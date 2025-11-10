@@ -1,0 +1,146 @@
+version: '3.8'
+
+# NOTE: Most users should use the one-line launchers instead:
+#   ./run-copilot.ps1, ./run-codex.ps1, ./run-claude.ps1
+# This docker-compose.yml is for advanced use cases only.
+
+services:
+  # All-agents container - interactive shell with all agents available
+  coding-agent:
+    image: coding-agents:local
+    container_name: ${CONTAINER_PREFIX:-coding-agent}-${REPO_NAME:-workspace}
+    
+    volumes:
+      # Mount the repository (set via environment or launcher script)
+      - ${REPO_PATH:?REPO_PATH must be set}:/workspace
+      
+      # Auto-detect home directory from current user
+      # These paths work for both WSL2 and native Linux
+      - ${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro
+      - ${HOME}/.config/gh:/home/agentuser/.config/gh:ro
+      - ${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro
+      
+      # Optional: Mount other agent configs if they exist
+      # - ${HOME}/.config/codex:/home/agentuser/.config/codex:ro
+      # - ${HOME}/.config/claude:/home/agentuser/.config/claude:ro
+      
+      # Optional: Mount MCP secrets (create this file on host if needed)
+      # - ${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro
+    
+    working_dir: /workspace
+    network_mode: bridge
+    
+    # Auto-inherit timezone from host
+    environment:
+      - TZ
+      # Container auto-detects user, no need to pass WSL_USER
+    
+    stdin_open: true
+    tty: true
+    
+    security_opt:
+      - no-new-privileges:true
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '${MAX_CPUS:-4}'
+          memory: ${MAX_MEMORY:-8G}
+        reservations:
+          cpus: '${MIN_CPUS:-2}'
+          memory: ${MIN_MEMORY:-4G}
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "test", "-d", "/workspace"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # GitHub Copilot CLI - launches directly into Copilot
+  copilot:
+    image: coding-agents-copilot:local
+    container_name: ${CONTAINER_PREFIX:-copilot}-${REPO_NAME:-workspace}
+    
+    volumes:
+      - ${REPO_PATH:?REPO_PATH must be set}:/workspace
+      - ${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro
+      - ${HOME}/.config/gh:/home/agentuser/.config/gh:ro
+      - ${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro
+      # - ${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro
+    
+    working_dir: /workspace
+    network_mode: bridge
+    stdin_open: true
+    tty: true
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - copilot
+
+  # Codex - launches directly into Codex
+  codex:
+    image: coding-agents-codex:local
+    container_name: ${CONTAINER_PREFIX:-codex}-${REPO_NAME:-workspace}
+    
+    volumes:
+      - ${REPO_PATH:?REPO_PATH must be set}:/workspace
+      - ${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro
+      - ${HOME}/.config/gh:/home/agentuser/.config/gh:ro
+      # - ${HOME}/.config/codex:/home/agentuser/.config/codex:ro
+      # - ${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro
+    
+    working_dir: /workspace
+    network_mode: bridge
+    stdin_open: true
+    tty: true
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - codex
+
+  # Claude CLI - launches directly into Claude
+  claude:
+    image: coding-agents-claude:local
+    container_name: ${CONTAINER_PREFIX:-claude}-${REPO_NAME:-workspace}
+    
+    volumes:
+      - ${REPO_PATH:?REPO_PATH must be set}:/workspace
+      - ${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro
+      - ${HOME}/.config/gh:/home/agentuser/.config/gh:ro
+      # - ${HOME}/.config/claude:/home/agentuser/.config/claude:ro
+      # - ${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro
+    
+    working_dir: /workspace
+    network_mode: bridge
+    stdin_open: true
+    tty: true
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - claude
+
+  # VS Code Remote Container
+  vscode:
+    image: coding-agents:local
+    container_name: ${CONTAINER_PREFIX:-vscode}-${REPO_NAME:-workspace}
+    
+    volumes:
+      - ${REPO_PATH:?REPO_PATH must be set}:/workspace
+      - ${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro
+      - ${HOME}/.config/gh:/home/agentuser/.config/gh:ro
+      - vscode-server-extensions:/home/agentuser/.vscode-server
+    
+    working_dir: /workspace
+    network_mode: bridge
+    stdin_open: true
+    tty: true
+    command: sleep infinity
+    profiles:
+      - vscode
+
+volumes:
+  vscode-server-extensions:
+    driver: local

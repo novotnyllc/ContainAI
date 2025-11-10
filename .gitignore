@@ -1,0 +1,30 @@
+# Ignore environment files with actual values
+.env
+
+# Ignore any accidentally created secrets
+*.key
+*.pem
+*.token
+*_token
+*_secret
+*_api_key
+
+# Docker build context
+.dockerignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
