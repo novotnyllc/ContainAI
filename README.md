@@ -1,0 +1,104 @@
+# AI Coding Agents in Containers
+
+Run AI coding agents (GitHub Copilot, OpenAI Codex, Anthropic Claude) in isolated Docker containers with OAuth authentication and MCP server support.
+
+## Features
+
+- **Multiple agents, no conflicts**: Each agent runs in its own isolated container
+- **OAuth authentication**: No API keys needed for agents (uses your existing subscriptions)
+- **VS Code integration**: Connect to running containers with Dev Containers extension
+- **Persistent workspaces**: Containers run in background, resume anytime
+- **MCP servers**: GitHub, Microsoft Docs, Playwright, Context7, Serena, and more
+
+## Quick Start
+
+### 1. Setup (one time)
+
+```bash
+# Authenticate GitHub CLI
+gh auth login
+
+# Configure git
+git config --global user.name "Your Name"
+git config --global user.email "your@email.com"
+
+# Build images (or use pre-built)
+./scripts/build.sh
+```
+
+### 2. Launch an agent
+
+```powershell
+# PowerShell
+.\launch-agent.ps1
+
+# Bash
+./launch-agent
+```
+
+### 3. Connect from VS Code
+
+1. Install **Dev Containers** extension
+2. Click remote button (bottom-left)
+3. Select "Attach to Running Container"
+4. Choose your container
+
+## Documentation
+
+- **[USAGE.md](USAGE.md)** - Complete user guide (start here!)
+- **[BUILD.md](BUILD.md)** - Building and publishing images
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and architecture
+
+## Examples
+
+Launch Copilot on current directory:
+```powershell
+.\launch-agent.ps1 . --agent copilot
+```
+
+Clone and explore a repo:
+```powershell
+.\launch-agent.ps1 https://github.com/microsoft/vscode --agent copilot
+```
+
+Multiple agents on same repo:
+```powershell
+.\launch-agent.ps1 C:\projects\app -b auth --agent copilot
+.\launch-agent.ps1 C:\projects\app -b database --agent codex
+.\launch-agent.ps1 C:\projects\app -b ui --agent claude
+```
+
+Install .NET preview SDK:
+```powershell
+.\launch-agent.ps1 . --agent codex --dotnet-preview 9.0
+```
+
+Configure network access:
+```powershell
+.\launch-agent.ps1 . --network-proxy allow-all
+```
+
+## What's Different
+
+Unlike running agents directly on your machine:
+
+- ✅ **Isolated**: Each agent has its own workspace
+- ✅ **No conflicts**: Multiple agents can work on same repo
+- ✅ **Clean**: Delete container when done, no leftovers
+- ✅ **Reproducible**: Same environment everywhere
+- ✅ **Connectable**: VS Code Remote works out of the box
+
+## Requirements
+
+- Docker with WSL2 backend (Windows) or Docker Desktop (Mac/Linux)
+- GitHub CLI authenticated (`gh auth login`)
+- Git configured
+- (Optional) Agent-specific OAuth: Copilot, Codex, Claude
+
+## License
+
+MIT
+
+---
+
+**Questions?** See [USAGE.md](USAGE.md) for detailed guide.

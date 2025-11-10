@@ -1,0 +1,364 @@
+#!/usr/bin/env bash
+# Launch a coding agent in an isolated container with its own git workspace
+# The container runs persistently for VS Code Remote connection
+
+set -e
+
+# Default values
+SOURCE="."
+BRANCH=""
+AGENT="all"
+NAME=""
+DOTNET_PREVIEW=""
+NETWORK_PROXY="none"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -b|--branch)
+            BRANCH="$2"
+            shift 2
+            ;;
+        --agent)
+            AGENT="$2"
+            shift 2
+            ;;
+        --name)
+            NAME="$2"
+            shift 2
+            ;;
+        --dotnet-preview)
+            DOTNET_PREVIEW="$2"
+            shift 2
+            ;;
+        --network-proxy)
+            NETWORK_PROXY="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: launch-agent [SOURCE] [OPTIONS]"
+            echo ""
+            echo "SOURCE can be:"
+            echo "  • Local path to a git repository (default: current directory)"
+            echo "  • Git URL (https://...)"
+            echo ""
+            echo "Options:"
+            echo "  -b, --branch BRANCH         Branch name (creates <agent>/<branch>)"
+            echo "  --agent AGENT               Agent type: copilot, codex, claude, all (default: all)"
+            echo "  --name NAME                 Custom container name"
+            echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 9.0)"
+            echo "  --network-proxy MODE        Network proxy: none, allow-all, squid (default: none)"
+            echo "  -h, --help                  Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  launch-agent                           # Current directory"
+            echo "  launch-agent . -b feature-auth         # Current dir, custom branch"
+            echo "  launch-agent https://github.com/user/repo --agent copilot"
+            echo "  launch-agent /path/to/repo --name my-workspace"
+            exit 0
+            ;;
+        *)
+            SOURCE="$1"
+            shift
+            ;;
+    esac
+done
+
+# Determine if source is a URL or local path
+if [[ "$SOURCE" =~ ^https?:// ]]; then
+    IS_URL=true
+    SOURCE_TYPE="url"
+    REPO_NAME=$(basename "$SOURCE" .git)
+    GIT_URL="$SOURCE"
+else
+    IS_URL=false
+    SOURCE_TYPE="local"
+    SOURCE=$(realpath "$SOURCE")
+    
+    # Check if it's a git repository
+    if [ ! -d "$SOURCE/.git" ]; then
+        echo "❌ Error: $SOURCE is not a git repository"
+        exit 1
+    fi
+    
+    REPO_NAME=$(basename "$SOURCE")
+    
+    # Get git remote URL if it exists
+    cd "$SOURCE"
+    ORIGIN_URL=$(git remote get-url origin 2>/dev/null || echo "")
+    cd - > /dev/null
+    
+    # Convert to WSL path if needed (for Windows compatibility)
+    if [[ "$SOURCE" =~ ^/mnt/[a-z]/ ]]; then
+        WSL_PATH="$SOURCE"
+    elif [[ "$SOURCE" =~ ^[A-Z]: ]]; then
+        DRIVE=$(echo "$SOURCE" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')
+        REST=$(echo "$SOURCE" | cut -d: -f2 | tr '\\' '/')
+        WSL_PATH="/mnt/${DRIVE}${REST}"
+    else
+        WSL_PATH="$SOURCE"
+    fi
+fi
+
+# Determine container and workspace names
+if [ -n "$NAME" ]; then
+    CONTAINER_NAME="${AGENT}-${NAME}"
+    WORKSPACE_NAME="$NAME"
+else
+    CONTAINER_NAME="${AGENT}-${REPO_NAME}"
+    WORKSPACE_NAME="$REPO_NAME"
+fi
+
+# Determine branch name
+if [ -z "$BRANCH" ]; then
+    if [ "$SOURCE_TYPE" = "local" ]; then
+        cd "$SOURCE"
+        CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+        cd - > /dev/null
+        BRANCH="${CURRENT_BRANCH:-main}"
+    else
+        BRANCH="main"
+    fi
+fi
+
+AGENT_BRANCH="${AGENT}/${BRANCH}"
+
+# Select image based on agent parameter
+case "$AGENT" in
+    copilot)
+        IMAGE_NAME="coding-agents-copilot:local"
+        ;;
+    codex)
+        IMAGE_NAME="coding-agents-codex:local"
+        ;;
+    claude)
+        IMAGE_NAME="coding-agents-claude:local"
+        ;;
+    *)
+        IMAGE_NAME="coding-agents:local"
+        ;;
+esac
+
+# Get timezone
+TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
+
+echo "🚀 Launching Coding Agent..."
+echo "🎯 Agent: $AGENT"
+echo "📁 Source: $SOURCE ($SOURCE_TYPE)"
+echo "🌿 Branch: $AGENT_BRANCH"
+echo "🏷️  Container: $CONTAINER_NAME"
+echo "🐳 Image: $IMAGE_NAME"
+echo ""
+
+# Check if container already exists
+if docker ps -a --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+    echo "📦 Container '$CONTAINER_NAME' already exists"
+    STATE=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME")
+    
+    if [ "$STATE" = "running" ]; then
+        echo "✅ Container is running"
+        echo ""
+        echo "To connect with VS Code:"
+        echo "  1. Install 'Dev Containers' extension"
+        echo "  2. Click the remote button (bottom-left)"
+        echo "  3. Select 'Attach to Running Container'"
+        echo "  4. Choose '$CONTAINER_NAME'"
+        echo ""
+        echo "Or connect via shell:"
+        echo "  docker exec -it $CONTAINER_NAME bash"
+        exit 0
+    else
+        echo "▶️  Starting existing container..."
+        docker start -ai "$CONTAINER_NAME"
+        exit $?
+    fi
+fi
+
+# Build docker arguments
+DOCKER_ARGS=(
+    "run" "-d"
+    "--name" "$CONTAINER_NAME"
+    "--hostname" "$CONTAINER_NAME"
+    "-e" "TZ=$TZ_VALUE"
+    "-e" "SOURCE_TYPE=$SOURCE_TYPE"
+    "-e" "REPO_NAME=$WORKSPACE_NAME"
+    "-e" "AGENT_BRANCH=$AGENT_BRANCH"
+    "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
+    "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
+    "-v" "${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
+)
+
+# Add source-specific environment variables
+if [ "$SOURCE_TYPE" = "url" ]; then
+    DOCKER_ARGS+=("-e" "GIT_URL=$GIT_URL")
+else
+    DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$WSL_PATH")
+    # Mount the local repo as a temporary source (read-only)
+    DOCKER_ARGS+=("-v" "${WSL_PATH}:/tmp/source-repo:ro")
+fi
+
+if [ -n "$ORIGIN_URL" ]; then
+    DOCKER_ARGS+=("-e" "ORIGIN_URL=$ORIGIN_URL")
+fi
+
+# Add .NET preview channel if specified
+if [ -n "$DOTNET_PREVIEW" ]; then
+    DOCKER_ARGS+=("-e" "DOTNET_PREVIEW_CHANNEL=$DOTNET_PREVIEW")
+fi
+
+# Configure network proxy
+if [ "$NETWORK_PROXY" = "squid" ]; then
+    echo "⚠️  Squid proxy support not yet implemented"
+    # TODO: Add squid sidecar container
+elif [ "$NETWORK_PROXY" = "allow-all" ]; then
+    # No proxy, full internet access (default behavior)
+    DOCKER_ARGS+=("-e" "NETWORK_POLICY=allow-all")
+else
+    # Default: no special network config
+    DOCKER_ARGS+=("-e" "NETWORK_POLICY=restricted")
+fi
+
+# Add optional agent configs
+if [ -d "${HOME}/.config/codex" ]; then
+    DOCKER_ARGS+=("-v" "${HOME}/.config/codex:/home/agentuser/.config/codex:ro")
+fi
+if [ -d "${HOME}/.config/claude" ]; then
+    DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
+fi
+
+# Add MCP secrets if they exist
+if [ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ]; then
+    DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
+fi
+
+DOCKER_ARGS+=(
+    "-w" "/workspace"
+    "--network" "bridge"
+    "--security-opt" "no-new-privileges:true"
+    "--cpus=4"
+    "--memory=8g"
+    "$IMAGE_NAME"
+    "sleep" "infinity"
+)
+
+# Create and start the container
+echo "📦 Creating container..."
+CONTAINER_ID=$(docker "${DOCKER_ARGS[@]}")
+
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to create container"
+    exit 1
+fi
+
+echo "✅ Container created: $CONTAINER_ID"
+echo ""
+
+# Setup the repository inside the container
+echo "📥 Setting up repository..."
+
+SETUP_SCRIPT='#!/bin/bash
+set -e
+
+cd /home/agentuser
+
+if [ "$SOURCE_TYPE" = "url" ]; then
+    echo "🌐 Cloning repository from $GIT_URL..."
+    git clone "$GIT_URL" workspace
+    cd workspace
+    echo "✅ Repository cloned"
+else
+    echo "📋 Copying repository from host..."
+    cp -r /tmp/source-repo workspace
+    cd workspace
+    echo "✅ Repository copied"
+fi
+
+# Setup dual remotes
+if [ -n "$ORIGIN_URL" ]; then
+    echo "🔗 Setting up remotes..."
+    
+    # Ensure origin is set correctly
+    if git remote get-url origin 2>/dev/null; then
+        git remote set-url origin "$ORIGIN_URL"
+    else
+        git remote add origin "$ORIGIN_URL"
+    fi
+    
+    # Add local remote pointing to the host repository
+    if [ "$SOURCE_TYPE" = "local" ]; then
+        git remote add local "$LOCAL_REPO_PATH" 2>/dev/null || git remote set-url local "$LOCAL_REPO_PATH"
+        echo "  • origin: $ORIGIN_URL"
+        echo "  • local: $LOCAL_REPO_PATH (default push)"
+        
+        # Set local as default push remote
+        git config remote.pushDefault local
+    else
+        echo "  • origin: $ORIGIN_URL"
+    fi
+else
+    echo "ℹ️  No origin remote configured"
+fi
+
+# Create and checkout agent branch
+echo "🌿 Creating branch: $AGENT_BRANCH"
+git checkout -b "$AGENT_BRANCH" 2>/dev/null || git checkout "$AGENT_BRANCH"
+
+echo "✅ Repository setup complete"
+echo ""
+echo "Branch: $(git branch --show-current)"
+echo "Remotes:"
+git remote -v | head -4
+
+# Configure git to use HTTPS with gh credential helper
+git config --global credential.helper ""
+git config --global credential.helper '\''!gh auth git-credential'\''
+
+# Setup MCP if config exists
+if [ -f "/workspace/config.toml" ]; then
+    echo ""
+    echo "⚙️  Setting up MCP configurations..."
+    /usr/local/bin/setup-mcp-configs.sh
+fi
+
+# Load MCP secrets if available
+if [ -f "/home/agentuser/.mcp-secrets.env" ]; then
+    echo "🔐 MCP secrets available"
+fi
+
+# Install .NET preview SDK if requested
+if [ -n "$DOTNET_PREVIEW_CHANNEL" ]; then
+    echo ""
+    echo "📦 Installing .NET SDK $DOTNET_PREVIEW_CHANNEL preview..."
+    /usr/local/bin/install-dotnet-preview.sh "$DOTNET_PREVIEW_CHANNEL" || echo "⚠️  Preview installation failed (may not exist yet)"
+fi
+
+echo ""
+echo "✨ Workspace ready at /workspace"
+'
+
+echo "$SETUP_SCRIPT" | docker exec -i "$CONTAINER_NAME" bash
+
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to setup repository"
+    echo "Cleaning up container..."
+    docker rm -f "$CONTAINER_NAME" > /dev/null
+    exit 1
+fi
+
+echo ""
+echo "✅ Agent is running!"
+echo ""
+echo "To connect with VS Code:"
+echo "  1. Install 'Dev Containers' extension"
+echo "  2. Click the remote button (bottom-left)"
+echo "  3. Select 'Attach to Running Container'"
+echo "  4. Choose '$CONTAINER_NAME'"
+echo ""
+echo "Or connect via shell:"
+echo "  docker exec -it $CONTAINER_NAME bash"
+echo ""
+echo "To stop:"
+echo "  docker stop $CONTAINER_NAME"
+echo ""
+echo "To remove:"
+echo "  docker rm -f $CONTAINER_NAME"
