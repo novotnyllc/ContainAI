@@ -1,13 +1,15 @@
 # Base image for coding agents container
-# All authentication comes from host mounts at runtime
-FROM ubuntu:22.04
+# This is a DEVELOPMENT container - agents need build tools to compile code!
+FROM ubuntu:24.04
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies and build tools in one layer
+# Build tools (build-essential, etc.) are REQUIRED - agents compile code!
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core utilities
     curl \
     wget \
     git \
@@ -15,16 +17,27 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     lsb-release \
     software-properties-common \
-    build-essential \
     sudo \
     zsh \
     vim \
     nano \
     jq \
     unzip \
+    # Build tools (REQUIRED for development)
+    build-essential \
+    # Python with dev headers (for building native extensions)
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    # Playwright browser dependencies (--with-deps needs these available)
     libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
     libatk-bridge2.0-0 \
+    libcups2 \
     libdrm2 \
+    libdbus-1-3 \
     libxkbcommon0 \
     libxcomposite1 \
     libxdamage1 \
@@ -35,38 +48,24 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     libasound2 \
     libatspi2.0-0 \
-    libcups2 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js 20.x (required for MCP servers and npx)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Python 3.11+ and pip
-RUN add-apt-repository ppa:deadsnakes/ppa && \
-    apt-get update && \
-    apt-get install -y python3.11 python3.11-venv python3-pip python3.11-dev && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install tomli for TOML parsing (tomllib is built-in for Python 3.11+)
-RUN python3 -m pip install --no-cache-dir tomli
-
-# Install .NET dependencies (required since we're not using package manager)
-RUN apt-get update && apt-get install -y \
+    libxshmfence1 \
+    # .NET runtime dependencies
     libc6 \
     libgcc-s1 \
     libgssapi-krb5-2 \
-    libicu70 \
-    liblttng-ust1 \
+    libicu74 \
     libssl3 \
     libstdc++6 \
     libunwind8 \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
-# Install .NET SDKs using Microsoft's official install script
+# Install Node.js 20.x (required for MCP servers and building Node projects)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install .NET SDKs (agents need SDK, not just runtime, to build C# projects)
 RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && \
     chmod +x dotnet-install.sh && \
     ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet && \
@@ -75,7 +74,6 @@ RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && \
     rm dotnet-install.sh && \
     ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
 
-# Set .NET environment variables
 ENV DOTNET_ROOT=/usr/share/dotnet
 ENV PATH="${PATH}:/usr/share/dotnet"
 
@@ -83,13 +81,13 @@ ENV PATH="${PATH}:/usr/share/dotnet"
 RUN dotnet workload install aspire maui wasm-tools ios android maccatalyst tvos || \
     echo "⚠️  Some workloads may have failed (expected for some platforms)"
 
-# Install PowerShell using official script (separate from .NET SDK)
+# Install PowerShell
 RUN curl -sSL https://aka.ms/install-powershell.sh -o install-powershell.sh && \
     chmod +x install-powershell.sh && \
     ./install-powershell.sh && \
     rm install-powershell.sh
 
-# Copy .NET preview installer script (run optionally at container start)
+# Copy .NET preview installer script
 COPY --chown=root:root scripts/runtime/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
 RUN chmod +x /usr/local/bin/install-dotnet-preview.sh
 
@@ -101,49 +99,43 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     apt-get install -y gh && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Playwright browsers and dependencies
-RUN npm install -g @playwright/mcp@latest && \
+# Install Playwright browsers and dependencies (--with-deps handles all system packages)
+RUN npm install -g \
+    @playwright/mcp@latest \
+    @modelcontextprotocol/server-sequential-thinking \
+    @githubnext/github-copilot-cli && \
     npx playwright install --with-deps chromium
 
-# Pre-install common MCP servers
-RUN npm install -g @modelcontextprotocol/server-sequential-thinking
+# Install tomli for TOML parsing
+RUN python3 -m pip install --no-cache-dir --break-system-packages tomli
 
-# Install GitHub Copilot CLI
-RUN npm install -g @githubnext/github-copilot-cli
-
-# Create a non-root user for running agents
-# Use UID/GID 1000 which is typical for first user in WSL2
-RUN useradd -m -s /bin/bash -u 1000 agentuser
-
-# Create directories for workspace and config
-RUN mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share && \
+# Create non-root user (UID 1000 for WSL2 compatibility)
+RUN useradd -m -s /bin/bash -u 1000 agentuser && \
+    mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share && \
     chown -R agentuser:agentuser /workspace /home/agentuser
 
-# Switch to non-root user
+# Copy Playwright browsers to agentuser's home (installed as root above)
+RUN mkdir -p /home/agentuser/.cache && \
+    cp -r /root/.cache/ms-playwright /home/agentuser/.cache/ && \
+    chown -R agentuser:agentuser /home/agentuser/.cache
+
 USER agentuser
 WORKDIR /home/agentuser
 
-# Install pipx/uvx for the user
+# Install pipx and uv for user
 RUN python3 -m pip install --user pipx && \
-    python3 -m pipx ensurepath
+    python3 -m pipx ensurepath && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ENV PATH="/home/agentuser/.local/bin:${PATH}"
 ENV PATH="/home/agentuser/.cargo/bin:${PATH}"
 
-# Install uv for user
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Pre-install Serena MCP server (will be refreshed on container start)
+# Pre-install Serena MCP server
 RUN uvx --from "git+https://github.com/oraios/serena@main" serena --help || true
 
-# Create config directory structure
+# Create config directory and copy agent configs
 RUN mkdir -p /home/agentuser/.config/coding-agents
-
-# Copy agent configuration files (base files apply to all agents)
 COPY --chown=agentuser:agentuser agent-configs/ /home/agentuser/.config/coding-agents/
 
-# Set working directory
 WORKDIR /workspace
-
-# Default command
 CMD ["/bin/bash"]
