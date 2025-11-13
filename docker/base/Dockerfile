@@ -139,9 +139,8 @@ RUN uvx --from "git+https://github.com/oraios/serena@main" serena --help || true
 # Create config directory structure
 RUN mkdir -p /home/agentuser/.config/coding-agents
 
-# Copy agent custom instructions to per-user location
-COPY --chown=agentuser:agentuser AGENTS.md /home/agentuser/.config/coding-agents/AGENTS.md
-COPY --chown=agentuser:agentuser AGENTS.md /workspace/AGENTS.md
+# Copy agent configuration files (base files apply to all agents)
+COPY --chown=agentuser:agentuser agent-configs/ /home/agentuser/.config/coding-agents/
 
 # Set working directory
 WORKDIR /workspace

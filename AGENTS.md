@@ -1,26 +1,32 @@
-## Required Tools and Workflows
+# Coding Agents Repository
 
-### Always Use These MCP Tools
+This file contains repository-specific guidance for working with the Coding Agents codebase.
 
-1. **Serena** - For semantic code retrieval and editing
-   - Use for understanding code structure and relationships
-   - Use for targeted code modifications
-   - Provides symbol-level navigation and editing
+## Repository Structure
 
-2. **Context7** - For up-to-date third-party documentation
-   - Use when working with external libraries or frameworks
-   - Ensures you have current API references
-   - Helps avoid deprecated patterns
+- `agent-configs/` - Custom instruction files for coding agents (copied to containers)
+- `docker/` - Container definitions and compose configurations
+- `scripts/` - Utility scripts (PowerShell and bash)
+- `config.toml` - MCP server configuration template
+- `docs/` - Documentation
 
-3. **Sequential Thinking** - For decision making
-   - Use for complex problem-solving
-   - Break down multi-step tasks
-   - Validate assumptions before implementing
+## Key Principles
 
-## Development Guidelines
+1. **Script Parity** - All functionality must exist in both PowerShell and bash
+2. **Test Coverage** - All functions must have comprehensive unit tests
+3. **Code Quality** - PowerShell must pass PSScriptAnalyzer with zero warnings
+4. **Documentation** - Keep CONTRIBUTING.md `docs/` updated with workflow changes
 
-See `CONTRIBUTING.md` in the repository for:
+## Agent Configuration
+
+Custom instructions for AI coding agents are stored in `agent-configs/`
+
+These files are automatically copied to containers and applied per agent.
+
+## Development Workflow
+
+See `CONTRIBUTING.md` for detailed development guidelines including:
+- Test suite usage
+- Inner loop development process
 - Code quality standards
-- Testing requirements
-- Bash/PowerShell parity expectations
-- Development workflow
+- Debugging techniques

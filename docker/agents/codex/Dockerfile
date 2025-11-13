@@ -15,6 +15,10 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-codex-auth.sh && \
     echo 'fi' >> /usr/local/bin/validate-codex-auth.sh && \
     chmod +x /usr/local/bin/validate-codex-auth.sh
 
+# Copy Codex specific config files to ~/.config/codex/
+RUN mkdir -p /home/agentuser/.config/codex
+COPY --chown=agentuser:agentuser agent-configs/codex/ /home/agentuser/.config/codex/instructions/
+
 USER agentuser
 WORKDIR /workspace
 

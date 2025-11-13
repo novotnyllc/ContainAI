@@ -15,6 +15,10 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-claude-auth.sh && \
     echo 'fi' >> /usr/local/bin/validate-claude-auth.sh && \
     chmod +x /usr/local/bin/validate-claude-auth.sh
 
+# Copy Claude specific config files to ~/.config/claude/
+RUN mkdir -p /home/agentuser/.config/claude
+COPY --chown=agentuser:agentuser agent-configs/claude/ /home/agentuser/.config/claude/instructions/
+
 USER agentuser
 WORKDIR /workspace
 

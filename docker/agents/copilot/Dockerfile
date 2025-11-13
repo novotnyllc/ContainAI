@@ -15,6 +15,10 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-copilot-auth.sh && \
     echo 'fi' >> /usr/local/bin/validate-copilot-auth.sh && \
     chmod +x /usr/local/bin/validate-copilot-auth.sh
 
+# Copy GitHub Copilot specific config files to ~/.config/github-copilot/
+RUN mkdir -p /home/agentuser/.config/github-copilot/agents
+COPY --chown=agentuser:agentuser agent-configs/github-copilot/ /home/agentuser/.config/github-copilot/agents/
+
 USER agentuser
 WORKDIR /workspace
 
