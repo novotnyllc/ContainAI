@@ -3,7 +3,7 @@
 # Supports two modes: full (build all) and launchers (use registry images)
 # No real secrets required - completely isolated testing
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -23,6 +23,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
+
+# Constants for timing
+CONTAINER_STARTUP_WAIT=2
+LONG_RUNNING_SLEEP=3600
 
 # ============================================================================
 # Usage and Argument Parsing
@@ -189,7 +193,7 @@ docker run -d \\
     -v "$TEST_REPO_DIR:/workspace" \\
     -e "GH_TOKEN=$TEST_GH_TOKEN" \\
     "$TEST_COPILOT_IMAGE" \\
-    sleep 3600
+    sleep $LONG_RUNNING_SLEEP
 EOF
     
     chmod +x /tmp/test-run-copilot
@@ -203,7 +207,7 @@ EOF
     fi
     
     # Verify container is running
-    sleep 2
+    sleep $CONTAINER_STARTUP_WAIT
     assert_container_running "$container_name"
 }
 
@@ -292,13 +296,13 @@ test_multiple_agents() {
             --network "$TEST_NETWORK" \
             -v "$TEST_REPO_DIR:/workspace" \
             "$test_image" \
-            sleep 3600 >/dev/null
+            sleep $LONG_RUNNING_SLEEP >/dev/null
         
         containers+=("$container_name")
     done
     
     # Verify all are running
-    sleep 2
+    sleep $CONTAINER_STARTUP_WAIT
     for container in "${containers[@]}"; do
         assert_container_running "$container"
     done
@@ -342,7 +346,7 @@ test_cleanup_on_exit() {
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         alpine:latest \
-        sleep 3600 >/dev/null
+        sleep $LONG_RUNNING_SLEEP >/dev/null
     
     # Verify it exists
     if docker ps -a --filter "name=$test_container" --format "{{.Names}}" | grep -q "$test_container"; then

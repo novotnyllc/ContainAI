@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Install .NET SDK preview versions with proper privilege handling
 # Usage: install-dotnet-preview.sh [channel]
 # Example: install-dotnet-preview.sh 9.0

@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 echo "🚀 Starting Coding Agents Container..."
 
@@ -13,12 +13,15 @@ cleanup_on_shutdown() {
     
     if [ "$AUTO_PUSH" != "true" ]; then
         echo "⏭️  Auto-push disabled, skipping..."
-        return
+        return 0
     fi
     
     # Only push if in a git repository with uncommitted changes
     if [ -d /workspace/.git ]; then
-        cd /workspace
+        cd /workspace || {
+            echo "⚠️  Warning: Could not change to workspace directory"
+            return 0
+        }
         
         # Check if there are any changes to commit
         if ! git diff-index --quiet HEAD -- 2>/dev/null; then

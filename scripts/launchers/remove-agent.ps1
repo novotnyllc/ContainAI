@@ -43,6 +43,13 @@ if (-not $ContainerName) {
     exit 1
 }
 
+# Validate container name
+if (-not (Test-ValidContainerName $ContainerName)) {
+    Write-Host "❌ Error: Invalid container name: $ContainerName" -ForegroundColor Red
+    Write-Host "   Container names must start with alphanumeric and contain only: a-z, A-Z, 0-9, _, ., -" -ForegroundColor Yellow
+    exit 1
+}
+
 # Check Docker
 if (-not (Test-DockerRunning)) { exit 1 }
 

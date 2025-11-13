@@ -101,17 +101,48 @@ if (-not $Branch) {
     }
 }
 
-# Sanitize branch name
-$SafeBranch = $Branch -replace '[/\\]', '-' -replace '_', '-'
+# Validate branch name
+if (-not (Test-ValidBranchName $Branch)) {
+    Write-Host "❌ Error: Invalid branch name: $Branch" -ForegroundColor Red
+    Write-Host "   Branch names must start with alphanumeric and contain only: a-z, A-Z, 0-9, /, _, ., -" -ForegroundColor Yellow
+    exit 1
+}
+
+# Sanitize branch name for container naming
+# Remove or replace characters not allowed in Docker container names
+$SafeBranch = $Branch -replace '[/\\]', '-'  # Replace slashes
+$SafeBranch = $SafeBranch -replace '[^a-zA-Z0-9._-]', '-'  # Replace any other invalid chars
+$SafeBranch = $SafeBranch -replace '-+', '-'  # Collapse multiple dashes
+$SafeBranch = $SafeBranch -replace '^[-._]+', ''  # Remove leading special chars
+$SafeBranch = $SafeBranch -replace '[-._]+$', ''  # Remove trailing special chars
 $SafeBranch = $SafeBranch.ToLower()
+
+# Ensure non-empty result
+if ([string]::IsNullOrEmpty($SafeBranch)) {
+    $SafeBranch = "branch"
+}
 
 # Determine container names
 if ($Name) {
+    # Validate custom name
+    if (-not (Test-ValidContainerName $Name)) {
+        Write-Host "❌ Error: Invalid container name: $Name" -ForegroundColor Red
+        Write-Host "   Container names must start with alphanumeric and contain only: a-z, A-Z, 0-9, _, ., -" -ForegroundColor Yellow
+        exit 1
+    }
     $ContainerName = "$Agent-$Name"
     $WorkspaceName = $Name
 } else {
     $ContainerName = "$Agent-$RepoName-$SafeBranch"
     $WorkspaceName = $RepoName
+}
+
+# Final validation of generated container name
+if (-not (Test-ValidContainerName $ContainerName)) {
+    Write-Host "❌ Error: Generated container name is invalid: $ContainerName" -ForegroundColor Red
+    Write-Host "   This may be due to special characters in the repository name or branch" -ForegroundColor Yellow
+    Write-Host "   Try using the -Name parameter to specify a custom name" -ForegroundColor Yellow
+    exit 1
 }
 
 $AgentBranch = "$Agent/$Branch"
@@ -122,6 +153,12 @@ $ProxyImage = "coding-agents-proxy:local"
 # Pull latest image
 Update-AgentImage -Agent $Agent
 $ImageName = "coding-agents-${Agent}:local"
+
+# Validate image name
+if (-not (Test-ValidImageName $ImageName)) {
+    Write-Host "❌ Error: Invalid image name: $ImageName" -ForegroundColor Red
+    exit 1
+}
 
 # Get timezone
 $TimeZone = (Get-TimeZone).Id

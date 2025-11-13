@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Validation script to check if the container is properly configured
 
-set -e
+set -euo pipefail
 
 echo "🔍 Validating Coding Agents Container Setup..."
 echo ""

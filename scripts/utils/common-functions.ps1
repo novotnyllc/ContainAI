@@ -1,5 +1,32 @@
 # Common functions for agent management scripts (PowerShell)
 
+function Test-ValidContainerName {
+    param([string]$Name)
+    # Container names must match: [a-zA-Z0-9][a-zA-Z0-9_.-]*
+    if ($Name -match '^[a-zA-Z0-9][a-zA-Z0-9_.-]*$') {
+        return $true
+    }
+    return $false
+}
+
+function Test-ValidBranchName {
+    param([string]$Branch)
+    # Basic git branch name validation - no spaces, no special chars that git doesn't allow
+    if ($Branch -match '^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$' -and $Branch -notmatch '\.\.' -and $Branch -notmatch '/$') {
+        return $true
+    }
+    return $false
+}
+
+function Test-ValidImageName {
+    param([string]$Image)
+    # Docker image name validation
+    if ($Image -match '^[a-z0-9]+(([._-]|__)[a-z0-9]+)*(:[a-zA-Z0-9_.-]+)?$') {
+        return $true
+    }
+    return $false
+}
+
 function Get-RepoName {
     param([string]$RepoPath)
     Split-Path -Leaf $RepoPath
@@ -27,15 +54,43 @@ function Test-DockerRunning {
 function Update-AgentImage {
     param(
         [Parameter(Mandatory=$true)]
-        [string]$Agent
+        [string]$Agent,
+        
+        [Parameter(Mandatory=$false)]
+        [int]$MaxRetries = 3,
+        
+        [Parameter(Mandatory=$false)]
+        [int]$RetryDelaySeconds = 2
     )
     
     $registryImage = "ghcr.io/novotnyllc/coding-agents-${Agent}:latest"
     $localImage = "coding-agents-${Agent}:local"
     
     Write-Host "📦 Checking for image updates..." -ForegroundColor Cyan
-    docker pull --quiet $registryImage 2>$null | Out-Null
-    docker tag $registryImage $localImage 2>$null | Out-Null
+    
+    # Try to pull with retries
+    $attempt = 0
+    $pulled = $false
+    
+    while ($attempt -lt $MaxRetries -and -not $pulled) {
+        $attempt++
+        try {
+            if ($attempt -gt 1) {
+                Write-Host "  Retry attempt $attempt of $MaxRetries..." -ForegroundColor Yellow
+            }
+            docker pull --quiet $registryImage 2>$null | Out-Null
+            docker tag $registryImage $localImage 2>$null | Out-Null
+            $pulled = $true
+        } catch {
+            if ($attempt -lt $MaxRetries) {
+                Start-Sleep -Seconds $RetryDelaySeconds
+            }
+        }
+    }
+    
+    if (-not $pulled) {
+        Write-Host "  ⚠️  Warning: Could not pull latest image, using cached version" -ForegroundColor Yellow
+    }
 }
 
 function Test-ContainerExists {
@@ -172,6 +227,17 @@ function Ensure-SquidProxy {
         [string]$SquidAllowedDomains = "*.github.com,*.githubcopilot.com,*.nuget.org"
     )
     
+    # Validate inputs
+    if (-not (Test-ValidContainerName $ProxyContainer)) {
+        Write-Host "❌ Error: Invalid proxy container name: $ProxyContainer" -ForegroundColor Red
+        throw "Invalid proxy container name"
+    }
+    
+    if ([string]::IsNullOrWhiteSpace($SquidAllowedDomains)) {
+        Write-Host "⚠️  Warning: No allowed domains specified for proxy" -ForegroundColor Yellow
+        $SquidAllowedDomains = "*.github.com"
+    }
+    
     # Create network if needed
     $networkExists = docker network inspect $NetworkName 2>$null
     if (-not $networkExists) {
@@ -200,8 +266,8 @@ function Ensure-SquidProxy {
 
 function New-RepoSetupScript {
     return @'
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 TARGET_DIR="/workspace"
 mkdir -p "$TARGET_DIR"

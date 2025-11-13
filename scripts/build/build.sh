@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Build script for the coding agents containers
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -31,39 +31,54 @@ case $choice in
         BASE_IMAGE="ghcr.io/$gh_username/coding-agents-base:latest"
         echo ""
         echo "📥 Pulling base image: $BASE_IMAGE"
-        docker pull "$BASE_IMAGE" || {
+        if ! docker pull "$BASE_IMAGE"; then
             echo "❌ Failed to pull base image"
             echo "   Make sure the image exists and you're authenticated:"
-            echo "   docker login ghcr.io"
+            echo "   docker login ghcr.io -u $gh_username"
+            echo ""
+            echo "   Or build locally instead (option 2)"
             exit 1
-        }
+        fi
         ;;
     2)
         echo ""
         echo "🔨 Building base image locally..."
         echo "   This will take approximately 15 minutes..."
-        docker build -f docker/base/Dockerfile -t coding-agents-base:local .
+        if ! docker build -f docker/base/Dockerfile -t coding-agents-base:local .; then
+            echo "❌ Failed to build base image"
+            exit 1
+        fi
         BASE_IMAGE="coding-agents-base:local"
         ;;
     *)
-        echo "Invalid choice"
+        echo "❌ Invalid choice: $choice"
+        echo "   Please enter 1 or 2"
         exit 1
         ;;
 esac
 
 echo ""
 echo "🔨 Building all-agents image..."
-docker build -f docker/agents/all/Dockerfile --build-arg BASE_IMAGE="$BASE_IMAGE" -t coding-agents:local .
+if ! docker build -f docker/agents/all/Dockerfile --build-arg BASE_IMAGE="$BASE_IMAGE" -t coding-agents:local .; then
+    echo "❌ Failed to build all-agents image"
+    exit 1
+fi
 
 echo ""
 echo "🔨 Building individual agent images..."
-docker build -f docker/agents/copilot/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-copilot:local .
-docker build -f docker/agents/codex/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-codex:local .
-docker build -f docker/agents/claude/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-claude:local .
+for agent in copilot codex claude; do
+    if ! docker build -f "docker/agents/${agent}/Dockerfile" --build-arg BASE_IMAGE=coding-agents:local -t "coding-agents-${agent}:local" .; then
+        echo "❌ Failed to build ${agent} image"
+        exit 1
+    fi
+done
 
 echo ""
 echo "🔨 Building network proxy image..."
-docker build -f docker/proxy/Dockerfile -t coding-agents-proxy:local .
+if ! docker build -f docker/proxy/Dockerfile -t coding-agents-proxy:local .; then
+    echo "❌ Failed to build proxy image"
+    exit 1
+fi
 
 echo ""
 echo "✅ Build complete!"

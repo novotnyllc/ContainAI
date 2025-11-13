@@ -6,7 +6,8 @@ FROM ${BASE_IMAGE}
 USER root
 
 # Validation script to check for Codex authentication
-RUN echo '#!/bin/bash' > /usr/local/bin/validate-codex-auth.sh && \
+RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-codex-auth.sh && \
+    echo 'set -euo pipefail' >> /usr/local/bin/validate-codex-auth.sh && \
     echo 'if [ ! -d "$HOME/.config/codex" ]; then' >> /usr/local/bin/validate-codex-auth.sh && \
     echo '  echo "⚠️  WARNING: Codex authentication not found!" >&2' >> /usr/local/bin/validate-codex-auth.sh && \
     echo '  echo "   Mount ~/.config/codex from host" >&2' >> /usr/local/bin/validate-codex-auth.sh && \
