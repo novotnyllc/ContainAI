@@ -20,11 +20,62 @@ param(
     [string]$DotNetPreview,
     
     [Parameter(Mandatory=$false)]
-    [ValidateSet("none", "allow-all", "squid")]
-    [string]$NetworkProxy = "none"
+    [ValidateSet("allow-all", "restricted", "squid", "none")]
+    [string]$NetworkProxy = "allow-all"
 )
 
 $ErrorActionPreference = "Stop"
+
+function Ensure-SquidProxy {
+    param(
+        [string]$NetworkName,
+        [string]$ProxyContainer,
+        [string]$ProxyImage,
+        [switch]$Recreate
+    )
+
+    $existingNetwork = docker network ls --filter "name=^${NetworkName}$" --format "{{.Name}}" 2>$null
+    if (-not $existingNetwork) {
+        docker network create $NetworkName | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create docker network '$NetworkName'"
+        }
+        Set-Variable -Scope Script -Name CreatedNetwork -Value $true
+    }
+
+    if ($Recreate -and (docker ps -a --filter "name=^${ProxyContainer}$" --format "{{.Names}}" 2>$null)) {
+        docker rm -f $ProxyContainer > $null 2>&1
+    }
+
+    $existingProxy = docker ps -a --filter "name=^${ProxyContainer}$" --format "{{.Names}}" 2>$null
+    if ($existingProxy) {
+        $state = docker inspect -f '{{.State.Status}}' $ProxyContainer 2>$null
+        if ($state -ne "running") {
+            docker start $ProxyContainer | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to start proxy container '$ProxyContainer'"
+            }
+        }
+    } else {
+        docker run -d \
+            --name $ProxyContainer \
+            --hostname $ProxyContainer \
+            --network $NetworkName \
+            --restart unless-stopped \
+            --label "coding-agents.proxy-of=$ContainerName" \
+            --label "coding-agents.proxy-image=$ProxyImage" \
+            $ProxyImage | Out-Null
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to launch proxy container '$ProxyContainer'"
+        }
+
+        Set-Variable -Scope Script -Name CreatedProxy -Value $true
+    }
+}
+
+$script:CreatedNetwork = $false
+$script:CreatedProxy = $false
 
 # Auto-detect WSL home directory
 $WslHome = wsl bash -c 'echo $HOME' 2>$null
@@ -36,6 +87,11 @@ if (-not $WslHome) {
 
 # Get timezone from host
 $TimeZone = (Get-TimeZone).Id
+
+# Treat 'none' as alias for allow-all for backwards compatibility
+if ($NetworkProxy -eq "none") {
+    $NetworkProxy = "allow-all"
+}
 
 # Determine if source is a URL or local path
 $IsUrl = $Source -match '^https?://'
@@ -74,6 +130,11 @@ if ($IsUrl) {
     $WslPath = $ResolvedPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
 }
 
+if ($NetworkProxy -eq "restricted" -and $SourceType -eq "url") {
+    Write-Host "❌ Restricted network mode cannot clone from a URL. Provide a local path or use -NetworkProxy allow-all." -ForegroundColor Red
+    exit 1
+}
+
 # Determine container and workspace names
 if ($Name) {
     $ContainerName = "$Agent-$Name"
@@ -109,12 +170,43 @@ $ImageName = switch ($Agent) {
     default { "coding-agents:local" }
 }
 
+$ProxyImage = "coding-agents-proxy:local"
+$ProxyContainerName = "$ContainerName-proxy"
+$ProxyNetworkName = "$ContainerName-net"
+$ProxyUrl = $null
+$UseSquid = $false
+
+$NetworkMode = "bridge"
+$NetworkPolicyEnv = "allow-all"
+
+switch ($NetworkProxy) {
+    "restricted" {
+        $NetworkMode = "none"
+        $NetworkPolicyEnv = "restricted"
+    }
+    "squid" {
+        $NetworkMode = $ProxyNetworkName
+        $NetworkPolicyEnv = "squid"
+        $UseSquid = $true
+    }
+    Default {
+        $NetworkPolicyEnv = "allow-all"
+    }
+}
+
+$NetworkSummary = switch ($NetworkPolicyEnv) {
+    "restricted" { "no outbound network" }
+    "squid" { "proxied via Squid sidecar" }
+    Default { "standard Docker bridge" }
+}
+
 Write-Host "🚀 Launching Coding Agent..." -ForegroundColor Cyan
 Write-Host "🎯 Agent: $Agent" -ForegroundColor Cyan
 Write-Host "📁 Source: $Source ($SourceType)" -ForegroundColor Cyan
 Write-Host "🌿 Branch: $AgentBranch" -ForegroundColor Cyan
 Write-Host "🏷️  Container: $ContainerName" -ForegroundColor Cyan
 Write-Host "🐳 Image: $ImageName" -ForegroundColor Cyan
+Write-Host "🌐 Network policy: $NetworkPolicyEnv (docker --network $NetworkMode → $NetworkSummary)" -ForegroundColor Cyan
 Write-Host ""
 
 # Check if container already exists
@@ -122,6 +214,28 @@ $ExistingContainer = docker ps -a --filter "name=^${ContainerName}$" --format "{
 if ($ExistingContainer) {
     Write-Host "📦 Container '$ContainerName' already exists" -ForegroundColor Yellow
     $State = docker inspect -f '{{.State.Status}}' $ContainerName
+    $ExistingPolicy = docker inspect -f '{{ index .Config.Labels "coding-agents.network-policy" }}' $ContainerName 2>$null
+
+    if ($ExistingPolicy -eq "squid") {
+        $ExistingProxyName = docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' $ContainerName 2>$null
+        if (-not $ExistingProxyName) { $ExistingProxyName = "$ContainerName-proxy" }
+        $ExistingNetworkName = docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' $ContainerName 2>$null
+        if (-not $ExistingNetworkName) { $ExistingNetworkName = "$ContainerName-net" }
+
+        $ProxyExists = docker ps -a --filter "name=^${ExistingProxyName}$" --format "{{.Names}}" 2>$null
+        $ProxyImageForExisting = docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-image" }}' $ExistingProxyName 2>$null
+        if (-not $ProxyImageForExisting) { $ProxyImageForExisting = $ProxyImage }
+
+        if (-not $ProxyExists -and -not (docker image inspect $ProxyImageForExisting > $null 2>&1)) {
+            Write-Host "⚠️  Squid proxy image '$ProxyImageForExisting' not available. Run ./scripts/build.sh to rebuild images before restarting." -ForegroundColor Yellow
+        } else {
+            try {
+                Ensure-SquidProxy -NetworkName $ExistingNetworkName -ProxyContainer $ExistingProxyName -ProxyImage $ProxyImageForExisting
+            } catch {
+                Write-Host "⚠️  Failed to ensure Squid proxy: $_" -ForegroundColor Yellow
+            }
+        }
+    }
     
     if ($State -eq "running") {
         Write-Host "✅ Container is running" -ForegroundColor Green
@@ -138,6 +252,23 @@ if ($ExistingContainer) {
     }
 }
 
+if ($UseSquid -and -not $ExistingContainer) {
+    if (-not (docker image inspect $ProxyImage > $null 2>&1)) {
+        Write-Host "❌ Proxy image '$ProxyImage' not found. Run ./scripts/build.sh to build the proxy image." -ForegroundColor Red
+        exit 1
+    }
+
+    try {
+        Ensure-SquidProxy -NetworkName $ProxyNetworkName -ProxyContainer $ProxyContainerName -ProxyImage $ProxyImage -Recreate
+        $ProxyUrl = "http://${ProxyContainerName}:3128"
+    } catch {
+        Write-Host "❌ Failed to initialize Squid proxy: $_" -ForegroundColor Red
+        if ($script:CreatedProxy) { docker rm -f $ProxyContainerName > $null 2>&1 }
+        if ($script:CreatedNetwork) { docker network rm $ProxyNetworkName > $null 2>&1 }
+        exit 1
+    }
+}
+
 # Build docker arguments
 $dockerArgs = @(
     "run", "-d",
@@ -147,6 +278,8 @@ $dockerArgs = @(
     "-e", "SOURCE_TYPE=$SourceType",
     "-e", "REPO_NAME=$WorkspaceName",
     "-e", "AGENT_BRANCH=$AgentBranch",
+    "-e", "NETWORK_POLICY=$NetworkPolicyEnv",
+    "--label", "coding-agents.network-policy=$NetworkPolicyEnv",
     "-v", "${WslHome}/.gitconfig:/home/agentuser/.gitconfig:ro",
     "-v", "${WslHome}/.config/gh:/home/agentuser/.config/gh:ro",
     "-v", "${WslHome}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
@@ -175,18 +308,26 @@ if ($DotNetPreview) {
     $dockerArgs += "DOTNET_PREVIEW_CHANNEL=$DotNetPreview"
 }
 
-# Configure network proxy
-if ($NetworkProxy -eq "squid") {
-    Write-Host "⚠️  Squid proxy support not yet implemented" -ForegroundColor Yellow
-    # TODO: Add squid sidecar container
-} elseif ($NetworkProxy -eq "allow-all") {
-    # No proxy, full internet access (default behavior)
+if ($UseSquid -and $ProxyUrl) {
     $dockerArgs += "-e"
-    $dockerArgs += "NETWORK_POLICY=allow-all"
-} else {
-    # Default: no special network config
+    $dockerArgs += "HTTP_PROXY=$ProxyUrl"
     $dockerArgs += "-e"
-    $dockerArgs += "NETWORK_POLICY=restricted"
+    $dockerArgs += "HTTPS_PROXY=$ProxyUrl"
+    $dockerArgs += "-e"
+    $dockerArgs += "http_proxy=$ProxyUrl"
+    $dockerArgs += "-e"
+    $dockerArgs += "https_proxy=$ProxyUrl"
+    $dockerArgs += "-e"
+    $dockerArgs += "NO_PROXY=localhost,127.0.0.1,.internal,::1"
+    $dockerArgs += "-e"
+    $dockerArgs += "no_proxy=localhost,127.0.0.1,.internal,::1"
+
+    $dockerArgs += "--label"
+    $dockerArgs += "coding-agents.proxy-container=$ProxyContainerName"
+    $dockerArgs += "--label"
+    $dockerArgs += "coding-agents.proxy-network=$ProxyNetworkName"
+    $dockerArgs += "--label"
+    $dockerArgs += "coding-agents.proxy-image=$ProxyImage"
 }
 
 # Add optional agent configs if they exist
@@ -207,7 +348,7 @@ if (wsl test -f "${WslHome}/.config/coding-agents/mcp-secrets.env") {
 
 $dockerArgs += @(
     "-w", "/workspace",
-    "--network", "bridge",
+    "--network", $NetworkMode,
     "--security-opt", "no-new-privileges:true",
     "--cpus=4",
     "--memory=8g",
@@ -221,6 +362,10 @@ $ContainerId = & docker $dockerArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Failed to create container" -ForegroundColor Red
+    if ($UseSquid) {
+        if ($script:CreatedProxy) { docker rm -f $ProxyContainerName > $null 2>&1 }
+        if ($script:CreatedNetwork) { docker network rm $ProxyNetworkName > $null 2>&1 }
+    }
     exit 1
 }
 
@@ -234,23 +379,25 @@ $setupScript = @"
 #!/bin/bash
 set -e
 
-cd /home/agentuser
+TARGET_DIR="/workspace"
+mkdir -p "\$TARGET_DIR"
+
+# Clean target directory to ensure a fresh workspace
+if [ -d "\$TARGET_DIR" ] && [ "\$(find "\$TARGET_DIR" -mindepth 1 -maxdepth 1 | wc -l)" -gt 0 ]; then
+    find "\$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+fi
 
 if [ "\$SOURCE_TYPE" = "url" ]; then
     echo "🌐 Cloning repository from \$GIT_URL..."
-    git clone "\$GIT_URL" workspace
-    cd workspace
+    git clone "\$GIT_URL" "\$TARGET_DIR"
     echo "✅ Repository cloned"
 else
     echo "📋 Copying repository from host..."
-    cp -r /tmp/source-repo workspace
-    cd workspace
-    
-    # Remove the mounted source to free up the mount point
-    rm -rf /tmp/source-repo
-    
+    cp -a /tmp/source-repo/. "\$TARGET_DIR/"
     echo "✅ Repository copied"
 fi
+
+cd "\$TARGET_DIR"
 
 # Setup dual remotes
 if [ -n "\$ORIGIN_URL" ]; then
@@ -321,6 +468,10 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Failed to setup repository" -ForegroundColor Red
     Write-Host "Cleaning up container..." -ForegroundColor Yellow
     docker rm -f $ContainerName | Out-Null
+    if ($UseSquid) {
+        docker rm -f $ProxyContainerName > $null 2>&1
+        docker network rm $ProxyNetworkName > $null 2>&1
+    }
     exit 1
 }
 
@@ -338,6 +489,13 @@ Write-Host "  docker exec -it $ContainerName bash" -ForegroundColor White
 Write-Host ""
 Write-Host "To stop:" -ForegroundColor Cyan
 Write-Host "  docker stop $ContainerName" -ForegroundColor White
+if ($UseSquid) {
+    Write-Host "  docker stop $ProxyContainerName  # Squid proxy" -ForegroundColor White
+}
 Write-Host ""
 Write-Host "To remove:" -ForegroundColor Cyan
 Write-Host "  docker rm -f $ContainerName" -ForegroundColor White
+if ($UseSquid) {
+    Write-Host "  docker rm -f $ProxyContainerName  # Squid proxy" -ForegroundColor White
+    Write-Host "  docker network rm $ProxyNetworkName  # Shared proxy network" -ForegroundColor White
+}

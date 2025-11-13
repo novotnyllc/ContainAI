@@ -80,12 +80,17 @@ This creates a container with a copy of your current repository.
 | `--agent` | Choose agent: `copilot`, `codex`, `claude`, `all` (default: `all`) | `--agent codex` |
 | `--name` | Custom container name | `--name my-workspace` |
 | `--dotnet-preview` | Install .NET preview SDK (e.g., `9.0`, `10.0`) | `--dotnet-preview 9.0` |
-| `--network-proxy` | Network mode: `none` (default), `allow-all`, `squid` | `--network-proxy allow-all` |
+| `--network-proxy` | Network mode: `allow-all` (default), `restricted`, `squid` (`none` is alias for `allow-all`) | `--network-proxy restricted` |
 
 **Network Proxy Modes:**
-- `none` (default): Standard Docker network access
-- `allow-all`: Explicitly allow all network traffic
-- `squid`: Route through proxy for monitoring (not yet implemented)
+- `allow-all` (default): Standard Docker bridge network (alias: `none`)
+- `restricted`: Launch container with `docker --network none` (no outbound network)
+- `squid`: Route HTTP/HTTPS through Squid proxy sidecar (`coding-agents-proxy:local`)
+
+Proxy sidecar resources (auto-created when using `squid` mode):
+- Container: `<agent>-<repo>-proxy`
+- Network: `<agent>-<repo>-net`
+- Logs: `docker logs <container>-proxy`
 
 See [NETWORK_PROXY.md](NETWORK_PROXY.md) for network configuration details.
 
@@ -148,17 +153,22 @@ The preview SDK is installed at container startup and available alongside stable
 ### Configure Network Access
 
 ```powershell
-# Default (restricted mode)
+# Default (allow-all bridge network)
 .\launch-agent.ps1 .
 
-# Allow all network traffic (unrestricted)
+# Restrict all outbound network traffic
+.\launch-agent.ps1 . --network-proxy restricted
+
+# Explicitly allow all network traffic (same as default)
 .\launch-agent.ps1 . --network-proxy allow-all
 
-# Future: Squid proxy with monitoring (not yet implemented)
+# Proxy with Squid logging
 .\launch-agent.ps1 . --network-proxy squid
 ```
 
 See [NETWORK_PROXY.md](NETWORK_PROXY.md) for detailed network configuration options.
+
+> **Note:** Restricted mode disables outbound network connectivity; provide a local repository path instead of a Git URL when using this option.
 
 ## Multiple Agents, Same Repo
 
@@ -262,6 +272,7 @@ docker ps -a           # All (including stopped)
 
 ```bash
 docker stop copilot-app
+docker stop copilot-app-proxy    # When launched with --network-proxy squid
 ```
 
 ### Start Existing Container
@@ -276,6 +287,8 @@ docker start copilot-app
 
 ```bash
 docker rm -f copilot-app
+docker rm -f copilot-app-proxy   # When launched with --network-proxy squid
+docker network rm copilot-app-net  # Proxy network (only if no other containers attached)
 ```
 
 ⚠️ **Warning:** This deletes the container's workspace. Push your changes first!
