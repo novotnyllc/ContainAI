@@ -100,6 +100,10 @@ try {
 } finally {
     if (Test-ContainerExists $ContainerName) {
         Write-Host ""
-        Push-ToLocal -ContainerName $ContainerName -SkipPush:$NoPush
+        if ($NoPush) {
+            Push-ToLocal -ContainerName $ContainerName -SkipPush
+        } else {
+            Push-ToLocal -ContainerName $ContainerName
+        }
     }
 }
