@@ -8,42 +8,137 @@ cleanup_on_shutdown() {
     echo ""
     echo "📤 Container shutting down..."
     
-    # Check if auto-push is enabled (default: true)
+    # Check if auto-commit/push is enabled (default: true)
+    AUTO_COMMIT="${AUTO_COMMIT_ON_SHUTDOWN:-true}"
     AUTO_PUSH="${AUTO_PUSH_ON_SHUTDOWN:-true}"
     
-    if [ "$AUTO_PUSH" != "true" ]; then
-        echo "⏭️  Auto-push disabled, skipping..."
+    if [ "$AUTO_COMMIT" != "true" ] && [ "$AUTO_PUSH" != "true" ]; then
+        echo "⏭️  Auto-commit and auto-push disabled, skipping..."
         return 0
     fi
     
-    # Only push if in a git repository with uncommitted changes
+    # Only process if in a git repository
     if [ -d /workspace/.git ]; then
         cd /workspace || {
             echo "⚠️  Warning: Could not change to workspace directory"
             return 0
         }
         
-        # Check if there are any changes to commit
-        if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-            echo "💾 Uncommitted changes detected, pushing to local remote..."
-            
-            REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
-            BRANCH=$(git branch --show-current 2>/dev/null)
-            
-            if [ -n "$BRANCH" ]; then
-                # Push to local remote (host machine)
-                if git push local "$BRANCH" 2>/dev/null; then
-                    echo "✅ Changes pushed to local remote: $REPO_NAME ($BRANCH)"
+        # Check if there are any changes (staged or unstaged)
+        if ! git diff-index --quiet HEAD -- 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+            if [ "$AUTO_COMMIT" = "true" ]; then
+                echo "💾 Uncommitted changes detected, creating automatic commit..."
+                
+                # Get repository and branch info
+                REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
+                BRANCH=$(git branch --show-current 2>/dev/null)
+                TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+                
+                # Stage all changes (tracked and untracked)
+                git add -A 2>/dev/null || {
+                    echo "⚠️  Warning: Failed to stage changes"
+                    return 0
+                }
+                
+                # Generate commit message based on changes
+                COMMIT_MSG=$(generate_auto_commit_message)
+                
+                # Create commit
+                if git commit -m "$COMMIT_MSG" 2>/dev/null; then
+                    echo "✅ Auto-commit created"
+                    echo "   Message: $COMMIT_MSG"
+                    
+                    # Push if auto-push is also enabled
+                    if [ "$AUTO_PUSH" = "true" ] && [ -n "$BRANCH" ]; then
+                        echo "📤 Pushing changes to local remote..."
+                        if git push local "$BRANCH" 2>/dev/null; then
+                            echo "✅ Changes pushed to local remote: $REPO_NAME ($BRANCH)"
+                        else
+                            echo "⚠️  Failed to push (local remote may not be configured)"
+                            echo "💡 Run: git remote add local <url> to enable auto-push"
+                        fi
+                    fi
                 else
-                    echo "⚠️  Failed to push changes (local remote may not be configured)"
+                    echo "⚠️  Warning: Failed to create commit"
                 fi
             else
-                echo "⚠️  Not on a branch, skipping push"
+                echo "⚠️  Uncommitted changes exist but auto-commit is disabled"
+                echo "💡 Set AUTO_COMMIT_ON_SHUTDOWN=true to enable"
             fi
         else
-            echo "✅ No uncommitted changes, nothing to push"
+            echo "✅ No uncommitted changes"
         fi
     fi
+}
+
+# Generate intelligent commit message based on git status
+generate_auto_commit_message() {
+    local agent_name="${AGENT_NAME:-unknown}"
+    
+    # Get git diff summary
+    local diff_stat=$(git diff --cached --stat 2>/dev/null | tail -1)
+    local files_changed=$(git diff --cached --name-only 2>/dev/null | head -10)
+    
+    # Try to generate commit message using the active AI agent
+    local ai_message=""
+    
+    # Check if GitHub Copilot CLI is available and authenticated
+    if command -v github-copilot-cli &> /dev/null && gh auth status &> /dev/null 2>&1; then
+        echo "🤖 Asking GitHub Copilot to generate commit message..." >&2
+        
+        # Create prompt for the AI
+        local prompt="Based on these git changes, write a concise commit message (50 chars max, conventional commits format):
+
+Files changed:
+$files_changed
+
+Diff summary:
+$diff_stat
+
+Provide only the commit message, no explanation."
+        
+        # Use GitHub Copilot to generate message (with timeout)
+        ai_message=$(timeout 10s github-copilot-cli suggest "$prompt" 2>/dev/null | head -1 | tr -d '\n' || echo "")
+        
+    # Fallback: Check if gh copilot is available as extension
+    elif command -v gh &> /dev/null && gh auth status &> /dev/null 2>&1; then
+        if gh copilot --help &> /dev/null 2>&1; then
+            echo "🤖 Asking GitHub Copilot to generate commit message..." >&2
+            
+            local prompt="Write a concise git commit message for these changes (max 50 chars, conventional commits format):
+$files_changed
+
+Only output the commit message, nothing else."
+            
+            ai_message=$(timeout 10s gh copilot suggest -t shell "$prompt" 2>/dev/null | grep -v "^$" | head -1 | tr -d '\n' || echo "")
+        fi
+    fi
+    
+    # Clean up AI message if we got one
+    if [ -n "$ai_message" ]; then
+        # Remove common prefixes and clean up
+        ai_message=$(echo "$ai_message" | sed -e 's/^git commit -m "//' -e 's/"$//' -e 's/^[Cc]ommit message: //' -e 's/^Message: //' | tr -d '\n')
+        
+        # Validate it's reasonable (not too long, not empty)
+        if [ ${#ai_message} -gt 10 ] && [ ${#ai_message} -lt 100 ]; then
+            echo "$ai_message"
+            return 0
+        fi
+    fi
+    
+    # Fallback: Generate basic message if AI fails
+    local added modified deleted
+    added=$(git diff --cached --name-only --diff-filter=A 2>/dev/null | wc -l)
+    modified=$(git diff --cached --name-only --diff-filter=M 2>/dev/null | wc -l)
+    deleted=$(git diff --cached --name-only --diff-filter=D 2>/dev/null | wc -l)
+    
+    local msg_parts=()
+    if [ "$added" -gt 0 ]; then msg_parts+=("$added added"); fi
+    if [ "$modified" -gt 0 ]; then msg_parts+=("$modified modified"); fi
+    if [ "$deleted" -gt 0 ]; then msg_parts+=("$deleted deleted"); fi
+    
+    local changes=$(IFS=", "; echo "${msg_parts[*]}")
+    echo "chore: auto-commit ($changes)"
 }
 
 # Register cleanup on shutdown signals
@@ -141,6 +236,11 @@ echo "💡 All authentication uses OAuth from WSL2 host"
 echo "   - GitHub/Copilot: via gh CLI (~/.config/gh/hosts.yml)"
 echo "   - Codex/Claude: via native OAuth configs"
 echo "   - Update on host, restart container to refresh"
+echo ""
+echo "🔄 Auto-commit/push enabled on container shutdown"
+echo "   - Uncommitted changes will be auto-committed with generated message"
+echo "   - Changes will be pushed to 'local' remote (if configured)"
+echo "   - Disable: AUTO_COMMIT_ON_SHUTDOWN=false or AUTO_PUSH_ON_SHUTDOWN=false"
 echo ""
 
 # Execute the command passed to the container
