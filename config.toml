@@ -44,7 +44,7 @@ args = ["-y","@upstash/context7-mcp","--api-key", "${CONTEXT7_API_KEY}"]
 
 [mcp_servers.serena]
 command = "uvx"
-args = ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--project", "/workspace", "--context", "ide-assistant", "--mode", "planning", "--mode", "editing"]
+args = ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--project", "/workspace", "--context", "ide-assistant", "--mode", "planning", "--mode", "editing", "--mode", "interactive"]
 
 [mcp_servers.sequential-thinking]
 command = "npx"
