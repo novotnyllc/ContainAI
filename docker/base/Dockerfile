@@ -72,16 +72,44 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install .NET SDKs 8, 9, and 10 (for C# development and Codex if needed)
-RUN wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
-    dpkg -i packages-microsoft-prod.deb && \
-    rm packages-microsoft-prod.deb && \
-    apt-get update && \
-    apt-get install -y dotnet-sdk-8.0 dotnet-sdk-9.0 dotnet-sdk-10.0 && \
-    rm -rf /var/lib/apt/lists/*
+# Install .NET dependencies (required since we're not using package manager)
+RUN apt-get update && apt-get install -y \
+    libc6 \
+    libgcc-s1 \
+    libgssapi-krb5-2 \
+    libicu70 \
+    liblttng-ust1 \
+    libssl3 \
+    libstdc++6 \
+    libunwind8 \
+    zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install .NET SDKs using Microsoft's official install script
+RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && \
+    chmod +x dotnet-install.sh && \
+    ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet && \
+    ./dotnet-install.sh --channel 9.0 --install-dir /usr/share/dotnet && \
+    ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet && \
+    rm dotnet-install.sh && \
+    ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
+
+# Set .NET environment variables
+ENV DOTNET_ROOT=/usr/share/dotnet
+ENV PATH="${PATH}:/usr/share/dotnet"
+
+# Install .NET workloads (MAUI, Blazor, WASM, etc.)
+RUN dotnet workload install aspire maui wasm-tools ios android maccatalyst tvos || \
+    echo "⚠️  Some workloads may have failed (expected for some platforms)"
+
+# Install PowerShell using official script (separate from .NET SDK)
+RUN curl -sSL https://aka.ms/install-powershell.sh -o install-powershell.sh && \
+    chmod +x install-powershell.sh && \
+    ./install-powershell.sh && \
+    rm install-powershell.sh
 
 # Copy .NET preview installer script (run optionally at container start)
-COPY --chown=root:root scripts/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
+COPY --chown=root:root scripts/runtime/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
 RUN chmod +x /usr/local/bin/install-dotnet-preview.sh
 
 # Install GitHub CLI
@@ -120,8 +148,8 @@ ENV PATH="/home/agentuser/.cargo/bin:${PATH}"
 # Install uv for user
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Pre-install Serena MCP server
-RUN uvx --from "git+https://github.com/oraios/serena" serena --help || true
+# Pre-install Serena MCP server (will be refreshed on container start)
+RUN uvx --from "git+https://github.com/oraios/serena@main" serena --help || true
 
 # Create config directory structure
 RUN mkdir -p /home/agentuser/.config/coding-agents

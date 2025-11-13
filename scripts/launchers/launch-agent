@@ -154,24 +154,38 @@ fi
 
 AGENT_BRANCH="${AGENT}/${BRANCH}"
 
-# Select image based on agent parameter
+# Pull latest images
+echo "📦 Checking for image updates..."
+
+# Select image based on agent parameter and pull from registry
 case "$AGENT" in
     copilot)
+        docker pull --quiet ghcr.io/novotnyllc/coding-agents-copilot:latest 2>/dev/null && \
+            docker tag ghcr.io/novotnyllc/coding-agents-copilot:latest coding-agents-copilot:local || true
         IMAGE_NAME="coding-agents-copilot:local"
         ;;
     codex)
+        docker pull --quiet ghcr.io/novotnyllc/coding-agents-codex:latest 2>/dev/null && \
+            docker tag ghcr.io/novotnyllc/coding-agents-codex:latest coding-agents-codex:local || true
         IMAGE_NAME="coding-agents-codex:local"
         ;;
     claude)
+        docker pull --quiet ghcr.io/novotnyllc/coding-agents-claude:latest 2>/dev/null && \
+            docker tag ghcr.io/novotnyllc/coding-agents-claude:latest coding-agents-claude:local || true
         IMAGE_NAME="coding-agents-claude:local"
         ;;
     *)
+        docker pull --quiet ghcr.io/novotnyllc/coding-agents:latest 2>/dev/null && \
+            docker tag ghcr.io/novotnyllc/coding-agents:latest coding-agents:local || true
         IMAGE_NAME="coding-agents:local"
         ;;
 esac
 
 # Get timezone
 TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
+
+# Default Squid allowed domains
+SQUID_ALLOWED_DOMAINS="*.github.com,*.githubcopilot.com,*.nuget.org,*.npmjs.org,*.pypi.org,*.python.org,*.microsoft.com,*.docker.io,registry-1.docker.io,api.githubcopilot.com,learn.microsoft.com,platform.uno,*.githubusercontent.com,*.azureedge.net"
 
 # Determine docker network settings based on selection
 NETWORK_MODE="bridge"
@@ -205,7 +219,7 @@ case "$NETWORK_POLICY_ENV" in
         NETWORK_SUMMARY="proxied via Squid sidecar"
         ;;
     *)
-        NETWORK_SUMMARY="standard Docker bridge"
+        NETWORK_SUMMARY="unrestricted (bridge mode)"
         ;;
 esac
 
@@ -277,6 +291,7 @@ if $USE_SQUID; then
         --hostname "$PROXY_CONTAINER_NAME" \
         --network "$PROXY_NETWORK_NAME" \
         --restart unless-stopped \
+        -e "SQUID_ALLOWED_DOMAINS=$SQUID_ALLOWED_DOMAINS" \
         --label "coding-agents.proxy-of=$CONTAINER_NAME" \
         --label "coding-agents.proxy-image=$PROXY_IMAGE" \
         "$PROXY_IMAGE" >/dev/null || {

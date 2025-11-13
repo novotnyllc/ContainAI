@@ -31,6 +31,13 @@ if (-not $WslHome) {
 # Get timezone from host
 $TimeZone = (Get-TimeZone).Id
 
+# Check for image updates
+Write-Host "📦 Checking for image updates..." -ForegroundColor Cyan
+docker pull --quiet ghcr.io/novotnyllc/coding-agents-copilot:latest 2>$null
+if ($LASTEXITCODE -eq 0) {
+    docker tag ghcr.io/novotnyllc/coding-agents-copilot:latest coding-agents-copilot:local
+}
+
 Write-Host "🚀 Launching GitHub Copilot CLI..." -ForegroundColor Cyan
 Write-Host "📁 Repository: $RepoPath" -ForegroundColor Cyan
 

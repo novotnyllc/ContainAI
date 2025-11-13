@@ -44,7 +44,7 @@ switch ($choice) {
         Write-Host ""
         Write-Host "🔨 Building base image locally..." -ForegroundColor Cyan
         Write-Host "   This will take approximately 15 minutes..." -ForegroundColor Yellow
-        docker build -f Dockerfile.base -t coding-agents-base:local .
+        docker build -f docker/base/Dockerfile -t coding-agents-base:local .
         if ($LASTEXITCODE -ne 0) {
             Write-Host "❌ Failed to build base image" -ForegroundColor Red
             exit 1
@@ -59,7 +59,7 @@ switch ($choice) {
 
 Write-Host ""
 Write-Host "🔨 Building all-agents image..." -ForegroundColor Cyan
-docker build --build-arg BASE_IMAGE=$BASE_IMAGE -t coding-agents:local .
+docker build -f docker/agents/all/Dockerfile --build-arg BASE_IMAGE=$BASE_IMAGE -t coding-agents:local .
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Failed to build all-agents image" -ForegroundColor Red
     exit 1
@@ -67,13 +67,13 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "🔨 Building individual agent images..." -ForegroundColor Cyan
-docker build -f Dockerfile.copilot --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-copilot:local .
-docker build -f Dockerfile.codex --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-codex:local .
-docker build -f Dockerfile.claude --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-claude:local .
+docker build -f docker/agents/copilot/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-copilot:local .
+docker build -f docker/agents/codex/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-codex:local .
+docker build -f docker/agents/claude/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-claude:local .
 
 Write-Host ""
 Write-Host "🔨 Building network proxy image..." -ForegroundColor Cyan
-docker build -f Dockerfile.proxy -t coding-agents-proxy:local .
+docker build -f docker/proxy/Dockerfile -t coding-agents-proxy:local .
 
 Write-Host ""
 Write-Host "✅ Build complete!" -ForegroundColor Green

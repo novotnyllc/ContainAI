@@ -1,5 +1,5 @@
-# Ultra-simple launcher for OpenAI Codex
-# Usage: .\run-codex.ps1 [directory]
+# Ultra-simple launcher for Claude CLI
+# Usage: .\run-claude.ps1 [directory]
 #   directory: Path to repository (defaults to current directory)
 
 param(
@@ -30,23 +30,30 @@ if (-not $WslHome) {
 # Get timezone from host
 $TimeZone = (Get-TimeZone).Id
 
-Write-Host "🚀 Launching OpenAI Codex..." -ForegroundColor Cyan
+# Check for image updates
+Write-Host "📦 Checking for image updates..." -ForegroundColor Cyan
+docker pull --quiet ghcr.io/novotnyllc/coding-agents-claude:latest 2>$null
+if ($LASTEXITCODE -eq 0) {
+    docker tag ghcr.io/novotnyllc/coding-agents-claude:latest coding-agents-claude:local
+}
+
+Write-Host "🚀 Launching Claude CLI..." -ForegroundColor Cyan
 Write-Host "📁 Repository: $RepoPath" -ForegroundColor Cyan
 
 # Build docker command with optional mounts
 $dockerArgs = @(
     "run", "-it", "--rm",
-    "--name", "codex-$RepoName",
+    "--name", "claude-$RepoName",
     "-e", "TZ=$TimeZone",
     "-v", "${WslPath}:/workspace",
     "-v", "${WslHome}/.gitconfig:/home/agentuser/.gitconfig:ro",
     "-v", "${WslHome}/.config/gh:/home/agentuser/.config/gh:ro"
 )
 
-# Add Codex config if it exists
-if (wsl test -d "${WslHome}/.config/codex") {
+# Add Claude config if it exists
+if (wsl test -d "${WslHome}/.config/claude") {
     $dockerArgs += "-v"
-    $dockerArgs += "${WslHome}/.config/codex:/home/agentuser/.config/codex:ro"
+    $dockerArgs += "${WslHome}/.config/claude:/home/agentuser/.config/claude:ro"
 }
 
 # Add MCP secrets if they exist
@@ -55,6 +62,6 @@ if (wsl test -f "${WslHome}/.config/coding-agents/mcp-secrets.env") {
     $dockerArgs += "${WslHome}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro"
 }
 
-$dockerArgs += @("-w", "/workspace", "--security-opt", "no-new-privileges:true", "coding-agents-codex:local")
+$dockerArgs += @("-w", "/workspace", "--security-opt", "no-new-privileges:true", "coding-agents-claude:local")
 
 & docker $dockerArgs

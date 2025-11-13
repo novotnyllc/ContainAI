@@ -1,7 +1,7 @@
 version: '3.8'
 
-# NOTE: Most users should use the one-line launchers instead:
-#   ./run-copilot.ps1, ./run-codex.ps1, ./run-claude.ps1
+# NOTE: Most users should use the launcher scripts instead:
+#   scripts/launchers/run-copilot.ps1, scripts/launchers/run-codex.ps1, scripts/launchers/run-claude.ps1
 # This docker-compose.yml is for advanced use cases only.
 
 services:
