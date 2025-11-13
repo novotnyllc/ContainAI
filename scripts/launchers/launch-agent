@@ -4,20 +4,18 @@
 
 set -e
 
+# Source shared functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/common-functions.sh"
+
 # Default values
 SOURCE="."
 BRANCH=""
-AGENT="all"
+AGENT="copilot"
 NAME=""
 DOTNET_PREVIEW=""
 NETWORK_PROXY="allow-all"
-
-# Proxy configuration defaults (computed later once container name is known)
-PROXY_IMAGE="coding-agents-proxy:local"
-PROXY_CONTAINER_NAME=""
-PROXY_NETWORK_NAME=""
-PROXY_URL=""
-USE_SQUID=false
+NO_PUSH=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -42,6 +40,10 @@ while [[ $# -gt 0 ]]; do
             NETWORK_PROXY="$2"
             shift 2
             ;;
+        --no-push)
+            NO_PUSH=true
+            shift
+            ;;
         -h|--help)
             echo "Usage: launch-agent [SOURCE] [OPTIONS]"
             echo ""
@@ -51,10 +53,11 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  -b, --branch BRANCH         Branch name (creates <agent>/<branch>)"
-            echo "  --agent AGENT               Agent type: copilot, codex, claude, all (default: all)"
+            echo "  --agent AGENT               Agent type: copilot, codex, claude (default: copilot)"
             echo "  --name NAME                 Custom container name"
             echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 9.0)"
             echo "  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)"
+            echo "  --no-push                   Disable auto-push on container shutdown"
             echo "  -h, --help                  Show this help"
             echo ""
             echo "Examples:"
@@ -73,74 +76,53 @@ done
 
 # Validate network proxy option
 case "$NETWORK_PROXY" in
-    allow-all|none|restricted|squid)
-        ;;
+    allow-all|none|restricted|squid) ;;
     *)
         echo "❌ Error: Invalid --network-proxy value '$NETWORK_PROXY'"
         exit 1
         ;;
 esac
 
-# Treat 'none' as alias for allow-all to preserve backwards compatibility
-if [ "$NETWORK_PROXY" = "none" ]; then
-    NETWORK_PROXY="allow-all"
-fi
+# Treat 'none' as alias for allow-all
+[ "$NETWORK_PROXY" = "none" ] && NETWORK_PROXY="allow-all"
 
-# Determine if source is a URL or local path
+# Check Docker
+check_docker_running || exit 1
+
+# Determine if source is URL or local path
 if [[ "$SOURCE" =~ ^https?:// ]]; then
     IS_URL=true
     SOURCE_TYPE="url"
     REPO_NAME=$(basename "$SOURCE" .git)
     GIT_URL="$SOURCE"
+    ORIGIN_URL="$GIT_URL"
+    WSL_PATH=""
 else
     IS_URL=false
     SOURCE_TYPE="local"
     SOURCE=$(realpath "$SOURCE")
     
-    # Check if it's a git repository
+    # Check if git repository
     if [ ! -d "$SOURCE/.git" ]; then
         echo "❌ Error: $SOURCE is not a git repository"
         exit 1
     fi
     
     REPO_NAME=$(basename "$SOURCE")
-    
-    # Get git remote URL if it exists
     cd "$SOURCE"
     ORIGIN_URL=$(git remote get-url origin 2>/dev/null || echo "")
     cd - > /dev/null
-    
-    # Convert to WSL path if needed (for Windows compatibility)
-    if [[ "$SOURCE" =~ ^/mnt/[a-z]/ ]]; then
-        WSL_PATH="$SOURCE"
-    elif [[ "$SOURCE" =~ ^[A-Z]: ]]; then
-        DRIVE=$(echo "$SOURCE" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')
-        REST=$(echo "$SOURCE" | cut -d: -f2 | tr '\\' '/')
-        WSL_PATH="/mnt/${DRIVE}${REST}"
-    else
-        WSL_PATH="$SOURCE"
-    fi
+    WSL_PATH=$(convert_to_wsl_path "$SOURCE")
+    GIT_URL=""
 fi
 
-# Restricted network cannot clone remote repositories
+# Restricted network cannot clone URLs
 if [ "$NETWORK_PROXY" = "restricted" ] && [ "$SOURCE_TYPE" = "url" ]; then
     echo "❌ Restricted network mode cannot clone from a URL. Provide a local path or use --network-proxy allow-all."
     exit 1
 fi
 
-# Determine container and workspace names
-if [ -n "$NAME" ]; then
-    CONTAINER_NAME="${AGENT}-${NAME}"
-    WORKSPACE_NAME="$NAME"
-else
-    CONTAINER_NAME="${AGENT}-${REPO_NAME}"
-    WORKSPACE_NAME="$REPO_NAME"
-fi
-
-PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
-PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
-
-# Determine branch name
+# Determine branch name first
 if [ -z "$BRANCH" ]; then
     if [ "$SOURCE_TYPE" = "local" ]; then
         cd "$SOURCE"
@@ -152,44 +134,39 @@ if [ -z "$BRANCH" ]; then
     fi
 fi
 
+# Sanitize branch name for container naming
+SAFE_BRANCH=$(echo "$BRANCH" | tr '/' '-' | tr '_' '-' | tr '[:upper:]' '[:lower:]')
+
+# Determine container names
+if [ -n "$NAME" ]; then
+    CONTAINER_NAME="${AGENT}-${NAME}"
+    WORKSPACE_NAME="$NAME"
+else
+    CONTAINER_NAME="${AGENT}-${REPO_NAME}-${SAFE_BRANCH}"
+    WORKSPACE_NAME="$REPO_NAME"
+fi
+
 AGENT_BRANCH="${AGENT}/${BRANCH}"
+PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
+PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
+PROXY_IMAGE="coding-agents-proxy:local"
 
-# Pull latest images
-echo "📦 Checking for image updates..."
-
-# Select image based on agent parameter and pull from registry
-case "$AGENT" in
-    copilot)
-        docker pull --quiet ghcr.io/novotnyllc/coding-agents-copilot:latest 2>/dev/null && \
-            docker tag ghcr.io/novotnyllc/coding-agents-copilot:latest coding-agents-copilot:local || true
-        IMAGE_NAME="coding-agents-copilot:local"
-        ;;
-    codex)
-        docker pull --quiet ghcr.io/novotnyllc/coding-agents-codex:latest 2>/dev/null && \
-            docker tag ghcr.io/novotnyllc/coding-agents-codex:latest coding-agents-codex:local || true
-        IMAGE_NAME="coding-agents-codex:local"
-        ;;
-    claude)
-        docker pull --quiet ghcr.io/novotnyllc/coding-agents-claude:latest 2>/dev/null && \
-            docker tag ghcr.io/novotnyllc/coding-agents-claude:latest coding-agents-claude:local || true
-        IMAGE_NAME="coding-agents-claude:local"
-        ;;
-    *)
-        docker pull --quiet ghcr.io/novotnyllc/coding-agents:latest 2>/dev/null && \
-            docker tag ghcr.io/novotnyllc/coding-agents:latest coding-agents:local || true
-        IMAGE_NAME="coding-agents:local"
-        ;;
-esac
+# Pull latest image
+pull_and_tag_image "$AGENT"
+IMAGE_NAME="coding-agents-${AGENT}:local"
 
 # Get timezone
 TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
 
-# Default Squid allowed domains
+# Squid allowed domains
 SQUID_ALLOWED_DOMAINS="*.github.com,*.githubcopilot.com,*.nuget.org,*.npmjs.org,*.pypi.org,*.python.org,*.microsoft.com,*.docker.io,registry-1.docker.io,api.githubcopilot.com,learn.microsoft.com,platform.uno,*.githubusercontent.com,*.azureedge.net"
 
-# Determine docker network settings based on selection
+# Determine network mode
 NETWORK_MODE="bridge"
 NETWORK_POLICY_ENV="allow-all"
+USE_SQUID=false
+PROXY_URL=""
+
 case "$NETWORK_PROXY" in
     restricted)
         NETWORK_MODE="none"
@@ -199,6 +176,7 @@ case "$NETWORK_PROXY" in
         NETWORK_MODE="$PROXY_NETWORK_NAME"
         NETWORK_POLICY_ENV="squid"
         USE_SQUID=true
+        PROXY_URL="http://${PROXY_CONTAINER_NAME}:3128"
         ;;
     *)
         NETWORK_POLICY_ENV="allow-all"
@@ -211,97 +189,44 @@ echo "📁 Source: $SOURCE ($SOURCE_TYPE)"
 echo "🌿 Branch: $AGENT_BRANCH"
 echo "🏷️  Container: $CONTAINER_NAME"
 echo "🐳 Image: $IMAGE_NAME"
-case "$NETWORK_POLICY_ENV" in
-    restricted)
-        NETWORK_SUMMARY="no outbound network"
-        ;;
-    squid)
-        NETWORK_SUMMARY="proxied via Squid sidecar"
-        ;;
-    *)
-        NETWORK_SUMMARY="unrestricted (bridge mode)"
-        ;;
-esac
-
-echo "🌐 Network policy: $NETWORK_POLICY_ENV (docker --network $NETWORK_MODE → $NETWORK_SUMMARY)"
+echo "🌐 Network policy: $NETWORK_POLICY_ENV"
 echo ""
 
 # Check if container already exists
-if docker ps -a --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+if container_exists "$CONTAINER_NAME"; then
     echo "📦 Container '$CONTAINER_NAME' already exists"
-    STATE=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME")
-    EXISTING_POLICY=$(docker inspect -f '{{ index .Config.Labels "coding-agents.network-policy" }}' "$CONTAINER_NAME" 2>/dev/null || echo "allow-all")
-
-    if [ "$EXISTING_POLICY" = "squid" ]; then
-        EXISTING_PROXY_NAME=$(docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' "$CONTAINER_NAME" 2>/dev/null || echo "${CONTAINER_NAME}-proxy")
-        EXISTING_NETWORK_NAME=$(docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' "$CONTAINER_NAME" 2>/dev/null || echo "${CONTAINER_NAME}-net")
-        PROXY_IMAGE_FOR_EXISTING=$(docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-image" }}' "$EXISTING_PROXY_NAME" 2>/dev/null || echo "$PROXY_IMAGE")
-
-        if ! docker ps -a --filter "name=^${EXISTING_PROXY_NAME}$" --format "{{.Names}}" | grep -q "^${EXISTING_PROXY_NAME}$"; then
-            echo "⚠️  Proxy container missing; recreating..."
-            docker network inspect "$EXISTING_NETWORK_NAME" >/dev/null 2>&1 || docker network create "$EXISTING_NETWORK_NAME"
-            docker run -d \
-                --name "$EXISTING_PROXY_NAME" \
-                --hostname "$EXISTING_PROXY_NAME" \
-                --network "$EXISTING_NETWORK_NAME" \
-                --restart unless-stopped \
-                --label "coding-agents.proxy-of=$CONTAINER_NAME" \
-                --label "coding-agents.proxy-image=$PROXY_IMAGE_FOR_EXISTING" \
-                "$PROXY_IMAGE_FOR_EXISTING" >/dev/null
-        else
-            PROXY_STATE=$(docker inspect -f '{{.State.Status}}' "$EXISTING_PROXY_NAME")
-            if [ "$PROXY_STATE" != "running" ]; then
-                echo "▶️  Starting proxy container..."
-                docker start "$EXISTING_PROXY_NAME" >/dev/null
-            fi
-        fi
-
-        PROXY_URL="http://${EXISTING_PROXY_NAME}:3128"
-        USE_SQUID=true
-        PROXY_CONTAINER_NAME="$EXISTING_PROXY_NAME"
-        PROXY_NETWORK_NAME="$EXISTING_NETWORK_NAME"
+    STATE=$(get_container_status "$CONTAINER_NAME")
+    
+    # Handle existing proxy if squid mode
+    if [ "$USE_SQUID" = true ]; then
+        EXISTING_PROXY=$(docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_CONTAINER_NAME")
+        EXISTING_NETWORK=$(docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_NETWORK_NAME")
+        PROXY_CONTAINER_NAME="$EXISTING_PROXY"
+        PROXY_NETWORK_NAME="$EXISTING_NETWORK"
+        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS"
     fi
     
     if [ "$STATE" = "running" ]; then
-        echo "✅ Container is running"
-        echo ""
-        echo "To connect with VS Code:"
-        echo "  1. Install 'Dev Containers' extension"
-        echo "  2. Click the remote button (bottom-left)"
-        echo "  3. Select 'Attach to Running Container'"
-        echo "  4. Choose '$CONTAINER_NAME'"
-        echo ""
-        echo "Or connect via shell:"
-        echo "  docker exec -it $CONTAINER_NAME bash"
+        echo "✅ Container is already running"
+        echo "   Connect via: docker exec -it $CONTAINER_NAME bash"
+        echo "   Or use VS Code Dev Containers extension"
         exit 0
     else
         echo "▶️  Starting existing container..."
-        docker start -ai "$CONTAINER_NAME"
-        exit $?
+        docker start "$CONTAINER_NAME"
+        echo "✅ Container started"
+        exit 0
     fi
 fi
 
-# Initialize Squid proxy for new containers if needed
-if $USE_SQUID; then
-    echo "🛡️  Initializing Squid proxy sidecar..."
-    docker network create "$PROXY_NETWORK_NAME" >/dev/null 2>&1 || true
-    docker rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1 || true
-    docker run -d \
-        --name "$PROXY_CONTAINER_NAME" \
-        --hostname "$PROXY_CONTAINER_NAME" \
-        --network "$PROXY_NETWORK_NAME" \
-        --restart unless-stopped \
-        -e "SQUID_ALLOWED_DOMAINS=$SQUID_ALLOWED_DOMAINS" \
-        --label "coding-agents.proxy-of=$CONTAINER_NAME" \
-        --label "coding-agents.proxy-image=$PROXY_IMAGE" \
-        "$PROXY_IMAGE" >/dev/null || {
-            echo "❌ Failed to launch Squid proxy."
-            exit 1
-        }
-    PROXY_URL="http://${PROXY_CONTAINER_NAME}:3128"
+# Setup squid proxy if needed
+if [ "$USE_SQUID" = true ]; then
+    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS"
 fi
 
 # Build docker arguments
+AUTO_PUSH_VALUE=$([ "$NO_PUSH" = true ] && echo "false" || echo "true")
+
 DOCKER_ARGS=(
     "run" "-d"
     "--name" "$CONTAINER_NAME"
@@ -311,55 +236,49 @@ DOCKER_ARGS=(
     "-e" "REPO_NAME=$WORKSPACE_NAME"
     "-e" "AGENT_BRANCH=$AGENT_BRANCH"
     "-e" "NETWORK_POLICY=$NETWORK_POLICY_ENV"
+    "-e" "AUTO_PUSH_ON_SHUTDOWN=$AUTO_PUSH_VALUE"
+    "--label" "coding-agents.type=agent"
+    "--label" "coding-agents.agent=$AGENT"
+    "--label" "coding-agents.repo=$REPO_NAME"
+    "--label" "coding-agents.branch=$BRANCH"
     "--label" "coding-agents.network-policy=$NETWORK_POLICY_ENV"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
     "-v" "${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
 )
 
-# Add source-specific environment variables
+# Add source-specific vars
 if [ "$SOURCE_TYPE" = "url" ]; then
     DOCKER_ARGS+=("-e" "GIT_URL=$GIT_URL")
 else
     DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$WSL_PATH")
-    # Mount the local repo as a temporary source (read-only)
     DOCKER_ARGS+=("-v" "${WSL_PATH}:/tmp/source-repo:ro")
 fi
 
-if [ -n "$ORIGIN_URL" ]; then
-    DOCKER_ARGS+=("-e" "ORIGIN_URL=$ORIGIN_URL")
-fi
+[ -n "$ORIGIN_URL" ] && DOCKER_ARGS+=("-e" "ORIGIN_URL=$ORIGIN_URL")
+[ -n "$DOTNET_PREVIEW" ] && DOCKER_ARGS+=("-e" "DOTNET_PREVIEW_CHANNEL=$DOTNET_PREVIEW")
 
-# Add .NET preview channel if specified
-if [ -n "$DOTNET_PREVIEW" ]; then
-    DOCKER_ARGS+=("-e" "DOTNET_PREVIEW_CHANNEL=$DOTNET_PREVIEW")
-fi
-
-if $USE_SQUID && [ -n "$PROXY_URL" ]; then
-    DOCKER_ARGS+=("-e" "HTTP_PROXY=$PROXY_URL")
-    DOCKER_ARGS+=("-e" "HTTPS_PROXY=$PROXY_URL")
-    DOCKER_ARGS+=("-e" "http_proxy=$PROXY_URL")
-    DOCKER_ARGS+=("-e" "https_proxy=$PROXY_URL")
-    DOCKER_ARGS+=("-e" "NO_PROXY=localhost,127.0.0.1,.internal,::1")
-    DOCKER_ARGS+=("-e" "no_proxy=localhost,127.0.0.1,.internal,::1")
-    DOCKER_ARGS+=("--label" "coding-agents.proxy-container=$PROXY_CONTAINER_NAME")
-    DOCKER_ARGS+=("--label" "coding-agents.proxy-network=$PROXY_NETWORK_NAME")
-    DOCKER_ARGS+=("--label" "coding-agents.proxy-image=$PROXY_IMAGE")
+# Add proxy environment if squid
+if [ "$USE_SQUID" = true ]; then
+    DOCKER_ARGS+=(
+        "-e" "HTTP_PROXY=$PROXY_URL"
+        "-e" "HTTPS_PROXY=$PROXY_URL"
+        "-e" "http_proxy=$PROXY_URL"
+        "-e" "https_proxy=$PROXY_URL"
+        "-e" "NO_PROXY=localhost,127.0.0.1,.internal,::1"
+        "-e" "no_proxy=localhost,127.0.0.1,.internal,::1"
+        "--label" "coding-agents.proxy-container=$PROXY_CONTAINER_NAME"
+        "--label" "coding-agents.proxy-network=$PROXY_NETWORK_NAME"
+        "--label" "coding-agents.proxy-image=$PROXY_IMAGE"
+    )
 fi
 
 # Add optional agent configs
-if [ -d "${HOME}/.config/codex" ]; then
-    DOCKER_ARGS+=("-v" "${HOME}/.config/codex:/home/agentuser/.config/codex:ro")
-fi
-if [ -d "${HOME}/.config/claude" ]; then
-    DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
-fi
+[ -d "${HOME}/.config/codex" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/codex:/home/agentuser/.config/codex:ro")
+[ -d "${HOME}/.config/claude" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
+[ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
 
-# Add MCP secrets if they exist
-if [ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ]; then
-    DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
-fi
-
+# Final args
 DOCKER_ARGS+=(
     "-w" "/workspace"
     "--network" "$NETWORK_MODE"
@@ -370,141 +289,34 @@ DOCKER_ARGS+=(
     "sleep" "infinity"
 )
 
-# Create and start the container
+# Create container
 echo "📦 Creating container..."
 CONTAINER_ID=$(docker "${DOCKER_ARGS[@]}")
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to create container"
-    if $USE_SQUID; then
-        docker rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1 || true
-        docker network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1 || true
-    fi
+    [ "$USE_SQUID" = true ] && docker rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1
+    [ "$USE_SQUID" = true ] && docker network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1
     exit 1
 fi
 
+# Setup repository inside container
 echo "📥 Setting up repository..."
-
-SETUP_SCRIPT='#!/bin/bash
-set -e
-
-TARGET_DIR="/workspace"
-mkdir -p "$TARGET_DIR"
-
-# Clean target directory to ensure a fresh workspace
-if [ -d "$TARGET_DIR" ] && [ "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 | wc -l)" -gt 0 ]; then
-    find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-fi
-
-if [ "$SOURCE_TYPE" = "url" ]; then
-    echo "🌐 Cloning repository from $GIT_URL..."
-    git clone "$GIT_URL" "$TARGET_DIR"
-    echo "✅ Repository cloned"
-else
-    echo "📋 Copying repository from host..."
-    cp -a /tmp/source-repo/. "$TARGET_DIR/"
-    echo "✅ Repository copied"
-fi
-
-cd "$TARGET_DIR"
-
-# Setup dual remotes
-if [ -n "$ORIGIN_URL" ]; then
-    echo "🔗 Setting up remotes..."
-    
-    # Ensure origin is set correctly
-    if git remote get-url origin 2>/dev/null; then
-        git remote set-url origin "$ORIGIN_URL"
-    else
-        git remote add origin "$ORIGIN_URL"
-    fi
-    
-    # Add local remote pointing to the host repository
-    if [ "$SOURCE_TYPE" = "local" ]; then
-        git remote add local "$LOCAL_REPO_PATH" 2>/dev/null || git remote set-url local "$LOCAL_REPO_PATH"
-        echo "  • origin: $ORIGIN_URL"
-        echo "  • local: $LOCAL_REPO_PATH (default push)"
-        
-        # Set local as default push remote
-        git config remote.pushDefault local
-    else
-        echo "  • origin: $ORIGIN_URL"
-    fi
-else
-    echo "ℹ️  No origin remote configured"
-fi
-
-# Create and checkout agent branch
-echo "🌿 Creating branch: $AGENT_BRANCH"
-git checkout -b "$AGENT_BRANCH" 2>/dev/null || git checkout "$AGENT_BRANCH"
-
-echo "✅ Repository setup complete"
-echo ""
-echo "Branch: $(git branch --show-current)"
-echo "Remotes:"
-git remote -v | head -4
-
-# Configure git to use HTTPS with gh credential helper
-git config --global credential.helper ""
-git config --global credential.helper '\''!gh auth git-credential'\''
-
-# Setup MCP if config exists
-if [ -f "/workspace/config.toml" ]; then
-    echo ""
-    echo "⚙️  Setting up MCP configurations..."
-    /usr/local/bin/setup-mcp-configs.sh
-fi
-
-# Load MCP secrets if available
-if [ -f "/home/agentuser/.mcp-secrets.env" ]; then
-    echo "🔐 MCP secrets available"
-fi
-
-# Install .NET preview SDK if requested
-if [ -n "$DOTNET_PREVIEW_CHANNEL" ]; then
-    echo ""
-    echo "📦 Installing .NET SDK $DOTNET_PREVIEW_CHANNEL preview..."
-    /usr/local/bin/install-dotnet-preview.sh "$DOTNET_PREVIEW_CHANNEL" || echo "⚠️  Preview installation failed (may not exist yet)"
-fi
-
-echo ""
-echo "✨ Workspace ready at /workspace"
-'
-
+SETUP_SCRIPT=$(generate_repo_setup_script "$SOURCE_TYPE" "$GIT_URL" "$WSL_PATH" "$ORIGIN_URL" "$AGENT_BRANCH")
 echo "$SETUP_SCRIPT" | docker exec -i "$CONTAINER_NAME" bash
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to setup repository"
-    echo "Cleaning up container..."
-    docker rm -f "$CONTAINER_NAME" > /dev/null
-    if $USE_SQUID; then
-        docker rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1 || true
-        docker network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1 || true
-    fi
+    docker rm -f "$CONTAINER_NAME"
     exit 1
 fi
 
 echo ""
-echo "✅ Agent is running!"
+echo "✅ Container '$CONTAINER_NAME' is ready!"
 echo ""
-echo "To connect with VS Code:"
-echo "  1. Install 'Dev Containers' extension"
-echo "  2. Click the remote button (bottom-left)"
-echo "  3. Select 'Attach to Running Container'"
-echo "  4. Choose '$CONTAINER_NAME'"
+echo "Connect via:"
+echo "  • VS Code: Attach to running container '$CONTAINER_NAME'"
+echo "  • Terminal: docker exec -it $CONTAINER_NAME bash"
 echo ""
-echo "Or connect via shell:"
-echo "  docker exec -it $CONTAINER_NAME bash"
-echo ""
-echo "To stop:"
-echo "  docker stop $CONTAINER_NAME"
-if $USE_SQUID; then
-    echo "  docker stop $PROXY_CONTAINER_NAME  # Squid proxy"
-fi
-echo ""
-echo "To remove:"
-echo "  docker rm -f $CONTAINER_NAME"
-if $USE_SQUID; then
-    echo "  docker rm -f $PROXY_CONTAINER_NAME  # Squid proxy"
-    echo "  docker network rm $PROXY_NETWORK_NAME  # Proxy network"
-fi
+echo "Repository: /workspace"
+echo "Branch: $AGENT_BRANCH"

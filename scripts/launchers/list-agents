@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# List all active agent containers
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/common-functions.sh"
+
+# Check Docker
+check_docker_running || exit 1
+
+echo "🤖 Active Agent Containers"
+echo ""
+
+# Get all agent containers
+containers=$(docker ps -a --filter "label=coding-agents.type=agent" --format "{{.Names}}" 2>/dev/null)
+
+if [ -z "$containers" ]; then
+    echo "No agent containers found"
+    echo ""
+    echo "Launch an agent with:"
+    echo "  run-copilot      # Quick launch in current directory"
+    echo "  launch-agent     # Advanced launch with options"
+    exit 0
+fi
+
+# Print header
+printf "%-30s %-15s %-20s %-30s\n" "NAME" "STATUS" "AGENT" "BRANCH"
+printf "%s\n" "$(printf '%.0s─' {1..100})"
+
+# List each container
+for container in $containers; do
+    status=$(get_container_status "$container")
+    agent=$(docker inspect -f '{{ index .Config.Labels "coding-agents.agent" }}' "$container" 2>/dev/null || echo "unknown")
+    branch=$(docker inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container" 2>/dev/null || echo "unknown")
+    repo=$(docker inspect -f '{{ index .Config.Labels "coding-agents.repo" }}' "$container" 2>/dev/null || echo "unknown")
+    
+    # Color code status
+    case "$status" in
+        running)
+            status_display="🟢 running"
+            ;;
+        exited)
+            status_display="🔴 stopped"
+            ;;
+        *)
+            status_display="⚪ $status"
+            ;;
+    esac
+    
+    printf "%-30s %-15s %-20s %-30s\n" "$container" "$status_display" "$agent" "$branch"
+done
+
+echo ""
+echo "📋 Management Commands:"
+echo "  docker exec -it <name> bash     # Connect to container"
+echo "  remove-agent <name>             # Remove container (with auto-push)"
+echo "  remove-agent <name> --no-push   # Remove without pushing"
