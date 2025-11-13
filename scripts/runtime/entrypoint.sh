@@ -86,6 +86,13 @@ else
     echo "ℹ️  No config.toml found in workspace - MCP servers not configured"
 fi
 
+# Index project with Serena for faster semantic operations
+if [ -d "/workspace/.git" ]; then
+    echo "📊 Indexing workspace for Serena (faster code navigation)..."
+    uvx --from "git+https://github.com/oraios/serena" serena project index --project /workspace 2>/dev/null || \
+        echo "⚠️  Serena indexing skipped (may be slower on first use)"
+fi
+
 # Load MCP secrets from host mount if available
 if [ -f "/home/agentuser/.mcp-secrets.env" ]; then
     echo "🔐 Loading MCP secrets from host..."
