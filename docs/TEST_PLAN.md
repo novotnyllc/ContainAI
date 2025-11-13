@@ -23,7 +23,7 @@ Comprehensive step-by-step test procedures to validate all features of the AI Co
 - [ ] (Optional) Anthropic Claude access configured at `~/.config/claude/`
 
 ### Test Repository Setup
-- [ ] Create test repository or use existing: `e:\dev\CodingAgents\test-workspace`
+- [ ] Create test repository or use existing: `C:\projects\test-workspace` (or `~/test-workspace` on Linux/Mac)
 - [ ] Initialize with README.md and sample code files
 - [ ] Push to GitHub (for testing GitHub URL cloning)
 - [ ] Note GitHub URL for tests: `https://github.com/<user>/<repo>`
@@ -36,7 +36,7 @@ Comprehensive step-by-step test procedures to validate all features of the AI Co
 **Objective**: Verify base image builds successfully with all dependencies
 
 **Steps**:
-1. Navigate to repository root: `cd e:\dev\CodingAgents`
+1. Navigate to repository root: `cd C:\projects\CodingAgents` (or `cd ~/coding-agents` on Linux/Mac)
 2. Build base image:
    ```bash
    docker build -f Dockerfile.base -t coding-agents-base:local .
@@ -188,7 +188,7 @@ docker tag ghcr.io/novotnyllc/coding-agents-claude:latest coding-agents-claude:l
 
 **Steps (PowerShell)**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent copilot
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent copilot
 ```
 
 **Steps (Bash)**:
@@ -221,7 +221,7 @@ docker rm -f copilot-test-workspace
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent copilot --network-proxy restricted
+.\scripts\launchers\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent copilot --network-proxy restricted
 ```
 
 **Expected Results**:
@@ -248,7 +248,7 @@ docker rm -f copilot-test-workspace
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent copilot --network-proxy squid
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent copilot --network-proxy squid
 ```
 
 **Expected Results**:
@@ -290,9 +290,9 @@ docker network rm copilot-test-workspace-net
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace -b feature-auth --agent copilot
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace -b feature-db --agent codex
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace -b feature-ui --agent claude
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace -b feature-auth --agent copilot
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace -b feature-db --agent codex
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace -b feature-ui --agent claude
 ```
 
 **Expected Results**:
@@ -328,7 +328,7 @@ docker rm -f copilot-test-workspace codex-test-workspace claude-test-workspace
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 https://github.com/<user>/<test-repo> --agent copilot
+.\scripts\launchers\launch-agent.ps1 https://github.com/<user>/<test-repo> --agent copilot
 ```
 
 **Expected Results**:
@@ -358,7 +358,7 @@ docker rm -f copilot-<test-repo>
 **Objective**: Verify VS Code can attach to agent container
 
 **Prerequisites**:
-- [ ] Launch a test container: `.\launch-agent.ps1 . --agent copilot`
+- [ ] Launch a test container: `.\scripts\launchers\launch-agent.ps1 . --agent copilot`
 - [ ] VS Code installed with Dev Containers extension
 
 **Steps**:
@@ -452,7 +452,7 @@ docker exec -it copilot-test-workspace git remote -v
 
 **Validation (on host)**:
 ```bash
-cd e:\dev\CodingAgents\test-workspace
+cd C:\projects\test-workspace
 git log --oneline -1
 # Should show "Test commit from container"
 ```
@@ -483,7 +483,7 @@ git push origin copilot/feature-auth
 **Steps**:
 1. Make change on host repository:
    ```bash
-   cd e:\dev\CodingAgents\test-workspace
+   cd C:\projects\test-workspace
    echo "Host change" >> host-file.txt
    git add host-file.txt
    git commit -m "Change from host"
@@ -506,7 +506,7 @@ git push origin copilot/feature-auth
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace -b my-feature --agent copilot
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace -b my-feature --agent copilot
 ```
 
 **Expected Results**:
@@ -531,7 +531,7 @@ docker exec -it copilot-test-workspace git branch --show-current
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent copilot
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent copilot
 ```
 
 **Expected Results**:
@@ -566,7 +566,7 @@ docker exec -it copilot-test-workspace bash -c "cat ~/.config/claude/mcp/config.
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent copilot
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent copilot
 ```
 
 **Expected Results**:
@@ -633,7 +633,7 @@ docker exec -it copilot-test-workspace bash -c "echo \$CONTEXT7_API_KEY"
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent copilot --dotnet-preview 9.0
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent copilot --dotnet-preview 9.0
 ```
 
 **Expected Results**:
@@ -654,7 +654,7 @@ docker exec -it copilot-test-workspace dotnet --version
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent claude
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent claude
 ```
 
 **Expected Results**:
@@ -676,7 +676,7 @@ docker exec -it claude-test-workspace dotnet --list-sdks
 
 **Steps**:
 ```powershell
-.\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent copilot --network-proxy squid
+.\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent copilot --network-proxy squid
 ```
 
 **Expected Results**:
@@ -820,7 +820,7 @@ docker inspect copilot-test-workspace | grep -i securityopt
 
 2. Launch container:
    ```powershell
-   .\launch-agent.ps1 e:\dev\CodingAgents\test-workspace --agent copilot
+   .\scripts\launchers\launch-agent.ps1 C:\projects\test-workspace --agent copilot
    ```
 
 3. Restore auth:

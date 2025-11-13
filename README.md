@@ -27,17 +27,54 @@ git config --global user.email "your@email.com"
 ./scripts/build.sh
 ```
 
-### 2. Launch an agent
+### 2. Add launchers to PATH (optional but recommended)
 
+This lets you run launchers from anywhere:
+
+**Windows (PowerShell):**
 ```powershell
-# PowerShell
-.\launch-agent.ps1
+# Temporary (current session)
+$env:PATH += ";$PWD\scripts\launchers"
 
-# Bash
-./launch-agent
+# Permanent: Add to System Environment Variables via GUI
+# Or add to PowerShell profile
 ```
 
-### 3. Connect from VS Code
+**Linux/macOS:**
+```bash
+# Temporary (current session)
+export PATH="$PWD/scripts/launchers:$PATH"
+
+# Permanent: Add to ~/.bashrc or ~/.zshrc
+echo 'export PATH="$HOME/coding-agents/scripts/launchers:$PATH"' >> ~/.bashrc
+```
+
+### 3. Launch an agent
+
+```powershell
+# PowerShell (with PATH setup)
+run-copilot
+
+# PowerShell (without PATH setup)
+.\scripts\launchers\run-copilot.ps1
+
+# Bash (with PATH setup)
+run-copilot
+
+# Bash (without PATH setup)
+./scripts/launchers/run-copilot
+```
+
+For persistent workspaces with branch management:
+```powershell
+# PowerShell
+.\scripts\launchers\launch-agent.ps1
+
+# Bash
+./scripts/launchers/launch-agent
+```
+
+### 4. Connect from VS Code
 
 1. Install **Dev Containers** extension
 2. Click remote button (bottom-left)
@@ -56,22 +93,22 @@ git config --global user.email "your@email.com"
 
 Launch Copilot on current directory:
 ```powershell
-.\launch-agent.ps1 . --agent copilot
+.\scripts\launchers\launch-agent.ps1 . --agent copilot
 ```
 
 Multiple agents on same repo:
 ```powershell
-.\launch-agent.ps1 . -b auth --agent copilot
-.\launch-agent.ps1 . -b database --agent codex
+.\scripts\launchers\launch-agent.ps1 . -b auth --agent copilot
+.\scripts\launchers\launch-agent.ps1 . -b database --agent codex
 ```
 
 Network controls:
 ```powershell
 # Restrict outbound traffic
-.\launch-agent.ps1 . --network-proxy restricted
+.\scripts\launchers\launch-agent.ps1 . --network-proxy restricted
 
 # Proxy with logging
-.\launch-agent.ps1 . --network-proxy squid
+.\scripts\launchers\launch-agent.ps1 . --network-proxy squid
 ```
 
 See [USAGE.md](USAGE.md) for complete examples and advanced scenarios.

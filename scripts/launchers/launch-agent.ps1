@@ -62,6 +62,7 @@ function Ensure-SquidProxy {
             --hostname $ProxyContainer `
             --network $NetworkName `
             --restart unless-stopped `
+            -e "SQUID_ALLOWED_DOMAINS=$SquidAllowedDomains" `
             --label "coding-agents.proxy-of=$ContainerName" `
             --label "coding-agents.proxy-image=$ProxyImage" `
             $ProxyImage | Out-Null
@@ -162,12 +163,31 @@ if (-not $Branch) {
 
 $AgentBranch = "$Agent/$Branch"
 
-# Select image based on agent parameter
+# Pull latest images
+Write-Host "📦 Checking for image updates..." -ForegroundColor Cyan
+
+# Select image based on agent parameter and pull from registry
 $ImageName = switch ($Agent) {
-    "copilot" { "coding-agents-copilot:local" }
-    "codex" { "coding-agents-codex:local" }
-    "claude" { "coding-agents-claude:local" }
-    default { "coding-agents:local" }
+    "copilot" {
+        docker pull --quiet ghcr.io/novotnyllc/coding-agents-copilot:latest 2>$null | Out-Null
+        docker tag ghcr.io/novotnyllc/coding-agents-copilot:latest coding-agents-copilot:local 2>$null | Out-Null
+        "coding-agents-copilot:local"
+    }
+    "codex" {
+        docker pull --quiet ghcr.io/novotnyllc/coding-agents-codex:latest 2>$null | Out-Null
+        docker tag ghcr.io/novotnyllc/coding-agents-codex:latest coding-agents-codex:local 2>$null | Out-Null
+        "coding-agents-codex:local"
+    }
+    "claude" {
+        docker pull --quiet ghcr.io/novotnyllc/coding-agents-claude:latest 2>$null | Out-Null
+        docker tag ghcr.io/novotnyllc/coding-agents-claude:latest coding-agents-claude:local 2>$null | Out-Null
+        "coding-agents-claude:local"
+    }
+    default {
+        docker pull --quiet ghcr.io/novotnyllc/coding-agents:latest 2>$null | Out-Null
+        docker tag ghcr.io/novotnyllc/coding-agents:latest coding-agents:local 2>$null | Out-Null
+        "coding-agents:local"
+    }
 }
 
 $ProxyImage = "coding-agents-proxy:local"
@@ -197,8 +217,11 @@ switch ($NetworkProxy) {
 $NetworkSummary = switch ($NetworkPolicyEnv) {
     "restricted" { "no outbound network" }
     "squid" { "proxied via Squid sidecar" }
-    Default { "standard Docker bridge" }
+    Default { "unrestricted (bridge mode)" }
 }
+
+# Default Squid allowed domains
+$SquidAllowedDomains = "*.github.com,*.githubcopilot.com,*.nuget.org,*.npmjs.org,*.pypi.org,*.python.org,*.microsoft.com,*.docker.io,registry-1.docker.io,api.githubcopilot.com,learn.microsoft.com,platform.uno,*.githubusercontent.com,*.azureedge.net"
 
 Write-Host "🚀 Launching Coding Agent..." -ForegroundColor Cyan
 Write-Host "🎯 Agent: $Agent" -ForegroundColor Cyan

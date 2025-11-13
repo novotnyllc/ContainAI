@@ -50,6 +50,11 @@ else
     echo "ℹ️  No MCP secrets file found (optional)"
 fi
 
+# Update Serena MCP server to latest version
+echo "🔄 Updating Serena MCP server..."
+uvx --refresh --from "git+https://github.com/oraios/serena@main" serena --version >/dev/null 2>&1 || \
+    echo "⚠️  Serena update skipped (offline or unavailable)"
+
 # Check authentication status (all from host mounts via OAuth)
 echo ""
 if command -v gh &> /dev/null; then

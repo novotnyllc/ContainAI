@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Ultra-simple launcher for GitHub Copilot
-# Usage: run-copilot [directory]
+# Ultra-simple launcher for Claude CLI
+# Usage: run-claude [directory]
 #   directory: Path to repository (defaults to current directory)
 
 REPO_PATH="${1:-.}"
@@ -14,25 +14,33 @@ if [[ "$REPO_PATH" =~ ^[A-Z]: ]]; then
     REPO_PATH="/mnt/${DRIVE}${REST}"
 fi
 
-echo "🚀 Launching GitHub Copilot CLI..."
+echo "📦 Checking for image updates..."
+docker pull --quiet ghcr.io/novotnyllc/coding-agents-claude:latest 2>/dev/null && \
+    docker tag ghcr.io/novotnyllc/coding-agents-claude:latest coding-agents-claude:local || true
+
+echo "🚀 Launching Claude CLI..."
 echo "📁 Repository: $REPO_PATH"
 
 # Build docker arguments
 DOCKER_ARGS=(
     "-it" "--rm"
-    "--name" "copilot-${REPO_NAME}"
+    "--name" "claude-${REPO_NAME}"
     "-e" "TZ=${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
     "-v" "${REPO_PATH}:/workspace"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
-    "-v" "${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
 )
+
+# Add Claude config if it exists
+if [ -d "${HOME}/.config/claude" ]; then
+    DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
+fi
 
 # Add MCP secrets if they exist
 if [ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ]; then
     DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
 fi
 
-DOCKER_ARGS+=("-w" "/workspace" "--security-opt" "no-new-privileges:true" "coding-agents-copilot:local")
+DOCKER_ARGS+=("-w" "/workspace" "--security-opt" "no-new-privileges:true" "coding-agents-claude:local")
 
 docker run "${DOCKER_ARGS[@]}"

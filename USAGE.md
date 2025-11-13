@@ -211,35 +211,170 @@ cd /workspace
 ls -la
 ```
 
-### Git Workflow
+### Git Workflow: Understanding the Container Environment
 
-Two remotes are configured:
+The container has **two separate contexts** for working with git:
 
+#### Context 1: Interactive Shell (bash)
+```
+┌──────────────────────────────────────────┐
+│  Container Shell (/workspace)            │
+│  • Full access to git commands           │
+│  • Can commit, push, pull                │
+│  • Two remotes configured:               │
+│    ├─ origin → GitHub                    │
+│    └─ local → Host repo (default push)   │
+└──────────────────────────────────────────┘
+```
+
+#### Context 2: Agent CLI Mode
+```
+┌──────────────────────────────────────────┐
+│  Agent CLI (e.g., github-copilot-cli)    │
+│  • Runs in subdirectory                  │
+│  • NOT in git repository!                │
+│  • Cannot use git commands               │
+│  • Exit to shell first: Ctrl+D or exit  │
+└──────────────────────────────────────────┘
+```
+
+**Common Error:** Running git commands while in agent CLI:
+```bash
+copilot> git status
+fatal: not a git repository
+```
+
+**Solution:** Exit agent CLI first (Ctrl+D), then run git commands:
+```bash
+copilot> ^D  # Exit agent
+$ git status  # Now works!
+```
+
+#### Dual Remote Configuration
+
+The container is configured with two git remotes for maximum flexibility:
+
+```
+┌─────────────────────────────────────────────────────┐
+│               Git Remote Topology                   │
+│                                                     │
+│   Container (/workspace)                           │
+│   ┌───────────────────────┐                        │
+│   │  Your Feature Branch  │                        │
+│   │  (e.g., copilot/auth) │                        │
+│   └─────┬──────────┬──────┘                        │
+│         │          │                                │
+│         │          │                                │
+│    git push   git push origin                      │
+│    (default)                                       │
+│         │          │                                │
+│         ▼          ▼                                │
+│   ┌─────────┐  ┌──────────────┐                   │
+│   │  local  │  │   origin     │                    │
+│   │  (Host) │  │  (GitHub)    │                    │
+│   └─────────┘  └──────────────┘                   │
+│         │            │                              │
+└─────────┼────────────┼──────────────────────────────┘
+          │            │
+          ▼            ▼
+    Host Machine   GitHub.com
+    /path/to/repo  github.com/user/repo
+```
+
+**Default push target:** `local` (host machine)  
+**Why?** Preserves changes on host even if container is deleted.
+
+#### Git Remote Commands
+
+**Check configured remotes:**
 ```bash
 git remote -v
-# origin: GitHub (for pull requests)
-# local:  Host machine (default push)
+# origin  https://github.com/user/repo.git (fetch)
+# origin  https://github.com/user/repo.git (push)
+# local   /path/to/host/repo (fetch)
+# local   /path/to/host/repo (push)
 ```
 
-**Push to host (default):**
+**Push to host (default - RECOMMENDED):**
 ```bash
 git push
+# Pushes to local remote (host machine)
+# Changes are immediately visible on host
 ```
 
-**Push to GitHub:**
+**Push to GitHub (for pull requests):**
 ```bash
 git push origin
+# Pushes to GitHub
+# Use for creating PRs or backing up to remote
 ```
 
 **Pull from host:**
 ```bash
 git pull local main
+# Syncs with host's main branch
 ```
 
 **Pull from GitHub:**
 ```bash
 git pull origin main
+# Syncs with GitHub's main branch
 ```
+
+#### Common Workflows
+
+**Workflow 1: Quick local development (no PR)**
+```bash
+# Work in VS Code or shell
+# ...make changes...
+
+# Commit and push to host
+git add .
+git commit -m "Implemented feature"
+git push  # Goes to host by default
+```
+
+**Workflow 2: Create GitHub PR**
+```bash
+# Work in VS Code or shell
+# ...make changes...
+
+# Commit and push to both remotes
+git add .
+git commit -m "Implemented feature"
+git push         # Save to host first
+git push origin  # Then push to GitHub for PR
+```
+
+**Workflow 3: Sync with team changes**
+```bash
+# Pull latest from GitHub
+git pull origin main
+
+# Merge into your feature branch
+git merge origin/main
+
+# Push updates to host
+git push
+```
+
+#### Troubleshooting Git Issues
+
+**Problem:** `fatal: not a git repository`
+- **Cause:** You're in agent CLI mode, not the shell
+- **Solution:** Exit agent (Ctrl+D), then run git commands
+
+**Problem:** `git push` doesn't update GitHub
+- **Cause:** Default push goes to `local` remote (host)
+- **Solution:** Use `git push origin` for GitHub
+
+**Problem:** Lost changes after deleting container
+- **Cause:** Forgot to push before `docker rm`
+- **Solution:** Always `git push` (to host) or `git push origin` (to GitHub) before removing containers
+
+**Problem:** Can't push to host from container
+- **Cause:** Host repo may not have your feature branch
+- **Solution:** Push creates the branch automatically, or use `git push origin` instead
 
 ### MCP Configuration
 

@@ -42,7 +42,7 @@ case $choice in
         echo ""
         echo "🔨 Building base image locally..."
         echo "   This will take approximately 15 minutes..."
-        docker build -f Dockerfile.base -t coding-agents-base:local .
+        docker build -f docker/base/Dockerfile -t coding-agents-base:local .
         BASE_IMAGE="coding-agents-base:local"
         ;;
     *)
@@ -53,17 +53,17 @@ esac
 
 echo ""
 echo "🔨 Building all-agents image..."
-docker build --build-arg BASE_IMAGE="$BASE_IMAGE" -t coding-agents:local .
+docker build -f docker/agents/all/Dockerfile --build-arg BASE_IMAGE="$BASE_IMAGE" -t coding-agents:local .
 
 echo ""
 echo "🔨 Building individual agent images..."
-docker build -f Dockerfile.copilot --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-copilot:local .
-docker build -f Dockerfile.codex --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-codex:local .
-docker build -f Dockerfile.claude --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-claude:local .
+docker build -f docker/agents/copilot/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-copilot:local .
+docker build -f docker/agents/codex/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-codex:local .
+docker build -f docker/agents/claude/Dockerfile --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-claude:local .
 
 echo ""
 echo "🔨 Building network proxy image..."
-docker build -f Dockerfile.proxy -t coding-agents-proxy:local .
+docker build -f docker/proxy/Dockerfile -t coding-agents-proxy:local .
 
 echo ""
 echo "✅ Build complete!"
