@@ -1,46 +1,94 @@
 #!/usr/bin/env bash
-# Ultra-simple launcher for Claude CLI
-# Usage: run-claude [directory]
-#   directory: Path to repository (defaults to current directory)
+# Quick launcher for Anthropic Claude from current directory
+# Usage: run-claude [directory] [--no-push]
 
-REPO_PATH="${1:-.}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/common-functions.sh"
+
+# Parse arguments
+REPO_PATH="."
+SKIP_PUSH=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --no-push)
+            SKIP_PUSH=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: run-claude [directory] [--no-push]"
+            echo ""
+            echo "Launch Anthropic Claude in an ephemeral container."
+            echo ""
+            echo "Arguments:"
+            echo "  directory    Path to repository (default: current directory)"
+            echo ""
+            echo "Options:"
+            echo "  --no-push    Skip auto-push to local remote on exit"
+            echo "  -h, --help   Show this help"
+            exit 0
+            ;;
+        *)
+            REPO_PATH="$1"
+            shift
+            ;;
+    esac
+done
+
+check_docker_running || exit 1
 REPO_PATH=$(realpath "$REPO_PATH")
-REPO_NAME=$(basename "$REPO_PATH")
 
-# Convert Windows path to WSL if needed
-if [[ "$REPO_PATH" =~ ^[A-Z]: ]]; then
-    DRIVE=$(echo "$REPO_PATH" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')
-    REST=$(echo "$REPO_PATH" | cut -d: -f2 | tr '\\' '/')
-    REPO_PATH="/mnt/${DRIVE}${REST}"
+if [ ! -d "$REPO_PATH/.git" ]; then
+    echo "❌ Error: $REPO_PATH is not a git repository"
+    exit 1
 fi
 
-echo "📦 Checking for image updates..."
-docker pull --quiet ghcr.io/novotnyllc/coding-agents-claude:latest 2>/dev/null && \
-    docker tag ghcr.io/novotnyllc/coding-agents-claude:latest coding-agents-claude:local || true
+REPO_NAME=$(get_repo_name "$REPO_PATH")
+BRANCH=$(get_current_branch "$REPO_PATH")
+CONTAINER_NAME="claude-${REPO_NAME}-${BRANCH}"
+REPO_PATH=$(convert_to_wsl_path "$REPO_PATH")
 
-echo "🚀 Launching Claude CLI..."
-echo "📁 Repository: $REPO_PATH"
+pull_and_tag_image "claude"
 
-# Build docker arguments
+echo "🚀 Launching Anthropic Claude..."
+echo "📁 Repository: $REPO_NAME"
+echo "🌿 Branch: $BRANCH"
+echo "🏷️  Container: $CONTAINER_NAME"
+echo ""
+
+cleanup() {
+    if docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
+        echo ""
+        push_to_local "$CONTAINER_NAME" "$SKIP_PUSH"
+    fi
+}
+trap cleanup EXIT INT TERM
+
 DOCKER_ARGS=(
     "-it" "--rm"
-    "--name" "claude-${REPO_NAME}"
+    "--name" "$CONTAINER_NAME"
     "-e" "TZ=${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
     "-v" "${REPO_PATH}:/workspace"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
+    "--label" "coding-agents.type=agent"
+    "--label" "coding-agents.agent=claude"
+    "--label" "coding-agents.repo=$REPO_NAME"
+    "--label" "coding-agents.branch=$BRANCH"
 )
 
-# Add Claude config if it exists
 if [ -d "${HOME}/.config/claude" ]; then
     DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
 fi
 
-# Add MCP secrets if they exist
 if [ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ]; then
     DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
 fi
 
-DOCKER_ARGS+=("-w" "/workspace" "--security-opt" "no-new-privileges:true" "coding-agents-claude:local")
+DOCKER_ARGS+=(
+    "-w" "/workspace"
+    "--security-opt" "no-new-privileges:true"
+    "coding-agents-claude:local"
+)
 
 docker run "${DOCKER_ARGS[@]}"

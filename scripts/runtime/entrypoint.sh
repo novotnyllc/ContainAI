@@ -3,6 +3,49 @@ set -e
 
 echo "🚀 Starting Coding Agents Container..."
 
+# Cleanup function to push changes before shutdown
+cleanup_on_shutdown() {
+    echo ""
+    echo "📤 Container shutting down..."
+    
+    # Check if auto-push is enabled (default: true)
+    AUTO_PUSH="${AUTO_PUSH_ON_SHUTDOWN:-true}"
+    
+    if [ "$AUTO_PUSH" != "true" ]; then
+        echo "⏭️  Auto-push disabled, skipping..."
+        return
+    fi
+    
+    # Only push if in a git repository with uncommitted changes
+    if [ -d /workspace/.git ]; then
+        cd /workspace
+        
+        # Check if there are any changes to commit
+        if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+            echo "💾 Uncommitted changes detected, pushing to local remote..."
+            
+            REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
+            BRANCH=$(git branch --show-current 2>/dev/null)
+            
+            if [ -n "$BRANCH" ]; then
+                # Push to local remote (host machine)
+                if git push local "$BRANCH" 2>/dev/null; then
+                    echo "✅ Changes pushed to local remote: $REPO_NAME ($BRANCH)"
+                else
+                    echo "⚠️  Failed to push changes (local remote may not be configured)"
+                fi
+            else
+                echo "⚠️  Not on a branch, skipping push"
+            fi
+        else
+            echo "✅ No uncommitted changes, nothing to push"
+        fi
+    fi
+}
+
+# Register cleanup on shutdown signals
+trap cleanup_on_shutdown SIGTERM SIGINT EXIT
+
 # Ensure we're in the workspace directory
 cd /workspace || exit 1
 

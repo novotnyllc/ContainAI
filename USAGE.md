@@ -53,117 +53,232 @@ cd coding-agents
 
 See [BUILD.md](BUILD.md) for details.
 
-## Launch an Agent
+## Container Naming Convention
 
-The `launch-agent` script creates a persistent container with an isolated copy of your repository. The container runs in the background, allowing you to connect with VS Code Dev Containers extension.
+All containers follow the pattern: `{agent}-{repo}-{branch}`
 
-### Basic Usage
+**Examples:**
+- `copilot-myapp-main` - GitHub Copilot on myapp repository, main branch
+- `codex-website-feature` - OpenAI Codex on website repository, feature branch
+- `claude-api-develop` - Anthropic Claude on api repository, develop branch
 
-**PowerShell (Windows):**
-```powershell
-.\launch-agent.ps1
-```
+**Why this naming?**
+- **Easily identifiable:** See what's running at a glance with `docker ps`
+- **No conflicts:** Multiple agents can work on the same repo/different branches
+- **Management friendly:** Use `list-agents` to see all your agent containers
+- **Labeled for filtering:** All containers have labels for agent, repo, and branch
 
-**Bash (Linux/Mac/WSL):**
+**Container labels** (for filtering and automation):
 ```bash
-./launch-agent
+coding-agents.type=agent       # Identifies agent containers
+coding-agents.agent=copilot    # Which agent (copilot/codex/claude)
+coding-agents.repo=myapp       # Repository name
+coding-agents.branch=main      # Branch name
 ```
 
-This creates a container with a copy of your current repository.
+## Auto-Push Safety Feature
 
-### Parameters
+All containers automatically push uncommitted changes back to your local repository before shutting down. This ensures you never lose work even if a container is accidentally removed.
+
+**How it works:**
+1. When you exit a container (Ctrl+D, docker stop, remove-agent)
+2. Container checks for uncommitted changes
+3. If changes exist, pushes to `local` remote (your host machine)
+4. Container shuts down safely
+
+**Default behavior:** Auto-push is **enabled**
+
+**Disable auto-push:**
+```bash
+# For ephemeral launchers
+run-copilot --no-push
+run-codex --no-push
+run-claude --no-push
+
+# PowerShell
+run-copilot.ps1 -NoPush
+
+# For persistent launchers
+launch-agent --no-push
+launch-agent.ps1 -NoPush
+
+# When removing containers
+remove-agent copilot-myapp-main --no-push
+```
+
+**When to disable:**
+- Testing/experimental work you don't want to keep
+- Temporary containers you plan to discard
+- When you've manually pushed changes already
+
+**Safety notes:**
+- Auto-push only works if `local` remote is configured (automatically done by launchers)
+- Changes must be committed first (use `git commit` inside container)
+- Ephemeral containers (`run-*` scripts) auto-remove after exit, so auto-push is critical
+- Persistent containers (`launch-agent`) stay running until explicitly removed
+
+## Launcher Scripts
+
+There are two types of launcher scripts:
+
+### 1. Quick Ephemeral Launchers (`run-*`)
+
+Fast, temporary containers that auto-remove on exit. Perfect for quick tasks.
+
+**Available scripts:**
+- `run-copilot` / `run-copilot.ps1` - GitHub Copilot
+- `run-codex` / `run-codex.ps1` - OpenAI Codex
+- `run-claude` / `run-claude.ps1` - Anthropic Claude
+
+**Usage pattern:**
+```bash
+# Navigate to your project
+cd ~/my-project
+
+# Launch agent (defaults to current directory)
+run-copilot
+run-codex
+run-claude
+
+# PowerShell
+run-copilot.ps1
+run-codex.ps1
+run-claude.ps1
+```
+
+**Optional flags:**
+- `--no-push` / `-NoPush` - Disable auto-push on exit
+- `--help` / `-Help` - Show usage information
+- `[directory]` - Specify directory (default: current directory)
+
+**Behavior:**
+- Pulls latest image automatically
+- Creates container named `{agent}-{repo}-{branch}`
+- Auto-removes container on exit
+- Auto-pushes changes to local remote before exit (unless --no-push)
+- Interactive shell, exit with Ctrl+D
+
+**Example:**
+```bash
+cd ~/my-project
+run-copilot              # Launch on current directory
+run-codex --no-push      # Launch without auto-push
+run-claude ~/other-proj  # Launch on specific directory
+```
+
+### 2. Persistent Launchers (`launch-agent`)
+
+Advanced containers that run in background. Supports branch management, network controls, and .NET preview installs.
+
+**Basic Usage:**
+
+```bash
+# Navigate to your project
+cd ~/my-project
+
+# Launch with defaults (copilot, current branch)
+launch-agent
+
+# Specify agent
+launch-agent --agent codex
+
+# Work on specific branch
+launch-agent --branch feature-auth
+```
+
+**Parameters:**
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | Source (positional) | Local path or GitHub URL | `.`, `/path/to/repo`, `https://github.com/user/repo` |
 | `-b` or `--branch` | Feature branch name (becomes `<agent>/<branch>`) | `-b auth` creates `copilot/auth` |
-| `--agent` | Choose agent: `copilot`, `codex`, `claude`, `all` (default: `all`) | `--agent codex` |
-| `--name` | Custom container name | `--name my-workspace` |
+| `--agent` | Choose agent: `copilot`, `codex`, `claude`, `all` (default: `copilot`) | `--agent codex` |
+| `--no-push` | Disable auto-push on shutdown | `--no-push` |
 | `--dotnet-preview` | Install .NET preview SDK (e.g., `9.0`, `10.0`) | `--dotnet-preview 9.0` |
-| `--network-proxy` | Network mode: `allow-all` (default), `restricted`, `squid` (`none` is alias for `allow-all`) | `--network-proxy restricted` |
+| `--network-proxy` | Network mode: `allow-all` (default), `restricted`, `squid` | `--network-proxy restricted` |
 
 **Network Proxy Modes:**
-- `allow-all` (default): Standard Docker bridge network (alias: `none`)
+- `allow-all` (default): Standard Docker bridge network
 - `restricted`: Launch container with `docker --network none` (no outbound network)
-- `squid`: Route HTTP/HTTPS through Squid proxy sidecar (`coding-agents-proxy:local`)
+- `squid`: Route HTTP/HTTPS through Squid proxy sidecar
 
 Proxy sidecar resources (auto-created when using `squid` mode):
-- Container: `<agent>-<repo>-proxy`
-- Network: `<agent>-<repo>-net`
-- Logs: `docker logs <container>-proxy`
+- Container: `{agent}-{repo}-proxy`
+- Network: `{agent}-{repo}-net`
+- Logs: `docker logs {container}-proxy`
 
 See [NETWORK_PROXY.md](NETWORK_PROXY.md) for network configuration details.
 
+**Behavior:**
+- Runs in background (detached mode)
+- Persists until explicitly removed
+- Auto-pushes changes on `docker stop` or `remove-agent` (unless --no-push)
+- Connect with VS Code Dev Containers or `docker exec`
+
 ## Examples
 
-### From Specific Directory
-
-```powershell
-.\launch-agent.ps1 C:\projects\my-app
-```
+### Quick Ephemeral Sessions
 
 ```bash
-./launch-agent /home/user/projects/my-app
+# Navigate to your project
+cd ~/my-project
+
+# Quick session with Copilot
+run-copilot
+
+# Quick session with Codex, no auto-push
+run-codex --no-push
+
+# Quick session on specific directory
+run-claude ~/other-project
 ```
 
-### Clone from GitHub
+### Persistent Workspaces
 
-```powershell
-.\launch-agent.ps1 https://github.com/user/repo
+```bash
+# Navigate to your project
+cd ~/my-project
+
+# Launch with default agent (copilot)
+launch-agent
+
+# Launch specific agent
+launch-agent --agent codex
+
+# Work on feature branch
+launch-agent --branch feature-auth
+
+# Clone from GitHub
+launch-agent https://github.com/user/repo --agent copilot
 ```
-
-The repository is cloned into the container (isolated from host).
-
-### Choose an Agent
-
-```powershell
-# GitHub Copilot
-.\launch-agent.ps1 . --agent copilot
-
-# OpenAI Codex
-.\launch-agent.ps1 . --agent codex
-
-# Anthropic Claude
-.\launch-agent.ps1 . --agent claude
-
-# All agents available
-.\launch-agent.ps1 . --agent all
-```
-
-### Custom Branch
-
-```powershell
-.\launch-agent.ps1 . -b feature-auth --agent copilot
-```
-
-Creates and checks out branch: `copilot/feature-auth`
 
 ### Install .NET Preview SDK
 
-```powershell
-# Install .NET 9.0 preview
-.\launch-agent.ps1 . --agent codex --dotnet-preview 9.0
+```bash
+cd ~/my-dotnet-project
 
-# Install .NET 10.0 preview
-.\launch-agent.ps1 . --agent codex --dotnet-preview 10.0
+# Install .NET 9.0 preview
+launch-agent --dotnet-preview 9.0
+
+# Install .NET 10.0 preview with Codex
+launch-agent --agent codex --dotnet-preview 10.0
 ```
 
 The preview SDK is installed at container startup and available alongside stable versions.
 
 ### Configure Network Access
 
-```powershell
+```bash
+cd ~/my-project
+
 # Default (allow-all bridge network)
-.\launch-agent.ps1 .
+launch-agent
 
 # Restrict all outbound network traffic
-.\launch-agent.ps1 . --network-proxy restricted
-
-# Explicitly allow all network traffic (same as default)
-.\launch-agent.ps1 . --network-proxy allow-all
+launch-agent --network-proxy restricted
 
 # Proxy with Squid logging
-.\launch-agent.ps1 . --network-proxy squid
+launch-agent --network-proxy squid
 ```
 
 See [NETWORK_PROXY.md](NETWORK_PROXY.md) for detailed network configuration options.
@@ -174,18 +289,96 @@ See [NETWORK_PROXY.md](NETWORK_PROXY.md) for detailed network configuration opti
 
 Launch multiple agents working on different features:
 
-```powershell
-.\launch-agent.ps1 C:\projects\app -b auth --agent copilot
-.\launch-agent.ps1 C:\projects\app -b database --agent codex  
-.\launch-agent.ps1 C:\projects\app -b ui --agent claude
+```bash
+cd ~/my-project
+
+# Launch different agents on different branches
+launch-agent --branch auth --agent copilot      # copilot-myproject-auth
+launch-agent --branch database --agent codex    # codex-myproject-database
+launch-agent --branch ui --agent claude         # claude-myproject-ui
 ```
 
 Each agent gets:
 - Own isolated workspace
 - Own branch (`copilot/auth`, `codex/database`, `claude/ui`)
-- Own container (`copilot-app`, `codex-app`, `claude-app`)
+- Own container (`copilot-myproject-auth`, `codex-myproject-database`, `claude-myproject-ui`)
 
 No conflicts!
+
+## Managing Containers
+
+### List Active Agent Containers
+
+View all running agent containers with status information:
+
+```bash
+list-agents           # Bash
+list-agents.ps1       # PowerShell
+```
+
+**Example output:**
+```
+Active Agent Containers:
+NAME                      STATUS       AGENT      BRANCH
+copilot-myapp-main        Up 2 hours   copilot    main
+codex-myapp-feature       Up 1 hour    codex      feature
+claude-website-develop    Up 30 min    claude     develop
+```
+
+**Features:**
+- Filters by `coding-agents.type=agent` label
+- Shows container name, status, agent type, and branch
+- Color-coded status (green=running, red=stopped)
+- Empty list if no agent containers running
+
+### Remove Agent Containers
+
+Safely remove containers with automatic change preservation:
+
+```bash
+# Remove with auto-push (default)
+remove-agent copilot-myapp-main
+remove-agent.ps1 copilot-myapp-main
+
+# Remove without auto-push
+remove-agent copilot-myapp-main --no-push
+remove-agent.ps1 copilot-myapp-main -NoPush
+```
+
+**What it does:**
+1. Checks for uncommitted changes
+2. Pushes to local remote (unless --no-push)
+3. Stops and removes the container
+4. Removes proxy sidecar (if using squid mode)
+5. Removes network (if empty and no other containers)
+
+**Safety features:**
+- Won't lose uncommitted work (auto-push default)
+- Cleans up all associated resources
+- Reports what was removed
+
+### Standard Docker Commands
+
+You can also use standard Docker commands:
+
+```bash
+# List all containers (not just agents)
+docker ps -a
+
+# Stop a container (triggers auto-push trap)
+docker stop copilot-myapp-main
+
+# Remove a container (triggers auto-push trap if running)
+docker rm -f copilot-myapp-main
+
+# View logs
+docker logs copilot-myapp-main
+
+# Execute command in container
+docker exec -it copilot-myapp-main bash
+```
+
+**Note:** Using `docker stop` or `docker rm -f` will trigger auto-push if the container is configured for it (default behavior).
 
 ## Connect from VS Code
 

@@ -1,36 +1,98 @@
 #!/usr/bin/env bash
-# Ultra-simple launcher for GitHub Copilot
-# Usage: run-copilot [directory]
+# Quick launcher for GitHub Copilot from current directory
+# Usage: run-copilot [directory] [--no-push]
 #   directory: Path to repository (defaults to current directory)
+#   --no-push: Skip auto-push on exit
 
-REPO_PATH="${1:-.}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/common-functions.sh"
+
+# Parse arguments
+REPO_PATH="."
+SKIP_PUSH=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --no-push)
+            SKIP_PUSH=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: run-copilot [directory] [--no-push]"
+            echo ""
+            echo "Launch GitHub Copilot CLI in an ephemeral container."
+            echo ""
+            echo "Arguments:"
+            echo "  directory    Path to repository (default: current directory)"
+            echo ""
+            echo "Options:"
+            echo "  --no-push    Skip auto-push to local remote on exit"
+            echo "  -h, --help   Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  run-copilot              # Launch in current directory"
+            echo "  run-copilot ~/my-repo    # Launch in specific directory"
+            echo "  run-copilot --no-push    # Skip auto-push on exit"
+            exit 0
+            ;;
+        *)
+            REPO_PATH="$1"
+            shift
+            ;;
+    esac
+done
+
+# Check Docker
+check_docker_running || exit 1
+
+# Resolve path
 REPO_PATH=$(realpath "$REPO_PATH")
-REPO_NAME=$(basename "$REPO_PATH")
 
-# Convert Windows path to WSL if needed
-if [[ "$REPO_PATH" =~ ^[A-Z]: ]]; then
-    DRIVE=$(echo "$REPO_PATH" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')
-    REST=$(echo "$REPO_PATH" | cut -d: -f2 | tr '\\' '/')
-    REPO_PATH="/mnt/${DRIVE}${REST}"
+# Verify it's a git repository
+if [ ! -d "$REPO_PATH/.git" ]; then
+    echo "❌ Error: $REPO_PATH is not a git repository"
+    echo "   Run from within a git repository or provide a path to one"
+    exit 1
 fi
 
-# Check for image updates
-echo "📦 Checking for image updates..."
-docker pull --quiet ghcr.io/novotnyllc/coding-agents-copilot:latest 2>/dev/null && \
-    docker tag ghcr.io/novotnyllc/coding-agents-copilot:latest coding-agents-copilot:local || true
+REPO_NAME=$(get_repo_name "$REPO_PATH")
+BRANCH=$(get_current_branch "$REPO_PATH")
+CONTAINER_NAME="copilot-${REPO_NAME}-${BRANCH}"
+
+# Convert to WSL path if needed
+REPO_PATH=$(convert_to_wsl_path "$REPO_PATH")
+
+# Pull latest image
+pull_and_tag_image "copilot"
 
 echo "🚀 Launching GitHub Copilot CLI..."
-echo "📁 Repository: $REPO_PATH"
+echo "📁 Repository: $REPO_NAME"
+echo "🌿 Branch: $BRANCH"
+echo "🏷️  Container: $CONTAINER_NAME"
+echo ""
+
+# Setup cleanup trap for auto-push
+cleanup() {
+    if docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
+        echo ""
+        push_to_local "$CONTAINER_NAME" "$SKIP_PUSH"
+    fi
+}
+trap cleanup EXIT INT TERM
 
 # Build docker arguments
 DOCKER_ARGS=(
     "-it" "--rm"
-    "--name" "copilot-${REPO_NAME}"
+    "--name" "$CONTAINER_NAME"
     "-e" "TZ=${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
     "-v" "${REPO_PATH}:/workspace"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
     "-v" "${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
+    "--label" "coding-agents.type=agent"
+    "--label" "coding-agents.agent=copilot"
+    "--label" "coding-agents.repo=$REPO_NAME"
+    "--label" "coding-agents.branch=$BRANCH"
 )
 
 # Add MCP secrets if they exist
@@ -38,6 +100,11 @@ if [ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ]; then
     DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
 fi
 
-DOCKER_ARGS+=("-w" "/workspace" "--security-opt" "no-new-privileges:true" "coding-agents-copilot:local")
+DOCKER_ARGS+=(
+    "-w" "/workspace"
+    "--security-opt" "no-new-privileges:true"
+    "coding-agents-copilot:local"
+)
 
+# Run container
 docker run "${DOCKER_ARGS[@]}"

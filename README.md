@@ -51,35 +51,67 @@ echo 'export PATH="$HOME/coding-agents/scripts/launchers:$PATH"' >> ~/.bashrc
 
 ### 3. Launch an agent
 
-```powershell
-# PowerShell (with PATH setup)
-run-copilot
+**Quick ephemeral container (auto-removes on exit):**
 
-# PowerShell (without PATH setup)
-.\scripts\launchers\run-copilot.ps1
+```bash
+# Navigate to your project
+cd ~/my-project
 
-# Bash (with PATH setup)
-run-copilot
+# Launch agent (defaults to current directory)
+run-copilot    # GitHub Copilot
+run-codex      # OpenAI Codex
+run-claude     # Anthropic Claude
 
-# Bash (without PATH setup)
-./scripts/launchers/run-copilot
+# PowerShell equivalent
+run-copilot.ps1
 ```
 
-For persistent workspaces with branch management:
-```powershell
-# PowerShell
-.\scripts\launchers\launch-agent.ps1
+**Persistent container (runs in background):**
 
-# Bash
-./scripts/launchers/launch-agent
+```bash
+# Navigate to your project
+cd ~/my-project
+
+# Launch with default agent (copilot)
+launch-agent
+
+# Launch specific agent
+launch-agent --agent codex
+
+# Launch on specific branch
+launch-agent --branch feature-auth
 ```
 
-### 4. Connect from VS Code
+**Container naming:** Containers are named `{agent}-{repo}-{branch}` for easy identification:
+- `copilot-myapp-main` - Copilot on myapp repository, main branch
+- `codex-website-feature` - Codex on website repository, feature branch
+- `claude-api-develop` - Claude on api repository, develop branch
+
+**Auto-push safety:** All containers automatically push uncommitted changes to your local repository before shutting down. Use `--no-push` to disable:
+```bash
+run-copilot --no-push
+launch-agent --no-push
+```
+
+### 4. Manage containers
+
+```bash
+# List all running agent containers
+list-agents
+
+# Remove a container (auto-pushes changes first)
+remove-agent copilot-myapp-main
+
+# Skip auto-push when removing
+remove-agent copilot-myapp-main --no-push
+```
+
+### 5. Connect from VS Code
 
 1. Install **Dev Containers** extension
 2. Click remote button (bottom-left)
 3. Select "Attach to Running Container"
-4. Choose your container
+4. Choose your container (e.g., `copilot-myapp-main`)
 
 ## Documentation
 
@@ -91,24 +123,40 @@ For persistent workspaces with branch management:
 
 ## Examples
 
-Launch Copilot on current directory:
-```powershell
-.\scripts\launchers\launch-agent.ps1 . --agent copilot
+**Quick ephemeral sessions:**
+```bash
+cd ~/my-project
+run-copilot              # Launch and work, auto-removes on exit
+run-codex --no-push      # Launch without auto-push
 ```
 
-Multiple agents on same repo:
-```powershell
-.\scripts\launchers\launch-agent.ps1 . -b auth --agent copilot
-.\scripts\launchers\launch-agent.ps1 . -b database --agent codex
+**Persistent workspaces:**
+```bash
+cd ~/my-project
+launch-agent                           # Default: Copilot on current branch
+launch-agent --agent codex             # Codex on current branch
+launch-agent --branch feature-auth     # Copilot on feature-auth branch
 ```
 
-Network controls:
-```powershell
-# Restrict outbound traffic
-.\scripts\launchers\launch-agent.ps1 . --network-proxy restricted
+**Multiple agents on same repo:**
+```bash
+cd ~/my-project
+launch-agent --branch main --agent copilot    # copilot-myproject-main
+launch-agent --branch auth --agent codex      # codex-myproject-auth
+launch-agent --branch api --agent claude      # claude-myproject-api
+```
 
-# Proxy with logging
-.\scripts\launchers\launch-agent.ps1 . --network-proxy squid
+**Container management:**
+```bash
+list-agents                            # Show all running containers
+remove-agent copilot-myproject-main    # Remove with auto-push
+remove-agent codex-myproject-auth --no-push  # Remove without push
+```
+
+**Network controls:**
+```bash
+launch-agent --network-proxy restricted   # Block outbound traffic
+launch-agent --network-proxy squid        # Proxy with logging
 ```
 
 See [USAGE.md](USAGE.md) for complete examples and advanced scenarios.
