@@ -1,0 +1,19 @@
+{
+  "settingSources": ["user", "project"],
+  "permissionRules": {
+    "allow": [
+      "Read(**)",
+      "Write(**)",
+      "Edit(**)",
+      "MultiEdit(**)",
+      "Bash(*)",
+      "LS(**)",
+      "Grep(**)",
+      "Task(**)",
+      "SlashCommand(**)"
+    ]
+  },
+  "sandbox": {
+    "allowUnsandboxedCommands": true
+  }
+}

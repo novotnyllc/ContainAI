@@ -15,13 +15,15 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-copilot-auth.sh && \
     echo 'fi' >> /usr/local/bin/validate-copilot-auth.sh && \
     chmod +x /usr/local/bin/validate-copilot-auth.sh
 
-# Copy GitHub Copilot specific config files to ~/.config/github-copilot/
+# Copy GitHub Copilot specific config files and init script
 RUN mkdir -p /home/agentuser/.config/github-copilot/agents
 COPY --chown=agentuser:agentuser agent-configs/github-copilot/ /home/agentuser/.config/github-copilot/agents/
+COPY docker/agents/copilot/init-copilot-config.sh /usr/local/bin/init-copilot-config.sh
+RUN chmod +x /usr/local/bin/init-copilot-config.sh
 
 USER agentuser
 WORKDIR /workspace
 
-# Override entrypoint to launch Copilot directly
+# Override entrypoint to launch Copilot directly with config init
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["bash", "-c", "/usr/local/bin/validate-copilot-auth.sh && github-copilot-cli"]
+CMD ["bash", "-c", "/usr/local/bin/init-copilot-config.sh && /usr/local/bin/validate-copilot-auth.sh && github-copilot-cli"]

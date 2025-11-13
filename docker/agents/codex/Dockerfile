@@ -15,9 +15,9 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-codex-auth.sh && \
     echo 'fi' >> /usr/local/bin/validate-codex-auth.sh && \
     chmod +x /usr/local/bin/validate-codex-auth.sh
 
-# Copy Codex specific config files to ~/.config/codex/
+# Copy Codex config (native TOML with MCP servers) to ~/.config/codex/
 RUN mkdir -p /home/agentuser/.config/codex
-COPY --chown=agentuser:agentuser agent-configs/codex/ /home/agentuser/.config/codex/instructions/
+COPY --chown=agentuser:agentuser agent-configs/codex/config.toml /home/agentuser/.config/codex/config.toml
 
 USER agentuser
 WORKDIR /workspace

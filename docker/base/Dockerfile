@@ -137,5 +137,18 @@ RUN uvx --from "git+https://github.com/oraios/serena@main" serena --help || true
 RUN mkdir -p /home/agentuser/.config/coding-agents
 COPY --chown=agentuser:agentuser agent-configs/ /home/agentuser/.config/coding-agents/
 
+# Make GitHub Copilot config available to all agents
+RUN mkdir -p /home/agentuser/.config/github-copilot/agents
+COPY --chown=agentuser:agentuser agent-configs/github-copilot/config.json /home/agentuser/.config/github-copilot/agents/config.json
+COPY docker/agents/copilot/merge-copilot-tokens.py /usr/local/bin/merge-copilot-tokens.py
+COPY docker/agents/copilot/init-copilot-config.sh /usr/local/bin/init-copilot-config.sh
+RUN chmod +x /usr/local/bin/init-copilot-config.sh /usr/local/bin/merge-copilot-tokens.py
+
+# Make Claude config available to all agents
+RUN mkdir -p /home/agentuser/.config/coding-agents/claude
+COPY --chown=agentuser:agentuser agent-configs/claude/.claude.json /home/agentuser/.config/coding-agents/claude/.claude.json
+COPY docker/agents/claude/init-claude-config.sh /usr/local/bin/init-claude-config.sh
+RUN chmod +x /usr/local/bin/init-claude-config.sh
+
 WORKDIR /workspace
 CMD ["/bin/bash"]

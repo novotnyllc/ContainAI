@@ -3,6 +3,7 @@ set -euo pipefail
 
 echo "🚀 Starting Coding Agents Container..."
 
+
 # Cleanup function to push changes before shutdown
 cleanup_on_shutdown() {
     echo ""
