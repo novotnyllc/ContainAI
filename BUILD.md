@@ -167,26 +167,26 @@ Each adds:
 
 ```bash
 # Tag images
-docker tag coding-agents-base:local ghcr.io/yourusername/coding-agents-base:latest
-docker tag coding-agents:local ghcr.io/yourusername/coding-agents:latest
-docker tag coding-agents-copilot:local ghcr.io/yourusername/coding-agents-copilot:latest
-docker tag coding-agents-codex:local ghcr.io/yourusername/coding-agents-codex:latest
-docker tag coding-agents-claude:local ghcr.io/yourusername/coding-agents-claude:latest
-docker tag coding-agents-proxy:local ghcr.io/yourusername/coding-agents-proxy:latest
+docker tag coding-agents-base:local ghcr.io/novotnyllc/coding-agents-base:latest
+docker tag coding-agents:local ghcr.io/novotnyllc/coding-agents:latest
+docker tag coding-agents-copilot:local ghcr.io/novotnyllc/coding-agents-copilot:latest
+docker tag coding-agents-codex:local ghcr.io/novotnyllc/coding-agents-codex:latest
+docker tag coding-agents-claude:local ghcr.io/novotnyllc/coding-agents-claude:latest
+docker tag coding-agents-proxy:local ghcr.io/novotnyllc/coding-agents-proxy:latest
 ```
 
 ### Push to Registry
 
 ```bash
 # Login to GitHub Container Registry
-echo $GITHUB_TOKEN | docker login ghcr.io -u yourusername --password-stdin
+echo $GITHUB_TOKEN | docker login ghcr.io -u clairernovotny --password-stdin
 
 # Push images
-docker push ghcr.io/yourusername/coding-agents-base:latest
-docker push ghcr.io/yourusername/coding-agents:latest
-docker push ghcr.io/yourusername/coding-agents-copilot:latest
-docker push ghcr.io/yourusername/coding-agents-codex:latest
-docker push ghcr.io/yourusername/coding-agents-claude:latest
+docker push ghcr.io/novotnyllc/coding-agents-base:latest
+docker push ghcr.io/novotnyllc/coding-agents:latest
+docker push ghcr.io/novotnyllc/coding-agents-copilot:latest
+docker push ghcr.io/novotnyllc/coding-agents-codex:latest
+docker push ghcr.io/novotnyllc/coding-agents-claude:latest
 ```
 
 ### Using Published Images
@@ -194,7 +194,7 @@ docker push ghcr.io/yourusername/coding-agents-claude:latest
 Update Dockerfile ARG to use published base:
 
 ```dockerfile
-ARG BASE_IMAGE=ghcr.io/yourusername/coding-agents-base:latest
+ARG BASE_IMAGE=ghcr.io/novotnyllc/coding-agents-base:latest
 FROM ${BASE_IMAGE}
 ```
 
@@ -202,8 +202,8 @@ Users can then:
 
 ```bash
 # Pull and use directly
-docker pull ghcr.io/yourusername/coding-agents-copilot:latest
-docker run -it ghcr.io/yourusername/coding-agents-copilot:latest
+docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
+docker run -it ghcr.io/novotnyllc/coding-agents-copilot:latest
 ```
 
 ## Development Workflow
