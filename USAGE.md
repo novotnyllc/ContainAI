@@ -452,17 +452,7 @@ When you run `launch-agent`:
 - `-Agent`/`--agent`: copilot, codex, claude, all (default: all)
 - `-Name`/`--name`: Custom container name (default: auto-generated)
 
-### Docker Commands
-```bash
-docker ps                          # List running containers
-docker ps -a                       # List all containers
-docker stop <container>            # Stop container
-docker start <container>           # Start container
-docker restart <container>         # Restart container
-docker rm -f <container>           # Remove container (loses workspace!)
-docker logs <container>            # View logs
-docker exec -it <container> bash   # Open shell
-```
+For container management (stop, start, remove), see the [Container Management](#container-management) section.
 
 ## Examples
 
@@ -530,5 +520,7 @@ A: Yes, use `docker exec -it <container> bash` for a terminal.
 ---
 
 **Next Steps:**
-- See [BUILD.md](BUILD.md) if building images yourself
-- See [ARCHITECTURE.md](ARCHITECTURE.md) for system design
+- See [docs/BUILD.md](docs/BUILD.md) if building images yourself
+- See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design
+- See [docs/NETWORK_PROXY.md](docs/NETWORK_PROXY.md) for network configuration
+- See [docs/TEST_PLAN.md](docs/TEST_PLAN.md) for comprehensive testing procedures

@@ -47,8 +47,10 @@ git config --global user.email "your@email.com"
 ## Documentation
 
 - **[USAGE.md](USAGE.md)** - Complete user guide (start here!)
-- **[BUILD.md](BUILD.md)** - Building and publishing images
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and architecture
+- **[docs/BUILD.md](docs/BUILD.md)** - Building and publishing images
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System design and architecture
+- **[docs/NETWORK_PROXY.md](docs/NETWORK_PROXY.md)** - Network modes and Squid proxy
+- **[docs/TEST_PLAN.md](docs/TEST_PLAN.md)** - Comprehensive testing procedures
 
 ## Examples
 
@@ -57,34 +59,22 @@ Launch Copilot on current directory:
 .\launch-agent.ps1 . --agent copilot
 ```
 
-Clone and explore a repo:
-```powershell
-.\launch-agent.ps1 https://github.com/microsoft/vscode --agent copilot
-```
-
 Multiple agents on same repo:
 ```powershell
-.\launch-agent.ps1 C:\projects\app -b auth --agent copilot
-.\launch-agent.ps1 C:\projects\app -b database --agent codex
-.\launch-agent.ps1 C:\projects\app -b ui --agent claude
+.\launch-agent.ps1 . -b auth --agent copilot
+.\launch-agent.ps1 . -b database --agent codex
 ```
 
-Install .NET preview SDK:
+Network controls:
 ```powershell
-.\launch-agent.ps1 . --agent codex --dotnet-preview 9.0
-```
-
-Configure network access:
-```powershell
-# Default (allow-all bridge network)
-.\launch-agent.ps1 .
-
-# Restrict outbound network traffic
+# Restrict outbound traffic
 .\launch-agent.ps1 . --network-proxy restricted
 
-# Proxy with Squid logging
+# Proxy with logging
 .\launch-agent.ps1 . --network-proxy squid
 ```
+
+See [USAGE.md](USAGE.md) for complete examples and advanced scenarios.
 
 ## What's Different
 
