@@ -64,6 +64,59 @@ sanitize_branch_name() {
     echo "$sanitized"
 }
 
+# Check if git branch exists in repository
+branch_exists() {
+    local repo_path="$1"
+    local branch_name="$2"
+    
+    (cd "$repo_path" && git show-ref --verify --quiet "refs/heads/$branch_name" 2>/dev/null)
+    return $?
+}
+
+# Get unmerged commits between branches
+get_unmerged_commits() {
+    local repo_path="$1"
+    local base_branch="$2"
+    local compare_branch="$3"
+    
+    (cd "$repo_path" && git log "$base_branch..$compare_branch" --oneline 2>/dev/null)
+}
+
+# Remove git branch
+remove_git_branch() {
+    local repo_path="$1"
+    local branch_name="$2"
+    local force="${3:-false}"
+    
+    local flag="-d"
+    if [ "$force" = "true" ]; then
+        flag="-D"
+    fi
+    
+    (cd "$repo_path" && git branch "$flag" "$branch_name" 2>/dev/null)
+    return $?
+}
+
+# Rename git branch
+rename_git_branch() {
+    local repo_path="$1"
+    local old_name="$2"
+    local new_name="$3"
+    
+    (cd "$repo_path" && git branch -m "$old_name" "$new_name" 2>/dev/null)
+    return $?
+}
+
+# Create new git branch
+create_git_branch() {
+    local repo_path="$1"
+    local branch_name="$2"
+    local start_point="${3:-HEAD}"
+    
+    (cd "$repo_path" && git branch "$branch_name" "$start_point" 2>/dev/null)
+    return $?
+}
+
 # Get repository name from path
 get_repo_name() {
     local repo_path="$1"
@@ -90,12 +143,63 @@ convert_to_wsl_path() {
 
 # Check if Docker is running
 check_docker_running() {
-    if ! docker info > /dev/null 2>&1; then
-        echo "❌ Docker is not running!"
-        echo "   Please start Docker and try again"
+    # Check if docker is available and running
+    if docker info > /dev/null 2>&1; then
+        return 0
+    fi
+    
+    echo "⚠️  Docker is not running. Checking for Docker installation..."
+    
+    # Check if docker command exists
+    if ! command -v docker &> /dev/null; then
+        echo "❌ Docker is not installed. Please install Docker from:"
+        echo "   https://www.docker.com/products/docker-desktop"
         return 1
     fi
-    return 0
+    
+    # Check if we're on WSL and can access Docker Desktop
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "🔍 Detected WSL environment. Checking Docker Desktop..."
+        
+        # Try to start Docker Desktop via Windows
+        if command -v powershell.exe &> /dev/null; then
+            local docker_desktop_path="/mnt/c/Program Files/Docker/Docker/Docker Desktop.exe"
+            
+            if [ -f "$docker_desktop_path" ]; then
+                echo "🚀 Starting Docker Desktop..."
+                powershell.exe -Command "Start-Process 'C:\Program Files\Docker\Docker\Docker Desktop.exe'" 2>/dev/null || true
+                
+                # Wait for Docker to start (max 60 seconds)
+                local max_wait=60
+                local waited=0
+                while [ $waited -lt $max_wait ]; do
+                    sleep 2
+                    waited=$((waited + 2))
+                    if docker info > /dev/null 2>&1; then
+                        echo "✅ Docker started successfully"
+                        return 0
+                    fi
+                    echo "  Waiting for Docker... ($waited/$max_wait seconds)"
+                done
+                
+                echo "❌ Docker failed to start within $max_wait seconds"
+                echo "   Please start Docker Desktop manually and try again"
+                return 1
+            fi
+        fi
+    fi
+    
+    # On Linux, check if docker service can be started
+    if [ -f /etc/init.d/docker ] || systemctl list-unit-files docker.service &> /dev/null; then
+        echo "💡 Docker service is installed but not running."
+        echo "   Try starting it with: sudo systemctl start docker"
+        echo "   Or: sudo service docker start"
+        return 1
+    fi
+    
+    echo "❌ Docker is installed but not running."
+    echo "   Please start Docker and try again"
+    return 1
 }
 
 # Pull and tag image with retry logic
@@ -199,11 +303,16 @@ get_proxy_network() {
 remove_container_with_sidecars() {
     local container_name="$1"
     local skip_push="${2:-false}"
+    local keep_branch="${3:-false}"
     
     if ! container_exists "$container_name"; then
         echo "❌ Container '$container_name' does not exist"
         return 1
     fi
+    
+    # Get container labels to find repo and branch info
+    local agent_branch=$(docker inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container_name" 2>/dev/null || true)
+    local repo_path=$(docker inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' "$container_name" 2>/dev/null || true)
     
     # Push changes first
     if [ "$(get_container_status "$container_name")" = "running" ]; then
@@ -233,6 +342,32 @@ remove_container_with_sidecars() {
         fi
     fi
     
+    # Clean up agent branch in host repo if applicable
+    if [ "$keep_branch" != "true" ] && [ -n "$agent_branch" ] && [ -n "$repo_path" ] && [ -d "$repo_path" ]; then
+        echo ""
+        echo "🌿 Cleaning up agent branch: $agent_branch"
+        
+        if branch_exists "$repo_path" "$agent_branch"; then
+            # Check if branch has unpushed work
+            local current_branch
+            current_branch=$(cd "$repo_path" && git branch --show-current 2>/dev/null)
+            local unmerged_commits
+            unmerged_commits=$(get_unmerged_commits "$repo_path" "$current_branch" "$agent_branch")
+            
+            if [ -n "$unmerged_commits" ]; then
+                echo "   ⚠️  Branch has unmerged commits - keeping branch"
+                echo "   Manually merge or delete: git branch -D $agent_branch"
+            else
+                if remove_git_branch "$repo_path" "$agent_branch" "true"; then
+                    echo "   ✅ Agent branch removed"
+                else
+                    echo "   ⚠️  Could not remove agent branch"
+                fi
+            fi
+        fi
+    fi
+    
+    echo ""
     echo "✅ Cleanup complete"
 }
 

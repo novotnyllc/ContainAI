@@ -17,7 +17,7 @@ $TestRepoDir = Join-Path $env:TEMP "test-coding-agents-repo"
 # Cleanup and Setup Functions
 # ============================================================================
 
-function Cleanup-Tests {
+function Clear-TestEnvironment {
     Write-Host ""
     Write-Host "🧹 Cleaning up test containers and networks..." -ForegroundColor Cyan
     
@@ -49,7 +49,7 @@ function Show-TestSummary {
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
 }
 
-function Setup-TestRepo {
+function Initialize-TestRepo {
     Test-Section "Setting up test repository"
     
     if (Test-Path $TestRepoDir) {
@@ -97,6 +97,7 @@ function Test-Section {
 }
 
 function Assert-Equals {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Equals is grammatically correct for comparison')]
     param(
         [string]$Expected,
         [string]$Actual,
@@ -111,6 +112,7 @@ function Assert-Equals {
 }
 
 function Assert-Contains {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Contains is grammatically correct for inclusion check')]
     param(
         [string]$Haystack,
         [string]$Needle,
@@ -125,6 +127,7 @@ function Assert-Contains {
 }
 
 function Assert-ContainerExists {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Exists is semantically correct for existence check')]
     param(
         [string]$ContainerName,
         [string]$Message = "Container exists: $ContainerName"
@@ -139,6 +142,7 @@ function Assert-ContainerExists {
 }
 
 function Assert-LabelExists {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Exists is semantically correct for existence check')]
     param(
         [string]$ContainerName,
         [string]$LabelKey,
@@ -158,6 +162,8 @@ function Assert-LabelExists {
 # ============================================================================
 
 function New-TestContainer {
+    [CmdletBinding(SupportsShouldProcess=$false)]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification='Test helper - no confirmation needed')]
     param(
         [string]$Agent,
         [string]$Repo,
@@ -180,6 +186,7 @@ function New-TestContainer {
 }
 
 function Test-ContainerLabels {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing multiple labels on containers')]
     param(
         [string]$ContainerName,
         [string]$Agent,
@@ -198,6 +205,9 @@ function Test-ContainerLabels {
 # ============================================================================
 
 function Test-SharedFunctions {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing multiple shared functions')]
+    param()
+    
     Test-Section "Testing shared functions"
     
     . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
@@ -241,6 +251,9 @@ function Test-ContainerLabelsTest {
 }
 
 function Test-ListAgents {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing command that lists multiple agents')]
+    param()
+    
     Test-Section "Testing list-agents command"
     
     New-TestContainer -Agent "codex" -Repo "test-coding-agents-repo" -Branch "develop" | Out-Null
@@ -298,7 +311,10 @@ function Test-BranchSanitization {
 }
 
 function Test-MultipleAgents {
-    Test-Section "Testing multiple agents on same repo"
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing multiple agent instances')]
+    param()
+    
+    Test-Section "Testing multiple agents on same repository"
     
     Push-Location $TestRepoDir
     git checkout -q main
@@ -336,6 +352,54 @@ function Test-LabelFiltering {
     } else {
         Fail "Label filtering found no copilot containers"
     }
+}
+
+function Test-WslPathConversion {
+    Test-Section "Testing WSL path conversion"
+    
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+    
+    # Test Windows path conversion
+    $wslPath = Convert-WindowsPathToWsl "C:\Users\test\project"
+    Assert-Equals "/mnt/c/Users/test/project" $wslPath "Windows path converted to WSL path"
+    
+    # Test already-WSL path (should be unchanged)
+    $wslPath2 = Convert-WindowsPathToWsl "/mnt/e/dev/project"
+    Assert-Equals "/mnt/e/dev/project" $wslPath2 "WSL path unchanged"
+    
+    # Test different drive
+    $wslPath3 = Convert-WindowsPathToWsl "E:\dev\project"
+    Assert-Equals "/mnt/e/dev/project" $wslPath3 "E: drive converted to WSL path"
+}
+
+function Test-BranchNameSanitization {
+    Test-Section "Testing branch name sanitization"
+    
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+    
+    # Test slash replacement
+    $safe1 = ConvertTo-SafeBranchName "feature/auth-module"
+    Assert-Equals "feature-auth-module" $safe1 "Forward slashes replaced with dashes"
+    
+    # Test backslash replacement
+    $safe2 = ConvertTo-SafeBranchName "feature\auth\module"
+    Assert-Equals "feature-auth-module" $safe2 "Backslashes replaced with dashes"
+    
+    # Test invalid characters
+    $safe3 = ConvertTo-SafeBranchName "feature@#\$%auth"
+    Assert-Equals "feature-auth" $safe3 "Invalid characters removed"
+    
+    # Test dash collapsing
+    $safe4 = ConvertTo-SafeBranchName "feature---auth"
+    Assert-Equals "feature-auth" $safe4 "Multiple dashes collapsed"
+    
+    # Test leading/trailing special chars
+    $safe5 = ConvertTo-SafeBranchName "---feature-auth---"
+    Assert-Equals "feature-auth" $safe5 "Leading/trailing dashes removed"
+    
+    # Test uppercase to lowercase
+    $safe6 = ConvertTo-SafeBranchName "Feature/Auth"
+    Assert-Equals "feature-auth" $safe6 "Uppercase converted to lowercase"
 }
 
 function Test-ContainerStatus {
@@ -376,6 +440,8 @@ function Main {
         Test-BranchSanitization
         Test-MultipleAgents
         Test-LabelFiltering
+        Test-WslPathConversion
+        Test-BranchNameSanitization
         Test-ContainerStatus
         Test-ListAgents
         Test-RemoveAgent

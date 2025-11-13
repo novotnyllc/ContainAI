@@ -4,46 +4,88 @@ Comprehensive automated testing for the CodingAgents project, including unit tes
 
 ## Overview
 
-### Integration Tests (Recommended)
+### Unit Tests (Primary)
 
-Full end-to-end testing with two modes:
+Fast, focused validation of individual components - **run these during development**:
 
-**Full Mode**: Builds all images in isolated environment
-- Creates local Docker registry (no push to public registry)
-- Builds base image and all agent images from Dockerfiles
-- Tests against freshly built images
-- Complete isolation - no external dependencies
-
-**Launchers Mode**: Tests against existing images
-- Pulls images from registry (or uses local)
-- Tags for isolated testing
-- Tests launcher scripts and functionality
-- Faster execution
-
-### Unit Tests (Legacy)
-
-Quick validation of launcher scripts and shared functions:
+**Launcher Tests** (`test-launchers.sh` / `test-launchers.ps1`):
 - Container naming conventions
-- Label verification
-- Management commands
-- Shared function validation
+- Docker label assignment and verification
+- Git repository operations
+- Image pull and tagging
+- WSL path conversion (Windows)
+- Branch name sanitization
+- Multi-agent isolation
+
+**Branch Management Tests** (`test-branch-management.sh` / `test-branch-management.ps1`):
+- Branch existence checking
+- Branch creation, renaming, deletion
+- Unmerged commit detection
+- Conflict resolution and archiving
+- Agent branch isolation
+- Container/branch cleanup integration
+
+**Both bash and PowerShell** versions provide equivalent coverage and should pass identically.
+
+### Integration Tests (Bash Only)
+
+Full end-to-end system validation with two modes:
+
+**Launchers Mode** (Fast - recommended for development):
+- Uses existing Docker images
+- Tests launcher script execution end-to-end
+- Validates container creation, networking, mounting
+- Tests multi-agent scenarios
+- ~3-5 minutes
+
+**Full Mode** (Complete - for CI/CD):
+- Builds all images from Dockerfiles in isolated registry
+- Complete validation including build process
+- ~10-15 minutes
+
+**Note**: Integration tests are bash-only because they test the complete system including Docker images and containers, which are language-agnostic. Unit tests provide bash/PowerShell parity validation.
 
 ## Test Files
 
-### Integration Tests
-- **`integration-test.sh`**: Comprehensive bash integration test suite
-- **`test-config.sh`**: Test configuration (no real secrets)
-- **`test-env.sh`**: Environment setup/teardown utilities
-
 ### Unit Tests
-- **`test-launchers.sh`**: Bash unit test suite (386 lines)
-- **`test-launchers.ps1`**: PowerShell unit test suite (388 lines)
+- **`test-launchers.sh`**: Bash launcher unit tests (~390 lines)
+- **`test-launchers.ps1`**: PowerShell launcher unit tests (~460 lines)  
+  Tests: container naming, labels, image operations, WSL paths, branch sanitization
+  
+- **`test-branch-management.sh`**: Bash branch management tests (~430 lines)
+- **`test-branch-management.ps1`**: PowerShell branch management tests (~512 lines)  
+  Tests: branch operations, conflict detection, archiving, cleanup, unmerged commits
+
+### Integration Tests (Bash Only)
+- **`integration-test.sh`**: Full system integration tests (~450 lines)
+- **`test-config.sh`**: Test configuration with mock credentials
+- **`test-env.sh`**: Environment setup/teardown utilities (~300 lines)
+
+**Complete Parity**: Bash and PowerShell unit tests provide equivalent coverage. Integration tests are bash-only as they test the system end-to-end (both bash and PowerShell launchers use same Docker infrastructure).
 
 ## Running Tests
 
-### Integration Tests (Recommended)
+### Quick Start (Development)
 
-**Full mode** - Build and test everything in isolation:
+**During development, run unit tests** - they're fast and comprehensive:
+
+**Bash:**
+```bash
+./scripts/test/test-launchers.sh
+./scripts/test/test-branch-management.sh
+```
+
+**PowerShell:**
+```powershell
+pwsh scripts/test/test-launchers.ps1
+pwsh scripts/test/test-branch-management.ps1
+```
+
+Both should pass with identical results. Time: ~1-2 minutes per file.
+
+### Integration Tests (Before PR)
+
+**Launchers mode** - Fast validation with existing images:
 ```bash
 # Linux/macOS/WSL
 chmod +x scripts/test/integration-test.sh
@@ -67,17 +109,12 @@ chmod +x scripts/test/integration-test.sh
 - ✅ Automatic cleanup (or `--preserve` for debugging)
 - ✅ Tests real container behavior, mounting, networking, etc.
 
-### Unit Tests (Quick Validation)
-
-**Linux/macOS/WSL:**
+**Full mode** - Complete validation including builds:
 ```bash
-chmod +x scripts/test/test-launchers.sh
-./scripts/test/test-launchers.sh
-```
+./scripts/test/integration-test.sh --mode full
 
-**Windows PowerShell:**
-```powershell
-.\scripts\test\test-launchers.ps1
+# With resource preservation for debugging
+./scripts/test/integration-test.sh --mode full --preserve
 ```
 
 ### In CI
@@ -129,19 +166,30 @@ See `.github/workflows/test-launchers.yml` for workflow details.
 - `pull_and_tag_image` / `Update-AgentImage`: Image management
 - `container_exists` / `Test-ContainerExists`: Container lookup
 - `push_to_local` / `Push-ToLocal`: Auto-push functionality
-- `remove_container_with_sidecars` / `Remove-ContainerWithSidecars`: Container cleanup
+- `remove_container_with_sidecars` / `Remove-ContainerWithSidecars`: Container cleanup with branch management
 - `convert_to_wsl_path` (bash only): WSL path conversion
+- `branch_exists` / `Test-BranchExists`: Check if branch exists in repository
+- `get_unmerged_commits` / `Get-UnmergedCommits`: List commits not merged into base branch
+- `remove_git_branch` / `Remove-GitBranch`: Delete a branch (with force option)
+- `rename_git_branch` / `Rename-GitBranch`: Rename/archive a branch
+- `create_git_branch` / `New-GitBranch`: Create new branch from specific commit
 
 **Container Operations**:
 - Container naming follows `{agent}-{repo}-{branch}` pattern
-- All containers have 4 required labels
+- All containers have required labels including `coding-agents.branch` and `coding-agents.repo-path`
 - List and remove operations
 - Label-based filtering
+- Branch conflict detection and resolution
+- Automatic branch cleanup on container removal
+- Unmerged commit protection (branches with unmerged work are preserved)
 
 **Edge Cases**:
 - Branch name sanitization
-- Multiple agents on same repository
+- Multiple agents on same repository with isolated branches
 - Container status tracking
+- Agent branch conflicts and replacement
+- Unmerged commit detection and archiving
+- Force flag (-y) for automated workflows
 
 ## Test Structure
 

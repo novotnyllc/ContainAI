@@ -16,6 +16,7 @@ NAME=""
 DOTNET_PREVIEW=""
 NETWORK_PROXY="allow-all"
 NO_PUSH=false
+FORCE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -44,6 +45,10 @@ while [[ $# -gt 0 ]]; do
             NO_PUSH=true
             shift
             ;;
+        -y|--force)
+            FORCE=true
+            shift
+            ;;
         -h|--help)
             echo "Usage: launch-agent [SOURCE] [OPTIONS]"
             echo ""
@@ -58,13 +63,20 @@ while [[ $# -gt 0 ]]; do
             echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 9.0)"
             echo "  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)"
             echo "  --no-push                   Disable auto-push on container shutdown"
+            echo "  -y, --force                 Automatically replace existing agent branch without prompting"
             echo "  -h, --help                  Show this help"
+            echo ""
+            echo "Branch Management:"
+            echo "  Each agent creates its own branch: <agent>/<base-branch>"
+            echo "  If the agent branch exists, you'll be prompted to replace it."
+            echo "  Branches with unmerged commits are archived before replacement."
             echo ""
             echo "Examples:"
             echo "  launch-agent                           # Current directory"
             echo "  launch-agent . -b feature-auth         # Current dir, custom branch"
             echo "  launch-agent https://github.com/user/repo --agent copilot"
             echo "  launch-agent /path/to/repo --name my-workspace"
+            echo "  launch-agent . -b main -y              # Auto-replace existing branch"
             exit 0
             ;;
         *)
@@ -183,6 +195,72 @@ case "$NETWORK_PROXY" in
         ;;
 esac
 
+# Check for branch conflicts in local repos
+if [ "$SOURCE_TYPE" = "local" ]; then
+    RESOLVED_PATH=$(realpath "$SOURCE")
+    
+    # Check if agent branch already exists
+    if branch_exists "$RESOLVED_PATH" "$AGENT_BRANCH"; then
+        echo "⚠️  Branch '$AGENT_BRANCH' already exists in the repository"
+        echo ""
+        
+        # Get current branch to check for unmerged commits
+        cd "$RESOLVED_PATH"
+        CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
+        cd - > /dev/null
+        
+        # Check for unmerged commits
+        UNMERGED_COMMITS=$(get_unmerged_commits "$RESOLVED_PATH" "$CURRENT_BRANCH" "$AGENT_BRANCH")
+        
+        if [ -n "$UNMERGED_COMMITS" ]; then
+            echo "📝 Branch has unmerged commits:"
+            echo "$UNMERGED_COMMITS" | head -5
+            COMMIT_COUNT=$(echo "$UNMERGED_COMMITS" | wc -l)
+            if [ "$COMMIT_COUNT" -gt 5 ]; then
+                echo "   ... and $((COMMIT_COUNT - 5)) more"
+            fi
+            echo ""
+            echo "   ℹ️  The branch will be archived before creating a new one."
+            echo ""
+        fi
+        
+        # Prompt for replacement unless force flag is set
+        if [ "$FORCE" != "true" ]; then
+            read -p "Replace existing branch? (y/N): " -n 1 -r REPLY
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                echo "❌ Aborted. Use -y or --force to automatically replace."
+                exit 1
+            fi
+        else
+            echo "   🔄 Force flag set - replacing automatically"
+        fi
+        
+        # Archive or delete the branch
+        if [ -n "$UNMERGED_COMMITS" ]; then
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            ARCHIVE_NAME="${AGENT_BRANCH}-archived-${TIMESTAMP}"
+            echo "📦 Archiving to: $ARCHIVE_NAME"
+            
+            if rename_git_branch "$RESOLVED_PATH" "$AGENT_BRANCH" "$ARCHIVE_NAME"; then
+                echo "   ✅ Branch archived successfully"
+            else
+                echo "   ❌ Failed to archive branch"
+                exit 1
+            fi
+        else
+            echo "🗑️  Removing existing branch (no unmerged commits)"
+            if remove_git_branch "$RESOLVED_PATH" "$AGENT_BRANCH" "true"; then
+                echo "   ✅ Branch removed successfully"
+            else
+                echo "   ❌ Failed to remove branch"
+                exit 1
+            fi
+        fi
+        echo ""
+    fi
+fi
+
 echo "🚀 Launching Coding Agent..."
 echo "🎯 Agent: $AGENT"
 echo "📁 Source: $SOURCE ($SOURCE_TYPE)"
@@ -240,7 +318,7 @@ DOCKER_ARGS=(
     "--label" "coding-agents.type=agent"
     "--label" "coding-agents.agent=$AGENT"
     "--label" "coding-agents.repo=$REPO_NAME"
-    "--label" "coding-agents.branch=$BRANCH"
+    "--label" "coding-agents.branch=$AGENT_BRANCH"
     "--label" "coding-agents.network-policy=$NETWORK_POLICY_ENV"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
@@ -253,6 +331,7 @@ if [ "$SOURCE_TYPE" = "url" ]; then
 else
     DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$WSL_PATH")
     DOCKER_ARGS+=("-v" "${WSL_PATH}:/tmp/source-repo:ro")
+    DOCKER_ARGS+=("--label" "coding-agents.repo-path=$RESOLVED_PATH")
 fi
 
 [ -n "$ORIGIN_URL" ] && DOCKER_ARGS+=("-e" "ORIGIN_URL=$ORIGIN_URL")

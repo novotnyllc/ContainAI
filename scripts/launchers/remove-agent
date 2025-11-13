@@ -7,6 +7,7 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 # Parse arguments
 CONTAINER_NAME=""
 SKIP_PUSH=false
+KEEP_BRANCH=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -14,19 +15,26 @@ while [[ $# -gt 0 ]]; do
             SKIP_PUSH=true
             shift
             ;;
+        --keep-branch)
+            KEEP_BRANCH=true
+            shift
+            ;;
         -h|--help)
-            echo "Usage: remove-agent <container-name> [--no-push]"
+            echo "Usage: remove-agent <container-name> [--no-push] [--keep-branch]"
             echo ""
             echo "Remove an agent container and its associated resources."
             echo "Automatically pushes changes to local remote before removal."
+            echo "Agent branches are cleaned up unless they have unmerged commits."
             echo ""
             echo "Options:"
-            echo "  --no-push    Skip git push before removal"
-            echo "  -h, --help   Show this help"
+            echo "  --no-push      Skip git push before removal"
+            echo "  --keep-branch  Keep the agent's branch in the host repository"
+            echo "  -h, --help     Show this help"
             echo ""
             echo "Examples:"
             echo "  remove-agent copilot-myrepo-main"
             echo "  remove-agent codex-myapp-feature --no-push"
+            echo "  remove-agent claude-myrepo-feature --keep-branch"
             exit 0
             ;;
         *)
@@ -40,7 +48,7 @@ done
 if [ -z "$CONTAINER_NAME" ]; then
     echo "❌ Error: Container name required"
     echo ""
-    echo "Usage: remove-agent <container-name> [--no-push]"
+    echo "Usage: remove-agent <container-name> [--no-push] [--keep-branch]"
     echo ""
     echo "Available containers:"
     docker ps -a --filter "label=coding-agents.type=agent" --format "  • {{.Names}}" 2>/dev/null
@@ -51,4 +59,4 @@ fi
 check_docker_running || exit 1
 
 # Remove container
-remove_container_with_sidecars "$CONTAINER_NAME" "$SKIP_PUSH"
+remove_container_with_sidecars "$CONTAINER_NAME" "$SKIP_PUSH" "$KEEP_BRANCH"
