@@ -61,6 +61,10 @@ docker build -f Dockerfile.codex --build-arg BASE_IMAGE=coding-agents:local -t c
 docker build -f Dockerfile.claude --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-claude:local .
 
 echo ""
+echo "🔨 Building network proxy image..."
+docker build -f Dockerfile.proxy -t coding-agents-proxy:local .
+
+echo ""
 echo "✅ Build complete!"
 echo ""
 echo "Images created:"
@@ -68,6 +72,7 @@ echo "  • coding-agents:local (all agents, interactive shell)"
 echo "  • coding-agents-copilot:local (launches Copilot directly)"
 echo "  • coding-agents-codex:local (launches Codex directly)"
 echo "  • coding-agents-claude:local (launches Claude directly)"
+echo "  • coding-agents-proxy:local (Squid network proxy sidecar)"
 echo ""
 echo "🚀 Run a container with:"
 echo "   ./scripts/run-agent.sh /path/to/your/repo"

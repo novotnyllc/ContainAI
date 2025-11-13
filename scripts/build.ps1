@@ -71,6 +71,10 @@ docker build -f Dockerfile.codex --build-arg BASE_IMAGE=coding-agents:local -t c
 docker build -f Dockerfile.claude --build-arg BASE_IMAGE=coding-agents:local -t coding-agents-claude:local .
 
 Write-Host ""
+Write-Host "🔨 Building network proxy image..." -ForegroundColor Cyan
+docker build -f Dockerfile.proxy -t coding-agents-proxy:local .
+
+Write-Host ""
 Write-Host "✅ Build complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Images created:" -ForegroundColor Cyan
@@ -78,6 +82,7 @@ Write-Host "  • coding-agents:local (all agents, interactive shell)"
 Write-Host "  • coding-agents-copilot:local (launches Copilot directly)"
 Write-Host "  • coding-agents-codex:local (launches Codex directly)"
 Write-Host "  • coding-agents-claude:local (launches Claude directly)"
+Write-Host "  • coding-agents-proxy:local (Squid network proxy sidecar)"
 Write-Host ""
 Write-Host "🚀 Run a container with:" -ForegroundColor Cyan
 Write-Host "   .\scripts\run-agent.ps1 -RepoPath 'E:\dev\your-repo'" -ForegroundColor Yellow

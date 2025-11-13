@@ -15,6 +15,19 @@ else
     echo "⚠️  Warning: Not a git repository. Initialize with 'git init' if needed."
 fi
 
+# Announce network policy for transparency
+case "${NETWORK_POLICY:-allow-all}" in
+    restricted)
+        echo "🌐 Network policy: restricted (container launched without outbound network)"
+        ;;
+    squid)
+        echo "🌐 Network policy: squid (traffic routed through proxy sidecar)"
+        ;;
+    *)
+        echo "🌐 Network policy: allow-all (standard Docker bridge network)"
+        ;;
+esac
+
 # Configure git to use HTTPS with gh credential helper (OAuth from host)
 git config --global credential.helper ""
 git config --global credential.helper '!gh auth git-credential'

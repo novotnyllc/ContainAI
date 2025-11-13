@@ -13,7 +13,7 @@ rmcp_client = true
 web_search_request = true
 
 # Sandbox settings - configurable network access
-# Set to false if you want restricted network (requires proxy configuration)
+# Set to false when launching with --network-proxy restricted
 [sandbox_workspace_write]
 network_access = true  # Change to false for restricted mode
 allow_all = true       # Change to false for restricted mode

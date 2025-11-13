@@ -9,6 +9,7 @@ Run AI coding agents (GitHub Copilot, OpenAI Codex, Anthropic Claude) in isolate
 - **VS Code integration**: Connect to running containers with Dev Containers extension
 - **Persistent workspaces**: Containers run in background, resume anytime
 - **MCP servers**: GitHub, Microsoft Docs, Playwright, Context7, Serena, and more
+- **Network controls**: Restricted mode (`--network none`) or Squid proxy sidecar for monitoring
 
 ## Quick Start
 
@@ -75,7 +76,14 @@ Install .NET preview SDK:
 
 Configure network access:
 ```powershell
-.\launch-agent.ps1 . --network-proxy allow-all
+# Default (allow-all bridge network)
+.\launch-agent.ps1 .
+
+# Restrict outbound network traffic
+.\launch-agent.ps1 . --network-proxy restricted
+
+# Proxy with Squid logging
+.\launch-agent.ps1 . --network-proxy squid
 ```
 
 ## What's Different

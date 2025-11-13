@@ -84,11 +84,13 @@ docker build -f Dockerfile -t coding-agents:local .
 docker build -f Dockerfile.copilot -t coding-agents-copilot:local .
 docker build -f Dockerfile.codex -t coding-agents-codex:local .
 docker build -f Dockerfile.claude -t coding-agents-claude:local .
+docker build -f Dockerfile.proxy -t coding-agents-proxy:local .
 ```
 
 **What they add:**
 - Auth validation scripts (warn if OAuth configs not mounted)
 - Default CMD to launch specific agent
+- `Dockerfile.proxy` builds Squid proxy sidecar used when launching with `--network-proxy squid`
 
 **Build time:** ~30 seconds each
 
@@ -170,6 +172,7 @@ docker tag coding-agents:local ghcr.io/yourusername/coding-agents:latest
 docker tag coding-agents-copilot:local ghcr.io/yourusername/coding-agents-copilot:latest
 docker tag coding-agents-codex:local ghcr.io/yourusername/coding-agents-codex:latest
 docker tag coding-agents-claude:local ghcr.io/yourusername/coding-agents-claude:latest
+docker tag coding-agents-proxy:local ghcr.io/yourusername/coding-agents-proxy:latest
 ```
 
 ### Push to Registry
