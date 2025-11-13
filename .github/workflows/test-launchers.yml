@@ -1,0 +1,138 @@
+name: Test Launcher Scripts
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'scripts/launchers/**'
+      - 'scripts/utils/**'
+      - 'scripts/test/**'
+      - 'docker/**'
+      - '.github/workflows/test-launchers.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'scripts/launchers/**'
+      - 'scripts/utils/**'
+      - 'scripts/test/**'
+      - 'docker/**'
+      - '.github/workflows/test-launchers.yml'
+
+jobs:
+  # Quick unit tests
+  unit-test-bash:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Docker
+        run: |
+          docker --version
+          docker info
+      
+      - name: Setup Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+      
+      - name: Make test script executable
+        run: chmod +x scripts/test/test-launchers.sh
+      
+      - name: Run launcher tests (bash)
+        run: ./scripts/test/test-launchers.sh
+      
+      - name: Cleanup test containers
+        if: always()
+        run: |
+          docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
+
+  unit-test-powershell:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Docker
+        run: |
+          docker --version
+          docker info
+      
+      - name: Setup Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+      
+      - name: Run launcher tests (PowerShell)
+        shell: pwsh
+        run: .\scripts\test\test-launchers.ps1
+      
+      - name: Cleanup test containers
+        if: always()
+        shell: pwsh
+        run: |
+          docker ps -aq --filter "label=coding-agents.test=true" | ForEach-Object { docker rm -f $_ } 2>$null
+
+  # Full integration tests (launchers mode - faster)
+  integration-test-launchers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Setup Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+      
+      - name: Make integration test executable
+        run: chmod +x scripts/test/integration-test.sh scripts/test/test-env.sh
+      
+      - name: Run integration tests (launchers mode)
+        run: ./scripts/test/integration-test.sh --mode launchers
+      
+      - name: Cleanup test resources
+        if: always()
+        run: |
+          docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
+          docker network ls --filter "name=test-coding-agents" --format "{{.Name}}" | xargs -r docker network rm || true
+
+  # Full integration tests (full mode - on main branch only)
+  integration-test-full:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Setup Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+      
+      - name: Make integration test executable
+        run: chmod +x scripts/test/integration-test.sh scripts/test/test-env.sh
+      
+      - name: Run integration tests (full mode)
+        run: ./scripts/test/integration-test.sh --mode full
+      
+      - name: Cleanup test resources
+        if: always()
+        run: |
+          docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
+          docker network ls --filter "name=test-coding-agents" --format "{{.Name}}" | xargs -r docker network rm || true
+          docker rm -f $(docker ps -aq --filter "ancestor=registry:2") 2>/dev/null || true
