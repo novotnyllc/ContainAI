@@ -174,7 +174,9 @@ Unlike running agents directly on your machine:
 
 ## Requirements
 
-- Docker with WSL2 backend (Windows) or Docker Desktop (Mac/Linux)
+- **Container Runtime**: Docker or Podman
+  - Docker Desktop (with WSL2 on Windows) or Podman Desktop/CLI
+  - Scripts auto-detect available runtime
 - GitHub CLI authenticated (`gh auth login`)
 - Git configured
 - (Optional) Agent-specific OAuth: Copilot, Codex, Claude

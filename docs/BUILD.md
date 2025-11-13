@@ -4,7 +4,10 @@ This guide is for developers who want to build and publish the coding agent cont
 
 ## Prerequisites
 
-- Docker with BuildKit enabled
+- **Container Runtime**: Docker or Podman
+  - Docker: Requires BuildKit enabled (default in recent versions)
+  - Podman: Native support for BuildKit-compatible builds
+  - Set `CONTAINER_RUNTIME=podman` to force Podman usage
 - Git
 - (Optional) GitHub Container Registry access for publishing
 

@@ -2,6 +2,38 @@
 # Common functions for agent management scripts
 set -euo pipefail
 
+# Detect container runtime (docker or podman)
+get_container_runtime() {
+    # Check for CONTAINER_RUNTIME environment variable first
+    if [ -n "${CONTAINER_RUNTIME:-}" ]; then
+        if command -v "$CONTAINER_RUNTIME" &> /dev/null; then
+            echo "$CONTAINER_RUNTIME"
+            return 0
+        fi
+    fi
+    
+    # Auto-detect: prefer docker, fall back to podman
+    if command -v docker &> /dev/null && docker info > /dev/null 2>&1; then
+        echo "docker"
+        return 0
+    elif command -v podman &> /dev/null && podman info > /dev/null 2>&1; then
+        echo "podman"
+        return 0
+    fi
+    
+    # Check if either exists but not running
+    if command -v docker &> /dev/null; then
+        echo "docker"
+        return 0
+    elif command -v podman &> /dev/null; then
+        echo "podman"
+        return 0
+    fi
+    
+    # Neither found
+    return 1
+}
+
 # Validate container name
 validate_container_name() {
     local name="$1"
@@ -141,19 +173,39 @@ convert_to_wsl_path() {
     fi
 }
 
-# Check if Docker is running
+# Check if container runtime (Docker/Podman) is running
 check_docker_running() {
-    # Check if docker is available and running
-    if docker info > /dev/null 2>&1; then
-        return 0
+    local runtime
+    runtime=$(get_container_runtime 2>/dev/null || echo "")
+    
+    if [ -n "$runtime" ]; then
+        # Check if runtime is running
+        if $runtime info > /dev/null 2>&1; then
+            return 0
+        fi
     fi
     
-    echo "⚠️  Docker is not running. Checking for Docker installation..."
+    echo "⚠️  Container runtime not running. Checking installation..."
     
-    # Check if docker command exists
-    if ! command -v docker &> /dev/null; then
-        echo "❌ Docker is not installed. Please install Docker from:"
-        echo "   https://www.docker.com/products/docker-desktop"
+    # Try docker first
+    if command -v docker &> /dev/null; then
+        runtime="docker"
+    elif command -v podman &> /dev/null; then
+        runtime="podman"
+        echo "ℹ️  Using Podman as container runtime"
+        
+        # Podman doesn't need a daemon on Linux
+        if podman info > /dev/null 2>&1; then
+            return 0
+        fi
+        
+        echo "❌ Podman is installed but not working properly"
+        echo "   Try: podman system reset"
+        return 1
+    else
+        echo "❌ No container runtime found. Please install one:"
+        echo "   Docker: https://www.docker.com/products/docker-desktop"
+        echo "   Podman: https://podman.io/getting-started/installation"
         return 1
     fi
     

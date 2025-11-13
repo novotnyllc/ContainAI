@@ -6,7 +6,10 @@ Quick guide for running AI coding agents in isolated containers.
 
 ### On Your Host Machine
 
-1. **Docker** (with WSL2 on Windows)
+1. **Container Runtime**: Docker or Podman
+   - **Docker**: Docker Desktop (with WSL2 on Windows) - [docker.com](https://www.docker.com/products/docker-desktop)
+   - **Podman**: Podman Desktop or CLI - [podman.io](https://podman.io/getting-started/installation)
+   - Scripts auto-detect which runtime is available
 2. **GitHub CLI** authenticated: `gh auth login`
 3. **Git configured:**
    ```bash
@@ -726,6 +729,30 @@ git push origin copilot/feature-auth
 3. Try attaching with Docker extension instead
 
 ## Advanced Usage
+
+### Force Specific Container Runtime
+
+By default, scripts auto-detect Docker or Podman. To force a specific runtime:
+
+```bash
+# Force Podman
+export CONTAINER_RUNTIME=podman
+./run-copilot
+
+# Force Docker
+export CONTAINER_RUNTIME=docker
+launch-agent
+```
+
+```powershell
+# Force Podman
+$env:CONTAINER_RUNTIME = "podman"
+.\run-copilot.ps1
+
+# Force Docker  
+$env:CONTAINER_RUNTIME = "docker"
+.\launch-agent.ps1
+```
 
 ### Custom Container Name
 

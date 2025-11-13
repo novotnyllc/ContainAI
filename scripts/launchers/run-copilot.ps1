@@ -71,6 +71,14 @@ if (-not $WslHome) {
     exit 1
 }
 
+# Check container runtime
+if (-not (Test-DockerRunning)) {
+    exit 1
+}
+
+# Get container runtime command (docker or podman)
+$ContainerCmd = Get-ContainerRuntime
+
 # Get timezone
 $TimeZone = (Get-TimeZone).Id
 
@@ -112,7 +120,7 @@ $dockerArgs += @(
 
 # Run container with cleanup
 try {
-    & docker $dockerArgs
+    & $ContainerCmd $dockerArgs
 } finally {
     if (Test-ContainerExists $ContainerName) {
         Write-Host ""

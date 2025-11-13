@@ -292,7 +292,9 @@ function Test-NewFeature {
 ## Prerequisites
 
 ### Integration Tests
-- Docker installed and running (with BuildKit support for full mode)
+- **Container Runtime**: Docker or Podman (scripts auto-detect)
+  - Docker: Requires BuildKit support for full mode
+  - Podman: Native support for BuildKit-compatible builds
 - Git installed and configured
 - Bash 4.0+ (Linux/macOS/WSL)
 - Sufficient disk space for building images (full mode: ~5GB)
@@ -300,7 +302,7 @@ function Test-NewFeature {
 - No real GitHub/API tokens required (uses mock credentials)
 
 ### Unit Tests
-- Docker installed and running
+- **Container Runtime**: Docker or Podman (scripts auto-detect)
 - Git installed and configured
 - Bash 4.0+ or PowerShell 5.1+
 - Minimal disk space
@@ -403,7 +405,7 @@ rm -rf /tmp/test-coding-agents-repo-<PID>
 ## Troubleshooting
 
 ### "Docker is not running"
-Ensure Docker Desktop or Docker daemon is running before executing tests.
+Ensure Docker or Podman is running before executing tests. Scripts automatically detect which container runtime is available.
 
 ### "Permission denied"
 Make bash test script executable: `chmod +x scripts/test/test-launchers.sh`
