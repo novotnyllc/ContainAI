@@ -26,7 +26,8 @@ read -p "Enter choice (1 or 2): " choice
 
 case $choice in
     1)
-        read -p "Enter GitHub username for base image: " gh_username
+        read -p "Enter GitHub username or org for base image [novotnyllc]: " gh_username
+        gh_username=${gh_username:-novotnyllc}
         BASE_IMAGE="ghcr.io/$gh_username/coding-agents-base:latest"
         echo ""
         echo "📥 Pulling base image: $BASE_IMAGE"

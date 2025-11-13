@@ -27,7 +27,8 @@ $choice = Read-Host "Enter choice (1 or 2)"
 
 switch ($choice) {
     "1" {
-        $gh_username = Read-Host "Enter GitHub username for base image"
+        $gh_username = Read-Host "Enter GitHub username or org for base image [novotnyllc]"
+        if ([string]::IsNullOrWhiteSpace($gh_username)) { $gh_username = "novotnyllc" }
         $BASE_IMAGE = "ghcr.io/$gh_username/coding-agents-base:latest"
         Write-Host ""
         Write-Host "📥 Pulling base image: $BASE_IMAGE" -ForegroundColor Cyan

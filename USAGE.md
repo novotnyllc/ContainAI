@@ -34,16 +34,16 @@ CONTEXT7_API_KEY=your_key_here
 ### Option 1: Pull Pre-Built (Recommended)
 
 ```bash
-docker pull ghcr.io/yourusername/coding-agents-copilot:latest
-docker pull ghcr.io/yourusername/coding-agents-codex:latest
-docker pull ghcr.io/yourusername/coding-agents-claude:latest
+docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
+docker pull ghcr.io/novotnyllc/coding-agents-codex:latest
+docker pull ghcr.io/novotnyllc/coding-agents-claude:latest
 ```
 
 ### Option 2: Build Locally
 
 ```bash
 # Get the repository
-git clone https://github.com/yourusername/coding-agents.git
+git clone https://github.com/novotnyllc/coding-agents.git
 cd coding-agents
 
 # Build images
