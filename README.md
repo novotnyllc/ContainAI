@@ -120,6 +120,7 @@ remove-agent copilot-myapp-main --no-push
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System design and architecture
 - **[docs/NETWORK_PROXY.md](docs/NETWORK_PROXY.md)** - Network modes and Squid proxy
 - **[docs/TEST_PLAN.md](docs/TEST_PLAN.md)** - Comprehensive testing procedures
+- **[scripts/test/README.md](scripts/test/README.md)** - Automated test suite (CI and local)
 
 ## Examples
 
