@@ -5,21 +5,18 @@ The coding agents can be launched with different network access policies to cont
 ## Network Modes
 
 ### `allow-all` (Default)
-- **Status**: Fully implemented
 - **Network Access**: Standard Docker bridge network (`--network bridge`)
 - **Use Case**: Everyday development with access to the public internet (package installs, API calls, etc.)
 - **Launch**: `./launch-agent .` or `./launch-agent . --network-proxy allow-all`
 - **Alias**: Passing `--network-proxy none` maps to this mode for backwards compatibility
 
 ### `restricted` (No outbound network)
-- **Status**: Fully implemented
 - **Network Access**: Container launched with `--network none` (no outbound or inbound network)
 - **Use Case**: Highly locked-down scenarios, security reviews, running untrusted code
 - **Limitation**: Cannot clone from Git URLs—provide a local repository path instead
 - **Launch**: `./launch-agent . --network-proxy restricted`
 
 ### `squid` (Proxy with Filtering)
-- **Status**: Fully implemented
 - **Network Access**: HTTP/HTTPS routed through Squid proxy sidecar container
 - **Logging**: Requests recorded at `/var/log/squid/access.log` inside proxy container
 - **Launch**: `./launch-agent . --network-proxy squid`

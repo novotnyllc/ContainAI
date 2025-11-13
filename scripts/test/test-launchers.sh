@@ -2,13 +2,16 @@
 # Automated test suite for launcher scripts
 # Tests all core functionality: naming, labels, auto-push, shared functions
 
-set -e
+set -euo pipefail
 
 # Color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Constants
+LONG_RUNNING_SLEEP=3600
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -149,7 +152,7 @@ create_test_container() {
         --label "coding-agents.agent=$agent" \
         --label "coding-agents.repo=$repo" \
         --label "coding-agents.branch=$branch" \
-        alpine:latest sleep 3600 >/dev/null
+        alpine:latest sleep $LONG_RUNNING_SLEEP >/dev/null
     
     echo "$container_name"
 }

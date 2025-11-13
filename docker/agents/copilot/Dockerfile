@@ -6,7 +6,8 @@ FROM ${BASE_IMAGE}
 USER root
 
 # Validation script to check for Copilot authentication
-RUN echo '#!/bin/bash' > /usr/local/bin/validate-copilot-auth.sh && \
+RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-copilot-auth.sh && \
+    echo 'set -euo pipefail' >> /usr/local/bin/validate-copilot-auth.sh && \
     echo 'if [ ! -d "$HOME/.config/github-copilot" ] && [ ! -d "$HOME/.config/gh" ]; then' >> /usr/local/bin/validate-copilot-auth.sh && \
     echo '  echo "⚠️  WARNING: GitHub Copilot authentication not found!" >&2' >> /usr/local/bin/validate-copilot-auth.sh && \
     echo '  echo "   Mount ~/.config/github-copilot or ~/.config/gh from host" >&2' >> /usr/local/bin/validate-copilot-auth.sh && \

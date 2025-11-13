@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Test environment setup and teardown utilities
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Source test configuration
 source "$SCRIPT_DIR/test-config.sh"
+
+# Constants for timing and retries
+REGISTRY_STARTUP_TIMEOUT=30
+REGISTRY_POLL_INTERVAL=1
+CONTAINER_STARTUP_WAIT=2
+LONG_RUNNING_SLEEP=3600
 
 # ============================================================================
 # Local Registry Management
@@ -30,13 +37,15 @@ start_local_registry() {
     
     # Wait for registry to be ready
     echo -n "  Waiting for registry to be ready"
-    for i in {1..30}; do
+    local elapsed=0
+    while [ $elapsed -lt $REGISTRY_STARTUP_TIMEOUT ]; do
         if curl -s http://localhost:5555/v2/ >/dev/null 2>&1; then
             echo " ✓"
             return 0
         fi
         echo -n "."
-        sleep 1
+        sleep $REGISTRY_POLL_INTERVAL
+        elapsed=$((elapsed + REGISTRY_POLL_INTERVAL))
     done
     
     echo " ✗ Failed to start registry"
@@ -122,23 +131,31 @@ pull_and_tag_test_images() {
         
         # Pull from actual registry
         local source_image="ghcr.io/yourusername/coding-agents-${agent}:latest"
-        docker pull "$source_image" 2>/dev/null || {
-            echo "  Warning: Could not pull $source_image, using local if available"
+        if ! docker pull "$source_image" 2>&1; then
+            echo "  ⚠️  Warning: Could not pull $source_image from registry"
             source_image="coding-agents-${agent}:latest"
-        }
+            if ! docker image inspect "$source_image" >/dev/null 2>&1; then
+                echo "  ❌ Error: No local image available either"
+                return 1
+            fi
+            echo "  Using local image: $source_image"
+        fi
         
         # Tag for testing
         local image_var="TEST_${agent^^}_IMAGE"
         local test_image="${!image_var}"
         
-        docker tag "$source_image" "$test_image" || {
-            echo "  Error: Could not tag image"
+        if ! docker tag "$source_image" "$test_image"; then
+            echo "  ❌ Error: Could not tag image"
             return 1
-        }
+        fi
         
         # Push to local test registry
         echo "  Pushing to local test registry..."
-        docker push "$test_image" || return 1
+        if ! docker push "$test_image"; then
+            echo "  ❌ Error: Could not push to local registry"
+            return 1
+        fi
     done
     
     echo ""
@@ -160,13 +177,16 @@ setup_test_network() {
 }
 
 cleanup_test_network() {
-    if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+    if [ "${TEST_PRESERVE_RESOURCES:-false}" = "true" ]; then
         echo "Preserving test network: $TEST_NETWORK"
         return 0
     fi
     
     echo "Removing test network: $TEST_NETWORK"
-    docker network rm "$TEST_NETWORK" 2>/dev/null || true
+    docker network rm "$TEST_NETWORK" 2>/dev/null || {
+        echo "⚠️  Warning: Could not remove test network"
+        return 1
+    }
 }
 
 # ============================================================================
@@ -211,13 +231,16 @@ EOF
 }
 
 cleanup_test_repository() {
-    if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+    if [ "${TEST_PRESERVE_RESOURCES:-false}" = "true" ]; then
         echo "Preserving test repository: $TEST_REPO_DIR"
         return 0
     fi
     
     echo "Removing test repository: $TEST_REPO_DIR"
-    rm -rf "$TEST_REPO_DIR"
+    rm -rf "$TEST_REPO_DIR" || {
+        echo "⚠️  Warning: Could not remove test repository"
+        return 1
+    }
 }
 
 # ============================================================================
@@ -225,7 +248,7 @@ cleanup_test_repository() {
 # ============================================================================
 
 cleanup_test_containers() {
-    if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+    if [ "${TEST_PRESERVE_RESOURCES:-false}" = "true" ]; then
         echo "Preserving test containers (session: $$)"
         return 0
     fi
@@ -233,9 +256,13 @@ cleanup_test_containers() {
     echo "Removing test containers..."
     
     # Remove by session label
-    local containers=$(docker ps -aq --filter "label=$TEST_LABEL_SESSION")
-    if [ -n "$containers" ]; then
-        echo "$containers" | xargs docker rm -f 2>/dev/null || true
+    local containers
+    containers=$(docker ps -aq --filter "label=$TEST_LABEL_SESSION" 2>/dev/null || true)
+    if [ -n "${containers}" ]; then
+        echo "${containers}" | xargs docker rm -f 2>/dev/null || {
+            echo "⚠️  Warning: Some containers could not be removed"
+            return 1
+        }
     fi
 }
 
@@ -244,7 +271,7 @@ cleanup_test_containers() {
 # ============================================================================
 
 cleanup_test_images() {
-    if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+    if [ "${TEST_PRESERVE_RESOURCES:-false}" = "true" ]; then
         echo "Preserving test images"
         return 0
     fi
@@ -252,8 +279,14 @@ cleanup_test_images() {
     echo "Removing test images..."
     
     # Remove test images from local registry namespace
-    docker images --filter "reference=${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/*" -q | \
-        xargs -r docker rmi -f 2>/dev/null || true
+    local images
+    images=$(docker images --filter "reference=${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/*" -q 2>/dev/null || true)
+    if [ -n "${images}" ]; then
+        echo "${images}" | xargs docker rmi -f 2>/dev/null || {
+            echo "⚠️  Warning: Some images could not be removed"
+            return 1
+        }
+    fi
 }
 
 # ============================================================================

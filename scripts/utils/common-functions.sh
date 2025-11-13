@@ -1,5 +1,68 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Common functions for agent management scripts
+set -euo pipefail
+
+# Validate container name
+validate_container_name() {
+    local name="$1"
+    # Container names must match: [a-zA-Z0-9][a-zA-Z0-9_.-]*
+    if [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Validate branch name
+validate_branch_name() {
+    local branch="$1"
+    # Basic git branch name validation
+    if [[ "$branch" =~ ^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$ ]] && [[ ! "$branch" =~ \.\. ]] && [[ ! "$branch" =~ /$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Validate image name
+validate_image_name() {
+    local image="$1"
+    # Docker image name validation
+    if [[ "$image" =~ ^[a-z0-9]+(([._-]|__)[a-z0-9]+)*(:[a-zA-Z0-9_.-]+)?$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Sanitize branch name for use in container names
+sanitize_branch_name() {
+    local branch="$1"
+    local sanitized
+    
+    # Replace slashes with dashes
+    sanitized="${branch//\//-}"
+    sanitized="${sanitized//\\/-}"
+    
+    # Replace any other invalid characters with dashes
+    sanitized=$(echo "$sanitized" | sed 's/[^a-zA-Z0-9._-]/-/g')
+    
+    # Collapse multiple dashes
+    sanitized=$(echo "$sanitized" | sed 's/-\+/-/g')
+    
+    # Remove leading special characters
+    sanitized=$(echo "$sanitized" | sed 's/^[._-]\+//')
+    
+    # Remove trailing special characters
+    sanitized=$(echo "$sanitized" | sed 's/[._-]\+$//')
+    
+    # Convert to lowercase
+    sanitized=$(echo "$sanitized" | tr '[:upper:]' '[:lower:]')
+    
+    # Ensure non-empty result
+    if [ -z "$sanitized" ]; then
+        sanitized="branch"
+    fi
+    
+    echo "$sanitized"
+}
 
 # Get repository name from path
 get_repo_name() {
@@ -35,15 +98,38 @@ check_docker_running() {
     return 0
 }
 
-# Pull and tag image
+# Pull and tag image with retry logic
 pull_and_tag_image() {
     local agent="$1"
+    local max_retries="${2:-3}"
+    local retry_delay="${3:-2}"
     local registry_image="ghcr.io/novotnyllc/coding-agents-${agent}:latest"
     local local_image="coding-agents-${agent}:local"
     
     echo "📦 Checking for image updates..."
-    if docker pull --quiet "$registry_image" 2>/dev/null; then
-        docker tag "$registry_image" "$local_image" 2>/dev/null || true
+    
+    local attempt=0
+    local pulled=false
+    
+    while [ $attempt -lt $max_retries ] && [ "$pulled" = "false" ]; do
+        attempt=$((attempt + 1))
+        
+        if [ $attempt -gt 1 ]; then
+            echo "  ⚠️  Retry attempt $attempt of $max_retries..."
+        fi
+        
+        if docker pull --quiet "$registry_image" 2>/dev/null; then
+            docker tag "$registry_image" "$local_image" 2>/dev/null || true
+            pulled=true
+        else
+            if [ $attempt -lt $max_retries ]; then
+                sleep $retry_delay
+            fi
+        fi
+    done
+    
+    if [ "$pulled" = "false" ]; then
+        echo "  ⚠️  Warning: Could not pull latest image, using cached version"
     fi
 }
 
@@ -192,8 +278,8 @@ generate_repo_setup_script() {
     local agent_branch="$5"
     
     cat << 'SETUP_SCRIPT'
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 TARGET_DIR="/workspace"
 mkdir -p "$TARGET_DIR"

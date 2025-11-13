@@ -6,7 +6,8 @@ FROM ${BASE_IMAGE}
 USER root
 
 # Validation script to check for Claude authentication
-RUN echo '#!/bin/bash' > /usr/local/bin/validate-claude-auth.sh && \
+RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-claude-auth.sh && \
+    echo 'set -euo pipefail' >> /usr/local/bin/validate-claude-auth.sh && \
     echo 'if [ ! -d "$HOME/.config/claude" ]; then' >> /usr/local/bin/validate-claude-auth.sh && \
     echo '  echo "⚠️  WARNING: Claude authentication not found!" >&2' >> /usr/local/bin/validate-claude-auth.sh && \
     echo '  echo "   Mount ~/.config/claude from host" >&2' >> /usr/local/bin/validate-claude-auth.sh && \

@@ -38,11 +38,6 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user for running agents
-# Use UID/GID 1000 which is typical for first user in WSL2
-RUN useradd -m -s /bin/bash -u 1000 -G sudo agentuser && \
-    echo "agentuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
 # Install Node.js 20.x (required for MCP servers and npx)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
@@ -57,20 +52,6 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
 
 # Install tomli for TOML parsing (tomllib is built-in for Python 3.11+)
 RUN python3 -m pip install --no-cache-dir tomli
-
-# Install pipx and uvx
-RUN python3 -m pip install --no-cache-dir --upgrade pip && \
-    python3 -m pip install --no-cache-dir pipx && \
-    python3 -m pipx ensurepath
-
-# Make sure pipx and uvx are in PATH
-ENV PATH="/root/.local/bin:${PATH}"
-
-# Install uvx (comes with uv)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> /root/.bashrc
-
-ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install .NET dependencies (required since we're not using package manager)
 RUN apt-get update && apt-get install -y \
@@ -129,6 +110,10 @@ RUN npm install -g @modelcontextprotocol/server-sequential-thinking
 
 # Install GitHub Copilot CLI
 RUN npm install -g @githubnext/github-copilot-cli
+
+# Create a non-root user for running agents
+# Use UID/GID 1000 which is typical for first user in WSL2
+RUN useradd -m -s /bin/bash -u 1000 agentuser
 
 # Create directories for workspace and config
 RUN mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share && \
