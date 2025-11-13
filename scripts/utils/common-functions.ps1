@@ -1,5 +1,53 @@
 # Common functions for agent management scripts (PowerShell)
 
+function Get-ContainerRuntime {
+    <#
+    .SYNOPSIS
+        Detects available container runtime (docker or podman)
+    
+    .DESCRIPTION
+        Checks for CONTAINER_RUNTIME environment variable first,
+        then auto-detects docker or podman (prefers docker).
+    
+    .OUTPUTS
+        String: "docker" or "podman"
+    #>
+    
+    # Check environment variable first
+    if ($env:CONTAINER_RUNTIME) {
+        $cmd = Get-Command $env:CONTAINER_RUNTIME -ErrorAction SilentlyContinue
+        if ($cmd) {
+            return $env:CONTAINER_RUNTIME
+        }
+    }
+    
+    # Auto-detect: prefer docker, fall back to podman
+    try {
+        $null = docker info 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return "docker"
+        }
+    } catch { }
+    
+    try {
+        $null = podman info 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return "podman"
+        }
+    } catch { }
+    
+    # Check if either command exists (even if not running)
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        return "docker"
+    }
+    if (Get-Command podman -ErrorAction SilentlyContinue) {
+        return "podman"
+    }
+    
+    # Neither found
+    return $null
+}
+
 function Test-ValidContainerName {
     param([string]$Name)
     # Container names must match: [a-zA-Z0-9][a-zA-Z0-9_.-]*
@@ -238,11 +286,11 @@ function Convert-WindowsPathToWsl {
 function Test-DockerRunning {
     <#
     .SYNOPSIS
-        Checks if Docker is running and attempts to auto-start if not
+        Checks if container runtime (Docker/Podman) is running
     
     .DESCRIPTION
-        Checks Docker availability and provides helpful error messages.
-        On Windows, attempts to auto-start Docker Desktop if installed.
+        Checks Docker or Podman availability and provides helpful error messages.
+        On Windows with Docker, attempts to auto-start Docker Desktop if installed.
     
     .EXAMPLE
         if (-not (Test-DockerRunning)) {
@@ -250,27 +298,48 @@ function Test-DockerRunning {
         }
     #>
     
-    # Check if docker is available and running
-    try {
-        $null = docker info 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return $true
-        }
-    } catch {
-        # Continue to auto-start attempt
+    $runtime = Get-ContainerRuntime
+    
+    if ($runtime) {
+        # Check if runtime is running
+        try {
+            $null = & $runtime info 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return $true
+            }
+        } catch { }
     }
     
-    Write-Host "⚠️  Docker is not running. Checking for Docker installation..." -ForegroundColor Yellow
+    Write-Host "⚠️  Container runtime not running. Checking installation..." -ForegroundColor Yellow
     
-    # Check if docker command exists
+    # Try docker first
     $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
-    if (-not $dockerCmd) {
-        Write-Host "❌ Docker is not installed. Please install Docker from:" -ForegroundColor Red
-        Write-Host "   https://www.docker.com/products/docker-desktop" -ForegroundColor Cyan
+    $podmanCmd = Get-Command podman -ErrorAction SilentlyContinue
+    
+    if (-not $dockerCmd -and -not $podmanCmd) {
+        Write-Host "❌ No container runtime found. Please install one:" -ForegroundColor Red
+        Write-Host "   Docker: https://www.docker.com/products/docker-desktop" -ForegroundColor Cyan
+        Write-Host "   Podman: https://podman.io/getting-started/installation" -ForegroundColor Cyan
         Write-Host "" -ForegroundColor Red
-        Write-Host "   For Windows: Download Docker Desktop for Windows" -ForegroundColor Cyan
-        Write-Host "   For Mac: Download Docker Desktop for Mac" -ForegroundColor Cyan
-        Write-Host "   For Linux: Use your package manager or visit docs.docker.com" -ForegroundColor Cyan
+        Write-Host "   For Windows: Download Docker Desktop or Podman Desktop" -ForegroundColor Cyan
+        Write-Host "   For Mac: Download Docker Desktop or brew install podman" -ForegroundColor Cyan
+        Write-Host "   For Linux: Use your package manager" -ForegroundColor Cyan
+        return $false
+    }
+    
+    # If podman is available and docker is not (or not running)
+    if ($podmanCmd -and (-not $dockerCmd -or $runtime -eq "podman")) {
+        Write-Host "ℹ️  Using Podman as container runtime" -ForegroundColor Cyan
+        
+        try {
+            $null = podman info 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return $true
+            }
+        } catch { }
+        
+        Write-Host "❌ Podman is installed but not working properly" -ForegroundColor Red
+        Write-Host "   Try: podman machine init && podman machine start" -ForegroundColor Cyan
         return $false
     }
     

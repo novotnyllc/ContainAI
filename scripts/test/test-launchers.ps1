@@ -433,6 +433,7 @@ function Main {
     
     try {
         Setup-TestRepo
+        Test-ContainerRuntimeDetection
         Test-SharedFunctions
         Test-ContainerNaming
         Test-ContainerLabelsTest

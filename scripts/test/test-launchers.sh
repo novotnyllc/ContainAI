@@ -173,7 +173,40 @@ verify_container_labels() {
 # Test Functions
 # ============================================================================
 
-# Test: Shared functions are available
+# ============================================================================
+# Test: Container Runtime Detection
+# ============================================================================
+
+test_container_runtime_detection() {
+    test_section "Container Runtime Detection"
+    
+    # Test get_container_runtime function
+    local runtime=$(get_container_runtime)
+    if [ -n "$runtime" ] && { [ "$runtime" = "docker" ] || [ "$runtime" = "podman" ]; }; then
+        pass "get_container_runtime() detected runtime: $runtime"
+    else
+        fail "get_container_runtime() returned invalid runtime: '$runtime'"
+    fi
+    
+    # Test that the runtime command is available
+    if command -v "$runtime" &> /dev/null; then
+        pass "Container runtime command '$runtime' is available"
+    else
+        fail "Container runtime command '$runtime' not found in PATH"
+    fi
+    
+    # Test that runtime can execute basic command
+    if $runtime info > /dev/null 2>&1; then
+        pass "Container runtime '$runtime' is functional"
+    else
+        fail "Container runtime '$runtime' failed 'info' command"
+    fi
+}
+
+# ============================================================================
+# Test: Shared Functions
+# ============================================================================
+
 test_shared_functions() {
     test_section "Testing shared functions"
     
@@ -371,6 +404,7 @@ main() {
     echo ""
     
     setup_test_repo
+    test_container_runtime_detection
     test_shared_functions
     test_wsl_path_conversion
     test_container_naming

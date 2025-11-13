@@ -3,7 +3,8 @@
 ## Development Workflow
 
 ### Prerequisites
-- Docker Desktop installed and running
+- **Container Runtime**: Docker or Podman (scripts auto-detect)
+  - Docker Desktop or Podman Desktop recommended
 - Git installed
 - PowerShell 7+ (Windows) or Bash (Linux/Mac)
 

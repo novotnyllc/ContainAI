@@ -45,6 +45,9 @@ done
 # Check Docker
 check_docker_running || exit 1
 
+# Get container runtime (docker or podman)
+CONTAINER_CMD=$(get_container_runtime)
+
 # Resolve path
 REPO_PATH=$(realpath "$REPO_PATH")
 
@@ -73,7 +76,7 @@ echo ""
 
 # Setup cleanup trap for auto-push
 cleanup() {
-    if docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
+    if $CONTAINER_CMD ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
         echo ""
         push_to_local "$CONTAINER_NAME" "$SKIP_PUSH"
     fi
@@ -107,4 +110,4 @@ DOCKER_ARGS+=(
 )
 
 # Run container
-docker run "${DOCKER_ARGS[@]}"
+$CONTAINER_CMD run "${DOCKER_ARGS[@]}"
