@@ -41,11 +41,6 @@ def convert_toml_to_mcp(toml_path):
         print("⚠️  No mcp_servers found in config.toml", file=sys.stderr)
         return False
     
-    # Convert to MCP JSON format
-    mcp_config = {
-        "mcpServers": mcp_servers
-    }
-    
     # Create config directories and write configs for each agent
     agents = {
         "github-copilot": "~/.config/github-copilot/mcp",
@@ -56,6 +51,25 @@ def convert_toml_to_mcp(toml_path):
     for agent_name, config_path in agents.items():
         config_dir = os.path.expanduser(config_path)
         os.makedirs(config_dir, exist_ok=True)
+        
+        # Customize serena context per agent (codex uses 'codex', others use 'ide-assistant')
+        agent_mcp_servers = mcp_servers.copy()
+        if "serena" in agent_mcp_servers and agent_name == "codex":
+            # Deep copy serena config for codex agent
+            serena_config = agent_mcp_servers["serena"].copy()
+            if "args" in serena_config:
+                args = serena_config["args"].copy()
+                # Replace '--context', 'ide-assistant' with '--context', 'codex'
+                for i in range(len(args) - 1):
+                    if args[i] == "--context" and args[i + 1] == "ide-assistant":
+                        args[i + 1] = "codex"
+                        break
+                serena_config["args"] = args
+                agent_mcp_servers["serena"] = serena_config
+        
+        mcp_config = {
+            "mcpServers": agent_mcp_servers
+        }
         
         config_file = os.path.join(config_dir, "config.json")
         try:
