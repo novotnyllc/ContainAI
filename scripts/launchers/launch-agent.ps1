@@ -24,7 +24,11 @@ param(
     [string]$NetworkProxy = "allow-all",
     
     [Parameter(Mandatory=$false)]
-    [switch]$NoPush
+    [switch]$NoPush,
+    
+    [Parameter(Mandatory=$false)]
+    [Alias("y")]
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,6 +110,87 @@ if (-not (Test-ValidBranchName $Branch)) {
     Write-Host "❌ Error: Invalid branch name: $Branch" -ForegroundColor Red
     Write-Host "   Branch names must start with alphanumeric and contain only: a-z, A-Z, 0-9, /, _, ., -" -ForegroundColor Yellow
     exit 1
+}
+
+# For local repos, handle agent branch conflicts
+if ($SourceType -eq "local") {
+    Push-Location $ResolvedPath
+    try {
+        $AgentBranchName = "$Agent/$Branch"
+        git show-ref --verify --quiet "refs/heads/$AgentBranchName" 2>$null | Out-Null
+        $BranchExistsCode = $LASTEXITCODE
+        
+        if ($BranchExistsCode -eq 0) {
+            Write-Host ""
+            Write-Host "⚠️  Warning: Branch '$AgentBranchName' already exists in the repository" -ForegroundColor Yellow
+            
+            # Check for unmerged commits
+            $currentBranch = git branch --show-current 2>$null
+            $unmergedCommits = git log "$currentBranch..$AgentBranchName" --oneline 2>$null
+            
+            if ($unmergedCommits) {
+                Write-Host "   Branch has unmerged commits:" -ForegroundColor Yellow
+                $unmergedCommits | Select-Object -First 5 | ForEach-Object { Write-Host "     $_" -ForegroundColor Gray }
+                if (($unmergedCommits | Measure-Object -Line).Lines -gt 5) {
+                    Write-Host "     ... and $(($unmergedCommits | Measure-Object -Line).Lines - 5) more" -ForegroundColor Gray
+                }
+            }
+            
+            if (-not $Force) {
+                $response = Read-Host "   Replace this branch? [y/N]"
+                if ($response -ne 'y' -and $response -ne 'Y') {
+                    Write-Host "❌ Launch cancelled. Use a different branch name or add -Force to replace" -ForegroundColor Red
+                    Pop-Location
+                    exit 1
+                }
+            } else {
+                Write-Host "   -Force specified, will replace branch" -ForegroundColor Cyan
+            }
+            
+            # Handle old branch
+            if ($unmergedCommits) {
+                # Rename old branch to preserve unmerged commits
+                $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+                $archiveBranch = "${AgentBranchName}-archived-${timestamp}"
+                Write-Host "   📦 Archiving old branch as: $archiveBranch" -ForegroundColor Cyan
+                git branch -m "$AgentBranchName" "$archiveBranch" 2>$null | Out-Null
+                
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "   ✅ Old branch preserved with unmerged commits" -ForegroundColor Green
+                } else {
+                    Write-Host "   ❌ Failed to archive old branch" -ForegroundColor Red
+                    Pop-Location
+                    exit 1
+                }
+            } else {
+                # No unmerged commits, safe to delete
+                Write-Host "   🗑️  Removing old branch (no unmerged commits)" -ForegroundColor Cyan
+                git branch -D "$AgentBranchName" 2>$null | Out-Null
+                
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "   ❌ Failed to remove old branch" -ForegroundColor Red
+                    Pop-Location
+                    exit 1
+                }
+            }
+            
+            Write-Host ""
+        }
+        
+        # Create new agent branch from current HEAD
+        $currentCommit = git rev-parse HEAD 2>$null
+        Write-Host "📌 Creating agent branch '$AgentBranchName' from commit: $($currentCommit.Substring(0,8))" -ForegroundColor Cyan
+        git branch "$AgentBranchName" 2>$null | Out-Null
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Failed to create agent branch" -ForegroundColor Red
+            Pop-Location
+            exit 1
+        }
+        
+    } finally {
+        Pop-Location
+    }
 }
 
 # Sanitize branch name for container naming
@@ -208,7 +293,7 @@ if (Test-ContainerExists $ContainerName) {
         $ExistingNetwork = docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' $ContainerName 2>$null
         if ($ExistingProxy) { $ProxyContainerName = $ExistingProxy }
         if ($ExistingNetwork) { $ProxyNetworkName = $ExistingNetwork }
-        Ensure-SquidProxy -NetworkName $ProxyNetworkName -ProxyContainer $ProxyContainerName -ProxyImage $ProxyImage -AgentContainer $ContainerName -SquidAllowedDomains $SquidAllowedDomains
+        Initialize-SquidProxy -NetworkName $ProxyNetworkName -ProxyContainer $ProxyContainerName -ProxyImage $ProxyImage -AgentContainer $ContainerName -SquidAllowedDomains $SquidAllowedDomains
     }
     
     if ($State -eq "running") {
@@ -226,7 +311,7 @@ if (Test-ContainerExists $ContainerName) {
 
 # Setup squid proxy if needed
 if ($UseSquid) {
-    Ensure-SquidProxy -NetworkName $ProxyNetworkName -ProxyContainer $ProxyContainerName -ProxyImage $ProxyImage -AgentContainer $ContainerName -SquidAllowedDomains $SquidAllowedDomains
+    Initialize-SquidProxy -NetworkName $ProxyNetworkName -ProxyContainer $ProxyContainerName -ProxyImage $ProxyImage -AgentContainer $ContainerName -SquidAllowedDomains $SquidAllowedDomains
 }
 
 # Build docker arguments
@@ -245,8 +330,16 @@ $dockerArgs = @(
     "--label", "coding-agents.type=agent",
     "--label", "coding-agents.agent=$Agent",
     "--label", "coding-agents.repo=$RepoName",
-    "--label", "coding-agents.branch=$Branch",
-    "--label", "coding-agents.network-policy=$NetworkPolicyEnv",
+    "--label", "coding-agents.branch=$AgentBranch",
+    "--label", "coding-agents.network-policy=$NetworkPolicyEnv"
+)
+
+# Add repo path label for local repos (for cleanup)
+if ($SourceType -eq "local") {
+    $dockerArgs += "--label", "coding-agents.repo-path=$ResolvedPath"
+}
+
+$dockerArgs += @(
     "-v", "${WslHome}/.gitconfig:/home/agentuser/.gitconfig:ro",
     "-v", "${WslHome}/.config/gh:/home/agentuser/.config/gh:ro",
     "-v", "${WslHome}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
@@ -293,7 +386,10 @@ $dockerArgs += "sleep", "infinity"
 # Create container
 Write-Host "📦 Creating container..." -ForegroundColor Cyan
 try {
-    $ContainerId = docker @dockerArgs
+    docker @dockerArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Docker create failed with exit code $LASTEXITCODE"
+    }
 } catch {
     Write-Host "❌ Failed to create container" -ForegroundColor Red
     if ($UseSquid) {

@@ -27,6 +27,119 @@ function Test-ValidImageName {
     return $false
 }
 
+function Test-BranchExists {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Exists is semantically correct for testing existence')]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$RepoPath,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$BranchName
+    )
+    
+    Push-Location $RepoPath
+    try {
+        git show-ref --verify --quiet "refs/heads/$BranchName" 2>$null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        Pop-Location
+    }
+}
+
+function Get-UnmergedCommits {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Returns multiple commits - plural is correct')]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$RepoPath,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$BaseBranch,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$CompareBranch
+    )
+    
+    Push-Location $RepoPath
+    try {
+        $commits = git log "$BaseBranch..$CompareBranch" --oneline 2>$null
+        return $commits
+    } finally {
+        Pop-Location
+    }
+}
+
+function Remove-GitBranch {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$RepoPath,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$BranchName,
+        
+        [Parameter(Mandatory=$false)]
+        [bool]$Force = $false
+    )
+    
+    if ($PSCmdlet.ShouldProcess($BranchName, "Remove git branch")) {
+        Push-Location $RepoPath
+        try {
+            $flag = if ($Force) { "-D" } else { "-d" }
+            git branch $flag $BranchName 2>$null | Out-Null
+            return ($LASTEXITCODE -eq 0)
+        } finally {
+            Pop-Location
+        }
+    }
+    return $false
+}
+
+function Rename-GitBranch {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$RepoPath,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$OldName,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$NewName
+    )
+    
+    Push-Location $RepoPath
+    try {
+        git branch -m $OldName $NewName 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        Pop-Location
+    }
+}
+
+function New-GitBranch {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Low')]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$RepoPath,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$BranchName,
+        
+        [Parameter(Mandatory=$false)]
+        [string]$StartPoint = "HEAD"
+    )
+    
+    if ($PSCmdlet.ShouldProcess($BranchName, "Create git branch")) {
+        Push-Location $RepoPath
+        try {
+            git branch $BranchName $StartPoint 2>$null | Out-Null
+            return ($LASTEXITCODE -eq 0)
+        } finally {
+            Pop-Location
+        }
+    }
+    return $false
+}
+
 function Get-RepoName {
     param([string]$RepoPath)
     Split-Path -Leaf $RepoPath
@@ -40,18 +153,196 @@ function Get-CurrentBranch {
     if ($branch) { return $branch } else { return "main" }
 }
 
+function ConvertTo-SafeBranchName {
+    <#
+    .SYNOPSIS
+        Sanitizes a branch name for use in Docker container names
+    
+    .DESCRIPTION
+        Converts a git branch name to a safe format for Docker container naming:
+        - Replaces slashes and backslashes with dashes
+        - Replaces invalid characters with dashes
+        - Collapses multiple dashes
+        - Removes leading/trailing special characters
+        - Converts to lowercase
+    
+    .PARAMETER BranchName
+        The git branch name to sanitize
+    
+    .EXAMPLE
+        ConvertTo-SafeBranchName "feature/auth-module"
+        Returns: "feature-auth-module"
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$BranchName
+    )
+    
+    # Replace slashes with dashes
+    $sanitized = $BranchName -replace '[/\\]', '-'
+    
+    # Replace any other invalid characters with dashes
+    $sanitized = $sanitized -replace '[^a-zA-Z0-9._-]', '-'
+    
+    # Collapse multiple dashes
+    $sanitized = $sanitized -replace '-+', '-'
+    
+    # Remove leading special characters
+    $sanitized = $sanitized -replace '^[._-]+', ''
+    
+    # Remove trailing special characters
+    $sanitized = $sanitized -replace '[._-]+$', ''
+    
+    # Convert to lowercase
+    $sanitized = $sanitized.ToLower()
+    
+    # Ensure non-empty result
+    if ([string]::IsNullOrWhiteSpace($sanitized)) {
+        $sanitized = "branch"
+    }
+    
+    return $sanitized
+}
+
+function Convert-WindowsPathToWsl {
+    <#
+    .SYNOPSIS
+        Converts Windows paths to WSL paths
+    
+    .DESCRIPTION
+        Converts Windows-style paths (e.g., C:\path\to\file) to WSL-style paths (/mnt/c/path/to/file)
+    
+    .PARAMETER Path
+        The Windows path to convert
+    
+    .EXAMPLE
+        Convert-WindowsPathToWsl "C:\dev\project"
+        Returns: "/mnt/c/dev/project"
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path
+    )
+    
+    # Check if path matches Windows drive letter pattern (C:, D:, etc.)
+    if ($Path -match '^([A-Z]):(.*)'  ) {
+        $drive = $Matches[1].ToLower()
+        $rest = $Matches[2] -replace '\\', '/'
+        return "/mnt/$drive$rest"
+    }
+    
+    # Return unchanged if not a Windows path
+    return $Path
+}
+
 function Test-DockerRunning {
+    <#
+    .SYNOPSIS
+        Checks if Docker is running and attempts to auto-start if not
+    
+    .DESCRIPTION
+        Checks Docker availability and provides helpful error messages.
+        On Windows, attempts to auto-start Docker Desktop if installed.
+    
+    .EXAMPLE
+        if (-not (Test-DockerRunning)) {
+            exit 1
+        }
+    #>
+    
+    # Check if docker is available and running
     try {
-        docker info | Out-Null
-        return $true
+        $null = docker info 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
     } catch {
-        Write-Host "❌ Docker is not running!" -ForegroundColor Red
-        Write-Host "   Please start Docker and try again" -ForegroundColor Yellow
+        # Continue to auto-start attempt
+    }
+    
+    Write-Host "⚠️  Docker is not running. Checking for Docker installation..." -ForegroundColor Yellow
+    
+    # Check if docker command exists
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $dockerCmd) {
+        Write-Host "❌ Docker is not installed. Please install Docker from:" -ForegroundColor Red
+        Write-Host "   https://www.docker.com/products/docker-desktop" -ForegroundColor Cyan
+        Write-Host "" -ForegroundColor Red
+        Write-Host "   For Windows: Download Docker Desktop for Windows" -ForegroundColor Cyan
+        Write-Host "   For Mac: Download Docker Desktop for Mac" -ForegroundColor Cyan
+        Write-Host "   For Linux: Use your package manager or visit docs.docker.com" -ForegroundColor Cyan
+        return $false
+    }
+    
+    # Docker is installed but not running
+    Write-Host "Docker is installed but not running." -ForegroundColor Yellow
+    
+    # On Windows, try to start Docker Desktop
+    if ($IsWindows -or $env:OS -match 'Windows') {
+        Write-Host "Attempting to start Docker Desktop..." -ForegroundColor Cyan
+        
+        # Find Docker Desktop executable
+        $dockerDesktopPaths = @(
+            "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
+            "${env:ProgramFiles(x86)}\Docker\Docker\Docker Desktop.exe",
+            "$env:LOCALAPPDATA\Docker\Docker Desktop.exe"
+        )
+        
+        $dockerDesktop = $null
+        foreach ($path in $dockerDesktopPaths) {
+            if (Test-Path $path) {
+                $dockerDesktop = $path
+                break
+            }
+        }
+        
+        if ($dockerDesktop) {
+            Write-Host "Starting Docker Desktop from: $dockerDesktop" -ForegroundColor Gray
+            Start-Process -FilePath $dockerDesktop -WindowStyle Hidden
+            
+            # Wait for Docker to start (max 60 seconds)
+            Write-Host "Waiting for Docker to start (max 60 seconds)..." -ForegroundColor Cyan
+            $maxWait = 60
+            $waited = 0
+            
+            while ($waited -lt $maxWait) {
+                Start-Sleep -Seconds 2
+                $waited += 2
+                
+                try {
+                    $null = docker info 2>$null
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "✅ Docker started successfully!" -ForegroundColor Green
+                        return $true
+                    }
+                } catch {
+                    # Continue waiting
+                }
+                
+                Write-Host "  Still waiting... ($waited/$maxWait seconds)" -ForegroundColor Gray
+            }
+            
+            Write-Host "❌ Docker failed to start within $maxWait seconds." -ForegroundColor Red
+            Write-Host "   Please start Docker Desktop manually and try again." -ForegroundColor Yellow
+            return $false
+        } else {
+            Write-Host "❌ Could not find Docker Desktop executable." -ForegroundColor Red
+            Write-Host "   Please start Docker Desktop manually." -ForegroundColor Yellow
+            return $false
+        }
+    } else {
+        # On Linux/Mac, provide guidance
+        Write-Host "❌ Please start Docker manually:" -ForegroundColor Red
+        Write-Host "" -ForegroundColor Red
+        Write-Host "   On Linux: sudo systemctl start docker" -ForegroundColor Cyan
+        Write-Host "   Or: sudo service docker start" -ForegroundColor Cyan
+        Write-Host "   On Mac: Open Docker Desktop application" -ForegroundColor Cyan
         return $false
     }
 }
 
 function Update-AgentImage {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification='Idempotent operation - safe to run without confirmation')]
     param(
         [Parameter(Mandatory=$true)]
         [string]$Agent,
@@ -94,7 +385,9 @@ function Update-AgentImage {
 }
 
 function Test-ContainerExists {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Exists is semantically correct for testing existence')]
     param([string]$ContainerName)
+    
     $existing = docker ps -a --filter "name=^${ContainerName}$" --format "{{.Names}}" 2>$null
     return ($existing -eq $ContainerName)
 }
@@ -149,6 +442,9 @@ fi
 }
 
 function Get-AgentContainers {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Returns multiple containers - plural is correct')]
+    param()
+    
     docker ps -a --filter "label=coding-agents.type=agent" `
         --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}"
 }
@@ -164,18 +460,31 @@ function Get-ProxyNetwork {
 }
 
 function Remove-ContainerWithSidecars {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Removes multiple sidecars - plural is semantically correct')]
     param(
         [Parameter(Mandatory=$true)]
         [string]$ContainerName,
         
         [Parameter(Mandatory=$false)]
-        [switch]$SkipPush
+        [switch]$SkipPush,
+        
+        [Parameter(Mandatory=$false)]
+        [switch]$KeepBranch
     )
     
-    if (-not (Test-ContainerExists $ContainerName)) {
+    if (-not $PSCmdlet.ShouldProcess($ContainerName, "Remove container and associated resources")) {
+        return
+    }
+    
+    if (-not (Test-ContainerExists -ContainerName $ContainerName)) {
         Write-Host "❌ Container '$ContainerName' does not exist" -ForegroundColor Red
         return $false
     }
+    
+    # Get container labels to find repo and branch info
+    $agentBranch = docker inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' $ContainerName 2>$null
+    $repoPath = docker inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' $ContainerName 2>$null
     
     # Push changes first
     if ((Get-ContainerStatus $ContainerName) -eq "running") {
@@ -205,11 +514,40 @@ function Remove-ContainerWithSidecars {
         }
     }
     
+    # Clean up agent branch in host repo if applicable
+    if (-not $KeepBranch -and $agentBranch -and $repoPath -and (Test-Path $repoPath)) {
+        Write-Host ""
+        Write-Host "🌿 Cleaning up agent branch: $agentBranch" -ForegroundColor Cyan
+        
+        if (Test-BranchExists -RepoPath $repoPath -BranchName $agentBranch) {
+            # Check if branch has unpushed work
+            Push-Location $repoPath
+            try {
+                $currentBranch = git branch --show-current 2>$null
+                $unmergedCommits = Get-UnmergedCommits -RepoPath $repoPath -BaseBranch $currentBranch -CompareBranch $agentBranch
+                
+                if ($unmergedCommits) {
+                    Write-Host "   ⚠️  Branch has unmerged commits - keeping branch" -ForegroundColor Yellow
+                    Write-Host "   Manually merge or delete: git branch -D $agentBranch" -ForegroundColor Gray
+                } else {
+                    if (Remove-GitBranch -RepoPath $repoPath -BranchName $agentBranch -Force) {
+                        Write-Host "   ✅ Agent branch removed" -ForegroundColor Green
+                    } else {
+                        Write-Host "   ⚠️  Could not remove agent branch" -ForegroundColor Yellow
+                    }
+                }
+            } finally {
+                Pop-Location
+            }
+        }
+    }
+    
+    Write-Host ""
     Write-Host "✅ Cleanup complete" -ForegroundColor Green
     return $true
 }
 
-function Ensure-SquidProxy {
+function Initialize-SquidProxy {
     param(
         [Parameter(Mandatory=$true)]
         [string]$NetworkName,
@@ -265,6 +603,10 @@ function Ensure-SquidProxy {
 }
 
 function New-RepoSetupScript {
+    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification='Returns a string script - does not execute anything')]
+    param()
+    
     return @'
 #!/usr/bin/env bash
 set -euo pipefail

@@ -193,9 +193,37 @@ launch-agent --branch feature-auth
 | Source (positional) | Local path or GitHub URL | `.`, `/path/to/repo`, `https://github.com/user/repo` |
 | `-b` or `--branch` | Feature branch name (becomes `<agent>/<branch>`) | `-b auth` creates `copilot/auth` |
 | `--agent` | Choose agent: `copilot`, `codex`, `claude`, `all` (default: `copilot`) | `--agent codex` |
+| `-y` or `--force` | Auto-replace existing agent branch without prompting | `-y` or `--force` |
 | `--no-push` | Disable auto-push on shutdown | `--no-push` |
 | `--dotnet-preview` | Install .NET preview SDK (e.g., `9.0`, `10.0`) | `--dotnet-preview 9.0` |
 | `--network-proxy` | Network mode: `allow-all` (default), `restricted`, `squid` | `--network-proxy restricted` |
+
+**Branch Management:**
+
+Each agent creates its own isolated branch in the format `<agent>/<branch>`:
+- `copilot/main` - GitHub Copilot's work on main branch
+- `codex/feature-auth` - OpenAI Codex's work on feature-auth
+- `claude/bugfix` - Anthropic Claude's work on bugfix
+
+When launching an agent, if its branch already exists:
+1. **Prompt for replacement** (default: No)
+   - Press `y` to replace the existing branch
+   - Press `n` (or Enter) to abort
+   - Use `-y` or `--force` flag to auto-replace without prompting
+
+2. **Check for unmerged commits**
+   - Lists commits not yet merged into the base branch
+   - Shows up to 5 most recent unmerged commits
+
+3. **Archive or delete**
+   - **Has unmerged commits**: Archives to `<agent>/<branch>-archived-<timestamp>`
+   - **No unmerged commits**: Safely deletes the branch
+   - Prevents accidental work loss
+
+When removing an agent container:
+- Agent branches are automatically cleaned up
+- Branches with unmerged commits are preserved (warning shown)
+- Use `--keep-branch` flag to preserve the branch regardless
 
 **Network Proxy Modes:**
 - `allow-all` (default): Standard Docker bridge network
@@ -333,16 +361,20 @@ claude-website-develop    Up 30 min    claude     develop
 
 ### Remove Agent Containers
 
-Safely remove containers with automatic change preservation:
+Safely remove containers with automatic change preservation and branch cleanup:
 
 ```bash
-# Remove with auto-push (default)
+# Remove with auto-push and branch cleanup (default)
 remove-agent copilot-myapp-main
 remove-agent.ps1 copilot-myapp-main
 
 # Remove without auto-push
 remove-agent copilot-myapp-main --no-push
 remove-agent.ps1 copilot-myapp-main -NoPush
+
+# Remove but keep the agent branch
+remove-agent copilot-myapp-main --keep-branch
+remove-agent.ps1 copilot-myapp-main -KeepBranch
 ```
 
 **What it does:**
@@ -351,9 +383,17 @@ remove-agent.ps1 copilot-myapp-main -NoPush
 3. Stops and removes the container
 4. Removes proxy sidecar (if using squid mode)
 5. Removes network (if empty and no other containers)
+6. **Cleans up agent branch** (unless --keep-branch or has unmerged commits)
+
+**Branch cleanup behavior:**
+- **No unmerged commits**: Branch is safely deleted
+- **Has unmerged commits**: Branch is preserved with a warning
+- **--keep-branch flag**: Branch is always preserved
+- Only affects local repositories (not remote URLs)
 
 **Safety features:**
 - Won't lose uncommitted work (auto-push default)
+- Won't lose unmerged commits (preserved with warning)
 - Cleans up all associated resources
 - Reports what was removed
 
