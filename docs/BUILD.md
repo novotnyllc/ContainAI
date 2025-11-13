@@ -36,7 +36,7 @@ The container system uses a **layered architecture**:
 │  • Ubuntu 22.04                     │
 │  • Node.js 20.x                     │
 │  • Python 3.11                      │
-│  • .NET SDK 8.0                     │
+│  • .NET SDK's 8.0, 9.0, 10.0        │
 │  • GitHub CLI                       │
 │  • Playwright                       │
 │  • MCP servers                      │
@@ -56,7 +56,7 @@ docker build -f Dockerfile.base -t coding-agents-base:local .
 - System dependencies (curl, git, build tools, etc.)
 - Node.js 20.x
 - Python 3.11 with tomli package
-- .NET SDK 8.0
+- .NET SDK 8.0, 9.0, 10.0
 - Rust toolchain
 - GitHub CLI
 - Playwright with Chromium
