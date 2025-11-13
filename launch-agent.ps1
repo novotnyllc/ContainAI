@@ -57,13 +57,13 @@ function Ensure-SquidProxy {
             }
         }
     } else {
-        docker run -d \
-            --name $ProxyContainer \
-            --hostname $ProxyContainer \
-            --network $NetworkName \
-            --restart unless-stopped \
-            --label "coding-agents.proxy-of=$ContainerName" \
-            --label "coding-agents.proxy-image=$ProxyImage" \
+        docker run -d `
+            --name $ProxyContainer `
+            --hostname $ProxyContainer `
+            --network $NetworkName `
+            --restart unless-stopped `
+            --label "coding-agents.proxy-of=$ContainerName" `
+            --label "coding-agents.proxy-image=$ProxyImage" `
             $ProxyImage | Out-Null
 
         if ($LASTEXITCODE -ne 0) {

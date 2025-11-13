@@ -267,6 +267,25 @@ if docker ps -a --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" | grep
     fi
 fi
 
+# Initialize Squid proxy for new containers if needed
+if $USE_SQUID; then
+    echo "🛡️  Initializing Squid proxy sidecar..."
+    docker network create "$PROXY_NETWORK_NAME" >/dev/null 2>&1 || true
+    docker rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1 || true
+    docker run -d \
+        --name "$PROXY_CONTAINER_NAME" \
+        --hostname "$PROXY_CONTAINER_NAME" \
+        --network "$PROXY_NETWORK_NAME" \
+        --restart unless-stopped \
+        --label "coding-agents.proxy-of=$CONTAINER_NAME" \
+        --label "coding-agents.proxy-image=$PROXY_IMAGE" \
+        "$PROXY_IMAGE" >/dev/null || {
+            echo "❌ Failed to launch Squid proxy."
+            exit 1
+        }
+    PROXY_URL="http://${PROXY_CONTAINER_NAME}:3128"
+fi
+
 # Build docker arguments
 DOCKER_ARGS=(
     "run" "-d"
@@ -446,6 +465,7 @@ if [ $? -ne 0 ]; then
     if $USE_SQUID; then
         docker rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1 || true
         docker network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1 || true
+    fi
     exit 1
 fi
 
