@@ -50,6 +50,10 @@ args = ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-s
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 
+[mcp_servers.fetch]
+command = "npx"
+args = ["mcp-server-fetch", "--ignore-robots-txt"]
+
 # Trust the mounted workspace - works with any repository
 [projects."/workspace"]
 trust_level = "trusted"
