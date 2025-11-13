@@ -7,17 +7,7 @@ Reads a single source of truth (config.toml) and generates config files for each
 import json
 import os
 import sys
-
-try:
-    import tomllib  # Python 3.11+
-except ImportError:
-    try:
-        import tomli as tomllib  # Fallback for older Python
-    except ImportError:
-        print("❌ Error: tomllib/tomli not available", file=sys.stderr)
-        print("   Install with: pip install tomli", file=sys.stderr)
-        sys.exit(1)
-
+import tomllib 
 
 def convert_toml_to_mcp(toml_path):
     """Convert TOML config to MCP JSON format for all agents."""
