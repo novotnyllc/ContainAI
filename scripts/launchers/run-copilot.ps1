@@ -8,6 +8,15 @@ param(
     [string]$RepoPath = ".",
     
     [Parameter(Mandatory=$false)]
+    [string]$Cpu = "4",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Memory = "8g",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Gpu,
+    
+    [Parameter(Mandatory=$false)]
     [switch]$NoPush,
     
     [Parameter(Mandatory=$false)]
@@ -25,13 +34,17 @@ if ($Help) {
     Write-Host "  RepoPath    Path to repository (default: current directory)"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -NoPush     Skip auto-push to local remote on exit"
-    Write-Host "  -Help       Show this help"
+    Write-Host "  -Cpu NUM      CPU limit (default: 4)"
+    Write-Host "  -Memory SIZE  Memory limit (default: 8g)"
+    Write-Host "  -Gpu SPEC     GPU specification (e.g., 'all' or 'device=0')"
+    Write-Host "  -NoPush       Skip auto-push to local remote on exit"
+    Write-Host "  -Help         Show this help"
     Write-Host ""
     Write-Host "Examples:"
     Write-Host "  .\run-copilot.ps1                # Launch in current directory"
     Write-Host "  .\run-copilot.ps1 C:\my-repo     # Launch in specific directory"
     Write-Host "  .\run-copilot.ps1 -NoPush        # Skip auto-push on exit"
+    Write-Host "  .\run-copilot.ps1 -Cpu 8 -Memory 16g  # Custom resources"
     exit 0
 }
 
@@ -115,8 +128,15 @@ if (wsl test -f "${WslHome}/.config/coding-agents/mcp-secrets.env") {
 $dockerArgs += @(
     "-w", "/workspace",
     "--security-opt", "no-new-privileges:true",
-    "coding-agents-copilot:local"
+    "--cpus=$Cpu",
+    "--memory=$Memory"
 )
+
+if ($Gpu) {
+    $dockerArgs += "--gpus=$Gpu"
+}
+
+$dockerArgs += "coding-agents-copilot:local"
 
 # Run container with cleanup
 try {

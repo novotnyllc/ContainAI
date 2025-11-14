@@ -15,6 +15,9 @@ BRANCH=""
 NAME=""
 DOTNET_PREVIEW=""
 NETWORK_PROXY="allow-all"
+CPU="4"
+MEMORY="8g"
+GPU=""
 NO_PUSH=false
 FORCE=false
 USE_CURRENT_BRANCH=false
@@ -59,6 +62,18 @@ while [[ $# -gt 0 ]]; do
             NETWORK_PROXY="$2"
             shift 2
             ;;
+        --cpu)
+            CPU="$2"
+            shift 2
+            ;;
+        --memory)
+            MEMORY="$2"
+            shift 2
+            ;;
+        --gpu)
+            GPU="$2"
+            shift 2
+            ;;
         --no-push)
             NO_PUSH=true
             shift
@@ -85,6 +100,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --name NAME                 Custom container name"
             echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)"
             echo "  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)"
+            echo "  --cpu NUM                   CPU limit (default: 4)"
+            echo "  --memory SIZE               Memory limit (default: 8g)"
+            echo "  --gpu SPEC                  GPU specification (e.g., 'all' or 'device=0')"
             echo "  --no-push                   Disable auto-push on container shutdown"
             echo "  --use-current-branch        Use current branch instead of creating agent branch (unsafe)"
             echo "  -y, --force                 Automatically replace existing agent branch without prompting"
@@ -436,8 +454,16 @@ DOCKER_ARGS+=(
     "-w" "/workspace"
     "--network" "$NETWORK_MODE"
     "--security-opt" "no-new-privileges:true"
-    "--cpus=4"
-    "--memory=8g"
+    "--cpus=$CPU"
+    "--memory=$MEMORY"
+)
+
+# Add GPU if specified
+if [ -n "$GPU" ]; then
+    DOCKER_ARGS+=("--gpus=$GPU")
+fi
+
+DOCKER_ARGS+=(
     "$IMAGE_NAME"
     "sleep" "infinity"
 )

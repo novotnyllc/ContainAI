@@ -24,6 +24,15 @@ param(
     [string]$NetworkProxy = "allow-all",
     
     [Parameter(Mandatory=$false)]
+    [string]$Cpu = "4",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Memory = "8g",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Gpu,
+    
+    [Parameter(Mandatory=$false)]
     [switch]$NoPush,
     
     [Parameter(Mandatory=$false)]
@@ -433,8 +442,14 @@ if (Test-Path "${WslHome}/.config/coding-agents/mcp-secrets.env") { $dockerArgs 
 $dockerArgs += "-w", "/workspace"
 $dockerArgs += "--network", $NetworkMode
 $dockerArgs += "--security-opt", "no-new-privileges:true"
-$dockerArgs += "--cpus=4"
-$dockerArgs += "--memory=8g"
+
+# Add resource limits
+$dockerArgs += "--cpus=$Cpu"
+$dockerArgs += "--memory=$Memory"
+if ($Gpu) {
+    $dockerArgs += "--gpus=$Gpu"
+}
+
 $dockerArgs += $ImageName
 $dockerArgs += "sleep", "infinity"
 
