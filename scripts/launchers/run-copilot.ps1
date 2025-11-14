@@ -135,9 +135,11 @@ Write-Host ""
 
 # Build docker arguments
 $dockerArgs = @(
-    "run", "-it", "--rm",
+    "run", "-d", "--rm",
     "--name", $ContainerName,
     "-e", "TZ=$TimeZone",
+    "-e", "AGENT_SESSION_MODE=supervised",
+    "-e", "AGENT_SESSION_NAME=agent",
     "-v", "${WslPath}:/workspace",
     "-v", "${WslHome}/.gitconfig:/home/agentuser/.gitconfig:ro",
     "-v", "${WslHome}/.config/gh:/home/agentuser/.config/gh:ro",
@@ -147,6 +149,11 @@ $dockerArgs = @(
     "--label", "coding-agents.repo=$RepoName",
     "--label", "coding-agents.branch=$Branch"
 )
+
+if ($NoPush) {
+    $dockerArgs += "-e"
+    $dockerArgs += "AUTO_PUSH_ON_SHUTDOWN=false"
+}
 
 # Add MCP secrets if they exist
 if (wsl test -f "${WslHome}/.config/coding-agents/mcp-secrets.env") {
@@ -167,16 +174,31 @@ if ($Gpu) {
 
 $dockerArgs += "coding-agents-copilot:local"
 
-# Run container with cleanup
-try {
-    & $ContainerCmd $dockerArgs
-} finally {
-    if (Test-ContainerExists $ContainerName) {
-        Write-Host ""
-        if ($NoPush) {
-            Push-ToLocal -ContainerName $ContainerName -SkipPush
-        } else {
-            Push-ToLocal -ContainerName $ContainerName
-        }
+$containerId = & $ContainerCmd $dockerArgs
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Failed to start GitHub Copilot container" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "🔗 Connecting to Copilot session (detach with Ctrl+B then D)..." -ForegroundColor Cyan
+& $ContainerCmd exec -it $ContainerName agent-session attach
+$attachExit = $LASTEXITCODE
+if ($attachExit -ne 0) {
+    if ((Get-ContainerStatus $ContainerName) -eq "running") {
+        Write-Host "⚠ Unable to attach. Run .\\connect-agent.ps1 -Name $ContainerName once the container is ready." -ForegroundColor Yellow
+    } else {
+        Write-Host "❌ Copilot session exited before it was ready." -ForegroundColor Red
     }
+    exit $attachExit
+}
+
+$status = Get-ContainerStatus $ContainerName
+if ($status -eq "running") {
+    Write-Host ""
+    Write-Host "ℹ Session detached but container is still running." -ForegroundColor Cyan
+    Write-Host "   Reconnect: .\\connect-agent.ps1 -Name $ContainerName" -ForegroundColor Gray
+    Write-Host "   Stop later: docker stop $ContainerName" -ForegroundColor Gray
+} else {
+    Write-Host ""
+    Write-Host "✅ Copilot session complete. Container stopped." -ForegroundColor Green
 }

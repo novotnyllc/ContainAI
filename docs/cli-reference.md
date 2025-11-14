@@ -13,6 +13,7 @@ Complete reference for all CodingAgents launcher scripts and their arguments.
 - [Management Scripts](#management-scripts)
   - [list-agents](#list-agents)
   - [remove-agent](#remove-agent)
+  - [connect-agent](#connect-agent)
 - [Setup Scripts](#setup-scripts)
   - [verify-prerequisites](#verify-prerequisites)
   - [install](#install)
@@ -165,11 +166,14 @@ run-copilot ~/my-project -b feature-api --cpu 8 --memory 16g --network-proxy squ
    - **Branch isolation** (if `-b` specified) or current branch (default)
    - Git authentication from host (if configured)
    - Auto-commit and push on exit (unless `--no-push`)
-4. Drops you into interactive shell with Copilot CLI
-5. On exit (`Ctrl+D` or `exit`):
+4. Starts a managed tmux session so you can detach/reconnect (`Ctrl+B`, then `D`)
+5. Drops you into interactive shell with Copilot CLI
+6. On exit (`Ctrl+D` or `exit`):
    - Auto-commits changes
    - Pushes to configured git remote (if any)
    - Container auto-removes
+
+**Reattach later:** `connect-agent --name <container>` reconnects to the tmux session if the container is still running (for example, if you detached with `Ctrl+B`, `D`).
 
 **Branch Behavior:**
 - Without `-b`: Works on current branch (same as `--use-current-branch`)
@@ -436,11 +440,12 @@ launch-agent copilot C:\production-repo `
 3. Checks for branch conflicts (prompts if exists)
 4. Creates container in background (`-d`)
 5. Sets up repository inside container
-6. Returns to terminal (container keeps running)
+6. Starts a managed tmux session so you can attach later without restarting
+7. Returns to terminal (container keeps running)
 
 **Connect to container:**
 - VS Code: Dev Containers → Attach to Running Container
-- Terminal: `docker exec -it {container-name} bash`
+- Terminal: `scripts/launchers/connect-agent --name {container-name}` (preferred) or `docker exec -it {container-name} bash`
 
 **Stop container:**
 ```bash
@@ -560,6 +565,55 @@ remove-agent copilot-myapp-feature --force
 remove-agent copilot-myapp-feature
 remove-agent -All
 remove-agent copilot-myapp-feature -Force
+```
+
+---
+
+### connect-agent
+
+Attach to the tmux session inside a running agent container.
+
+**Location:** `scripts/launchers/connect-agent` (bash), `connect-agent.ps1` (PowerShell)
+
+#### Synopsis
+
+```bash
+connect-agent [OPTIONS] [CONTAINER_NAME]
+```
+
+```powershell
+connect-agent.ps1 [[-Name] <String>] [OPTIONS]
+```
+
+#### Arguments & Options
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `CONTAINER_NAME` | string | Container name to attach to (optional if only one running) |
+| `-n, --name NAME` (bash)<br>`-Name NAME` (PowerShell) | string | Explicit container name |
+| `-h, --help` (bash)<br>`-Help` (PowerShell) | flag | Show help |
+
+#### Behavior
+
+1. Validates Docker/Podman is running
+2. Detects running agent containers (label `coding-agents.type=agent`)
+3. If multiple containers are running, prompts for explicit `--name`
+4. Executes `agent-session attach` inside the container so you land in the managed tmux session
+5. Falls back to `docker exec -it ... bash` if the helper is missing (older containers)
+
+Detach any time with `Ctrl+B`, then `D`. Repeat `connect-agent` whenever you want to hop back in.
+
+#### Examples
+
+```bash
+# Attach to the only running container
+connect-agent
+
+# Attach to a specific container
+connect-agent --name copilot-myapp-feature
+
+# Windows
+connect-agent.ps1 -Name copilot-myapp-feature
 ```
 
 ---
@@ -886,7 +940,7 @@ Next steps:
 4. Pushes to git remote (if configured, unless `--no-push`)
 5. Container auto-removes (`--rm`)
 
-**Persistent (`launch-agent`):**
+4. Starts a managed tmux session so you can detach/reconnect (`Ctrl+B`, then `D`)
 1. Container keeps running in background
 2. On `docker stop`:
    - Entrypoint receives SIGTERM

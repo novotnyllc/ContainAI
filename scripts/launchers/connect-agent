@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Attach to a running coding agent container via tmux session
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../utils/common-functions.sh"
+
+check_docker_running || exit 1
+CONTAINER_CMD=$(get_container_runtime)
+
+usage() {
+    cat <<'HELP'
+Usage: connect-agent [OPTIONS] [container-name]
+
+Options:
+  -n, --name NAME   Container name to attach to
+  -h, --help        Show this help message
+
+If no container name is provided, connect-agent will attach to the only
+running agent container. If multiple containers are running, you must
+specify which one to use. Use list-agents to see active containers.
+HELP
+}
+
+CONTAINER_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -n|--name)
+            CONTAINER_NAME="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            if [ -z "$CONTAINER_NAME" ]; then
+                CONTAINER_NAME="$1"
+                shift
+            else
+                echo "connect-agent: unexpected argument '$1'" >&2
+                usage
+                exit 2
+            fi
+            ;;
+    esac
+done
+
+select_container() {
+    mapfile -t containers < <($CONTAINER_CMD ps --filter "label=coding-agents.type=agent" --format '{{.Names}}')
+    if [ ${#containers[@]} -eq 0 ]; then
+        echo "No running agent containers found. Launch one with run-<agent> or launch-agent." >&2
+        exit 1
+    fi
+
+    if [ ${#containers[@]} -gt 1 ]; then
+        echo "Multiple agent containers detected. Specify one of:" >&2
+        printf '  %s\n' "${containers[@]}" >&2
+        exit 1
+    fi
+
+    CONTAINER_NAME="${containers[0]}"
+}
+
+if [ -z "$CONTAINER_NAME" ]; then
+    select_container
+fi
+
+if ! validate_container_name "$CONTAINER_NAME"; then
+    echo "Invalid container name: $CONTAINER_NAME" >&2
+    exit 2
+fi
+
+if ! $CONTAINER_CMD ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo "Container '$CONTAINER_NAME' is not running." >&2
+    exit 1
+fi
+
+if ! $CONTAINER_CMD exec "$CONTAINER_NAME" /bin/bash -c 'command -v agent-session >/dev/null 2>&1'; then
+    echo "agent-session helper not found inside container. Falling back to bash shell (no detach support)." >&2
+    exec $CONTAINER_CMD exec -it "$CONTAINER_NAME" bash
+fi
+
+echo "Attaching to $CONTAINER_NAME (detach with Ctrl+B then D)..."
+exec $CONTAINER_CMD exec -it "$CONTAINER_NAME" agent-session attach

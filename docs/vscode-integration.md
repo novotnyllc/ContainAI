@@ -78,13 +78,16 @@ code --list-extensions | Select-String "ms-vscode-remote.remote-containers"
 
 **Result:** VS Code Explorer shows your repository files from inside the container.
 
-### Method 2: Launch from VS Code Command Palette
+### Method 2: Launch from VS Code's Integrated Terminal
 
-1. **Open the Command Palette:** `F1` or `Ctrl+Shift+P`
-2. **Type:** `Tasks: Run Task`
-3. **Select:** `Launch Copilot Agent` (or `Launch Codex Agent`, `Launch Claude Agent`)
-4. **Wait for container to start** (terminal shows startup logs)
-5. **Attach VS Code** (see Method 1, step 2)
+1. **Open VS Code on the host** (outside of any container) and load the CodingAgents repository so the launchers are on your PATH.
+2. **Open the integrated terminal:** `` Ctrl+` ``.
+3. **Run a launcher from your project directory:**
+   ```bash
+   cd ~/my-project
+   run-copilot        # or run-codex / run-claude
+   ```
+4. **Attach VS Code** using the steps in Method 1 once the container is running.
 
 ---
 
@@ -141,30 +144,7 @@ After attaching to the container:
 
 ## Starting a New Container from VS Code
 
-### Method 1: Using Tasks (Recommended)
-
-VS Code tasks are automatically configured when you attach to a container. These tasks are stored in the container's per-user settings (not in the repository) so they work seamlessly without modifying your workspace.
-
-1. **Attach to any running container** (see [Connecting to a Running Container](#connecting-to-a-running-container))
-2. **Open Command Palette:** `F1` or `Ctrl+Shift+P`
-3. **Select:** `Tasks: Run Task`
-4. **Choose an agent task:**
-   - `Launch Copilot Agent`
-   - `Launch Codex Agent`
-   - `Launch Claude Agent`
-   - `List Running Agents`
-   - `Verify Prerequisites`
-   - `Build All Agent Images`
-   - `Run Integration Tests`
-   - `Run Unit Tests`
-
-**Note:** Tasks are automatically set up during container initialization in `~/.vscode-server/data/Machine/tasks.json`. They execute commands from the workspace but don't require any workspace configuration files.
-
-**Task Options:**
-- Tasks pass default options (4 CPUs, 8GB memory)
-- To customize resources, use command line instead (see Method 2)
-
-### Method 2: Using Integrated Terminal
+### Method 1: Using the Host Integrated Terminal
 
 For full control over launch options:
 
@@ -191,7 +171,7 @@ For full control over launch options:
 
 4. **Attach VS Code** (see [Connecting to a Running Container](#connecting-to-a-running-container))
 
-### Method 3: Direct Docker/Podman Command
+### Method 2: Direct Docker/Podman Command
 
 For advanced users:
 
@@ -826,9 +806,10 @@ docker container prune --filter "label=coding-agent=true"
 
 3. **Check GitHub CLI authentication:**
    ```bash
+   # Run on the host (outside the container)
    gh auth status
    
-   # If not authenticated:
+   # If not authenticated (still on the host):
    gh auth login
    ```
 
@@ -934,7 +915,7 @@ You now know how to:
 | Attach to container | `F1` → "Attach to Running Container" |
 | Open workspace | File → Open Folder → `/workspace` |
 | New terminal | `` Ctrl+` `` |
-| Launch agent | `F1` → "Run Task" → "Launch Copilot Agent" |
+| Launch agent | Open host terminal → `run-copilot` / `launch-agent` |
 | Check logs | `docker logs copilot-agent` |
 | Stop container | `docker stop copilot-agent` |
 | Remote indicator | Bottom-left `><` icon |

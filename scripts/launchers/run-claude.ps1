@@ -106,9 +106,11 @@ Write-Host "🏷️  Container: $ContainerName" -ForegroundColor Cyan
 Write-Host ""
 
 $dockerArgs = @(
-    "run", "-it", "--rm",
+    "run", "-d", "--rm",
     "--name", $ContainerName,
     "-e", "TZ=$TimeZone",
+    "-e", "AGENT_SESSION_MODE=supervised",
+    "-e", "AGENT_SESSION_NAME=agent",
     "-v", "${WslPath}:/workspace",
     "-v", "${WslHome}/.gitconfig:/home/agentuser/.gitconfig:ro",
     "-v", "${WslHome}/.config/gh:/home/agentuser/.config/gh:ro",
@@ -117,6 +119,11 @@ $dockerArgs = @(
     "--label", "coding-agents.repo=$RepoName",
     "--label", "coding-agents.branch=$Branch"
 )
+
+if ($NoPush) {
+    $dockerArgs += "-e"
+    $dockerArgs += "AUTO_PUSH_ON_SHUTDOWN=false"
+}
 
 if (wsl test -d "${WslHome}/.config/claude") {
     $dockerArgs += "-v"
@@ -141,15 +148,31 @@ if ($Gpu) {
 
 $dockerArgs += "coding-agents-claude:local"
 
-try {
-    & docker $dockerArgs
-} finally {
-    if (Test-ContainerExists $ContainerName) {
-        Write-Host ""
-        if ($NoPush) {
-            Push-ToLocal -ContainerName $ContainerName -SkipPush
-        } else {
-            Push-ToLocal -ContainerName $ContainerName
-        }
+$containerId = & docker $dockerArgs
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Failed to start Claude container" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "🔗 Connecting to Claude session (detach with Ctrl+B then D)..." -ForegroundColor Cyan
+& docker exec -it $ContainerName agent-session attach
+$attachExit = $LASTEXITCODE
+if ($attachExit -ne 0) {
+    if ((Get-ContainerStatus $ContainerName) -eq "running") {
+        Write-Host "⚠ Unable to attach. Run .\\connect-agent.ps1 -Name $ContainerName once the container is ready." -ForegroundColor Yellow
+    } else {
+        Write-Host "❌ Claude session exited before it was ready." -ForegroundColor Red
     }
+    exit $attachExit
+}
+
+$status = Get-ContainerStatus $ContainerName
+if ($status -eq "running") {
+    Write-Host ""
+    Write-Host "ℹ Session detached but container is still running." -ForegroundColor Cyan
+    Write-Host "   Reconnect: .\\connect-agent.ps1 -Name $ContainerName" -ForegroundColor Gray
+    Write-Host "   Stop later: docker stop $ContainerName" -ForegroundColor Gray
+} else {
+    Write-Host ""
+    Write-Host "✅ Claude session complete. Container stopped." -ForegroundColor Green
 }

@@ -118,6 +118,7 @@ fi
 REPO_NAME=$(get_repo_name "$REPO_PATH")
 BRANCH=$(get_current_branch "$REPO_PATH")
 CONTAINER_NAME="copilot-${REPO_NAME}-${BRANCH}"
+TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
 
 # Convert to WSL path if needed
 REPO_PATH=$(convert_to_wsl_path "$REPO_PATH")
@@ -131,20 +132,14 @@ echo "🌿 Branch: $BRANCH"
 echo "🏷️  Container: $CONTAINER_NAME"
 echo ""
 
-# Setup cleanup trap for auto-push
-cleanup() {
-    if $CONTAINER_CMD ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
-        echo ""
-        push_to_local "$CONTAINER_NAME" "$SKIP_PUSH"
-    fi
-}
-trap cleanup EXIT INT TERM
-
 # Build docker arguments
 DOCKER_ARGS=(
-    "-it" "--rm"
+    "run" "-d"
+    "--rm"
     "--name" "$CONTAINER_NAME"
-    "-e" "TZ=${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
+    "-e" "TZ=$TZ_VALUE"
+    "-e" "AGENT_SESSION_MODE=supervised"
+    "-e" "AGENT_SESSION_NAME=agent"
     "-v" "${REPO_PATH}:/workspace"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
@@ -154,6 +149,10 @@ DOCKER_ARGS=(
     "--label" "coding-agents.repo=$REPO_NAME"
     "--label" "coding-agents.branch=$BRANCH"
 )
+
+if $SKIP_PUSH; then
+    DOCKER_ARGS+=("-e" "AUTO_PUSH_ON_SHUTDOWN=false")
+fi
 
 # Add MCP secrets if they exist
 if [ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ]; then
@@ -174,5 +173,29 @@ fi
 
 DOCKER_ARGS+=("coding-agents-copilot:local")
 
-# Run container
-$CONTAINER_CMD run "${DOCKER_ARGS[@]}"
+if ! CONTAINER_ID=$($CONTAINER_CMD "${DOCKER_ARGS[@]}"); then
+    echo "❌ Failed to start GitHub Copilot container"
+    exit 1
+fi
+
+echo "🔗 Connecting to Copilot session (detach with Ctrl+B then D)..."
+$CONTAINER_CMD exec -it "$CONTAINER_NAME" agent-session attach
+ATTACH_STATUS=$?
+if [ $ATTACH_STATUS -ne 0 ]; then
+    if $CONTAINER_CMD ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+        echo "⚠️  Unable to attach to session. Use $SCRIPT_DIR/connect-agent --name $CONTAINER_NAME once the container is ready."
+    else
+        echo "❌ Copilot session exited before it was ready."
+    fi
+    exit $ATTACH_STATUS
+fi
+
+if $CONTAINER_CMD ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+    echo ""
+    echo "ℹ️  Session detached but container is still running."
+    echo "   Reconnect: $SCRIPT_DIR/connect-agent --name $CONTAINER_NAME"
+    echo "   Stop later: docker stop $CONTAINER_NAME"
+else
+    echo ""
+    echo "✅ Copilot session complete. Container stopped."
+fi

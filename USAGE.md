@@ -24,20 +24,16 @@ Use **`launch-agent`** only when you need:
    - **Docker**: Docker Desktop (with WSL2 on Windows) - [docker.com](https://www.docker.com/products/docker-desktop)
    - **Podman**: Podman Desktop or CLI - [podman.io](https://podman.io/getting-started/installation)
    - Scripts auto-detect which runtime is available
-2. **GitHub CLI** authenticated: `gh auth login`
-3. **Git configured:**
-   ```bash
-   git config --global user.name "Your Name"
-   git config --global user.email "your@email.com"
-   ```
+2. **Host Git configuration and credentials**: Whatever identity/credential helpers you already use on the host (SSH keys, credential store, GitHub CLI, etc.). Containers inherit them automatically—no extra setup required inside the container.
+3. **socat** on the host (used for credential and GPG proxies). On Linux/macOS install via package manager; on Windows install inside WSL.
 
 ### Optional: Agent Authentication
 
 Agents use authentication configs from your host machine (mounted read-only):
 
-- **GitHub Copilot**: Uses `gh auth login` (required above)
-- **OpenAI Codex**: Authenticate Codex CLI on host, config at `~/.config/codex/`
-- **Anthropic Claude**: Authenticate Claude CLI on host, config at `~/.config/claude/`
+- **GitHub Copilot**: Use whatever authentication you already rely on (GitHub CLI, browsers, etc.) **on the host**.
+- **OpenAI Codex**: Authenticate the Codex CLI on the host, config at `~/.config/codex/`
+- **Anthropic Claude**: Authenticate the Claude CLI on the host, config at `~/.config/claude/`
 
 > **Important:** You must authenticate agents on your **host machine** before launching containers. The authentication configs are mounted read-only into containers.
 
@@ -50,9 +46,9 @@ GITHUB_TOKEN=ghp_your_token_here
 CONTEXT7_API_KEY=your_key_here
 ```
 
-## Get the Images
+## Optional: Pre-fetch Images
 
-### Option 1: Pull Pre-Built (Recommended)
+The launchers automatically pull the correct image the first time you run them. If you prefer to pre-fetch (e.g., limited bandwidth during work hours) you still can:
 
 ```bash
 docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
@@ -60,7 +56,7 @@ docker pull ghcr.io/novotnyllc/coding-agents-codex:latest
 docker pull ghcr.io/novotnyllc/coding-agents-claude:latest
 ```
 
-### Option 2: Build Locally
+## Optional: Build Images Locally
 
 ```bash
 # Get the repository
@@ -330,6 +326,18 @@ Each agent gets:
 - Own container (`copilot-myproject-auth`, `codex-myproject-database`, `claude-myproject-ui`)
 
 No conflicts!
+
+## Detaching and Reconnecting
+
+Every agent container now starts a managed tmux session so you can pause work without stopping the container.
+
+- **Detach:** Press `Ctrl+B`, then `D` while inside the agent session. The session (Copilot/Codex/Claude or a shell) keeps running in the background.
+- **Reconnect (Bash):** `scripts/launchers/connect-agent --name <container>`
+- **Reconnect (PowerShell):** `scripts\launchers\connect-agent.ps1 -Name <container>`
+- If only one agent container is running, `connect-agent` automatically attaches to it. Otherwise, pass the container name (see `list-agents`).
+- `run-*` launchers automatically attach you to the session after the container starts. When you detach, the container keeps running so you can reconnect later.
+- `launch-agent` containers also expose a ready-to-use shell session through `connect-agent`, making it easy to hop in and out without VS Code.
+- When finished for good, stop the container (`docker stop <name>` or `remove-agent <name>`) so auto-commit/push can run and resources are freed.
 
 ## Managing Containers
 

@@ -225,11 +225,6 @@ if [ -f "/workspace/config.toml" ]; then
     /usr/local/bin/setup-mcp-configs.sh 2>&1 | grep -E "^(ERROR|WARN)" || true
 fi
 
-# Setup VS Code tasks for container
-if [ -f "/workspace/scripts/runtime/setup-vscode-tasks.sh" ]; then
-    /workspace/scripts/runtime/setup-vscode-tasks.sh 2>/dev/null || true
-fi
-
 # Index project with Serena for faster semantic operations (silent unless error)
 if [ -d "/workspace/.git" ]; then
     uvx --from "git+https://github.com/oraios/serena" serena project index --project /workspace >/dev/null 2>&1 || \
@@ -280,6 +275,34 @@ fi
 
 echo "✨ Container ready | MCP: /workspace/config.toml | Auto-commit on shutdown"
 echo ""
+
+SESSION_HELPER="/usr/local/bin/agent-session"
+SESSION_MODE="${AGENT_SESSION_MODE:-disabled}"
+
+if [ -x "$SESSION_HELPER" ]; then
+    case "$SESSION_MODE" in
+        supervised)
+            # Run primary command inside managed tmux session for detach/reconnect support
+            "$SESSION_HELPER" supervise "$@"
+            exit $?
+            ;;
+        shell)
+            # Ensure an interactive shell session exists alongside the main process
+            SHELL_ARGS=()
+            if [ -n "${AGENT_SESSION_SHELL_BIN:-}" ]; then
+                SHELL_ARGS+=("$AGENT_SESSION_SHELL_BIN")
+            fi
+            if [ -n "${AGENT_SESSION_SHELL_ARGS:-}" ]; then
+                read -r -a __extra_shell_args <<< "${AGENT_SESSION_SHELL_ARGS}"
+                SHELL_ARGS+=("${__extra_shell_args[@]}")
+            fi
+            if [ ${#SHELL_ARGS[@]} -eq 0 ]; then
+                SHELL_ARGS=("/bin/bash" "-l")
+            fi
+            "$SESSION_HELPER" ensure-shell "${SHELL_ARGS[@]}"
+            ;;
+    esac
+fi
 
 # Execute the command passed to the container
 exec "$@"

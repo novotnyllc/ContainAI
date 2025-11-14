@@ -53,37 +53,26 @@ The credential proxy uses a **READ-ONLY** socket-based architecture to provide m
 
 ### Components
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                        HOST                             │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  git-credential-proxy-server.sh                  │  │
-│  │  - Listens on Unix socket (mode 600)            │  │
-│  │  - Validates ALL inputs                          │  │
-│  │  - READ-ONLY: Only allows 'get' operation       │  │
-│  │  - Rate limits connections                       │  │
-│  │  - Delegates to: git credential fill             │  │
-│  │  - Audit logs all requests                       │  │
-│  └──────────────────────────────────────────────────┘  │
-│                         ↕ Unix Socket                   │
-│         ~/.config/coding-agents/git-credential.sock     │
-└─────────────────────────────────────────────────────────┘
-                          ↕ (mounted read-only)
-┌─────────────────────────────────────────────────────────┐
-│                      CONTAINER                          │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  git-credential-host-helper.sh                   │  │
-│  │  - Sends protocol header: GIT-CREDENTIAL-V1      │  │
-│  │  - Sends operation: 'get' ONLY                   │  │
-│  │  - Validates inputs before sending               │  │
-│  │  - Timeouts on all operations                    │  │
-│  │  - Fallback: gh CLI, .git-credentials (ro)       │  │
-│  └──────────────────────────────────────────────────┘  │
-│                                                         │
-│  NO CREDENTIALS STORED IN CONTAINER                    │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+   subgraph Host
+      server["git-credential-proxy-server.sh\n• Listens on Unix socket (mode 600)\n• Validates all inputs\n• Read-only: only 'get'\n• Rate limits connections\n• Delegates to git credential fill\n• Audit logs every request"]
+      socket["~/.config/coding-agents/git-credential.sock"]
+      server --> socket
+   end
+
+   subgraph Container
+      helper["git-credential-host-helper.sh\n• Sends header: GIT-CREDENTIAL-V1\n• Sends operation: 'get' only\n• Validates inputs before sending\n• Timeouts guard every call\n• Falls back to gh CLI/.git-credentials (ro)"]
+      noCreds["NO CREDENTIALS STORED IN CONTAINER"]
+      helper --> noCreds
+   end
+
+   socket -. read-only mount .-> helper
+
+   classDef host fill:#e1f5ff,stroke:#0366d6;
+   classDef container fill:#d4edda,stroke:#28a745;
+   class server,socket host;
+   class helper,noCreds container;
 ```
 
 ### Protocol
