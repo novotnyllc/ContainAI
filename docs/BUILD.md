@@ -15,36 +15,57 @@ This guide is for developers who want to build and publish the coding agent cont
 
 The container system uses a **layered architecture**:
 
+```mermaid
+flowchart TB
+    subgraph specialized["Specialized Images (Optional)"]
+        direction LR
+        copilot["copilot"]
+        codex["codex"]
+        claude["claude"]
+    end
+    
+    subgraph allagents["All-Agents Image (Main)<br/>coding-agents:local"]
+        direction TB
+        all_content["• Entrypoint scripts<br/>• MCP config converter<br/>• Multi-agent support"]
+    end
+    
+    subgraph base["Base Image<br/>coding-agents-base:local"]
+        direction TB
+        base_content["• Ubuntu 22.04<br/>• Node.js 20.x<br/>• Python 3.11<br/>• .NET SDK's 8.0, 9.0, 10.0<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
+    end
+    
+    specialized -->|builds from| allagents
+    allagents -->|builds from| base
+    
+    style specialized fill:#e1f5ff,stroke:#0366d6
+    style allagents fill:#fff3cd,stroke:#856404
+    style base fill:#d4edda,stroke:#28a745
 ```
-┌─────────────────────────────────────┐
-│   Specialized Images (Optional)     │
-│  ┌──────────┬──────────┬──────────┐ │
-│  │ copilot  │  codex   │  claude  │ │
-│  └──────────┴──────────┴──────────┘ │
-└──────────────┬──────────────────────┘
-               │
-┌──────────────▼──────────────────────┐
-│      All-Agents Image (Main)        │
-│         coding-agents:local         │
-│                                     │
-│  • Entrypoint scripts               │
-│  • MCP config converter             │
-│  • Multi-agent support              │
-└──────────────┬──────────────────────┘
-               │
-┌──────────────▼──────────────────────┐
-│         Base Image                  │
-│    coding-agents-base:local         │
-│                                     │
-│  • Ubuntu 22.04                     │
-│  • Node.js 20.x                     │
-│  • Python 3.11                      │
-│  • .NET SDK's 8.0, 9.0, 10.0        │
-│  • GitHub CLI                       │
-│  • Playwright                       │
-│  • MCP servers                      │
-│  • Non-root user (UID 1000)         │
-└─────────────────────────────────────┘
+
+```mermaid
+flowchart TB
+    subgraph specialized["Specialized Images (Optional)"]
+        copilot["copilot"]
+        codex["codex"]
+        claude["claude"]
+    end
+    
+    subgraph allagents["All-Agents Image (Main)<br/>coding-agents:local"]
+        direction TB
+        all_content["• Entrypoint scripts<br/>• MCP config converter<br/>• Multi-agent support"]
+    end
+    
+    subgraph base["Base Image<br/>coding-agents-base:local"]
+        direction TB
+        base_content["• Ubuntu 22.04<br/>• Node.js 20.x<br/>• Python 3.11<br/>• .NET SDK's 8.0, 9.0, 10.0<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
+    end
+    
+    specialized --> allagents
+    allagents --> base
+    
+    style specialized fill:#e1f5ff,stroke:#0366d6
+    style allagents fill:#fff3cd,stroke:#856404
+    style base fill:#d4edda,stroke:#28a745
 ```
 
 ## Building Locally

@@ -12,97 +12,65 @@ High-level design of the AI coding agents container system.
 
 ## System Overview
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    HOST SYSTEM                      │
-│                                                     │
-│  Authentication (OAuth)                             │
-│  ├── ~/.config/gh/                 (GitHub CLI)    │
-│  ├── ~/.config/github-copilot/    (Copilot)       │
-│  ├── ~/.config/codex/              (Codex)        │
-│  └── ~/.config/claude/             (Claude)       │
-│                                                     │
-│  MCP Secrets (Optional)                            │
-│  └── ~/.config/coding-agents/                      │
-│      └── mcp-secrets.env           (API keys)     │
-│                                                     │
-│  Source Repository                                 │
-│  └── /path/to/repo/                               │
-│                                                     │
-└─────────────────┬───────────────────────────────────┘
-                  │
-                  │ launch-agent.ps1 / launch-agent
-                  │ (copies repo, mounts auth)
-                  ▼
-┌─────────────────────────────────────────────────────┐
-│              CONTAINER (isolated)                   │
-│                                                     │
-│  Workspace                                          │
-│  └── /workspace/                   (repo copy)     │
-│      ├── config.toml               (MCP config)    │
-│      └── <your code>                               │
-│                                                     │
-│  Authentication (read-only mounts from host)       │
-│  ├── ~/.config/gh/ ─────────────────> (ro)        │
-│  ├── ~/.config/github-copilot/ ──────> (ro)       │
-│  ├── ~/.config/codex/ ───────────────> (ro)       │
-│  ├── ~/.config/claude/ ──────────────> (ro)       │
-│  └── ~/.mcp-secrets.env ─────────────> (ro)       │
-│                                                     │
-│  Git Remotes                                        │
-│  ├── origin → GitHub                               │
-│  └── local → Host repo (default push)              │
-│                                                     │
-│  Agents                                             │
-│  ├── GitHub Copilot CLI                            │
-│  ├── OpenAI Codex                                  │
-│  └── Anthropic Claude                              │
-│                                                     │
-│  MCP Servers                                        │
-│  ├── GitHub                                         │
-│  ├── Microsoft Docs                                │
-│  ├── Playwright                                    │
-│  ├── Context7                                      │
-│  ├── Serena                                        │
-│  └── Sequential Thinking                           │
-│                                                     │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph host["HOST SYSTEM"]
+        direction TB
+        auth["Authentication (OAuth)<br/>• ~/.config/gh/ (GitHub CLI)<br/>• ~/.config/github-copilot/ (Copilot)<br/>• ~/.config/codex/ (Codex)<br/>• ~/.config/claude/ (Claude)"]
+        secrets["MCP Secrets (Optional)<br/>• ~/.config/coding-agents/<br/>  └── mcp-secrets.env (API keys)"]
+        repo["Source Repository<br/>• /path/to/repo/"]
+    end
+    
+    launcher["launch-agent.ps1 / launch-agent<br/>(copies repo, mounts auth)"]
+    
+    subgraph container["CONTAINER (isolated)"]
+        direction TB
+        workspace["Workspace<br/>• /workspace/ (repo copy)<br/>  ├── config.toml (MCP config)<br/>  └── &lt;your code&gt;"]
+        
+        container_auth["Authentication (read-only mounts from host)<br/>• ~/.config/gh/ ────> (ro)<br/>• ~/.config/github-copilot/ ────> (ro)<br/>• ~/.config/codex/ ────> (ro)<br/>• ~/.config/claude/ ────> (ro)<br/>• ~/.mcp-secrets.env ────> (ro)"]
+        
+        git["Git Remotes<br/>• origin → GitHub<br/>• local → Host repo (default push)"]
+        
+        agents["Agents<br/>• GitHub Copilot CLI<br/>• OpenAI Codex<br/>• Anthropic Claude"]
+        
+        mcp["MCP Servers<br/>• GitHub<br/>• Microsoft Docs<br/>• Playwright<br/>• Context7<br/>• Serena<br/>• Sequential Thinking"]
+    end
+    
+    host --> launcher
+    launcher --> container
+    
+    style host fill:#e1f5ff,stroke:#0366d6
+    style container fill:#fff3cd,stroke:#856404
+    style launcher fill:#d4edda,stroke:#28a745
 ```
 
 ## Container Architecture
 
 ### Image Layers
 
-```
-┌────────────────────────────────────┐
-│  Specialized Images (Optional)     │
-│  • coding-agents-copilot:local     │
-│  • coding-agents-codex:local       │
-│  • coding-agents-claude:local      │
-│  + Auth validation                 │
-│  + Agent-specific CMD              │
-└─────────────┬──────────────────────┘
-              │ FROM
-┌─────────────▼──────────────────────┐
-│  All-Agents Image                  │
-│  • coding-agents:local             │
-│  + entrypoint.sh                   │
-│  + setup-mcp-configs.sh            │
-│  + convert-toml-to-mcp.py          │
-└─────────────┬──────────────────────┘
-              │ FROM
-┌─────────────▼──────────────────────┐
-│  Base Image                        │
-│  • coding-agents-base:local        │
-│  • Ubuntu 22.04                    │
-│  • Node.js 20.x                    │
-│  • Python 3.11                     │
-│  • .NET SDK 8.0                    │
-│  • GitHub CLI                      │
-│  • Playwright                      │
-│  • MCP servers                     │
-│  • Non-root user (UID 1000)        │
-└────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph specialized["Specialized Images (Optional)"]
+        direction TB
+        spec_content["• coding-agents-copilot:local<br/>• coding-agents-codex:local<br/>• coding-agents-claude:local<br/>+ Auth validation<br/>+ Agent-specific CMD"]
+    end
+    
+    subgraph allagents["All-Agents Image"]
+        direction TB
+        all_content["• coding-agents:local<br/>+ entrypoint.sh<br/>+ setup-mcp-configs.sh<br/>+ convert-toml-to-mcp.py"]
+    end
+    
+    subgraph base["Base Image"]
+        direction TB
+        base_content["• coding-agents-base:local<br/>• Ubuntu 22.04<br/>• Node.js 20.x<br/>• Python 3.11<br/>• .NET SDK 8.0<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
+    end
+    
+    specialized -->|FROM| allagents
+    allagents -->|FROM| base
+    
+    style specialized fill:#e1f5ff,stroke:#0366d6
+    style allagents fill:#fff3cd,stroke:#856404
+    style base fill:#d4edda,stroke:#28a745
 ```
 
 ### Base Image (coding-agents-base:local)
@@ -363,31 +331,23 @@ args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 
 ### Same Repository, Multiple Agents
 
-```
-Host Repository: /path/to/myapp
-                      │
-        ┌─────────────┼─────────────┐
-        │             │             │
-    (copy)        (copy)        (copy)
-        │             │             │
-        ▼             ▼             ▼
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│  Container  │ │  Container  │ │  Container  │
-│  copilot-   │ │  codex-     │ │  claude-    │
-│  myapp      │ │  myapp      │ │  myapp      │
-├─────────────┤ ├─────────────┤ ├─────────────┤
-│ /workspace  │ │ /workspace  │ │ /workspace  │
-│ (isolated)  │ │ (isolated)  │ │ (isolated)  │
-├─────────────┤ ├─────────────┤ ├─────────────┤
-│ Branch:     │ │ Branch:     │ │ Branch:     │
-│ copilot/auth│ │ codex/db    │ │ claude/ui   │
-└─────────────┘ └─────────────┘ └─────────────┘
-        │             │             │
-        └─────────────┼─────────────┘
-                      │
-             (git push local)
-                      ▼
-           Host Repository Updated
+```mermaid
+flowchart TB
+    host["Host Repository<br/>/path/to/myapp"]
+    
+    host -->|copy| copilot["Container: copilot-myapp<br/>/workspace (isolated)<br/>Branch: copilot/auth"]
+    host -->|copy| codex["Container: codex-myapp<br/>/workspace (isolated)<br/>Branch: codex/db"]
+    host -->|copy| claude["Container: claude-myapp<br/>/workspace (isolated)<br/>Branch: claude/ui"]
+    
+    copilot -->|git push local| updated["Host Repository Updated"]
+    codex -->|git push local| updated
+    claude -->|git push local| updated
+    
+    style host fill:#e1f5ff,stroke:#0366d6
+    style copilot fill:#d4edda,stroke:#28a745
+    style codex fill:#d4edda,stroke:#28a745
+    style claude fill:#d4edda,stroke:#28a745
+    style updated fill:#fff3cd,stroke:#856404
 ```
 
 **No conflicts** because each container has independent:
@@ -399,20 +359,21 @@ Host Repository: /path/to/myapp
 
 ### Dev Containers Extension
 
-```
-VS Code on Host
-      │
-      │ Remote-Containers API
-      ▼
-Docker Engine
-      │
-      │ Attach to container
-      ▼
-Container: copilot-myapp
-      │
-      │ FS access, terminal, debugging
-      ▼
-/workspace (full IDE features)
+```mermaid
+flowchart TB
+    vscode["VS Code on Host"]
+    docker["Docker Engine"]
+    container["Container: copilot-myapp"]
+    workspace["/workspace<br/>(full IDE features)"]
+    
+    vscode -->|"Remote-Containers API"| docker
+    docker -->|"Attach to container"| container
+    container -->|"FS access, terminal, debugging"| workspace
+    
+    style vscode fill:#e1f5ff,stroke:#0366d6
+    style docker fill:#fff3cd,stroke:#856404
+    style container fill:#d4edda,stroke:#28a745
+    style workspace fill:#f8d7da,stroke:#721c24
 ```
 
 **Features:**
@@ -454,44 +415,68 @@ Containers use default bridge network:
 
 ### Code Changes
 
-```
-Developer (VS Code)
-      ↓ (edit files)
-Container /workspace
-      ↓ (git commit)
-Container git
-      ↓ (git push)
-Host Repository (local remote)
-      ↓ (git push origin)
-GitHub (origin remote)
+```mermaid
+flowchart TB
+    dev["Developer (VS Code)"]
+    workspace["Container /workspace"]
+    git["Container git"]
+    host["Host Repository (local remote)"]
+    github["GitHub (origin remote)"]
+    
+    dev -->|"edit files"| workspace
+    workspace -->|"git commit"| git
+    git -->|"git push"| host
+    host -->|"git push origin"| github
+    
+    style dev fill:#e1f5ff,stroke:#0366d6
+    style workspace fill:#d4edda,stroke:#28a745
+    style git fill:#d4edda,stroke:#28a745
+    style host fill:#fff3cd,stroke:#856404
+    style github fill:#f8d7da,stroke:#721c24
 ```
 
 ### Authentication
 
-```
-Host OAuth (gh login)
-      ↓ (write config)
-Host ~/.config/gh/
-      ↓ (mount ro)
-Container ~/.config/gh/
-      ↓ (read config)
-Container gh CLI
-      ↓ (provide credentials)
-Git operations
+```mermaid
+flowchart TB
+    oauth["Host OAuth (gh login)"]
+    hostconfig["Host ~/.config/gh/"]
+    containerconfig["Container ~/.config/gh/"]
+    ghcli["Container gh CLI"]
+    gitops["Git operations"]
+    
+    oauth -->|"write config"| hostconfig
+    hostconfig -->|"mount ro"| containerconfig
+    containerconfig -->|"read config"| ghcli
+    ghcli -->|"provide credentials"| gitops
+    
+    style oauth fill:#e1f5ff,stroke:#0366d6
+    style hostconfig fill:#fff3cd,stroke:#856404
+    style containerconfig fill:#d4edda,stroke:#28a745
+    style ghcli fill:#d4edda,stroke:#28a745
+    style gitops fill:#f8d7da,stroke:#721c24
 ```
 
 ### MCP Configuration
 
-```
-Developer (create config.toml)
-      ↓
-Container /workspace/config.toml
-      ↓ (startup script)
-convert-toml-to-mcp.py
-      ↓ (parse + convert)
-Agent-specific JSON configs
-      ↓ (agents read)
-MCP servers activated
+```mermaid
+flowchart TB
+    dev["Developer (create config.toml)"]
+    toml["Container /workspace/config.toml"]
+    converter["convert-toml-to-mcp.py"]
+    json["Agent-specific JSON configs"]
+    mcp["MCP servers activated"]
+    
+    dev --> toml
+    toml -->|"startup script"| converter
+    converter -->|"parse + convert"| json
+    json -->|"agents read"| mcp
+    
+    style dev fill:#e1f5ff,stroke:#0366d6
+    style toml fill:#fff3cd,stroke:#856404
+    style converter fill:#d4edda,stroke:#28a745
+    style json fill:#d4edda,stroke:#28a745
+    style mcp fill:#f8d7da,stroke:#721c24
 ```
 
 ## Comparison to Alternatives

@@ -51,7 +51,7 @@ echo 'export PATH="$HOME/coding-agents/scripts/launchers:$PATH"' >> ~/.bashrc
 
 ### 3. Launch an agent
 
-**Quick ephemeral container (auto-removes on exit):**
+**Recommended: Quick ephemeral container (auto-removes on exit):**
 
 ```bash
 # Navigate to your project
@@ -66,7 +66,9 @@ run-claude     # Anthropic Claude
 run-copilot.ps1
 ```
 
-**Persistent container (runs in background):**
+**Advanced: Persistent container (runs in background):**
+
+For long-running tasks or when you need advanced features like branch management or network controls:
 
 ```bash
 # Navigate to your project
@@ -124,14 +126,15 @@ remove-agent copilot-myapp-main --no-push
 
 ## Examples
 
-**Quick ephemeral sessions:**
+**Recommended: Quick ephemeral sessions:**
 ```bash
 cd ~/my-project
 run-copilot              # Launch and work, auto-removes on exit
 run-codex --no-push      # Launch without auto-push
+run-claude ~/other-proj  # Launch on specific directory
 ```
 
-**Persistent workspaces:**
+**Advanced: Persistent workspaces (for long-running tasks):**
 ```bash
 cd ~/my-project
 launch-agent                           # Default: Copilot on current branch
@@ -139,7 +142,7 @@ launch-agent --agent codex             # Codex on current branch
 launch-agent --branch feature-auth     # Copilot on feature-auth branch
 ```
 
-**Multiple agents on same repo:**
+**Advanced: Multiple agents on same repo:**
 ```bash
 cd ~/my-project
 launch-agent --branch main --agent copilot    # copilot-myproject-main
@@ -147,17 +150,17 @@ launch-agent --branch auth --agent codex      # codex-myproject-auth
 launch-agent --branch api --agent claude      # claude-myproject-api
 ```
 
-**Container management:**
+**Advanced: Network controls:**
+```bash
+launch-agent --network-proxy restricted   # Block outbound traffic
+launch-agent --network-proxy squid        # Proxy with logging
+```
+
+**Container management (for persistent containers):**
 ```bash
 list-agents                            # Show all running containers
 remove-agent copilot-myproject-main    # Remove with auto-push
 remove-agent codex-myproject-auth --no-push  # Remove without push
-```
-
-**Network controls:**
-```bash
-launch-agent --network-proxy restricted   # Block outbound traffic
-launch-agent --network-proxy squid        # Proxy with logging
 ```
 
 See [USAGE.md](USAGE.md) for complete examples and advanced scenarios.
