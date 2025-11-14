@@ -30,3 +30,8 @@ See `CONTRIBUTING.md` for detailed development guidelines including:
 - Inner loop development process
 - Code quality standards
 - Debugging techniques
+
+### Integration Test Expectations
+
+- **Build time**: Integration tests run inside an isolated Docker-in-Docker environment to keep the host Docker daemon pristine. A full rebuild (`integration-test.sh --mode full`) takes 15-25 minutes because every agent image is rebuilt inside the isolated sandbox. Launchers mode (`--mode launchers`) uses mock images and completes in 5-10 minutes. Plan your CI and local workflows accordingly.
+- **Host isolation**: All integration tests run via `scripts/test/integration-test.sh`, which automatically creates a disposable Docker-in-Docker container. This ensures no containers, images, or networks leak to the host system.

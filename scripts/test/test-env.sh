@@ -14,6 +14,73 @@ REGISTRY_POLL_INTERVAL=1
 CONTAINER_STARTUP_WAIT=2
 LONG_RUNNING_SLEEP=3600
 
+FIXTURE_CONFIG_FILE="$TEST_MOCK_SECRETS_DIR/config.toml"
+FIXTURE_GH_TOKEN_FILE="$TEST_MOCK_SECRETS_DIR/gh-token.txt"
+TEST_PROXY_STARTED="false"
+
+# ============================================================================
+# Fixture Helpers
+# ============================================================================
+
+populate_mock_workspace_assets() {
+    if [ -f "$FIXTURE_CONFIG_FILE" ]; then
+        cp "$FIXTURE_CONFIG_FILE" "$TEST_REPO_DIR/config.toml"
+        echo "  Added mock config.toml to test repository"
+    fi
+
+    if [ -f "$FIXTURE_GH_TOKEN_FILE" ]; then
+        mkdir -p "$TEST_REPO_DIR/.mock-secrets"
+        cp "$FIXTURE_GH_TOKEN_FILE" "$TEST_REPO_DIR/.mock-secrets/gh-token.txt"
+    fi
+}
+
+start_mock_proxy() {
+    echo "Starting mock HTTP proxy..."
+
+    docker network create \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        "$TEST_PROXY_NETWORK" 2>/dev/null || true
+
+    docker run -d \
+        --name "$TEST_PROXY_CONTAINER" \
+        --network "$TEST_PROXY_NETWORK" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        alpine:3.19 sh -c "apk add --no-cache busybox-extras >/dev/null && while true; do nc -l -p 3128 >/dev/null; done" >/dev/null
+
+    TEST_PROXY_STARTED="true"
+    
+    # Wait for listener to be ready with health check polling
+    echo -n "  Waiting for proxy listener"
+    for i in {1..10}; do
+        if docker exec "$TEST_PROXY_CONTAINER" nc -z localhost 3128 2>/dev/null; then
+            echo " ✓"
+            return 0
+        fi
+        echo -n "."
+        sleep 1
+    done
+    echo " ✗ Proxy listener failed to start"
+    return 1
+}
+
+stop_mock_proxy() {
+    if [ "$TEST_PROXY_STARTED" != "true" ]; then
+        return 0
+    fi
+
+    if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+        echo "Preserving mock proxy resources"
+        return 0
+    fi
+
+    echo "Stopping mock proxy..."
+    docker rm -f "$TEST_PROXY_CONTAINER" 2>/dev/null || true
+    docker network rm "$TEST_PROXY_NETWORK" 2>/dev/null || true
+    TEST_PROXY_STARTED="false"
+}
+
 # ============================================================================
 # Local Registry Management
 # ============================================================================
@@ -28,12 +95,15 @@ start_local_registry() {
     fi
     
     # Start registry container
-    docker run -d \
+    if ! docker run -d \
         --name "$TEST_REGISTRY_CONTAINER" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         -p 5555:5000 \
-        registry:2 >/dev/null
+        registry:2 2>&1 >/dev/null; then
+        echo "  ✗ Failed to start registry container"
+        return 1
+    fi
     
     # Wait for registry to be ready
     echo -n "  Waiting for registry to be ready"
@@ -78,7 +148,7 @@ build_test_images() {
     echo ""
     echo "Building base image..."
     docker build \
-        -f docker/base.Dockerfile \
+        -f docker/base/Dockerfile \
         -t "$TEST_BASE_IMAGE" \
         --build-arg BUILDKIT_INLINE_CACHE=1 \
         . || return 1
@@ -98,7 +168,7 @@ build_test_images() {
         local test_image="${!image_var}"
         
         docker build \
-            -f "docker/${agent}.Dockerfile" \
+            -f "docker/agents/${agent}/Dockerfile" \
             -t "$test_image" \
             --build-arg BASE_IMAGE="$TEST_BASE_IMAGE" \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
@@ -114,6 +184,75 @@ build_test_images() {
 }
 
 # ============================================================================
+# Lightweight Mock Images (Launchers Mode Fallback)
+# ============================================================================
+
+build_mock_agent_images() {
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Building lightweight mock agent images"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    local build_dir
+    build_dir=$(mktemp -d)
+
+    cp "$PROJECT_ROOT/scripts/runtime/setup-mcp-configs.sh" "$build_dir/setup-mcp-configs.sh"
+    cp "$PROJECT_ROOT/scripts/utils/convert-toml-to-mcp.py" "$build_dir/convert-toml-to-mcp.py"
+
+    cat > "$build_dir/Dockerfile" <<'EOF'
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash git ca-certificates curl jq && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash agentuser
+
+COPY setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
+COPY convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
+RUN chmod +x /usr/local/bin/setup-mcp-configs.sh
+
+USER agentuser
+WORKDIR /workspace
+CMD ["sleep", "infinity"]
+EOF
+
+    # Build base mock image once
+    echo ""
+    echo "Building mock image..."
+    local base_mock_image="${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/base-mock:test"
+    docker build -t "$base_mock_image" "$build_dir" || {
+        rm -rf "$build_dir"
+        return 1
+    }
+    
+    # Tag and push for each agent
+    local agents=("copilot" "codex" "claude")
+    for agent in "${agents[@]}"; do
+        local image_var="TEST_${agent^^}_IMAGE"
+        local test_image="${!image_var}"
+        echo "  Tagging for $agent..."
+        docker tag "$base_mock_image" "$test_image" || {
+            rm -rf "$build_dir"
+            return 1
+        }
+        if [ "${TEST_USE_REGISTRY_PULLS:-true}" = "true" ]; then
+            docker push "$test_image" >/dev/null 2>&1 || {
+                rm -rf "$build_dir"
+                return 1
+            }
+        fi
+    done
+
+    rm -rf "$build_dir"
+    echo ""
+    echo "✓ Mock agent images built"
+    return 0
+}
+
+# ============================================================================
 # Image Pulling (Launchers Mode)
 # ============================================================================
 
@@ -123,25 +262,28 @@ pull_and_tag_test_images() {
     echo "Pulling and tagging images for testing"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    # Pull from registry and tag for local testing
     local agents=("copilot" "codex" "claude")
     for agent in "${agents[@]}"; do
         echo ""
         echo "Pulling $agent image..."
         
-        # Pull from actual registry
-        local source_image="ghcr.io/yourusername/coding-agents-${agent}:latest"
-        if ! docker pull "$source_image" 2>&1; then
+        local source_registry="${TEST_SOURCE_REGISTRY:-ghcr.io/yourusername}"
+        local source_image="${source_registry}/coding-agents-${agent}:latest"
+        if docker pull "$source_image" >/dev/null 2>&1; then
+            echo "  ✓ Pulled $source_image"
+        else
             echo "  ⚠️  Warning: Could not pull $source_image from registry"
             source_image="coding-agents-${agent}:latest"
-            if ! docker image inspect "$source_image" >/dev/null 2>&1; then
-                echo "  ❌ Error: No local image available either"
-                return 1
+            if docker image inspect "$source_image" >/dev/null 2>&1; then
+                echo "  ✓ Using local image: $source_image"
+            else
+                echo "  ⚠️  No local image named $source_image"
+                echo "  🔨 Building mock agent images locally..."
+                build_mock_agent_images
+                return $?
             fi
-            echo "  Using local image: $source_image"
         fi
         
-        # Tag for testing
         local image_var="TEST_${agent^^}_IMAGE"
         local test_image="${!image_var}"
         
@@ -150,11 +292,12 @@ pull_and_tag_test_images() {
             return 1
         fi
         
-        # Push to local test registry
-        echo "  Pushing to local test registry..."
-        if ! docker push "$test_image"; then
-            echo "  ❌ Error: Could not push to local registry"
-            return 1
+        if [ "${TEST_USE_REGISTRY_PULLS:-true}" = "true" ]; then
+            echo "  Pushing to local test registry..."
+            if ! docker push "$test_image" >/dev/null 2>&1; then
+                echo "  ❌ Error: Could not push to local registry"
+                return 1
+            fi
         fi
     done
     
@@ -202,9 +345,10 @@ setup_test_repository() {
     
     # Initialize git repo
     git init -q
-    git config user.name "$TEST_GH_USER"
-    git config user.email "$TEST_GH_EMAIL"
-    git config remote.pushDefault local
+    git config --local user.name "$TEST_GH_USER"
+    git config --local user.email "$TEST_GH_EMAIL"
+    git config --local remote.pushDefault local
+    git config --local commit.gpgsign false
     
     # Create initial content
     cat > README.md << 'EOF'
@@ -213,6 +357,7 @@ setup_test_repository() {
 This is a test repository for the coding agents test suite.
 EOF
     
+    mkdir -p src
     cat > src/main.py << 'EOF'
 def hello():
     """Simple test function"""
@@ -221,11 +366,15 @@ def hello():
 if __name__ == "__main__":
     print(hello())
 EOF
-    
-    mkdir -p src
     git add .
     git commit -q -m "Initial commit"
-    git checkout -q -b main
+    if git rev-parse --verify --quiet main >/dev/null; then
+        git checkout -q main
+    else
+        git checkout -q -b main
+    fi
+
+    populate_mock_workspace_assets
     
     echo "  Repository created with initial content"
 }
@@ -258,12 +407,15 @@ cleanup_test_containers() {
     # Remove by session label
     local containers
     containers=$(docker ps -aq --filter "label=$TEST_LABEL_SESSION" 2>/dev/null || true)
-    if [ -n "${containers}" ]; then
-        echo "${containers}" | xargs docker rm -f 2>/dev/null || {
-            echo "⚠️  Warning: Some containers could not be removed"
-            return 1
-        }
+    if [ -z "${containers}" ]; then
+        echo "  No test containers to remove"
+        return 0
     fi
+    
+    echo "${containers}" | xargs docker rm -f 2>/dev/null || {
+        echo "⚠️  Warning: Some containers could not be removed"
+        return 1
+    }
 }
 
 # ============================================================================
@@ -281,12 +433,15 @@ cleanup_test_images() {
     # Remove test images from local registry namespace
     local images
     images=$(docker images --filter "reference=${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/*" -q 2>/dev/null || true)
-    if [ -n "${images}" ]; then
-        echo "${images}" | xargs docker rmi -f 2>/dev/null || {
-            echo "⚠️  Warning: Some images could not be removed"
-            return 1
-        }
+    if [ -z "${images}" ]; then
+        echo "  No test images to remove"
+        return 0
     fi
+    
+    echo "${images}" | xargs docker rmi -f 2>/dev/null || {
+        echo "⚠️  Warning: Some images could not be removed"
+        return 1
+    }
 }
 
 # ============================================================================
@@ -341,6 +496,7 @@ teardown_test_environment() {
     cleanup_test_repository
     cleanup_test_images
     stop_local_registry
+    stop_mock_proxy
     
     if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
         echo ""
@@ -361,6 +517,7 @@ teardown_test_environment() {
 export -f start_local_registry
 export -f stop_local_registry
 export -f build_test_images
+export -f build_mock_agent_images
 export -f pull_and_tag_test_images
 export -f setup_test_network
 export -f cleanup_test_network
@@ -370,3 +527,6 @@ export -f cleanup_test_containers
 export -f cleanup_test_images
 export -f setup_test_environment
 export -f teardown_test_environment
+export -f populate_mock_workspace_assets
+export -f start_mock_proxy
+export -f stop_mock_proxy

@@ -45,6 +45,18 @@ Full end-to-end system validation with two modes:
 
 **Note**: Integration tests are bash-only because they test the complete system including Docker images and containers, which are language-agnostic. Unit tests provide bash/PowerShell parity validation.
 
+## Feature Coverage Matrix
+
+| Feature / Guarantee                          | Automated Coverage                                                                                              | Notes |
+|----------------------------------------------|------------------------------------------------------------------------------------------------------------------|-------|
+| Container launch, labels, workspace mounts   | `integration-test.sh`: launcher execution, label, networking, workspace, env-variable tests                      | Ensures runtime wiring matches docs. |
+| Multi-agent isolation & cleanup              | `integration-test.sh`: multiple agent, isolation, cleanup sections                                               | Validates concurrent containers + teardown. |
+| Branch/auto-push safety                      | `test-branch-management.sh` / `.ps1` unit suites                                                                 | Bash & PowerShell parity. |
+| MCP config conversion                        | `integration-test.sh::test_mcp_configuration_generation`                                                         | Exercises `/usr/local/bin/setup-mcp-configs.sh` with mock config.toml. |
+| Network proxy modes (`restricted` / `squid`) | `integration-test.sh::test_network_proxy_modes`                                                                  | Uses mock proxy container + `--network none` to ensure wiring behaves. |
+| Shared utility functions                     | `integration-test.sh::test_shared_functions` + unit suites                                                       | Guards regressions in `scripts/utils/common-functions.*`. |
+| Runtime secret handling                      | Mock fixtures under `scripts/test/fixtures/mock-secrets` ensure no real credentials are required for tests       | Fixtures copied into isolated workspace. |
+
 ## Test Files
 
 ### Unit Tests
@@ -57,11 +69,17 @@ Full end-to-end system validation with two modes:
   Tests: branch operations, conflict detection, archiving, cleanup, unmerged commits
 
 ### Integration Tests (Bash Only)
-- **`integration-test.sh`**: Full system integration tests (~450 lines)
+- **`integration-test.sh`**: Isolated integration test runner (~250 lines)
+- **`integration-test-impl.sh`**: Internal test implementation (~577 lines)
 - **`test-config.sh`**: Test configuration with mock credentials
-- **`test-env.sh`**: Environment setup/teardown utilities (~300 lines)
+- **`test-env.sh`**: Environment setup/teardown utilities (~330 lines)
 
 **Complete Parity**: Bash and PowerShell unit tests provide equivalent coverage. Integration tests are bash-only as they test the system end-to-end (both bash and PowerShell launchers use same Docker infrastructure).
+
+### Runtime Mock Inputs
+- `scripts/test/fixtures/mock-secrets/config.toml`: Sample MCP configuration copied into every test repository.
+- `scripts/test/fixtures/mock-secrets/gh-token.txt`: Placeholder GitHub token used for environment variables.
+- Integration harness mounts these fixtures automatically; no manual setup is required. The mocks live entirely inside `/tmp` test directories, so the host environment remains untouched.
 
 ## Running Tests
 
@@ -85,23 +103,31 @@ Both should pass with identical results. Time: ~1-2 minutes per file.
 
 ### Integration Tests (Before PR)
 
-**Launchers mode** - Fast validation with existing images:
-```bash
-# Linux/macOS/WSL
-chmod +x scripts/test/integration-test.sh
-./scripts/test/integration-test.sh --mode full
+Integration tests run inside an isolated Docker-in-Docker environment for reproducibility and safety:
 
-# With resource preservation for debugging
-./scripts/test/integration-test.sh --mode full --preserve
-```
-
-**Launchers mode** - Test with existing images:
 ```bash
-# Linux/macOS/WSL
+# Quick validation with existing/mock images (recommended for development)
 ./scripts/test/integration-test.sh --mode launchers
 
-# Faster, uses images from registry or local cache
+# Full build validation (run before submitting PR)
+./scripts/test/integration-test.sh --mode full
+
+# Preserve resources for debugging
+./scripts/test/integration-test.sh --mode launchers --preserve
 ```
+
+**How it works:** Starts a privileged `docker:25.0-dind` container, mounts your repo read-only at `/workspace`, installs required tooling (bash/git/python/jq), then runs the full integration suite against the isolated Docker daemon. All containers, images, registries, and networks are confined to the sandbox and deleted automatically when complete.
+
+**Timing:**
+- Launchers mode: ~5-10 minutes (includes DinD startup + mock image builds)
+- Full mode: ~15-25 minutes (rebuilds base + all agent images)
+
+**Requirements:**
+- Docker daemon with `--privileged` container support
+- ~2GB disk space for DinD container
+- Port 5555 available inside the isolated environment
+
+**Runtime mocks**: Both modes automatically mount the fixture config/tokens, spin up a disposable proxy container, and create a restricted network to verify `--network-proxy` behavior. No host credentials or proxy daemons are modified.
 
 **Key Features**:
 - ✅ No real secrets required (uses mock credentials)
@@ -292,13 +318,10 @@ function Test-NewFeature {
 ## Prerequisites
 
 ### Integration Tests
-- **Container Runtime**: Docker or Podman (scripts auto-detect)
-  - Docker: Requires BuildKit support for full mode
-  - Podman: Native support for BuildKit-compatible builds
+- Docker daemon with `--privileged` container support (Podman not supported)
 - Git installed and configured
 - Bash 4.0+ (Linux/macOS/WSL)
-- Sufficient disk space for building images (full mode: ~5GB)
-- Port 5555 available for local registry
+- ~5GB disk space for DinD container and builds (full mode)
 - No real GitHub/API tokens required (uses mock credentials)
 
 ### Unit Tests
@@ -313,34 +336,33 @@ function Test-NewFeature {
 **When to use**: 
 - Before making Dockerfile changes
 - Complete validation of build process
-- CI/CD pipeline for image building
+- Before submitting pull requests
 - Ensuring no external dependencies
 
 **What it does**:
-1. Starts local Docker registry on localhost:5555
-2. Builds base image from `docker/base.Dockerfile`
-3. Pushes base to local registry
-4. Builds agent images (copilot, codex, claude) using local base
-5. Runs full test suite against built images
+1. Starts isolated Docker-in-Docker environment
+2. Creates local registry inside sandbox
+3. Builds base image from `docker/base/Dockerfile`
+4. Builds agent images (copilot, codex, claude)
+5. Runs complete test suite
 6. Cleans up (or preserves with `--preserve`)
 
-**Time**: ~10-15 minutes (depending on build cache)
+**Time**: ~15-25 minutes (includes DinD startup + all builds)
 
 ### Launchers Mode (`--mode launchers`)
 **When to use**:
-- Testing launcher scripts only
-- Quick validation
-- Local development workflow
-- When images already exist
+- Quick validation during development
+- Testing launcher scripts
+- When agent images already exist locally
 
 **What it does**:
-1. Starts local Docker registry on localhost:5555
-2. Pulls existing images from registry (or uses local)
-3. Tags for testing (no modifications)
-4. Runs test suite against tagged images
+1. Starts isolated Docker-in-Docker environment
+2. Creates local registry inside sandbox
+3. Builds lightweight mock agent images
+4. Runs complete test suite
 5. Cleans up (or preserves with `--preserve`)
 
-**Time**: ~2-5 minutes
+**Time**: ~5-10 minutes (includes DinD startup + mock builds)
 
 ## Security & Isolation
 
