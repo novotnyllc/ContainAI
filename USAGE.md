@@ -2,6 +2,20 @@
 
 Quick guide for running AI coding agents in isolated containers.
 
+## Recommended Approach: Ephemeral Containers
+
+For most use cases, use the **`run-*` scripts** (run-copilot, run-codex, run-claude). These create temporary containers that:
+- Launch instantly
+- Auto-remove when you exit (no cleanup needed)
+- Auto-push changes before exit (safe by default)
+- Work like any other CLI tool
+
+Use **`launch-agent`** only when you need:
+- Long-running background containers
+- Advanced branch management
+- Network proxy controls
+- Multiple persistent agents on the same repo
+
 ## What You Need
 
 ### On Your Host Machine
@@ -142,9 +156,9 @@ remove-agent copilot-myapp-main --no-push
 
 ## Launcher Scripts
 
-There are two types of launcher scripts:
+There are two types of launcher scripts. **Start with `run-*` for most tasks.**
 
-### 1. Quick Ephemeral Launchers (`run-*`)
+### 1. Ephemeral Launchers (`run-*`) - RECOMMENDED
 
 Fast, temporary containers that auto-remove on exit. Perfect for quick tasks.
 
@@ -189,9 +203,18 @@ run-codex --no-push      # Launch without auto-push
 run-claude ~/other-proj  # Launch on specific directory
 ```
 
-### 2. Persistent Launchers (`launch-agent`)
+### 2. Persistent Launchers (`launch-agent`) - ADVANCED
 
-Advanced containers that run in background. Supports branch management, network controls, and .NET preview installs.
+For long-running tasks or when you need advanced features. Containers run in background and support branch management, network controls, and .NET preview installs.
+
+**When to use launch-agent:**
+- Multi-day/week development sessions
+- Need to disconnect and reconnect to same workspace
+- Working on multiple branches with different agents
+- Require network monitoring or restrictions
+- Installing custom SDKs (e.g., .NET preview)
+
+**Most users should use `run-*` scripts instead.**
 
 **Basic Usage:**
 
@@ -218,7 +241,7 @@ launch-agent --branch feature-auth
 | `--agent` | Choose agent: `copilot`, `codex`, `claude`, `all` (default: `copilot`) | `--agent codex` |
 | `-y` or `--force` | Auto-replace existing agent branch without prompting | `-y` or `--force` |
 | `--no-push` | Disable auto-push on shutdown | `--no-push` |
-| `--dotnet-preview` | Install .NET preview SDK (e.g., `9.0`, `10.0`) | `--dotnet-preview 9.0` |
+| `--dotnet-preview` | Install .NET preview SDK | `--dotnet-preview 11.0` |
 | `--network-proxy` | Network mode: `allow-all` (default), `restricted`, `squid` | `--network-proxy restricted` |
 
 **Branch Management:**
@@ -268,7 +291,9 @@ See [NETWORK_PROXY.md](NETWORK_PROXY.md) for network configuration details.
 
 ## Examples
 
-### Quick Ephemeral Sessions
+### Ephemeral Sessions (Recommended)
+
+Use these for day-to-day development:
 
 ```bash
 # Navigate to your project
@@ -284,7 +309,9 @@ run-codex --no-push
 run-claude ~/other-project
 ```
 
-### Persistent Workspaces
+### Persistent Workspaces (Advanced) (Advanced)
+
+For long-running development sessions:
 
 ```bash
 # Navigate to your project
@@ -302,6 +329,8 @@ launch-agent --branch feature-auth
 # Clone from GitHub
 launch-agent https://github.com/user/repo --agent copilot
 ```
+
+**Note:** For most tasks, use `run-copilot`, `run-codex`, or `run-claude` instead.
 
 ### Install .NET Preview SDK
 
@@ -357,6 +386,8 @@ Each agent gets:
 No conflicts!
 
 ## Managing Containers
+
+**Note:** If you're using `run-*` scripts, you don't need these commands - containers auto-remove on exit. These are only needed for persistent containers created with `launch-agent`.
 
 ### List Active Agent Containers
 
@@ -472,26 +503,29 @@ ls -la
 The container has **two separate contexts** for working with git:
 
 #### Context 1: Interactive Shell (bash)
-```
-┌──────────────────────────────────────────┐
-│  Container Shell (/workspace)            │
-│  • Full access to git commands           │
-│  • Can commit, push, pull                │
-│  • Two remotes configured:               │
-│    ├─ origin → GitHub                    │
-│    └─ local → Host repo (default push)   │
-└──────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph "Container Shell (/workspace)"
+        A["✓ Full access to git commands"]
+        B["✓ Can commit, push, pull"]
+        C["Two remotes configured:"]
+        D["origin → GitHub"]
+        E["local → Host repo (default push)"]
+        A --> B --> C --> D
+        C --> E
+    end
 ```
 
 #### Context 2: Agent CLI Mode
-```
-┌──────────────────────────────────────────┐
-│  Agent CLI (e.g., github-copilot-cli)    │
-│  • Runs in subdirectory                  │
-│  • NOT in git repository!                │
-│  • Cannot use git commands               │
-│  • Exit to shell first: Ctrl+D or exit  │
-└──────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph "Agent CLI (e.g., github-copilot-cli)"
+        F["• Runs in subdirectory"]
+        G["✗ NOT in git repository!"]
+        H["✗ Cannot use git commands"]
+        I["Exit to shell first: Ctrl+D or exit"]
+        F --> G --> H --> I
+    end
 ```
 
 **Common Error:** Running git commands while in agent CLI:
@@ -510,31 +544,23 @@ $ git status  # Now works!
 
 The container is configured with two git remotes for maximum flexibility:
 
-```
-┌─────────────────────────────────────────────────────┐
-│               Git Remote Topology                   │
-│                                                     │
-│   Container (/workspace)                           │
-│   ┌───────────────────────┐                        │
-│   │  Your Feature Branch  │                        │
-│   │  (e.g., copilot/auth) │                        │
-│   └─────┬──────────┬──────┘                        │
-│         │          │                                │
-│         │          │                                │
-│    git push   git push origin                      │
-│    (default)                                       │
-│         │          │                                │
-│         ▼          ▼                                │
-│   ┌─────────┐  ┌──────────────┐                   │
-│   │  local  │  │   origin     │                    │
-│   │  (Host) │  │  (GitHub)    │                    │
-│   └─────────┘  └──────────────┘                   │
-│         │            │                              │
-└─────────┼────────────┼──────────────────────────────┘
-          │            │
-          ▼            ▼
-    Host Machine   GitHub.com
-    /path/to/repo  github.com/user/repo
+```mermaid
+graph TB
+    subgraph Container["/workspace"]
+        Branch["Your Feature Branch<br/>(e.g., copilot/auth)"]
+    end
+    
+    Branch -->|"git push<br/>(default)"| Local["local<br/>(Host)"]
+    Branch -->|"git push origin"| Origin["origin<br/>(GitHub)"]
+    
+    Local -->|"Persists to"| HostMachine["Host Machine<br/>/path/to/repo"]
+    Origin -->|"Pushes to"| GitHub["GitHub.com<br/>github.com/user/repo"]
+    
+    style Branch fill:#e1f5ff
+    style Local fill:#d4edda
+    style Origin fill:#d4edda
+    style HostMachine fill:#fff3cd
+    style GitHub fill:#fff3cd
 ```
 
 **Default push target:** `local` (host machine)  
@@ -852,7 +878,25 @@ When you run `launch-agent`:
 
 ## Command Reference
 
-### Launch Agent
+### Run Agent (Recommended)
+```bash
+# Bash
+run-copilot [directory] [--no-push] [--help]
+run-codex [directory] [--no-push] [--help]
+run-claude [directory] [--no-push] [--help]
+
+# PowerShell
+run-copilot.ps1 [directory] [-NoPush] [-Help]
+run-codex.ps1 [directory] [-NoPush] [-Help]
+run-claude.ps1 [directory] [-NoPush] [-Help]
+```
+
+**Parameters:**
+- `directory`: Local path (default: current directory)
+- `-NoPush`/`--no-push`: Disable auto-push on exit
+- `-Help`/`--help`: Show usage information
+
+### Launch Agent (Advanced)
 ```powershell
 # PowerShell
 .\launch-agent.ps1 [source] [-Branch name] [-Agent type] [-Name custom]
