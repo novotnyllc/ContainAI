@@ -81,8 +81,10 @@ launch-agent copilot
 launch-agent codex
 
 # Launch on specific branch
-launch-agent copilot --branch feature-auth
+launch-agent copilot --branch feature-api
 ```
+
+**Branch isolation:** Agents work on isolated branches (e.g., `copilot/session-1`, `codex/feature-api`) to keep agent work separate from your current branch.
 
 **Container naming:** Containers are named `{agent}-{repo}-{branch}` for easy identification:
 - `copilot-myapp-main` - Copilot on myapp repository, main branch
@@ -139,15 +141,15 @@ run-claude ~/other-proj  # Launch on specific directory
 cd ~/my-project
 launch-agent copilot                      # Copilot on current branch
 launch-agent codex                        # Codex on current branch
-launch-agent copilot --branch feature-auth # Copilot on feature-auth branch
+launch-agent copilot --branch feature-api  # Copilot on feature-api branch
 ```
 
 **Multiple agents on same repo:**
 ```bash
 cd ~/my-project
 launch-agent copilot --branch main     # copilot-myproject-main
-launch-agent codex --branch auth       # codex-myproject-auth
-launch-agent claude --branch api       # claude-myproject-api
+launch-agent codex --branch api-v2     # codex-myproject-api-v2
+launch-agent claude --branch refactor  # claude-myproject-refactor
 ```
 
 **Advanced: Network controls:**

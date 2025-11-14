@@ -101,9 +101,9 @@ run-copilot.ps1
 ```bash
 # Persistent container (background, reconnectable)
 cd ~/my-project
-launch-agent copilot                  # Copilot on current branch
-launch-agent codex            # Codex on current branch
-launch-agent copilot --branch feature-auth    # Copilot on feature-auth branch
+launch-agent copilot                  # Copilot with auto-generated session branch
+launch-agent codex                    # Codex with auto-generated session branch
+launch-agent copilot --branch feature-api     # Copilot on feature-api branch
 
 # PowerShell
 launch-agent.ps1 -Agent codex -Branch feature-auth

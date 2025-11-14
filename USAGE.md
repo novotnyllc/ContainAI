@@ -219,17 +219,17 @@ For long-running tasks or when you need advanced features. Containers run in bac
 **Basic Usage:**
 
 ```bash
-# Navigate to your project
-cd ~/my-project
-
-# Launch with agent (required as first argument)
+# Everyday use - just launch
 launch-agent copilot
-
-# Launch different agent
 launch-agent codex
 
-# Work on specific branch
-launch-agent copilot --branch feature-auth
+# Work on specific feature
+launch-agent copilot --branch refactor-db
+launch-agent claude --branch optimize-queries
+
+# Clone and work on GitHub repo
+launch-agent copilot https://github.com/user/repo
+launch-agent copilot https://github.com/user/repo --branch add-tests
 ```
 
 **Parameters:**
@@ -241,15 +241,31 @@ launch-agent copilot --branch feature-auth
 | `-b` or `--branch` | Feature branch name (becomes `<agent>/<branch>`) | `-b auth` creates `copilot/auth` |
 | `-y` or `--force` | Auto-replace existing agent branch without prompting | `-y` or `--force` |
 | `--no-push` | Disable auto-push on shutdown | `--no-push` |
+| `--use-current-branch` | Work directly on current branch instead of creating agent branch | `--use-current-branch` |
 | `--dotnet-preview` | Install .NET preview SDK | `--dotnet-preview 11.0` |
 | `--network-proxy` | Network mode: `allow-all` (default), `restricted`, `squid` | `--network-proxy restricted` |
 
 **Branch Management:**
 
-Each agent creates its own isolated branch in the format `<agent>/<branch>`:
-- `copilot/main` - GitHub Copilot's work on main branch
-- `codex/feature-auth` - OpenAI Codex's work on feature-auth
-- `claude/bugfix` - Anthropic Claude's work on bugfix
+Agents work on isolated branches to keep their changes separate:
+
+**Without `--branch` flag:**
+- Creates unique session branch: `<agent>/session-1`, `<agent>/session-2`, etc.
+- Useful for quick experiments or when you don't want to name a branch
+- Example: `copilot/session-1`, `codex/session-2`
+
+**With `--branch` flag:**
+- Creates `<agent>/<branch>` from your current commit
+- Example: `--branch feature-api` creates `copilot/feature-api`
+- Example: `--branch refactor-auth` creates `claude/refactor-auth`
+
+**Already on agent branch:**
+- If current branch matches `<agent>/*` pattern, reuses it
+- Example: Already on `copilot/session-1` → continues using it
+
+**With `--use-current-branch`:**
+- Works directly on whatever branch you're currently on
+- No agent-specific branch created
 
 When launching an agent, if its branch already exists:
 1. **Prompt for replacement** (default: No)
@@ -373,9 +389,9 @@ Launch multiple agents working on different features:
 cd ~/my-project
 
 # Launch different agents on different branches
-launch-agent copilot --branch auth       # copilot-myproject-auth
-launch-agent codex --branch database     # codex-myproject-database
-launch-agent claude --branch ui          # claude-myproject-ui
+launch-agent copilot --branch api-v2       # copilot-myproject-api-v2
+launch-agent codex --branch database       # codex-myproject-database
+launch-agent claude --branch frontend      # claude-myproject-frontend
 ```
 
 Each agent gets:
@@ -927,7 +943,7 @@ docker rm -f copilot-myrepo
 ### Long-term development
 
 ```powershell
-.\launch-agent.ps1 copilot C:\projects\app -b feature-x
+.\launch-agent.ps1 copilot C:\projects\app -b feature-api
 # Connect from VS Code
 # Work over days/weeks
 # Container persists until you remove it
@@ -936,8 +952,8 @@ docker rm -f copilot-myrepo
 ### Multiple features, multiple agents
 
 ```powershell
-.\launch-agent.ps1 copilot . -b backend
-.\launch-agent.ps1 claude . -b frontend
+.\launch-agent.ps1 copilot . -b backend-api
+.\launch-agent.ps1 claude . -b frontend-redesign
 .\launch-agent.ps1 codex . -b tests
 ```
 

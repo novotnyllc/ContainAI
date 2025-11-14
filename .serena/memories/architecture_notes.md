@@ -25,11 +25,24 @@
 
 ## Branch Management
 
+### Branch Isolation
+**How agents interact with branches:**
+- Without `--branch`: Auto-creates unique session branch `{agent}/session-N`
+- With `--branch <name>`: Creates `{agent}/<name>` branch
+- Already on agent branch (matches `{agent}/*`): Reuses that branch
+- With `--use-current-branch`: Works directly on current branch
+
 ### Agent Branches
-- Each agent gets isolated branch: `{agent}/{base-branch}`
-- Examples: `copilot/main`, `codex/feature-auth`
-- Created automatically when launching agent on existing branch
+- Each agent works on isolated branch: `{agent}/{base-branch}`
+- Examples: `copilot/feature-api`, `codex/refactor-db`, `copilot/session-1`
+- Created automatically when launching agent
 - Deleted automatically when container removed (unless has unmerged commits)
+
+### Session Branches
+- Auto-generated when no `--branch` specified
+- Pattern: `{agent}/session-1`, `{agent}/session-2`, etc.
+- Numbered sequentially to avoid conflicts
+- Convenient for quick experiments without naming
 
 ### Conflict Resolution
 1. **Detection**: Check for existing agent branch before creating

@@ -17,6 +17,7 @@ DOTNET_PREVIEW=""
 NETWORK_PROXY="allow-all"
 NO_PUSH=false
 FORCE=false
+USE_CURRENT_BRANCH=false
 
 # First argument must be agent type
 if [[ $# -eq 0 || "$1" == "-"* ]]; then
@@ -62,6 +63,10 @@ while [[ $# -gt 0 ]]; do
             NO_PUSH=true
             shift
             ;;
+        --use-current-branch)
+            USE_CURRENT_BRANCH=true
+            shift
+            ;;
         -y|--force)
             FORCE=true
             shift
@@ -81,20 +86,24 @@ while [[ $# -gt 0 ]]; do
             echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)"
             echo "  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)"
             echo "  --no-push                   Disable auto-push on container shutdown"
+            echo "  --use-current-branch        Use current branch instead of creating agent branch (unsafe)"
             echo "  -y, --force                 Automatically replace existing agent branch without prompting"
             echo "  -h, --help                  Show this help"
             echo ""
-            echo "Branch Management:"
-            echo "  Each agent creates its own branch: <agent>/<base-branch>"
-            echo "  If the agent branch exists, you'll be prompted to replace it."
-            echo "  Branches with unmerged commits are archived before replacement."
+            echo "Branch Behavior:"
+            echo "  • Without --branch: creates unique session branch <agent>/session-N"
+            echo "  • With --branch: creates <agent>/<branch>"
+            echo "  • Already on agent branch: reuses that branch"
+            echo "  • Use --use-current-branch to work directly on current branch"
+            echo "  • Existing agent branches prompt for replacement"
+            echo "  • Branches with unmerged commits are archived before replacement"
             echo ""
             echo "Examples:"
             echo "  launch-agent copilot                              # Copilot in current directory"
-            echo "  launch-agent codex . -b feature-auth              # Codex in current dir, custom branch"
+            echo "  launch-agent codex . -b refactor-db               # Codex in current dir, custom branch"
             echo "  launch-agent copilot https://github.com/user/repo # Copilot from GitHub"
             echo "  launch-agent claude /path/to/repo --name my-workspace"
-            echo "  launch-agent copilot . -b main -y                 # Auto-replace existing branch"
+            echo "  launch-agent copilot . -b feature-api -y          # Auto-replace existing agent branch"
             exit 0
             ;;
         *)
@@ -152,15 +161,56 @@ if [ "$NETWORK_PROXY" = "restricted" ] && [ "$SOURCE_TYPE" = "url" ]; then
     exit 1
 fi
 
-# Determine branch name first
+# Helper: Check if branch name follows agent naming convention
+is_agent_branch() {
+    local branch_name="$1"
+    [[ "$branch_name" =~ ^(copilot|codex|claude)/ ]]
+}
+
+# Helper: Find next available session number
+find_next_session() {
+    local repo_path="$1"
+    local agent="$2"
+    local n=1
+    cd "$repo_path"
+    while git show-ref --verify --quiet "refs/heads/${agent}/session-${n}" 2>/dev/null; do
+        ((n++))
+    done
+    cd - > /dev/null
+    echo "$n"
+}
+
+# Determine branch name with safety checks
 if [ -z "$BRANCH" ]; then
     if [ "$SOURCE_TYPE" = "local" ]; then
         cd "$SOURCE"
         CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
         cd - > /dev/null
-        BRANCH="${CURRENT_BRANCH:-main}"
+        
+        # Safety: Never use current branch unless it's an agent branch or explicitly allowed
+        if [ "$USE_CURRENT_BRANCH" = "true" ]; then
+            BRANCH="${CURRENT_BRANCH:-main}"
+            echo "⚠️  Warning: Using current branch directly (--use-current-branch specified)"
+        elif is_agent_branch "$CURRENT_BRANCH"; then
+            # Current branch is already an agent branch, safe to use
+            BRANCH="$CURRENT_BRANCH"
+            echo "✓ Current branch '$CURRENT_BRANCH' is an agent branch"
+        else
+            # Generate unique session branch
+            SESSION_NUM=$(find_next_session "$SOURCE" "$AGENT")
+            BRANCH="session-${SESSION_NUM}"
+            echo "ℹ️  Creating new branch '${AGENT}/${BRANCH}' (current: ${CURRENT_BRANCH:-main})"
+        fi
     else
         BRANCH="main"
+    fi
+else
+    # Explicit branch provided, safety check only for local repos
+    if [ "$SOURCE_TYPE" = "local" ] && [ "$USE_CURRENT_BRANCH" != "true" ]; then
+        cd "$SOURCE"
+        CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+        cd - > /dev/null
+        # Branch will be created as agent/branch, so no issue
     fi
 fi
 
@@ -176,7 +226,13 @@ else
     WORKSPACE_NAME="$REPO_NAME"
 fi
 
-AGENT_BRANCH="${AGENT}/${BRANCH}"
+# Determine agent branch (handle case where BRANCH is already agent/branch format)
+if is_agent_branch "$BRANCH"; then
+    AGENT_BRANCH="$BRANCH"
+else
+    AGENT_BRANCH="${AGENT}/${BRANCH}"
+fi
+
 PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
 PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
 PROXY_IMAGE="coding-agents-proxy:local"
