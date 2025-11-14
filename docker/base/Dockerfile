@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nano \
     jq \
     unzip \
+    socat \
     # Build tools (REQUIRED for development)
     build-essential \
     # Python with dev headers (for building native extensions)

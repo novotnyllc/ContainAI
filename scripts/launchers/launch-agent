@@ -449,6 +449,102 @@ fi
 [ -d "${HOME}/.config/claude" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
 [ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
 
+# Start git credential proxy server on host if not already running
+CREDENTIAL_SOCKET_PATH="${HOME}/.config/coding-agents/git-credential.sock"
+CREDENTIAL_PROXY_SCRIPT="$SCRIPT_DIR/../runtime/git-credential-proxy-server.sh"
+
+if [ ! -S "$CREDENTIAL_SOCKET_PATH" ]; then
+    if [ -f "$CREDENTIAL_PROXY_SCRIPT" ]; then
+        echo "🔐 Starting git credential proxy server..."
+        mkdir -p "$(dirname "$CREDENTIAL_SOCKET_PATH")"
+        
+        # Start proxy server in background with nohup
+        nohup "$CREDENTIAL_PROXY_SCRIPT" "$CREDENTIAL_SOCKET_PATH" > /dev/null 2>&1 &
+        PROXY_PID=$!
+        
+        # Wait for socket to be created (max 5 seconds)
+        for i in {1..50}; do
+            [ -S "$CREDENTIAL_SOCKET_PATH" ] && break
+            sleep 0.1
+        done
+        
+        if [ -S "$CREDENTIAL_SOCKET_PATH" ]; then
+            echo "   ✅ Credential proxy started (PID: $PROXY_PID)"
+        else
+            echo "   ⚠️  Credential proxy started but socket not ready"
+            echo "      Container will fall back to file-based credentials"
+        fi
+    else
+        echo "⚠️  Credential proxy script not found, using file-based credentials"
+    fi
+fi
+
+# Start GPG proxy server on host if not already running and GPG signing is configured
+GPG_SOCKET_PATH="${HOME}/.config/coding-agents/gpg-proxy.sock"
+GPG_PROXY_SCRIPT="$SCRIPT_DIR/../runtime/gpg-proxy-server.sh"
+
+if git config commit.gpgsign 2>/dev/null | grep -q "true"; then
+    if [ ! -S "$GPG_SOCKET_PATH" ]; then
+        if [ -f "$GPG_PROXY_SCRIPT" ]; then
+            echo "🔏 Starting GPG proxy server for commit signing..."
+            mkdir -p "$(dirname "$GPG_SOCKET_PATH")"
+            
+            # Start GPG proxy server in background
+            nohup "$GPG_PROXY_SCRIPT" "$GPG_SOCKET_PATH" > /dev/null 2>&1 &
+            GPG_PROXY_PID=$!
+            
+            # Wait for socket to be created
+            for i in {1..50}; do
+                [ -S "$GPG_SOCKET_PATH" ] && break
+                sleep 0.1
+            done
+            
+            if [ -S "$GPG_SOCKET_PATH" ]; then
+                echo "   ✅ GPG proxy started (PID: $GPG_PROXY_PID)"
+            else
+                echo "   ⚠️  GPG proxy started but socket not ready"
+            fi
+        fi
+    fi
+fi
+
+# Mount credential proxy socket (most secure - no files in container)
+if [ -S "$CREDENTIAL_SOCKET_PATH" ]; then
+    DOCKER_ARGS+=("-v" "$CREDENTIAL_SOCKET_PATH:/tmp/git-credential-proxy.sock:ro")
+    DOCKER_ARGS+=("-e" "CREDENTIAL_SOCKET=/tmp/git-credential-proxy.sock")
+fi
+
+# Mount GPG proxy socket (secure signing - private keys stay on host)
+if [ -S "$GPG_SOCKET_PATH" ]; then
+    DOCKER_ARGS+=("-v" "$GPG_SOCKET_PATH:/tmp/gpg-proxy.sock:ro")
+    DOCKER_ARGS+=("-e" "GPG_PROXY_SOCKET=/tmp/gpg-proxy.sock")
+fi
+
+# Fallback: Mount credential files (read-only for security)
+# These are only used if socket proxy is not available
+[ -f "${HOME}/.git-credentials" ] && DOCKER_ARGS+=("-v" "${HOME}/.git-credentials:/home/agentuser/.git-credentials:ro")
+[ -d "${HOME}/.ssh" ] && DOCKER_ARGS+=("-v" "${HOME}/.ssh:/home/agentuser/.ssh:ro")
+
+# Mount GPG config for commit signing (read-only, no private keys)
+# Only mount if GPG proxy socket not available (fallback to agent socket)
+if [ -d "${HOME}/.gnupg" ] && [ ! -S "$GPG_SOCKET_PATH" ]; then
+    # Mount GPG home directory read-only (contains config, public keys, not private keys)
+    DOCKER_ARGS+=("-v" "${HOME}/.gnupg:/home/agentuser/.gnupg:ro")
+    
+    # Forward GPG agent socket if available (for direct signing without proxy)
+    GPG_AGENT_SOCK="${HOME}/.gnupg/S.gpg-agent"
+    if [ -S "$GPG_AGENT_SOCK" ]; then
+        DOCKER_ARGS+=("-v" "$GPG_AGENT_SOCK:/home/agentuser/.gnupg/S.gpg-agent")
+    fi
+fi
+
+# SSH agent socket forwarding (supports any SSH agent via standard SSH_AUTH_SOCK)
+if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+    # Forward SSH agent socket to container
+    DOCKER_ARGS+=("-v" "$SSH_AUTH_SOCK:/tmp/ssh-agent.sock:ro")
+    DOCKER_ARGS+=("-e" "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
+fi
+
 # Final args
 DOCKER_ARGS+=(
     "-w" "/workspace"

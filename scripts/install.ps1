@@ -71,7 +71,7 @@ function Install-Unix {
         "$env:HOME/.bashrc"
     }
     
-    $exportLine = "export PATH=`"${LaunchersPath}:`$PATH`""
+    $exportLine = "export PATH=`"${LaunchersPath}:`$`{PATH}`""
     
     # Check if already in rc file
     if (Test-Path $rcFile) {

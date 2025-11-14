@@ -57,6 +57,12 @@ docker ps
 # Should show empty table (not an error)
 ```
 
+**Install socat in WSL (required for credential/GPG proxy):**
+```powershell
+wsl sudo apt-get update
+wsl sudo apt-get install -y socat
+```
+
 **Troubleshooting**: If you see "Docker daemon is not running", ensure Docker Desktop is started and the whale icon shows "Docker Desktop is running".
 
 ### macOS
@@ -74,6 +80,11 @@ docker --version
 
 docker ps
 # Should show empty table (not an error)
+```
+
+**Install socat (required for credential/GPG proxy):**
+```bash
+brew install socat
 ```
 
 ### Linux
@@ -101,6 +112,9 @@ echo \
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
+# Install socat (required for credential/GPG proxy)
+sudo apt-get install -y socat
+
 # Add your user to docker group (avoids needing sudo)
 sudo usermod -aG docker $USER
 
@@ -109,7 +123,7 @@ sudo usermod -aG docker $USER
 
 **Fedora/RHEL:**
 ```bash
-sudo dnf install -y docker
+sudo dnf install -y docker socat
 sudo systemctl start docker
 sudo systemctl enable docker
 sudo usermod -aG docker $USER
@@ -134,12 +148,12 @@ Podman is a daemonless container engine compatible with Docker commands.
 **Ubuntu/Debian:**
 ```bash
 sudo apt-get update
-sudo apt-get install -y podman
+sudo apt-get install -y podman socat
 ```
 
 **Fedora/RHEL:**
 ```bash
-sudo dnf install -y podman
+sudo dnf install -y podman socat
 ```
 
 **Arch Linux:**
