@@ -27,6 +27,9 @@ param(
     [switch]$NoPush,
     
     [Parameter(Mandatory=$false)]
+    [switch]$UseCurrentBranch,
+    
+    [Parameter(Mandatory=$false)]
     [Alias("y")]
     [switch]$Force
 )
@@ -93,13 +96,53 @@ if ($NetworkProxy -eq "restricted" -and $SourceType -eq "url") {
     exit 1
 }
 
-# Determine branch name first
+# Helper: Check if branch name follows agent naming convention
+function Test-AgentBranch {
+    param([string]$BranchName)
+    return $BranchName -match '^(copilot|codex|claude)/'
+}
+
+# Helper: Find next available session number
+function Find-NextSession {
+    param(
+        [string]$RepoPath,
+        [string]$Agent
+    )
+    Push-Location $RepoPath
+    $n = 1
+    while ($true) {
+        git show-ref --verify --quiet "refs/heads/$Agent/session-$n" 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            break
+        }
+        $n++
+    }
+    Pop-Location
+    return $n
+}
+
+# Determine branch name with safety checks
 if (-not $Branch) {
     if ($SourceType -eq "local") {
         Push-Location $ResolvedPath
         $CurrentBranch = git branch --show-current 2>$null
         Pop-Location
-        $Branch = if ($CurrentBranch) { $CurrentBranch } else { "main" }
+        
+        # Safety: Never use current branch unless it's an agent branch or explicitly allowed
+        if ($UseCurrentBranch) {
+            $Branch = if ($CurrentBranch) { $CurrentBranch } else { "main" }
+            Write-Host "⚠️  Warning: Using current branch directly (-UseCurrentBranch specified)" -ForegroundColor Yellow
+        } elseif (Test-AgentBranch $CurrentBranch) {
+            # Current branch is already an agent branch, safe to use
+            $Branch = $CurrentBranch
+            Write-Host "✓ Current branch '$CurrentBranch' is an agent branch" -ForegroundColor Green
+        } else {
+            # Generate unique session branch
+            $SessionNum = Find-NextSession -RepoPath $ResolvedPath -Agent $Agent
+            $Branch = "session-$SessionNum"
+            $CurrentDisplay = if ($CurrentBranch) { $CurrentBranch } else { "main" }
+            Write-Host "ℹ️  Creating new branch '$Agent/$Branch' (current: $CurrentDisplay)" -ForegroundColor Cyan
+        }
     } else {
         $Branch = "main"
     }
@@ -116,7 +159,13 @@ if (-not (Test-ValidBranchName $Branch)) {
 if ($SourceType -eq "local") {
     Push-Location $ResolvedPath
     try {
-        $AgentBranchName = "$Agent/$Branch"
+        # Determine agent branch (handle case where Branch is already agent/branch format)
+        if (Test-AgentBranch $Branch) {
+            $AgentBranchName = $Branch
+        } else {
+            $AgentBranchName = "$Agent/$Branch"
+        }
+        
         git show-ref --verify --quiet "refs/heads/$AgentBranchName" 2>$null | Out-Null
         $BranchExistsCode = $LASTEXITCODE
         
@@ -230,7 +279,13 @@ if (-not (Test-ValidContainerName $ContainerName)) {
     exit 1
 }
 
-$AgentBranch = "$Agent/$Branch"
+# Set AgentBranch (handle case where Branch is already agent/branch format)
+if (Test-AgentBranch $Branch) {
+    $AgentBranch = $Branch
+} else {
+    $AgentBranch = "$Agent/$Branch"
+}
+
 $ProxyContainerName = "$ContainerName-proxy"
 $ProxyNetworkName = "$ContainerName-net"
 $ProxyImage = "coding-agents-proxy:local"
