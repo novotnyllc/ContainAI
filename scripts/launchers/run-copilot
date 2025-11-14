@@ -9,10 +9,25 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 
 # Parse arguments
 REPO_PATH="."
+CPU="4"
+MEMORY="8g"
+GPU=""
 SKIP_PUSH=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --cpu)
+            CPU="$2"
+            shift 2
+            ;;
+        --memory)
+            MEMORY="$2"
+            shift 2
+            ;;
+        --gpu)
+            GPU="$2"
+            shift 2
+            ;;
         --no-push)
             SKIP_PUSH=true
             shift
@@ -26,13 +41,17 @@ while [[ $# -gt 0 ]]; do
             echo "  directory    Path to repository (default: current directory)"
             echo ""
             echo "Options:"
-            echo "  --no-push    Skip auto-push to local remote on exit"
-            echo "  -h, --help   Show this help"
+            echo "  --cpu NUM      CPU limit (default: 4)"
+            echo "  --memory SIZE  Memory limit (default: 8g)"
+            echo "  --gpu SPEC     GPU specification (e.g., 'all' or 'device=0')"
+            echo "  --no-push      Skip auto-push to local remote on exit"
+            echo "  -h, --help     Show this help"
             echo ""
             echo "Examples:"
             echo "  run-copilot              # Launch in current directory"
             echo "  run-copilot ~/my-repo    # Launch in specific directory"
             echo "  run-copilot --no-push    # Skip auto-push on exit"
+            echo "  run-copilot --cpu 8 --memory 16g  # Custom resources"
             exit 0
             ;;
         *)
@@ -106,8 +125,16 @@ fi
 DOCKER_ARGS+=(
     "-w" "/workspace"
     "--security-opt" "no-new-privileges:true"
-    "coding-agents-copilot:local"
+    "--cpus=$CPU"
+    "--memory=$MEMORY"
 )
+
+# Add GPU if specified
+if [ -n "$GPU" ]; then
+    DOCKER_ARGS+=("--gpus=$GPU")
+fi
+
+DOCKER_ARGS+=("coding-agents-copilot:local")
 
 # Run container
 $CONTAINER_CMD run "${DOCKER_ARGS[@]}"
