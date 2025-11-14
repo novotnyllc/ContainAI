@@ -156,100 +156,129 @@ trap cleanup_on_shutdown SIGTERM SIGINT EXIT
 # Ensure we're in the workspace directory
 cd /workspace || exit 1
 
-# Display current repository information
+# Display current repository information (concise)
 if [ -d .git ]; then
-    echo "📁 Repository: $(git remote get-url origin 2>/dev/null || echo 'Local repository')"
-    echo "🌿 Branch: $(git branch --show-current 2>/dev/null || echo 'Unknown')"
-    echo "📝 Last commit: $(git log -1 --oneline 2>/dev/null || echo 'No commits')"
+    branch=$(git branch --show-current 2>/dev/null || echo 'detached')
+    echo "📁 $(git remote get-url origin 2>/dev/null || echo 'Local repository') [${branch}]"
 else
-    echo "⚠️  Warning: Not a git repository. Initialize with 'git init' if needed."
+    echo "⚠️  Not a git repository - run 'git init' if needed"
 fi
 
-# Announce network policy for transparency
-case "${NETWORK_POLICY:-allow-all}" in
-    restricted)
-        echo "🌐 Network policy: restricted (container launched without outbound network)"
-        ;;
-    squid)
-        echo "🌐 Network policy: squid (traffic routed through proxy sidecar)"
-        ;;
-    *)
-        echo "🌐 Network policy: allow-all (standard Docker bridge network)"
-        ;;
-esac
-
-# Configure git to use HTTPS with gh credential helper (OAuth from host)
+# Configure git to use generic credential helper that delegates to host's auth
+# Works with GitHub, GitLab, Bitbucket, Azure DevOps, self-hosted, etc.
+# The credential helper tries: gh CLI (for github.com) -> git-credential-store
 git config --global credential.helper ""
-git config --global credential.helper '!gh auth git-credential'
+git config --global credential.helper '!/usr/local/bin/git-credential-host-helper.sh'
+
+# Configure git autocrlf for Windows compatibility
+git config --global core.autocrlf true
+
+# Configure commit signing if host has it configured
+# This allows verified commits while keeping signing keys secure on host
+if [ -f /home/agentuser/.gitconfig ]; then
+    # Check if host has GPG signing configured
+    if host_gpg_key=$(git config --file /home/agentuser/.gitconfig user.signingkey 2>/dev/null); then
+        if [ -n "$host_gpg_key" ]; then
+            # Copy GPG signing configuration from host
+            git config --global user.signingkey "$host_gpg_key"
+            
+            # Check if host has commit signing enabled
+            if git config --file /home/agentuser/.gitconfig commit.gpgsign 2>/dev/null | grep -q "true"; then
+                git config --global commit.gpgsign true
+                
+                # Use GPG proxy instead of copying host's gpg.program path
+                # This keeps private keys secure on host
+                if [ -S "${GPG_PROXY_SOCKET:-/tmp/gpg-proxy.sock}" ]; then
+                    git config --global gpg.program /usr/local/bin/gpg-host-proxy.sh
+                    echo "🔏 Commit signing: GPG via proxy (key: ${host_gpg_key:0:8}...)"
+                elif [ -S "${HOME}/.gnupg/S.gpg-agent" ]; then
+                    # Fallback: Use direct GPG agent socket if available
+                    git config --global gpg.program gpg
+                    echo "🔏 Commit signing: GPG via agent (key: ${host_gpg_key:0:8}...)"
+                else
+                    echo "⚠️  GPG signing configured but proxy/agent unavailable"
+                fi
+            fi
+        fi
+    fi
+    
+    # Check if host has SSH signing configured (newer git feature)
+    if host_ssh_key=$(git config --file /home/agentuser/.gitconfig user.signingkey 2>/dev/null); then
+        if git config --file /home/agentuser/.gitconfig gpg.format 2>/dev/null | grep -q "ssh"; then
+            # Copy SSH signing configuration from host
+            git config --global gpg.format ssh
+            git config --global user.signingkey "$host_ssh_key"
+            
+            if git config --file /home/agentuser/.gitconfig commit.gpgsign 2>/dev/null | grep -q "true"; then
+                git config --global commit.gpgsign true
+                echo "🔏 Commit signing: SSH via agent"
+            fi
+            
+            # SSH signing uses SSH agent socket - already forwarded if available
+            # The signing key can be different from authentication key
+        fi
+    fi
+fi
 
 # Setup MCP configuration if config.toml exists
 if [ -f "/workspace/config.toml" ]; then
-    echo "⚙️  Setting up MCP configurations from workspace config.toml..."
-    /usr/local/bin/setup-mcp-configs.sh
-else
-    echo "ℹ️  No config.toml found in workspace - MCP servers not configured"
+    /usr/local/bin/setup-mcp-configs.sh 2>&1 | grep -E "^(ERROR|WARN)" || true
 fi
 
-# Index project with Serena for faster semantic operations
+# Setup VS Code tasks for container
+if [ -f "/workspace/scripts/runtime/setup-vscode-tasks.sh" ]; then
+    /workspace/scripts/runtime/setup-vscode-tasks.sh 2>/dev/null || true
+fi
+
+# Index project with Serena for faster semantic operations (silent unless error)
 if [ -d "/workspace/.git" ]; then
-    echo "📊 Indexing workspace for Serena (faster code navigation)..."
-    uvx --from "git+https://github.com/oraios/serena" serena project index --project /workspace 2>/dev/null || \
-        echo "⚠️  Serena indexing skipped (may be slower on first use)"
+    uvx --from "git+https://github.com/oraios/serena" serena project index --project /workspace >/dev/null 2>&1 || \
+        echo "⚠️  Serena indexing failed"
 fi
 
 # Load MCP secrets from host mount if available
 if [ -f "/home/agentuser/.mcp-secrets.env" ]; then
-    echo "🔐 Loading MCP secrets from host..."
     set -a
     source /home/agentuser/.mcp-secrets.env
     set +a
-else
-    echo "ℹ️  No MCP secrets file found (optional)"
 fi
 
-# Update Serena MCP server to latest version
-echo "🔄 Updating Serena MCP server..."
-uvx --refresh --from "git+https://github.com/oraios/serena@main" serena --version >/dev/null 2>&1 || \
-    echo "⚠️  Serena update skipped (offline or unavailable)"
+# Update Serena MCP server to latest version (silent)
+uvx --refresh --from "git+https://github.com/oraios/serena@main" serena --version >/dev/null 2>&1 || true
 
-# Check authentication status (all from host mounts via OAuth)
+# Check authentication and configuration (concise summary)
 echo ""
-if command -v gh &> /dev/null; then
-    if gh auth status &> /dev/null 2>&1; then
-        echo "✅ GitHub CLI authenticated via OAuth (from host)"
-    else
-        echo "⚠️  GitHub CLI: Run 'gh auth login' in WSL2 host, then restart container"
+
+# Collect authentication status quietly
+auth_status=""
+git_user=$(git config user.name 2>/dev/null || echo "")
+[ -n "$git_user" ] && auth_status="${auth_status}git:${git_user} "
+
+if [ -S "${CREDENTIAL_SOCKET:-/tmp/git-credential-proxy.sock}" ]; then
+    auth_status="${auth_status}creds:proxy(secure) "
+elif command -v gh &> /dev/null && gh auth status &> /dev/null 2>&1; then
+    auth_status="${auth_status}creds:gh "
+elif [ -f ~/.git-credentials ]; then
+    auth_status="${auth_status}creds:file "
+fi
+
+if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+    key_count=$(ssh-add -l 2>/dev/null | grep -v "no identities" | wc -l)
+    if [ "$key_count" -gt 0 ]; then
+        auth_status="${auth_status}ssh:${key_count}keys "
     fi
+elif [ -d ~/.ssh ] && [ -n "$(ls -A ~/.ssh/id_* 2>/dev/null)" ]; then
+    auth_status="${auth_status}ssh:keys-only "
 fi
 
-# Check git config (from host mount)
-if git config user.name &> /dev/null 2>&1; then
-    echo "✅ Git configured (from host)"
+# Single-line authentication summary
+if [ -n "$auth_status" ]; then
+    echo "✅ Auth: ${auth_status}"
 else
-    echo "⚠️  Git: Configure in WSL2 host with 'git config --global user.name/email'"
+    echo "⚠️  No authentication configured - see docs/vscode-integration.md"
 fi
 
-echo ""
-echo "✨ Container ready - Prompt-free operation enabled!"
-echo ""
-echo "Available coding agents (OAuth authenticated):"
-echo "  • GitHub Copilot: Use 'github-copilot-cli' or alias '??'"
-echo "  • Codex: Use 'codex' command"
-echo "  • Claude: Use 'claude' command"
-echo ""
-echo "Repository: /workspace (automatically trusted)"
-echo "MCP config: /workspace/config.toml"
-echo "Policy: approval_policy = \"always\" (no prompts)"
-echo ""
-echo "💡 All authentication uses OAuth from WSL2 host"
-echo "   - GitHub/Copilot: via gh CLI (~/.config/gh/hosts.yml)"
-echo "   - Codex/Claude: via native OAuth configs"
-echo "   - Update on host, restart container to refresh"
-echo ""
-echo "🔄 Auto-commit/push enabled on container shutdown"
-echo "   - Uncommitted changes will be auto-committed with generated message"
-echo "   - Changes will be pushed to 'local' remote (if configured)"
-echo "   - Disable: AUTO_COMMIT_ON_SHUTDOWN=false or AUTO_PUSH_ON_SHUTDOWN=false"
+echo "✨ Container ready | MCP: /workspace/config.toml | Auto-commit on shutdown"
 echo ""
 
 # Execute the command passed to the container

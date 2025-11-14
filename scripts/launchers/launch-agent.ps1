@@ -438,6 +438,108 @@ if (Test-Path "${WslHome}/.config/codex") { $dockerArgs += "-v", "${WslHome}/.co
 if (Test-Path "${WslHome}/.config/claude") { $dockerArgs += "-v", "${WslHome}/.config/claude:/home/agentuser/.config/claude:ro" }
 if (Test-Path "${WslHome}/.config/coding-agents/mcp-secrets.env") { $dockerArgs += "-v", "${WslHome}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro" }
 
+# Start git credential proxy server on host if not already running
+$credentialSocketPath = "${WslHome}/.config/coding-agents/git-credential.sock"
+$credentialProxyScript = Join-Path $PSScriptRoot "..\runtime\git-credential-proxy-server.sh"
+
+if (-not (Test-Path $credentialSocketPath -PathType Leaf)) {
+    if (Test-Path $credentialProxyScript) {
+        Write-Host "🔐 Starting git credential proxy server..." -ForegroundColor Cyan
+        $proxyDir = Split-Path $credentialSocketPath -Parent
+        if (-not (Test-Path $proxyDir)) {
+            New-Item -ItemType Directory -Path $proxyDir -Force | Out-Null
+        }
+        
+        # Start proxy server in background using WSL bash
+        Start-Process -FilePath "wsl" -ArgumentList "bash", "-c", "`"nohup '$credentialProxyScript' '$credentialSocketPath' > /dev/null 2>&1 &`"" -NoNewWindow | Out-Null
+        
+        # Wait for socket to be created (max 5 seconds)
+        $waited = 0
+        while (-not (Test-Path $credentialSocketPath -PathType Leaf) -and $waited -lt 5000) {
+            Start-Sleep -Milliseconds 100
+            $waited += 100
+        }
+        
+        if (Test-Path $credentialSocketPath -PathType Leaf) {
+            Write-Host "   ✅ Credential proxy started" -ForegroundColor Green
+        } else {
+            Write-Warning "   ⚠️  Credential proxy started but socket not ready"
+            Write-Warning "      Container will fall back to file-based credentials"
+        }
+    } else {
+        Write-Warning "⚠️  Credential proxy script not found, using file-based credentials"
+    }
+}
+
+# Start GPG proxy server on host if not already running and GPG signing is configured
+$gpgSocketPath = "${WslHome}/.config/coding-agents/gpg-proxy.sock"
+$gpgProxyScript = Join-Path $PSScriptRoot "..\runtime\gpg-proxy-server.sh"
+
+$commitGpgSign = wsl bash -c "git config commit.gpgsign 2>/dev/null"
+if ($commitGpgSign -eq "true") {
+    if (-not (Test-Path $gpgSocketPath -PathType Leaf)) {
+        if (Test-Path $gpgProxyScript) {
+            Write-Host "🔏 Starting GPG proxy server for commit signing..." -ForegroundColor Cyan
+            $gpgProxyDir = Split-Path $gpgSocketPath -Parent
+            if (-not (Test-Path $gpgProxyDir)) {
+                New-Item -ItemType Directory -Path $gpgProxyDir -Force | Out-Null
+            }
+            
+            # Start GPG proxy server in background
+            Start-Process -FilePath "wsl" -ArgumentList "bash", "-c", "`"nohup '$gpgProxyScript' '$gpgSocketPath' > /dev/null 2>&1 &`"" -NoNewWindow
+            
+            # Wait for socket to be created
+            $waited = 0
+            while (-not (Test-Path $gpgSocketPath -PathType Leaf) -and $waited -lt 5000) {
+                Start-Sleep -Milliseconds 100
+                $waited += 100
+            }
+            
+            if (Test-Path $gpgSocketPath -PathType Leaf) {
+                Write-Host "   ✅ GPG proxy started" -ForegroundColor Green
+            }
+        }
+    }
+}
+
+# Mount credential proxy socket (most secure - no files in container)
+if (Test-Path $credentialSocketPath -PathType Leaf) {
+    $dockerArgs += "-v", "${credentialSocketPath}:/tmp/git-credential-proxy.sock:ro"
+    $dockerArgs += "-e", "CREDENTIAL_SOCKET=/tmp/git-credential-proxy.sock"
+}
+
+# Mount GPG proxy socket (secure signing - private keys stay on host)
+if (Test-Path $gpgSocketPath -PathType Leaf) {
+    $dockerArgs += "-v", "${gpgSocketPath}:/tmp/gpg-proxy.sock:ro"
+    $dockerArgs += "-e", "GPG_PROXY_SOCKET=/tmp/gpg-proxy.sock"
+}
+
+# Fallback: Mount credential files (read-only for security)
+# These are only used if socket proxy is not available
+if (Test-Path "${WslHome}/.git-credentials") { $dockerArgs += "-v", "${WslHome}/.git-credentials:/home/agentuser/.git-credentials:ro" }
+if (Test-Path "${WslHome}/.ssh") { $dockerArgs += "-v", "${WslHome}/.ssh:/home/agentuser/.ssh:ro" }
+
+# Mount GPG config for commit signing (read-only, no private keys)
+# Only mount if GPG proxy socket not available (fallback to agent socket)
+if ((Test-Path "${WslHome}/.gnupg") -and -not (Test-Path $gpgSocketPath -PathType Leaf)) {
+    # Mount GPG home directory read-only (contains config, public keys, not private keys)
+    $dockerArgs += "-v", "${WslHome}/.gnupg:/home/agentuser/.gnupg:ro"
+    
+    # Forward GPG agent socket if available (for direct signing without proxy)
+    $gpgAgentSock = "${WslHome}/.gnupg/S.gpg-agent"
+    if (Test-Path $gpgAgentSock) {
+        $dockerArgs += "-v", "${gpgAgentSock}:/home/agentuser/.gnupg/S.gpg-agent"
+    }
+}
+
+# SSH agent socket forwarding (supports any SSH agent via standard SSH_AUTH_SOCK)
+$sshAuthSock = $env:SSH_AUTH_SOCK
+if ($sshAuthSock -and (Test-Path $sshAuthSock)) {
+    # Forward SSH agent socket to container
+    $dockerArgs += "-v", "${sshAuthSock}:/tmp/ssh-agent.sock:ro"
+    $dockerArgs += "-e", "SSH_AUTH_SOCK=/tmp/ssh-agent.sock"
+}
+
 # Final args
 $dockerArgs += "-w", "/workspace"
 $dockerArgs += "--network", $NetworkMode

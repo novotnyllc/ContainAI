@@ -1,5 +1,9 @@
-# Verify that all prerequisites for CodingAgents are installed and configured
+﻿# Verify that all prerequisites for CodingAgents are installed and configured
 # Usage: .\scripts\verify-prerequisites.ps1
+
+# Suppress Write-Host warnings - this is a user-facing verification script
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='User-facing output script')]
+param()
 
 $ErrorActionPreference = "Continue"  # Don't stop on errors, we want to check everything
 
@@ -8,21 +12,21 @@ $script:Passed = 0
 $script:Failed = 0
 $script:Warnings = 0
 
-# Print functions
-function Print-Checking {
+# Output functions
+function Write-Checking {
     param([string]$Message)
     Write-Host "⏳ Checking: " -NoNewline -ForegroundColor Blue
     Write-Host $Message
 }
 
-function Print-Success {
+function Write-Success {
     param([string]$Message)
     Write-Host "✓ " -NoNewline -ForegroundColor Green
     Write-Host $Message
     $script:Passed++
 }
 
-function Print-Error {
+function Write-ErrorMsg {
     param([string]$Message, [string]$Hint = "")
     Write-Host "✗ " -NoNewline -ForegroundColor Red
     Write-Host $Message
@@ -32,7 +36,7 @@ function Print-Error {
     $script:Failed++
 }
 
-function Print-Warning {
+function Write-WarningMsg {
     param([string]$Message, [string]$Hint = "")
     Write-Host "⚠ " -NoNewline -ForegroundColor Yellow
     Write-Host $Message
@@ -42,7 +46,7 @@ function Print-Warning {
     $script:Warnings++
 }
 
-function Print-Info {
+function Write-InfoMsg {
     param([string]$Message, [string]$Hint = "")
     Write-Host "ℹ  " -NoNewline -ForegroundColor Yellow
     Write-Host $Message
@@ -58,21 +62,21 @@ Write-Host "======================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Check Docker or Podman installation
-Print-Checking "Container runtime (Docker or Podman)"
+Write-Checking "Container runtime (Docker or Podman)"
 $script:ContainerCmd = ""
 try {
     $dockerVersion = (docker --version 2>$null | Select-String -Pattern '\d+\.\d+\.\d+').Matches[0].Value
     if ($dockerVersion) {
-        Print-Success "Docker installed (version $dockerVersion)"
+        Write-Success "Docker installed (version $dockerVersion)"
         $script:ContainerCmd = "docker"
-        
+
         # Check if Docker version is recent enough (20.10.0+)
         $versionParts = $dockerVersion.Split('.')
         $major = [int]$versionParts[0]
         $minor = [int]$versionParts[1]
-        
+
         if ($major -lt 20 -or ($major -eq 20 -and $minor -lt 10)) {
-            Print-Warning "Docker version $dockerVersion is old. Recommend 20.10.0+"
+            Write-WarningMsg "Docker version $dockerVersion is old. Recommend 20.10.0+"
         }
     } else {
         throw "Version not detected"
@@ -82,27 +86,27 @@ try {
     try {
         $podmanVersion = (podman --version 2>$null | Select-String -Pattern '\d+\.\d+\.\d+').Matches[0].Value
         if ($podmanVersion) {
-            Print-Success "Podman installed (version $podmanVersion)"
+            Write-Success "Podman installed (version $podmanVersion)"
             $script:ContainerCmd = "podman"
-            
+
             # Check if Podman version is recent enough (3.0.0+)
             $versionParts = $podmanVersion.Split('.')
             $major = [int]$versionParts[0]
-            
+
             if ($major -lt 3) {
-                Print-Warning "Podman version $podmanVersion is old. Recommend 3.0.0+"
+                Write-WarningMsg "Podman version $podmanVersion is old. Recommend 3.0.0+"
             }
         } else {
             throw "Version not detected"
         }
     } catch {
-        Print-Error "Neither Docker nor Podman is installed" "Install Docker from: https://docs.docker.com/get-docker/ or Podman from: https://podman.io/getting-started/installation"
+        Write-ErrorMsg "Neither Docker nor Podman is installed" "Install Docker from: https://docs.docker.com/get-docker/ or Podman from: https://podman.io/getting-started/installation"
     }
 }
 
 # Check if container runtime is running
 if ($script:ContainerCmd) {
-    Print-Checking "$($script:ContainerCmd) daemon status"
+    Write-Checking "$($script:ContainerCmd) daemon status"
     try {
         if ($script:ContainerCmd -eq "docker") {
             $null = docker info 2>&1
@@ -110,140 +114,173 @@ if ($script:ContainerCmd) {
             $null = podman info 2>&1
         }
         if ($LASTEXITCODE -eq 0) {
-            Print-Success "$($script:ContainerCmd) daemon is running"
+            Write-Success "$($script:ContainerCmd) daemon is running"
         } else {
             if ($script:ContainerCmd -eq "docker") {
-                Print-Error "Docker daemon is not running" "Start Docker Desktop"
+                Write-ErrorMsg "Docker daemon is not running" "Start Docker Desktop"
             } else {
-                Print-Error "Podman service is not running" "Start Podman service"
+                Write-ErrorMsg "Podman service is not running" "Start Podman service"
             }
         }
     } catch {
         if ($script:ContainerCmd -eq "docker") {
-            Print-Error "Docker daemon is not running" "Start Docker Desktop"
+            Write-ErrorMsg "Docker daemon is not running" "Start Docker Desktop"
         } else {
-            Print-Error "Podman service is not running" "Start Podman service"
+            Write-ErrorMsg "Podman service is not running" "Start Podman service"
         }
     }
 }
 
 # Check WSL (Windows only)
 if ($IsWindows -or $env:OS -match "Windows") {
-    Print-Checking "WSL2 availability"
+    Write-Checking "WSL2 availability"
     try {
         $wslVersion = wsl --version 2>$null
         if ($LASTEXITCODE -eq 0) {
             $version = ($wslVersion | Select-String -Pattern 'WSL version:\s*(\S+)').Matches[0].Groups[1].Value
             if ($version) {
-                Print-Success "WSL installed (version $version)"
+                Write-Success "WSL installed (version $version)"
             } else {
-                Print-Success "WSL installed"
+                Write-Success "WSL installed"
             }
         } else {
-            Print-Warning "WSL not detected" "Docker Desktop requires WSL2 on Windows"
+            Write-WarningMsg "WSL not detected" "Docker Desktop requires WSL2 on Windows"
         }
     } catch {
-        Print-Warning "WSL not detected" "Docker Desktop requires WSL2 on Windows"
+        Write-WarningMsg "WSL not detected" "Docker Desktop requires WSL2 on Windows"
     }
 }
 
 # Check Git installation
-Print-Checking "Git installation"
+Write-Checking "Git installation"
 try {
     $gitVersion = (git --version 2>$null | Select-String -Pattern '\d+\.\d+\.\d+').Matches[0].Value
     if ($gitVersion) {
-        Print-Success "Git installed (version $gitVersion)"
+        Write-Success "Git installed (version $gitVersion)"
     } else {
         throw "Version not detected"
     }
 } catch {
-    Print-Error "Git is not installed" "Install from: https://git-scm.com/downloads"
+    Write-ErrorMsg "Git is not installed" "Install from: https://git-scm.com/downloads"
 }
 
 # Check Git configuration
-Print-Checking "Git user.name configuration"
+Write-Checking "Git user.name configuration"
 try {
     $gitName = git config --global user.name 2>$null
     if ($gitName -and $gitName.Trim()) {
-        Print-Success "Git user.name configured: $gitName"
+        Write-Success "Git user.name configured: $gitName"
     } else {
-        Print-Error "Git user.name not configured" 'Run: git config --global user.name "Your Name"'
+        Write-ErrorMsg "Git user.name not configured" 'Run: git config --global user.name "Your Name"'
     }
 } catch {
-    Print-Error "Git user.name not configured" 'Run: git config --global user.name "Your Name"'
+    Write-ErrorMsg "Git user.name not configured" 'Run: git config --global user.name "Your Name"'
 }
 
-Print-Checking "Git user.email configuration"
+Write-Checking "Git user.email configuration"
 try {
     $gitEmail = git config --global user.email 2>$null
     if ($gitEmail -and $gitEmail.Trim()) {
-        Print-Success "Git user.email configured: $gitEmail"
+        Write-Success "Git user.email configured: $gitEmail"
     } else {
-        Print-Error "Git user.email not configured" 'Run: git config --global user.email "your@email.com"'
+        Write-ErrorMsg "Git user.email not configured" 'Run: git config --global user.email "your@email.com"'
     }
 } catch {
-    Print-Error "Git user.email not configured" 'Run: git config --global user.email "your@email.com"'
+    Write-ErrorMsg "Git user.email not configured" 'Run: git config --global user.email "your@email.com"'
+}
+
+# Check socat installation (in WSL for Windows, native for Linux/Mac)
+Write-Checking "socat installation"
+try {
+    if ($IsWindows -or $env:OS -match "Windows") {
+        # On Windows, check if socat is available in WSL
+        $socatCheck = wsl bash -c "command -v socat" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $socatCheck) {
+            $socatVersion = wsl bash -c "socat -V 2>&1 | head -1 | grep -oP 'socat version \K[\d.]+'" 2>$null
+            if ($socatVersion) {
+                Write-Success "socat installed in WSL (version $socatVersion)"
+            } else {
+                Write-Success "socat installed in WSL"
+            }
+        } else {
+            Write-ErrorMsg "socat is not installed in WSL (required for credential/GPG proxy)" "Install in WSL: wsl sudo apt-get install socat"
+        }
+    } else {
+        # On Linux/Mac, check directly
+        $socatVersion = (socat -V 2>&1 | Select-Object -First 1 | Select-String -Pattern 'socat version ([\d.]+)').Matches[0].Groups[1].Value
+        if ($socatVersion) {
+            Write-Success "socat installed (version $socatVersion)"
+        } else {
+            throw "Version not detected"
+        }
+    }
+} catch {
+    if ($IsMacOS) {
+        Write-ErrorMsg "socat is not installed (required for credential/GPG proxy)" "Install: brew install socat"
+    } else {
+        Write-ErrorMsg "socat is not installed (required for credential/GPG proxy)" "Install using your package manager"
+    }
 }
 
 # Check GitHub CLI installation
-Print-Checking "GitHub CLI installation"
+Write-Checking "GitHub CLI installation"
 try {
     $ghVersion = (gh --version 2>$null | Select-Object -First 1 | Select-String -Pattern '\d+\.\d+\.\d+').Matches[0].Value
     if ($ghVersion) {
-        Print-Success "GitHub CLI installed (version $ghVersion)"
+        Write-Success "GitHub CLI installed (version $ghVersion)"
     } else {
         throw "Version not detected"
     }
 } catch {
-    Print-Error "GitHub CLI is not installed" "Install from: https://cli.github.com/"
+    Write-ErrorMsg "GitHub CLI is not installed" "Install from: https://cli.github.com/"
 }
 
 # Check GitHub CLI authentication
-Print-Checking "GitHub CLI authentication"
+Write-Checking "GitHub CLI authentication"
 try {
-    $ghStatus = gh auth status 2>&1
+    gh auth status 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
         # Try to get username
         try {
             $ghUser = (gh api user --jq .login 2>$null)
             if ($ghUser) {
-                Print-Success "GitHub CLI authenticated (user: $ghUser)"
+                Write-Success "GitHub CLI authenticated (user: $ghUser)"
             } else {
-                Print-Success "GitHub CLI authenticated"
+                Write-Success "GitHub CLI authenticated"
             }
         } catch {
-            Print-Success "GitHub CLI authenticated"
+            Write-Success "GitHub CLI authenticated"
         }
     } else {
-        Print-Error "GitHub CLI is not authenticated" "Run: gh auth login"
+        Write-ErrorMsg "GitHub CLI is not authenticated" "Run: gh auth login"
     }
 } catch {
     if (Get-Command gh -ErrorAction SilentlyContinue) {
-        Print-Error "GitHub CLI is not authenticated" "Run: gh auth login"
+        Write-ErrorMsg "GitHub CLI is not authenticated" "Run: gh auth login"
     } else {
-        Print-Error "Cannot check authentication (gh not installed)"
+        Write-ErrorMsg "Cannot check authentication (gh not installed)"
     }
 }
 
 # Check disk space
-Print-Checking "Available disk space"
+Write-Checking "Available disk space"
 try {
     $drive = (Get-Location).Drive
     if ($drive) {
         $freeSpaceGB = [math]::Round($drive.Free / 1GB, 1)
-        
+
         if ($freeSpaceGB -ge 5.0) {
-            Print-Success "Disk space available: $freeSpaceGB GB"
+            Write-Success "Disk space available: $freeSpaceGB GB"
         } elseif ($freeSpaceGB -ge 3.0) {
-            Print-Warning "Disk space available: $freeSpaceGB GB (recommend 5GB+)"
+            Write-WarningMsg "Disk space available: $freeSpaceGB GB (recommend 5GB+)"
         } else {
-            Print-Error "Disk space available: $freeSpaceGB GB (need at least 5GB)" "Free up disk space or choose different location"
+            Write-ErrorMsg "Disk space available: $freeSpaceGB GB (need at least 5GB)" "Free up disk space or choose different location"
         }
     } else {
-        Print-Warning "Cannot determine drive information"
+        Write-WarningMsg "Cannot determine drive information"
     }
 } catch {
-    Print-Warning "Cannot check disk space"
+    Write-WarningMsg "Cannot check disk space"
 }
 
 # Check for optional tools
@@ -252,54 +289,54 @@ Write-Host "Optional Tools:" -ForegroundColor Cyan
 Write-Host "---------------" -ForegroundColor Cyan
 
 # VS Code
-Print-Checking "VS Code installation"
+Write-Checking "VS Code installation"
 if (Get-Command code -ErrorAction SilentlyContinue) {
     try {
         $codeVersion = (code --version 2>$null | Select-Object -First 1)
         if ($codeVersion) {
-            Print-Success "VS Code installed (for Dev Containers integration)"
+            Write-Success "VS Code installed (for Dev Containers integration)"
         } else {
-            Print-Success "VS Code installed"
+            Write-Success "VS Code installed"
         }
     } catch {
-        Print-Success "VS Code installed"
+        Write-Success "VS Code installed"
     }
 } else {
-    Print-Info "VS Code not found (optional, but recommended)" "Install from: https://code.visualstudio.com/"
+    Write-InfoMsg "VS Code not found (optional, but recommended)" "Install from: https://code.visualstudio.com/"
 }
 
 # jq (useful for MCP config)
-Print-Checking "jq installation"
+Write-Checking "jq installation"
 if (Get-Command jq -ErrorAction SilentlyContinue) {
     try {
         $jqVersion = (jq --version 2>$null | Select-String -Pattern '\d+\.\d+').Matches[0].Value
         if ($jqVersion) {
-            Print-Success "jq installed (version $jqVersion)"
+            Write-Success "jq installed (version $jqVersion)"
         } else {
-            Print-Success "jq installed"
+            Write-Success "jq installed"
         }
     } catch {
-        Print-Success "jq installed"
+        Write-Success "jq installed"
     }
 } else {
-    Print-Info "jq not found (optional, useful for JSON processing)"
+    Write-InfoMsg "jq not found (optional, useful for JSON processing)"
 }
 
 # yq (useful for MCP config)
-Print-Checking "yq installation"
+Write-Checking "yq installation"
 if (Get-Command yq -ErrorAction SilentlyContinue) {
     try {
         $yqVersion = (yq --version 2>$null | Select-String -Pattern '\d+\.\d+\.\d+').Matches[0].Value
         if ($yqVersion) {
-            Print-Success "yq installed (version $yqVersion)"
+            Write-Success "yq installed (version $yqVersion)"
         } else {
-            Print-Success "yq installed"
+            Write-Success "yq installed"
         }
     } catch {
-        Print-Success "yq installed"
+        Write-Success "yq installed"
     }
 } else {
-    Print-Info "yq not found (optional, useful for YAML processing)"
+    Write-InfoMsg "yq not found (optional, useful for YAML processing)"
 }
 
 # Summary

@@ -268,6 +268,9 @@ Unlike running agents directly on your machine:
 - **Container Runtime**: Docker or Podman
   - Docker Desktop (with WSL2 on Windows) or Podman Desktop/CLI
   - Scripts auto-detect available runtime
+- **socat**: Required for credential and GPG proxy servers
+  - Linux/Mac: `apt-get install socat` or `brew install socat`
+  - Windows: Available in WSL2 (install in WSL: `sudo apt-get install socat`)
 - GitHub CLI authenticated (`gh auth login`)
 - Git configured
 - (Optional) Agent-specific OAuth: Copilot, Codex, Claude
