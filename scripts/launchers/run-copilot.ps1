@@ -80,6 +80,9 @@ if ($Help) {
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$ScriptDir\..\utils\common-functions.ps1"
 
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
+Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "run-copilot"
+
 # Check Docker
 if (-not (Test-DockerRunning)) { exit 1 }
 
@@ -174,7 +177,7 @@ if ($Gpu) {
 
 $dockerArgs += "coding-agents-copilot:local"
 
-$containerId = & $ContainerCmd $dockerArgs
+$null = & $ContainerCmd $dockerArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Failed to start GitHub Copilot container" -ForegroundColor Red
     exit 1

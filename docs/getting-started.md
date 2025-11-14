@@ -359,26 +359,32 @@ docker pull ghcr.io/novotnyllc/coding-agents-claude:latest
 
 ### Option B: Build locally (~15-20 minutes)
 
-Build all images from source (useful for development or customization):
+Build all images from source (useful for development or customization). You can also target a subset of images if you only need specific agents.
 
 **Linux/Mac:**
 ```bash
+# Build everything
 ./scripts/build/build.sh
+
+# Build only Copilot + proxy
+./scripts/build/build.sh --agents copilot,proxy
 ```
 
 **Windows:**
 ```powershell
+# Build everything
 .\scripts\build\build.ps1
+
+# Build only Copilot + proxy
+.\scripts\build\build.ps1 -Agents copilot,proxy
 ```
 
 **What happens during build:**
-1. Prompts for base image: Pull or build locally
-2. Builds `coding-agents-base:local` (if building locally)
-3. Builds `coding-agents:local` (all-agents image)
-4. Builds `coding-agents-copilot:local`
-5. Builds `coding-agents-codex:local`
-6. Builds `coding-agents-claude:local`
-7. Builds `coding-agents-proxy:local`
+1. Prompts for base image only if you're building one or more agent images (`copilot`, `codex`, `claude`)
+2. Builds `coding-agents-base:local` (if you choose to build locally)
+3. Builds `coding-agents:local` (shared "all agents" image) whenever agent images are selected
+4. Builds the requested specialized agent images (e.g., `coding-agents-copilot:local`)
+5. Builds `coding-agents-proxy:local` when `proxy` is part of the target list
 
 **Build time breakdown:**
 - Base image: ~10 minutes (if building locally, 1 min if pulling)
@@ -469,6 +475,28 @@ exit  # Container auto-commits and pushes changes
 - ✅ Git authentication (if configured on host)
 - ✅ Auto-commit and push on exit (if remote configured)
 - ✅ Works on your current branch
+
+### Optional: Configure Launcher Update Policy
+
+Every launcher checks whether your local CodingAgents repository is behind its upstream before starting. By default it prompts when updates are available. You can change this behavior with a tiny host-side config file:
+
+| Platform | Config file |
+|----------|-------------|
+| Linux / macOS | `~/.config/coding-agents/host-config.env` |
+| Windows | `%USERPROFILE%\.config\coding-agents\host-config.env` |
+
+Example:
+
+```ini
+# ~/.config/coding-agents/host-config.env
+LAUNCHER_UPDATE_POLICY=prompt   # prompt | always | never
+```
+
+- `prompt` (default): notify when updates are available and ask before pulling
+- `always`: automatically `git pull --ff-only` whenever you're behind (requires clean working tree)
+- `never`: skip the check entirely (useful for air-gapped environments)
+
+You can temporarily override the policy per-process with `CODING_AGENTS_LAUNCHER_UPDATE_POLICY` in your shell or PowerShell session.
 
 ### Advanced Launch (Persistent)
 

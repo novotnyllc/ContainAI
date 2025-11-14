@@ -8,6 +8,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
+
 # Default values
 AGENT=""
 SOURCE="."

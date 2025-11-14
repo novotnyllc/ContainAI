@@ -43,6 +43,9 @@ if (-not $env:TEST_MODE) {
 # Local registry container name
 $env:TEST_REGISTRY_CONTAINER = "test-registry-$PID"
 
+# Disable launcher update checks during automated tests
+$env:CODING_AGENTS_SKIP_UPDATE_CHECK = "1"
+
 Write-Host "Test configuration loaded:" -ForegroundColor Cyan
 Write-Host "  Mode: $env:TEST_MODE" -ForegroundColor White
 Write-Host "  Registry: $env:TEST_REGISTRY" -ForegroundColor White
