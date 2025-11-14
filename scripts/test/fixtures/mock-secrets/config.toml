@@ -1,0 +1,13 @@
+# Mock MCP configuration used during integration tests
+# Provides multiple server entries to exercise conversion logic
+
+[mcp_servers.github]
+type = "sse"
+url = "https://mock.github.example/mcp"
+api_key = "mock-github-key"
+
+[mcp_servers.docs]
+type = "rest"
+url = "https://mock.docs.example/api"
+headers = { "Authorization" = "Bearer mock-docs-token" }
+

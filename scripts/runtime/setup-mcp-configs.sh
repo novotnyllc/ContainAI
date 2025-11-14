@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-MCP_CONFIG="/workspace/config.toml"
+MCP_CONFIG="${MCP_CONFIG_OVERRIDE:-/workspace/config.toml}"
 
 if [ ! -f "$MCP_CONFIG" ]; then
     echo "⚠️  No config.toml found at $MCP_CONFIG"
