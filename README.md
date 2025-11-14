@@ -202,6 +202,10 @@ remove-agent copilot-myapp-main --no-push
 ## Documentation
 
 - **[USAGE.md](USAGE.md)** - Complete user guide (start here!)
+- **[docs/getting-started.md](docs/getting-started.md)** - First-time setup walkthrough
+- **[docs/vscode-integration.md](docs/vscode-integration.md)** - Using VS Code with containers
+- **[docs/cli-reference.md](docs/cli-reference.md)** - All command-line options
+- **[docs/mcp-setup.md](docs/mcp-setup.md)** - MCP server configuration
 - **[docs/build.md](docs/build.md)** - Building and publishing images
 - **[docs/architecture.md](docs/architecture.md)** - System design and architecture
 - **[docs/network-proxy.md](docs/network-proxy.md)** - Network modes and Squid proxy
