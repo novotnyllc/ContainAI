@@ -12,6 +12,7 @@ Features include MCP server support for extended capabilities, automated git ope
 - **OAuth authentication**: No API keys needed for agents (uses your existing subscriptions)
 - **VS Code integration**: Connect to running containers with Dev Containers extension
 - **Persistent workspaces**: Containers run in background, resume anytime
+- **Detach & resume**: Built-in tmux sessions plus `connect-agent` let you drop and reconnect without stopping containers
 - **MCP servers**: GitHub, Microsoft Docs, Playwright, Context7, Serena, and more
 - **Network controls**: Restricted mode (`--network none`) or Squid proxy sidecar for monitoring
 
@@ -20,9 +21,8 @@ Features include MCP server support for extended capabilities, automated git ope
 **New to Docker or containers?** See the [detailed getting started guide](docs/getting-started.md).
 
 **Prerequisites:**
-- ✅ Docker (or Podman) installed and running
-- ✅ Git configured (`user.name`, `user.email`)
-- ℹ️  GitHub CLI authenticated (`gh auth login`) - **Only if using GitHub Copilot or GitHub-hosted repos**
+- ✅ Docker or Podman installed and running (the launchers auto-detect which one to use)
+- ℹ️  Host Git credentials/config are reused automatically—no container-side setup needed
 
 **Quick verification:**
 ```bash
@@ -30,21 +30,18 @@ Features include MCP server support for extended capabilities, automated git ope
 .\scripts\verify-prerequisites.ps1 # Windows
 ```
 
-**Note:** The verification script will warn if GitHub CLI is missing, but this is only required for GitHub Copilot. Other agents work without it.
+**Note:** The verification script only reports what it finds. If it warns that GitHub CLI isn't installed, you can ignore it unless your host actually uses GitHub CLI for auth—the containers just inherit whatever credentials already exist on the host.
 
-**Get running in 3 steps:**
+**Get running in 2 steps (images auto-pull on first launch):**
 
 ```bash
-# 1. Pull image (1 minute)
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
-
-# 2. Install launchers (30 seconds)
+# 1. Install launchers once
 ./scripts/install.sh        # Linux/Mac
-.\scripts\install.ps1       # Windows PowerShell
+.\scripts\install.ps1      # Windows PowerShell
 
-# 3. Launch agent (instant)
+# 2. Launch an agent from any repository (image pulls automatically)
 cd ~/my-project
-run-copilot
+run-copilot                  # or run-codex / run-claude
 ```
 
 That's it! You're coding with AI in an isolated container.
@@ -55,49 +52,15 @@ That's it! You're coding with AI in an isolated container.
 
 ## Complete Setup Guide
 
-### 1. Prerequisites (one time)
+### 1. Prepare your host (one time)
 
-**Required:**
+- Install Docker Desktop, Podman, or another OCI-compatible runtime.
+- Make sure `socat` is available on the host (used for credential/GPG proxies).
+- Keep using whatever Git credential helpers or SSH keys you already rely on—the container mounts them automatically.
+- If you use services such as GitHub Copilot, authenticate on the host the same way you normally would. No additional login is required inside the container.
+- (Optional) Run `./scripts/verify-prerequisites.sh` (or the PowerShell equivalent) to confirm everything looks good.
 
-```bash
-# Configure git
-git config --global user.name "Your Name"
-git config --global user.email "your@email.com"
-```
-
-**For GitHub Copilot (optional):**
-
-```bash
-# Authenticate GitHub CLI - only needed for GitHub Copilot
-gh auth login
-```
-
-**For other agents (optional):**
-
-Authenticate on your host machine if you want to use these agents:
-
-```bash
-# For OpenAI Codex (if you have access)
-# Follow authentication instructions for the Codex CLI
-# Config stored at ~/.config/codex/
-
-# For Anthropic Claude (if you have access)  
-# Follow authentication instructions for the Claude CLI
-# Config stored at ~/.config/claude/
-```
-
-> **Note:** Agent authentication configs are mounted read-only into containers. You must authenticate on your host machine first.
-
-**Get the images:**
-
-```bash
-# Option 1: Pull pre-built (recommended)
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
-
-# Option 2: Build locally
-./scripts/build.sh  # Linux/macOS
-.\scripts\build.ps1 # Windows
-```
+Images are pulled or built automatically the first time you run `run-*` or `launch-agent`. You only need the build scripts if you are developing custom images.
 
 ### 2. Add launchers to PATH (optional but recommended)
 
@@ -192,6 +155,23 @@ remove-agent copilot-myapp-main
 remove-agent copilot-myapp-main --no-push
 ```
 
+### 5. Detach and reconnect
+
+All launchers start a managed tmux session inside the container. Detach any time with `Ctrl+B`, then `D`. Reattach later without restarting the container:
+
+```bash
+# Attach to a specific container (bash)
+scripts/launchers/connect-agent --name copilot-myapp-main
+
+# PowerShell equivalent
+scripts\launchers\connect-agent.ps1 -Name copilot-myapp-main
+
+# If only one container is running, the name is optional
+connect-agent
+```
+
+This workflow also makes it easy to hop into `launch-agent` shells without VS Code. When you're truly finished, stop/remove the container so the auto-commit/push cleanup can run.
+
 ### 5. Connect from VS Code
 
 1. Install **Dev Containers** extension
@@ -271,9 +251,8 @@ Unlike running agents directly on your machine:
 - **socat**: Required for credential and GPG proxy servers
   - Linux/Mac: `apt-get install socat` or `brew install socat`
   - Windows: Available in WSL2 (install in WSL: `sudo apt-get install socat`)
-- GitHub CLI authenticated (`gh auth login`)
-- Git configured
-- (Optional) Agent-specific OAuth: Copilot, Codex, Claude
+- **Host Git credentials**: Whatever you already use (Git config, SSH keys, credential helpers) is mounted automatically—no container-specific setup needed
+- **Host authentications**: If you use GitHub Copilot, Claude, Codex, etc., authenticate on the host as usual and the container will reuse those tokens/configs
 
 ## License
 

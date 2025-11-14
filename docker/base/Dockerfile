@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     unzip \
     socat \
+    tmux \
     # Build tools (REQUIRED for development)
     build-essential \
     # Python with dev headers (for building native extensions)
@@ -91,6 +92,11 @@ RUN curl -sSL https://aka.ms/install-powershell.sh -o install-powershell.sh && \
 # Copy .NET preview installer script
 COPY --chown=root:root scripts/runtime/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
 RUN chmod +x /usr/local/bin/install-dotnet-preview.sh
+
+# Session management helpers for detach/reattach support
+COPY --chown=root:root scripts/runtime/agent-session /usr/local/bin/agent-session
+COPY --chown=root:root scripts/runtime/agent-session-runner /usr/local/bin/agent-session-runner
+RUN chmod +x /usr/local/bin/agent-session /usr/local/bin/agent-session-runner
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \

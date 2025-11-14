@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Helper that executes a command and writes its exit code for agent-session
+set -euo pipefail
+
+if [ "$#" -lt 2 ]; then
+    echo "agent-session-runner: requires status file and command" >&2
+    exit 2
+fi
+
+STATUS_FILE=$1
+shift
+
+mkdir -p "$(dirname "$STATUS_FILE")"
+
+finish() {
+    local code=$?
+    echo "$code" >"$STATUS_FILE"
+    exit "$code"
+}
+
+trap finish EXIT
+exec "$@"

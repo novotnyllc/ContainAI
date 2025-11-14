@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# Lightweight tmux session manager for agent containers
+set -euo pipefail
+
+SESSION_NAME=${AGENT_SESSION_NAME:-agent}
+STATUS_FILE=${AGENT_SESSION_STATUS_FILE:-/tmp/${SESSION_NAME}.status}
+READY_FILE=${AGENT_SESSION_READY_FILE:-/tmp/${SESSION_NAME}.ready}
+ATTACH_TIMEOUT=${AGENT_SESSION_ATTACH_TIMEOUT:-30}
+TMUX_PREFIX=${AGENT_SESSION_PREFIX:-C-a}
+
+usage() {
+    cat <<'HELP'
+Usage: agent-session <command> [args]
+
+Commands:
+  supervise <cmd...>     Run command inside managed tmux session and exit when it finishes
+  ensure-shell [cmd...]  Ensure an interactive shell session exists (default: /bin/bash -l)
+  attach                 Attach to the managed session (waits until ready)
+  status                 Print current session status
+  stop                   Terminate the managed session
+  help                   Show this message
+HELP
+}
+
+ensure_tmux() {
+    if ! command -v tmux >/dev/null 2>&1; then
+        echo "agent-session: tmux is not installed inside this container" >&2
+        exit 1
+    fi
+}
+
+escape_args() {
+    local out=""
+    local arg
+    for arg in "$@"; do
+        out+=" $(printf '%q' "$arg")"
+    done
+    echo "${out# }"
+}
+
+configure_session() {
+    tmux set-option -t "$SESSION_NAME" -q detach-on-destroy off || true
+    tmux set-option -t "$SESSION_NAME" -q remain-on-exit off || true
+    tmux set-option -t "$SESSION_NAME" -q status off || true
+    tmux set-option -t "$SESSION_NAME" -q history-limit 50000 || true
+    tmux unbind-key -T prefix C-b >/dev/null 2>&1 || true
+    tmux set-option -t "$SESSION_NAME" -q prefix "$TMUX_PREFIX" || true
+    tmux bind-key -T prefix "$TMUX_PREFIX" send-prefix >/dev/null 2>&1 || true
+}
+
+start_tmux_session() {
+    local wait_for_exit="$1"
+    shift
+
+    if [ "$#" -eq 0 ]; then
+        echo "agent-session: no command specified" >&2
+        exit 2
+    fi
+
+    rm -f "$STATUS_FILE" "$READY_FILE"
+    tmux kill-session -t "$SESSION_NAME" >/dev/null 2>&1 || true
+
+    local runner="/usr/local/bin/agent-session-runner"
+    local runner_cmd
+    runner_cmd="$(printf '%q' "$runner") $(printf '%q' "$STATUS_FILE") $(escape_args "$@")"
+
+    tmux new-session -d -s "$SESSION_NAME" "$runner_cmd" >/dev/null
+    configure_session
+    touch "$READY_FILE"
+
+    if [ "$wait_for_exit" = "true" ]; then
+        wait_for_session_exit
+    fi
+}
+
+wait_for_session_exit() {
+    while tmux has-session -t "$SESSION_NAME" >/dev/null 2>&1; do
+        sleep 1
+    done
+}
+
+read_exit_code() {
+    if [ -f "$STATUS_FILE" ]; then
+        local code
+        code=$(cat "$STATUS_FILE" 2>/dev/null || echo "0")
+        if [[ "$code" =~ ^[0-9]+$ ]]; then
+            echo "$code"
+            return
+        fi
+    fi
+    echo "0"
+}
+
+cmd_supervise() {
+    ensure_tmux
+    if [ "$#" -eq 0 ]; then
+        echo "agent-session supervise: missing command" >&2
+        exit 2
+    fi
+    start_tmux_session "true" "$@"
+    local exit_code
+    exit_code=$(read_exit_code)
+    exit "$exit_code"
+}
+
+shell_command_args() {
+    if [ "$#" -gt 0 ]; then
+        printf '%s\n' "$@"
+        return
+    fi
+
+    if [ -n "${AGENT_SESSION_SHELL_BIN:-}" ]; then
+        local args=()
+        args+=("$AGENT_SESSION_SHELL_BIN")
+        if [ -n "${AGENT_SESSION_SHELL_ARGS:-}" ]; then
+            read -r -a extra <<< "${AGENT_SESSION_SHELL_ARGS}"
+            args+=("${extra[@]}")
+        fi
+        printf '%s\n' "${args[@]}"
+        return
+    fi
+
+    printf '%s\n' "/bin/bash" "-l"
+}
+
+cmd_ensure_shell() {
+    ensure_tmux
+    if tmux has-session -t "$SESSION_NAME" >/dev/null 2>&1; then
+        touch "$READY_FILE"
+        return
+    fi
+
+    mapfile -t shell_args < <(shell_command_args "$@")
+    start_tmux_session "false" "${shell_args[@]}"
+}
+
+cmd_attach() {
+    ensure_tmux
+    local attempts=0
+    local max_attempts=$((ATTACH_TIMEOUT * 5))
+    while ! tmux has-session -t "$SESSION_NAME" >/dev/null 2>&1; do
+        sleep 0.2
+        attempts=$((attempts + 1))
+        if [ $attempts -ge $max_attempts ]; then
+            echo "agent-session attach: timed out waiting for session '$SESSION_NAME'" >&2
+            exit 2
+        fi
+    done
+    echo "Attached to '$SESSION_NAME'. Press Ctrl+B then D to detach." >&2
+    tmux attach -t "$SESSION_NAME"
+}
+
+cmd_status() {
+    ensure_tmux
+    if tmux has-session -t "$SESSION_NAME" >/dev/null 2>&1; then
+        echo "running"
+        return
+    fi
+
+    if [ -f "$STATUS_FILE" ]; then
+        echo "exited $(read_exit_code)"
+    else
+        echo "stopped"
+    fi
+}
+
+cmd_stop() {
+    ensure_tmux
+    if tmux has-session -t "$SESSION_NAME" >/dev/null 2>&1; then
+        tmux kill-session -t "$SESSION_NAME" >/dev/null 2>&1 || true
+    fi
+    rm -f "$READY_FILE"
+}
+
+command="${1:-}" || true
+case "$command" in
+    supervise)
+        shift
+        cmd_supervise "$@"
+        ;;
+    ensure-shell)
+        shift
+        cmd_ensure_shell "$@"
+        ;;
+    attach)
+        shift
+        cmd_attach "$@"
+        ;;
+    status)
+        shift
+        cmd_status "$@"
+        ;;
+    stop)
+        shift
+        cmd_stop "$@"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac

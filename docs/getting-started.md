@@ -8,15 +8,16 @@ This guide will walk you through setting up CodingAgents from scratch, even if y
 
 - [Prerequisites](#prerequisites)
 - [Step 1: Install Docker](#step-1-install-docker)
-- [Step 2: Configure Git](#step-2-configure-git)
+- [Step 2: Check Git Configuration (Host)](#step-2-check-git-configuration-host)
 - [Step 3: Install GitHub CLI (Optional)](#step-3-install-github-cli-optional)
 - [Step 4: Authenticate GitHub CLI (Optional)](#step-4-authenticate-github-cli-optional)
 - [Step 5: Verify Your Setup](#step-5-verify-your-setup)
 - [Step 6: Clone CodingAgents](#step-6-clone-codingagents)
-- [Step 7: Get Container Images](#step-7-get-container-images)
+- [Step 7: (Optional) Pre-fetch or Build Images](#step-7-optional-pre-fetch-or-build-images)
 - [Step 8: Install Launcher Scripts](#step-8-install-launcher-scripts)
 - [Step 9: First Launch](#step-9-first-launch)
 - [Step 10: Connect from VS Code](#step-10-connect-from-vs-code-optional)
+- [Detaching and Reconnecting](#detaching-and-reconnecting)
 - [Next Steps](#next-steps)
 - [Troubleshooting](#troubleshooting)
 
@@ -191,25 +192,16 @@ podman ps
 
 **Note:** CodingAgents scripts automatically detect and use either `docker` or `podman` commands.
 
-## Step 2: Configure Git
+## Step 2: Check Git Configuration (Host)
 
-Git needs to know who you are for commit attribution.
+Containers automatically reuse the Git identity and credential helpers already configured on your host. In most cases, there's nothing to do. If you're unsure whether Git knows who you are, run the following on the **host**:
 
-```bash
-git config --global user.name "Your Name"
-git config --global user.email "your.email@example.com"
-```
-
-**Verify:**
 ```bash
 git config --global user.name
-# Should show: Your Name
-
 git config --global user.email
-# Should show: your.email@example.com
 ```
 
-**Already configured?** Skip this step if `git config` shows your information.
+If those commands already return your information, you're done. If they're empty, set them once on the host so commits created from inside the container still carry your name/email.
 
 ## Step 3: Install GitHub CLI (Optional)
 
@@ -351,40 +343,21 @@ Get the CodingAgents repository:
 
 ```bash
 git clone https://github.com/novotnyllc/CodingAgents.git
-cd CodingAgents
 ```
 
-**Verify:**
-```bash
-ls -la
-# Should show: docker/, scripts/, docs/, README.md, etc.
-```
+## Step 7: (Optional) Pre-fetch or Build Images
 
-## Step 7: Get Container Images
+You can skip this step entirely—the launchers automatically pull whatever image they need the first time you run them. Pre-fetching is only helpful if you want to download everything ahead of time (for example, before hopping on a slow network) or if you're developing custom images.
 
-You have two options:
-
-### Option A: Pull Pre-built Images (Recommended, ~1 minute)
-
-This is faster and easier for first-time users:
+### Option A: Pre-fetch pre-built images (~1 minute)
 
 ```bash
 docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
-```
-
-**For other agents:**
-```bash
 docker pull ghcr.io/novotnyllc/coding-agents-codex:latest
 docker pull ghcr.io/novotnyllc/coding-agents-claude:latest
 ```
 
-**Verify:**
-```bash
-docker images | grep coding-agents
-# Should show the pulled images
-```
-
-### Option B: Build Locally (~15-20 minutes)
+### Option B: Build locally (~15-20 minutes)
 
 Build all images from source (useful for development or customization):
 
@@ -412,10 +385,10 @@ Build all images from source (useful for development or customization):
 - Each specialized image: ~2 minutes
 - Proxy image: ~1 minute
 
-**Verify:**
+**Verify (optional):**
 ```bash
 docker images | grep coding-agents
-# Should show all images with :local tag
+# Shows the tags you just pulled or built
 ```
 
 ## Step 8: Install Launcher Scripts
@@ -478,6 +451,7 @@ run-copilot
 3. Creates ephemeral container
 4. Mounts your repository at `/workspace`
 5. Drops you into a shell with GitHub Copilot CLI
+6. Starts a tmux session so you can safely detach/reconnect (`Ctrl+B`, then `D`)
 
 **Try it out:**
 ```bash
@@ -553,6 +527,29 @@ docker stop copilot-myproject-feature-auth
 ```
 
 **Auto-push on stop**: Container automatically commits and pushes changes when stopped (unless launched with `--no-push`).
+
+## Detaching and Reconnecting
+
+Every launcher runs your agent inside a managed tmux session. Detach any time without stopping the container:
+
+```text
+Inside container: press Ctrl+B, then D
+```
+
+Later, reattach from the host even if VS Code isn't connected:
+
+```bash
+# Bash
+scripts/launchers/connect-agent --name copilot-myproject-feature-auth
+
+# PowerShell
+scripts\launchers\connect-agent.ps1 -Name copilot-myproject-feature-auth
+
+# When only one agent is running, omit --name
+connect-agent
+```
+
+`connect-agent` will show the running containers and tmux sessions if you forget the name. Use `exit` inside tmux to leave the session (and let auto-commit/push run) when you're truly finished.
 
 ## Next Steps
 

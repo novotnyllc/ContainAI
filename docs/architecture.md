@@ -199,51 +199,75 @@ exec "$@"
 
 ### GitHub/Copilot (OAuth)
 
-```
-Host: gh auth login
-  ↓
-Host: ~/.config/gh/hosts.yml
-  ↓ (mounted read-only)
-Container: ~/.config/gh/hosts.yml
-  ↓
-Container: git config --global credential.helper '!gh auth git-credential'
-  ↓
-Container: git operations use gh CLI for auth
+```mermaid
+flowchart TB
+    login["Host: gh auth login"]
+    hostConfig["Host: ~/.config/gh/hosts.yml"]
+    mount["Container: ~/.config/gh/hosts.yml<br/>(read-only mount)"]
+    helper["Container: git config --global credential.helper '!gh auth git-credential'"]
+    gitOps["Container: git operations use gh CLI for auth"]
+
+    login --> hostConfig --> mount --> helper --> gitOps
+
+    style login fill:#e1f5ff,stroke:#0366d6
+    style hostConfig fill:#e1f5ff,stroke:#0366d6
+    style mount fill:#fff3cd,stroke:#856404
+    style helper fill:#d4edda,stroke:#28a745
+    style gitOps fill:#d4edda,stroke:#28a745
 ```
 
 ### Codex/Claude (OAuth)
 
-```
-Host: Setup OAuth (agent-specific process)
-  ↓
-Host: ~/.config/codex/ or ~/.config/claude/
-  ↓ (mounted read-only)
-Container: ~/.config/codex/ or ~/.config/claude/
-  ↓
-Container: Agent CLI reads auth config
+```mermaid
+flowchart TB
+    setup["Host: run agent-specific OAuth setup"]
+    hostDir["Host: ~/.config/codex/ or ~/.config/claude/"]
+    containerDir["Container: ~/.config/codex/ or ~/.config/claude/<br/>(read-only mount)"]
+    cli["Container: Agent CLI reads auth config"]
+
+    setup --> hostDir --> containerDir --> cli
+
+    style setup fill:#e1f5ff,stroke:#0366d6
+    style hostDir fill:#e1f5ff,stroke:#0366d6
+    style containerDir fill:#fff3cd,stroke:#856404
+    style cli fill:#d4edda,stroke:#28a745
 ```
 
 ### MCP Secrets (API Keys)
 
-```
-Host: Create ~/.config/coding-agents/mcp-secrets.env
-  ↓
-Host: Add GITHUB_TOKEN, CONTEXT7_API_KEY, etc.
-  ↓ (mounted read-only as ~/.mcp-secrets.env)
-Container: source ~/.mcp-secrets.env
-  ↓
-Container: Environment variables available to MCP servers
+```mermaid
+flowchart TB
+    create["Host: create ~/.config/coding-agents/mcp-secrets.env"]
+    populate["Host: add GITHUB_TOKEN, CONTEXT7_API_KEY, ..."]
+    mountSecret["Container: ~/.mcp-secrets.env (read-only)"]
+    sourceFile["Container: source ~/.mcp-secrets.env"]
+    envReady["Container: MCP servers read exported env vars"]
+
+    create --> populate --> mountSecret --> sourceFile --> envReady
+
+    style create fill:#e1f5ff,stroke:#0366d6
+    style populate fill:#e1f5ff,stroke:#0366d6
+    style mountSecret fill:#fff3cd,stroke:#856404
+    style sourceFile fill:#d4edda,stroke:#28a745
+    style envReady fill:#d4edda,stroke:#28a745
 ```
 
 ## Git Workflow
 
 ### Dual Remote Setup
 
-```
-Container Workspace
-  ├── origin → https://github.com/user/repo.git
-  └── local → /mnt/e/path/to/host/repo
-              (default push target)
+```mermaid
+flowchart TB
+    workspace["Container Workspace"]
+    origin["origin → https://github.com/user/repo.git"]
+    local["local → /mnt/e/path/to/host/repo<br/>(default push)"]
+
+    workspace --> origin
+    workspace --> local
+
+    style workspace fill:#d4edda,stroke:#28a745
+    style origin fill:#e1f5ff,stroke:#0366d6
+    style local fill:#fff3cd,stroke:#856404
 ```
 
 **Benefits:**
@@ -269,17 +293,28 @@ Pattern: `<agent>/<feature>`
 
 ### Config Flow
 
-```
-Workspace
-└── config.toml (single source of truth)
-    ↓ (container startup)
-setup-mcp-configs.sh
-    ↓
-convert-toml-to-mcp.py
-    ↓ (generates JSON for each agent)
-├── ~/.config/github-copilot/mcp/config.json
-├── ~/.config/codex/mcp/config.json
-└── ~/.config/claude/mcp/config.json
+```mermaid
+flowchart TB
+  workspace["Workspace"]
+  configToml["config.toml (single source of truth)"]
+  setup["setup-mcp-configs.sh"]
+  convert["convert-toml-to-mcp.py"]
+  copilotCfg["~/.config/github-copilot/mcp/config.json"]
+  codexCfg["~/.config/codex/mcp/config.json"]
+  claudeCfg["~/.config/claude/mcp/config.json"]
+
+  workspace --> configToml --> setup --> convert
+  convert --> copilotCfg
+  convert --> codexCfg
+  convert --> claudeCfg
+
+  style workspace fill:#e1f5ff,stroke:#0366d6
+  style configToml fill:#e1f5ff,stroke:#0366d6
+  style setup fill:#fff3cd,stroke:#856404
+  style convert fill:#fff3cd,stroke:#856404
+  style copilotCfg fill:#d4edda,stroke:#28a745
+  style codexCfg fill:#d4edda,stroke:#28a745
+  style claudeCfg fill:#d4edda,stroke:#28a745
 ```
 
 ### Example config.toml
