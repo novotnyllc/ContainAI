@@ -5,8 +5,10 @@
 ### Prerequisites
 - **Container Runtime**: Docker or Podman (scripts auto-detect)
   - Docker Desktop or Podman Desktop recommended
-- Git installed
-- PowerShell 7+ (Windows) or Bash (Linux/Mac)
+- **Git** configured with `user.name` and `user.email`
+- **GitHub CLI** authenticated: `gh auth login`
+- **PowerShell 7+** (Windows) or **Bash** (Linux/macOS)
+- (Optional) Authenticated agents (Copilot, Codex, Claude) on host machine
 
 ### Quick Start
 

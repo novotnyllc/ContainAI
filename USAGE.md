@@ -33,9 +33,13 @@ Use **`launch-agent`** only when you need:
 
 ### Optional: Agent Authentication
 
-- **GitHub Copilot**: Already handled by `gh auth login`
-- **OpenAI Codex**: Setup OAuth, config at `~/.config/codex/`
-- **Anthropic Claude**: Setup OAuth, config at `~/.config/claude/`
+Agents use authentication configs from your host machine (mounted read-only):
+
+- **GitHub Copilot**: Uses `gh auth login` (required above)
+- **OpenAI Codex**: Authenticate Codex CLI on host, config at `~/.config/codex/`
+- **Anthropic Claude**: Authenticate Claude CLI on host, config at `~/.config/claude/`
+
+> **Important:** You must authenticate agents on your **host machine** before launching containers. The authentication configs are mounted read-only into containers.
 
 ### Optional: MCP Server API Keys
 
@@ -68,7 +72,7 @@ cd coding-agents
 .\scripts\build.ps1 # Windows
 ```
 
-See [BUILD.md](BUILD.md) for details.
+See [docs/build.md](docs/build.md) for details.
 
 ## Container Naming Convention
 
@@ -287,99 +291,25 @@ When removing an agent container:
 - Branches with unmerged commits are preserved (warning shown)
 - Use `--keep-branch` flag to preserve the branch regardless
 
-**Network Proxy Modes:**
-- `allow-all` (default): Standard Docker bridge network
-- `restricted`: Launch container with `docker --network none` (no outbound network)
-- `squid`: Route HTTP/HTTPS through Squid proxy sidecar
-
-Proxy sidecar resources (auto-created when using `squid` mode):
-- Container: `{agent}-{repo}-proxy`
-- Network: `{agent}-{repo}-net`
-- Logs: `docker logs {container}-proxy`
-
-See [NETWORK_PROXY.md](NETWORK_PROXY.md) for network configuration details.
-
 **Behavior:**
 - Runs in background (detached mode)
 - Persists until explicitly removed
 - Auto-pushes changes on `docker stop` or `remove-agent` (unless --no-push)
 - Connect with VS Code Dev Containers or `docker exec`
 
-## Examples
-
-### Ephemeral Sessions (Recommended)
-
-Use these for day-to-day development:
+**Advanced Options:**
 
 ```bash
-# Navigate to your project
-cd ~/my-project
-
-# Quick session with Copilot
-run-copilot
-
-# Quick session with Codex, no auto-push
-run-codex --no-push
-
-# Quick session on specific directory
-run-claude ~/other-project
-```
-
-### Persistent Workspaces (Advanced) (Advanced)
-
-For long-running development sessions:
-
-```bash
-# Navigate to your project
-cd ~/my-project
-
-# Launch with agent (required)
-launch-agent copilot
-
-# Launch different agent
-launch-agent codex
-
-# Work on feature branch
-launch-agent copilot --branch feature-auth
-
-# Clone from GitHub
-launch-agent copilot https://github.com/user/repo
-```
-
-**Note:** For most tasks, use `run-copilot`, `run-codex`, or `run-claude` instead.
-
-### Install .NET Preview SDK
-
-```bash
-cd ~/my-dotnet-project
-
-# Install .NET 9.0 preview
+# Install .NET preview SDK
 launch-agent copilot --dotnet-preview 9.0
-
-# Install .NET 10.0 preview with Codex
 launch-agent codex --dotnet-preview 10.0
+
+# Network proxy modes
+launch-agent copilot --network-proxy restricted   # No outbound network
+launch-agent copilot --network-proxy squid        # Proxy with logging
 ```
 
-The preview SDK is installed at container startup and available alongside stable versions.
-
-### Configure Network Access
-
-```bash
-cd ~/my-project
-
-# Default (allow-all bridge network)
-launch-agent copilot
-
-# Restrict all outbound network traffic
-launch-agent copilot --network-proxy restricted
-
-# Proxy with Squid logging
-launch-agent copilot --network-proxy squid
-```
-
-See [NETWORK_PROXY.md](NETWORK_PROXY.md) for detailed network configuration options.
-
-> **Note:** Restricted mode disables outbound network connectivity; provide a local repository path instead of a Git URL when using this option.
+See [docs/network-proxy.md](docs/network-proxy.md) for network configuration details.
 
 ## Multiple Agents, Same Repo
 
@@ -987,7 +917,7 @@ A: If you pushed your changes to git, you can recover. Otherwise, they're lost. 
 A: No, each container has its own isolated copy of the repository.
 
 **Q: How much disk space do containers use?**  
-A: Images: ~4GB base + 100MB per agent. Containers: depends on your code size.
+A: Images: ~3-4 GB base + 100MB per agent (Ubuntu 24.04, .NET SDKs with workloads, Playwright). Containers: depends on your code size.
 
 **Q: Can I use this without VS Code?**  
 A: Yes, use `docker exec -it <container> bash` for a terminal.
@@ -995,7 +925,7 @@ A: Yes, use `docker exec -it <container> bash` for a terminal.
 ---
 
 **Next Steps:**
-- See [docs/BUILD.md](docs/BUILD.md) if building images yourself
-- See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design
-- See [docs/NETWORK_PROXY.md](docs/NETWORK_PROXY.md) for network configuration
-- See [docs/TEST_PLAN.md](docs/TEST_PLAN.md) for comprehensive testing procedures
+- See [docs/build.md](docs/build.md) if building images yourself
+- See [docs/architecture.md](docs/architecture.md) for system design
+- See [docs/network-proxy.md](docs/network-proxy.md) for network configuration
+- See [scripts/test/README.md](scripts/test/README.md) for testing procedures

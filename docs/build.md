@@ -79,9 +79,10 @@ docker build -f Dockerfile.base -t coding-agents-base:local .
 **What it installs:**
 - System dependencies (curl, git, build tools, etc.)
 - Node.js 20.x
-- Python 3.11 with tomli package
+- Python 3.12
 - .NET SDK 8.0, 9.0, 10.0
-- Rust toolchain
+- .NET workloads (Aspire, MAUI, WASM, iOS, Android, etc.)
+- PowerShell
 - GitHub CLI
 - Playwright with Chromium
 - Pre-installed MCP servers
@@ -138,10 +139,11 @@ Or use PowerShell:
 ### Base Image (Dockerfile.base)
 
 **Key decisions:**
-- Ubuntu 22.04: Stable LTS base
+- Ubuntu 24.04: Latest LTS base
 - UID 1000: Matches first user on most Linux/WSL2 systems
 - Non-root: Security best practice
-- Multi-language: Node.js, Python, .NET for MCP servers
+- Multi-language: Node.js, Python, .NET for MCP servers and building code
+- Full .NET workloads: Enables building MAUI, Blazor, WASM, mobile apps
 
 **No secrets or authentication:**
 - All auth comes from runtime mounts
@@ -153,7 +155,7 @@ Or use PowerShell:
 curl, git, build-essential, sudo, zsh, vim, nano, jq, unzip
 
 # Language runtimes
-Node.js 20.x, Python 3.11, .NET SDK 8.0, Rust (cargo/rustc)
+Node.js 20.x, Python 3.12, .NET SDK 8.0/9.0/10.0, PowerShell
 
 # Tools
 GitHub CLI (gh), Playwright, MCP servers
@@ -335,7 +337,7 @@ docker run -it --rm <layer-id> /bin/bash
 ## Image Size Optimization
 
 Current approximate sizes:
-- Base: ~3-4 GB
+- Base: ~3-4 GB (Ubuntu 24.04 ~80MB, Node.js ~200MB, .NET SDKs + workloads ~2GB, Playwright ~500MB, PowerShell ~100MB, build tools ~500MB)
 - All-agents: +50 MB
 - Specialized: +10 MB each
 
@@ -409,7 +411,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 **Python version:**
 ```dockerfile
 # In Dockerfile.base
-RUN apt-get install -y python3.12
+# Python comes from Ubuntu 24.04 (currently 3.12)
+# To use a different version, add deadsnakes PPA:
+RUN add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y python3.13
 ```
 
 **MCP servers:**
@@ -526,7 +532,7 @@ jobs:
 A: Base image is large (~4GB) and changes rarely. Derived images are small and change frequently during development.
 
 **Q: Can I use a different base image?**  
-A: Yes, but ensure it has all required packages. Ubuntu 22.04 LTS is recommended for stability.
+A: Yes, but ensure it has all required packages. Ubuntu 24.04 LTS is recommended for latest tooling and long-term support.
 
 **Q: Why UID 1000?**  
 A: Matches the first user on most Linux/WSL2 systems, preventing permission issues with mounted volumes.
@@ -540,5 +546,5 @@ A: Yes, but consider if they should be pre-installed (bloats image) or installed
 ---
 
 **Next Steps:**
-- See [USAGE.md](USAGE.md) for end-user guide
-- See [ARCHITECTURE.md](ARCHITECTURE.md) for system design
+- See [../USAGE.md](../USAGE.md) for end-user guide
+- See [architecture.md](architecture.md) for system design

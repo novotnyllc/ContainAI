@@ -62,7 +62,7 @@ flowchart TB
     
     subgraph base["Base Image"]
         direction TB
-        base_content["• coding-agents-base:local<br/>• Ubuntu 22.04<br/>• Node.js 20.x<br/>• Python 3.11<br/>• .NET SDK 8.0<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
+        base_content["• coding-agents-base:local<br/>• Ubuntu 24.04<br/>• Node.js 20.x<br/>• Python 3.12<br/>• .NET SDK 8.0, 9.0, 10.0<br/>• .NET workloads (Aspire, MAUI, WASM)<br/>• PowerShell<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
     end
     
     specialized -->|FROM| allagents
@@ -79,14 +79,15 @@ flowchart TB
 
 **Key components:**
 - Ubuntu 22.04 LTS
-- Node.js 20.x, Python 3.11, .NET SDK 8.0, Rust
-- GitHub CLI (`gh`)
+- Node.js 20.x, Python 3.12, .NET SDK 8.0/9.0/10.0, PowerShell
+- .NET workloads (Aspire, MAUI, WASM, iOS, Android, etc.)
+- GitHub CLI (gh)
 - Playwright with Chromium
 - Pre-installed MCP servers
 - Non-root user: `agentuser` (UID 1000)
 
 **Build time:** ~10-15 minutes  
-**Size:** ~3-4 GB
+**Size:** ~3-4 GB (Ubuntu 24.04 ~80MB, Node.js ~200MB, .NET SDKs + workloads ~2GB, Playwright ~500MB, PowerShell ~100MB, build tools ~500MB)
 
 **No authentication:** Image contains no secrets, can be published publicly.
 
@@ -557,7 +558,7 @@ flowchart TB
 - **No port forwarding by default:** Add `-p` flags if needed
 - **No GPU access:** For ML workloads, add `--gpus all`
 - **WSL2 required on Windows:** Native Windows Docker not tested
-- **Large base image:** ~4 GB (future: consider distroless)
+- **Large base image:** ~3-4 GB due to .NET workloads and Playwright (future: consider distroless or split images)
 
 ### Future Improvements
 
@@ -570,5 +571,6 @@ flowchart TB
 ---
 
 **For more details:**
-- [BUILD.md](BUILD.md) - Building and publishing images
-- [USAGE.md](USAGE.md) - Using the agents
+- [build.md](build.md) - Building and publishing images
+- [../USAGE.md](../USAGE.md) - Using the agents
+- [network-proxy.md](network-proxy.md) - Network configuration

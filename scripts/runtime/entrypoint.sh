@@ -51,12 +51,17 @@ cleanup_on_shutdown() {
                     
                     # Push if auto-push is also enabled
                     if [ "$AUTO_PUSH" = "true" ] && [ -n "$BRANCH" ]; then
-                        echo "📤 Pushing changes to local remote..."
-                        if git push local "$BRANCH" 2>/dev/null; then
-                            echo "✅ Changes pushed to local remote: $REPO_NAME ($BRANCH)"
+                        # Validate branch name (alphanumeric, dash, underscore, slash only)
+                        if [[ "$BRANCH" =~ ^[a-zA-Z0-9/_-]+$ ]]; then
+                            echo "📤 Pushing changes to local remote..."
+                            if git push local "$BRANCH" 2>/dev/null; then
+                                echo "✅ Changes pushed to local remote: $REPO_NAME ($BRANCH)"
+                            else
+                                echo "⚠️  Failed to push (local remote may not be configured)"
+                                echo "💡 Run: git remote add local <url> to enable auto-push"
+                            fi
                         else
-                            echo "⚠️  Failed to push (local remote may not be configured)"
-                            echo "💡 Run: git remote add local <url> to enable auto-push"
+                            echo "⚠️  Invalid branch name, skipping push"
                         fi
                     fi
                 else
@@ -119,6 +124,9 @@ Only output the commit message, nothing else."
     if [ -n "$ai_message" ]; then
         # Remove common prefixes and clean up
         ai_message=$(echo "$ai_message" | sed -e 's/^git commit -m "//' -e 's/"$//' -e 's/^[Cc]ommit message: //' -e 's/^Message: //' | tr -d '\n')
+        
+        # Sanitize: remove control characters, limit length
+        ai_message=$(echo "$ai_message" | tr -d '\r\n\t' | head -c 100)
         
         # Validate it's reasonable (not too long, not empty)
         if [ ${#ai_message} -gt 10 ] && [ ${#ai_message} -lt 100 ]; then
