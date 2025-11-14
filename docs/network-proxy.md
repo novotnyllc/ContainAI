@@ -28,20 +28,31 @@ The coding agents can be launched with different network access policies to cont
 
 ## Examples
 
-```powershell
+**Ephemeral containers (recommended):**
+
+```bash
 # Default (allow-all)
-./launch-agent.ps1 copilot
+run-copilot
 
 # Restrict outbound network traffic
-./launch-agent.ps1 copilot -NetworkProxy restricted
+run-copilot --network-proxy restricted
 
-# Explicit alias for default behavior
-./launch-agent.ps1 copilot -NetworkProxy allow-all
-./launch-agent.ps1 copilot -NetworkProxy none
-
-# Proxy with Squid
-./launch-agent.ps1 copilot -NetworkProxy squid
+# Proxy with Squid logging
+run-copilot --network-proxy squid
 ```
+
+```powershell
+# Default (allow-all)
+.\run-copilot.ps1
+
+# Restrict outbound network traffic
+.\run-copilot.ps1 -NetworkProxy restricted
+
+# Proxy with Squid logging
+.\run-copilot.ps1 -NetworkProxy squid
+```
+
+**Persistent containers (advanced):**
 
 ```bash
 # Default (allow-all)
@@ -56,6 +67,21 @@ The coding agents can be launched with different network access policies to cont
 
 # Proxy with Squid
 ./launch-agent copilot --network-proxy squid
+```
+
+```powershell
+# Default (allow-all)
+./launch-agent.ps1 copilot
+
+# Restrict outbound network traffic
+./launch-agent.ps1 copilot -NetworkProxy restricted
+
+# Explicit alias for default behavior
+./launch-agent.ps1 copilot -NetworkProxy allow-all
+./launch-agent.ps1 copilot -NetworkProxy none
+
+# Proxy with Squid
+./launch-agent.ps1 copilot -NetworkProxy squid
 ```
 
 ## Configuration in config.toml
@@ -76,10 +102,3 @@ allow_all = true       # Set to false when using restricted mode
 1. **Default Mode**: Mirrors the typical developer experience with full outbound access
 2. **Restricted Mode**: Eliminates outbound connectivity; ideal for analyzing untrusted code but requires local repository sources
 3. **Proxy Mode**: Routes all outbound HTTP/HTTPS through Squid sidecar for auditing and filtering
-
-## Future Enhancements
-
-- [ ] Add domain whitelist/blacklist configuration
-- [ ] Provide traffic logging and analysis tools
-- [ ] Support custom proxy configurations
-- [ ] Integrate with container network plugins (Calico, Weave)

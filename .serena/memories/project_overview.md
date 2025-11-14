@@ -33,7 +33,7 @@ coding-agents/
 │   ├── runtime/       # Container entrypoint and startup scripts
 │   ├── test/          # Unit and integration tests
 │   └── build/         # Build scripts
-├── docs/              # Documentation (ARCHITECTURE.md, BUILD.md, etc.)
+├── docs/              # Documentation (architecture.md, build.md, etc.)
 ├── config.toml        # MCP server configuration template
 ├── AGENTS.md          # Repository-specific agent instructions
 ├── README.md          # User guide

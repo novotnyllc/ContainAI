@@ -89,7 +89,7 @@ If you changed functionality:
 - [ ] Update `README.md` if user-facing changes
 - [ ] Update `USAGE.md` if launcher behavior changed
 - [ ] Update `CONTRIBUTING.md` if development workflow changed
-- [ ] Update `docs/ARCHITECTURE.md` if design changed
+- [ ] Update `docs/architecture.md` if design changed
 - [ ] Update `AGENTS.md` if agent-specific guidance changed
 
 ## 8. Security Check

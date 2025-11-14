@@ -1,6 +1,10 @@
 # AI Coding Agents in Containers
 
-Run AI coding agents (GitHub Copilot, OpenAI Codex, Anthropic Claude) in isolated Docker containers with OAuth authentication and MCP server support.
+Run AI coding agents (GitHub Copilot, OpenAI Codex, Anthropic Claude) in isolated Docker containers with controlled network access. Each agent operates in its own workspace with branch isolation, enabling multiple agents to work on the same repository without conflicts while maintaining privacy and security.
+
+Containers provide network restrictions (full isolation or monitored proxy access), separate git branches for each agent, and VS Code integration via Dev Containers. Agents can be launched as ephemeral instances that auto-remove on exit, or as persistent background containers for long-running tasks.
+
+Features include MCP server support for extended capabilities, automated git operations, and configurable network policies. All agent activity is contained within Docker, keeping the host environment clean and prompts private.
 
 ## Features
 
@@ -15,21 +19,57 @@ Run AI coding agents (GitHub Copilot, OpenAI Codex, Anthropic Claude) in isolate
 
 ### 1. Setup (one time)
 
+**Required:**
+
 ```bash
-# Authenticate GitHub CLI
+# Authenticate GitHub CLI (required for all agents)
 gh auth login
 
 # Configure git
 git config --global user.name "Your Name"
 git config --global user.email "your@email.com"
+```
 
-# Build images (or use pre-built)
-./scripts/build.sh
+**Optional - Authenticate additional agents on your host:**
+
+GitHub Copilot uses your GitHub authentication above, but if you want to use other agents:
+
+```bash
+# For OpenAI Codex (if you have access)
+# Follow authentication instructions for the Codex CLI
+# Config stored at ~/.config/codex/
+
+# For Anthropic Claude (if you have access)  
+# Follow authentication instructions for the Claude CLI
+# Config stored at ~/.config/claude/
+```
+
+> **Note:** Agent authentication configs are mounted read-only into containers. You must authenticate on your host machine first.
+
+**Get the images:**
+
+```bash
+# Option 1: Pull pre-built (recommended)
+docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
+
+# Option 2: Build locally
+./scripts/build.sh  # Linux/macOS
+.\scripts\build.ps1 # Windows
 ```
 
 ### 2. Add launchers to PATH (optional but recommended)
 
 This lets you run launchers from anywhere:
+
+```bash
+# Linux/macOS
+./scripts/install.sh
+
+# Windows (PowerShell)
+.\scripts\install.ps1
+```
+
+Or manually add to PATH:
 
 **Windows (PowerShell):**
 ```powershell
@@ -120,11 +160,11 @@ remove-agent copilot-myapp-main --no-push
 ## Documentation
 
 - **[USAGE.md](USAGE.md)** - Complete user guide (start here!)
-- **[docs/BUILD.md](docs/BUILD.md)** - Building and publishing images
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System design and architecture
-- **[docs/NETWORK_PROXY.md](docs/NETWORK_PROXY.md)** - Network modes and Squid proxy
-- **[docs/TEST_PLAN.md](docs/TEST_PLAN.md)** - Comprehensive testing procedures
+- **[docs/build.md](docs/build.md)** - Building and publishing images
+- **[docs/architecture.md](docs/architecture.md)** - System design and architecture
+- **[docs/network-proxy.md](docs/network-proxy.md)** - Network modes and Squid proxy
 - **[scripts/test/README.md](scripts/test/README.md)** - Automated test suite (CI and local)
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guidelines
 
 ## Examples
 
