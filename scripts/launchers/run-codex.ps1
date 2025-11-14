@@ -70,6 +70,9 @@ if ($Help) {
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$ScriptDir\..\utils\common-functions.ps1"
 
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
+Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "run-codex"
+
 if (-not (Test-DockerRunning)) { exit 1 }
 
 try {
@@ -148,7 +151,7 @@ if ($Gpu) {
 
 $dockerArgs += "coding-agents-codex:local"
 
-$containerId = & docker $dockerArgs
+$null = & docker $dockerArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Failed to start Codex container" -ForegroundColor Red
     exit 1

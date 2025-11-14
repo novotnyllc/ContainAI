@@ -49,6 +49,9 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptDir "..\utils\common-functions.ps1")
 
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "launch-agent"
+
 # Auto-detect WSL home directory
 $WslHome = wsl bash -c 'echo $HOME' 2>$null
 if (-not $WslHome) {

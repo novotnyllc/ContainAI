@@ -1,5 +1,166 @@
 # Common functions for agent management scripts (PowerShell)
 
+$script:ConfigRoot = if ($env:CODING_AGENTS_HOST_CONFIG) {
+    Split-Path -Parent $env:CODING_AGENTS_HOST_CONFIG
+} else {
+    $homePath = if ($env:HOME) { $env:HOME } else { [Environment]::GetFolderPath('UserProfile') }
+    Join-Path $homePath ".config/coding-agents"
+}
+
+$script:HostConfigFile = if ($env:CODING_AGENTS_HOST_CONFIG) {
+    $env:CODING_AGENTS_HOST_CONFIG
+} else {
+    Join-Path $script:ConfigRoot "host-config.env"
+}
+
+$script:DefaultLauncherUpdatePolicy = "prompt"
+
+function Get-HostConfigValue {
+    param([Parameter(Mandatory = $true)][string]$Key)
+
+    if (-not (Test-Path $script:HostConfigFile)) {
+        return $null
+    }
+
+    $pattern = "^\s*$Key\s*="
+    $line = Get-Content $script:HostConfigFile -ErrorAction SilentlyContinue |
+        Where-Object { $_ -match $pattern } |
+        Select-Object -Last 1
+
+    if (-not $line) {
+        return $null
+    }
+
+    $value = $line.Substring($line.IndexOf('=') + 1).Trim()
+    $value = $value.Trim('"').Trim("'")
+    return $value
+}
+
+function Get-LauncherUpdatePolicy {
+    $value = $env:CODING_AGENTS_LAUNCHER_UPDATE_POLICY
+    if (-not $value) {
+        $value = Get-HostConfigValue -Key "LAUNCHER_UPDATE_POLICY"
+    }
+
+    switch ($value?.ToLower()) {
+        'always' { return 'always' }
+        'never'  { return 'never' }
+        'prompt' { return 'prompt' }
+        $null    { return $script:DefaultLauncherUpdatePolicy }
+        default  { return $script:DefaultLauncherUpdatePolicy }
+    }
+}
+
+function Invoke-LauncherUpdateCheck {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $false)][string]$Context
+    )
+
+    if ($env:CODING_AGENTS_SKIP_UPDATE_CHECK -eq '1') {
+        return
+    }
+
+    $policy = Get-LauncherUpdatePolicy
+    if ($policy -eq 'never') {
+        return
+    }
+
+    if (-not (Test-Path (Join-Path $RepoRoot '.git'))) {
+        return
+    }
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Host "⚠️  Skipping launcher update check (git not available)" -ForegroundColor Yellow
+        return
+    }
+
+    git -C $RepoRoot rev-parse HEAD 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        return
+    }
+
+    $upstream = git -C $RepoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $upstream) {
+        return
+    }
+
+    git -C $RepoRoot fetch --quiet --tags 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "⚠️  Unable to check launcher updates (git fetch failed)" -ForegroundColor Yellow
+        return
+    }
+
+    $localHead = git -C $RepoRoot rev-parse HEAD 2>$null
+    $remoteHead = git -C $RepoRoot rev-parse '@{u}' 2>$null
+    $base = git -C $RepoRoot merge-base HEAD '@{u}' 2>$null
+
+    if ($localHead -eq $remoteHead) {
+        return
+    }
+
+    if ($localHead -ne $base -and $remoteHead -ne $base) {
+        Write-Host "⚠️  Launcher repository has diverged from $upstream. Please sync manually." -ForegroundColor Yellow
+        return
+    }
+
+    $clean = $true
+    git -C $RepoRoot diff --quiet 2>$null
+    if ($LASTEXITCODE -ne 0) { $clean = $false }
+    if ($clean) {
+        git -C $RepoRoot diff --quiet --cached 2>$null
+        if ($LASTEXITCODE -ne 0) { $clean = $false }
+    }
+
+    if ($policy -eq 'always') {
+        if (-not $clean) {
+            Write-Host "⚠️  Launcher repository has local changes; cannot auto-update." -ForegroundColor Yellow
+            return
+        }
+        git -C $RepoRoot pull --ff-only | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Launcher scripts updated to match $upstream" -ForegroundColor Green
+        } else {
+            Write-Host "⚠️  Failed to auto-update launcher scripts. Please update manually." -ForegroundColor Yellow
+        }
+        return
+    }
+
+    $canPrompt = $true
+    try {
+        if ([Console]::IsInputRedirected) {
+            $canPrompt = $false
+        }
+    } catch {
+        $canPrompt = $false
+    }
+
+    if (-not $canPrompt) {
+        Write-Host "⚠️  Launcher scripts are behind $upstream. Update the repository when convenient." -ForegroundColor Yellow
+        return
+    }
+
+    $suffix = if ($Context) { " ($Context)" } else { "" }
+    Write-Host "ℹ️  Launcher scripts are behind $upstream.$suffix" -ForegroundColor Cyan
+    if (-not $clean) {
+        Write-Host "   Local changes detected; please update manually." -ForegroundColor Yellow
+        return
+    }
+
+    $response = Read-Host "Update Coding Agents launchers now? [Y/n]"
+    if ([string]::IsNullOrWhiteSpace($response)) { $response = "y" }
+    if ($response.StartsWith('y', 'InvariantCultureIgnoreCase')) {
+        git -C $RepoRoot pull --ff-only | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Launcher scripts updated." -ForegroundColor Green
+        } else {
+            Write-Host "⚠️  Failed to update launchers. Please update manually." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "⏭️  Skipped launcher update." -ForegroundColor Yellow
+    }
+}
+
 function Get-ContainerRuntime {
     <#
     .SYNOPSIS

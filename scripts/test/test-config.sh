@@ -54,6 +54,9 @@ export TEST_SOURCE_REGISTRY="${TEST_SOURCE_REGISTRY:-ghcr.io/yourusername}"
 # Whether to use registry pulls (set to false to skip pushes in offline mode)
 export TEST_USE_REGISTRY_PULLS="${TEST_USE_REGISTRY_PULLS:-true}"
 
+# Disable launcher update checks during automated tests
+export CODING_AGENTS_SKIP_UPDATE_CHECK=1
+
 echo "Test configuration loaded:"
 echo "  Mode: $TEST_MODE"
 echo "  Registry: $TEST_REGISTRY"

@@ -26,6 +26,8 @@ Complete reference for all CodingAgents launcher scripts and their arguments.
 
 Ephemeral containers that auto-remove on exit. Best for quick coding sessions.
 
+> **Auto-update:** Launchers check whether the CodingAgents repository is behind its upstream before starting and prompt you to sync. Configure the behavior via `~/.config/coding-agents/host-config.env` (Linux/macOS) or `%USERPROFILE%\.config\coding-agents\host-config.env` (Windows) by setting `LAUNCHER_UPDATE_POLICY=prompt|always|never`.
+
 ### run-copilot
 
 Launch GitHub Copilot CLI in the current directory.
@@ -434,6 +436,9 @@ launch-agent copilot C:\production-repo `
 ```
 
 #### Behavior
+  # Build only Copilot + proxy
+  ./scripts/build/build.sh --agents copilot,proxy
+
 
 1. Validates source (path or URL)
 2. Determines branch name (auto or specified)
@@ -442,6 +447,9 @@ launch-agent copilot C:\production-repo `
 5. Sets up repository inside container
 6. Starts a managed tmux session so you can attach later without restarting
 7. Returns to terminal (container keeps running)
+  # Build only Copilot + proxy
+  .\scripts\build\build.ps1 -Agents copilot,proxy
+
 
 **Connect to container:**
 - VS Code: Dev Containers → Attach to Running Container
@@ -784,9 +792,12 @@ Build container images from source.
 
 | Option | Type | Description |
 |--------|------|-------------|
+| `-a, --agents LIST` (bash)<br>`-Agents LIST` (PowerShell) | string | Comma-separated list of targets to build. Accepts `copilot`, `codex`, `claude`, `proxy`, or `all`. Default: all targets. |
 | `-h, --help` (bash)<br>`-Help` (PowerShell) | flag | Show help |
 
-**Note:** Build options are interactive (base image selection)
+**Notes:**
+- The base-image prompt only appears when at least one agent image (`copilot`, `codex`, `claude`) is selected.
+- Specialized images depend on `coding-agents:local` and will trigger its build automatically.
 
 #### Interactive Prompts
 
@@ -801,25 +812,12 @@ Choice [1-2]:
 **Pull:** Downloads pre-built base image (~1 minute)
 **Build:** Builds from Dockerfile (~10 minutes)
 
-#### Build Order
+#### Build Order (per requested targets)
 
-1. **Base image** (`coding-agents-base:local`)
-   - Ubuntu 24.04, Node.js, Python, .NET, PowerShell
-   - ~3-4GB
-
-2. **All-agents image** (`coding-agents:local`)
-   - Extends base with common tools
-   - ~3-4GB
-
-3. **Specialized images** (built in parallel):
-   - `coding-agents-copilot:local`
-   - `coding-agents-codex:local`
-   - `coding-agents-claude:local`
-   - ~3-4GB each
-
-4. **Proxy image** (`coding-agents-proxy:local`)
-   - Squid proxy for network monitoring
-   - ~50MB
+1. **Base image** (`coding-agents-base:local`) – only when building agent images
+2. **All-agents image** (`coding-agents:local`) – prerequisite for agent-specific images
+3. **Selected specialized images** – `coding-agents-copilot:local`, `coding-agents-codex:local`, `coding-agents-claude:local`
+4. **Proxy image** (`coding-agents-proxy:local`) – built when requested
 
 #### Examples
 

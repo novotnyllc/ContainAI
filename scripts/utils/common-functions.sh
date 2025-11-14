@@ -2,6 +2,147 @@
 # Common functions for agent management scripts
 set -euo pipefail
 
+CODING_AGENTS_CONFIG_DIR="${HOME}/.config/coding-agents"
+CODING_AGENTS_HOST_CONFIG_FILE="${CODING_AGENTS_HOST_CONFIG:-${CODING_AGENTS_CONFIG_DIR}/host-config.env}"
+DEFAULT_LAUNCHER_UPDATE_POLICY="prompt"
+
+_read_host_config_value() {
+    local key="$1"
+    local file="$CODING_AGENTS_HOST_CONFIG_FILE"
+
+    if [ ! -f "$file" ] || [ -z "$key" ]; then
+        return 0
+    fi
+
+    # shellcheck disable=SC2002
+    local line
+    line=$(cat "$file" 2>/dev/null | grep -E "^\s*${key}\s*=" | tail -n 1) || true
+    if [ -z "$line" ]; then
+        return 0
+    fi
+
+    local value
+    value=${line#*=}
+    value=$(echo "$value" | sed -e 's/^\s*//' -e 's/\s*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+    printf '%s' "$value"
+}
+
+get_launcher_update_policy() {
+    local env_value="${CODING_AGENTS_LAUNCHER_UPDATE_POLICY:-}"
+    local value="$env_value"
+
+    if [ -z "$value" ]; then
+        value=$(_read_host_config_value "LAUNCHER_UPDATE_POLICY")
+    fi
+
+    case "$value" in
+        always|prompt|never)
+            echo "$value"
+            ;;
+        "")
+            echo "$DEFAULT_LAUNCHER_UPDATE_POLICY"
+            ;;
+        *)
+            echo "$DEFAULT_LAUNCHER_UPDATE_POLICY"
+            ;;
+    esac
+}
+
+maybe_check_launcher_updates() {
+    local repo_root="$1"
+    local context="$2"
+    local policy
+
+    if [ "${CODING_AGENTS_SKIP_UPDATE_CHECK:-0}" = "1" ]; then
+        return 0
+    fi
+
+    policy=$(get_launcher_update_policy)
+    if [ "$policy" = "never" ]; then
+        return 0
+    fi
+
+    if [ -z "$repo_root" ] || [ ! -d "$repo_root/.git" ]; then
+        return 0
+    fi
+
+    if ! command -v git >/dev/null 2>&1; then
+        echo "⚠️  Skipping launcher update check (git not available)"
+        return 0
+    fi
+
+    if ! git -C "$repo_root" rev-parse HEAD >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local upstream
+    upstream=$(git -C "$repo_root" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) || return 0
+
+    if ! git -C "$repo_root" fetch --quiet --tags >/dev/null 2>&1; then
+        echo "⚠️  Unable to check launcher updates (git fetch failed)"
+        return 0
+    fi
+
+    local local_head remote_head base
+    local_head=$(git -C "$repo_root" rev-parse HEAD)
+    remote_head=$(git -C "$repo_root" rev-parse '@{u}')
+    base=$(git -C "$repo_root" merge-base HEAD '@{u}')
+
+    if [ "$local_head" = "$remote_head" ]; then
+        return 0
+    fi
+
+    if [ "$local_head" != "$base" ] && [ "$remote_head" != "$base" ]; then
+        echo "⚠️  Launcher repository has diverged from $upstream. Please sync manually."
+        return 0
+    fi
+
+    local clean=true
+    if ! git -C "$repo_root" diff --quiet || ! git -C "$repo_root" diff --quiet --cached; then
+        clean=false
+    fi
+
+    if [ "$policy" = "always" ]; then
+        if [ "$clean" = false ]; then
+            echo "⚠️  Launcher repository has local changes; cannot auto-update."
+            return 0
+        fi
+        if git -C "$repo_root" pull --ff-only >/dev/null 2>&1; then
+            echo "✅ Launcher scripts updated to match $upstream"
+        else
+            echo "⚠️  Failed to auto-update launcher scripts. Please update manually."
+        fi
+        return 0
+    fi
+
+    if [ ! -t 0 ]; then
+        echo "⚠️  Launcher scripts are behind $upstream. Update the repository when convenient."
+        return 0
+    fi
+
+    local suffix=""
+    if [ -n "$context" ]; then
+        suffix=" ($context)"
+    fi
+    echo "ℹ️  Launcher scripts are behind $upstream.$suffix"
+    if [ "$clean" = false ]; then
+        echo "   Local changes detected; please update manually."
+        return 0
+    fi
+
+    read -p "Update Coding Agents launchers now? [Y/n]: " -r response
+    response=${response:-Y}
+    if [[ $response =~ ^[Yy]$ ]]; then
+        if git -C "$repo_root" pull --ff-only >/dev/null 2>&1; then
+            echo "✅ Launcher scripts updated."
+        else
+            echo "⚠️  Failed to update launchers. Please update manually."
+        fi
+    else
+        echo "⏭️  Skipped launcher update."
+    fi
+}
+
 # Detect container runtime (docker or podman)
 get_container_runtime() {
     # Check for CONTAINER_RUNTIME environment variable first
