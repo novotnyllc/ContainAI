@@ -250,7 +250,7 @@ docker run -it ghcr.io/novotnyllc/coding-agents-copilot:latest
 
 3. **Test changes:**
    ```bash
-   ./launch-agent.ps1 . --agent copilot
+   ./launch-agent.ps1 copilot .
    ```
 
 4. **Clean up old images:**

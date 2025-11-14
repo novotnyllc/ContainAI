@@ -76,7 +76,7 @@ Test with a real container to verify behavior:
 
 ```bash
 cd ~/test-project
-launch-agent --agent copilot --branch test-feature
+launch-agent copilot --branch test-feature
 
 # Work in the container, verify changes work as expected
 # Exit and verify cleanup happened correctly

@@ -101,9 +101,9 @@ run-copilot.ps1
 ```bash
 # Persistent container (background, reconnectable)
 cd ~/my-project
-launch-agent                          # Default: Copilot on current branch
-launch-agent --agent codex            # Codex on current branch
-launch-agent --branch feature-auth    # Copilot on feature-auth branch
+launch-agent copilot                  # Copilot on current branch
+launch-agent codex            # Codex on current branch
+launch-agent copilot --branch feature-auth    # Copilot on feature-auth branch
 
 # PowerShell
 launch-agent.ps1 -Agent codex -Branch feature-auth
@@ -170,7 +170,7 @@ pwsh scripts/test/test-launchers.ps1
 
 # 2. If tests pass, test manually
 cd ~/test-project
-launch-agent --agent copilot --branch test-feature
+launch-agent copilot --branch test-feature
 
 # 3. Make more changes in container, test, iterate
 

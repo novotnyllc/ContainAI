@@ -74,14 +74,14 @@ For long-running tasks or when you need advanced features like branch management
 # Navigate to your project
 cd ~/my-project
 
-# Launch with default agent (copilot)
-launch-agent
+# Launch with specific agent (required)
+launch-agent copilot
 
-# Launch specific agent
-launch-agent --agent codex
+# Launch different agent
+launch-agent codex
 
 # Launch on specific branch
-launch-agent --branch feature-auth
+launch-agent copilot --branch feature-auth
 ```
 
 **Container naming:** Containers are named `{agent}-{repo}-{branch}` for easy identification:
@@ -92,7 +92,7 @@ launch-agent --branch feature-auth
 **Auto-push safety:** All containers automatically push uncommitted changes to your local repository before shutting down. Use `--no-push` to disable:
 ```bash
 run-copilot --no-push
-launch-agent --no-push
+launch-agent copilot --no-push
 ```
 
 ### 4. Manage containers
@@ -137,23 +137,23 @@ run-claude ~/other-proj  # Launch on specific directory
 **Advanced: Persistent workspaces (for long-running tasks):**
 ```bash
 cd ~/my-project
-launch-agent                           # Default: Copilot on current branch
-launch-agent --agent codex             # Codex on current branch
-launch-agent --branch feature-auth     # Copilot on feature-auth branch
+launch-agent copilot                      # Copilot on current branch
+launch-agent codex                        # Codex on current branch
+launch-agent copilot --branch feature-auth # Copilot on feature-auth branch
 ```
 
-**Advanced: Multiple agents on same repo:**
+**Multiple agents on same repo:**
 ```bash
 cd ~/my-project
-launch-agent --branch main --agent copilot    # copilot-myproject-main
-launch-agent --branch auth --agent codex      # codex-myproject-auth
-launch-agent --branch api --agent claude      # claude-myproject-api
+launch-agent copilot --branch main     # copilot-myproject-main
+launch-agent codex --branch auth       # codex-myproject-auth
+launch-agent claude --branch api       # claude-myproject-api
 ```
 
 **Advanced: Network controls:**
 ```bash
-launch-agent --network-proxy restricted   # Block outbound traffic
-launch-agent --network-proxy squid        # Proxy with logging
+launch-agent copilot --network-proxy restricted   # Block outbound traffic
+launch-agent copilot --network-proxy squid        # Proxy with logging
 ```
 
 **Container management (for persistent containers):**

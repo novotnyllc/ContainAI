@@ -136,8 +136,8 @@ run-copilot --no-push
 run-copilot.ps1 -NoPush
 
 # For persistent launchers
-launch-agent --no-push
-launch-agent.ps1 -NoPush
+launch-agent copilot --no-push
+launch-agent.ps1 copilot -NoPush
 
 # When removing containers
 remove-agent copilot-myapp-main --no-push
@@ -222,23 +222,23 @@ For long-running tasks or when you need advanced features. Containers run in bac
 # Navigate to your project
 cd ~/my-project
 
-# Launch with defaults (copilot, current branch)
-launch-agent
+# Launch with agent (required as first argument)
+launch-agent copilot
 
-# Specify agent
-launch-agent --agent codex
+# Launch different agent
+launch-agent codex
 
 # Work on specific branch
-launch-agent --branch feature-auth
+launch-agent copilot --branch feature-auth
 ```
 
 **Parameters:**
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| Source (positional) | Local path or GitHub URL | `.`, `/path/to/repo`, `https://github.com/user/repo` |
+| Agent (required, first) | Agent type: `copilot`, `codex`, `claude` | `copilot`, `codex`, `claude` |
+| Source (positional) | Local path or GitHub URL (default: current directory) | `.`, `/path/to/repo`, `https://github.com/user/repo` |
 | `-b` or `--branch` | Feature branch name (becomes `<agent>/<branch>`) | `-b auth` creates `copilot/auth` |
-| `--agent` | Choose agent: `copilot`, `codex`, `claude`, `all` (default: `copilot`) | `--agent codex` |
 | `-y` or `--force` | Auto-replace existing agent branch without prompting | `-y` or `--force` |
 | `--no-push` | Disable auto-push on shutdown | `--no-push` |
 | `--dotnet-preview` | Install .NET preview SDK | `--dotnet-preview 11.0` |
@@ -317,17 +317,17 @@ For long-running development sessions:
 # Navigate to your project
 cd ~/my-project
 
-# Launch with default agent (copilot)
-launch-agent
+# Launch with agent (required)
+launch-agent copilot
 
-# Launch specific agent
-launch-agent --agent codex
+# Launch different agent
+launch-agent codex
 
 # Work on feature branch
-launch-agent --branch feature-auth
+launch-agent copilot --branch feature-auth
 
 # Clone from GitHub
-launch-agent https://github.com/user/repo --agent copilot
+launch-agent copilot https://github.com/user/repo
 ```
 
 **Note:** For most tasks, use `run-copilot`, `run-codex`, or `run-claude` instead.
@@ -338,10 +338,10 @@ launch-agent https://github.com/user/repo --agent copilot
 cd ~/my-dotnet-project
 
 # Install .NET 9.0 preview
-launch-agent --dotnet-preview 9.0
+launch-agent copilot --dotnet-preview 9.0
 
 # Install .NET 10.0 preview with Codex
-launch-agent --agent codex --dotnet-preview 10.0
+launch-agent codex --dotnet-preview 10.0
 ```
 
 The preview SDK is installed at container startup and available alongside stable versions.
@@ -352,13 +352,13 @@ The preview SDK is installed at container startup and available alongside stable
 cd ~/my-project
 
 # Default (allow-all bridge network)
-launch-agent
+launch-agent copilot
 
 # Restrict all outbound network traffic
-launch-agent --network-proxy restricted
+launch-agent copilot --network-proxy restricted
 
 # Proxy with Squid logging
-launch-agent --network-proxy squid
+launch-agent copilot --network-proxy squid
 ```
 
 See [NETWORK_PROXY.md](NETWORK_PROXY.md) for detailed network configuration options.
@@ -373,9 +373,9 @@ Launch multiple agents working on different features:
 cd ~/my-project
 
 # Launch different agents on different branches
-launch-agent --branch auth --agent copilot      # copilot-myproject-auth
-launch-agent --branch database --agent codex    # codex-myproject-database
-launch-agent --branch ui --agent claude         # claude-myproject-ui
+launch-agent copilot --branch auth       # copilot-myproject-auth
+launch-agent codex --branch database     # codex-myproject-database
+launch-agent claude --branch ui          # claude-myproject-ui
 ```
 
 Each agent gets:
@@ -787,7 +787,7 @@ export CONTAINER_RUNTIME=podman
 
 # Force Docker
 export CONTAINER_RUNTIME=docker
-launch-agent
+launch-agent copilot
 ```
 
 ```powershell
@@ -797,14 +797,14 @@ $env:CONTAINER_RUNTIME = "podman"
 
 # Force Docker  
 $env:CONTAINER_RUNTIME = "docker"
-.\launch-agent.ps1
+.\launch-agent.ps1 copilot
 ```
 
 ### Custom Container Name
 
 ```powershell
-.\launch-agent.ps1 . --name experiment-1
-# Creates: all-experiment-1
+.\launch-agent.ps1 copilot . --name experiment-1
+# Creates: copilot-experiment-1
 ```
 
 ### Specify Git Remote Manually
@@ -899,16 +899,16 @@ run-claude.ps1 [directory] [-NoPush] [-Help]
 ### Launch Agent (Advanced)
 ```powershell
 # PowerShell
-.\launch-agent.ps1 [source] [-Branch name] [-Agent type] [-Name custom]
+.\launch-agent.ps1 <agent> [source] [-Branch name] [-Name custom]
 
 # Bash
-./launch-agent [source] [-b name] [--agent type] [--name custom]
+./launch-agent <agent> [source] [-b name] [--name custom]
 ```
 
 **Parameters:**
+- `agent`: Agent type (required): copilot, codex, or claude
 - `source`: Directory path or GitHub URL (default: current dir)
 - `-Branch`/`-b`: Branch name (default: current branch or "main")
-- `-Agent`/`--agent`: copilot, codex, claude, all (default: all)
 - `-Name`/`--name`: Custom container name (default: auto-generated)
 
 For container management (stop, start, remove), see the [Container Management](#container-management) section.
@@ -918,7 +918,7 @@ For container management (stop, start, remove), see the [Container Management](#
 ### Single agent, quick task
 
 ```powershell
-.\launch-agent.ps1 . --agent copilot
+.\launch-agent.ps1 copilot
 # Work in container
 # Push changes
 docker rm -f copilot-myrepo
@@ -927,7 +927,7 @@ docker rm -f copilot-myrepo
 ### Long-term development
 
 ```powershell
-.\launch-agent.ps1 C:\projects\app -b feature-x --agent copilot
+.\launch-agent.ps1 copilot C:\projects\app -b feature-x
 # Connect from VS Code
 # Work over days/weeks
 # Container persists until you remove it
@@ -936,15 +936,15 @@ docker rm -f copilot-myrepo
 ### Multiple features, multiple agents
 
 ```powershell
-.\launch-agent.ps1 . -b backend --agent copilot
-.\launch-agent.ps1 . -b frontend --agent claude
-.\launch-agent.ps1 . -b tests --agent codex
+.\launch-agent.ps1 copilot . -b backend
+.\launch-agent.ps1 claude . -b frontend
+.\launch-agent.ps1 codex . -b tests
 ```
 
 ### Experiment with open source
 
 ```powershell
-.\launch-agent.ps1 https://github.com/microsoft/vscode -b explore --agent copilot
+.\launch-agent.ps1 copilot https://github.com/microsoft/vscode -b explore
 # Explore in isolated environment
 # No impact on host
 docker rm -f copilot-vscode  # Clean up when done
