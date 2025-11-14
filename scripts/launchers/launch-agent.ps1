@@ -2,16 +2,16 @@
 # The container runs persistently for VS Code Remote connection
 
 param(
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory=$true, Position=0)]
+    [ValidateSet("copilot", "codex", "claude")]
+    [string]$Agent,
+    
+    [Parameter(Mandatory=$false, Position=1)]
     [string]$Source = ".",
     
     [Parameter(Mandatory=$false)]
     [Alias("b")]
     [string]$Branch,
-    
-    [Parameter(Mandatory=$false)]
-    [ValidateSet("copilot", "codex", "claude")]
-    [string]$Agent = "copilot",
     
     [Parameter(Mandatory=$false)]
     [string]$Name,

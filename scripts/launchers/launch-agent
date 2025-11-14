@@ -9,24 +9,41 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
 # Default values
+AGENT=""
 SOURCE="."
 BRANCH=""
-AGENT="copilot"
 NAME=""
 DOTNET_PREVIEW=""
 NETWORK_PROXY="allow-all"
 NO_PUSH=false
 FORCE=false
 
-# Parse arguments
+# First argument must be agent type
+if [[ $# -eq 0 || "$1" == "-"* ]]; then
+    echo "❌ Error: Agent type is required as first argument"
+    echo "Usage: launch-agent <agent> [SOURCE] [OPTIONS]"
+    echo "Agent types: copilot, codex, claude"
+    exit 1
+fi
+
+AGENT="$1"
+shift
+
+# Validate agent
+case "$AGENT" in
+    copilot|codex|claude) ;;
+    *)
+        echo "❌ Error: Invalid agent type '$AGENT'"
+        echo "Valid options: copilot, codex, claude"
+        exit 1
+        ;;
+esac
+
+# Parse remaining arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         -b|--branch)
             BRANCH="$2"
-            shift 2
-            ;;
-        --agent)
-            AGENT="$2"
             shift 2
             ;;
         --name)
@@ -50,7 +67,9 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: launch-agent [SOURCE] [OPTIONS]"
+            echo "Usage: launch-agent <agent> [SOURCE] [OPTIONS]"
+            echo ""
+            echo "Agent types: copilot, codex, claude"
             echo ""
             echo "SOURCE can be:"
             echo "  • Local path to a git repository (default: current directory)"
@@ -58,9 +77,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  -b, --branch BRANCH         Branch name (creates <agent>/<branch>)"
-            echo "  --agent AGENT               Agent type: copilot, codex, claude (default: copilot)"
             echo "  --name NAME                 Custom container name"
-            echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 9.0)"
+            echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)"
             echo "  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)"
             echo "  --no-push                   Disable auto-push on container shutdown"
             echo "  -y, --force                 Automatically replace existing agent branch without prompting"
@@ -72,11 +90,11 @@ while [[ $# -gt 0 ]]; do
             echo "  Branches with unmerged commits are archived before replacement."
             echo ""
             echo "Examples:"
-            echo "  launch-agent                           # Current directory"
-            echo "  launch-agent . -b feature-auth         # Current dir, custom branch"
-            echo "  launch-agent https://github.com/user/repo --agent copilot"
-            echo "  launch-agent /path/to/repo --name my-workspace"
-            echo "  launch-agent . -b main -y              # Auto-replace existing branch"
+            echo "  launch-agent copilot                              # Copilot in current directory"
+            echo "  launch-agent codex . -b feature-auth              # Codex in current dir, custom branch"
+            echo "  launch-agent copilot https://github.com/user/repo # Copilot from GitHub"
+            echo "  launch-agent claude /path/to/repo --name my-workspace"
+            echo "  launch-agent copilot . -b main -y                 # Auto-replace existing branch"
             exit 0
             ;;
         *)

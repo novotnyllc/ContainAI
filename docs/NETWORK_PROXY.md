@@ -7,19 +7,19 @@ The coding agents can be launched with different network access policies to cont
 ### `allow-all` (Default)
 - **Network Access**: Standard Docker bridge network (`--network bridge`)
 - **Use Case**: Everyday development with access to the public internet (package installs, API calls, etc.)
-- **Launch**: `./launch-agent .` or `./launch-agent . --network-proxy allow-all`
+- **Launch**: `./launch-agent copilot` or `./launch-agent copilot --network-proxy allow-all`
 - **Alias**: Passing `--network-proxy none` maps to this mode for backwards compatibility
 
 ### `restricted` (No outbound network)
 - **Network Access**: Container launched with `--network none` (no outbound or inbound network)
 - **Use Case**: Highly locked-down scenarios, security reviews, running untrusted code
 - **Limitation**: Cannot clone from Git URLs—provide a local repository path instead
-- **Launch**: `./launch-agent . --network-proxy restricted`
+- **Launch**: `./launch-agent copilot --network-proxy restricted`
 
 ### `squid` (Proxy with Filtering)
 - **Network Access**: HTTP/HTTPS routed through Squid proxy sidecar container
 - **Logging**: Requests recorded at `/var/log/squid/access.log` inside proxy container
-- **Launch**: `./launch-agent . --network-proxy squid`
+- **Launch**: `./launch-agent copilot --network-proxy squid`
 - **Artifacts**:
   - **Image**: `coding-agents-proxy:local`
   - **Sidecar**: `<agent>-<repo>-proxy`
@@ -30,32 +30,32 @@ The coding agents can be launched with different network access policies to cont
 
 ```powershell
 # Default (allow-all)
-./launch-agent.ps1 .
+./launch-agent.ps1 copilot
 
 # Restrict outbound network traffic
-./launch-agent.ps1 . -NetworkProxy restricted
+./launch-agent.ps1 copilot -NetworkProxy restricted
 
 # Explicit alias for default behavior
-./launch-agent.ps1 . -NetworkProxy allow-all
-./launch-agent.ps1 . -NetworkProxy none
+./launch-agent.ps1 copilot -NetworkProxy allow-all
+./launch-agent.ps1 copilot -NetworkProxy none
 
 # Proxy with Squid
-./launch-agent.ps1 . -NetworkProxy squid
+./launch-agent.ps1 copilot -NetworkProxy squid
 ```
 
 ```bash
 # Default (allow-all)
-./launch-agent .
+./launch-agent copilot
 
 # Restrict outbound network traffic
-./launch-agent . --network-proxy restricted
+./launch-agent copilot --network-proxy restricted
 
 # Explicit alias for default behavior
-./launch-agent . --network-proxy allow-all
-./launch-agent . --network-proxy none
+./launch-agent copilot --network-proxy allow-all
+./launch-agent copilot --network-proxy none
 
 # Proxy with Squid
-./launch-agent . --network-proxy squid
+./launch-agent copilot --network-proxy squid
 ```
 
 ## Configuration in config.toml

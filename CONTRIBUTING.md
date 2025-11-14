@@ -107,7 +107,7 @@ pwsh scripts/test/test-branch-management.ps1
 3. **If tests pass, test manually** with a real container:
    ```bash
    # Launch an agent to test manually
-   ./scripts/launchers/launch-agent . --agent copilot --branch test-feature
+   ./scripts/launchers/launch-agent copilot . --branch test-feature
    ```
 
 4. **Before committing**, run full unit tests:

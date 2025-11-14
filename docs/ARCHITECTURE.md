@@ -126,7 +126,7 @@ flowchart TB
 ### 1. User Runs launch-agent
 
 ```powershell
-.\launch-agent.ps1 C:\projects\myapp -b feature-x --agent copilot
+.\launch-agent.ps1 copilot C:\projects\myapp -b feature-x
 ```
 
 ### 2. Script Detects Source Type
