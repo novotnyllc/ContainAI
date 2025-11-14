@@ -8,6 +8,20 @@ param(
     [string]$RepoPath = ".",
     
     [Parameter(Mandatory=$false)]
+    [Alias("b")]
+    [string]$Branch,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$Name,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$DotNetPreview,
+    
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("allow-all", "restricted", "squid", "none")]
+    [string]$NetworkProxy = "allow-all",
+    
+    [Parameter(Mandatory=$false)]
     [string]$Cpu = "4",
     
     [Parameter(Mandatory=$false)]
@@ -20,31 +34,46 @@ param(
     [switch]$NoPush,
     
     [Parameter(Mandatory=$false)]
+    [switch]$UseCurrentBranch,
+    
+    [Parameter(Mandatory=$false)]
+    [Alias("y")]
+    [switch]$Force,
+    
+    [Parameter(Mandatory=$false)]
     [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "Usage: .\run-copilot.ps1 [RepoPath] [-NoPush]"
+    Write-Host "Usage: .\run-copilot.ps1 [RepoPath] [OPTIONS]"
     Write-Host ""
     Write-Host "Launch GitHub Copilot CLI in an ephemeral container."
     Write-Host ""
     Write-Host "Arguments:"
-    Write-Host "  RepoPath    Path to repository (default: current directory)"
+    Write-Host "  RepoPath              Path to repository (default: current directory)"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -Cpu NUM      CPU limit (default: 4)"
-    Write-Host "  -Memory SIZE  Memory limit (default: 8g)"
-    Write-Host "  -Gpu SPEC     GPU specification (e.g., 'all' or 'device=0')"
-    Write-Host "  -NoPush       Skip auto-push to local remote on exit"
-    Write-Host "  -Help         Show this help"
+    Write-Host "  -Branch BRANCH        Branch name (creates <agent>/<branch>)"
+    Write-Host "  -Name NAME            Custom container name"
+    Write-Host "  -DotNetPreview CH     Install .NET preview SDK (e.g., 11.0)"
+    Write-Host "  -NetworkProxy MODE    Network: allow-all, restricted, squid (default: allow-all)"
+    Write-Host "  -Cpu NUM              CPU limit (default: 4)"
+    Write-Host "  -Memory SIZE          Memory limit (default: 8g)"
+    Write-Host "  -Gpu SPEC             GPU specification (e.g., 'all' or 'device=0')"
+    Write-Host "  -NoPush               Skip auto-push to git remote on exit"
+    Write-Host "  -UseCurrentBranch     Use current branch (no isolation)"
+    Write-Host "  -Force                Replace existing branch without prompt"
+    Write-Host "  -Help                 Show this help"
     Write-Host ""
     Write-Host "Examples:"
-    Write-Host "  .\run-copilot.ps1                # Launch in current directory"
-    Write-Host "  .\run-copilot.ps1 C:\my-repo     # Launch in specific directory"
-    Write-Host "  .\run-copilot.ps1 -NoPush        # Skip auto-push on exit"
-    Write-Host "  .\run-copilot.ps1 -Cpu 8 -Memory 16g  # Custom resources"
+    Write-Host "  .\run-copilot.ps1                        # Launch in current directory"
+    Write-Host "  .\run-copilot.ps1 C:\my-repo             # Launch in specific directory"
+    Write-Host "  .\run-copilot.ps1 -Branch feature        # Create copilot/feature branch"
+    Write-Host "  .\run-copilot.ps1 -Name my-session       # Custom container name"
+    Write-Host "  .\run-copilot.ps1 -NetworkProxy squid    # Use monitored proxy"
+    Write-Host "  .\run-copilot.ps1 -Cpu 8 -Memory 16g     # Custom resources"
     exit 0
 }
 

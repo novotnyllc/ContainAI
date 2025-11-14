@@ -9,13 +9,35 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 
 # Parse arguments
 REPO_PATH="."
+BRANCH=""
+NAME=""
+DOTNET_PREVIEW=""
+NETWORK_PROXY="allow-all"
 CPU="4"
 MEMORY="8g"
 GPU=""
 SKIP_PUSH=false
+USE_CURRENT_BRANCH=false
+FORCE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -b|--branch)
+            BRANCH="$2"
+            shift 2
+            ;;
+        --name)
+            NAME="$2"
+            shift 2
+            ;;
+        --dotnet-preview)
+            DOTNET_PREVIEW="$2"
+            shift 2
+            ;;
+        --network-proxy)
+            NETWORK_PROXY="$2"
+            shift 2
+            ;;
         --cpu)
             CPU="$2"
             shift 2
@@ -32,26 +54,42 @@ while [[ $# -gt 0 ]]; do
             SKIP_PUSH=true
             shift
             ;;
+        --use-current-branch)
+            USE_CURRENT_BRANCH=true
+            shift
+            ;;
+        -y|--force)
+            FORCE=true
+            shift
+            ;;
         -h|--help)
-            echo "Usage: run-copilot [directory] [--no-push]"
+            echo "Usage: run-copilot [directory] [OPTIONS]"
             echo ""
             echo "Launch GitHub Copilot CLI in an ephemeral container."
             echo ""
             echo "Arguments:"
-            echo "  directory    Path to repository (default: current directory)"
+            echo "  directory              Path to repository (default: current directory)"
             echo ""
             echo "Options:"
-            echo "  --cpu NUM      CPU limit (default: 4)"
-            echo "  --memory SIZE  Memory limit (default: 8g)"
-            echo "  --gpu SPEC     GPU specification (e.g., 'all' or 'device=0')"
-            echo "  --no-push      Skip auto-push to local remote on exit"
-            echo "  -h, --help     Show this help"
+            echo "  -b, --branch BRANCH    Branch name (creates <agent>/<branch>)"
+            echo "  --name NAME            Custom container name"
+            echo "  --dotnet-preview CH    Install .NET preview SDK (e.g., 11.0)"
+            echo "  --network-proxy MODE   Network: allow-all, restricted, squid (default: allow-all)"
+            echo "  --cpu NUM              CPU limit (default: 4)"
+            echo "  --memory SIZE          Memory limit (default: 8g)"
+            echo "  --gpu SPEC             GPU specification (e.g., 'all' or 'device=0')"
+            echo "  --no-push              Skip auto-push to git remote on exit"
+            echo "  --use-current-branch   Use current branch (no isolation)"
+            echo "  -y, --force            Replace existing branch without prompt"
+            echo "  -h, --help             Show this help"
             echo ""
             echo "Examples:"
-            echo "  run-copilot              # Launch in current directory"
-            echo "  run-copilot ~/my-repo    # Launch in specific directory"
-            echo "  run-copilot --no-push    # Skip auto-push on exit"
-            echo "  run-copilot --cpu 8 --memory 16g  # Custom resources"
+            echo "  run-copilot                        # Launch in current directory"
+            echo "  run-copilot ~/my-repo              # Launch in specific directory"
+            echo "  run-copilot -b feature             # Create copilot/feature branch"
+            echo "  run-copilot --name my-session      # Custom container name"
+            echo "  run-copilot --network-proxy squid  # Use monitored proxy"
+            echo "  run-copilot --cpu 8 --memory 16g   # Custom resources"
             exit 0
             ;;
         *)
