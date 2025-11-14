@@ -163,12 +163,12 @@ If an agent reads this file, it might interpret the comment as an instruction ra
 
 Even with prompt injection, agents **cannot**:
 
-- ❌ Escape the container (no privileged mode, no Docker socket)
-- ❌ Access your host filesystem (except mounted workspace)
-- ❌ Modify authentication credentials (mounted read-only)
-- ❌ Make network requests in `restricted` mode
-- ❌ Bypass Squid whitelist in `squid` mode
-- ❌ Gain elevated privileges (no-new-privileges enforced)
+- Escape the container (no privileged mode, no Docker socket)
+- Access your host filesystem (except mounted workspace)
+- Modify authentication credentials (mounted read-only)
+- Make network requests in `restricted` mode
+- Bypass Squid whitelist in `squid` mode
+- Gain elevated privileges (no-new-privileges enforced)
 
 ### Reporting Prompt Injection Issues
 
@@ -178,15 +178,15 @@ If you discover a prompt injection that bypasses these protections, please repor
 
 ### What Stays Private
 
-- ✅ **Code changes:** Each agent has isolated workspace, changes don't leak between agents
-- ✅ **Git history:** Each container has separate git workspace
-- ✅ **Environment variables:** Container environments are isolated
+- **Code changes:** Each agent has isolated workspace, changes don't leak between agents
+- **Git history:** Each container has separate git workspace
+- **Environment variables:** Container environments are isolated
 
 ### What Gets Shared
 
-- ⚠️ **Agent API calls:** Agents send prompts/code to their respective services (GitHub, OpenAI, Anthropic)
-- ⚠️ **Network requests:** In `allow-all` mode, agents can make arbitrary outbound requests
-- ⚠️ **Squid logs:** In `squid` mode, all HTTP/HTTPS requests are logged locally
+- **Agent API calls:** Agents send prompts/code to their respective services (GitHub, OpenAI, Anthropic)
+- **Network requests:** In `allow-all` mode, agents can make arbitrary outbound requests
+- **Squid logs:** In `squid` mode, all HTTP/HTTPS requests are logged locally
 
 ### Best Practices
 

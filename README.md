@@ -15,24 +15,66 @@ Features include MCP server support for extended capabilities, automated git ope
 - **MCP servers**: GitHub, Microsoft Docs, Playwright, Context7, Serena, and more
 - **Network controls**: Restricted mode (`--network none`) or Squid proxy sidecar for monitoring
 
-## Quick Start
+## Quick Start (5 Minutes)
 
-### 1. Setup (one time)
+**New to Docker or containers?** See the [detailed getting started guide](docs/getting-started.md).
+
+**Prerequisites:**
+- ✅ Docker (or Podman) installed and running
+- ✅ Git configured (`user.name`, `user.email`)
+- ℹ️  GitHub CLI authenticated (`gh auth login`) - **Only if using GitHub Copilot or GitHub-hosted repos**
+
+**Quick verification:**
+```bash
+./scripts/verify-prerequisites.sh  # Linux/Mac
+.\scripts\verify-prerequisites.ps1 # Windows
+```
+
+**Note:** The verification script will warn if GitHub CLI is missing, but this is only required for GitHub Copilot. Other agents work without it.
+
+**Get running in 3 steps:**
+
+```bash
+# 1. Pull image (1 minute)
+docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
+
+# 2. Install launchers (30 seconds)
+./scripts/install.sh        # Linux/Mac
+.\scripts\install.ps1       # Windows PowerShell
+
+# 3. Launch agent (instant)
+cd ~/my-project
+run-copilot
+```
+
+That's it! You're coding with AI in an isolated container.
+
+**Learn more:** [Usage Guide](USAGE.md) | [Getting Started](docs/getting-started.md) | [Architecture](docs/architecture.md)
+
+---
+
+## Complete Setup Guide
+
+### 1. Prerequisites (one time)
 
 **Required:**
 
 ```bash
-# Authenticate GitHub CLI (required for all agents)
-gh auth login
-
 # Configure git
 git config --global user.name "Your Name"
 git config --global user.email "your@email.com"
 ```
 
-**Optional - Authenticate additional agents on your host:**
+**For GitHub Copilot (optional):**
 
-GitHub Copilot uses your GitHub authentication above, but if you want to use other agents:
+```bash
+# Authenticate GitHub CLI - only needed for GitHub Copilot
+gh auth login
+```
+
+**For other agents (optional):**
+
+Authenticate on your host machine if you want to use these agents:
 
 ```bash
 # For OpenAI Codex (if you have access)
