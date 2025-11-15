@@ -531,6 +531,7 @@ remove_container_with_sidecars() {
     # Get container labels to find repo and branch info
     local agent_branch=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container_name" 2>/dev/null || true)
     local repo_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' "$container_name" 2>/dev/null || true)
+    local local_remote_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.local-remote" }}' "$container_name" 2>/dev/null || true)
     
     # Push changes first
     if [ "$(get_container_status "$container_name")" = "running" ]; then
@@ -558,6 +559,12 @@ remove_container_with_sidecars() {
             echo "🗑️  Removing network: $proxy_network"
             container_cli network rm "$proxy_network" 2>/dev/null || true
         fi
+    fi
+
+    if [ -n "$agent_branch" ] && [ -n "$repo_path" ] && [ -d "$repo_path" ] && [ -n "$local_remote_path" ]; then
+        echo ""
+        echo "🔄 Syncing agent branch back to host repository..."
+        sync_local_remote_to_host "$repo_path" "$local_remote_path" "$agent_branch"
     fi
     
     # Clean up agent branch in host repo if applicable

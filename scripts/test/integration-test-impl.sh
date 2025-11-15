@@ -279,9 +279,14 @@ test_mcp_configuration_generation() {
     test_section "Testing MCP configuration generation"
 
     local container_name="${TEST_CONTAINER_PREFIX}-mcp"
-    local config_path="/home/agentuser/.config/github-copilot/mcp/config.json"
     local expected_keys="docs,github"
     local success=true
+    local config_paths=(
+        "/home/agentuser/.config/github-copilot/mcp/config.json"
+        "/home/agentuser/.config/codex/mcp/config.json"
+        "/home/agentuser/.config/claude/mcp/config.json"
+    )
+    local config_labels=("copilot" "codex" "claude")
 
     docker run -d \
         --name "$container_name" \
@@ -301,10 +306,14 @@ test_mcp_configuration_generation() {
         pass "MCP setup script executed"
     fi
 
-    if docker exec "$container_name" test -f "$config_path"; then
-        pass "MCP config file created"
-        local keys
-        if keys=$(docker exec -i "$container_name" env CONFIG_PATH="$config_path" python3 - <<'PY'
+    local idx
+    for idx in "${!config_paths[@]}"; do
+        local config_path=${config_paths[$idx]}
+        local label=${config_labels[$idx]}
+        if docker exec "$container_name" test -f "$config_path"; then
+            pass "MCP config file created for $label"
+            local keys
+            if keys=$(docker exec -i "$container_name" env CONFIG_PATH="$config_path" python3 - <<'PY'
 import json
 import os
 
@@ -314,20 +323,21 @@ with open(path, 'r', encoding='utf-8') as handle:
 print(','.join(sorted(data.get('mcpServers', {}).keys())))
 PY
 ); then
-            if [ "$keys" = "$expected_keys" ]; then
-                pass "MCP config contains expected servers"
+                if [ "$keys" = "$expected_keys" ]; then
+                    pass "MCP config contains expected servers for $label"
+                else
+                    fail "Unexpected MCP server keys for $label (expected $expected_keys, got $keys)"
+                    success=false
+                fi
             else
-                fail "Unexpected MCP server keys (expected $expected_keys, got $keys)"
+                fail "Failed to inspect MCP config contents for $label"
                 success=false
             fi
         else
-            fail "Failed to inspect MCP config contents"
+            fail "MCP config file not created for $label"
             success=false
         fi
-    else
-        fail "MCP config file not created"
-        success=false
-    fi
+    done
 
     docker rm -f "$container_name" >/dev/null 2>&1 || true
 

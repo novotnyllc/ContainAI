@@ -286,6 +286,117 @@ test_local_remote_push() {
     unset WORKSPACE_DIR SOURCE_TYPE LOCAL_REMOTE_URL AGENT_BRANCH ORIGIN_URL
 }
 
+test_local_remote_fallback_push() {
+    test_section "Testing local remote fallback push"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local workspace_dir
+    workspace_dir=$(mktemp -d)
+    local bare_dir
+    bare_dir=$(mktemp -d)
+    local bare_repo="$bare_dir/local-remote.git"
+    git init --bare "$bare_repo" >/dev/null
+
+    mkdir -p /tmp/source-repo
+    rm -rf /tmp/source-repo/*
+    cp -a "$TEST_REPO_DIR/." /tmp/source-repo/
+
+    local agent_branch="copilot/session-fallback"
+    local setup_script
+    setup_script=$(generate_repo_setup_script "local" "" "$TEST_REPO_DIR" "" "$agent_branch")
+    if ! echo "$setup_script" | WORKSPACE_DIR="$workspace_dir" SOURCE_TYPE="local" LOCAL_REMOTE_URL="" LOCAL_REPO_PATH="file://$bare_repo" AGENT_BRANCH="$agent_branch" bash; then
+        fail "Repository setup script failed with fallback remote"
+        rm -rf "$workspace_dir" "$bare_dir"
+        rm -rf /tmp/source-repo
+        return
+    fi
+
+    pushd "$workspace_dir" >/dev/null
+    git config user.name "Test User"
+    git config user.email "test@example.com"
+    echo "fallback push" >> README.md
+    git add README.md
+    git commit -q -m "fallback push"
+    if git push local "$agent_branch" >/dev/null 2>&1; then
+        pass "git push succeeded using fallback LOCAL_REPO_PATH"
+    else
+        fail "git push failed when using LOCAL_REPO_PATH fallback"
+    fi
+    popd >/dev/null
+
+    if git --git-dir="$bare_repo" rev-parse --verify "refs/heads/$agent_branch" >/dev/null 2>&1; then
+        pass "Fallback remote contains agent branch"
+    else
+        fail "Fallback remote missing agent branch"
+    fi
+
+    rm -rf "$workspace_dir" "$bare_dir"
+    rm -rf /tmp/source-repo
+    unset WORKSPACE_DIR SOURCE_TYPE LOCAL_REMOTE_URL LOCAL_REPO_PATH AGENT_BRANCH ORIGIN_URL
+}
+
+test_secure_remote_sync() {
+    test_section "Testing secure remote host sync"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local agent_branch="copilot/session-sync"
+    local bare_dir
+    bare_dir=$(mktemp -d)
+    local bare_repo="$bare_dir/local-remote.git"
+    git init --bare "$bare_repo" >/dev/null
+
+    local agent_workspace
+    agent_workspace=$(mktemp -d)
+    pushd "$agent_workspace" >/dev/null
+    git init -q
+    git config user.name "Agent"
+    git config user.email "agent@example.com"
+    echo "agent work" > agent.txt
+    git add agent.txt
+    git commit -q -m "agent commit"
+    git branch -M "$agent_branch"
+    git remote add origin "$bare_repo"
+    if git push origin "$agent_branch" >/dev/null 2>&1; then
+        pass "Agent branch pushed to secure remote"
+    else
+        fail "Failed to push agent branch to secure remote"
+        popd >/dev/null
+        rm -rf "$agent_workspace" "$bare_dir"
+        return
+    fi
+    popd >/dev/null
+
+    (cd "$TEST_REPO_DIR" && git branch -D "$agent_branch" >/dev/null 2>&1 || true)
+
+    local sanitized_branch="${agent_branch//\//-}"
+    local container_name="test-sync-${sanitized_branch}"
+    docker run -d \
+        --name "$container_name" \
+        --label "coding-agents.test=true" \
+        --label "coding-agents.type=agent" \
+        --label "coding-agents.branch=$agent_branch" \
+        --label "coding-agents.repo-path=$TEST_REPO_DIR" \
+        --label "coding-agents.local-remote=$bare_repo" \
+        alpine:latest sleep 60 >/dev/null
+
+    if remove_container_with_sidecars "$container_name" "true" "true" >/dev/null 2>&1; then
+        pass "remove_container_with_sidecars synchronizes secure remote"
+    else
+        fail "remove_container_with_sidecars failed"
+    fi
+
+    if git -C "$TEST_REPO_DIR" show "$agent_branch:agent.txt" >/dev/null 2>&1; then
+        pass "Host branch fast-forwarded from secure remote"
+    else
+        fail "Host branch missing agent changes"
+    fi
+
+    (cd "$TEST_REPO_DIR" && git branch -D "$agent_branch" >/dev/null 2>&1 || true)
+    rm -rf "$agent_workspace" "$bare_dir"
+}
+
 # Test: Container naming convention
 test_container_naming() {
     test_section "Testing container naming convention"
@@ -472,6 +583,8 @@ main() {
     test_container_runtime_detection
     test_shared_functions
     test_local_remote_push
+    test_local_remote_fallback_push
+    test_secure_remote_sync
     test_wsl_path_conversion
     test_container_naming
     test_container_labels
