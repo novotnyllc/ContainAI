@@ -12,6 +12,16 @@ param()
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($env:TEMP)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:TMPDIR)) {
+        $env:TEMP = $env:TMPDIR
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:TMP)) {
+        $env:TEMP = $env:TMP
+    } else {
+        $env:TEMP = [System.IO.Path]::GetTempPath()
+    }
+}
+
 # Test session ID for complete isolation
 $TEST_SESSION_ID = $PID
 $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path

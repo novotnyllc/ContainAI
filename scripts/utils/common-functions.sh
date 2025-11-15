@@ -266,8 +266,10 @@ branch_exists() {
     local repo_path="$1"
     local branch_name="$2"
     
-    (cd "$repo_path" && git show-ref --verify --quiet "refs/heads/$branch_name" 2>/dev/null)
-    return $?
+    if (cd "$repo_path" && git show-ref --verify --quiet "refs/heads/$branch_name" 2>/dev/null); then
+        return 0
+    fi
+    return 1
 }
 
 # Get unmerged commits between branches

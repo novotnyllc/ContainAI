@@ -7,6 +7,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($env:TEMP)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:TMPDIR)) {
+        $env:TEMP = $env:TMPDIR
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:TMP)) {
+        $env:TEMP = $env:TMP
+    } else {
+        $env:TEMP = [System.IO.Path]::GetTempPath()
+    }
+}
+
 $script:FailedTests = 0
 $script:PassedTests = 0
 
@@ -188,6 +198,11 @@ function New-TestContainer {
     
     $SanitizedBranch = $Branch -replace '/', '-'
     $ContainerName = "$Agent-$Repo-$SanitizedBranch"
+
+    $existing = docker ps -a --filter "name=^${ContainerName}$" --format "{{.Names}}" 2>$null
+    if ($existing -eq $ContainerName) {
+        docker rm -f $ContainerName 2>$null | Out-Null
+    }
     
     docker run -d `
         --name $ContainerName `

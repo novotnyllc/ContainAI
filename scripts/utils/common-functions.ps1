@@ -959,7 +959,7 @@ function Sync-LocalRemoteToHost {
     Push-Location $RepoPath
     try {
         $tempRef = "refs/coding-agents-sync/$AgentBranch" -replace ' ', '-'
-        if (-not (git fetch $LocalRemotePath "$AgentBranch:$tempRef" 2>$null)) {
+        if (-not (git fetch $LocalRemotePath "${AgentBranch}:$tempRef" 2>$null)) {
             Write-Warning "Failed to fetch agent branch from secure remote"
             return
         }
