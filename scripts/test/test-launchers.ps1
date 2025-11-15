@@ -204,6 +204,39 @@ function Test-ContainerLabels {
 # Test Functions
 # ============================================================================
 
+function Test-ContainerRuntimeDetection {
+    Test-Section "Testing container runtime detection"
+    
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+    
+    $runtime = Get-ContainerRuntime
+    if ($runtime -and @("docker", "podman") -contains $runtime) {
+        Pass "Get-ContainerRuntime detected runtime: $runtime"
+    } else {
+        Fail "Get-ContainerRuntime returned invalid runtime: '$runtime'"
+        return
+    }
+    
+    $cmd = Get-Command $runtime -ErrorAction SilentlyContinue
+    if ($cmd) {
+        Pass "Container runtime command '$runtime' is available"
+    } else {
+        Fail "Container runtime command '$runtime' not found in PATH"
+        return
+    }
+    
+    try {
+        & $runtime info 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Pass "Container runtime '$runtime' successfully executed 'info'"
+        } else {
+            Fail "Container runtime '$runtime' failed 'info' command with exit code $LASTEXITCODE"
+        }
+    } catch {
+        Fail "Container runtime '$runtime' threw an error running 'info': $_"
+    }
+}
+
 function Test-SharedFunctions {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing multiple shared functions')]
     param()
