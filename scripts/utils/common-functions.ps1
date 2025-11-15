@@ -14,6 +14,30 @@ $script:HostConfigFile = if ($env:CODING_AGENTS_HOST_CONFIG) {
 }
 
 $script:DefaultLauncherUpdatePolicy = "prompt"
+$script:ContainerCli = $null
+
+function Get-ContainerCli {
+    if ($script:ContainerCli) {
+        return $script:ContainerCli
+    }
+
+    $runtime = Get-ContainerRuntime
+    if (-not $runtime) {
+        $runtime = "docker"
+    }
+    $script:ContainerCli = $runtime
+    return $script:ContainerCli
+}
+
+function Invoke-ContainerCli {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+
+    $cli = Get-ContainerCli
+    & $cli @Args
+}
 
 function Get-HostConfigValue {
     param([Parameter(Mandatory = $true)][string]$Key)
@@ -466,6 +490,7 @@ function Test-DockerRunning {
         try {
             $null = & $runtime info 2>$null
             if ($LASTEXITCODE -eq 0) {
+                $script:ContainerCli = $runtime
                 return $true
             }
         } catch { }
@@ -495,6 +520,7 @@ function Test-DockerRunning {
         try {
             $null = podman info 2>$null
             if ($LASTEXITCODE -eq 0) {
+                $script:ContainerCli = "podman"
                 return $true
             }
         } catch { }
@@ -543,6 +569,7 @@ function Test-DockerRunning {
                     $null = docker info 2>$null
                     if ($LASTEXITCODE -eq 0) {
                         Write-Host "✅ Docker started successfully!" -ForegroundColor Green
+                        $script:ContainerCli = "docker"
                         return $true
                     }
                 } catch {
@@ -599,8 +626,8 @@ function Update-AgentImage {
             if ($attempt -gt 1) {
                 Write-Host "  Retry attempt $attempt of $MaxRetries..." -ForegroundColor Yellow
             }
-            docker pull --quiet $registryImage 2>$null | Out-Null
-            docker tag $registryImage $localImage 2>$null | Out-Null
+            Invoke-ContainerCli pull --quiet $registryImage 2>$null | Out-Null
+            Invoke-ContainerCli tag $registryImage $localImage 2>$null | Out-Null
             $pulled = $true
         } catch {
             if ($attempt -lt $MaxRetries) {
@@ -618,13 +645,13 @@ function Test-ContainerExists {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Exists is semantically correct for testing existence')]
     param([string]$ContainerName)
     
-    $existing = docker ps -a --filter "name=^${ContainerName}$" --format "{{.Names}}" 2>$null
+    $existing = Invoke-ContainerCli ps -a --filter "name=^${ContainerName}$" --format "{{.Names}}" 2>$null
     return ($existing -eq $ContainerName)
 }
 
 function Get-ContainerStatus {
     param([string]$ContainerName)
-    $status = docker inspect -f '{{.State.Status}}' $ContainerName 2>$null
+    $status = Invoke-ContainerCli inspect -f '{{.State.Status}}' $ContainerName 2>$null
     if ($status) { return $status } else { return "not-found" }
 }
 
@@ -664,8 +691,12 @@ else
 fi
 '@
     
+    $cli = Get-ContainerCli
     try {
-        $pushScript | docker exec -i $ContainerName bash 2>$null
+        $pushScript | & $cli exec -i $ContainerName bash 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Push failed"
+        }
     } catch {
         Write-Host "⚠️  Could not push changes" -ForegroundColor Yellow
     }
@@ -675,18 +706,18 @@ function Get-AgentContainers {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Returns multiple containers - plural is correct')]
     param()
     
-    docker ps -a --filter "label=coding-agents.type=agent" `
+    Invoke-ContainerCli ps -a --filter "label=coding-agents.type=agent" `
         --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}"
 }
 
 function Get-ProxyContainer {
     param([string]$AgentContainer)
-    docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' $AgentContainer 2>$null
+    Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' $AgentContainer 2>$null
 }
 
 function Get-ProxyNetwork {
     param([string]$AgentContainer)
-    docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' $AgentContainer 2>$null
+    Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' $AgentContainer 2>$null
 }
 
 function Remove-ContainerWithSidecars {
@@ -713,8 +744,8 @@ function Remove-ContainerWithSidecars {
     }
     
     # Get container labels to find repo and branch info
-    $agentBranch = docker inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' $ContainerName 2>$null
-    $repoPath = docker inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' $ContainerName 2>$null
+    $agentBranch = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' $ContainerName 2>$null
+    $repoPath = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' $ContainerName 2>$null
     
     # Push changes first
     if ((Get-ContainerStatus $ContainerName) -eq "running") {
@@ -727,20 +758,20 @@ function Remove-ContainerWithSidecars {
     
     # Remove main container
     Write-Host "🗑️  Removing container: $ContainerName" -ForegroundColor Cyan
-    docker rm -f $ContainerName 2>$null | Out-Null
+    Invoke-ContainerCli rm -f $ContainerName 2>$null | Out-Null
     
     # Remove proxy if exists
     if ($proxyContainer -and (Test-ContainerExists $proxyContainer)) {
         Write-Host "🗑️  Removing proxy: $proxyContainer" -ForegroundColor Cyan
-        docker rm -f $proxyContainer 2>$null | Out-Null
+        Invoke-ContainerCli rm -f $proxyContainer 2>$null | Out-Null
     }
     
     # Remove network if exists and no containers attached
     if ($proxyNetwork) {
-        $attached = docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' $proxyNetwork 2>$null
+        $attached = Invoke-ContainerCli network inspect -f '{{range .Containers}}{{.Name}} {{end}}' $proxyNetwork 2>$null
         if (-not $attached) {
             Write-Host "🗑️  Removing network: $proxyNetwork" -ForegroundColor Cyan
-            docker network rm $proxyNetwork 2>$null | Out-Null
+            Invoke-ContainerCli network rm $proxyNetwork 2>$null | Out-Null
         }
     }
     
@@ -807,20 +838,20 @@ function Initialize-SquidProxy {
     }
     
     # Create network if needed
-    $networkExists = docker network inspect $NetworkName 2>$null
+    $networkExists = Invoke-ContainerCli network inspect $NetworkName 2>$null
     if (-not $networkExists) {
-        docker network create $NetworkName | Out-Null
+        Invoke-ContainerCli network create $NetworkName | Out-Null
     }
     
     # Check if proxy exists
     if (Test-ContainerExists $ProxyContainer) {
         $state = Get-ContainerStatus $ProxyContainer
         if ($state -ne "running") {
-            docker start $ProxyContainer | Out-Null
+            Invoke-ContainerCli start $ProxyContainer | Out-Null
         }
     } else {
         # Create new proxy
-        docker run -d `
+        Invoke-ContainerCli run -d `
             --name $ProxyContainer `
             --hostname $ProxyContainer `
             --network $NetworkName `

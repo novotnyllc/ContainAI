@@ -394,6 +394,21 @@ test_container_status() {
     docker start "$container_name" >/dev/null 2>&1
 }
 
+# Test: Launcher wrapper scripts
+test_launcher_wrappers() {
+    test_section "Testing launcher wrapper scripts"
+
+    local wrappers=("run-copilot" "run-codex" "run-claude")
+    for wrapper in "${wrappers[@]}"; do
+        local script_path="$PROJECT_ROOT/scripts/launchers/${wrapper}"
+        if output=$("$script_path" --help 2>&1); then
+            assert_contains "$output" "Usage: run-agent" "${wrapper} --help displays usage"
+        else
+            fail "${wrapper} --help failed (exit $?)"
+        fi
+    done
+}
+
 # Main test execution
 main() {
     echo "╔═══════════════════════════════════════════════════════════╗"
@@ -414,6 +429,7 @@ main() {
     test_multiple_agents
     test_label_filtering
     test_container_status
+    test_launcher_wrappers
     test_list_agents
     test_remove_agent
     

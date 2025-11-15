@@ -5,14 +5,15 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$ScriptDir\..\utils\common-functions.ps1"
 
-# Check Docker
+# Check container runtime
 if (-not (Test-DockerRunning)) { exit 1 }
+$containerCli = Get-ContainerCli
 
 Write-Host "🤖 Active Agent Containers" -ForegroundColor Cyan
 Write-Host ""
 
 # Get all agent containers
-$containers = docker ps -a --filter "label=coding-agents.type=agent" --format "{{.Names}}" 2>$null
+$containers = Invoke-ContainerCli ps -a --filter "label=coding-agents.type=agent" --format "{{.Names}}" 2>$null
 
 if (-not $containers) {
     Write-Host "No agent containers found"
@@ -30,11 +31,11 @@ Write-Host ("-" * 100)
 # List each container
 foreach ($container in $containers) {
     $status = Get-ContainerStatus $container
-    $agent = docker inspect -f '{{ index .Config.Labels "coding-agents.agent" }}' $container 2>$null
+    $agent = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.agent" }}' $container 2>$null
     if (-not $agent) { $agent = "unknown" }
-    $branch = docker inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' $container 2>$null
+    $branch = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' $container 2>$null
     if (-not $branch) { $branch = "unknown" }
-    $repo = docker inspect -f '{{ index .Config.Labels "coding-agents.repo" }}' $container 2>$null
+    $repo = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.repo" }}' $container 2>$null
     if (-not $repo) { $repo = "unknown" }
     
     # Color code status
@@ -49,6 +50,6 @@ foreach ($container in $containers) {
 
 Write-Host ""
 Write-Host "📋 Management Commands:" -ForegroundColor Cyan
-Write-Host "  docker exec -it <name> bash     # Connect to container"
+Write-Host "  $containerCli exec -it <name> bash     # Connect to container"
 Write-Host "  remove-agent <name>             # Remove container (with auto-push)"
 Write-Host "  remove-agent <name> --no-push   # Remove without pushing"

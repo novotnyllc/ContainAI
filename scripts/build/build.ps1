@@ -172,8 +172,9 @@ foreach ($image in $builtImages) {
     Write-Host "  • $image"
 }
 Write-Host ""
-Write-Host "🚀 Run a container with:" -ForegroundColor Cyan
-Write-Host "   .\scripts\run-agent.ps1 -RepoPath 'E:\dev\your-repo'" -ForegroundColor Yellow
+Write-Host "🚀 Launch an agent container with:" -ForegroundColor Cyan
+Write-Host "   .\scripts\launchers\run-agent.ps1 copilot -Source 'E:\dev\your-repo'" -ForegroundColor Yellow
+Write-Host "   # or use .\scripts\launchers\run-copilot.ps1 'E:\dev\your-repo'" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "   Or using docker-compose:" -ForegroundColor Cyan
 Write-Host "   cp .env.example .env" -ForegroundColor Yellow

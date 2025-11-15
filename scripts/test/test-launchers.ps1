@@ -419,6 +419,24 @@ function Test-ContainerStatus {
     docker start $containerName 2>$null | Out-Null
 }
 
+function Test-LauncherWrappers {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing multiple wrapper scripts')]
+    param()
+
+    Test-Section "Testing launcher wrapper scripts"
+
+    $wrappers = @('run-copilot.ps1', 'run-codex.ps1', 'run-claude.ps1')
+    foreach ($wrapper in $wrappers) {
+        $script = Join-Path $ProjectRoot "scripts\launchers\$wrapper"
+        $output = & $script -Help 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Assert-Contains $output "Usage" "$wrapper -Help displays usage"
+        } else {
+            Fail "$wrapper -Help failed with exit code $LASTEXITCODE"
+        }
+    }
+}
+
 # ============================================================================
 # Main Test Execution
 # ============================================================================
@@ -444,6 +462,7 @@ function Main {
         Test-WslPathConversion
         Test-BranchNameSanitization
         Test-ContainerStatus
+        Test-LauncherWrappers
         Test-ListAgents
         Test-RemoveAgent
     }

@@ -44,19 +44,19 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Ensure container runtime is available before we proceed
+check_docker_running || exit 1
+
 # Check arguments
 if [ -z "$CONTAINER_NAME" ]; then
     echo "❌ Error: Container name required"
     echo ""
-    echo "Usage: remove-agent <container-name> [--no-push] [--keep-branch]"
+    echo "Usage: remove-agent <container-name> [--no-push] [--keep-branch]"    
     echo ""
     echo "Available containers:"
-    docker ps -a --filter "label=coding-agents.type=agent" --format "  • {{.Names}}" 2>/dev/null
+    container_cli ps -a --filter "label=coding-agents.type=agent" --format "  • {{.Names}}" 2>/dev/null
     exit 1
 fi
-
-# Check Docker
-check_docker_running || exit 1
 
 # Remove container
 remove_container_with_sidecars "$CONTAINER_NAME" "$SKIP_PUSH" "$KEEP_BRANCH"
