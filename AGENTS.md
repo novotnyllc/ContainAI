@@ -36,6 +36,13 @@ This file contains repository-specific guidance for working with the Coding Agen
 3. **Code Quality** - PowerShell must pass PSScriptAnalyzer with zero warnings
 4. **Documentation** - Keep CONTRIBUTING.md `docs/` updated with workflow changes
 
+## Coding Conventions 
+
+- **PowerShell**: Always use approved verb-noun names (`Clear-TestEnvironment`, `Get-ContainerStatus`, etc.). Avoid aliases like `curl`, prefer full cmdlets (`Invoke-WebRequest`). Ensure scripts stay analyzer-clean.
+- **Bash**: Use `set -euo pipefail`, quote variables, prefer POSIX-friendly syntax unless Bash-only needed. Mirror behavior with the PowerShell counterpart.
+- **Shared Behavior**: When fixing a workflow in one shell, immediately update the sibling script and its tests. Keep comments minimal and only for non-obvious logic so agents can diff quickly.
+- **Tests First-Class**: Whenever you change branch/remote handling or setup scripts, update both bash and PowerShell launcher tests plus integration tests to reflect the new guarantees.
+
 ## Agent Configuration
 
 Custom instructions for AI coding agents are stored in `agent-configs/`

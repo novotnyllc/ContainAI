@@ -49,7 +49,7 @@ function Show-TestSummary {
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
 }
 
-function Initialize-TestRepo {
+function Setup-TestRepo {
     Test-Section "Setting up test repository"
     
     if (Test-Path $TestRepoDir) {
@@ -635,7 +635,7 @@ function Main {
         Test-RemoveAgent
     }
     finally {
-        Cleanup-Tests
+        Clear-TestEnvironment
     }
 }
 
