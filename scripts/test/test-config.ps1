@@ -12,6 +12,17 @@ $env:TEST_CODEX_IMAGE = "$env:TEST_REGISTRY/$env:TEST_IMAGE_PREFIX/codex:test"
 $env:TEST_CLAUDE_IMAGE = "$env:TEST_REGISTRY/$env:TEST_IMAGE_PREFIX/claude:test"
 
 # Test repository location
+$tempRoot = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) {
+    $env:TEMP
+} elseif (-not [string]::IsNullOrWhiteSpace($env:TMPDIR)) {
+    $env:TMPDIR
+} elseif (-not [string]::IsNullOrWhiteSpace($env:TMP)) {
+    $env:TMP
+} else {
+    [System.IO.Path]::GetTempPath()
+}
+
+$env:TEMP = $tempRoot
 $env:TEST_REPO_DIR = Join-Path $env:TEMP "test-coding-agents-repo-$PID"
 $env:TEST_WORKSPACE_DIR = Join-Path $env:TEMP "test-coding-agents-workspace-$PID"
 

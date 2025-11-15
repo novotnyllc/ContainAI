@@ -74,11 +74,13 @@ setup_test_repo() {
 pass() {
     echo -e "${GREEN}✓${NC} $1"
     ((PASSED_TESTS++))
+    return 0
 }
 
 fail() {
     echo -e "${RED}✗${NC} $1"
     ((FAILED_TESTS++))
+    return 1
 }
 
 test_section() {
@@ -103,7 +105,7 @@ assert_contains() {
     local needle="$2"
     local message="$3"
     
-    if echo "$haystack" | grep -q "$needle"; then
+    if echo "$haystack" | grep -q -- "$needle"; then
         pass "$message"
     else
         fail "$message (string not found: '$needle')"
@@ -155,6 +157,10 @@ create_test_container() {
     local branch="$3"
     local sanitized_branch="${branch//\//-}"
     local container_name="${agent}-${repo}-${sanitized_branch}"
+
+    if docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" | grep -q "^${container_name}$"; then
+        docker rm -f "$container_name" >/dev/null 2>&1 || true
+    fi
     
     docker run -d \
         --name "$container_name" \
@@ -190,6 +196,8 @@ verify_container_labels() {
 
 test_container_runtime_detection() {
     test_section "Container Runtime Detection"
+    
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
     
     # Test get_container_runtime function
     local runtime=$(get_container_runtime)
@@ -272,7 +280,7 @@ test_local_remote_push() {
         return
     fi
 
-    cd "$workspace_dir"
+    pushd "$workspace_dir" >/dev/null
     git config user.name "Test User"
     git config user.email "test@example.com"
     echo "secure push" >> README.md
@@ -283,6 +291,8 @@ test_local_remote_push() {
     else
         fail "git push to local remote failed"
     fi
+
+    popd >/dev/null || true
 
     local pushed_ref
     pushed_ref=$(git --git-dir="$bare_repo" rev-parse "refs/heads/$agent_branch" 2>/dev/null || echo "")
@@ -334,7 +344,7 @@ test_local_remote_fallback_push() {
     else
         fail "git push failed when using LOCAL_REPO_PATH fallback"
     fi
-    popd >/dev/null
+    popd >/dev/null || true
 
     if git --git-dir="$bare_repo" rev-parse --verify "refs/heads/$agent_branch" >/dev/null 2>&1; then
         pass "Fallback remote contains agent branch"
@@ -373,11 +383,11 @@ test_secure_remote_sync() {
         pass "Agent branch pushed to secure remote"
     else
         fail "Failed to push agent branch to secure remote"
-        popd >/dev/null
+        popd >/dev/null || true
         rm -rf "$agent_workspace" "$bare_dir"
         return
     fi
-    popd >/dev/null
+    popd >/dev/null || true
 
     (cd "$TEST_REPO_DIR" && git branch -D "$agent_branch" >/dev/null 2>&1 || true)
 

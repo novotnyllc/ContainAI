@@ -1,3 +1,5 @@
+# Quick launcher for GitHub Copilot from the current directory
+# Usage: .\run-copilot.ps1 [RepoPath] [OPTIONS]
 param(
     [Parameter(Mandatory=$false, Position=0)]
     [string]$RepoPath = ".",

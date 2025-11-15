@@ -110,12 +110,12 @@ setup_test_repo() {
 
 pass() {
     echo -e "${GREEN}✓${NC} $1"
-    ((PASSED_TESTS++))
+    ((PASSED_TESTS++)) || true
 }
 
 fail() {
     echo -e "${RED}✗${NC} $1"
-    ((FAILED_TESTS++))
+    ((FAILED_TESTS++)) || true
 }
 
 test_section() {
