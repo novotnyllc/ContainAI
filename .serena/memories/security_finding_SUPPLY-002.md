@@ -1,0 +1,8 @@
+- ID: SUPPLY-002
+- Category: Supply Chain
+- Source: config.toml + scripts/runtime/entrypoint.sh (Serena auto-update)
+- Description: MCP servers are executed via `npx -y <package>@latest` or `uvx --from git+https://github.com/...@main`, and entrypoint.sh automatically `uvx --refresh`es Serena from GitHub HEAD on every container start. None of these dependencies are version-pinned or integrity-checked, meaning the runtime blindly executes the newest code fetched from npm or arbitrary Git repos.
+- Impact: A compromised npm/GitHub package immediately executes inside every agent container with access to secrets and workspaces, providing a turnkey supply-chain attack vector.
+- Likelihood: High (agents rely on these MCP servers for every session).
+- Severity: Critical
+- Recommended Fix: Lock each MCP server to vetted versions (exact semver or commit), mirror them in a trusted registry, and disable the auto-refresh behavior. Consider vendoring Serena or building internal packages instead of pulling from `@latest`.

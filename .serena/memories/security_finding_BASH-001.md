@@ -1,0 +1,8 @@
+- ID: BASH-001
+- Category: Unsafe I/O
+- Source: scripts/utils/common-functions.sh (push_to_local at lines ~470-505)
+- Description: When removing a container, `push_to_local` spawns `docker exec <container> bash -c '... read -p "Commit message" ...'` to prompt for staging and commit details. The prompt and `read` execute *inside* the target container, so any keystrokes the operator types (commit message, yes/no) are delivered directly to the compromised environment. A malicious agent can therefore capture or spoof host prompts during cleanup.
+- Impact: Breaks the assumption that host-side cleanup commands are out-of-band; the container can phish for secrets or capture sensitive text typed during removal.
+- Likelihood: Medium (remove-agent is a standard workflow and containers can manipulate user perception via additional output).
+- Severity: Medium
+- Recommended Fix: Never prompt via `docker exec`. Perform any required user interaction on the host first, then pass non-interactive commands into the container (e.g., use `git commit -m` parameters or skip commits entirely during automated cleanup).

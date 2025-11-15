@@ -1,0 +1,8 @@
+- ID: MCP-001
+- Category: Tool Chain
+- Source: config.toml (root) + scripts/runtime/setup-mcp-configs.sh
+- Description: All MCP servers (Playwright, Context7, Sequential Thinking, Fetch, Serena, etc.) are launched directly inside the agent container with the same permissions as the agent process. There is no sandboxing or permission boundary between servers—each receives `/workspace`, inherited environment variables (tokens), and can arbitrarily read/write files. A compromise of any third-party MCP server package immediately grants full access to mounted host secrets.
+- Impact: Any supply-chain compromise in npm/uvx packages or remote MCP endpoints gives attackers full control of the agent session and access to secrets that users expect to remain scoped.
+- Likelihood: Medium-High (servers like `@playwright/mcp@latest` and `mcp-server-fetch` are fetched on demand from npm and not under project control).
+- Severity: High
+- Recommended Fix: Run MCP servers in dedicated sandboxes (e.g., separate containers, seccomp-filtered subprocesses with restricted FS/env) and implement allowlists/permission prompts for workspace or secret access before connecting tools.

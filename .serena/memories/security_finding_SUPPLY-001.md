@@ -1,0 +1,8 @@
+- ID: SUPPLY-001
+- Category: Supply Chain
+- Source: docker/base/Dockerfile (Node.js install, dotnet-install.sh, install-powershell.sh) + scripts/runtime/install-dotnet-preview.sh
+- Description: Base images and helper scripts routinely run `curl | bash` against unauthenticated URLs (Nodesource setup script, dotnet-install.sh, Microsoft PowerShell installer, dotnet preview installer). None of these downloads are pinned by checksum, signature, or even version; every build or runtime invocation executes whatever script the remote server currently serves.
+- Impact: Any compromise of Nodesource/dot.net/CDN or a MITM on the developer’s network injects arbitrary root-level commands into the image build or container runtime, subverting every agent container built from it.
+- Likelihood: Medium (scripts run on every build/start, and `install-dotnet-preview.sh` can be invoked interactively).
+- Severity: Critical
+- Recommended Fix: Vendor these scripts under version control, verify SHA256 checksums, or use package repositories with GPG verification. Pin tool versions in Dockerfiles instead of using live installation scripts.

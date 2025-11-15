@@ -1,0 +1,8 @@
+- ID: POWERSHELL-001
+- Category: Unsafe I/O
+- Source: scripts/utils/common-functions.ps1 (Push-ToLocal function around lines 660-700)
+- Description: The PowerShell cleanup flow streams an interactive bash script into `docker exec -i <container> bash` that prompts the user (`read -p "Commit message"`). As with the bash launchers, those prompts run inside the (potentially compromised) container, capturing keystrokes and allowing the container to spoof host requests during removal.
+- Impact: Host operators may leak sensitive text or accept spoofed prompts when running the PowerShell tools, giving an attacker an easy phishing channel even after deciding to remove the container.
+- Likelihood: Medium (remove-agent.ps1 and `push-to-local` call this helper by default).
+- Severity: Medium
+- Recommended Fix: Mirror the bash mitigation—collect input on the host before running `docker exec`, or make cleanup non-interactive.

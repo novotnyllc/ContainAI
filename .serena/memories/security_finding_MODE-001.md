@@ -1,0 +1,8 @@
+- ID: MODE-001
+- Category: Mode Separation
+- Source: scripts/launchers/launch-agent (defaults around lines 20-80 and network handling around 200-250) + docs/network-proxy.md
+- Description: The default launch path (`launch-agent` / `run-<agent>`) always uses `--network-proxy allow-all` (alias `none`), giving the container unrestricted outbound internet while simultaneously mounting host SSH/GPG keys and MCP secrets. There is no interactive warning, policy gate, or telemetry when the user runs in this "unrestricted" mode—even though documentation markets 'restricted' as the secure option. Users who forget to manually opt into restricted/proxy mode unknowingly give untrusted code maximum capabilities.
+- Impact: In the most common launch flow, a malicious repository gains both full egress and host credentials, enabling immediate data exfiltration or C2 beacons.
+- Likelihood: High (default path + docs highlight allow-all as normal).
+- Severity: High
+- Recommended Fix: Flip the default to restricted/proxy, or at minimum require an explicit `--unrestricted` acknowledgement before launching with global network + secret mounts. Display a warning banner inside the container when running unrestricted.

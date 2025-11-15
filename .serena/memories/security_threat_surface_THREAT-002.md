@@ -1,0 +1,8 @@
+- ID: THREAT-002
+- Category: Threat Surface
+- Source: docs/network-proxy.md + docs/security-credential-proxy.md
+- Description: Realistic attack chains include: (a) agent obtains code execution inside container, writes malicious data to host-mounted socket (credential proxy) to exfil tokens; (b) in unrestricted `allow-all` mode, agent downloads exploit kit, then targets Docker daemon via mounted /var/run/docker.sock if present (need to verify) or uses host networking; (c) Squid proxy sidecar compromise enabling MITM between agent and internet plus log poisoning. Proxy + credential helper components thus form critical cross-container trust boundaries.
+- Impact: Highlights multi-step chains that combine container compromises with shared services; ensures review covers socket permissions, sidecar isolation, and default network posture.
+- Likelihood: Medium (agents handle prompts from potentially malicious repos and remote MCP servers).
+- Severity: Critical if chain succeeds (host credential theft + network pivot).
+- Recommended Action: Validate that default launch mode minimizes attack surface and that shared services include authentication/auditing.

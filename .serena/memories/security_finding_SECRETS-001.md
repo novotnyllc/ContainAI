@@ -1,0 +1,8 @@
+- ID: SECRETS-001
+- Category: Secret Exposure
+- Source: scripts/launchers/launch-agent (volume assembly lines ~300-380)
+- Description: Launchers automatically mount the host's entire `~/.ssh` directory and, when no proxy socket exists, the entire `~/.gnupg` tree into the container (both readable by `agentuser`). Although marked read-only, private SSH and GPG keys become directly readable to any process in the agent container, defeating the goal of keeping host credentials off the container filesystem.
+- Impact: A compromised agent can copy SSH or GPG private keys and reuse them elsewhere, leading to full credential compromise of the host developer.
+- Likelihood: High—mount happens whenever the directories exist, regardless of whether SSH/GPG proxies are in use, and agents routinely run unreviewed code.
+- Severity: Critical
+- Recommended Fix: Eliminate directory mounts; rely solely on forwarded sockets (SSH_AUTH_SOCK, GPG proxy), or gate the mounts behind an explicit `--allow-key-mount` flag with loud warnings. At minimum, ensure private key files are never exposed (e.g., mount only `known_hosts`).

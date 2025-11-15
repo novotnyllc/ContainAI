@@ -1,0 +1,8 @@
+- ID: NETWORK-001
+- Category: Network Controls
+- Source: scripts/launchers/launch-agent (network mode handling around lines 210-260) + docker/proxy/squid.conf & entrypoint
+- Description: "Squid" mode merely joins the agent container and proxy sidecar to the same user-defined Docker bridge and sets HTTP(S)_PROXY env vars. There is no eBPF/iptables enforcement, no transparent proxying, and the network still has full NAT access. Malicious code can simply ignore the env vars and curl directly to the internet, bypassing the allowlist/logging controls described in docs/network-proxy.md.
+- Impact: Operators may believe outbound access is limited to the Squid allowlist, but in reality unrestricted egress remains available. Attackers can exfiltrate secrets or download payloads even when "proxy" mode is selected.
+- Likelihood: High (agents execute arbitrary commands that can unset env vars or use raw sockets).
+- Severity: High
+- Recommended Fix: Attach the agent container to an isolated network namespace with no default gateway, then only allow egress via DNAT to the Squid container (e.g., using `--network none` + `--link` + `--env ALL_PROXY=http://proxy` + `socat`), or enforce egress via Docker's `--network none` plus an explicit `socat` tunnel. Alternatively, use `iptables` on the user-defined network to drop all traffic not destined for the proxy.

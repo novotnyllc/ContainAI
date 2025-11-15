@@ -1,0 +1,8 @@
+- ID: ARCH-002
+- Category: Architecture Insight
+- Source: docs/architecture.md (Base Image + Launch Flow sections)
+- Description: Containers build from `coding-agents-base` (Ubuntu 22.04/24.04) layering tooling plus entrypoint logic. Entrypoint copies repo from /tmp mount into /home/agentuser/workspace, configures git remotes, sources MCP secrets, and executes the selected agent under non-root user `agentuser` (UID 1000).
+- Impact: Non-root default reduces privilege, but entrypoint performs host-sourced git config and executes arbitrary agent command, so any tampering in mounts/entrypoint affects runtime trust.
+- Likelihood: n/a (informational)
+- Severity: Informational
+- Recommended Action: Preserve non-root execution and review entrypoint for least-privilege when modifying container startup.

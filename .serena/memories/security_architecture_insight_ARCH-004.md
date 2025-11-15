@@ -1,0 +1,8 @@
+- ID: ARCH-004
+- Category: Architecture Insight
+- Source: docs/security-credential-proxy.md (entire doc)
+- Description: Git credential access relies on a host-side Unix socket service (`git-credential-proxy-server.sh`) exposed read-only to containers via helper scripts. Protocol enforces GET-only semantics with strict validation, rate limiting, and audit logging; containers never store credentials locally and fall back to gh CLI or file-based helpers if the proxy is unavailable.
+- Impact: Introduces a critical trust boundary at the Unix socket mount—compromised containers can request credentials but cannot mutate host state. Security depends on socket permissions, validation, and helper correctness.
+- Likelihood: n/a
+- Severity: Informational
+- Recommended Action: Maintain strict socket permissions and validation; ensure helper scripts are kept minimal and audited when changing credential flow.

@@ -1,0 +1,8 @@
+- ID: SECRETS-003
+- Category: Secret Exposure
+- Source: scripts/launchers/launch-agent (credential fallbacks around lines 330-360)
+- Description: Even when the Git credential proxy socket is available, the launcher unconditionally mounts `~/.git-credentials` (if it exists) into the container. The entrypoint’s helper treats it as a fallback, but the file still contains plaintext PATs or OAuth tokens that any container process can cat and reuse.
+- Impact: If the host ever uses the credential store helper, every stored token becomes exposed to the agent container regardless of proxy usage, enabling immediate repo or service compromise.
+- Likelihood: Medium (many developers have ~/.git-credentials from earlier workflows; mount happens automatically).
+- Severity: High
+- Recommended Fix: Do not mount `~/.git-credentials` at all unless the proxy socket is unavailable and the user explicitly opts in; ideally migrate to socket-only access or ephemeral gh CLI tokens.

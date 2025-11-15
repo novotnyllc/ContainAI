@@ -1,0 +1,8 @@
+- ID: ARCH-003
+- Category: Architecture Insight
+- Source: docs/network-proxy.md (Network Modes section)
+- Description: Launchers support three network tiers per container: default `allow-all` uses Docker bridge with outbound internet, `restricted` enforces `--network none` for full isolation (requires local repo copy), and `squid` mode attaches the agent container to a dedicated network plus Squid proxy sidecar that logs HTTP(S) requests at /var/log/squid/access.log.
+- Impact: Network posture is configurable per launch; risk posture varies dramatically depending on user-chosen mode. Squid mode introduces shared network + sidecar container trust boundary that must be hardened.
+- Likelihood: n/a
+- Severity: Informational
+- Recommended Action: Align MCP sandbox settings with selected container mode and ensure documentation emphasizes differences and logging behaviors.

@@ -1,0 +1,8 @@
+- ID: CONFIG-001
+- Category: Developer Guidance
+- Source: README.md (Quick Start + Launch sections) and docs/network-proxy.md
+- Description: Documentation markets the default `allow-all` network mode as the normal workflow and highlights optional flags (`--network-proxy restricted`, `--no-push`, `--use-current-branch`) without describing the security impact (credential exposure, host repo mutation, no logging). There is no warning banner before mounting SSH/GPG keys or sourcing `mcp-secrets.env`.
+- Impact: Developers are likely to run with unsafe defaults and unknowingly leak secrets or push unreviewed code back to the host.
+- Likelihood: High—README is the entry point and does not mention any risks until deep in docs.
+- Severity: Medium
+- Recommended Fix: Surface clear warnings in README/USAGE: highlight that allow-all mode exposes host credentials and lacks logging, and recommend restricted/proxy by default. Require explicit consent before enabling host key mounts or auto-push.

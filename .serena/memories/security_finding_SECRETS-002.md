@@ -1,0 +1,8 @@
+- ID: SECRETS-002
+- Category: Secret Exposure
+- Source: scripts/launchers/launch-agent (mounting `.mcp-secrets.env`) + scripts/runtime/entrypoint.sh (lines ~150-170)
+- Description: If `~/.config/coding-agents/mcp-secrets.env` exists, it is mounted into every container and fully `source`d with `set -a`, exporting all API keys (GitHub, Context7, etc.) to the global environment. Every tool, script, or dependency inside the agent container can read or exfiltrate every secret regardless of need-to-know.
+- Impact: A single compromised agent can steal all configured MCP secrets and reuse them outside the environment, leading to third-party account compromise and quota abuse.
+- Likelihood: Medium-High (files auto-mounted whenever present and agents often execute downloaded code).
+- Severity: High
+- Recommended Fix: Move to per-server scoped secret injection (e.g., pass only required env vars to each MCP subprocess) and avoid sourcing the entire secrets file into the shell environment. Consider encrypting the secrets file and requiring explicit opt-in per container launch.

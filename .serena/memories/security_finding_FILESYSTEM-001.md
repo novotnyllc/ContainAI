@@ -1,0 +1,8 @@
+- ID: FILESYSTEM-001
+- Category: Unsafe I/O
+- Source: scripts/launchers/launch-agent (lines ~150-230) + scripts/utils/common-functions.sh (sync_local_remote_to_host around lines 650-720)
+- Description: For every local repository (unless `--no-push`), the launcher creates a bare repo under `~/.coding-agents/local-remotes/<hash>.git`, mounts it read-write into the container at `/tmp/local-remote`, and auto-syncs it back into the host repo via `sync_local_remote_to_host`. Any compromised container can therefore write arbitrary history to the mounted bare repo and have it fast-forwarded into the host working copy without manual review when `remove-agent`/cleanup runs.
+- Impact: Workspace isolation is bypassed—the host repository can be overwritten or supply-chain poisoned merely by compromising the agent container, despite the main repo being mounted read-only. Host developers may unknowingly pull malicious commits auto-synced from the container.
+- Likelihood: Medium (feature enabled by default on local repos; agents run arbitrary user code).
+- Severity: High
+- Recommended Fix: Require explicit opt-in before mounting writable host remotes or syncing back automatically; ideally push via authenticated network remotes instead of host filesystem, or at minimum prompt the user and verify signatures before updating the host repo from the mounted bare remote.

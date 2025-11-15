@@ -1,0 +1,8 @@
+- ID: DOCKER-001
+- Category: Container Escape
+- Source: docker/docker-compose.yml (service volume definitions)
+- Description: The provided docker-compose workflow mounts the host repository at `${REPO_PATH}` directly into `/workspace` with read-write permissions, bypassing the copy-on-launch isolation enforced by the launcher scripts. Any compromise of the agent container in this mode has full write access to the host working tree, negating the repo isolation guarantees documented elsewhere.
+- Impact: Developers who follow the compose example (advertised for "advanced use") unknowingly expose their host repo to arbitrary mutation or ransomware from the agent container.
+- Likelihood: Medium—compose is shipped in repo and may be reused by automation or power users.
+- Severity: High
+- Recommended Fix: Either remove the compose file or modify it to mirror launcher behavior (mount repo read-only and copy inside container). At minimum, add prominent warnings plus an option to mount a tmpfs instead of the host repo.

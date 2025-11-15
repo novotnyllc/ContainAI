@@ -1,0 +1,8 @@
+- ID: ARCH-001
+- Category: Architecture Insight
+- Source: docs/architecture.md (System Overview + Container Architecture sections)
+- Description: The platform launches per-agent containers via `launch-agent` scripts that copy the host repo into an isolated `/workspace`, mount host OAuth credentials and optional MCP secret env files read-only, and configure dual git remotes (origin and host-local). Each container runs a managed agent process plus MCP servers. Trust boundary sits at the Docker container boundary: host provides credentials + source via read-only mounts, while agent activities remain inside `/workspace` with git push over mounted helpers.
+- Impact: Establishes baseline trust assumptions—host secrets remain on host except for read-only mounts; containers hold working copy plus agent operations.
+- Likelihood: n/a (informational)
+- Severity: Informational
+- Recommended Action: Use this model when assessing escape vectors or mounts; ensure any new features respect the read-only credential mounts and workspace isolation.

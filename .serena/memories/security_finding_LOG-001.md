@@ -1,0 +1,8 @@
+- ID: LOG-001
+- Category: Logging/Auditing
+- Source: docs/network-proxy.md (Squid logging only) + scripts/runtime/entrypoint.sh (no persistent auditing)
+- Description: Apart from optional Squid access logs and credential-proxy audit entries, the platform records no container-level activity—no transcript of shell commands, MCP server launches, git auto-commits, or file access. In the default allow-all mode there is zero egress logging. Incident responders therefore cannot reconstruct what an agent did once the container stops.
+- Impact: Breaches or data exfiltration by a compromised agent leave no trail, preventing detection or forensics.
+- Likelihood: High (most sessions run with allow-all network and without Squid).
+- Severity: Medium
+- Recommended Fix: Introduce mandatory activity logging (e.g., command history streaming to the host, container stdout/stderr capture, or OSQuery audit) and ensure even default network mode records destination metadata.

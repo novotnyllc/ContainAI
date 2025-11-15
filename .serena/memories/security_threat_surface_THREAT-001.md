@@ -1,0 +1,8 @@
+- ID: THREAT-001
+- Category: Threat Surface
+- Source: docs/architecture.md (System Overview, Launch Flow) + README.md (Features, Quick Start)
+- Description: Threat actors include (1) malicious repo owners providing untrusted source copied into containers, (2) tenant developers launching agents with hostile prompts, (3) compromised agents attempting container escape, and (4) network adversaries observing Squid proxy traffic. Assets include host OAuth credentials (mounted read-only), local repository data, MCP secret env vars, Docker engine, Squid logs, and credential proxy socket. Attack surfaces span launcher scripts, Docker run flags (privileged, mounts), entrypoint, MCP server commands, git credential proxy socket, host shared directories, and network proxy bridging restricted containers.
+- Impact: Provides full threat model baseline for subsequent vulnerability analysis; highlights that compromise of agent container risks host repo + secrets if boundaries fail.
+- Likelihood: Medium (agents execute user-provided code and prompts frequently).
+- Severity: High (successful attack leaks credentials or escapes to host).
+- Recommended Action: Use this threat surface when prioritizing mitigations—focus on mount permissions, proxy hardening, and network isolation fidelity.

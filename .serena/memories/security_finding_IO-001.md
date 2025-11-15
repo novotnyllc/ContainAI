@@ -1,0 +1,8 @@
+- ID: IO-001
+- Category: Unsafe I/O
+- Source: scripts/runtime/entrypoint.sh (lines ~130-150) + scripts/runtime/setup-mcp-configs.sh + scripts/utils/convert-toml-to-mcp.py
+- Description: Any repository-provided `config.toml` is auto-processed on container start without review; its `mcp_servers.*.command` and `args` fields become trusted JSON consumed by Copilot/Codex/Claude. When the agent session initializes, those commands are executed verbatim inside the container, meaning simply checking out a hostile repo launches arbitrary code before the human sees a prompt. No prompt, allowlist, or sandbox is applied to these commands.
+- Impact: A malicious repository author can force the agent container to run arbitrary binaries (e.g., curl exfiltration) by committing a crafted MCP config. Combined with mounted host credentials, this becomes a turnkey secret-exfiltration vector during repo import.
+- Likelihood: High (config processing is automatic and repos frequently contain config.toml for MCP).
+- Severity: High
+- Recommended Fix: Require explicit user approval before honoring repo-supplied MCP command definitions, restrict allowed binaries to a safe allowlist, or run each MCP server in a locked-down sandbox that cannot access host-mounted secrets.

@@ -1,0 +1,8 @@
+- ID: CONTAINER-001
+- Category: Container Escape
+- Source: scripts/launchers/launch-agent (around Docker args assembly, lines 250-360)
+- Description: Agents are started with `docker run` arguments assembled without dropping Linux capabilities or supplying a hardened seccomp/AppArmor profile—only `--security-opt no-new-privileges:true` is set. Untrusted agent code therefore retains the default Docker capability set (e.g., CAP_NET_RAW, CAP_SYS_CHROOT, MKNOD), which is enough to craft packets, mount chroots, or exploit kernel bugs despite the stated goal of strict isolation.
+- Impact: A malicious tool or prompt inside the container can leverage residual capabilities to attempt kernel-level exploitation or pivoting, potentially escaping to the host or attacking sibling containers.
+- Likelihood: Medium (agents routinely execute arbitrary code pulled from user repos and the internet).
+- Severity: High
+- Recommended Fix: Explicitly add `--cap-drop=ALL` and selectively `--cap-add` only what is required (ideally none), and enforce a restrictive seccomp/apparmor profile such as Docker's `default.json` plus `--security-opt apparmor=coding-agents` to narrow the syscall surface.
