@@ -142,6 +142,8 @@ run-copilot --no-push
 launch-agent copilot --no-push
 ```
 
+**Workspace isolation model (no git worktrees):** Each container copies the entire repository into `/workspace` and mounts host credentials/configs read-only. This keeps prompts and filesystem mutations inside the container boundary while still letting `git push` sync back to the host. Git worktrees are intentionally **not supported** because they share a single `.git` directory—mounting that into multiple containers would defeat the isolation guarantees described in [docs/architecture.md](docs/architecture.md) and make cleanup brittle. If you really want to skip isolation, use the documented `--use-current-branch` flag for a single session instead of binding a worktree into the container.
+
 ### 4. Manage containers
 
 ```bash
