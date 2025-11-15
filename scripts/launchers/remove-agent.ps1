@@ -39,13 +39,15 @@ if ($Help) {
 }
 
 # Check arguments
+if (-not (Test-DockerRunning)) { exit 1 }
+
 if (-not $ContainerName) {
     Write-Host "❌ Error: Container name required" -ForegroundColor Red
     Write-Host ""
     Write-Host "Usage: remove-agent.ps1 <container-name> [-NoPush]"
     Write-Host ""
     Write-Host "Available containers:"
-    docker ps -a --filter "label=coding-agents.type=agent" --format "  • {{.Names}}" 2>$null
+    Invoke-ContainerCli ps -a --filter "label=coding-agents.type=agent" --format "  • {{.Names}}" 2>$null
     exit 1
 }
 
@@ -55,9 +57,6 @@ if (-not (Test-ValidContainerName $ContainerName)) {
     Write-Host "   Container names must start with alphanumeric and contain only: a-z, A-Z, 0-9, _, ., -" -ForegroundColor Yellow
     exit 1
 }
-
-# Check Docker
-if (-not (Test-DockerRunning)) { exit 1 }
 
 # Remove container and optionally clean up branch
 Remove-ContainerWithSidecars -ContainerName $ContainerName -SkipPush:$NoPush -KeepBranch:$KeepBranch

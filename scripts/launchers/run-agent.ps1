@@ -1,5 +1,5 @@
-# Launch a coding agent in an isolated container with its own git workspace
-# The container runs persistently for VS Code Remote connection
+# Launch an ephemeral coding agent session that auto-attaches to the agent CLI
+# Containers auto-clean on exit but keep git safeguards and host integrations
 
 param(
     [Parameter(Mandatory=$true, Position=0)]
@@ -51,7 +51,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptDir "..\utils\common-functions.ps1")
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
-Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "launch-agent"
+Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "run-agent"
 
 # Auto-detect WSL home directory
 $WslHome = wsl bash -c 'echo $HOME' 2>$null
@@ -409,7 +409,7 @@ if ($UseSquid) {
 $autoPushValue = if ($NoPush) { "false" } else { "true" }
 
 $dockerArgs = @(
-    "run", "-d",
+    "run", "-d", "--rm",
     "--name", $ContainerName,
     "--hostname", $ContainerName,
     "-e", "TZ=$TimeZone",
@@ -418,9 +418,8 @@ $dockerArgs = @(
     "-e", "AGENT_BRANCH=$AgentBranch",
     "-e", "NETWORK_POLICY=$NetworkPolicyEnv",
     "-e", "AUTO_PUSH_ON_SHUTDOWN=$autoPushValue",
-    "-e", "AGENT_SESSION_MODE=shell",
-    "-e", "AGENT_SESSION_SHELL_BIN=/bin/bash",
-    "-e", "AGENT_SESSION_SHELL_ARGS=-l",
+    "-e", "AGENT_SESSION_MODE=supervised",
+    "-e", "AGENT_SESSION_NAME=agent",
     "--label", "coding-agents.type=agent",
     "--label", "coding-agents.agent=$Agent",
     "--label", "coding-agents.repo=$RepoName",
@@ -583,7 +582,6 @@ if ($Gpu) {
 }
 
 $dockerArgs += $ImageName
-$dockerArgs += "sleep", "infinity"
 
 # Create container
 Write-Host "📦 Creating container..." -ForegroundColor Cyan
@@ -616,12 +614,42 @@ try {
     exit 1
 }
 
+if ($UseSquid) {
+    Start-Job -ScriptBlock {
+        param($CliCmd, $AgentContainer, $ProxyContainer, $ProxyNetwork)
+        try {
+            & $CliCmd wait $AgentContainer | Out-Null
+        } catch {
+            # Ignore errors if container already gone
+        }
+        & $CliCmd rm -f $ProxyContainer 2>$null | Out-Null
+        & $CliCmd network rm $ProxyNetwork 2>$null | Out-Null
+    } -ArgumentList $ContainerCli, $ContainerName, $ProxyContainerName, $ProxyNetworkName | Out-Null
+}
+
 Write-Host ""
 Write-Host "✅ Container '$ContainerName' is ready!" -ForegroundColor Green
-Write-Host ""
-Write-Host "Connect via:" -ForegroundColor Cyan
-Write-Host "  • VS Code: Attach to running container '$ContainerName'" -ForegroundColor White
-Write-Host "  • Terminal: $ContainerCli exec -it $ContainerName bash" -ForegroundColor White
-Write-Host ""
-Write-Host "Repository: /workspace" -ForegroundColor Gray
-Write-Host "Branch: $AgentBranch" -ForegroundColor Gray
+Write-Host "🔗 Attaching to agent session (detach with Ctrl+B, then D)..." -ForegroundColor Cyan
+& $ContainerCli exec -it $ContainerName agent-session attach
+$attachExit = $LASTEXITCODE
+
+if ($attachExit -ne 0) {
+    if ((Get-ContainerStatus $ContainerName) -eq "running") {
+        $connectScript = Join-Path $scriptDir "connect-agent.ps1"
+        Write-Host "⚠ Unable to attach automatically. Re-run: `n   $connectScript -Name $ContainerName" -ForegroundColor Yellow
+    } else {
+        Write-Host "❌ Agent session exited before it was ready." -ForegroundColor Red
+    }
+    exit $attachExit
+}
+
+if ((Get-ContainerStatus $ContainerName) -eq "running") {
+    $connectScript = Join-Path $scriptDir "connect-agent.ps1"
+    Write-Host ""
+    Write-Host "ℹ Session detached but container is still running." -ForegroundColor Cyan
+    Write-Host "   Reconnect: $connectScript -Name $ContainerName" -ForegroundColor Gray
+    Write-Host "   Stop later: $ContainerCli stop $ContainerName" -ForegroundColor Gray
+} else {
+    Write-Host ""
+    Write-Host "✅ Agent session complete. Container stopped." -ForegroundColor Green
+}

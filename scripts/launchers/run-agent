@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Launch a coding agent in an isolated container with its own git workspace
-# The container runs persistently for VS Code Remote connection
+# Launch an ephemeral coding agent session that auto-attaches to the agent CLI
+# Containers auto-clean on exit but keep all git safeguards and host mounts
 
 set -e
 
@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
+maybe_check_launcher_updates "$REPO_ROOT" "run-agent"
 
 # Default values
 AGENT=""
@@ -29,7 +29,7 @@ USE_CURRENT_BRANCH=false
 # First argument must be agent type
 if [[ $# -eq 0 || "$1" == "-"* ]]; then
     echo "❌ Error: Agent type is required as first argument"
-    echo "Usage: launch-agent <agent> [SOURCE] [OPTIONS]"
+    echo "Usage: run-agent <agent> [SOURCE] [OPTIONS]"
     echo "Agent types: copilot, codex, claude"
     exit 1
 fi
@@ -92,7 +92,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: launch-agent <agent> [SOURCE] [OPTIONS]"
+            echo "Usage: run-agent <agent> [SOURCE] [OPTIONS]"
             echo ""
             echo "Agent types: copilot, codex, claude"
             echo ""
@@ -122,11 +122,11 @@ while [[ $# -gt 0 ]]; do
             echo "  • Branches with unmerged commits are archived before replacement"
             echo ""
             echo "Examples:"
-            echo "  launch-agent copilot                              # Copilot in current directory"
-            echo "  launch-agent codex . -b refactor-db               # Codex in current dir, custom branch"
-            echo "  launch-agent copilot https://github.com/user/repo # Copilot from GitHub"
-            echo "  launch-agent claude /path/to/repo --name my-workspace"
-            echo "  launch-agent copilot . -b feature-api -y          # Auto-replace existing agent branch"
+            echo "  run-agent copilot                              # Copilot in current directory"
+            echo "  run-agent codex . -b refactor-db               # Codex in current dir, custom branch"
+            echo "  run-agent copilot https://github.com/user/repo # Copilot from GitHub"
+            echo "  run-agent claude /path/to/repo --name my-workspace"
+            echo "  run-agent copilot . -b feature-api -y          # Auto-replace existing agent branch"
             exit 0
             ;;
         *)
@@ -270,7 +270,7 @@ fi
 
 if ! validate_container_name "$CONTAINER_NAME"; then
     echo "❌ Error: Generated container name '$CONTAINER_NAME' is invalid"
-    echo "   Adjust --name, repository, or branch values to avoid unsupported characters"
+    echo "   Adjust --name, repository, or branch to avoid spaces and special characters"
     exit 1
 fi
 
@@ -430,7 +430,7 @@ fi
 AUTO_PUSH_VALUE=$([ "$NO_PUSH" = true ] && echo "false" || echo "true")
 
 DOCKER_ARGS=(
-    "run" "-d"
+    "run" "-d" "--rm"
     "--name" "$CONTAINER_NAME"
     "--hostname" "$CONTAINER_NAME"
     "-e" "TZ=$TZ_VALUE"
@@ -439,9 +439,8 @@ DOCKER_ARGS=(
     "-e" "AGENT_BRANCH=$AGENT_BRANCH"
     "-e" "NETWORK_POLICY=$NETWORK_POLICY_ENV"
     "-e" "AUTO_PUSH_ON_SHUTDOWN=$AUTO_PUSH_VALUE"
-    "-e" "AGENT_SESSION_MODE=shell"
-    "-e" "AGENT_SESSION_SHELL_BIN=/bin/bash"
-    "-e" "AGENT_SESSION_SHELL_ARGS=-l"
+    "-e" "AGENT_SESSION_MODE=supervised"
+    "-e" "AGENT_SESSION_NAME=agent"
     "--label" "coding-agents.type=agent"
     "--label" "coding-agents.agent=$AGENT"
     "--label" "coding-agents.repo=$REPO_NAME"
@@ -594,10 +593,7 @@ if [ -n "$GPU" ]; then
     DOCKER_ARGS+=("--gpus=$GPU")
 fi
 
-DOCKER_ARGS+=(
-    "$IMAGE_NAME"
-    "sleep" "infinity"
-)
+DOCKER_ARGS+=("$IMAGE_NAME")
 
 # Create container
 echo "📦 Creating container..."
@@ -621,12 +617,35 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+if [ "$USE_SQUID" = true ]; then
+    (
+        container_cli wait "$CONTAINER_NAME" >/dev/null 2>&1 || true
+        container_cli rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1 || true
+        container_cli network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1 || true
+    ) &
+fi
+
 echo ""
 echo "✅ Container '$CONTAINER_NAME' is ready!"
-echo ""
-echo "Connect via:"
-echo "  • VS Code: Attach to running container '$CONTAINER_NAME'"
-echo "  • Terminal: $CONTAINER_CLI exec -it $CONTAINER_NAME bash"
-echo ""
-echo "Repository: /workspace"
-echo "Branch: $AGENT_BRANCH"
+echo "🔗 Attaching to agent session (detach with Ctrl+B, then D)..."
+container_cli exec -it "$CONTAINER_NAME" agent-session attach
+ATTACH_STATUS=$?
+
+if [ $ATTACH_STATUS -ne 0 ]; then
+    if container_cli ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        echo "⚠️  Unable to attach. Re-run: $SCRIPT_DIR/connect-agent --name $CONTAINER_NAME"
+    else
+        echo "❌ Agent session exited before it was ready."
+    fi
+    exit $ATTACH_STATUS
+fi
+
+if container_cli ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo ""
+    echo "ℹ️  Session detached but container is still running."
+    echo "   Reconnect: $SCRIPT_DIR/connect-agent --name $CONTAINER_NAME"
+    echo "   Stop later: $CONTAINER_CLI stop $CONTAINER_NAME"
+else
+    echo ""
+    echo "✅ Agent session complete. Container stopped."
+fi

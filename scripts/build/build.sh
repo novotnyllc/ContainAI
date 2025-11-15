@@ -224,8 +224,9 @@ for image in "${BUILT_IMAGES[@]}"; do
 done
 
 echo ""
-echo "🚀 Run a container with:"
-echo "   ./scripts/run-agent.sh /path/to/your/repo"
+echo "🚀 Launch an agent container with:"
+echo "   ./scripts/launchers/run-agent copilot /path/to/your/repo"
+echo "   # or use the shortcuts like ./scripts/launchers/run-copilot ."
 
 echo ""
 echo "   Or using docker-compose:"

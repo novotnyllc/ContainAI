@@ -175,6 +175,30 @@ get_container_runtime() {
     return 1
 }
 
+# Cache the active container CLI (docker or podman) so downstream helpers can reuse it
+get_active_container_cmd() {
+    if [ -n "${CODING_AGENTS_CONTAINER_CMD:-}" ]; then
+        echo "$CODING_AGENTS_CONTAINER_CMD"
+        return 0
+    fi
+
+    local runtime
+    runtime=$(get_container_runtime 2>/dev/null || true)
+    if [ -z "$runtime" ]; then
+        runtime="docker"
+    fi
+
+    CODING_AGENTS_CONTAINER_CMD="$runtime"
+    echo "$runtime"
+}
+
+# Wrapper that dispatches to the detected container CLI
+container_cli() {
+    local cmd
+    cmd=$(get_active_container_cmd)
+    "$cmd" "$@"
+}
+
 # Validate container name
 validate_container_name() {
     local name="$1"
@@ -317,79 +341,80 @@ convert_to_wsl_path() {
 # Check if container runtime (Docker/Podman) is running
 check_docker_running() {
     local runtime
-    runtime=$(get_container_runtime 2>/dev/null || echo "")
-    
+    runtime=$(get_container_runtime 2>/dev/null || true)
+
     if [ -n "$runtime" ]; then
-        # Check if runtime is running
         if $runtime info > /dev/null 2>&1; then
+            CODING_AGENTS_CONTAINER_CMD="$runtime"
             return 0
         fi
     fi
-    
+
     echo "⚠️  Container runtime not running. Checking installation..."
-    
-    # Try docker first
+
+    local detected_runtime=""
     if command -v docker &> /dev/null; then
-        runtime="docker"
+        detected_runtime="docker"
     elif command -v podman &> /dev/null; then
-        runtime="podman"
-        echo "ℹ️  Using Podman as container runtime"
-        
-        # Podman doesn't need a daemon on Linux
-        if podman info > /dev/null 2>&1; then
-            return 0
-        fi
-        
-        echo "❌ Podman is installed but not working properly"
-        echo "   Try: podman system reset"
-        return 1
+        detected_runtime="podman"
     else
         echo "❌ No container runtime found. Please install one:"
         echo "   Docker: https://www.docker.com/products/docker-desktop"
         echo "   Podman: https://podman.io/getting-started/installation"
         return 1
     fi
-    
-    # Check if we're on WSL and can access Docker Desktop
+
+    if [ "$detected_runtime" = "podman" ]; then
+        echo "ℹ️  Using Podman as container runtime"
+
+        if podman info > /dev/null 2>&1; then
+            CODING_AGENTS_CONTAINER_CMD="podman"
+            return 0
+        fi
+
+        echo "❌ Podman is installed but not working properly"
+        echo "   Try: podman system reset"
+        return 1
+    fi
+
+    # Everything below assumes docker is installed; attempt to help the user start it.
     if grep -qi microsoft /proc/version 2>/dev/null; then
         echo "🔍 Detected WSL environment. Checking Docker Desktop..."
-        
-        # Try to start Docker Desktop via Windows
+
         if command -v powershell.exe &> /dev/null; then
             local docker_desktop_path="/mnt/c/Program Files/Docker/Docker/Docker Desktop.exe"
-            
+
             if [ -f "$docker_desktop_path" ]; then
                 echo "🚀 Starting Docker Desktop..."
-                powershell.exe -Command "Start-Process 'C:\Program Files\Docker\Docker\Docker Desktop.exe'" 2>/dev/null || true
-                
-                # Wait for Docker to start (max 60 seconds)
+                powershell.exe -Command "Start-Process 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'" 2>/dev/null || true
+
                 local max_wait=60
                 local waited=0
                 while [ $waited -lt $max_wait ]; do
                     sleep 2
                     waited=$((waited + 2))
                     if docker info > /dev/null 2>&1; then
+                        CODING_AGENTS_CONTAINER_CMD="docker"
                         echo "✅ Docker started successfully"
                         return 0
                     fi
                     echo "  Waiting for Docker... ($waited/$max_wait seconds)"
                 done
-                
+
                 echo "❌ Docker failed to start within $max_wait seconds"
                 echo "   Please start Docker Desktop manually and try again"
                 return 1
             fi
         fi
     fi
-    
-    # On Linux, check if docker service can be started
+
     if [ -f /etc/init.d/docker ] || systemctl list-unit-files docker.service &> /dev/null; then
         echo "💡 Docker service is installed but not running."
         echo "   Try starting it with: sudo systemctl start docker"
         echo "   Or: sudo service docker start"
         return 1
     fi
-    
+
     echo "❌ Docker is installed but not running."
     echo "   Please start Docker and try again"
     return 1
@@ -415,8 +440,8 @@ pull_and_tag_image() {
             echo "  ⚠️  Retry attempt $attempt of $max_retries..."
         fi
         
-        if docker pull --quiet "$registry_image" 2>/dev/null; then
-            docker tag "$registry_image" "$local_image" 2>/dev/null || true
+        if container_cli pull --quiet "$registry_image" 2>/dev/null; then
+            container_cli tag "$registry_image" "$local_image" 2>/dev/null || true
             pulled=true
         else
             if [ $attempt -lt $max_retries ]; then
@@ -433,13 +458,13 @@ pull_and_tag_image() {
 # Check if container exists
 container_exists() {
     local container_name="$1"
-    docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${container_name}$"
+    container_cli ps -a --filter "name=^${container_name}$" --format "{{.Names}}" 2>/dev/null | grep -q "^${container_name}$"
 }
 
 # Get container status
 get_container_status() {
     local container_name="$1"
-    docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || echo "not-found"
+    container_cli inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || echo "not-found"
 }
 
 # Push changes to local remote
@@ -453,7 +478,7 @@ push_to_local() {
     fi
     
     echo "💾 Pushing changes to local remote..."
-    docker exec "$container_name" bash -c '
+    container_cli exec "$container_name" bash -c '
         cd /workspace
         if [ -n "$(git status --porcelain)" ]; then
             echo "📝 Uncommitted changes detected"
@@ -476,20 +501,20 @@ push_to_local() {
 
 # List all agent containers
 list_agent_containers() {
-    docker ps -a --filter "label=coding-agents.type=agent" \
+    container_cli ps -a --filter "label=coding-agents.type=agent" \
         --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}"
 }
 
 # Get proxy container name for agent
 get_proxy_container() {
     local agent_container="$1"
-    docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' "$agent_container" 2>/dev/null
+    container_cli inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' "$agent_container" 2>/dev/null
 }
 
 # Get proxy network name for agent
 get_proxy_network() {
     local agent_container="$1"
-    docker inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' "$agent_container" 2>/dev/null
+    container_cli inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' "$agent_container" 2>/dev/null
 }
 
 # Remove container and associated resources
@@ -504,8 +529,8 @@ remove_container_with_sidecars() {
     fi
     
     # Get container labels to find repo and branch info
-    local agent_branch=$(docker inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container_name" 2>/dev/null || true)
-    local repo_path=$(docker inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' "$container_name" 2>/dev/null || true)
+    local agent_branch=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container_name" 2>/dev/null || true)
+    local repo_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' "$container_name" 2>/dev/null || true)
     
     # Push changes first
     if [ "$(get_container_status "$container_name")" = "running" ]; then
@@ -518,20 +543,20 @@ remove_container_with_sidecars() {
     
     # Remove main container
     echo "🗑️  Removing container: $container_name"
-    docker rm -f "$container_name" 2>/dev/null || true
+    container_cli rm -f "$container_name" 2>/dev/null || true
     
     # Remove proxy if exists
     if [ -n "$proxy_container" ] && container_exists "$proxy_container"; then
         echo "🗑️  Removing proxy: $proxy_container"
-        docker rm -f "$proxy_container" 2>/dev/null || true
+        container_cli rm -f "$proxy_container" 2>/dev/null || true
     fi
     
     # Remove network if exists and no containers attached
     if [ -n "$proxy_network" ]; then
-        local attached=$(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$proxy_network" 2>/dev/null)
+        local attached=$(container_cli network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$proxy_network" 2>/dev/null)
         if [ -z "$attached" ]; then
             echo "🗑️  Removing network: $proxy_network"
-            docker network rm "$proxy_network" 2>/dev/null || true
+            container_cli network rm "$proxy_network" 2>/dev/null || true
         fi
     fi
     
@@ -573,19 +598,19 @@ ensure_squid_proxy() {
     local squid_allowed_domains="${5:-*.github.com,*.githubcopilot.com,*.nuget.org}"
     
     # Create network if needed
-    if ! docker network inspect "$network_name" >/dev/null 2>&1; then
-        docker network create "$network_name" >/dev/null
+    if ! container_cli network inspect "$network_name" >/dev/null 2>&1; then
+        container_cli network create "$network_name" >/dev/null
     fi
     
     # Check if proxy exists
     if container_exists "$proxy_container"; then
         local state=$(get_container_status "$proxy_container")
         if [ "$state" != "running" ]; then
-            docker start "$proxy_container" >/dev/null
+            container_cli start "$proxy_container" >/dev/null
         fi
     else
         # Create new proxy
-        docker run -d \
+        container_cli run -d \
             --name "$proxy_container" \
             --hostname "$proxy_container" \
             --network "$network_name" \
