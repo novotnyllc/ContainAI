@@ -134,6 +134,17 @@ assert_label_exists() {
     fi
 }
 
+run_test() {
+    local name="$1"
+    shift
+    if "$@"; then
+        return 0
+    else
+        local status=$?
+        fail "$name failed with exit code $status"
+    fi
+}
+
 # ============================================================================
 # Test Container Helper Functions
 # ============================================================================
@@ -579,23 +590,23 @@ main() {
     echo "Testing from: $PROJECT_ROOT"
     echo ""
     
-    setup_test_repo
-    test_container_runtime_detection
-    test_shared_functions
-    test_local_remote_push
-    test_local_remote_fallback_push
-    test_secure_remote_sync
-    test_wsl_path_conversion
-    test_container_naming
-    test_container_labels
-    test_image_pull
-    test_branch_sanitization
-    test_multiple_agents
-    test_label_filtering
-    test_container_status
-    test_launcher_wrappers
-    test_list_agents
-    test_remove_agent
+    run_test "setup_test_repo" setup_test_repo
+    run_test "test_container_runtime_detection" test_container_runtime_detection
+    run_test "test_shared_functions" test_shared_functions
+    run_test "test_local_remote_push" test_local_remote_push
+    run_test "test_local_remote_fallback_push" test_local_remote_fallback_push
+    run_test "test_secure_remote_sync" test_secure_remote_sync
+    run_test "test_wsl_path_conversion" test_wsl_path_conversion
+    run_test "test_container_naming" test_container_naming
+    run_test "test_container_labels" test_container_labels
+    run_test "test_image_pull" test_image_pull
+    run_test "test_branch_sanitization" test_branch_sanitization
+    run_test "test_multiple_agents" test_multiple_agents
+    run_test "test_label_filtering" test_label_filtering
+    run_test "test_container_status" test_container_status
+    run_test "test_launcher_wrappers" test_launcher_wrappers
+    run_test "test_list_agents" test_list_agents
+    run_test "test_remove_agent" test_remove_agent
     
     # Cleanup happens in trap
 }

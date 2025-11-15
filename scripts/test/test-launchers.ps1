@@ -157,6 +157,22 @@ function Assert-LabelExists {
     }
 }
 
+function Invoke-Test {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Name,
+
+        [Parameter(Mandatory=$true)]
+        [scriptblock]$Action
+    )
+
+    try {
+        & $Action
+    } catch {
+        Fail "$Name failed with error: $_"
+    }
+}
+
 # ============================================================================
 # Test Container Helper Functions
 # ============================================================================
@@ -647,27 +663,32 @@ function Main {
     Write-Host "Testing from: $ProjectRoot" -ForegroundColor White
     Write-Host ""
     
+    $tests = @(
+        @{ Name = "Setup-TestRepo"; Action = { Setup-TestRepo } },
+        @{ Name = "Test-ContainerRuntimeDetection"; Action = { Test-ContainerRuntimeDetection } },
+        @{ Name = "Test-SharedFunctions"; Action = { Test-SharedFunctions } },
+        @{ Name = "Test-LocalRemotePush"; Action = { Test-LocalRemotePush } },
+        @{ Name = "Test-LocalRemoteFallbackPush"; Action = { Test-LocalRemoteFallbackPush } },
+        @{ Name = "Test-SecureRemoteSync"; Action = { Test-SecureRemoteSync } },
+        @{ Name = "Test-ContainerNaming"; Action = { Test-ContainerNaming } },
+        @{ Name = "Test-ContainerLabelsTest"; Action = { Test-ContainerLabelsTest } },
+        @{ Name = "Test-ImagePull"; Action = { Test-ImagePull } },
+        @{ Name = "Test-BranchSanitization"; Action = { Test-BranchSanitization } },
+        @{ Name = "Test-MultipleAgents"; Action = { Test-MultipleAgents } },
+        @{ Name = "Test-LabelFiltering"; Action = { Test-LabelFiltering } },
+        @{ Name = "Test-WslPathConversion"; Action = { Test-WslPathConversion } },
+        @{ Name = "Test-BranchNameSanitization"; Action = { Test-BranchNameSanitization } },
+        @{ Name = "Test-ContainerStatus"; Action = { Test-ContainerStatus } },
+        @{ Name = "Test-LauncherWrappers"; Action = { Test-LauncherWrappers } },
+        @{ Name = "Test-ListAgents"; Action = { Test-ListAgents } },
+        @{ Name = "Test-RemoveAgent"; Action = { Test-RemoveAgent } }
+    )
+
     try {
-        Setup-TestRepo
-        Test-ContainerRuntimeDetection
-        Test-SharedFunctions
-        Test-LocalRemotePush
-        Test-LocalRemoteFallbackPush
-        Test-SecureRemoteSync
-        Test-ContainerNaming
-        Test-ContainerLabelsTest
-        Test-ImagePull
-        Test-BranchSanitization
-        Test-MultipleAgents
-        Test-LabelFiltering
-        Test-WslPathConversion
-        Test-BranchNameSanitization
-        Test-ContainerStatus
-        Test-LauncherWrappers
-        Test-ListAgents
-        Test-RemoveAgent
-    }
-    finally {
+        foreach ($test in $tests) {
+            Invoke-Test -Name $test.Name -Action $test.Action
+        }
+    } finally {
         Clear-TestEnvironment
     }
 }
