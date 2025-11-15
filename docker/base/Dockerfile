@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgcc-s1 \
     libgssapi-krb5-2 \
     libicu74 \
-    libssl3 \
+    libssl3t64 \
     libstdc++6 \
     libunwind8 \
     zlib1g \
