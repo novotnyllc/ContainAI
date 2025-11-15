@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libpango-1.0-0 \
     libcairo2 \
-    libasound2 \
+    libasound2t64 \
     libatspi2.0-0 \
     libxshmfence1 \
     # .NET runtime dependencies
