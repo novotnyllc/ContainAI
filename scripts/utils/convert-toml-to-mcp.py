@@ -31,10 +31,10 @@ def convert_toml_to_mcp(toml_path):
         print("⚠️  No mcp_servers found in config.toml", file=sys.stderr)
         return False
     
-    # Only generate standard mcpServers format for Copilot and Claude
-    # Codex uses native TOML with MCP servers appended
+    # Generate standard mcpServers format for every agent
     agents = {
         "github-copilot": "~/.config/github-copilot/mcp",
+        "codex": "~/.config/codex/mcp",
         "claude": "~/.config/claude/mcp"
     }
     

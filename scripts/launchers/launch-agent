@@ -27,6 +27,8 @@ FORCE=false
 USE_CURRENT_BRANCH=false
 LOCAL_REMOTE_HOST_PATH=""
 LOCAL_REMOTE_WSL_PATH=""
+LOCAL_REMOTE_URL=""
+LOCAL_REPO_PATH_VALUE=""
 
 # First argument must be agent type
 if [[ $# -eq 0 || "$1" == "-"* ]]; then
@@ -179,6 +181,7 @@ else
     cd - > /dev/null
     WSL_PATH=$(convert_to_wsl_path "$SOURCE")
     GIT_URL=""
+    LOCAL_REPO_PATH_VALUE="$WSL_PATH"
 
     if [ "$NO_PUSH" != true ]; then
         REMOTE_HASH=$(printf "%s" "$SOURCE" | (command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum) | awk '{print $1}')
@@ -191,6 +194,12 @@ else
         fi
         LOCAL_REMOTE_WSL_PATH=$(convert_to_wsl_path "$LOCAL_REMOTE_HOST_PATH")
         LOCAL_REMOTE_URL="file:///tmp/local-remote"
+        LOCAL_REPO_PATH_VALUE="$LOCAL_REMOTE_URL"
+    fi
+
+    if [ "$NO_PUSH" != true ] && [ -z "$LOCAL_REMOTE_URL" ]; then
+        echo "❌ Failed to configure secure local remote for auto-push"
+        exit 1
     fi
 fi
 
@@ -471,7 +480,8 @@ DOCKER_ARGS=(
 if [ "$SOURCE_TYPE" = "url" ]; then
     DOCKER_ARGS+=("-e" "GIT_URL=$GIT_URL")
 else
-    DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$WSL_PATH")
+    LOCAL_REPO_ENV_VALUE="${LOCAL_REPO_PATH_VALUE:-$WSL_PATH}"
+    DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$LOCAL_REPO_ENV_VALUE")
     DOCKER_ARGS+=("-v" "${WSL_PATH}:/tmp/source-repo:ro")
     DOCKER_ARGS+=("--label" "coding-agents.repo-path=$RESOLVED_PATH")
     if [ -n "${LOCAL_REMOTE_WSL_PATH:-}" ]; then

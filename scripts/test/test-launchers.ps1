@@ -282,6 +282,122 @@ function Test-LocalRemotePush {
     Remove-Item $bareRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+function Test-LocalRemoteFallbackPush {
+    Test-Section "Testing local remote fallback push"
+
+    $bareRoot = Join-Path $env:TEMP ("bare-fallback-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $bareRoot | Out-Null
+    $bareRepo = Join-Path $bareRoot "local-remote.git"
+    git init --bare $bareRepo | Out-Null
+
+    $workspaceDir = Join-Path $env:TEMP ("workspace-fallback-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $workspaceDir | Out-Null
+    Get-ChildItem -LiteralPath $TestRepoDir -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $workspaceDir -Recurse -Force -ErrorAction Stop
+    }
+
+    Push-Location $workspaceDir
+    git config user.name "Test User"
+    git config user.email "test@example.com"
+    if (-not (git remote get-url local 2>$null)) {
+        git remote add local $bareRepo | Out-Null
+    } else {
+        git remote set-url local $bareRepo | Out-Null
+    }
+    git config remote.pushDefault local
+    git checkout -q main
+    $agentBranch = "copilot/session-fallback"
+    Add-Content -Path README.md -Value "fallback push"
+    git add README.md
+    git commit -q -m "fallback push"
+    try {
+        git push local $agentBranch 2>$null | Out-Null
+        Pass "git push to fallback local remote succeeded"
+    } catch {
+        Fail "git push to fallback local remote failed: $_"
+    }
+    Pop-Location
+
+    $pushedRef = git --git-dir=$bareRepo rev-parse "refs/heads/$agentBranch" 2>$null
+    if ($pushedRef) {
+        Pass "Fallback remote received agent branch"
+    } else {
+        Fail "Fallback remote missing agent branch"
+    }
+
+    Remove-Item $workspaceDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $bareRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+function Test-SecureRemoteSync {
+    Test-Section "Testing secure remote host sync"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $agentBranch = "copilot/session-sync"
+    $bareRoot = Join-Path $env:TEMP ("bare-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $bareRoot | Out-Null
+    $bareRepo = Join-Path $bareRoot "local-remote.git"
+    git init --bare $bareRepo | Out-Null
+
+    $agentWorkspace = Join-Path $env:TEMP ("agent-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $agentWorkspace | Out-Null
+    Push-Location $agentWorkspace
+    git init -q
+    git config user.name "Agent"
+    git config user.email "agent@example.com"
+    "agent work" | Out-File -FilePath agent.txt -Encoding UTF8
+    git add agent.txt
+    git commit -q -m "agent commit"
+    git branch -M $agentBranch
+    git remote add origin $bareRepo
+    try {
+        git push origin $agentBranch 2>$null | Out-Null
+        Pass "Agent branch pushed to secure remote"
+    } catch {
+        Fail "Failed to push agent branch to secure remote: $_"
+        Pop-Location
+        Remove-Item $agentWorkspace -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $bareRoot -Recurse -Force -ErrorAction SilentlyContinue
+        return
+    }
+    Pop-Location
+
+    Push-Location $TestRepoDir
+    git branch -D $agentBranch 2>$null | Out-Null
+    Pop-Location
+
+    $sanitizedBranch = $agentBranch -replace '/', '-'
+    $containerName = "test-sync-$sanitizedBranch"
+    docker run -d `
+        --name $containerName `
+        --label "coding-agents.test=true" `
+        --label "coding-agents.type=agent" `
+        --label "coding-agents.branch=$agentBranch" `
+        --label "coding-agents.repo-path=$TestRepoDir" `
+        --label "coding-agents.local-remote=$bareRepo" `
+        alpine:latest sleep 60 | Out-Null
+
+    if (Remove-ContainerWithSidecars -ContainerName $containerName -SkipPush -KeepBranch) {
+        Pass "Remove-ContainerWithSidecars synchronizes secure remote"
+    } else {
+        Fail "Remove-ContainerWithSidecars reported failure"
+    }
+
+    Push-Location $TestRepoDir
+    try {
+        git show "$agentBranch:agent.txt" 2>$null | Out-Null
+        Pass "Host branch fast-forwarded from secure remote"
+    } catch {
+        Fail "Host branch missing agent changes"
+    }
+    git branch -D $agentBranch 2>$null | Out-Null
+    Pop-Location
+
+    Remove-Item $agentWorkspace -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $bareRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 function Test-ContainerNaming {
     Test-Section "Testing container naming convention"
     
@@ -503,6 +619,8 @@ function Main {
         Test-ContainerRuntimeDetection
         Test-SharedFunctions
         Test-LocalRemotePush
+        Test-LocalRemoteFallbackPush
+        Test-SecureRemoteSync
         Test-ContainerNaming
         Test-ContainerLabelsTest
         Test-ImagePull

@@ -45,6 +45,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $BranchFromFlag = $PSBoundParameters.ContainsKey('Branch')
+$LocalRemoteHostPath = ""
+$LocalRemoteWslPath = ""
+$LocalRemoteUrl = ""
+$LocalRepoPathValue = ""
 
 # Source shared functions
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -107,6 +111,7 @@ if ($IsUrl) {
     
     $WslPath = $ResolvedPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
     $GitUrl = ""
+    $LocalRepoPathValue = $WslPath
     if (-not $NoPush) {
         $LocalRemoteDir = [Environment]::GetEnvironmentVariable("CODING_AGENTS_LOCAL_REMOTES_DIR")
         if ([string]::IsNullOrWhiteSpace($LocalRemoteDir)) {
@@ -116,12 +121,17 @@ if ($IsUrl) {
             New-Item -ItemType Directory -Path $LocalRemoteDir -Force | Out-Null
         }
         $RepoHash = Get-RepoPathHash -Path $ResolvedPath
-        $LocalRemotePath = Join-Path $LocalRemoteDir ("{0}.git" -f $RepoHash)
-        if (-not (Test-Path $LocalRemotePath)) {
-            git init --bare "$LocalRemotePath" 2>$null | Out-Null
+        $LocalRemoteHostPath = Join-Path $LocalRemoteDir ("{0}.git" -f $RepoHash)
+        if (-not (Test-Path $LocalRemoteHostPath)) {
+            git init --bare "$LocalRemoteHostPath" 2>$null | Out-Null
         }
-        $LocalRemoteWslPath = $LocalRemotePath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
+        $LocalRemoteWslPath = $LocalRemoteHostPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
         $LocalRemoteUrl = "file:///tmp/local-remote"
+        $LocalRepoPathValue = $LocalRemoteUrl
+    }
+
+    if (-not $NoPush -and [string]::IsNullOrWhiteSpace($LocalRemoteUrl)) {
+        throw "Failed to configure secure local remote for auto-push"
     }
 }
 
@@ -289,17 +299,6 @@ if ($SourceType -eq "local" -and -not $UseCurrentBranch) {
             }
             
             Write-Host ""
-        }
-        
-        # Create new agent branch from current HEAD
-        $currentCommit = git rev-parse HEAD 2>$null
-        Write-Host "📌 Creating agent branch '$AgentBranchName' from commit: $($currentCommit.Substring(0,8))" -ForegroundColor Cyan
-        git branch "$AgentBranchName" 2>$null | Out-Null
-        
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "❌ Failed to create agent branch" -ForegroundColor Red
-            Pop-Location
-            exit 1
         }
         
     } finally {
@@ -474,11 +473,15 @@ $dockerArgs += @(
 if ($SourceType -eq "url") {
     $dockerArgs += "-e", "GIT_URL=$GitUrl"
 } else {
-    $dockerArgs += "-e", "LOCAL_REPO_PATH=$WslPath"
+    $localRepoEnvValue = if ($LocalRepoPathValue) { $LocalRepoPathValue } else { $WslPath }
+    $dockerArgs += "-e", "LOCAL_REPO_PATH=$localRepoEnvValue"
     $dockerArgs += "-v", "${WslPath}:/tmp/source-repo:ro"
     if (-not [string]::IsNullOrEmpty($LocalRemoteWslPath)) {
         $dockerArgs += "-e", "LOCAL_REMOTE_URL=$LocalRemoteUrl"
         $dockerArgs += "-v", "${LocalRemoteWslPath}:/tmp/local-remote"
+        if (-not [string]::IsNullOrEmpty($LocalRemoteHostPath)) {
+            $dockerArgs += "--label", "coding-agents.local-remote=$LocalRemoteHostPath"
+        }
     }
 }
 

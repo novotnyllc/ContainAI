@@ -134,28 +134,28 @@ else
     fi
 fi
 
-# Check GitHub CLI installation
+# Check GitHub CLI installation (optional)
 print_checking "GitHub CLI installation"
 if command -v gh &> /dev/null; then
     GH_VERSION=$(gh --version | head -1 | grep -oP '\d+\.\d+\.\d+')
     print_success "GitHub CLI installed (version $GH_VERSION)"
 else
-    print_error "GitHub CLI is not installed"
-    echo "         Install from: https://cli.github.com/"
+    print_warning "GitHub CLI not found (optional for GitHub-specific commands)"
+    echo "         Install from: https://cli.github.com/ if you plan to use gh-based flows"
 fi
 
-# Check GitHub CLI authentication
+# Check GitHub CLI authentication (optional)
 print_checking "GitHub CLI authentication"
 if command -v gh &> /dev/null; then
     if gh auth status > /dev/null 2>&1; then
         GH_USER=$(gh api user --jq .login 2>/dev/null || echo "unknown")
         print_success "GitHub CLI authenticated (user: $GH_USER)"
     else
-        print_error "GitHub CLI is not authenticated"
-        echo "         Run: gh auth login"
+        print_warning "GitHub CLI is not authenticated (only required for gh workflows)"
+        echo "         Run: gh auth login if you plan to use gh commands"
     fi
 else
-    print_error "Cannot check authentication (gh not installed)"
+    print_warning "Skipping authentication check (GitHub CLI not installed)"
 fi
 
 # Check disk space

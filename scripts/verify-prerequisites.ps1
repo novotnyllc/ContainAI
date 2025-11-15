@@ -224,42 +224,41 @@ try {
 
 # Check GitHub CLI installation
 Write-Checking "GitHub CLI installation"
-try {
-    $ghVersion = (gh --version 2>$null | Select-Object -First 1 | Select-String -Pattern '\d+\.\d+\.\d+').Matches[0].Value
-    if ($ghVersion) {
-        Write-Success "GitHub CLI installed (version $ghVersion)"
-    } else {
-        throw "Version not detected"
-    }
-} catch {
-    Write-ErrorMsg "GitHub CLI is not installed" "Install from: https://cli.github.com/"
+        if (Get-Command gh -ErrorAction SilentlyContinue) {
+            $ghVersion = (gh --version | Select-String -Pattern '\d+\.\d+\.\d+').Matches[0].Value
+            if ($ghVersion) {
+                Write-Success "GitHub CLI installed (version $ghVersion)"
+            } else {
+                Write-Success "GitHub CLI installed"
+            }
+        } else {
+            Write-WarningMsg "GitHub CLI not found (optional for gh workflows)" "Install from: https://cli.github.com/ if needed"
 }
 
 # Check GitHub CLI authentication
 Write-Checking "GitHub CLI authentication"
-try {
-    gh auth status 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        # Try to get username
-        try {
-            $ghUser = (gh api user --jq .login 2>$null)
-            if ($ghUser) {
-                Write-Success "GitHub CLI authenticated (user: $ghUser)"
-            } else {
-                Write-Success "GitHub CLI authenticated"
+        if (Get-Command gh -ErrorAction SilentlyContinue) {
+            try {
+                gh auth status > $null 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    try {
+                        $ghUser = gh api user --jq .login 2>$null
+                        if ($ghUser) {
+                            Write-Success "GitHub CLI authenticated (user: $ghUser)"
+                        } else {
+                            Write-Success "GitHub CLI authenticated"
+                        }
+                    } catch {
+                        Write-Success "GitHub CLI authenticated"
+                    }
+                } else {
+                    Write-WarningMsg "GitHub CLI is not authenticated" "Run: gh auth login if you plan to use gh commands"
+                }
+            } catch {
+                Write-WarningMsg "GitHub CLI is not authenticated" "Run: gh auth login if you plan to use gh commands"
             }
-        } catch {
-            Write-Success "GitHub CLI authenticated"
-        }
-    } else {
-        Write-ErrorMsg "GitHub CLI is not authenticated" "Run: gh auth login"
-    }
-} catch {
-    if (Get-Command gh -ErrorAction SilentlyContinue) {
-        Write-ErrorMsg "GitHub CLI is not authenticated" "Run: gh auth login"
-    } else {
-        Write-ErrorMsg "Cannot check authentication (gh not installed)"
-    }
+        } else {
+            Write-WarningMsg "Skipping authentication check (GitHub CLI not installed)"
 }
 
 # Check disk space

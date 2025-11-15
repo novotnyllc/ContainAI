@@ -746,6 +746,7 @@ function Remove-ContainerWithSidecars {
     # Get container labels to find repo and branch info
     $agentBranch = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' $ContainerName 2>$null
     $repoPath = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' $ContainerName 2>$null
+    $localRemotePath = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.local-remote" }}' $ContainerName 2>$null
     
     # Push changes first
     if ((Get-ContainerStatus $ContainerName) -eq "running") {
@@ -773,6 +774,12 @@ function Remove-ContainerWithSidecars {
             Write-Host "🗑️  Removing network: $proxyNetwork" -ForegroundColor Cyan
             Invoke-ContainerCli network rm $proxyNetwork 2>$null | Out-Null
         }
+    }
+
+    if ($agentBranch -and $repoPath -and (Test-Path $repoPath) -and $localRemotePath) {
+        Write-Host ""
+        Write-Host "🔄 Syncing agent branch back to host repository..." -ForegroundColor Cyan
+        Sync-LocalRemoteToHost -RepoPath $repoPath -LocalRemotePath $localRemotePath -AgentBranch $agentBranch
     }
     
     # Clean up agent branch in host repo if applicable
