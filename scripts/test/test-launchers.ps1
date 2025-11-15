@@ -67,7 +67,7 @@ function Initialize-TestRepo {
     "# Test Repository" | Out-File -FilePath "README.md" -Encoding UTF8
     git add README.md
     git commit -q -m "Initial commit"
-    git checkout -q -b main
+    git checkout -q -B main
     
     Pop-Location
     
@@ -231,6 +231,55 @@ function Test-SharedFunctions {
     } else {
         Fail "Test-ContainerExists returned true for non-existent container"
     }
+}
+
+function Test-LocalRemotePush {
+    Test-Section "Testing secure local remote push"
+
+    $bareRoot = Join-Path $env:TEMP ("bare-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $bareRoot | Out-Null
+    $bareRepo = Join-Path $bareRoot "local-remote.git"
+    git init --bare $bareRepo | Out-Null
+
+    $workspaceDir = Join-Path $env:TEMP ("workspace-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $workspaceDir | Out-Null
+    Get-ChildItem -LiteralPath $TestRepoDir -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $workspaceDir -Recurse -Force -ErrorAction Stop
+    }
+
+    Push-Location $workspaceDir
+    git config user.name "Test User"
+    git config user.email "test@example.com"
+    $localUrlPath = $bareRepo -replace '\\','/'
+    $localRemoteUrl = "file:///$localUrlPath"
+    if (-not (git remote get-url local 2>$null)) {
+        git remote add local $localRemoteUrl | Out-Null
+    } else {
+        git remote set-url local $localRemoteUrl | Out-Null
+    }
+    git config remote.pushDefault local
+    git checkout -q main
+    $agentBranch = "copilot/session-test"
+    Add-Content -Path README.md -Value "secure push"
+    git add README.md
+    git commit -q -m "test push"
+    try {
+        git push local $agentBranch 2>$null | Out-Null
+        Pass "git push to local remote succeeded"
+    } catch {
+        Fail "git push to local remote failed: $_"
+    }
+    Pop-Location
+
+    $pushedRef = git --git-dir=$bareRepo rev-parse "refs/heads/$agentBranch" 2>$null
+    if ($pushedRef) {
+        Pass "Bare remote received agent branch"
+    } else {
+        Fail "Bare remote missing agent branch"
+    }
+
+    Remove-Item $workspaceDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $bareRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 function Test-ContainerNaming {
@@ -453,6 +502,7 @@ function Main {
         Setup-TestRepo
         Test-ContainerRuntimeDetection
         Test-SharedFunctions
+        Test-LocalRemotePush
         Test-ContainerNaming
         Test-ContainerLabelsTest
         Test-ImagePull

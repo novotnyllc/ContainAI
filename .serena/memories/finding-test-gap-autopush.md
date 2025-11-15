@@ -1,0 +1,5 @@
+# Finding: No automated tests cover auto-push path to host repos
+- Category: Test Coverage Gap
+- Evidence: scripts/test/test-launchers.sh, scripts/test/test-launchers.ps1, scripts/test/test-branch-management.sh/.ps1 focus on branch helpers and container labels but never exercise the cleanup trap in scripts/runtime/entrypoint.sh or assert that `git push local <branch>` succeeds. Integration tests (scripts/test/integration-test.sh) stub images and do not cover real host remotes either.
+- Impact: The severe regression where auto-push always fails (due to unreachable read-only remotes) shipped unnoticed. Without a regression test, future fixes could also silently break.
+- Expected: Add a harness that mounts a writable bare repo, launches run-agent, triggers cleanup, and asserts commits land in the host repo. Mirror coverage in both bash and PowerShell launchers.

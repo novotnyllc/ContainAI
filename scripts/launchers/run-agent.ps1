@@ -45,6 +45,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $BranchFromFlag = $PSBoundParameters.ContainsKey('Branch')
+$LocalRemoteHostPath = ""
+$LocalRemoteWslPath = ""
 
 # Source shared functions
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -107,6 +109,22 @@ if ($IsUrl) {
     
     $WslPath = $ResolvedPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
     $GitUrl = ""
+    if (-not $NoPush) {
+        $LocalRemoteDir = [Environment]::GetEnvironmentVariable("CODING_AGENTS_LOCAL_REMOTES_DIR")
+        if ([string]::IsNullOrWhiteSpace($LocalRemoteDir)) {
+            $LocalRemoteDir = Join-Path $env:USERPROFILE ".coding-agents\\local-remotes"
+        }
+        if (-not (Test-Path $LocalRemoteDir)) {
+            New-Item -ItemType Directory -Path $LocalRemoteDir -Force | Out-Null
+        }
+        $RepoHash = Get-RepoPathHash -Path $ResolvedPath
+        $LocalRemoteHostPath = Join-Path $LocalRemoteDir ("{0}.git" -f $RepoHash)
+        if (-not (Test-Path $LocalRemoteHostPath)) {
+            git init --bare "$LocalRemoteHostPath" 2>$null | Out-Null
+        }
+        $LocalRemoteWslPath = $LocalRemoteHostPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
+        $LocalRemoteUrl = "file:///tmp/local-remote"
+    }
 }
 
 if ($UseCurrentBranch) {
@@ -130,6 +148,21 @@ if ($NetworkProxy -eq "restricted" -and $SourceType -eq "url") {
 function Test-AgentBranch {
     param([string]$BranchName)
     return $BranchName -match '^(copilot|codex|claude)/'
+}
+
+function Get-RepoPathHash {
+    param([string]$Path)
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Path)
+        $hash = $sha.ComputeHash($bytes)
+        $hex = -join ($hash | ForEach-Object { $_.ToString("x2") })
+        return $hex.Substring(0,16)
+    }
+    finally {
+        $sha.Dispose()
+    }
 }
 
 # Helper: Find next available session number
@@ -444,6 +477,13 @@ if ($SourceType -eq "url") {
 } else {
     $dockerArgs += "-e", "LOCAL_REPO_PATH=$WslPath"
     $dockerArgs += "-v", "${WslPath}:/tmp/source-repo:ro"
+    if (-not [string]::IsNullOrEmpty($LocalRemoteWslPath)) {
+        $dockerArgs += "-e", "LOCAL_REMOTE_URL=$LocalRemoteUrl"
+        $dockerArgs += "-v", "${LocalRemoteWslPath}:/tmp/local-remote"
+        if (-not [string]::IsNullOrEmpty($LocalRemoteHostPath)) {
+            $dockerArgs += "--label", "coding-agents.local-remote=$LocalRemoteHostPath"
+        }
+    }
 }
 
 if ($OriginUrl) { $dockerArgs += "-e", "ORIGIN_URL=$OriginUrl" }
@@ -652,4 +692,9 @@ if ((Get-ContainerStatus $ContainerName) -eq "running") {
 } else {
     Write-Host ""
     Write-Host "✅ Agent session complete. Container stopped." -ForegroundColor Green
+}
+
+if ($SourceType -eq "local" -and -not $NoPush -and -not [string]::IsNullOrWhiteSpace($LocalRemoteHostPath)) {
+    Write-Host "🔄 Syncing agent branch back to host repository..." -ForegroundColor Cyan
+    Sync-LocalRemoteToHost -RepoPath $ResolvedPath -LocalRemotePath $LocalRemoteHostPath -AgentBranch $AgentBranch
 }

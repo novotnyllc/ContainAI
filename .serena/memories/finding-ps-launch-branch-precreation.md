@@ -1,0 +1,6 @@
+# Finding: launch-agent.ps1 pre-creates branches unlike bash
+- Category: Bash ↔ PowerShell Parity / Correctness
+- Files: scripts/launchers/launch-agent.ps1 lines ~200-270 (creates/deletes `$AgentBranchName` via `git branch`), scripts/launchers/launch-agent (only archives/deletes conflicts; actual creation happens in container setup script).
+- Problem: The PowerShell launcher not only archives/deletes existing agent branches (same as bash) but also immediately runs `git branch "$AgentBranchName"` on the host repo to create the new agent branch before container startup. The bash launcher never creates the branch on the host; it leaves creation to the container’s repo-setup script so the branch only exists if the container actually starts and work is done.
+- Impact: Windows users get empty agent branches as soon as they run `launch-agent`, even if container launch fails. Documented isolation (agent work happens in container branch) is broken and behavior diverges from bash, making parity tests impossible and leaving stray branches.
+- Expected: PowerShell launcher should mirror bash behavior: detect/archive conflicts but do not create the branch locally; instead, allow the container-side `generate_repo_setup_script` workflow to create/push as-needed once the agent starts.

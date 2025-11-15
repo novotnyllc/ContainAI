@@ -872,7 +872,7 @@ function New-RepoSetupScript {
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET_DIR="/workspace"
+TARGET_DIR="${WORKSPACE_DIR:-/workspace}"
 mkdir -p "$TARGET_DIR"
 
 # Clean target directory
@@ -893,7 +893,15 @@ else
     cd "$TARGET_DIR"
     
     # Configure local remote
-    if [ -n "$LOCAL_REPO_PATH" ]; then
+    if [ -n "$LOCAL_REMOTE_URL" ]; then
+        if git remote get-url local >/dev/null 2>&1; then
+            git remote set-url local "$LOCAL_REMOTE_URL"
+        else
+            git remote add local "$LOCAL_REMOTE_URL"
+        fi
+        git config remote.pushDefault local
+        git config remote.local.pushurl "$LOCAL_REMOTE_URL" >/dev/null 2>&1 || true
+    elif [ -n "$LOCAL_REPO_PATH" ]; then
         if ! git remote get-url local >/dev/null 2>&1; then
             git remote add local "$LOCAL_REPO_PATH"
         fi
@@ -913,4 +921,78 @@ fi
 
 echo "✅ Repository setup complete"
 '@
+}
+
+function Sync-LocalRemoteToHost {
+    [CmdletBinding()]
+    param(
+        [string]$RepoPath,
+        [string]$LocalRemotePath,
+        [string]$AgentBranch
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RepoPath) -or [string]::IsNullOrWhiteSpace($LocalRemotePath) -or [string]::IsNullOrWhiteSpace($AgentBranch)) {
+        return
+    }
+
+    if (-not (Test-Path (Join-Path $RepoPath '.git'))) {
+        return
+    }
+
+    if (-not (Test-Path $LocalRemotePath)) {
+        Write-Warning "Secure remote missing at $LocalRemotePath"
+        return
+    }
+
+    $branchExists = git --git-dir=$LocalRemotePath rev-parse --verify --quiet "refs/heads/$AgentBranch" 2>$null
+    if (-not $?) {
+        return
+    }
+
+    Push-Location $RepoPath
+    try {
+        $tempRef = "refs/coding-agents-sync/$AgentBranch" -replace ' ', '-'
+        if (-not (git fetch $LocalRemotePath "$AgentBranch:$tempRef" 2>$null)) {
+            Write-Warning "Failed to fetch agent branch from secure remote"
+            return
+        }
+
+        $fetchedSha = git rev-parse $tempRef 2>$null
+        if (-not $?) { return }
+
+        $currentBranch = git branch --show-current 2>$null
+        $hostHasBranch = git show-ref --verify --quiet "refs/heads/$AgentBranch" 2>$null
+        $hostHasBranch = $?
+
+        if ($hostHasBranch) {
+            if ($currentBranch -eq $AgentBranch) {
+                $worktreeState = git status --porcelain 2>$null
+                if ($worktreeState) {
+                    Write-Warning "Working tree dirty on $AgentBranch; skipped auto-sync"
+                } else {
+                    if (git merge --ff-only $tempRef 2>$null) {
+                        Write-Host "✅ Host branch '$AgentBranch' fast-forwarded from secure remote"
+                    } else {
+                        Write-Warning "Unable to fast-forward '$AgentBranch' (merge required)"
+                    }
+                }
+            } else {
+                if (git update-ref "refs/heads/$AgentBranch" $fetchedSha 2>$null) {
+                    Write-Host "✅ Host branch '$AgentBranch' updated from secure remote"
+                } else {
+                    Write-Warning "Failed to update branch '$AgentBranch'"
+                }
+            }
+        } else {
+            if (git branch $AgentBranch $tempRef 2>$null) {
+                Write-Host "✅ Created branch '$AgentBranch' from secure remote"
+            } else {
+                Write-Warning "Failed to create branch '$AgentBranch'"
+            }
+        }
+    }
+    finally {
+        git update-ref -d $tempRef 2>$null | Out-Null
+        Pop-Location
+    }
 }

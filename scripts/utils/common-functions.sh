@@ -634,7 +634,7 @@ generate_repo_setup_script() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET_DIR="/workspace"
+TARGET_DIR="${WORKSPACE_DIR:-/workspace}"
 mkdir -p "$TARGET_DIR"
 
 # Clean target directory
@@ -655,7 +655,16 @@ else
     cd "$TARGET_DIR"
     
     # Configure local remote
-    if [ -n "$LOCAL_REPO_PATH" ]; then
+    if [ -n "$LOCAL_REMOTE_URL" ]; then
+        if git remote get-url local >/dev/null 2>&1; then
+            git remote set-url local "$LOCAL_REMOTE_URL"
+        else
+            git remote add local "$LOCAL_REMOTE_URL"
+        fi
+        git config remote.pushDefault local
+        git config remote.local.pushurl "$LOCAL_REMOTE_URL" 2>/dev/null || true
+    elif [ -n "$LOCAL_REPO_PATH" ]; then
+        # Backward compatibility for older launchers
         if ! git remote get-url local >/dev/null 2>&1; then
             git remote add local "$LOCAL_REPO_PATH"
         fi
@@ -675,4 +684,74 @@ fi
 
 echo "✅ Repository setup complete"
 SETUP_SCRIPT
+}
+
+# Sync commits from secure bare remote back into host repository
+sync_local_remote_to_host() {
+    local repo_path="$1"
+    local local_remote_path="$2"
+    local agent_branch="$3"
+
+    if [ -z "$repo_path" ] || [ -z "$local_remote_path" ] || [ -z "$agent_branch" ]; then
+        return 0
+    fi
+
+    if [ ! -d "$repo_path/.git" ]; then
+        return 0
+    fi
+
+    if [ ! -d "$local_remote_path" ]; then
+        echo "⚠️  Secure remote missing at $local_remote_path" >&2
+        return 0
+    fi
+
+    # Ensure bare remote actually has the branch
+    if ! git --git-dir="$local_remote_path" rev-parse --verify --quiet "refs/heads/$agent_branch"; then
+        return 0
+    fi
+
+    (
+        cd "$repo_path" || exit 0
+
+        local temp_ref="refs/coding-agents-sync/${agent_branch// /-}"
+        if ! git fetch "$local_remote_path" "$agent_branch:$temp_ref" >/dev/null 2>&1; then
+            echo "⚠️  Failed to fetch agent branch from secure remote" >&2
+            exit 0
+        fi
+
+        local fetched_sha
+        fetched_sha=$(git rev-parse "$temp_ref" 2>/dev/null) || exit 0
+        local current_branch
+        current_branch=$(git branch --show-current 2>/dev/null || echo "")
+
+        if git show-ref --verify --quiet "refs/heads/$agent_branch"; then
+            if [ "$current_branch" = "$agent_branch" ]; then
+                local worktree_state
+                worktree_state=$(git status --porcelain 2>/dev/null)
+                if [ -n "$worktree_state" ]; then
+                    echo "⚠️  Working tree dirty on $agent_branch; skipped auto-sync" >&2
+                else
+                    if git merge --ff-only "$temp_ref" >/dev/null 2>&1; then
+                        echo "✅ Host branch '$agent_branch' fast-forwarded from secure remote"
+                    else
+                        echo "⚠️  Unable to fast-forward '$agent_branch' (merge required)" >&2
+                    fi
+                fi
+            else
+                if git update-ref "refs/heads/$agent_branch" "$fetched_sha" >/dev/null 2>&1; then
+                    echo "✅ Host branch '$agent_branch' updated from secure remote"
+                else
+                    echo "⚠️  Failed to update branch '$agent_branch'" >&2
+                fi
+            fi
+        else
+            if git branch "$agent_branch" "$temp_ref" >/dev/null 2>&1; then
+                echo "✅ Created branch '$agent_branch' from secure remote"
+            else
+                echo "⚠️  Failed to create branch '$agent_branch'" >&2
+            fi
+        fi
+
+        git update-ref -d "$temp_ref" >/dev/null 2>&1 || true
+    )
 }

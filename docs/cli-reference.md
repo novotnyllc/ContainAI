@@ -172,8 +172,10 @@ run-copilot ~/my-project -b feature-api --cpu 8 --memory 16g --network-proxy squ
 5. Drops you into interactive shell with Copilot CLI
 6. On exit (`Ctrl+D` or `exit`):
    - Auto-commits changes
-   - Pushes to configured git remote (if any)
+  - Pushes to the secure local remote (bare repo) so work is preserved even if the container is removed
    - Container auto-removes
+
+> **Auto-push storage:** For local repositories, commits are written to `~/.coding-agents/local-remotes/<repo-hash>.git`. Fetch from that bare repo to bring changes back into your working tree, or set `CODING_AGENTS_LOCAL_REMOTES_DIR` before launching to change the location.
 
 **Reattach later:** `connect-agent --name <container>` reconnects to the tmux session if the container is still running (for example, if you detached with `Ctrl+B`, `D`).
 
@@ -935,7 +937,7 @@ Next steps:
 1. On exit, trap executes
 2. Checks if container still exists
 3. Commits changes: `git add -A`, `git commit`
-4. Pushes to git remote (if configured, unless `--no-push`)
+4. Pushes to the per-repo bare remote under `~/.coding-agents/local-remotes` (unless `--no-push`)
 5. Container auto-removes (`--rm`)
 
 4. Starts a managed tmux session so you can detach/reconnect (`Ctrl+B`, then `D`)
@@ -943,11 +945,11 @@ Next steps:
 2. On `docker stop`:
    - Entrypoint receives SIGTERM
    - Commits changes
-   - Pushes to git remote (if configured, unless `--no-push`)
+  - Pushes to the secure bare remote (unless `--no-push`)
 3. Container stops but persists
 4. Manual removal: `docker rm`
 
-**Note:** Git remote configuration is optional. Without a remote, changes are committed locally only.
+**Note:** Git now pushes to the managed bare repo path automatically. Fetch from that path (or set `CODING_AGENTS_LOCAL_REMOTES_DIR` to customize the location) to bring changes into your working tree.
 
 ---
 

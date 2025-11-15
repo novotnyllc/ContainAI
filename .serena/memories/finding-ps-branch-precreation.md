@@ -1,0 +1,6 @@
+# Finding: Windows run-agent.ps1 mutates host repo unlike bash version
+- Category: Bash ↔ PowerShell Parity / Correctness
+- Files: scripts/launchers/run-agent.ps1 (block creating `git branch "$AgentBranchName"`), scripts/launchers/run-agent (no equivalent creation)
+- Problem: The PowerShell launcher unconditionally runs `git branch "$AgentBranchName"` on the host repo before the container is even created, creating or replacing the agent branch immediately. The bash launcher only removes/reuses existing agent branches and leaves creation to the container-side workflow. Result: Windows users end up with empty agent branches even if container startup fails, and `--use-current-branch` safety is bypassed because the branch now exists locally.
+- Impact: Host repos on Windows get mutated prematurely, violating the documented isolation model and causing stray branches when launch fails. The behavior is inconsistent across shells, complicating parity and testing.
+- Expected: PowerShell launcher should mirror bash behavior: only archive/delete conflicting agent branches on the host, and let the container create/push the new branch once work actually happens.
