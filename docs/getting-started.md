@@ -556,6 +556,10 @@ docker stop copilot-myproject-feature-auth
 
 **Auto-push on stop**: Container automatically commits and pushes changes when stopped (unless launched with `--no-push`).
 
+- Changes are pushed to a dedicated bare repository under `~/.coding-agents/local-remotes/<repo-hash>.git` so the container never writes directly to your working tree.
+- To pull the work back into your checkout, fetch from that bare repo: `git fetch ~/.coding-agents/local-remotes/<repo-hash>.git <branch>:<branch>`.
+- Override the storage path by setting `CODING_AGENTS_LOCAL_REMOTES_DIR` before launching if you prefer a different secure location.
+
 ## Detaching and Reconnecting
 
 Every launcher runs your agent inside a managed tmux session. Detach any time without stopping the container:

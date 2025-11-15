@@ -25,6 +25,8 @@ GPU=""
 NO_PUSH=false
 FORCE=false
 USE_CURRENT_BRANCH=false
+LOCAL_REMOTE_HOST_PATH=""
+LOCAL_REMOTE_WSL_PATH=""
 
 # First argument must be agent type
 if [[ $# -eq 0 || "$1" == "-"* ]]; then
@@ -177,6 +179,19 @@ else
     cd - > /dev/null
     WSL_PATH=$(convert_to_wsl_path "$SOURCE")
     GIT_URL=""
+
+    if [ "$NO_PUSH" != true ]; then
+        REMOTE_HASH=$(printf "%s" "$SOURCE" | (command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum) | awk '{print $1}')
+        REMOTE_HASH=${REMOTE_HASH:0:16}
+        LOCAL_REMOTE_DIR="${CODING_AGENTS_LOCAL_REMOTES_DIR:-${HOME}/.coding-agents/local-remotes}"
+        LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
+        mkdir -p "$LOCAL_REMOTE_DIR"
+        if [ ! -d "$LOCAL_REMOTE_HOST_PATH" ]; then
+            git init --bare "$LOCAL_REMOTE_HOST_PATH" >/dev/null
+        fi
+        LOCAL_REMOTE_WSL_PATH=$(convert_to_wsl_path "$LOCAL_REMOTE_HOST_PATH")
+        LOCAL_REMOTE_URL="file:///tmp/local-remote"
+    fi
 fi
 
 if [ "$USE_CURRENT_BRANCH" = "true" ]; then
@@ -458,6 +473,11 @@ else
     DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$WSL_PATH")
     DOCKER_ARGS+=("-v" "${WSL_PATH}:/tmp/source-repo:ro")
     DOCKER_ARGS+=("--label" "coding-agents.repo-path=$RESOLVED_PATH")
+    if [ -n "${LOCAL_REMOTE_WSL_PATH:-}" ]; then
+        DOCKER_ARGS+=("-e" "LOCAL_REMOTE_URL=${LOCAL_REMOTE_URL}")
+        DOCKER_ARGS+=("-v" "${LOCAL_REMOTE_WSL_PATH}:/tmp/local-remote")
+        DOCKER_ARGS+=("--label" "coding-agents.local-remote=$LOCAL_REMOTE_HOST_PATH")
+    fi
 fi
 
 [ -n "$ORIGIN_URL" ] && DOCKER_ARGS+=("-e" "ORIGIN_URL=$ORIGIN_URL")
@@ -648,4 +668,9 @@ if container_cli ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | 
 else
     echo ""
     echo "✅ Agent session complete. Container stopped."
+fi
+
+if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ]; then
+    echo "🔄 Syncing agent branch back to host repository..."
+    sync_local_remote_to_host "$RESOLVED_PATH" "$LOCAL_REMOTE_HOST_PATH" "$AGENT_BRANCH"
 fi

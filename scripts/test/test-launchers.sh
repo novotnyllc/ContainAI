@@ -62,7 +62,7 @@ setup_test_repo() {
     echo "# Test Repository" > README.md
     git add README.md
     git commit -q -m "Initial commit"
-    git checkout -q -b main
+    git checkout -q -B main
     
     pass "Created test repository at $TEST_REPO_DIR"
 }
@@ -234,6 +234,56 @@ test_shared_functions() {
     else
         fail "container_exists() returned true for non-existent container"
     fi
+}
+
+test_local_remote_push() {
+    test_section "Testing secure local remote push"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local workspace_dir
+    workspace_dir=$(mktemp -d)
+    local bare_dir
+    bare_dir=$(mktemp -d)
+    local bare_repo="$bare_dir/local-remote.git"
+    git init --bare "$bare_repo" >/dev/null
+
+    mkdir -p /tmp/source-repo
+    rm -rf /tmp/source-repo/*
+    cp -a "$TEST_REPO_DIR/." /tmp/source-repo/
+
+    local agent_branch="copilot/session-test"
+    local setup_script
+    setup_script=$(generate_repo_setup_script "local" "" "$TEST_REPO_DIR" "" "$agent_branch")
+    if ! echo "$setup_script" | WORKSPACE_DIR="$workspace_dir" SOURCE_TYPE="local" LOCAL_REMOTE_URL="file://$bare_repo" AGENT_BRANCH="$agent_branch" GIT_URL="" ORIGIN_URL="" bash; then
+        fail "Repository setup script failed"
+        rm -rf "$workspace_dir" "$bare_dir"
+        return
+    fi
+
+    cd "$workspace_dir"
+    git config user.name "Test User"
+    git config user.email "test@example.com"
+    echo "secure push" >> README.md
+    git add README.md
+    git commit -q -m "test push"
+    if git push local "$agent_branch" >/dev/null 2>&1; then
+        pass "git push to local remote succeeded"
+    else
+        fail "git push to local remote failed"
+    fi
+
+    local pushed_ref
+    pushed_ref=$(git --git-dir="$bare_repo" rev-parse "refs/heads/$agent_branch" 2>/dev/null || echo "")
+    if [ -n "$pushed_ref" ]; then
+        pass "Bare remote received agent branch"
+    else
+        fail "Bare remote missing agent branch"
+    fi
+
+    rm -rf "$workspace_dir" "$bare_dir"
+    rm -rf /tmp/source-repo
+    unset WORKSPACE_DIR SOURCE_TYPE LOCAL_REMOTE_URL AGENT_BRANCH ORIGIN_URL
 }
 
 # Test: Container naming convention
@@ -421,6 +471,7 @@ main() {
     setup_test_repo
     test_container_runtime_detection
     test_shared_functions
+    test_local_remote_push
     test_wsl_path_conversion
     test_container_naming
     test_container_labels
