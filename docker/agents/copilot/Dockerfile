@@ -16,10 +16,12 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-copilot-auth.sh && \
     chmod +x /usr/local/bin/validate-copilot-auth.sh
 
 # Copy GitHub Copilot specific config files and init script
-RUN mkdir -p /home/agentuser/.config/github-copilot/agents
+RUN mkdir -p /home/agentuser/.config/github-copilot/agents && \
+    chown -R agentuser:agentuser /home/agentuser/.config/github-copilot
 COPY --chown=agentuser:agentuser agent-configs/github-copilot/ /home/agentuser/.config/github-copilot/agents/
 COPY docker/agents/copilot/init-copilot-config.sh /usr/local/bin/init-copilot-config.sh
-RUN chmod +x /usr/local/bin/init-copilot-config.sh
+COPY docker/agents/copilot/merge-copilot-tokens.py /usr/local/bin/merge-copilot-tokens.py
+RUN chmod +x /usr/local/bin/init-copilot-config.sh /usr/local/bin/merge-copilot-tokens.py
 
 USER agentuser
 WORKDIR /workspace

@@ -26,9 +26,37 @@ PASSED_TESTS=0
 cleanup() {
     echo ""
     echo "🧹 Cleaning up test containers and networks..."
-    
-    docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f 2>/dev/null || true
-    docker network ls --filter "name=test-" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
+    local attempt=0
+    local max_attempts=5
+    local removed=true
+    while [ $attempt -lt $max_attempts ]; do
+        removed=true
+        local containers
+        containers=$(docker ps -aq --filter "label=coding-agents.test=true" 2>/dev/null || true)
+        if [ -n "$containers" ]; then
+            echo "  Removing containers (attempt $((attempt+1))/$max_attempts)..."
+            echo "$containers" | xargs -r docker rm -f 2>/dev/null || true
+            removed=false
+        fi
+
+        local networks
+        networks=$(docker network ls --filter "name=test-" --format "{{.Name}}" 2>/dev/null || true)
+        if [ -n "$networks" ]; then
+            echo "  Removing networks (attempt $((attempt+1))/$max_attempts)..."
+            echo "$networks" | xargs -r docker network rm 2>/dev/null || true
+            removed=false
+        fi
+
+        if $removed; then
+            break
+        fi
+        attempt=$((attempt + 1))
+        sleep 1
+    done
+
+    if ! $removed; then
+        echo "⚠️  Warning: Some test resources may still exist after cleanup retries"
+    fi
     rm -rf "$TEST_REPO_DIR"
     
     print_test_summary
@@ -393,6 +421,11 @@ test_secure_remote_sync() {
 
     local sanitized_branch="${agent_branch//\//-}"
     local container_name="test-sync-${sanitized_branch}"
+
+    # Remove any stale container from previous runs to avoid conflicts
+    if docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" | grep -q "^${container_name}$"; then
+        docker rm -f "$container_name" >/dev/null 2>&1 || true
+    fi
     docker run -d \
         --name "$container_name" \
         --label "coding-agents.test=true" \
