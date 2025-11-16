@@ -610,13 +610,27 @@ if ($sshAuthSock -and (Test-Path $sshAuthSock)) {
 # Final args
 $dockerArgs += "-w", "/workspace"
 $dockerArgs += "--network", $NetworkMode
+$dockerArgs += "--cap-drop=ALL"
 $dockerArgs += "--security-opt", "no-new-privileges:true"
+$dockerArgs += "--pids-limit=4096"
 
 # Add resource limits
 $dockerArgs += "--cpus=$Cpu"
 $dockerArgs += "--memory=$Memory"
+$dockerArgs += "--memory-swap=$Memory"
 if ($Gpu) {
     $dockerArgs += "--gpus=$Gpu"
+}
+
+$extraArgsEnv = $env:CODING_AGENTS_EXTRA_DOCKER_ARGS
+if ($extraArgsEnv) {
+    $errors = $null
+    $tokens = [System.Management.Automation.PSParser]::Tokenize($extraArgsEnv, [ref]$errors)
+    foreach ($token in $tokens) {
+        if ($token.Type -in @('CommandArgument','String')) {
+            $dockerArgs += $token.Content
+        }
+    }
 }
 
 $dockerArgs += $ImageName

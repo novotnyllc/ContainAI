@@ -164,7 +164,9 @@ build_test_images() {
         echo "Building $agent image..."
         
         # Get the test image variable name
-        local image_var="TEST_${agent^^}_IMAGE"
+        local agent_upper
+        agent_upper=$(printf '%s' "$agent" | tr '[:lower:]' '[:upper:]')
+        local image_var="TEST_${agent_upper}_IMAGE"
         local test_image="${!image_var}"
         
         docker build \
@@ -231,7 +233,9 @@ EOF
     # Tag and push for each agent
     local agents=("copilot" "codex" "claude")
     for agent in "${agents[@]}"; do
-        local image_var="TEST_${agent^^}_IMAGE"
+        local agent_upper
+        agent_upper=$(printf '%s' "$agent" | tr '[:lower:]' '[:upper:]')
+        local image_var="TEST_${agent_upper}_IMAGE"
         local test_image="${!image_var}"
         echo "  Tagging for $agent..."
         docker tag "$base_mock_image" "$test_image" || {
@@ -284,7 +288,9 @@ pull_and_tag_test_images() {
             fi
         fi
         
-        local image_var="TEST_${agent^^}_IMAGE"
+        local agent_upper
+        agent_upper=$(printf '%s' "$agent" | tr '[:lower:]' '[:upper:]')
+        local image_var="TEST_${agent_upper}_IMAGE"
         local test_image="${!image_var}"
         
         if ! docker tag "$source_image" "$test_image"; then
@@ -403,19 +409,34 @@ cleanup_test_containers() {
     fi
     
     echo "Removing test containers..."
-    
-    # Remove by session label
-    local containers
-    containers=$(docker ps -aq --filter "label=$TEST_LABEL_SESSION" 2>/dev/null || true)
-    if [ -z "${containers}" ]; then
-        echo "  No test containers to remove"
-        return 0
-    fi
-    
-    echo "${containers}" | xargs docker rm -f 2>/dev/null || {
-        echo "⚠️  Warning: Some containers could not be removed"
-        return 1
-    }
+    local attempt=0
+    local max_attempts=5
+    while true; do
+        local containers
+        containers=$(docker ps -aq --filter "label=$TEST_LABEL_SESSION" 2>/dev/null || true)
+        if [ -z "$containers" ]; then
+            if [ $attempt -eq 0 ]; then
+                echo "  No test containers to remove"
+            else
+                echo "  ✓ Test containers removed"
+            fi
+            return 0
+        fi
+        echo "$containers" | xargs docker rm -f 2>/dev/null || true
+        attempt=$((attempt + 1))
+        if [ $attempt -ge $max_attempts ]; then
+            local remaining
+            remaining=$(docker ps -aq --filter "label=$TEST_LABEL_SESSION" 2>/dev/null || true)
+            if [ -n "$remaining" ]; then
+                echo "⚠️  Warning: Containers still present after cleanup attempts: $remaining"
+                return 1
+            fi
+            echo "  ✓ Test containers removed"
+            return 0
+        fi
+        echo "  Waiting for containers to terminate (attempt $attempt/$max_attempts)..."
+        sleep 1
+    done
 }
 
 # ============================================================================

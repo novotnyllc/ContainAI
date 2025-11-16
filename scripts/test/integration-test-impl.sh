@@ -157,7 +157,9 @@ test_image_availability() {
     
     local agents=("copilot" "codex" "claude")
     for agent in "${agents[@]}"; do
-        local image_var="TEST_${agent^^}_IMAGE"
+        local agent_upper
+        agent_upper=$(printf '%s' "$agent" | tr '[:lower:]' '[:upper:]')
+        local image_var="TEST_${agent_upper}_IMAGE"
         local test_image="${!image_var}"
         
         if docker image inspect "$test_image" >/dev/null 2>&1; then
@@ -449,7 +451,9 @@ test_multiple_agents() {
     
     for agent in "${agents[@]}"; do
         local container_name="${TEST_CONTAINER_PREFIX}-${agent}-test"
-        local image_var="TEST_${agent^^}_IMAGE"
+        local agent_upper
+        agent_upper=$(printf '%s' "$agent" | tr '[:lower:]' '[:upper:]')
+        local image_var="TEST_${agent_upper}_IMAGE"
         local test_image="${!image_var}"
         
         docker run -d \
