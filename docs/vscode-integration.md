@@ -282,7 +282,7 @@ The **Source Control** pane (`Ctrl+Shift+G`) integrates with Git inside the cont
 
 **Git configuration:**
 - Uses Git config from mounted workspace (`.git/config`)
-- SSH keys from `~/.ssh` (if mounted)
+- SSH keys via forwarded `SSH_AUTH_SOCK` (host `~/.ssh` is never mounted)
 - GitHub CLI authentication (if configured)
 
 ### Extensions
@@ -814,8 +814,8 @@ docker container prune --filter "label=coding-agent=true"
    ```
 
 4. **SSH key access:**
-   - Host `~/.ssh` may not be mounted
-   - Use HTTPS with GitHub CLI instead of SSH
+   - Host `~/.ssh` is intentionally never mounted for security
+   - Ensure `ssh-agent` is running so `SSH_AUTH_SOCK` can be forwarded, or use HTTPS with GitHub CLI
 
 ### Container Stops Unexpectedly
 
