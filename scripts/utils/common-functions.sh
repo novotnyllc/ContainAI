@@ -2,9 +2,119 @@
 # Common functions for agent management scripts
 set -euo pipefail
 
+COMMON_FUNCTIONS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+CODING_AGENTS_REPO_ROOT_DEFAULT=$(cd "$COMMON_FUNCTIONS_DIR/../.." && pwd)
+
 CODING_AGENTS_CONFIG_DIR="${HOME}/.config/coding-agents"
 CODING_AGENTS_HOST_CONFIG_FILE="${CODING_AGENTS_HOST_CONFIG:-${CODING_AGENTS_CONFIG_DIR}/host-config.env}"
+CODING_AGENTS_OVERRIDE_DIR="${CODING_AGENTS_OVERRIDE_DIR:-${CODING_AGENTS_CONFIG_DIR}/overrides}"
+CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-${CODING_AGENTS_OVERRIDE_DIR}/allow-dirty}"
+CODING_AGENTS_BROKER_SCRIPT="${CODING_AGENTS_BROKER_SCRIPT:-${CODING_AGENTS_REPO_ROOT_DEFAULT}/scripts/runtime/secret-broker.py}"
 DEFAULT_LAUNCHER_UPDATE_POLICY="prompt"
+
+_resolve_git_binary() {
+    if command -v git >/dev/null 2>&1; then
+        echo "git"
+        return 0
+    fi
+    echo ""
+    return 1
+}
+
+get_git_head_hash() {
+    local repo_root="$1"
+    local git_bin
+    git_bin=$(_resolve_git_binary) || return 1
+    if [ -z "$repo_root" ] || [ ! -d "$repo_root/.git" ]; then
+        return 1
+    fi
+    "$git_bin" -C "$repo_root" rev-parse HEAD 2>/dev/null
+}
+
+_trusted_path_exists() {
+    local repo_root="$1"
+    local path="$2"
+    local git_bin
+    git_bin=$(_resolve_git_binary) || return 1
+    if [ -z "$path" ]; then
+        return 1
+    fi
+    if [ -e "$repo_root/$path" ]; then
+        return 0
+    fi
+    "$git_bin" -C "$repo_root" rev-parse --verify --quiet "HEAD:$path" >/dev/null 2>&1
+}
+
+collect_trusted_tree_hashes() {
+    local repo_root="$1"
+    shift || true
+    local git_bin
+    git_bin=$(_resolve_git_binary) || return 1
+    if [ -z "$repo_root" ] || [ ! -d "$repo_root/.git" ]; then
+        return 1
+    fi
+
+    local path hash
+    for path in "$@"; do
+        if [ -z "$path" ]; then
+            continue
+        fi
+        if "$git_bin" -C "$repo_root" rev-parse --verify --quiet "HEAD:$path" >/dev/null 2>&1; then
+            hash=$("$git_bin" -C "$repo_root" rev-parse "HEAD:$path")
+            printf '%s=%s\n' "$path" "$hash"
+        fi
+    done
+}
+
+_list_dirty_entries() {
+    local repo_root="$1"
+    shift || true
+    local git_bin
+    git_bin=$(_resolve_git_binary) || return 1
+    local dirty=()
+    local status_output path
+    for path in "$@"; do
+        if [ -z "$path" ]; then
+            continue
+        fi
+        if ! _trusted_path_exists "$repo_root" "$path"; then
+            continue
+        fi
+        status_output=$("$git_bin" -C "$repo_root" status --short -- "$path" 2>/dev/null || true)
+        if [ -n "$status_output" ]; then
+            dirty+=("$path")
+        fi
+    done
+    printf '%s\n' "${dirty[@]}"
+}
+
+ensure_trusted_paths_clean() {
+    local repo_root="$1"
+    shift || true
+    local label="${1:-trusted files}"
+    shift || true
+    local override_token="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN}"
+    local dirty
+
+    if [ -z "$repo_root" ] || [ ! -d "$repo_root/.git" ]; then
+        echo "⚠️  Unable to verify ${label}; repository root missing" >&2
+        return 1
+    fi
+
+    dirty=$(_list_dirty_entries "$repo_root" "$@")
+    if [ -z "$dirty" ]; then
+        return 0
+    fi
+
+    if [ -f "$override_token" ]; then
+        echo "⚠️  Override token detected at $override_token; launching with dirty ${label}: $dirty" >&2
+        return 0
+    fi
+
+    echo "❌ Trusted ${label} have uncommitted changes: $dirty" >&2
+    echo "   Clean or commit these files, or create an override token at $override_token (usage logged)." >&2
+    return 1
+}
 
 _read_host_config_value() {
     local key="$1"
@@ -173,6 +283,48 @@ get_container_runtime() {
     
     # Neither found
     return 1
+}
+
+get_secret_broker_script() {
+    local candidate
+    candidate="${CODING_AGENTS_BROKER_SCRIPT}"
+    if [ -x "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
+    candidate="${CODING_AGENTS_REPO_ROOT_DEFAULT}/scripts/runtime/secret-broker.py"
+    if [ -x "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
+    echo ""
+    return 1
+}
+
+ensure_broker_ready() {
+    local broker
+    broker=$(get_secret_broker_script) || {
+        echo "⚠️  Secret broker script not found" >&2
+        return 1
+    }
+    if ! run_python_tool "$broker" -- health >/dev/null 2>&1; then
+        echo "❌ Secret broker health check failed" >&2
+        return 1
+    fi
+}
+
+issue_session_capabilities() {
+    local session_id="$1"
+    local output_dir="$2"
+    shift 2 || true
+    local stubs=("$@")
+    local broker
+    broker=$(get_secret_broker_script) || return 1
+    if [ ${#stubs[@]} -eq 0 ]; then
+        return 0
+    fi
+    mkdir -p "$output_dir"
+    run_python_tool "$broker" --mount "$output_dir" -- issue --session-id "$session_id" --output "$output_dir" --stubs "${stubs[@]}"
 }
 
 # Cache the active container CLI (docker or podman) so downstream helpers can reuse it
@@ -536,6 +688,108 @@ check_docker_running() {
     echo "❌ Docker is installed but not running."
     echo "   Please start Docker and try again"
     return 1
+}
+
+get_python_runner_image() {
+    if [ -n "${CODING_AGENTS_PYTHON_IMAGE:-}" ]; then
+        echo "$CODING_AGENTS_PYTHON_IMAGE"
+    else
+        echo "python:3.11-slim"
+    fi
+}
+
+run_python_tool() {
+    local script_path="$1"
+    if [ -z "$script_path" ]; then
+        echo "❌ Missing script path for python runner" >&2
+        return 1
+    fi
+    shift || true
+
+    local extra_mounts=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --mount)
+                if [[ $# -ge 2 ]]; then
+                    extra_mounts+=("$2")
+                    shift 2
+                    continue
+                else
+                    break
+                fi
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    local script_args=("$@")
+
+    local repo_root="${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
+    if [ ! -d "$repo_root" ]; then
+        echo "❌ Repo root '$repo_root' not found for python runner" >&2
+        return 1
+    fi
+
+    if ! check_docker_running; then
+        return 1
+    fi
+
+    local container_cmd
+    container_cmd=$(get_active_container_cmd)
+    local image
+    image=$(get_python_runner_image)
+
+    local docker_args=("run" "--rm" "-w" "$repo_root" "-e" "PYTHONUNBUFFERED=1")
+    if command -v id >/dev/null 2>&1; then
+        docker_args+=("--user" "$(id -u):$(id -g)")
+    fi
+    docker_args+=("-e" "TZ=${TZ:-UTC}")
+
+    while IFS='=' read -r name value; do
+        [ -z "$name" ] && continue
+        docker_args+=("-e" "${name}=${value}")
+    done < <(env | grep '^CODING_AGENTS_' || true)
+
+    local mounts=("$repo_root")
+    [ -n "${HOME:-}" ] && mounts+=("$HOME")
+    mounts+=("/tmp")
+    local mount_path
+    for mount_path in "${extra_mounts[@]}"; do
+        [ -n "$mount_path" ] && mounts+=("$mount_path")
+    done
+
+    local mounted=()
+    local path existing skip
+    for path in "${mounts[@]}"; do
+        [ -z "$path" ] && continue
+        skip=0
+        for existing in "${mounted[@]}"; do
+            if [ "$existing" = "$path" ]; then
+                skip=1
+                break
+            fi
+        done
+        if [ "$skip" -eq 1 ]; then
+            continue
+        fi
+        mounted+=("$path")
+        if [ ! -d "$path" ]; then
+            mkdir -p "$path" 2>/dev/null || true
+        fi
+        docker_args+=("--mount" "type=bind,src=${path},dst=${path}")
+    done
+
+    docker_args+=("$image" "python3" "$script_path")
+    if [ ${#script_args[@]} -gt 0 ]; then
+        docker_args+=("${script_args[@]}")
+    fi
+
+    "$container_cmd" "${docker_args[@]}"
 }
 
 # Pull and tag image with retry logic

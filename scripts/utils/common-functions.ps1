@@ -1,5 +1,7 @@
 # Common functions for agent management scripts (PowerShell)
 
+$script:RepoRootDefault = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
 $script:ConfigRoot = if ($env:CODING_AGENTS_HOST_CONFIG) {
     Split-Path -Parent $env:CODING_AGENTS_HOST_CONFIG
 } else {
@@ -13,8 +15,147 @@ $script:HostConfigFile = if ($env:CODING_AGENTS_HOST_CONFIG) {
     Join-Path $script:ConfigRoot "host-config.env"
 }
 
+$script:OverrideDir = if ($env:CODING_AGENTS_OVERRIDE_DIR) {
+    $env:CODING_AGENTS_OVERRIDE_DIR
+} else {
+    Join-Path $script:ConfigRoot "overrides"
+}
+
+$script:DirtyOverrideToken = if ($env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN) {
+    $env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
+} else {
+    Join-Path $script:OverrideDir "allow-dirty"
+}
+
+$script:BrokerScript = if ($env:CODING_AGENTS_BROKER_SCRIPT) {
+    $env:CODING_AGENTS_BROKER_SCRIPT
+} else {
+    Join-Path $script:RepoRootDefault "scripts/runtime/secret-broker.py"
+}
+
+$script:GitExecutable = $null
+
 $script:DefaultLauncherUpdatePolicy = "prompt"
 $script:ContainerCli = $null
+
+function Get-GitExecutable {
+    if ($script:GitExecutable) {
+        return $script:GitExecutable
+    }
+
+    try {
+        $git = Get-Command git -ErrorAction Stop
+        $script:GitExecutable = $git.Source
+        return $script:GitExecutable
+    } catch {
+        return $null
+    }
+}
+
+function Get-GitHeadHash {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    $git = Get-GitExecutable
+    if (-not $git) {
+        return $null
+    }
+    if (-not (Test-Path (Join-Path $RepoRoot '.git'))) {
+        return $null
+    }
+    try {
+        $result = & $git -C $RepoRoot rev-parse HEAD 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return $result.Trim()
+        }
+    } catch {
+    }
+    return $null
+}
+
+function Get-TrustedPathTreeHashes {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string[]]$Paths
+    )
+
+    $git = Get-GitExecutable
+    if (-not $git) {
+        return @()
+    }
+
+    $hashes = @()
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        try {
+            & $git -C $RepoRoot rev-parse --verify --quiet "HEAD:$path" 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { continue }
+            $hash = & $git -C $RepoRoot rev-parse "HEAD:$path" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $hash) {
+                $hashes += [pscustomobject]@{ Path = $path; Hash = $hash.Trim() }
+            }
+        } catch {
+        }
+    }
+    return $hashes
+}
+
+function Test-TrustedPathsClean {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string[]]$Paths,
+        [string]$Label = "trusted files",
+        [switch]$ThrowOnFailure
+    )
+
+    $git = Get-GitExecutable
+    if (-not $git) {
+        $message = "Git is required to verify $Label"
+        if ($ThrowOnFailure) { throw $message }
+        Write-Warning $message
+        return $false
+    }
+
+    if (-not (Test-Path (Join-Path $RepoRoot '.git'))) {
+        $message = "Unable to verify $Label; .git directory not found"
+        if ($ThrowOnFailure) { throw $message }
+        Write-Warning $message
+        return $false
+    }
+
+    $dirty = @()
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        try {
+            $status = & $git -C $RepoRoot status --short -- $path 2>$null
+            if ($status) {
+                $dirty += $path
+            }
+        } catch {
+        }
+    }
+
+    if ($dirty.Count -eq 0) {
+        return $true
+    }
+
+    $overrideToken = if ($env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN) {
+        $env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
+    } else {
+        $script:DirtyOverrideToken
+    }
+
+    if (Test-Path $overrideToken) {
+        Write-Warning "Override token '$overrideToken' detected; proceeding with dirty $Label: $($dirty -join ', ')"
+        return $true
+    }
+
+    $message = "Trusted $Label have uncommitted changes: $($dirty -join ', ')"
+    if ($ThrowOnFailure) {
+        throw $message
+    }
+    Write-Error $message
+    return $false
+}
 
 function Get-ContainerCli {
     if ($script:ContainerCli) {
@@ -38,6 +179,51 @@ function Invoke-ContainerCli {
 
     $cli = Get-ContainerCli
     & $cli @CliArgs
+}
+
+function Get-SecretBrokerScript {
+    if ($script:BrokerScript -and (Test-Path $script:BrokerScript)) {
+        return $script:BrokerScript
+    }
+    return $null
+}
+
+function Test-SecretBrokerReady {
+    $broker = Get-SecretBrokerScript
+    if (-not $broker) {
+        Write-Warning "Secret broker script not found"
+        return $false
+    }
+    if (Invoke-PythonTool -ScriptPath $broker -ScriptArgs @('health')) {
+        return $true
+    }
+    Write-Error "Secret broker health check failed"
+    return $false
+}
+
+function Invoke-SessionCapabilityIssue {
+    param(
+        [Parameter(Mandatory = $true)][string]$SessionId,
+        [Parameter(Mandatory = $true)][string]$OutputDir,
+        [string[]]$Stubs
+    )
+
+    if (-not $Stubs -or $Stubs.Count -eq 0) {
+        return $true
+    }
+
+    $broker = Get-SecretBrokerScript
+    if (-not $broker) {
+        Write-Error "Secret broker script not found"
+        return $false
+    }
+
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    }
+
+    $scriptArgs = @('issue', '--session-id', $SessionId, '--output', $OutputDir, '--stubs') + $Stubs
+    return (Invoke-PythonTool -ScriptPath $broker -MountPaths @($OutputDir) -ScriptArgs $scriptArgs)
 }
 
 function Get-SeccompProfilePath {
@@ -704,6 +890,99 @@ function Test-DockerRunning {
         Write-Host "   On Mac: Open Docker Desktop application" -ForegroundColor Cyan
         return $false
     }
+}
+
+function Get-PythonRunnerImage {
+    if ($env:CODING_AGENTS_PYTHON_IMAGE) {
+        return $env:CODING_AGENTS_PYTHON_IMAGE
+    }
+    return "python:3.11-slim"
+}
+
+function Invoke-PythonTool {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptPath,
+
+        [Parameter()]
+        [string[]]$MountPaths,
+
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$ScriptArgs
+    )
+
+    if (-not (Test-DockerRunning)) {
+        return $false
+    }
+
+    $repoRoot = if ($env:CODING_AGENTS_REPO_ROOT) { $env:CODING_AGENTS_REPO_ROOT } else { $script:RepoRootDefault }
+    if (-not (Test-Path $repoRoot)) {
+        Write-Error "Repo root '$repoRoot' not found for python runner"
+        return $false
+    }
+
+    $cli = Get-ContainerCli
+    $image = Get-PythonRunnerImage
+    $containerArgs = @("run", "--rm", "-w", $repoRoot, "-e", "PYTHONUNBUFFERED=1")
+
+    if ($IsLinux) {
+        try {
+            $uid = & id -u 2>$null
+            $gid = & id -g 2>$null
+            if ($uid -and $gid) {
+                $containerArgs += "--user"
+                $containerArgs += "$uid:$gid"
+            }
+        } catch {
+        }
+    }
+
+    $tzValue = if ($env:TZ) { $env:TZ } else { "UTC" }
+    $containerArgs += "-e"
+    $containerArgs += "TZ=$tzValue"
+
+    foreach ($entry in [System.Environment]::GetEnvironmentVariables().GetEnumerator()) {
+        if ($entry.Key -like "CODING_AGENTS_*") {
+            $containerArgs += "-e"
+            $containerArgs += ("{0}={1}" -f $entry.Key, $entry.Value)
+        }
+    }
+
+    $mounts = New-Object System.Collections.Generic.List[string]
+    $mounts.Add($repoRoot) | Out-Null
+    if ($env:HOME) { $mounts.Add($env:HOME) | Out-Null }
+    $tmpPath = [System.IO.Path]::GetTempPath().TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    if (-not [string]::IsNullOrWhiteSpace($tmpPath)) { $mounts.Add($tmpPath) | Out-Null }
+    if ($MountPaths) {
+        foreach ($mp in $MountPaths) {
+            if (-not [string]::IsNullOrWhiteSpace($mp)) {
+                $mounts.Add($mp) | Out-Null
+            }
+        }
+    }
+
+    $seen = @{}
+    foreach ($mount in $mounts) {
+        if ([string]::IsNullOrWhiteSpace($mount)) { continue }
+        if (-not (Test-Path $mount)) {
+            try { New-Item -ItemType Directory -Path $mount -Force | Out-Null } catch { }
+        }
+        if ($seen.ContainsKey($mount)) { continue }
+        $seen[$mount] = $true
+        $containerArgs += "--mount"
+        $containerArgs += "type=bind,src=$mount,dst=$mount"
+    }
+
+    $containerArgs += $image
+    $containerArgs += "python3"
+    $containerArgs += $ScriptPath
+    if ($ScriptArgs) {
+        $containerArgs += $ScriptArgs
+    }
+
+    & $cli @containerArgs
+    return ($LASTEXITCODE -eq 0)
 }
 
 function Update-AgentImage {

@@ -59,6 +59,31 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "launch-agent"
 
+$TrustedPaths = @("scripts/launchers", "scripts/runtime", "docker/profiles")
+Test-TrustedPathsClean -RepoRoot $RepoRoot -Paths $TrustedPaths -Label "launcher + helper files" -ThrowOnFailure | Out-Null
+$LauncherHeadHash = Get-GitHeadHash -RepoRoot $RepoRoot
+$TrustedTreeHashes = Get-TrustedPathTreeHashes -RepoRoot $RepoRoot -Paths $TrustedPaths
+$TrustedTreeEnv = if ($TrustedTreeHashes) { ($TrustedTreeHashes | ForEach-Object { "{0}={1}" -f $_.Path, $_.Hash }) -join "," } else { "" }
+if ($LauncherHeadHash) {
+    Write-Host "🔒 Launcher commit: $LauncherHeadHash" -ForegroundColor Cyan
+}
+if ($TrustedTreeHashes.Count -gt 0) {
+    Write-Host "   Trusted tree hashes:" -ForegroundColor Gray
+    foreach ($entry in $TrustedTreeHashes) {
+        Write-Host "     • $($entry.Path)=$($entry.Hash)" -ForegroundColor Gray
+    }
+}
+$SessionIdBase = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+$SessionArtifactDir = $null
+$SessionConfigOutput = $null
+$SessionManifestPath = $null
+$SessionConfigSha256 = $null
+$SessionConfigSource = $null
+$SessionConfigRendered = $false
+$SessionConfigRootInContainer = "/run/coding-agents"
+$DefaultBrokerStubs = @("github", "uno", "msftdocs", "playwright", "context7", "serena", "sequential-thinking", "fetch")
+$BrokerStubs = @($DefaultBrokerStubs)
+
 # Auto-detect WSL home directory
 $WslHome = wsl bash -c 'echo $HOME' 2>$null
 if (-not $WslHome) {
@@ -134,6 +159,18 @@ if ($IsUrl) {
 
     if (-not $NoPush -and [string]::IsNullOrWhiteSpace($LocalRemoteUrl)) {
         throw "Failed to configure secure local remote for auto-push"
+    }
+
+    $configCandidate = Join-Path $ResolvedPath "config.toml"
+    if (Test-Path $configCandidate) {
+        $SessionConfigSource = $configCandidate
+    }
+}
+
+if (-not $SessionConfigSource) {
+    $hostConfigCandidate = Join-Path $env:USERPROFILE ".config\coding-agents\config.toml"
+    if (Test-Path $hostConfigCandidate) {
+        $SessionConfigSource = $hostConfigCandidate
     }
 }
 
@@ -345,6 +382,13 @@ if (-not (Test-ValidContainerName $ContainerName)) {
     exit 1
 }
 
+$SessionArtifactDir = Join-Path ([System.IO.Path]::GetTempPath()) ("coding-agents-session-{0}" -f ([guid]::NewGuid().ToString("N")))
+New-Item -ItemType Directory -Path $SessionArtifactDir -Force | Out-Null
+$SessionConfigOutput = Join-Path $SessionArtifactDir "session-config"
+New-Item -ItemType Directory -Path $SessionConfigOutput -Force | Out-Null
+$SessionId = "{0}-{1}-{2}" -f $ContainerName, $SessionIdBase, (Get-Random -Maximum 100000)
+(Register-EngineEvent PowerShell.Exiting -Action { if ($SessionArtifactDir -and (Test-Path $SessionArtifactDir)) { Remove-Item -Recurse -Force $SessionArtifactDir } } | Out-Null)
+
 $WorkspaceVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "workspace"
 $HomeVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "home"
 $ToolcacheVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "toolcache"
@@ -398,6 +442,65 @@ switch ($NetworkProxy) {
     default {
         $NetworkPolicyEnv = "allow-all"
     }
+}
+
+$rendererScript = Join-Path $RepoRoot "scripts/utils/render-session-config.py"
+$trustedHashArgs = @()
+foreach ($entry in $TrustedTreeHashes) {
+    $trustedHashArgs += "--trusted-hash"
+    $trustedHashArgs += ("{0}={1}" -f $entry.Path, $entry.Hash)
+}
+
+if (Test-Path $rendererScript) {
+    $renderArgs = @("--output", $SessionConfigOutput, "--session-id", $SessionId, "--network-policy", $NetworkPolicyEnv, "--repo", $RepoName, "--agent", $Agent, "--container", $ContainerName)
+    if ($SessionConfigSource) { $renderArgs += "--config"; $renderArgs += $SessionConfigSource }
+    if ($LauncherHeadHash) { $renderArgs += "--git-head"; $renderArgs += $LauncherHeadHash }
+    if ($trustedHashArgs.Count -gt 0) { $renderArgs += $trustedHashArgs }
+
+    $mountPaths = @($SessionConfigOutput)
+    if ($SessionConfigSource) { $mountPaths += $SessionConfigSource }
+
+    if (Invoke-PythonTool -ScriptPath $rendererScript -MountPaths $mountPaths -ScriptArgs $renderArgs) {
+        $SessionManifestPath = Join-Path $SessionConfigOutput "manifest.json"
+        if (Test-Path $SessionManifestPath) {
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+                $bytes = [System.IO.File]::ReadAllBytes($SessionManifestPath)
+                $hash = $sha.ComputeHash($bytes)
+                $SessionConfigSha256 = ($hash | ForEach-Object { $_.ToString("x2") }) -join ""
+                $SessionConfigRendered = $true
+                Write-Host "🔐 Session MCP config manifest: $SessionConfigSha256" -ForegroundColor Green
+                $serversFile = Join-Path $SessionConfigOutput "servers.txt"
+                if (Test-Path $serversFile) {
+                    try {
+                        $servers = Get-Content $serversFile | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+                        if ($servers.Count -gt 0) {
+                            $BrokerStubs = $servers
+                        }
+                    } catch {
+                        Write-Warning "⚠️  Failed to read server list for broker tokens: $_"
+                    }
+                }
+            } finally {
+                $sha.Dispose()
+            }
+        }
+    } else {
+        Write-Warning "⚠️  Failed to render session MCP config via python runner"
+    }
+} else {
+    Write-Warning "⚠️  render-session-config.py unavailable; skipping host-side MCP rendering"
+}
+
+if (-not (Test-SecretBrokerReady)) {
+    Write-Host "❌ Secret broker health check failed" -ForegroundColor Red
+    exit 1
+}
+
+$brokerCapabilityDir = Join-Path $SessionConfigOutput "capabilities"
+if (-not (Invoke-SessionCapabilityIssue -SessionId $SessionId -OutputDir $brokerCapabilityDir -Stubs $BrokerStubs)) {
+    Write-Host "❌ Failed to issue session capability tokens" -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "🚀 Launching Coding Agent..." -ForegroundColor Cyan
@@ -457,6 +560,12 @@ $dockerArgs = @(
     "-e", "AGENT_SESSION_MODE=shell",
     "-e", "AGENT_SESSION_SHELL_BIN=/bin/bash",
     "-e", "AGENT_SESSION_SHELL_ARGS=-l",
+    "-e", "HOST_SESSION_ID=$SessionId",
+    "-e", "HOST_SESSION_CONFIG_SHA256=$SessionConfigSha256",
+    "-e", "HOST_TRUSTED_TREES=$TrustedTreeEnv",
+    "-e", "HOST_LAUNCHER_HEAD=$LauncherHeadHash",
+    "-e", "HOST_SESSION_CONFIG_ROOT=$SessionConfigRootInContainer",
+    "-e", "HOST_CAPABILITY_ROOT=${SessionConfigRootInContainer}/capabilities",
     "--label", "coding-agents.type=agent",
     "--label", "coding-agents.agent=$Agent",
     "--label", "coding-agents.repo=$RepoName",
@@ -530,7 +639,8 @@ $tmpfsMounts = @(
     "/var/lib/apt/lists:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
     "/var/cache/apt:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
     "/var/cache/debconf:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
-    "/var/lib/dpkg:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755"
+    "/var/lib/dpkg:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
+    "$SessionConfigRootInContainer:rw,nosuid,nodev,noexec,mode=750"
 )
 foreach ($mount in $tmpfsMounts) {
     $dockerArgs += "--tmpfs", $mount
@@ -702,6 +812,16 @@ try {
         Invoke-ContainerCli network rm $ProxyNetworkName 2>$null | Out-Null
     }
     exit 1
+}
+
+if ($SessionConfigRendered -and (Test-Path $SessionConfigOutput)) {
+    try {
+        Invoke-ContainerCli exec $ContainerName mkdir -p $SessionConfigRootInContainer | Out-Null
+        $bundleSource = Join-Path $SessionConfigOutput "."
+        Invoke-ContainerCli cp $bundleSource "$ContainerName`:$SessionConfigRootInContainer" | Out-Null
+    } catch {
+        Write-Warning "⚠️  Unable to copy session configs into container: $_"
+    }
 }
 
 # Setup repository inside container
