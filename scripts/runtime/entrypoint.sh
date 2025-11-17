@@ -28,6 +28,53 @@ seed_tmpfs_from_base() {
     chmod "$mode" "$target" 2>/dev/null || true
 }
 
+install_host_session_configs() {
+    local root="$1"
+    local manifest="$root/manifest.json"
+    local installed=1
+    local -A targets=(
+        ["github-copilot"]="/home/${AGENT_USERNAME}/.config/github-copilot/mcp"
+        ["codex"]="/home/${AGENT_USERNAME}/.config/codex/mcp"
+        ["claude"]="/home/${AGENT_USERNAME}/.config/claude/mcp"
+    )
+
+    for agent in "${!targets[@]}"; do
+        local src="$root/${agent}/config.json"
+        local dest_dir="${targets[$agent]}"
+        if [ -f "$src" ]; then
+            ensure_dir_owned "$dest_dir" 0700
+            cp "$src" "$dest_dir/config.json"
+            chown "$AGENT_UID:$AGENT_GID" "$dest_dir/config.json" 2>/dev/null || true
+            chmod 0600 "$dest_dir/config.json" 2>/dev/null || true
+            installed=0
+        fi
+    done
+
+    if [ -f "$manifest" ]; then
+        local manifest_dest="/home/${AGENT_USERNAME}/.config/coding-agents/session-manifest.json"
+        ensure_dir_owned "$(dirname "$manifest_dest")" 0700
+        cp "$manifest" "$manifest_dest"
+        chown "$AGENT_UID:$AGENT_GID" "$manifest_dest" 2>/dev/null || true
+        chmod 0600 "$manifest_dest" 2>/dev/null || true
+    fi
+
+    return $installed
+}
+
+install_host_capabilities() {
+    local root="$1"
+    local target="/home/${AGENT_USERNAME}/.config/coding-agents/capabilities"
+    if [ ! -d "$root" ]; then
+        return 1
+    fi
+    ensure_dir_owned "$target" 0700
+    cp -a "$root/." "$target/" 2>/dev/null || true
+    chown -R "$AGENT_UID:$AGENT_GID" "$target" 2>/dev/null || true
+    find "$target" -type d -exec chmod 0700 {} + 2>/dev/null || true
+    find "$target" -type f -exec chmod 0600 {} + 2>/dev/null || true
+    return 0
+}
+
 prepare_rootfs_mounts() {
     umask 0002
     ensure_dir_owned "/workspace" 0775
@@ -296,8 +343,27 @@ if [ -f /home/agentuser/.gitconfig ]; then
     fi
 fi
 
-# Setup MCP configuration if config.toml exists
-if [ -f "/workspace/config.toml" ]; then
+HOST_CONFIG_DEPLOYED=false
+if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
+    echo "🔐 Applying host-rendered MCP configs (session ${HOST_SESSION_ID:-unknown})"
+    if install_host_session_configs "$HOST_SESSION_CONFIG_ROOT"; then
+        HOST_CONFIG_DEPLOYED=true
+        echo "   Manifest SHA: ${HOST_SESSION_CONFIG_SHA256:-unknown}"
+    else
+        echo "⚠️  Host session config directory missing agent payloads; falling back to workspace config.toml"
+    fi
+fi
+
+if [ -n "${HOST_CAPABILITY_ROOT:-}" ] && [ -d "${HOST_CAPABILITY_ROOT:-}" ]; then
+    echo "🔑 Installing capability tokens from host"
+    if install_host_capabilities "$HOST_CAPABILITY_ROOT"; then
+        echo "   Capability tokens staged"
+    else
+        echo "⚠️  Failed to install capability tokens"
+    fi
+fi
+
+if [ "$HOST_CONFIG_DEPLOYED" = false ] && [ -f "/workspace/config.toml" ]; then
     /usr/local/bin/setup-mcp-configs.sh 2>&1 | grep -E "^(ERROR|WARN)" || true
 fi
 

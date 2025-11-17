@@ -307,6 +307,155 @@ test_shared_functions() {
     unset CODING_AGENTS_DISABLE_APPARMOR
 }
 
+test_trusted_path_enforcement() {
+    test_section "Trusted path enforcement"
+
+    if ! command -v git >/dev/null 2>&1; then
+        fail "Git is required for trusted path tests"
+        return
+    fi
+
+    local temp_repo
+    temp_repo=$(mktemp -d)
+    pushd "$temp_repo" >/dev/null
+    git init -q
+    mkdir -p scripts/launchers
+    echo "echo hi" > scripts/launchers/foo.sh
+    git add scripts/launchers/foo.sh >/dev/null
+    git commit -q -m "init"
+    popd >/dev/null
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    if ensure_trusted_paths_clean "$temp_repo" "test" "scripts/launchers"; then
+        pass "Clean trusted paths allowed"
+    else
+        fail "Clean trusted paths should pass"
+    fi
+
+    echo "# dirty" >> "$temp_repo/scripts/launchers/foo.sh"
+    if ensure_trusted_paths_clean "$temp_repo" "test" "scripts/launchers"; then
+        fail "Dirty trusted paths should fail"
+    else
+        pass "Dirty trusted paths blocked"
+    fi
+
+    local override_token="$temp_repo/allow-dirty"
+    touch "$override_token"
+    if CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$override_token" ensure_trusted_paths_clean "$temp_repo" "test" "scripts/launchers" >/dev/null 2>&1; then
+        pass "Override token permits dirty paths"
+    else
+        fail "Override token should allow launch"
+    fi
+
+    rm -rf "$temp_repo"
+}
+
+test_session_config_renderer() {
+    test_section "Session config renderer"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local output_dir
+    output_dir=$(mktemp -d)
+    local session_id="test-session-$$"
+    local renderer="$PROJECT_ROOT/scripts/utils/render-session-config.py"
+    local render_args=(
+        "--config" "$PROJECT_ROOT/config.toml"
+        "--output" "$output_dir"
+        "--session-id" "$session_id"
+        "--network-policy" "allow-all"
+        "--repo" "test-repo"
+        "--agent" "copilot"
+        "--container" "test-container"
+    )
+
+    if run_python_tool "$renderer" --mount "$output_dir" -- "${render_args[@]}" >/dev/null 2>&1; then
+        local manifest="$output_dir/manifest.json"
+        local config_json="$output_dir/github-copilot/config.json"
+        local servers_file="$output_dir/servers.txt"
+        if [ -f "$manifest" ]; then
+            pass "Manifest generated"
+        else
+            fail "Manifest missing"
+        fi
+        if [ -f "$config_json" ]; then
+            pass "Copilot config rendered"
+        else
+            fail "Copilot config missing"
+        fi
+        if [ -f "$servers_file" ] && [ -s "$servers_file" ]; then
+            local line_count
+            line_count=$(grep -cve '^\s*$' "$servers_file" || true)
+            if [ "$line_count" -gt 0 ]; then
+                pass "Server list exported via servers.txt"
+            else
+                fail "servers.txt exists but is empty"
+            fi
+        else
+            fail "servers.txt missing"
+        fi
+    else
+        fail "render-session-config.py failed via python runner"
+    fi
+
+    rm -rf "$output_dir"
+}
+
+test_secret_broker_cli() {
+    test_section "Secret broker CLI"
+
+    local broker_script="$PROJECT_ROOT/scripts/runtime/secret-broker.py"
+    if [ ! -x "$broker_script" ]; then
+        fail "secret-broker.py missing or not executable"
+        return
+    fi
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local config_root
+    config_root=$(mktemp -d)
+    local cap_dir
+    cap_dir=$(mktemp -d)
+    local env_dir="$config_root/config"
+    mkdir -p "$env_dir"
+
+    local init_mounts=("--mount" "$config_root")
+    local issue_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${init_mounts[@]}" -- init --stubs alpha beta >/dev/null 2>&1; then
+        pass "Broker init succeeds"
+    else
+        fail "Broker init failed"
+        rm -rf "$config_root" "$cap_dir"
+        return
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- issue --session-id test-session --output "$cap_dir" --stubs alpha >/dev/null 2>&1; then
+        pass "Capability issuance succeeds"
+    else
+        fail "Capability issuance failed"
+        rm -rf "$config_root" "$cap_dir"
+        return
+    fi
+
+    local token_file
+    token_file=$(find "$cap_dir" -name '*.json' | head -n 1)
+    if [ -f "$token_file" ]; then
+        pass "Capability token file generated"
+    else
+        fail "Capability token file missing"
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${init_mounts[@]}" -- health >/dev/null 2>&1; then
+        pass "Broker health check succeeds"
+    else
+        fail "Broker health check failed"
+    fi
+
+    rm -rf "$config_root" "$cap_dir"
+}
+
 test_local_remote_push() {
     test_section "Testing secure local remote push"
 
@@ -663,6 +812,9 @@ main() {
     run_test "setup_test_repo" setup_test_repo
     run_test "test_container_runtime_detection" test_container_runtime_detection
     run_test "test_shared_functions" test_shared_functions
+    run_test "test_trusted_path_enforcement" test_trusted_path_enforcement
+    run_test "test_session_config_renderer" test_session_config_renderer
+    run_test "test_secret_broker_cli" test_secret_broker_cli
     run_test "test_local_remote_push" test_local_remote_push
     run_test "test_local_remote_fallback_push" test_local_remote_fallback_push
     run_test "test_secure_remote_sync" test_secure_remote_sync
