@@ -49,8 +49,35 @@ jobs:
         run: |
           docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
 
+  unit-test-powershell-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Docker
+        run: |
+          docker --version
+          docker info
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Run launcher tests (PowerShell Linux)
+        run: pwsh -NoLogo -File scripts/test/test-launchers.ps1
+
+      - name: Cleanup test containers
+        if: always()
+        run: |
+          docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
+
   unit-test-powershell:
     runs-on: windows-latest
+    # Windows runners expose only Windows containers, so this job verifies the guardrail failure.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -67,9 +94,24 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
       
-      - name: Run launcher tests (PowerShell)
+      - name: Run launcher tests (PowerShell - expect guard failure)
         shell: pwsh
-        run: .\scripts\test\test-launchers.ps1
+        run: |
+          $output = & .\scripts\test\test-launchers.ps1 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Write-Host
+
+          if ($exitCode -eq 0) {
+              Write-Error "Windows runners should fail because Linux containers are not available."
+              exit 1
+          }
+
+          if ($output -notmatch "Linux containers") {
+              Write-Error "Launcher script failed for an unexpected reason."
+              exit 1
+          }
+
+          Write-Host "Windows runner correctly reported the unsupported environment."
       
       - name: Cleanup test containers
         if: always()

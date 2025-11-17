@@ -109,8 +109,8 @@ ENV PATH="${PATH}:/usr/share/dotnet"
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=true
 ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
 
-# Install .NET workloads (MAUI, Blazor, WASM, etc.)
-RUN dotnet workload install wasm-tools wasm-tools-net9 wasm-tools-net8 ios android maccatalyst tvos || \
+# Install .NET workloads 
+RUN dotnet workload install wasm-tools wasm-tools-net9 wasm-tools-net8 || \
     echo "⚠️  Some workloads may have failed (expected for some platforms)"
 
 # Install PowerShell using the universal package guidance (falls back to tarball on ARM)
