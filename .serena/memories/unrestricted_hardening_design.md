@@ -23,8 +23,8 @@
 - Mitigates: RISK-SIL-01 while preserving dev builds
 - References: docker/base/Dockerfile, docs/architecture.md
 - Proposal: Keep root filesystem largely read-only but carve out dedicated writable overlays for directories build tooling legitimately touches:
-  - Mount tmpfs volumes for `/tmp`, `/var/tmp`, `/var/cache/apt`, `/var/lib/apt/lists`, `/var/lib/dpkg`, and language-specific caches (e.g., `/home/agentuser/.cache`, `/home/agentuser/.npm`, `/home/agentuser/.nuget`, `/home/agentuser/.local`)
-  - Provide optional bind-mounted “tooling scratch” volume (e.g., `/tool-scratch`) that package managers can target via env vars (`PIP_CACHE_DIR`, `NPM_CACHE_DIR`).
+  - Mount tmpfs volumes only for locations that cannot be redirected (e.g., `/tmp`, `/var/tmp`, `/var/cache/apt`, `/var/lib/apt/lists`, `/var/lib/dpkg`). Language-specific caches should instead be steered to configurable paths via env vars so they share a common writable area.
+  - Provide optional bind-mounted “tooling scratch” volume (e.g., `/tool-scratch`) that package managers can target via env vars (`PIP_CACHE_DIR`, `NPM_CACHE_DIR`, `CARGO_HOME`, etc.), minimizing the number of tmpfs mounts the container needs to carry.
   - Add a `safe_pkg` wrapper that temporarily bind-mounts additional writable overlays (using `mount --bind` inside the namespace) only for approved directories when commands like `apt install` or `dotnet workload install` run, ensuring dev builds that invoke package managers continue to work without granting blanket root write access.
   - Document required env overrides in `docs/build.md` so project builds know where caches live.
 
@@ -34,11 +34,11 @@
 - References: docs/network-proxy.md, docker/proxy/entrypoint.sh
 - Proposal: Make Squid (or a hardened egress proxy) the default for unrestricted mode. Expand `SQUID_ALLOWED_DOMAINS` to tiered sets: Tier A (always on): GitHub, Microsoft docs, package registries; Tier B (MCP-specific): allow per-config entries (Context7, Serena git). Block RFC1918/metadata ranges explicitly. Log every request to host (mount proxy logs read-only for analysis). Provide optional `--network-proxy allow-all` but gate it as Tier 3 (prompt or admin knob). Silent for default flows because safe domains already cover typical dev needs.
 
-## HDN-NET-02: Outbound Token Bucket
-- Category: Design Pattern — Network Monitoring
-- Mitigates: RISK-EXF-01/02, RISK-NET-01
-- References: docker/proxy/entrypoint.sh
-- Proposal: Add egress byte throttling per container via the proxy (Squid delay pools or tc in sidecar). Trigger alerts/logs when transfer volume exceeds configurable thresholds. No prompts; actions logged for review.
+## HDN-NET-02: Outbound Token Bucket & High-Risk MCP Channel
+- Category: Design Pattern — Network Monitoring & Mediation
+- Mitigates: RISK-EXF-01/02, RISK-NET-01 while accommodating unrestricted fetch MCP
+- References: docker/proxy/entrypoint.sh, config.toml (`mcp_servers.fetch`)
+- Proposal: Keep strict allowlists for normal traffic, but run the fetch MCP through a dedicated policy channel: (a) apply per-session transfer ceilings and rate limiting (Squid delay pools/tc) and (b) log full URLs + payload sizes for every fetch request. This avoids per-request prompts while giving visibility and throttling for inherently open-ended fetch operations without introducing a host-side mediator.
 
 ## HDN-SEC-01: Secret Broker Service (Shared-Cred Compatible)
 - Category: Design Pattern — Secrets
@@ -50,7 +50,7 @@
 - Category: Design Pattern — Secrets
 - Mitigates: RISK-LAT-01
 - References: scripts/launchers/launch-agent, scripts/runtime/entrypoint.sh
-- Proposal: When forwarding SSH or GPG sockets, wrap them in policy daemons that restrict allowed hosts/operations (e.g., only git remotes matching the workspace’s origin). Deny agent-initiated SSH to arbitrary hosts unless user explicitly approves once outside the session (Tier 3 prompt). Logging only for allowed operations.
+- Proposal: When forwarding SSH or GPG sockets, wrap them in policy daemons that restrict allowed hosts/operations (e.g., only git remotes matching the workspace’s origin). Deny agent-initiated SSH to arbitrary hosts unless user explicitly enables it for the session; still no prompts during normal use, but logging and host allowlists enforce policy.
 
 ## HDN-TL-01: Safe Shell & FS Abstractions
 - Category: Safe Abstraction
