@@ -437,6 +437,36 @@ function Test-SharedFunctions {
     } else {
         Fail "Test-ContainerExists returned true for non-existent container"
     }
+
+    try {
+        $seccompPath = Get-SeccompProfilePath -RepoRoot $ProjectRoot
+        Assert-Equals -Expected (Join-Path $ProjectRoot "docker/profiles/seccomp-coding-agents.json") -Actual $seccompPath -Message "Get-SeccompProfilePath returns built-in profile"
+    } catch {
+        Fail "Get-SeccompProfilePath failed: $_"
+    }
+
+    $env:CODING_AGENTS_SECCOMP_PROFILE = "missing-profile.json"
+    $seccompFailed = $false
+    try {
+        $null = Get-SeccompProfilePath -RepoRoot $ProjectRoot
+    } catch {
+        $seccompFailed = $true
+    }
+    if ($seccompFailed) {
+        Pass "Get-SeccompProfilePath reports missing override"
+    } else {
+        Fail "Get-SeccompProfilePath should fail for missing override"
+    }
+    Remove-Item env:CODING_AGENTS_SECCOMP_PROFILE -ErrorAction SilentlyContinue
+
+    $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
+    $appProfile = Get-AppArmorProfileName -RepoRoot $ProjectRoot
+    if (-not $appProfile) {
+        Pass "Get-AppArmorProfileName skips when disabled"
+    } else {
+        Fail "Get-AppArmorProfileName should return null when disabled"
+    }
+    Remove-Item env:CODING_AGENTS_DISABLE_APPARMOR -ErrorAction SilentlyContinue
 }
 
 function Test-LocalRemotePush {

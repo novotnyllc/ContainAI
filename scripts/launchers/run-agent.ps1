@@ -49,6 +49,8 @@ $LocalRemoteHostPath = ""
 $LocalRemoteWslPath = ""
 $LocalRemoteUrl = ""
 $LocalRepoPathValue = ""
+$TmpfsLargeSize = if ($env:CODING_AGENTS_TMPFS_LARGE) { $env:CODING_AGENTS_TMPFS_LARGE } else { "2g" }
+$TmpfsSmallSize = if ($env:CODING_AGENTS_TMPFS_SMALL) { $env:CODING_AGENTS_TMPFS_SMALL } else { "512m" }
 
 # Source shared functions
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -343,6 +345,10 @@ if (-not (Test-ValidContainerName $ContainerName)) {
     exit 1
 }
 
+$WorkspaceVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "workspace"
+$HomeVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "home"
+$ToolcacheVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "toolcache"
+
 # Set AgentBranch (handle case where Branch is already agent/branch format or using current branch)
 if ($UseCurrentBranch) {
     $AgentBranch = $Branch
@@ -454,7 +460,10 @@ $dockerArgs = @(
     "--label", "coding-agents.agent=$Agent",
     "--label", "coding-agents.repo=$RepoName",
     "--label", "coding-agents.branch=$AgentBranch",
-    "--label", "coding-agents.network-policy=$NetworkPolicyEnv"
+    "--label", "coding-agents.network-policy=$NetworkPolicyEnv",
+    "--label", "coding-agents.volume.workspace=$WorkspaceVolume",
+    "--label", "coding-agents.volume.home=$HomeVolume",
+    "--label", "coding-agents.volume.toolcache=$ToolcacheVolume"
 )
 
 # Add repo path label for local repos (for cleanup)
@@ -466,6 +475,12 @@ $dockerArgs += @(
     "-v", "${WslHome}/.gitconfig:/home/agentuser/.gitconfig:ro",
     "-v", "${WslHome}/.config/gh:/home/agentuser/.config/gh:ro",
     "-v", "${WslHome}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
+)
+
+$dockerArgs += @(
+    "--mount", "type=volume,src=${WorkspaceVolume},dst=/workspace",
+    "--mount", "type=volume,src=${HomeVolume},dst=/home/agentuser",
+    "--mount", "type=volume,src=${ToolcacheVolume},dst=/toolcache"
 )
 
 # Add source-specific vars
@@ -504,6 +519,21 @@ if ($UseSquid) {
 if (Test-Path "${WslHome}/.config/codex") { $dockerArgs += "-v", "${WslHome}/.config/codex:/home/agentuser/.config/codex:ro" }
 if (Test-Path "${WslHome}/.config/claude") { $dockerArgs += "-v", "${WslHome}/.config/claude:/home/agentuser/.config/claude:ro" }
 if (Test-Path "${WslHome}/.config/coding-agents/mcp-secrets.env") { $dockerArgs += "-v", "${WslHome}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro" }
+
+$tmpfsMounts = @(
+    "/tmp:rw,nosuid,nodev,size=${TmpfsLargeSize},mode=1777",
+    "/var/tmp:rw,nosuid,nodev,size=${TmpfsLargeSize},mode=1777",
+    "/run:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
+    "/var/log:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
+    "/var/lib/apt:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
+    "/var/lib/apt/lists:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
+    "/var/cache/apt:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
+    "/var/cache/debconf:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
+    "/var/lib/dpkg:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755"
+)
+foreach ($mount in $tmpfsMounts) {
+    $dockerArgs += "--tmpfs", $mount
+}
 
 # Start git credential proxy server on host if not already running
 $credentialSocketPath = "${WslHome}/.config/coding-agents/git-credential.sock"
@@ -605,9 +635,24 @@ if ($gpgSigningEnabled -and -not (Test-Path $gpgSocketPath -PathType Leaf)) {
     Write-Warning "⚠️  Commit signing is enabled but the gpg-proxy socket was not created. Signing will be disabled; run gpg-proxy-server.sh or disable commit.gpgsign."
 }
 
+$seccompProfilePath = $null
+if ($env:CODING_AGENTS_DISABLE_SECCOMP -ne '1') {
+    try {
+        $seccompProfilePath = Get-SeccompProfilePath -RepoRoot $RepoRoot
+    } catch {
+        Write-Host "❌ $_" -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Warning "⚠️  Seccomp enforcement disabled via CODING_AGENTS_DISABLE_SECCOMP=1"
+}
+
+$appArmorProfileName = Get-AppArmorProfileName -RepoRoot $RepoRoot
+
 # Final args
 $dockerArgs += "-w", "/workspace"
 $dockerArgs += "--network", $NetworkMode
+$dockerArgs += "--read-only"
 $dockerArgs += "--cap-drop=ALL"
 $dockerArgs += "--security-opt", "no-new-privileges:true"
 $dockerArgs += "--pids-limit=4096"
@@ -618,6 +663,14 @@ $dockerArgs += "--memory=$Memory"
 $dockerArgs += "--memory-swap=$Memory"
 if ($Gpu) {
     $dockerArgs += "--gpus=$Gpu"
+}
+
+if ($seccompProfilePath) {
+    $dockerArgs += "--security-opt", "seccomp=$seccompProfilePath"
+}
+
+if ($appArmorProfileName) {
+    $dockerArgs += "--security-opt", "apparmor=$appArmorProfileName"
 }
 
 $extraArgsEnv = $env:CODING_AGENTS_EXTRA_DOCKER_ARGS

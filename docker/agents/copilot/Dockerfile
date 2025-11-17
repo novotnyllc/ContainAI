@@ -23,7 +23,6 @@ COPY docker/agents/copilot/init-copilot-config.sh /usr/local/bin/init-copilot-co
 COPY docker/agents/copilot/merge-copilot-tokens.py /usr/local/bin/merge-copilot-tokens.py
 RUN chmod +x /usr/local/bin/init-copilot-config.sh /usr/local/bin/merge-copilot-tokens.py
 
-USER agentuser
 WORKDIR /workspace
 
 # Override entrypoint to launch Copilot directly with config init

@@ -29,6 +29,27 @@ LOCAL_REMOTE_HOST_PATH=""
 LOCAL_REMOTE_WSL_PATH=""
 LOCAL_REMOTE_URL=""
 LOCAL_REPO_PATH_VALUE=""
+TMPFS_LARGE_SIZE="${CODING_AGENTS_TMPFS_LARGE:-2g}"
+TMPFS_SMALL_SIZE="${CODING_AGENTS_TMPFS_SMALL:-512m}"
+
+cleanup_run_agent_volumes() {
+    local container_name="${CONTAINER_NAME:-}"
+    if [ -z "$container_name" ]; then
+        return 0
+    fi
+
+    if container_exists "$container_name" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local suffix volume
+    for suffix in workspace home toolcache; do
+        volume=$(get_container_volume_name "$container_name" "$suffix")
+        if container_cli volume inspect "$volume" >/dev/null 2>&1; then
+            container_cli volume rm "$volume" >/dev/null 2>&1 || true
+        fi
+    done
+}
 
 # First argument must be agent type
 if [[ $# -eq 0 || "$1" == "-"* ]]; then
@@ -134,6 +155,9 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         *)
+        WORKSPACE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "workspace")
+        HOME_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "home")
+        TOOLCACHE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "toolcache")
             SOURCE="$1"
             shift
             ;;
@@ -470,9 +494,18 @@ DOCKER_ARGS=(
     "--label" "coding-agents.repo=$REPO_NAME"
     "--label" "coding-agents.branch=$AGENT_BRANCH"
     "--label" "coding-agents.network-policy=$NETWORK_POLICY_ENV"
+    "--label" "coding-agents.volume.workspace=$WORKSPACE_VOLUME"
+    "--label" "coding-agents.volume.home=$HOME_VOLUME"
+    "--label" "coding-agents.volume.toolcache=$TOOLCACHE_VOLUME"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
     "-v" "${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
+)
+
+DOCKER_ARGS+=(
+    "--mount" "type=volume,src=${WORKSPACE_VOLUME},dst=/workspace"
+    "--mount" "type=volume,src=${HOME_VOLUME},dst=/home/agentuser"
+    "--mount" "type=volume,src=${TOOLCACHE_VOLUME},dst=/toolcache"
 )
 
 # Add source-specific vars
@@ -512,6 +545,22 @@ fi
 [ -d "${HOME}/.config/codex" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/codex:/home/agentuser/.config/codex:ro")
 [ -d "${HOME}/.config/claude" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
 [ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
+
+TMPFS_MOUNTS=(
+    "/tmp:rw,nosuid,nodev,size=${TMPFS_LARGE_SIZE},mode=1777"
+    "/var/tmp:rw,nosuid,nodev,size=${TMPFS_LARGE_SIZE},mode=1777"
+    "/run:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
+    "/var/log:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
+    "/var/lib/apt:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
+    "/var/lib/apt/lists:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
+    "/var/cache/apt:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
+    "/var/cache/debconf:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
+    "/var/lib/dpkg:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
+)
+
+for tmpfs_mount in "${TMPFS_MOUNTS[@]}"; do
+    DOCKER_ARGS+=("--tmpfs" "$tmpfs_mount")
+done
 
 # Start git credential proxy server on host if not already running
 CREDENTIAL_SOCKET_PATH="${HOME}/.config/coding-agents/git-credential.sock"
@@ -607,10 +656,28 @@ if [ "$GPG_SIGNING_ENABLED" = true ] && [ ! -S "$GPG_SOCKET_PATH" ]; then
     echo "⚠️  Commit signing is enabled but gpg-proxy socket was not created. Signing will be disabled; run gpg-proxy-server.sh or disable commit.gpgsign."
 fi
 
+SECCOMP_PROFILE_PATH=""
+if [ "${CODING_AGENTS_DISABLE_SECCOMP:-0}" != "1" ]; then
+    if ! SECCOMP_PROFILE_PATH=$(resolve_seccomp_profile_path "$REPO_ROOT"); then
+        echo "❌ Unable to locate seccomp profile. Set CODING_AGENTS_SECCOMP_PROFILE to a valid file or export CODING_AGENTS_DISABLE_SECCOMP=1 to bypass (not recommended)."
+        exit 1
+    fi
+else
+    echo "⚠️  Seccomp enforcement disabled via CODING_AGENTS_DISABLE_SECCOMP=1" >&2
+fi
+
+APPARMOR_PROFILE_NAME=""
+if APPARMOR_PROFILE_NAME=$(resolve_apparmor_profile_name "$REPO_ROOT"); then
+    :
+else
+    APPARMOR_PROFILE_NAME=""
+fi
+
 # Final args
 DOCKER_ARGS+=(
     "-w" "/workspace"
     "--network" "$NETWORK_MODE"
+    "--read-only"
     "--cap-drop=ALL"
     "--security-opt" "no-new-privileges:true"
     "--pids-limit=4096"
@@ -618,6 +685,14 @@ DOCKER_ARGS+=(
     "--memory=$MEMORY"
     "--memory-swap=$MEMORY"
 )
+
+if [ -n "$SECCOMP_PROFILE_PATH" ]; then
+    DOCKER_ARGS+=("--security-opt" "seccomp=$SECCOMP_PROFILE_PATH")
+fi
+
+if [ -n "$APPARMOR_PROFILE_NAME" ]; then
+    DOCKER_ARGS+=("--security-opt" "apparmor=$APPARMOR_PROFILE_NAME")
+fi
 
 # Add GPU if specified
 if [ -n "$GPU" ]; then

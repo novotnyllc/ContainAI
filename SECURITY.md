@@ -10,6 +10,8 @@ Each AI coding agent runs in an isolated Docker container with:
 
 - **Non-root user:** All containers run as `agentuser` (UID 1000)
 - **No privilege escalation:** `--security-opt no-new-privileges:true` is always set
+- **Curated seccomp:** `docker/profiles/seccomp-coding-agents.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
+- **AppArmor confinement:** `docker/profiles/apparmor-coding-agents.profile` is loaded as `coding-agents` to deny `/proc` and `/sys` writes
 - **Capabilities dropped:** `--cap-drop=ALL` removes all Linux capabilities
 - **Process limits:** `--pids-limit=4096` prevents fork bomb attacks
 - **Resource limits:** CPU and memory limits prevent resource exhaustion

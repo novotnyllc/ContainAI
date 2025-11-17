@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     socat \
     tmux \
+    gosu \
     # Build tools (REQUIRED for development)
     build-essential \
     # Python with dev headers (for building native extensions)
@@ -202,6 +203,21 @@ RUN set -eux; \
     mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share && \
     chown -R agentuser:agentuser /workspace /home/agentuser
 
+# Snapshot mutable root directories so they can be restored into tmpfs overlays at runtime
+RUN set -eux; \
+    snapshot_root="/opt/coding-agents/basefs"; \
+    mkdir -p "${snapshot_root}/var/lib/dpkg" \
+        "${snapshot_root}/var/lib/apt" \
+        "${snapshot_root}/var/cache/apt" \
+        "${snapshot_root}/var/cache/debconf"; \
+    cp -a /var/lib/dpkg/. "${snapshot_root}/var/lib/dpkg/"; \
+    cp -a /var/lib/apt/. "${snapshot_root}/var/lib/apt/"; \
+    cp -a /var/cache/apt/. "${snapshot_root}/var/cache/apt/" || true; \
+    cp -a /var/cache/debconf/. "${snapshot_root}/var/cache/debconf/" || true
+
+# Prepare shared tool cache mount point
+RUN mkdir -p /toolcache && chown agentuser:agentuser /toolcache
+
 # Copy Playwright browsers to agentuser's home (installed as root above)
 RUN mkdir -p /home/agentuser/.cache && \
     cp -r /root/.cache/ms-playwright /home/agentuser/.cache/ && \
@@ -216,13 +232,32 @@ RUN pipx --version >/dev/null && \
 
 ENV PATH="/home/agentuser/.local/bin:${PATH}"
 ENV PATH="/home/agentuser/.cargo/bin:${PATH}"
+ENV PATH="/toolcache/pipx/bin:${PATH}"
+
+ENV CODING_AGENTS_BASEFS=/opt/coding-agents/basefs \
+    CODING_AGENTS_TOOLCACHE=/toolcache \
+    PIP_CACHE_DIR=/toolcache/pip \
+    PIPX_HOME=/toolcache/pipx \
+    PIPX_BIN_DIR=/toolcache/pipx/bin \
+    NPM_CONFIG_CACHE=/toolcache/npm \
+    npm_config_cache=/toolcache/npm \
+    YARN_CACHE_FOLDER=/toolcache/yarn \
+    PNPM_HOME=/toolcache/pnpm \
+    PLAYWRIGHT_BROWSERS_PATH=/toolcache/ms-playwright \
+    UV_CACHE_DIR=/toolcache/uv \
+    CARGO_HOME=/toolcache/cargo \
+    RUSTUP_HOME=/toolcache/rustup \
+    BUN_INSTALL=/toolcache/bun \
+    DOTNET_CLI_HOME=/toolcache/dotnet \
+    DOTNET_USER_HOME=/toolcache/dotnet \
+    NUGET_PACKAGES=/toolcache/nuget/packages \
+    NUGET_HTTP_CACHE_PATH=/toolcache/nuget/http-cache
 
 # Pre-install Serena MCP server
 RUN uvx --from "git+https://github.com/oraios/serena@main" serena --help || true
 
 USER root
 
-USER agentuser
-
 WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash"]

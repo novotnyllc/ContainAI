@@ -1,0 +1,1 @@
+PowerShell launchers (launch-agent.ps1, run-agent.ps1) mirror the bash scripts and therefore also lack read-only roots, tmpfs mounts, seccomp/AppArmor security opts, and CODING_AGENTS_EXTRA_DOCKER_ARGS support in launch-agent.ps1. They must be updated in lockstep with the bash scripts.

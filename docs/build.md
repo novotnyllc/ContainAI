@@ -376,6 +376,8 @@ Current approximate sizes:
 - No secrets in images
 - Security opt: `no-new-privileges:true`
 - Read-only mounts for auth
+- Seccomp profile: `docker/profiles/seccomp-coding-agents.json` blocks ptrace/clone3/mount/setns
+- AppArmor profile: `docker/profiles/apparmor-coding-agents.profile` denies `/proc` and `/sys` writes
 
 ⚠️ **Future improvements:**
 - Scan images with `docker scan` or Trivy
@@ -397,6 +399,24 @@ Current approximate sizes:
 - Scan images for vulnerabilities
 - Test images thoroughly
 - Use semantic versioning (not just `latest`)
+
+### Host Security Profiles
+
+Launchers automatically pass both security profiles:
+
+- **Seccomp:** No additional setup—Docker/Podman read `docker/profiles/seccomp-coding-agents.json` directly.
+- **AppArmor:** Ensure the profile is loaded on Linux hosts:
+
+```bash
+sudo apparmor_parser -r docker/profiles/apparmor-coding-agents.profile
+```
+
+Environment overrides:
+
+- `CODING_AGENTS_SECCOMP_PROFILE` – alternate seccomp JSON path
+- `CODING_AGENTS_DISABLE_SECCOMP=1` – skip seccomp (not recommended)
+- `CODING_AGENTS_APPARMOR_PROFILE_NAME` / `CODING_AGENTS_APPARMOR_PROFILE_FILE` – custom AppArmor profile
+- `CODING_AGENTS_DISABLE_APPARMOR=1` – skip AppArmor (not recommended)
 
 ## Maintenance
 

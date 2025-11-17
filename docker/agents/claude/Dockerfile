@@ -22,7 +22,6 @@ COPY --chown=agentuser:agentuser agent-configs/claude/.claude.json /home/agentus
 COPY docker/agents/claude/init-claude-config.sh /usr/local/bin/init-claude-config.sh
 RUN chmod +x /usr/local/bin/init-claude-config.sh
 
-USER agentuser
 WORKDIR /workspace
 
 # Override entrypoint to launch Claude directly with config init

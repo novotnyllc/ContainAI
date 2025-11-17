@@ -190,7 +190,7 @@ run-copilot ~/my-project -b feature-api --cpu 8 --memory 16g --network-proxy squ
 - **Image:** `coding-agents-copilot:local`
 - **Working Dir:** `/workspace`
 - **Network:** Bridge (internet access)
-- **Security:** `no-new-privileges:true`
+- **Security:** `no-new-privileges:true`, seccomp `docker/profiles/seccomp-coding-agents.json`, AppArmor profile `coding-agents` (if supported)
 - **Removal:** Automatic on exit (`--rm`)
 
 ---
@@ -964,6 +964,11 @@ Scripts respect these environment variables:
 | `PATH` | all scripts | Must include launcher directory |
 | `HOME` | all scripts | User home directory for configs |
 | `USERPROFILE` | Windows scripts | User profile directory |
+| `CODING_AGENTS_SECCOMP_PROFILE` | launchers | Override path to seccomp JSON profile |
+| `CODING_AGENTS_DISABLE_SECCOMP` | launchers | Set to `1` to skip seccomp (not recommended) |
+| `CODING_AGENTS_APPARMOR_PROFILE_NAME` | Linux launchers | Override AppArmor profile name |
+| `CODING_AGENTS_APPARMOR_PROFILE_FILE` | Linux launchers | Override AppArmor profile file path |
+| `CODING_AGENTS_DISABLE_APPARMOR` | Linux launchers | Set to `1` to skip AppArmor enforcement |
 
 ### Setting Environment Variables
 
