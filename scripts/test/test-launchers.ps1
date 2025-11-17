@@ -72,6 +72,7 @@ function Setup-TestRepo {
     git init -q
     git config user.name "Test User"
     git config user.email "test@example.com"
+    git config commit.gpgsign false
     git config remote.pushDefault local
     
     "# Test Repository" | Out-File -FilePath "README.md" -Encoding UTF8
@@ -314,6 +315,7 @@ function Test-LocalRemotePush {
     Push-Location $workspaceDir
     git config user.name "Test User"
     git config user.email "test@example.com"
+    git config commit.gpgsign false
     $localUrlPath = $bareRepo -replace '\\','/'
     $localRemoteUrl = "file:///$localUrlPath"
     if (-not (git remote get-url local 2>$null)) {
@@ -363,6 +365,7 @@ function Test-LocalRemoteFallbackPush {
     Push-Location $workspaceDir
     git config user.name "Test User"
     git config user.email "test@example.com"
+    git config commit.gpgsign false
     if (-not (git remote get-url local 2>$null)) {
         git remote add local $bareRepo | Out-Null
     } else {
@@ -410,6 +413,7 @@ function Test-SecureRemoteSync {
     git init -q
     git config user.name "Agent"
     git config user.email "agent@example.com"
+    git config commit.gpgsign false
     "agent work" | Out-File -FilePath agent.txt -Encoding UTF8
     git add agent.txt
     git commit -q -m "agent commit"

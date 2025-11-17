@@ -30,13 +30,14 @@ function Get-ContainerCli {
 }
 
 function Invoke-ContainerCli {
+    [CmdletBinding()]
     param(
-        [Parameter(ValueFromRemainingArguments = $true)]
-        [string[]]$Args
+        [Parameter(ValueFromRemainingArguments = $true, Position = 0)]
+        [string[]]$CliArgs
     )
 
     $cli = Get-ContainerCli
-    & $cli @Args
+    & $cli @CliArgs
 }
 
 function Get-HostConfigValue {
@@ -721,7 +722,7 @@ function Get-ProxyNetwork {
 }
 
 function Remove-ContainerWithSidecars {
-    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Removes multiple sidecars - plural is semantically correct')]
     param(
         [Parameter(Mandatory=$true)]

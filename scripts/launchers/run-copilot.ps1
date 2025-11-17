@@ -44,12 +44,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "Usage: .\run-copilot.ps1 [RepoPath] [OPTIONS]"
-    Write-Host ""
-    Write-Host "Launch GitHub Copilot CLI in an ephemeral container." -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Options mirror run-agent; see docs/cli-reference.md for details." -ForegroundColor Gray
-    Write-Host "Example: .\run-copilot.ps1 -Branch feature/api" -ForegroundColor Gray
+    @(
+        "Usage: .\run-copilot.ps1 [RepoPath] [OPTIONS]",
+        "",
+        "Launch GitHub Copilot CLI in an ephemeral container.",
+        "",
+        "Options mirror run-agent; see docs/cli-reference.md for details.",
+        "Example: .\run-copilot.ps1 -Branch feature/api"
+    ) | ForEach-Object { Write-Output $_ }
     exit 0
 }
 

@@ -26,8 +26,10 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 # ============================================================================
 
 check_docker_available() {
-    docker version >/dev/null 2>&1
-    return $?
+    if docker version >/dev/null; then
+        return 0
+    fi
+    return 1
 }
 
 start_docker_if_needed() {
@@ -94,6 +96,7 @@ setup_test_repo() {
     git init -q
     git config user.name "Test User"
     git config user.email "test@example.com"
+    git config commit.gpgsign false
     
     # Create initial commit
     echo "# Test Repository $TEST_SESSION_ID" > README.md

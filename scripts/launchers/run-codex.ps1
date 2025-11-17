@@ -45,11 +45,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "Usage: .\run-codex.ps1 [RepoPath] [OPTIONS]"
-    Write-Host ""
-    Write-Host "Launch Codex in an ephemeral supervised container." -ForegroundColor Cyan
-    Write-Host "Options mirror run-agent; see docs/cli-reference.md for full list." -ForegroundColor Gray
-    Write-Host "Example: .\run-codex.ps1 -Branch spike -Cpu 8" -ForegroundColor Gray
+    @(
+        "Usage: .\run-codex.ps1 [RepoPath] [OPTIONS]",
+        "",
+        "Launch Codex in an ephemeral supervised container.",
+        "Options mirror run-agent; see docs/cli-reference.md for full list.",
+        "Example: .\run-codex.ps1 -Branch spike -Cpu 8"
+    ) | ForEach-Object { Write-Output $_ }
     exit 0
 }
 

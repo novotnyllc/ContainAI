@@ -138,6 +138,7 @@ function Initialize-TestRepo {
         git init -q
         git config user.name "Test User"
         git config user.email "test@example.com"
+        git config commit.gpgsign false
         
         # Create initial commit
         "# Test Repository $TEST_SESSION_ID" | Out-File -FilePath "README.md" -Encoding UTF8
