@@ -1,4 +1,4 @@
-# Common functions for agent management scripts (PowerShell)
+﻿# Common functions for agent management scripts (PowerShell)
 
 $script:RepoRootDefault = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
@@ -33,10 +33,45 @@ $script:BrokerScript = if ($env:CODING_AGENTS_BROKER_SCRIPT) {
     Join-Path $script:RepoRootDefault "scripts/runtime/secret-broker.py"
 }
 
+$script:AuditLogPath = if ($env:CODING_AGENTS_AUDIT_LOG) {
+    $env:CODING_AGENTS_AUDIT_LOG
+} else {
+    Join-Path $script:ConfigRoot "security-events.log"
+}
+
+$script:HelperNetworkPolicy = if ($env:CODING_AGENTS_HELPER_NETWORK_POLICY) {
+    $env:CODING_AGENTS_HELPER_NETWORK_POLICY
+} else {
+    "loopback"
+}
+
+$helperPidLimitValue = 64
+if ($env:CODING_AGENTS_HELPER_PIDS_LIMIT) {
+    [int]::TryParse($env:CODING_AGENTS_HELPER_PIDS_LIMIT, [ref]$helperPidLimitValue) | Out-Null
+}
+$script:HelperPidLimit = $helperPidLimitValue
+
+$script:HelperMemory = if ($env:CODING_AGENTS_HELPER_MEMORY) {
+    $env:CODING_AGENTS_HELPER_MEMORY
+} else {
+    "512m"
+}
+
 $script:GitExecutable = $null
 
 $script:DefaultLauncherUpdatePolicy = "prompt"
 $script:ContainerCli = $null
+
+function Write-AgentMessage {
+    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Human-facing launcher output requires colorized console text')]
+    param(
+        [string]$Message = "",
+        [System.ConsoleColor]$Color = [System.ConsoleColor]::Gray
+    )
+
+    Write-Host $Message -ForegroundColor $Color
+}
 
 function Get-GitExecutable {
     if ($script:GitExecutable) {
@@ -63,16 +98,18 @@ function Get-GitHeadHash {
         return $null
     }
     try {
-        $result = & $git -C $RepoRoot rev-parse HEAD 2>$null
+        $result = & $git -C $RepoRoot rev-parse HEAD 2> $null
         if ($LASTEXITCODE -eq 0) {
             return $result.Trim()
         }
     } catch {
+        Write-Verbose "Get-GitHeadHash failed: $_"
     }
     return $null
 }
 
 function Get-TrustedPathTreeHashes {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Returns multiple hashes, plural form is intentional')]
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string[]]$Paths
@@ -87,16 +124,115 @@ function Get-TrustedPathTreeHashes {
     foreach ($path in $Paths) {
         if ([string]::IsNullOrWhiteSpace($path)) { continue }
         try {
-            & $git -C $RepoRoot rev-parse --verify --quiet "HEAD:$path" 2>$null | Out-Null
+            & $git -C $RepoRoot rev-parse --verify --quiet "HEAD:$path" 2> $null | Out-Null
             if ($LASTEXITCODE -ne 0) { continue }
-            $hash = & $git -C $RepoRoot rev-parse "HEAD:$path" 2>$null
+            $hash = & $git -C $RepoRoot rev-parse "HEAD:$path" 2> $null
             if ($LASTEXITCODE -eq 0 -and $hash) {
                 $hashes += [pscustomobject]@{ Path = $path; Hash = $hash.Trim() }
             }
         } catch {
+            Write-Verbose "Get-TrustedPathTreeHashes failed for '$path': $_"
         }
     }
     return $hashes
+}
+
+function Write-SecurityEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$EventName,
+        [Parameter(Mandatory = $true)][hashtable]$Payload
+    )
+
+    if ($env:CODING_AGENTS_DISABLE_AUDIT_LOG -eq "1") {
+        return
+    }
+
+    $record = [pscustomobject]@{
+        ts = (Get-Date).ToUniversalTime().ToString("o")
+        event = $EventName
+        payload = $Payload
+    }
+    $json = $record | ConvertTo-Json -Depth 6 -Compress
+    $logPath = if ($env:CODING_AGENTS_AUDIT_LOG) { $env:CODING_AGENTS_AUDIT_LOG } else { $script:AuditLogPath }
+    $fullLogPath = [System.IO.Path]::GetFullPath($logPath)
+    $logDir = [System.IO.Path]::GetDirectoryName($fullLogPath)
+    if (-not (Test-Path $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+    Add-Content -Path $fullLogPath -Value $json -Encoding utf8
+    $systemdCat = Get-Command systemd-cat -ErrorAction SilentlyContinue
+    if ($systemdCat) {
+        try {
+            $json | systemd-cat -t "coding-agents-launcher" | Out-Null
+        } catch {
+            Write-Verbose "systemd-cat logging failed: $_"
+        }
+    }
+}
+
+function Write-OverrideUsageEvent {
+    param(
+        [string]$RepoRoot,
+        [string]$Label,
+        [string[]]$DirtyPaths
+    )
+
+    if (-not $DirtyPaths -or $DirtyPaths.Count -eq 0) {
+        return
+    }
+
+    $payload = @{
+        repo = $RepoRoot
+        label = $Label
+        dirtyPaths = $DirtyPaths
+    }
+    Write-SecurityEvent -EventName "override-used" -Payload $payload
+}
+
+function Write-SessionConfigEvent {
+    param(
+        [string]$SessionId,
+        [string]$ManifestSha,
+        [string]$RepoRoot,
+        [System.Collections.IEnumerable]$TrustedHashes
+    )
+
+    $payload = @{
+        session = $SessionId
+        manifestSha = if ($ManifestSha) { $ManifestSha } else { "unknown" }
+        gitHead = Get-GitHeadHash -RepoRoot $RepoRoot
+        trustedTrees = $TrustedHashes
+    }
+    Write-SecurityEvent -EventName "session-config" -Payload $payload
+}
+
+function Write-CapabilityIssuanceEvent {
+    param(
+        [string]$SessionId,
+        [string]$OutputDir,
+        [string[]]$Stubs,
+        [string]$RepoRoot
+    )
+
+    if (-not (Test-Path $OutputDir)) {
+        return
+    }
+
+    $capabilities = Get-ChildItem -Path $OutputDir -Recurse -Filter *.json -ErrorAction SilentlyContinue | ForEach-Object {
+        [pscustomobject]@{
+            stub = $_.Directory.Name
+            capabilityId = $_.BaseName
+        }
+    }
+
+    $payload = @{
+        session = $SessionId
+        gitHead = Get-GitHeadHash -RepoRoot $RepoRoot
+        manifestSha = if ($env:CODING_AGENTS_SESSION_CONFIG_SHA256) { $env:CODING_AGENTS_SESSION_CONFIG_SHA256 } else { "unknown" }
+        stubs = $Stubs
+        capabilities = $capabilities
+    }
+    Write-SecurityEvent -EventName "capabilities-issued" -Payload $payload
 }
 
 function Test-TrustedPathsClean {
@@ -126,11 +262,12 @@ function Test-TrustedPathsClean {
     foreach ($path in $Paths) {
         if ([string]::IsNullOrWhiteSpace($path)) { continue }
         try {
-            $status = & $git -C $RepoRoot status --short -- $path 2>$null
+            $status = & $git -C $RepoRoot status --short -- $path 2> $null
             if ($status) {
                 $dirty += $path
             }
         } catch {
+            Write-Verbose "Failed to inspect trusted path '$path': $_"
         }
     }
 
@@ -146,6 +283,7 @@ function Test-TrustedPathsClean {
 
     if (Test-Path $overrideToken) {
         Write-Warning "Override token '$overrideToken' detected; proceeding with dirty ${Label}: $($dirty -join ', ')"
+        Write-OverrideUsageEvent -RepoRoot $RepoRoot -Label $Label -DirtyPaths $dirty
         return $true
     }
 
@@ -223,7 +361,11 @@ function Invoke-SessionCapabilityIssue {
     }
 
     $scriptArgs = @('issue', '--session-id', $SessionId, '--output', $OutputDir, '--stubs') + $Stubs
-    return (Invoke-PythonTool -ScriptPath $broker -MountPaths @($OutputDir) -ScriptArgs $scriptArgs)
+    $result = Invoke-PythonTool -ScriptPath $broker -MountPaths @($OutputDir) -ScriptArgs $scriptArgs
+    if ($result) {
+        Write-CapabilityIssuanceEvent -SessionId $SessionId -OutputDir $OutputDir -Stubs $Stubs -RepoRoot $script:RepoRootDefault
+    }
+    return $result
 }
 
 function Get-SeccompProfilePath {
@@ -298,6 +440,172 @@ function Get-AppArmorProfileName {
 
     Write-Warning "⚠️  AppArmor profile '$profileName' is not loaded. Run: sudo apparmor_parser -r '$profilePath'"
     return $null
+}
+
+function Test-HostSecurityPrereqs {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Validates multiple prerequisites in a single call')]
+    param(
+        [string]$RepoRoot
+    )
+
+    $resolvedRoot = if ($RepoRoot) {
+        $RepoRoot
+    } elseif ($env:CODING_AGENTS_REPO_ROOT) {
+        $env:CODING_AGENTS_REPO_ROOT
+    } else {
+        $script:RepoRootDefault
+    }
+
+    $errors = New-Object System.Collections.Generic.List[string]
+    $warnings = New-Object System.Collections.Generic.List[string]
+
+    if ($env:CODING_AGENTS_DISABLE_SECCOMP -eq '1') {
+        $warnings.Add('Seccomp enforcement disabled via CODING_AGENTS_DISABLE_SECCOMP=1') | Out-Null
+    } else {
+        try {
+            Get-SeccompProfilePath -RepoRoot $resolvedRoot | Out-Null
+        } catch {
+            $hint = if ($env:CODING_AGENTS_SECCOMP_PROFILE) { $env:CODING_AGENTS_SECCOMP_PROFILE } else { Join-Path $resolvedRoot 'docker/profiles/seccomp-coding-agents.json' }
+            if (-not [System.IO.Path]::IsPathRooted($hint)) {
+                $hint = Join-Path $resolvedRoot $hint
+            }
+            $errors.Add("Seccomp profile not found at $hint. Install host security profiles or set CODING_AGENTS_DISABLE_SECCOMP=1 (not recommended).") | Out-Null
+        }
+    }
+
+    if ($env:CODING_AGENTS_DISABLE_APPARMOR -eq '1') {
+        $warnings.Add('AppArmor enforcement disabled via CODING_AGENTS_DISABLE_APPARMOR=1') | Out-Null
+    } else {
+        if (-not $IsLinux) {
+            $errors.Add('AppArmor enforcement requires a Linux host. Run from Linux or export CODING_AGENTS_DISABLE_APPARMOR=1 to acknowledge the risk.') | Out-Null
+        } elseif (-not (Test-AppArmorSupported)) {
+            $errors.Add('AppArmor kernel support not detected. Enable AppArmor or export CODING_AGENTS_DISABLE_APPARMOR=1 to override.') | Out-Null
+        } else {
+            $profileName = if ($env:CODING_AGENTS_APPARMOR_PROFILE_NAME) { $env:CODING_AGENTS_APPARMOR_PROFILE_NAME } else { 'coding-agents' }
+            if (-not (Test-AppArmorProfileLoaded -Name $profileName)) {
+                $profilePath = if ($env:CODING_AGENTS_APPARMOR_PROFILE_FILE) { $env:CODING_AGENTS_APPARMOR_PROFILE_FILE } else { Join-Path $resolvedRoot 'docker/profiles/apparmor-coding-agents.profile' }
+                if (-not [System.IO.Path]::IsPathRooted($profilePath)) {
+                    $profilePath = Join-Path $resolvedRoot $profilePath
+                }
+                if (-not (Test-Path $profilePath)) {
+                    $errors.Add("AppArmor profile file '$profilePath' not found. Set CODING_AGENTS_APPARMOR_PROFILE_FILE to a valid profile path.") | Out-Null
+                } else {
+                    $errors.Add("AppArmor profile '$profileName' is not loaded. Run: sudo apparmor_parser -r '$profilePath' or export CODING_AGENTS_DISABLE_APPARMOR=1 to override.") | Out-Null
+                }
+            }
+        }
+    }
+
+    if ($env:CODING_AGENTS_DISABLE_PTRACE_SCOPE -eq '1') {
+        $warnings.Add('Ptrace scope hardening disabled via CODING_AGENTS_DISABLE_PTRACE_SCOPE=1') | Out-Null
+    } elseif ($IsLinux -and -not (Test-Path '/proc/sys/kernel/yama/ptrace_scope')) {
+        $errors.Add('kernel.yama.ptrace_scope is unavailable. Enable the Yama LSM or export CODING_AGENTS_DISABLE_PTRACE_SCOPE=1 to bypass (not recommended).') | Out-Null
+    }
+
+    if ($env:CODING_AGENTS_DISABLE_SENSITIVE_TMPFS -eq '1') {
+        $warnings.Add('Sensitive tmpfs mounting disabled via CODING_AGENTS_DISABLE_SENSITIVE_TMPFS=1') | Out-Null
+    }
+
+    if ($errors.Count -gt 0) {
+        $joined = $errors -join "`n  - "
+        Write-Error "Host security verification failed:`n  - $joined"
+        return $false
+    }
+
+    if ($warnings.Count -gt 0) {
+        $joinedWarnings = $warnings -join "`n  - "
+        Write-Warning "Host security warnings:`n  - $joinedWarnings"
+    }
+
+    return $true
+}
+
+function Test-ContainerSecuritySupport {
+    if ($env:CODING_AGENTS_DISABLE_CONTAINER_SECURITY_CHECK -eq '1') {
+        Write-Warning "Container security checks disabled via CODING_AGENTS_DISABLE_CONTAINER_SECURITY_CHECK=1"
+        return $true
+    }
+
+    $requireSeccomp = ($env:CODING_AGENTS_DISABLE_SECCOMP -ne '1')
+    $requireAppArmor = ($env:CODING_AGENTS_DISABLE_APPARMOR -ne '1')
+    if (-not $requireSeccomp -and -not $requireAppArmor) {
+        return $true
+    }
+
+    $infoJson = $env:CODING_AGENTS_CONTAINER_INFO_JSON
+    if (-not $infoJson) {
+        $cli = Get-ContainerCli
+        if (-not $cli) {
+            Write-Error "Unable to determine container runtime for security checks"
+            return $false
+        }
+        try {
+            $infoJson = & $cli info --format '{{json .}}' 2> $null
+            if (-not $infoJson) {
+                $infoJson = & $cli info --format json 2> $null
+            }
+        } catch {
+            $infoJson = $null
+        }
+    }
+
+    if (-not $infoJson) {
+        Write-Error "Unable to inspect container runtime security options"
+        return $false
+    }
+
+    try {
+        $info = $infoJson | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-Error "Failed to parse container runtime security information"
+        return $false
+    }
+
+    $hasSeccomp = $false
+    $hasAppArmor = $false
+
+    $securityOptions = @()
+    if ($info.SecurityOptions) { $securityOptions += $info.SecurityOptions }
+    if ($info.securityOptions) { $securityOptions += $info.securityOptions }
+
+    foreach ($entry in $securityOptions) {
+        if ($entry -is [string]) {
+            $lower = $entry.ToLowerInvariant()
+            if ($lower -match 'seccomp') { $hasSeccomp = $true }
+            if ($lower -match 'apparmor') { $hasAppArmor = $true }
+        }
+    }
+
+    $hostInfo = $info.host
+    if ($hostInfo) {
+        $security = $hostInfo.security
+        if ($security) {
+            if ($security.seccompProfilePath -or $security.seccompEnabled) {
+                $hasSeccomp = $true
+            }
+            if ($security.apparmorEnabled) {
+                $hasAppArmor = $true
+            }
+        }
+        if ($hostInfo.seccomp -and $hostInfo.seccomp.ToString().ToLowerInvariant() -eq 'enabled') {
+            $hasSeccomp = $true
+        }
+        if ($hostInfo.apparmor -and $hostInfo.apparmor.ToString().ToLowerInvariant() -eq 'enabled') {
+            $hasAppArmor = $true
+        }
+    }
+
+    if ($requireSeccomp -and -not $hasSeccomp) {
+        Write-Error "Container runtime does not report seccomp support. Update Docker/Podman or set CODING_AGENTS_DISABLE_SECCOMP=1 to override."
+        return $false
+    }
+
+    if ($requireAppArmor -and -not $hasAppArmor) {
+        Write-Error "Container runtime does not report AppArmor support. Enable the module or set CODING_AGENTS_DISABLE_APPARMOR=1 to override."
+        return $false
+    }
+
+    return $true
 }
 
 function Get-SanitizedDockerName {
@@ -389,57 +697,57 @@ function Invoke-LauncherUpdateCheck {
     }
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Host "⚠️  Skipping launcher update check (git not available)" -ForegroundColor Yellow
+        Write-AgentMessage -Message "⚠️  Skipping launcher update check (git not available)" -Color Yellow
         return
     }
 
-    git -C $RepoRoot rev-parse HEAD 2>$null | Out-Null
+    git -C $RepoRoot rev-parse HEAD 2> $null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         return
     }
 
-    $upstream = git -C $RepoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null
+    $upstream = git -C $RepoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2> $null
     if ($LASTEXITCODE -ne 0 -or -not $upstream) {
         return
     }
 
-    git -C $RepoRoot fetch --quiet --tags 2>$null | Out-Null
+    git -C $RepoRoot fetch --quiet --tags 2> $null | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "⚠️  Unable to check launcher updates (git fetch failed)" -ForegroundColor Yellow
+        Write-AgentMessage -Message "⚠️  Unable to check launcher updates (git fetch failed)" -Color Yellow
         return
     }
 
-    $localHead = git -C $RepoRoot rev-parse HEAD 2>$null
-    $remoteHead = git -C $RepoRoot rev-parse '@{u}' 2>$null
-    $base = git -C $RepoRoot merge-base HEAD '@{u}' 2>$null
+    $localHead = git -C $RepoRoot rev-parse HEAD 2> $null
+    $remoteHead = git -C $RepoRoot rev-parse '@{u}' 2> $null
+    $base = git -C $RepoRoot merge-base HEAD '@{u}' 2> $null
 
     if ($localHead -eq $remoteHead) {
         return
     }
 
     if ($localHead -ne $base -and $remoteHead -ne $base) {
-        Write-Host "⚠️  Launcher repository has diverged from $upstream. Please sync manually." -ForegroundColor Yellow
+        Write-AgentMessage -Message "⚠️  Launcher repository has diverged from $upstream. Please sync manually." -Color Yellow
         return
     }
 
     $clean = $true
-    git -C $RepoRoot diff --quiet 2>$null
+    git -C $RepoRoot diff --quiet 2> $null
     if ($LASTEXITCODE -ne 0) { $clean = $false }
     if ($clean) {
-        git -C $RepoRoot diff --quiet --cached 2>$null
+        git -C $RepoRoot diff --quiet --cached 2> $null
         if ($LASTEXITCODE -ne 0) { $clean = $false }
     }
 
     if ($policy -eq 'always') {
         if (-not $clean) {
-            Write-Host "⚠️  Launcher repository has local changes; cannot auto-update." -ForegroundColor Yellow
+            Write-AgentMessage -Message "⚠️  Launcher repository has local changes; cannot auto-update." -Color Yellow
             return
         }
         git -C $RepoRoot pull --ff-only | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "✅ Launcher scripts updated to match $upstream" -ForegroundColor Green
+            Write-AgentMessage -Message "✅ Launcher scripts updated to match $upstream" -Color Green
         } else {
-            Write-Host "⚠️  Failed to auto-update launcher scripts. Please update manually." -ForegroundColor Yellow
+            Write-AgentMessage -Message "⚠️  Failed to auto-update launcher scripts. Please update manually." -Color Yellow
         }
         return
     }
@@ -454,14 +762,14 @@ function Invoke-LauncherUpdateCheck {
     }
 
     if (-not $canPrompt) {
-        Write-Host "⚠️  Launcher scripts are behind $upstream. Update the repository when convenient." -ForegroundColor Yellow
+        Write-AgentMessage -Message "⚠️  Launcher scripts are behind $upstream. Update the repository when convenient." -Color Yellow
         return
     }
 
     $suffix = if ($Context) { " ($Context)" } else { "" }
-    Write-Host "ℹ️  Launcher scripts are behind $upstream.$suffix" -ForegroundColor Cyan
+    Write-AgentMessage -Message "ℹ️  Launcher scripts are behind $upstream.$suffix" -Color Cyan
     if (-not $clean) {
-        Write-Host "   Local changes detected; please update manually." -ForegroundColor Yellow
+        Write-AgentMessage -Message "   Local changes detected; please update manually." -Color Yellow
         return
     }
 
@@ -470,12 +778,12 @@ function Invoke-LauncherUpdateCheck {
     if ($response.StartsWith('y', 'InvariantCultureIgnoreCase')) {
         git -C $RepoRoot pull --ff-only | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "✅ Launcher scripts updated." -ForegroundColor Green
+            Write-AgentMessage -Message "✅ Launcher scripts updated." -Color Green
         } else {
-            Write-Host "⚠️  Failed to update launchers. Please update manually." -ForegroundColor Yellow
+            Write-AgentMessage -Message "⚠️  Failed to update launchers. Please update manually." -Color Yellow
         }
     } else {
-        Write-Host "⏭️  Skipped launcher update." -ForegroundColor Yellow
+        Write-AgentMessage -Message "⏭️  Skipped launcher update." -Color Yellow
     }
 }
 
@@ -483,15 +791,15 @@ function Get-ContainerRuntime {
     <#
     .SYNOPSIS
         Detects available container runtime (docker or podman)
-    
+
     .DESCRIPTION
         Checks for CONTAINER_RUNTIME environment variable first,
         then auto-detects docker or podman (prefers docker).
-    
+
     .OUTPUTS
         String: "docker" or "podman"
     #>
-    
+
     # Check environment variable first
     if ($env:CONTAINER_RUNTIME) {
         $cmd = Get-Command $env:CONTAINER_RUNTIME -ErrorAction SilentlyContinue
@@ -499,22 +807,26 @@ function Get-ContainerRuntime {
             return $env:CONTAINER_RUNTIME
         }
     }
-    
+
     # Auto-detect: prefer docker, fall back to podman
     try {
-        $null = docker info 2>$null
+        $null = docker info 2> $null
         if ($LASTEXITCODE -eq 0) {
             return "docker"
         }
-    } catch { }
-    
+    } catch {
+        Write-Verbose "docker info probe failed: $_"
+    }
+
     try {
-        $null = podman info 2>$null
+        $null = podman info 2> $null
         if ($LASTEXITCODE -eq 0) {
             return "podman"
         }
-    } catch { }
-    
+    } catch {
+        Write-Verbose "podman info probe failed: $_"
+    }
+
     # Check if either command exists (even if not running)
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         return "docker"
@@ -522,7 +834,7 @@ function Get-ContainerRuntime {
     if (Get-Command podman -ErrorAction SilentlyContinue) {
         return "podman"
     }
-    
+
     # Neither found
     return $null
 }
@@ -559,14 +871,14 @@ function Test-BranchExists {
     param(
         [Parameter(Mandatory=$true)]
         [string]$RepoPath,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$BranchName
     )
-    
+
     Push-Location $RepoPath
     try {
-        git show-ref --verify --quiet "refs/heads/$BranchName" 2>$null
+        git show-ref --verify --quiet "refs/heads/$BranchName" 2> $null
         return ($LASTEXITCODE -eq 0)
     } finally {
         Pop-Location
@@ -578,17 +890,17 @@ function Get-UnmergedCommits {
     param(
         [Parameter(Mandatory=$true)]
         [string]$RepoPath,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$BaseBranch,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$CompareBranch
     )
-    
+
     Push-Location $RepoPath
     try {
-        $commits = git log "$BaseBranch..$CompareBranch" --oneline 2>$null
+        $commits = git log "$BaseBranch..$CompareBranch" --oneline 2> $null
         return $commits
     } finally {
         Pop-Location
@@ -597,22 +909,23 @@ function Get-UnmergedCommits {
 
 function Remove-GitBranch {
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+    [OutputType([bool])]
     param(
         [Parameter(Mandatory=$true)]
         [string]$RepoPath,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$BranchName,
-        
+
         [Parameter(Mandatory=$false)]
         [bool]$Force = $false
     )
-    
+
     if ($PSCmdlet.ShouldProcess($BranchName, "Remove git branch")) {
         Push-Location $RepoPath
         try {
             $flag = if ($Force) { "-D" } else { "-d" }
-            git branch $flag $BranchName 2>$null | Out-Null
+            git branch $flag $BranchName 2> $null | Out-Null
             return ($LASTEXITCODE -eq 0)
         } finally {
             Pop-Location
@@ -625,17 +938,17 @@ function Rename-GitBranch {
     param(
         [Parameter(Mandatory=$true)]
         [string]$RepoPath,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$OldName,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$NewName
     )
-    
+
     Push-Location $RepoPath
     try {
-        git branch -m $OldName $NewName 2>$null | Out-Null
+        git branch -m $OldName $NewName 2> $null | Out-Null
         return ($LASTEXITCODE -eq 0)
     } finally {
         Pop-Location
@@ -644,21 +957,22 @@ function Rename-GitBranch {
 
 function New-GitBranch {
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Low')]
+    [OutputType([bool])]
     param(
         [Parameter(Mandatory=$true)]
         [string]$RepoPath,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$BranchName,
-        
+
         [Parameter(Mandatory=$false)]
         [string]$StartPoint = "HEAD"
     )
-    
+
     if ($PSCmdlet.ShouldProcess($BranchName, "Create git branch")) {
         Push-Location $RepoPath
         try {
-            git branch $BranchName $StartPoint 2>$null | Out-Null
+            git branch $BranchName $StartPoint 2> $null | Out-Null
             return ($LASTEXITCODE -eq 0)
         } finally {
             Pop-Location
@@ -675,7 +989,7 @@ function Get-RepoName {
 function Get-CurrentBranch {
     param([string]$RepoPath)
     Push-Location $RepoPath
-    $branch = git branch --show-current 2>$null
+    $branch = git branch --show-current 2> $null
     Pop-Location
     if ($branch) { return $branch } else { return "main" }
 }
@@ -684,7 +998,7 @@ function ConvertTo-SafeBranchName {
     <#
     .SYNOPSIS
         Sanitizes a branch name for use in Docker container names
-    
+
     .DESCRIPTION
         Converts a git branch name to a safe format for Docker container naming:
         - Replaces slashes and backslashes with dashes
@@ -692,10 +1006,10 @@ function ConvertTo-SafeBranchName {
         - Collapses multiple dashes
         - Removes leading/trailing special characters
         - Converts to lowercase
-    
+
     .PARAMETER BranchName
         The git branch name to sanitize
-    
+
     .EXAMPLE
         ConvertTo-SafeBranchName "feature/auth-module"
         Returns: "feature-auth-module"
@@ -704,30 +1018,30 @@ function ConvertTo-SafeBranchName {
         [Parameter(Mandatory=$true)]
         [string]$BranchName
     )
-    
+
     # Replace slashes with dashes
     $sanitized = $BranchName -replace '[/\\]', '-'
-    
+
     # Replace any other invalid characters with dashes
     $sanitized = $sanitized -replace '[^a-zA-Z0-9._-]', '-'
-    
+
     # Collapse multiple dashes
     $sanitized = $sanitized -replace '-+', '-'
-    
+
     # Remove leading special characters
     $sanitized = $sanitized -replace '^[._-]+', ''
-    
+
     # Remove trailing special characters
     $sanitized = $sanitized -replace '[._-]+$', ''
-    
+
     # Convert to lowercase
     $sanitized = $sanitized.ToLower()
-    
+
     # Ensure non-empty result
     if ([string]::IsNullOrWhiteSpace($sanitized)) {
         $sanitized = "branch"
     }
-    
+
     return $sanitized
 }
 
@@ -735,13 +1049,13 @@ function Convert-WindowsPathToWsl {
     <#
     .SYNOPSIS
         Converts Windows paths to WSL paths
-    
+
     .DESCRIPTION
         Converts Windows-style paths (e.g., C:\path\to\file) to WSL-style paths (/mnt/c/path/to/file)
-    
+
     .PARAMETER Path
         The Windows path to convert
-    
+
     .EXAMPLE
         Convert-WindowsPathToWsl "C:\dev\project"
         Returns: "/mnt/c/dev/project"
@@ -750,14 +1064,14 @@ function Convert-WindowsPathToWsl {
         [Parameter(Mandatory=$true)]
         [string]$Path
     )
-    
+
     # Check if path matches Windows drive letter pattern (C:, D:, etc.)
     if ($Path -match '^([A-Z]):(.*)'  ) {
         $drive = $Matches[1].ToLower()
         $rest = $Matches[2] -replace '\\', '/'
         return "/mnt/$drive$rest"
     }
-    
+
     # Return unchanged if not a Windows path
     return $Path
 }
@@ -766,78 +1080,82 @@ function Test-DockerRunning {
     <#
     .SYNOPSIS
         Checks if container runtime (Docker/Podman) is running
-    
+
     .DESCRIPTION
         Checks Docker or Podman availability and provides helpful error messages.
         On Windows with Docker, attempts to auto-start Docker Desktop if installed.
-    
+
     .EXAMPLE
         if (-not (Test-DockerRunning)) {
             exit 1
         }
     #>
-    
+
     $runtime = Get-ContainerRuntime
-    
+
     if ($runtime) {
         # Check if runtime is running
         try {
-            $null = & $runtime info 2>$null
+            $null = & $runtime info 2> $null
             if ($LASTEXITCODE -eq 0) {
                 $script:ContainerCli = $runtime
                 return $true
             }
-        } catch { }
+        } catch {
+            Write-Verbose "Runtime '$runtime' info check failed: $_"
+        }
     }
-    
-    Write-Host "⚠️  Container runtime not running. Checking installation..." -ForegroundColor Yellow
-    
+
+    Write-AgentMessage -Message "⚠️  Container runtime not running. Checking installation..." -Color Yellow
+
     # Try docker first
     $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
     $podmanCmd = Get-Command podman -ErrorAction SilentlyContinue
-    
+
     if (-not $dockerCmd -and -not $podmanCmd) {
-        Write-Host "❌ No container runtime found. Please install one:" -ForegroundColor Red
-        Write-Host "   Docker: https://www.docker.com/products/docker-desktop" -ForegroundColor Cyan
-        Write-Host "   Podman: https://podman.io/getting-started/installation" -ForegroundColor Cyan
-        Write-Host "" -ForegroundColor Red
-        Write-Host "   For Windows: Download Docker Desktop or Podman Desktop" -ForegroundColor Cyan
-        Write-Host "   For Mac: Download Docker Desktop or brew install podman" -ForegroundColor Cyan
-        Write-Host "   For Linux: Use your package manager" -ForegroundColor Cyan
+        Write-AgentMessage -Message "❌ No container runtime found. Please install one:" -Color Red
+        Write-AgentMessage -Message "   Docker: https://www.docker.com/products/docker-desktop" -Color Cyan
+        Write-AgentMessage -Message "   Podman: https://podman.io/getting-started/installation" -Color Cyan
+        Write-AgentMessage -Message "" -Color Red
+        Write-AgentMessage -Message "   For Windows: Download Docker Desktop or Podman Desktop" -Color Cyan
+        Write-AgentMessage -Message "   For Mac: Download Docker Desktop or brew install podman" -Color Cyan
+        Write-AgentMessage -Message "   For Linux: Use your package manager" -Color Cyan
         return $false
     }
-    
+
     # If podman is available and docker is not (or not running)
     if ($podmanCmd -and (-not $dockerCmd -or $runtime -eq "podman")) {
-        Write-Host "ℹ️  Using Podman as container runtime" -ForegroundColor Cyan
-        
+        Write-AgentMessage -Message "ℹ️  Using Podman as container runtime" -Color Cyan
+
         try {
-            $null = podman info 2>$null
+            $null = podman info 2> $null
             if ($LASTEXITCODE -eq 0) {
                 $script:ContainerCli = "podman"
                 return $true
             }
-        } catch { }
-        
-        Write-Host "❌ Podman is installed but not working properly" -ForegroundColor Red
-        Write-Host "   Try: podman machine init && podman machine start" -ForegroundColor Cyan
+        } catch {
+            Write-Verbose "Podman info check failed: $_"
+        }
+
+        Write-AgentMessage -Message "❌ Podman is installed but not working properly" -Color Red
+        Write-AgentMessage -Message "   Try: podman machine init && podman machine start" -Color Cyan
         return $false
     }
-    
+
     # Docker is installed but not running
-    Write-Host "Docker is installed but not running." -ForegroundColor Yellow
-    
+    Write-AgentMessage -Message "Docker is installed but not running." -Color Yellow
+
     # On Windows, try to start Docker Desktop
     if ($IsWindows -or $env:OS -match 'Windows') {
-        Write-Host "Attempting to start Docker Desktop..." -ForegroundColor Cyan
-        
+        Write-AgentMessage -Message "Attempting to start Docker Desktop..." -Color Cyan
+
         # Find Docker Desktop executable
         $dockerDesktopPaths = @(
             "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
             "${env:ProgramFiles(x86)}\Docker\Docker\Docker Desktop.exe",
             "$env:LOCALAPPDATA\Docker\Docker Desktop.exe"
         )
-        
+
         $dockerDesktop = $null
         foreach ($path in $dockerDesktopPaths) {
             if (Test-Path $path) {
@@ -845,49 +1163,49 @@ function Test-DockerRunning {
                 break
             }
         }
-        
+
         if ($dockerDesktop) {
-            Write-Host "Starting Docker Desktop from: $dockerDesktop" -ForegroundColor Gray
+            Write-AgentMessage -Message "Starting Docker Desktop from: $dockerDesktop" -Color Gray
             Start-Process -FilePath $dockerDesktop -WindowStyle Hidden
-            
+
             # Wait for Docker to start (max 60 seconds)
-            Write-Host "Waiting for Docker to start (max 60 seconds)..." -ForegroundColor Cyan
+            Write-AgentMessage -Message "Waiting for Docker to start (max 60 seconds)..." -Color Cyan
             $maxWait = 60
             $waited = 0
-            
+
             while ($waited -lt $maxWait) {
                 Start-Sleep -Seconds 2
                 $waited += 2
-                
+
                 try {
-                    $null = docker info 2>$null
+                    $null = docker info 2> $null
                     if ($LASTEXITCODE -eq 0) {
-                        Write-Host "✅ Docker started successfully!" -ForegroundColor Green
+                        Write-AgentMessage -Message "✅ Docker started successfully!" -Color Green
                         $script:ContainerCli = "docker"
                         return $true
                     }
                 } catch {
-                    # Continue waiting
+                    Write-Verbose "Docker info retry failed: $_"
                 }
-                
-                Write-Host "  Still waiting... ($waited/$maxWait seconds)" -ForegroundColor Gray
+
+                Write-AgentMessage -Message "  Still waiting... ($waited/$maxWait seconds)" -Color Gray
             }
-            
-            Write-Host "❌ Docker failed to start within $maxWait seconds." -ForegroundColor Red
-            Write-Host "   Please start Docker Desktop manually and try again." -ForegroundColor Yellow
+
+            Write-AgentMessage -Message "❌ Docker failed to start within $maxWait seconds." -Color Red
+            Write-AgentMessage -Message "   Please start Docker Desktop manually and try again." -Color Yellow
             return $false
         } else {
-            Write-Host "❌ Could not find Docker Desktop executable." -ForegroundColor Red
-            Write-Host "   Please start Docker Desktop manually." -ForegroundColor Yellow
+            Write-AgentMessage -Message "❌ Could not find Docker Desktop executable." -Color Red
+            Write-AgentMessage -Message "   Please start Docker Desktop manually." -Color Yellow
             return $false
         }
     } else {
         # On Linux/Mac, provide guidance
-        Write-Host "❌ Please start Docker manually:" -ForegroundColor Red
-        Write-Host "" -ForegroundColor Red
-        Write-Host "   On Linux: sudo systemctl start docker" -ForegroundColor Cyan
-        Write-Host "   Or: sudo service docker start" -ForegroundColor Cyan
-        Write-Host "   On Mac: Open Docker Desktop application" -ForegroundColor Cyan
+        Write-AgentMessage -Message "❌ Please start Docker manually:" -Color Red
+        Write-AgentMessage -Message "" -Color Red
+        Write-AgentMessage -Message "   On Linux: sudo systemctl start docker" -Color Cyan
+        Write-AgentMessage -Message "   Or: sudo service docker start" -Color Cyan
+        Write-AgentMessage -Message "   On Mac: Open Docker Desktop application" -Color Cyan
         return $false
     }
 }
@@ -901,6 +1219,7 @@ function Get-PythonRunnerImage {
 
 function Invoke-PythonTool {
     [CmdletBinding()]
+    [OutputType([bool])]
     param(
         [Parameter(Mandatory = $true)]
         [string]$ScriptPath,
@@ -928,19 +1247,56 @@ function Invoke-PythonTool {
 
     if ($IsLinux) {
         try {
-            $uid = & id -u 2>$null
-            $gid = & id -g 2>$null
+            $uid = & id -u 2> $null
+            $gid = & id -g 2> $null
             if ($uid -and $gid) {
                 $containerArgs += "--user"
                 $containerArgs += "${uid}:${gid}"
             }
         } catch {
+            Write-Verbose "Unable to determine host UID/GID for helper runner: $_"
         }
     }
 
     $tzValue = if ($env:TZ) { $env:TZ } else { "UTC" }
     $containerArgs += "-e"
     $containerArgs += "TZ=$tzValue"
+    $containerArgs += "--pids-limit"
+    $containerArgs += $script:HelperPidLimit
+    $containerArgs += "--security-opt"
+    $containerArgs += "no-new-privileges"
+    $containerArgs += "--cap-drop"
+    $containerArgs += "ALL"
+    if ($script:HelperMemory) {
+        $containerArgs += "--memory"
+        $containerArgs += $script:HelperMemory
+    }
+
+    $helperNetwork = if ($env:CODING_AGENTS_HELPER_NETWORK_POLICY) { $env:CODING_AGENTS_HELPER_NETWORK_POLICY } else { $script:HelperNetworkPolicy }
+    switch ($helperNetwork.ToLowerInvariant()) {
+        "loopback" { $containerArgs += "--network"; $containerArgs += "none" }
+        "none" { $containerArgs += "--network"; $containerArgs += "none" }
+        "host" { $containerArgs += "--network"; $containerArgs += "host" }
+        "bridge" { $containerArgs += "--network"; $containerArgs += "bridge" }
+        Default { $containerArgs += "--network"; $containerArgs += $helperNetwork }
+    }
+
+    $containerArgs += "--tmpfs"
+    $containerArgs += "/tmp:rw,nosuid,nodev,noexec,size=64m"
+    $containerArgs += "--tmpfs"
+    $containerArgs += "/var/tmp:rw,nosuid,nodev,noexec,size=32m"
+
+    if ($env:CODING_AGENTS_DISABLE_HELPER_SECCOMP -ne "1") {
+        try {
+            $seccompProfile = Get-SeccompProfilePath -RepoRoot $repoRoot
+            if ($seccompProfile) {
+                $containerArgs += "--security-opt"
+                $containerArgs += "seccomp=$seccompProfile"
+            }
+        } catch {
+            Write-Verbose "Failed to resolve helper seccomp profile: $_"
+        }
+    }
 
     foreach ($entry in [System.Environment]::GetEnvironmentVariables().GetEnumerator()) {
         if ($entry.Key -like "CODING_AGENTS_*") {
@@ -952,8 +1308,6 @@ function Invoke-PythonTool {
     $mounts = New-Object System.Collections.Generic.List[string]
     $mounts.Add($repoRoot) | Out-Null
     if ($env:HOME) { $mounts.Add($env:HOME) | Out-Null }
-    $tmpPath = [System.IO.Path]::GetTempPath().TrimEnd([System.IO.Path]::DirectorySeparatorChar)
-    if (-not [string]::IsNullOrWhiteSpace($tmpPath)) { $mounts.Add($tmpPath) | Out-Null }
     if ($MountPaths) {
         foreach ($mp in $MountPaths) {
             if (-not [string]::IsNullOrWhiteSpace($mp)) {
@@ -966,7 +1320,9 @@ function Invoke-PythonTool {
     foreach ($mount in $mounts) {
         if ([string]::IsNullOrWhiteSpace($mount)) { continue }
         if (-not (Test-Path $mount)) {
-            try { New-Item -ItemType Directory -Path $mount -Force | Out-Null } catch { }
+            try { New-Item -ItemType Directory -Path $mount -Force | Out-Null } catch {
+                Write-Verbose "Unable to create mount path '$mount': $_"
+            }
         }
         if ($seen.ContainsKey($mount)) { continue }
         $seen[$mount] = $true
@@ -990,31 +1346,31 @@ function Update-AgentImage {
     param(
         [Parameter(Mandatory=$true)]
         [string]$Agent,
-        
+
         [Parameter(Mandatory=$false)]
         [int]$MaxRetries = 3,
-        
+
         [Parameter(Mandatory=$false)]
         [int]$RetryDelaySeconds = 2
     )
-    
+
     $registryImage = "ghcr.io/novotnyllc/coding-agents-${Agent}:latest"
     $localImage = "coding-agents-${Agent}:local"
-    
-    Write-Host "📦 Checking for image updates..." -ForegroundColor Cyan
-    
+
+    Write-AgentMessage -Message "📦 Checking for image updates..." -Color Cyan
+
     # Try to pull with retries
     $attempt = 0
     $pulled = $false
-    
+
     while ($attempt -lt $MaxRetries -and -not $pulled) {
         $attempt++
         try {
             if ($attempt -gt 1) {
-                Write-Host "  Retry attempt $attempt of $MaxRetries..." -ForegroundColor Yellow
+                Write-AgentMessage -Message "  Retry attempt $attempt of $MaxRetries..." -Color Yellow
             }
-            Invoke-ContainerCli pull --quiet $registryImage 2>$null | Out-Null
-            Invoke-ContainerCli tag $registryImage $localImage 2>$null | Out-Null
+            Invoke-ContainerCli -CliArgs @('pull', '--quiet', $registryImage) 2> $null | Out-Null
+            Invoke-ContainerCli -CliArgs @('tag', $registryImage, $localImage) 2> $null | Out-Null
             $pulled = $true
         } catch {
             if ($attempt -lt $MaxRetries) {
@@ -1022,23 +1378,23 @@ function Update-AgentImage {
             }
         }
     }
-    
+
     if (-not $pulled) {
-        Write-Host "  ⚠️  Warning: Could not pull latest image, using cached version" -ForegroundColor Yellow
+        Write-AgentMessage -Message "  ⚠️  Warning: Could not pull latest image, using cached version" -Color Yellow
     }
 }
 
 function Test-ContainerExists {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Exists is semantically correct for testing existence')]
     param([string]$ContainerName)
-    
-    $existing = Invoke-ContainerCli ps -a --filter "name=^${ContainerName}$" --format "{{.Names}}" 2>$null
+
+    $existing = Invoke-ContainerCli -CliArgs @('ps', '-a', '--filter', "name=^${ContainerName}$", '--format', '{{.Names}}') 2> $null
     return ($existing -eq $ContainerName)
 }
 
 function Get-ContainerStatus {
     param([string]$ContainerName)
-    $status = Invoke-ContainerCli inspect -f '{{.State.Status}}' $ContainerName 2>$null
+    $status = Invoke-ContainerCli -CliArgs @('inspect', '-f', '{{.State.Status}}', $ContainerName) 2> $null
     if ($status) { return $status } else { return "not-found" }
 }
 
@@ -1046,18 +1402,18 @@ function Push-ToLocal {
     param(
         [Parameter(Mandatory=$true)]
         [string]$ContainerName,
-        
+
         [Parameter(Mandatory=$false)]
         [switch]$SkipPush
     )
-    
+
     if ($SkipPush) {
-        Write-Host "⏭️  Skipping git push (--no-push specified)" -ForegroundColor Yellow
+        Write-AgentMessage -Message "⏭️  Skipping git push (--no-push specified)" -Color Yellow
         return
     }
-    
-    Write-Host "💾 Pushing changes to local remote..." -ForegroundColor Cyan
-    
+
+    Write-AgentMessage -Message "💾 Pushing changes to local remote..." -Color Cyan
+
     $pushScript = @'
 cd /workspace
 if [ -n "$(git status --porcelain)" ]; then
@@ -1077,118 +1433,123 @@ else
     echo "⚠️  Failed to push (may be up to date)"
 fi
 '@
-    
+
     $cli = Get-ContainerCli
     try {
-        $pushScript | & $cli exec -i $ContainerName bash 2>$null
+        $pushScript | & $cli exec -i $ContainerName bash 2> $null
         if ($LASTEXITCODE -ne 0) {
             throw "Push failed"
         }
     } catch {
-        Write-Host "⚠️  Could not push changes" -ForegroundColor Yellow
+        Write-AgentMessage -Message "⚠️  Could not push changes" -Color Yellow
     }
 }
 
 function Get-AgentContainers {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Returns multiple containers - plural is correct')]
     param()
-    
-    Invoke-ContainerCli ps -a --filter "label=coding-agents.type=agent" `
-        --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}"
+    $listArgs = @(
+        'ps',
+        '-a',
+        '--filter', 'label=coding-agents.type=agent',
+        '--format', 'table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}'
+    )
+    Invoke-ContainerCli -CliArgs $listArgs
 }
 
 function Get-ProxyContainer {
     param([string]$AgentContainer)
-    Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' $AgentContainer 2>$null
+    Invoke-ContainerCli -CliArgs @('inspect', '-f', '{{ index .Config.Labels "coding-agents.proxy-container" }}', $AgentContainer) 2> $null
 }
 
 function Get-ProxyNetwork {
     param([string]$AgentContainer)
-    Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' $AgentContainer 2>$null
+    Invoke-ContainerCli -CliArgs @('inspect', '-f', '{{ index .Config.Labels "coding-agents.proxy-network" }}', $AgentContainer) 2> $null
 }
 
 function Remove-ContainerWithSidecars {
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    [OutputType([bool])]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Removes multiple sidecars - plural is semantically correct')]
     param(
         [Parameter(Mandatory=$true)]
         [string]$ContainerName,
-        
+
         [Parameter(Mandatory=$false)]
         [switch]$SkipPush,
-        
+
         [Parameter(Mandatory=$false)]
         [switch]$KeepBranch
     )
-    
+
     if (-not $PSCmdlet.ShouldProcess($ContainerName, "Remove container and associated resources")) {
         return
     }
-    
+
     if (-not (Test-ContainerExists -ContainerName $ContainerName)) {
-        Write-Host "❌ Container '$ContainerName' does not exist" -ForegroundColor Red
+        Write-AgentMessage -Message "❌ Container '$ContainerName' does not exist" -Color Red
         return $false
     }
-    
+
     # Get container labels to find repo and branch info
-    $agentBranch = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' $ContainerName 2>$null
-    $repoPath = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' $ContainerName 2>$null
-    $localRemotePath = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.local-remote" }}' $ContainerName 2>$null
-    
+    $agentBranch = Invoke-ContainerCli -CliArgs @('inspect', '-f', '{{ index .Config.Labels "coding-agents.branch" }}', $ContainerName) 2> $null
+    $repoPath = Invoke-ContainerCli -CliArgs @('inspect', '-f', '{{ index .Config.Labels "coding-agents.repo-path" }}', $ContainerName) 2> $null
+    $localRemotePath = Invoke-ContainerCli -CliArgs @('inspect', '-f', '{{ index .Config.Labels "coding-agents.local-remote" }}', $ContainerName) 2> $null
+
     # Push changes first
     if ((Get-ContainerStatus $ContainerName) -eq "running") {
         Push-ToLocal -ContainerName $ContainerName -SkipPush:$SkipPush
     }
-    
+
     # Get associated resources
     $proxyContainer = Get-ProxyContainer $ContainerName
     $proxyNetwork = Get-ProxyNetwork $ContainerName
-    
+
     # Remove main container
-    Write-Host "🗑️  Removing container: $ContainerName" -ForegroundColor Cyan
-    Invoke-ContainerCli rm -f $ContainerName 2>$null | Out-Null
-    
+    Write-AgentMessage -Message "🗑️  Removing container: $ContainerName" -Color Cyan
+    Invoke-ContainerCli -CliArgs @('rm', '-f', $ContainerName) 2> $null | Out-Null
+
     # Remove proxy if exists
     if ($proxyContainer -and (Test-ContainerExists $proxyContainer)) {
-        Write-Host "🗑️  Removing proxy: $proxyContainer" -ForegroundColor Cyan
-        Invoke-ContainerCli rm -f $proxyContainer 2>$null | Out-Null
+        Write-AgentMessage -Message "🗑️  Removing proxy: $proxyContainer" -Color Cyan
+        Invoke-ContainerCli -CliArgs @('rm', '-f', $proxyContainer) 2> $null | Out-Null
     }
-    
+
     # Remove network if exists and no containers attached
     if ($proxyNetwork) {
-        $attached = Invoke-ContainerCli network inspect -f '{{range .Containers}}{{.Name}} {{end}}' $proxyNetwork 2>$null
+        $attached = Invoke-ContainerCli -CliArgs @('network', 'inspect', '-f', '{{range .Containers}}{{.Name}} {{end}}', $proxyNetwork) 2> $null
         if (-not $attached) {
-            Write-Host "🗑️  Removing network: $proxyNetwork" -ForegroundColor Cyan
-            Invoke-ContainerCli network rm $proxyNetwork 2>$null | Out-Null
+            Write-AgentMessage -Message "🗑️  Removing network: $proxyNetwork" -Color Cyan
+            Invoke-ContainerCli -CliArgs @('network', 'rm', $proxyNetwork) 2> $null | Out-Null
         }
     }
 
     if ($agentBranch -and $repoPath -and (Test-Path $repoPath) -and $localRemotePath) {
-        Write-Host ""
-        Write-Host "🔄 Syncing agent branch back to host repository..." -ForegroundColor Cyan
+        Write-AgentMessage -Message ""
+        Write-AgentMessage -Message "🔄 Syncing agent branch back to host repository..." -Color Cyan
         Sync-LocalRemoteToHost -RepoPath $repoPath -LocalRemotePath $localRemotePath -AgentBranch $agentBranch
     }
-    
+
     # Clean up agent branch in host repo if applicable
     if (-not $KeepBranch -and $agentBranch -and $repoPath -and (Test-Path $repoPath)) {
-        Write-Host ""
-        Write-Host "🌿 Cleaning up agent branch: $agentBranch" -ForegroundColor Cyan
-        
+        Write-AgentMessage -Message ""
+        Write-AgentMessage -Message "🌿 Cleaning up agent branch: $agentBranch" -Color Cyan
+
         if (Test-BranchExists -RepoPath $repoPath -BranchName $agentBranch) {
             # Check if branch has unpushed work
             Push-Location $repoPath
             try {
-                $currentBranch = git branch --show-current 2>$null
+                $currentBranch = git branch --show-current 2> $null
                 $unmergedCommits = Get-UnmergedCommits -RepoPath $repoPath -BaseBranch $currentBranch -CompareBranch $agentBranch
-                
+
                 if ($unmergedCommits) {
-                    Write-Host "   ⚠️  Branch has unmerged commits - keeping branch" -ForegroundColor Yellow
-                    Write-Host "   Manually merge or delete: git branch -D $agentBranch" -ForegroundColor Gray
+                    Write-AgentMessage -Message "   ⚠️  Branch has unmerged commits - keeping branch" -Color Yellow
+                    Write-AgentMessage -Message "   Manually merge or delete: git branch -D $agentBranch" -Color Gray
                 } else {
                     if (Remove-GitBranch -RepoPath $repoPath -BranchName $agentBranch -Force) {
-                        Write-Host "   ✅ Agent branch removed" -ForegroundColor Green
+                        Write-AgentMessage -Message "   ✅ Agent branch removed" -Color Green
                     } else {
-                        Write-Host "   ⚠️  Could not remove agent branch" -ForegroundColor Yellow
+                        Write-AgentMessage -Message "   ⚠️  Could not remove agent branch" -Color Yellow
                     }
                 }
             } finally {
@@ -1196,9 +1557,9 @@ function Remove-ContainerWithSidecars {
             }
         }
     }
-    
-    Write-Host ""
-    Write-Host "✅ Cleanup complete" -ForegroundColor Green
+
+    Write-AgentMessage -Message ""
+    Write-AgentMessage -Message "✅ Cleanup complete" -Color Green
     return $true
 }
 
@@ -1206,62 +1567,65 @@ function Initialize-SquidProxy {
     param(
         [Parameter(Mandatory=$true)]
         [string]$NetworkName,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$ProxyContainer,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$ProxyImage,
-        
+
         [Parameter(Mandatory=$true)]
         [string]$AgentContainer,
-        
+
         [Parameter(Mandatory=$false)]
         [string]$SquidAllowedDomains = "*.github.com,*.githubcopilot.com,*.nuget.org"
     )
-    
+
     # Validate inputs
     if (-not (Test-ValidContainerName $ProxyContainer)) {
-        Write-Host "❌ Error: Invalid proxy container name: $ProxyContainer" -ForegroundColor Red
+        Write-AgentMessage -Message "❌ Error: Invalid proxy container name: $ProxyContainer" -Color Red
         throw "Invalid proxy container name"
     }
-    
+
     if ([string]::IsNullOrWhiteSpace($SquidAllowedDomains)) {
-        Write-Host "⚠️  Warning: No allowed domains specified for proxy" -ForegroundColor Yellow
+        Write-AgentMessage -Message "⚠️  Warning: No allowed domains specified for proxy" -Color Yellow
         $SquidAllowedDomains = "*.github.com"
     }
-    
+
     # Create network if needed
-    $networkExists = Invoke-ContainerCli network inspect $NetworkName 2>$null
+    $networkExists = Invoke-ContainerCli -CliArgs @('network', 'inspect', $NetworkName) 2> $null
     if (-not $networkExists) {
-        Invoke-ContainerCli network create $NetworkName | Out-Null
+        Invoke-ContainerCli -CliArgs @('network', 'create', $NetworkName) | Out-Null
     }
-    
+
     # Check if proxy exists
     if (Test-ContainerExists $ProxyContainer) {
         $state = Get-ContainerStatus $ProxyContainer
         if ($state -ne "running") {
-            Invoke-ContainerCli start $ProxyContainer | Out-Null
+            Invoke-ContainerCli -CliArgs @('start', $ProxyContainer) | Out-Null
         }
     } else {
         # Create new proxy
-        Invoke-ContainerCli run -d `
-            --name $ProxyContainer `
-            --hostname $ProxyContainer `
-            --network $NetworkName `
-            --restart unless-stopped `
-            -e "SQUID_ALLOWED_DOMAINS=$SquidAllowedDomains" `
-            --label "coding-agents.proxy-of=$AgentContainer" `
-            --label "coding-agents.proxy-image=$ProxyImage" `
-            $ProxyImage | Out-Null
+        $proxyArgs = @(
+            'run', '-d',
+            '--name', $ProxyContainer,
+            '--hostname', $ProxyContainer,
+            '--network', $NetworkName,
+            '--restart', 'unless-stopped',
+            '-e', "SQUID_ALLOWED_DOMAINS=$SquidAllowedDomains",
+            '--label', "coding-agents.proxy-of=$AgentContainer",
+            '--label', "coding-agents.proxy-image=$ProxyImage",
+            $ProxyImage
+        )
+        Invoke-ContainerCli -CliArgs $proxyArgs | Out-Null
     }
 }
 
 function New-RepoSetupScript {
     [CmdletBinding()]
+    [OutputType([string])]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification='Returns a string script - does not execute anything')]
     param()
-    
     return @'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -1285,7 +1649,7 @@ else
     echo "📁 Copying repository from host..."
     cp -a /tmp/source-repo/. "$TARGET_DIR/"
     cd "$TARGET_DIR"
-    
+
     # Configure local remote
     if [ -n "$LOCAL_REMOTE_URL" ]; then
         if git remote get-url local >/dev/null 2>&1; then
@@ -1338,7 +1702,7 @@ function Sync-LocalRemoteToHost {
         return
     }
 
-    $branchExists = git --git-dir=$LocalRemotePath rev-parse --verify --quiet "refs/heads/$AgentBranch" 2>$null
+    git --git-dir=$LocalRemotePath rev-parse --verify --quiet "refs/heads/$AgentBranch" 2> $null | Out-Null
     if (-not $?) {
         return
     }
@@ -1346,47 +1710,51 @@ function Sync-LocalRemoteToHost {
     Push-Location $RepoPath
     try {
         $tempRef = "refs/coding-agents-sync/$AgentBranch" -replace ' ', '-'
-        if (-not (git fetch $LocalRemotePath "${AgentBranch}:$tempRef" 2>$null)) {
+        git fetch $LocalRemotePath "${AgentBranch}:$tempRef" 2> $null | Out-Null
+        if (-not $?) {
             Write-Warning "Failed to fetch agent branch from secure remote"
             return
         }
 
-        $fetchedSha = git rev-parse $tempRef 2>$null
+        $fetchedSha = git rev-parse $tempRef 2> $null
         if (-not $?) { return }
 
-        $currentBranch = git branch --show-current 2>$null
-        $hostHasBranch = git show-ref --verify --quiet "refs/heads/$AgentBranch" 2>$null
+        $currentBranch = git branch --show-current 2> $null
+        $hostHasBranch = git show-ref --verify --quiet "refs/heads/$AgentBranch" 2> $null
         $hostHasBranch = $?
 
         if ($hostHasBranch) {
             if ($currentBranch -eq $AgentBranch) {
-                $worktreeState = git status --porcelain 2>$null
+                $worktreeState = git status --porcelain 2> $null
                 if ($worktreeState) {
                     Write-Warning "Working tree dirty on $AgentBranch; skipped auto-sync"
                 } else {
-                    if (git merge --ff-only $tempRef 2>$null) {
-                        Write-Host "✅ Host branch '$AgentBranch' fast-forwarded from secure remote"
+                    git merge --ff-only $tempRef 2> $null | Out-Null
+                    if ($?) {
+                        Write-AgentMessage -Message "✅ Host branch '$AgentBranch' fast-forwarded from secure remote"
                     } else {
                         Write-Warning "Unable to fast-forward '$AgentBranch' (merge required)"
                     }
                 }
             } else {
-                if (git update-ref "refs/heads/$AgentBranch" $fetchedSha 2>$null) {
-                    Write-Host "✅ Host branch '$AgentBranch' updated from secure remote"
+                git update-ref "refs/heads/$AgentBranch" $fetchedSha 2> $null | Out-Null
+                if ($?) {
+                    Write-AgentMessage -Message "✅ Host branch '$AgentBranch' updated from secure remote"
                 } else {
                     Write-Warning "Failed to update branch '$AgentBranch'"
                 }
             }
         } else {
-            if (git branch $AgentBranch $tempRef 2>$null) {
-                Write-Host "✅ Created branch '$AgentBranch' from secure remote"
+            git branch $AgentBranch $tempRef 2> $null | Out-Null
+            if ($?) {
+                Write-AgentMessage -Message "✅ Created branch '$AgentBranch' from secure remote"
             } else {
                 Write-Warning "Failed to create branch '$AgentBranch'"
             }
         }
     }
     finally {
-        git update-ref -d $tempRef 2>$null | Out-Null
+        git update-ref -d $tempRef 2> $null | Out-Null
         Pop-Location
     }
 }

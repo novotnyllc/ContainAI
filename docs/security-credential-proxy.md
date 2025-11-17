@@ -291,6 +291,21 @@ Required before deployment:
 - `bash` 4.0+
 - Standard Unix utilities (cut, grep, timeout)
 
+#### Host Security Preflight
+
+The same launcher checks that guard the secret broker also protect the credential proxy:
+
+```mermaid
+flowchart LR
+   prerequisiteCheck["verify_host_security_prereqs"] --> runtimeCheck["verify_container_security_support"] --> proxyStart["Start git-credential proxy"]
+
+   classDef stage fill:#d4edda,stroke:#28a745,color:#111;
+   class prerequisiteCheck,runtimeCheck,proxyStart stage;
+```
+
+- If AppArmor or seccomp are missing, the launcher halts before exposing the socket, preventing unconfined containers from connecting.
+- Export `CODING_AGENTS_DISABLE_APPARMOR=1` or `CODING_AGENTS_DISABLE_SECCOMP=1` only if you intentionally accept the reduced guarantees; the launcher logs these overrides for later review.
+
 ### Starting the Server
 
 Server auto-starts when launching container:

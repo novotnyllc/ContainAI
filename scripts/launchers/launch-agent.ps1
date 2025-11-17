@@ -59,6 +59,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "launch-agent"
 
+if (-not (Test-HostSecurityPrereqs -RepoRoot $RepoRoot)) {
+    exit 1
+}
+
 $TrustedPaths = @("scripts/launchers", "scripts/runtime", "docker/profiles")
 Test-TrustedPathsClean -RepoRoot $RepoRoot -Paths $TrustedPaths -Label "launcher + helper files" -ThrowOnFailure | Out-Null
 $LauncherHeadHash = Get-GitHeadHash -RepoRoot $RepoRoot
@@ -105,6 +109,10 @@ if (-not (Test-DockerRunning)) {
 $ContainerCli = Get-ContainerCli
 if (-not $ContainerCli) {
     Write-Host "❌ Error: Unable to determine container runtime" -ForegroundColor Red
+    exit 1
+}
+
+if (-not (Test-ContainerSecuritySupport)) {
     exit 1
 }
 
@@ -470,6 +478,7 @@ if (Test-Path $rendererScript) {
                 $SessionConfigSha256 = ($hash | ForEach-Object { $_.ToString("x2") }) -join ""
                 $SessionConfigRendered = $true
                 Write-Host "🔐 Session MCP config manifest: $SessionConfigSha256" -ForegroundColor Green
+                Write-SessionConfigEvent -SessionId $SessionId -ManifestSha $SessionConfigSha256 -RepoRoot $RepoRoot -TrustedHashes $TrustedTreeHashes
                 $serversFile = Join-Path $SessionConfigOutput "servers.txt"
                 if (Test-Path $serversFile) {
                     try {
@@ -498,6 +507,7 @@ if (-not (Test-SecretBrokerReady)) {
 }
 
 $brokerCapabilityDir = Join-Path $SessionConfigOutput "capabilities"
+$env:CODING_AGENTS_SESSION_CONFIG_SHA256 = if ($SessionConfigSha256) { $SessionConfigSha256 } else { "" }
 if (-not (Invoke-SessionCapabilityIssue -SessionId $SessionId -OutputDir $brokerCapabilityDir -Stubs $BrokerStubs)) {
     Write-Host "❌ Failed to issue session capability tokens" -ForegroundColor Red
     exit 1

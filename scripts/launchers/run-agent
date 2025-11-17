@@ -11,6 +11,10 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 maybe_check_launcher_updates "$REPO_ROOT" "run-agent"
 
+if ! verify_host_security_prereqs "$REPO_ROOT"; then
+    exit 1
+fi
+
 # Default values
 AGENT=""
 SOURCE="."
@@ -178,6 +182,9 @@ esac
 
 # Check Docker
 check_docker_running || exit 1
+if ! verify_container_security_support; then
+    exit 1
+fi
 CONTAINER_CLI=$(get_active_container_cmd)
 
 # Determine if source is URL or local path

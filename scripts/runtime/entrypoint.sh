@@ -6,6 +6,81 @@ AGENT_UID=$(id -u "$AGENT_USERNAME" 2>/dev/null || echo 1000)
 AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo 1000)
 BASEFS_DIR="${CODING_AGENTS_BASEFS:-/opt/coding-agents/basefs}"
 TOOLCACHE_DIR="${CODING_AGENTS_TOOLCACHE:-/toolcache}"
+PTRACE_SCOPE_VALUE="${CODING_AGENTS_PTRACE_SCOPE:-3}"
+CAP_TMPFS_SIZE="${CODING_AGENTS_CAP_TMPFS_SIZE:-16m}"
+
+is_mountpoint() {
+    local path="$1"
+    if command -v mountpoint >/dev/null 2>&1; then
+        mountpoint -q "$path"
+        return $?
+    fi
+    grep -qs "[[:space:]]$path[[:space:]]" /proc/mounts
+}
+
+enforce_ptrace_scope() {
+    local target="$PTRACE_SCOPE_VALUE"
+    if [ "${CODING_AGENTS_DISABLE_PTRACE_SCOPE:-0}" = "1" ]; then
+        return
+    fi
+    if [ ! -w /proc/sys/kernel/yama/ptrace_scope ]; then
+        echo "⚠️  ptrace_scope not writable; skipping" >&2
+        return
+    fi
+    if command -v sysctl >/dev/null 2>&1; then
+        if sysctl -w kernel.yama.ptrace_scope="$target" >/dev/null 2>&1; then
+            echo "🔒 kernel.yama.ptrace_scope set to $target"
+            return
+        fi
+    fi
+    if echo "$target" >/proc/sys/kernel/yama/ptrace_scope 2>/dev/null; then
+        echo "🔒 kernel.yama.ptrace_scope set to $target"
+    else
+        echo "⚠️  Failed to set kernel.yama.ptrace_scope" >&2
+    fi
+}
+
+harden_proc_visibility() {
+    if [ "${CODING_AGENTS_DISABLE_PROC_HARDENING:-0}" = "1" ]; then
+        return
+    fi
+    local group="${CODING_AGENTS_PROC_GROUP:-agentproc}"
+    if ! getent group "$group" >/dev/null 2>&1; then
+        if ! groupadd --system "$group" >/dev/null 2>&1; then
+            echo "⚠️  Unable to create $group group for /proc hardening" >&2
+            return
+        fi
+    fi
+    usermod -a -G "$group" "$AGENT_USERNAME" >/dev/null 2>&1 || true
+    local gid
+    gid=$(getent group "$group" | awk -F: '{print $3}')
+    if [ -z "$gid" ]; then
+        echo "⚠️  Failed to resolve GID for $group" >&2
+        return
+    fi
+    if mount -o remount,hidepid=2,gid="$gid" /proc >/dev/null 2>&1; then
+        echo "🔒 /proc remounted with hidepid=2 (group $group)"
+    else
+        echo "⚠️  Unable to remount /proc with hidepid=2" >&2
+    fi
+}
+
+prepare_sensitive_tmpfs() {
+    local path="$1"
+    local size="${2:-16m}"
+    if [ "${CODING_AGENTS_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
+        return
+    fi
+    mkdir -p "$path"
+    if ! is_mountpoint "$path"; then
+        if ! mount -t tmpfs -o "size=$size,nosuid,nodev,noexec,mode=700" tmpfs "$path" >/dev/null 2>&1; then
+            echo "⚠️  Failed to mount tmpfs at $path" >&2
+        fi
+    else
+        mount -o remount,nosuid,nodev,noexec,mode=700 "$path" >/dev/null 2>&1 || true
+    fi
+    chown "$AGENT_UID:$AGENT_GID" "$path" 2>/dev/null || true
+}
 
 ensure_dir_owned() {
     local path="$1"
@@ -114,6 +189,9 @@ prepare_rootfs_mounts() {
 
 if [ "$(id -u)" -eq 0 ]; then
     prepare_rootfs_mounts
+    enforce_ptrace_scope
+    harden_proc_visibility
+    prepare_sensitive_tmpfs "/home/${AGENT_USERNAME}/.config/coding-agents/capabilities" "$CAP_TMPFS_SIZE"
     if command -v gosu >/dev/null 2>&1; then
         exec gosu "$AGENT_USERNAME" /usr/local/bin/entrypoint.sh "$@"
     elif command -v sudo >/dev/null 2>&1; then

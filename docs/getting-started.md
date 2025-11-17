@@ -440,7 +440,15 @@ where.exe run-copilot  # Windows
 
 ## Step 9: First Launch
 
-Time to launch your first coding agent!
+Time to launch your first coding agent! Before any container starts, the launcher automatically verifies host security requirements and seeds the secret broker.
+
+```mermaid
+flowchart LR
+   launcher["launch-agent / run-<agent>"] --> hostCheck["Host security preflight"] --> brokerInit["Secret broker auto-init"] --> container["Container start"]
+
+   classDef stage fill:#d4edda,stroke:#28a745,color:#111;
+   class launcher,hostCheck,brokerInit,container stage;
+```
 
 ### Quick Launch (Ephemeral)
 

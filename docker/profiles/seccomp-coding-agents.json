@@ -250,10 +250,8 @@
 				"pselect6",
 				"pselect6_time64",
 				"pwrite64",
-				"pwritev",
 				"pwritev2",
 				"read",
-				"readahead",
 				"readlink",
 				"readlinkat",
 				"readv",
@@ -395,17 +393,6 @@
 				"writev"
 			],
 			"action": "SCMP_ACT_ALLOW"
-		},
-		{
-			"names": [
-				"process_vm_readv",
-				"process_vm_writev",
-				"ptrace"
-			],
-			"action": "SCMP_ACT_ALLOW",
-			"includes": {
-				"minKernel": "4.8"
-			}
 		},
 		{
 			"names": [

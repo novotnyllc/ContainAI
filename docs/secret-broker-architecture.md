@@ -20,6 +20,22 @@ This document explains how Coding Agents restricts access to long-lived credenti
 | MCP Stub Wrappers | Trusted binaries inside container | Immutable helpers responsible for redeeming capabilities and launching MCPs.
 | Squid proxy | Shared service | Provides egress filtering/logging only; never stores credentials.
 
+## Automatic Initialization & Health Guarantees
+
+The broker no longer needs a manual `secret-broker.py init` step. Any launcher command that issues, stores, redeems, or health-checks secrets triggers `_ensure_broker_files`, which performs the following idempotent operations:
+
+```mermaid
+flowchart TB
+    start["Launcher / Broker CLI"] --> ensureDir["Create broker.d directory (chmod 700)"] --> keyStore["Seed keys.json (per stub HMAC keys)"] --> stateFile["Seed state.json (rate limits + used tokens)"] --> secretsFile["Seed secrets.json (sealed store)"] --> lock["Optionally chattr +i for immutability"]
+
+    classDef stage fill:#d4edda,stroke:#28a745,color:#111;
+    class start,ensureDir,keyStore,stateFile,secretsFile,lock stage;
+```
+
+- Existing files are preserved; missing stubs silently gain keys so new MCP helpers can be added via config alone.
+- `secret-broker.py health` and launcher audit hooks rely on the same helper to confirm the files exist before continuing, ensuring drift or accidental deletion is caught immediately.
+- Because initialization happens lazily, CI and developers never have to remember a bootstrap command—running any launcher is enough.
+
 ## Launch-Time Capability Provisioning
 
 ```mermaid
@@ -40,6 +56,8 @@ sequenceDiagram
     Note over Container: No untrusted code has run yet&#59; only launcher and stubs exist
 ```
 
+This sequence only runs after the host and container runtimes pass the security preflight described in `docs/architecture.md`. If seccomp/AppArmor cannot be guaranteed, the broker never receives a capability request, preventing secrets from leaving the host.
+
 Key points:
 
 - Capability tokens encode session ID, target stub hash, cgroup/pid namespace, and expiry.
@@ -53,7 +71,7 @@ Key points:
 
 1. Read `config.toml` plus CLI overrides on the host.
 2. Merge runtime facts (session ID, network mode, tmpfs mount points, capability token paths).
-3. Write the merged config into the agent tmpfs (`nosuid,nodev,noexec,0700`) and record its SHA256 in the broker log for traceability.
+3. Write the merged config into the agent tmpfs (`nosuid,nodev,noexec,0700`) and record its SHA256 in the audit log (`session-config` event) for traceability.
 4. Pass the config path to the agent entrypoint. Because it is generated anew each launch, changes to `config.toml` are picked up automatically without relaxing integrity checks on trusted scripts.
 
 ## Mutual Authentication & Session-Derived Secrets
@@ -71,6 +89,23 @@ Key points:
 - **Rate limiting & watchdog** – The broker enforces per-session capability quotas and exponential backoff on repeated failures; a host-side watchdog halts new launches if the broker exits, loses its seccomp/AppArmor profiles, or detects tampering with the shared-key store.
 - **Immutable audit trail** – Issuance events (including generated config SHA256, git tree hash, capability IDs) are logged to `journald` with persistent storage and mirrored to an append-only file. Optional off-host shipping (scp/HTTPS) provides tamper-evident history.
 - **Dev overrides** – If developers need to run with modified launchers/stubs, they create a host-only override token (e.g., `~/.config/coding-agents/overrides/allow-dirty`). Launcher requires the token and logs its use so deviations are explicit.
+
+### Helper Sandbox Policies
+
+- **Network policy:** Helper runners default to `--network none`, exposing only loopback IPC. Override with `CODING_AGENTS_HELPER_NETWORK_POLICY=host|bridge|<docker-network>` if a specific helper truly requires egress.
+- **Tmpfs isolation:** `/tmp` and `/var/tmp` inside helper containers are tmpfs mounts (`nosuid,nodev,noexec`) sized 64MB/32MB to prevent secrets from ever touching disk.
+- **Resource clamps:** `CODING_AGENTS_HELPER_PIDS_LIMIT` (default `64`) and `CODING_AGENTS_HELPER_MEMORY` (default `512m`) bound helper processes so compromised helpers cannot starve the host.
+- **Seccomp/AppArmor parity:** `resolve_seccomp_profile_path` injects the same ptrace-denying profile used by the main agent, and AppArmor (when available) assigns helpers to the `coding-agents` profile to block filesystem escapes.
+
+### Audit Trail & Override Workflow
+
+- **Log location:** Unless overridden via `CODING_AGENTS_AUDIT_LOG`, launchers append newline-delimited JSON to `~/.config/coding-agents/security-events.log` and mirror each event to `systemd-cat -t coding-agents-launcher`.
+- **Event taxonomy:**
+    - `session-config` – session ID, manifest SHA256, git `HEAD`, trusted tree hashes
+    - `capabilities-issued` – session ID, requested stubs, capability IDs emitted by the broker
+    - `override-used` – repo path, label, and list of trusted files that were dirty when the override token was honored
+- **Operational use:** Tail the file during development (`tail -f ~/.config/coding-agents/security-events.log`) to capture manifest hashes for change-management tickets, or feed it into your SIEM/log shipper.
+- **Override tokens:** A launch only succeeds on dirty trusted files if `~/.config/coding-agents/overrides/allow-dirty` (configurable via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`) exists. Deleting the token immediately restores strict enforcement, and every use is auditable via the log above.
 
 ## Secret Redemption and MCP Launch Flow
 
