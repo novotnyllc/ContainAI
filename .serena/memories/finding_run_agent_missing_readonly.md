@@ -1,1 +1,0 @@
-Run-agent (scripts/launchers/run-agent + run-agent.ps1) enforces memory-swap but still lacks --read-only roots, tmpfs mounts for /tmp or package caches, and seccomp/AppArmor opts. Package managers write directly into the root filesystem, so readonly enforcement cannot be turned on yet. Needs the same writable whitelist implementation planned for RB-04.
