@@ -609,6 +609,7 @@ if ($gpgSigningEnabled -and -not (Test-Path $gpgSocketPath -PathType Leaf)) {
 # Final args
 $dockerArgs += "-w", "/workspace"
 $dockerArgs += "--network", $NetworkMode
+$dockerArgs += "--cap-drop=ALL"
 $dockerArgs += "--security-opt", "no-new-privileges:true"
 
 # Add resource limits

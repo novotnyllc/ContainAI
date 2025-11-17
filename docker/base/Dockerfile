@@ -159,6 +159,7 @@ COPY --chown=root:root scripts/runtime/git-credential-proxy-server.sh /usr/local
 COPY --chown=root:root scripts/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
 COPY --chown=root:root scripts/runtime/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
 COPY --chown=root:root scripts/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
+COPY --chown=root:root scripts/runtime/git-safe-operation.sh /usr/local/bin/git-safe-operation
 COPY --chown=root:root scripts/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
 RUN chmod +x \
     /usr/local/bin/agent-session \
@@ -169,6 +170,7 @@ RUN chmod +x \
     /usr/local/bin/gpg-host-proxy.sh \
     /usr/local/bin/gpg-proxy-server.sh \
     /usr/local/bin/setup-mcp-configs.sh \
+    /usr/local/bin/git-safe-operation \
     /usr/local/bin/convert-toml-to-mcp.py
 
 # Install GitHub CLI

@@ -4,14 +4,42 @@ This document outlines security considerations for using and contributing to the
 
 ## Security Model
 
+### Safe-Unrestricted Mode (Default)
+
+The default "unrestricted" mode provides powerful agent capabilities while maintaining strong security through structural controls rather than constant prompts. This mode is designed to be safe enough for daily use with untrusted code.
+
+**Key Safety Properties:**
+- ✅ **Host isolation:** Container cannot access or modify host filesystem or Docker daemon
+- ✅ **Capability hardening:** All Linux capabilities dropped, no privilege escalation possible
+- ✅ **Network filtering:** Squid proxy blocks private IPs, cloud metadata, and non-allowlisted domains
+- ✅ **Branch isolation:** All changes confined to agent-specific branch for review
+- ✅ **Credential scoping:** Credentials are read-only and cannot be modified by agent
+- ✅ **Automatic snapshots:** Destructive git operations create restore points
+
+**Structural Defenses:**
+1. **Container hardening** - Non-root user, no privileged mode, capabilities dropped, no docker.sock
+2. **Network proxy** - Domain allowlist, private IP blocking, metadata endpoint blocking, rate limiting
+3. **Filesystem isolation** - Workspace only, no host mounts, ephemeral container
+4. **Branch isolation** - Agent changes require explicit user review before merge
+5. **Audit trail** - Git history, squid logs, auto-commit on shutdown
+
+**What Unrestricted Mode Cannot Prevent:**
+- ⚠️ Data exfiltration of visible credentials (inherent to agent functionality)
+- ⚠️ Code injection on agent branch (requires user review to merge)
+- ⚠️ Lateral movement using exposed credentials (limited by credential scope)
+
+See [Security Architecture Analysis](docs/security-architecture-analysis.md) for complete threat model and design details.
+
 ### Container Isolation
 
 Each AI coding agent runs in an isolated Docker container with:
 
 - **Non-root user:** All containers run as `agentuser` (UID 1000)
+- **All capabilities dropped:** `--cap-drop=ALL` removes all Linux capabilities
 - **No privilege escalation:** `--security-opt no-new-privileges:true` is always set
-- **Resource limits:** CPU and memory limits prevent resource exhaustion
-- **No Docker socket access:** Containers cannot control the Docker daemon
+- **Resource limits:** CPU, memory, and PID limits prevent resource exhaustion
+- **No Docker socket access:** Containers cannot control the Docker daemon or escape to host
+- **Automatic snapshots:** Git snapshots created before destructive operations via `git-safe-operation`
 
 ### Authentication & Credentials
 
@@ -45,15 +73,18 @@ run-copilot --network-proxy restricted
 - Agent can only access local files
 - Use for: Sensitive codebases, compliance requirements, offline work
 
-#### 3. Squid Proxy Mode
+#### 3. Squid Proxy Mode (Recommended Default)
 ```bash
 launch-agent copilot --network-proxy squid
 run-copilot --network-proxy squid
 ```
 - All HTTP/HTTPS traffic routed through monitored proxy
-- Domain whitelist enforced (configurable)
+- Domain allowlist enforced (configurable)
+- **Private IPs blocked:** 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+- **Cloud metadata blocked:** 169.254.169.254 (AWS/Azure/GCP)
+- **Rate limiting:** 10MB request size, 100MB response size
 - Full request logs available
-- Use for: Auditing, monitoring, investigating agent behavior
+- Use for: Safe unrestricted development with auditability
 
 **Squid proxy logs contain full URLs and may include sensitive data.** Review logs before sharing.
 
@@ -163,12 +194,20 @@ If an agent reads this file, it might interpret the comment as an instruction ra
 
 Even with prompt injection, agents **cannot**:
 
-- Escape the container (no privileged mode, no Docker socket)
-- Access your host filesystem (except mounted workspace)
+- Escape the container (no privileged mode, no Docker socket, capabilities dropped)
+- Access your host filesystem (except mounted workspace copy)
 - Modify authentication credentials (mounted read-only)
+- Make network requests to private IPs or cloud metadata endpoints (blocked by squid)
 - Make network requests in `restricted` mode
-- Bypass Squid whitelist in `squid` mode
-- Gain elevated privileges (no-new-privileges enforced)
+- Bypass Squid allowlist in `squid` mode
+- Gain elevated privileges (no-new-privileges enforced, all capabilities dropped)
+- Write to container root filesystem (if using read-only mode)
+
+**Automatic Safety Features:**
+- Git snapshots created before destructive operations (use `git-safe-operation` tool)
+- Branch isolation prevents accidental main branch corruption
+- Auto-commit on shutdown provides full audit trail
+- Read-only credential mounts prevent credential tampering
 
 ### Reporting Prompt Injection Issues
 
