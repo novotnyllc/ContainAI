@@ -9,24 +9,24 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not (Test-DockerRunning)) { exit 1 }
 $containerCli = Get-ContainerCli
 
-Write-Host "🤖 Active Agent Containers" -ForegroundColor Cyan
-Write-Host ""
+Write-Output "🤖 Active Agent Containers"
+Write-Output ""
 
 # Get all agent containers
 $containers = Invoke-ContainerCli ps -a --filter "label=coding-agents.type=agent" --format "{{.Names}}" 2>$null
 
 if (-not $containers) {
-    Write-Host "No agent containers found"
-    Write-Host ""
-    Write-Host "Launch an agent with:"
-    Write-Host "  run-copilot      # Quick launch in current directory"
-    Write-Host "  launch-agent     # Advanced launch with options"
+    Write-Output "No agent containers found"
+    Write-Output ""
+    Write-Output "Launch an agent with:"
+    Write-Output "  run-copilot      # Quick launch in current directory"
+    Write-Output "  launch-agent     # Advanced launch with options"
     exit 0
 }
 
 # Print header
-Write-Host ("{0,-30} {1,-15} {2,-20} {3,-30}" -f "NAME", "STATUS", "AGENT", "BRANCH") -ForegroundColor White
-Write-Host ("-" * 100)
+Write-Output ("{0,-30} {1,-15} {2,-20} {3,-30}" -f "NAME", "STATUS", "AGENT", "BRANCH")
+Write-Output ("-" * 100)
 
 # List each container
 foreach ($container in $containers) {
@@ -40,16 +40,16 @@ foreach ($container in $containers) {
     
     # Color code status
     $statusDisplay = switch ($status) {
-        "running" { "🟢 running"; $color = "Green" }
-        "exited" { "🔴 stopped"; $color = "Red" }
-        default { "⚪ $status"; $color = "Gray" }
+        "running" { "🟢 running" }
+        "exited" { "🔴 stopped" }
+        default { "⚪ $status" }
     }
     
-    Write-Host ("{0,-30} {1,-15} {2,-20} {3,-30}" -f $container, $statusDisplay, $agent, $branch) -ForegroundColor $color
+    Write-Output ("{0,-30} {1,-15} {2,-20} {3,-30}" -f $container, $statusDisplay, $agent, $branch)
 }
 
-Write-Host ""
-Write-Host "📋 Management Commands:" -ForegroundColor Cyan
-Write-Host "  $containerCli exec -it <name> bash     # Connect to container"
-Write-Host "  remove-agent <name>             # Remove container (with auto-push)"
-Write-Host "  remove-agent <name> --no-push   # Remove without pushing"
+Write-Output ""
+Write-Output "📋 Management Commands:"
+Write-Output "  $containerCli exec -it <name> bash     # Connect to container"
+Write-Output "  remove-agent <name>             # Remove container (with auto-push)"
+Write-Output "  remove-agent <name> --no-push   # Remove without pushing"

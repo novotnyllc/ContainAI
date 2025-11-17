@@ -45,11 +45,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ($Help) {
-    Write-Host "Usage: .\run-claude.ps1 [RepoPath] [OPTIONS]"
-    Write-Host ""
-    Write-Host "Launch Claude in an ephemeral supervised container." -ForegroundColor Cyan
-    Write-Host "Options mirror run-agent; see docs/cli-reference.md for full list." -ForegroundColor Gray
-    Write-Host "Example: .\run-claude.ps1 -Branch docs -NetworkProxy squid" -ForegroundColor Gray
+    @(
+        "Usage: .\run-claude.ps1 [RepoPath] [OPTIONS]",
+        "",
+        "Launch Claude in an ephemeral supervised container.",
+        "Options mirror run-agent; see docs/cli-reference.md for full list.",
+        "Example: .\run-claude.ps1 -Branch docs -NetworkProxy squid"
+    ) | ForEach-Object { Write-Output $_ }
     exit 0
 }
 

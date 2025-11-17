@@ -85,6 +85,7 @@ setup_test_repo() {
     git init -q
     git config user.name "Test User"
     git config user.email "test@example.com"
+    git config commit.gpgsign false
     git config remote.pushDefault local
     
     echo "# Test Repository" > README.md
@@ -311,6 +312,7 @@ test_local_remote_push() {
     pushd "$workspace_dir" >/dev/null
     git config user.name "Test User"
     git config user.email "test@example.com"
+    git config commit.gpgsign false
     echo "secure push" >> README.md
     git add README.md
     git commit -q -m "test push"
@@ -364,6 +366,7 @@ test_local_remote_fallback_push() {
     pushd "$workspace_dir" >/dev/null
     git config user.name "Test User"
     git config user.email "test@example.com"
+    git config commit.gpgsign false
     echo "fallback push" >> README.md
     git add README.md
     git commit -q -m "fallback push"
@@ -402,6 +405,7 @@ test_secure_remote_sync() {
     git init -q
     git config user.name "Agent"
     git config user.email "agent@example.com"
+    git config commit.gpgsign false
     echo "agent work" > agent.txt
     git add agent.txt
     git commit -q -m "agent commit"
