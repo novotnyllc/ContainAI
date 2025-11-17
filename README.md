@@ -15,6 +15,7 @@ Features include MCP server support for extended capabilities, automated git ope
 - **Detach & resume**: Built-in tmux sessions plus `connect-agent` let you drop and reconnect without stopping containers
 - **MCP servers**: GitHub, Microsoft Docs, Playwright, Context7, Serena, and more
 - **Network controls**: Restricted mode (`--network none`) or Squid proxy sidecar for monitoring
+- **Broker-enforced secrets**: Session manifests + `mcp-stub` wrappers keep MCP API keys off disk and scoped per container
 
 ## Quick Start (5 Minutes)
 
@@ -46,6 +47,8 @@ run-copilot                  # or run-codex / run-claude
 
 That's it! You're coding with AI in an isolated container.
 
+Behind the scenes the launcher hashed its own files, rendered a per-session MCP manifest on the host, asked the secret broker for sealed capability tokens, copied those artifacts into a tmpfs inside the container, and ensured every MCP server launches through the trusted `mcp-stub`. No raw API keys ever touch your workspace.
+
 **Learn more:** [Usage Guide](USAGE.md) | [Getting Started](docs/getting-started.md) | [Architecture](docs/architecture.md)
 
 ---
@@ -58,6 +61,7 @@ That's it! You're coding with AI in an isolated container.
 - Make sure `socat` is available on the host (used for credential/GPG proxies).
 - Keep using whatever Git credential helpers or SSH keys you already rely on—the container mounts them automatically.
 - If you use services such as GitHub Copilot, authenticate on the host the same way you normally would. No additional login is required inside the container.
+- (Optional) Create `~/.config/coding-agents/mcp-secrets.env` so the launcher can feed `render-session-config.py` and the secret broker without copying API keys into containers.
 - (Optional) Run `./scripts/verify-prerequisites.sh` (or the PowerShell equivalent) to confirm everything looks good.
 
 Images are pulled or built automatically the first time you run `run-*` or `launch-agent`. You only need the build scripts if you are developing custom images.
@@ -244,6 +248,13 @@ Unlike running agents directly on your machine:
 - ✅ **Clean**: Delete container when done, no leftovers
 - ✅ **Reproducible**: Same environment everywhere
 - ✅ **Connectable**: VS Code Remote works out of the box
+
+## Security Model Highlights
+
+- **Host-rendered manifests** – `render-session-config.py` hashes trusted launcher/runtime files, merges your `config.toml`, and records a manifest SHA256 before a container is created.
+- **Secret broker enforcement** – launchers stage API keys inside the broker, receive sealed capabilities, and copy them into `/run/coding-agents` (tmpfs). Only the trusted `mcp-stub` inside the container can redeem those capabilities.
+- **Tight threat boundaries** – secrets live either on the host or inside stub-owned tmpfs mounts. Even if an agent workspace is compromised, it cannot read the manifest, capability bundle, or broker socket.
+- **Legacy fallback logged** – the older `setup-mcp-configs.sh` converter still exists for compatibility, but it only runs if the host skips manifest rendering (which the launchers no longer do by default).
 
 ## Requirements
 

@@ -16,39 +16,50 @@ High-level design of the AI coding agents container system.
 flowchart TB
     subgraph host["HOST SYSTEM"]
         direction TB
-        auth["Authentication (OAuth)<br/>• ~/.config/gh/ (GitHub CLI)<br/>• ~/.config/github-copilot/ (Copilot)<br/>• ~/.config/codex/ (Codex)<br/>• ~/.config/claude/ (Claude)"]
-        secrets["MCP Secrets (Optional)<br/>• ~/.config/coding-agents/<br/>  └── mcp-secrets.env (API keys)"]
-        repo["Source Repository<br/>• /path/to/repo/"]
-        broker["Secret Broker<br/>• auto-initialized key/state store<br/>• per-session capabilities"]
+        auth["Authentication (OAuth)<br/>• ~/.config/gh/<br/>• ~/.config/github-copilot/<br/>• ~/.config/codex/<br/>• ~/.config/claude/"]
+        secrets["Secret Inputs<br/>• ~/.config/coding-agents/mcp-secrets.env<br/>• env overrides"]
+        repo["Source Repository<br/>• /path/to/repo"]
+        renderer["Session Renderer<br/>• render-session-config.py<br/>• hashes trusted trees<br/>• encodes stub manifests"]
+        broker["Secret Broker<br/>• per-stub shared keys<br/>• issues + redeems capabilities"]
     end
-    
-    launcher["launch-agent.ps1 / launch-agent<br/>• security preflight<br/>• capability issuance"]
-    
+
+    launcher["launch-agent / run-agent<br/>• security preflight<br/>• capability issuance<br/>• tmpfs + mount orchestration"]
+
     subgraph container["CONTAINER (isolated)"]
         direction TB
-        workspace["Workspace<br/>• /workspace/ (repo copy)<br/>  ├── config.toml (MCP config)<br/>  └── &lt;your code&gt;"]
-        
-        container_auth["Authentication (read-only mounts from host)<br/>• ~/.config/gh/ ────> (ro)<br/>• ~/.config/github-copilot/ ────> (ro)<br/>• ~/.config/codex/ ────> (ro)<br/>• ~/.config/claude/ ────> (ro)<br/>• ~/.mcp-secrets.env ────> (ro)"]
-        
-        git["Git Remotes<br/>• origin → GitHub<br/>• local → Host repo (default push)"]
-        
-        agents["Agents<br/>• GitHub Copilot CLI<br/>• OpenAI Codex<br/>• Anthropic Claude"]
-        
-        mcp["MCP Servers<br/>• GitHub<br/>• Microsoft Docs<br/>• Playwright<br/>• Context7<br/>• Serena<br/>• Sequential Thinking"]
+        workspace["Workspace (/workspace)<br/>• git clone/copy<br/>• user code only"]
+        tmpfs["Session tmpfs (/run/coding-agents)<br/>• stub specs<br/>• sealed capabilities<br/>• decrypted secrets"]
+        mcpstub["mcp-stub wrappers<br/>• broker-only secret redemption<br/>• launches MCP processes"]
+        agents["Agents (Copilot/Codex/Claude)"]
     end
-    
-    host --> launcher
+
+    auth --> renderer
+    secrets --> renderer
+    repo --> renderer
+    renderer --> launcher
     launcher --> broker
     broker --> launcher
     launcher --> container
-    
+    container -->|uses read-only mounts| auth
+    tmpfs --> mcpstub --> agents
+
     style host fill:#e1f5ff,stroke:#0366d6
     style container fill:#fff3cd,stroke:#856404
     style launcher fill:#d4edda,stroke:#28a745
     style broker fill:#d4edda,stroke:#28a745
 ```
 
-The launcher refuses to progress past the host if seccomp, AppArmor, ptrace scope, or tmpfs protections cannot be enforced. Once the host passes, the launcher requests per-session capability bundles from the secret broker, which creates its key store on demand the first time it is used.
+Launchers refuse to proceed if seccomp, AppArmor, ptrace scope, or tmpfs protections cannot be enforced. After the host passes all checks, `render-session-config.py` emits a signed manifest, stub specs, and capability requests. The secret broker produces sealed capability bundles for each MCP stub; those bundles are copied into the container’s private tmpfs before any untrusted workload starts. MCP binaries can only access secrets by invoking the trusted `mcp-stub` helper, which redeems a capability against the broker and injects decrypted values into stub-owned tmpfs.
+
+### Threat Boundaries
+
+| Zone | Examples | Trust Level | Guarantees |
+| --- | --- | --- | --- |
+| Host enclave | launchers, `render-session-config.py`, secret broker, audit logs | **Trusted** | Hash-verified scripts, seccomp/AppArmor enforced, never runs user code |
+| Session tmpfs | `/run/coding-agents`, capability directories, decrypted secrets | **Constrained** | Mounted `nosuid,nodev,noexec`, owned by stub-specific UIDs, cleared on exit |
+| Agent workspace | `/workspace`, user shells, MCP child processes | **Untrusted** | Read-only view of auth configs, cannot access tmpfs or broker sockets |
+
+Only the launcher can talk directly to the broker. Agent processes must call `mcp-stub`, which checks that the manifest hash, capability scope, and PID namespace match the session before opening a memfd with decrypted data. If any layer fails integrity checks, the broker refuses to stream secrets and the MCP launch aborts.
 
 ## Container Architecture
 
@@ -63,7 +74,7 @@ flowchart TB
     
     subgraph allagents["All-Agents Image"]
         direction TB
-        all_content["• coding-agents:local<br/>+ entrypoint.sh<br/>+ setup-mcp-configs.sh<br/>+ convert-toml-to-mcp.py"]
+        all_content["• coding-agents:local<br/>+ entrypoint.sh (session bootstrap)<br/>+ mcp-stub helper<br/>+ legacy setup-mcp-configs shim"]
     end
     
     subgraph base["Base Image"]
@@ -102,9 +113,9 @@ flowchart TB
 **Purpose:** Production-ready image with runtime scripts
 
 **Adds:**
-- `entrypoint.sh` - Container startup logic
-- `setup-mcp-configs.sh` - MCP config wrapper
-- `convert-toml-to-mcp.py` - TOML to JSON converter
+- `entrypoint.sh` – Container startup logic (enforces host-rendered manifest hashes, prepares tmpfs mounts)
+- `mcp-stub` – Broker-aware wrapper that redeems sealed capabilities before launching any MCP server
+- `setup-mcp-configs.sh` – Legacy converter kept for compatibility; new sessions rely on the host-rendered manifest but the shim remains while older images are phased out
 
 **Build time:** ~1 minute  
 **Size:** +50 MB
@@ -132,91 +143,62 @@ flowchart TB
 
 ### 0. Security Preflight
 
-Every launch begins with two guardrails:
+Each launcher refuses to touch secrets until the host proves it can enforce the required guardrails:
 
-1. `verify_host_security_prereqs` confirms seccomp/AppArmor profiles exist, ptrace scope can be hardened, and sensitive tmpfs mounts are enabled (or intentionally overridden via `CODING_AGENTS_DISABLE_*`).
-2. `verify_container_security_support` inspects `docker info` / `podman info` to ensure the runtime advertises seccomp + AppArmor enforcement.
+1. `verify_host_security_prereqs` confirms seccomp/AppArmor profiles exist, ptrace scope can be hardened, tmpfs enforcement is enabled, and the trusted file set (`scripts/launchers`, `scripts/runtime`, `docker/profiles`) matches `HEAD`.
+2. `verify_container_security_support` inspects `docker info` / `podman info` to ensure the runtime enforces the requested profiles.
 
 ```mermaid
 flowchart LR
     gitState["Git Integrity Check"] --> hostCheck["Host Prereqs"] --> runtimeCheck["Runtime Inspection"]
-    runtimeCheck --> brokerInit["Secret Broker Auto-Init"] --> containerStart["Container Create"]
+    runtimeCheck --> sessionRender["Render session manifest"] --> brokerInit["Secret broker issue/health"] --> containerStart["Container create"]
 
     classDef stage fill:#d4edda,stroke:#28a745,color:#111;
-    class gitState,hostCheck,runtimeCheck,brokerInit,containerStart stage;
+    class gitState,hostCheck,runtimeCheck,sessionRender,brokerInit,containerStart stage;
 ```
 
-### 1. User Runs launch-agent
+### 1. Session Rendering & Capability Issuance
 
-```powershell
-.\launch-agent.ps1 copilot C:\projects\myapp -b feature-x
-```
+Before any container spins up, `render-session-config.py` runs on the host:
 
-### 2. Script Detects Source Type
+- Reads repo-level `config.toml`, agent-specific overrides, and CLI flags.
+- Collects secrets from `~/.config/coding-agents/mcp-secrets.env` (plus overrides) without exposing them to the workspace.
+- Emits a session manifest with the session ID, network policy, trusted tree hashes, and per-stub wiring (servers, command lines, env placeholders).
+- Writes `servers.txt` and `stub-secrets.txt` so launchers know which MCP stubs need credentials.
 
-- **Local path:** Copies entire repo into container
-- **GitHub URL:** Clones repo into container
+The launcher then:
 
-### 3. Container Created with Mounts
+1. Stores required secret values inside the broker (`secret-broker.py store`).
+2. Requests sealed capabilities for every stub declared in the manifest.
+3. Records the manifest SHA256 and capability IDs in the audit log.
 
-```
-docker run -d \
-  --name copilot-myapp \
-  -e SOURCE_TYPE=local \
-  -e AGENT_BRANCH=copilot/feature-x \
-  -v ~/.config/gh:/home/agentuser/.config/gh:ro \
-  -v ~/.config/github-copilot:/home/agentuser/.config/github-copilot:ro \
-  -v ~/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro \
-  -v /tmp/source-repo:/tmp/source-repo:ro \
-  coding-agents-copilot:local \
-  sleep infinity
-```
+### 2. Container Creation
 
-### 4. Entrypoint Runs Setup
+With secrets staged, the launcher creates the container:
 
-Inside container:
+- Exposes repo/branch metadata via environment variables (`HOST_SESSION_ID`, `HOST_SESSION_CONFIG_ROOT`, `HOST_CAPABILITY_ROOT`).
+- Mounts `/run/coding-agents` as a dedicated tmpfs (`nosuid,nodev,noexec,mode=750`).
+- Copies the rendered manifest, per-agent MCP config JSON, and sealed capabilities into that tmpfs **before** any user code runs.
+- Mounts OAuth configs (`~/.config/gh`, `~/.config/github-copilot`, etc.) read-only, along with credential/GPG proxy sockets when available.
 
-```bash
-#!/bin/bash
-# entrypoint.sh
+### 3. Entrypoint & Stub Initialization
 
-# Copy repo to workspace
-cp -r /tmp/source-repo /home/agentuser/workspace
-cd /home/agentuser/workspace
+`entrypoint.sh` executes inside the container with the following responsibilities:
 
-# Setup git remotes
-git remote add origin <github-url>
-git remote add local <host-path>
-git config remote.pushDefault local
+1. Re-enforces ptrace scope, `/proc` hardening, and tmpfs ownership under `agentuser`.
+2. Verifies and installs the host-provided manifest + MCP configs under `~/.config/<agent>/mcp/`.
+3. Copies sealed capabilities into `/home/agentuser/.config/coding-agents/capabilities` (also tmpfs).
+4. Falls back to `setup-mcp-configs.sh` **only** if the host did not provide a manifest (legacy mode).
+5. Configures git credential + GPG proxies, dual remotes, and auto-commit hooks.
 
-# Create agent branch
-git checkout -b copilot/feature-x
+Actual MCP servers never see raw secrets. When Copilot/Codex/Claude launches a server, it invokes `/usr/local/bin/mcp-stub`. The stub selects the correct capability, asks the host broker to redeem it, receives the decrypted secret through a memfd, writes it inside its private tmpfs, and finally `exec`s the true MCP command.
 
-# Configure git credentials (gh CLI)
-git config --global credential.helper '!gh auth git-credential'
+### 4. Container Ready
 
-# Convert MCP config if exists
-if [ -f config.toml ]; then
-    /usr/local/bin/setup-mcp-configs.sh
-fi
-
-# Load MCP secrets
-if [ -f ~/.mcp-secrets.env ]; then
-    source ~/.mcp-secrets.env
-fi
-
-# Start agent
-exec "$@"
-```
-
-### 5. Container Ready
-
-- Running in background
-- Workspace at `/workspace`
-- Git configured with dual remotes
-- MCP servers configured
-- Secret broker capabilities + sealed secrets staged inside stub-specific tmpfs mounts
-- Connectable from VS Code
+- Workspace initialized at `/workspace` with isolated branch.
+- Agent session (tmux) started and ready for CLI or VS Code attachments.
+- `HOST_*` metadata allows runtime scripts to prove provenance back to the manifest hash.
+- Secrets remain inside tmpfs and disappear when the container stops.
 
 ## Authentication Flow
 
@@ -262,18 +244,24 @@ flowchart TB
 flowchart TB
     create["Host: create ~/.config/coding-agents/mcp-secrets.env"]
     populate["Host: add GITHUB_TOKEN, CONTEXT7_API_KEY, ..."]
-    mountSecret["Container: ~/.mcp-secrets.env (read-only)"]
-    sourceFile["Container: source ~/.mcp-secrets.env"]
-    envReady["Container: MCP servers read exported env vars"]
+    renderer["render-session-config.py resolves placeholders"]
+    brokerStore["Secret broker seals values per stub"]
+    tmpfsNode["Container tmpfs holds capabilities"]
+    stub["mcp-stub redeems + decrypts into stub-owned tmpfs"]
+    envReady["MCP server runs with injected env"]
 
-    create --> populate --> mountSecret --> sourceFile --> envReady
+    create --> populate --> renderer --> brokerStore --> tmpfsNode --> stub --> envReady
 
     style create fill:#e1f5ff,stroke:#0366d6
     style populate fill:#e1f5ff,stroke:#0366d6
-    style mountSecret fill:#fff3cd,stroke:#856404
-    style sourceFile fill:#d4edda,stroke:#28a745
+    style renderer fill:#fff3cd,stroke:#856404
+    style brokerStore fill:#fff3cd,stroke:#856404
+    style tmpfsNode fill:#d4edda,stroke:#28a745
+    style stub fill:#d4edda,stroke:#28a745
     style envReady fill:#d4edda,stroke:#28a745
 ```
+
+Secrets remain on the host and are never mounted into `/home/agentuser`. The manifest contains only encrypted placeholders; a compromised workspace cannot scrape plaintext API keys, and each stub only redeems the secrets it is scoped for.
 
 ## Git Workflow
 
@@ -318,27 +306,29 @@ Pattern: `<agent>/<feature>`
 
 ```mermaid
 flowchart TB
-  workspace["Workspace"]
-  configToml["config.toml (single source of truth)"]
-  setup["setup-mcp-configs.sh"]
-  convert["convert-toml-to-mcp.py"]
-  copilotCfg["~/.config/github-copilot/mcp/config.json"]
-  codexCfg["~/.config/codex/mcp/config.json"]
-  claudeCfg["~/.config/claude/mcp/config.json"]
+    workspace["Workspace"]
+    configToml["config.toml (single source of truth)"]
+    renderer["render-session-config.py<br/>(host)"]
+    manifest["Session manifest + stub spec<br/>/run/coding-agents"]
+    agentCfgs["Per-agent config.json<br/>~/.config/<agent>/mcp/"]
+    stub["mcp-stub"]
+    broker["Secret broker"]
+    mcp["MCP servers"]
 
-  workspace --> configToml --> setup --> convert
-  convert --> copilotCfg
-  convert --> codexCfg
-  convert --> claudeCfg
+    workspace --> configToml --> renderer --> manifest --> agentCfgs --> stub --> mcp
+    stub --> broker
 
-  style workspace fill:#e1f5ff,stroke:#0366d6
-  style configToml fill:#e1f5ff,stroke:#0366d6
-  style setup fill:#fff3cd,stroke:#856404
-  style convert fill:#fff3cd,stroke:#856404
-  style copilotCfg fill:#d4edda,stroke:#28a745
-  style codexCfg fill:#d4edda,stroke:#28a745
-  style claudeCfg fill:#d4edda,stroke:#28a745
+    style workspace fill:#e1f5ff,stroke:#0366d6
+    style configToml fill:#e1f5ff,stroke:#0366d6
+    style renderer fill:#fff3cd,stroke:#856404
+    style manifest fill:#fff3cd,stroke:#856404
+    style agentCfgs fill:#d4edda,stroke:#28a745
+    style stub fill:#d4edda,stroke:#28a745
+    style broker fill:#d4edda,stroke:#28a745
+    style mcp fill:#f8d7da,stroke:#721c24
 ```
+
+`render-session-config.py` now runs entirely on the host. It parses `config.toml`, expands `${VAR}` placeholders using secrets loaded from `~/.config/coding-agents/mcp-secrets.env`, and writes fully-resolved JSON configs for each agent into the session tmpfs. The container no longer needs to read your plaintext secrets file; only the manifest and sealed capabilities cross the boundary.
 
 ### Example config.toml
 
@@ -353,7 +343,7 @@ command = "npx"
 args = ["-y", "@upstash/context7-mcp"]
 env = { CONTEXT7_API_KEY = "${CONTEXT7_API_KEY}" }
 
-[mcp_servers.playwright]
+[mcp_servers.context7]
 command = "npx"
 args = ["-y", "@playwright/mcp@latest"]
 
@@ -370,21 +360,7 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 ```
 
-### Generated JSON (example)
-
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
-      }
-    }
-  }
-}
-```
+The renderer substitutes `${VAR}` placeholders before the configs enter the container. Secrets therefore exist only in two places: your encrypted host broker store and the stub-specific tmpfs mounted at `/run/coding-agents`. When an MCP server launches, `mcp-stub` injects the decrypted values into its private tmpfs and removes them as soon as the process exits.
 
 ## Multi-Agent Workflow
 

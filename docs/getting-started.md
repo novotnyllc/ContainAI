@@ -613,8 +613,8 @@ connect-agent
 Model Context Protocol (MCP) servers extend agent capabilities:
 
 1. See [MCP Setup Guide](mcp-setup.md)
-2. Create `~/.config/coding-agents/mcp-secrets.env`
-3. Add API keys for services you want to use
+2. Create `~/.config/coding-agents/mcp-secrets.env` (host-only; the launcher reads it before rendering each session)
+3. Add API keys for services you want to use (GitHub token required for GitHub MCP)
 
 ### Multiple Agents
 

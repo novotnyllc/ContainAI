@@ -87,6 +87,128 @@ $SessionConfigRendered = $false
 $SessionConfigRootInContainer = "/run/coding-agents"
 $DefaultBrokerStubs = @("github", "uno", "msftdocs", "playwright", "context7", "serena", "sequential-thinking", "fetch")
 $BrokerStubs = @($DefaultBrokerStubs)
+$Script:SessionStubSecrets = @{}
+$Script:McpSecretValues = @{}
+$Script:LoadedSecretFiles = New-Object 'System.Collections.Generic.HashSet[string]'
+
+function Import-StubSecretManifest {
+    param(
+        [string]$Path
+    )
+    if (-not (Test-Path $Path)) { return }
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $trimmed = ($line.Split('#')[0]).Trim()
+        if (-not $trimmed) { continue }
+        $parts = $trimmed -split '\s+'
+        if ($parts.Length -lt 2) { continue }
+        $stub = $parts[0]
+        $Script:SessionStubSecrets[$stub] = $parts[1..($parts.Length - 1)]
+    }
+}
+
+function Import-McpSecretValues {
+    param(
+        [string[]]$AdditionalPaths
+    )
+    $candidates = @()
+    if ($env:CODING_AGENTS_MCP_SECRETS_FILE) { $candidates += $env:CODING_AGENTS_MCP_SECRETS_FILE }
+    if ($env:MCP_SECRETS_FILE) { $candidates += $env:MCP_SECRETS_FILE }
+    if ($AdditionalPaths) { $candidates += $AdditionalPaths }
+    $candidates += @(
+        (Join-Path $HOME ".config/coding-agents/mcp-secrets.env"),
+        (Join-Path $HOME ".mcp-secrets.env")
+    )
+    foreach ($candidate in $candidates) {
+        if (-not $candidate) { continue }
+        $resolved = try { (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path } catch { $candidate }
+        if ($Script:LoadedSecretFiles.Contains($resolved)) { continue }
+        $Script:LoadedSecretFiles.Add($resolved) | Out-Null
+        if (-not (Test-Path $resolved)) { continue }
+        foreach ($line in Get-Content -LiteralPath $resolved) {
+            $raw = $line.Trim()
+            if (-not $raw -or $raw.StartsWith('#')) { continue }
+            if ($raw.StartsWith('export ')) { $raw = $raw.Substring(7).Trim() }
+            if (-not $raw.Contains('=')) { continue }
+            $pair = $raw.Split('=', 2)
+            $name = $pair[0].Trim()
+            $value = $pair[1].Trim()
+            if (-not $name) { continue }
+            if ($value.Length -ge 2 -and ((($value.StartsWith('"')) -and $value.EndsWith('"')) -or (($value.StartsWith("'")) -and $value.EndsWith("'")))) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+            if (-not $Script:McpSecretValues.ContainsKey($name)) {
+                $Script:McpSecretValues[$name] = $value
+            }
+        }
+    }
+}
+
+function Resolve-SecretValue {
+    param([string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
+    if ($Script:McpSecretValues.ContainsKey($Name)) {
+        return $Script:McpSecretValues[$Name]
+    }
+    $envValue = [Environment]::GetEnvironmentVariable($Name)
+    if ($envValue) {
+        $Script:McpSecretValues[$Name] = $envValue
+        return $envValue
+    }
+    return $null
+}
+
+function Store-StubSecrets {
+    param([string]$BrokerScript)
+    foreach ($stub in $Script:SessionStubSecrets.Keys) {
+        $names = $Script:SessionStubSecrets[$stub]
+        if (-not $names) { continue }
+        foreach ($name in $names) {
+            $value = Resolve-SecretValue -Name $name
+            if (-not $value) {
+                Write-Warning "⚠️  Missing secret '$name' for stub '$stub'"
+                continue
+            }
+            try {
+                $env:CODING_AGENTS_SECRET_VALUE = $value
+                if (-not (Invoke-PythonTool -ScriptPath $BrokerScript -ScriptArgs @("store", "--stub", $stub, "--name", $name, "--from-env", "CODING_AGENTS_SECRET_VALUE"))) {
+                    return $false
+                }
+            } finally {
+                Remove-Item Env:CODING_AGENTS_SECRET_VALUE -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    return $true
+}
+
+function Seal-StubCapabilities {
+    param(
+        [string]$BrokerScript,
+        [string]$CapabilityRoot
+    )
+    foreach ($stub in $Script:SessionStubSecrets.Keys) {
+        $names = $Script:SessionStubSecrets[$stub]
+        if (-not $names) { continue }
+        $capDir = Join-Path $CapabilityRoot $stub
+        if (-not (Test-Path $capDir)) {
+            Write-Warning "⚠️  Capability directory missing for stub '$stub'"
+            continue
+        }
+        $capFile = Get-ChildItem -LiteralPath $capDir -Filter *.json -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if (-not $capFile) {
+            Write-Warning "⚠️  No capability token found for stub '$stub'"
+            continue
+        }
+        $redeemArgs = @("redeem", "--capability", $capFile.FullName)
+        foreach ($name in $names) {
+            $redeemArgs += @("--secret", $name)
+        }
+        if (-not (Invoke-PythonTool -ScriptPath $BrokerScript -MountPaths @($CapabilityRoot) -ScriptArgs $redeemArgs)) {
+            return $false
+        }
+    }
+    return $true
+}
 
 # Auto-detect WSL home directory
 $WslHome = wsl bash -c 'echo $HOME' 2>$null
@@ -490,6 +612,10 @@ if (Test-Path $rendererScript) {
                         Write-Warning "⚠️  Failed to read server list for broker tokens: $_"
                     }
                 }
+                $stubSecretFile = Join-Path $SessionConfigOutput "stub-secrets.txt"
+                if (Test-Path $stubSecretFile) {
+                    Import-StubSecretManifest -Path $stubSecretFile
+                }
             } finally {
                 $sha.Dispose()
             }
@@ -506,11 +632,32 @@ if (-not (Test-SecretBrokerReady)) {
     exit 1
 }
 
+$brokerScript = Get-SecretBrokerScript
+if (-not $brokerScript) {
+    Write-Host "❌ Secret broker script not found" -ForegroundColor Red
+    exit 1
+}
+
+if ($SessionStubSecrets.Count -gt 0) {
+    Import-McpSecretValues
+    if (-not (Store-StubSecrets -BrokerScript $brokerScript)) {
+        Write-Host "❌ Failed to stage broker-managed secrets" -ForegroundColor Red
+        exit 1
+    }
+}
+
 $brokerCapabilityDir = Join-Path $SessionConfigOutput "capabilities"
 $env:CODING_AGENTS_SESSION_CONFIG_SHA256 = if ($SessionConfigSha256) { $SessionConfigSha256 } else { "" }
 if (-not (Invoke-SessionCapabilityIssue -SessionId $SessionId -OutputDir $brokerCapabilityDir -Stubs $BrokerStubs)) {
     Write-Host "❌ Failed to issue session capability tokens" -ForegroundColor Red
     exit 1
+}
+
+if ($SessionStubSecrets.Count -gt 0) {
+    if (-not (Seal-StubCapabilities -BrokerScript $brokerScript -CapabilityRoot $brokerCapabilityDir)) {
+        Write-Host "❌ Failed to seal stub secrets" -ForegroundColor Red
+        exit 1
+    }
 }
 
 Write-Host "🚀 Launching Coding Agent..." -ForegroundColor Cyan
