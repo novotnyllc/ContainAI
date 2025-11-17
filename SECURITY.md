@@ -10,6 +10,8 @@ Each AI coding agent runs in an isolated Docker container with:
 
 - **Non-root user:** All containers run as `agentuser` (UID 1000)
 - **No privilege escalation:** `--security-opt no-new-privileges:true` is always set
+- **Capabilities dropped:** `--cap-drop=ALL` removes all Linux capabilities
+- **Process limits:** `--pids-limit=4096` prevents fork bomb attacks
 - **Resource limits:** CPU and memory limits prevent resource exhaustion
 - **No Docker socket access:** Containers cannot control the Docker daemon
 

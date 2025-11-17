@@ -612,7 +612,9 @@ fi
 DOCKER_ARGS+=(
     "-w" "/workspace"
     "--network" "$NETWORK_MODE"
+    "--cap-drop=ALL"
     "--security-opt" "no-new-privileges:true"
+    "--pids-limit=4096"
     "--cpus=$CPU"
     "--memory=$MEMORY"
 )
