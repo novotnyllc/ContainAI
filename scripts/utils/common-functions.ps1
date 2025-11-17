@@ -145,7 +145,7 @@ function Test-TrustedPathsClean {
     }
 
     if (Test-Path $overrideToken) {
-        Write-Warning "Override token '$overrideToken' detected; proceeding with dirty $Label: $($dirty -join ', ')"
+        Write-Warning "Override token '$overrideToken' detected; proceeding with dirty ${Label}: $($dirty -join ', ')"
         return $true
     }
 
@@ -932,7 +932,7 @@ function Invoke-PythonTool {
             $gid = & id -g 2>$null
             if ($uid -and $gid) {
                 $containerArgs += "--user"
-                $containerArgs += "$uid:$gid"
+                $containerArgs += "${uid}:${gid}"
             }
         } catch {
         }

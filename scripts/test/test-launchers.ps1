@@ -469,6 +469,128 @@ function Test-SharedFunctions {
     Remove-Item env:CODING_AGENTS_DISABLE_APPARMOR -ErrorAction SilentlyContinue
 }
 
+function Test-SessionConfigRenderer {
+    Test-Section "Testing session config renderer"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $renderer = Join-Path $ProjectRoot "scripts/utils/render-session-config.py"
+    if (-not (Test-Path $renderer)) {
+        Fail "render-session-config.py missing"
+        return
+    }
+
+    $outputDir = Join-Path $env:TEMP ("session-config-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $outputDir | Out-Null
+    $configPath = Join-Path $ProjectRoot "config.toml"
+    $sessionId = "test-session-$PID"
+    $renderArgs = @(
+        "--config", $configPath,
+        "--output", $outputDir,
+        "--session-id", $sessionId,
+        "--network-policy", "allow-all",
+        "--repo", "test-repo",
+        "--agent", "copilot",
+        "--container", "test-container"
+    )
+    $mounts = @($outputDir, $configPath)
+
+    try {
+        if (Invoke-PythonTool -ScriptPath $renderer -MountPaths $mounts -ScriptArgs $renderArgs) {
+            $manifestPath = Join-Path $outputDir "manifest.json"
+            if (Test-Path $manifestPath) {
+                Pass "Manifest generated"
+            } else {
+                Fail "Manifest missing"
+            }
+
+            $copilotConfig = Join-Path $outputDir "github-copilot/config.json"
+            if (Test-Path $copilotConfig) {
+                Pass "Copilot config rendered"
+            } else {
+                Fail "Copilot config missing"
+            }
+
+            $serversFile = Join-Path $outputDir "servers.txt"
+            if (Test-Path $serversFile) {
+                $servers = Get-Content $serversFile | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+                if ($servers.Count -gt 0) {
+                    Pass "Server list exported via servers.txt"
+                } else {
+                    Fail "servers.txt contains no entries"
+                }
+            } else {
+                Fail "servers.txt missing"
+            }
+        } else {
+            Fail "render-session-config.py failed via python runner"
+        }
+    } finally {
+        Remove-Item $outputDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-SecretBrokerCli {
+    Test-Section "Testing secret broker CLI"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $brokerScript = Join-Path $ProjectRoot "scripts/runtime/secret-broker.py"
+    if (-not (Test-Path $brokerScript)) {
+        Fail "secret-broker.py missing"
+        return
+    }
+
+    $configRoot = Join-Path $env:TEMP ("broker-config-" + [guid]::NewGuid().ToString())
+    $null = New-Item -ItemType Directory -Path $configRoot -Force
+    $envDir = Join-Path $configRoot "config"
+    $null = New-Item -ItemType Directory -Path $envDir -Force
+    $capDir = Join-Path $env:TEMP ("broker-cap-" + [guid]::NewGuid().ToString())
+    $null = New-Item -ItemType Directory -Path $capDir -Force
+
+    $previousConfig = $env:CODING_AGENTS_CONFIG_DIR
+    $env:CODING_AGENTS_CONFIG_DIR = $envDir
+
+    $initMounts = @($configRoot)
+    $issueMounts = @($configRoot, $capDir)
+    try {
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $initMounts -ScriptArgs @("init", "--stubs", "alpha", "beta")) {
+            Pass "Broker init succeeds"
+        } else {
+            Fail "Broker init failed"
+            return
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $issueMounts -ScriptArgs @("issue", "--session-id", "test-session", "--output", $capDir, "--stubs", "alpha")) {
+            Pass "Capability issuance succeeds"
+        } else {
+            Fail "Capability issuance failed"
+            return
+        }
+
+        $tokenFile = Get-ChildItem -Path $capDir -Filter '*.json' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($tokenFile) {
+            Pass "Capability token file generated"
+        } else {
+            Fail "Capability token file missing"
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $initMounts -ScriptArgs @("health")) {
+            Pass "Broker health check succeeds"
+        } else {
+            Fail "Broker health check failed"
+        }
+    } finally {
+        if ($previousConfig) {
+            $env:CODING_AGENTS_CONFIG_DIR = $previousConfig
+        } else {
+            Remove-Item Env:CODING_AGENTS_CONFIG_DIR -ErrorAction SilentlyContinue
+        }
+        Remove-Item $configRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $capDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Test-LocalRemotePush {
     Test-Section "Testing secure local remote push"
 
@@ -860,6 +982,8 @@ function Main {
         @{ Name = "Initialize-TestRepo"; Action = { Initialize-TestRepo } },
         @{ Name = "Test-ContainerRuntimeDetection"; Action = { Test-ContainerRuntimeDetection } },
         @{ Name = "Test-SharedFunctions"; Action = { Test-SharedFunctions } },
+        @{ Name = "Test-SessionConfigRenderer"; Action = { Test-SessionConfigRenderer } },
+        @{ Name = "Test-SecretBrokerCli"; Action = { Test-SecretBrokerCli } },
         @{ Name = "Test-LocalRemotePush"; Action = { Test-LocalRemotePush } },
         @{ Name = "Test-LocalRemoteFallbackPush"; Action = { Test-LocalRemoteFallbackPush } },
         @{ Name = "Test-SecureRemoteSync"; Action = { Test-SecureRemoteSync } },
