@@ -543,7 +543,9 @@ $gpgSocketPath = "${WslHome}/.config/coding-agents/gpg-proxy.sock"
 $gpgProxyScript = Join-Path $PSScriptRoot "..\runtime\gpg-proxy-server.sh"
 
 $commitGpgSign = wsl bash -c "git config commit.gpgsign 2>/dev/null"
+$gpgSigningEnabled = $false
 if ($commitGpgSign -eq "true") {
+    $gpgSigningEnabled = $true
     if (-not (Test-Path $gpgSocketPath -PathType Leaf)) {
         if (Test-Path $gpgProxyScript) {
             Write-Host "🔏 Starting GPG proxy server for commit signing..." -ForegroundColor Cyan
@@ -584,27 +586,23 @@ if (Test-Path $gpgSocketPath -PathType Leaf) {
 # Fallback: Mount credential files (read-only for security)
 # These are only used if socket proxy is not available
 if (Test-Path "${WslHome}/.git-credentials") { $dockerArgs += "-v", "${WslHome}/.git-credentials:/home/agentuser/.git-credentials:ro" }
-if (Test-Path "${WslHome}/.ssh") { $dockerArgs += "-v", "${WslHome}/.ssh:/home/agentuser/.ssh:ro" }
-
-# Mount GPG config for commit signing (read-only, no private keys)
-# Only mount if GPG proxy socket not available (fallback to agent socket)
-if ((Test-Path "${WslHome}/.gnupg") -and -not (Test-Path $gpgSocketPath -PathType Leaf)) {
-    # Mount GPG home directory read-only (contains config, public keys, not private keys)
-    $dockerArgs += "-v", "${WslHome}/.gnupg:/home/agentuser/.gnupg:ro"
-    
-    # Forward GPG agent socket if available (for direct signing without proxy)
-    $gpgAgentSock = "${WslHome}/.gnupg/S.gpg-agent"
-    if (Test-Path $gpgAgentSock) {
-        $dockerArgs += "-v", "${gpgAgentSock}:/home/agentuser/.gnupg/S.gpg-agent"
-    }
-}
 
 # SSH agent socket forwarding (supports any SSH agent via standard SSH_AUTH_SOCK)
 $sshAuthSock = $env:SSH_AUTH_SOCK
+$sshAgentSocketMounted = $false
 if ($sshAuthSock -and (Test-Path $sshAuthSock)) {
     # Forward SSH agent socket to container
     $dockerArgs += "-v", "${sshAuthSock}:/tmp/ssh-agent.sock:ro"
     $dockerArgs += "-e", "SSH_AUTH_SOCK=/tmp/ssh-agent.sock"
+    $sshAgentSocketMounted = $true
+}
+
+if (-not $sshAgentSocketMounted -and (Test-Path "${WslHome}/.ssh")) {
+    Write-Warning "⚠️  SSH agent socket not available; host SSH keys will not be forwarded. Start ssh-agent before running run-agent.ps1."
+}
+
+if ($gpgSigningEnabled -and -not (Test-Path $gpgSocketPath -PathType Leaf)) {
+    Write-Warning "⚠️  Commit signing is enabled but the gpg-proxy socket was not created. Signing will be disabled; run gpg-proxy-server.sh or disable commit.gpgsign."
 }
 
 # Final args

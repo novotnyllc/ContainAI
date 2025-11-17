@@ -546,8 +546,10 @@ fi
 # Start GPG proxy server on host if not already running and GPG signing is configured
 GPG_SOCKET_PATH="${HOME}/.config/coding-agents/gpg-proxy.sock"
 GPG_PROXY_SCRIPT="$SCRIPT_DIR/../runtime/gpg-proxy-server.sh"
+GPG_SIGNING_ENABLED=false
 
 if git config commit.gpgsign 2>/dev/null | grep -q "true"; then
+    GPG_SIGNING_ENABLED=true
     if [ ! -S "$GPG_SOCKET_PATH" ]; then
         if [ -f "$GPG_PROXY_SCRIPT" ]; then
             echo "🔏 Starting GPG proxy server for commit signing..."
@@ -587,26 +589,22 @@ fi
 # Fallback: Mount credential files (read-only for security)
 # These are only used if socket proxy is not available
 [ -f "${HOME}/.git-credentials" ] && DOCKER_ARGS+=("-v" "${HOME}/.git-credentials:/home/agentuser/.git-credentials:ro")
-[ -d "${HOME}/.ssh" ] && DOCKER_ARGS+=("-v" "${HOME}/.ssh:/home/agentuser/.ssh:ro")
-
-# Mount GPG config for commit signing (read-only, no private keys)
-# Only mount if GPG proxy socket not available (fallback to agent socket)
-if [ -d "${HOME}/.gnupg" ] && [ ! -S "$GPG_SOCKET_PATH" ]; then
-    # Mount GPG home directory read-only (contains config, public keys, not private keys)
-    DOCKER_ARGS+=("-v" "${HOME}/.gnupg:/home/agentuser/.gnupg:ro")
-    
-    # Forward GPG agent socket if available (for direct signing without proxy)
-    GPG_AGENT_SOCK="${HOME}/.gnupg/S.gpg-agent"
-    if [ -S "$GPG_AGENT_SOCK" ]; then
-        DOCKER_ARGS+=("-v" "$GPG_AGENT_SOCK:/home/agentuser/.gnupg/S.gpg-agent")
-    fi
-fi
 
 # SSH agent socket forwarding (supports any SSH agent via standard SSH_AUTH_SOCK)
+SSH_AGENT_SOCKET_MOUNTED=false
 if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
     # Forward SSH agent socket to container
     DOCKER_ARGS+=("-v" "$SSH_AUTH_SOCK:/tmp/ssh-agent.sock:ro")
     DOCKER_ARGS+=("-e" "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
+    SSH_AGENT_SOCKET_MOUNTED=true
+fi
+
+if [ "$SSH_AGENT_SOCKET_MOUNTED" = false ] && [ -d "${HOME}/.ssh" ]; then
+    echo "⚠️  SSH agent socket not available; host SSH keys will not be forwarded. Start ssh-agent before running run-agent."
+fi
+
+if [ "$GPG_SIGNING_ENABLED" = true ] && [ ! -S "$GPG_SOCKET_PATH" ]; then
+    echo "⚠️  Commit signing is enabled but gpg-proxy socket was not created. Signing will be disabled; run gpg-proxy-server.sh or disable commit.gpgsign."
 fi
 
 # Final args
