@@ -35,6 +35,32 @@ LOCAL_REMOTE_URL=""
 LOCAL_REPO_PATH_VALUE=""
 TMPFS_LARGE_SIZE="${CODING_AGENTS_TMPFS_LARGE:-2g}"
 TMPFS_SMALL_SIZE="${CODING_AGENTS_TMPFS_SMALL:-512m}"
+SESSION_ARTIFACT_DIR=""
+SESSION_CONFIG_OUTPUT=""
+SESSION_MANIFEST_PATH=""
+SESSION_CONFIG_SHA256=""
+SESSION_CONFIG_SOURCE=""
+SESSION_CONFIG_RENDERED=false
+SESSION_ID_BASE=$(date -u +"%Y%m%dT%H%M%SZ")
+SESSION_CONFIG_ROOT_IN_CONTAINER="/run/coding-agents"
+DEFAULT_BROKER_STUBS=("github" "uno" "msftdocs" "playwright" "context7" "serena" "sequential-thinking" "fetch")
+BROKER_STUBS=("${DEFAULT_BROKER_STUBS[@]}")
+declare -A MCP_SECRET_VALUES=()
+declare -A SESSION_STUB_SECRETS=()
+LAUNCHER_HEAD_HASH=$(get_git_head_hash "$REPO_ROOT" 2>/dev/null || echo "")
+TRUSTED_PATHS=("scripts/launchers" "scripts/runtime" "docker/profiles")
+TRUSTED_TREE_HASHES_RAW=$(collect_trusted_tree_hashes "$REPO_ROOT" "${TRUSTED_PATHS[@]}")
+TRUSTED_TREE_HASHES_ENV=$(printf '%s' "$TRUSTED_TREE_HASHES_RAW" | tr '\n' ',' | sed 's/,$//')
+if [ -n "$LAUNCHER_HEAD_HASH" ]; then
+    echo "🔒 Launcher commit: $LAUNCHER_HEAD_HASH"
+fi
+if [ -n "$TRUSTED_TREE_HASHES_RAW" ]; then
+    echo "   Trusted tree hashes:"
+    while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        echo "     • $entry"
+    done <<< "$TRUSTED_TREE_HASHES_RAW"
+fi
 
 cleanup_run_agent_volumes() {
     local container_name="${CONTAINER_NAME:-}"
@@ -53,6 +79,152 @@ cleanup_run_agent_volumes() {
             container_cli volume rm "$volume" >/dev/null 2>&1 || true
         fi
     done
+
+    if [ -n "$SESSION_ARTIFACT_DIR" ] && [ -d "$SESSION_ARTIFACT_DIR" ]; then
+        rm -rf "$SESSION_ARTIFACT_DIR"
+    fi
+}
+trap cleanup_run_agent_volumes EXIT
+
+trim_whitespace() {
+    local value="$1"
+    value="${value#${value%%[![:space:]]*}}"
+    value="${value%${value##*[![:space:]]}}"
+    printf '%s' "$value"
+}
+
+load_mcp_secret_values() {
+    local -a candidates=()
+    declare -A seen_map=()
+    if [ -n "${CODING_AGENTS_MCP_SECRETS_FILE:-}" ]; then
+        candidates+=("${CODING_AGENTS_MCP_SECRETS_FILE}")
+    fi
+    if [ -n "${MCP_SECRETS_FILE:-}" ]; then
+        candidates+=("${MCP_SECRETS_FILE}")
+    fi
+    candidates+=("${HOME}/.config/coding-agents/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
+    local candidate resolved
+    for candidate in "${candidates[@]}"; do
+        [ -n "$candidate" ] || continue
+        resolved=$(realpath "$candidate" 2>/dev/null || echo "$candidate")
+        if [ -n "${seen_map[$resolved]:-}" ]; then
+            continue
+        fi
+        seen_map["$resolved"]=1
+        if [ ! -f "$candidate" ]; then
+            continue
+        fi
+        while IFS= read -r line || [ -n "$line" ]; do
+            line=$(trim_whitespace "$line")
+            [ -n "$line" ] || continue
+            [[ "$line" == \#* ]] && continue
+            if [[ "$line" == export* ]]; then
+                line="${line#export }"
+                line=$(trim_whitespace "$line")
+            fi
+            if [[ "$line" != *=* ]]; then
+                continue
+            fi
+            local name="${line%%=*}"
+            local value="${line#*=}"
+            name=$(trim_whitespace "$name")
+            value=$(trim_whitespace "$value")
+            [ -n "$name" ] || continue
+            if [ -n "$value" ] && [[ ( "$value" == "\""*"\"" ) || ( "$value" == "'"*"'" ) ]]; then
+                value="${value:1:${#value}-2}"
+            fi
+            if [ -z "${MCP_SECRET_VALUES[$name]+x}" ]; then
+                MCP_SECRET_VALUES["$name"]="$value"
+            fi
+        done < "$candidate"
+    done
+}
+
+resolve_secret_value() {
+    local key="$1"
+    if [ -z "$key" ]; then
+        return 1
+    fi
+    if [ -n "${MCP_SECRET_VALUES[$key]:-}" ]; then
+        printf '%s' "${MCP_SECRET_VALUES[$key]}"
+        return 0
+    fi
+    if [ -n "${!key:-}" ]; then
+        MCP_SECRET_VALUES["$key"]="${!key}"
+        printf '%s' "${!key}"
+        return 0
+    fi
+    return 1
+}
+
+parse_stub_secret_manifest() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%%#*}
+        line=$(trim_whitespace "$line")
+        [ -n "$line" ] || continue
+        local stub="${line%% *}"
+        local rest="${line#${stub}}"
+        rest=$(trim_whitespace "$rest")
+        [ -n "$stub" ] || continue
+        [ -n "$rest" ] || continue
+        SESSION_STUB_SECRETS["$stub"]="$rest"
+    done < "$file"
+}
+
+store_stub_secrets() {
+    local broker_script="$1"
+    local stub
+    for stub in "${!SESSION_STUB_SECRETS[@]}"; do
+        local names="${SESSION_STUB_SECRETS[$stub]}"
+        [ -n "$names" ] || continue
+        local name
+        for name in $names; do
+            local value
+            value=$(resolve_secret_value "$name") || value=""
+            if [ -z "$value" ]; then
+                echo "⚠️  Missing secret '$name' for stub '$stub'" >&2
+                continue
+            fi
+            if ! CODING_AGENTS_SECRET_VALUE="$value" run_python_tool "$broker_script" -- store --stub "$stub" --name "$name" --from-env CODING_AGENTS_SECRET_VALUE >/dev/null 2>&1; then
+                echo "❌ Failed to store secret '$name' for stub '$stub'" >&2
+                return 1
+            fi
+        done
+    done
+    return 0
+}
+
+seal_stub_capabilities() {
+    local broker_script="$1"
+    local cap_root="$2"
+    local stub
+    for stub in "${!SESSION_STUB_SECRETS[@]}"; do
+        local names="${SESSION_STUB_SECRETS[$stub]}"
+        [ -n "$names" ] || continue
+        local cap_dir="$cap_root/$stub"
+        if [ ! -d "$cap_dir" ]; then
+            echo "⚠️  Capability directory missing for stub '$stub'" >&2
+            continue
+        fi
+        local cap_file
+        cap_file=$(find "$cap_dir" -maxdepth 1 -name '*.json' | head -n1)
+        if [ -z "$cap_file" ]; then
+            echo "⚠️  No capability token found for stub '$stub'" >&2
+            continue
+        fi
+        local redeem_args=("--capability" "$cap_file")
+        local name
+        for name in $names; do
+            redeem_args+=("--secret" "$name")
+        done
+        if ! run_python_tool "$broker_script" --mount "$cap_root" -- "redeem" "${redeem_args[@]}" >/dev/null 2>&1; then
+            echo "❌ Failed to seal secrets for stub '$stub'" >&2
+            return 1
+        fi
+    done
+    return 0
 }
 
 # First argument must be agent type
@@ -234,6 +406,14 @@ else
     fi
 fi
 
+if [ -z "$SESSION_CONFIG_SOURCE" ] && [ "$SOURCE_TYPE" = "local" ] && [ -f "$SOURCE/config.toml" ]; then
+    SESSION_CONFIG_SOURCE="$SOURCE/config.toml"
+fi
+
+if [ -z "$SESSION_CONFIG_SOURCE" ] && [ -f "${HOME}/.config/coding-agents/config.toml" ]; then
+    SESSION_CONFIG_SOURCE="${HOME}/.config/coding-agents/config.toml"
+fi
+
 if [ "$USE_CURRENT_BRANCH" = "true" ]; then
     if [ "$SOURCE_TYPE" != "local" ]; then
         echo "❌ Error: --use-current-branch is only supported for local repositories"
@@ -329,6 +509,21 @@ if ! validate_container_name "$CONTAINER_NAME"; then
     exit 1
 fi
 
+SESSION_ARTIFACT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/coding-agents-session.XXXXXXXX" 2>/dev/null || mktemp -d)
+SESSION_CONFIG_OUTPUT="$SESSION_ARTIFACT_DIR/session-config"
+mkdir -p "$SESSION_CONFIG_OUTPUT"
+SESSION_ID="${CONTAINER_NAME}-${SESSION_ID_BASE}-${RANDOM}"
+
+if [ -z "$WORKSPACE_VOLUME" ]; then
+    WORKSPACE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "workspace")
+fi
+if [ -z "$HOME_VOLUME" ]; then
+    HOME_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "home")
+fi
+if [ -z "$TOOLCACHE_VOLUME" ]; then
+    TOOLCACHE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "toolcache")
+fi
+
 # Determine agent branch (handle case where BRANCH is already agent/branch format)
 if [ "$USE_CURRENT_BRANCH" = "true" ]; then
     AGENT_BRANCH="$BRANCH"
@@ -373,6 +568,94 @@ case "$NETWORK_PROXY" in
         NETWORK_POLICY_ENV="allow-all"
         ;;
 esac
+
+RENDERER_SCRIPT="$REPO_ROOT/scripts/utils/render-session-config.py"
+TRUSTED_HASH_ARGS=()
+if [ -n "$TRUSTED_TREE_HASHES_RAW" ]; then
+    while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        TRUSTED_HASH_ARGS+=("--trusted-hash" "$entry")
+    done <<< "$TRUSTED_TREE_HASHES_RAW"
+fi
+
+if [ -f "$RENDERER_SCRIPT" ]; then
+    RENDER_ARGS=("--output" "$SESSION_CONFIG_OUTPUT" "--session-id" "$SESSION_ID" "--network-policy" "$NETWORK_POLICY_ENV" "--repo" "$REPO_NAME" "--agent" "$AGENT" "--container" "$CONTAINER_NAME")
+    if [ -n "$SESSION_CONFIG_SOURCE" ]; then
+        RENDER_ARGS+=("--config" "$SESSION_CONFIG_SOURCE")
+    fi
+    if [ -n "$LAUNCHER_HEAD_HASH" ]; then
+        RENDER_ARGS+=("--git-head" "$LAUNCHER_HEAD_HASH")
+    fi
+    RENDER_ARGS+=("${TRUSTED_HASH_ARGS[@]}")
+    RUNNER_MOUNTS=("--mount" "$SESSION_CONFIG_OUTPUT")
+    if [ -n "$SESSION_CONFIG_SOURCE" ]; then
+        RUNNER_MOUNTS+=("--mount" "$SESSION_CONFIG_SOURCE")
+    fi
+    if run_python_tool "$RENDERER_SCRIPT" "${RUNNER_MOUNTS[@]}" -- "${RENDER_ARGS[@]}" >/dev/null 2>&1; then
+        SESSION_MANIFEST_PATH="$SESSION_CONFIG_OUTPUT/manifest.json"
+        if [ -f "$SESSION_MANIFEST_PATH" ]; then
+            if command -v shasum >/dev/null 2>&1; then
+                SESSION_CONFIG_SHA256=$(shasum -a 256 "$SESSION_MANIFEST_PATH" | awk '{print $1}')
+            elif command -v sha256sum >/dev/null 2>&1; then
+                SESSION_CONFIG_SHA256=$(sha256sum "$SESSION_MANIFEST_PATH" | awk '{print $1}')
+            else
+                SESSION_CONFIG_SHA256=""
+            fi
+            SESSION_CONFIG_RENDERED=true
+            echo "🔐 Session MCP config manifest: ${SESSION_CONFIG_SHA256:-unknown}"
+            log_session_config_manifest "$SESSION_ID" "${SESSION_CONFIG_SHA256:-}" "$REPO_ROOT" "$TRUSTED_TREE_HASHES_RAW"
+            servers_file="$SESSION_CONFIG_OUTPUT/servers.txt"
+            if [ -f "$servers_file" ]; then
+                mapfile -t MANIFEST_STUBS < <(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$servers_file" | grep -v '^$')
+                if [ ${#MANIFEST_STUBS[@]} -gt 0 ]; then
+                    BROKER_STUBS=("${MANIFEST_STUBS[@]}")
+                fi
+            fi
+            stub_secret_file="$SESSION_CONFIG_OUTPUT/stub-secrets.txt"
+            if [ -f "$stub_secret_file" ]; then
+                parse_stub_secret_manifest "$stub_secret_file"
+            fi
+        fi
+    else
+        echo "⚠️  Failed to render session MCP config via python runner" >&2
+    fi
+else
+    echo "⚠️  Session config renderer missing at $RENDERER_SCRIPT" >&2
+fi
+
+if ! ensure_broker_ready; then
+    echo "❌ Secret broker health check failed" >&2
+    exit 1
+fi
+
+BROKER_SCRIPT=$(get_secret_broker_script)
+if [ -z "$BROKER_SCRIPT" ]; then
+    echo "❌ Secret broker script not found" >&2
+    exit 1
+fi
+
+if [ ${#SESSION_STUB_SECRETS[@]} -gt 0 ]; then
+    load_mcp_secret_values
+    if ! store_stub_secrets "$BROKER_SCRIPT"; then
+        echo "❌ Failed to stage broker-managed secrets" >&2
+        exit 1
+    fi
+fi
+
+BROKER_CAP_DIR="$SESSION_CONFIG_OUTPUT/capabilities"
+mkdir -p "$BROKER_CAP_DIR"
+export CODING_AGENTS_SESSION_CONFIG_SHA256="${SESSION_CONFIG_SHA256:-}"
+if ! issue_session_capabilities "$SESSION_ID" "$BROKER_CAP_DIR" "${BROKER_STUBS[@]}"; then
+    echo "❌ Failed to issue capability tokens" >&2
+    exit 1
+fi
+
+if [ ${#SESSION_STUB_SECRETS[@]} -gt 0 ]; then
+    if ! seal_stub_capabilities "$BROKER_SCRIPT" "$BROKER_CAP_DIR"; then
+        echo "❌ Failed to seal stub secrets" >&2
+        exit 1
+    fi
+fi
 
 # Check for branch conflicts in local repos (only when creating isolated branches)
 if [ "$SOURCE_TYPE" = "local" ] && [ "$USE_CURRENT_BRANCH" != "true" ]; then
@@ -496,6 +779,12 @@ DOCKER_ARGS=(
     "-e" "AUTO_PUSH_ON_SHUTDOWN=$AUTO_PUSH_VALUE"
     "-e" "AGENT_SESSION_MODE=supervised"
     "-e" "AGENT_SESSION_NAME=agent"
+    "-e" "HOST_SESSION_ID=$SESSION_ID"
+    "-e" "HOST_SESSION_CONFIG_SHA256=$SESSION_CONFIG_SHA256"
+    "-e" "HOST_TRUSTED_TREES=$TRUSTED_TREE_HASHES_ENV"
+    "-e" "HOST_LAUNCHER_HEAD=$LAUNCHER_HEAD_HASH"
+    "-e" "HOST_SESSION_CONFIG_ROOT=$SESSION_CONFIG_ROOT_IN_CONTAINER"
+    "-e" "HOST_CAPABILITY_ROOT=${SESSION_CONFIG_ROOT_IN_CONTAINER}/capabilities"
     "--label" "coding-agents.type=agent"
     "--label" "coding-agents.agent=$AGENT"
     "--label" "coding-agents.repo=$REPO_NAME"
@@ -563,6 +852,7 @@ TMPFS_MOUNTS=(
     "/var/cache/apt:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
     "/var/cache/debconf:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
     "/var/lib/dpkg:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
+    "${SESSION_CONFIG_ROOT_IN_CONTAINER}:rw,nosuid,nodev,noexec,mode=750"
 )
 
 for tmpfs_mount in "${TMPFS_MOUNTS[@]}"; do
@@ -723,6 +1013,15 @@ if [ $? -ne 0 ]; then
     [ "$USE_SQUID" = true ] && container_cli rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1
     [ "$USE_SQUID" = true ] && container_cli network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1
     exit 1
+fi
+
+if [ "$SESSION_CONFIG_RENDERED" = true ] && [ -d "$SESSION_CONFIG_OUTPUT" ]; then
+    if ! container_cli exec "$CONTAINER_NAME" mkdir -p "$SESSION_CONFIG_ROOT_IN_CONTAINER" >/dev/null 2>&1; then
+        echo "⚠️  Failed to prepare session config directory inside container" >&2
+    else
+        container_cli cp "$SESSION_CONFIG_OUTPUT/." "$CONTAINER_NAME:$SESSION_CONFIG_ROOT_IN_CONTAINER" >/dev/null 2>&1 || \
+            echo "⚠️  Unable to copy session configs into container" >&2
+    fi
 fi
 
 # Setup repository inside container

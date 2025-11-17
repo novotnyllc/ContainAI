@@ -81,6 +81,151 @@ TMPFS_LARGE_SIZE="${CODING_AGENTS_TMPFS_LARGE:-2g}"
 TMPFS_SMALL_SIZE="${CODING_AGENTS_TMPFS_SMALL:-512m}"
 DEFAULT_BROKER_STUBS=("github" "uno" "msftdocs" "playwright" "context7" "serena" "sequential-thinking" "fetch")
 BROKER_STUBS=("${DEFAULT_BROKER_STUBS[@]}")
+declare -A MCP_SECRET_VALUES=()
+declare -A SESSION_STUB_SECRETS=()
+
+trim_whitespace() {
+    local value="$1"
+    value="${value#${value%%[![:space:]]*}}"
+    value="${value%${value##*[![:space:]]}}"
+    printf '%s' "$value"
+}
+
+load_mcp_secret_values() {
+    local -a candidates=()
+    declare -A seen_map=()
+    if [ -n "${CODING_AGENTS_MCP_SECRETS_FILE:-}" ]; then
+        candidates+=("${CODING_AGENTS_MCP_SECRETS_FILE}")
+    fi
+    if [ -n "${MCP_SECRETS_FILE:-}" ]; then
+        candidates+=("${MCP_SECRETS_FILE}")
+    fi
+    candidates+=("${HOME}/.config/coding-agents/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
+    local candidate resolved
+    for candidate in "${candidates[@]}"; do
+        [ -n "$candidate" ] || continue
+        resolved=$(realpath "$candidate" 2>/dev/null || echo "$candidate")
+        if [ -n "${seen_map[$resolved]:-}" ]; then
+            continue
+        fi
+        seen_map["$resolved"]=1
+        if [ ! -f "$candidate" ]; then
+            continue
+        fi
+        while IFS= read -r line || [ -n "$line" ]; do
+            line=$(trim_whitespace "$line")
+            [ -n "$line" ] || continue
+            [[ "$line" == \#* ]] && continue
+            if [[ "$line" == export* ]]; then
+                line="${line#export }"
+                line=$(trim_whitespace "$line")
+            fi
+            if [[ "$line" != *=* ]]; then
+                continue
+            fi
+            local name="${line%%=*}"
+            local value="${line#*=}"
+            name=$(trim_whitespace "$name")
+            value=$(trim_whitespace "$value")
+            if [ -z "$name" ]; then
+                continue
+            fi
+            if [ -n "$value" ] && [[ ( "$value" == "\""*"\"" ) || ( "$value" == "'"*"'" ) ]]; then
+                value="${value:1:${#value}-2}"
+            fi
+            if [ -z "${MCP_SECRET_VALUES[$name]+x}" ]; then
+                MCP_SECRET_VALUES["$name"]="$value"
+            fi
+        done < "$candidate"
+    done
+}
+
+resolve_secret_value() {
+    local key="$1"
+    if [ -z "$key" ]; then
+        return 1
+    fi
+    if [ -n "${MCP_SECRET_VALUES[$key]:-}" ]; then
+        printf '%s' "${MCP_SECRET_VALUES[$key]}"
+        return 0
+    fi
+    if [ -n "${!key:-}" ]; then
+        MCP_SECRET_VALUES["$key"]="${!key}"
+        printf '%s' "${!key}"
+        return 0
+    fi
+    return 1
+}
+
+parse_stub_secret_manifest() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%%#*}
+        line=$(trim_whitespace "$line")
+        [ -n "$line" ] || continue
+        local stub="${line%% *}"
+        local rest="${line#${stub}}"
+        rest=$(trim_whitespace "$rest")
+        [ -n "$stub" ] || continue
+        [ -n "$rest" ] || continue
+        SESSION_STUB_SECRETS["$stub"]="$rest"
+    done < "$file"
+}
+
+store_stub_secrets() {
+    local broker_script="$1"
+    local stub
+    for stub in "${!SESSION_STUB_SECRETS[@]}"; do
+        local names="${SESSION_STUB_SECRETS[$stub]}"
+        [ -n "$names" ] || continue
+        local name
+        for name in $names; do
+            local value
+            value=$(resolve_secret_value "$name") || value=""
+            if [ -z "$value" ]; then
+                echo "⚠️  Missing secret '$name' for stub '$stub'" >&2
+                continue
+            fi
+            if ! CODING_AGENTS_SECRET_VALUE="$value" run_python_tool "$broker_script" -- store --stub "$stub" --name "$name" --from-env CODING_AGENTS_SECRET_VALUE >/dev/null 2>&1; then
+                echo "❌ Failed to store secret '$name' for stub '$stub'" >&2
+                return 1
+            fi
+        done
+    done
+    return 0
+}
+
+seal_stub_capabilities() {
+    local broker_script="$1"
+    local cap_root="$2"
+    local stub
+    for stub in "${!SESSION_STUB_SECRETS[@]}"; do
+        local names="${SESSION_STUB_SECRETS[$stub]}"
+        [ -n "$names" ] || continue
+        local cap_dir="$cap_root/$stub"
+        if [ ! -d "$cap_dir" ]; then
+            echo "⚠️  Capability directory missing for stub '$stub'" >&2
+            continue
+        fi
+        local cap_file
+        cap_file=$(find "$cap_dir" -maxdepth 1 -name '*.json' | head -n1)
+        if [ -z "$cap_file" ]; then
+            echo "⚠️  No capability token found for stub '$stub'" >&2
+            continue
+        fi
+        local redeem_args=("--capability" "$cap_file")
+        local name
+        for name in $names; do
+            redeem_args+=("--secret" "$name")
+        done
+        if ! run_python_tool "$broker_script" --mount "$cap_root" -- "redeem" "${redeem_args[@]}" >/dev/null 2>&1; then
+            echo "❌ Failed to seal secrets for stub '$stub'" >&2
+            return 1
+        fi
+    done
+    return 0
+}
 
 # First argument must be agent type
 if [[ $# -eq 0 || "$1" == "-"* ]]; then
@@ -450,6 +595,10 @@ if [ -f "$RENDERER_SCRIPT" ]; then
                     BROKER_STUBS=("${MANIFEST_STUBS[@]}")
                 fi
             fi
+            stub_secret_file="$SESSION_CONFIG_OUTPUT/stub-secrets.txt"
+            if [ -f "$stub_secret_file" ]; then
+                parse_stub_secret_manifest "$stub_secret_file"
+            fi
         fi
     else
         echo "⚠️  Failed to render session MCP config via python runner" >&2
@@ -463,12 +612,33 @@ if ! ensure_broker_ready; then
     exit 1
 fi
 
+BROKER_SCRIPT=$(get_secret_broker_script)
+if [ -z "$BROKER_SCRIPT" ]; then
+    echo "❌ Secret broker script not found" >&2
+    exit 1
+fi
+
+if [ ${#SESSION_STUB_SECRETS[@]} -gt 0 ]; then
+    load_mcp_secret_values
+    if ! store_stub_secrets "$BROKER_SCRIPT"; then
+        echo "❌ Failed to stage broker-managed secrets" >&2
+        exit 1
+    fi
+fi
+
 BROKER_CAP_DIR="$SESSION_CONFIG_OUTPUT/capabilities"
 mkdir -p "$BROKER_CAP_DIR"
 export CODING_AGENTS_SESSION_CONFIG_SHA256="${SESSION_CONFIG_SHA256:-}"
 if ! issue_session_capabilities "$SESSION_ID" "$BROKER_CAP_DIR" "${BROKER_STUBS[@]}"; then
     echo "❌ Failed to issue capability tokens" >&2
     exit 1
+fi
+
+if [ ${#SESSION_STUB_SECRETS[@]} -gt 0 ]; then
+    if ! seal_stub_capabilities "$BROKER_SCRIPT" "$BROKER_CAP_DIR"; then
+        echo "❌ Failed to seal stub secrets" >&2
+        exit 1
+    fi
 fi
 
 # Check for branch conflicts in local repos (only when creating isolated branches)

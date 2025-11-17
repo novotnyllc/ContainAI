@@ -5,19 +5,92 @@ from __future__ import annotations
 
 import argparse
 import ast
+import base64
 import datetime as _dt
 import hashlib
 import json
 import os
 import pathlib
+import re
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 AGENT_CONFIG_TARGETS: Dict[str, str] = {
     "github-copilot": "/home/agentuser/.config/github-copilot/mcp/config.json",
     "codex": "/home/agentuser/.config/codex/mcp/config.json",
     "claude": "/home/agentuser/.config/claude/mcp/config.json",
 }
+STUB_COMMAND = "/usr/local/bin/mcp-stub"
+ENV_PATTERN = re.compile(r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)")
+DEFAULT_SECRET_PATHS = [
+    pathlib.Path("~/.config/coding-agents/mcp-secrets.env").expanduser(),
+    pathlib.Path("~/.mcp-secrets.env").expanduser(),
+]
+
+
+def _load_secret_file(path: pathlib.Path) -> Dict[str, str]:
+    secrets: Dict[str, str] = {}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):]
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if not key:
+                    continue
+                if value and ((value[0] == value[-1]) and value.startswith(("'", '"'))):
+                    value = value[1:-1]
+                secrets.setdefault(key, value)
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        print(f"⚠️  Unable to read secrets from {path}: {exc}", file=sys.stderr)
+    return secrets
+
+
+def _collect_secrets(explicit_files: List[pathlib.Path]) -> Dict[str, str]:
+    candidates: List[pathlib.Path] = []
+    seen: Set[str] = set()
+    env_override = os.environ.get("CODING_AGENTS_MCP_SECRETS_FILE") or os.environ.get("MCP_SECRETS_FILE")
+    if env_override:
+        candidates.append(pathlib.Path(env_override).expanduser())
+    candidates.extend(explicit_files)
+    candidates.extend(DEFAULT_SECRET_PATHS)
+    merged: Dict[str, str] = {}
+    for candidate in candidates:
+        resolved = candidate.expanduser()
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.update({k: v for k, v in _load_secret_file(resolved).items() if k not in merged})
+    return merged
+
+
+def _collect_placeholders(value) -> Set[str]:
+    names: Set[str] = set()
+    if isinstance(value, str):
+        for match in ENV_PATTERN.finditer(value):
+            names.add(match.group("braced") or match.group("bare"))
+    elif isinstance(value, list):
+        for item in value:
+            names.update(_collect_placeholders(item))
+    elif isinstance(value, dict):
+        for item in value.values():
+            names.update(_collect_placeholders(item))
+    return names
+
+
+def _encode_stub_spec(spec: Dict) -> str:
+    payload = json.dumps(spec, sort_keys=True).encode("utf-8")
+    return base64.b64encode(payload).decode("ascii")
 
 
 def _sha256_file(path: pathlib.Path) -> Optional[str]:
@@ -75,6 +148,91 @@ def _ensure_directory(path: pathlib.Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def _resolve_value(value, secrets: Dict[str, str]):
+    def _replace(match: re.Match[str]) -> str:
+        var = match.group("braced") or match.group("bare")
+        if var in secrets and secrets[var]:
+            return secrets[var]
+        env_val = os.environ.get(var)
+        if env_val:
+            return env_val
+        return match.group(0)
+
+    if isinstance(value, str):
+        return ENV_PATTERN.sub(_replace, value)
+    if isinstance(value, list):
+        return [_resolve_value(item, secrets) for item in value]
+    if isinstance(value, dict):
+        return {key: _resolve_value(val, secrets) for key, val in value.items()}
+    return value
+
+
+def _render_remote_server(name: str, settings: Dict, secrets: Dict[str, str], warnings: List[str]) -> Dict:
+    rendered: Dict = {}
+    bearer_var = settings.get("bearer_token_env_var")
+    for key, value in settings.items():
+        if key == "bearer_token_env_var":
+            continue
+        rendered[key] = _resolve_value(value, secrets)
+    if bearer_var:
+        token = secrets.get(bearer_var) or os.environ.get(bearer_var)
+        if token:
+            rendered["bearerToken"] = token
+        else:
+            warnings.append(
+                f"⚠️  Missing bearer token '{bearer_var}' for MCP server '{name}'"
+            )
+    return rendered
+
+
+def _render_stub_server(
+    name: str,
+    settings: Dict,
+    secrets: Dict[str, str],
+    warnings: List[str],
+) -> Tuple[Dict, List[str]]:
+    config = dict(settings)
+    command = str(config.pop("command", "")).strip()
+    if not command:
+        raise ValueError(f"MCP server '{name}' is missing a command")
+    raw_args = config.pop("args", []) or []
+    args = [str(item) for item in raw_args]
+    raw_env = config.pop("env", {}) or {}
+    env = {str(k): str(v) for k, v in raw_env.items()}
+    cwd = config.pop("cwd", None)
+    config.pop("bearer_token_env_var", None)
+
+    placeholder_names = _collect_placeholders(command)
+    placeholder_names.update(_collect_placeholders(args))
+    placeholder_names.update(_collect_placeholders(env))
+    if cwd:
+        placeholder_names.update(_collect_placeholders(cwd))
+    available_names = set(secrets.keys()) | {k for k, v in os.environ.items() if v}
+    stub_secrets = sorted(name for name in placeholder_names if name in available_names)
+    missing = sorted(name for name in placeholder_names if name not in available_names)
+    for placeholder in missing:
+        warnings.append(
+            f"⚠️  Secret '{placeholder}' referenced by MCP server '{name}' is not defined"
+        )
+
+    spec: Dict[str, object] = {
+        "stub": name,
+        "server": name,
+        "command": command,
+        "args": args,
+        "env": env,
+        "secrets": stub_secrets,
+    }
+    if cwd:
+        spec["cwd"] = str(cwd)
+
+    rendered_entry = dict(config)
+    rendered_entry["command"] = STUB_COMMAND
+    rendered_entry["args"] = []
+    rendered_entry["env"] = {"CODING_AGENTS_STUB_SPEC": _encode_stub_spec(spec)}
+    return rendered_entry, stub_secrets
+
+
 def render_configs(
     *,
     config_path: Optional[pathlib.Path],
@@ -86,6 +244,7 @@ def render_configs(
     container_name: str,
     trusted_tree_hashes: List[str],
     git_head: Optional[str],
+    secrets: Dict[str, str],
 ) -> Dict:
     config_data: Dict = {}
     source_exists = config_path is not None and config_path.exists()
@@ -96,11 +255,27 @@ def render_configs(
     else:
         config_data = {"mcp_servers": {}}
 
-    mcp_servers = config_data.get("mcp_servers", {}) or {}
+    source_servers = config_data.get("mcp_servers", {}) or {}
     generated_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    rendered_servers: Dict[str, Dict] = {}
+    stub_secret_map: Dict[str, List[str]] = {}
+    stubbed_server_names: List[str] = []
+    warnings: List[str] = []
+
+    for server_name, server_cfg in source_servers.items():
+        settings = dict(server_cfg or {})
+        if "command" in settings:
+            rendered_entry, stub_secrets = _render_stub_server(server_name, settings, secrets, warnings)
+            rendered_servers[server_name] = rendered_entry
+            if stub_secrets:
+                stub_secret_map[server_name] = stub_secrets
+            stubbed_server_names.append(server_name)
+        else:
+            rendered_servers[server_name] = _render_remote_server(server_name, settings, secrets, warnings)
 
     files: List[Dict] = []
-    server_names = sorted(mcp_servers.keys())
+    all_server_names = sorted(source_servers.keys())
+    stubbed_server_names = sorted(set(stubbed_server_names))
     for agent_key, target_path in AGENT_CONFIG_TARGETS.items():
         payload = {
             "session": {
@@ -112,7 +287,7 @@ def render_configs(
                 "target": target_path,
                 "sourceRepo": repo_name,
             },
-            "mcpServers": mcp_servers,
+            "mcpServers": rendered_servers,
         }
         content = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
         agent_dir = output_dir / agent_key
@@ -135,19 +310,32 @@ def render_configs(
         "configSourceSha256": config_sha,
         "gitHead": git_head,
         "trustedTrees": trusted_tree_hashes,
-        "servers": server_names,
+        "servers": stubbed_server_names,
+        "allServers": all_server_names,
+        "stubSecrets": stub_secret_map,
         "files": files,
     }
 
     manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     servers_path = output_dir / "servers.txt"
-    if server_names:
-        servers_path.write_text("\n".join(server_names) + "\n", encoding="utf-8")
+    if stubbed_server_names:
+        servers_path.write_text("\n".join(stubbed_server_names) + "\n", encoding="utf-8")
     else:
         servers_path.write_text("", encoding="utf-8")
+    stub_secret_path = output_dir / "stub-secrets.txt"
+    with stub_secret_path.open("w", encoding="utf-8") as handle:
+        for stub in sorted(stub_secret_map.keys()):
+            names = stub_secret_map[stub]
+            if not names:
+                continue
+            handle.write(f"{stub} {' '.join(names)}\n")
     manifest["manifestPath"] = str(manifest_path)
     manifest["manifestSha256"] = _sha256_file(manifest_path)
+    manifest["stubSecretFile"] = str(stub_secret_path)
+    if warnings:
+        for warning in warnings:
+            print(warning, file=sys.stderr)
     return manifest
 
 
@@ -168,6 +356,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Trusted tree hash entry in the form path=hash",
     )
     parser.add_argument("--git-head", dest="git_head", default=None)
+    parser.add_argument(
+        "--secrets-file",
+        dest="secret_files",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help="Additional secrets env files to read",
+    )
     return parser.parse_args(argv)
 
 
@@ -177,6 +373,7 @@ def main(argv: List[str]) -> int:
     _ensure_directory(output_dir)
 
     config_path = args.config if args.config and args.config.exists() else None
+    secrets = _collect_secrets(args.secret_files or [])
     manifest = render_configs(
         config_path=config_path,
         output_dir=output_dir,
@@ -187,6 +384,7 @@ def main(argv: List[str]) -> int:
         container_name=args.container,
         trusted_tree_hashes=args.trusted_hashes,
         git_head=args.git_head,
+        secrets=secrets,
     )
 
     print(json.dumps(manifest, indent=2))

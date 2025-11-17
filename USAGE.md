@@ -39,7 +39,7 @@ Agents use authentication configs from your host machine (mounted read-only):
 
 ### Optional: MCP Server API Keys
 
-If using MCP servers, create `~/.config/coding-agents/mcp-secrets.env`:
+If using MCP servers, create `~/.config/coding-agents/mcp-secrets.env`. The launcher reads this file on the **host**, feeds it into the session renderer, and stages the values inside the secret broker—containers never need the plaintext copy.
 
 ```bash
 GITHUB_TOKEN=ghp_your_token_here
@@ -614,7 +614,7 @@ git push
 
 ### MCP Configuration
 
-If your workspace has `config.toml`, it's automatically converted to agent-specific JSON on container startup.
+If your workspace has `config.toml`, the launcher renders it on the host (before the container starts) and drops per-agent JSON plus stub manifests into the session tmpfs.
 
 **Example config.toml:**
 ```toml
@@ -628,7 +628,7 @@ args = ["-y", "@upstash/context7-mcp"]
 env = { CONTEXT7_API_KEY = "${CONTEXT7_API_KEY}" }
 ```
 
-Secrets like `CONTEXT7_API_KEY` are loaded from `~/.config/coding-agents/mcp-secrets.env` (if mounted).
+Secrets like `CONTEXT7_API_KEY` resolve from `~/.config/coding-agents/mcp-secrets.env` during host-side rendering; the plaintext values never need to exist inside the container.
 
 ## Container Management
 
@@ -685,7 +685,7 @@ If you see:
 
 ### MCP Servers Not Working
 
-Check secrets file exists:
+Check the host secrets file exists (the renderer reads it before each launch):
 ```bash
 ls ~/.config/coding-agents/mcp-secrets.env
 ```
@@ -694,7 +694,7 @@ Verify tokens are valid:
 - GitHub: https://github.com/settings/tokens
 - Context7: https://context7.ai/
 
-Restart container after adding/updating secrets.
+Restart the launcher after adding/updating secrets so a fresh session manifest is generated.
 
 ### Container Already Exists
 
@@ -792,43 +792,46 @@ When you run `launch-agent`:
    - Local path: Copies entire repo into container
    - GitHub URL: Clones repo into container
 
-2. **Creates container:**
-   - Mounts OAuth configs from host (read-only)
-   - Runs in background (persistent)
-   - Creates workspace at `/workspace`
+2. **Renders session + issues capabilities (host):**
+   - `render-session-config.py` merges `config.toml`, CLI flags, and your secrets file.
+   - Launcher stores required secrets inside the broker and requests sealed capabilities for each MCP stub.
+   - Manifest + capability IDs are hashed and logged for auditing.
 
-3. **Setups git:**
+3. **Creates container:**
+   - Mounts OAuth configs from host (read-only) and spins up `/run/coding-agents` tmpfs.
+   - Copies the rendered manifest, agent-specific MCP JSON, and sealed capabilities into the tmpfs before any user code runs.
+   - Exposes provenance data via `HOST_SESSION_*` environment variables.
+
+4. **Sets up git:**
    - Sets `origin` remote (GitHub)
    - Sets `local` remote (host path, if applicable)
    - Sets `local` as default push target
-   - Configures gh CLI for credentials
+   - Configures credential/GPG proxies for the host
 
-4. **Creates branch:**
+5. **Creates branch:**
    - Checks out `<agent>/<branch-name>`
    - Example: `copilot/feature-auth`
 
-5. **Loads MCP config:**
-   - Looks for `/workspace/config.toml`
-   - Converts to agent-specific JSON
-   - Loads secrets from `~/.mcp-secrets.env`
+6. **Bootstraps MCP stubs:**
+   - `entrypoint.sh` enforces ptrace/AppArmor policies and installs the manifest into `~/.config/<agent>/mcp`.
+   - `mcp-stub` becomes the only launcher for MCP servers; it redeems capabilities and injects decrypted secrets into stub-owned tmpfs.
 
-6. **Ready:**
+7. **Ready:**
    - Container runs in background
    - Connect via VS Code or shell
 
 ## Security Notes
 
-✅ **Safe:**
-- OAuth authentication (no hardcoded API keys)
-- Read-only mounts from host
-- Non-root user in container
-- No secrets in repository
-- No secrets in container images
-- Isolated filesystem per container
+✅ **Secure by default:**
+- Launchers hash trusted files and log the manifest SHA256 before any secrets are issued.
+- Secrets stay on the host broker until `mcp-stub` redeems a capability into a stub-owned tmpfs.
+- Containers run as non-root with seccomp/AppArmor, read-only rootfs, and dedicated tmpfs mounts for `/run/coding-agents`.
+- OAuth configs and credential/GPG proxies are mounted read-only.
 
 ⚠️ **Keep secure:**
-- `~/.config/coding-agents/mcp-secrets.env` (outside any git repo)
+- `~/.config/coding-agents/mcp-secrets.env` (host-only, outside any git repo)
 - Don't commit `.env` files with real tokens
+- Avoid modifying `scripts/launchers` or `scripts/runtime` without understanding how it affects manifest hashes
 
 ## Command Reference
 

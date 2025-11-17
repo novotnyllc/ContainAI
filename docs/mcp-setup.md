@@ -65,37 +65,52 @@ MCP configuration is managed through two mechanisms:
 1. **Secrets file**: `~/.config/coding-agents/mcp-secrets.env` - API keys and tokens
 2. **Config file**: `~/.config/coding-agents/config.toml` - Server configurations
 
-### Auto-conversion from config.toml
+### Host-side rendering
 
-CodingAgents automatically converts TOML configuration to the JSON format required by MCP clients:
+CodingAgents now resolves `config.toml` **before** a container starts. The launcher invokes `render-session-config.py`, which:
 
-```toml
-# config.toml (input)
-[mcp.servers.github]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
+- Reads your repo-level `config.toml` plus any `~/.config/coding-agents/config[-<agent>].toml` overrides.
+- Loads secrets from `~/.config/coding-agents/mcp-secrets.env` (or `MCP_SECRETS_FILE`) while still on the host.
+- Substitutes `$VAR` / `${VAR}` placeholders everywhere they appear (arguments, env blocks, `bearer_token_env_var`, etc.).
+- Emits fully resolved JSON configs for each agent (`~/.config/<agent>/mcp/config.json` inside the container) and a stub manifest that maps servers → `mcp-stub` command lines.
 
-[mcp.servers.github.env]
-GITHUB_TOKEN = "$GITHUB_TOKEN"
+Because the resolved JSON lives only in the session tmpfs, containers never need direct access to your plaintext secrets file.
+
+### End-to-end Secret & Stub Flow
+
+The diagram below shows the full lifecycle for secrets from the host to the MCP stub inside the container:
+
+```mermaid
+sequenceDiagram
+   autonumber
+   participant Dev as Developer Host
+   participant Launch as run-agent / launch-agent
+   participant Render as render-session-config.py
+   participant Broker as Host Secret Broker
+   participant Ctr as Container entrypoint.sh
+   participant Stub as mcp-stub
+   participant MCP as MCP Server
+
+   Dev->>Launch: run-copilot / run-codex
+   Launch->>Render: Provide config.toml + secrets file path
+   Render-->>Launch: Session manifest + stub spec (hash recorded)
+   Launch->>Broker: Store secrets + request capabilities per stub
+   Broker-->>Launch: Sealed capability bundle (scoped to session)
+   Launch->>Ctr: docker run + copy manifest/capabilities into /run/coding-agents
+   Ctr->>Stub: entrypoint installs configs, enforces tmpfs ownership
+   note over Stub,Broker: Agent later requests MCP access
+   Stub->>Broker: Redeem capability token for server-specific secret
+   Broker-->>Stub: Stream secret via memfd/tmpfs, token expires after use
+   Stub->>MCP: Launch MCP binary with injected secret, expose STDIO/SSE endpoint
+   MCP-->>Stub: Provide tool responses
+   Stub-->>Dev: Relay MCP responses back to the agent process
 ```
 
-Is converted to:
+Key points:
 
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_TOKEN": "ghp_actual_token_value"
-      }
-    }
-  }
-}
-```
-
-Environment variables are automatically expanded from `mcp-secrets.env`.
+- Secrets are supplied either by the host-broker rendered configs or by converting `/workspace/config.toml` at container start; nothing secret is baked into the image.
+- The generated JSON lives on the container’s writable layer and disappears when the container exits.
+- MCP stubs run under dedicated UIDs, fetch secrets at launch via the broker, and keep them inside private tmpfs mounts so the agent process never reads raw tokens.
 
 ## Setting Up Secrets
 
@@ -363,22 +378,38 @@ ls -la /tmp/
 
 ## Troubleshooting
 
-### Secrets File Not Mounted
+### Secrets File Missing During Rendering
 
-**Symptom:** Agent can't access MCP servers
+**Symptom:** `render-session-config.py` logs `⚠️  Secret 'GITHUB_TOKEN' ... not defined` or MCP stubs fail with "missing capability secret" messages.
 
 **Check:**
 ```bash
-# On host
+# Confirm the host secrets file exists
 ls -la ~/.config/coding-agents/mcp-secrets.env
 
-# Inside container
-docker exec <container> ls -la /home/agentuser/.mcp-secrets.env
+# Ensure the expected keys are present
+grep GITHUB_TOKEN ~/.config/coding-agents/mcp-secrets.env
+
+# If you override the location, verify the launcher sees it
+echo ${CODING_AGENTS_MCP_SECRETS_FILE:-$MCP_SECRETS_FILE}
+```
+
+You can also re-run the renderer directly to surface warnings before launching an agent:
+
+```bash
+python scripts/utils/render-session-config.py \
+   --output /tmp/mcp-dry-run \
+   --session-id test \
+   --network-policy allow-all \
+   --repo repo \
+   --agent github-copilot \
+   --container dry-run \
+   --config config.toml
 ```
 
 **Solution:**
-- Ensure file exists at `~/.config/coding-agents/mcp-secrets.env`
-- Restart container if file was created after launch
+- Add the missing key/value pairs to `~/.config/coding-agents/mcp-secrets.env` (or the override path)
+- Re-launch the agent so the host renderer can rebuild the manifest with the updated secrets
 
 ### Environment Variables Not Expanding
 
@@ -505,14 +536,12 @@ launch-agent copilot .
 
 **Symptom:**
 ```
-Error: EACCES: permission denied, open '/home/agentuser/.mcp-secrets.env'
+Error: EACCES: permission denied, open '/home/<user>/.config/coding-agents/mcp-secrets.env'
 ```
 
-**Cause:** File permissions too restrictive or wrong owner
+**Cause:** Your user account cannot read the secrets file, so the host renderer fails before the container launches.
 
-**Solution:**
-
-**On host:**
+**Solution (run on host):**
 ```bash
 # Fix ownership
 chown $USER:$USER ~/.config/coding-agents/mcp-secrets.env
@@ -590,14 +619,7 @@ echo ".config/coding-agents/mcp-secrets.env" >> .gitignore
 
 ### 5. Container Isolation
 
-Secrets are mounted **read-only** into containers:
-```bash
--v ~/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro
-#                                                                            ^^
-#                                                                       read-only
-```
-
-This prevents agents from modifying your secrets.
+Secrets never enter the container as files. The launcher renders configs on the host, stores sealed capabilities in `/run/coding-agents`, and MCP binaries can only read tokens by calling the trusted `mcp-stub` helper. Verify each run prints `🔐 Session MCP config manifest: <sha>`—that indicates host rendering succeeded and no plaintext secrets were copied into the workspace volume.
 
 ## Advanced Configuration
 
