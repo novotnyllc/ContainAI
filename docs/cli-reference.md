@@ -348,6 +348,24 @@ launch-agent <AGENT> [<SOURCE>] [OPTIONS]
 | `restricted` | None (`--network none`) | Maximum security, no external access |
 | `squid` | Monitored proxy | Audit network requests, domain whitelist |
 
+#### Integrity, Audit, and Overrides
+
+- **Trusted file enforcement:** Before starting a container, `launch-agent` checks that `scripts/launchers/**`, stub helpers, and `docker/profiles/**` match `HEAD`. If anything is dirty, the launch aborts unless you create an override token at `~/.config/coding-agents/overrides/allow-dirty` (configurable via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`). Every override is logged.
+- **Session manifest logging:** The host renders a per-session config, computes its SHA256, exports it via `CODING_AGENTS_SESSION_CONFIG_SHA256`, and writes a `session-config` event to the audit log. Compare this hash with what helper tooling reports to ensure configs were not tampered with in transit.
+- **Audit log location:** Structured JSON events (`session-config`, `capabilities-issued`, `override-used`) are appended to `~/.config/coding-agents/security-events.log`. Override via `CODING_AGENTS_AUDIT_LOG=/path/to/file` if you need alternate storage. All events are also forwarded to `systemd-cat -t coding-agents-launcher` when available.
+- **Helper sandbox controls:** By default helper containers run with `--network none`, tmpfs-backed `/tmp` + `/var/tmp`, `--cap-drop ALL`, and the ptrace-blocking seccomp profile. Tune with environment variables before launching:
+  - `CODING_AGENTS_HELPER_NETWORK_POLICY=loopback|none|host|bridge|<docker-network>`
+  - `CODING_AGENTS_HELPER_PIDS_LIMIT` (default `64`)
+  - `CODING_AGENTS_HELPER_MEMORY` (default `512m`)
+
+To inspect recent events quickly:
+
+```bash
+tail -f ~/.config/coding-agents/security-events.log
+```
+
+Run `bash scripts/test/test-launchers.sh` (or `pwsh scripts/test/test-launchers.ps1`) after modifying launcher logic to confirm helper network isolation and audit logging regressions are still covered.
+
 #### Examples
 
 **Basic usage:**

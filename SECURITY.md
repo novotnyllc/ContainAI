@@ -4,6 +4,25 @@ This document outlines security considerations for using and contributing to the
 
 ## Security Model
 
+### Host & Container Security Validation
+
+Before any container is created, the launchers execute two dedicated preflight checks:
+
+- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-coding-agents.profile` or explicitly acknowledge overrides via `CODING_AGENTS_DISABLE_*` environment variables.
+- `verify_container_security_support` inspects `docker info` / `podman info` JSON to ensure the selected runtime reports seccomp and AppArmor support. The launch aborts if the runtime cannot advertise both features (unless the matching override variable is set).
+
+```mermaid
+flowchart LR
+   hostCheck["Host Preflight\nverify_host_security_prereqs"] --> runtimeCheck["Runtime Inspection\nverify_container_security_support"]
+   runtimeCheck --> brokerInit["Secret Broker Auto-Init\n_ensure_broker_files"]
+   brokerInit --> launch["Container Launch\nseccomp + AppArmor"]
+
+   classDef good fill:#d4edda,stroke:#28a745,color:#111;
+   class hostCheck,runtimeCheck,brokerInit,launch good;
+```
+
+If a prerequisite is intentionally skipped (for example, running on macOS without AppArmor), the launcher requires an explicit opt-out via `CODING_AGENTS_DISABLE_APPARMOR=1` and logs the warning so reviewers can see it in `security-events.log`.
+
 ### Container Isolation
 
 Each AI coding agent runs in an isolated Docker container with:
@@ -16,6 +35,8 @@ Each AI coding agent runs in an isolated Docker container with:
 - **Process limits:** `--pids-limit=4096` prevents fork bomb attacks
 - **Resource limits:** CPU and memory limits prevent resource exhaustion
 - **No Docker socket access:** Containers cannot control the Docker daemon
+- **Helper sandboxing:** Helper runners inherit the same seccomp profile, run with `--network none` (unless explicitly overridden), and keep configs/secrets inside per-helper tmpfs mounts (`nosuid,nodev,noexec`)
+- **Session attestations:** Launchers render session configs on the host, compute a SHA256 manifest, and export `CODING_AGENTS_SESSION_CONFIG_SHA256` for downstream verification
 
 ### Authentication & Credentials
 
@@ -30,6 +51,20 @@ Authentication uses OAuth from your host machine, but secrets are now gated by t
 - **Host-controlled:** Revoke access on host to immediately revoke container access
 - **Launcher integrity checks:** `launch-agent` refuses to start if trusted scripts/stubs differ from `HEAD` (unless a host-only override token is present), ensuring only vetted code requests secrets from the broker
 - **Secret broker sandbox:** Secrets are streamed from a host daemon that enforces per-session capabilities, mutual authentication, ptrace-safe tmpfs mounts, and immutable audit logs (see architecture doc for details)
+- **Auto-initialized broker:** The broker lazily seeds its key store, state file, and sealed secret store the first time a launcher issues or stores secrets, so there are no manual `secret-broker.py init` steps. Subsequent launches reuse the hardened files (owned `0600`, optionally `chattr +i`).
+
+### Session Config Integrity & Audit Logging
+
+- **Host-rendered configs:** `scripts/utils/render-session-config.py` merges `config.toml`, runtime facts (session ID, container name, helper mounts), and broker capabilities before any containerized code runs. The manifest SHA256 is stored in `CODING_AGENTS_SESSION_CONFIG_SHA256` and logged so helpers can confirm they received the expected configuration.
+- **Structured audit log:** Every launch records `session-config`, `capabilities-issued`, and `override-used` events in `~/.config/coding-agents/security-events.log` (override via `CODING_AGENTS_AUDIT_LOG`). Entries are mirrored to `journald` as `coding-agents-launcher` and include timestamp, git `HEAD`, trusted tree hashes, and issued capability IDs.
+- **Immutable file perms:** Audit logs, manifest outputs, and capability bundles are written with `umask 077` and stored on tmpfs mounts owned by dedicated helper users; agent workloads only receive read-only bind mounts.
+- **Verification:** Tail the log with `tail -f ~/.config/coding-agents/security-events.log` to confirm manifest hashes and capability issuance before connecting to long-lived sessions.
+
+### Override Workflow
+
+- **Token location:** Dirty trusted files (e.g., `scripts/launchers/**`, stub binaries) block launches unless you create `~/.config/coding-agents/overrides/allow-dirty` (customize via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`).
+- **Mandatory logging:** Any time the override token is present, `launch-agent` emits an `override-used` audit event listing the repo, label, and paths that were dirty so reviewers can prove the deviation was deliberate.
+- **Removal:** Delete the token once local testing is complete to restore strict git cleanliness enforcement and avoid accumulating noisy audit entries.
 
 **Important:** Authenticate on your host machine first. Containers mount these configs read-only at runtime.
 

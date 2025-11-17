@@ -19,9 +19,10 @@ flowchart TB
         auth["Authentication (OAuth)<br/>• ~/.config/gh/ (GitHub CLI)<br/>• ~/.config/github-copilot/ (Copilot)<br/>• ~/.config/codex/ (Codex)<br/>• ~/.config/claude/ (Claude)"]
         secrets["MCP Secrets (Optional)<br/>• ~/.config/coding-agents/<br/>  └── mcp-secrets.env (API keys)"]
         repo["Source Repository<br/>• /path/to/repo/"]
+        broker["Secret Broker<br/>• auto-initialized key/state store<br/>• per-session capabilities"]
     end
     
-    launcher["launch-agent.ps1 / launch-agent<br/>(copies repo, mounts auth)"]
+    launcher["launch-agent.ps1 / launch-agent<br/>• security preflight<br/>• capability issuance"]
     
     subgraph container["CONTAINER (isolated)"]
         direction TB
@@ -37,12 +38,17 @@ flowchart TB
     end
     
     host --> launcher
+    launcher --> broker
+    broker --> launcher
     launcher --> container
     
     style host fill:#e1f5ff,stroke:#0366d6
     style container fill:#fff3cd,stroke:#856404
     style launcher fill:#d4edda,stroke:#28a745
+    style broker fill:#d4edda,stroke:#28a745
 ```
+
+The launcher refuses to progress past the host if seccomp, AppArmor, ptrace scope, or tmpfs protections cannot be enforced. Once the host passes, the launcher requests per-session capability bundles from the secret broker, which creates its key store on demand the first time it is used.
 
 ## Container Architecture
 
@@ -124,6 +130,22 @@ flowchart TB
 
 ## Launch Flow
 
+### 0. Security Preflight
+
+Every launch begins with two guardrails:
+
+1. `verify_host_security_prereqs` confirms seccomp/AppArmor profiles exist, ptrace scope can be hardened, and sensitive tmpfs mounts are enabled (or intentionally overridden via `CODING_AGENTS_DISABLE_*`).
+2. `verify_container_security_support` inspects `docker info` / `podman info` to ensure the runtime advertises seccomp + AppArmor enforcement.
+
+```mermaid
+flowchart LR
+    gitState["Git Integrity Check"] --> hostCheck["Host Prereqs"] --> runtimeCheck["Runtime Inspection"]
+    runtimeCheck --> brokerInit["Secret Broker Auto-Init"] --> containerStart["Container Create"]
+
+    classDef stage fill:#d4edda,stroke:#28a745,color:#111;
+    class gitState,hostCheck,runtimeCheck,brokerInit,containerStart stage;
+```
+
 ### 1. User Runs launch-agent
 
 ```powershell
@@ -193,6 +215,7 @@ exec "$@"
 - Workspace at `/workspace`
 - Git configured with dual remotes
 - MCP servers configured
+- Secret broker capabilities + sealed secrets staged inside stub-specific tmpfs mounts
 - Connectable from VS Code
 
 ## Authentication Flow

@@ -10,6 +10,10 @@ CODING_AGENTS_HOST_CONFIG_FILE="${CODING_AGENTS_HOST_CONFIG:-${CODING_AGENTS_CON
 CODING_AGENTS_OVERRIDE_DIR="${CODING_AGENTS_OVERRIDE_DIR:-${CODING_AGENTS_CONFIG_DIR}/overrides}"
 CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-${CODING_AGENTS_OVERRIDE_DIR}/allow-dirty}"
 CODING_AGENTS_BROKER_SCRIPT="${CODING_AGENTS_BROKER_SCRIPT:-${CODING_AGENTS_REPO_ROOT_DEFAULT}/scripts/runtime/secret-broker.py}"
+CODING_AGENTS_AUDIT_LOG="${CODING_AGENTS_AUDIT_LOG:-${CODING_AGENTS_CONFIG_DIR}/security-events.log}"
+CODING_AGENTS_HELPER_NETWORK_POLICY="${CODING_AGENTS_HELPER_NETWORK_POLICY:-loopback}"
+CODING_AGENTS_HELPER_PIDS_LIMIT="${CODING_AGENTS_HELPER_PIDS_LIMIT:-64}"
+CODING_AGENTS_HELPER_MEMORY="${CODING_AGENTS_HELPER_MEMORY:-512m}"
 DEFAULT_LAUNCHER_UPDATE_POLICY="prompt"
 
 _resolve_git_binary() {
@@ -88,6 +92,152 @@ _list_dirty_entries() {
     printf '%s\n' "${dirty[@]}"
 }
 
+json_escape_string() {
+    local input="${1:-}"
+    input=${input//\\/\\\\}
+    input=${input//\"/\\\"}
+    input=${input//$'\n'/\\n}
+    input=${input//$'\r'/\\r}
+    input=${input//$'\t'/\\t}
+    printf '%s' "$input"
+}
+
+json_array_from_list() {
+    if [ "$#" -eq 0 ]; then
+        printf '[]'
+        return
+    fi
+    local entries=()
+    while [ "$#" -gt 0 ]; do
+        entries+=("\"$(json_escape_string "$1")\"")
+        shift
+    done
+    local joined
+    joined=$(IFS=,; echo "${entries[*]}")
+    printf '[%s]' "$joined"
+}
+
+trusted_tree_hashes_to_json() {
+    local raw="$1"
+    local entries=()
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        local path="${line%%=*}"
+        local hash="${line#*=}"
+        entries+=("{\"path\":\"$(json_escape_string "$path")\",\"hash\":\"$(json_escape_string "$hash")\"}")
+    done <<< "$raw"
+    local joined
+    joined=$(IFS=,; echo "${entries[*]}")
+    printf '[%s]' "$joined"
+}
+
+collect_capability_metadata() {
+    local root="$1"
+    if [ -z "$root" ] || [ ! -d "$root" ]; then
+        printf '[]'
+        return
+    fi
+    local entries=()
+    while IFS= read -r -d '' file; do
+        local stub
+        stub=$(basename "$(dirname "$file")")
+        local cap
+        cap=$(basename "$file")
+        cap=${cap%.json}
+        entries+=("{\"stub\":\"$(json_escape_string "$stub")\",\"capabilityId\":\"$(json_escape_string "$cap")\"}")
+    done < <(find "$root" -mindepth 2 -maxdepth 2 -type f -name '*.json' -print0 2>/dev/null)
+    local joined
+    joined=$(IFS=,; echo "${entries[*]}")
+    printf '[%s]' "$joined"
+}
+
+log_security_event() {
+    if [ "${CODING_AGENTS_DISABLE_AUDIT_LOG:-0}" = "1" ]; then
+        return
+    fi
+    local event_name="$1"
+    local payload="${2:-{}}"
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local record
+    record=$(printf '{"ts":"%s","event":"%s","payload":%s}\n' "$timestamp" "$(json_escape_string "$event_name")" "$payload")
+    local log_file="$CODING_AGENTS_AUDIT_LOG"
+    local log_dir
+    log_dir=$(dirname "$log_file")
+    mkdir -p "$log_dir"
+    local previous_umask
+    previous_umask=$(umask)
+    umask 077
+    printf '%s' "$record" >> "$log_file"
+    umask "$previous_umask"
+    if command -v systemd-cat >/dev/null 2>&1; then
+        printf '%s' "$record" | systemd-cat -t coding-agents-launcher >/dev/null 2>&1 || true
+    fi
+}
+
+log_session_config_manifest() {
+    local session_id="$1"
+    local manifest_sha="$2"
+    local repo_root="$3"
+    local tree_hashes="$4"
+    local git_head
+    git_head=$(get_git_head_hash "$repo_root" 2>/dev/null || echo "")
+    local tree_json
+    tree_json=$(trusted_tree_hashes_to_json "$tree_hashes")
+    local payload
+    payload=$(printf '{"session":"%s","manifestSha":"%s","gitHead":"%s","trustedTrees":%s}' \
+        "$(json_escape_string "$session_id")" \
+        "$(json_escape_string "${manifest_sha:-unknown}")" \
+        "$(json_escape_string "$git_head")" \
+        "$tree_json")
+    log_security_event "session-config" "$payload"
+}
+
+log_capability_issuance_event() {
+    local session_id="$1"
+    local output_dir="$2"
+    shift 2 || true
+    local stubs=("$@")
+    local repo_root="${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
+    local git_head
+    git_head=$(get_git_head_hash "$repo_root" 2>/dev/null || echo "")
+    local manifest_sha="${CODING_AGENTS_SESSION_CONFIG_SHA256:-}"
+    local stub_json
+    stub_json=$(json_array_from_list "${stubs[@]}")
+    local capabilities_json
+    capabilities_json=$(collect_capability_metadata "$output_dir")
+    local payload
+    payload=$(printf '{"session":"%s","gitHead":"%s","manifestSha":"%s","stubs":%s,"capabilities":%s}' \
+        "$(json_escape_string "$session_id")" \
+        "$(json_escape_string "$git_head")" \
+        "$(json_escape_string "${manifest_sha:-unknown}")" \
+        "$stub_json" \
+        "$capabilities_json")
+    log_security_event "capabilities-issued" "$payload"
+}
+
+log_override_usage() {
+    local repo_root="$1"
+    local label="$2"
+    local dirty_list="$3"
+    if [ -z "$dirty_list" ]; then
+        return
+    fi
+    local paths=()
+    while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        paths+=("$entry")
+    done <<< "$dirty_list"
+    local dirty_json
+    dirty_json=$(json_array_from_list "${paths[@]}")
+    local payload
+    payload=$(printf '{"repo":"%s","label":"%s","dirtyPaths":%s}' \
+        "$(json_escape_string "$repo_root")" \
+        "$(json_escape_string "$label")" \
+        "$dirty_json")
+    log_security_event "override-used" "$payload"
+}
+
 ensure_trusted_paths_clean() {
     local repo_root="$1"
     shift || true
@@ -108,6 +258,7 @@ ensure_trusted_paths_clean() {
 
     if [ -f "$override_token" ]; then
         echo "⚠️  Override token detected at $override_token; launching with dirty ${label}: $dirty" >&2
+        log_override_usage "$repo_root" "$label" "$dirty"
         return 0
     fi
 
@@ -324,7 +475,11 @@ issue_session_capabilities() {
         return 0
     fi
     mkdir -p "$output_dir"
-    run_python_tool "$broker" --mount "$output_dir" -- issue --session-id "$session_id" --output "$output_dir" --stubs "${stubs[@]}"
+    if run_python_tool "$broker" --mount "$output_dir" -- issue --session-id "$session_id" --output "$output_dir" --stubs "${stubs[@]}"; then
+        log_capability_issuance_event "$session_id" "$output_dir" "${stubs[@]}"
+        return 0
+    fi
+    return 1
 }
 
 # Cache the active container CLI (docker or podman) so downstream helpers can reuse it
@@ -440,6 +595,173 @@ resolve_apparmor_profile_name() {
 
     echo "⚠️  AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'" >&2
     return 1
+}
+
+verify_host_security_prereqs() {
+    local repo_root="${1:-${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}}"
+    local errors=()
+    local warnings=()
+
+    if [ "${CODING_AGENTS_DISABLE_SECCOMP:-0}" = "1" ]; then
+        warnings+=("Seccomp enforcement disabled via CODING_AGENTS_DISABLE_SECCOMP=1")
+    else
+        if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
+            local hint="${CODING_AGENTS_SECCOMP_PROFILE:-$repo_root/docker/profiles/seccomp-coding-agents.json}"
+            if [[ "$hint" != /* ]]; then
+                hint="$repo_root/$hint"
+            fi
+            errors+=("Seccomp profile not found at $hint. Install host security profiles or export CODING_AGENTS_DISABLE_SECCOMP=1 (not recommended).")
+        fi
+    fi
+
+    if [ "${CODING_AGENTS_DISABLE_APPARMOR:-0}" = "1" ]; then
+        warnings+=("AppArmor enforcement disabled via CODING_AGENTS_DISABLE_APPARMOR=1")
+    else
+        if ! is_linux_host; then
+            errors+=("AppArmor enforcement requires a Linux host. Run from Linux or export CODING_AGENTS_DISABLE_APPARMOR=1 to acknowledge the risk.")
+        elif ! is_apparmor_supported; then
+            errors+=("AppArmor kernel support not detected. Enable AppArmor or export CODING_AGENTS_DISABLE_APPARMOR=1 to override.")
+        else
+            local profile="${CODING_AGENTS_APPARMOR_PROFILE_NAME:-coding-agents}"
+            local profile_file="${CODING_AGENTS_APPARMOR_PROFILE_FILE:-$repo_root/docker/profiles/apparmor-coding-agents.profile}"
+            if [[ "$profile_file" != /* ]]; then
+                profile_file="$repo_root/$profile_file"
+            fi
+            if ! apparmor_profile_loaded "$profile"; then
+                if [ -f "$profile_file" ]; then
+                    errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file' or export CODING_AGENTS_DISABLE_APPARMOR=1 to override.")
+                else
+                    errors+=("AppArmor profile file '$profile_file' not found. Set CODING_AGENTS_APPARMOR_PROFILE_FILE to a valid profile path.")
+                fi
+            fi
+        fi
+    fi
+
+    if [ "${CODING_AGENTS_DISABLE_PTRACE_SCOPE:-0}" = "1" ]; then
+        warnings+=("Ptrace scope hardening disabled via CODING_AGENTS_DISABLE_PTRACE_SCOPE=1")
+    elif is_linux_host && [ ! -e /proc/sys/kernel/yama/ptrace_scope ]; then
+        errors+=("kernel.yama.ptrace_scope is unavailable. Enable the Yama LSM or export CODING_AGENTS_DISABLE_PTRACE_SCOPE=1 to bypass (not recommended).")
+    fi
+
+    if [ "${CODING_AGENTS_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
+        warnings+=("Sensitive tmpfs mounting disabled via CODING_AGENTS_DISABLE_SENSITIVE_TMPFS=1")
+    fi
+
+    if [ ${#errors[@]} -gt 0 ]; then
+        echo "❌ Host security verification failed:" >&2
+        local message
+        for message in "${errors[@]}"; do
+            echo "   - $message" >&2
+        done
+        return 1
+    fi
+
+    if [ ${#warnings[@]} -gt 0 ]; then
+        echo "⚠️  Host security warnings:" >&2
+        local warning
+        for warning in "${warnings[@]}"; do
+            echo "   - $warning" >&2
+        done
+    fi
+
+    return 0
+}
+
+verify_container_security_support() {
+    if [ "${CODING_AGENTS_DISABLE_CONTAINER_SECURITY_CHECK:-0}" = "1" ]; then
+        echo "⚠️  Container security checks disabled via CODING_AGENTS_DISABLE_CONTAINER_SECURITY_CHECK=1" >&2
+        return 0
+    fi
+
+    local require_seccomp=1
+    local require_apparmor=1
+    if [ "${CODING_AGENTS_DISABLE_SECCOMP:-0}" = "1" ]; then
+        require_seccomp=0
+    fi
+    if [ "${CODING_AGENTS_DISABLE_APPARMOR:-0}" = "1" ]; then
+        require_apparmor=0
+    fi
+
+    if [ $require_seccomp -eq 0 ] && [ $require_apparmor -eq 0 ]; then
+        return 0
+    fi
+
+    local info_json="${CODING_AGENTS_CONTAINER_INFO_JSON:-}"
+    if [ -z "$info_json" ]; then
+        local runtime
+        runtime=$(get_active_container_cmd)
+        if [ -z "$runtime" ]; then
+            echo "❌ Unable to determine container runtime for security checks" >&2
+            return 1
+        fi
+        if ! info_json=$($runtime info --format '{{json .}}' 2>/dev/null); then
+            info_json=$($runtime info --format json 2>/dev/null || true)
+        fi
+    fi
+
+    if [ -z "$info_json" ]; then
+        echo "❌ Unable to inspect container runtime security options" >&2
+        return 1
+    fi
+
+    local summary
+    summary=$(printf '%s' "$info_json" | python3 - <<'PY'
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+result = {"seccomp": False, "apparmor": False}
+def consider(options):
+    if isinstance(options, list):
+        for entry in options:
+            if isinstance(entry, str):
+                low = entry.lower()
+                if "seccomp" in low:
+                    result["seccomp"] = True
+                if "apparmor" in low:
+                    result["apparmor"] = True
+consider(data.get("SecurityOptions"))
+consider(data.get("securityOptions"))
+host = data.get("host") or {}
+security = host.get("security") or {}
+if security.get("seccompProfilePath") or security.get("seccompEnabled"):
+    result["seccomp"] = True
+if security.get("apparmorEnabled"):
+    result["apparmor"] = True
+if isinstance(host.get("seccomp"), str) and host["seccomp"].lower() == "enabled":
+    result["seccomp"] = True
+if isinstance(host.get("apparmor"), str) and host["apparmor"].lower() == "enabled":
+    result["apparmor"] = True
+print(json.dumps(result))
+PY
+) || summary=""
+
+    if [ -z "$summary" ]; then
+        echo "❌ Failed to parse container security capabilities" >&2
+        return 1
+    fi
+
+    local has_seccomp=0
+    local has_apparmor=0
+    if printf '%s' "$summary" | grep -q '"seccomp"[[:space:]]*:[[:space:]]*true'; then
+        has_seccomp=1
+    fi
+    if printf '%s' "$summary" | grep -q '"apparmor"[[:space:]]*:[[:space:]]*true'; then
+        has_apparmor=1
+    fi
+
+    if [ $require_seccomp -eq 1 ] && [ $has_seccomp -ne 1 ]; then
+        echo "❌ Container runtime does not report seccomp support. Update Docker/Podman or export CODING_AGENTS_DISABLE_SECCOMP=1 to override." >&2
+        return 1
+    fi
+
+    if [ $require_apparmor -eq 1 ] && [ $has_apparmor -ne 1 ]; then
+        echo "❌ Container runtime does not report AppArmor support. Ensure the module is enabled or export CODING_AGENTS_DISABLE_APPARMOR=1 to override." >&2
+        return 1
+    fi
+
+    return 0
 }
 
 sanitize_docker_resource_name() {
@@ -749,15 +1071,48 @@ run_python_tool() {
         docker_args+=("--user" "$(id -u):$(id -g)")
     fi
     docker_args+=("-e" "TZ=${TZ:-UTC}")
+    docker_args+=("--pids-limit" "$CODING_AGENTS_HELPER_PIDS_LIMIT")
+    docker_args+=("--security-opt" "no-new-privileges")
+    docker_args+=("--cap-drop" "ALL")
+
+    if [ -n "$CODING_AGENTS_HELPER_MEMORY" ]; then
+        docker_args+=("--memory" "$CODING_AGENTS_HELPER_MEMORY")
+    fi
+
+    local helper_network="${CODING_AGENTS_HELPER_NETWORK_POLICY:-loopback}"
+    case "$helper_network" in
+        loopback|none)
+            docker_args+=("--network" "none")
+            ;;
+        host)
+            docker_args+=("--network" "host")
+            ;;
+        bridge|"" )
+            docker_args+=("--network" "bridge")
+            ;;
+        *)
+            docker_args+=("--network" "$helper_network")
+            ;;
+    esac
+
+    docker_args+=("--tmpfs" "/tmp:rw,nosuid,nodev,noexec,size=64m")
+    docker_args+=("--tmpfs" "/var/tmp:rw,nosuid,nodev,noexec,size=32m")
 
     while IFS='=' read -r name value; do
         [ -z "$name" ] && continue
         docker_args+=("-e" "${name}=${value}")
     done < <(env | grep '^CODING_AGENTS_' || true)
 
+    local seccomp_profile=""
+    if [ "${CODING_AGENTS_DISABLE_HELPER_SECCOMP:-0}" != "1" ]; then
+        seccomp_profile=$(resolve_seccomp_profile_path "$repo_root" 2>/dev/null || true)
+    fi
+    if [ -n "$seccomp_profile" ]; then
+        docker_args+=("--security-opt" "seccomp=$seccomp_profile")
+    fi
+
     local mounts=("$repo_root")
     [ -n "${HOME:-}" ] && mounts+=("$HOME")
-    mounts+=("/tmp")
     local mount_path
     for mount_path in "${extra_mounts[@]}"; do
         [ -n "$mount_path" ] && mounts+=("$mount_path")

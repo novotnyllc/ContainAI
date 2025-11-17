@@ -11,6 +11,10 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
 
+if ! verify_host_security_prereqs "$REPO_ROOT"; then
+    exit 1
+fi
+
 TRUSTED_PATHS=("scripts/launchers" "scripts/runtime" "docker/profiles")
 TRUSTED_TREE_LABEL="launcher + helper files"
 if ! ensure_trusted_paths_clean "$REPO_ROOT" "$TRUSTED_TREE_LABEL" "${TRUSTED_PATHS[@]}"; then
@@ -202,6 +206,9 @@ esac
 
 # Check Docker
 check_docker_running || exit 1
+if ! verify_container_security_support; then
+    exit 1
+fi
 CONTAINER_CLI=$(get_active_container_cmd)
 
 # Determine if source is URL or local path
@@ -435,6 +442,7 @@ if [ -f "$RENDERER_SCRIPT" ]; then
             fi
             SESSION_CONFIG_RENDERED=true
             echo "🔐 Session MCP config manifest: ${SESSION_CONFIG_SHA256:-unknown}"
+            log_session_config_manifest "$SESSION_ID" "${SESSION_CONFIG_SHA256:-}" "$REPO_ROOT" "$TRUSTED_TREE_HASHES_RAW"
             servers_file="$SESSION_CONFIG_OUTPUT/servers.txt"
             if [ -f "$servers_file" ]; then
                 mapfile -t MANIFEST_STUBS < <(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$servers_file" | grep -v '^$')
@@ -457,6 +465,7 @@ fi
 
 BROKER_CAP_DIR="$SESSION_CONFIG_OUTPUT/capabilities"
 mkdir -p "$BROKER_CAP_DIR"
+export CODING_AGENTS_SESSION_CONFIG_SHA256="${SESSION_CONFIG_SHA256:-}"
 if ! issue_session_capabilities "$SESSION_ID" "$BROKER_CAP_DIR" "${BROKER_STUBS[@]}"; then
     echo "❌ Failed to issue capability tokens" >&2
     exit 1

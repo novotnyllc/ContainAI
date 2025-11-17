@@ -59,6 +59,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "run-agent"
 
+if (-not (Test-HostSecurityPrereqs -RepoRoot $RepoRoot)) {
+    exit 1
+}
+
 # Auto-detect WSL home directory
 $WslHome = wsl bash -c 'echo $HOME' 2>$null
 if (-not $WslHome) {
@@ -80,6 +84,10 @@ if (-not (Test-DockerRunning)) {
 $ContainerCli = Get-ContainerCli
 if (-not $ContainerCli) {
     Write-Host "❌ Error: Unable to determine container runtime" -ForegroundColor Red
+    exit 1
+}
+
+if (-not (Test-ContainerSecuritySupport)) {
     exit 1
 }
 

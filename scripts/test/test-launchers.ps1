@@ -469,6 +469,122 @@ function Test-SharedFunctions {
     Remove-Item env:CODING_AGENTS_DISABLE_APPARMOR -ErrorAction SilentlyContinue
 }
 
+function Test-HelperNetworkIsolation {
+    Test-Section "Testing helper network isolation"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $homeDir = if ($env:HOME) { $env:HOME } else { [Environment]::GetFolderPath('UserProfile') }
+    $scriptDir = Join-Path $homeDir ".coding-agents-tests"
+    if (-not (Test-Path $scriptDir)) {
+        New-Item -ItemType Directory -Path $scriptDir -Force | Out-Null
+    }
+    $scriptPath = Join-Path $scriptDir ("helper-net-" + [System.Guid]::NewGuid().ToString() + ".py")
+    @"
+import os
+import sys
+
+interfaces = [name for name in os.listdir('/sys/class/net') if name not in ('lo',)]
+sys.exit(0 if not interfaces else 1)
+"@ | Set-Content -Path $scriptPath -Encoding UTF8
+
+    try {
+        $mountDir = [System.IO.Path]::GetDirectoryName($scriptPath)
+        if (Invoke-PythonTool -ScriptPath $scriptPath -MountPaths @($mountDir)) {
+            Pass "Helper runner hides non-loopback interfaces"
+        } else {
+            Fail "Helper runner exposed additional interfaces"
+        }
+    } finally {
+        Remove-Item $scriptPath -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-AuditLoggingPipeline {
+    Test-Section "Testing audit logging pipeline"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $logFile = Join-Path $env:TEMP ("helper-audit-" + [System.Guid]::NewGuid().ToString() + ".log")
+    $env:CODING_AGENTS_AUDIT_LOG = $logFile
+
+    Write-SecurityEvent -EventName "unit-test" -Payload @{ ok = $true }
+    $initialLog = Get-Content $logFile -ErrorAction Stop | Out-String
+    if ($initialLog -match '"event":"unit-test"') {
+        Pass "Security events persisted to audit log"
+    } else {
+        Fail "Audit log missing custom event"
+    }
+
+    $overrideToken = Join-Path $env:TEMP ("override-" + [System.Guid]::NewGuid().ToString())
+    New-Item -ItemType File -Path $overrideToken -Force | Out-Null
+
+    $tempRepo = Join-Path $env:TEMP ("audit-" + [System.Guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $tempRepo -Force | Out-Null
+    Push-Location $tempRepo
+    git init -q | Out-Null
+    New-Item -ItemType Directory -Path "scripts/launchers" -Force | Out-Null
+    "echo hi" | Out-File -FilePath "scripts/launchers/tool.sh" -Encoding UTF8
+    git add scripts/launchers/tool.sh | Out-Null
+    git commit -q -m "init" | Out-Null
+    "# dirty" | Out-File -FilePath "scripts/launchers/tool.sh" -Encoding UTF8 -Append
+    Pop-Location
+
+    $env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN = $overrideToken
+    Test-TrustedPathsClean -RepoRoot $tempRepo -Paths @("scripts/launchers") -Label "test stubs" | Out-Null
+
+    $updatedLog = Get-Content $logFile -ErrorAction Stop | Out-String
+    if ($updatedLog -match '"event":"override-used"') {
+        Pass "Override usage recorded"
+    } else {
+        Fail "Override usage not captured in audit log"
+    }
+
+    Remove-Item $tempRepo -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $overrideToken -Force -ErrorAction SilentlyContinue
+    Remove-Item $logFile -Force -ErrorAction SilentlyContinue
+    Remove-Item Env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN -ErrorAction SilentlyContinue
+    Remove-Item Env:CODING_AGENTS_AUDIT_LOG -ErrorAction SilentlyContinue
+}
+
+function Test-SeccompPtraceBlock {
+    Test-Section "Testing seccomp ptrace enforcement"
+
+    $profile = Join-Path $ProjectRoot "docker/profiles/seccomp-coding-agents.json"
+    if (-not (Test-Path $profile)) {
+        Fail "Seccomp profile missing at $profile"
+        return
+    }
+
+    $pythonScript = @"
+import ctypes, os, sys
+
+libc = ctypes.CDLL(None, use_errno=True)
+PTRACE_ATTACH = 16
+pid = os.getpid()
+res = libc.ptrace(PTRACE_ATTACH, pid, None, None)
+err = ctypes.get_errno()
+if res == -1 and err in (1, 13, 38):
+    sys.exit(0)
+sys.exit(1)
+"@
+
+    $args = @(
+        "run", "--rm",
+        "--security-opt", "no-new-privileges",
+        "--security-opt", "seccomp=$profile",
+        "python:3.11-slim",
+        "python", "-c", $pythonScript
+    )
+
+    & docker @args | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Pass "ptrace blocked by seccomp profile"
+    } else {
+        Fail "ptrace syscall not blocked by seccomp profile"
+    }
+}
+
 function Test-SessionConfigRenderer {
     Test-Section "Testing session config renderer"
 
@@ -547,20 +663,16 @@ function Test-SecretBrokerCli {
     $null = New-Item -ItemType Directory -Path $envDir -Force
     $capDir = Join-Path $env:TEMP ("broker-cap-" + [guid]::NewGuid().ToString())
     $null = New-Item -ItemType Directory -Path $capDir -Force
+    $sealedDir = Join-Path $capDir "sealed"
+    $null = New-Item -ItemType Directory -Path $sealedDir -Force
 
     $previousConfig = $env:CODING_AGENTS_CONFIG_DIR
     $env:CODING_AGENTS_CONFIG_DIR = $envDir
 
-    $initMounts = @($configRoot)
+    $configMounts = @($configRoot)
     $issueMounts = @($configRoot, $capDir)
+    $redeemMounts = @($configRoot, $capDir, $sealedDir)
     try {
-        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $initMounts -ScriptArgs @("init", "--stubs", "alpha", "beta")) {
-            Pass "Broker init succeeds"
-        } else {
-            Fail "Broker init failed"
-            return
-        }
-
         if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $issueMounts -ScriptArgs @("issue", "--session-id", "test-session", "--output", $capDir, "--stubs", "alpha")) {
             Pass "Capability issuance succeeds"
         } else {
@@ -575,7 +687,68 @@ function Test-SecretBrokerCli {
             Fail "Capability token file missing"
         }
 
-        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $initMounts -ScriptArgs @("health")) {
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $configMounts -ScriptArgs @("store", "--stub", "alpha", "--name", "TEST_SECRET", "--value", "super-secret")) {
+            Pass "Broker secret store succeeds"
+        } else {
+            Fail "Broker secret store failed"
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $redeemMounts -ScriptArgs @("redeem", "--capability", $tokenFile.FullName, "--secret", "TEST_SECRET", "--output-dir", $sealedDir)) {
+            Pass "Capability redemption seals secret"
+        } else {
+            Fail "Capability redemption failed"
+        }
+
+        $sealedPath = Join-Path $sealedDir "TEST_SECRET.sealed"
+        if (-not (Test-Path $sealedPath)) {
+            Fail "Sealed secret missing"
+        } else {
+            Pass "Sealed secret written to disk"
+        }
+
+        try {
+            $tokenJson = Get-Content $tokenFile.FullName -Raw | ConvertFrom-Json
+            $sealedJson = Get-Content $sealedPath -Raw | ConvertFrom-Json
+            $sessionKeyBytes = @()
+            for ($i = 0; $i -lt $tokenJson.session_key.Length; $i += 2) {
+                $sessionKeyBytes += [Convert]::ToByte($tokenJson.session_key.Substring($i, 2), 16)
+            }
+            $sessionKeyBytes = [byte[]]$sessionKeyBytes
+            $cipher = [Convert]::FromBase64String($sealedJson.ciphertext)
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+                $block = $sha.ComputeHash($sessionKeyBytes)
+                $index = 0
+                $plainBytes = New-Object System.Collections.Generic.List[byte]
+                foreach ($byte in $cipher) {
+                    $plainBytes.Add($byte -bxor $block[$index]) | Out-Null
+                    $index++
+                    if ($index -ge $block.Length) {
+                        $block = $sha.ComputeHash($block)
+                        $index = 0
+                    }
+                }
+                $plaintext = [System.Text.Encoding]::UTF8.GetString($plainBytes.ToArray())
+                if ($plaintext -eq "super-secret") {
+                    Pass "Sealed secret decrypts with session key"
+                } else {
+                    Fail "Decrypted sealed secret does not match expected value"
+                }
+            } finally {
+                $sha.Dispose()
+            }
+        } catch {
+            Fail "Failed to decrypt sealed secret: $_"
+        }
+
+        $secondRedeem = Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $redeemMounts -ScriptArgs @("redeem", "--capability", $tokenFile.FullName, "--secret", "TEST_SECRET")
+        if ($secondRedeem) {
+            Fail "Redeeming same capability twice should fail"
+        } else {
+            Pass "Capability redemption is single-use"
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $configMounts -ScriptArgs @("health")) {
             Pass "Broker health check succeeds"
         } else {
             Fail "Broker health check failed"
@@ -589,6 +762,93 @@ function Test-SecretBrokerCli {
         Remove-Item $configRoot -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item $capDir -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Test-HostSecurityPreflight {
+    Test-Section "Testing host security preflight"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $previous = @{
+        CODING_AGENTS_DISABLE_SECCOMP = $env:CODING_AGENTS_DISABLE_SECCOMP
+        CODING_AGENTS_DISABLE_APPARMOR = $env:CODING_AGENTS_DISABLE_APPARMOR
+        CODING_AGENTS_DISABLE_PTRACE_SCOPE = $env:CODING_AGENTS_DISABLE_PTRACE_SCOPE
+        CODING_AGENTS_DISABLE_SENSITIVE_TMPFS = $env:CODING_AGENTS_DISABLE_SENSITIVE_TMPFS
+        CODING_AGENTS_SECCOMP_PROFILE = $env:CODING_AGENTS_SECCOMP_PROFILE
+    }
+
+    try {
+        $env:CODING_AGENTS_DISABLE_SECCOMP = "1"
+        $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
+        $env:CODING_AGENTS_DISABLE_PTRACE_SCOPE = "1"
+        $env:CODING_AGENTS_DISABLE_SENSITIVE_TMPFS = "1"
+        Remove-Item Env:CODING_AGENTS_SECCOMP_PROFILE -ErrorAction SilentlyContinue
+
+        if (Test-HostSecurityPrereqs -RepoRoot $ProjectRoot) {
+            Pass "Preflight allows explicit override of security guardrails"
+        } else {
+            Fail "Preflight rejected explicit override scenario"
+        }
+
+        $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
+        $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
+        $env:CODING_AGENTS_DISABLE_PTRACE_SCOPE = "1"
+        $env:CODING_AGENTS_DISABLE_SENSITIVE_TMPFS = "1"
+        $env:CODING_AGENTS_SECCOMP_PROFILE = Join-Path $ProjectRoot "tests/nonexistent-seccomp.json"
+
+        if (Test-HostSecurityPrereqs -RepoRoot $ProjectRoot) {
+            Fail "Preflight should fail when seccomp profile is missing"
+        } else {
+            Pass "Seccomp profile requirement enforced"
+        }
+    }
+    finally {
+        foreach ($entry in $previous.GetEnumerator()) {
+            if ($null -eq $entry.Value -or $entry.Value -eq "") {
+                Remove-Item "Env:$($entry.Key)" -ErrorAction SilentlyContinue
+            } else {
+                Set-Item "Env:$($entry.Key)" $entry.Value
+            }
+        }
+    }
+}
+
+function Test-ContainerSecurityPreflight {
+    Test-Section "Testing container security preflight"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $goodJson = '{"SecurityOptions":["name=seccomp","name=apparmor"]}'
+    $missingAppArmor = '{"SecurityOptions":["name=seccomp"]}'
+
+    $env:CODING_AGENTS_CONTAINER_INFO_JSON = $goodJson
+    $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
+    $env:CODING_AGENTS_DISABLE_APPARMOR = "0"
+    if (Test-ContainerSecuritySupport) {
+        Pass "Container preflight passes when runtime reports both features"
+    } else {
+        Fail "Container preflight rejected valid runtime JSON"
+    }
+
+    $env:CODING_AGENTS_CONTAINER_INFO_JSON = $missingAppArmor
+    $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
+    $env:CODING_AGENTS_DISABLE_APPARMOR = "0"
+    if (Test-ContainerSecuritySupport) {
+        Fail "Container preflight should fail when AppArmor missing"
+    } else {
+        Pass "AppArmor requirement enforced when runtime lacks support"
+    }
+
+    $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
+    if (Test-ContainerSecuritySupport) {
+        Pass "AppArmor override bypasses container check"
+    } else {
+        Fail "AppArmor override should allow launch without runtime support"
+    }
+
+    Remove-Item Env:CODING_AGENTS_CONTAINER_INFO_JSON -ErrorAction SilentlyContinue
+    Remove-Item Env:CODING_AGENTS_DISABLE_APPARMOR -ErrorAction SilentlyContinue
+    Remove-Item Env:CODING_AGENTS_DISABLE_SECCOMP -ErrorAction SilentlyContinue
 }
 
 function Test-LocalRemotePush {
@@ -982,6 +1242,11 @@ function Main {
         @{ Name = "Initialize-TestRepo"; Action = { Initialize-TestRepo } },
         @{ Name = "Test-ContainerRuntimeDetection"; Action = { Test-ContainerRuntimeDetection } },
         @{ Name = "Test-SharedFunctions"; Action = { Test-SharedFunctions } },
+        @{ Name = "Test-HelperNetworkIsolation"; Action = { Test-HelperNetworkIsolation } },
+        @{ Name = "Test-AuditLoggingPipeline"; Action = { Test-AuditLoggingPipeline } },
+        @{ Name = "Test-SeccompPtraceBlock"; Action = { Test-SeccompPtraceBlock } },
+        @{ Name = "Test-HostSecurityPreflight"; Action = { Test-HostSecurityPreflight } },
+        @{ Name = "Test-ContainerSecurityPreflight"; Action = { Test-ContainerSecurityPreflight } },
         @{ Name = "Test-SessionConfigRenderer"; Action = { Test-SessionConfigRenderer } },
         @{ Name = "Test-SecretBrokerCli"; Action = { Test-SecretBrokerCli } },
         @{ Name = "Test-LocalRemotePush"; Action = { Test-LocalRemotePush } },

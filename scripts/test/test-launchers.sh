@@ -307,6 +307,109 @@ test_shared_functions() {
     unset CODING_AGENTS_DISABLE_APPARMOR
 }
 
+test_helper_network_isolation() {
+    test_section "Helper network isolation"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local helper_dir="$HOME/.coding-agents-tests"
+    mkdir -p "$helper_dir"
+    local script
+    script=$(mktemp "$helper_dir/helper-net.XXXXXX.py")
+    cat <<'PY' > "$script"
+import os
+import sys
+
+interfaces = [name for name in os.listdir('/sys/class/net') if name not in ('lo',)]
+if interfaces:
+    sys.exit(1)
+sys.exit(0)
+PY
+
+    if run_python_tool "$script" --mount "$(dirname "$script")" >/dev/null 2>&1; then
+        pass "Helper runner hides non-loopback interfaces"
+    else
+        fail "Helper runner exposed external network interfaces"
+    fi
+    rm -f "$script"
+}
+
+test_audit_logging_pipeline() {
+    test_section "Audit logging pipeline"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local log_file
+    log_file=$(mktemp /tmp/helper-audit.XXXXXX.log)
+    export CODING_AGENTS_AUDIT_LOG="$log_file"
+
+    log_security_event "unit-test" '{"ok":true}'
+    if grep -q '"event":"unit-test"' "$log_file"; then
+        pass "Security events persisted to audit log"
+    else
+        fail "Audit log missing custom event"
+    fi
+
+    local override_token
+    override_token=$(mktemp /tmp/helper-override.XXXXXX)
+    local temp_repo
+    temp_repo=$(mktemp -d)
+    pushd "$temp_repo" >/dev/null
+    git init -q
+    mkdir -p scripts/launchers
+    echo "echo hi" > scripts/launchers/tool.sh
+    git add scripts/launchers/tool.sh >/dev/null
+    git commit -q -m "init"
+    echo "# dirty" >> scripts/launchers/tool.sh
+    popd >/dev/null
+
+    CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$override_token" \
+        ensure_trusted_paths_clean "$temp_repo" "test stubs" "scripts/launchers" >/dev/null 2>&1
+    if grep -q '"event":"override-used"' "$log_file"; then
+        pass "Override usage recorded"
+    else
+        fail "Override usage not captured in audit log"
+    fi
+
+    rm -rf "$temp_repo" "$override_token"
+    rm -f "$log_file"
+    unset CODING_AGENTS_AUDIT_LOG
+}
+
+test_seccomp_ptrace_block() {
+    test_section "Seccomp ptrace enforcement"
+
+    local profile="$PROJECT_ROOT/docker/profiles/seccomp-coding-agents.json"
+    if [ ! -f "$profile" ]; then
+        fail "Seccomp profile missing at $profile"
+        return
+    fi
+
+    local python_code
+    read -r -d '' python_code <<'PY'
+import ctypes, os, sys
+
+libc = ctypes.CDLL(None, use_errno=True)
+PTRACE_ATTACH = 16
+pid = os.getpid()
+res = libc.ptrace(PTRACE_ATTACH, pid, None, None)
+err = ctypes.get_errno()
+if res == -1 and err in (1, 13, 38):
+    sys.exit(0)
+sys.exit(1)
+PY
+
+    if docker run --rm \
+        --security-opt "no-new-privileges" \
+        --security-opt "seccomp=$profile" \
+        python:3.11-slim \
+        python -c "$python_code" >/dev/null 2>&1; then
+        pass "ptrace blocked by seccomp profile"
+    else
+        fail "ptrace syscall not blocked by seccomp profile"
+    fi
+}
+
 test_trusted_path_enforcement() {
     test_section "Trusted path enforcement"
 
@@ -420,16 +523,11 @@ test_secret_broker_cli() {
     local env_dir="$config_root/config"
     mkdir -p "$env_dir"
 
-    local init_mounts=("--mount" "$config_root")
+    local config_mounts=("--mount" "$config_root")
     local issue_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
-
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${init_mounts[@]}" -- init --stubs alpha beta >/dev/null 2>&1; then
-        pass "Broker init succeeds"
-    else
-        fail "Broker init failed"
-        rm -rf "$config_root" "$cap_dir"
-        return
-    fi
+    local sealed_dir="$cap_dir/sealed"
+    mkdir -p "$sealed_dir"
+    local redeem_mounts=("--mount" "$config_root" "--mount" "$cap_dir" "--mount" "$sealed_dir")
 
     if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- issue --session-id test-session --output "$cap_dir" --stubs alpha >/dev/null 2>&1; then
         pass "Capability issuance succeeds"
@@ -447,13 +545,112 @@ test_secret_broker_cli() {
         fail "Capability token file missing"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${init_mounts[@]}" -- health >/dev/null 2>&1; then
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${config_mounts[@]}" -- store --stub alpha --name TEST_SECRET --value super-secret >/dev/null 2>&1; then
+        pass "Broker secret store succeeds"
+    else
+        fail "Broker secret store failed"
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET --output-dir "$sealed_dir" >/dev/null 2>&1; then
+        pass "Capability redemption seals secret"
+    else
+        fail "Capability redemption failed"
+    fi
+
+    local sealed_file="$sealed_dir/TEST_SECRET.sealed"
+    if [ -f "$sealed_file" ]; then
+        pass "Sealed secret written to disk"
+    else
+        fail "Sealed secret missing"
+    fi
+
+    local decrypted
+    decrypted=$(python3 - <<'PY'
+import base64, hashlib, json, sys
+import pathlib
+
+cap = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+cap = json.loads(cap)
+sealed = pathlib.Path(sys.argv[2]).read_text(encoding='utf-8')
+sealed = json.loads(sealed)
+session_key = bytes.fromhex(cap["session_key"])
+data = base64.b64decode(sealed["ciphertext"])
+block = hashlib.sha256(session_key).digest()
+out = bytearray()
+idx = 0
+for byte in data:
+    out.append(byte ^ block[idx])
+    idx += 1
+    if idx >= len(block):
+        block = hashlib.sha256(block).digest()
+        idx = 0
+sys.stdout.write(out.decode('utf-8'))
+PY
+"$token_file" "$sealed_file")
+    if [ "$decrypted" = "super-secret" ]; then
+        pass "Sealed secret decrypts with session key"
+    else
+        fail "Sealed secret decrypted to unexpected value"
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET >/dev/null 2>&1; then
+        fail "Redeeming same capability twice should fail"
+    else
+        pass "Capability redemption is single-use"
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${config_mounts[@]}" -- health >/dev/null 2>&1; then
         pass "Broker health check succeeds"
     else
         fail "Broker health check failed"
     fi
 
     rm -rf "$config_root" "$cap_dir"
+}
+
+test_host_security_preflight() {
+    test_section "Host security preflight"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    if CODING_AGENTS_DISABLE_SECCOMP=1 CODING_AGENTS_DISABLE_APPARMOR=1 CODING_AGENTS_DISABLE_PTRACE_SCOPE=1 CODING_AGENTS_DISABLE_SENSITIVE_TMPFS=1 verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
+        pass "Preflight allows explicit override of every guard"
+    else
+        fail "Preflight rejected explicit override scenario"
+    fi
+
+    local missing_profile="$PROJECT_ROOT/tests/nonexistent-seccomp.json"
+    if CODING_AGENTS_DISABLE_APPARMOR=1 CODING_AGENTS_DISABLE_PTRACE_SCOPE=1 CODING_AGENTS_DISABLE_SENSITIVE_TMPFS=1 CODING_AGENTS_SECCOMP_PROFILE="$missing_profile" verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
+        fail "Preflight should fail when seccomp profile is missing"
+    else
+        pass "Seccomp profile requirement enforced"
+    fi
+}
+
+test_container_security_preflight() {
+    test_section "Container security preflight"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local good_json='{"SecurityOptions":["name=seccomp","name=apparmor"]}'
+    if CODING_AGENTS_CONTAINER_INFO_JSON="$good_json" CODING_AGENTS_DISABLE_SECCOMP=0 CODING_AGENTS_DISABLE_APPARMOR=0 verify_container_security_support >/dev/null 2>&1; then
+        pass "Container preflight passes when runtime reports both features"
+    else
+        fail "Container preflight rejected valid runtime JSON"
+    fi
+
+    local missing_apparmor='{"SecurityOptions":["name=seccomp"]}'
+    if CODING_AGENTS_CONTAINER_INFO_JSON="$missing_apparmor" CODING_AGENTS_DISABLE_SECCOMP=0 CODING_AGENTS_DISABLE_APPARMOR=0 verify_container_security_support >/dev/null 2>&1; then
+        fail "Container preflight should fail when AppArmor missing"
+    else
+        pass "AppArmor requirement enforced when runtime lacks support"
+    fi
+
+    if CODING_AGENTS_CONTAINER_INFO_JSON="$missing_apparmor" CODING_AGENTS_DISABLE_APPARMOR=1 verify_container_security_support >/dev/null 2>&1; then
+        pass "AppArmor override bypasses container check"
+    else
+        fail "AppArmor override should allow launch without runtime support"
+    fi
 }
 
 test_local_remote_push() {
@@ -812,6 +1009,11 @@ main() {
     run_test "setup_test_repo" setup_test_repo
     run_test "test_container_runtime_detection" test_container_runtime_detection
     run_test "test_shared_functions" test_shared_functions
+    run_test "test_helper_network_isolation" test_helper_network_isolation
+    run_test "test_audit_logging_pipeline" test_audit_logging_pipeline
+    run_test "test_seccomp_ptrace_block" test_seccomp_ptrace_block
+    run_test "test_host_security_preflight" test_host_security_preflight
+    run_test "test_container_security_preflight" test_container_security_preflight
     run_test "test_trusted_path_enforcement" test_trusted_path_enforcement
     run_test "test_session_config_renderer" test_session_config_renderer
     run_test "test_secret_broker_cli" test_secret_broker_cli
