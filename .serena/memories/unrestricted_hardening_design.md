@@ -32,7 +32,7 @@
 - Category: Design Pattern — Network
 - Mitigates: RISK-EXF-01/02, RISK-NET-01
 - References: docs/network-proxy.md, docker/proxy/entrypoint.sh
-- Proposal: Make Squid (or a hardened egress proxy) the default for unrestricted mode. Expand `SQUID_ALLOWED_DOMAINS` to tiered sets: Tier A (always on): GitHub, Microsoft docs, package registries; Tier B (MCP-specific): allow per-config entries (Context7, Serena git). Block RFC1918/metadata ranges explicitly. Log every request to host (mount proxy logs read-only for analysis). Provide optional `--network-proxy allow-all` but gate it as Tier 3 (prompt or admin knob). Silent for default flows because safe domains already cover typical dev needs.
+- Proposal: Make Squid (or a hardened egress proxy) the default for unrestricted mode. Expand `SQUID_ALLOWED_DOMAINS` to tiered sets: Tier A (always on): GitHub, Microsoft docs, package registries; Tier B (MCP-specific): allow per-config entries (Context7, Serena git). Enforce deny rules for all RFC1918, Carrier Grade NAT, link-local, and cloud metadata address ranges (`169.254.169.254`, `metadata.google.internal`, etc.) so agents can never reach private networks or metadata services they do not need. Log every request to host (mount proxy logs read-only for analysis). Provide optional `--network-proxy allow-all` but gate it as Tier 3 (prompt or admin knob). Silent for default flows because safe domains already cover typical dev needs.
 
 ## HDN-NET-02: Outbound Token Bucket & High-Risk MCP Channel
 - Category: Design Pattern — Network Monitoring & Mediation
