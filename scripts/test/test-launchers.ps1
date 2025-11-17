@@ -2,14 +2,14 @@
 # Tests all core functionality: naming, labels, auto-push, shared functions
 
 [CmdletBinding()]
-param(
-    [switch]$Verbose
-)
+param()
 
 $ErrorActionPreference = "Stop"
 $InformationPreference = "Continue"
 
-if ($Verbose) {
+$EnableVerboseOutput = $PSBoundParameters.ContainsKey("Verbose")
+
+if ($EnableVerboseOutput) {
     $VerbosePreference = "Continue"
 } else {
     $VerbosePreference = "SilentlyContinue"
@@ -67,21 +67,21 @@ function Write-TestLine {
 function Clear-TestEnvironment {
     Write-TestLine
     Write-TestLine -Color Cyan -Message "[CLEANUP] Removing test containers and networks"
-    
+
     docker ps -aq --filter "label=coding-agents.test=true" | ForEach-Object {
         docker rm -f $_ 2> $null | Out-Null
     }
-    
+
     docker network ls --filter "name=test-" --format "{{.Name}}" | ForEach-Object {
         docker network rm $_ 2> $null | Out-Null
     }
-    
+
     if (Test-Path $TestRepoDir) {
         Remove-Item $TestRepoDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    
+
     Show-TestSummary
-    
+
     if ($script:FailedTests -gt 0) {
         exit 1
     }
@@ -98,28 +98,49 @@ function Show-TestSummary {
 
 function Initialize-TestRepo {
     Test-Section "Setting up test repository"
-    
+
     if (Test-Path $TestRepoDir) {
         Remove-Item $TestRepoDir -Recurse -Force
     }
-    
+
     New-Item -ItemType Directory -Path $TestRepoDir | Out-Null
     Push-Location $TestRepoDir
-    
+
     git init -q
     git config user.name "Test User"
     git config user.email "test@example.com"
     git config commit.gpgsign false
     git config remote.pushDefault local
-    
+
     "# Test Repository" | Out-File -FilePath "README.md" -Encoding UTF8
     git add README.md
     git commit -q -m "Initial commit"
     git checkout -q -B main
-    
+
     Pop-Location
-    
+
     Pass "Created test repository at $TestRepoDir"
+}
+
+function Test-GitRemoteExists {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Function describes whether a remote exists; renaming would reduce clarity')]
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$RemoteName
+    )
+
+    try {
+        $remotes = git remote 2> $null
+        if (-not $remotes) {
+            return $false
+        }
+
+        return $remotes -contains $RemoteName
+    } catch {
+        return $false
+    }
 }
 
 # ============================================================================
@@ -151,7 +172,7 @@ function Assert-Equals {
         [string]$Actual,
         [string]$Message
     )
-    
+
     if ($Expected -eq $Actual) {
         Pass $Message
     } else {
@@ -166,7 +187,7 @@ function Assert-Contains {
         [string]$Needle,
         [string]$Message
     )
-    
+
     if ($Haystack -match [regex]::Escape($Needle)) {
         Pass $Message
     } else {
@@ -180,7 +201,7 @@ function Assert-ContainerExists {
         [string]$ContainerName,
         [string]$Message = "Container exists: $ContainerName"
     )
-    
+
     $exists = docker ps -a --filter "name=^${ContainerName}$" --format "{{.Names}}" 2> $null
     if ($exists -eq $ContainerName) {
         Pass $Message
@@ -196,7 +217,7 @@ function Assert-LabelExists {
         [string]$LabelKey,
         [string]$LabelValue
     )
-    
+
     $actual = docker inspect -f "{{ index .Config.Labels `"${LabelKey}`" }}" $ContainerName 2> $null
     if ($actual -eq $LabelValue) {
         Pass "Label ${LabelKey}=${LabelValue} on $ContainerName"
@@ -315,7 +336,7 @@ function New-TestContainer {
         [string]$Repo,
         [string]$Branch
     )
-    
+
     $SanitizedBranch = $Branch -replace '/', '-'
     $ContainerName = "$Agent-$Repo-$SanitizedBranch"
 
@@ -323,7 +344,7 @@ function New-TestContainer {
     if ($existing -eq $ContainerName) {
         docker rm -f $ContainerName 2> $null | Out-Null
     }
-    
+
     $labels = @{
         "coding-agents.test" = "true"
         "coding-agents.type" = "agent"
@@ -333,7 +354,7 @@ function New-TestContainer {
     }
 
     Start-TestContainer -ContainerName $ContainerName -Labels $labels | Out-Null
-    
+
     return $ContainerName
 }
 
@@ -345,7 +366,7 @@ function Test-ContainerLabels {
         [string]$Repo,
         [string]$Branch
     )
-    
+
     Assert-LabelExists -ContainerName $ContainerName -LabelKey "coding-agents.type" -LabelValue "agent"
     Assert-LabelExists -ContainerName $ContainerName -LabelKey "coding-agents.agent" -LabelValue $Agent
     Assert-LabelExists -ContainerName $ContainerName -LabelKey "coding-agents.repo" -LabelValue $Repo
@@ -358,9 +379,9 @@ function Test-ContainerLabels {
 
 function Test-ContainerRuntimeDetection {
     Test-Section "Testing container runtime detection"
-    
+
     . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
-    
+
     $runtime = Get-ContainerRuntime
     if ($runtime -and @("docker", "podman") -contains $runtime) {
         Pass "Get-ContainerRuntime detected runtime: $runtime"
@@ -368,7 +389,7 @@ function Test-ContainerRuntimeDetection {
         Fail "Get-ContainerRuntime returned invalid runtime: '$runtime'"
         return
     }
-    
+
     $cmd = Get-Command $runtime -ErrorAction SilentlyContinue
     if ($cmd) {
         Pass "Container runtime command '$runtime' is available"
@@ -376,7 +397,7 @@ function Test-ContainerRuntimeDetection {
         Fail "Container runtime command '$runtime' not found in PATH"
         return
     }
-    
+
     try {
         & $runtime info 2> $null | Out-Null
         if ($LASTEXITCODE -eq 0) {
@@ -392,25 +413,25 @@ function Test-ContainerRuntimeDetection {
 function Test-SharedFunctions {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing multiple shared functions')]
     param()
-    
+
     Test-Section "Testing shared functions"
-    
+
     . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
-    
+
     $repoName = Get-RepoName $TestRepoDir
     Assert-Equals -Expected "test-coding-agents-repo" -Actual $repoName -Message "Get-RepoName returns correct name"
-    
+
     Push-Location $TestRepoDir
     $branch = Get-CurrentBranch $TestRepoDir
     Pop-Location
     Assert-Equals -Expected "main" -Actual $branch -Message "Get-CurrentBranch returns 'main'"
-    
+
     if (Test-DockerRunning) {
         Pass "Test-DockerRunning succeeds when Docker is running"
     } else {
         Fail "Test-DockerRunning failed"
     }
-    
+
     if (-not (Test-ContainerExists "non-existent-container-12345")) {
         Pass "Test-ContainerExists returns false for non-existent container"
     } else {
@@ -438,7 +459,7 @@ function Test-LocalRemotePush {
     git config commit.gpgsign false
     $localUrlPath = $bareRepo -replace '\\','/'
     $localRemoteUrl = "file:///$localUrlPath"
-    if (-not (git remote get-url local 2> $null)) {
+    if (-not (Test-GitRemoteExists -RemoteName "local")) {
         git remote add local $localRemoteUrl | Out-Null
     } else {
         git remote set-url local $localRemoteUrl | Out-Null
@@ -486,7 +507,7 @@ function Test-LocalRemoteFallbackPush {
     git config user.name "Test User"
     git config user.email "test@example.com"
     git config commit.gpgsign false
-    if (-not (git remote get-url local 2> $null)) {
+    if (-not (Test-GitRemoteExists -RemoteName "local")) {
         git remote add local $bareRepo | Out-Null
     } else {
         git remote set-url local $bareRepo | Out-Null
@@ -589,9 +610,9 @@ function Test-SecureRemoteSync {
 
 function Test-ContainerNaming {
     Test-Section "Testing container naming convention"
-    
+
     $containerName = New-TestContainer -Agent "copilot" -Repo "test-coding-agents-repo" -Branch "main"
-    
+
     Assert-ContainerExists -ContainerName $containerName
     Assert-Contains -Haystack $containerName -Needle "copilot-" -Message "Container name starts with agent"
     Assert-Contains -Haystack $containerName -Needle "-main" -Message "Container name ends with branch"
@@ -599,7 +620,7 @@ function Test-ContainerNaming {
 
 function Test-ContainerLabelsTest {
     Test-Section "Testing container labels"
-    
+
     $containerName = "copilot-test-coding-agents-repo-main"
     Test-ContainerLabels -ContainerName $containerName -Agent "copilot" -Repo "test-coding-agents-repo" -Branch "main"
 }
@@ -607,14 +628,14 @@ function Test-ContainerLabelsTest {
 function Test-ListAgents {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing command that lists multiple agents')]
     param()
-    
+
     Test-Section "Testing list-agents command"
-    
+
     New-TestContainer -Agent "codex" -Repo "test-coding-agents-repo" -Branch "develop" | Out-Null
-    
+
     $listScript = Join-Path $ProjectRoot "scripts\launchers\list-agents.ps1"
     $output = & $listScript | Out-String
-    
+
     Assert-Contains -Haystack $output -Needle "copilot-test-coding-agents-repo-main" -Message "list-agents shows copilot container"
     Assert-Contains -Haystack $output -Needle "codex-test-coding-agents-repo-develop" -Message "list-agents shows codex container"
     Assert-Contains -Haystack $output -Needle "NAME" -Message "list-agents shows header"
@@ -622,12 +643,12 @@ function Test-ListAgents {
 
 function Test-RemoveAgent {
     Test-Section "Testing remove-agent command"
-    
+
     $containerName = "codex-test-coding-agents-repo-develop"
-    
+
     $removeScript = Join-Path $ProjectRoot "scripts\launchers\remove-agent.ps1"
     & $removeScript $containerName -NoPush
-    
+
     $exists = docker ps -a --filter "name=^${containerName}$" --format "{{.Names}}" 2> $null
     if (-not $exists) {
         Pass "remove-agent successfully removed container"
@@ -638,9 +659,9 @@ function Test-RemoveAgent {
 
 function Test-ImagePull {
     Test-Section "Testing image pull functionality"
-    
+
     . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
-    
+
     try {
         Update-AgentImage -Agent "copilot" 2> $null
         Pass "Update-AgentImage executes without error"
@@ -651,56 +672,56 @@ function Test-ImagePull {
 
 function Test-BranchSanitization {
     Test-Section "Testing branch name sanitization"
-    
+
     Push-Location $TestRepoDir
     git checkout -q -b "feature/test-branch"
     Pop-Location
-    
+
     $containerName = New-TestContainer -Agent "copilot" -Repo "test-coding-agents-repo" -Branch "feature/test-branch"
-    
+
     Assert-ContainerExists -ContainerName $containerName
     Assert-LabelExists -ContainerName $containerName -LabelKey "coding-agents.branch" -LabelValue "feature/test-branch"
-    
+
     docker rm -f $containerName 2> $null | Out-Null
 }
 
 function Test-MultipleAgents {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification='Testing multiple agent instances')]
     param()
-    
+
     Test-Section "Testing multiple agents on same repository"
-    
+
     Push-Location $TestRepoDir
     git checkout -q main
     Pop-Location
-    
+
     $agents = @("codex", "claude")
     $containers = @()
-    
+
     foreach ($agent in $agents) {
         $containers += New-TestContainer -Agent $agent -Repo "test-coding-agents-repo" -Branch "main"
     }
-    
+
     foreach ($container in $containers) {
         Assert-ContainerExists -ContainerName $container -Message "Agent container created: $container"
     }
-    
+
     Pass "Multiple agents can run on same repo/branch"
 }
 
 function Test-LabelFiltering {
     Test-Section "Testing label-based filtering"
-    
+
     $agentCount = (docker ps -a --filter "label=coding-agents.type=agent" --filter "label=coding-agents.test=true" --format "{{.Names}}" | Measure-Object).Count
-    
+
     if ($agentCount -ge 3) {
         Pass "Label filtering finds multiple agent containers (found: $agentCount)"
     } else {
         Fail "Label filtering found insufficient containers (found: $agentCount, expected: >= 3)"
     }
-    
+
     $copilotCount = (docker ps -a --filter "label=coding-agents.agent=copilot" --filter "label=coding-agents.test=true" --format "{{.Names}}" | Measure-Object).Count
-    
+
     if ($copilotCount -ge 1) {
         Pass "Label filtering finds copilot containers (found: $copilotCount)"
     } else {
@@ -710,17 +731,17 @@ function Test-LabelFiltering {
 
 function Test-WslPathConversion {
     Test-Section "Testing WSL path conversion"
-    
+
     . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
-    
+
     # Test Windows path conversion
     $wslPath = Convert-WindowsPathToWsl "C:\Users\test\project"
     Assert-Equals -Expected "/mnt/c/Users/test/project" -Actual $wslPath -Message "Windows path converted to WSL path"
-    
+
     # Test already-WSL path (should be unchanged)
     $wslPath2 = Convert-WindowsPathToWsl "/mnt/e/dev/project"
     Assert-Equals -Expected "/mnt/e/dev/project" -Actual $wslPath2 -Message "WSL path unchanged"
-    
+
     # Test different drive
     $wslPath3 = Convert-WindowsPathToWsl "E:\dev\project"
     Assert-Equals -Expected "/mnt/e/dev/project" -Actual $wslPath3 -Message "E: drive converted to WSL path"
@@ -728,29 +749,29 @@ function Test-WslPathConversion {
 
 function Test-BranchNameSanitization {
     Test-Section "Testing branch name sanitization"
-    
+
     . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
-    
+
     # Test slash replacement
     $safe1 = ConvertTo-SafeBranchName "feature/auth-module"
     Assert-Equals -Expected "feature-auth-module" -Actual $safe1 -Message "Forward slashes replaced with dashes"
-    
+
     # Test backslash replacement
     $safe2 = ConvertTo-SafeBranchName "feature\auth\module"
     Assert-Equals -Expected "feature-auth-module" -Actual $safe2 -Message "Backslashes replaced with dashes"
-    
+
     # Test invalid characters
     $safe3 = ConvertTo-SafeBranchName "feature@#\$%auth"
     Assert-Equals -Expected "feature-auth" -Actual $safe3 -Message "Invalid characters removed"
-    
+
     # Test dash collapsing
     $safe4 = ConvertTo-SafeBranchName "feature---auth"
     Assert-Equals -Expected "feature-auth" -Actual $safe4 -Message "Multiple dashes collapsed"
-    
+
     # Test leading/trailing special chars
     $safe5 = ConvertTo-SafeBranchName "---feature-auth---"
     Assert-Equals -Expected "feature-auth" -Actual $safe5 -Message "Leading/trailing dashes removed"
-    
+
     # Test uppercase to lowercase
     $safe6 = ConvertTo-SafeBranchName "Feature/Auth"
     Assert-Equals -Expected "feature-auth" -Actual $safe6 -Message "Uppercase converted to lowercase"
@@ -758,18 +779,18 @@ function Test-BranchNameSanitization {
 
 function Test-ContainerStatus {
     Test-Section "Testing container status functions"
-    
+
     . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
-    
+
     $containerName = "copilot-test-coding-agents-repo-main"
-    
+
     $status = Get-ContainerStatus $containerName
     Assert-Equals -Expected "running" -Actual $status -Message "Get-ContainerStatus returns 'running'"
-    
+
     docker stop $containerName 2> $null | Out-Null
     $status2 = Get-ContainerStatus $containerName
     Assert-Equals -Expected "exited" -Actual $status2 -Message "Get-ContainerStatus returns 'exited' after stop"
-    
+
     docker start $containerName 2> $null | Out-Null
 }
 
@@ -804,7 +825,7 @@ function Main {
     Write-TestLine
 
     Confirm-LinuxContainerEnvironment
-    
+
     $tests = @(
         @{ Name = "Initialize-TestRepo"; Action = { Initialize-TestRepo } },
         @{ Name = "Test-ContainerRuntimeDetection"; Action = { Test-ContainerRuntimeDetection } },
