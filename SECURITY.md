@@ -19,7 +19,7 @@ Each AI coding agent runs in an isolated Docker container with:
 
 ### Authentication & Credentials
 
-Authentication uses OAuth from your host machine:
+Authentication uses OAuth from your host machine, but secrets are now gated by the host launcher + broker workflow described in `docs/secret-broker-architecture.md`:
 
 - **Read-only mounts:** All authentication configs are mounted as `:ro` (read-only)
   - `~/.config/gh` - GitHub CLI authentication
@@ -28,6 +28,8 @@ Authentication uses OAuth from your host machine:
   - `~/.config/claude` - Anthropic Claude authentication
 - **No secrets in images:** Container images contain no API keys or tokens
 - **Host-controlled:** Revoke access on host to immediately revoke container access
+- **Launcher integrity checks:** `launch-agent` refuses to start if trusted scripts/stubs differ from `HEAD` (unless a host-only override token is present), ensuring only vetted code requests secrets from the broker
+- **Secret broker sandbox:** Secrets are streamed from a host daemon that enforces per-session capabilities, mutual authentication, ptrace-safe tmpfs mounts, and immutable audit logs (see architecture doc for details)
 
 **Important:** Authenticate on your host machine first. Containers mount these configs read-only at runtime.
 
