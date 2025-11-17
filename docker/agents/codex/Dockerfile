@@ -20,7 +20,6 @@ RUN mkdir -p /home/agentuser/.config/codex && \
     chown -R agentuser:agentuser /home/agentuser/.config/codex
 COPY --chown=agentuser:agentuser agent-configs/codex/config.toml /home/agentuser/.config/codex/config.toml
 
-USER agentuser
 WORKDIR /workspace
 
 # Override entrypoint to launch Codex directly

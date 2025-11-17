@@ -1,6 +1,82 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+AGENT_USERNAME="${CODING_AGENTS_USER:-agentuser}"
+AGENT_UID=$(id -u "$AGENT_USERNAME" 2>/dev/null || echo 1000)
+AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo 1000)
+BASEFS_DIR="${CODING_AGENTS_BASEFS:-/opt/coding-agents/basefs}"
+TOOLCACHE_DIR="${CODING_AGENTS_TOOLCACHE:-/toolcache}"
+
+ensure_dir_owned() {
+    local path="$1"
+    local mode="${2:-}"
+    mkdir -p "$path"
+    chown "$AGENT_UID:$AGENT_GID" "$path" 2>/dev/null || true
+    if [ -n "$mode" ]; then
+        chmod "$mode" "$path" 2>/dev/null || true
+    fi
+}
+
+seed_tmpfs_from_base() {
+    local base="$1"
+    local target="$2"
+    local mode="${3:-755}"
+    mkdir -p "$target"
+    if [ -d "$base" ] && [ -z "$(ls -A "$target" 2>/dev/null)" ]; then
+        cp -a "$base"/. "$target"/ 2>/dev/null || true
+    fi
+    chmod "$mode" "$target" 2>/dev/null || true
+}
+
+prepare_rootfs_mounts() {
+    umask 0002
+    ensure_dir_owned "/workspace" 0775
+    ensure_dir_owned "/home/${AGENT_USERNAME}" 0755
+    ensure_dir_owned "$TOOLCACHE_DIR" 0775
+
+    local cache_paths=(
+        "pip"
+        "pipx"
+        "pipx/bin"
+        "npm"
+        "yarn"
+        "pnpm"
+        "uv"
+        "cargo"
+        "rustup"
+        "ms-playwright"
+        "bun"
+        "nuget"
+        "nuget/http-cache"
+        "nuget/packages"
+        "dotnet"
+    )
+
+    for rel in "${cache_paths[@]}"; do
+        ensure_dir_owned "${TOOLCACHE_DIR}/${rel}" 0775
+    done
+
+    seed_tmpfs_from_base "${BASEFS_DIR}/var/lib/dpkg" "/var/lib/dpkg"
+    seed_tmpfs_from_base "${BASEFS_DIR}/var/lib/apt" "/var/lib/apt"
+    seed_tmpfs_from_base "${BASEFS_DIR}/var/cache/apt" "/var/cache/apt"
+    seed_tmpfs_from_base "${BASEFS_DIR}/var/cache/debconf" "/var/cache/debconf"
+
+    chmod 1777 /tmp /var/tmp 2>/dev/null || true
+    chmod 0755 /run /var/log 2>/dev/null || true
+}
+
+if [ "$(id -u)" -eq 0 ]; then
+    prepare_rootfs_mounts
+    if command -v gosu >/dev/null 2>&1; then
+        exec gosu "$AGENT_USERNAME" /usr/local/bin/entrypoint.sh "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        exec sudo -E -u "$AGENT_USERNAME" /usr/local/bin/entrypoint.sh "$@"
+    else
+        echo "❌ Unable to drop privileges to $AGENT_USERNAME (gosu/sudo missing)" >&2
+        exit 1
+    fi
+fi
+
 echo "🚀 Starting Coding Agents Container..."
 
 

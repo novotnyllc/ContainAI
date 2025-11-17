@@ -199,6 +199,122 @@ container_cli() {
     "$cmd" "$@"
 }
 
+is_linux_host() {
+    local kernel
+    kernel=$(uname -s 2>/dev/null || echo "")
+    [ "$kernel" = "Linux" ]
+}
+
+resolve_seccomp_profile_path() {
+    local repo_root="$1"
+    local candidate="${CODING_AGENTS_SECCOMP_PROFILE:-}"
+
+    if [ -z "$candidate" ]; then
+        candidate="$repo_root/docker/profiles/seccomp-coding-agents.json"
+    elif [[ "$candidate" != /* ]]; then
+        candidate="$repo_root/$candidate"
+    fi
+
+    if [ -f "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
+
+    echo "❌ Seccomp profile not found at $candidate" >&2
+    return 1
+}
+
+is_apparmor_supported() {
+    if ! is_linux_host; then
+        return 1
+    fi
+
+    local enabled_flag="/sys/module/apparmor/parameters/enabled"
+    if [ ! -r "$enabled_flag" ]; then
+        return 1
+    fi
+
+    local status
+    status=$(cat "$enabled_flag" 2>/dev/null || true)
+    if echo "$status" | grep -qi '^y'; then
+        return 0
+    fi
+    return 1
+}
+
+apparmor_profile_loaded() {
+    local profile="$1"
+    local profiles_file="/sys/kernel/security/apparmor/profiles"
+
+    if [ -z "$profile" ] || [ ! -r "$profiles_file" ]; then
+        return 1
+    fi
+
+    if grep -q "^${profile} " "$profiles_file"; then
+        return 0
+    fi
+    return 1
+}
+
+resolve_apparmor_profile_name() {
+    local repo_root="$1"
+    local profile="${CODING_AGENTS_APPARMOR_PROFILE_NAME:-coding-agents}"
+    local profile_file="${CODING_AGENTS_APPARMOR_PROFILE_FILE:-$repo_root/docker/profiles/apparmor-coding-agents.profile}"
+
+    if [ "${CODING_AGENTS_DISABLE_APPARMOR:-0}" = "1" ]; then
+        return 1
+    fi
+
+    if ! is_apparmor_supported; then
+        return 1
+    fi
+
+    if apparmor_profile_loaded "$profile"; then
+        echo "$profile"
+        return 0
+    fi
+
+    if [ ! -f "$profile_file" ]; then
+        echo "⚠️  AppArmor profile file not found at $profile_file" >&2
+        return 1
+    fi
+
+    if [ "$(id -u 2>/dev/null || echo 1)" = "0" ] && command -v apparmor_parser >/dev/null 2>&1; then
+        if apparmor_parser -r -T -W "$profile_file" >/dev/null 2>&1 && apparmor_profile_loaded "$profile"; then
+            echo "$profile"
+            return 0
+        fi
+    fi
+
+    echo "⚠️  AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'" >&2
+    return 1
+}
+
+sanitize_docker_resource_name() {
+    local name="${1:-}"
+    name=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+    name=$(echo "$name" | tr -c 'a-z0-9_.-' '-')
+    name="${name#-}"
+    name="${name%-}"
+    if [ -z "$name" ]; then
+        name="agent"
+    fi
+    if [ ${#name} -gt 48 ]; then
+        name="${name:0:48}"
+    fi
+    echo "$name"
+}
+
+get_container_volume_name() {
+    local container_name="$1"
+    local suffix="$2"
+    local sanitized_container
+    sanitized_container=$(sanitize_docker_resource_name "$container_name")
+    local sanitized_suffix
+    sanitized_suffix=$(sanitize_docker_resource_name "$suffix")
+    printf '%s-%s\n' "$sanitized_container" "$sanitized_suffix"
+}
+
 # Validate container name
 validate_container_name() {
     local name="$1"

@@ -282,6 +282,29 @@ test_shared_functions() {
     else
         fail "container_exists() returned true for non-existent container"
     fi
+
+    local seccomp_path
+    if seccomp_path=$(resolve_seccomp_profile_path "$PROJECT_ROOT"); then
+        assert_equals "$PROJECT_ROOT/docker/profiles/seccomp-coding-agents.json" "$seccomp_path" "resolve_seccomp_profile_path() returns built-in profile"
+    else
+        fail "resolve_seccomp_profile_path() failed to locate built-in profile"
+    fi
+
+    CODING_AGENTS_SECCOMP_PROFILE="missing-profile.json"
+    if resolve_seccomp_profile_path "$PROJECT_ROOT" >/dev/null 2>&1; then
+        fail "resolve_seccomp_profile_path() should fail for missing override"
+    else
+        pass "resolve_seccomp_profile_path() reports missing override"
+    fi
+    unset CODING_AGENTS_SECCOMP_PROFILE
+
+    CODING_AGENTS_DISABLE_APPARMOR=1
+    if resolve_apparmor_profile_name "$PROJECT_ROOT" >/dev/null 2>&1; then
+        fail "resolve_apparmor_profile_name() should honor disable flag"
+    else
+        pass "resolve_apparmor_profile_name() skips when AppArmor disabled"
+    fi
+    unset CODING_AGENTS_DISABLE_APPARMOR
 }
 
 test_local_remote_push() {

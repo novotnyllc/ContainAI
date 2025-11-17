@@ -40,6 +40,113 @@ function Invoke-ContainerCli {
     & $cli @CliArgs
 }
 
+function Get-SeccompProfilePath {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    $candidate = if ($env:CODING_AGENTS_SECCOMP_PROFILE) {
+        $env:CODING_AGENTS_SECCOMP_PROFILE
+    } else {
+        Join-Path $RepoRoot "docker/profiles/seccomp-coding-agents.json"
+    }
+
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path $RepoRoot $candidate
+    }
+
+    if (-not (Test-Path $candidate)) {
+        throw "Seccomp profile not found at $candidate"
+    }
+
+    return (Resolve-Path $candidate).ProviderPath
+}
+
+function Test-AppArmorSupported {
+    if (-not $IsLinux) { return $false }
+    $flagPath = "/sys/module/apparmor/parameters/enabled"
+    if (-not (Test-Path $flagPath)) { return $false }
+    $status = (Get-Content $flagPath -ErrorAction SilentlyContinue)
+    if (-not $status) { return $false }
+    return ($status -match '^(Y|y)')
+}
+
+function Test-AppArmorProfileLoaded {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $profilesFile = "/sys/kernel/security/apparmor/profiles"
+    if (-not (Test-Path $profilesFile)) { return $false }
+    $pattern = "^{0}\s" -f [System.Text.RegularExpressions.Regex]::Escape($Name)
+    return Select-String -Path $profilesFile -Pattern $pattern -Quiet -ErrorAction SilentlyContinue
+}
+
+function Get-AppArmorProfileName {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    if ($env:CODING_AGENTS_DISABLE_APPARMOR -eq '1') {
+        return $null
+    }
+
+    if (-not (Test-AppArmorSupported)) {
+        return $null
+    }
+
+    $profileName = if ($env:CODING_AGENTS_APPARMOR_PROFILE_NAME) {
+        $env:CODING_AGENTS_APPARMOR_PROFILE_NAME
+    } else {
+        "coding-agents"
+    }
+
+    if (Test-AppArmorProfileLoaded -Name $profileName) {
+        return $profileName
+    }
+
+    $profilePath = if ($env:CODING_AGENTS_APPARMOR_PROFILE_FILE) {
+        $env:CODING_AGENTS_APPARMOR_PROFILE_FILE
+    } else {
+        Join-Path $RepoRoot "docker/profiles/apparmor-coding-agents.profile"
+    }
+
+    if (-not (Test-Path $profilePath)) {
+        Write-Warning "⚠️  AppArmor profile file not found at $profilePath"
+        return $null
+    }
+
+    Write-Warning "⚠️  AppArmor profile '$profileName' is not loaded. Run: sudo apparmor_parser -r '$profilePath'"
+    return $null
+}
+
+function Get-SanitizedDockerName {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $normalized = $Name.ToLowerInvariant()
+    $builder = New-Object System.Text.StringBuilder
+    foreach ($ch in $normalized.ToCharArray()) {
+        if ($ch -match '[a-z0-9_.-]') {
+            [void]$builder.Append($ch)
+        } else {
+            [void]$builder.Append('-')
+        }
+    }
+    $result = $builder.ToString().Trim('-')
+    if ([string]::IsNullOrWhiteSpace($result)) {
+        $result = "agent"
+    }
+    if ($result.Length -gt 48) {
+        $result = $result.Substring(0, 48)
+    }
+    return $result
+}
+
+function Get-ContainerVolumeName {
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [Parameter(Mandatory = $true)][string]$Suffix
+    )
+
+    $base = Get-SanitizedDockerName -Name $ContainerName
+    $tail = Get-SanitizedDockerName -Name $Suffix
+    return "$base-$tail"
+}
+
 function Get-HostConfigValue {
     param([Parameter(Mandatory = $true)][string]$Key)
 
