@@ -1,0 +1,4 @@
+- Copilot agent images provide `init-copilot-config.sh` + `merge-copilot-tokens.py`, but launchers never mount `~/.copilot/`, so host tokens in `~/.copilot/config.json` cannot reach the container. Current flow only mounts `~/.config/github-copilot` and `~/.config/gh`.
+- Claude agent init script expects `~/.claude/.credentials.json`, yet launchers only mount `~/.config/claude`, leaving the actual credential store inaccessible inside the container.
+- Codex agent relies on host `~/.codex/auth.json`, but launchers mount only `~/.config/codex`, so Codex secrets are not propagated either.
+- No launcher currently calls `secret-broker.py`; docs promise sealed-capability workflows, but code lacks capability issuance and tmpfs token mounting for agent-specific secrets.

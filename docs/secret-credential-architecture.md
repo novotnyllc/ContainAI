@@ -111,18 +111,18 @@ Key points:
 
 ```mermaid
 flowchart TD
-    subgraph Command_MCP
-        AC[Vendor agent] -->|execve intercepted| RC[agent-task-runner]
-        RC -->|capability request| BR[Secret Broker]
-        BR -->|memfd secret| ST[Per-MCP stub (UID mcp_X)]
-        ST -->|STDIO bridge| AC
-        ST -->|sandboxed network| NET1[Allowed domains]
-    end
-    subgraph HTTPS_or_SSE_MCP
-        AV[Vendor agent (agentcli namespace)] -->|read config secret| CFG[Generated MCP config]
-        AV -->|HTTPS request with secret| NET2[Remote MCP endpoint]
-        AV -.->|spawn helper?| RC2[agent-task-runner denies /run/agent-secrets access]
-    end
+        subgraph Command MCP
+                AC[Vendor agent] -->|execve intercepted| RC[agent-task-runner]
+                RC -->|capability request| BR[Secret Broker]
+                BR -->|memfd secret| ST[Per-MCP stub (UID mcp_X)]
+                ST -->|STDIO bridge| AC
+                ST -->|sandboxed network| NET1[Allowed domains]
+        end
+        subgraph HTTPS/SSE MCP
+                AV[Vendor agent (agentcli namespace)] -->|read config secret| CFG[Generated MCP config]
+                AV -->|HTTPS request with secret| NET2[Remote MCP endpoint]
+                AV -.->|spawn helper?| RC2[agent-task-runner denies access to /run/agent-secrets]
+        end
 ```
 
 Key points:

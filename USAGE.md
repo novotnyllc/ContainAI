@@ -33,6 +33,22 @@ Agents use authentication configs from your host machine (mounted read-only):
 
 > **Important:** You must authenticate agents on your **host machine** before launching containers. The authentication configs are mounted read-only into containers.
 
+#### How agent credentials stay brokered
+- You authenticate on the host (`github-copilot-cli auth login`, `codex auth login`, `claude auth login`, etc.), so long-lived OAuth tokens live only under your home directory.
+- Every `run-*`/`launch-agent` command asks the host-side secret broker (`scripts/runtime/secret-broker.py`) to seal the credentials and emit per-session capability bundles **before** Docker starts.
+- The launcher copies those capabilities into `/run/coding-agents` (a tmpfs) and bind-mounts the relevant CLI config directories read-only. Inside the container, the trusted stubs/credential proxies redeem the capability, load the secret into their private tmpfs, and scrub it when the session ends.
+- Because the broker is the only component that ever touches the raw secret file, neither your repository nor the container filesystem ever stores the plaintext tokens.
+
+#### Verify the secret broker (optional but recommended)
+```bash
+./scripts/runtime/secret-broker.py health           # confirms broker.d files and permissions
+ls -l ~/.config/coding-agents/broker.d              # shows keys.json/state.json/secrets.json on the host
+tail -n5 ~/.config/coding-agents/security-events.log # see capability issuance events
+```
+
+- The broker auto-initializes when you run any launcher, but you can force a bootstrap with `./scripts/runtime/secret-broker.py init`.
+- To stage static API keys manually (rare), run `./scripts/runtime/secret-broker.py store --stub context7 --name api_key --from-env CONTEXT7_API_KEY` and repeat per stub. Full command details live in `docs/secret-broker-architecture.md`.
+
 ### Optional: MCP Server API Keys
 
 If using MCP servers, create `~/.config/coding-agents/mcp-secrets.env`. The launcher reads this file on the **host**, feeds it into the session renderer, and stages the values inside the secret broker—containers never need the plaintext copy.
