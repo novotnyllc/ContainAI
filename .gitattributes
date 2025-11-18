@@ -66,6 +66,7 @@
 *.ksh      text eol=lf
 *.sh       text eol=lf
 *.zsh      text eol=lf
+*.ps1      text eol=lf
 # Likewise, force cmd and batch scripts to always use crlf
 *.bat      text eol=crlf
 *.cmd      text eol=crlf
