@@ -1,49 +1,74 @@
-# Launch a coding agent in an isolated container with its own git workspace
+﻿# Launch a coding agent in an isolated container with its own git workspace
 # The container runs persistently for VS Code Remote connection
 
 param(
     [Parameter(Mandatory=$true, Position=0)]
     [ValidateSet("copilot", "codex", "claude")]
     [string]$Agent,
-    
+
     [Parameter(Mandatory=$false, Position=1)]
     [string]$Source = ".",
-    
+
     [Parameter(Mandatory=$false)]
     [Alias("b")]
     [string]$Branch,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Name,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$DotNetPreview,
-    
+
     [Parameter(Mandatory=$false)]
     [ValidateSet("allow-all", "restricted", "squid", "none")]
     [string]$NetworkProxy = "allow-all",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Cpu = "4",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Memory = "8g",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Gpu,
-    
+
     [Parameter(Mandatory=$false)]
     [switch]$NoPush,
-    
+
     [Parameter(Mandatory=$false)]
     [switch]$UseCurrentBranch,
-    
+
     [Parameter(Mandatory=$false)]
     [Alias("y")]
     [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
+if ($InformationPreference -eq "SilentlyContinue") {
+    $InformationPreference = "Continue"
+}
+
+function Write-LauncherMessage {
+    param(
+        [string]$Message = "",
+        [ValidateSet('Default','Red','Green','Yellow','Cyan','Gray','White')]
+        [string]$Color = 'Default'
+    )
+
+    $ansiCodes = @{
+        Default = ""
+        Red = "`e[31m"
+        Green = "`e[32m"
+        Yellow = "`e[33m"
+        Cyan = "`e[36m"
+        Gray = "`e[90m"
+        White = "`e[97m"
+    }
+
+    $prefix = $ansiCodes[$Color]
+    $reset = if ($prefix) { "`e[0m" } else { "" }
+    Write-Information ($prefix + $Message + $reset) -InformationAction Continue
+}
 $BranchFromFlag = $PSBoundParameters.ContainsKey('Branch')
 $LocalRemoteHostPath = ""
 $LocalRemoteWslPath = ""
@@ -59,7 +84,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "launch-agent"
 
-if (-not (Ensure-PrerequisitesVerified -RepoRoot $RepoRoot)) {
+if (-not (Test-PrerequisitesVerified -RepoRoot $RepoRoot)) {
     exit 1
 }
 
@@ -73,12 +98,12 @@ $LauncherHeadHash = Get-GitHeadHash -RepoRoot $RepoRoot
 $TrustedTreeHashes = Get-TrustedPathTreeHashes -RepoRoot $RepoRoot -Paths $TrustedPaths
 $TrustedTreeEnv = if ($TrustedTreeHashes) { ($TrustedTreeHashes | ForEach-Object { "{0}={1}" -f $_.Path, $_.Hash }) -join "," } else { "" }
 if ($LauncherHeadHash) {
-    Write-Host "🔒 Launcher commit: $LauncherHeadHash" -ForegroundColor Cyan
+    Write-LauncherMessage "🔒 Launcher commit: $LauncherHeadHash" -Color Cyan
 }
 if ($TrustedTreeHashes.Count -gt 0) {
-    Write-Host "   Trusted tree hashes:" -ForegroundColor Gray
+    Write-LauncherMessage "   Trusted tree hashes:" -Color Gray
     foreach ($entry in $TrustedTreeHashes) {
-        Write-Host "     • $($entry.Path)=$($entry.Hash)" -ForegroundColor Gray
+        Write-LauncherMessage "     • $($entry.Path)=$($entry.Hash)" -Color Gray
     }
 }
 $SessionIdBase = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
@@ -110,7 +135,7 @@ function Import-StubSecretManifest {
     }
 }
 
-function Import-McpSecretValues {
+function Import-McpSecretValue {
     param(
         [string[]]$AdditionalPaths
     )
@@ -161,7 +186,8 @@ function Resolve-SecretValue {
     return $null
 }
 
-function Store-StubSecrets {
+function Set-StubSecret {
+    [CmdletBinding(SupportsShouldProcess=$true)]
     param([string]$BrokerScript)
     foreach ($stub in $Script:SessionStubSecrets.Keys) {
         $names = $Script:SessionStubSecrets[$stub]
@@ -170,6 +196,9 @@ function Store-StubSecrets {
             $value = Resolve-SecretValue -Name $name
             if (-not $value) {
                 Write-Warning "⚠️  Missing secret '$name' for stub '$stub'"
+                continue
+            }
+            if (-not $PSCmdlet.ShouldProcess("stub '$stub'", "store secret '$name'")) {
                 continue
             }
             try {
@@ -185,7 +214,8 @@ function Store-StubSecrets {
     return $true
 }
 
-function Seal-StubCapabilities {
+function Protect-StubCapability {
+    [CmdletBinding(SupportsShouldProcess=$true)]
     param(
         [string]$BrokerScript,
         [string]$CapabilityRoot
@@ -207,8 +237,10 @@ function Seal-StubCapabilities {
         foreach ($name in $names) {
             $redeemArgs += @("--secret", $name)
         }
-        if (-not (Invoke-PythonTool -ScriptPath $BrokerScript -MountPaths @($CapabilityRoot) -ScriptArgs $redeemArgs)) {
-            return $false
+        if ($PSCmdlet.ShouldProcess("stub '$stub'", "seal capability token")) {
+            if (-not (Invoke-PythonTool -ScriptPath $BrokerScript -MountPaths @($CapabilityRoot) -ScriptArgs $redeemArgs)) {
+                return $false
+            }
         }
     }
     return $true
@@ -217,8 +249,8 @@ function Seal-StubCapabilities {
 # Auto-detect WSL home directory
 $WslHome = wsl bash -c 'echo $HOME' 2>$null
 if (-not $WslHome) {
-    Write-Host "❌ Error: Could not detect WSL home directory" -ForegroundColor Red
-    Write-Host "   Make sure WSL2 is installed and running" -ForegroundColor Yellow
+    Write-LauncherMessage "❌ Error: Could not detect WSL home directory" -Color Red
+    Write-LauncherMessage "   Make sure WSL2 is installed and running" -Color Yellow
     exit 1
 }
 
@@ -234,7 +266,7 @@ if (-not (Test-DockerRunning)) {
 
 $ContainerCli = Get-ContainerCli
 if (-not $ContainerCli) {
-    Write-Host "❌ Error: Unable to determine container runtime" -ForegroundColor Red
+    Write-LauncherMessage "❌ Error: Unable to determine container runtime" -Color Red
     exit 1
 }
 
@@ -253,18 +285,18 @@ if ($IsUrl) {
 } else {
     $ResolvedPath = Resolve-Path $Source -ErrorAction SilentlyContinue
     if (-not $ResolvedPath) {
-        Write-Host "❌ Error: Source path does not exist: $Source" -ForegroundColor Red
+        Write-LauncherMessage "❌ Error: Source path does not exist: $Source" -Color Red
         exit 1
     }
-    
+
     if (-not (Test-Path (Join-Path $ResolvedPath ".git"))) {
-        Write-Host "❌ Error: $Source is not a git repository" -ForegroundColor Red
+        Write-LauncherMessage "❌ Error: $Source is not a git repository" -Color Red
         exit 1
     }
-    
+
     $RepoName = Split-Path -Leaf $ResolvedPath
     $SourceType = "local"
-    
+
     $WslPath = $ResolvedPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
     $GitUrl = ""
     $LocalRepoPathValue = $WslPath
@@ -305,18 +337,18 @@ if (-not $SessionConfigSource) {
 
 if ($UseCurrentBranch) {
     if ($SourceType -ne "local") {
-        Write-Host "❌ Error: -UseCurrentBranch is only supported for local repositories" -ForegroundColor Red
+        Write-LauncherMessage "❌ Error: -UseCurrentBranch is only supported for local repositories" -Color Red
         exit 1
     }
     if ($BranchFromFlag) {
-        Write-Host "❌ Error: -UseCurrentBranch cannot be combined with -Branch" -ForegroundColor Red
+        Write-LauncherMessage "❌ Error: -UseCurrentBranch cannot be combined with -Branch" -Color Red
         exit 1
     }
 }
 
 # Restricted network cannot clone URLs
 if ($NetworkProxy -eq "restricted" -and $SourceType -eq "url") {
-    Write-Host "❌ Restricted network mode cannot clone from a URL. Provide a local path or use -NetworkProxy allow-all." -ForegroundColor Red
+    Write-LauncherMessage "❌ Restricted network mode cannot clone from a URL. Provide a local path or use -NetworkProxy allow-all." -Color Red
     exit 1
 }
 
@@ -366,25 +398,25 @@ if (-not $Branch) {
         Push-Location $ResolvedPath
         $CurrentBranch = git branch --show-current 2>$null
         Pop-Location
-        
+
         # Safety: Never use current branch unless it's an agent branch or explicitly allowed
         if ($UseCurrentBranch) {
             if (-not $CurrentBranch) {
-                Write-Host "❌ Error: Repository is in a detached HEAD state; cannot use -UseCurrentBranch" -ForegroundColor Red
+                Write-LauncherMessage "❌ Error: Repository is in a detached HEAD state; cannot use -UseCurrentBranch" -Color Red
                 exit 1
             }
             $Branch = $CurrentBranch
-            Write-Host "⚠️  Warning: Using current branch directly (-UseCurrentBranch specified)" -ForegroundColor Yellow
+            Write-LauncherMessage "⚠️  Warning: Using current branch directly (-UseCurrentBranch specified)" -Color Yellow
         } elseif (Test-AgentBranch $CurrentBranch) {
             # Current branch is already an agent branch, safe to use
             $Branch = $CurrentBranch
-            Write-Host "✓ Current branch '$CurrentBranch' is an agent branch" -ForegroundColor Green
+            Write-LauncherMessage "✓ Current branch '$CurrentBranch' is an agent branch" -Color Green
         } else {
             # Generate unique session branch
             $SessionNum = Find-NextSession -RepoPath $ResolvedPath -Agent $Agent
             $Branch = "session-$SessionNum"
             $CurrentDisplay = if ($CurrentBranch) { $CurrentBranch } else { "main" }
-            Write-Host "ℹ️  Creating new branch '$Agent/$Branch' (current: $CurrentDisplay)" -ForegroundColor Cyan
+            Write-LauncherMessage "ℹ️  Creating new branch '$Agent/$Branch' (current: $CurrentDisplay)" -Color Cyan
         }
     } else {
         $Branch = "main"
@@ -393,8 +425,8 @@ if (-not $Branch) {
 
 # Validate branch name
 if (-not (Test-ValidBranchName $Branch)) {
-    Write-Host "❌ Error: Invalid branch name: $Branch" -ForegroundColor Red
-    Write-Host "   Branch names must start with alphanumeric and contain only: a-z, A-Z, 0-9, /, _, ., -" -ForegroundColor Yellow
+    Write-LauncherMessage "❌ Error: Invalid branch name: $Branch" -Color Red
+    Write-LauncherMessage "   Branch names must start with alphanumeric and contain only: a-z, A-Z, 0-9, /, _, ., -" -Color Yellow
     exit 1
 }
 
@@ -408,67 +440,67 @@ if ($SourceType -eq "local" -and -not $UseCurrentBranch) {
         } else {
             $AgentBranchName = "$Agent/$Branch"
         }
-        
+
         git show-ref --verify --quiet "refs/heads/$AgentBranchName" 2>$null | Out-Null
         $BranchExistsCode = $LASTEXITCODE
-        
+
         if ($BranchExistsCode -eq 0) {
-            Write-Host ""
-            Write-Host "⚠️  Warning: Branch '$AgentBranchName' already exists in the repository" -ForegroundColor Yellow
-            
+            Write-LauncherMessage ""
+            Write-LauncherMessage "⚠️  Warning: Branch '$AgentBranchName' already exists in the repository" -Color Yellow
+
             # Check for unmerged commits
             $currentBranch = git branch --show-current 2>$null
             $unmergedCommits = git log "$currentBranch..$AgentBranchName" --oneline 2>$null
-            
+
             if ($unmergedCommits) {
-                Write-Host "   Branch has unmerged commits:" -ForegroundColor Yellow
-                $unmergedCommits | Select-Object -First 5 | ForEach-Object { Write-Host "     $_" -ForegroundColor Gray }
+                Write-LauncherMessage "   Branch has unmerged commits:" -Color Yellow
+                $unmergedCommits | Select-Object -First 5 | ForEach-Object { Write-LauncherMessage "     $_" -Color Gray }
                 if (($unmergedCommits | Measure-Object -Line).Lines -gt 5) {
-                    Write-Host "     ... and $(($unmergedCommits | Measure-Object -Line).Lines - 5) more" -ForegroundColor Gray
+                    Write-LauncherMessage "     ... and $(($unmergedCommits | Measure-Object -Line).Lines - 5) more" -Color Gray
                 }
             }
-            
+
             if (-not $Force) {
                 $response = Read-Host "   Replace this branch? [y/N]"
                 if ($response -ne 'y' -and $response -ne 'Y') {
-                    Write-Host "❌ Launch cancelled. Use a different branch name or add -Force to replace" -ForegroundColor Red
+                    Write-LauncherMessage "❌ Launch cancelled. Use a different branch name or add -Force to replace" -Color Red
                     Pop-Location
                     exit 1
                 }
             } else {
-                Write-Host "   -Force specified, will replace branch" -ForegroundColor Cyan
+                Write-LauncherMessage "   -Force specified, will replace branch" -Color Cyan
             }
-            
+
             # Handle old branch
             if ($unmergedCommits) {
                 # Rename old branch to preserve unmerged commits
                 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
                 $archiveBranch = "${AgentBranchName}-archived-${timestamp}"
-                Write-Host "   📦 Archiving old branch as: $archiveBranch" -ForegroundColor Cyan
+                Write-LauncherMessage "   📦 Archiving old branch as: $archiveBranch" -Color Cyan
                 git branch -m "$AgentBranchName" "$archiveBranch" 2>$null | Out-Null
-                
+
                 if ($LASTEXITCODE -eq 0) {
-                    Write-Host "   ✅ Old branch preserved with unmerged commits" -ForegroundColor Green
+                    Write-LauncherMessage "   ✅ Old branch preserved with unmerged commits" -Color Green
                 } else {
-                    Write-Host "   ❌ Failed to archive old branch" -ForegroundColor Red
+                    Write-LauncherMessage "   ❌ Failed to archive old branch" -Color Red
                     Pop-Location
                     exit 1
                 }
             } else {
                 # No unmerged commits, safe to delete
-                Write-Host "   🗑️  Removing old branch (no unmerged commits)" -ForegroundColor Cyan
+                Write-LauncherMessage "   🗑️  Removing old branch (no unmerged commits)" -Color Cyan
                 git branch -D "$AgentBranchName" 2>$null | Out-Null
-                
+
                 if ($LASTEXITCODE -ne 0) {
-                    Write-Host "   ❌ Failed to remove old branch" -ForegroundColor Red
+                    Write-LauncherMessage "   ❌ Failed to remove old branch" -Color Red
                     Pop-Location
                     exit 1
                 }
             }
-            
-            Write-Host ""
+
+            Write-LauncherMessage ""
         }
-        
+
     } finally {
         Pop-Location
     }
@@ -492,8 +524,8 @@ if ([string]::IsNullOrEmpty($SafeBranch)) {
 if ($Name) {
     # Validate custom name
     if (-not (Test-ValidContainerName $Name)) {
-        Write-Host "❌ Error: Invalid container name: $Name" -ForegroundColor Red
-        Write-Host "   Container names must start with alphanumeric and contain only: a-z, A-Z, 0-9, _, ., -" -ForegroundColor Yellow
+        Write-LauncherMessage "❌ Error: Invalid container name: $Name" -Color Red
+        Write-LauncherMessage "   Container names must start with alphanumeric and contain only: a-z, A-Z, 0-9, _, ., -" -Color Yellow
         exit 1
     }
     $ContainerName = "$Agent-$Name"
@@ -505,9 +537,9 @@ if ($Name) {
 
 # Final validation of generated container name
 if (-not (Test-ValidContainerName $ContainerName)) {
-    Write-Host "❌ Error: Generated container name is invalid: $ContainerName" -ForegroundColor Red
-    Write-Host "   This may be due to special characters in the repository name or branch" -ForegroundColor Yellow
-    Write-Host "   Try using the -Name parameter to specify a custom name" -ForegroundColor Yellow
+    Write-LauncherMessage "❌ Error: Generated container name is invalid: $ContainerName" -Color Red
+    Write-LauncherMessage "   This may be due to special characters in the repository name or branch" -Color Yellow
+    Write-LauncherMessage "   Try using the -Name parameter to specify a custom name" -Color Yellow
     exit 1
 }
 
@@ -541,7 +573,7 @@ $ImageName = "coding-agents-${Agent}:local"
 
 # Validate image name
 if (-not (Test-ValidImageName $ImageName)) {
-    Write-Host "❌ Error: Invalid image name: $ImageName" -ForegroundColor Red
+    Write-LauncherMessage "❌ Error: Invalid image name: $ImageName" -Color Red
     exit 1
 }
 
@@ -602,7 +634,7 @@ if (Test-Path $rendererScript) {
                 $hash = $sha.ComputeHash($bytes)
                 $SessionConfigSha256 = ($hash | ForEach-Object { $_.ToString("x2") }) -join ""
                 $SessionConfigRendered = $true
-                Write-Host "🔐 Session MCP config manifest: $SessionConfigSha256" -ForegroundColor Green
+                Write-LauncherMessage "🔐 Session MCP config manifest: $SessionConfigSha256" -Color Green
                 Write-SessionConfigEvent -SessionId $SessionId -ManifestSha $SessionConfigSha256 -RepoRoot $RepoRoot -TrustedHashes $TrustedTreeHashes
                 $serversFile = Join-Path $SessionConfigOutput "servers.txt"
                 if (Test-Path $serversFile) {
@@ -631,20 +663,20 @@ if (Test-Path $rendererScript) {
 }
 
 if (-not (Test-SecretBrokerReady)) {
-    Write-Host "❌ Secret broker health check failed" -ForegroundColor Red
+    Write-LauncherMessage "❌ Secret broker health check failed" -Color Red
     exit 1
 }
 
 $brokerScript = Get-SecretBrokerScript
 if (-not $brokerScript) {
-    Write-Host "❌ Secret broker script not found" -ForegroundColor Red
+    Write-LauncherMessage "❌ Secret broker script not found" -Color Red
     exit 1
 }
 
 if ($SessionStubSecrets.Count -gt 0) {
-    Import-McpSecretValues
-    if (-not (Store-StubSecrets -BrokerScript $brokerScript)) {
-        Write-Host "❌ Failed to stage broker-managed secrets" -ForegroundColor Red
+    Import-McpSecretValue
+    if (-not (Set-StubSecret -BrokerScript $brokerScript)) {
+        Write-LauncherMessage "❌ Failed to stage broker-managed secrets" -Color Red
         exit 1
     }
 }
@@ -652,31 +684,31 @@ if ($SessionStubSecrets.Count -gt 0) {
 $brokerCapabilityDir = Join-Path $SessionConfigOutput "capabilities"
 $env:CODING_AGENTS_SESSION_CONFIG_SHA256 = if ($SessionConfigSha256) { $SessionConfigSha256 } else { "" }
 if (-not (Invoke-SessionCapabilityIssue -SessionId $SessionId -OutputDir $brokerCapabilityDir -Stubs $BrokerStubs)) {
-    Write-Host "❌ Failed to issue session capability tokens" -ForegroundColor Red
+    Write-LauncherMessage "❌ Failed to issue session capability tokens" -Color Red
     exit 1
 }
 
 if ($SessionStubSecrets.Count -gt 0) {
-    if (-not (Seal-StubCapabilities -BrokerScript $brokerScript -CapabilityRoot $brokerCapabilityDir)) {
-        Write-Host "❌ Failed to seal stub secrets" -ForegroundColor Red
+    if (-not (Protect-StubCapability -BrokerScript $brokerScript -CapabilityRoot $brokerCapabilityDir)) {
+        Write-LauncherMessage "❌ Failed to seal stub secrets" -Color Red
         exit 1
     }
 }
 
-Write-Host "🚀 Launching Coding Agent..." -ForegroundColor Cyan
-Write-Host "🎯 Agent: $Agent" -ForegroundColor White
-Write-Host "📁 Source: $Source ($SourceType)" -ForegroundColor White
-Write-Host "🌿 Branch: $AgentBranch" -ForegroundColor White
-Write-Host "🏷️  Container: $ContainerName" -ForegroundColor White
-Write-Host "🐳 Image: $ImageName" -ForegroundColor White
-Write-Host "🌐 Network policy: $NetworkPolicyEnv" -ForegroundColor White
-Write-Host ""
+Write-LauncherMessage "🚀 Launching Coding Agent..." -Color Cyan
+Write-LauncherMessage "🎯 Agent: $Agent" -Color White
+Write-LauncherMessage "📁 Source: $Source ($SourceType)" -Color White
+Write-LauncherMessage "🌿 Branch: $AgentBranch" -Color White
+Write-LauncherMessage "🏷️  Container: $ContainerName" -Color White
+Write-LauncherMessage "🐳 Image: $ImageName" -Color White
+Write-LauncherMessage "🌐 Network policy: $NetworkPolicyEnv" -Color White
+Write-LauncherMessage ""
 
 # Check if container already exists
 if (Test-ContainerExists $ContainerName) {
-    Write-Host "📦 Container '$ContainerName' already exists" -ForegroundColor Yellow
+    Write-LauncherMessage "📦 Container '$ContainerName' already exists" -Color Yellow
     $State = Get-ContainerStatus $ContainerName
-    
+
     # Handle existing proxy if squid mode
     if ($UseSquid) {
         $ExistingProxy = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' $ContainerName 2>$null
@@ -685,16 +717,16 @@ if (Test-ContainerExists $ContainerName) {
         if ($ExistingNetwork) { $ProxyNetworkName = $ExistingNetwork }
         Initialize-SquidProxy -NetworkName $ProxyNetworkName -ProxyContainer $ProxyContainerName -ProxyImage $ProxyImage -AgentContainer $ContainerName -SquidAllowedDomains $SquidAllowedDomains
     }
-    
+
     if ($State -eq "running") {
-        Write-Host "✅ Container is already running" -ForegroundColor Green
-        Write-Host "   Connect via: $ContainerCli exec -it $ContainerName bash" -ForegroundColor Gray
-        Write-Host "   Or use VS Code Dev Containers extension" -ForegroundColor Gray
+        Write-LauncherMessage "✅ Container is already running" -Color Green
+        Write-LauncherMessage "   Connect via: $ContainerCli exec -it $ContainerName bash" -Color Gray
+        Write-LauncherMessage "   Or use VS Code Dev Containers extension" -Color Gray
         exit 0
     } else {
-        Write-Host "▶️  Starting existing container..." -ForegroundColor Cyan
+        Write-LauncherMessage "▶️  Starting existing container..." -Color Cyan
         Invoke-ContainerCli start $ContainerName | Out-Null
-        Write-Host "✅ Container started" -ForegroundColor Green
+        Write-LauncherMessage "✅ Container started" -Color Green
         exit 0
     }
 }
@@ -811,24 +843,24 @@ $credentialProxyScript = Join-Path $PSScriptRoot "..\runtime\git-credential-prox
 
 if (-not (Test-Path $credentialSocketPath -PathType Leaf)) {
     if (Test-Path $credentialProxyScript) {
-        Write-Host "🔐 Starting git credential proxy server..." -ForegroundColor Cyan
+        Write-LauncherMessage "🔐 Starting git credential proxy server..." -Color Cyan
         $proxyDir = Split-Path $credentialSocketPath -Parent
         if (-not (Test-Path $proxyDir)) {
             New-Item -ItemType Directory -Path $proxyDir -Force | Out-Null
         }
-        
+
         # Start proxy server in background using WSL bash
         Start-Process -FilePath "wsl" -ArgumentList "bash", "-c", "`"nohup '$credentialProxyScript' '$credentialSocketPath' > /dev/null 2>&1 &`"" -NoNewWindow | Out-Null
-        
+
         # Wait for socket to be created (max 5 seconds)
         $waited = 0
         while (-not (Test-Path $credentialSocketPath -PathType Leaf) -and $waited -lt 5000) {
             Start-Sleep -Milliseconds 100
             $waited += 100
         }
-        
+
         if (Test-Path $credentialSocketPath -PathType Leaf) {
-            Write-Host "   ✅ Credential proxy started" -ForegroundColor Green
+            Write-LauncherMessage "   ✅ Credential proxy started" -Color Green
         } else {
             Write-Warning "   ⚠️  Credential proxy started but socket not ready"
             Write-Warning "      Container will fall back to file-based credentials"
@@ -848,24 +880,24 @@ if ($commitGpgSign -eq "true") {
     $gpgSigningEnabled = $true
     if (-not (Test-Path $gpgSocketPath -PathType Leaf)) {
         if (Test-Path $gpgProxyScript) {
-            Write-Host "🔏 Starting GPG proxy server for commit signing..." -ForegroundColor Cyan
+            Write-LauncherMessage "🔏 Starting GPG proxy server for commit signing..." -Color Cyan
             $gpgProxyDir = Split-Path $gpgSocketPath -Parent
             if (-not (Test-Path $gpgProxyDir)) {
                 New-Item -ItemType Directory -Path $gpgProxyDir -Force | Out-Null
             }
-            
+
             # Start GPG proxy server in background
             Start-Process -FilePath "wsl" -ArgumentList "bash", "-c", "`"nohup '$gpgProxyScript' '$gpgSocketPath' > /dev/null 2>&1 &`"" -NoNewWindow
-            
+
             # Wait for socket to be created
             $waited = 0
             while (-not (Test-Path $gpgSocketPath -PathType Leaf) -and $waited -lt 5000) {
                 Start-Sleep -Milliseconds 100
                 $waited += 100
             }
-            
+
             if (Test-Path $gpgSocketPath -PathType Leaf) {
-                Write-Host "   ✅ GPG proxy started" -ForegroundColor Green
+                Write-LauncherMessage "   ✅ GPG proxy started" -Color Green
             }
         }
     }
@@ -910,7 +942,7 @@ if ($env:CODING_AGENTS_DISABLE_SECCOMP -ne '1') {
     try {
         $seccompProfilePath = Get-SeccompProfilePath -RepoRoot $RepoRoot
     } catch {
-        Write-Host "❌ $_" -ForegroundColor Red
+        Write-LauncherMessage "❌ $_" -Color Red
         exit 1
     }
 } else {
@@ -958,14 +990,14 @@ $dockerArgs += $ImageName
 $dockerArgs += "sleep", "infinity"
 
 # Create container
-Write-Host "📦 Creating container..." -ForegroundColor Cyan
+Write-LauncherMessage "📦 Creating container..." -Color Cyan
 try {
     Invoke-ContainerCli @dockerArgs | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Container create failed with exit code $LASTEXITCODE"
     }
 } catch {
-    Write-Host "❌ Failed to create container" -ForegroundColor Red
+    Write-LauncherMessage "❌ Failed to create container" -Color Red
     if ($UseSquid) {
         Invoke-ContainerCli rm -f $ProxyContainerName 2>$null | Out-Null
         Invoke-ContainerCli network rm $ProxyNetworkName 2>$null | Out-Null
@@ -984,7 +1016,7 @@ if ($SessionConfigRendered -and (Test-Path $SessionConfigOutput)) {
 }
 
 # Setup repository inside container
-Write-Host "📥 Setting up repository..." -ForegroundColor Cyan
+Write-LauncherMessage "📥 Setting up repository..." -Color Cyan
 $setupScript = New-RepoSetupScript
 
 try {
@@ -993,7 +1025,7 @@ try {
         throw "Container setup failed with exit code $LASTEXITCODE"
     }
 } catch {
-    Write-Host "❌ Failed to setup repository" -ForegroundColor Red
+    Write-LauncherMessage "❌ Failed to setup repository" -Color Red
     Invoke-ContainerCli rm -f $ContainerName | Out-Null
     exit 1
 }
@@ -1013,12 +1045,12 @@ if (($SourceType -eq "local") -and (-not $NoPush) -and $LocalRemoteHostPath -and
     }
 }
 
-Write-Host ""
-Write-Host "✅ Container '$ContainerName' is ready!" -ForegroundColor Green
-Write-Host ""
-Write-Host "Connect via:" -ForegroundColor Cyan
-Write-Host "  • VS Code: Attach to running container '$ContainerName'" -ForegroundColor White
-Write-Host "  • Terminal: $ContainerCli exec -it $ContainerName bash" -ForegroundColor White
-Write-Host ""
-Write-Host "Repository: /workspace" -ForegroundColor Gray
-Write-Host "Branch: $AgentBranch" -ForegroundColor Gray
+Write-LauncherMessage ""
+Write-LauncherMessage "✅ Container '$ContainerName' is ready!" -Color Green
+Write-LauncherMessage ""
+Write-LauncherMessage "Connect via:" -Color Cyan
+Write-LauncherMessage "  • VS Code: Attach to running container '$ContainerName'" -Color White
+Write-LauncherMessage "  • Terminal: $ContainerCli exec -it $ContainerName bash" -Color White
+Write-LauncherMessage ""
+Write-LauncherMessage "Repository: /workspace" -Color Gray
+Write-LauncherMessage "Branch: $AgentBranch" -Color Gray

@@ -59,7 +59,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "run-agent"
 
-if (-not (Ensure-PrerequisitesVerified -RepoRoot $RepoRoot)) {
+if (-not (Test-PrerequisitesVerified -RepoRoot $RepoRoot)) {
     exit 1
 }
 

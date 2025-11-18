@@ -530,8 +530,7 @@ function Test-AuditLoggingPipeline {
     "# dirty" | Out-File -FilePath "scripts/launchers/tool.sh" -Encoding UTF8 -Append
     Pop-Location
 
-    $env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN = $overrideToken
-    Test-TrustedPathsClean -RepoRoot $tempRepo -Paths @("scripts/launchers") -Label "test stubs" | Out-Null
+    Test-TrustedPathsClean -RepoRoot $tempRepo -Paths @("scripts/launchers") -Label "test stubs" -OverrideToken $overrideToken | Out-Null
 
     $updatedLog = Get-Content $logFile -ErrorAction Stop | Out-String
     if ($updatedLog -match '"event":"override-used"') {
@@ -543,7 +542,6 @@ function Test-AuditLoggingPipeline {
     Remove-Item $tempRepo -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item $overrideToken -Force -ErrorAction SilentlyContinue
     Remove-Item $logFile -Force -ErrorAction SilentlyContinue
-    Remove-Item Env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN -ErrorAction SilentlyContinue
     Remove-Item Env:CODING_AGENTS_AUDIT_LOG -ErrorAction SilentlyContinue
 }
 
