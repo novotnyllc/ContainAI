@@ -125,6 +125,8 @@ run-claude.ps1
 - Creates container named `{agent}-{repo}-{branch}`
 - Auto-removes container on exit
 - Auto-pushes changes to local remote before exit (unless --no-push)
+- Keeps a background sync daemon running to fast-forward your host repo after every push (disable with `CODING_AGENTS_DISABLE_AUTO_SYNC=1`)
+- Removes upstream git remotes so the container cannot reach your GitHub origin; publish from the host repo when you're ready
 - Interactive shell, exit with Ctrl+D or detach via tmux (see below)
 
 **Example:**

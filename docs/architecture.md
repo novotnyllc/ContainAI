@@ -201,7 +201,7 @@ With secrets staged, the launcher creates the container:
 2. Verifies and installs the host-provided manifest + MCP configs under `~/.config/<agent>/mcp/`.
 3. Copies sealed capabilities into `/home/agentuser/.config/coding-agents/capabilities` (also tmpfs).
 4. Falls back to `setup-mcp-configs.sh` **only** if the host did not provide a manifest (legacy mode).
-5. Configures git credential + GPG proxies, dual remotes, and auto-commit hooks.
+5. Configures git credential + GPG proxies, strips upstream remotes, and wires the managed local remote plus auto-commit hooks.
 
 Actual MCP servers never see raw secrets. When Copilot/Codex/Claude launches a server, it invokes `/usr/local/bin/mcp-stub`. The stub selects the correct capability, asks the host broker to redeem it, receives the decrypted secret through a memfd, writes it inside its private tmpfs, and finally `exec`s the true MCP command.
 
@@ -277,26 +277,31 @@ Secrets remain on the host and are never mounted into `/home/agentuser`. The man
 
 ## Git Workflow
 
-### Dual Remote Setup
+### Managed Local Remote
 
 ```mermaid
 flowchart TB
     workspace["Container Workspace"]
-    origin["origin → https://github.com/user/repo.git"]
-    local["local → /mnt/e/path/to/host/repo<br/>(default push)"]
+    local["local → /tmp/local-remote<br/>(host bare repo)"]
+    host["Host repository"]
+    github["GitHub or other origin"]
 
-    workspace --> origin
-    workspace --> local
+    workspace -->|"git push (default)"| local
+    local -->|"sync via launcher"| host
+    host -->|"manual git push origin"| github
 
     style workspace fill:#d4edda,stroke:#28a745
-    style origin fill:#e1f5ff,stroke:#0366d6
     style local fill:#fff3cd,stroke:#856404
+    style host fill:#fff3cd,stroke:#856404
+    style github fill:#ffe8cc,stroke:#b45f06
 ```
 
 **Benefits:**
-- Push to `local` syncs back to host immediately
-- Push to `origin` creates pull request
-- Pull from either to get updates
+- Containers stay isolated from GitHub credentials and cannot accidentally force-push.
+- Host bare repo captures every commit even if the container is deleted.
+- A background daemon (`scripts/runtime/sync-local-remote.{sh,ps1}`) watches the bare repo and fast-forwards the host working tree after every push unless `CODING_AGENTS_DISABLE_AUTO_SYNC=1`.
+- You choose when (or if) agent output is published upstream.
+- Users can still add their own remotes inside the container, but only after an explicit opt-in.
 
 ### Branch Naming
 
@@ -472,12 +477,12 @@ flowchart TB
     workspace["Container /workspace"]
     git["Container git"]
     host["Host Repository (local remote)"]
-    github["GitHub (origin remote)"]
+    github["GitHub (upstream origin)"]
     
     dev -->|"edit files"| workspace
     workspace -->|"git commit"| git
-    git -->|"git push"| host
-    host -->|"git push origin"| github
+    git -->|"git push (local)"| host
+    host -->|"manual git push origin"| github
     
     style dev fill:#e1f5ff,stroke:#0366d6
     style workspace fill:#d4edda,stroke:#28a745
@@ -577,13 +582,13 @@ flowchart TB
 - No risk of concurrent writes to same files
 - Each agent gets clean starting state
 
-### Why Dual Remotes?
+### Why Remove Upstream Remotes?
 
 **Rationale:**
-- `local` remote: Quick sync back to host for testing
-- `origin` remote: Create PRs on GitHub
-- Default to `local`: Safe, changes appear on host immediately
-- Explicit `origin`: Intentional publish to team
+- Eliminates accidental pushes to sensitive GitHub branches from within the container.
+- Keeps the container useful even when offline—only the host repo needs network access.
+- Forces a deliberate review step on the host before anything leaves the secure bare repo.
+- Still allows power users to add remotes manually when they intentionally want that capability.
 
 ### Why TOML for MCP Config?
 

@@ -177,6 +177,10 @@ run-copilot ~/my-project -b feature-api --cpu 8 --memory 16g --network-proxy squ
 
 > **Auto-push storage:** For local repositories, commits are written to `~/.coding-agents/local-remotes/<repo-hash>.git`. Fetch from that bare repo to bring changes back into your working tree, or set `CODING_AGENTS_LOCAL_REMOTES_DIR` before launching to change the location.
 
+> **Upstream access:** The container starts without any GitHub origin remote. Only the managed `local` remote is configured so you must publish from the host repository (or explicitly add a remote yourself inside the container).
+
+> **Host sync:** After every push to `local`, the host working tree fast-forwards automatically unless you set `CODING_AGENTS_DISABLE_AUTO_SYNC=1`.
+
 **Reattach later:** `connect-agent --name <container>` reconnects to the tmux session if the container is still running (for example, if you detached with `Ctrl+B`, `D`).
 
 **Branch Behavior:**

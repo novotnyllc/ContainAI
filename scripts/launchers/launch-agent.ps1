@@ -249,7 +249,6 @@ if ($IsUrl) {
     $RepoName = [System.IO.Path]::GetFileNameWithoutExtension($Source) -replace '\.git$', ''
     $SourceType = "url"
     $GitUrl = $Source
-    $OriginUrl = $GitUrl
     $WslPath = ""
 } else {
     $ResolvedPath = Resolve-Path $Source -ErrorAction SilentlyContinue
@@ -265,10 +264,6 @@ if ($IsUrl) {
     
     $RepoName = Split-Path -Leaf $ResolvedPath
     $SourceType = "local"
-    
-    Push-Location $ResolvedPath
-    $OriginUrl = git remote get-url origin 2>$null
-    Pop-Location
     
     $WslPath = $ResolvedPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
     $GitUrl = ""
@@ -774,7 +769,6 @@ if ($SourceType -eq "url") {
     }
 }
 
-if ($OriginUrl) { $dockerArgs += "-e", "ORIGIN_URL=$OriginUrl" }
 if ($DotNetPreview) { $dockerArgs += "-e", "DOTNET_PREVIEW_CHANNEL=$DotNetPreview" }
 
 # Add proxy environment if squid
@@ -1002,6 +996,21 @@ try {
     Write-Host "❌ Failed to setup repository" -ForegroundColor Red
     Invoke-ContainerCli rm -f $ContainerName | Out-Null
     exit 1
+}
+
+if (($SourceType -eq "local") -and (-not $NoPush) -and $LocalRemoteHostPath -and ($env:CODING_AGENTS_DISABLE_AUTO_SYNC -ne '1')) {
+    $syncScript = Join-Path $RepoRoot "scripts/runtime/sync-local-remote.ps1"
+    if (Test-Path $syncScript) {
+        $logDir = Join-Path $env:USERPROFILE ".coding-agents\\logs"
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        $logFile = Join-Path $logDir "$ContainerName-sync.log"
+        $syncArgs = @('-File', $syncScript, '-BareRepo', $LocalRemoteHostPath, '-HostRepo', $ResolvedPath, '-Branch', $AgentBranch, '-ContainerName', $ContainerName)
+        if ($env:CODING_AGENTS_LOCAL_SYNC_INTERVAL) {
+            $syncArgs += '-IntervalSeconds'
+            $syncArgs += $env:CODING_AGENTS_LOCAL_SYNC_INTERVAL
+        }
+        Start-Process -FilePath "pwsh" -ArgumentList $syncArgs -RedirectStandardOutput $logFile -RedirectStandardError $logFile -WindowStyle Hidden | Out-Null
+    }
 }
 
 Write-Host ""

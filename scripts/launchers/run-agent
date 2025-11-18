@@ -8,8 +8,75 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
+print_run_agent_usage() {
+        cat <<'EOF'
+Usage: run-agent <agent> [SOURCE] [OPTIONS]
+
+Agent types: copilot, codex, claude
+
+SOURCE can be:
+    • Local path to a git repository (default: current directory)
+    • Git URL (https://...)
+
+Options:
+    -b, --branch BRANCH         Branch name (creates <agent>/<branch>)
+    --name NAME                 Custom container name
+    --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)
+    --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)
+    --cpu NUM                   CPU limit (default: 4)
+    --memory SIZE               Memory limit (default: 8g)
+    --gpu SPEC                  GPU specification (e.g., 'all' or 'device=0')
+    --no-push                   Disable auto-push on container shutdown
+    --use-current-branch        Use current branch instead of creating agent branch (unsafe)
+    -y, --force                 Automatically replace existing agent branch without prompting
+    -h, --help                  Show this help
+
+Branch Behavior:
+    • Without --branch: creates unique session branch <agent>/session-N
+    • With --branch: creates <agent>/<branch>
+    • Already on agent branch: reuses that branch
+    • Use --use-current-branch to work directly on current branch
+    • Existing agent branches prompt for replacement
+    • Branches with unmerged commits are archived before replacement
+
+Examples:
+    run-agent copilot                              # Copilot in current directory
+    run-agent codex . -b refactor-db               # Codex in current dir, custom branch
+    run-agent copilot https://github.com/user/repo # Copilot from GitHub
+    run-agent claude /path/to/repo --name my-workspace
+    run-agent copilot . -b feature-api -y          # Auto-replace existing agent branch
+EOF
+}
+
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 maybe_check_launcher_updates "$REPO_ROOT" "run-agent"
+
+WANTS_HELP=false
+for arg in "$@"; do
+        case "$arg" in
+                -h|--help)
+                        WANTS_HELP=true
+                        break
+                        ;;
+        esac
+done
+
+if $WANTS_HELP; then
+        if [[ $# -eq 0 || "$1" == "-"* ]]; then
+                print_run_agent_usage
+                exit 0
+        fi
+        help_agent="$1"
+        case "$help_agent" in
+                copilot|codex|claude) ;;
+                *)
+                        echo "❌ Error: Invalid agent type '$help_agent'"
+                        exit 1
+                        ;;
+        esac
+        print_run_agent_usage
+        exit 0
+fi
 
 if ! ensure_prerequisites_verified "$REPO_ROOT"; then
     exit 1
@@ -297,41 +364,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: run-agent <agent> [SOURCE] [OPTIONS]"
-            echo ""
-            echo "Agent types: copilot, codex, claude"
-            echo ""
-            echo "SOURCE can be:"
-            echo "  • Local path to a git repository (default: current directory)"
-            echo "  • Git URL (https://...)"
-            echo ""
-            echo "Options:"
-            echo "  -b, --branch BRANCH         Branch name (creates <agent>/<branch>)"
-            echo "  --name NAME                 Custom container name"
-            echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)"
-            echo "  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)"
-            echo "  --cpu NUM                   CPU limit (default: 4)"
-            echo "  --memory SIZE               Memory limit (default: 8g)"
-            echo "  --gpu SPEC                  GPU specification (e.g., 'all' or 'device=0')"
-            echo "  --no-push                   Disable auto-push on container shutdown"
-            echo "  --use-current-branch        Use current branch instead of creating agent branch (unsafe)"
-            echo "  -y, --force                 Automatically replace existing agent branch without prompting"
-            echo "  -h, --help                  Show this help"
-            echo ""
-            echo "Branch Behavior:"
-            echo "  • Without --branch: creates unique session branch <agent>/session-N"
-            echo "  • With --branch: creates <agent>/<branch>"
-            echo "  • Already on agent branch: reuses that branch"
-            echo "  • Use --use-current-branch to work directly on current branch"
-            echo "  • Existing agent branches prompt for replacement"
-            echo "  • Branches with unmerged commits are archived before replacement"
-            echo ""
-            echo "Examples:"
-            echo "  run-agent copilot                              # Copilot in current directory"
-            echo "  run-agent codex . -b refactor-db               # Codex in current dir, custom branch"
-            echo "  run-agent copilot https://github.com/user/repo # Copilot from GitHub"
-            echo "  run-agent claude /path/to/repo --name my-workspace"
-            echo "  run-agent copilot . -b feature-api -y          # Auto-replace existing agent branch"
+            print_run_agent_usage
             exit 0
             ;;
         *)
@@ -369,7 +402,6 @@ if [[ "$SOURCE" =~ ^https?:// ]]; then
     SOURCE_TYPE="url"
     REPO_NAME=$(basename "$SOURCE" .git)
     GIT_URL="$SOURCE"
-    ORIGIN_URL="$GIT_URL"
     WSL_PATH=""
 else
     IS_URL=false
@@ -384,7 +416,6 @@ else
     
     REPO_NAME=$(basename "$SOURCE")
     cd "$SOURCE"
-    ORIGIN_URL=$(git remote get-url origin 2>/dev/null || echo "")
     cd - > /dev/null
     WSL_PATH=$(convert_to_wsl_path "$SOURCE")
     GIT_URL=""
@@ -827,7 +858,6 @@ else
     fi
 fi
 
-[ -n "$ORIGIN_URL" ] && DOCKER_ARGS+=("-e" "ORIGIN_URL=$ORIGIN_URL")
 [ -n "$DOTNET_PREVIEW" ] && DOCKER_ARGS+=("-e" "DOTNET_PREVIEW_CHANNEL=$DOTNET_PREVIEW")
 
 # Add proxy environment if squid
@@ -1034,13 +1064,27 @@ fi
 
 # Setup repository inside container
 echo "📥 Setting up repository..."
-SETUP_SCRIPT=$(generate_repo_setup_script "$SOURCE_TYPE" "$GIT_URL" "$WSL_PATH" "$ORIGIN_URL" "$AGENT_BRANCH")
+SETUP_SCRIPT=$(generate_repo_setup_script "$SOURCE_TYPE" "$GIT_URL" "$WSL_PATH" "$AGENT_BRANCH")
 echo "$SETUP_SCRIPT" | container_cli exec -i "$CONTAINER_NAME" bash
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to setup repository"
     container_cli rm -f "$CONTAINER_NAME"
     exit 1
+fi
+
+if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ] && [ "${CODING_AGENTS_DISABLE_AUTO_SYNC:-0}" != "1" ]; then
+    SYNC_SCRIPT="$REPO_ROOT/scripts/runtime/sync-local-remote.sh"
+    if [ -x "$SYNC_SCRIPT" ]; then
+        mkdir -p "${HOME}/.coding-agents/logs"
+        LOG_FILE="${HOME}/.coding-agents/logs/${CONTAINER_NAME}-sync.log"
+        "$SYNC_SCRIPT" \
+            --bare "$LOCAL_REMOTE_HOST_PATH" \
+            --repo "$RESOLVED_PATH" \
+            --branch "$AGENT_BRANCH" \
+            --container "$CONTAINER_NAME" \
+            >>"$LOG_FILE" 2>&1 &
+    fi
 fi
 
 if [ "$USE_SQUID" = true ]; then

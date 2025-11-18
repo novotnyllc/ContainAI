@@ -18,6 +18,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_REPO_DIR="/tmp/test-coding-agents-repo"
 FAILED_TESTS=0
 PASSED_TESTS=0
+DIRTY_OVERRIDE_TOKEN=$(mktemp -t coding-agents-dirty-override.XXXXXX)
+touch "$DIRTY_OVERRIDE_TOKEN"
+export CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$DIRTY_OVERRIDE_TOKEN"
 
 # ============================================================================
 # Cleanup and Setup Functions
@@ -58,6 +61,7 @@ cleanup() {
         echo "⚠️  Warning: Some test resources may still exist after cleanup retries"
     fi
     rm -rf "$TEST_REPO_DIR"
+    rm -f "$DIRTY_OVERRIDE_TOKEN"
     
     print_test_summary
     
@@ -413,8 +417,16 @@ PY
 test_trusted_path_enforcement() {
     test_section "Trusted path enforcement"
 
+    local saved_override_token="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-}"
+    unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
+
     if ! command -v git >/dev/null 2>&1; then
         fail "Git is required for trusted path tests"
+        if [ -n "$saved_override_token" ]; then
+            export CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
+        else
+            unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
+        fi
         return
     fi
 
@@ -452,6 +464,12 @@ test_trusted_path_enforcement() {
     fi
 
     rm -rf "$temp_repo"
+
+    if [ -n "$saved_override_token" ]; then
+        export CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
+    else
+        unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
+    fi
 }
 
 test_session_config_renderer() {
@@ -565,14 +583,22 @@ test_secret_broker_cli() {
     fi
 
     local decrypted
-    decrypted=$(python3 - <<'PY'
-import base64, hashlib, json, sys
+    decrypted=$(python3 - "$token_file" "$sealed_file" <<'PY'
+import base64
+import hashlib
+import json
 import pathlib
+import sys
 
-cap = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+if len(sys.argv) < 3:
+    sys.exit(1)
+
+cap_path, sealed_path = sys.argv[1], sys.argv[2]
+cap = pathlib.Path(cap_path).read_text(encoding='utf-8')
 cap = json.loads(cap)
-sealed = pathlib.Path(sys.argv[2]).read_text(encoding='utf-8')
+sealed = pathlib.Path(sealed_path).read_text(encoding='utf-8')
 sealed = json.loads(sealed)
+
 session_key = bytes.fromhex(cap["session_key"])
 data = base64.b64decode(sealed["ciphertext"])
 block = hashlib.sha256(session_key).digest()
@@ -584,9 +610,10 @@ for byte in data:
     if idx >= len(block):
         block = hashlib.sha256(block).digest()
         idx = 0
+
 sys.stdout.write(out.decode('utf-8'))
 PY
-"$token_file" "$sealed_file")
+)
     if [ "$decrypted" = "super-secret" ]; then
         pass "Sealed secret decrypts with session key"
     else
@@ -671,8 +698,8 @@ test_local_remote_push() {
 
     local agent_branch="copilot/session-test"
     local setup_script
-    setup_script=$(generate_repo_setup_script "local" "" "$TEST_REPO_DIR" "" "$agent_branch")
-    if ! echo "$setup_script" | WORKSPACE_DIR="$workspace_dir" SOURCE_TYPE="local" LOCAL_REMOTE_URL="file://$bare_repo" AGENT_BRANCH="$agent_branch" GIT_URL="" ORIGIN_URL="" bash; then
+    setup_script=$(generate_repo_setup_script "local" "" "$TEST_REPO_DIR" "$agent_branch")
+    if ! echo "$setup_script" | WORKSPACE_DIR="$workspace_dir" SOURCE_TYPE="local" LOCAL_REMOTE_URL="file://$bare_repo" AGENT_BRANCH="$agent_branch" GIT_URL="" bash; then
         fail "Repository setup script failed"
         rm -rf "$workspace_dir" "$bare_dir"
         return
@@ -703,7 +730,7 @@ test_local_remote_push() {
 
     rm -rf "$workspace_dir" "$bare_dir"
     rm -rf /tmp/source-repo
-    unset WORKSPACE_DIR SOURCE_TYPE LOCAL_REMOTE_URL AGENT_BRANCH ORIGIN_URL
+    unset WORKSPACE_DIR SOURCE_TYPE LOCAL_REMOTE_URL AGENT_BRANCH
 }
 
 test_local_remote_fallback_push() {
@@ -724,7 +751,7 @@ test_local_remote_fallback_push() {
 
     local agent_branch="copilot/session-fallback"
     local setup_script
-    setup_script=$(generate_repo_setup_script "local" "" "$TEST_REPO_DIR" "" "$agent_branch")
+    setup_script=$(generate_repo_setup_script "local" "" "$TEST_REPO_DIR" "$agent_branch")
     if ! echo "$setup_script" | WORKSPACE_DIR="$workspace_dir" SOURCE_TYPE="local" LOCAL_REMOTE_URL="" LOCAL_REPO_PATH="file://$bare_repo" AGENT_BRANCH="$agent_branch" bash; then
         fail "Repository setup script failed with fallback remote"
         rm -rf "$workspace_dir" "$bare_dir"
@@ -754,7 +781,7 @@ test_local_remote_fallback_push() {
 
     rm -rf "$workspace_dir" "$bare_dir"
     rm -rf /tmp/source-repo
-    unset WORKSPACE_DIR SOURCE_TYPE LOCAL_REMOTE_URL LOCAL_REPO_PATH AGENT_BRANCH ORIGIN_URL
+    unset WORKSPACE_DIR SOURCE_TYPE LOCAL_REMOTE_URL LOCAL_REPO_PATH AGENT_BRANCH
 }
 
 test_secure_remote_sync() {
