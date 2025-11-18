@@ -65,6 +65,7 @@ run-copilot [REPO_PATH] [OPTIONS]
 | `--gpu SPEC` (bash)<br>`-Gpu SPEC` (PowerShell) | string | none | GPU specification (e.g., `all`, `device=0`, `device=0,1`) |
 | `--no-push` (bash)<br>`-NoPush` (PowerShell) | flag | false | Skip auto-push to git remote on exit |
 | `--use-current-branch` (bash)<br>`-UseCurrentBranch` (PowerShell) | flag | false | Use current branch (no isolation) |
+| `--prompt PROMPT` (bash)<br>`-Prompt PROMPT` (PowerShell) | string | none | Non-interactive prompt run (auto CLI execution, reuses repo when available, automatic shutdown) |
 | `-y, --force` (bash)<br>`-Force` (PowerShell) | flag | false | Replace existing branch without prompt |
 | `-h, --help` (bash)<br>`-Help` (PowerShell) | flag | false | Show help message |
 
@@ -157,11 +158,17 @@ run-copilot ~/my-project -b feature-api --cpu 8 --memory 16g --network-proxy squ
 
 # Windows
 .\run-copilot.ps1 C:\Projects\MyApp -Branch feature-api -Cpu 8 -Memory 16g -NetworkProxy squid
+
+# Ask a one-off question (no repo required)
+run-copilot --prompt "Return the words: host secrets OK."
+# Equivalent Codex/Claude examples
+run-codex --prompt "Summarize CONTRIBUTING.md"
+run-claude --prompt "List repo services that need MCP"
 ```
 
 #### Behavior
 
-1. Validates repository path exists and is a git repository
+1. Validates the path exists and is a git repository whenever a repo is involved (prompt sessions reuse the same validation and only fall back to an empty workspace when no repo is detected)
 2. Pulls latest `coding-agents-copilot:local` image
 3. Creates ephemeral container with:
    - Repository mounted at `/workspace`
@@ -180,6 +187,8 @@ run-copilot ~/my-project -b feature-api --cpu 8 --memory 16g --network-proxy squ
 > **Upstream access:** The container starts without any GitHub origin remote. Only the managed `local` remote is configured so you must publish from the host repository (or explicitly add a remote yourself inside the container).
 
 > **Host sync:** After every push to `local`, the host working tree fast-forwards automatically unless you set `CODING_AGENTS_DISABLE_AUTO_SYNC=1`.
+
+**Prompt sessions (all agents):** Passing `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) auto-runs the agent-specific CLI (`github-copilot-cli exec "$prompt"`, `codex exec "$prompt"`, or `claude -p "$prompt"`). When you launch it from inside a Git repository (or pass a repo/SOURCE argument), the workspace mirrors a normal session with branch isolation and stripped remotes. If no repo exists, the launcher falls back to a synthetic empty workspace. Either way, auto-push is disabled and the container shuts down as soon as the CLI returns, which makes it ideal for diagnostics and the `--with-host-secrets` integration path.
 
 **Reattach later:** `connect-agent --name <container>` reconnects to the tmux session if the container is still running (for example, if you detached with `Ctrl+B`, `D`).
 

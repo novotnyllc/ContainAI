@@ -52,6 +52,8 @@ flowchart TB
 
 Launchers refuse to proceed if seccomp, AppArmor, ptrace scope, or tmpfs protections cannot be enforced. After the host passes all checks, `render-session-config.py` emits a signed manifest, stub specs, and capability requests. The secret broker produces sealed capability bundles for each MCP stub; those bundles are copied into the container’s private tmpfs before any untrusted workload starts. MCP binaries can only access secrets by invoking the trusted `mcp-stub` helper, which redeems a capability against the broker and injects decrypted values into stub-owned tmpfs.
 
+Prompt (`--prompt`) sessions reuse the exact same trust chain. When you launch them from inside a Git repository, the host still copies the repo root, generates an agent branch, and mounts the same trusted manifests; the only change is that the launcher auto-runs the agent CLI and then powers the container off. If no repository exists, the launcher falls back to a synthetic empty workspace so prompts remain available anywhere.
+
 ### Threat Boundaries
 
 | Zone | Examples | Trust Level | Guarantees |
@@ -211,6 +213,35 @@ Actual MCP servers never see raw secrets. When Copilot/Codex/Claude launches a s
 - Agent session (tmux) started and ready for CLI or VS Code attachments.
 - `HOST_*` metadata allows runtime scripts to prove provenance back to the manifest hash.
 - Secrets remain inside tmpfs and disappear when the container stops.
+
+### Prompt Sessions
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant Launcher
+    participant Broker
+    participant Container
+    participant AgentCLI as Agent CLI
+
+    User->>Launcher: run-<agent> --prompt "Prompt"
+    Launcher->>Launcher: Validate flag (force --no-push, detect repo root)
+    Launcher->>Broker: Stage secrets + capabilities (same as repo flow)
+    Launcher->>Container: docker run (repo copy or empty fallback)
+    Container->>AgentCLI: Invoke agent-specific CLI (copilot/codex/claude)
+    AgentCLI-->>User: Stream response
+    Container-->>Launcher: Exit immediately, remove tmpfs + volumes
+
+    Note over Launcher,Container: Auto-push disabled; git remotes configured only when a repo exists
+```
+
+Properties:
+
+- When a Git repository is available, the workspace is prepared exactly like a normal session (clone/copy, isolated branch, host remotes stripped). If no repo exists, the launcher falls back to an empty workspace to keep prompts usable anywhere.
+- Secrets, manifests, and MCP configs still route through `render-session-config.py` and the broker, preserving the same security envelope as repo-backed sessions.
+- Source arguments plus `--branch`/`--use-current-branch` are allowed, but the launcher always flips on `--no-push` so prompt runs remain read-only.
+- Because the container shuts down as soon as the CLI returns, no tmux reattach or cleanup is necessary.
 
 ## Authentication Flow
 

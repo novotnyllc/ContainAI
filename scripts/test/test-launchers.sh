@@ -985,6 +985,33 @@ test_wsl_path_conversion() {
     assert_equals "/mnt/e/dev/project" "$wsl_path2" "WSL path unchanged"
 }
 
+test_prompt_fallback_repo_setup() {
+    test_section "Testing prompt fallback workspace preparation"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local setup_script
+    setup_script=$(generate_repo_setup_script "prompt" "" "" "")
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    echo "keep" > "$temp_dir/existing.txt"
+
+    local output
+    if output=$(SOURCE_TYPE="prompt" WORKSPACE_DIR="$temp_dir" bash <<<"$setup_script" 2>&1); then
+        assert_contains "$output" "Prompt session requested without repository" "Setup script acknowledges prompt fallback"
+    else
+        fail "Prompt fallback setup script failed"
+    fi
+
+    if [ -z "$(ls -A "$temp_dir")" ]; then
+        pass "Prompt fallback workspace left empty"
+    else
+        fail "Prompt fallback workspace not empty after setup"
+    fi
+
+    rm -rf "$temp_dir"
+}
+
 # Test: Container status functions
 test_container_status() {
     test_section "Testing container status functions"
@@ -1015,6 +1042,7 @@ test_launcher_wrappers() {
         local script_path="$PROJECT_ROOT/scripts/launchers/${wrapper}"
         if output=$("$script_path" --help 2>&1); then
             assert_contains "$output" "Usage: run-agent" "${wrapper} --help displays usage"
+            assert_contains "$output" "--prompt" "${wrapper} --help documents --prompt"
         else
             fail "${wrapper} --help failed (exit $?)"
         fi
@@ -1052,6 +1080,7 @@ main() {
     run_test "test_multiple_agents" test_multiple_agents
     run_test "test_label_filtering" test_label_filtering
     run_test "test_container_status" test_container_status
+    run_test "test_prompt_fallback_repo_setup" test_prompt_fallback_repo_setup
     run_test "test_launcher_wrappers" test_launcher_wrappers
     run_test "test_list_agents" test_list_agents
     run_test "test_remove_agent" test_remove_agent

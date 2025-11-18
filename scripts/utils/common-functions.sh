@@ -1515,7 +1515,10 @@ if [ -d "$TARGET_DIR" ] && [ "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 | wc 
     find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 fi
 
-if [ "$SOURCE_TYPE" = "url" ]; then
+if [ "$SOURCE_TYPE" = "prompt" ]; then
+    echo "🆕 Prompt session requested without repository: leaving workspace empty"
+    exit 0
+elif [ "$SOURCE_TYPE" = "url" ]; then
     echo "🌐 Cloning repository from $GIT_URL..."
     git clone "$GIT_URL" "$TARGET_DIR"
 else

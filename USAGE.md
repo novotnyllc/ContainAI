@@ -1,9 +1,5 @@
 # Usage Guide
 
-Quick guide for running AI coding agents in isolated containers.
-
-## Recommended Approach: Ephemeral Containers
-
 For most use cases, use the **`run-*` scripts** (run-copilot, run-codex, run-claude). These create temporary containers that:
 - Launch instantly
 - Auto-remove when you exit (no cleanup needed)
@@ -92,6 +88,26 @@ coding-agents.agent=copilot    # Which agent (copilot/codex/claude)
 coding-agents.repo=myapp       # Repository name
 coding-agents.branch=main      # Branch name
 ```
+
+## Prompt Mode
+
+Need a quick answer without cloning a repo? Add `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) to **any** `run-*` launcher:
+
+```bash
+run-codex --prompt "Sketch a README outline"
+run-claude --prompt "List security controls in this project"
+run-copilot --prompt "Return the words: host secrets OK."
+# PowerShell
+run-claude.ps1 -Prompt "Summarize CONTRIBUTING.md"
+```
+
+Key traits:
+- Works for Copilot, Codex, and Claude; the launcher picks the correct CLI (`github-copilot-cli exec`, `codex exec`, or `claude -p`).
+- Reuses your current Git repository automatically (even from a subdirectory). If no repo is detected, the launcher falls back to the legacy empty workspace so prompts still run anywhere.
+- Accepts SOURCE arguments and branch flags just like a normal session while still forcing `--no-push`, keeping prompt runs read-only by default.
+- Ideal for diagnostics, onboarding checks, or the host-secrets integration test path (`--with-host-secrets`).
+
+You still get all preflight checks, secret-broker protections, and MCP wiring—the only difference is that prompt sessions auto-run the agent CLI and exit when the response is streamed back.
 
 ## Auto-Commit and Auto-Push Safety Features
 
