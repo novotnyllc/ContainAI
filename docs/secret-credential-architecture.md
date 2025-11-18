@@ -277,12 +277,6 @@ When an MCP definition advertises an HTTPS or SSE transport, the launcher does *
 3. Terminates the agent’s inbound HTTPS request, rewrites it as needed (headers, auth), and establishes the outbound TLS/SSE session to the remote MCP.
 4. Streams responses back over the localhost connection so the vendor agent experiences a normal HTTPS MCP even though the secrets never leave the helper namespace.
 
-#### Protocol Coverage
-
-- **Header and auth variability** – Each helper ships with a per-MCP adapter that understands the required HTTP verbs, headers, and auth schemes (Bearer, `x-api-key`, custom HMAC). The helper replays whatever the upstream expects regardless of what the vendor agent sent, so adding/changing headers does not leak secrets to the agent.
-- **HTTPS vs. SSE** – For traditional HTTPS APIs the helper simply proxies request/response bodies. For SSE endpoints it upgrades the upstream connection to streaming mode, parses `event:` / `data:` frames, and re-emits them over the localhost channel. The vendor agent sees SSE semantics even though the helper is the party that actually holds the remote TCP socket.
-- **Certificate trust** – Helpers use a trust store assembled at launch: system CA bundle plus any MCP-specific pins (SHA256 SPKI hashes or custom CA certs) delivered via the same capability payload. This ensures we can trust private MCP endpoints without modifying the vendor agent or exposing certificates directly to it.
-
 Only in rare debug scenarios (gated by an override token) will the config embed the upstream URL directly. Otherwise, the helper proxy allows us to enforce DNS allow-lists, certificate pinning, rate limits, and auditing exactly as we do for command-based stubs while still honoring the MCP’s HTTPS protocol requirements.
 
 ### Why MCP Stubs Still Exist (Command Mode)
