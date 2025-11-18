@@ -565,7 +565,7 @@ docker stop copilot-myproject-feature-auth
 **Auto-push on stop**: Container automatically commits and pushes changes when stopped (unless launched with `--no-push`).
 
 - Changes are pushed to a dedicated bare repository under `~/.coding-agents/local-remotes/<repo-hash>.git` so the container never writes directly to your working tree.
-- To pull the work back into your checkout, fetch from that bare repo: `git fetch ~/.coding-agents/local-remotes/<repo-hash>.git <branch>:<branch>`.
+- A host-side sync daemon fast-forwards your working tree as soon as the push completes (disable with `CODING_AGENTS_DISABLE_AUTO_SYNC=1`).
 - Override the storage path by setting `CODING_AGENTS_LOCAL_REMOTES_DIR` before launching if you prefer a different secure location.
 
 ## Detaching and Reconnecting

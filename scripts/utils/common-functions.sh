@@ -820,13 +820,16 @@ verify_container_security_support() {
     fi
 
     local summary
-    summary=$(printf '%s' "$info_json" | python3 - <<'PY'
+    summary=$(python3 - "$info_json" <<'PY'
 import json, sys
+
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(sys.argv[1])
 except Exception:
     sys.exit(1)
+
 result = {"seccomp": False, "apparmor": False}
+
 def consider(options):
     if isinstance(options, list):
         for entry in options:
@@ -836,8 +839,10 @@ def consider(options):
                     result["seccomp"] = True
                 if "apparmor" in low:
                     result["apparmor"] = True
+
 consider(data.get("SecurityOptions"))
 consider(data.get("securityOptions"))
+
 host = data.get("host") or {}
 security = host.get("security") or {}
 if security.get("seccompProfilePath") or security.get("seccompEnabled"):
@@ -848,6 +853,7 @@ if isinstance(host.get("seccomp"), str) and host["seccomp"].lower() == "enabled"
     result["seccomp"] = True
 if isinstance(host.get("apparmor"), str) and host["apparmor"].lower() == "enabled":
     result["apparmor"] = True
+
 print(json.dumps(result))
 PY
 ) || summary=""
@@ -1495,8 +1501,7 @@ generate_repo_setup_script() {
     local source_type="$1"
     local git_url="$2"
     local wsl_path="$3"
-    local origin_url="$4"
-    local agent_branch="$5"
+    local agent_branch="$4"
     
     cat << 'SETUP_SCRIPT'
 #!/usr/bin/env bash
@@ -1513,16 +1518,15 @@ fi
 if [ "$SOURCE_TYPE" = "url" ]; then
     echo "🌐 Cloning repository from $GIT_URL..."
     git clone "$GIT_URL" "$TARGET_DIR"
-    cd "$TARGET_DIR"
-    if [ -n "$ORIGIN_URL" ]; then
-        git remote set-url origin "$ORIGIN_URL"
-    fi
 else
     echo "📁 Copying repository from host..."
     cp -a /tmp/source-repo/. "$TARGET_DIR/"
-    cd "$TARGET_DIR"
-    
-    # Configure local remote
+fi
+
+cd "$TARGET_DIR"
+
+# Configure local remote when cloning from the host copy
+if [ "$SOURCE_TYPE" = "local" ]; then
     if [ -n "$LOCAL_REMOTE_URL" ]; then
         if git remote get-url local >/dev/null 2>&1; then
             git remote set-url local "$LOCAL_REMOTE_URL"
@@ -1538,6 +1542,11 @@ else
         fi
         git config remote.pushDefault local
     fi
+fi
+
+# Remove upstream origin to keep the container isolated from the source remote
+if git remote get-url origin >/dev/null 2>&1; then
+    git remote remove origin
 fi
 
 # Create and checkout branch

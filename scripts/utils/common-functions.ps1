@@ -1803,16 +1803,15 @@ fi
 if [ "$SOURCE_TYPE" = "url" ]; then
     echo "🌐 Cloning repository from $GIT_URL..."
     git clone "$GIT_URL" "$TARGET_DIR"
-    cd "$TARGET_DIR"
-    if [ -n "$ORIGIN_URL" ]; then
-        git remote set-url origin "$ORIGIN_URL"
-    fi
 else
     echo "📁 Copying repository from host..."
     cp -a /tmp/source-repo/. "$TARGET_DIR/"
-    cd "$TARGET_DIR"
+fi
 
-    # Configure local remote
+cd "$TARGET_DIR"
+
+# Configure local remote when copying from the host
+if [ "$SOURCE_TYPE" = "local" ]; then
     if [ -n "$LOCAL_REMOTE_URL" ]; then
         if git remote get-url local >/dev/null 2>&1; then
             git remote set-url local "$LOCAL_REMOTE_URL"
@@ -1827,6 +1826,11 @@ else
         fi
         git config remote.pushDefault local
     fi
+fi
+
+# Remove origin remote to keep the container isolated from upstream
+if git remote get-url origin >/dev/null 2>&1; then
+    git remote remove origin
 fi
 
 # Create and checkout branch

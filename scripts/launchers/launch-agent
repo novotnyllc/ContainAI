@@ -366,7 +366,6 @@ if [[ "$SOURCE" =~ ^https?:// ]]; then
     SOURCE_TYPE="url"
     REPO_NAME=$(basename "$SOURCE" .git)
     GIT_URL="$SOURCE"
-    ORIGIN_URL="$GIT_URL"
     WSL_PATH=""
 else
     IS_URL=false
@@ -381,7 +380,6 @@ else
     
     REPO_NAME=$(basename "$SOURCE")
     cd "$SOURCE"
-    ORIGIN_URL=$(git remote get-url origin 2>/dev/null || echo "")
     cd - > /dev/null
     WSL_PATH=$(convert_to_wsl_path "$SOURCE")
     GIT_URL=""
@@ -813,7 +811,6 @@ else
     fi
 fi
 
-[ -n "$ORIGIN_URL" ] && DOCKER_ARGS+=("-e" "ORIGIN_URL=$ORIGIN_URL")
 [ -n "$DOTNET_PREVIEW" ] && DOCKER_ARGS+=("-e" "DOTNET_PREVIEW_CHANNEL=$DOTNET_PREVIEW")
 
 # Add proxy environment if squid
@@ -1023,13 +1020,27 @@ fi
 
 # Setup repository inside container
 echo "📥 Setting up repository..."
-SETUP_SCRIPT=$(generate_repo_setup_script "$SOURCE_TYPE" "$GIT_URL" "$WSL_PATH" "$ORIGIN_URL" "$AGENT_BRANCH")
+SETUP_SCRIPT=$(generate_repo_setup_script "$SOURCE_TYPE" "$GIT_URL" "$WSL_PATH" "$AGENT_BRANCH")
 echo "$SETUP_SCRIPT" | container_cli exec -i "$CONTAINER_NAME" bash
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to setup repository"
     container_cli rm -f "$CONTAINER_NAME"
     exit 1
+fi
+
+if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ] && [ "${CODING_AGENTS_DISABLE_AUTO_SYNC:-0}" != "1" ]; then
+    SYNC_SCRIPT="$REPO_ROOT/scripts/runtime/sync-local-remote.sh"
+    if [ -x "$SYNC_SCRIPT" ]; then
+        mkdir -p "${HOME}/.coding-agents/logs"
+        LOG_FILE="${HOME}/.coding-agents/logs/${CONTAINER_NAME}-sync.log"
+        "$SYNC_SCRIPT" \
+            --bare "$LOCAL_REMOTE_HOST_PATH" \
+            --repo "$SOURCE" \
+            --branch "$AGENT_BRANCH" \
+            --container "$CONTAINER_NAME" \
+            >>"$LOG_FILE" 2>&1 &
+    fi
 fi
 
 echo ""

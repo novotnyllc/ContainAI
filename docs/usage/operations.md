@@ -48,9 +48,11 @@ git remote -v
 # Check which remote is default
 git config remote.pushDefault
 
-# Set explicitly
+# Push to the managed local remote explicitly (inside the container)
 git push local copilot/feature-auth
-# or
+
+# Ready to publish? Switch to the host repo (already up to date)
+cd ~/projects/app
 git push origin copilot/feature-auth
 ```
 
@@ -201,7 +203,7 @@ A: No if using published images. Yes if making custom changes.
 A: Inside the container at `/workspace`. They're persistent until you remove the container.
 
 **Q: How do I get my changes out?**  
-A: Use `git push` (pushes to `local` remote on host by default) or `git push origin` (pushes to GitHub).
+A: Inside the container run `git push` to update the managed `local` remote. A background sync fast-forwards the matching branch in your host repo, so you can immediately `git push origin <branch>` from the host when you're ready. (If you set `CODING_AGENTS_DISABLE_AUTO_SYNC=1`, manually `git fetch ~/.coding-agents/local-remotes/<hash>.git <branch>` before pushing.)
 
 **Q: Can I edit files from host while container is running?**  
 A: No, the workspace is isolated inside the container. Use VS Code Remote to edit.

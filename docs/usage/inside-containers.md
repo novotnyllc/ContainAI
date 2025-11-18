@@ -33,15 +33,15 @@ The container has **two separate contexts** for working with git:
 #### Context 1: Interactive Shell (bash)
 ```mermaid
 graph TB
-    subgraph "Container Shell (/workspace)"
-        A["✓ Full access to git commands"]
-        B["✓ Can commit, push, pull"]
-        C["Two remotes configured:"]
-        D["origin → GitHub"]
-        E["local → Host repo (default push)"]
-        A --> B --> C --> D
-        C --> E
-    end
+   subgraph "Container Shell (/workspace)"
+      A["✓ Full access to git commands"]
+      B["✓ Can commit, push, pull"]
+      C["Managed remotes:"]
+      D["local → host bare repo (default push)"]
+      E["Add origin yourself if needed"]
+      A --> B --> C --> D
+      C --> E
+   end
 ```
 
 #### Context 2: Agent CLI Mode
@@ -68,104 +68,93 @@ copilot> ^D  # Exit agent
 $ git status  # Now works!
 ```
 
-#### Dual Remote Configuration
+#### Managed Local Remote (no upstream origin)
 
-The container is configured with two git remotes for maximum flexibility:
+Containers intentionally strip every upstream remote. Only the managed `local` remote remains, pointing at the host-side bare repository the launchers created for you.
 
 ```mermaid
 graph TB
-    subgraph Container["/workspace"]
-        Branch["Your Feature Branch<br/>(e.g., copilot/auth)"]
-    end
-    
-    Branch -->|"git push<br/>(default)"| Local["local<br/>(Host)"]
-    Branch -->|"git push origin"| Origin["origin<br/>(GitHub)"]
-    
-    Local -->|"Persists to"| HostMachine["Host Machine<br/>/path/to/repo"]
-    Origin -->|"Pushes to"| GitHub["GitHub.com<br/>github.com/user/repo"]
-    
-    style Branch fill:#e1f5ff
-    style Local fill:#d4edda
-    style Origin fill:#d4edda
-    style HostMachine fill:#fff3cd
-    style GitHub fill:#fff3cd
+   subgraph Container["/workspace"]
+      Branch["Your Feature Branch<br/>(e.g., copilot/auth)"]
+   end
+
+   Branch -->|"git push (default)"| Local["local<br/>(host bare repo)"]
+   Local -->|"sync via launcher"| HostRepo["Host repo<br/>~/projects/app"]
+   HostRepo -->|"you decide when to publish"| GitHub["GitHub or other origin"]
+
+   style Branch fill:#e1f5ff
+   style Local fill:#d4edda
+   style HostRepo fill:#fff3cd
+   style GitHub fill:#ffe8cc
 ```
 
-**Default push target:** `local` (host machine)  
-**Why?** Preserves changes on host even if container is deleted.
+**Default push target:** `local`  
+**Why?** Preserves work in a host-owned bare repo even if the container disappears, while keeping the container isolated from GitHub. Publishing to GitHub (or any other upstream) happens from your host git client after you review the agent's commits.
+
+Need to talk to GitHub from inside the container anyway? Add a remote yourself (`git remote add origin https://...`) so you consciously accept that trust boundary. The launchers will never configure it for you.
+
+Every time you `git push` to `local`, a background sync daemon fast-forwards the matching branch in your host repository. Unless you opt out with `CODING_AGENTS_DISABLE_AUTO_SYNC=1`, you can simply switch back to your host repo after a push and the commit will already be there.
 
 #### Git Remote Commands
 
 **Check configured remotes:**
 ```bash
 git remote -v
-# origin  https://github.com/user/repo.git (fetch)
-# origin  https://github.com/user/repo.git (push)
-# local   /path/to/host/repo (fetch)
-# local   /path/to/host/repo (push)
+# local  /tmp/local-remote (fetch)
+# local  /tmp/local-remote (push)
 ```
 
-**Push to host (default - RECOMMENDED):**
+If you launched with `--no-push`, there will be no remotes. Copy files out manually or add the remotes you need.
+
+**Push to host (default - recommended):**
 ```bash
 git push
-# Pushes to local remote (host machine)
-# Changes are immediately visible on host
+# Writes to the managed local remote mounted at /tmp/local-remote
 ```
 
-**Push to GitHub (for pull requests):**
-```bash
-git push origin
-# Pushes to GitHub
-# Use for creating PRs or backing up to remote
-```
-
-**Pull from host:**
+**Pull from host bare repo:**
 ```bash
 git pull local main
-# Syncs with host's main branch
 ```
 
-**Pull from GitHub:**
-```bash
-git pull origin main
-# Syncs with GitHub's main branch
-```
+**Publish to GitHub:**
+1. Inside the container: commit + `git push` (updates the managed bare repo and auto-syncs your host working tree).
+2. On the host: switch to your repo (already updated) and run `git push origin` when you're satisfied.
 
 #### Common Workflows
 
-**Workflow 1: Quick local development (no PR)**
+**Workflow 1: Quick local development (no PR yet)**
 ```bash
 # Work in VS Code or shell
-# ...make changes...
-
-# Commit and push to host
 git add .
 git commit -m "Implemented feature"
-git push  # Goes to host by default
+git push              # Saves to local bare repo + auto-syncs host repo
+
+# Back on host workstation (already updated)
+cd ~/projects/app
+git status
 ```
 
-**Workflow 2: Create GitHub PR**
+**Workflow 2: Publish to GitHub**
 ```bash
-# Work in VS Code or shell
-# ...make changes...
-
-# Commit and push to both remotes
+# Inside container
 git add .
 git commit -m "Implemented feature"
-git push         # Save to host first
-git push origin  # Then push to GitHub for PR
+git push                   # Updates bare repo + host workspace
+
+# Back on host workstation (branch already fast-forwarded)
+cd ~/projects/app
+git switch copilot/feature-auth
+git push origin copilot/feature-auth
 ```
 
 **Workflow 3: Sync with team changes**
 ```bash
-# Pull latest from GitHub
+# On host: bring latest changes into your repo
+cd ~/projects/app
 git pull origin main
 
-# Merge into your feature branch
-git merge origin/main
-
-# Push updates to host
-git push
+# Relaunch the agent (or recopy the repo) so the container picks up the new snapshot
 ```
 
 #### Troubleshooting Git Issues
@@ -175,16 +164,20 @@ git push
 - **Solution:** Exit agent (Ctrl+D), then run git commands
 
 **Problem:** `git push` doesn't update GitHub
-- **Cause:** Default push goes to `local` remote (host)
-- **Solution:** Use `git push origin` for GitHub
+- **Cause:** Containers still only push to the managed `local` remote.
+- **Solution:** After the auto-sync completes, switch to your host repo and run `git push origin`. If you disabled auto-sync (`CODING_AGENTS_DISABLE_AUTO_SYNC=1`), manually fetch from `~/.coding-agents/local-remotes/<hash>.git` first.
 
 **Problem:** Lost changes after deleting container
-- **Cause:** Forgot to push before `docker rm`
-- **Solution:** Always `git push` (to host) or `git push origin` (to GitHub) before removing containers
+- **Cause:** Forgot to `git push` before `docker rm`
+- **Solution:** Always push to the local remote (default). When you remove the container with the launcher, the host automatically merges from the bare repo.
 
-**Problem:** Can't push to host from container
-- **Cause:** Host repo may not have your feature branch
-- **Solution:** Push creates the branch automatically, or use `git push origin` instead
+**Problem:** Need latest commits from GitHub inside container
+- **Cause:** Containers are isolated from upstream remotes.
+- **Solution:** Update on the host (e.g., `git pull origin main`), then relaunch the container so it copies the refreshed working tree.
+
+**Problem:** Need to talk to GitHub from inside the container
+- **Cause:** Remote was intentionally removed.
+- **Solution:** Manually run `git remote add origin https://github.com/user/repo.git` inside the container once you are ready to allow that access.
 
 ## MCP Configuration
 
@@ -223,10 +216,10 @@ When you run `launch-agent`:
    - Exposes provenance data via `HOST_SESSION_*` environment variables.
 
 4. **Sets up git:**
-   - Sets `origin` remote (GitHub)
-   - Sets `local` remote (host path, if applicable)
-   - Sets `local` as default push target
-   - Configures credential/GPG proxies for the host
+   - Removes upstream remotes so the container cannot reach your GitHub origin by default
+   - Configures the managed `local` remote (host bare repo) when available
+   - Sets `local` as the default push target
+   - Configures credential/GPG proxies for host-mediated operations
 
 5. **Creates branch:**
    - Checks out `<agent>/<branch-name>`
