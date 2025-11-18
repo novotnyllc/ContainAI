@@ -27,6 +27,18 @@ $script:DirtyOverrideToken = if ($env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN) {
     Join-Path $script:OverrideDir "allow-dirty"
 }
 
+$script:CacheRoot = if ($env:CODING_AGENTS_CACHE_DIR) {
+    $env:CODING_AGENTS_CACHE_DIR
+} else {
+    Join-Path $script:ConfigRoot "cache"
+}
+
+$script:PrereqCacheFile = if ($env:CODING_AGENTS_PREREQ_CACHE_FILE) {
+    $env:CODING_AGENTS_PREREQ_CACHE_FILE
+} else {
+    Join-Path $script:CacheRoot "prereq-check"
+}
+
 $script:BrokerScript = if ($env:CODING_AGENTS_BROKER_SCRIPT) {
     $env:CODING_AGENTS_BROKER_SCRIPT
 } else {
@@ -71,6 +83,135 @@ function Write-AgentMessage {
     )
 
     Write-Host $Message -ForegroundColor $Color
+}
+
+function Get-StringSha256 {
+    param([string]$InputString = "")
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($InputString)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash($bytes)
+    } finally {
+        $sha.Dispose()
+    }
+    return ([System.BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant()
+}
+
+function Get-FileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return $null
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $hash = $sha.ComputeHash($stream)
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+    return ([System.BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant()
+}
+
+function Get-ToolVersionString {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string[]]$Arguments = @('--version'),
+        [switch]$FirstLineOnly
+    )
+
+    $cmd = Get-Command $Command -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        return "missing"
+    }
+
+    try {
+        $output = & $cmd @Arguments 2>&1
+        if ($LASTEXITCODE -ne 0 -or -not $output) {
+            return "missing"
+        }
+        $text = if ($FirstLineOnly) { ($output | Select-Object -First 1) } else { $output }
+        return (($text -join ' ').Trim())
+    } catch {
+        return "missing"
+    }
+}
+
+function Get-PrereqFingerprint {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    $entries = [System.Collections.Generic.List[string]]::new()
+    $psScript = Join-Path $RepoRoot 'scripts/verify-prerequisites.ps1'
+    $bashScript = Join-Path $RepoRoot 'scripts/verify-prerequisites.sh'
+    $scriptPath = if (Test-Path $psScript) { $psScript } elseif (Test-Path $bashScript) { $bashScript } else { $null }
+    if ($scriptPath) {
+        $hash = Get-FileSha256 -Path $scriptPath
+        $entries.Add("script=$hash")
+    } else {
+        $entries.Add("script=missing")
+    }
+
+    $entries.Add("docker=$(Get-ToolVersionString -Command 'docker' -FirstLineOnly)")
+    $entries.Add("podman=$(Get-ToolVersionString -Command 'podman' -FirstLineOnly)")
+    $entries.Add("socat=$(Get-ToolVersionString -Command 'socat' -Arguments @('-V') -FirstLineOnly)")
+    $entries.Add("git=$(Get-ToolVersionString -Command 'git' -FirstLineOnly)")
+    $entries.Add("gh=$(Get-ToolVersionString -Command 'gh' -FirstLineOnly)")
+
+    $osDescription = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+    $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    $entries.Add("uname=$osDescription-$osArch")
+
+    $joined = [string]::Join([Environment]::NewLine, $entries)
+    return Get-StringSha256 -InputString $joined
+}
+
+function Ensure-PrerequisitesVerified {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    if ($env:CODING_AGENTS_DISABLE_AUTO_PREREQ_CHECK -eq "1") {
+        return $true
+    }
+
+    $psScript = Join-Path $RepoRoot 'scripts/verify-prerequisites.ps1'
+    $bashScript = Join-Path $RepoRoot 'scripts/verify-prerequisites.sh'
+    $scriptPath = if (Test-Path $psScript) { $psScript } elseif (Test-Path $bashScript) { $bashScript } else { $null }
+    if (-not $scriptPath) {
+        return $true
+    }
+
+    $fingerprint = Get-PrereqFingerprint -RepoRoot $RepoRoot
+    if (-not $fingerprint) {
+        return $true
+    }
+
+    $cachePath = if ($env:CODING_AGENTS_PREREQ_CACHE_FILE) { $env:CODING_AGENTS_PREREQ_CACHE_FILE } else { $script:PrereqCacheFile }
+    $cached = if (Test-Path $cachePath) { (Get-Content -Path $cachePath -TotalCount 1 -ErrorAction SilentlyContinue) } else { $null }
+    if ($cached -and $cached -eq $fingerprint) {
+        return $true
+    }
+
+    Write-AgentMessage -Message "🔍 Running prerequisite verification (first launch or dependency change detected)..." -Color Cyan
+    if ($scriptPath.ToLower().EndsWith('.ps1')) {
+        & $scriptPath
+    } else {
+        & bash $scriptPath
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-AgentMessage -Message "❌ Automatic prerequisite check failed. Resolve the issues above or rerun $scriptPath manually." -Color Red
+        return $false
+    }
+
+    $cacheDir = Split-Path -Parent $cachePath
+    if (-not (Test-Path $cacheDir)) {
+        New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+    }
+    $content = "{0}`n{1}" -f $fingerprint, (Get-Date).ToUniversalTime().ToString('o')
+    Set-Content -Path $cachePath -Value $content -Encoding UTF8
+    Write-AgentMessage -Message "✅ Prerequisites verified. Results cached for future launches." -Color Green
+    return $true
 }
 
 function Get-GitExecutable {
@@ -1354,10 +1495,31 @@ function Update-AgentImage {
         [int]$RetryDelaySeconds = 2
     )
 
-    $registryImage = "ghcr.io/novotnyllc/coding-agents-${Agent}:latest"
-    $localImage = "coding-agents-${Agent}:local"
+    $normalized = $Agent.ToLowerInvariant()
+    switch ($normalized) {
+        'base' {
+            $registryImage = 'ghcr.io/novotnyllc/coding-agents-base:latest'
+            $localImage = 'coding-agents-base:local'
+        }
+        'all' { 
+            $registryImage = 'ghcr.io/novotnyllc/coding-agents:latest'
+            $localImage = 'coding-agents:local'
+        }
+        'all-agents' {
+            $registryImage = 'ghcr.io/novotnyllc/coding-agents:latest'
+            $localImage = 'coding-agents:local'
+        }
+        'proxy' {
+            $registryImage = 'ghcr.io/novotnyllc/coding-agents-proxy:latest'
+            $localImage = 'coding-agents-proxy:local'
+        }
+        default {
+            $registryImage = "ghcr.io/novotnyllc/coding-agents-${Agent}:latest"
+            $localImage = "coding-agents-${Agent}:local"
+        }
+    }
 
-    Write-AgentMessage -Message "📦 Checking for image updates..." -Color Cyan
+    Write-AgentMessage -Message "📦 Checking for image updates ($Agent)..." -Color Cyan
 
     # Try to pull with retries
     $attempt = 0

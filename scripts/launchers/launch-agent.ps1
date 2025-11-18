@@ -59,6 +59,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "launch-agent"
 
+if (-not (Ensure-PrerequisitesVerified -RepoRoot $RepoRoot)) {
+    exit 1
+}
+
 if (-not (Test-HostSecurityPrereqs -RepoRoot $RepoRoot)) {
     exit 1
 }
@@ -572,6 +576,10 @@ switch ($NetworkProxy) {
     default {
         $NetworkPolicyEnv = "allow-all"
     }
+}
+
+if ($UseSquid) {
+    Update-AgentImage -Agent "proxy"
 }
 
 $rendererScript = Join-Path $RepoRoot "scripts/utils/render-session-config.py"

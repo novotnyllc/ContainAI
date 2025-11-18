@@ -68,72 +68,6 @@ flowchart TB
     style base fill:#d4edda,stroke:#28a745
 ```
 
-## Building Locally
-
-### 1. Build Base Image
-
-```bash
-docker build -f Dockerfile.base -t coding-agents-base:local .
-```
-
-**What it installs:**
-- System dependencies (curl, git, build tools, etc.)
-- Node.js 20.x
-- Python 3.12
-- .NET SDK 8.0, 9.0, 10.0
-- .NET workloads (Aspire, MAUI, WASM, iOS, Android, etc.)
-- PowerShell
-- GitHub CLI
-- Playwright with Chromium
-- Pre-installed MCP servers
-- Creates non-root user `agentuser` (UID 1000)
-
-**Build time:** ~10-15 minutes (first time)
-
-### 2. Build All-Agents Image
-
-```bash
-docker build -f Dockerfile -t coding-agents:local .
-```
-
-**What it adds:**
-- `entrypoint.sh` - Container startup script
-- `setup-mcp-configs.sh` - MCP config converter wrapper
-- `convert-toml-to-mcp.py` - TOML to JSON converter
-
-**Build time:** ~1 minute
-
-### 3. Build Specialized Images (Optional)
-
-```bash
-docker build -f Dockerfile.copilot -t coding-agents-copilot:local .
-docker build -f Dockerfile.codex -t coding-agents-codex:local .
-docker build -f Dockerfile.claude -t coding-agents-claude:local .
-docker build -f Dockerfile.proxy -t coding-agents-proxy:local .
-```
-
-**What they add:**
-- Auth validation scripts (warn if OAuth configs not mounted)
-- Default CMD to launch specific agent
-- `Dockerfile.proxy` builds Squid proxy sidecar used when launching with `--network-proxy squid`
-
-**Build time:** ~30 seconds each
-
-### All at Once
-
-Use the build script:
-
-```bash
-chmod +x scripts/build.sh
-./scripts/build.sh
-```
-
-Or use PowerShell:
-
-```powershell
-.\scripts\build.ps1
-```
-
 ## Image Details
 
 ### Base Image (Dockerfile.base)
@@ -232,65 +166,6 @@ docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
 docker run -it ghcr.io/novotnyllc/coding-agents-copilot:latest
 ```
 
-## Development Workflow
-
-### Making Changes
-
-1. **Edit source files** (scripts, Dockerfiles, etc.)
-
-2. **Rebuild affected images:**
-   ```bash
-   # If changing base image
-   docker build -f Dockerfile.base -t coding-agents-base:local .
-   docker build -f Dockerfile -t coding-agents:local .
-   docker build -f Dockerfile.copilot -t coding-agents-copilot:local .
-   
-   # If only changing scripts
-   docker build -f Dockerfile -t coding-agents:local .
-   docker build -f Dockerfile.copilot -t coding-agents-copilot:local .
-   ```
-
-3. **Test changes:**
-   ```bash
-   ./launch-agent.ps1 copilot .
-   ```
-
-4. **Clean up old images:**
-   ```bash
-   docker image prune -f
-   ```
-
-### Testing Validation Scripts
-
-```bash
-# Test without auth mounts (should warn)
-docker run -it --rm coding-agents-copilot:local
-
-# Test with auth mounts (should work)
-docker run -it --rm \
-  -v ~/.config/gh:/home/agentuser/.config/gh:ro \
-  -v ~/.config/github-copilot:/home/agentuser/.config/github-copilot:ro \
-  coding-agents-copilot:local
-```
-
-### Debugging Build Issues
-
-**View build logs:**
-```bash
-docker build --progress=plain -f Dockerfile.base -t coding-agents-base:local .
-```
-
-**No cache rebuild:**
-```bash
-docker build --no-cache -f Dockerfile.base -t coding-agents-base:local .
-```
-
-**Inspect intermediate layer:**
-```bash
-# Build will show layer IDs, run specific layer
-docker run -it --rm <layer-id> /bin/bash
-```
-
 ## Script Files
 
 ### entrypoint.sh
@@ -378,11 +253,30 @@ Current approximate sizes:
 - Read-only mounts for auth
 - Seccomp profile: `docker/profiles/seccomp-coding-agents.json` blocks ptrace/clone3/mount/setns
 - AppArmor profile: `docker/profiles/apparmor-coding-agents.profile` denies `/proc` and `/sys` writes
+- Image secret scanning with Trivy (`--scanners secret`) on base/all-agents/specialized variants
 
 ⚠️ **Future improvements:**
-- Scan images with `docker scan` or Trivy
 - Use distroless images for smaller attack surface
 - Implement resource limits in Dockerfiles
+
+#### Secret Scanning Workflow
+
+The bash and PowerShell build scripts automatically invoke Trivy after every successful `docker build`. Install the CLI ahead of time (or set `CODING_AGENTS_TRIVY_BIN` to a custom path) so the scan can run locally; CI pipelines must do the same. The manual commands are documented below if you need to re-run a scan or double-check a specific tag:
+
+```bash
+# Base image
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL coding-agents-base:local
+
+# All-agents wrapper
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL coding-agents:local
+
+# Specialized images
+for image in coding-agents-copilot coding-agents-codex coding-agents-claude; do
+  trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL "${image}:local"
+done
+```
+
+`--exit-code 1` enforces a failing build when potential secrets are detected. Run the scan before tagging/publishing so flagged layers can be rebuilt without leaking artifacts.
 
 ### Build Security
 

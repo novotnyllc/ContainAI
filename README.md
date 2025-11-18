@@ -45,7 +45,7 @@ cd ~/my-project
 run-copilot                  # or run-codex / run-claude
 ```
 
-That's it! You're coding with AI in an isolated container.
+That's it! You're coding with AI in an isolated container. For a deeper walkthrough (network modes, container management, VS Code), read [docs/running-agents.md](docs/running-agents.md).
 
 Behind the scenes the launcher hashed its own files, rendered a per-session MCP manifest on the host, asked the secret broker for sealed capability tokens, copied those artifacts into a tmpfs inside the container, and ensured every MCP server launches through the trusted `mcp-stub`. No raw API keys ever touch your workspace.
 
@@ -55,145 +55,23 @@ Behind the scenes the launcher hashed its own files, rendered a per-session MCP 
 
 ## Complete Setup Guide
 
-### 1. Prepare your host (one time)
+1. **[docs/getting-started.md](docs/getting-started.md)** – full onboarding (Docker install, credential prep, first container) for new users.
+2. **[docs/running-agents.md](docs/running-agents.md)** – everyday workflows covering launch patterns, container management, networking modes, and VS Code integration.
+3. **[docs/local-build-and-test.md](docs/local-build-and-test.md)** – how to pull or rebuild images and run the unit/integration test suites before submitting a PR.
 
-- Install Docker Desktop, Podman, or another OCI-compatible runtime.
-- Make sure `socat` is available on the host (used for credential/GPG proxies).
-- Keep using whatever Git credential helpers or SSH keys you already rely on—the container mounts them automatically.
-- If you use services such as GitHub Copilot, authenticate on the host the same way you normally would. No additional login is required inside the container.
-- (Optional) Create `~/.config/coding-agents/mcp-secrets.env` so the launcher can feed `render-session-config.py` and the secret broker without copying API keys into containers.
-- (Optional) Run `./scripts/verify-prerequisites.sh` (or the PowerShell equivalent) to confirm everything looks good.
-
-Images are pulled or built automatically the first time you run `run-*` or `launch-agent`. You only need the build scripts if you are developing custom images.
-
-### 2. Add launchers to PATH (optional but recommended)
-
-This lets you run launchers from anywhere:
-
-```bash
-# Linux/macOS
-./scripts/install.sh
-
-# Windows (PowerShell)
-.\scripts\install.ps1
-```
-
-Or manually add to PATH:
-
-**Windows (PowerShell):**
-```powershell
-# Temporary (current session)
-$env:PATH += ";$PWD\scripts\launchers"
-
-# Permanent: Add to System Environment Variables via GUI
-# Or add to PowerShell profile
-```
-
-**Linux/macOS:**
-```bash
-# Temporary (current session)
-export PATH="$PWD/scripts/launchers:$PATH"
-
-# Permanent: Add to ~/.bashrc or ~/.zshrc
-echo 'export PATH="$HOME/coding-agents/scripts/launchers:$PATH"' >> ~/.bashrc
-```
-
-### 3. Launch an agent
-
-**Recommended: Quick ephemeral container (auto-removes on exit):**
-
-```bash
-# Navigate to your project
-cd ~/my-project
-
-# Launch agent (defaults to current directory)
-run-copilot    # GitHub Copilot
-run-codex      # OpenAI Codex
-run-claude     # Anthropic Claude
-
-# PowerShell equivalent
-run-copilot.ps1
-```
-
-**Advanced: Persistent container (runs in background):**
-
-For long-running tasks or when you need advanced features like branch management or network controls:
-
-```bash
-# Navigate to your project
-cd ~/my-project
-
-# Launch with specific agent (required)
-launch-agent copilot
-
-# Launch different agent
-launch-agent codex
-
-# Launch on specific branch
-launch-agent copilot --branch feature-api
-```
-
-**Branch isolation:** Agents work on isolated branches (e.g., `copilot/session-1`, `codex/feature-api`) to keep agent work separate from your current branch.
-
-**Container naming:** Containers are named `{agent}-{repo}-{branch}` for easy identification:
-- `copilot-myapp-main` - Copilot on myapp repository, main branch
-- `codex-website-feature` - Codex on website repository, feature branch
-- `claude-api-develop` - Claude on api repository, develop branch
-
-**Auto-push safety:** All containers automatically push uncommitted changes to your local repository before shutting down. Use `--no-push` to disable:
-```bash
-run-copilot --no-push
-launch-agent copilot --no-push
-```
-
-**Workspace isolation model (no git worktrees):** Each container copies the entire repository into `/workspace` and mounts host credentials/configs read-only. This keeps prompts and filesystem mutations inside the container boundary while still letting `git push` sync back to the host. Git worktrees are intentionally **not supported** because they share a single `.git` directory—mounting that into multiple containers would defeat the isolation guarantees described in [docs/architecture.md](docs/architecture.md) and make cleanup brittle. If you really want to skip isolation, use the documented `--use-current-branch` flag for a single session instead of binding a worktree into the container.
-
-### 4. Manage containers
-
-```bash
-# List all running agent containers
-list-agents
-
-# Remove a container (auto-pushes changes first)
-remove-agent copilot-myapp-main
-
-# Skip auto-push when removing
-remove-agent copilot-myapp-main --no-push
-```
-
-### 5. Detach and reconnect
-
-All launchers start a managed tmux session inside the container. Detach any time with `Ctrl+B`, then `D`. Reattach later without restarting the container:
-
-```bash
-# Attach to a specific container (bash)
-scripts/launchers/connect-agent --name copilot-myapp-main
-
-# PowerShell equivalent
-scripts\launchers\connect-agent.ps1 -Name copilot-myapp-main
-
-# If only one container is running, the name is optional
-connect-agent
-```
-
-This workflow also makes it easy to hop into `launch-agent` shells without VS Code. When you're truly finished, stop/remove the container so the auto-commit/push cleanup can run.
-
-### 5. Connect from VS Code
-
-1. Install **Dev Containers** extension
-2. Click remote button (bottom-left)
-3. Select "Attach to Running Container"
-4. Choose your container (e.g., `copilot-myapp-main`)
 
 ## Documentation
 
 - **[USAGE.md](USAGE.md)** - Complete user guide (start here!)
 - **[docs/getting-started.md](docs/getting-started.md)** - First-time setup walkthrough
+- **[docs/running-agents.md](docs/running-agents.md)** - Everyday launcher workflow, networking, and VS Code tips
 - **[docs/vscode-integration.md](docs/vscode-integration.md)** - Using VS Code with containers
 - **[docs/cli-reference.md](docs/cli-reference.md)** - All command-line options
 - **[docs/mcp-setup.md](docs/mcp-setup.md)** - MCP server configuration
-- **[docs/build.md](docs/build.md)** - Building and publishing images
+- **[docs/local-build-and-test.md](docs/local-build-and-test.md)** - Pulling or rebuilding images plus running tests locally
+- **[docs/build.md](docs/build.md)** - Image architecture details and publishing guidance
 - **[docs/architecture.md](docs/architecture.md)** - System design and architecture
+- **[docs/security-workflows.md](docs/security-workflows.md)** - Mermaid sequence diagrams for launch, secrets, and CI security gates
 - **[docs/network-proxy.md](docs/network-proxy.md)** - Network modes and Squid proxy
 - **[scripts/test/README.md](scripts/test/README.md)** - Automated test suite (CI and local)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guidelines
@@ -254,6 +132,7 @@ Unlike running agents directly on your machine:
 - **Host-rendered manifests** – `render-session-config.py` hashes trusted launcher/runtime files, merges your `config.toml`, and records a manifest SHA256 before a container is created.
 - **Secret broker enforcement** – launchers stage API keys inside the broker, receive sealed capabilities, and copy them into `/run/coding-agents` (tmpfs). Only the trusted `mcp-stub` inside the container can redeem those capabilities.
 - **Tight threat boundaries** – secrets live either on the host or inside stub-owned tmpfs mounts. Even if an agent workspace is compromised, it cannot read the manifest, capability bundle, or broker socket.
+- **Image secret scanning** – every `coding-agents-*` image must pass `trivy --scanners secret` before tagging/publishing so leaked tokens are caught before distribution.
 - **Legacy fallback logged** – the older `setup-mcp-configs.sh` converter still exists for compatibility, but it only runs if the host skips manifest rendering (which the launchers no longer do by default).
 
 ## Requirements
@@ -264,6 +143,8 @@ Unlike running agents directly on your machine:
 - **socat**: Required for credential and GPG proxy servers
   - Linux/Mac: `apt-get install socat` or `brew install socat`
   - Windows: Available in WSL2 (install in WSL: `sudo apt-get install socat`)
+- **Trivy CLI**: Required for automatic secret scanning whenever images are built locally or in tests
+  - Install via package manager or `curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.53.0`
 - **Host Git credentials**: Whatever you already use (Git config, SSH keys, credential helpers) is mounted automatically—no container-specific setup needed
 - **Host authentications**: If you use GitHub Copilot, Claude, Codex, etc., authenticate on the host as usual and the container will reuse those tokens/configs
 

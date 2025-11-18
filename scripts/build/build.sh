@@ -16,18 +16,89 @@ Options:
   -a, --agents LIST   Comma-separated list of targets to build.
                       Valid values: copilot, codex, claude, proxy, all
                       Default: all
+    --from-source       Build images locally instead of pulling published tags
   -h, --help          Show this help message and exit
 
 Examples:
-  ./scripts/build/build.sh                       # Build every image
-  ./scripts/build/build.sh --agents copilot      # Only Copilot image
-  ./scripts/build/build.sh -a copilot,proxy      # Copilot + proxy
+    ./scripts/build/build.sh                       # Pull every published image
+    ./scripts/build/build.sh --agents copilot      # Only Copilot image
+    ./scripts/build/build.sh --from-source         # Force a local rebuild
+    ./scripts/build/build.sh -a copilot,proxy      # Copilot + proxy
 EOF
 }
 
 ALL_TARGETS=(copilot codex claude proxy)
 DEFAULT_TARGETS=("${ALL_TARGETS[@]}")
 RAW_AGENT_SELECTION=()
+SECRET_SCANNER_BIN="${CODING_AGENTS_TRIVY_BIN:-}"
+SECRET_SCAN_ARGS=(image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress)
+REGISTRY_OWNER="${CODING_AGENTS_IMAGE_OWNER:-novotnyllc}"
+REGISTRY_PREFIX="ghcr.io/${REGISTRY_OWNER}"
+BUILD_FROM_SOURCE=false
+
+ensure_secret_scanner() {
+    if [[ -n "$SECRET_SCANNER_BIN" ]]; then
+        if command -v "$SECRET_SCANNER_BIN" >/dev/null 2>&1; then
+            SECRET_SCANNER_BIN="$(command -v "$SECRET_SCANNER_BIN")"
+            return
+        fi
+        echo "❌ CODING_AGENTS_TRIVY_BIN is set to '$SECRET_SCANNER_BIN' but it is not executable"
+        exit 1
+    fi
+    if command -v trivy >/dev/null 2>&1; then
+        SECRET_SCANNER_BIN="$(command -v trivy)"
+        return
+    fi
+    cat <<'EOF'
+❌ Trivy CLI is required for automatic secret scanning.
+   Install it from https://aquasecurity.github.io/trivy or set CODING_AGENTS_TRIVY_BIN.
+EOF
+    exit 1
+}
+
+scan_image_for_secrets() {
+    local image="$1"
+    ensure_secret_scanner
+    echo "🔍 Secret scanning $image for embedded credentials..."
+    if ! "$SECRET_SCANNER_BIN" "${SECRET_SCAN_ARGS[@]}" "$image"; then
+        echo "❌ Secret scan failed for $image"
+        exit 1
+    fi
+}
+
+pull_registry_image() {
+    local target="$1"
+    local remote=""
+    local local_tag=""
+
+    case "$target" in
+        base)
+            remote="${REGISTRY_PREFIX}/coding-agents-base:latest"
+            local_tag="coding-agents-base:local"
+            ;;
+        all)
+            remote="${REGISTRY_PREFIX}/coding-agents:latest"
+            local_tag="coding-agents:local"
+            ;;
+        proxy)
+            remote="${REGISTRY_PREFIX}/coding-agents-proxy:latest"
+            local_tag="coding-agents-proxy:local"
+            ;;
+        *)
+            remote="${REGISTRY_PREFIX}/coding-agents-${target}:latest"
+            local_tag="coding-agents-${target}:local"
+            ;;
+    esac
+
+    echo "📥 Pulling ${remote}"
+    if docker pull "$remote"; then
+        docker tag "$remote" "$local_tag" >/dev/null 2>&1 || true
+        echo "   ✅ Tagged as $local_tag"
+    else
+        echo "❌ Failed to pull $remote"
+        exit 1
+    fi
+}
 
 add_agents_from_csv() {
     local raw="$1"
@@ -51,6 +122,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --agents=*)
             add_agents_from_csv "${1#*=}"
+            shift
+            ;;
+        --from-source)
+            BUILD_FROM_SOURCE=true
             shift
             ;;
         -h|--help)
@@ -127,6 +202,39 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
+if ! $BUILD_FROM_SOURCE; then
+    PULL_TARGETS=()
+    if $NEEDS_AGENT_IMAGES; then
+        PULL_TARGETS+=(base all)
+        PULL_TARGETS+=("${AGENT_IMAGES[@]}")
+    fi
+    if $BUILD_PROXY; then
+        PULL_TARGETS+=(proxy)
+    fi
+
+    if [[ ${#PULL_TARGETS[@]} -eq 0 ]]; then
+        echo "⚠️  No targets were selected. Nothing to pull."
+        exit 0
+    fi
+
+    declare -A PULLED_TARGETS=()
+    echo "📥 Syncing published images locally"
+    for target in "${PULL_TARGETS[@]}"; do
+        [[ -n "$target" ]] || continue
+        if [[ -n "${PULLED_TARGETS[$target]:-}" ]]; then
+            continue
+        fi
+        pull_registry_image "$target"
+        PULLED_TARGETS["$target"]=1
+    done
+
+    echo ""
+    echo "✅ Images are ready for launchers (local tags synced)."
+    exit 0
+fi
+
+ensure_secret_scanner
+
 BASE_IMAGE=""
 BUILT_IMAGES=()
 
@@ -160,6 +268,7 @@ if $NEEDS_AGENT_IMAGES; then
                 echo "❌ Failed to build base image"
                 exit 1
             fi
+            scan_image_for_secrets "coding-agents-base:local"
             BASE_IMAGE="coding-agents-base:local"
             ;;
         *)
@@ -175,6 +284,7 @@ if $NEEDS_AGENT_IMAGES; then
         echo "❌ Failed to build all-agents image"
         exit 1
     fi
+    scan_image_for_secrets "coding-agents:local"
     BUILT_IMAGES+=("coding-agents:local (all agents, interactive shell)")
 
     if [[ ${#AGENT_IMAGES[@]} -gt 0 ]]; then
@@ -185,6 +295,7 @@ if $NEEDS_AGENT_IMAGES; then
                 echo "❌ Failed to build ${agent} image"
                 exit 1
             fi
+            scan_image_for_secrets "coding-agents-${agent}:local"
             case "$agent" in
                 copilot)
                     BUILT_IMAGES+=("coding-agents-copilot:local (launches Copilot directly)")
@@ -207,6 +318,7 @@ if $BUILD_PROXY; then
         echo "❌ Failed to build proxy image"
         exit 1
     fi
+    scan_image_for_secrets "coding-agents-proxy:local"
     BUILT_IMAGES+=("coding-agents-proxy:local (Squid network proxy sidecar)")
 fi
 

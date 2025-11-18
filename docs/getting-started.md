@@ -1,6 +1,6 @@
 # Getting Started with CodingAgents
 
-This guide will walk you through setting up CodingAgents from scratch, even if you've never used Docker or containers before.
+This guide will walk you through setting up CodingAgents from scratch, even if you've never used Docker or containers before. If you already have Docker installed and just need to understand the launcher workflow, skip ahead to [docs/running-agents.md](running-agents.md).
 
 **Total Time**: 20-50 minutes (first time)
 

@@ -22,7 +22,7 @@ This document explains how Coding Agents restricts access to long-lived credenti
 
 ## Automatic Initialization & Health Guarantees
 
-The broker no longer needs a manual `secret-broker.py init` step. Any launcher command that issues, stores, redeems, or health-checks secrets triggers `_ensure_broker_files`, which performs the following idempotent operations:
+Any launcher command that issues, stores, redeems, or health-checks secrets triggers `_ensure_broker_files`, which performs the following idempotent operations:
 
 ```mermaid
 flowchart TB
@@ -138,9 +138,7 @@ Static API keys cannot be rotated on demand, so safeguards focus on limiting exp
 3. **Session envelope encryption** – Broker sends `Enc(HMAC(master, session data), api_key)` so even if the tmpfs is copied, the ciphertext cannot unlock future sessions without the master kept on the host.
 4. **Audit + rotation** – Broker logs include session ID + timestamp; if compromise is suspected, operators rotate the upstream Context7 key once and rely on the broker to re-distribute it to trusted sessions.
 
-## GitHub PATs Without Apps
-
-To avoid GitHub App complexity while still minimizing blast radius:
+## GitHub PATs
 
 1. Host `launch-agent` calls `gh auth token --scopes repo:read` (or fine-grained PAT CLI) scoped to the active repository and public repos.
 2. The resulting PAT is stored only in broker encrypted memory.

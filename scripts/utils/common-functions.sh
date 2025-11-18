@@ -9,12 +9,127 @@ CODING_AGENTS_CONFIG_DIR="${HOME}/.config/coding-agents"
 CODING_AGENTS_HOST_CONFIG_FILE="${CODING_AGENTS_HOST_CONFIG:-${CODING_AGENTS_CONFIG_DIR}/host-config.env}"
 CODING_AGENTS_OVERRIDE_DIR="${CODING_AGENTS_OVERRIDE_DIR:-${CODING_AGENTS_CONFIG_DIR}/overrides}"
 CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-${CODING_AGENTS_OVERRIDE_DIR}/allow-dirty}"
+CODING_AGENTS_CACHE_DIR="${CODING_AGENTS_CACHE_DIR:-${CODING_AGENTS_CONFIG_DIR}/cache}"
+CODING_AGENTS_PREREQ_CACHE_FILE="${CODING_AGENTS_PREREQ_CACHE_FILE:-${CODING_AGENTS_CACHE_DIR}/prereq-check}"
 CODING_AGENTS_BROKER_SCRIPT="${CODING_AGENTS_BROKER_SCRIPT:-${CODING_AGENTS_REPO_ROOT_DEFAULT}/scripts/runtime/secret-broker.py}"
 CODING_AGENTS_AUDIT_LOG="${CODING_AGENTS_AUDIT_LOG:-${CODING_AGENTS_CONFIG_DIR}/security-events.log}"
 CODING_AGENTS_HELPER_NETWORK_POLICY="${CODING_AGENTS_HELPER_NETWORK_POLICY:-loopback}"
 CODING_AGENTS_HELPER_PIDS_LIMIT="${CODING_AGENTS_HELPER_PIDS_LIMIT:-64}"
 CODING_AGENTS_HELPER_MEMORY="${CODING_AGENTS_HELPER_MEMORY:-512m}"
 DEFAULT_LAUNCHER_UPDATE_POLICY="prompt"
+
+_sha256_stream() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+    else
+        python3 - <<'PY'
+import hashlib, sys
+print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())
+PY
+    fi
+}
+
+_sha256_file() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+    _sha256_stream < "$file"
+}
+
+_collect_prereq_fingerprint() {
+    local repo_root="$1"
+    local script_path="$repo_root/scripts/verify-prerequisites.sh"
+    local entries=()
+    if [ -f "$script_path" ]; then
+        local script_hash
+        script_hash=$(_sha256_file "$script_path" 2>/dev/null || echo "missing")
+        entries+=("script=$script_hash")
+    else
+        entries+=("script=missing")
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        entries+=("docker=$(docker --version 2>/dev/null | tr -d '\r')")
+    else
+        entries+=("docker=missing")
+    fi
+
+    if command -v podman >/dev/null 2>&1; then
+        entries+=("podman=$(podman --version 2>/dev/null | tr -d '\r')")
+    else
+        entries+=("podman=missing")
+    fi
+
+    if command -v socat >/dev/null 2>&1; then
+        entries+=("socat=$(socat -V 2>/dev/null | head -1 | tr -d '\r')")
+    else
+        entries+=("socat=missing")
+    fi
+
+    if command -v git >/dev/null 2>&1; then
+        entries+=("git=$(git --version 2>/dev/null | tr -d '\r')")
+    else
+        entries+=("git=missing")
+    fi
+
+    if command -v gh >/dev/null 2>&1; then
+        entries+=("gh=$(gh --version 2>/dev/null | head -1 | tr -d '\r')")
+    else
+        entries+=("gh=missing")
+    fi
+
+    entries+=("uname=$(uname -s 2>/dev/null || echo unknown)-$(uname -m 2>/dev/null || echo unknown)")
+
+    if [ ${#entries[@]} -eq 0 ]; then
+        return 1
+    fi
+
+    printf '%s\n' "${entries[@]}" | _sha256_stream
+}
+
+ensure_prerequisites_verified() {
+    local repo_root="${1:-${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}}"
+    if [ "${CODING_AGENTS_DISABLE_AUTO_PREREQ_CHECK:-0}" = "1" ]; then
+        return 0
+    fi
+    local script_path="$repo_root/scripts/verify-prerequisites.sh"
+    if [ ! -x "$script_path" ]; then
+        return 0
+    fi
+    local fingerprint
+    fingerprint=$(_collect_prereq_fingerprint "$repo_root" 2>/dev/null || echo "")
+    if [ -z "$fingerprint" ]; then
+        return 0
+    fi
+    local cache_file="$CODING_AGENTS_PREREQ_CACHE_FILE"
+    local cached=""
+    if [ -f "$cache_file" ]; then
+        read -r cached < "$cache_file"
+    fi
+    if [ -n "$cached" ] && [ "$cached" = "$fingerprint" ]; then
+        return 0
+    fi
+
+    echo "🔍 Running prerequisite verification (first launch or dependency change detected)..."
+    if "$script_path"; then
+        local cache_dir
+        cache_dir=$(dirname "$cache_file")
+        mkdir -p "$cache_dir"
+        local tmp_file
+        tmp_file="${cache_file}.tmp"
+        {
+            echo "$fingerprint"
+            date -u +"%Y-%m-%dT%H:%M:%SZ"
+        } > "$tmp_file"
+        mv "$tmp_file" "$cache_file"
+        echo "✅ Prerequisites verified. Results cached for future launches."
+        return 0
+    fi
+
+    echo "❌ Automatic prerequisite check failed. Resolve the issues above or run $script_path manually." >&2
+    return 1
+}
 
 _resolve_git_binary() {
     if command -v git >/dev/null 2>&1; then
@@ -1149,24 +1264,43 @@ run_python_tool() {
 
 # Pull and tag image with retry logic
 pull_and_tag_image() {
-    local agent="$1"
+    local target="$1"
     local max_retries="${2:-3}"
     local retry_delay="${3:-2}"
-    local registry_image="ghcr.io/novotnyllc/coding-agents-${agent}:latest"
-    local local_image="coding-agents-${agent}:local"
-    
-    echo "📦 Checking for image updates..."
-    
+    local registry_image=""
+    local local_image=""
+
+    case "$target" in
+        base)
+            registry_image="ghcr.io/novotnyllc/coding-agents-base:latest"
+            local_image="coding-agents-base:local"
+            ;;
+        all|all-agents)
+            registry_image="ghcr.io/novotnyllc/coding-agents:latest"
+            local_image="coding-agents:local"
+            ;;
+        proxy)
+            registry_image="ghcr.io/novotnyllc/coding-agents-proxy:latest"
+            local_image="coding-agents-proxy:local"
+            ;;
+        *)
+            registry_image="ghcr.io/novotnyllc/coding-agents-${target}:latest"
+            local_image="coding-agents-${target}:local"
+            ;;
+    esac
+
+    echo "📦 Checking for image updates (${target})..."
+
     local attempt=0
     local pulled=false
-    
+
     while [ $attempt -lt $max_retries ] && [ "$pulled" = "false" ]; do
         attempt=$((attempt + 1))
-        
+
         if [ $attempt -gt 1 ]; then
             echo "  ⚠️  Retry attempt $attempt of $max_retries..."
         fi
-        
+
         if container_cli pull --quiet "$registry_image" 2>/dev/null; then
             container_cli tag "$registry_image" "$local_image" 2>/dev/null || true
             pulled=true
@@ -1176,7 +1310,7 @@ pull_and_tag_image() {
             fi
         fi
     done
-    
+
     if [ "$pulled" = "false" ]; then
         echo "  ⚠️  Warning: Could not pull latest image, using cached version"
     fi
