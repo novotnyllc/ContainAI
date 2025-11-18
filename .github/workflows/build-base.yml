@@ -32,6 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
@@ -54,6 +55,25 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Install Trivy CLI
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.53.0
+
+      - name: Build linux/amd64 image for scanning
+        run: |
+          docker buildx build \
+            --builder "${{ steps.buildx.outputs.name }}" \
+            --platform linux/amd64 \
+            --load \
+            --cache-from type=gha,scope=coding-agents-base \
+            --cache-to type=gha,scope=coding-agents-base,mode=max \
+            -t coding-agents-base:scan \
+            -f docker/base/Dockerfile \
+            .
+
+      - name: Scan base image for embedded secrets
+        run: trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress coding-agents-base:scan
+
       - name: Build and push base image
         id: build
         uses: docker/build-push-action@v5
@@ -63,8 +83,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=coding-agents-base
+          cache-to: type=gha,scope=coding-agents-base,mode=max
           platforms: linux/amd64,linux/arm64
 
       - name: Generate artifact attestation

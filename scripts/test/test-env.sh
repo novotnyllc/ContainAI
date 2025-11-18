@@ -17,6 +17,36 @@ LONG_RUNNING_SLEEP=3600
 FIXTURE_CONFIG_FILE="$TEST_MOCK_SECRETS_DIR/config.toml"
 FIXTURE_GH_TOKEN_FILE="$TEST_MOCK_SECRETS_DIR/gh-token.txt"
 TEST_PROXY_STARTED="false"
+SECRET_SCANNER_BIN="${CODING_AGENTS_TRIVY_BIN:-}"
+SECRET_SCAN_ARGS=(image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress)
+
+ensure_secret_scanner() {
+    if [[ -n "$SECRET_SCANNER_BIN" ]]; then
+        if command -v "$SECRET_SCANNER_BIN" >/dev/null 2>&1; then
+            SECRET_SCANNER_BIN="$(command -v "$SECRET_SCANNER_BIN")"
+            return
+        fi
+        echo "❌ CODING_AGENTS_TRIVY_BIN is set to '$SECRET_SCANNER_BIN' but it is not executable"
+        exit 1
+    fi
+    if command -v trivy >/dev/null 2>&1; then
+        SECRET_SCANNER_BIN="$(command -v trivy)"
+        return
+    fi
+    echo "❌ Trivy CLI is required for automatic image secret scanning" >&2
+    echo "   Install it from https://aquasecurity.github.io/trivy or set CODING_AGENTS_TRIVY_BIN" >&2
+    exit 1
+}
+
+scan_image_for_secrets() {
+    local image="$1"
+    ensure_secret_scanner
+    echo "  🔍 Secret scanning $image for embedded credentials..."
+    if ! "$SECRET_SCANNER_BIN" "${SECRET_SCAN_ARGS[@]}" "$image"; then
+        echo "❌ Secret scan failed for $image" >&2
+        exit 1
+    fi
+}
 
 # ============================================================================
 # Fixture Helpers
@@ -152,6 +182,7 @@ build_test_images() {
         -t "$TEST_BASE_IMAGE" \
         --build-arg BUILDKIT_INLINE_CACHE=1 \
         . || return 1
+    scan_image_for_secrets "$TEST_BASE_IMAGE"
     
     # Push to local registry
     echo "  Pushing to local registry..."
@@ -175,6 +206,7 @@ build_test_images() {
             --build-arg BASE_IMAGE="$TEST_BASE_IMAGE" \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             . || return 1
+        scan_image_for_secrets "$test_image"
         
         echo "  Pushing to local registry..."
         docker push "$test_image" || return 1
@@ -229,6 +261,7 @@ EOF
         rm -rf "$build_dir"
         return 1
     }
+    scan_image_for_secrets "$base_mock_image"
     
     # Tag and push for each agent
     local agents=("copilot" "codex" "claude")

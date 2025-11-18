@@ -51,7 +51,11 @@ Authentication uses OAuth from your host machine, but secrets are now gated by t
 - **Host-controlled:** Revoke access on host to immediately revoke container access
 - **Launcher integrity checks:** `launch-agent` refuses to start if trusted scripts/stubs differ from `HEAD` (unless a host-only override token is present), ensuring only vetted code requests secrets from the broker
 - **Secret broker sandbox:** Secrets are streamed from a host daemon that enforces per-session capabilities, mutual authentication, ptrace-safe tmpfs mounts, and immutable audit logs (see architecture doc for details)
-- **Auto-initialized broker:** The broker lazily seeds its key store, state file, and sealed secret store the first time a launcher issues or stores secrets, so there are no manual `secret-broker.py init` steps. Subsequent launches reuse the hardened files (owned `0600`, optionally `chattr +i`).
+### Image Secret Scanning
+
+- **Mandatory scans:** Each `coding-agents-*` image (base, all-agents, specialized) must be scanned with `trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL ...` shortly after build and again before publication. Treat any findings as build failures until resolved.
+- **Coverage:** Integrate the scan into CI and follow the same commands locally (documented in `docs/build.md`) so contributors replicate the gate before tagging/publishing artifacts.
+- **Why it matters:** Host renderers and the secret broker keep credentials out of running containers, and the Trivy gate keeps secrets from slipping into intermediate layers, cache directories, or published tarballs.
 
 ### Session Config Integrity & Audit Logging
 

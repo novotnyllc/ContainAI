@@ -11,6 +11,10 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
 
+if ! ensure_prerequisites_verified "$REPO_ROOT"; then
+    exit 1
+fi
+
 if ! verify_host_security_prereqs "$REPO_ROOT"; then
     exit 1
 fi
@@ -551,6 +555,10 @@ case "$NETWORK_PROXY" in
         NETWORK_POLICY_ENV="allow-all"
         ;;
 esac
+
+if [ "$USE_SQUID" = true ]; then
+    pull_and_tag_image "proxy"
+fi
 
 SESSION_CONFIG_ROOT_IN_CONTAINER="/run/coding-agents"
 RENDERER_SCRIPT="$REPO_ROOT/scripts/utils/render-session-config.py"

@@ -8,7 +8,8 @@ High-level design of the AI coding agents container system.
 2. **Isolation**: Each agent runs in its own container with independent workspace
 3. **No Secrets in Repo**: All authentication mounted from host at runtime
 4. **Stateless Images**: Container images contain no secrets or user data
-5. **Persistent Workspaces**: Containers run in background, connectable from VS Code
+5. **Secret Scanning**: Every image build and publish step runs a container-aware secret scanner so leaked tokens never ship inside layers
+6. **Persistent Workspaces**: Containers run in background, connectable from VS Code
 
 ## System Overview
 
@@ -138,6 +139,17 @@ flowchart TB
 
 **Build time:** ~30 seconds each  
 **Size:** +10 MB each
+
+### Image Secret Scanning
+
+To keep the "stateless image" guarantee enforceable, every build (local or CI) must finish with a container secret scan before the image is tagged or published. We currently use [Trivy](https://aquasecurity.github.io/trivy) with its secret scanner enabled:
+
+```bash
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL coding-agents-base:local
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL coding-agents:local
+```
+
+Integrate the same check into CI for all agent variants so every published artifact proves it passed the scanner. If any token-shaped string or committed credential is detected, the build should fail and the image must not be pushed. Combined with host-rendered manifests and broker-enforced runtime secrets, this keeps secrets out of layers and intermediate build cache.
 
 ## Launch Flow
 

@@ -59,6 +59,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Invoke-LauncherUpdateCheck -RepoRoot $RepoRoot -Context "run-agent"
 
+if (-not (Ensure-PrerequisitesVerified -RepoRoot $RepoRoot)) {
+    exit 1
+}
+
 if (-not (Test-HostSecurityPrereqs -RepoRoot $RepoRoot)) {
     exit 1
 }
@@ -406,6 +410,10 @@ switch ($NetworkProxy) {
     default {
         $NetworkPolicyEnv = "allow-all"
     }
+}
+
+if ($UseSquid) {
+    Update-AgentImage -Agent "proxy"
 }
 
 Write-Host "🚀 Launching Coding Agent..." -ForegroundColor Cyan
