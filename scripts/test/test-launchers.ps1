@@ -1157,6 +1157,28 @@ function Test-WslPathConversion {
     Assert-Equals -Expected "/mnt/e/dev/project" -Actual $wslPath3 -Message "E: drive converted to WSL path"
 }
 
+function Test-PromptFallbackRepoSetup {
+    Test-Section "Testing prompt fallback workspace preparation"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $scriptContent = New-RepoSetupScript
+
+    if ($scriptContent -match "Prompt session requested without repository: leaving workspace empty") {
+        Pass "Setup script documents prompt fallback flow"
+    } else {
+        Fail "Setup script missing prompt fallback message"
+    }
+
+    $exitIndex = $scriptContent.IndexOf("exit 0")
+    $cloneIndex = $scriptContent.IndexOf("git clone")
+    if ($exitIndex -ge 0 -and ($cloneIndex -lt 0 -or $exitIndex -lt $cloneIndex)) {
+        Pass "Prompt fallback branch exits before git operations"
+    } else {
+        Fail "Prompt fallback branch does not exit before git operations"
+    }
+}
+
 function Test-BranchNameSanitization {
     Test-Section "Testing branch name sanitization"
 
@@ -1216,6 +1238,7 @@ function Test-LauncherWrappers {
         $output = & $script -Help 2>&1
         if ($LASTEXITCODE -eq 0) {
             Assert-Contains -Haystack $output -Needle "Usage" -Message "$wrapper -Help displays usage"
+            Assert-Contains -Haystack $output -Needle "-Prompt" -Message "$wrapper -Help documents -Prompt"
         } else {
             Fail "$wrapper -Help failed with exit code $LASTEXITCODE"
         }
@@ -1257,6 +1280,7 @@ function Main {
         @{ Name = "Test-MultipleAgents"; Action = { Test-MultipleAgents } },
         @{ Name = "Test-LabelFiltering"; Action = { Test-LabelFiltering } },
         @{ Name = "Test-WslPathConversion"; Action = { Test-WslPathConversion } },
+        @{ Name = "Test-PromptFallbackRepoSetup"; Action = { Test-PromptFallbackRepoSetup } },
         @{ Name = "Test-BranchNameSanitization"; Action = { Test-BranchNameSanitization } },
         @{ Name = "Test-ContainerStatus"; Action = { Test-ContainerStatus } },
         @{ Name = "Test-LauncherWrappers"; Action = { Test-LauncherWrappers } },

@@ -7,6 +7,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+TEST_WITH_HOST_SECRETS="${TEST_WITH_HOST_SECRETS:-false}"
+TEST_HOST_SECRETS_FILE="${TEST_HOST_SECRETS_FILE:-}"
+HOST_SECRETS_FILE="${TEST_HOST_SECRETS_FILE:-}"
 
 # Source test utilities
 source "$SCRIPT_DIR/test-config.sh"
@@ -45,6 +48,7 @@ MODES:
 OPTIONS:
   --preserve          Preserve test resources after completion
   --verbose           Enable verbose output
+    --with-host-secrets Enable host-mode tests that require real MCP secrets
   --help              Show this help message
 
 EXAMPLES:
@@ -59,6 +63,57 @@ EXAMPLES:
 
 EOF
     exit 0
+}
+
+resolve_host_secrets_file() {
+    local -a candidates=()
+    local -A seen=()
+
+    if [[ -n "$HOST_SECRETS_FILE" ]]; then
+        candidates+=("$HOST_SECRETS_FILE")
+    fi
+    if [[ -n "${CODING_AGENTS_MCP_SECRETS_FILE:-}" ]]; then
+        candidates+=("${CODING_AGENTS_MCP_SECRETS_FILE}")
+    fi
+    if [[ -n "${MCP_SECRETS_FILE:-}" ]]; then
+        candidates+=("${MCP_SECRETS_FILE}")
+    fi
+    candidates+=("${HOME}/.config/coding-agents/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
+
+    local candidate resolved
+    for candidate in "${candidates[@]}"; do
+        [[ -n "$candidate" ]] || continue
+        resolved=$(realpath "$candidate" 2>/dev/null || echo "$candidate")
+        if [[ -n "${seen[$resolved]:-}" ]]; then
+            continue
+        fi
+        seen[$resolved]=1
+        if [[ -f "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+ensure_host_secrets_ready() {
+    if [[ -z "$HOST_SECRETS_FILE" || ! -f "$HOST_SECRETS_FILE" ]]; then
+        if ! HOST_SECRETS_FILE=$(resolve_host_secrets_file); then
+            cat >&2 <<'EOF'
+❌ --with-host-secrets requested but no mcp-secrets.env file was found.
+Provide CODING_AGENTS_MCP_SECRETS_FILE, MCP_SECRETS_FILE, or place the file under ~/.config/coding-agents/.
+EOF
+            exit 1
+        fi
+    fi
+
+    if ! grep -q '^GITHUB_TOKEN=' "$HOST_SECRETS_FILE" >/dev/null 2>&1; then
+        cat >&2 <<EOF
+❌ Host secrets file '$HOST_SECRETS_FILE' does not define GITHUB_TOKEN.
+Add a valid token before running --with-host-secrets tests.
+EOF
+        exit 1
+    fi
 }
 
 # Parse arguments
@@ -76,6 +131,10 @@ while [[ $# -gt 0 ]]; do
             set -x
             shift
             ;;
+        --with-host-secrets)
+            TEST_WITH_HOST_SECRETS="true"
+            shift
+            ;;
         --help)
             usage
             ;;
@@ -90,6 +149,10 @@ done
 if [[ "$TEST_MODE" != "full" && "$TEST_MODE" != "launchers" ]]; then
     echo "Error: Invalid mode '$TEST_MODE'. Must be 'full' or 'launchers'"
     exit 1
+fi
+
+if [[ "$TEST_WITH_HOST_SECRETS" == "true" ]]; then
+    ensure_host_secrets_ready
 fi
 
 # ============================================================================
@@ -536,6 +599,45 @@ test_cleanup_on_exit() {
     fi
 }
 
+test_host_prompt_mode() {
+    test_section "Testing host secrets prompt-mode execution"
+
+    local prompt="Return the words: host secrets OK."
+    local run_copilot="$PROJECT_ROOT/scripts/launchers/run-copilot"
+
+    if [[ ! -x "$run_copilot" ]]; then
+        fail "run-copilot launcher not executable at $run_copilot"
+        return
+    fi
+
+    local tmp_output
+    tmp_output=$(mktemp)
+    local exit_code=0
+
+    if CODING_AGENTS_MCP_SECRETS_FILE="$HOST_SECRETS_FILE" \
+        "$run_copilot" --prompt "$prompt" >"$tmp_output" 2>&1; then
+        exit_code=0
+    else
+        exit_code=$?
+    fi
+
+    local response
+    response=$(cat "$tmp_output" 2>/dev/null || true)
+    rm -f "$tmp_output"
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "Prompt-mode Copilot execution failed (exit $exit_code)"
+        echo "$response"
+        return
+    fi
+
+    if [[ -n "${response//[[:space:]]/}" ]]; then
+        pass "Prompt-mode Copilot produced output"
+    else
+        fail "Prompt-mode Copilot returned empty response"
+    fi
+}
+
 test_shared_functions() {
     test_section "Testing shared functions with test environment"
     
@@ -592,6 +694,9 @@ run_all_tests() {
     test_multiple_agents
     test_container_isolation
     test_cleanup_on_exit
+    if [ "$TEST_WITH_HOST_SECRETS" = "true" ]; then
+        test_host_prompt_mode
+    fi
     
     # Print summary
     echo ""

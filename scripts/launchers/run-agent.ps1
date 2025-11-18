@@ -40,10 +40,14 @@ param(
     
     [Parameter(Mandatory=$false)]
     [Alias("y")]
-    [switch]$Force
+    [switch]$Force,
+
+    [Parameter(Mandatory=$false)]
+    [string]$Prompt
 )
 
 $ErrorActionPreference = "Stop"
+$SourceExplicit = $PSBoundParameters.ContainsKey('Source')
 $BranchFromFlag = $PSBoundParameters.ContainsKey('Branch')
 $LocalRemoteHostPath = ""
 $LocalRemoteWslPath = ""
@@ -51,6 +55,12 @@ $LocalRemoteUrl = ""
 $LocalRepoPathValue = ""
 $TmpfsLargeSize = if ($env:CODING_AGENTS_TMPFS_LARGE) { $env:CODING_AGENTS_TMPFS_LARGE } else { "2g" }
 $TmpfsSmallSize = if ($env:CODING_AGENTS_TMPFS_SMALL) { $env:CODING_AGENTS_TMPFS_SMALL } else { "512m" }
+$PromptMode = -not [string]::IsNullOrWhiteSpace($Prompt)
+$SourceType = ""
+$RepoName = ""
+$GitUrl = ""
+$ResolvedPath = $null
+$WslPath = ""
 
 # Source shared functions
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -95,6 +105,10 @@ if (-not (Test-ContainerSecuritySupport)) {
     exit 1
 }
 
+if ($PromptMode) {
+    $NoPush = $true
+}
+
 # Determine if source is URL or local path
 $IsUrl = $Source -match '^https?://'
 
@@ -104,44 +118,71 @@ if ($IsUrl) {
     $GitUrl = $Source
     $WslPath = ""
 } else {
-    $ResolvedPath = Resolve-Path $Source -ErrorAction SilentlyContinue
-    if (-not $ResolvedPath) {
+    $ResolvedPathItem = Resolve-Path $Source -ErrorAction SilentlyContinue
+    if (-not $ResolvedPathItem) {
         Write-Host "❌ Error: Source path does not exist: $Source" -ForegroundColor Red
         exit 1
     }
-    
-    if (-not (Test-Path (Join-Path $ResolvedPath ".git"))) {
-        Write-Host "❌ Error: $Source is not a git repository" -ForegroundColor Red
-        exit 1
-    }
-    
-    $RepoName = Split-Path -Leaf $ResolvedPath
-    $SourceType = "local"
-    
-    $WslPath = $ResolvedPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
-    $GitUrl = ""
-    $LocalRepoPathValue = $WslPath
-    if (-not $NoPush) {
-        $LocalRemoteDir = [Environment]::GetEnvironmentVariable("CODING_AGENTS_LOCAL_REMOTES_DIR")
-        if ([string]::IsNullOrWhiteSpace($LocalRemoteDir)) {
-            $LocalRemoteDir = Join-Path $env:USERPROFILE ".coding-agents\\local-remotes"
+    $ResolvedPath = $ResolvedPathItem.ProviderPath
+
+    if (-not (Test-Path (Join-Path $ResolvedPath ".git")) -and -not $SourceExplicit) {
+        $autoRoot = & git -C "$ResolvedPath" rev-parse --show-toplevel 2>$null
+        if ($LASTEXITCODE -eq 0 -and $autoRoot) {
+            $autoRoot = $autoRoot.Trim()
+            try {
+                $ResolvedPath = (Resolve-Path $autoRoot).ProviderPath
+            } catch {
+                $ResolvedPath = [System.IO.Path]::GetFullPath($autoRoot)
+            }
         }
-        if (-not (Test-Path $LocalRemoteDir)) {
-            New-Item -ItemType Directory -Path $LocalRemoteDir -Force | Out-Null
-        }
-        $RepoHash = Get-RepoPathHash -Path $ResolvedPath
-        $LocalRemoteHostPath = Join-Path $LocalRemoteDir ("{0}.git" -f $RepoHash)
-        if (-not (Test-Path $LocalRemoteHostPath)) {
-            git init --bare "$LocalRemoteHostPath" 2>$null | Out-Null
-        }
-        $LocalRemoteWslPath = $LocalRemoteHostPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
-        $LocalRemoteUrl = "file:///tmp/local-remote"
-        $LocalRepoPathValue = $LocalRemoteUrl
     }
 
-    if (-not $NoPush -and [string]::IsNullOrWhiteSpace($LocalRemoteUrl)) {
-        throw "Failed to configure secure local remote for auto-push"
+    if (-not (Test-Path (Join-Path $ResolvedPath ".git"))) {
+        if ($PromptMode) {
+            $SourceType = "prompt"
+            $RepoName = "prompt"
+            $Source = "prompt-only"
+        } else {
+            Write-Host "❌ Error: $Source is not a git repository" -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        $RepoName = Split-Path -Leaf $ResolvedPath
+        $SourceType = "local"
+
+        $WslPath = $ResolvedPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
+        $GitUrl = ""
+        $LocalRepoPathValue = $WslPath
+        if (-not $NoPush) {
+            $LocalRemoteDir = [Environment]::GetEnvironmentVariable("CODING_AGENTS_LOCAL_REMOTES_DIR")
+            if ([string]::IsNullOrWhiteSpace($LocalRemoteDir)) {
+                $LocalRemoteDir = Join-Path $env:USERPROFILE ".coding-agents\\local-remotes"
+            }
+            if (-not (Test-Path $LocalRemoteDir)) {
+                New-Item -ItemType Directory -Path $LocalRemoteDir -Force | Out-Null
+            }
+            $RepoHash = Get-RepoPathHash -Path $ResolvedPath
+            $LocalRemoteHostPath = Join-Path $LocalRemoteDir ("{0}.git" -f $RepoHash)
+            if (-not (Test-Path $LocalRemoteHostPath)) {
+                git init --bare "$LocalRemoteHostPath" 2>$null | Out-Null
+            }
+            $LocalRemoteWslPath = $LocalRemoteHostPath -replace '^([A-Z]):', { '/mnt/' + $_.Groups[1].Value.ToLower() } -replace '\\', '/'
+            $LocalRemoteUrl = "file:///tmp/local-remote"
+            $LocalRepoPathValue = $LocalRemoteUrl
+        }
+
+        if (-not $NoPush -and [string]::IsNullOrWhiteSpace($LocalRemoteUrl)) {
+            throw "Failed to configure secure local remote for auto-push"
+        }
     }
+}
+
+if ($SourceType -eq "prompt" -and -not $Branch) {
+    $Branch = "prompt-session"
+}
+
+if ([string]::IsNullOrWhiteSpace($RepoName)) {
+    $RepoName = "prompt"
 }
 
 if ($UseCurrentBranch) {
@@ -180,6 +221,36 @@ function Get-RepoPathHash {
     finally {
         $sha.Dispose()
     }
+}
+
+function Invoke-PromptSession {
+    param(
+        [string]$Prompt,
+        [string]$ContainerCli,
+        [string]$ContainerName,
+        [string]$Agent
+    )
+    Write-Host ""
+    Write-Host "💡 Running prompt session inside container" -ForegroundColor Cyan
+    Write-Host "   Prompt: $Prompt" -ForegroundColor Gray
+    $command = switch ($Agent) {
+        "copilot" { 'github-copilot-cli exec "$PROMPT_INPUT"' }
+        "codex" { 'codex exec "$PROMPT_INPUT"' }
+        "claude" { 'claude -p "$PROMPT_INPUT"' }
+        default { throw "Unsupported agent '$Agent' for prompt sessions" }
+    }
+    $execArgs = @("exec", "-e", "PROMPT_INPUT=$Prompt", $ContainerName, "bash", "-lc", $command)
+    & $ContainerCli @execArgs
+    $exitCode = $LASTEXITCODE
+    & $ContainerCli "stop" $ContainerName | Out-Null
+    if ($exitCode -eq 0) {
+        Write-Host ""
+        Write-Host "✅ Prompt session completed" -ForegroundColor Green
+    } else {
+        Write-Host ""
+        Write-Host "❌ Prompt session failed with exit code $exitCode" -ForegroundColor Red
+    }
+    return $exitCode
 }
 
 # Helper: Find next available session number
@@ -477,11 +548,6 @@ $dockerArgs = @(
     "--label", "coding-agents.volume.toolcache=$ToolcacheVolume"
 )
 
-# Add repo path label for local repos (for cleanup)
-if ($SourceType -eq "local") {
-    $dockerArgs += "--label", "coding-agents.repo-path=$ResolvedPath"
-}
-
 $dockerArgs += @(
     "-v", "${WslHome}/.gitconfig:/home/agentuser/.gitconfig:ro",
     "-v", "${WslHome}/.config/gh:/home/agentuser/.config/gh:ro",
@@ -497,10 +563,13 @@ $dockerArgs += @(
 # Add source-specific vars
 if ($SourceType -eq "url") {
     $dockerArgs += "-e", "GIT_URL=$GitUrl"
-} else {
+} elseif ($SourceType -eq "local") {
     $localRepoEnvValue = if ($LocalRepoPathValue) { $LocalRepoPathValue } else { $WslPath }
     $dockerArgs += "-e", "LOCAL_REPO_PATH=$localRepoEnvValue"
     $dockerArgs += "-v", "${WslPath}:/tmp/source-repo:ro"
+    if (-not [string]::IsNullOrEmpty($ResolvedPath)) {
+        $dockerArgs += "--label", "coding-agents.repo-path=$ResolvedPath"
+    }
     if (-not [string]::IsNullOrEmpty($LocalRemoteWslPath)) {
         $dockerArgs += "-e", "LOCAL_REMOTE_URL=$LocalRemoteUrl"
         $dockerArgs += "-v", "${LocalRemoteWslPath}:/tmp/local-remote"
@@ -508,6 +577,10 @@ if ($SourceType -eq "url") {
             $dockerArgs += "--label", "coding-agents.local-remote=$LocalRemoteHostPath"
         }
     }
+} elseif ($SourceType -eq "prompt") {
+    $dockerArgs += "-e", "PROMPT_ONLY_MODE=true"
+} else {
+    throw "Unknown SOURCE_TYPE '$SourceType'"
 }
 
 if ($DotNetPreview) { $dockerArgs += "-e", "DOTNET_PREVIEW_CHANNEL=$DotNetPreview" }
@@ -757,6 +830,10 @@ if ($UseSquid) {
 
 Write-Host ""
 Write-Host "✅ Container '$ContainerName' is ready!" -ForegroundColor Green
+if ($PromptMode) {
+    $promptExit = Invoke-PromptSession -Prompt $Prompt -ContainerCli $ContainerCli -ContainerName $ContainerName -Agent $Agent
+    exit $promptExit
+}
 Write-Host "🔗 Attaching to agent session (detach with Ctrl+B, then D)..." -ForegroundColor Cyan
 & $ContainerCli exec -it $ContainerName agent-session attach
 $attachExit = $LASTEXITCODE

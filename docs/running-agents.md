@@ -46,6 +46,24 @@ Ephemeral containers:
 - Create an isolated branch (e.g., `copilot/session-12`)
 - Auto-remove themselves when the agent exits
 
+### Prompt Sessions
+
+When you only need an answer (no repo work), pass `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) to **any** `run-*` launcher:
+
+```bash
+run-copilot --prompt "Return the words: host secrets OK."
+run-codex --prompt "Describe the branching policy"
+run-claude --prompt "List required secrets"
+```
+
+Characteristics:
+- Works uniformly for Copilot, Codex, and Claude. The launcher invokes the correct CLI (`github-copilot-cli exec`, `codex exec`, or `claude -p`) inside the container and exits once the response has streamed.
+- Reuses your current Git repository automatically (auto-detecting the repo root even when you run from a subdirectory) and falls back to an empty workspace only when no repo exists.
+- Accepts repo arguments plus `--branch` or `--use-current-branch` just like a normal session while forcing `--no-push` for safety.
+- Uses the same security preflights, manifest hashing, and secret-broker flow as repo-backed sessions, so host secrets remain protected.
+
+This is also the path exercised by `./scripts/test/integration-test.sh --with-host-secrets`, so documenting and testing it ensures parity across all agents.
+
 ### Persistent (Long-Running)
 
 `launch-agent` keeps the container alive until you remove it:

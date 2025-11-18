@@ -50,10 +50,12 @@ Set `CODING_AGENTS_IMAGE_OWNER=your-org` before running the script if you publis
 | Branch management unit tests (PowerShell) | `pwsh scripts/test/test-branch-management.ps1` | Same coverage in PS. |
 | Integration tests – launchers mode | `./scripts/test/integration-test.sh --mode launchers` | Reuses lightweight mock images; end-to-end launcher coverage. |
 | Integration tests – full mode | `./scripts/test/integration-test.sh --mode full` | Builds every image inside Docker-in-Docker; best for pre-PR validation. |
+| Integration tests – host secrets | `./scripts/test/integration-test.sh --mode launchers --isolation host --with-host-secrets` | Runs on the host Docker daemon, mounts your `mcp-secrets.env`, and exercises the `run-<agent> --prompt` path (currently Copilot) to verify live secrets. |
 
 Tips:
 - Use `--preserve` with the integration harness to keep the temporary Docker-in-Docker environment alive for debugging.
-- All tests rely on mock secrets stored under `scripts/test/fixtures/mock-secrets`; no real tokens are required.
+- All tests rely on mock secrets stored under `scripts/test/fixtures/mock-secrets` unless you opt into `--with-host-secrets`, which reads your real tokens from `~/.config/coding-agents/mcp-secrets.env` (or `CODING_AGENTS_MCP_SECRETS_FILE`).
+- The `--with-host-secrets` flag requires `--isolation host` so the harness can access your secrets file; it adds a prompt-mode `--prompt` run (currently using Copilot, but supported by all agents) that now reuses your repo when available and falls back to an empty workspace only if no repo exists.
 - Windows users can run the bash tests inside WSL2. PowerShell variants exist for parity when running natively.
 
 For deeper explanations of each suite, consult [scripts/test/README.md](../scripts/test/README.md).

@@ -28,6 +28,7 @@ Options:
     --gpu SPEC                  GPU specification (e.g., 'all' or 'device=0')
     --no-push                   Disable auto-push on container shutdown
     --use-current-branch        Use current branch instead of creating agent branch (unsafe)
+    --prompt PROMPT             Prompt execution (reuses current repo when available)
     -y, --force                 Automatically replace existing agent branch without prompting
     -h, --help                  Show this help
 
@@ -100,6 +101,13 @@ GPU=""
 NO_PUSH=false
 FORCE=false
 USE_CURRENT_BRANCH=false
+PROMPT_MODE=false
+PROMPT_TEXT=""
+SOURCE_SPECIFIED=false
+SOURCE_TYPE=""
+REPO_NAME=""
+GIT_URL=""
+WSL_PATH=""
 LOCAL_REMOTE_HOST_PATH=""
 LOCAL_REMOTE_WSL_PATH=""
 LOCAL_REMOTE_URL=""
@@ -298,6 +306,42 @@ seal_stub_capabilities() {
     return 0
 }
 
+run_prompt_session() {
+    echo ""
+    echo "💡 Running prompt session inside container"
+    echo "   Prompt: $PROMPT_TEXT"
+
+    local exec_cmd status=0
+    case "$AGENT" in
+        copilot)
+            exec_cmd='github-copilot-cli exec "$PROMPT_INPUT"'
+            ;;
+        codex)
+            exec_cmd='codex exec "$PROMPT_INPUT"'
+            ;;
+        claude)
+            exec_cmd='claude -p "$PROMPT_INPUT"'
+            ;;
+        *)
+            echo "❌ Prompt mode is not supported for agent '$AGENT'" >&2
+            return 1
+            ;;
+    esac
+
+    if container_cli exec -e PROMPT_INPUT="$PROMPT_TEXT" "$CONTAINER_NAME" bash -lc "$exec_cmd"; then
+        status=0
+        echo ""
+        echo "✅ Prompt session completed"
+    else
+        status=$?
+        echo ""
+        echo "❌ Prompt session failed inside container (exit $status)" >&2
+    fi
+
+    container_cli stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    return $status
+}
+
 # First argument must be agent type
 if [[ $# -eq 0 || "$1" == "-"* ]]; then
     echo "❌ Error: Agent type is required as first argument"
@@ -363,15 +407,22 @@ while [[ $# -gt 0 ]]; do
             FORCE=true
             shift
             ;;
+        --prompt)
+            if [[ $# -lt 2 ]]; then
+                echo "❌ Error: --prompt requires a prompt" >&2
+                exit 1
+            fi
+            PROMPT_MODE=true
+            PROMPT_TEXT="$2"
+            shift 2
+            ;;
         -h|--help)
             print_run_agent_usage
             exit 0
             ;;
         *)
-        WORKSPACE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "workspace")
-        HOME_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "home")
-        TOOLCACHE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "toolcache")
             SOURCE="$1"
+            SOURCE_SPECIFIED=true
             shift
             ;;
     esac
@@ -389,6 +440,11 @@ esac
 # Treat 'none' as alias for allow-all
 [ "$NETWORK_PROXY" = "none" ] && NETWORK_PROXY="allow-all"
 
+
+if [ "$PROMPT_MODE" = true ]; then
+    NO_PUSH=true
+fi
+
 # Check Docker
 check_docker_running || exit 1
 if ! verify_container_security_support; then
@@ -398,48 +454,70 @@ CONTAINER_CLI=$(get_active_container_cmd)
 
 # Determine if source is URL or local path
 if [[ "$SOURCE" =~ ^https?:// ]]; then
-    IS_URL=true
     SOURCE_TYPE="url"
     REPO_NAME=$(basename "$SOURCE" .git)
     GIT_URL="$SOURCE"
     WSL_PATH=""
 else
-    IS_URL=false
-    SOURCE_TYPE="local"
-    SOURCE=$(realpath "$SOURCE")
-    
-    # Check if git repository
-    if [ ! -d "$SOURCE/.git" ]; then
-        echo "❌ Error: $SOURCE is not a git repository"
+    if ! SOURCE=$(realpath "$SOURCE" 2>/dev/null); then
+        echo "❌ Error: Source path does not exist: $SOURCE"
         exit 1
     fi
-    
-    REPO_NAME=$(basename "$SOURCE")
-    cd "$SOURCE"
-    cd - > /dev/null
-    WSL_PATH=$(convert_to_wsl_path "$SOURCE")
-    GIT_URL=""
-    LOCAL_REPO_PATH_VALUE="$WSL_PATH"
 
-    if [ "$NO_PUSH" != true ]; then
-        REMOTE_HASH=$(printf "%s" "$SOURCE" | (command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum) | awk '{print $1}')
-        REMOTE_HASH=${REMOTE_HASH:0:16}
-        LOCAL_REMOTE_DIR="${CODING_AGENTS_LOCAL_REMOTES_DIR:-${HOME}/.coding-agents/local-remotes}"
-        LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
-        mkdir -p "$LOCAL_REMOTE_DIR"
-        if [ ! -d "$LOCAL_REMOTE_HOST_PATH" ]; then
-            git init --bare "$LOCAL_REMOTE_HOST_PATH" >/dev/null
+    # Auto-detect repo root when using default SOURCE
+    if [ ! -d "$SOURCE/.git" ] && [ "$SOURCE_SPECIFIED" != true ]; then
+        AUTO_ROOT=$(git -C "$SOURCE" rev-parse --show-toplevel 2>/dev/null || true)
+        if [ -n "$AUTO_ROOT" ]; then
+            SOURCE=$(realpath "$AUTO_ROOT" 2>/dev/null || echo "$AUTO_ROOT")
         fi
-        LOCAL_REMOTE_WSL_PATH=$(convert_to_wsl_path "$LOCAL_REMOTE_HOST_PATH")
-        LOCAL_REMOTE_URL="file:///tmp/local-remote"
-        LOCAL_REPO_PATH_VALUE="$LOCAL_REMOTE_URL"
     fi
 
-    if [ "$NO_PUSH" != true ] && [ -z "$LOCAL_REMOTE_URL" ]; then
-        echo "❌ Failed to configure secure local remote for auto-push"
-        exit 1
+    if [ ! -d "$SOURCE/.git" ]; then
+        if [ "$PROMPT_MODE" = true ]; then
+            SOURCE_TYPE="prompt"
+            REPO_NAME="prompt"
+            SOURCE="prompt-only"
+        else
+            echo "❌ Error: $SOURCE is not a git repository"
+            exit 1
+        fi
+    fi
+
+    if [ "$SOURCE_TYPE" != "prompt" ]; then
+        SOURCE_TYPE="local"
+        REPO_NAME=$(basename "$SOURCE")
+        cd "$SOURCE"
+        cd - > /dev/null
+        WSL_PATH=$(convert_to_wsl_path "$SOURCE")
+        GIT_URL=""
+        LOCAL_REPO_PATH_VALUE="$WSL_PATH"
+
+        if [ "$NO_PUSH" != true ]; then
+            REMOTE_HASH=$(printf "%s" "$SOURCE" | (command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum) | awk '{print $1}')
+            REMOTE_HASH=${REMOTE_HASH:0:16}
+            LOCAL_REMOTE_DIR="${CODING_AGENTS_LOCAL_REMOTES_DIR:-${HOME}/.coding-agents/local-remotes}"
+            LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
+            mkdir -p "$LOCAL_REMOTE_DIR"
+            if [ ! -d "$LOCAL_REMOTE_HOST_PATH" ]; then
+                git init --bare "$LOCAL_REMOTE_HOST_PATH" >/dev/null
+            fi
+            LOCAL_REMOTE_WSL_PATH=$(convert_to_wsl_path "$LOCAL_REMOTE_HOST_PATH")
+            LOCAL_REMOTE_URL="file:///tmp/local-remote"
+            LOCAL_REPO_PATH_VALUE="$LOCAL_REMOTE_URL"
+        fi
+
+        if [ "$NO_PUSH" != true ] && [ -z "$LOCAL_REMOTE_URL" ]; then
+            echo "❌ Failed to configure secure local remote for auto-push"
+            exit 1
+        fi
     fi
 fi
+
+if [ "$SOURCE_TYPE" = "prompt" ] && [ -z "$BRANCH" ]; then
+    BRANCH="prompt-session"
+fi
+
+[ -n "$REPO_NAME" ] || REPO_NAME="prompt"
 
 if [ -z "$SESSION_CONFIG_SOURCE" ] && [ "$SOURCE_TYPE" = "local" ] && [ -f "$SOURCE/config.toml" ]; then
     SESSION_CONFIG_SOURCE="$SOURCE/config.toml"
@@ -846,7 +924,7 @@ DOCKER_ARGS+=(
 # Add source-specific vars
 if [ "$SOURCE_TYPE" = "url" ]; then
     DOCKER_ARGS+=("-e" "GIT_URL=$GIT_URL")
-else
+elif [ "$SOURCE_TYPE" = "local" ]; then
     LOCAL_REPO_ENV_VALUE="${LOCAL_REPO_PATH_VALUE:-$WSL_PATH}"
     DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$LOCAL_REPO_ENV_VALUE")
     DOCKER_ARGS+=("-v" "${WSL_PATH}:/tmp/source-repo:ro")
@@ -856,6 +934,11 @@ else
         DOCKER_ARGS+=("-v" "${LOCAL_REMOTE_WSL_PATH}:/tmp/local-remote")
         DOCKER_ARGS+=("--label" "coding-agents.local-remote=$LOCAL_REMOTE_HOST_PATH")
     fi
+elif [ "$SOURCE_TYPE" = "prompt" ]; then
+    DOCKER_ARGS+=("-e" "PROMPT_ONLY_MODE=true")
+else
+    echo "❌ Internal error: unknown SOURCE_TYPE '$SOURCE_TYPE'" >&2
+    exit 1
 fi
 
 [ -n "$DOTNET_PREVIEW" ] && DOCKER_ARGS+=("-e" "DOTNET_PREVIEW_CHANNEL=$DOTNET_PREVIEW")
@@ -1097,6 +1180,11 @@ fi
 
 echo ""
 echo "✅ Container '$CONTAINER_NAME' is ready!"
+if [ "$PROMPT_MODE" = true ]; then
+    run_prompt_session
+    exit $?
+fi
+
 echo "🔗 Attaching to agent session (detach with Ctrl+B, then D)..."
 container_cli exec -it "$CONTAINER_NAME" agent-session attach
 ATTACH_STATUS=$?

@@ -14,6 +14,8 @@ DIND_CONTAINER="${TEST_ISOLATION_CONTAINER:-coding-agents-test-dind-$RANDOM}"
 ISOLATION_MODE="${TEST_ISOLATION_MODE:-dind}"
 DIND_STARTED=false
 TEST_ARGS=()
+WITH_HOST_SECRETS=false
+HOST_SECRETS_FILE=""
 
 if [[ -n "${TEST_ISOLATION_DOCKER_RUN_FLAGS:-}" ]]; then
     # shellcheck disable=SC2206
@@ -64,6 +66,7 @@ OPTIONS:
     --preserve          Keep test resources after completion for debugging
     --isolation dind    Run tests inside Docker-in-Docker (default)
     --isolation host    Run tests directly on host Docker daemon (optional, skips DinD risk)
+    --with-host-secrets Enable host-secrets tests (requires --isolation host)
     --help              Show this help message
 
 ENVIRONMENT VARIABLES:
@@ -87,6 +90,34 @@ EXAMPLES:
     # Force host mode when the default is DinD
     TEST_ISOLATION_MODE=host $(basename "$0") --mode launchers
 EOF
+}
+
+resolve_host_secrets_file() {
+    local -a candidates=()
+    local -A seen=()
+
+    if [[ -n "${CODING_AGENTS_MCP_SECRETS_FILE:-}" ]]; then
+        candidates+=("${CODING_AGENTS_MCP_SECRETS_FILE}")
+    fi
+    if [[ -n "${MCP_SECRETS_FILE:-}" ]]; then
+        candidates+=("${MCP_SECRETS_FILE}")
+    fi
+    candidates+=("${HOME}/.config/coding-agents/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
+
+    local candidate resolved
+    for candidate in "${candidates[@]}"; do
+        [[ -n "$candidate" ]] || continue
+        resolved=$(realpath "$candidate" 2>/dev/null || echo "$candidate")
+        if [[ -n "${seen[$resolved]:-}" ]]; then
+            continue
+        fi
+        seen[$resolved]=1
+        if [[ -f "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -115,6 +146,11 @@ while [[ $# -gt 0 ]]; do
             ISOLATION_MODE="$2"
             shift 2
             ;;
+        --with-host-secrets)
+            WITH_HOST_SECRETS=true
+            TEST_ARGS+=("$1")
+            shift
+            ;;
         *)
             echo "Error: Unknown option '$1'" >&2
             usage
@@ -130,6 +166,22 @@ case "$ISOLATION_MODE" in
         exit 1
         ;;
 esac
+
+if [[ "$WITH_HOST_SECRETS" == "true" ]]; then
+    if [[ "$ISOLATION_MODE" != "host" ]]; then
+        echo "Error: --with-host-secrets requires --isolation host" >&2
+        exit 1
+    fi
+    if ! HOST_SECRETS_FILE=$(resolve_host_secrets_file); then
+        cat >&2 <<EOF
+Error: Unable to locate host secrets file.
+Set CODING_AGENTS_MCP_SECRETS_FILE, MCP_SECRETS_FILE, or populate ~/.config/coding-agents/mcp-secrets.env
+EOF
+        exit 1
+    fi
+    export TEST_WITH_HOST_SECRETS="true"
+    export TEST_HOST_SECRETS_FILE="$HOST_SECRETS_FILE"
+fi
 
 trap cleanup EXIT INT TERM
 
@@ -253,7 +305,14 @@ run_integration_tests() {
 run_on_host() {
     echo "Running integration suite directly on host Docker daemon"
     echo ""
-    bash "$INTEGRATION_SCRIPT" "${TEST_ARGS[@]}"
+    if [[ "$WITH_HOST_SECRETS" == "true" ]]; then
+        CODING_AGENTS_MCP_SECRETS_FILE="$HOST_SECRETS_FILE" \
+        TEST_WITH_HOST_SECRETS="true" \
+        TEST_HOST_SECRETS_FILE="$HOST_SECRETS_FILE" \
+        bash "$INTEGRATION_SCRIPT" "${TEST_ARGS[@]}"
+    else
+        bash "$INTEGRATION_SCRIPT" "${TEST_ARGS[@]}"
+    fi
 }
 
 if [[ "$ISOLATION_MODE" = "host" ]]; then
