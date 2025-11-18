@@ -18,9 +18,6 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_REPO_DIR="/tmp/test-coding-agents-repo"
 FAILED_TESTS=0
 PASSED_TESTS=0
-DIRTY_OVERRIDE_TOKEN=$(mktemp -t coding-agents-dirty-override.XXXXXX)
-touch "$DIRTY_OVERRIDE_TOKEN"
-export CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$DIRTY_OVERRIDE_TOKEN"
 
 # ============================================================================
 # Cleanup and Setup Functions
@@ -61,7 +58,6 @@ cleanup() {
         echo "⚠️  Warning: Some test resources may still exist after cleanup retries"
     fi
     rm -rf "$TEST_REPO_DIR"
-    rm -f "$DIRTY_OVERRIDE_TOKEN"
     
     print_test_summary
     
@@ -377,6 +373,7 @@ test_audit_logging_pipeline() {
 
     rm -rf "$temp_repo" "$override_token"
     rm -f "$log_file"
+    unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
     unset CODING_AGENTS_AUDIT_LOG
 }
 
@@ -423,7 +420,7 @@ test_trusted_path_enforcement() {
     if ! command -v git >/dev/null 2>&1; then
         fail "Git is required for trusted path tests"
         if [ -n "$saved_override_token" ]; then
-            export CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
+            CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
         else
             unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
         fi
@@ -466,7 +463,7 @@ test_trusted_path_enforcement() {
     rm -rf "$temp_repo"
 
     if [ -n "$saved_override_token" ]; then
-        export CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
+        CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
     else
         unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
     fi

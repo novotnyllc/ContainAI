@@ -168,7 +168,7 @@ function Get-PrereqFingerprint {
     return Get-StringSha256 -InputString $joined
 }
 
-function Ensure-PrerequisitesVerified {
+function Test-PrerequisitesVerified {
     param([Parameter(Mandatory = $true)][string]$RepoRoot)
 
     if ($env:CODING_AGENTS_DISABLE_AUTO_PREREQ_CHECK -eq "1") {
@@ -381,7 +381,8 @@ function Test-TrustedPathsClean {
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string[]]$Paths,
         [string]$Label = "trusted files",
-        [switch]$ThrowOnFailure
+        [switch]$ThrowOnFailure,
+        [string]$OverrideToken
     )
 
     $git = Get-GitExecutable
@@ -416,7 +417,9 @@ function Test-TrustedPathsClean {
         return $true
     }
 
-    $overrideToken = if ($env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN) {
+    $overrideToken = if (-not [string]::IsNullOrWhiteSpace($OverrideToken)) {
+        $OverrideToken
+    } elseif ($env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN) {
         $env:CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
     } else {
         $script:DirtyOverrideToken
@@ -1501,7 +1504,7 @@ function Update-AgentImage {
             $registryImage = 'ghcr.io/novotnyllc/coding-agents-base:latest'
             $localImage = 'coding-agents-base:local'
         }
-        'all' { 
+        'all' {
             $registryImage = 'ghcr.io/novotnyllc/coding-agents:latest'
             $localImage = 'coding-agents:local'
         }
