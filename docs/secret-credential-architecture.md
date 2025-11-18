@@ -20,6 +20,47 @@ This document explains how Coding Agents restricts access to long-lived credenti
 | MCP Stub Wrappers | Trusted binaries inside container | Immutable helpers responsible for redeeming capabilities and launching MCPs.
 | Squid proxy | Shared service | Provides egress filtering/logging only; never stores credentials.
 
+### Trust Boundary Overview
+
+The diagram below mirrors the Microsoft Threat Modeling Tool convention by explicitly drawing the trust boundaries around the host launcher, the partially trusted container, and shared network services.
+
+```mermaid
+flowchart LR
+    subgraph Host_Boundary["Trust Boundary: Host (Trusted)"]
+        LA["launch-agent / run-agent"]
+        BR["Secret Broker"]
+        GA["Git tree attestor"]
+    end
+
+    subgraph Container_Boundary["Trust Boundary: Agent Container (Partially trusted)"]
+        RT["Container runtime + seccomp/AppArmor"]
+        VC["Vendor Agent CLI (agentcli UID)"]
+        ST["MCP stubs / helpers"]
+        TR["agent-task-runner"]
+    end
+
+    subgraph Shared_Services["Trust Boundary: Shared Services"]
+        SQ["Squid proxy"]
+        REM["Remote MCP / SaaS endpoints"]
+    end
+
+    LA -->|hash + attest| GA
+    LA -->|capability request| BR
+    BR -->|sealed tokens| LA
+    LA -->|seccomp-configured start| RT
+    RT --> VC
+    VC -->|exec request| TR
+    TR -->|sanitized subprocess| VC
+    BR -->|redeem capability| ST
+    ST -->|STDIO / IPC| VC
+    ST -->|egress subject to policy| SQ
+    VC -->|HTTPS MCP call| REM
+    SQ -->|filtered outbound| REM
+
+    classDef boundary fill:#eef4ff,stroke:#3065b5,stroke-dasharray: 5 5,color:#111;
+    class Host_Boundary,Container_Boundary,Shared_Services boundary;
+```
+
 ## Automatic Initialization & Health Guarantees
 
 Any launcher command that issues, stores, redeems, or health-checks secrets triggers `_ensure_broker_files`, which performs the following idempotent operations:
@@ -107,31 +148,142 @@ Key points:
 - **Operational use:** Tail the file during development (`tail -f ~/.config/coding-agents/security-events.log`) to capture manifest hashes for change-management tickets, or feed it into your SIEM/log shipper.
 - **Override tokens:** A launch only succeeds on dirty trusted files if `~/.config/coding-agents/overrides/allow-dirty` (configurable via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`) exists. Deleting the token immediately restores strict enforcement, and every use is auditable via the log above.
 
+### `audit-agent`: On-Demand Session Inventory
+
+To help operators and developers validate a running session, we introduce `scripts/launchers/audit-agent` (with matching PowerShell). The command produces a signed JSON report describing the configuration, files, mounts, UIDs, and capability handles associated with an agent container without requiring any manual `docker exec` inspection.
+
+#### Invocation
+
+```
+audit-agent --session <session-id> [--output /path/report.tar.gz] [--format json|table] [--include-secrets]
+```
+
+- `--session` (required) identifies the running container. Shortcuts like `--latest` read `~/.config/coding-agents/session-manifests/last.json`.
+- `--output` (optional) writes the resulting tarball to a custom location; default is `~/.config/coding-agents/audit/<session>-audit.tar.gz`.
+- `--format table` controls the textual summary printed to `stdout`, but the authoritative artifact is always the tarball.
+- `--include-secrets` inlines decrypted values (Base64) instead of redacting them with `*****`. Use only when absolutely necessary; the flag is logged as an `audit-agent` event so reviewers know secrets were exported.
+
+#### Data Sources and Collection Steps
+
+1. **Host config provenance** – hash `config.toml`, `agent-configs/<agent>`, CLI overrides, and the rendered session manifest already stored under `~/.config/coding-agents/session-manifests/<session>.json`. Copy each file into the tarball under `host-config/`.
+2. **Generated in-container artifacts** – `docker cp` (read-only) the files we synthesized: `/run/agent-data/<agent>/manifest.json`, `/run/agent-secrets/<agent>/manifest.json`, `/run/coding-agents/<agent>/session-config.toml`, etc. Place them inside `generated-artifacts/` and include `sha256` entries in `manifest.json`.
+3. **Capability handles** – call `secret-broker.py dump --session <session>` to list each capability: stub name, capability path, expiry, owning UID/GID, and current redemption count. Write the metadata to `capabilities/index.json` and copy the raw capability files (symbolic links only) into `capabilities/files/`, redacting contents unless `--include-secrets` is supplied.
+4. **User and namespace inventory** – query the container (`docker exec <cid> getent passwd agentuser agentcli mcp_*`) plus `ps --no-headers -eo user,pid,cmd` filtered to the session cgroup. Record PID namespaces, `Uid:` lines from `/proc/<pid>/status`, and seccomp/AppArmor labels gathered from `/proc/<pid>/attr/current`.
+5. **Mount table** – parse `/proc/<pid>/mountinfo` for the init process to list every tmpfs we created (agent data, secrets, broker bundles) along with mount options and owning UID.
+6. **Network + proxy bindings** – capture the Squid ACL in use, helper container network settings (from `docker inspect`), and any loopback sockets exposed by MCP stubs, saving details to `network/info.json`.
+
+After collecting data, `audit-agent` assembles a directory tree:
+
+```
+audit-agent-<session>/
+    manifest.json
+    host-config/
+    generated-artifacts/
+    capabilities/
+        index.json
+        files/<capability blobs or placeholders>
+    container/
+        users.json
+        mounts.json
+        processes.json
+    network/info.json
+```
+
+The tree is tarred + gzipped and signed; `manifest.json` references every file with its `sha256`, `owner`, `source`, and whether the payload is redacted.
+
+#### Redaction Model
+
+By default every sensitive field (`apiKey`, `copilot_tokens`, `capabilityBlob`, etc.) is replaced with `"value": "*****"` while retaining metadata (`length`, `createdAt`, `source`). Passing `--include-secrets` populates `"value"` with the real data encoded as Base64 and adds `"plaintextBytes"` for sanity checks. Because the host/CLI user already owns the secrets, we do not enforce extra access control, but the audit log records:
+
+```
+{"event":"audit-agent","session":"abcd...","includeSecrets":true,"timestamp":"..."}
+```
+
+This balance lets day-to-day troubleshooting rely on redacted manifests while still providing a break-glass path for deep debugging.
+
+#### Output Guarantees
+
+- **Signed reports:** `audit-agent` signs the final JSON with the same per-user keyring used for session manifests, enabling offline verification.
+- **No mutation:** The command runs entirely read-only—tmpfs mounts are copied, not modified, and no new capabilities are issued.
+- **Composable:** Reports can be attached to support tickets or CI artifacts; ingestion scripts can assert that every stub, mount, and capability referenced in the report matches expectations.
+
+Together with the runtime audit log, `audit-agent` gives operators a trustworthy, reproducible view of what is running inside each agent container.
+
 ## Secret Redemption and MCP Launch Flow
 
 ```mermaid
 flowchart TD
-        subgraph Command MCP
-                AC[Vendor agent] -->|execve intercepted| RC[agent-task-runner]
-                RC -->|capability request| BR[Secret Broker]
-                BR -->|memfd secret| ST[Per-MCP stub (UID mcp_X)]
-                ST -->|STDIO bridge| AC
-                ST -->|sandboxed network| NET1[Allowed domains]
-        end
-        subgraph HTTPS/SSE MCP
-                AV[Vendor agent (agentcli namespace)] -->|read config secret| CFG[Generated MCP config]
-                AV -->|HTTPS request with secret| NET2[Remote MCP endpoint]
-                AV -.->|spawn helper?| RC2[agent-task-runner denies access to /run/agent-secrets]
-        end
+    subgraph Command_MCP[Command MCP]
+        AC[Vendor agent] -->|execve intercepted| RC[agent-task-runner]
+        RC -->|capability request| BR[Secret Broker]
+        BR -->|memfd secret| ST[Per-MCP stub (UID mcp_X)]
+        ST -->|STDIO bridge| AC
+        ST -->|sandboxed network| NET1[Allowed domains]
+    end
+    subgraph HTTPS_or_SSE_MCP[HTTPS/SSE MCP]
+        AV[Vendor agent (agentcli namespace)] -->|read config secret| CFG[Generated MCP config]
+        AV -->|HTTPS request with secret| NET2[Remote MCP endpoint]
+        AV -.->|spawn helper?| RC2[agent-task-runner denies access to /run/agent-secrets]
+    end
 ```
 
 Key points:
 
 - MCP entries come in two flavors:
     1. **Command-based** (e.g., Serena, Playwright). These follow the exec-intercept + stub flow shown above: the runner launches the stub under a dedicated UID, secrets live inside stub tmpfs, and STDIO/IPC is bridged back to the vendor agent.
-    2. **HTTPS/SSE endpoints** (e.g., Context7, GitHub MCP, Microsoft Learn). The vendor agent process itself performs the HTTPS call using the API key embedded in the generated config. No stub process exists; instead the config file is readable only inside the `agentcli` namespace.
-- Even for HTTPS/SSE entries, exec interception matters because any helper the agent spawns while handling responses still goes through the runner and therefore cannot read `/run/agent-secrets` or the config directories. The vendor agent remains the only process with access to those secrets.
+    2. **HTTPS/SSE endpoints** (e.g., Context7, GitHub MCP, Microsoft Learn). The vendor agent connects to a localhost helper (Unix socket or 127.0.0.1) that we inject into the generated config; that helper redeems the capability and forwards traffic to the real remote endpoint over a constrained network policy.
+- Even for HTTPS/SSE entries, exec interception matters because any helper the agent spawns while handling responses still goes through the runner and therefore cannot read `/run/agent-secrets` or the config directories. The only components that ever see decrypted HTTPS secrets are the localhost helper proxy and (optionally) the vendor agent process running inside the sealed `agentcli` namespace.
 - Command-based MCPs retain stubs to provide per-server UIDs, tmpfs cleanup, network/seccomp policy enforcement, and broker-audited lifecycle management. HTTPS MCPs rely on the vendor agent’s namespace isolation to keep secrets away from untrusted subprocesses while still allowing the agent to embed tokens in outbound requests.
+
+### Vendor Agent MCP Invocation
+
+From the vendor agent’s perspective, MCP definitions in the generated config are already rewritten to reference the hardened stubs. STDIO-style entries never point directly at upstream binaries; instead the launcher replaces them with stub executables plus the exact launch args the stub expects. HTTPS entries keep their URLs and API keys because the vendor agent makes those calls itself.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant VA as Vendor Agent (agentcli)
+    participant CFG as Generated MCP Config
+    participant ATR as agent-task-runner
+    participant ST as MCP Stub (per UID)
+    participant BR as Secret Broker
+
+    VA->>CFG: Read MCP entry (e.g., "serena" command)
+    CFG-->>VA: Stub path + launch args + capability mount point
+    VA->>ATR: execve stub via agent-task-runner socket
+    ATR->>ST: Spawn stub inside stub namespace
+    ST->>BR: Redeem capability for secrets/config
+    ST-->>VA: STDIO/JSON bridge carries tool responses
+
+    Note over VA,CFG: HTTPS MCP entries point to localhost helper proxies
+    Note over VA,CFG: STDIO entries are rewritten to stub binaries
+```
+
+Because the config already references stub binaries, no vendor code change is required: the agent still “launches what the config tells it,” but now that command resolves to `prepare-serena-stub` (for example) rather than the raw MCP binary. The launcher performs this translation while generating the session config:
+
+1. Parse every MCP entry.
+2. For `command` transports, replace `command` and `args` with the stub executable and required arguments (`--cap-path`, `--session-id`, etc.).
+3. Record the stub hash in the manifest so any tampering invalidates the configuration.
+4. Leave HTTPS/SSE transports untouched except for embedding the per-session API keys.
+
+At runtime the vendor agent invokes the stub described in its config, the agent-task-runner intercepts the exec, and the stub handles capability redemption + sandboxing. This ensures the vendor agent remains the orchestrator while the enforcement logic stays in the trusted stub code.
+
+### HTTPS/SSE Helper Proxies
+
+When an MCP definition advertises an HTTPS or SSE transport, the launcher does **not** let the vendor agent call the internet directly with long-lived keys. Instead, config generation swaps the remote URL with a localhost helper endpoint (`https://127.0.0.1:<port>/mcp/<name>` or `unix:///run/mcp-sockets/<name>.sock`). That helper process:
+
+1. Runs under a dedicated UID (`mcp_https_<name>`) inside the container or as a host-side helper with `--network none` except for egress to the approved domains.
+2. Redeems the broker capability to obtain the real upstream API key and TLS settings, storing them only in its tmpfs.
+3. Terminates the agent’s inbound HTTPS request, rewrites it as needed (headers, auth), and establishes the outbound TLS/SSE session to the remote MCP.
+4. Streams responses back over the localhost connection so the vendor agent experiences a normal HTTPS MCP even though the secrets never leave the helper namespace.
+
+#### Protocol Coverage
+
+- **Header and auth variability** – Each helper ships with a per-MCP adapter that understands the required HTTP verbs, headers, and auth schemes (Bearer, `x-api-key`, custom HMAC). The helper replays whatever the upstream expects regardless of what the vendor agent sent, so adding/changing headers does not leak secrets to the agent.
+- **HTTPS vs. SSE** – For traditional HTTPS APIs the helper simply proxies request/response bodies. For SSE endpoints it upgrades the upstream connection to streaming mode, parses `event:` / `data:` frames, and re-emits them over the localhost channel. The vendor agent sees SSE semantics even though the helper is the party that actually holds the remote TCP socket.
+- **Certificate trust** – Helpers use a trust store assembled at launch: system CA bundle plus any MCP-specific pins (SHA256 SPKI hashes or custom CA certs) delivered via the same capability payload. This ensures we can trust private MCP endpoints without modifying the vendor agent or exposing certificates directly to it.
+
+Only in rare debug scenarios (gated by an override token) will the config embed the upstream URL directly. Otherwise, the helper proxy allows us to enforce DNS allow-lists, certificate pinning, rate limits, and auditing exactly as we do for command-based stubs while still honoring the MCP’s HTTPS protocol requirements.
 
 ### Why MCP Stubs Still Exist (Command Mode)
 
