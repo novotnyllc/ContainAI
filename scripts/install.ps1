@@ -1,120 +1,103 @@
 #!/usr/bin/env pwsh
-<#
+<#!
 .SYNOPSIS
-    Install coding-agents launchers to PATH
+    Installs CodingAgents launchers on Windows hosts.
 .DESCRIPTION
-    Adds the scripts/launchers directory to the user's PATH environment variable.
-    On Windows, modifies the User PATH in the registry.
-    On Linux/macOS, adds to ~/.bashrc or ~/.zshrc.
-.EXAMPLE
-    .\scripts\install.ps1
+    Ensures WSL is available, runs prerequisite & health checks inside WSL,
+    and adds scripts\launchers to the user's PATH so commands like run-copilot
+    are available from any PowerShell prompt.
 #>
-
 [CmdletBinding()]
-param()
+param(
+    [switch]$SkipChecks
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ScriptRoot = Split-Path -Parent $PSScriptRoot
-$LaunchersPath = Join-Path $ScriptRoot "scripts\launchers"
+$ScriptRoot = Split-Path -Parent $PSCommandPath
+$RepoRoot = Split-Path -Parent $ScriptRoot
+$LaunchersPath = Join-Path $RepoRoot 'scripts\launchers'
 
-if (-not (Test-Path $LaunchersPath)) {
-    Write-Error "Launchers directory not found: $LaunchersPath"
-    exit 1
+if (-not (Test-Path -LiteralPath $LaunchersPath)) {
+    throw "Launchers directory not found: $LaunchersPath"
 }
 
-Write-Host "Running Coding Agents health check..." -ForegroundColor Cyan
-$healthScript = Join-Path $ScriptRoot "scripts/utils/check-health.ps1"
-if (-not (Test-Path $healthScript)) {
-    Write-Error "Health check script not found: $healthScript"
-    exit 1
+. (Join-Path $ScriptRoot 'utils\wsl-shim.ps1')
+
+function Invoke-WslScript {
+    param(
+        [Parameter(Mandatory)] [string]$RelativePath,
+        [Parameter(Mandatory)] [string]$Description
+    )
+
+    Write-Host "Running $Description..." -ForegroundColor Cyan
+    $code = Invoke-CodingAgentsWslScript -ScriptRelativePath $RelativePath
+    if ($code -ne 0) {
+        throw "❌ $Description failed. Resolve the errors above and rerun scripts\\install.ps1."
+    }
+    Write-Host "✅ $Description passed." -ForegroundColor Green
 }
 
-& $healthScript
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Health check failed. Resolve the issues above and re-run scripts\install.ps1."
-    exit 1
+function Normalize-PathValue {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    try {
+        return ([System.IO.Path]::GetFullPath($Path)).TrimEnd('\')
+    } catch {
+        return $Path.TrimEnd('\')
+    }
 }
 
-function Install-Windows {
-    Write-Host "Installing launchers to PATH (Windows)..." -ForegroundColor Cyan
-    
-    # Validate LaunchersPath
-    if (-not (Test-Path $LaunchersPath -PathType Container)) {
-        Write-Error "Invalid path: $LaunchersPath is not a directory"
-        exit 1
-    }
-    
-    # Validate no malicious characters in path
-    if ($LaunchersPath -match '[<>"|?*]') {
-        Write-Error "Path contains invalid characters: $LaunchersPath"
-        exit 1
-    }
-    
-    # Get current user PATH
-    $currentPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    
-    # Check if already in PATH
-    if ($currentPath -split ';' | Where-Object { $_ -eq $LaunchersPath }) {
-        Write-Host "✓ Launchers already in PATH: $LaunchersPath" -ForegroundColor Green
-        return
-    }
-    
-    # Add to PATH
-    $newPath = if ($currentPath) { "$currentPath;$LaunchersPath" } else { $LaunchersPath }
-    [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-    
-    # Update current session
-    $env:PATH += ";$LaunchersPath"
-    
-    Write-Host "✓ Added to PATH: $LaunchersPath" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "NOTE: You may need to restart your terminal for the change to take effect." -ForegroundColor Yellow
-    Write-Host "      Or run: `$env:PATH += ';$LaunchersPath'" -ForegroundColor Yellow
-}
+function Test-PathInList {
+    param(
+        [string]$Candidate,
+        [string]$PathList
+    )
 
-function Install-Unix {
-    Write-Host "Installing launchers to PATH (Unix)..." -ForegroundColor Cyan
-    
-    $shell = $env:SHELL
-    $rcFile = if ($shell -match 'zsh') {
-        "$env:HOME/.zshrc"
-    } else {
-        "$env:HOME/.bashrc"
-    }
-    
-    $exportLine = "export PATH=`"${LaunchersPath}:`$`{PATH}`""
-    
-    # Check if already in rc file
-    if (Test-Path $rcFile) {
-        $content = Get-Content $rcFile -Raw
-        if ($content -match [regex]::Escape($LaunchersPath)) {
-            Write-Host "✓ Launchers already in $rcFile" -ForegroundColor Green
-            return
+    $normalizedCandidate = Normalize-PathValue $Candidate
+    if ([string]::IsNullOrEmpty($normalizedCandidate)) { return $false }
+    foreach ($entry in ($PathList -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+        if (Normalize-PathValue $entry -ieq $normalizedCandidate) {
+            return $true
         }
     }
-    
-    # Add to rc file
-    Add-Content -Path $rcFile -Value "`n# Coding Agents launchers"
-    Add-Content -Path $rcFile -Value $exportLine
-    
-    # Update current session
-    $env:PATH = "${LaunchersPath}:$env:PATH"
-    
-    Write-Host "✓ Added to $rcFile" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "NOTE: Restart your terminal or run: source $rcFile" -ForegroundColor Yellow
+    return $false
 }
 
-# Detect OS and install
-if ($IsWindows -or $PSVersionTable.Platform -eq 'Win32NT' -or !$PSVersionTable.Platform) {
-    Install-Windows
+function Ensure-LaunchersOnPath {
+    param([string]$PathToAdd)
+
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not (Test-PathInList -Candidate $PathToAdd -PathList $userPath)) {
+        $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) {
+            $PathToAdd
+        } else {
+            "$PathToAdd;$userPath"
+        }
+        [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+        Write-Host "✓ Added $PathToAdd to your User PATH." -ForegroundColor Green
+    } else {
+        Write-Host "✓ Launchers already present in User PATH." -ForegroundColor DarkGray
+    }
+
+    if (-not (Test-PathInList -Candidate $PathToAdd -PathList $env:Path)) {
+        $env:Path = "$PathToAdd;$env:Path"
+        Write-Host "✓ Updated current session PATH." -ForegroundColor DarkGray
+    }
+}
+
+Write-Host "Installing CodingAgents launchers..." -ForegroundColor Cyan
+if ($SkipChecks) {
+    Write-Host "Skipping prerequisite and health checks (--SkipChecks)." -ForegroundColor Yellow
 } else {
-    Install-Unix
+    Invoke-WslScript -RelativePath 'scripts/verify-prerequisites.sh' -Description 'Prerequisite verification'
+    Invoke-WslScript -RelativePath 'scripts/utils/check-health.sh' -Description 'System health check'
 }
 
-Write-Host ""
-Write-Host "Installation complete! You can now run:" -ForegroundColor Green
-Write-Host "  run-copilot, run-codex, run-claude" -ForegroundColor Cyan
-Write-Host "  launch-agent, list-agents, remove-agent" -ForegroundColor Cyan
+Ensure-LaunchersOnPath -PathToAdd $LaunchersPath
+
+Write-Host "`nLaunchers installed." -ForegroundColor Green
+Write-Host "You can now run 'run-copilot', 'run-codex', 'run-claude', etc. from any PowerShell prompt." -ForegroundColor Green
+Write-Host "Open a new terminal (or run 'refreshenv' if using Scoop/Chocolatey) so the updated PATH takes effect everywhere." -ForegroundColor Yellow

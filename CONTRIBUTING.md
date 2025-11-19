@@ -202,29 +202,19 @@ $results | Where-Object {$_.Severity -in @('Error','Warning')}
 - **No hardcoded secrets** - use environment variables or mock values in tests
 - **Complete error handling** - every external command should handle failures
 - **Descriptive error messages** - tell users what went wrong and how to fix it
-- **Feature parity** - bash and PowerShell scripts should have equivalent functionality
+- **Runtime parity** - bash is the source of truth; Windows `.ps1` shims must invoke the same bash scripts via `scripts/utils/wsl-shim.ps1`
 - **Test coverage** - all new functions need corresponding tests
 
 ## Script Parity
 
-### Bash ↔ PowerShell Equivalents
+### Windows WSL shims
 
-| Bash | PowerShell | Purpose |
-|------|------------|---------|
-| `validate_container_name()` | `Test-ValidContainerName` | Validate Docker names |
-| `branch_exists()` | `Test-BranchExists` | Check if git branch exists |
-| `sanitize_branch_name()` | `ConvertTo-SafeBranchName` | Make branches Docker-safe |
-| `convert_to_wsl_path()` | `Convert-WindowsPathToWsl` | Windows→WSL path conversion |
-| `check_docker_running()` | `Test-DockerRunning` | Check Docker + auto-start |
-| `pull_and_tag_image()` | `Update-AgentImage` | Pull and tag agent images |
-| `container_exists()` | `Test-ContainerExists` | Check if container exists |
-| `remove_container_with_sidecars()` | `Remove-ContainerWithSidecars` | Remove agent + proxy |
-| `ensure_squid_proxy()` | `Initialize-SquidProxy` | Setup network proxy |
+Bash scripts contain all runtime logic. Windows support is delivered through thin `.ps1` wrappers that:
+1. dot-source `scripts/utils/wsl-shim.ps1`
+2. call `Invoke-CodingAgentsWslScript -ScriptRelativePath '<target bash script>' -Arguments $Arguments`
+3. exit with the propagated status code
 
-**Both languages must have:**
-- All launcher scripts (`launch-agent`, `remove-agent`, `list-agents`, `run-*`)
-- All common functions in `scripts/utils/common-functions.*`
-- All unit tests (test-launchers, test-branch-management)
+Only scripts that touch native Windows settings (for example `enable-wsl-security.ps1`) should contain standalone PowerShell logic. When adding or renaming a Bash entrypoint, create the matching shim so Windows users can invoke the same behavior from PowerShell.
 
 ## File Structure
 
@@ -239,7 +229,7 @@ coding-agents/
 │   │   └── run-*            # Quick launch scripts
 │   ├── utils/               # Shared functions
 │   │   ├── common-functions.sh   # Bash library
-│   │   └── common-functions.ps1  # PowerShell library
+│   │   └── wsl-shim.ps1          # Shared Windows shim helper
 │   └── test/                # Test suites
 │       ├── test-launchers.sh     # Unit tests (bash)
 │       ├── test-launchers.ps1    # Unit tests (PowerShell)

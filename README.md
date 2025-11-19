@@ -45,6 +45,8 @@ cd ~/my-project
 run-copilot                  # or run-codex / run-claude
 ```
 
+> **Windows note:** Every `.ps1` in this repository is a thin shim that launches the matching bash script inside your default WSL 2 distribution. Install and enable WSL (`wsl --install`, restart) before running the PowerShell commands above. `scripts\install.ps1` runs the same prerequisite + health checks via WSL and adds `scripts\launchers` to your user PATH so commands like `run-copilot` work from any PowerShell prompt.
+
 That's it! You're coding with AI in an isolated container. For a deeper walkthrough (network modes, container management, VS Code), read [docs/running-agents.md](docs/running-agents.md).
 
 Behind the scenes the launcher hashed its own files, rendered a per-session MCP manifest on the host, asked the secret broker for sealed capability tokens, copied those artifacts into a tmpfs inside the container, and ensured every MCP server launches through the trusted `mcp-stub`. No raw API keys ever touch your workspace.
