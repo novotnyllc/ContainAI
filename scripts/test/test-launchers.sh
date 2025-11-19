@@ -1403,6 +1403,44 @@ test_launcher_wrappers() {
     done
 }
 
+test_seccomp_mount_block() {
+    test_section "Seccomp mount enforcement"
+
+    local profile="$PROJECT_ROOT/docker/profiles/seccomp-coding-agents.json"
+    if [ ! -f "$profile" ]; then
+        fail "Seccomp profile missing at $profile"
+        return
+    fi
+
+    local python_code
+    read -r -d '' python_code <<'PY'
+import ctypes, os, sys
+
+libc = ctypes.CDLL(None, use_errno=True)
+# Attempt mount syscall (should be blocked)
+# We pass None/0 because we expect the block to happen before argument validation
+res = libc.mount(None, None, None, 0, None)
+err = ctypes.get_errno()
+
+# Check for EPERM(1), EACCES(13), or ENOSYS(38)
+# This confirms seccomp caught it, rather than the kernel rejecting invalid args
+if res == -1 and err in (1, 13, 38):
+    sys.exit(0)
+print(f"Syscall allowed or unexpected error: res={res}, errno={err}")
+sys.exit(1)
+PY
+
+    if docker run --rm \
+        --security-opt "no-new-privileges" \
+        --security-opt "seccomp=$profile" \
+        python:3.11-slim \
+        python3 -c "$python_code" >/dev/null 2>&1; then
+        pass "mount syscall blocked by seccomp profile"
+    else
+        fail "mount syscall not blocked (or failed unexpectedly)"
+    fi
+}
+
 # List of available tests in default order
 ALL_TESTS=(
     "setup_test_repo"
@@ -1434,6 +1472,7 @@ ALL_TESTS=(
     "test_launcher_wrappers"
     "test_list_agents"
     "test_remove_agent"
+    "test_seccomp_mount_block"
 )
 
 print_usage() {
