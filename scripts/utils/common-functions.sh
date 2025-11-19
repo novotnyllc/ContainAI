@@ -769,6 +769,8 @@ verify_host_security_prereqs() {
         if ! apparmor_profile_loaded "$profile"; then
             if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
                 warnings+=("Unable to verify AppArmor profile '$profile' without elevated privileges. Re-run './scripts/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$profile_file'.")
+            elif [ "$current_uid" -ne 0 ] && [ -f "$profile_file" ]; then
+                warnings+=("AppArmor profile '$profile' verification skipped (requires sudo). Rerun './scripts/utils/check-health.sh' with sudo to confirm.")
             elif [ -f "$profile_file" ]; then
                 errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'.")
             else
