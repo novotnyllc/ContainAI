@@ -686,6 +686,15 @@ run_prompt_session() {
 
     if container_cli exec -e PROMPT_INPUT="$PROMPT_TEXT" "$CONTAINER_NAME" bash -lc "$exec_cmd"; then
         status=0
+        if [ -n "${CODING_AGENTS_PROMPT_POST_HOOK:-}" ]; then
+            echo "🛠️  Running prompt post-hook command"
+            if container_cli exec "$CONTAINER_NAME" bash -lc "${CODING_AGENTS_PROMPT_POST_HOOK}"; then
+                echo "✅ Prompt post-hook completed"
+            else
+                local hook_status=$?
+                echo "⚠️  Prompt post-hook failed inside container (exit $hook_status)" >&2
+            fi
+        fi
         echo ""
         echo "✅ Prompt session completed"
     else
