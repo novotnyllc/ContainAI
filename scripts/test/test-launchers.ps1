@@ -1129,7 +1129,6 @@ function Test-ContainerSecurityPreflight {
 
     $env:CODING_AGENTS_CONTAINER_INFO_JSON = $goodJson
     $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
-    $env:CODING_AGENTS_DISABLE_APPARMOR = "0"
     $preflightPassed = $false
     try {
         $preflightPassed = Test-ContainerSecuritySupport
@@ -1144,7 +1143,6 @@ function Test-ContainerSecurityPreflight {
 
     $env:CODING_AGENTS_CONTAINER_INFO_JSON = $missingAppArmor
     $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
-    $env:CODING_AGENTS_DISABLE_APPARMOR = "0"
     $appArmorCheckPassed = $false
     try {
         $appArmorCheckPassed = Test-ContainerSecuritySupport
@@ -1157,21 +1155,7 @@ function Test-ContainerSecurityPreflight {
         Pass "AppArmor requirement enforced when runtime lacks support"
     }
 
-    $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
-    $overridePassed = $false
-    try {
-        $overridePassed = Test-ContainerSecuritySupport
-    } catch {
-        $overridePassed = $false
-    }
-    if ($overridePassed) {
-        Pass "AppArmor override bypasses container check"
-    } else {
-        Fail "AppArmor override should allow launch without runtime support"
-    }
-
     Remove-Item Env:CODING_AGENTS_CONTAINER_INFO_JSON -ErrorAction SilentlyContinue
-    Remove-Item Env:CODING_AGENTS_DISABLE_APPARMOR -ErrorAction SilentlyContinue
     Remove-Item Env:CODING_AGENTS_DISABLE_SECCOMP -ErrorAction SilentlyContinue
 }
 
