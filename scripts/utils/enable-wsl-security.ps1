@@ -199,4 +199,4 @@ if ($status.NeedsSystemd -or $status.NeedsSecurityFs) {
 }
 
 Restart-Wsl -WslExe $wslExePath
-Write-Host "✅ Configuration complete. AppArmor is now active." -ForegroundColor Green
+Write-Host '✅ Configuration complete. AppArmor is now active.' -ForegroundColor Green
