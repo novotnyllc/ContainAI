@@ -1171,15 +1171,11 @@ if ($gpgSigningEnabled -and -not (Test-Path $gpgSocketPath -PathType Leaf)) {
 }
 
 $seccompProfilePath = $null
-if ($env:CODING_AGENTS_DISABLE_SECCOMP -ne '1') {
-    try {
-        $seccompProfilePath = Get-SeccompProfilePath -RepoRoot $RepoRoot
-    } catch {
-        Write-LauncherMessage "❌ $_" -Color Red
-        exit 1
-    }
-} else {
-    Write-Warning "⚠️  Seccomp enforcement disabled via CODING_AGENTS_DISABLE_SECCOMP=1"
+try {
+    $seccompProfilePath = Get-SeccompProfilePath -RepoRoot $RepoRoot
+} catch {
+    Write-LauncherMessage "❌ $_" -Color Red
+    exit 1
 }
 
 $appArmorProfileName = Get-AppArmorProfileName -RepoRoot $RepoRoot

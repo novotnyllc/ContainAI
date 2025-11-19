@@ -306,11 +306,7 @@ sudo apparmor_parser -r docker/profiles/apparmor-coding-agents.profile
 ```
 
 Environment overrides:
-
-- `CODING_AGENTS_SECCOMP_PROFILE` – alternate seccomp JSON path
-- `CODING_AGENTS_DISABLE_SECCOMP=1` – skip seccomp (not recommended)
-- `CODING_AGENTS_APPARMOR_PROFILE_NAME` / `CODING_AGENTS_APPARMOR_PROFILE_FILE` – custom AppArmor profile
-- `CODING_AGENTS_DISABLE_APPARMOR=1` – skip AppArmor (not recommended)
+None. The built-in profiles under `docker/profiles/` are mandatory; rerun `scripts/install.sh` to reinstall them if they are missing.
 
 ## Maintenance
 

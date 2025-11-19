@@ -290,13 +290,14 @@ test_shared_functions() {
         fail "resolve_seccomp_profile_path() failed to locate built-in profile"
     fi
 
-    CODING_AGENTS_SECCOMP_PROFILE="missing-profile.json"
-    if resolve_seccomp_profile_path "$PROJECT_ROOT" >/dev/null 2>&1; then
-        fail "resolve_seccomp_profile_path() should fail for missing override"
+    local fake_root
+    fake_root=$(mktemp -d)
+    if resolve_seccomp_profile_path "$fake_root" >/dev/null 2>&1; then
+        fail "resolve_seccomp_profile_path() should fail when profile file is absent"
     else
-        pass "resolve_seccomp_profile_path() reports missing override"
+        pass "resolve_seccomp_profile_path() reports missing built-in profile"
     fi
-    unset CODING_AGENTS_SECCOMP_PROFILE
+    rm -rf "$fake_root"
 
     if resolve_apparmor_profile_name "$PROJECT_ROOT" >/dev/null 2>&1; then
         pass "resolve_apparmor_profile_name() locates active AppArmor profile"
@@ -992,11 +993,20 @@ test_host_security_preflight() {
             fail "Preflight rejected valid host security configuration"
         fi
 
-    local missing_profile="$PROJECT_ROOT/tests/nonexistent-seccomp.json"
-    if CODING_AGENTS_SECCOMP_PROFILE="$missing_profile" verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
-        fail "Preflight should fail when seccomp profile is missing"
+    local seccomp_profile="$PROJECT_ROOT/docker/profiles/seccomp-coding-agents.json"
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    local temp_backup="$temp_dir/seccomp-coding-agents.json"
+    if mv "$seccomp_profile" "$temp_backup"; then
+        if verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
+            fail "Preflight should fail when seccomp profile is missing"
+        else
+            pass "Seccomp profile requirement enforced"
+        fi
+        mv "$temp_backup" "$seccomp_profile"
+        rmdir "$temp_dir"
     else
-        pass "Seccomp profile requirement enforced"
+        fail "Unable to move seccomp profile for negative test"
     fi
 }
 
@@ -1006,14 +1016,14 @@ test_container_security_preflight() {
     source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
 
     local good_json='{"SecurityOptions":["name=seccomp","name=apparmor"]}'
-        if CODING_AGENTS_CONTAINER_INFO_JSON="$good_json" CODING_AGENTS_DISABLE_SECCOMP=0 verify_container_security_support >/dev/null 2>&1; then
+        if CODING_AGENTS_CONTAINER_INFO_JSON="$good_json" verify_container_security_support >/dev/null 2>&1; then
             pass "Container preflight passes when runtime reports seccomp feature"
         else
             fail "Container preflight rejected valid runtime JSON"
         fi
 
     local missing_apparmor='{"SecurityOptions":["name=seccomp"]}'
-    if CODING_AGENTS_CONTAINER_INFO_JSON="$missing_apparmor" CODING_AGENTS_DISABLE_SECCOMP=0 verify_container_security_support >/dev/null 2>&1; then
+    if CODING_AGENTS_CONTAINER_INFO_JSON="$missing_apparmor" verify_container_security_support >/dev/null 2>&1; then
         fail "Container preflight should fail when AppArmor missing"
     else
         pass "AppArmor requirement enforced when runtime lacks support"

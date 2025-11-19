@@ -303,8 +303,7 @@ flowchart LR
    class prerequisiteCheck,runtimeCheck,proxyStart stage;
 ```
 
-- If AppArmor or seccomp are missing, the launcher halts before exposing the socket, preventing unconfined containers from connecting.
-- Export `CODING_AGENTS_DISABLE_APPARMOR=1` or `CODING_AGENTS_DISABLE_SECCOMP=1` only if you intentionally accept the reduced guarantees; the launcher logs these overrides for later review.
+- If AppArmor or seccomp are missing, the launcher halts before exposing the socket, preventing unconfined containers from connecting. These guardrails are mandatory and cannot be bypassed.
 
 ### Starting the Server
 

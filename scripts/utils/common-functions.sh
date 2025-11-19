@@ -627,22 +627,34 @@ is_linux_host() {
     [ "$kernel" = "Linux" ]
 }
 
+is_wsl_environment() {
+    if [ -n "${WSL_DISTRO_NAME:-}" ]; then
+        return 0
+    fi
+    if ! is_linux_host; then
+        return 1
+    fi
+    if [ -r /proc/version ] && grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+wsl_security_helper_path() {
+    local repo_root="${1:-${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}}"
+    echo "$repo_root/scripts/utils/fix-wsl-security.sh"
+}
+
 resolve_seccomp_profile_path() {
     local repo_root="$1"
-    local candidate="${CODING_AGENTS_SECCOMP_PROFILE:-}"
-
-    if [ -z "$candidate" ]; then
-        candidate="$repo_root/docker/profiles/seccomp-coding-agents.json"
-    elif [[ "$candidate" != /* ]]; then
-        candidate="$repo_root/$candidate"
-    fi
+    local candidate="$repo_root/docker/profiles/seccomp-coding-agents.json"
 
     if [ -f "$candidate" ]; then
         echo "$candidate"
         return 0
     fi
 
-    echo "❌ Seccomp profile not found at $candidate" >&2
+    echo "❌ Seccomp profile not found at $candidate. Run scripts/install.sh to reinstall the host security assets." >&2
     return 1
 }
 
@@ -680,8 +692,8 @@ apparmor_profile_loaded() {
 
 resolve_apparmor_profile_name() {
     local repo_root="$1"
-    local profile="${CODING_AGENTS_APPARMOR_PROFILE_NAME:-coding-agents}"
-    local profile_file="${CODING_AGENTS_APPARMOR_PROFILE_FILE:-$repo_root/docker/profiles/apparmor-coding-agents.profile}"
+    local profile="coding-agents"
+    local profile_file="$repo_root/docker/profiles/apparmor-coding-agents.profile"
 
     if ! is_apparmor_supported; then
         return 1
@@ -693,7 +705,7 @@ resolve_apparmor_profile_name() {
     fi
 
     if [ ! -f "$profile_file" ]; then
-        echo "⚠️  AppArmor profile file not found at $profile_file" >&2
+        echo "⚠️  AppArmor profile file not found at $profile_file. Run scripts/install.sh to restore the host security profiles." >&2
         return 1
     fi
 
@@ -713,33 +725,33 @@ verify_host_security_prereqs() {
     local errors=()
     local warnings=()
 
-    if [ "${CODING_AGENTS_DISABLE_SECCOMP:-0}" = "1" ]; then
-        warnings+=("Seccomp enforcement disabled via CODING_AGENTS_DISABLE_SECCOMP=1")
-    else
-        if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
-            local hint="${CODING_AGENTS_SECCOMP_PROFILE:-$repo_root/docker/profiles/seccomp-coding-agents.json}"
-            if [[ "$hint" != /* ]]; then
-                hint="$repo_root/$hint"
-            fi
-            errors+=("Seccomp profile not found at $hint. Install host security profiles or export CODING_AGENTS_DISABLE_SECCOMP=1 (not recommended).")
-        fi
+    if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
+        local default_profile="$repo_root/docker/profiles/seccomp-coding-agents.json"
+        errors+=("Seccomp profile not found at $default_profile. Run scripts/install.sh to reinstall the host security assets before launching agents.")
     fi
 
     if ! is_linux_host; then
         errors+=("AppArmor enforcement requires a Linux host. Run from a Linux kernel with AppArmor enabled.")
     elif ! is_apparmor_supported; then
-        errors+=("AppArmor kernel support not detected. Enable AppArmor to continue.")
-    else
-        local profile="${CODING_AGENTS_APPARMOR_PROFILE_NAME:-coding-agents}"
-        local profile_file="${CODING_AGENTS_APPARMOR_PROFILE_FILE:-$repo_root/docker/profiles/apparmor-coding-agents.profile}"
-        if [[ "$profile_file" != /* ]]; then
-            profile_file="$repo_root/$profile_file"
+        if is_wsl_environment; then
+            local helper_script
+            helper_script=$(wsl_security_helper_path "$repo_root")
+            if [ -x "$helper_script" ]; then
+                errors+=("AppArmor kernel support not detected (WSL 2). Run '$helper_script --check' to audit your Windows configuration, then rerun '$helper_script' (optionally with --force) to apply the fixes and restart WSL.")
+            else
+                errors+=("AppArmor kernel support not detected (WSL 2). Use the WSL security helper under scripts/utils to enable AppArmor on the host kernel.")
+            fi
+        else
+            errors+=("AppArmor kernel support not detected. Enable AppArmor to continue.")
         fi
+    else
+        local profile="coding-agents"
+        local profile_file="$repo_root/docker/profiles/apparmor-coding-agents.profile"
         if ! apparmor_profile_loaded "$profile"; then
             if [ -f "$profile_file" ]; then
                 errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'.")
             else
-                errors+=("AppArmor profile file '$profile_file' not found. Set CODING_AGENTS_APPARMOR_PROFILE_FILE to a valid profile path.")
+                errors+=("AppArmor profile file '$profile_file' not found. Run scripts/install.sh to restore the host security profiles.")
             fi
         fi
     fi
@@ -775,16 +787,6 @@ verify_host_security_prereqs() {
 }
 
 verify_container_security_support() {
-    if [ "${CODING_AGENTS_DISABLE_CONTAINER_SECURITY_CHECK:-0}" = "1" ]; then
-        echo "⚠️  Container security checks disabled via CODING_AGENTS_DISABLE_CONTAINER_SECURITY_CHECK=1" >&2
-        return 0
-    fi
-
-    local require_seccomp=1
-    if [ "${CODING_AGENTS_DISABLE_SECCOMP:-0}" = "1" ]; then
-        require_seccomp=0
-    fi
-
     local info_json="${CODING_AGENTS_CONTAINER_INFO_JSON:-}"
     if [ -z "$info_json" ]; then
         local runtime
@@ -856,8 +858,8 @@ PY
         has_apparmor=1
     fi
 
-    if [ $require_seccomp -eq 1 ] && [ $has_seccomp -ne 1 ]; then
-        echo "❌ Container runtime does not report seccomp support. Update Docker/Podman or export CODING_AGENTS_DISABLE_SECCOMP=1 to override." >&2
+    if [ $has_seccomp -ne 1 ]; then
+        echo "❌ Container runtime does not report seccomp support. Update Docker/Podman to a build with seccomp enabled." >&2
         return 1
     fi
 

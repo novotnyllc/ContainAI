@@ -4,6 +4,18 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+COMMON_FUNCTIONS="$REPO_ROOT/scripts/utils/common-functions.sh"
+if [ ! -f "$COMMON_FUNCTIONS" ]; then
+    echo "Unable to locate $COMMON_FUNCTIONS" >&2
+    exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$COMMON_FUNCTIONS"
+CODING_AGENTS_REPO_ROOT="$REPO_ROOT"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -177,15 +189,21 @@ else
     print_warning "Cannot check disk space (df not available)"
 fi
 
-# Check WSL (Windows only)
-if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
-    print_checking "WSL version"
-    if command -v wsl.exe &> /dev/null; then
-        WSL_VERSION=$(wsl.exe --version 2>/dev/null | grep "WSL version" | grep -oP '\d+\.\d+\.\d+' || echo "2.x")
-        print_success "Running in WSL $WSL_VERSION"
-    else
-        print_success "Running in WSL"
-    fi
+# Host/container security gates
+print_checking "Host security enforcement (seccomp/AppArmor)"
+if HOST_RESULT=$(verify_host_security_prereqs "$REPO_ROOT" 2>&1); then
+    print_success "Host prerequisites satisfied"
+else
+    print_error "Host security prerequisites failed"
+    echo "$HOST_RESULT" | sed 's/^/         /'
+fi
+
+print_checking "Container runtime security features"
+if CONTAINER_RESULT=$(verify_container_security_support 2>&1); then
+    print_success "Runtime advertises seccomp + AppArmor"
+else
+    print_error "Container security support missing"
+    echo "$CONTAINER_RESULT" | sed 's/^/         /'
 fi
 
 # Check for optional tools

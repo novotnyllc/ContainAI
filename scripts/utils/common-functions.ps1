@@ -515,18 +515,10 @@ function Invoke-SessionCapabilityIssue {
 function Get-SeccompProfilePath {
     param([Parameter(Mandatory = $true)][string]$RepoRoot)
 
-    $candidate = if ($env:CODING_AGENTS_SECCOMP_PROFILE) {
-        $env:CODING_AGENTS_SECCOMP_PROFILE
-    } else {
-        Join-Path $RepoRoot "docker/profiles/seccomp-coding-agents.json"
-    }
-
-    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
-        $candidate = Join-Path $RepoRoot $candidate
-    }
+    $candidate = Join-Path $RepoRoot "docker/profiles/seccomp-coding-agents.json"
 
     if (-not (Test-Path $candidate)) {
-        throw "Seccomp profile not found at $candidate"
+        throw "Seccomp profile not found at $candidate. Run scripts/install.sh to reinstall the host security assets."
     }
 
     return (Resolve-Path $candidate).ProviderPath
@@ -539,6 +531,17 @@ function Test-AppArmorSupported {
     $status = (Get-Content $flagPath -ErrorAction SilentlyContinue)
     if (-not $status) { return $false }
     return ($status -match '^(Y|y)')
+}
+
+function Test-IsWslHost {
+    if (-not $IsLinux) { return $false }
+    if ($env:WSL_DISTRO_NAME) { return $true }
+    try {
+        $version = (Get-Content "/proc/version" -ErrorAction Stop) -join ""
+        return ($version -match 'Microsoft' -or $version -match 'WSL')
+    } catch {
+        return $false
+    }
 }
 
 function Test-AppArmorProfileLoaded {
@@ -557,24 +560,16 @@ function Get-AppArmorProfileName {
         return $null
     }
 
-    $profileName = if ($env:CODING_AGENTS_APPARMOR_PROFILE_NAME) {
-        $env:CODING_AGENTS_APPARMOR_PROFILE_NAME
-    } else {
-        "coding-agents"
-    }
+    $profileName = "coding-agents"
 
     if (Test-AppArmorProfileLoaded -Name $profileName) {
         return $profileName
     }
 
-    $profilePath = if ($env:CODING_AGENTS_APPARMOR_PROFILE_FILE) {
-        $env:CODING_AGENTS_APPARMOR_PROFILE_FILE
-    } else {
-        Join-Path $RepoRoot "docker/profiles/apparmor-coding-agents.profile"
-    }
+    $profilePath = Join-Path $RepoRoot "docker/profiles/apparmor-coding-agents.profile"
 
     if (-not (Test-Path $profilePath)) {
-        Write-Warning "⚠️  AppArmor profile file not found at $profilePath"
+        Write-Warning "⚠️  AppArmor profile file not found at $profilePath. Run scripts/install.sh to restore the host security profiles."
         return $null
     }
 
@@ -599,33 +594,27 @@ function Test-HostSecurityPrereqs {
     $errors = New-Object System.Collections.Generic.List[string]
     $warnings = New-Object System.Collections.Generic.List[string]
 
-    if ($env:CODING_AGENTS_DISABLE_SECCOMP -eq '1') {
-        $warnings.Add('Seccomp enforcement disabled via CODING_AGENTS_DISABLE_SECCOMP=1') | Out-Null
-    } else {
-        try {
-            Get-SeccompProfilePath -RepoRoot $resolvedRoot | Out-Null
-        } catch {
-            $hint = if ($env:CODING_AGENTS_SECCOMP_PROFILE) { $env:CODING_AGENTS_SECCOMP_PROFILE } else { Join-Path $resolvedRoot 'docker/profiles/seccomp-coding-agents.json' }
-            if (-not [System.IO.Path]::IsPathRooted($hint)) {
-                $hint = Join-Path $resolvedRoot $hint
-            }
-            $errors.Add("Seccomp profile not found at $hint. Install host security profiles or set CODING_AGENTS_DISABLE_SECCOMP=1 (not recommended).") | Out-Null
-        }
+    try {
+        Get-SeccompProfilePath -RepoRoot $resolvedRoot | Out-Null
+    } catch {
+        $errors.Add("Seccomp profile not found at $(Join-Path $resolvedRoot 'docker/profiles/seccomp-coding-agents.json'). Run scripts/install.sh to reinstall the host security assets before launching agents.") | Out-Null
     }
 
     if (-not $IsLinux) {
         $errors.Add('AppArmor enforcement requires a Linux host. Run from Linux with AppArmor enabled.') | Out-Null
     } elseif (-not (Test-AppArmorSupported)) {
-        $errors.Add('AppArmor kernel support not detected. Enable AppArmor before launching agents.') | Out-Null
+        $helperScript = Join-Path $resolvedRoot 'scripts/utils/fix-wsl-security.sh'
+        if (Test-IsWslHost -and (Test-Path $helperScript)) {
+            $errors.Add("AppArmor kernel support not detected (WSL 2). Run '$helperScript --check' to audit your Windows configuration, then rerun '$helperScript' (optionally with --force) to apply the fixes and restart WSL.") | Out-Null
+        } else {
+            $errors.Add('AppArmor kernel support not detected. Enable AppArmor before launching agents.') | Out-Null
+        }
     } else {
-        $profileName = if ($env:CODING_AGENTS_APPARMOR_PROFILE_NAME) { $env:CODING_AGENTS_APPARMOR_PROFILE_NAME } else { 'coding-agents' }
+        $profileName = 'coding-agents'
         if (-not (Test-AppArmorProfileLoaded -Name $profileName)) {
-            $profilePath = if ($env:CODING_AGENTS_APPARMOR_PROFILE_FILE) { $env:CODING_AGENTS_APPARMOR_PROFILE_FILE } else { Join-Path $resolvedRoot 'docker/profiles/apparmor-coding-agents.profile' }
-            if (-not [System.IO.Path]::IsPathRooted($profilePath)) {
-                $profilePath = Join-Path $resolvedRoot $profilePath
-            }
+            $profilePath = Join-Path $resolvedRoot 'docker/profiles/apparmor-coding-agents.profile'
             if (-not (Test-Path $profilePath)) {
-                $errors.Add("AppArmor profile file '$profilePath' not found. Set CODING_AGENTS_APPARMOR_PROFILE_FILE to a valid profile path.") | Out-Null
+                $errors.Add("AppArmor profile file '$profilePath' not found. Run scripts/install.sh to restore the host security profiles.") | Out-Null
             } else {
                 $errors.Add("AppArmor profile '$profileName' is not loaded. Run: sudo apparmor_parser -r '$profilePath'.") | Out-Null
             }
@@ -657,13 +646,6 @@ function Test-HostSecurityPrereqs {
 }
 
 function Test-ContainerSecuritySupport {
-    if ($env:CODING_AGENTS_DISABLE_CONTAINER_SECURITY_CHECK -eq '1') {
-        Write-Warning "Container security checks disabled via CODING_AGENTS_DISABLE_CONTAINER_SECURITY_CHECK=1"
-        return $true
-    }
-
-    $requireSeccomp = ($env:CODING_AGENTS_DISABLE_SECCOMP -ne '1')
-
     $infoJson = $env:CODING_AGENTS_CONTAINER_INFO_JSON
     if (-not $infoJson) {
         $cli = Get-ContainerCli
@@ -727,8 +709,8 @@ function Test-ContainerSecuritySupport {
         }
     }
 
-    if ($requireSeccomp -and -not $hasSeccomp) {
-        Write-Error "Container runtime does not report seccomp support. Update Docker/Podman or set CODING_AGENTS_DISABLE_SECCOMP=1 to override."
+    if (-not $hasSeccomp) {
+        Write-Error "Container runtime does not report seccomp support. Update Docker/Podman to a build with seccomp enabled."
         return $false
     }
 
