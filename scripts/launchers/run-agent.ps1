@@ -775,14 +775,26 @@ function Invoke-PromptSession {
     $execArgs = @("exec", "-e", "PROMPT_INPUT=$Prompt", $ContainerName, "bash", "-lc", $command)
     & $ContainerCli @execArgs
     $exitCode = $LASTEXITCODE
-    & $ContainerCli "stop" $ContainerName | Out-Null
     if ($exitCode -eq 0) {
+        $postHook = [Environment]::GetEnvironmentVariable("CODING_AGENTS_PROMPT_POST_HOOK")
+        if (-not [string]::IsNullOrWhiteSpace($postHook)) {
+            Write-Information "🛠️  Running prompt post-hook command"
+            $hookArgs = @("exec", $ContainerName, "bash", "-lc", $postHook)
+            & $ContainerCli @hookArgs
+            $hookExit = $LASTEXITCODE
+            if ($hookExit -eq 0) {
+                Write-Information "✅ Prompt post-hook completed"
+            } else {
+                Write-Information "⚠️  Prompt post-hook failed with exit code $hookExit"
+            }
+        }
         Write-Information ""
         Write-Information "✅ Prompt session completed"
     } else {
         Write-Information ""
         Write-Information "❌ Prompt session failed with exit code $exitCode"
     }
+    & $ContainerCli "stop" $ContainerName | Out-Null
     return $exitCode
 }
 
