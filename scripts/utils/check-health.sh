@@ -31,6 +31,7 @@ PASS=0
 FAIL=0
 WARN=0
 declare -a FIX_COMMAND=()
+HOST_APPARMOR_ACTIVE=0
 
 header() { echo -e "\n${CYAN}🏥 $1${NC}"; echo "----------------------------------------"; }
 pass()   { echo -e "${GREEN}✅ $1${NC}"; ((PASS++)); }
@@ -130,6 +131,7 @@ if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
     # C. AppArmor (The Critical Check)
     if [ -f /sys/kernel/security/apparmor/profiles ]; then
         pass "WSL: AppArmor is active"
+        HOST_APPARMOR_ACTIVE=1
     else
         fail "WSL: AppArmor DISABLED" "Your agents are running unconfined! Run './scripts/utils/fix-wsl-security.sh' immediately."
         suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
@@ -141,6 +143,9 @@ elif [ "$OS_TYPE" = "Darwin" ]; then
 elif [ "$OS_TYPE" = "Linux" ]; then
     pass "Environment: Native Linux ($ARCH)"
     IS_WSL=0
+    if [ -f /sys/kernel/security/apparmor/profiles ]; then
+        HOST_APPARMOR_ACTIVE=1
+    fi
     
     # Native Linux requires stricter checks
     if ! command -v apparmor_parser >/dev/null; then
@@ -175,7 +180,11 @@ else
             IS_DESKTOP=1
             pass "Backend: Docker Desktop (Safe VM Isolation)"
         elif [ "$IS_WSL" -eq 1 ]; then
-             warn "Backend: Native Engine (WSL 2)" "You are running Docker directly in WSL. AppArmor is REQUIRED here."
+             if [ "${HOST_APPARMOR_ACTIVE:-0}" -eq 1 ]; then
+                 pass "Backend: Native Engine (WSL 2)"
+             else
+                 warn "Backend: Native Engine (WSL 2)" "You are running Docker directly in WSL. AppArmor is REQUIRED here."
+             fi
         elif [ "$OS_TYPE" = "Linux" ]; then
              # Check for gVisor
              if echo "$INFO" | grep -q "runsc"; then
@@ -227,15 +236,26 @@ header "Launcher Security Gates"
 
 if load_common_functions; then
     CODING_AGENTS_REPO_ROOT="$REPO_ROOT"
-    if host_output=$(verify_host_security_prereqs "$REPO_ROOT" 2>&1); then
+    host_output=$(verify_host_security_prereqs "$REPO_ROOT" 2>&1)
+    host_status=$?
+    if [ $host_status -eq 0 ]; then
         pass "Host enforcement: seccomp & AppArmor present"
     else
-        fail "Host enforcement failed" "Resolve the errors below (run fix-wsl-security if on WSL)."
-        if [ "${IS_WSL:-0}" -eq 1 ]; then
+        fail "Host enforcement failed" "Resolve the errors below (see suggested fix)."
+        profile_file="$REPO_ROOT/docker/profiles/apparmor-coding-agents.profile"
+        if printf '%s' "$host_output" | grep -q "AppArmor profile 'coding-agents' is not loaded"; then
+            suggest_fix sudo apparmor_parser -r "$profile_file"
+        elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then
+            suggest_fix "$REPO_ROOT/scripts/install.sh"
+        elif printf '%s' "$host_output" | grep -qi "AppArmor kernel support not detected"; then
+            suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
+        elif [ "${IS_WSL:-0}" -eq 1 ]; then
             suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
         else
             suggest_fix "$REPO_ROOT/scripts/install.sh"
         fi
+    fi
+    if [ -n "$host_output" ]; then
         while IFS= read -r line; do
             [ -n "$line" ] && info "$line"
         done <<< "$host_output"

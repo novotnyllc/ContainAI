@@ -676,15 +676,26 @@ is_apparmor_supported() {
     return 1
 }
 
+apparmor_profiles_file() {
+    echo "/sys/kernel/security/apparmor/profiles"
+}
+
+apparmor_profiles_readable() {
+    local profiles_file
+    profiles_file=$(apparmor_profiles_file)
+    [ -r "$profiles_file" ]
+}
+
 apparmor_profile_loaded() {
     local profile="$1"
-    local profiles_file="/sys/kernel/security/apparmor/profiles"
+    local profiles_file
+    profiles_file=$(apparmor_profiles_file)
 
     if [ -z "$profile" ] || [ ! -r "$profiles_file" ]; then
         return 1
     fi
 
-    if grep -q "^${profile} " "$profiles_file"; then
+    if grep -q "^${profile} " "$profiles_file" 2>/dev/null; then
         return 0
     fi
     return 1
@@ -724,6 +735,14 @@ verify_host_security_prereqs() {
     local repo_root="${1:-${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}}"
     local errors=()
     local warnings=()
+    local current_uid
+    current_uid=$(id -u 2>/dev/null || echo 1)
+    local profiles_file
+    profiles_file=$(apparmor_profiles_file)
+    local profiles_file_readable=0
+    if [ -r "$profiles_file" ]; then
+        profiles_file_readable=1
+    fi
 
     if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
         local default_profile="$repo_root/docker/profiles/seccomp-coding-agents.json"
@@ -748,7 +767,9 @@ verify_host_security_prereqs() {
         local profile="coding-agents"
         local profile_file="$repo_root/docker/profiles/apparmor-coding-agents.profile"
         if ! apparmor_profile_loaded "$profile"; then
-            if [ -f "$profile_file" ]; then
+            if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
+                warnings+=("Unable to verify AppArmor profile '$profile' without elevated privileges. Re-run './scripts/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$profile_file'.")
+            elif [ -f "$profile_file" ]; then
                 errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'.")
             else
                 errors+=("AppArmor profile file '$profile_file' not found. Run scripts/install.sh to restore the host security profiles.")
