@@ -1236,6 +1236,7 @@ test_remove_agent() {
     test_section "Testing remove-agent command"
     
     local container_name="codex-test-coding-agents-repo-develop"
+    create_test_container "codex" "test-coding-agents-repo" "develop" >/dev/null
     
     # Remove with --no-push flag (since test container doesn't have git)
     "$PROJECT_ROOT/scripts/launchers/remove-agent" "$container_name" --no-push
