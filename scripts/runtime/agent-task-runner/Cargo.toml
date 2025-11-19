@@ -1,0 +1,32 @@
+[package]
+name = "agent-task-runner"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+libc = "0.2"
+libseccomp-sys = "0.3.0"
+nix = { version = "0.30.1", default-features = false, features = ["fs", "ioctl", "mount", "poll", "process", "signal", "socket", "uio", "user"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+signal-hook = "0.3"
+thiserror = "2.0.17"
+
+[[bin]]
+name = "agentcli-exec"
+path = "src/agentcli_exec.rs"
+
+[[bin]]
+name = "agent-task-runnerd"
+path = "src/agent_task_runnerd.rs"
+
+[[bin]]
+name = "agent-task-sandbox"
+path = "src/agent_task_sandbox.rs"
+
+[[bin]]
+name = "agent-task-runnerctl"
+path = "src/agent_task_runnerctl.rs"

@@ -167,6 +167,22 @@ Static API keys cannot be rotated on demand, so safeguards focus on limiting exp
 - **Telemetry**: Broker emits structured logs for issuance, redemption, and policy failures; Squid provides complementary outbound request logs for correlation.
 - **Anomaly detection**: Excess secret requests, mismatched PID namespaces, or attempts to use expired tokens trigger automatic revocation and optional container teardown.
 
+## Capability Unseal Utility
+
+Agent CLI helpers now rely on `scripts/runtime/capability-unseal.py` to turn sealed blobs back into plaintext configs once they are inside the hardened tmpfs. The script understands the broker token format, verifies the embedded HMAC/session key, and refuses to operate if a bundle was tampered with or redeemed twice. Base images install it at `/usr/local/bin/capability-unseal`, so helpers such as `prepare-copilot-secrets.sh` can decrypt `agent_*` capabilities without re-implementing the sealing logic.
+
+Example host-side inspection:
+
+```bash
+python3 scripts/runtime/capability-unseal.py \ 
+    --stub agent_copilot_cli \ 
+    --secret copilot_cli_config_json \ 
+    --cap-root ~/.config/coding-agents/capabilities \ 
+    --format raw > /tmp/copilot-config.json
+```
+
+Use `--format json` to view the sealed metadata (capability id, issued timestamp, algorithm) instead of the raw secret. The launcher test suites (`test-launchers.sh` / `.ps1`) call this tool directly to ensure every issued capability can be validated and decrypted in both shells.
+
 ## IO Models vs. User Isolation
 
 Agents interact with MCPs through multiple transports (STDIO, SSE, HTTPS) while each MCP stub runs under its own Unix user. The launcher wires these pieces together as follows:
@@ -239,6 +255,11 @@ flowchart LR
 4. Modify `docker/agents/codex/Dockerfile` CMD to run the helper + validation script before `codex`. Remove the expectation that users must bind-mount their entire host config tree.
 5. Extend launcher tests to assert that Codex sessions fail fast (with actionable messages) when `~/.codex/auth.json` is absent or when the broker rejects the capability, ensuring we never launch Codex without secrets wired correctly.
 
+**Implementation status (Nov 2025)**
+- Host launchers now treat `agent_codex_cli` as a first-class stub: when `~/.codex/auth.json` exists they load it, derive a SHA-256 digest for audit trails, and include the sealed bundle plus manifest under `/run/coding-agents/codex/cli` before copying into the container.
+- `docker/agents/codex/prepare-codex-secrets.sh` ships inside the Codex image, redeeming the sealed blob via `capability-unseal` (or a test override) and persisting `auth.json` with restrictive permissions; the image CMD runs this helper before `codex` executes.
+- Unit tests in both launcher suites execute the helper out-of-container by overriding `CODING_AGENTS_AGENT_HOME`, `CODING_AGENTS_AGENT_CAP_ROOT`, and `CODING_AGENTS_CAPABILITY_UNSEAL`, verifying the decrypted payload matches the broker fixture so regressions are caught without a full container spin-up.
+
 ### Anthropic Claude CLI (`~/.claude/.credentials.json`)
 
 ```mermaid
@@ -254,8 +275,8 @@ flowchart LR
 ```
 
 **Current gap**
-- `init-claude-config.sh` expects `$HOME/.claude/.credentials.json`, yet launchers never mount the host `~/.claude` directory. Launches therefore proceed without credentials even though `validate-claude-auth.sh` warns.
-- There is no consistent way to feed raw `CLAUDE_API_KEY` env vars through the broker when developers prefer not to store JSON files on disk.
+- Legacy `init-claude-config.sh` expected `$HOME/.claude/.credentials.json`, yet launchers never mounted the host `~/.claude` directory—so launches historically proceeded without credentials even though `validate-claude-auth.sh` warned. The new helper documented below supersedes that flow, but the gap is recorded here for context.
+- There was no consistent way to feed raw `CLAUDE_API_KEY` env vars through the broker when developers preferred not to store JSON files on disk; capability redemption plus helper synthesis now closes that hole.
 
 **Implementation plan**
 1. Expand launcher preflights to look for either `~/.claude/.credentials.json` or `CLAUDE_API_KEY` on the host. Whichever is present gets sealed through the broker via the `agent_claude_cli` stub; if both exist, prefer the JSON file but note the choice in the audit log.
@@ -263,6 +284,11 @@ flowchart LR
 3. Replace `init-claude-config.sh` with `prepare-claude-secrets.sh` that redeems the capability, writes `.credentials.json` (or synthesizes it from `CLAUDE_API_KEY`), and ensures `/home/agentuser/.claude` never leaves tmpfs. Validation should now fail closed if the capability is missing or unreadable.
 4. Update the Claude Dockerfile entrypoint to run `prepare-claude-secrets.sh && validate-claude-auth.sh && claude`, ensuring credentials always exist before the CLI boots.
 5. Add launcher tests that simulate both file-based and env-based Claude secrets, verifying that only the selected form appears inside the container tmpfs and that audit logs record the fallback path.
+
+**Implementation status (Nov 2025)**
+- Bash + PowerShell launchers already hash-check either `~/.claude/.credentials.json` or `CLAUDE_API_KEY`, prefer the file form, and stage the resulting `agent_claude_cli` capability plus manifest beneath `/run/coding-agents/claude/cli/capabilities` before every container launch.
+- `docker/agents/claude/prepare-claude-secrets.sh` now ships in the image, redeems the sealed `claude_cli_credentials` bundle through `capability-unseal`, seeds `.claude.json` defaults, and materializes `.claude/.credentials.json` (synthesizing JSON from a bare API key when needed) prior to running `claude`; `validate-claude-auth.sh` now exits non-zero if that credential file is missing so launches fail closed.
+- Launcher unit tests `test_claude_cli_helper` (bash) and `Test-ClaudeCliHelper` (PowerShell) run the helper out of container using overridden `CODING_AGENTS_AGENT_HOME` / `CODING_AGENTS_AGENT_CAP_ROOT`, covering both JSON and inline-secret flows to guard against regressions without spinning up Docker.
 
 Across all three agents, the broker-issued capability flow keeps long-lived host secrets resident on the host while still letting the containerized CLI authenticate. The steps above bring the implementation in line with the documented security model and give operators traceability for every time an agent consumes a host identity.
 
@@ -351,3 +377,8 @@ sequenceDiagram
 ```
 
 This approach lets us persist the useful artifacts (logs, history, saved sessions) while preventing arbitrary file writes back onto the host. It also guarantees that the same data the CLI expects is present every time without reopening the attack surface that came with raw bind mounts.
+
+**Implementation status (Nov 2025)**
+- Host launchers (bash + PowerShell) now call `scripts/utils/package-agent-data.py` before every session, writing a per-agent `data-import.tar` plus manifest under `/run/coding-agents/<agent>/data`. The manifest captures SHA-256 digests so the host can validate what was staged.
+- `entrypoint.sh` provisions a dedicated tmpfs (`/run/agent-data`) sized via `CODING_AGENTS_DATA_TMPFS_SIZE` (default 64 MiB) and unpacks each available import tar into `/run/agent-data/<agent>` with `chmod 700` semantics before the CLI boots.
+- Launcher tests include a packager regression case to ensure the helper continues to emit manifests/tars when host data exists and suppresses empty archives when nothing matches the whitelist.

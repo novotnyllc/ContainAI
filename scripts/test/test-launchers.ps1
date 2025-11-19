@@ -661,15 +661,14 @@ function Test-SecretBrokerCli {
     $null = New-Item -ItemType Directory -Path $envDir -Force
     $capDir = Join-Path $env:TEMP ("broker-cap-" + [guid]::NewGuid().ToString())
     $null = New-Item -ItemType Directory -Path $capDir -Force
-    $sealedDir = Join-Path $capDir "sealed"
-    $null = New-Item -ItemType Directory -Path $sealedDir -Force
+    $sealedDir = Join-Path (Join-Path $capDir "alpha") "secrets"
 
     $previousConfig = $env:CODING_AGENTS_CONFIG_DIR
     $env:CODING_AGENTS_CONFIG_DIR = $envDir
 
     $configMounts = @($configRoot)
     $issueMounts = @($configRoot, $capDir)
-    $redeemMounts = @($configRoot, $capDir, $sealedDir)
+    $redeemMounts = @($configRoot, $capDir)
     try {
         if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $issueMounts -ScriptArgs @("issue", "--session-id", "test-session", "--output", $capDir, "--stubs", "alpha")) {
             Pass "Capability issuance succeeds"
@@ -691,7 +690,7 @@ function Test-SecretBrokerCli {
             Fail "Broker secret store failed"
         }
 
-        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $redeemMounts -ScriptArgs @("redeem", "--capability", $tokenFile.FullName, "--secret", "TEST_SECRET", "--output-dir", $sealedDir)) {
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $redeemMounts -ScriptArgs @("redeem", "--capability", $tokenFile.FullName, "--secret", "TEST_SECRET")) {
             Pass "Capability redemption seals secret"
         } else {
             Fail "Capability redemption failed"
@@ -739,6 +738,32 @@ function Test-SecretBrokerCli {
             Fail "Failed to decrypt sealed secret: $_"
         }
 
+        $capabilityUnseal = Join-Path $ProjectRoot "scripts/runtime/capability-unseal.py"
+        if (-not (Test-Path $capabilityUnseal)) {
+            Fail "capability-unseal.py missing"
+        } else {
+            $pythonCmdInfo = Get-Command python3 -ErrorAction SilentlyContinue
+            if (-not $pythonCmdInfo) {
+                $pythonCmdInfo = Get-Command python -ErrorAction SilentlyContinue
+            }
+            $pythonCmd = if ($pythonCmdInfo) { $pythonCmdInfo.Source } else { $null }
+
+            if (-not $pythonCmd) {
+                Fail "Python interpreter not found for capability-unseal test"
+            } else {
+                $unsealed = & $pythonCmd $capabilityUnseal "--stub" "alpha" "--secret" "TEST_SECRET" "--cap-root" $capDir "--format" "raw" 2> $null
+                if ($LASTEXITCODE -eq 0) {
+                    if ($unsealed -eq "super-secret") {
+                        Pass "capability-unseal retrieves sealed secret"
+                    } else {
+                        Fail "capability-unseal returned unexpected value"
+                    }
+                } else {
+                    Fail "capability-unseal script failed"
+                }
+            }
+        }
+
         $secondRedeem = Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $redeemMounts -ScriptArgs @("redeem", "--capability", $tokenFile.FullName, "--secret", "TEST_SECRET")
         if ($secondRedeem) {
             Fail "Redeeming same capability twice should fail"
@@ -759,6 +784,263 @@ function Test-SecretBrokerCli {
         }
         Remove-Item $configRoot -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item $capDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-CodexCliHelper {
+    Test-Section "Testing Codex CLI helper"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $helperScript = Join-Path $ProjectRoot "docker/agents/codex/prepare-codex-secrets.sh"
+    if (-not (Test-Path $helperScript)) {
+        Fail "Codex helper missing at $helperScript"
+        return
+    }
+
+    $bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+    if (-not $bashCmd) {
+        Pass "Bash not available; skipping Codex helper test"
+        return
+    }
+
+    $brokerScript = Join-Path $ProjectRoot "scripts/runtime/secret-broker.py"
+    $configRoot = Join-Path $env:TEMP ("codex-helper-config-" + [guid]::NewGuid().ToString())
+    $null = New-Item -ItemType Directory -Path $configRoot -Force
+    $envDir = Join-Path $configRoot "config"
+    $capDir = Join-Path $configRoot "capabilities"
+    $null = New-Item -ItemType Directory -Path $envDir -Force
+    $null = New-Item -ItemType Directory -Path $capDir -Force
+    $secretFile = Join-Path $configRoot "auth.json"
+    '{"refresh_token":"unit-test","access_token":"abc"}' | Set-Content -LiteralPath $secretFile -Encoding UTF8
+
+    $previousConfig = $env:CODING_AGENTS_CONFIG_DIR
+    $env:CODING_AGENTS_CONFIG_DIR = $envDir
+
+    $issueMounts = @($configRoot, $capDir)
+    $storeMounts = @($configRoot)
+    $redeemMounts = @($configRoot, $capDir)
+
+    try {
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $issueMounts -ScriptArgs @("issue", "--session-id", "codex-helper", "--output", $capDir, "--stubs", "agent_codex_cli")) {
+            Pass "Codex capability issuance succeeds"
+        } else {
+            Fail "Codex capability issuance failed"
+            return
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $storeMounts -ScriptArgs @("store", "--stub", "agent_codex_cli", "--name", "codex_cli_auth_json", "--from-file", $secretFile)) {
+            Pass "Codex secret stored"
+        } else {
+            Fail "Codex secret store failed"
+        }
+
+        $tokenFile = Get-ChildItem -Path $capDir -Filter '*.json' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $tokenFile) {
+            Fail "Codex capability token missing"
+            return
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $redeemMounts -ScriptArgs @("redeem", "--capability", $tokenFile.FullName, "--secret", "codex_cli_auth_json")) {
+            Pass "Codex capability redemption seals secret"
+        } else {
+            Fail "Codex capability redemption failed"
+        }
+
+        $agentHome = Join-Path $env:TEMP ("codex-helper-home-" + [guid]::NewGuid().ToString())
+        $null = New-Item -ItemType Directory -Path $agentHome -Force
+        $env:CODING_AGENTS_AGENT_HOME = $agentHome
+        $env:CODING_AGENTS_AGENT_CAP_ROOT = $capDir
+        $env:CODING_AGENTS_CAPABILITY_UNSEAL = Join-Path $ProjectRoot "scripts/runtime/capability-unseal.py"
+
+        $bashResult = & $bashCmd.Source $helperScript 2> $null
+        if ($LASTEXITCODE -eq 0) {
+            Pass "prepare-codex-secrets decrypts bundle"
+            $authFile = Join-Path $agentHome ".codex/auth.json"
+            if ((Test-Path $authFile) -and (Get-Content -LiteralPath $authFile -Raw | Select-String -SimpleMatch "unit-test")) {
+                Pass "Codex auth.json materialized"
+            } else {
+                Fail "Codex auth.json missing or incorrect"
+            }
+        } else {
+            Fail "prepare-codex-secrets failed"
+        }
+
+    }
+    finally {
+        if ($previousConfig) {
+            $env:CODING_AGENTS_CONFIG_DIR = $previousConfig
+        } else {
+            Remove-Item Env:CODING_AGENTS_CONFIG_DIR -ErrorAction SilentlyContinue
+        }
+        Remove-Item Env:CODING_AGENTS_AGENT_HOME -ErrorAction SilentlyContinue
+        Remove-Item Env:CODING_AGENTS_AGENT_CAP_ROOT -ErrorAction SilentlyContinue
+        Remove-Item Env:CODING_AGENTS_CAPABILITY_UNSEAL -ErrorAction SilentlyContinue
+        Remove-Item $configRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $capDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $secretFile -Force -ErrorAction SilentlyContinue
+        if (Test-Path $agentHome) {
+            Remove-Item $agentHome -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Test-ClaudeCliHelper {
+    Test-Section "Testing Claude CLI helper"
+
+    . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
+
+    $helperScript = Join-Path $ProjectRoot "docker/agents/claude/prepare-claude-secrets.sh"
+    if (-not (Test-Path $helperScript)) {
+        Fail "Claude helper missing at $helperScript"
+        return
+    }
+
+    $bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+    if (-not $bashCmd) {
+        Pass "Bash not available; skipping Claude helper test"
+        return
+    }
+
+    $brokerScript = Join-Path $ProjectRoot "scripts/runtime/secret-broker.py"
+    $configRoot = Join-Path $env:TEMP ("claude-helper-config-" + [guid]::NewGuid().ToString())
+    $null = New-Item -ItemType Directory -Path $configRoot -Force
+    $envDir = Join-Path $configRoot "config"
+    $null = New-Item -ItemType Directory -Path $envDir -Force
+    $secretFile = Join-Path $configRoot "credentials.json"
+    '{"api_key":"file-secret","workspace_id":"dev"}' | Set-Content -LiteralPath $secretFile -Encoding UTF8
+
+    $previousConfig = $env:CODING_AGENTS_CONFIG_DIR
+    $storeMounts = @($configRoot)
+    $fileCapDir = $null
+    $inlineCapDir = $null
+    $agentHomeFile = $null
+    $agentHomeInline = $null
+
+    try {
+        $env:CODING_AGENTS_CONFIG_DIR = $envDir
+
+        # File-based credentials scenario
+        $fileCapDir = Join-Path $configRoot "file-capabilities"
+        $null = New-Item -ItemType Directory -Path $fileCapDir -Force
+        $issueFileMounts = @($configRoot, $fileCapDir)
+        $redeemFileMounts = @($configRoot, $fileCapDir)
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $issueFileMounts -ScriptArgs @("issue", "--session-id", "claude-helper-file", "--output", $fileCapDir, "--stubs", "agent_claude_cli")) {
+            Pass "Claude capability issuance (file) succeeds"
+        } else {
+            Fail "Claude capability issuance (file) failed"
+            return
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $storeMounts -ScriptArgs @("store", "--stub", "agent_claude_cli", "--name", "claude_cli_credentials", "--from-file", $secretFile)) {
+            Pass "Claude secret (file) stored"
+        } else {
+            Fail "Claude secret (file) store failed"
+        }
+
+        $fileToken = Get-ChildItem -Path $fileCapDir -Filter '*.json' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $fileToken) {
+            Fail "Claude capability token (file) missing"
+            return
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $redeemFileMounts -ScriptArgs @("redeem", "--capability", $fileToken.FullName, "--secret", "claude_cli_credentials")) {
+            Pass "Claude capability (file) redemption seals secret"
+        } else {
+            Fail "Claude capability (file) redemption failed"
+        }
+
+        $agentHomeFile = Join-Path $env:TEMP ("claude-helper-home-file-" + [guid]::NewGuid().ToString())
+        $null = New-Item -ItemType Directory -Path $agentHomeFile -Force
+        $agentConfigDir = Join-Path $agentHomeFile ".config/coding-agents/claude"
+        $null = New-Item -ItemType Directory -Path $agentConfigDir -Force
+        '{}' | Set-Content -LiteralPath (Join-Path $agentConfigDir ".claude.json") -Encoding UTF8
+
+        $env:CODING_AGENTS_AGENT_HOME = $agentHomeFile
+        $env:CODING_AGENTS_AGENT_CAP_ROOT = $fileCapDir
+        $env:CODING_AGENTS_CAPABILITY_UNSEAL = Join-Path $ProjectRoot "scripts/runtime/capability-unseal.py"
+
+        & $bashCmd.Source $helperScript 2> $null
+        if ($LASTEXITCODE -eq 0) {
+            Pass "prepare-claude-secrets decrypts file-based bundle"
+            $fileCreds = Join-Path $agentHomeFile ".claude/.credentials.json"
+            $content = if (Test-Path $fileCreds) { Get-Content -LiteralPath $fileCreds -Raw -ErrorAction SilentlyContinue } else { "" }
+            if ($content -and ($content -like '*"api_key": "file-secret"*') -and ($content -like '*"workspace_id": "dev"*')) {
+                Pass "Claude credentials mirrored JSON payload"
+            } else {
+                Fail "Claude credentials missing expected JSON payload"
+            }
+        } else {
+            Fail "prepare-claude-secrets failed for file-based bundle"
+        }
+
+        # Inline API key scenario
+        $inlineSecret = "inline-secret-token"
+        $inlineCapDir = Join-Path $configRoot "inline-capabilities"
+        $null = New-Item -ItemType Directory -Path $inlineCapDir -Force
+        $issueInlineMounts = @($configRoot, $inlineCapDir)
+        $redeemInlineMounts = @($configRoot, $inlineCapDir)
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $issueInlineMounts -ScriptArgs @("issue", "--session-id", "claude-helper-inline", "--output", $inlineCapDir, "--stubs", "agent_claude_cli")) {
+            Pass "Claude capability issuance (inline) succeeds"
+        } else {
+            Fail "Claude capability issuance (inline) failed"
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $storeMounts -ScriptArgs @("store", "--stub", "agent_claude_cli", "--name", "claude_cli_credentials", "--value", $inlineSecret)) {
+            Pass "Claude secret (inline) stored"
+        } else {
+            Fail "Claude secret (inline) store failed"
+        }
+
+        $inlineToken = Get-ChildItem -Path $inlineCapDir -Filter '*.json' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $inlineToken) {
+            Fail "Claude capability token (inline) missing"
+            return
+        }
+
+        if (Invoke-PythonTool -ScriptPath $brokerScript -MountPaths $redeemInlineMounts -ScriptArgs @("redeem", "--capability", $inlineToken.FullName, "--secret", "claude_cli_credentials")) {
+            Pass "Claude capability (inline) redemption seals secret"
+        } else {
+            Fail "Claude capability (inline) redemption failed"
+        }
+
+        $agentHomeInline = Join-Path $env:TEMP ("claude-helper-home-inline-" + [guid]::NewGuid().ToString())
+        $null = New-Item -ItemType Directory -Path $agentHomeInline -Force
+        $env:CODING_AGENTS_AGENT_HOME = $agentHomeInline
+        $env:CODING_AGENTS_AGENT_CAP_ROOT = $inlineCapDir
+
+        & $bashCmd.Source $helperScript 2> $null
+        if ($LASTEXITCODE -eq 0) {
+            Pass "prepare-claude-secrets decrypts inline bundle"
+            $inlineCreds = Join-Path $agentHomeInline ".claude/.credentials.json"
+            $inlineContent = if (Test-Path $inlineCreds) { Get-Content -LiteralPath $inlineCreds -Raw -ErrorAction SilentlyContinue } else { "" }
+            if ($inlineContent -and ($inlineContent -like ('*"api_key": "' + $inlineSecret + '"*'))) {
+                Pass "Claude credentials synthesized from API key"
+            } else {
+                Fail "Claude credentials missing synthesized API key"
+            }
+        } else {
+            Fail "prepare-claude-secrets failed for inline bundle"
+        }
+
+    }
+    finally {
+        if ($previousConfig) {
+            $env:CODING_AGENTS_CONFIG_DIR = $previousConfig
+        } else {
+            Remove-Item Env:CODING_AGENTS_CONFIG_DIR -ErrorAction SilentlyContinue
+        }
+        Remove-Item Env:CODING_AGENTS_AGENT_HOME -ErrorAction SilentlyContinue
+        Remove-Item Env:CODING_AGENTS_AGENT_CAP_ROOT -ErrorAction SilentlyContinue
+        Remove-Item Env:CODING_AGENTS_CAPABILITY_UNSEAL -ErrorAction SilentlyContinue
+        if ($configRoot) { Remove-Item $configRoot -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($secretFile) { Remove-Item $secretFile -Force -ErrorAction SilentlyContinue }
+        if ($fileCapDir) { Remove-Item $fileCapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($inlineCapDir) { Remove-Item $inlineCapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($agentHomeFile) { Remove-Item $agentHomeFile -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($agentHomeInline) { Remove-Item $agentHomeInline -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -1270,6 +1552,8 @@ function Main {
         @{ Name = "Test-ContainerSecurityPreflight"; Action = { Test-ContainerSecurityPreflight } },
         @{ Name = "Test-SessionConfigRenderer"; Action = { Test-SessionConfigRenderer } },
         @{ Name = "Test-SecretBrokerCli"; Action = { Test-SecretBrokerCli } },
+        @{ Name = "Test-CodexCliHelper"; Action = { Test-CodexCliHelper } },
+        @{ Name = "Test-ClaudeCliHelper"; Action = { Test-ClaudeCliHelper } },
         @{ Name = "Test-LocalRemotePush"; Action = { Test-LocalRemotePush } },
         @{ Name = "Test-LocalRemoteFallbackPush"; Action = { Test-LocalRemoteFallbackPush } },
         @{ Name = "Test-SecureRemoteSync"; Action = { Test-SecureRemoteSync } },

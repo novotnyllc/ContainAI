@@ -12,8 +12,11 @@ TEST_HOST_SECRETS_FILE="${TEST_HOST_SECRETS_FILE:-}"
 HOST_SECRETS_FILE="${TEST_HOST_SECRETS_FILE:-}"
 
 # Source test utilities
+# shellcheck source=scripts/test/test-config.sh disable=SC1091
 source "$SCRIPT_DIR/test-config.sh"
+# shellcheck source=scripts/test/test-env.sh disable=SC1091
 source "$SCRIPT_DIR/test-env.sh"
+# shellcheck source=scripts/utils/common-functions.sh disable=SC1091
 source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
 
 # Test tracking
@@ -23,7 +26,6 @@ PASSED_TESTS=0
 # Color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
@@ -124,6 +126,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --preserve)
+            # shellcheck disable=SC2034 # consumed by sourced helpers
             TEST_PRESERVE_RESOURCES="true"
             shift
             ;;
@@ -188,7 +191,8 @@ assert_equals() {
 
 assert_container_running() {
     local container_name="$1"
-    local status=$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null)
+    local status
+    status=$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null)
     
     if [ "$status" = "running" ]; then
         pass "Container $container_name is running"
@@ -202,7 +206,8 @@ assert_container_has_label() {
     local label_key="$2"
     local expected_value="$3"
     
-    local actual=$(docker inspect -f "{{ index .Config.Labels \"${label_key}\" }}" "$container_name" 2>/dev/null)
+    local actual
+    actual=$(docker inspect -f "{{ index .Config.Labels \"${label_key}\" }}" "$container_name" 2>/dev/null)
     
     if [ "$actual" = "$expected_value" ]; then
         pass "Container $container_name has correct label $label_key=$expected_value"
@@ -293,7 +298,8 @@ test_container_networking() {
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
     
     # Check if container is in correct network
-    local networks=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$container_name")
+    local networks
+    networks=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$container_name")
     
     if echo "$networks" | grep -q "$TEST_NETWORK"; then
         pass "Container is in test network"
@@ -308,7 +314,8 @@ test_workspace_mounting() {
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
     
     # Check if workspace is mounted
-    local mounts=$(docker inspect -f '{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' "$container_name")
+    local mounts
+    mounts=$(docker inspect -f '{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' "$container_name")
     
     if echo "$mounts" | grep -q "$TEST_REPO_DIR:/workspace"; then
         pass "Workspace is correctly mounted"
@@ -337,6 +344,123 @@ test_environment_variables() {
         pass "Environment variables are set"
     else
         fail "Environment variables not found"
+    fi
+}
+
+test_agentcli_uid_split() {
+    test_section "Testing agentcli UID split"
+
+    local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
+
+    if docker exec "$container_name" id -u agentcli >/dev/null 2>&1; then
+        pass "agentcli user exists"
+    else
+        fail "agentcli user missing"
+    fi
+
+    local groups
+    groups=$(docker exec "$container_name" id -nG agentuser 2>/dev/null || true)
+    if echo "$groups" | grep -qw "agentcli"; then
+        pass "agentuser joined agentcli group"
+    else
+        fail "agentuser is not in agentcli group"
+    fi
+
+    local secrets_meta
+    secrets_meta=$(docker exec "$container_name" stat -c '%U:%G:%a' /run/agent-secrets 2>/dev/null || true)
+    if [ "$secrets_meta" = "agentcli:agentcli:770" ]; then
+        pass "/run/agent-secrets owned by agentcli with 770 perms"
+    else
+        fail "/run/agent-secrets ownership/perms mismatch ($secrets_meta)"
+    fi
+
+    local data_meta
+    data_meta=$(docker exec "$container_name" stat -c '%U:%G:%a' /run/agent-data 2>/dev/null || true)
+    if [ "$data_meta" = "agentcli:agentcli:770" ]; then
+        pass "/run/agent-data owned by agentcli with 770 perms"
+    else
+        fail "/run/agent-data ownership/perms mismatch ($data_meta)"
+    fi
+
+    local secret_opts
+    secret_opts=$(docker exec "$container_name" findmnt -no OPTIONS /run/agent-secrets 2>/dev/null || true)
+    if echo "$secret_opts" | grep -q "nosuid" && echo "$secret_opts" | grep -q "nodev" && echo "$secret_opts" | grep -q "noexec" && echo "$secret_opts" | grep -q "unbindable"; then
+        pass "/run/agent-secrets mount options enforce nosuid/nodev/noexec/unbindable"
+    else
+        fail "Missing required mount options on /run/agent-secrets ($secret_opts)"
+    fi
+
+    local propagation
+    propagation=$(docker exec "$container_name" findmnt -no PROPAGATION /run/agent-secrets 2>/dev/null || true)
+    if [ "$propagation" = "private" ]; then
+        pass "/run/agent-secrets mount is private"
+    else
+        fail "/run/agent-secrets propagation mismatch ($propagation)"
+    fi
+}
+
+test_agent_task_runner_seccomp() {
+    test_section "Testing agent-task-runner seccomp notifications"
+
+    local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
+
+    if docker exec "$container_name" agentcli-exec /bin/bash -c 'true' >/dev/null 2>&1; then
+        pass "agentcli-exec executed sample command"
+    else
+        fail "agentcli-exec failed to run sample command"
+        return
+    fi
+
+    local log_output
+    log_output=$(docker exec "$container_name" cat /run/agent-task-runner/events.log 2>/dev/null || true)
+    if echo "$log_output" | grep -q '"action":"allow"'; then
+        pass "agent-task-runner recorded exec notification"
+    else
+        fail "agent-task-runner log missing exec notification"
+    fi
+}
+
+test_cli_wrappers() {
+    test_section "Testing CLI wrappers"
+
+    local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
+
+    if docker exec "$container_name" test -x /usr/local/bin/github-copilot-cli.real; then
+        pass "github-copilot-cli.real preserved"
+    else
+        fail "github-copilot-cli.real missing"
+    fi
+
+    local wrapper_head
+    wrapper_head=$(docker exec "$container_name" head -n 5 /usr/local/bin/github-copilot-cli 2>/dev/null || true)
+    if echo "$wrapper_head" | grep -q "agentcli-exec"; then
+        pass "github-copilot-cli wrapper invokes agentcli-exec"
+    else
+        fail "github-copilot-cli wrapper missing agentcli-exec reference"
+    fi
+
+    local socket_export
+    socket_export=$(docker exec "$container_name" grep -n "AGENT_TASK_RUNNER_SOCKET" /usr/local/bin/github-copilot-cli 2>/dev/null || true)
+    if [ -n "$socket_export" ]; then
+        pass "Wrapper exports AGENT_TASK_RUNNER_SOCKET"
+    else
+        fail "Wrapper does not export AGENT_TASK_RUNNER_SOCKET"
+    fi
+
+    local runnerctl_hook
+    runnerctl_hook=$(docker exec "$container_name" grep -n "agent-task-runnerctl" /usr/local/bin/github-copilot-cli 2>/dev/null || true)
+    if [ -n "$runnerctl_hook" ]; then
+        pass "Wrapper routes explicit exec/run via agent-task-runnerctl"
+    else
+        fail "Wrapper missing agent-task-runnerctl reference"
+    fi
+
+    local exec_mode
+    exec_mode=$(docker exec "$container_name" stat -c '%a %U:%G' /usr/local/bin/agentcli-exec 2>/dev/null || true)
+    if [ "$exec_mode" = "4755 root:root" ]; then
+        pass "agentcli-exec installed setuid root"
+    else
+        fail "agentcli-exec permissions unexpected ($exec_mode)"
     fi
 }
 
@@ -426,7 +550,8 @@ test_network_proxy_modes() {
 
     sleep $CONTAINER_STARTUP_WAIT
 
-    local restricted_networks=$(docker inspect -f '{{range $name, $net := .NetworkSettings.Networks}}{{$name}} {{end}}' "$restricted_container")
+    local restricted_networks
+    restricted_networks=$(docker inspect -f '{{range $name, $net := .NetworkSettings.Networks}}{{$name}} {{end}}' "$restricted_container")
     if echo "$restricted_networks" | grep -q "none"; then
         pass "Restricted container attached to none network"
     else
@@ -472,7 +597,8 @@ PY
 
     sleep $CONTAINER_STARTUP_WAIT
 
-    local env_http_proxy=$(docker exec "$proxy_client" printenv HTTP_PROXY 2>/dev/null || true)
+    local env_http_proxy
+    env_http_proxy=$(docker exec "$proxy_client" printenv HTTP_PROXY 2>/dev/null || true)
     if [ "$env_http_proxy" = "$proxy_url" ]; then
         pass "Proxy environment variable propagated"
     else
@@ -549,8 +675,10 @@ test_container_isolation() {
     local container2="${TEST_CONTAINER_PREFIX}-claude-test"
     
     # Verify containers have different IDs
-    local id1=$(docker inspect -f '{{.Id}}' "$container1")
-    local id2=$(docker inspect -f '{{.Id}}' "$container2")
+    local id1
+    id1=$(docker inspect -f '{{.Id}}' "$container1")
+    local id2
+    id2=$(docker inspect -f '{{.Id}}' "$container2")
     
     if [ "$id1" != "$id2" ]; then
         pass "Containers are isolated (different IDs)"
@@ -644,7 +772,8 @@ test_shared_functions() {
     cd "$TEST_REPO_DIR"
     
     # Test get_repo_name
-    local repo_name=$(get_repo_name "$TEST_REPO_DIR")
+    local repo_name
+    repo_name=$(get_repo_name "$TEST_REPO_DIR")
     if [[ "$repo_name" =~ test-coding-agents-repo ]]; then
         pass "get_repo_name() works in test environment"
     else
@@ -652,7 +781,8 @@ test_shared_functions() {
     fi
     
     # Test get_current_branch
-    local branch=$(get_current_branch "$TEST_REPO_DIR")
+    local branch
+    branch=$(get_current_branch "$TEST_REPO_DIR")
     assert_equals "main" "$branch" "get_current_branch() returns correct branch"
     
     # Test check_docker_running
@@ -689,6 +819,9 @@ run_all_tests() {
     test_container_networking
     test_workspace_mounting
     test_environment_variables
+    test_agentcli_uid_split
+    test_cli_wrappers
+    test_agent_task_runner_seccomp
     test_mcp_configuration_generation
     test_network_proxy_modes
     test_multiple_agents
@@ -710,10 +843,11 @@ run_all_tests() {
 }
 
 # Cleanup trap
+# shellcheck disable=SC2329 # invoked via trap
 cleanup() {
     local exit_code=$?
     teardown_test_environment
-    exit $exit_code
+    exit "$exit_code"
 }
 
 trap cleanup EXIT INT TERM

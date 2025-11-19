@@ -1,3 +1,14 @@
+# Build the agent-task-runner binaries (agentcli-exec + agent-task-runnerd) with Rust
+FROM cgr.dev/chainguard/rust:latest-dev AS agent-task-runner-builder
+
+RUN apk add --no-cache \
+    libseccomp-dev \
+    pkgconf
+
+WORKDIR /agent-task-runner
+COPY scripts/runtime/agent-task-runner/ ./
+RUN cargo build --release --locked
+
 # Base image for coding agents container
 # This is a DEVELOPMENT container - agents need build tools to compile code!
 FROM ubuntu:24.04
@@ -54,6 +65,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2t64 \
     libatspi2.0-0 \
     libxshmfence1 \
+    libseccomp-dev \
     # .NET runtime dependencies
     libc6 \
     libgcc-s1 \
@@ -161,7 +173,9 @@ COPY --chown=root:root scripts/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host
 COPY --chown=root:root scripts/runtime/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
 COPY --chown=root:root scripts/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
 COPY --chown=root:root scripts/runtime/mcp-stub.py /usr/local/bin/mcp-stub
+COPY --chown=root:root scripts/runtime/capability-unseal.py /usr/local/bin/capability-unseal
 COPY --chown=root:root scripts/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
+COPY --chown=root:root scripts/utils/package-agent-data.py /usr/local/bin/package-agent-data.py
 RUN chmod +x \
     /usr/local/bin/agent-session \
     /usr/local/bin/agent-session-runner \
@@ -172,7 +186,9 @@ RUN chmod +x \
     /usr/local/bin/gpg-proxy-server.sh \
     /usr/local/bin/setup-mcp-configs.sh \
     /usr/local/bin/mcp-stub \
-    /usr/local/bin/convert-toml-to-mcp.py
+    /usr/local/bin/capability-unseal \
+    /usr/local/bin/convert-toml-to-mcp.py \
+    /usr/local/bin/package-agent-data.py
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -189,6 +205,20 @@ RUN npm install -g \
     @githubnext/github-copilot-cli && \
     npx playwright install --with-deps chromium
 
+# Install agentcli exec helper, task-runner daemon (Rust builds), and wrap vendor CLIs
+COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agentcli-exec /usr/local/bin/agentcli-exec
+COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-runnerd /usr/local/bin/agent-task-runnerd
+COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-sandbox /usr/local/bin/agent-task-sandbox
+COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-runnerctl /usr/local/bin/agent-task-runnerctl
+RUN chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl && \
+    chmod 4755 /usr/local/bin/agentcli-exec && \
+    chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl
+
+COPY --chown=root:root scripts/runtime/install-agent-cli-wrappers.sh /usr/local/bin/install-agent-cli-wrappers.sh
+RUN chmod +x /usr/local/bin/install-agent-cli-wrappers.sh && \
+    /usr/local/bin/install-agent-cli-wrappers.sh github-copilot-cli:copilot codex:codex claude:claude && \
+    rm /usr/local/bin/install-agent-cli-wrappers.sh
+
 # Create non-root user (reuse Ubuntu's default UID 1000 user if present)
 RUN set -eux; \
     if id -u agentuser >/dev/null 2>&1; then \
@@ -201,7 +231,11 @@ RUN set -eux; \
         usermod -s /bin/bash agentuser; \
     else \
         useradd -m -s /bin/bash -u 1000 agentuser; \
-    fi && \
+    fi; \
+    if ! id -u agentcli >/dev/null 2>&1; then \
+        useradd -m -s /usr/sbin/nologin agentcli; \
+    fi; \
+    usermod -a -G agentcli agentuser >/dev/null 2>&1 || true; \
     mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share && \
     chown -R agentuser:agentuser /workspace /home/agentuser
 

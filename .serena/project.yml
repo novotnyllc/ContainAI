@@ -15,7 +15,9 @@
 # Note that when using the JetBrains backend, language servers are not used and this list is correspondingly ignored.
 languages:
 - bash
+- cpp
 - python
+- rust
 - markdown
 - typescript
 encoding: "utf-8"

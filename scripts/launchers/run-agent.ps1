@@ -55,12 +55,431 @@ $LocalRemoteUrl = ""
 $LocalRepoPathValue = ""
 $TmpfsLargeSize = if ($env:CODING_AGENTS_TMPFS_LARGE) { $env:CODING_AGENTS_TMPFS_LARGE } else { "2g" }
 $TmpfsSmallSize = if ($env:CODING_AGENTS_TMPFS_SMALL) { $env:CODING_AGENTS_TMPFS_SMALL } else { "512m" }
+$TmpfsSecretSize = if ($env:CODING_AGENTS_TMPFS_SECRETS) { $env:CODING_AGENTS_TMPFS_SECRETS } else { "32m" }
 $PromptMode = -not [string]::IsNullOrWhiteSpace($Prompt)
 $SourceType = ""
 $RepoName = ""
 $GitUrl = ""
 $ResolvedPath = $null
 $WslPath = ""
+$SessionConfigSource = $null
+$SessionArtifactDir = $null
+$SessionConfigOutput = $null
+$SessionManifestPath = $null
+$SessionConfigSha256 = $null
+$SessionConfigRendered = $false
+$SessionConfigRootInContainer = "/run/coding-agents"
+$SessionIdBase = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+$DefaultBrokerStubs = @("github", "uno", "msftdocs", "playwright", "context7", "serena", "sequential-thinking", "fetch")
+$script:BrokerStubs = New-Object 'System.Collections.Generic.List[string]'
+foreach ($stub in $DefaultBrokerStubs) { $script:BrokerStubs.Add($stub) | Out-Null }
+$script:SessionStubSecrets = @{}
+$script:SessionSecretFileSources = @{}
+$script:AgentCliSecretSources = @{}
+$script:AgentCliSecretDigests = @{}
+$script:AgentCliSecretNamesByStub = @{}
+$script:AgentCliAgentNameByStub = @{}
+$script:AgentCliStubs = New-Object 'System.Collections.Generic.List[string]'
+$script:McpSecretValues = @{}
+$script:LoadedSecretFiles = New-Object 'System.Collections.Generic.HashSet[string]'
+
+function Add-UniqueValue {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.Generic.List[string]]$List,
+        [string]$Value
+    )
+    if ([string]::IsNullOrWhiteSpace($Value)) { return }
+    if (-not $List.Contains($Value)) {
+        $List.Add($Value) | Out-Null
+    }
+}
+
+function Add-StubSecretName {
+    param(
+        [string]$Stub,
+        [string]$SecretName
+    )
+    if ([string]::IsNullOrWhiteSpace($Stub) -or [string]::IsNullOrWhiteSpace($SecretName)) { return }
+    if (-not $script:SessionStubSecrets.ContainsKey($Stub)) {
+        $script:SessionStubSecrets[$Stub] = New-Object 'System.Collections.Generic.List[string]'
+    }
+    $list = $script:SessionStubSecrets[$Stub]
+    if (-not $list.Contains($SecretName)) {
+        $list.Add($SecretName) | Out-Null
+    }
+}
+
+function Import-StubSecretManifest {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $trimmed = ($line.Split('#')[0]).Trim()
+        if (-not $trimmed) { continue }
+        $parts = $trimmed -split '\s+'
+        if ($parts.Length -lt 2) { continue }
+        $stub = $parts[0]
+        $secrets = $parts[1..($parts.Length - 1)]
+        foreach ($name in $secrets) {
+            Add-StubSecretName -Stub $stub -SecretName $name
+        }
+    }
+}
+
+function Import-McpSecretValue {
+    param([string[]]$AdditionalPaths)
+    $candidates = @()
+    if ($env:CODING_AGENTS_MCP_SECRETS_FILE) { $candidates += $env:CODING_AGENTS_MCP_SECRETS_FILE }
+    if ($env:MCP_SECRETS_FILE) { $candidates += $env:MCP_SECRETS_FILE }
+    if ($AdditionalPaths) { $candidates += $AdditionalPaths }
+    $candidates += @(
+        (Join-Path $HOME ".config/coding-agents/mcp-secrets.env"),
+        (Join-Path $HOME ".mcp-secrets.env")
+    )
+    foreach ($candidate in $candidates) {
+        if (-not $candidate) { continue }
+        $resolved = try { (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path } catch { $candidate }
+        if ($script:LoadedSecretFiles.Contains($resolved)) { continue }
+        $script:LoadedSecretFiles.Add($resolved) | Out-Null
+        if (-not (Test-Path $resolved)) { continue }
+        foreach ($line in Get-Content -LiteralPath $resolved) {
+            $raw = $line.Trim()
+            if (-not $raw -or $raw.StartsWith('#')) { continue }
+            if ($raw.StartsWith('export ')) { $raw = $raw.Substring(7).Trim() }
+            if (-not $raw.Contains('=')) { continue }
+            $pair = $raw.Split('=', 2)
+            $name = $pair[0].Trim()
+            $value = $pair[1].Trim()
+            if (-not $name) { continue }
+            if ($value.Length -ge 2 -and ((($value.StartsWith('"')) -and $value.EndsWith('"')) -or (($value.StartsWith("'")) -and $value.EndsWith("'")))) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+            if (-not $script:McpSecretValues.ContainsKey($name)) {
+                $script:McpSecretValues[$name] = $value
+            }
+        }
+    }
+}
+
+function Resolve-SecretValue {
+    param([string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
+    if ($script:McpSecretValues.ContainsKey($Name)) {
+        return $script:McpSecretValues[$Name]
+    }
+    $envValue = [Environment]::GetEnvironmentVariable($Name)
+    if ($envValue) {
+        $script:McpSecretValues[$Name] = $envValue
+        return $envValue
+    }
+    return $null
+}
+
+function Set-StubSecret {
+    param([string]$BrokerScript)
+    foreach ($stub in $script:SessionStubSecrets.Keys) {
+        $names = [string[]]$script:SessionStubSecrets[$stub]
+        if (-not $names -or $names.Count -eq 0) { continue }
+        foreach ($name in $names) {
+            if ($script:SessionSecretFileSources.ContainsKey($name)) {
+                $fileSource = $script:SessionSecretFileSources[$name]
+                if (-not (Invoke-PythonTool -ScriptPath $BrokerScript -MountPaths @($fileSource) -ScriptArgs @("store", "--stub", $stub, "--name", $name, "--from-file", $fileSource))) {
+                    return $false
+                }
+                continue
+            }
+            $value = Resolve-SecretValue -Name $name
+            if (-not $value) {
+                Write-Warning "⚠️  Missing secret '$name' for stub '$stub'"
+                continue
+            }
+            try {
+                $env:CODING_AGENTS_SECRET_VALUE = $value
+                if (-not (Invoke-PythonTool -ScriptPath $BrokerScript -ScriptArgs @("store", "--stub", $stub, "--name", $name, "--from-env", "CODING_AGENTS_SECRET_VALUE"))) {
+                    return $false
+                }
+            } finally {
+                Remove-Item Env:CODING_AGENTS_SECRET_VALUE -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    return $true
+}
+
+function Protect-StubCapability {
+    param(
+        [string]$BrokerScript,
+        [string]$CapabilityRoot
+    )
+    foreach ($stub in $script:SessionStubSecrets.Keys) {
+        $names = [string[]]$script:SessionStubSecrets[$stub]
+        if (-not $names -or $names.Count -eq 0) { continue }
+        $capDir = Join-Path $CapabilityRoot $stub
+        if (-not (Test-Path $capDir)) {
+            Write-Warning "⚠️  Capability directory missing for stub '$stub'"
+            continue
+        }
+        $capFile = Get-ChildItem -LiteralPath $capDir -Filter *.json -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if (-not $capFile) {
+            Write-Warning "⚠️  No capability token found for stub '$stub'"
+            continue
+        }
+        $redeemArgs = @("redeem", "--capability", $capFile.FullName)
+        foreach ($name in $names) {
+            $redeemArgs += @("--secret", $name)
+        }
+        if (-not (Invoke-PythonTool -ScriptPath $BrokerScript -MountPaths @($CapabilityRoot) -ScriptArgs $redeemArgs)) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Get-FileSha256 {
+    param([string]$Path)
+    if (-not (Test-Path $Path -PathType Leaf)) { return $null }
+    try {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    } catch {
+        Write-Verbose "Unable to hash file '$Path': $_"
+        return $null
+    }
+}
+
+function Get-StringSha256 {
+    param([string]$Value)
+    if (-not $Value) { return $null }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+        $hash = $sha.ComputeHash($bytes)
+        return ($hash | ForEach-Object { $_.ToString("x2") }) -join ""
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Register-AgentCliSecret {
+    param(
+        [string]$AgentName,
+        [string]$StubName,
+        [string]$SecretName,
+        [ValidateSet("file", "inline")][string]$SourceType,
+        [string]$SourceLabel,
+        [string]$DataSource,
+        [string]$DigestValue
+    )
+
+    Add-UniqueValue -List $script:BrokerStubs -Value $StubName
+    Add-UniqueValue -List $script:AgentCliStubs -Value $StubName
+    Add-StubSecretName -Stub $StubName -SecretName $SecretName
+
+    if ($SourceType -eq "file") {
+        $script:SessionSecretFileSources[$SecretName] = $DataSource
+    } else {
+        $script:McpSecretValues[$SecretName] = $DataSource
+    }
+
+    $script:AgentCliSecretSources[$SecretName] = $SourceLabel
+    $script:AgentCliSecretDigests[$SecretName] = $DigestValue
+    if (-not $script:AgentCliSecretNamesByStub.ContainsKey($StubName)) {
+        $script:AgentCliSecretNamesByStub[$StubName] = @()
+    }
+    if ($script:AgentCliSecretNamesByStub[$StubName] -notcontains $SecretName) {
+        $script:AgentCliSecretNamesByStub[$StubName] = $script:AgentCliSecretNamesByStub[$StubName] + $SecretName
+    }
+    $script:AgentCliAgentNameByStub[$StubName] = $AgentName
+}
+
+function Detect-CopilotCliSecret {
+    $hostCfg = Join-Path (Join-Path $HOME ".copilot") "config.json"
+    if (-not (Test-Path $hostCfg -PathType Leaf)) {
+        Write-Host "❌ Copilot credentials not found at $hostCfg" -ForegroundColor Red
+        if ($env:CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS -eq "1") {
+            Write-Host "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" -ForegroundColor Yellow
+            return $false
+        }
+        exit 1
+    }
+    $digest = Get-FileSha256 -Path $hostCfg
+    Register-AgentCliSecret -AgentName "copilot" -StubName "agent_copilot_cli" -SecretName "copilot_cli_config_json" -SourceType "file" -SourceLabel $hostCfg -DataSource $hostCfg -DigestValue $digest
+    $display = if ($digest) { $digest } else { "unknown" }
+    Write-Host "🔐 Copilot CLI credential detected (sha256=$display)"
+    return $true
+}
+
+function Detect-CodexCliSecret {
+    $hostCfg = Join-Path (Join-Path $HOME ".codex") "auth.json"
+    if (-not (Test-Path $hostCfg -PathType Leaf)) {
+        Write-Host "❌ Codex credentials not found at $hostCfg" -ForegroundColor Red
+        if ($env:CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS -eq "1") {
+            Write-Host "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" -ForegroundColor Yellow
+            return $false
+        }
+        exit 1
+    }
+    $digest = Get-FileSha256 -Path $hostCfg
+    Register-AgentCliSecret -AgentName "codex" -StubName "agent_codex_cli" -SecretName "codex_cli_auth_json" -SourceType "file" -SourceLabel $hostCfg -DataSource $hostCfg -DigestValue $digest
+    $display = if ($digest) { $digest } else { "unknown" }
+    Write-Host "🔐 Codex CLI credential detected (sha256=$display)"
+    return $true
+}
+
+function Detect-ClaudeCliSecret {
+    $fileCfg = Join-Path (Join-Path $HOME ".claude") ".credentials.json"
+    if (Test-Path $fileCfg -PathType Leaf) {
+        $digest = Get-FileSha256 -Path $fileCfg
+        Register-AgentCliSecret -AgentName "claude" -StubName "agent_claude_cli" -SecretName "claude_cli_credentials" -SourceType "file" -SourceLabel $fileCfg -DataSource $fileCfg -DigestValue $digest
+        $display = if ($digest) { $digest } else { "unknown" }
+        Write-Host "🔐 Claude CLI credential detected from $fileCfg (sha256=$display)"
+        return $true
+    }
+    $envKey = [Environment]::GetEnvironmentVariable("CLAUDE_API_KEY")
+    if ($envKey) {
+        $digest = Get-StringSha256 -Value $envKey
+        Register-AgentCliSecret -AgentName "claude" -StubName "agent_claude_cli" -SecretName "claude_cli_credentials" -SourceType "inline" -SourceLabel "env:CLAUDE_API_KEY" -DataSource $envKey -DigestValue $digest
+        $display = if ($digest) { $digest } else { "unknown" }
+        Write-Host "🔐 Claude CLI credential detected from CLAUDE_API_KEY environment (sha256=$display)"
+        return $true
+    }
+    Write-Host "❌ Claude credentials missing (expected ~/.claude/.credentials.json or CLAUDE_API_KEY)" -ForegroundColor Red
+    if ($env:CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS -eq "1") {
+        Write-Host "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" -ForegroundColor Yellow
+        return $false
+    }
+    exit 1
+}
+
+function Detect-AgentCliSecrets {
+    switch ($Agent) {
+        "copilot" { Detect-CopilotCliSecret | Out-Null }
+        "codex" { Detect-CodexCliSecret | Out-Null }
+        "claude" { Detect-ClaudeCliSecret | Out-Null }
+    }
+}
+
+function Write-AgentCliManifest {
+    param(
+        [string]$ManifestPath,
+        [string]$Stub,
+        [string]$AgentName,
+        [string]$SessionId,
+        [string[]]$SecretNames
+    )
+    $entries = @()
+    foreach ($secret in $SecretNames) {
+        if (-not $secret) { continue }
+        $entries += [pscustomobject]@{
+            name = $secret
+            source = if ($script:AgentCliSecretSources.ContainsKey($secret)) { $script:AgentCliSecretSources[$secret] } else { "unknown" }
+            sha256 = if ($script:AgentCliSecretDigests.ContainsKey($secret)) { $script:AgentCliSecretDigests[$secret] } else { "" }
+        }
+    }
+    $manifest = [pscustomobject]@{
+        agent = $AgentName
+        stub = $Stub
+        session = $SessionId
+        secrets = $entries
+    }
+    $json = $manifest | ConvertTo-Json -Depth 5
+    $directory = [System.IO.Path]::GetDirectoryName($ManifestPath)
+    if (-not (Test-Path $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    Set-Content -LiteralPath $ManifestPath -Value $json -Encoding utf8
+}
+
+function Stage-AgentCliCapabilityBundles {
+    param(
+        [string]$CapabilityRoot,
+        [string]$SessionOutputDir,
+        [string]$SessionId
+    )
+    foreach ($stub in $script:AgentCliStubs) {
+        $agentName = if ($script:AgentCliAgentNameByStub.ContainsKey($stub)) { $script:AgentCliAgentNameByStub[$stub] } else { $null }
+        if (-not $agentName) { continue }
+        $sourceDir = Join-Path $CapabilityRoot $stub
+        if (-not (Test-Path $sourceDir)) {
+            Write-Warning "⚠️  Capability directory missing for stub '$stub'"
+            continue
+        }
+        $destRoot = Join-Path $SessionOutputDir $agentName
+        $cliDir = Join-Path $destRoot "cli"
+        $capDest = Join-Path $cliDir "capabilities"
+        New-Item -ItemType Directory -Path $capDest -Force | Out-Null
+        Get-ChildItem -LiteralPath $sourceDir -Force | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $capDest -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $secretNames = if ($script:AgentCliSecretNamesByStub.ContainsKey($stub)) { [string[]]$script:AgentCliSecretNamesByStub[$stub] } else { @() }
+        Write-AgentCliManifest -ManifestPath (Join-Path $cliDir "manifest.json") -Stub $stub -AgentName $agentName -SessionId $SessionId -SecretNames $secretNames
+    }
+}
+
+function Ensure-DataHmacKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$AgentName,
+        [Parameter(Mandatory = $true)][string]$SessionId,
+        [Parameter(Mandatory = $true)][string]$KeyPath
+    )
+
+    if (-not (Test-Path $KeyPath -PathType Leaf)) {
+        $directory = Split-Path -Parent $KeyPath
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+        $bytes = New-Object byte[] 32
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+        $keyHex = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+        Set-Content -LiteralPath $KeyPath -Value $keyHex -Encoding ascii
+    }
+
+    $hostStore = Join-Path (Join-Path $HOME ".config/coding-agents/data-hmac") $AgentName
+    if (-not (Test-Path $hostStore)) {
+        New-Item -ItemType Directory -Path $hostStore -Force | Out-Null
+    }
+    Copy-Item -LiteralPath $KeyPath -Destination (Join-Path $hostStore "$SessionId.key") -Force
+}
+
+function Package-AgentDataPayload {
+    param(
+        [string]$AgentName,
+        [string]$SessionOutputDir,
+        [string]$SessionId
+    )
+
+    $packagerScript = Join-Path $RepoRoot "scripts/utils/package-agent-data.py"
+    if (-not (Test-Path $packagerScript)) {
+        return
+    }
+
+    $dataDir = Join-Path (Join-Path $SessionOutputDir $AgentName) (Join-Path "data" $SessionId)
+    if (-not (Test-Path $dataDir)) {
+        New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+    }
+    $tarPath = Join-Path $dataDir "data-import.tar"
+    $manifestPath = Join-Path $dataDir "manifest.json"
+    $keyPath = Join-Path $dataDir "data-hmac.key"
+    Ensure-DataHmacKey -AgentName $AgentName -SessionId $SessionId -KeyPath $keyPath
+    $mounts = @($SessionOutputDir)
+    $args = @("--agent", $AgentName, "--session-id", $SessionId, "--tar", $tarPath, "--manifest", $manifestPath)
+    if ($env:HOME) {
+        $args += @("--home-path", $env:HOME)
+    }
+    $args += @("--hmac-key-file", $keyPath)
+
+    if (Invoke-PythonTool -ScriptPath $packagerScript -MountPaths $mounts -ScriptArgs $args) {
+        if ((Test-Path $tarPath) -and ((Get-Item $tarPath).Length -gt 0)) {
+            Write-Host "📦 Packaged $AgentName data import archive" -ForegroundColor Green
+        } else {
+            Remove-Item -LiteralPath $tarPath -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $manifestPath -ErrorAction SilentlyContinue
+            Write-Host "ℹ️  No host data discovered for $AgentName data import" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Warning "⚠️  Failed to package host data for agent '$AgentName'"
+        Remove-Item -LiteralPath $tarPath -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $manifestPath -ErrorAction SilentlyContinue
+    }
+}
 
 # Source shared functions
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -75,6 +494,24 @@ if (-not (Test-PrerequisitesVerified -RepoRoot $RepoRoot)) {
 
 if (-not (Test-HostSecurityPrereqs -RepoRoot $RepoRoot)) {
     exit 1
+}
+
+$TrustedPaths = @("scripts/launchers", "scripts/runtime", "docker/profiles")
+$LauncherHeadHash = Get-GitHeadHash -RepoRoot $RepoRoot
+$TrustedTreeHashes = Get-TrustedPathTreeHashes -RepoRoot $RepoRoot -Paths $TrustedPaths
+$TrustedTreeEnv = if ($TrustedTreeHashes -and $TrustedTreeHashes.Count -gt 0) {
+    ($TrustedTreeHashes | ForEach-Object { "{0}={1}" -f $_.Path, $_.Hash }) -join ","
+} else {
+    ""
+}
+if ($LauncherHeadHash) {
+    Write-Host "🔒 Launcher commit: $LauncherHeadHash" -ForegroundColor Cyan
+}
+if ($TrustedTreeHashes -and $TrustedTreeHashes.Count -gt 0) {
+    Write-Host "   Trusted tree hashes:" -ForegroundColor Gray
+    foreach ($entry in $TrustedTreeHashes) {
+        Write-Host "     • $($entry.Path)=$($entry.Hash)" -ForegroundColor Gray
+    }
 }
 
 # Auto-detect WSL home directory
@@ -174,6 +611,20 @@ if ($IsUrl) {
         if (-not $NoPush -and [string]::IsNullOrWhiteSpace($LocalRemoteUrl)) {
             throw "Failed to configure secure local remote for auto-push"
         }
+
+        if (-not $SessionConfigSource) {
+            $configCandidate = Join-Path $ResolvedPath "config.toml"
+            if (Test-Path $configCandidate) {
+                $SessionConfigSource = $configCandidate
+            }
+        }
+    }
+}
+
+if (-not $SessionConfigSource) {
+    $hostConfigCandidate = Join-Path $env:USERPROFILE ".config\coding-agents\config.toml"
+    if (Test-Path $hostConfigCandidate) {
+        $SessionConfigSource = $hostConfigCandidate
     }
 }
 
@@ -423,6 +874,13 @@ if (-not (Test-ValidContainerName $ContainerName)) {
     exit 1
 }
 
+$SessionArtifactDir = Join-Path ([System.IO.Path]::GetTempPath()) ("coding-agents-session-{0}" -f ([guid]::NewGuid().ToString("N")))
+New-Item -ItemType Directory -Path $SessionArtifactDir -Force | Out-Null
+$SessionConfigOutput = Join-Path $SessionArtifactDir "session-config"
+New-Item -ItemType Directory -Path $SessionConfigOutput -Force | Out-Null
+$SessionId = "{0}-{1}-{2}" -f $ContainerName, $SessionIdBase, (Get-Random -Maximum 100000)
+(Register-EngineEvent PowerShell.Exiting -Action { if ($SessionArtifactDir -and (Test-Path $SessionArtifactDir)) { Remove-Item -Recurse -Force $SessionArtifactDir } } | Out-Null)
+
 $WorkspaceVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "workspace"
 $HomeVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "home"
 $ToolcacheVolume = Get-ContainerVolumeName -ContainerName $ContainerName -Suffix "toolcache"
@@ -482,6 +940,97 @@ if ($UseSquid) {
     Update-AgentImage -Agent "proxy"
 }
 
+$rendererScript = Join-Path $RepoRoot "scripts/utils/render-session-config.py"
+$trustedHashArgs = @()
+if ($TrustedTreeHashes) {
+    foreach ($entry in $TrustedTreeHashes) {
+        $trustedHashArgs += "--trusted-hash"
+        $trustedHashArgs += ("{0}={1}" -f $entry.Path, $entry.Hash)
+    }
+}
+
+if (Test-Path $rendererScript) {
+    $renderArgs = @("--output", $SessionConfigOutput, "--session-id", $SessionId, "--network-policy", $NetworkPolicyEnv, "--repo", $RepoName, "--agent", $Agent, "--container", $ContainerName)
+    if ($SessionConfigSource) { $renderArgs += "--config"; $renderArgs += $SessionConfigSource }
+    if ($LauncherHeadHash) { $renderArgs += "--git-head"; $renderArgs += $LauncherHeadHash }
+    if ($trustedHashArgs.Count -gt 0) { $renderArgs += $trustedHashArgs }
+    $mountPaths = @($SessionConfigOutput)
+    if ($SessionConfigSource) { $mountPaths += $SessionConfigSource }
+    if (Invoke-PythonTool -ScriptPath $rendererScript -MountPaths $mountPaths -ScriptArgs $renderArgs) {
+        $SessionManifestPath = Join-Path $SessionConfigOutput "manifest.json"
+        if (Test-Path $SessionManifestPath) {
+            $SessionConfigSha256 = Get-FileSha256 -Path $SessionManifestPath
+            $SessionConfigRendered = $true
+            $display = if ($SessionConfigSha256) { $SessionConfigSha256 } else { "unknown" }
+            Write-Host "🔐 Session MCP config manifest: $display" -ForegroundColor Green
+            Write-SessionConfigEvent -SessionId $SessionId -ManifestSha $SessionConfigSha256 -RepoRoot $RepoRoot -TrustedHashes $TrustedTreeHashes
+            $serversFile = Join-Path $SessionConfigOutput "servers.txt"
+            if (Test-Path $serversFile) {
+                try {
+                    $servers = Get-Content -LiteralPath $serversFile | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+                    if ($servers -and $servers.Count -gt 0) {
+                        $script:BrokerStubs.Clear()
+                        foreach ($stub in $servers) {
+                            $script:BrokerStubs.Add($stub) | Out-Null
+                        }
+                    }
+                } catch {
+                    Write-Warning "⚠️  Failed to read server list for broker tokens: $_"
+                }
+            }
+            $stubSecretFile = Join-Path $SessionConfigOutput "stub-secrets.txt"
+            if (Test-Path $stubSecretFile) {
+                Import-StubSecretManifest -Path $stubSecretFile
+            }
+        }
+    } else {
+        Write-Warning "⚠️  Failed to render session MCP config via python runner"
+    }
+} else {
+    Write-Warning "⚠️  render-session-config.py unavailable; skipping host-side MCP rendering"
+}
+
+Detect-AgentCliSecrets
+
+if (-not (Test-SecretBrokerReady)) {
+    Write-Host "❌ Secret broker health check failed" -ForegroundColor Red
+    exit 1
+}
+
+$brokerScript = Get-SecretBrokerScript
+if (-not $brokerScript) {
+    Write-Host "❌ Secret broker script not found" -ForegroundColor Red
+    exit 1
+}
+
+if ($script:SessionStubSecrets.Count -gt 0) {
+    Import-McpSecretValue
+    if (-not (Set-StubSecret -BrokerScript $brokerScript)) {
+        Write-Host "❌ Failed to stage broker-managed secrets" -ForegroundColor Red
+        exit 1
+    }
+}
+
+$brokerCapabilityDir = Join-Path $SessionConfigOutput "capabilities"
+$env:CODING_AGENTS_SESSION_CONFIG_SHA256 = if ($SessionConfigSha256) { $SessionConfigSha256 } else { "" }
+if (-not (Invoke-SessionCapabilityIssue -SessionId $SessionId -OutputDir $brokerCapabilityDir -Stubs $script:BrokerStubs.ToArray())) {
+    Write-Host "❌ Failed to issue session capability tokens" -ForegroundColor Red
+    exit 1
+}
+
+if ($script:SessionStubSecrets.Count -gt 0) {
+    if (-not (Protect-StubCapability -BrokerScript $brokerScript -CapabilityRoot $brokerCapabilityDir)) {
+        Write-Host "❌ Failed to seal stub secrets" -ForegroundColor Red
+        exit 1
+    }
+}
+
+if ($script:AgentCliStubs.Count -gt 0) {
+    Stage-AgentCliCapabilityBundles -CapabilityRoot $brokerCapabilityDir -SessionOutputDir $SessionConfigOutput -SessionId $SessionId
+}
+
+Package-AgentDataPayload -AgentName $Agent -SessionOutputDir $SessionConfigOutput -SessionId $SessionId
+
 Write-Host "🚀 Launching Coding Agent..." -ForegroundColor Cyan
 Write-Host "🎯 Agent: $Agent" -ForegroundColor White
 Write-Host "📁 Source: $Source ($SourceType)" -ForegroundColor White
@@ -527,7 +1076,7 @@ if ($UseSquid) {
 $autoPushValue = if ($NoPush) { "false" } else { "true" }
 
 $dockerArgs = @(
-    "run", "-d", "--rm",
+    "run", "-d",
     "--name", $ContainerName,
     "--hostname", $ContainerName,
     "-e", "TZ=$TimeZone",
@@ -538,6 +1087,16 @@ $dockerArgs = @(
     "-e", "AUTO_PUSH_ON_SHUTDOWN=$autoPushValue",
     "-e", "AGENT_SESSION_MODE=supervised",
     "-e", "AGENT_SESSION_NAME=agent",
+    "-e", "AGENT_NAME=$Agent",
+    "-e", "HOST_SESSION_ID=$SessionId",
+    "-e", "HOST_SESSION_CONFIG_SHA256=$SessionConfigSha256",
+    "-e", "HOST_TRUSTED_TREES=$TrustedTreeEnv",
+    "-e", "HOST_LAUNCHER_HEAD=$LauncherHeadHash",
+    "-e", "HOST_SESSION_CONFIG_ROOT=$SessionConfigRootInContainer",
+    "-e", "HOST_CAPABILITY_ROOT=${SessionConfigRootInContainer}/capabilities",
+    "-e", "CODING_AGENTS_AGENT_SECRET_ROOT=/run/agent-secrets",
+    "-e", "CODING_AGENTS_AGENT_DATA_ROOT=/run/agent-data",
+    "-e", "CODING_AGENTS_SECRET_TMPFS_SIZE=${TmpfsSecretSize}",
     "--label", "coding-agents.type=agent",
     "--label", "coding-agents.agent=$Agent",
     "--label", "coding-agents.repo=$RepoName",
@@ -612,7 +1171,9 @@ $tmpfsMounts = @(
     "/var/lib/apt/lists:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
     "/var/cache/apt:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
     "/var/cache/debconf:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
-    "/var/lib/dpkg:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755"
+    "/var/lib/dpkg:rw,nosuid,nodev,size=${TmpfsSmallSize},mode=755",
+    "${SessionConfigRootInContainer}:rw,nosuid,nodev,noexec,mode=750",
+    "/run/agent-secrets:rw,nosuid,nodev,noexec,size=${TmpfsSecretSize},mode=750"
 )
 foreach ($mount in $tmpfsMounts) {
     $dockerArgs += "--tmpfs", $mount
@@ -783,6 +1344,16 @@ try {
         Invoke-ContainerCli network rm $ProxyNetworkName 2>$null | Out-Null
     }
     exit 1
+}
+
+if (Test-Path $SessionConfigOutput) {
+    try {
+        Invoke-ContainerCli exec $ContainerName mkdir -p $SessionConfigRootInContainer | Out-Null
+        $hostCopySource = Join-Path $SessionConfigOutput "."
+        Invoke-ContainerCli cp $hostCopySource "$ContainerName:$SessionConfigRootInContainer" | Out-Null
+    } catch {
+        Write-Warning "⚠️  Unable to copy session configs into container: $_"
+    }
 }
 
 # Setup repository inside container

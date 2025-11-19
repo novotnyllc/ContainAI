@@ -105,11 +105,16 @@ flowchart TB
 - Playwright with Chromium
 - Pre-installed MCP servers
 - Non-root user: `agentuser` (UID 1000)
+- Dedicated CLI user: `agentcli` (owns `/run/agent-*` tmpfs and executes vendor CLIs)
 
 **Build time:** ~10-15 minutes  
 **Size:** ~3-4 GB (Ubuntu 24.04 ~80MB, Node.js ~200MB, .NET SDKs + workloads ~2GB, Playwright ~500MB, PowerShell ~100MB, build tools ~500MB)
 
 **No authentication:** Image contains no secrets, can be published publicly.
+
+During container startup the entrypoint mounts `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` as tmpfs volumes owned by `agentcli` with `nosuid,nodev,noexec,private,unbindable` semantics. This keeps vendor CLI material entirely inside memory-backed storage that the workspace user (`agentuser`) can only reach via the shared `agentcli` group, preventing accidental host bind-mounts or namespace leaks.
+
+The base image also ships a small setuid helper (`/usr/local/bin/agentcli-exec`) and rewrites the vendor binaries (`github-copilot-cli`, `codex`, `claude`) to wrappers that export `AGENT_TASK_RUNNER_SOCKET`/helper metadata before invoking the real binary as `agentcli`. This ensures every CLI session automatically runs inside the locked-down UID split without asking operators to change workflows.
 
 ### All-Agents Image (coding-agents:local)
 
@@ -199,7 +204,7 @@ With secrets staged, the launcher creates the container:
 
 `entrypoint.sh` executes inside the container with the following responsibilities:
 
-1. Re-enforces ptrace scope, `/proc` hardening, and tmpfs ownership under `agentuser`.
+1. Re-enforces ptrace scope, `/proc` hardening, and tmpfs ownership under `agentuser` while mounting CLI-sensitive tmpfs as `agentcli` with `nosuid,nodev,noexec` guardrails.
 2. Verifies and installs the host-provided manifest + MCP configs under `~/.config/<agent>/mcp/`.
 3. Copies sealed capabilities into `/home/agentuser/.config/coding-agents/capabilities` (also tmpfs).
 4. Falls back to `setup-mcp-configs.sh` **only** if the host did not provide a manifest (legacy mode).
@@ -477,6 +482,14 @@ flowchart TB
 - Package managers (pip/pipx, npm/yarn/pnpm, Playwright, uv, cargo/rustup, bun, NuGet/dotnet) write inside the shared `/toolcache` volume
 - Read-only mounts for authentication
 - No capabilities added
+
+### Agent Task Runner Daemon
+
+- `agentcli-exec` installs a libseccomp filter so that every `execve`/`execveat` inside the `agentcli` namespace is paused and inspected by `agent-task-runnerd` before it runs.
+- Both helpers ship from the Rust crate at `scripts/runtime/agent-task-runner`, eliminating the previous C implementations per the secure-language requirement.
+- `agent-task-runnerd` (shipped in `/usr/local/bin/agent-task-runnerd`) listens on `/run/agent-task-runner.sock`, receives the seccomp notification FD over SCM_RIGHTS, reconstructs the target command from the paused task’s memory, and appends a JSON log line to `/run/agent-task-runner/events.log`.
+- Operators choose `CODING_AGENTS_RUNNER_POLICY=observe|enforce` at runtime. Observe mode resumes the syscall after logging; enforce mode denies any exec whose binary lives under `/run/agent-secrets` or `/run/agent-data`, preventing helper processes from inheriting sensitive tmpfs mounts even if wrappers are bypassed.
+- Because the filter is attached inside the container rather than via Docker’s seccomp profile, the interception works for every vendor CLI (Copilot, Codex, Claude) regardless of future runtime changes.
 
 ### Secret Management
 

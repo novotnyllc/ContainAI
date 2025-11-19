@@ -334,6 +334,65 @@ PY
     rm -f "$script"
 }
 
+test_agent_data_packager() {
+    test_section "Agent data packager"
+
+    local temp_home
+    temp_home=$(mktemp -d)
+    mkdir -p "$temp_home/.copilot/sessions"
+    mkdir -p "$temp_home/.copilot/logs"
+    echo '{"messages":1}' > "$temp_home/.copilot/sessions/chat.json"
+    echo 'log line' > "$temp_home/.copilot/logs/agent.log"
+
+    local out_dir
+    out_dir=$(mktemp -d)
+    local tar_path="$out_dir/import.tar"
+    local manifest_path="$out_dir/manifest.json"
+
+    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+        --agent copilot \
+        --session-id test-session \
+        --home-path "$temp_home" \
+        --tar "$tar_path" \
+        --manifest "$manifest_path"; then
+        pass "Packager produced outputs"
+    else
+        fail "Packager script exited non-zero"
+        rm -rf "$temp_home" "$out_dir"
+        return
+    fi
+
+    if tar tf "$tar_path" | grep -q '.copilot/sessions/chat.json'; then
+        pass "Tar archive contains session file"
+    else
+        fail "Tar archive missing session file"
+    fi
+
+    local manifest_content
+    manifest_content=$(cat "$manifest_path")
+    assert_contains "$manifest_content" '.copilot/sessions/chat.json' "Manifest records session path"
+    assert_contains "$manifest_content" '.copilot/logs/agent.log' "Manifest records log path"
+    assert_contains "$manifest_content" '"session":"test-session"' "Manifest tagged with session id"
+
+    rm -rf "$temp_home/.copilot/sessions" "$temp_home/.copilot/logs"
+    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+        --agent copilot \
+        --session-id empty-session \
+        --home-path "$temp_home" \
+        --tar "$tar_path" \
+        --manifest "$manifest_path"; then
+        if [ -f "$tar_path" ]; then
+            fail "Tarball should be removed when no data is present"
+        else
+            pass "Packager omits tarball when no inputs exist"
+        fi
+    else
+        fail "Packager script failed on empty input"
+    fi
+
+    rm -rf "$temp_home" "$out_dir"
+}
+
 test_audit_logging_pipeline() {
     test_section "Audit logging pipeline"
 
@@ -540,9 +599,8 @@ test_secret_broker_cli() {
 
     local config_mounts=("--mount" "$config_root")
     local issue_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
-    local sealed_dir="$cap_dir/sealed"
-    mkdir -p "$sealed_dir"
-    local redeem_mounts=("--mount" "$config_root" "--mount" "$cap_dir" "--mount" "$sealed_dir")
+    local sealed_dir="$cap_dir/alpha/secrets"
+    local redeem_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
 
     if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- issue --session-id test-session --output "$cap_dir" --stubs alpha >/dev/null 2>&1; then
         pass "Capability issuance succeeds"
@@ -566,7 +624,7 @@ test_secret_broker_cli() {
         fail "Broker secret store failed"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET --output-dir "$sealed_dir" >/dev/null 2>&1; then
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET >/dev/null 2>&1; then
         pass "Capability redemption seals secret"
     else
         fail "Capability redemption failed"
@@ -617,6 +675,17 @@ PY
         fail "Sealed secret decrypted to unexpected value"
     fi
 
+    local unsealed
+    if unsealed=$("$PROJECT_ROOT/scripts/runtime/capability-unseal.py" --stub alpha --secret TEST_SECRET --cap-root "$cap_dir" --format raw 2>/dev/null); then
+        if [ "$unsealed" = "super-secret" ]; then
+            pass "capability-unseal retrieves sealed secret"
+        else
+            fail "capability-unseal returned unexpected value"
+        fi
+    else
+        fail "capability-unseal script failed"
+    fi
+
     if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET >/dev/null 2>&1; then
         fail "Redeeming same capability twice should fail"
     else
@@ -630,6 +699,216 @@ PY
     fi
 
     rm -rf "$config_root" "$cap_dir"
+}
+
+test_codex_cli_helper() {
+    test_section "Codex CLI helper"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local helper_script="$PROJECT_ROOT/docker/agents/codex/prepare-codex-secrets.sh"
+    if [ ! -x "$helper_script" ]; then
+        fail "Codex helper missing at $helper_script"
+        return
+    fi
+
+    local broker_script="$PROJECT_ROOT/scripts/runtime/secret-broker.py"
+    local config_root cap_dir env_dir secret_file
+    config_root=$(mktemp -d)
+    cap_dir=$(mktemp -d)
+    env_dir="$config_root/config"
+    mkdir -p "$env_dir"
+    secret_file=$(mktemp)
+    printf '{"refresh_token":"unit-test","access_token":"abc"}' >"$secret_file"
+
+    local previous_config="${CODING_AGENTS_CONFIG_DIR:-}"
+    local issue_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
+    local store_mounts=("--mount" "$config_root")
+    local redeem_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- issue --session-id codex-helper --output "$cap_dir" --stubs agent_codex_cli >/dev/null 2>&1; then
+        pass "Codex capability issuance succeeds"
+    else
+        fail "Codex capability issuance failed"
+        rm -rf "$config_root" "$cap_dir" "$secret_file"
+        [ -n "$previous_config" ] && CODING_AGENTS_CONFIG_DIR="$previous_config" || unset CODING_AGENTS_CONFIG_DIR
+        return
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_codex_cli --name codex_cli_auth_json --from-file "$secret_file" >/dev/null 2>&1; then
+        pass "Codex secret stored"
+    else
+        fail "Codex secret store failed"
+    fi
+
+    local token_file
+    token_file=$(find "$cap_dir" -name '*.json' | head -n 1)
+    if [ -z "$token_file" ]; then
+        fail "Codex capability token missing"
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret codex_cli_auth_json >/dev/null 2>&1; then
+        pass "Codex capability redemption seals secret"
+    else
+        fail "Codex capability redemption failed"
+    fi
+
+    local agent_home secret_root
+    agent_home=$(mktemp -d)
+    secret_root="$agent_home/run-secrets"
+    if CODING_AGENTS_AGENT_HOME="$agent_home" \
+        CODING_AGENTS_AGENT_CAP_ROOT="$cap_dir" \
+        CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root" \
+        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/scripts/runtime/capability-unseal.py" \
+        "$helper_script" >/dev/null 2>&1; then
+        pass "prepare-codex-secrets decrypts bundle"
+    else
+        fail "prepare-codex-secrets failed"
+    fi
+
+    local auth_file="$secret_root/codex/auth.json"
+    if [ -f "$auth_file" ] && grep -q 'unit-test' "$auth_file"; then
+        pass "Codex auth.json materialized"
+    else
+        fail "Codex auth.json missing or incorrect"
+    fi
+
+    local link_target
+    link_target=$(readlink "$agent_home/.codex" 2>/dev/null || true)
+    if [ "$link_target" = "$secret_root/codex" ]; then
+        pass "Codex CLI directory symlinked to secret tmpfs"
+    else
+        fail "Codex CLI directory not linked to secret tmpfs"
+    fi
+
+    if [ -n "$previous_config" ]; then
+        CODING_AGENTS_CONFIG_DIR="$previous_config"
+    else
+        unset CODING_AGENTS_CONFIG_DIR
+    fi
+    rm -rf "$config_root" "$cap_dir" "$agent_home"
+    rm -f "$secret_file"
+}
+
+test_claude_cli_helper() {
+    test_section "Claude CLI helper"
+
+    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+
+    local helper_script="$PROJECT_ROOT/docker/agents/claude/prepare-claude-secrets.sh"
+    if [ ! -x "$helper_script" ]; then
+        fail "Claude helper missing at $helper_script"
+        return
+    fi
+
+    local broker_script="$PROJECT_ROOT/scripts/runtime/secret-broker.py"
+    local config_root env_dir secret_file
+    config_root=$(mktemp -d)
+    env_dir="$config_root/config"
+    mkdir -p "$env_dir"
+    secret_file=$(mktemp)
+    printf '{"api_key":"file-secret","workspace_id":"dev"}' >"$secret_file"
+
+    local previous_config="${CODING_AGENTS_CONFIG_DIR:-}"
+
+    local file_cap_dir inline_cap_dir
+    file_cap_dir=$(mktemp -d)
+    inline_cap_dir=$(mktemp -d)
+    local store_mounts=("--mount" "$config_root")
+
+    local issue_file_mounts=("--mount" "$config_root" "--mount" "$file_cap_dir")
+    local redeem_file_mounts=("--mount" "$config_root" "--mount" "$file_cap_dir")
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_file_mounts[@]}" -- issue --session-id claude-helper-file --output "$file_cap_dir" --stubs agent_claude_cli >/dev/null 2>&1; then
+        pass "Claude capability issuance (file) succeeds"
+    else
+        fail "Claude capability issuance (file) failed"
+        rm -rf "$config_root" "$file_cap_dir" "$inline_cap_dir"
+        rm -f "$secret_file"
+        [ -n "$previous_config" ] && CODING_AGENTS_CONFIG_DIR="$previous_config" || unset CODING_AGENTS_CONFIG_DIR
+        return
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_claude_cli --name claude_cli_credentials --from-file "$secret_file" >/dev/null 2>&1; then
+        pass "Claude secret (file) stored"
+    else
+        fail "Claude secret (file) store failed"
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_file_mounts[@]}" -- redeem --capability "$(find "$file_cap_dir" -name '*.json' | head -n 1)" --secret claude_cli_credentials >/dev/null 2>&1; then
+        pass "Claude capability (file) redemption seals secret"
+    else
+        fail "Claude capability (file) redemption failed"
+    fi
+
+    local agent_home_file
+    agent_home_file=$(mktemp -d)
+    mkdir -p "$agent_home_file/.config/coding-agents/claude"
+    printf '{"projects":{}}' >"$agent_home_file/.config/coding-agents/claude/.claude.json"
+
+    if CODING_AGENTS_AGENT_HOME="$agent_home_file" \
+        CODING_AGENTS_AGENT_CAP_ROOT="$file_cap_dir" \
+        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/scripts/runtime/capability-unseal.py" \
+        "$helper_script" >/dev/null 2>&1; then
+        pass "prepare-claude-secrets decrypts file-based bundle"
+    else
+        fail "prepare-claude-secrets failed for file-based bundle"
+    fi
+
+    local file_credentials="$agent_home_file/.claude/.credentials.json"
+    if [ -f "$file_credentials" ] && grep -q '"api_key": "file-secret"' "$file_credentials" && grep -q '"workspace_id": "dev"' "$file_credentials"; then
+        pass "Claude credentials mirrored JSON payload"
+    else
+        fail "Claude credentials missing expected JSON payload"
+    fi
+
+    local inline_secret="inline-secret-token"
+    local issue_inline_mounts=("--mount" "$config_root" "--mount" "$inline_cap_dir")
+    local redeem_inline_mounts=("--mount" "$config_root" "--mount" "$inline_cap_dir")
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_inline_mounts[@]}" -- issue --session-id claude-helper-inline --output "$inline_cap_dir" --stubs agent_claude_cli >/dev/null 2>&1; then
+        pass "Claude capability issuance (inline) succeeds"
+    else
+        fail "Claude capability issuance (inline) failed"
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_claude_cli --name claude_cli_credentials --value "$inline_secret" >/dev/null 2>&1; then
+        pass "Claude secret (inline) stored"
+    else
+        fail "Claude secret (inline) store failed"
+    fi
+
+    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_inline_mounts[@]}" -- redeem --capability "$(find "$inline_cap_dir" -name '*.json' | head -n 1)" --secret claude_cli_credentials >/dev/null 2>&1; then
+        pass "Claude capability (inline) redemption seals secret"
+    else
+        fail "Claude capability (inline) redemption failed"
+    fi
+
+    local agent_home_inline
+    agent_home_inline=$(mktemp -d)
+
+    if CODING_AGENTS_AGENT_HOME="$agent_home_inline" \
+        CODING_AGENTS_AGENT_CAP_ROOT="$inline_cap_dir" \
+        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/scripts/runtime/capability-unseal.py" \
+        "$helper_script" >/dev/null 2>&1; then
+        pass "prepare-claude-secrets decrypts inline bundle"
+    else
+        fail "prepare-claude-secrets failed for inline bundle"
+    fi
+
+    local inline_credentials="$agent_home_inline/.claude/.credentials.json"
+    if [ -f "$inline_credentials" ] && grep -q "\"api_key\": \"$inline_secret\"" "$inline_credentials"; then
+        pass "Claude credentials synthesized from API key"
+    else
+        fail "Claude credentials missing synthesized API key"
+    fi
+
+    if [ -n "$previous_config" ]; then
+        CODING_AGENTS_CONFIG_DIR="$previous_config"
+    else
+        unset CODING_AGENTS_CONFIG_DIR
+    fi
+    rm -rf "$config_root" "$file_cap_dir" "$inline_cap_dir" "$agent_home_file" "$agent_home_inline"
+    rm -f "$secret_file"
 }
 
 test_host_security_preflight() {
@@ -1062,6 +1341,7 @@ main() {
     run_test "test_container_runtime_detection" test_container_runtime_detection
     run_test "test_shared_functions" test_shared_functions
     run_test "test_helper_network_isolation" test_helper_network_isolation
+    run_test "test_agent_data_packager" test_agent_data_packager
     run_test "test_audit_logging_pipeline" test_audit_logging_pipeline
     run_test "test_seccomp_ptrace_block" test_seccomp_ptrace_block
     run_test "test_host_security_preflight" test_host_security_preflight
@@ -1069,6 +1349,8 @@ main() {
     run_test "test_trusted_path_enforcement" test_trusted_path_enforcement
     run_test "test_session_config_renderer" test_session_config_renderer
     run_test "test_secret_broker_cli" test_secret_broker_cli
+    run_test "test_codex_cli_helper" test_codex_cli_helper
+    run_test "test_claude_cli_helper" test_claude_cli_helper
     run_test "test_local_remote_push" test_local_remote_push
     run_test "test_local_remote_fallback_push" test_local_remote_fallback_push
     run_test "test_secure_remote_sync" test_secure_remote_sync
