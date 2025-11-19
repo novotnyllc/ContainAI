@@ -15,6 +15,17 @@ fi
 
 echo "Installing launchers to PATH..."
 
+echo "Running Coding Agents prerequisite and health checks..."
+if ! "$REPO_ROOT/scripts/verify-prerequisites.sh"; then
+    echo "❌ Prerequisite verification failed. Resolve the issues above and re-run scripts/install.sh."
+    exit 1
+fi
+
+if ! "$REPO_ROOT/scripts/utils/check-health.sh"; then
+    echo "❌ Health check failed. Resolve the issues above and re-run scripts/install.sh."
+    exit 1
+fi
+
 # Determine shell rc file
 if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$SHELL" == *"zsh"* ]]; then
     RC_FILE="$HOME/.zshrc"

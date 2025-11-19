@@ -450,19 +450,20 @@ function Test-SharedFunctions {
         Fail "Get-SeccompProfilePath failed: $_"
     }
 
-    $env:CODING_AGENTS_SECCOMP_PROFILE = "missing-profile.json"
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ca-seccomp-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $tempRoot | Out-Null
     $seccompFailed = $false
     try {
-        $null = Get-SeccompProfilePath -RepoRoot $ProjectRoot
+        $null = Get-SeccompProfilePath -RepoRoot $tempRoot
     } catch {
         $seccompFailed = $true
     }
     if ($seccompFailed) {
-        Pass "Get-SeccompProfilePath reports missing override"
+        Pass "Get-SeccompProfilePath reports missing built-in profile"
     } else {
-        Fail "Get-SeccompProfilePath should fail for missing override"
+        Fail "Get-SeccompProfilePath should fail when profile file is absent"
     }
-    Remove-Item env:CODING_AGENTS_SECCOMP_PROFILE -ErrorAction SilentlyContinue
+    Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 
     $appProfile = Get-AppArmorProfileName -RepoRoot $ProjectRoot
     if ($appProfile) {
@@ -1094,9 +1095,12 @@ function Test-HostSecurityPreflight {
         Fail "Preflight rejected valid host security configuration"
     }
 
-    $originalSeccomp = $env:CODING_AGENTS_SECCOMP_PROFILE
+    $seccompProfile = Join-Path $ProjectRoot "docker/profiles/seccomp-coding-agents.json"
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ca-seccomp-missing-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $tempDir | Out-Null
+    $backupPath = Join-Path $tempDir "seccomp-coding-agents.json"
+    Move-Item -LiteralPath $seccompProfile -Destination $backupPath -Force
     try {
-        $env:CODING_AGENTS_SECCOMP_PROFILE = Join-Path $ProjectRoot "tests/nonexistent-seccomp.json"
         $seccompCheckPassed = $true
         try {
             $seccompCheckPassed = Test-HostSecurityPrereqs -RepoRoot $ProjectRoot
@@ -1111,11 +1115,8 @@ function Test-HostSecurityPreflight {
         }
     }
     finally {
-        if ([string]::IsNullOrWhiteSpace($originalSeccomp)) {
-            Remove-Item Env:CODING_AGENTS_SECCOMP_PROFILE -ErrorAction SilentlyContinue
-        } else {
-            $env:CODING_AGENTS_SECCOMP_PROFILE = $originalSeccomp
-        }
+        Move-Item -LiteralPath $backupPath -Destination $seccompProfile -Force
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -1128,7 +1129,6 @@ function Test-ContainerSecurityPreflight {
     $missingAppArmor = '{"SecurityOptions":["name=seccomp"]}'
 
     $env:CODING_AGENTS_CONTAINER_INFO_JSON = $goodJson
-    $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
     $preflightPassed = $false
     try {
         $preflightPassed = Test-ContainerSecuritySupport
@@ -1142,7 +1142,6 @@ function Test-ContainerSecurityPreflight {
     }
 
     $env:CODING_AGENTS_CONTAINER_INFO_JSON = $missingAppArmor
-    $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
     $appArmorCheckPassed = $false
     try {
         $appArmorCheckPassed = Test-ContainerSecuritySupport
@@ -1156,7 +1155,6 @@ function Test-ContainerSecurityPreflight {
     }
 
     Remove-Item Env:CODING_AGENTS_CONTAINER_INFO_JSON -ErrorAction SilentlyContinue
-    Remove-Item Env:CODING_AGENTS_DISABLE_SECCOMP -ErrorAction SilentlyContinue
 }
 
 function Test-LocalRemotePush {

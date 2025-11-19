@@ -8,8 +8,8 @@ This document outlines security considerations for using and contributing to the
 
 Before any container is created, the launchers execute two dedicated preflight checks:
 
-- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-coding-agents.profile` or explicitly acknowledge overrides via `CODING_AGENTS_DISABLE_*` environment variables.
-- `verify_container_security_support` inspects `docker info` / `podman info` JSON to ensure the selected runtime reports seccomp and AppArmor support. The launch aborts if the runtime cannot advertise both features (unless the matching override variable is set).
+- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-coding-agents.profile` or enable AppArmor in WSL via `scripts/utils/fix-wsl-security.sh`.
+- `verify_container_security_support` inspects `docker info` / `podman info` JSON to ensure the selected runtime reports seccomp and AppArmor support. The launch aborts immediately if either feature is missing.
 
 ```mermaid
 flowchart LR
@@ -21,7 +21,7 @@ flowchart LR
    class hostCheck,runtimeCheck,brokerInit,launch good;
 ```
 
-If a prerequisite is intentionally skipped (for example, running on macOS without AppArmor), the launcher requires an explicit opt-out via `CODING_AGENTS_DISABLE_APPARMOR=1` and logs the warning so reviewers can see it in `security-events.log`.
+Intentional opt-outs are no longer supported. If AppArmor or seccomp are missing, the launcher fails fast so you can remediate the host configuration before continuing.
 
 ### Container Isolation
 

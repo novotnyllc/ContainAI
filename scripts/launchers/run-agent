@@ -1458,13 +1458,9 @@ if [ "$GPG_SIGNING_ENABLED" = true ] && [ ! -S "$GPG_SOCKET_PATH" ]; then
 fi
 
 SECCOMP_PROFILE_PATH=""
-if [ "${CODING_AGENTS_DISABLE_SECCOMP:-0}" != "1" ]; then
-    if ! SECCOMP_PROFILE_PATH=$(resolve_seccomp_profile_path "$REPO_ROOT"); then
-        echo "❌ Unable to locate seccomp profile. Set CODING_AGENTS_SECCOMP_PROFILE to a valid file or export CODING_AGENTS_DISABLE_SECCOMP=1 to bypass (not recommended)."
-        exit 1
-    fi
-else
-    echo "⚠️  Seccomp enforcement disabled via CODING_AGENTS_DISABLE_SECCOMP=1" >&2
+if ! SECCOMP_PROFILE_PATH=$(resolve_seccomp_profile_path "$REPO_ROOT"); then
+    echo "❌ Seccomp profile missing. Run scripts/install.sh to reinstall the host security assets and retry."
+    exit 1
 fi
 
 APPARMOR_PROFILE_NAME=""

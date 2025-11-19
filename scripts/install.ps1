@@ -24,6 +24,19 @@ if (-not (Test-Path $LaunchersPath)) {
     exit 1
 }
 
+Write-Host "Running Coding Agents health check..." -ForegroundColor Cyan
+$healthScript = Join-Path $ScriptRoot "scripts/utils/check-health.ps1"
+if (-not (Test-Path $healthScript)) {
+    Write-Error "Health check script not found: $healthScript"
+    exit 1
+}
+
+& $healthScript
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Health check failed. Resolve the issues above and re-run scripts\install.ps1."
+    exit 1
+}
+
 function Install-Windows {
     Write-Host "Installing launchers to PATH (Windows)..." -ForegroundColor Cyan
     
