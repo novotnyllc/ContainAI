@@ -22,6 +22,7 @@ DIND_STARTED=false
 TEST_ARGS=()
 WITH_HOST_SECRETS=false
 HOST_SECRETS_FILE=""
+DIND_SECRETS_PATH="/run/coding-agents/mcp-secrets.env"
 DEFAULT_TRIVY_VERSION="${TEST_ISOLATION_TRIVY_VERSION:-0.50.2}"
 
 if [[ -n "${TEST_ISOLATION_DOCKER_RUN_FLAGS:-}" ]]; then
@@ -33,6 +34,7 @@ fi
 
 cleanup() {
     local exit_code=$?
+    scrub_dind_host_secrets
     if [[ "$DIND_STARTED" == "true" ]]; then
         if [[ "${TEST_PRESERVE_RESOURCES:-false}" == "true" ]]; then
             echo ""
@@ -64,6 +66,37 @@ print_dind_logs() {
         echo "Unable to retrieve logs from $DIND_CONTAINER"
     fi
     echo "--- End logs ---"
+}
+
+scrub_dind_host_secrets() {
+    if [[ "$WITH_HOST_SECRETS" != "true" || "$ISOLATION_MODE" != "dind" || "$DIND_STARTED" != "true" ]]; then
+        return
+    fi
+    docker exec "$DIND_CONTAINER" sh -c "rm -f '$DIND_SECRETS_PATH'" >/dev/null 2>&1 || true
+}
+
+stage_host_secrets_inside_dind() {
+    if [[ "$WITH_HOST_SECRETS" != "true" || "$ISOLATION_MODE" != "dind" ]]; then
+        return
+    fi
+
+    echo "  Copying host secrets into isolation..."
+    local dest_dir
+    dest_dir=$(dirname "$DIND_SECRETS_PATH")
+    if ! docker exec "$DIND_CONTAINER" sh -c "mkdir -p '$dest_dir' && chmod 700 '$dest_dir'" >/dev/null 2>&1; then
+        echo "  ✗ Failed to prepare secrets directory inside isolation"
+        exit 1
+    fi
+
+    if ! docker cp "$HOST_SECRETS_FILE" "$DIND_CONTAINER:$DIND_SECRETS_PATH" >/dev/null 2>&1; then
+        echo "  ✗ Failed to copy host secrets into isolation"
+        exit 1
+    fi
+
+    if ! docker exec "$DIND_CONTAINER" sh -c "chmod 600 '$DIND_SECRETS_PATH'" >/dev/null 2>&1; then
+        echo "  ⚠️  Unable to tighten permissions on secrets file inside isolation" >&2
+    fi
+    echo "  ✓ Host secrets staged inside isolation"
 }
 
 initialize_dind_run_dir() {
@@ -103,7 +136,7 @@ OPTIONS:
     --preserve          Keep test resources after completion for debugging
     --isolation dind    Run tests inside Docker-in-Docker (default)
     --isolation host    Run tests directly on host Docker daemon (optional, skips DinD risk)
-    --with-host-secrets Enable host-secrets tests (requires --isolation host)
+    --with-host-secrets Enable host-secrets prompt tests (copies secrets into isolation when needed)
     --help              Show this help message
 
 ENVIRONMENT VARIABLES:
@@ -207,10 +240,6 @@ case "$ISOLATION_MODE" in
 esac
 
 if [[ "$WITH_HOST_SECRETS" == "true" ]]; then
-    if [[ "$ISOLATION_MODE" != "host" ]]; then
-        echo "Error: --with-host-secrets requires --isolation host" >&2
-        exit 1
-    fi
     if ! HOST_SECRETS_FILE=$(resolve_host_secrets_file); then
         cat >&2 <<EOF
 Error: Unable to locate host secrets file.
@@ -390,8 +419,17 @@ run_integration_tests() {
         command+=" $(printf '%q' "$arg")"
     done
     
+    local -a exec_env=("-e" "TEST_PRESERVE_RESOURCES=${TEST_PRESERVE_RESOURCES:-false}")
+    if [[ "$WITH_HOST_SECRETS" == "true" ]]; then
+        exec_env+=(
+            "-e" "TEST_WITH_HOST_SECRETS=true"
+            "-e" "TEST_HOST_SECRETS_FILE=$DIND_SECRETS_PATH"
+            "-e" "CODING_AGENTS_MCP_SECRETS_FILE=$DIND_SECRETS_PATH"
+        )
+    fi
+
     local test_exit_code=0
-    docker exec -e TEST_PRESERVE_RESOURCES="${TEST_PRESERVE_RESOURCES:-false}" "$DIND_CONTAINER" bash -lc "$command" || test_exit_code=$?
+    docker exec "${exec_env[@]}" "$DIND_CONTAINER" bash -lc "$command" || test_exit_code=$?
     
     echo ""
     echo "═══════════════════════════════════════════════════════════"
@@ -427,5 +465,6 @@ else
     wait_for_daemon
     bootstrap_tools
     ensure_trivy_inside_isolation
+    stage_host_secrets_inside_dind
     run_integration_tests
 fi

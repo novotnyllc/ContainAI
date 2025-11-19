@@ -50,14 +50,14 @@ Set `CODING_AGENTS_IMAGE_OWNER=your-org` before running the script if you publis
 | Branch management unit tests (PowerShell) | `pwsh scripts/test/test-branch-management.ps1` | Same coverage in PS. |
 | Integration tests – launchers mode | `./scripts/test/integration-test.sh --mode launchers` | Reuses lightweight mock images; end-to-end launcher coverage. |
 | Integration tests – full mode | `./scripts/test/integration-test.sh --mode full` | Builds every image inside Docker-in-Docker; best for pre-PR validation. |
-| Integration tests – host secrets | `./scripts/test/integration-test.sh --mode launchers --isolation host --with-host-secrets` | Runs on the host Docker daemon, mounts your `mcp-secrets.env`, and exercises the `run-<agent> --prompt` path (currently Copilot) to verify live secrets. |
+| Integration tests – host secrets | `./scripts/test/integration-test.sh --mode launchers --with-host-secrets` | Copies your `mcp-secrets.env` into the isolated DinD harness (or uses the host daemon if you pass `--isolation host`) and exercises the `run-<agent> --prompt` path (currently Copilot) to verify live secrets. |
 
 > Tip: Use `./scripts/test/test-launchers.sh --list` (bash) or `pwsh scripts/test/test-launchers.ps1 -List` (PowerShell) to enumerate available launcher tests, then pass one or more names to run only the scenarios you need.
 
 Tips:
 - Use `--preserve` with the integration harness to keep the temporary Docker-in-Docker environment alive for debugging.
 - All tests rely on mock secrets stored under `scripts/test/fixtures/mock-secrets` unless you opt into `--with-host-secrets`, which reads your real tokens from `~/.config/coding-agents/mcp-secrets.env` (or `CODING_AGENTS_MCP_SECRETS_FILE`).
-- The `--with-host-secrets` flag requires `--isolation host` so the harness can access your secrets file; it adds a prompt-mode `--prompt` run (currently using Copilot, but supported by all agents) that now reuses your repo when available and falls back to an empty workspace only if no repo exists.
+- The `--with-host-secrets` flag works in both DinD and host isolation. In DinD mode, the harness securely copies your secrets file into the sandbox, deletes it after the run, and then runs a prompt-mode `--prompt` flow (currently Copilot) against your real repo. Add `--isolation host` only if you explicitly want to run on the host daemon.
 - Windows users can run the bash tests inside WSL2. PowerShell variants exist for parity when running natively.
 
 For deeper explanations of each suite, consult [scripts/test/README.md](../scripts/test/README.md).

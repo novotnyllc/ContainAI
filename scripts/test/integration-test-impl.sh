@@ -216,6 +216,46 @@ assert_container_has_label() {
     fi
 }
 
+next_agent_branch_name() {
+    local agent="$1"
+    local refs count=0
+    refs=$(git -C "$TEST_REPO_DIR" for-each-ref --format='%(refname:short)' "refs/heads/${agent}/session-*" 2>/dev/null || true)
+    if [[ -n "$refs" ]]; then
+        count=$(printf '%s\n' "$refs" | wc -l | tr -d '[:space:]')
+    fi
+    echo "${agent}/session-$((count + 1))"
+}
+
+wait_for_agent_branch() {
+    local branch="$1"
+    local timeout="${2:-60}"
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        if git -C "$TEST_REPO_DIR" rev-parse --verify --quiet "$branch" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    return 1
+}
+
+build_prompt_post_hook_script() {
+    local agent="$1"
+    local marker="$2"
+    local commit_msg="$3"
+    cat <<EOF
+set -euo pipefail
+cd /workspace
+cat <<'EOM' > ${marker}
+${agent} prompt hook success
+EOM
+git add ${marker}
+git commit -m "${commit_msg}" >/dev/null
+git push local HEAD >/dev/null
+EOF
+}
+
 # ============================================================================
 # Integration Tests
 # ============================================================================
@@ -728,13 +768,30 @@ test_cleanup_on_exit() {
 }
 
 test_host_prompt_mode() {
-    test_section "Testing host secrets prompt-mode execution"
+    test_section "Testing prompt-mode Copilot with host secrets"
 
+    if [[ "$TEST_WITH_HOST_SECRETS" != "true" ]]; then
+        echo "Skipping prompt-mode secret test (flag not enabled)"
+        return
+    fi
+
+    if [[ -z "$HOST_SECRETS_FILE" ]]; then
+        fail "Host secrets file path not set"
+        return
+    fi
+
+    local agent="copilot"
     local prompt="Return the words: host secrets OK."
-    local run_copilot="$PROJECT_ROOT/scripts/launchers/run-copilot"
+    local run_copilot="$PROJECT_ROOT/scripts/launchers/run-$agent"
+    local branch
+    branch=$(next_agent_branch_name "$agent")
+    local marker="prompt-hook-${agent}.txt"
+    local commit_msg="prompt hook commit (${agent})"
+    local hook_script
+    hook_script=$(build_prompt_post_hook_script "$agent" "$marker" "$commit_msg")
 
     if [[ ! -x "$run_copilot" ]]; then
-        fail "run-copilot launcher not executable at $run_copilot"
+        fail "run-$agent launcher not executable at $run_copilot"
         return
     fi
 
@@ -742,28 +799,52 @@ test_host_prompt_mode() {
     tmp_output=$(mktemp)
     local exit_code=0
 
-    if CODING_AGENTS_MCP_SECRETS_FILE="$HOST_SECRETS_FILE" \
+    pushd "$TEST_REPO_DIR" >/dev/null
+    if ! CODING_AGENTS_MCP_SECRETS_FILE="$HOST_SECRETS_FILE" \
+        CODING_AGENTS_PROMPT_POST_HOOK="$hook_script" \
         "$run_copilot" --prompt "$prompt" >"$tmp_output" 2>&1; then
-        exit_code=0
-    else
         exit_code=$?
     fi
-
-    local response
-    response=$(cat "$tmp_output" 2>/dev/null || true)
-    rm -f "$tmp_output"
+    popd >/dev/null
 
     if [[ $exit_code -ne 0 ]]; then
         fail "Prompt-mode Copilot execution failed (exit $exit_code)"
-        echo "$response"
+        cat "$tmp_output"
+        rm -f "$tmp_output"
+        return
+    fi
+    pass "Prompt-mode Copilot execution completed"
+
+    if wait_for_agent_branch "$branch" 90; then
+        pass "Created agent branch $branch via prompt session"
+    else
+        fail "Timed out waiting for branch $branch to sync back to host"
+        cat "$tmp_output"
+        rm -f "$tmp_output"
         return
     fi
 
-    if [[ -n "${response//[[:space:]]/}" ]]; then
-        pass "Prompt-mode Copilot produced output"
+    local contents
+    contents=$(git -C "$TEST_REPO_DIR" show "$branch:$marker" 2>/dev/null || true)
+    if [[ "$contents" == *"${agent} prompt hook success"* ]]; then
+        pass "Prompt hook artifact synced to $branch"
     else
-        fail "Prompt-mode Copilot returned empty response"
+        fail "Prompt hook artifact missing from $branch"
     fi
+
+    local subject
+    subject=$(git -C "$TEST_REPO_DIR" log -1 --pretty=%s "$branch" 2>/dev/null || true)
+    local subject_display="$subject"
+    if [[ -z "$subject_display" ]]; then
+        subject_display="<none>"
+    fi
+    if [[ "$subject" == "$commit_msg" ]]; then
+        pass "Prompt hook commit message matches expectation"
+    else
+        fail "Unexpected commit subject for $branch (expected '$commit_msg', got '$subject_display')"
+    fi
+
+    rm -f "$tmp_output"
 }
 
 test_shared_functions() {
