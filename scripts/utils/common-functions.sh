@@ -683,10 +683,6 @@ resolve_apparmor_profile_name() {
     local profile="${CODING_AGENTS_APPARMOR_PROFILE_NAME:-coding-agents}"
     local profile_file="${CODING_AGENTS_APPARMOR_PROFILE_FILE:-$repo_root/docker/profiles/apparmor-coding-agents.profile}"
 
-    if [ "${CODING_AGENTS_DISABLE_APPARMOR:-0}" = "1" ]; then
-        return 1
-    fi
-
     if ! is_apparmor_supported; then
         return 1
     fi
@@ -729,25 +725,21 @@ verify_host_security_prereqs() {
         fi
     fi
 
-    if [ "${CODING_AGENTS_DISABLE_APPARMOR:-0}" = "1" ]; then
-        warnings+=("AppArmor enforcement disabled via CODING_AGENTS_DISABLE_APPARMOR=1")
+    if ! is_linux_host; then
+        errors+=("AppArmor enforcement requires a Linux host. Run from a Linux kernel with AppArmor enabled.")
+    elif ! is_apparmor_supported; then
+        errors+=("AppArmor kernel support not detected. Enable AppArmor to continue.")
     else
-        if ! is_linux_host; then
-            errors+=("AppArmor enforcement requires a Linux host. Run from Linux or export CODING_AGENTS_DISABLE_APPARMOR=1 to acknowledge the risk.")
-        elif ! is_apparmor_supported; then
-            errors+=("AppArmor kernel support not detected. Enable AppArmor or export CODING_AGENTS_DISABLE_APPARMOR=1 to override.")
-        else
-            local profile="${CODING_AGENTS_APPARMOR_PROFILE_NAME:-coding-agents}"
-            local profile_file="${CODING_AGENTS_APPARMOR_PROFILE_FILE:-$repo_root/docker/profiles/apparmor-coding-agents.profile}"
-            if [[ "$profile_file" != /* ]]; then
-                profile_file="$repo_root/$profile_file"
-            fi
-            if ! apparmor_profile_loaded "$profile"; then
-                if [ -f "$profile_file" ]; then
-                    errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file' or export CODING_AGENTS_DISABLE_APPARMOR=1 to override.")
-                else
-                    errors+=("AppArmor profile file '$profile_file' not found. Set CODING_AGENTS_APPARMOR_PROFILE_FILE to a valid profile path.")
-                fi
+        local profile="${CODING_AGENTS_APPARMOR_PROFILE_NAME:-coding-agents}"
+        local profile_file="${CODING_AGENTS_APPARMOR_PROFILE_FILE:-$repo_root/docker/profiles/apparmor-coding-agents.profile}"
+        if [[ "$profile_file" != /* ]]; then
+            profile_file="$repo_root/$profile_file"
+        fi
+        if ! apparmor_profile_loaded "$profile"; then
+            if [ -f "$profile_file" ]; then
+                errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'.")
+            else
+                errors+=("AppArmor profile file '$profile_file' not found. Set CODING_AGENTS_APPARMOR_PROFILE_FILE to a valid profile path.")
             fi
         fi
     fi
@@ -789,16 +781,8 @@ verify_container_security_support() {
     fi
 
     local require_seccomp=1
-    local require_apparmor=1
     if [ "${CODING_AGENTS_DISABLE_SECCOMP:-0}" = "1" ]; then
         require_seccomp=0
-    fi
-    if [ "${CODING_AGENTS_DISABLE_APPARMOR:-0}" = "1" ]; then
-        require_apparmor=0
-    fi
-
-    if [ $require_seccomp -eq 0 ] && [ $require_apparmor -eq 0 ]; then
-        return 0
     fi
 
     local info_json="${CODING_AGENTS_CONTAINER_INFO_JSON:-}"
@@ -877,8 +861,8 @@ PY
         return 1
     fi
 
-    if [ $require_apparmor -eq 1 ] && [ $has_apparmor -ne 1 ]; then
-        echo "❌ Container runtime does not report AppArmor support. Ensure the module is enabled or export CODING_AGENTS_DISABLE_APPARMOR=1 to override." >&2
+    if [ $has_apparmor -ne 1 ]; then
+        echo "❌ Container runtime does not report AppArmor support. Enable the AppArmor module on the host kernel." >&2
         return 1
     fi
 

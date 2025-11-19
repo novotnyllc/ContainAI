@@ -464,14 +464,12 @@ function Test-SharedFunctions {
     }
     Remove-Item env:CODING_AGENTS_SECCOMP_PROFILE -ErrorAction SilentlyContinue
 
-    $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
     $appProfile = Get-AppArmorProfileName -RepoRoot $ProjectRoot
-    if (-not $appProfile) {
-        Pass "Get-AppArmorProfileName skips when disabled"
+    if ($appProfile) {
+        Pass "Get-AppArmorProfileName locates active AppArmor profile"
     } else {
-        Fail "Get-AppArmorProfileName should return null when disabled"
+        Fail "Get-AppArmorProfileName could not verify AppArmor support"
     }
-    Remove-Item env:CODING_AGENTS_DISABLE_APPARMOR -ErrorAction SilentlyContinue
 }
 
 function Test-HelperNetworkIsolation {
@@ -1090,33 +1088,15 @@ function Test-HostSecurityPreflight {
 
     . (Join-Path $ProjectRoot "scripts\utils\common-functions.ps1")
 
-    $previous = @{
-        CODING_AGENTS_DISABLE_SECCOMP = $env:CODING_AGENTS_DISABLE_SECCOMP
-        CODING_AGENTS_DISABLE_APPARMOR = $env:CODING_AGENTS_DISABLE_APPARMOR
-        CODING_AGENTS_DISABLE_PTRACE_SCOPE = $env:CODING_AGENTS_DISABLE_PTRACE_SCOPE
-        CODING_AGENTS_DISABLE_SENSITIVE_TMPFS = $env:CODING_AGENTS_DISABLE_SENSITIVE_TMPFS
-        CODING_AGENTS_SECCOMP_PROFILE = $env:CODING_AGENTS_SECCOMP_PROFILE
+    if (Test-HostSecurityPrereqs -RepoRoot $ProjectRoot) {
+        Pass "Preflight succeeds when host security prerequisites are satisfied"
+    } else {
+        Fail "Preflight rejected valid host security configuration"
     }
 
+    $originalSeccomp = $env:CODING_AGENTS_SECCOMP_PROFILE
     try {
-        $env:CODING_AGENTS_DISABLE_SECCOMP = "1"
-        $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
-        $env:CODING_AGENTS_DISABLE_PTRACE_SCOPE = "1"
-        $env:CODING_AGENTS_DISABLE_SENSITIVE_TMPFS = "1"
-        Remove-Item Env:CODING_AGENTS_SECCOMP_PROFILE -ErrorAction SilentlyContinue
-
-        if (Test-HostSecurityPrereqs -RepoRoot $ProjectRoot) {
-            Pass "Preflight allows explicit override of security guardrails"
-        } else {
-            Fail "Preflight rejected explicit override scenario"
-        }
-
-        $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
-        $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
-        $env:CODING_AGENTS_DISABLE_PTRACE_SCOPE = "1"
-        $env:CODING_AGENTS_DISABLE_SENSITIVE_TMPFS = "1"
         $env:CODING_AGENTS_SECCOMP_PROFILE = Join-Path $ProjectRoot "tests/nonexistent-seccomp.json"
-
         $seccompCheckPassed = $true
         try {
             $seccompCheckPassed = Test-HostSecurityPrereqs -RepoRoot $ProjectRoot
@@ -1131,12 +1111,10 @@ function Test-HostSecurityPreflight {
         }
     }
     finally {
-        foreach ($entry in $previous.GetEnumerator()) {
-            if ($null -eq $entry.Value -or $entry.Value -eq "") {
-                Remove-Item "Env:$($entry.Key)" -ErrorAction SilentlyContinue
-            } else {
-                Set-Item "Env:$($entry.Key)" $entry.Value
-            }
+        if ([string]::IsNullOrWhiteSpace($originalSeccomp)) {
+            Remove-Item Env:CODING_AGENTS_SECCOMP_PROFILE -ErrorAction SilentlyContinue
+        } else {
+            $env:CODING_AGENTS_SECCOMP_PROFILE = $originalSeccomp
         }
     }
 }
