@@ -2,6 +2,8 @@
 
 Complete reference for all CodingAgents launcher scripts and their arguments.
 
+> **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They no longer implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh scripts\launchers\run-copilot.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
+
 ## Table of Contents
 
 - [Quick Launch Scripts](#quick-launch-scripts)

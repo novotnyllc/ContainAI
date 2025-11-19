@@ -12,6 +12,8 @@ Use **`launch-agent`** only when you need:
 - Network proxy controls
 - Multiple persistent agents on the same repo
 
+> **Windows shells:** All `.ps1` files in this repo are thin wrappers that call the bash scripts inside your default WSL 2 distro. Install/enable WSL 2, then run `pwsh scripts\launchers\run-copilot.ps1 --% --prompt "..."` (use `--%` to stop PowerShell from interpreting GNU-style `--flags`). Every option documented below uses the bash syntax; the PowerShell wrappers forward those arguments verbatim. Running `scripts\install.ps1` adds `scripts\launchers` to your PATH so you can invoke `run-copilot`, `launch-agent`, etc. directly from any PowerShell prompt.
+
 ## What You Need
 
 ### On Your Host Machine
@@ -107,14 +109,14 @@ coding-agents.branch=main      # Branch name
 
 ## Prompt Mode
 
-Need a quick answer without cloning a repo? Add `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) to **any** `run-*` launcher:
+Need a quick answer without cloning a repo? Add `--prompt "<prompt>"` (same flag when running through the PowerShell shim) to **any** `run-*` launcher:
 
 ```bash
 run-codex --prompt "Sketch a README outline"
 run-claude --prompt "List security controls in this project"
 run-copilot --prompt "Return the words: host secrets OK."
-# PowerShell
-run-claude.ps1 -Prompt "Summarize CONTRIBUTING.md"
+# PowerShell (use --% so PowerShell stops parsing flags)
+pwsh scripts\launchers\run-claude.ps1 --% --prompt "Summarize CONTRIBUTING.md"
 ```
 
 Key traits:

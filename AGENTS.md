@@ -25,22 +25,22 @@ This file contains repository-specific guidance for working with the Coding Agen
 
 - `agent-configs/` - Custom instruction files for coding agents (copied to containers)
 - `docker/` - Container definitions and compose configurations
-- `scripts/` - Utility scripts (PowerShell and bash)
+- `scripts/` - Utility scripts (bash plus thin Windows shims)
 - `config.toml` - MCP server configuration template
 - `docs/` - Documentation
 
 ## Key Principles
 
-1. **Script Parity** - All functionality must exist in both PowerShell and bash
+1. **Canonical Bash** - Bash implementations are the source of truth. Windows `.ps1` wrappers simply delegate into WSL and must stay in sync with their bash counterparts.
 2. **Test Coverage** - All functions must have comprehensive unit tests
-3. **Code Quality** - PowerShell must pass PSScriptAnalyzer with zero warnings
+3. **Shim Quality** - Windows shims should perform only WSL validation/path translation and must not fork business logic
 4. **Documentation** - Keep CONTRIBUTING.md `docs/` updated with workflow changes
 
 ## Coding Conventions 
 
-- **PowerShell**: Always use approved verb-noun names (`Clear-TestEnvironment`, `Get-ContainerStatus`, etc.). Avoid aliases like `curl`, prefer full cmdlets (`Invoke-WebRequest`). Ensure scripts stay analyzer-clean.
-- **Bash**: Use `set -euo pipefail`, quote variables, prefer POSIX-friendly syntax unless Bash-only needed. Mirror behavior with the PowerShell counterpart.
-- **Shared Behavior**: When fixing a workflow in one shell, immediately update the sibling script and its tests. Keep comments minimal and only for non-obvious logic so agents can diff quickly.
+- **Windows shims**: `scripts/utils/wsl-shim.ps1` handles WSL detection and path conversion. Keep individual `.ps1` entrypoints minimal—dot-source the shim, pass arguments through, and propagate exit codes.
+- **Bash**: Use `set -euo pipefail`, quote variables, prefer POSIX-friendly syntax unless Bash-only needed.
+- **Shared Behavior**: Fixes belong in bash. After updating a bash workflow, regenerate or adjust the corresponding shim (if any) plus its tests so Windows callers still reach the new logic.
 - **Tests First-Class**: Whenever you change branch/remote handling or setup scripts, update both bash and PowerShell launcher tests plus integration tests to reflect the new guarantees.
 
 ## Agent Configuration
