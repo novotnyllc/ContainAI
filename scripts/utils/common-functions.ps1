@@ -1529,7 +1529,7 @@ function Copy-AgentDataExports {
     $containerExportPath = '{0}:{1}' -f $ContainerName, $containerPath
     $output = & $cli cp $containerExportPath $DestinationRoot 2>&1
     if ($LASTEXITCODE -ne 0) {
-        if ($output -match 'No such' -or $output -match 'not found') {
+        if ($output -match 'No such' -or $output -match 'not found' -or $output -match 'could not find') {
             return $false
         }
         Write-AgentMessage -Message "⚠️  Failed to copy agent data export for ${AgentName}: $output" -Color Yellow

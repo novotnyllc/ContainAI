@@ -1402,7 +1402,8 @@ function Test-ListAgents {
 function Test-RemoveAgent {
     Test-Section "Testing remove-agent command"
 
-    $containerName = "codex-test-coding-agents-repo-develop"
+    $containerName = New-TestContainer -Agent "codex" -Repo "test-coding-agents-repo" -Branch "develop"
+    Assert-ContainerExists -ContainerName $containerName -Message "remove-agent test container created"
 
     $removeScript = Join-Path $ProjectRoot "scripts\launchers\remove-agent.ps1"
     & $removeScript $containerName -NoPush
