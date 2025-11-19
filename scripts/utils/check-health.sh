@@ -30,12 +30,53 @@ NC='\033[0m'
 PASS=0
 FAIL=0
 WARN=0
+declare -a FIX_COMMAND=()
 
 header() { echo -e "\n${CYAN}🏥 $1${NC}"; echo "----------------------------------------"; }
 pass()   { echo -e "${GREEN}✅ $1${NC}"; ((PASS++)); }
 warn()   { echo -e "${YELLOW}⚠️  $1${NC}"; echo "   💡 $2"; ((WARN++)); }
 fail()   { echo -e "${RED}❌ $1${NC}"; echo "   👉 Fix: $2"; ((FAIL++)); }
 info()   { echo -e "   ℹ️  $1"; }
+
+suggest_fix() {
+    if [ ${#FIX_COMMAND[@]} -eq 0 ]; then
+        FIX_COMMAND=("$@")
+    fi
+}
+
+prompt_fix_command() {
+    if [ ${#FIX_COMMAND[@]} -eq 0 ]; then
+        echo -e "${YELLOW}💡 Review the errors above and follow the suggested manual steps.${NC}"
+        return
+    fi
+
+    local display_cmd
+    if [[ "${FIX_COMMAND[0]}" == "$REPO_ROOT"* ]]; then
+        display_cmd="./${FIX_COMMAND[0]#$REPO_ROOT/}"
+    else
+        display_cmd="${FIX_COMMAND[0]}"
+    fi
+    if [ ${#FIX_COMMAND[@]} -gt 1 ]; then
+        display_cmd+=" ${FIX_COMMAND[*]:1}"
+    fi
+
+    if [ ! -t 0 ]; then
+        echo -e "${YELLOW}💡 Suggested fix: run '${display_cmd}' and rerun check-health.${NC}"
+        return
+    fi
+
+    read -r -p "$(echo -e "${CYAN}Run ${display_cmd} now? [y/N]: ${NC}")" reply
+    if [[ "$reply" =~ ^[Yy]$ || "$reply" =~ ^[Yy][Ee][Ss]$ ]]; then
+        echo -e "${BLUE}▶ Executing ${display_cmd}${NC}"
+        if ( cd "$REPO_ROOT" && "${FIX_COMMAND[@]}" ); then
+            echo -e "${GREEN}✅ Fix command completed. Re-run check-health to confirm.${NC}"
+        else
+            echo -e "${RED}❌ Fix command failed. Review the output above for details.${NC}"
+        fi
+    else
+        echo -e "${YELLOW}ℹ️  Skipped automated fix. Run '${display_cmd}' later.${NC}"
+    fi
+}
 
 echo -e "${BLUE}CodingAgents System Diagnosis${NC}"
 
@@ -71,6 +112,7 @@ if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
         pass "WSL: Systemd is active"
     else
         fail "WSL: Systemd is disabled" "Run './scripts/utils/fix-wsl-security.sh' to enable."
+        suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
     fi
 
     # B. Kernel Version
@@ -90,6 +132,7 @@ if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
         pass "WSL: AppArmor is active"
     else
         fail "WSL: AppArmor DISABLED" "Your agents are running unconfined! Run './scripts/utils/fix-wsl-security.sh' immediately."
+        suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
     fi
 
 elif [ "$OS_TYPE" = "Darwin" ]; then
@@ -157,10 +200,12 @@ fi
 
 # --- 4. NETWORK ---
 header "Connectivity"
-if curl --head --fail --silent --max-time 3 "https://ghcr.io" >/dev/null; then
-    pass "Registry: ghcr.io Reachable"
+REGISTRY_URL="https://ghcr.io/v2/"
+registry_status=$(curl --silent --show-error --location --write-out "%{http_code}" --output /dev/null --max-time 6 --connect-timeout 3 --retry 1 --retry-connrefused "$REGISTRY_URL" 2>/dev/null || echo "000")
+if [[ "$registry_status" =~ ^[0-9]+$ ]] && [ "$registry_status" -ne 000 ] && [ "$registry_status" -lt 500 ]; then
+    pass "Registry: ghcr.io reachable (HTTP $registry_status)"
 else
-    warn "Registry: ghcr.io Unreachable" "Check VPN/Proxy settings. Agent pulls may fail."
+    warn "Registry: ghcr.io check failed" "Received HTTP $registry_status. Verify DNS / proxy settings and confirm 'curl $REGISTRY_URL' succeeds manually."
 fi
 
 # --- 5. STORAGE ---
@@ -186,6 +231,11 @@ if load_common_functions; then
         pass "Host enforcement: seccomp & AppArmor present"
     else
         fail "Host enforcement failed" "Resolve the errors below (run fix-wsl-security if on WSL)."
+        if [ "${IS_WSL:-0}" -eq 1 ]; then
+            suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
+        else
+            suggest_fix "$REPO_ROOT/scripts/install.sh"
+        fi
         while IFS= read -r line; do
             [ -n "$line" ] && info "$line"
         done <<< "$host_output"
@@ -215,5 +265,6 @@ if [ $FAIL -eq 0 ]; then
 else
     echo -e "${RED}❌ System Check Failed ($FAIL errors).${NC}"
     echo "   Please fix the issues above before launching."
+    prompt_fix_command
     exit 1
 fi
