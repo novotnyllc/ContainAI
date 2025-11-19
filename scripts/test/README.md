@@ -47,6 +47,10 @@ Full end-to-end system validation with two modes:
 
 ## Feature Coverage Matrix
 
+| Integration tests – host secrets | `./scripts/test/integration-test.sh --mode launchers --with-host-secrets` | Copies your `mcp-secrets.env` into the isolated DinD harness (or uses the host daemon if you pass `--isolation host`) and exercises the `run-<agent> --prompt` path (currently Copilot) to verify live secrets. |
+
+> **Why there isn't a PowerShell integration harness**
+> The PowerShell launchers (`run-*.ps1`) are thin wrappers that forward arguments to the shared bash implementation (`scripts/launchers/run-agent`). The integration suite manipulates containers, DinD, and git state entirely through bash, so duplicating the 800+ line harness in PowerShell would provide no extra coverage. We rely on the existing PowerShell unit tests (`test-launchers.ps1`, `test-branch-management.ps1`) to guard the PS entrypoints and keep all end-to-end validation centralized in the bash integration runner.
 | Feature / Guarantee                          | Automated Coverage                                                                                              | Notes |
 |----------------------------------------------|------------------------------------------------------------------------------------------------------------------|-------|
 | Container launch, labels, workspace mounts   | `integration-test.sh`: launcher execution, label, networking, workspace, env-variable tests                      | Ensures runtime wiring matches docs. |
