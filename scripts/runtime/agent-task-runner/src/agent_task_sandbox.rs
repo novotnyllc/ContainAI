@@ -7,6 +7,7 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
+use caps::{CapSet, CapsHashSet, Capability};
 use nix::errno::Errno;
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use nix::unistd::{chdir, initgroups, setresgid, setresuid, User};
@@ -25,6 +26,7 @@ fn real_main() -> Result<()> {
     let env_map = load_environment()?;
     prepare_mounts(&config)?;
     drop_privileges(&config.user)?;
+    ensure_capabilities_dropped()?;
     apply_environment(&env_map)?;
     change_directory(&config.cwd)?;
     exec_command(&config)
@@ -222,6 +224,27 @@ fn enforce_no_new_privs() -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn ensure_capabilities_dropped() -> Result<()> {
+    let effective = caps::read(None, CapSet::Effective)
+        .context("failed to query effective capabilities")?;
+    if effective.contains(&Capability::CAP_SYS_ADMIN) {
+        bail!("sandbox still has CAP_SYS_ADMIN; refusing to launch user command");
+    }
+    if !effective.is_empty() {
+        bail!(
+            "sandbox still has capabilities enabled: {}",
+            format_capability_set(&effective)
+        );
+    }
+    Ok(())
+}
+
+fn format_capability_set(set: &CapsHashSet) -> String {
+    let mut names: Vec<String> = set.iter().map(|cap| format!("{cap:?}")).collect();
+    names.sort();
+    names.join(", ")
 }
 
 fn apply_environment(env_map: &BTreeMap<String, String>) -> Result<()> {
