@@ -1,59 +1,63 @@
-# Secret Credential HTTPS Backlog (Updated 2025-11-18)
+s# Secret Credential HTTPS Backlog (Updated 2025-11-19)
 
 ## Epic 1 – Agent CLI Secret Import/Export
-- **1.1 Detect Secrets – run-agent/launch-agent** – **Done**  
-  `scripts/launchers/run-agent`, `scripts/launchers/launch-agent`, and their PowerShell counterparts hash Copilot/Codex/Claude credentials, call the broker via `store_stub_secrets`, and label capability bundles (`Stage-AgentCliCapabilityBundles`).
+- **1.1 Detect Secrets – run-agent/launch-agent** – **Done**  \
+  `scripts/launchers/run-agent` and `run-agent.ps1` call `detect_{copilot,codex,claude}_cli_secret` before container launch, hashing each credential via `register_agent_cli_secret` so the broker stashes per-agent secrets.
 - **1.2 Capability Packaging – host tmpfs** – **Done**  \
-  `scripts/launchers/{run,launch}-agent` and the PowerShell variants invoke `issue_session_capabilities` to drop sealed broker tokens under `$SESSION_CONFIG_OUTPUT/capabilities`, mirror them into `SESSION_CONFIG_OUTPUT/<agent>/cli/capabilities`, and then `docker cp` the tree into `/run/coding-agents` inside the container (tmpfs with `nosuid,nodev,noexec`). Per-agent manifests come from `write_agent_cli_manifest`, so helpers now redeem capabilities without touching host secret directories.
+  `stage_agent_cli_capability_bundles` (bash/PowerShell) copies sealed broker capabilities plus manifests into `$SESSION_CONFIG_OUTPUT/<agent>/cli/capabilities` and the container mounts that tmpfs at `/run/coding-agents/<agent>/cli`.
+- **1.3 Container Helpers** – **Done**  \
+  Helpers `docker/agents/{copilot,codex,claude}/prepare-*-secrets.sh` redeem capabilities through `/usr/local/bin/capability-unseal`, write configs under `/run/agent-secrets/<agent>`, and symlink CLI state to tmpfs. `scripts/runtime/entrypoint.sh` wires `CODING_AGENTS_AGENT_CAP_ROOT`/`CODING_AGENTS_AGENT_SECRET_ROOT` before helper execution.
+- **1.4 Data Import/Export** – **InProgress**  \
+  The host packager (`scripts/utils/package-agent-data.py`) emits per-entry SHA256/HMAC and entrypoint imports/exports tarballs via `/run/agent-data/<agent>/<session>`; however, neither `install_host_agent_data` nor `merge_agent_data_exports` validates the HMAC (no `--hmac-key-file` / `--require-hmac` usage), so tamper detection is still missing and the round-trip lacks regression tests.
 
 ## Epic 2 – Agent Namespace & Exec Interception
-- **2.1 UID Split – agentuser/agentcli** – **Done (2025-11-18)**  
-  `docker/base/Dockerfile` now provisions an `agentcli` user and places `agentuser` in the `agentcli` group. `scripts/runtime/entrypoint.sh` mounts `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` as tmpfs owned by `agentcli` with `nosuid,nodev,noexec,private,unbindable` semantics, stages agent data before the privilege drop, and ensures fallback directories stay `agentcli`-owned. Docs (`docs/architecture.md`, `docs/vscode-integration.md`) describe the split, and `scripts/test/integration-test-impl.sh` adds `test_agentcli_uid_split` to verify ownership and mount options.
-- **2.2 Wrapper & Env – CLI wrappers** – **Done (2025-11-18)**  
-  `docker/base/Dockerfile` now builds `/usr/local/bin/agentcli-exec` (setuid helper) and runs `scripts/runtime/install-agent-cli-wrappers.sh` to rewrite `github-copilot-cli`, `codex`, and `claude` into shims that export `AGENT_TASK_RUNNER_SOCKET`/helper metadata before invoking the preserved `.real` binary as `agentcli`. Documentation (`docs/architecture.md`, `docs/secret-credential-architecture.md`) explains the wrapper model, and `scripts/test/integration-test-impl.sh` adds `test_cli_wrappers` to assert the wrapper + helper are in place. This satisfies the env + privilege drop requirements pending future runner/seccomp integration.
-- **2.3 Seccomp Exec Trap – agent-task-runnerd** – **Done (2025-11-18)**  
-  The legacy C helpers are gone and `/usr/local/bin/agentcli-exec` + `/usr/local/bin/agent-task-runnerd` now come from the Rust crate in `scripts/runtime/agent-task-runner` (tests added in `src/lib.rs`). `docker/base/Dockerfile` compiles them via a dedicated cargo builder stage and installs the resulting binaries with the same ownership/permissions. Documentation in `docs/architecture.md` and `docs/secret-credential-architecture.md` calls out the safe-language implementation so the plan’s policy is enforced.
-- **2.4 Runner Sandbox – namespace limits** – **Done (2025-11-18)**  
-  `scripts/runtime/entrypoint.sh` now launches `agent-task-runnerd` before privileges drop so it can `unshare` and mount inside child namespaces. The sandbox binary (`scripts/runtime/agent-task-runner/src/agent_task_sandbox.rs`) remounts `/` private, replaces `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` with sealed tmpfs (`mode 000`), enforces `PR_SET_NO_NEW_PRIVS`, and defaults to the `coding-agents-task` AppArmor profile. Behavior is documented in `docs/secret-credential-architecture.md`, and the helper has unit tests (`cargo test --bin agent-task-sandbox`).
-- **2.5 CLI Integration – explicit exec/run** – **TODO**  
-  Runner daemon already exposes `MSG_RUN_REQUEST` JSON handling and stdout/stderr streaming, but nothing in the wrappers or helpers speaks that protocol today. `agentcli-exec` only registers the seccomp listener and immediately `execvp`s the vendor binary, so exec mediation still relies solely on kernel traps. Work needed: client-side RPC shim that sends run requests over `AGENT_TASK_RUNNER_SOCKET`, updates to `install-agent-cli-wrappers.sh` to route explicit subcommands (e.g., `copilot exec`, `codex run`) through the shim, plus Rust/unit/integration tests covering the socket path.
+- **2.1 UID Split – agentuser/agentcli** – **Done**  \
+  `docker/base/Dockerfile` provisions `agentcli` and adds `agentuser` to the group, while `scripts/runtime/entrypoint.sh` mounts `/run/agent-{secrets,data,data-export}` as `agentcli`-owned tmpfs (`nosuid,nodev,noexec,private,unbindable`) before privilege drop.
+- **2.2 Wrapper & Env – CLI wrappers** – **Done**  \
+  `/usr/local/bin/install-agent-cli-wrappers.sh` renames the vendor binaries, exports `AGENT_TASK_RUNNER_SOCKET`, and invokes `agentcli-exec`. `scripts/test/integration-test-impl.sh:test_cli_wrappers` confirms the wrappers call `agentcli-exec` and set the socket env.
+- **2.3 Seccomp Exec Trap – agent-task-runnerd** – **Done**  \
+  The Rust daemon (`scripts/runtime/agent-task-runner/src/agent_task_runnerd.rs`) registers for seccomp user-notification events, logs allow/deny decisions to `/run/agent-task-runner/events.log`, and ships via the cargo builder stage in `docker/base/Dockerfile`.
+- **2.4 Runner Sandbox – namespace limits** – **Done**  \
+  `agent-task-sandbox` remounts `/` private, masks `/run/agent-*`, enforces `PR_SET_NO_NEW_PRIVS`, and applies the `coding-agents-task` AppArmor profile before spawning shells (`scripts/runtime/agent-task-runner/src/agent_task_sandbox.rs`; entrypoint lines 360–420).
+- **2.5 CLI Integration – explicit exec/run** – **Done**  \
+  Wrappers dispatch `exec|run|shell` via `/usr/local/bin/agent-task-runnerctl` before falling back to `agentcli-exec` (see `scripts/runtime/install-agent-cli-wrappers.sh`). Integration tests grep for `agent-task-runnerctl` to guarantee the RPC path is wired.
 
-## Epic 3 – MCP Stub & Helper Improvements – MCP Stub & Helper Improvements
-- **3.1 Command MCP Stubs** – **TODO**  
-  No per-MCP stub binaries or UID/AppArmor wiring exist beyond the legacy `scripts/runtime/mcp-stub.py`.
-- **3.2 HTTPS/SSE Helper Proxies** – **TODO**  
-  No localhost helper daemons or proxy scripts are present; HTTPS flows still rely on vendor CLIs directly.
-- **3.3 Session Config Rewrites** – **TODO**  
-  Session config generator (`scripts/runtime/setup-mcp-configs.sh`) does not rewrite transports to helper binaries.
-- **3.4 Helper Lifecycle Hooks** – **TODO**  
-  No helper processes emit audit events or health metrics; nothing cleans tmpfs artifacts.
+## Epic 3 – MCP Stub & Helper Improvements
+- **3.1 Command MCP Stubs** – **TODO**  \
+  Only the shared Python `scripts/runtime/mcp-stub.py` ships—no per-MCP binaries, UIDs, or AppArmor labels exist yet.
+- **3.2 HTTPS/SSE Helper Proxies** – **TODO**  \
+  The repo lacks localhost helper daemons; HTTPS/SSE MCP traffic still goes straight from agent containers to vendor endpoints.
+- **3.3 Session Config Rewrites** – **TODO**  \
+  `scripts/runtime/setup-mcp-configs.sh` keeps emitting original MCP URLs/commands. There is no manifest rewrite that swaps transports for helper sockets.
+- **3.4 Helper Lifecycle Hooks** – **TODO**  \
+  With no helpers, there are no lifecycle events, tmpfs cleanup routines, or structured logs.
 
 ## Epic 4 – TLS Trust & Certificates
-- **4.1 Trust Store Strategy** – **TODO**  
-  No code prepares curated bundles or copies certs into helper tmpfs directories.
-- **4.2 Certificate/Public Key Pinning** – **TODO**  
-  Configuration schema lacks pinning entries and helpers do not enforce TLS pins.
-- **4.3 Trust Overrides Command** – **TODO**  
-  There is no `coding-agents trust` command or supporting storage under `~/.config/coding-agents/trust-overrides/`.
+- **4.1 Trust Store Strategy** – **TODO**  \
+  No code copies CA bundles into helper tmpfs or lets helpers choose between host vs curated trust stores.
+- **4.2 Certificate/Public Key Pinning** – **TODO**  \
+  Session configs have no pinning schema and nothing enforces pins for MCP HTTPS endpoints.
+- **4.3 Trust Overrides Command** – **TODO**  \
+  Still missing the `coding-agents trust add` workflow and `~/.config/coding-agents/trust-overrides/` management.
 
 ## Epic 5 – Audit & Introspection Tooling
-- **5.1 audit-agent Command (bash + PowerShell)** – **TODO**  
-  No `audit-agent` script exists under `scripts/` (bash or PowerShell).
-- **5.2 Launcher Structured Events** – **InProgress**  
-  `scripts/utils/common-functions.{sh,ps1}` provide `log_security_event` plus session-config/capability override emitters, but helper lifecycle/audit events are not yet implemented.
-- **5.3 Telemetry & Audit Verification** – **TODO**  
-  There are no automated checks ensuring audit logs contain expected events.
+- **5.1 audit-agent Command (bash + PowerShell)** – **TODO**  \
+  Documentation references `scripts/launchers/audit-agent`, but no bash or PowerShell implementation exists in the repo.
+- **5.2 Launcher Structured Events** – **InProgress**  \
+  `scripts/utils/common-functions.{sh,ps1}` log `session-config`, `capabilities-issued`, and `override-used`, yet there are no helper lifecycle events and nothing reports audit dumps.
+- **5.3 Telemetry & Audit Verification** – **TODO**  \
+  No automated tests or CI steps validate `security-events.log` or runner audit files.
 
 ## Epic 6 – Documentation & Troubleshooting
-- **Status: TODO**  
-  Docs (`docs/secret-credential-architecture.md`, `docs/security-workflows.md`, etc.) still describe the hardened design in future tense and do not match the partial implementation.
+- **Status: InProgress**  \
+  Docs such as `docs/secret-credential-architecture.md` describe HTTPS helper proxies and an `audit-agent` CLI as if they shipped, but those binaries/scripts are absent, so runbooks remain aspirational and need updates reflecting the actual state.
 
 ## Epic 7 – Testing & Validation
-- **7.1 Unit/Integration Tests** – **TODO**  
-  Existing suites (`scripts/test/test-launchers.{sh,ps1}`) lack coverage for secret packaging, capability redemption, tmpfs ownership, or exec interception.
-- **7.2 CI Enforcement** – **TODO**  
-  No automation enforces bash/PowerShell parity or analyzer runs for the new workflows beyond manual guidance in CONTRIBUTING.
-- **7.3 Telemetry & Audit Verification** – **TODO**  
-  There are no tests or CI steps verifying audit log contents for capability issuance, helper lifecycle, or TLS failures.
-- **7.4 Split Prod from Test common helpers** – **TODO**  
-  The common-functions contains test code that is copied into the runtime containers. Reduce attack surface area and factor better to split out functions that are only for testing into a separate file
+- **7.1 Unit/Integration Tests** – **InProgress**  \
+  Launchers/tests now cover secrets (`test_codex_cli_helper`), packager (`test_agent_data_packager`), helper network isolation, and CLI wrappers, but there is zero coverage for HTTPS helper flows, TLS pinning, or the missing audit-agent command.
+- **7.2 CI Enforcement** – **TODO**  \
+  No automated job enforces bash/PowerShell parity or analyzer checks; guidance still relies on manual CONTRIBUTING steps.
+- **7.3 Telemetry & Audit Verification** – **TODO**  \
+  CI never inspects audit logs or runner events after a launch.
+- **7.4 Split prod vs. test helpers** – **TODO**  \
+  `scripts/utils/common-functions.{sh,ps1}` are still shared by runtime helpers and tests, so sensitive functions (e.g., `remove_container_with_sidecars`) continue to ship into containers instead of being isolated.
