@@ -1,43 +1,43 @@
-# Launch an ephemeral coding agent session that auto-attaches to the agent CLI
+﻿# Launch an ephemeral coding agent session that auto-attaches to the agent CLI
 # Containers auto-clean on exit but keep git safeguards and host integrations
 
 param(
     [Parameter(Mandatory=$true, Position=0)]
     [ValidateSet("copilot", "codex", "claude")]
     [string]$Agent,
-    
+
     [Parameter(Mandatory=$false, Position=1)]
     [string]$Source = ".",
-    
+
     [Parameter(Mandatory=$false)]
     [Alias("b")]
     [string]$Branch,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Name,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$DotNetPreview,
-    
+
     [Parameter(Mandatory=$false)]
     [ValidateSet("allow-all", "restricted", "squid", "none")]
     [string]$NetworkProxy = "allow-all",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Cpu = "4",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Memory = "8g",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Gpu,
-    
+
     [Parameter(Mandatory=$false)]
     [switch]$NoPush,
-    
+
     [Parameter(Mandatory=$false)]
     [switch]$UseCurrentBranch,
-    
+
     [Parameter(Mandatory=$false)]
     [Alias("y")]
     [switch]$Force,
@@ -47,6 +47,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$InformationPreference = "Continue"
 $SourceExplicit = $PSBoundParameters.ContainsKey('Source')
 $BranchFromFlag = $PSBoundParameters.ContainsKey('Branch')
 $LocalRemoteHostPath = ""
@@ -82,6 +83,62 @@ $script:AgentCliAgentNameByStub = @{}
 $script:AgentCliStubs = New-Object 'System.Collections.Generic.List[string]'
 $script:McpSecretValues = @{}
 $script:LoadedSecretFiles = New-Object 'System.Collections.Generic.HashSet[string]'
+$ForbiddenExtraArgs = @("--privileged", "--pid=host", "--network=host", "--ipc=host", "--uts=host")
+$ForbiddenSecurityValues = @("seccomp=unconfined", "apparmor=unconfined", "no-new-privileges=false")
+
+function Invoke-ForbiddenExtraArgFailure {
+    param(
+        [Parameter(Mandatory = $true)][string]$Arg,
+        [string]$Reason
+    )
+    $message = "CODING_AGENTS_EXTRA_DOCKER_ARGS cannot include '$Arg'"
+    if (-not [string]::IsNullOrWhiteSpace($Reason)) {
+        $message = "$message ($Reason)"
+    }
+    Write-Information "❌ $message"
+    Write-Information "   These options break the container security model and can impact the host system."
+    exit 1
+}
+
+function Test-SecurityOptValue {
+    param([string]$Value)
+    foreach ($forbidden in $ForbiddenSecurityValues) {
+        if ($Value -eq $forbidden) {
+            Invoke-ForbiddenExtraArgFailure -Arg "--security-opt $Value" -Reason "because security hardening would be disabled"
+        }
+    }
+}
+
+function Test-ExtraDockerArg {
+    param([string[]]$DockerArgList)
+    if (-not $DockerArgList) { return }
+    for ($idx = 0; $idx -lt $DockerArgList.Count; $idx++) {
+        $current = $DockerArgList[$idx]
+        foreach ($forbidden in $ForbiddenExtraArgs) {
+            if ($current -eq $forbidden) {
+                Invoke-ForbiddenExtraArgFailure -Arg $current -Reason "because host namespaces must stay isolated"
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($current)) {
+            continue
+        }
+        if (($current -eq "--cap-add") -or ($current -like "--cap-add=*")) {
+            Invoke-ForbiddenExtraArgFailure -Arg $current -Reason "launcher already manages the minimal capability set"
+        }
+        if ($current -eq "--security-opt") {
+            if ($idx + 1 -ge $DockerArgList.Count -or [string]::IsNullOrWhiteSpace($DockerArgList[$idx + 1])) {
+                Invoke-ForbiddenExtraArgFailure -Arg "--security-opt" -Reason "requires a non-empty value"
+            }
+            Test-SecurityOptValue -Value $DockerArgList[$idx + 1]
+            $idx++
+            continue
+        }
+        if ($current -like "--security-opt=*") {
+            $inline = $current.Substring("--security-opt=".Length)
+            Test-SecurityOptValue -Value $inline
+        }
+    }
+}
 
 function Add-UniqueValue {
     param(
@@ -175,11 +232,15 @@ function Resolve-SecretValue {
 }
 
 function Set-StubSecret {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param([string]$BrokerScript)
     foreach ($stub in $script:SessionStubSecrets.Keys) {
         $names = [string[]]$script:SessionStubSecrets[$stub]
         if (-not $names -or $names.Count -eq 0) { continue }
         foreach ($name in $names) {
+            if (-not $PSCmdlet.ShouldProcess("stub '$stub' secret '$name'", "Store broker-managed secret")) {
+                continue
+            }
             if ($script:SessionSecretFileSources.ContainsKey($name)) {
                 $fileSource = $script:SessionSecretFileSources[$name]
                 if (-not (Invoke-PythonTool -ScriptPath $BrokerScript -MountPaths @($fileSource) -ScriptArgs @("store", "--stub", $stub, "--name", $name, "--from-file", $fileSource))) {
@@ -290,12 +351,12 @@ function Register-AgentCliSecret {
     $script:AgentCliAgentNameByStub[$StubName] = $AgentName
 }
 
-function Detect-CopilotCliSecret {
+function Get-CopilotCliSecret {
     $hostCfg = Join-Path (Join-Path $HOME ".copilot") "config.json"
     if (-not (Test-Path $hostCfg -PathType Leaf)) {
-        Write-Host "❌ Copilot credentials not found at $hostCfg" -ForegroundColor Red
+        Write-Information "❌ Copilot credentials not found at $hostCfg"
         if ($env:CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS -eq "1") {
-            Write-Host "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" -ForegroundColor Yellow
+            Write-Information "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1"
             return $false
         }
         exit 1
@@ -303,16 +364,16 @@ function Detect-CopilotCliSecret {
     $digest = Get-FileSha256 -Path $hostCfg
     Register-AgentCliSecret -AgentName "copilot" -StubName "agent_copilot_cli" -SecretName "copilot_cli_config_json" -SourceType "file" -SourceLabel $hostCfg -DataSource $hostCfg -DigestValue $digest
     $display = if ($digest) { $digest } else { "unknown" }
-    Write-Host "🔐 Copilot CLI credential detected (sha256=$display)"
+    Write-Information "🔐 Copilot CLI credential detected (sha256=$display)"
     return $true
 }
 
-function Detect-CodexCliSecret {
+function Get-CodexCliSecret {
     $hostCfg = Join-Path (Join-Path $HOME ".codex") "auth.json"
     if (-not (Test-Path $hostCfg -PathType Leaf)) {
-        Write-Host "❌ Codex credentials not found at $hostCfg" -ForegroundColor Red
+        Write-Information "❌ Codex credentials not found at $hostCfg"
         if ($env:CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS -eq "1") {
-            Write-Host "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" -ForegroundColor Yellow
+            Write-Information "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1"
             return $false
         }
         exit 1
@@ -320,17 +381,17 @@ function Detect-CodexCliSecret {
     $digest = Get-FileSha256 -Path $hostCfg
     Register-AgentCliSecret -AgentName "codex" -StubName "agent_codex_cli" -SecretName "codex_cli_auth_json" -SourceType "file" -SourceLabel $hostCfg -DataSource $hostCfg -DigestValue $digest
     $display = if ($digest) { $digest } else { "unknown" }
-    Write-Host "🔐 Codex CLI credential detected (sha256=$display)"
+    Write-Information "🔐 Codex CLI credential detected (sha256=$display)"
     return $true
 }
 
-function Detect-ClaudeCliSecret {
+function Get-ClaudeCliSecret {
     $fileCfg = Join-Path (Join-Path $HOME ".claude") ".credentials.json"
     if (Test-Path $fileCfg -PathType Leaf) {
         $digest = Get-FileSha256 -Path $fileCfg
         Register-AgentCliSecret -AgentName "claude" -StubName "agent_claude_cli" -SecretName "claude_cli_credentials" -SourceType "file" -SourceLabel $fileCfg -DataSource $fileCfg -DigestValue $digest
         $display = if ($digest) { $digest } else { "unknown" }
-        Write-Host "🔐 Claude CLI credential detected from $fileCfg (sha256=$display)"
+        Write-Information "🔐 Claude CLI credential detected from $fileCfg (sha256=$display)"
         return $true
     }
     $envKey = [Environment]::GetEnvironmentVariable("CLAUDE_API_KEY")
@@ -338,22 +399,22 @@ function Detect-ClaudeCliSecret {
         $digest = Get-StringSha256 -Value $envKey
         Register-AgentCliSecret -AgentName "claude" -StubName "agent_claude_cli" -SecretName "claude_cli_credentials" -SourceType "inline" -SourceLabel "env:CLAUDE_API_KEY" -DataSource $envKey -DigestValue $digest
         $display = if ($digest) { $digest } else { "unknown" }
-        Write-Host "🔐 Claude CLI credential detected from CLAUDE_API_KEY environment (sha256=$display)"
+        Write-Information "🔐 Claude CLI credential detected from CLAUDE_API_KEY environment (sha256=$display)"
         return $true
     }
-    Write-Host "❌ Claude credentials missing (expected ~/.claude/.credentials.json or CLAUDE_API_KEY)" -ForegroundColor Red
+    Write-Information "❌ Claude credentials missing (expected ~/.claude/.credentials.json or CLAUDE_API_KEY)"
     if ($env:CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS -eq "1") {
-        Write-Host "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" -ForegroundColor Yellow
+        Write-Information "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1"
         return $false
     }
     exit 1
 }
 
-function Detect-AgentCliSecrets {
+function Initialize-AgentCliSecret {
     switch ($Agent) {
-        "copilot" { Detect-CopilotCliSecret | Out-Null }
-        "codex" { Detect-CodexCliSecret | Out-Null }
-        "claude" { Detect-ClaudeCliSecret | Out-Null }
+        "copilot" { Get-CopilotCliSecret | Out-Null }
+        "codex" { Get-CodexCliSecret | Out-Null }
+        "claude" { Get-ClaudeCliSecret | Out-Null }
     }
 }
 
@@ -388,7 +449,8 @@ function Write-AgentCliManifest {
     Set-Content -LiteralPath $ManifestPath -Value $json -Encoding utf8
 }
 
-function Stage-AgentCliCapabilityBundles {
+function Set-AgentCliCapabilityBundle {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [string]$CapabilityRoot,
         [string]$SessionOutputDir,
@@ -400,6 +462,9 @@ function Stage-AgentCliCapabilityBundles {
         $sourceDir = Join-Path $CapabilityRoot $stub
         if (-not (Test-Path $sourceDir)) {
             Write-Warning "⚠️  Capability directory missing for stub '$stub'"
+            continue
+        }
+        if (-not $PSCmdlet.ShouldProcess("stub '$stub'", "Stage capability bundle")) {
             continue
         }
         $destRoot = Join-Path $SessionOutputDir $agentName
@@ -414,7 +479,8 @@ function Stage-AgentCliCapabilityBundles {
     }
 }
 
-function Ensure-DataHmacKey {
+function Set-DataHmacKey {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $true)][string]$AgentName,
         [Parameter(Mandatory = $true)][string]$SessionId,
@@ -424,22 +490,32 @@ function Ensure-DataHmacKey {
     if (-not (Test-Path $KeyPath -PathType Leaf)) {
         $directory = Split-Path -Parent $KeyPath
         if (-not (Test-Path $directory)) {
-            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            if ($PSCmdlet.ShouldProcess($directory, "Create key directory")) {
+                New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            }
         }
-        $bytes = New-Object byte[] 32
-        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-        $keyHex = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
-        Set-Content -LiteralPath $KeyPath -Value $keyHex -Encoding ascii
+        if ($PSCmdlet.ShouldProcess($KeyPath, "Create data HMAC key")) {
+            $bytes = New-Object byte[] 32
+            [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+            $keyHex = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+            Set-Content -LiteralPath $KeyPath -Value $keyHex -Encoding ascii
+        }
     }
 
     $hostStore = Join-Path (Join-Path $HOME ".config/coding-agents/data-hmac") $AgentName
     if (-not (Test-Path $hostStore)) {
-        New-Item -ItemType Directory -Path $hostStore -Force | Out-Null
+        if ($PSCmdlet.ShouldProcess($hostStore, "Create data HMAC host store")) {
+            New-Item -ItemType Directory -Path $hostStore -Force | Out-Null
+        }
     }
-    Copy-Item -LiteralPath $KeyPath -Destination (Join-Path $hostStore "$SessionId.key") -Force
+    $sessionKeyPath = Join-Path $hostStore "$SessionId.key"
+    if ($PSCmdlet.ShouldProcess($sessionKeyPath, "Copy data HMAC key to host store")) {
+        Copy-Item -LiteralPath $KeyPath -Destination $sessionKeyPath -Force
+    }
 }
 
-function Package-AgentDataPayload {
+function New-AgentDataPayload {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [string]$AgentName,
         [string]$SessionOutputDir,
@@ -451,6 +527,10 @@ function Package-AgentDataPayload {
         return
     }
 
+    if (-not $PSCmdlet.ShouldProcess("agent '$AgentName'", "Generate data payload")) {
+        return
+    }
+
     $dataDir = Join-Path (Join-Path $SessionOutputDir $AgentName) (Join-Path "data" $SessionId)
     if (-not (Test-Path $dataDir)) {
         New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
@@ -458,21 +538,21 @@ function Package-AgentDataPayload {
     $tarPath = Join-Path $dataDir "data-import.tar"
     $manifestPath = Join-Path $dataDir "manifest.json"
     $keyPath = Join-Path $dataDir "data-hmac.key"
-    Ensure-DataHmacKey -AgentName $AgentName -SessionId $SessionId -KeyPath $keyPath
+    Set-DataHmacKey -AgentName $AgentName -SessionId $SessionId -KeyPath $keyPath
     $mounts = @($SessionOutputDir)
-    $args = @("--agent", $AgentName, "--session-id", $SessionId, "--tar", $tarPath, "--manifest", $manifestPath)
+    $packageArgs = @("--agent", $AgentName, "--session-id", $SessionId, "--tar", $tarPath, "--manifest", $manifestPath)
     if ($env:HOME) {
-        $args += @("--home-path", $env:HOME)
+        $packageArgs += @("--home-path", $env:HOME)
     }
-    $args += @("--hmac-key-file", $keyPath)
+    $packageArgs += @("--hmac-key-file", $keyPath)
 
-    if (Invoke-PythonTool -ScriptPath $packagerScript -MountPaths $mounts -ScriptArgs $args) {
+    if (Invoke-PythonTool -ScriptPath $packagerScript -MountPaths $mounts -ScriptArgs $packageArgs) {
         if ((Test-Path $tarPath) -and ((Get-Item $tarPath).Length -gt 0)) {
-            Write-Host "📦 Packaged $AgentName data import archive" -ForegroundColor Green
+            Write-Information "📦 Packaged $AgentName data import archive"
         } else {
             Remove-Item -LiteralPath $tarPath -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $manifestPath -ErrorAction SilentlyContinue
-            Write-Host "ℹ️  No host data discovered for $AgentName data import" -ForegroundColor Yellow
+            Write-Information "ℹ️  No host data discovered for $AgentName data import"
         }
     } else {
         Write-Warning "⚠️  Failed to package host data for agent '$AgentName'"
@@ -505,20 +585,20 @@ $TrustedTreeEnv = if ($TrustedTreeHashes -and $TrustedTreeHashes.Count -gt 0) {
     ""
 }
 if ($LauncherHeadHash) {
-    Write-Host "🔒 Launcher commit: $LauncherHeadHash" -ForegroundColor Cyan
+    Write-Information "🔒 Launcher commit: $LauncherHeadHash"
 }
 if ($TrustedTreeHashes -and $TrustedTreeHashes.Count -gt 0) {
-    Write-Host "   Trusted tree hashes:" -ForegroundColor Gray
+    Write-Information "   Trusted tree hashes:"
     foreach ($entry in $TrustedTreeHashes) {
-        Write-Host "     • $($entry.Path)=$($entry.Hash)" -ForegroundColor Gray
+        Write-Information "     • $($entry.Path)=$($entry.Hash)"
     }
 }
 
 # Auto-detect WSL home directory
 $WslHome = wsl bash -c 'echo $HOME' 2>$null
 if (-not $WslHome) {
-    Write-Host "❌ Error: Could not detect WSL home directory" -ForegroundColor Red
-    Write-Host "   Make sure WSL2 is installed and running" -ForegroundColor Yellow
+    Write-Information "❌ Error: Could not detect WSL home directory"
+    Write-Information "   Make sure WSL2 is installed and running"
     exit 1
 }
 
@@ -534,7 +614,7 @@ if (-not (Test-DockerRunning)) {
 
 $ContainerCli = Get-ContainerCli
 if (-not $ContainerCli) {
-    Write-Host "❌ Error: Unable to determine container runtime" -ForegroundColor Red
+    Write-Information "❌ Error: Unable to determine container runtime"
     exit 1
 }
 
@@ -557,7 +637,7 @@ if ($IsUrl) {
 } else {
     $ResolvedPathItem = Resolve-Path $Source -ErrorAction SilentlyContinue
     if (-not $ResolvedPathItem) {
-        Write-Host "❌ Error: Source path does not exist: $Source" -ForegroundColor Red
+        Write-Information "❌ Error: Source path does not exist: $Source"
         exit 1
     }
     $ResolvedPath = $ResolvedPathItem.ProviderPath
@@ -580,7 +660,7 @@ if ($IsUrl) {
             $RepoName = "prompt"
             $Source = "prompt-only"
         } else {
-            Write-Host "❌ Error: $Source is not a git repository" -ForegroundColor Red
+            Write-Information "❌ Error: $Source is not a git repository"
             exit 1
         }
     } else {
@@ -638,18 +718,18 @@ if ([string]::IsNullOrWhiteSpace($RepoName)) {
 
 if ($UseCurrentBranch) {
     if ($SourceType -ne "local") {
-        Write-Host "❌ Error: -UseCurrentBranch is only supported for local repositories" -ForegroundColor Red
+        Write-Information "❌ Error: -UseCurrentBranch is only supported for local repositories"
         exit 1
     }
     if ($BranchFromFlag) {
-        Write-Host "❌ Error: -UseCurrentBranch cannot be combined with -Branch" -ForegroundColor Red
+        Write-Information "❌ Error: -UseCurrentBranch cannot be combined with -Branch"
         exit 1
     }
 }
 
 # Restricted network cannot clone URLs
 if ($NetworkProxy -eq "restricted" -and $SourceType -eq "url") {
-    Write-Host "❌ Restricted network mode cannot clone from a URL. Provide a local path or use -NetworkProxy allow-all." -ForegroundColor Red
+    Write-Information "❌ Restricted network mode cannot clone from a URL. Provide a local path or use -NetworkProxy allow-all."
     exit 1
 }
 
@@ -681,9 +761,9 @@ function Invoke-PromptSession {
         [string]$ContainerName,
         [string]$Agent
     )
-    Write-Host ""
-    Write-Host "💡 Running prompt session inside container" -ForegroundColor Cyan
-    Write-Host "   Prompt: $Prompt" -ForegroundColor Gray
+    Write-Information ""
+    Write-Information "💡 Running prompt session inside container"
+    Write-Information "   Prompt: $Prompt"
     $command = switch ($Agent) {
         "copilot" { 'github-copilot-cli exec "$PROMPT_INPUT"' }
         "codex" { 'codex exec "$PROMPT_INPUT"' }
@@ -695,11 +775,11 @@ function Invoke-PromptSession {
     $exitCode = $LASTEXITCODE
     & $ContainerCli "stop" $ContainerName | Out-Null
     if ($exitCode -eq 0) {
-        Write-Host ""
-        Write-Host "✅ Prompt session completed" -ForegroundColor Green
+        Write-Information ""
+        Write-Information "✅ Prompt session completed"
     } else {
-        Write-Host ""
-        Write-Host "❌ Prompt session failed with exit code $exitCode" -ForegroundColor Red
+        Write-Information ""
+        Write-Information "❌ Prompt session failed with exit code $exitCode"
     }
     return $exitCode
 }
@@ -729,25 +809,25 @@ if (-not $Branch) {
         Push-Location $ResolvedPath
         $CurrentBranch = git branch --show-current 2>$null
         Pop-Location
-        
+
         # Safety: Never use current branch unless it's an agent branch or explicitly allowed
         if ($UseCurrentBranch) {
             if (-not $CurrentBranch) {
-                Write-Host "❌ Error: Repository is in a detached HEAD state; cannot use -UseCurrentBranch" -ForegroundColor Red
+                Write-Information "❌ Error: Repository is in a detached HEAD state; cannot use -UseCurrentBranch"
                 exit 1
             }
             $Branch = $CurrentBranch
-            Write-Host "⚠️  Warning: Using current branch directly (-UseCurrentBranch specified)" -ForegroundColor Yellow
+            Write-Information "⚠️  Warning: Using current branch directly (-UseCurrentBranch specified)"
         } elseif (Test-AgentBranch $CurrentBranch) {
             # Current branch is already an agent branch, safe to use
             $Branch = $CurrentBranch
-            Write-Host "✓ Current branch '$CurrentBranch' is an agent branch" -ForegroundColor Green
+            Write-Information "✓ Current branch '$CurrentBranch' is an agent branch"
         } else {
             # Generate unique session branch
             $SessionNum = Find-NextSession -RepoPath $ResolvedPath -Agent $Agent
             $Branch = "session-$SessionNum"
             $CurrentDisplay = if ($CurrentBranch) { $CurrentBranch } else { "main" }
-            Write-Host "ℹ️  Creating new branch '$Agent/$Branch' (current: $CurrentDisplay)" -ForegroundColor Cyan
+            Write-Information "ℹ️  Creating new branch '$Agent/$Branch' (current: $CurrentDisplay)"
         }
     } else {
         $Branch = "main"
@@ -756,8 +836,8 @@ if (-not $Branch) {
 
 # Validate branch name
 if (-not (Test-ValidBranchName $Branch)) {
-    Write-Host "❌ Error: Invalid branch name: $Branch" -ForegroundColor Red
-    Write-Host "   Branch names must start with alphanumeric and contain only: a-z, A-Z, 0-9, /, _, ., -" -ForegroundColor Yellow
+    Write-Information "❌ Error: Invalid branch name: $Branch"
+    Write-Information "   Branch names must start with alphanumeric and contain only: a-z, A-Z, 0-9, /, _, ., -"
     exit 1
 }
 
@@ -771,67 +851,67 @@ if ($SourceType -eq "local" -and -not $UseCurrentBranch) {
         } else {
             $AgentBranchName = "$Agent/$Branch"
         }
-        
+
         git show-ref --verify --quiet "refs/heads/$AgentBranchName" 2>$null | Out-Null
         $BranchExistsCode = $LASTEXITCODE
-        
+
         if ($BranchExistsCode -eq 0) {
-            Write-Host ""
-            Write-Host "⚠️  Warning: Branch '$AgentBranchName' already exists in the repository" -ForegroundColor Yellow
-            
+            Write-Information ""
+            Write-Information "⚠️  Warning: Branch '$AgentBranchName' already exists in the repository"
+
             # Check for unmerged commits
             $currentBranch = git branch --show-current 2>$null
             $unmergedCommits = git log "$currentBranch..$AgentBranchName" --oneline 2>$null
-            
+
             if ($unmergedCommits) {
-                Write-Host "   Branch has unmerged commits:" -ForegroundColor Yellow
-                $unmergedCommits | Select-Object -First 5 | ForEach-Object { Write-Host "     $_" -ForegroundColor Gray }
+                Write-Information "   Branch has unmerged commits:"
+                $unmergedCommits | Select-Object -First 5 | ForEach-Object { Write-Information "     $_" }
                 if (($unmergedCommits | Measure-Object -Line).Lines -gt 5) {
-                    Write-Host "     ... and $(($unmergedCommits | Measure-Object -Line).Lines - 5) more" -ForegroundColor Gray
+                    Write-Information "     ... and $(($unmergedCommits | Measure-Object -Line).Lines - 5) more"
                 }
             }
-            
+
             if (-not $Force) {
                 $response = Read-Host "   Replace this branch? [y/N]"
                 if ($response -ne 'y' -and $response -ne 'Y') {
-                    Write-Host "❌ Launch cancelled. Use a different branch name or add -Force to replace" -ForegroundColor Red
+                    Write-Information "❌ Launch cancelled. Use a different branch name or add -Force to replace"
                     Pop-Location
                     exit 1
                 }
             } else {
-                Write-Host "   -Force specified, will replace branch" -ForegroundColor Cyan
+                Write-Information "   -Force specified, will replace branch"
             }
-            
+
             # Handle old branch
             if ($unmergedCommits) {
                 # Rename old branch to preserve unmerged commits
                 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
                 $archiveBranch = "${AgentBranchName}-archived-${timestamp}"
-                Write-Host "   📦 Archiving old branch as: $archiveBranch" -ForegroundColor Cyan
+                Write-Information "   📦 Archiving old branch as: $archiveBranch"
                 git branch -m "$AgentBranchName" "$archiveBranch" 2>$null | Out-Null
-                
+
                 if ($LASTEXITCODE -eq 0) {
-                    Write-Host "   ✅ Old branch preserved with unmerged commits" -ForegroundColor Green
+                    Write-Information "   ✅ Old branch preserved with unmerged commits"
                 } else {
-                    Write-Host "   ❌ Failed to archive old branch" -ForegroundColor Red
+                    Write-Information "   ❌ Failed to archive old branch"
                     Pop-Location
                     exit 1
                 }
             } else {
                 # No unmerged commits, safe to delete
-                Write-Host "   🗑️  Removing old branch (no unmerged commits)" -ForegroundColor Cyan
+                Write-Information "   🗑️  Removing old branch (no unmerged commits)"
                 git branch -D "$AgentBranchName" 2>$null | Out-Null
-                
+
                 if ($LASTEXITCODE -ne 0) {
-                    Write-Host "   ❌ Failed to remove old branch" -ForegroundColor Red
+                    Write-Information "   ❌ Failed to remove old branch"
                     Pop-Location
                     exit 1
                 }
             }
-            
-            Write-Host ""
+
+            Write-Information ""
         }
-        
+
     } finally {
         Pop-Location
     }
@@ -855,8 +935,8 @@ if ([string]::IsNullOrEmpty($SafeBranch)) {
 if ($Name) {
     # Validate custom name
     if (-not (Test-ValidContainerName $Name)) {
-        Write-Host "❌ Error: Invalid container name: $Name" -ForegroundColor Red
-        Write-Host "   Container names must start with alphanumeric and contain only: a-z, A-Z, 0-9, _, ., -" -ForegroundColor Yellow
+        Write-Information "❌ Error: Invalid container name: $Name"
+        Write-Information "   Container names must start with alphanumeric and contain only: a-z, A-Z, 0-9, _, ., -"
         exit 1
     }
     $ContainerName = "$Agent-$Name"
@@ -868,9 +948,9 @@ if ($Name) {
 
 # Final validation of generated container name
 if (-not (Test-ValidContainerName $ContainerName)) {
-    Write-Host "❌ Error: Generated container name is invalid: $ContainerName" -ForegroundColor Red
-    Write-Host "   This may be due to special characters in the repository name or branch" -ForegroundColor Yellow
-    Write-Host "   Try using the -Name parameter to specify a custom name" -ForegroundColor Yellow
+    Write-Information "❌ Error: Generated container name is invalid: $ContainerName"
+    Write-Information "   This may be due to special characters in the repository name or branch"
+    Write-Information "   Try using the -Name parameter to specify a custom name"
     exit 1
 }
 
@@ -904,7 +984,7 @@ $ImageName = "coding-agents-${Agent}:local"
 
 # Validate image name
 if (-not (Test-ValidImageName $ImageName)) {
-    Write-Host "❌ Error: Invalid image name: $ImageName" -ForegroundColor Red
+    Write-Information "❌ Error: Invalid image name: $ImageName"
     exit 1
 }
 
@@ -962,7 +1042,7 @@ if (Test-Path $rendererScript) {
             $SessionConfigSha256 = Get-FileSha256 -Path $SessionManifestPath
             $SessionConfigRendered = $true
             $display = if ($SessionConfigSha256) { $SessionConfigSha256 } else { "unknown" }
-            Write-Host "🔐 Session MCP config manifest: $display" -ForegroundColor Green
+            Write-Information "🔐 Session MCP config manifest: $display"
             Write-SessionConfigEvent -SessionId $SessionId -ManifestSha $SessionConfigSha256 -RepoRoot $RepoRoot -TrustedHashes $TrustedTreeHashes
             $serversFile = Join-Path $SessionConfigOutput "servers.txt"
             if (Test-Path $serversFile) {
@@ -990,23 +1070,23 @@ if (Test-Path $rendererScript) {
     Write-Warning "⚠️  render-session-config.py unavailable; skipping host-side MCP rendering"
 }
 
-Detect-AgentCliSecrets
+Initialize-AgentCliSecret
 
 if (-not (Test-SecretBrokerReady)) {
-    Write-Host "❌ Secret broker health check failed" -ForegroundColor Red
+    Write-Information "❌ Secret broker health check failed"
     exit 1
 }
 
 $brokerScript = Get-SecretBrokerScript
 if (-not $brokerScript) {
-    Write-Host "❌ Secret broker script not found" -ForegroundColor Red
+    Write-Information "❌ Secret broker script not found"
     exit 1
 }
 
 if ($script:SessionStubSecrets.Count -gt 0) {
     Import-McpSecretValue
     if (-not (Set-StubSecret -BrokerScript $brokerScript)) {
-        Write-Host "❌ Failed to stage broker-managed secrets" -ForegroundColor Red
+        Write-Information "❌ Failed to stage broker-managed secrets"
         exit 1
     }
 }
@@ -1014,37 +1094,37 @@ if ($script:SessionStubSecrets.Count -gt 0) {
 $brokerCapabilityDir = Join-Path $SessionConfigOutput "capabilities"
 $env:CODING_AGENTS_SESSION_CONFIG_SHA256 = if ($SessionConfigSha256) { $SessionConfigSha256 } else { "" }
 if (-not (Invoke-SessionCapabilityIssue -SessionId $SessionId -OutputDir $brokerCapabilityDir -Stubs $script:BrokerStubs.ToArray())) {
-    Write-Host "❌ Failed to issue session capability tokens" -ForegroundColor Red
+    Write-Information "❌ Failed to issue session capability tokens"
     exit 1
 }
 
 if ($script:SessionStubSecrets.Count -gt 0) {
     if (-not (Protect-StubCapability -BrokerScript $brokerScript -CapabilityRoot $brokerCapabilityDir)) {
-        Write-Host "❌ Failed to seal stub secrets" -ForegroundColor Red
+        Write-Information "❌ Failed to seal stub secrets"
         exit 1
     }
 }
 
 if ($script:AgentCliStubs.Count -gt 0) {
-    Stage-AgentCliCapabilityBundles -CapabilityRoot $brokerCapabilityDir -SessionOutputDir $SessionConfigOutput -SessionId $SessionId
+    Set-AgentCliCapabilityBundle -CapabilityRoot $brokerCapabilityDir -SessionOutputDir $SessionConfigOutput -SessionId $SessionId
 }
 
-Package-AgentDataPayload -AgentName $Agent -SessionOutputDir $SessionConfigOutput -SessionId $SessionId
+New-AgentDataPayload -AgentName $Agent -SessionOutputDir $SessionConfigOutput -SessionId $SessionId
 
-Write-Host "🚀 Launching Coding Agent..." -ForegroundColor Cyan
-Write-Host "🎯 Agent: $Agent" -ForegroundColor White
-Write-Host "📁 Source: $Source ($SourceType)" -ForegroundColor White
-Write-Host "🌿 Branch: $AgentBranch" -ForegroundColor White
-Write-Host "🏷️  Container: $ContainerName" -ForegroundColor White
-Write-Host "🐳 Image: $ImageName" -ForegroundColor White
-Write-Host "🌐 Network policy: $NetworkPolicyEnv" -ForegroundColor White
-Write-Host ""
+Write-Information "🚀 Launching Coding Agent..."
+Write-Information "🎯 Agent: $Agent"
+Write-Information "📁 Source: $Source ($SourceType)"
+Write-Information "🌿 Branch: $AgentBranch"
+Write-Information "🏷️  Container: $ContainerName"
+Write-Information "🐳 Image: $ImageName"
+Write-Information "🌐 Network policy: $NetworkPolicyEnv"
+Write-Information ""
 
 # Check if container already exists
 if (Test-ContainerExists $ContainerName) {
-    Write-Host "📦 Container '$ContainerName' already exists" -ForegroundColor Yellow
+    Write-Information "📦 Container '$ContainerName' already exists"
     $State = Get-ContainerStatus $ContainerName
-    
+
     # Handle existing proxy if squid mode
     if ($UseSquid) {
         $ExistingProxy = Invoke-ContainerCli inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' $ContainerName 2>$null
@@ -1053,16 +1133,16 @@ if (Test-ContainerExists $ContainerName) {
         if ($ExistingNetwork) { $ProxyNetworkName = $ExistingNetwork }
         Initialize-SquidProxy -NetworkName $ProxyNetworkName -ProxyContainer $ProxyContainerName -ProxyImage $ProxyImage -AgentContainer $ContainerName -SquidAllowedDomains $SquidAllowedDomains
     }
-    
+
     if ($State -eq "running") {
-        Write-Host "✅ Container is already running" -ForegroundColor Green
-        Write-Host "   Connect via: $ContainerCli exec -it $ContainerName bash" -ForegroundColor Gray
-        Write-Host "   Or use VS Code Dev Containers extension" -ForegroundColor Gray
+        Write-Information "✅ Container is already running"
+        Write-Information "   Connect via: $ContainerCli exec -it $ContainerName bash"
+        Write-Information "   Or use VS Code Dev Containers extension"
         exit 0
     } else {
-        Write-Host "▶️  Starting existing container..." -ForegroundColor Cyan
+        Write-Information "▶️  Starting existing container..."
         Invoke-ContainerCli start $ContainerName | Out-Null
-        Write-Host "✅ Container started" -ForegroundColor Green
+        Write-Information "✅ Container started"
         exit 0
     }
 }
@@ -1185,24 +1265,24 @@ $credentialProxyScript = Join-Path $PSScriptRoot "..\runtime\git-credential-prox
 
 if (-not (Test-Path $credentialSocketPath -PathType Leaf)) {
     if (Test-Path $credentialProxyScript) {
-        Write-Host "🔐 Starting git credential proxy server..." -ForegroundColor Cyan
+        Write-Information "🔐 Starting git credential proxy server..."
         $proxyDir = Split-Path $credentialSocketPath -Parent
         if (-not (Test-Path $proxyDir)) {
             New-Item -ItemType Directory -Path $proxyDir -Force | Out-Null
         }
-        
+
         # Start proxy server in background using WSL bash
         Start-Process -FilePath "wsl" -ArgumentList "bash", "-c", "`"nohup '$credentialProxyScript' '$credentialSocketPath' > /dev/null 2>&1 &`"" -NoNewWindow | Out-Null
-        
+
         # Wait for socket to be created (max 5 seconds)
         $waited = 0
         while (-not (Test-Path $credentialSocketPath -PathType Leaf) -and $waited -lt 5000) {
             Start-Sleep -Milliseconds 100
             $waited += 100
         }
-        
+
         if (Test-Path $credentialSocketPath -PathType Leaf) {
-            Write-Host "   ✅ Credential proxy started" -ForegroundColor Green
+            Write-Information "   ✅ Credential proxy started"
         } else {
             Write-Warning "   ⚠️  Credential proxy started but socket not ready"
             Write-Warning "      Container will fall back to file-based credentials"
@@ -1222,24 +1302,24 @@ if ($commitGpgSign -eq "true") {
     $gpgSigningEnabled = $true
     if (-not (Test-Path $gpgSocketPath -PathType Leaf)) {
         if (Test-Path $gpgProxyScript) {
-            Write-Host "🔏 Starting GPG proxy server for commit signing..." -ForegroundColor Cyan
+            Write-Information "🔏 Starting GPG proxy server for commit signing..."
             $gpgProxyDir = Split-Path $gpgSocketPath -Parent
             if (-not (Test-Path $gpgProxyDir)) {
                 New-Item -ItemType Directory -Path $gpgProxyDir -Force | Out-Null
             }
-            
+
             # Start GPG proxy server in background
             Start-Process -FilePath "wsl" -ArgumentList "bash", "-c", "`"nohup '$gpgProxyScript' '$gpgSocketPath' > /dev/null 2>&1 &`"" -NoNewWindow
-            
+
             # Wait for socket to be created
             $waited = 0
             while (-not (Test-Path $gpgSocketPath -PathType Leaf) -and $waited -lt 5000) {
                 Start-Sleep -Milliseconds 100
                 $waited += 100
             }
-            
+
             if (Test-Path $gpgSocketPath -PathType Leaf) {
-                Write-Host "   ✅ GPG proxy started" -ForegroundColor Green
+                Write-Information "   ✅ GPG proxy started"
             }
         }
     }
@@ -1284,7 +1364,7 @@ if ($env:CODING_AGENTS_DISABLE_SECCOMP -ne '1') {
     try {
         $seccompProfilePath = Get-SeccompProfilePath -RepoRoot $RepoRoot
     } catch {
-        Write-Host "❌ $_" -ForegroundColor Red
+        Write-Information "❌ $_"
         exit 1
     }
 } else {
@@ -1298,6 +1378,8 @@ $dockerArgs += "-w", "/workspace"
 $dockerArgs += "--network", $NetworkMode
 $dockerArgs += "--read-only"
 $dockerArgs += "--cap-drop=ALL"
+# Only SYS_ADMIN is re-added for the entrypoint mount remaps
+$dockerArgs += "--cap-add=SYS_ADMIN"
 $dockerArgs += "--security-opt", "no-new-privileges:true"
 $dockerArgs += "--pids-limit=4096"
 
@@ -1321,24 +1403,27 @@ $extraArgsEnv = $env:CODING_AGENTS_EXTRA_DOCKER_ARGS
 if ($extraArgsEnv) {
     $errors = $null
     $tokens = [System.Management.Automation.PSParser]::Tokenize($extraArgsEnv, [ref]$errors)
+    $extraArgsList = @()
     foreach ($token in $tokens) {
-        if ($token.Type -in @('CommandArgument','String')) {
-            $dockerArgs += $token.Content
+        if ($token.Type -in @('CommandArgument','String','CommandParameter')) {
+            $extraArgsList += $token.Content
         }
     }
+    Test-ExtraDockerArg -DockerArgList $extraArgsList
+    $dockerArgs += $extraArgsList
 }
 
 $dockerArgs += $ImageName
 
 # Create container
-Write-Host "📦 Creating container..." -ForegroundColor Cyan
+Write-Information "📦 Creating container..."
 try {
     Invoke-ContainerCli @dockerArgs | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Container create failed with exit code $LASTEXITCODE"
     }
 } catch {
-    Write-Host "❌ Failed to create container" -ForegroundColor Red
+    Write-Information "❌ Failed to create container"
     if ($UseSquid) {
         Invoke-ContainerCli rm -f $ProxyContainerName 2>$null | Out-Null
         Invoke-ContainerCli network rm $ProxyNetworkName 2>$null | Out-Null
@@ -1346,18 +1431,18 @@ try {
     exit 1
 }
 
-if (Test-Path $SessionConfigOutput) {
+if ($SessionConfigRendered -and (Test-Path $SessionConfigOutput)) {
     try {
         Invoke-ContainerCli exec $ContainerName mkdir -p $SessionConfigRootInContainer | Out-Null
         $hostCopySource = Join-Path $SessionConfigOutput "."
-        Invoke-ContainerCli cp $hostCopySource "$ContainerName:$SessionConfigRootInContainer" | Out-Null
+        Invoke-ContainerCli cp $hostCopySource "${ContainerName}:${SessionConfigRootInContainer}" | Out-Null
     } catch {
         Write-Warning "⚠️  Unable to copy session configs into container: $_"
     }
 }
 
 # Setup repository inside container
-Write-Host "📥 Setting up repository..." -ForegroundColor Cyan
+Write-Information "📥 Setting up repository..."
 $setupScript = New-RepoSetupScript
 
 try {
@@ -1366,7 +1451,7 @@ try {
         throw "Container setup failed with exit code $LASTEXITCODE"
     }
 } catch {
-    Write-Host "❌ Failed to setup repository" -ForegroundColor Red
+    Write-Information "❌ Failed to setup repository"
     Invoke-ContainerCli rm -f $ContainerName | Out-Null
     exit 1
 }
@@ -1388,49 +1473,48 @@ if (($SourceType -eq "local") -and (-not $NoPush) -and $LocalRemoteHostPath -and
 
 if ($UseSquid) {
     Start-Job -ScriptBlock {
-        param($CliCmd, $AgentContainer, $ProxyContainer, $ProxyNetwork)
         try {
-            & $CliCmd wait $AgentContainer | Out-Null
+            & $using:ContainerCli wait $using:ContainerName | Out-Null
         } catch {
-            # Ignore errors if container already gone
+            Write-Verbose -Message "Container wait skipped: $_"
         }
-        & $CliCmd rm -f $ProxyContainer 2>$null | Out-Null
-        & $CliCmd network rm $ProxyNetwork 2>$null | Out-Null
-    } -ArgumentList $ContainerCli, $ContainerName, $ProxyContainerName, $ProxyNetworkName | Out-Null
+        & $using:ContainerCli rm -f $using:ProxyContainerName 2>$null | Out-Null
+        & $using:ContainerCli network rm $using:ProxyNetworkName 2>$null | Out-Null
+    } | Out-Null
 }
 
-Write-Host ""
-Write-Host "✅ Container '$ContainerName' is ready!" -ForegroundColor Green
+Write-Information ""
+Write-Information "✅ Container '$ContainerName' is ready!"
 if ($PromptMode) {
     $promptExit = Invoke-PromptSession -Prompt $Prompt -ContainerCli $ContainerCli -ContainerName $ContainerName -Agent $Agent
     exit $promptExit
 }
-Write-Host "🔗 Attaching to agent session (detach with Ctrl+B, then D)..." -ForegroundColor Cyan
+Write-Information "🔗 Attaching to agent session (detach with Ctrl+B, then D)..."
 & $ContainerCli exec -it $ContainerName agent-session attach
 $attachExit = $LASTEXITCODE
 
 if ($attachExit -ne 0) {
     if ((Get-ContainerStatus $ContainerName) -eq "running") {
         $connectScript = Join-Path $scriptDir "connect-agent.ps1"
-        Write-Host "⚠ Unable to attach automatically. Re-run: `n   $connectScript -Name $ContainerName" -ForegroundColor Yellow
+        Write-Information "⚠ Unable to attach automatically. Re-run: `n   $connectScript -Name $ContainerName"
     } else {
-        Write-Host "❌ Agent session exited before it was ready." -ForegroundColor Red
+        Write-Information "❌ Agent session exited before it was ready."
     }
     exit $attachExit
 }
 
 if ((Get-ContainerStatus $ContainerName) -eq "running") {
     $connectScript = Join-Path $scriptDir "connect-agent.ps1"
-    Write-Host ""
-    Write-Host "ℹ Session detached but container is still running." -ForegroundColor Cyan
-    Write-Host "   Reconnect: $connectScript -Name $ContainerName" -ForegroundColor Gray
-    Write-Host "   Stop later: $ContainerCli stop $ContainerName" -ForegroundColor Gray
+    Write-Information ""
+    Write-Information "ℹ Session detached but container is still running."
+    Write-Information "   Reconnect: $connectScript -Name $ContainerName"
+    Write-Information "   Stop later: $ContainerCli stop $ContainerName"
 } else {
-    Write-Host ""
-    Write-Host "✅ Agent session complete. Container stopped." -ForegroundColor Green
+    Write-Information ""
+    Write-Information "✅ Agent session complete. Container stopped."
 }
 
 if ($SourceType -eq "local" -and -not $NoPush -and -not [string]::IsNullOrWhiteSpace($LocalRemoteHostPath)) {
-    Write-Host "🔄 Syncing agent branch back to host repository..." -ForegroundColor Cyan
+    Write-Information "🔄 Syncing agent branch back to host repository..."
     Sync-LocalRemoteToHost -RepoPath $ResolvedPath -LocalRemotePath $LocalRemoteHostPath -AgentBranch $AgentBranch
 }

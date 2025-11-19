@@ -134,6 +134,58 @@ declare -A AGENT_CLI_SECRET_DIGESTS=()
 declare -A AGENT_CLI_SECRET_NAMES_BY_STUB=()
 declare -A AGENT_CLI_AGENT_NAME_BY_STUB=()
 declare -a AGENT_CLI_STUBS=()
+FORBIDDEN_EXTRA_ARGS=("--privileged" "--pid=host" "--network=host" "--ipc=host" "--uts=host")
+FORBIDDEN_SECURITY_VALUES=("seccomp=unconfined" "apparmor=unconfined" "no-new-privileges=false")
+
+fail_forbidden_extra_arg() {
+    local arg="$1"
+    local reason="$2"
+    echo "❌ CODING_AGENTS_EXTRA_DOCKER_ARGS cannot include '$arg' ${reason:+($reason)}" >&2
+    echo "   These options break the container security model and can impact the host system." >&2
+    exit 1
+}
+
+validate_security_opt_value() {
+    local value="$1"
+    for forbidden in "${FORBIDDEN_SECURITY_VALUES[@]}"; do
+        if [ "$value" = "$forbidden" ]; then
+            fail_forbidden_extra_arg "--security-opt $value" "because security hardening would be disabled"
+        fi
+    done
+}
+
+validate_extra_docker_args() {
+    local -a args=("$@")
+    local idx=0
+    local total=${#args[@]}
+    while [ $idx -lt $total ]; do
+        local current="${args[$idx]}"
+        for forbidden in "${FORBIDDEN_EXTRA_ARGS[@]}"; do
+            if [ -n "$forbidden" ] && [ "$current" = "$forbidden" ]; then
+                fail_forbidden_extra_arg "$current" "because host namespaces must stay isolated"
+            fi
+        done
+        case "$current" in
+            "") ;;
+            --cap-add|--cap-add=*)
+                fail_forbidden_extra_arg "$current" "launcher already manages the minimal capability set"
+                ;;
+            --security-opt)
+                if [ $((idx + 1)) -ge $total ]; then
+                    fail_forbidden_extra_arg "--security-opt" "requires a non-empty value"
+                fi
+                local next_value="${args[$((idx + 1))]}"
+                validate_security_opt_value "$next_value"
+                idx=$((idx + 1))
+                ;;
+            --security-opt=*)
+                local inline_value="${current#--security-opt=}"
+                validate_security_opt_value "$inline_value"
+                ;;
+        esac
+        idx=$((idx + 1))
+    done
+}
 LAUNCHER_HEAD_HASH=$(get_git_head_hash "$REPO_ROOT" 2>/dev/null || echo "")
 TRUSTED_PATHS=("scripts/launchers" "scripts/runtime" "docker/profiles")
 TRUSTED_TREE_HASHES_RAW=$(collect_trusted_tree_hashes "$REPO_ROOT" "${TRUSTED_PATHS[@]}")
@@ -1198,7 +1250,6 @@ AUTO_PUSH_VALUE=$([ "$NO_PUSH" = true ] && echo "false" || echo "true")
 
 DOCKER_ARGS+=(
     "run" "-d"
-    "--privileged"
     "--name" "$CONTAINER_NAME"
     "--hostname" "$CONTAINER_NAME"
     "-e" "TZ=$TZ_VALUE"
@@ -1415,6 +1466,8 @@ DOCKER_ARGS+=(
     "--network" "$NETWORK_MODE"
     "--read-only"
     "--cap-drop=ALL"
+    # Only SYS_ADMIN is re-added for the entrypoint mount remaps
+    "--cap-add=SYS_ADMIN"
     "--security-opt" "no-new-privileges:true"
     "--pids-limit=4096"
     "--cpus=$CPU"
@@ -1438,6 +1491,7 @@ fi
 if [ -n "${CODING_AGENTS_EXTRA_DOCKER_ARGS:-}" ]; then
     # shellcheck disable=SC2206
     EXTRA_DOCKER_ARGS=(${CODING_AGENTS_EXTRA_DOCKER_ARGS})
+    validate_extra_docker_args "${EXTRA_DOCKER_ARGS[@]}"
     DOCKER_ARGS+=("${EXTRA_DOCKER_ARGS[@]}")
 fi
 
