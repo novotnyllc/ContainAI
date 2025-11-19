@@ -147,28 +147,28 @@ function Set-WslLinuxConfig {
 function Restart-Wsl {
     param([string]$WslExe)
 
-    Write-Host "🔄 Restarting WSL..." -ForegroundColor Yellow
+    Write-Host "Restarting WSL..." -ForegroundColor Yellow
     & $WslExe --shutdown | Out-Null
     Start-Sleep -Seconds 5
     try {
         & $WslExe bash -c "exit 0" | Out-Null
     } catch {
-        Write-Warning "⚠️  Unable to pre-start WSL default user session automatically: $_"
+        Write-Warning "Unable to pre-start WSL default user session automatically: $_"
     }
 }
 
 $wslExePath = Get-WslExecutablePath
-Write-Host "🔍 Checking WSL 2 security configuration..." -ForegroundColor Cyan
+Write-Host "Checking WSL 2 security configuration..." -ForegroundColor Cyan
 $status = Get-WslSecurityStatus -WslConfig $WslConfigPath -KernelLine $KernelParams -WslExe $wslExePath
 
 if ($status.Diagnostics.Count -eq 0) {
-    Write-Host "✅ System is already correctly configured." -ForegroundColor Green
+    Write-Host "System is already correctly configured." -ForegroundColor Green
     exit 0
 }
 
-Write-Host "`n⚠️  The following security fixes are required:" -ForegroundColor Yellow
+Write-Host "`nThe following security fixes are required:" -ForegroundColor Yellow
 foreach ($message in $status.Diagnostics) {
-    Write-Host "   • $message"
+    Write-Host "   - $message"
 }
 
 if ($CheckOnly) {
@@ -179,12 +179,12 @@ if (-not $Force) {
     Write-Host "`nThis will modify configuration files and RESTART WSL (closing all running shells)." -ForegroundColor Red
     $confirmation = Read-Host "Do you want to proceed? [y/N]"
     if ($confirmation -notmatch '^[Yy]$') {
-        Write-Host "❌ Aborted."
+        Write-Host "Aborted."
         exit 1
     }
 }
 
-Write-Host "`n🚀 Applying fixes..." -ForegroundColor Cyan
+Write-Host "`nApplying fixes..." -ForegroundColor Cyan
 
 if ($status.WindowsNeedsUpdate) {
     Set-WindowsKernelConfig -WslConfig $WslConfigPath -KernelLine $KernelParams
@@ -199,4 +199,4 @@ if ($status.NeedsSystemd -or $status.NeedsSecurityFs) {
 }
 
 Restart-Wsl -WslExe $wslExePath
-Write-Host '✅ Configuration complete. AppArmor is now active.' -ForegroundColor Green
+Write-Host 'Configuration complete. AppArmor is now active.' -ForegroundColor Green
