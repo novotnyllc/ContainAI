@@ -1292,7 +1292,7 @@ copy_agent_data_exports() {
     mkdir -p "$dest_root"
     local output
     if ! output=$(container_cli cp "${container_name}:${container_path}" "$dest_root" 2>&1); then
-        if echo "$output" | grep -qi "no such file"; then
+        if echo "$output" | grep -qiE 'no such file|could not find'; then
             return 1
         fi
         echo "⚠️  Failed to copy agent data export: $output" >&2
