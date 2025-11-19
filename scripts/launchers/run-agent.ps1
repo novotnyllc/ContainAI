@@ -58,6 +58,7 @@ $TmpfsLargeSize = if ($env:CODING_AGENTS_TMPFS_LARGE) { $env:CODING_AGENTS_TMPFS
 $TmpfsSmallSize = if ($env:CODING_AGENTS_TMPFS_SMALL) { $env:CODING_AGENTS_TMPFS_SMALL } else { "512m" }
 $TmpfsSecretSize = if ($env:CODING_AGENTS_TMPFS_SECRETS) { $env:CODING_AGENTS_TMPFS_SECRETS } else { "32m" }
 $PromptMode = -not [string]::IsNullOrWhiteSpace($Prompt)
+$PromptOnlySession = $false
 $SourceType = ""
 $RepoName = ""
 $GitUrl = ""
@@ -622,10 +623,6 @@ if (-not (Test-ContainerSecuritySupport)) {
     exit 1
 }
 
-if ($PromptMode) {
-    $NoPush = $true
-}
-
 # Determine if source is URL or local path
 $IsUrl = $Source -match '^https?://'
 
@@ -659,6 +656,7 @@ if ($IsUrl) {
             $SourceType = "prompt"
             $RepoName = "prompt"
             $Source = "prompt-only"
+            $PromptOnlySession = $true
         } else {
             Write-Information "❌ Error: $Source is not a git repository"
             exit 1
@@ -699,6 +697,10 @@ if ($IsUrl) {
             }
         }
     }
+}
+
+if ($PromptOnlySession -and -not $NoPush) {
+    $NoPush = $true
 }
 
 if (-not $SessionConfigSource) {

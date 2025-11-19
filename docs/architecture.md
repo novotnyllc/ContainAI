@@ -238,14 +238,14 @@ sequenceDiagram
     AgentCLI-->>User: Stream response
     Container-->>Launcher: Exit immediately, remove tmpfs + volumes
 
-    Note over Launcher,Container: Auto-push disabled; git remotes configured only when a repo exists
+    Note over Launcher,Container: Auto-push disabled only when no repo is available
 ```
 
 Properties:
 
-- When a Git repository is available, the workspace is prepared exactly like a normal session (clone/copy, isolated branch, host remotes stripped). If no repo exists, the launcher falls back to an empty workspace to keep prompts usable anywhere.
+- When a Git repository is available, the workspace is prepared exactly like a normal session (clone/copy, isolated branch, host remotes stripped). If no repo exists, the launcher falls back to an empty workspace to keep prompts usable anywhere (and disables auto-push because there is nothing to sync).
 - Secrets, manifests, and MCP configs still route through `render-session-config.py` and the broker, preserving the same security envelope as repo-backed sessions.
-- Source arguments plus `--branch`/`--use-current-branch` are allowed, but the launcher always flips on `--no-push` so prompt runs remain read-only.
+- Source arguments plus `--branch`/`--use-current-branch` are allowed. Prompt sessions inherit the default auto-push behavior whenever a real repo is mounted, and only force `--no-push` when running against the synthetic prompt workspace.
 - Because the container shuts down as soon as the CLI returns, no tmux reattach or cleanup is necessary.
 
 ## Authentication Flow

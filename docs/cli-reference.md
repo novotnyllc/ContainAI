@@ -188,7 +188,7 @@ run-claude --prompt "List repo services that need MCP"
 
 > **Host sync:** After every push to `local`, the host working tree fast-forwards automatically unless you set `CODING_AGENTS_DISABLE_AUTO_SYNC=1`.
 
-**Prompt sessions (all agents):** Passing `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) auto-runs the agent-specific CLI (`github-copilot-cli exec "$prompt"`, `codex exec "$prompt"`, or `claude -p "$prompt"`). When you launch it from inside a Git repository (or pass a repo/SOURCE argument), the workspace mirrors a normal session with branch isolation and stripped remotes. If no repo exists, the launcher falls back to a synthetic empty workspace. Either way, auto-push is disabled and the container shuts down as soon as the CLI returns, which makes it ideal for diagnostics and the `--with-host-secrets` integration path.
+**Prompt sessions (all agents):** Passing `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) auto-runs the agent-specific CLI (`github-copilot-cli exec "$prompt"`, `codex exec "$prompt"`, or `claude -p "$prompt"`). When you launch it from inside a Git repository (or pass a repo/SOURCE argument), the workspace mirrors a normal session with branch isolation, auto-commit, and auto-push (unless you explicitly pass `--no-push`). If no repo exists, the launcher falls back to a synthetic empty workspace, disables auto-push because there is nowhere to push, and still tears down the container as soon as the CLI returns—perfect for diagnostics and the `--with-host-secrets` integration path.
 
 **Reattach later:** `connect-agent --name <container>` reconnects to the tmux session if the container is still running (for example, if you detached with `Ctrl+B`, `D`).
 
