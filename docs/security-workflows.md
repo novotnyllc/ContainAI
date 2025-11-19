@@ -96,7 +96,7 @@ sequenceDiagram
     participant AgentCLI as Agent CLI
 
     User->>Launcher: run-<agent> --prompt "Prompt"
-    Launcher->>Launcher: Force --no-push, auto-detect repo root
+    Launcher->>Launcher: Auto-detect repo root, decide whether auto-push can stay enabled
     Launcher->>SecretBroker: Store secrets + request capabilities (all agents)
     alt Repo detected
         Launcher->>Docker: docker run (repo copy, manifests, tmpfs)
@@ -114,6 +114,6 @@ sequenceDiagram
 Why this matters:
 
 - Multi-agent parity: The same flag works for Copilot, Codex, or Claude, and the launcher chooses the correct CLI entry point automatically.
-- Safe repo reuse: When you run inside a Git repo, the workspace matches a normal session with branch isolation; otherwise the launcher falls back to an empty workspace so prompts still work anywhere.
+- Safe repo reuse: When you run inside a Git repo, the workspace matches a normal session with branch isolation and keeps auto-push enabled; otherwise the launcher falls back to an empty workspace, disables auto-push (there's no repo to sync), and still lets prompts run anywhere.
 - Security invariants hold: capability bundles, MCP configs, and audit metadata still flow through the broker before the container launches.
 - Ideal for diagnostics and the `--with-host-secrets` integration gate; failures isolate to the agent CLI rather than repository plumbing.

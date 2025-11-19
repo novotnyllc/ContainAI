@@ -553,9 +553,9 @@ function Test-AuditLoggingPipeline {
 function Test-SeccompPtraceBlock {
     Test-Section "Testing seccomp ptrace enforcement"
 
-    $profile = Join-Path $ProjectRoot "docker/profiles/seccomp-coding-agents.json"
-    if (-not (Test-Path $profile)) {
-        Fail "Seccomp profile missing at $profile"
+    $seccompProfilePath = Join-Path $ProjectRoot "docker/profiles/seccomp-coding-agents.json"
+    if (-not (Test-Path $seccompProfilePath)) {
+        Fail "Seccomp profile missing at $seccompProfilePath"
         return
     }
 
@@ -572,15 +572,15 @@ if res == -1 and err in (1, 13, 38):
 sys.exit(1)
 "@
 
-    $args = @(
+    $dockerArgs = @(
         "run", "--rm",
         "--security-opt", "no-new-privileges",
-        "--security-opt", "seccomp=$profile",
+        "--security-opt", "seccomp=$seccompProfilePath",
         "python:3.11-slim",
         "python", "-c", $pythonScript
     )
 
-    & docker @args | Out-Null
+    & docker @dockerArgs | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Pass "ptrace blocked by seccomp profile"
     } else {

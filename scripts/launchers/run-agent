@@ -797,10 +797,6 @@ esac
 [ "$NETWORK_PROXY" = "none" ] && NETWORK_PROXY="allow-all"
 
 
-if [ "$PROMPT_MODE" = true ]; then
-    NO_PUSH=true
-fi
-
 # Check Docker
 check_docker_running || exit 1
 if ! verify_container_security_support; then
@@ -867,6 +863,15 @@ else
             exit 1
         fi
     fi
+fi
+
+PROMPT_ONLY_SESSION=false
+if [ "$SOURCE_TYPE" = "prompt" ]; then
+    PROMPT_ONLY_SESSION=true
+fi
+
+if [ "$PROMPT_ONLY_SESSION" = true ] && [ "$NO_PUSH" != true ]; then
+    NO_PUSH=true
 fi
 
 if [ "$SOURCE_TYPE" = "prompt" ] && [ -z "$BRANCH" ]; then
