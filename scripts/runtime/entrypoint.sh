@@ -209,6 +209,12 @@ install_host_agent_data() {
     local session_id="${HOST_SESSION_ID:-default}"
     local imported=1
     local -a agents=("copilot" "codex" "claude")
+    local packager="/usr/local/bin/package-agent-data.py"
+
+    if [ ! -x "$packager" ]; then
+        echo "⚠️  Data packager missing; cannot import host data safely" >&2
+        return 1
+    fi
 
     for agent in "${agents[@]}"; do
         local src_dir="$root/${agent}/data/${session_id}"
@@ -222,16 +228,36 @@ install_host_agent_data() {
         chmod 0770 "$dest_dir" "$data_home" 2>/dev/null || true
 
         if [ -f "$tar_path" ] && [ -s "$tar_path" ]; then
+            if [ ! -f "$manifest_path" ] || [ ! -s "$manifest_path" ]; then
+                echo "❌ Missing manifest for ${agent} data payload; refusing to import" >&2
+                rm -rf -- "$data_home"
+                mkdir -p -- "$data_home"
+                continue
+            fi
+            if [ ! -f "$key_path" ] || [ ! -s "$key_path" ]; then
+                echo "❌ Missing HMAC key for ${agent} data payload; refusing to import" >&2
+                rm -rf -- "$data_home"
+                mkdir -p -- "$data_home"
+                continue
+            fi
             rm -rf -- "$data_home"
             mkdir -p -- "$data_home"
-            if tar --extract --file "$tar_path" --directory "$data_home" --no-same-owner --no-same-permissions >/dev/null 2>&1; then
+            if python3 "$packager" \
+                --mode merge \
+                --agent "$agent" \
+                --session-id "$session_id" \
+                --manifest "$manifest_path" \
+                --tar "$tar_path" \
+                --target-home "$data_home" \
+                --require-hmac \
+                --hmac-key-file "$key_path"; then
                 imported=0
                 chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$data_home" 2>/dev/null || true
                 find "$data_home" -type d -exec chmod 0770 {} + 2>/dev/null || true
                 find "$data_home" -type f -exec chmod 0660 {} + 2>/dev/null || true
                 echo "📦 Imported ${agent} data payload"
             else
-                echo "⚠️  Failed to extract data import tar for ${agent}" >&2
+                echo "❌ HMAC validation failed for ${agent} data payload" >&2
                 rm -rf -- "$data_home"
                 mkdir -p -- "$data_home"
             fi

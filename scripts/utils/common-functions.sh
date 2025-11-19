@@ -1306,33 +1306,63 @@ merge_agent_data_exports() {
     local staged_dir="$2"
     local repo_root="$3"
     local home_dir="$4"
-    local script_path="$repo_root/scripts/utils/package-agent-data.py"
+    local packager="$repo_root/scripts/utils/package-agent-data.py"
 
-    if [ ! -d "$staged_dir" ] || [ ! -f "$script_path" ]; then
+    if [ -z "$agent_name" ] || [ ! -d "$staged_dir" ] || [ ! -f "$packager" ]; then
         return 1
     fi
+
+    local key_root="$home_dir/.config/coding-agents/data-hmac/${agent_name}"
+    mkdir -p -- "$key_root"
 
     local merged=false
-    shopt -s nullglob
-    local manifests=("$staged_dir"/*.manifest.json)
-    if [ ${#manifests[@]} -eq 0 ]; then
-        shopt -u nullglob
-        return 1
-    fi
-
-    local manifest
-    for manifest in "${manifests[@]}"; do
-        local tar_path="${manifest%.manifest.json}.tar"
-        [ -f "$tar_path" ] || continue
-        local args=("--mode" "merge" "--agent" "$agent_name" "--manifest" "$manifest" "--tar" "$tar_path" "--target-home" "$home_dir")
-        if run_python_tool "$script_path" --mount "$staged_dir" --mount "$home_dir" -- "${args[@]}" >/dev/null 2>&1; then
-            merged=true
-            rm -f "$manifest" "$tar_path"
-        else
-            echo "⚠️  Failed to merge data export manifest $(basename "$manifest")" >&2
+    while IFS= read -r -d '' manifest_path; do
+        local base_name="$(basename "$manifest_path" .manifest.json)"
+        local tar_path="${manifest_path%.manifest.json}.tar"
+        if [ ! -f "$tar_path" ]; then
+            echo "⚠️  Missing tarball for ${agent_name} payload ${base_name}; skipping" >&2
+            continue
         fi
-    done
-    shopt -u nullglob
+
+        local session_id
+        if ! session_id=$(python3 - "$manifest_path" <<'PYINNER'
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as fh:
+    data = json.load(fh)
+session = data.get('session') or data.get('session_id')
+if not session:
+    raise SystemExit('missing-session')
+print(session)
+PYINNER
+        ); then
+            echo "⚠️  Could not determine session id for ${agent_name} payload ${base_name}; skipping" >&2
+            continue
+        fi
+
+        local key_path="$key_root/${session_id}.key"
+        if [ ! -f "$key_path" ]; then
+            echo "⚠️  Missing HMAC key for ${agent_name} session ${session_id}; skipping" >&2
+            continue
+        fi
+
+        local output_dir="$home_dir/.coding-agents/${agent_name}/imports/${session_id}"
+        mkdir -p -- "$output_dir"
+
+        if run_python_tool "$packager" --mount "$staged_dir" --mount "$home_dir" -- \
+            --mode merge \
+            --agent "$agent_name" \
+            --session-id "$session_id" \
+            --manifest "$manifest_path" \
+            --tar "$tar_path" \
+            --target-home "$output_dir" \
+            --require-hmac \
+            --hmac-key-file "$key_path" >/dev/null; then
+            merged=true
+            rm -f -- "$manifest_path" "$tar_path"
+        else
+            echo "❌ HMAC validation failed for ${agent_name} session ${session_id}; payload retained for inspection" >&2
+        fi
+    done < <(find "$staged_dir" -type f -name '*.manifest.json' -print0)
 
     if [ "$merged" = true ]; then
         echo "📥 Merged ${agent_name} data export into host profile"

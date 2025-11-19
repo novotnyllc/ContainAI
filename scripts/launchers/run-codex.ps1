@@ -39,6 +39,9 @@ param(
     [switch]$Force,
 
     [Parameter(Mandatory=$false)]
+    [string]$Prompt,
+
+    [Parameter(Mandatory=$false)]
     [switch]$Help
 )
 
@@ -50,6 +53,7 @@ if ($Help) {
         "",
         "Launch Codex in an ephemeral supervised container.",
         "Options mirror run-agent; see docs/cli-reference.md for full list.",
+        "-Prompt <text>        Launch a prompt-only session (no repo sync).",
         "Example: .\run-codex.ps1 -Branch spike -Cpu 8"
     ) | ForEach-Object { Write-Output $_ }
     exit 0
@@ -69,6 +73,7 @@ if ($PSBoundParameters.ContainsKey('Gpu')) { $argsList += @('-Gpu', $Gpu) }
 if ($NoPush) { $argsList += '-NoPush' }
 if ($UseCurrentBranch) { $argsList += '-UseCurrentBranch' }
 if ($Force) { $argsList += '-Force' }
+if ($PSBoundParameters.ContainsKey('Prompt')) { $argsList += @('-Prompt', $Prompt) }
 
 & $RunAgent @argsList
 exit $LASTEXITCODE

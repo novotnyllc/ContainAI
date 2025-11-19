@@ -4,14 +4,12 @@ set -euo pipefail
 STUB_NAME="agent_codex_cli"
 SECRET_NAME="codex_cli_auth_json"
 AGENT_HOME="${CODING_AGENTS_AGENT_HOME:-/home/agentuser}"
-AGENT_DATA_HOME="${CODING_AGENTS_AGENT_DATA_HOME:-$AGENT_HOME}"
 AGENT_SECRET_ROOT="${CODING_AGENTS_AGENT_SECRET_ROOT:-/run/agent-secrets}"
 DEFAULT_CAP_ROOT="${CODING_AGENTS_CAP_ROOT_OVERRIDE:-${AGENT_HOME}/.config/coding-agents/capabilities}"
 AGENT_CLI_CAP_ROOT="${CODING_AGENTS_AGENT_CAP_ROOT:-/run/coding-agents/codex/cli/capabilities}"
 DEST_DIR="${AGENT_SECRET_ROOT}/codex"
 DEST_FILE="${DEST_DIR}/auth.json"
 CLI_DIR="${AGENT_HOME}/.codex"
-DATA_DIR="${AGENT_DATA_HOME}/.codex"
 UNSEAL_BIN="${CODING_AGENTS_CAPABILITY_UNSEAL:-/usr/local/bin/capability-unseal}"
 
 link_cli_dir() {
@@ -52,7 +50,7 @@ main() {
 
     local tmp_file
     tmp_file=$(mktemp)
-    trap 'rm -f "$tmp_file"' EXIT
+    trap 'rm -f "${tmp_file:-}"' EXIT
 
     if ! "$UNSEAL_BIN" --stub "$STUB_NAME" --secret "$SECRET_NAME" --cap-root "$cap_root" --format raw >"$tmp_file"; then
         echo "Failed to decrypt Codex credential bundle" >&2
@@ -61,9 +59,7 @@ main() {
 
     cp "$tmp_file" "$DEST_FILE"
     chmod 600 "$DEST_FILE"
-    mkdir -p "$DATA_DIR"
-    ln -sfn "$DEST_FILE" "$DATA_DIR/auth.json"
-    link_cli_dir "$DATA_DIR" "$CLI_DIR"
+    link_cli_dir "$DEST_DIR" "$CLI_DIR"
     echo "Codex secrets prepared from capability bundle"
 }
 

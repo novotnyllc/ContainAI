@@ -1496,7 +1496,7 @@ function Get-ContainerLabel {
     }
 
     try {
-        $format = "{{ index .Config.Labels \"$LabelKey\" }}"
+        $format = '{{ index .Config.Labels "{0}" }}' -f $LabelKey
         $value = Invoke-ContainerCli -CliArgs @('inspect', '-f', $format, $ContainerName) 2> $null
         if ($value -and $value -eq '<no value>') {
             return $null
@@ -1526,12 +1526,13 @@ function Copy-AgentDataExports {
 
     $containerPath = "/run/agent-data-export/$AgentName"
     $cli = Get-ContainerCli
-    $output = & $cli cp "$ContainerName:$containerPath" $DestinationRoot 2>&1
+    $containerExportPath = '{0}:{1}' -f $ContainerName, $containerPath
+    $output = & $cli cp $containerExportPath $DestinationRoot 2>&1
     if ($LASTEXITCODE -ne 0) {
         if ($output -match 'No such' -or $output -match 'not found') {
             return $false
         }
-        Write-AgentMessage -Message "⚠️  Failed to copy agent data export for $AgentName: $output" -Color Yellow
+        Write-AgentMessage -Message "⚠️  Failed to copy agent data export for ${AgentName}: $output" -Color Yellow
         return $false
     }
 
@@ -1570,8 +1571,8 @@ function Merge-AgentDataExports {
             continue
         }
 
-        $args = @('--mode', 'merge', '--agent', $AgentName, '--manifest', $manifest.FullName, '--tar', $tarPath, '--target-home', $HomeDir)
-        $result = Invoke-PythonTool -ScriptPath $scriptPath -MountPaths @($StagedDir, $HomeDir) -ScriptArgs $args
+        $mergeArgs = @('--mode', 'merge', '--agent', $AgentName, '--manifest', $manifest.FullName, '--tar', $tarPath, '--target-home', $HomeDir)
+        $result = Invoke-PythonTool -ScriptPath $scriptPath -MountPaths @($StagedDir, $HomeDir) -ScriptArgs $mergeArgs
         if ($result) {
             $merged = $true
             Remove-Item -LiteralPath $manifest.FullName -Force -ErrorAction SilentlyContinue
@@ -1589,7 +1590,7 @@ function Merge-AgentDataExports {
     return $false
 }
 
-function Process-AgentDataExports {
+function Invoke-AgentDataExports {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$ContainerName,
@@ -1830,7 +1831,7 @@ function Remove-ContainerWithSidecars {
 
     $repoRoot = if ($env:CODING_AGENTS_REPO_ROOT) { $env:CODING_AGENTS_REPO_ROOT } else { $script:RepoRootDefault }
     $homeDir = if ($HOME) { $HOME } else { [Environment]::GetFolderPath('UserProfile') }
-    Process-AgentDataExports -ContainerName $ContainerName -RepoRoot $repoRoot -HomeDir $homeDir
+    Invoke-AgentDataExports -ContainerName $ContainerName -RepoRoot $repoRoot -HomeDir $homeDir
 
     # Get associated resources
     $proxyContainer = Get-ProxyContainer $ContainerName
@@ -1877,7 +1878,7 @@ function Remove-ContainerWithSidecars {
                     Write-AgentMessage -Message "   ⚠️  Branch has unmerged commits - keeping branch" -Color Yellow
                     Write-AgentMessage -Message "   Manually merge or delete: git branch -D $agentBranch" -Color Gray
                 } else {
-                    if (Remove-GitBranch -RepoPath $repoPath -BranchName $agentBranch -Force) {
+                    if (Remove-GitBranch -RepoPath $repoPath -BranchName $agentBranch -Force:$true) {
                         Write-AgentMessage -Message "   ✅ Agent branch removed" -Color Green
                     } else {
                         Write-AgentMessage -Message "   ⚠️  Could not remove agent branch" -Color Yellow

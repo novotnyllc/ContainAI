@@ -1,12 +1,17 @@
 # Build the agent-task-runner binaries (agentcli-exec + agent-task-runnerd) with Rust
 FROM cgr.dev/chainguard/rust:latest-dev AS agent-task-runner-builder
 
+USER root
 RUN apk add --no-cache \
     libseccomp-dev \
     pkgconf
 
+RUN install -d -o nonroot -g nonroot /agent-task-runner
+
+USER nonroot
+
 WORKDIR /agent-task-runner
-COPY scripts/runtime/agent-task-runner/ ./
+COPY --chown=nonroot:nonroot scripts/runtime/agent-task-runner/ ./
 RUN cargo build --release --locked
 
 # Base image for coding agents container

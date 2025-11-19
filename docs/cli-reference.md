@@ -377,7 +377,7 @@ To inspect recent events quickly:
 tail -f ~/.config/coding-agents/security-events.log
 ```
 
-Run `bash scripts/test/test-launchers.sh` (or `pwsh scripts/test/test-launchers.ps1`) after modifying launcher logic to confirm helper network isolation and audit logging regressions are still covered.
+Run `bash scripts/test/test-launchers.sh --list` to discover available launcher tests, then provide `all` or explicit names (for example, `bash scripts/test/test-launchers.sh test_agent_data_packager test_helper_network_isolation`) after modifying launcher logic. PowerShell users can do the same with `pwsh scripts/test/test-launchers.ps1 -List` and `pwsh scripts/test/test-launchers.ps1 Test-SecretBrokerCli`.
 
 #### Examples
 

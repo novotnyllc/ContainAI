@@ -224,69 +224,10 @@ build_test_images() {
 build_mock_agent_images() {
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "Building lightweight mock agent images"
+    echo "Building full agent images (mock fallback disabled)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-    local build_dir
-    build_dir=$(mktemp -d)
-
-    cp "$PROJECT_ROOT/scripts/runtime/setup-mcp-configs.sh" "$build_dir/setup-mcp-configs.sh"
-    cp "$PROJECT_ROOT/scripts/utils/convert-toml-to-mcp.py" "$build_dir/convert-toml-to-mcp.py"
-
-    cat > "$build_dir/Dockerfile" <<'EOF'
-FROM python:3.11-slim
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        bash git ca-certificates curl jq && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN useradd -m -s /bin/bash agentuser
-
-COPY setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
-COPY convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
-RUN chmod +x /usr/local/bin/setup-mcp-configs.sh
-
-USER agentuser
-WORKDIR /workspace
-CMD ["sleep", "infinity"]
-EOF
-
-    # Build base mock image once
-    echo ""
-    echo "Building mock image..."
-    local base_mock_image="${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/base-mock:test"
-    docker build -t "$base_mock_image" "$build_dir" || {
-        rm -rf "$build_dir"
-        return 1
-    }
-    scan_image_for_secrets "$base_mock_image"
-    
-    # Tag and push for each agent
-    local agents=("copilot" "codex" "claude")
-    for agent in "${agents[@]}"; do
-        local agent_upper
-        agent_upper=$(printf '%s' "$agent" | tr '[:lower:]' '[:upper:]')
-        local image_var="TEST_${agent_upper}_IMAGE"
-        local test_image="${!image_var}"
-        echo "  Tagging for $agent..."
-        docker tag "$base_mock_image" "$test_image" || {
-            rm -rf "$build_dir"
-            return 1
-        }
-        if [ "${TEST_USE_REGISTRY_PULLS:-true}" = "true" ]; then
-            docker push "$test_image" >/dev/null 2>&1 || {
-                rm -rf "$build_dir"
-                return 1
-            }
-        fi
-    done
-
-    rm -rf "$build_dir"
-    echo ""
-    echo "✓ Mock agent images built"
-    return 0
+    echo "  Falling back to repository Dockerfiles to preserve runtime parity"
+    build_test_images
 }
 
 # ============================================================================
