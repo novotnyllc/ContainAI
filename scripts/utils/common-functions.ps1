@@ -553,10 +553,6 @@ function Test-AppArmorProfileLoaded {
 function Get-AppArmorProfileName {
     param([Parameter(Mandatory = $true)][string]$RepoRoot)
 
-    if ($env:CODING_AGENTS_DISABLE_APPARMOR -eq '1') {
-        return $null
-    }
-
     if (-not (Test-AppArmorSupported)) {
         return $null
     }
@@ -617,25 +613,21 @@ function Test-HostSecurityPrereqs {
         }
     }
 
-    if ($env:CODING_AGENTS_DISABLE_APPARMOR -eq '1') {
-        $warnings.Add('AppArmor enforcement disabled via CODING_AGENTS_DISABLE_APPARMOR=1') | Out-Null
+    if (-not $IsLinux) {
+        $errors.Add('AppArmor enforcement requires a Linux host. Run from Linux with AppArmor enabled.') | Out-Null
+    } elseif (-not (Test-AppArmorSupported)) {
+        $errors.Add('AppArmor kernel support not detected. Enable AppArmor before launching agents.') | Out-Null
     } else {
-        if (-not $IsLinux) {
-            $errors.Add('AppArmor enforcement requires a Linux host. Run from Linux or export CODING_AGENTS_DISABLE_APPARMOR=1 to acknowledge the risk.') | Out-Null
-        } elseif (-not (Test-AppArmorSupported)) {
-            $errors.Add('AppArmor kernel support not detected. Enable AppArmor or export CODING_AGENTS_DISABLE_APPARMOR=1 to override.') | Out-Null
-        } else {
-            $profileName = if ($env:CODING_AGENTS_APPARMOR_PROFILE_NAME) { $env:CODING_AGENTS_APPARMOR_PROFILE_NAME } else { 'coding-agents' }
-            if (-not (Test-AppArmorProfileLoaded -Name $profileName)) {
-                $profilePath = if ($env:CODING_AGENTS_APPARMOR_PROFILE_FILE) { $env:CODING_AGENTS_APPARMOR_PROFILE_FILE } else { Join-Path $resolvedRoot 'docker/profiles/apparmor-coding-agents.profile' }
-                if (-not [System.IO.Path]::IsPathRooted($profilePath)) {
-                    $profilePath = Join-Path $resolvedRoot $profilePath
-                }
-                if (-not (Test-Path $profilePath)) {
-                    $errors.Add("AppArmor profile file '$profilePath' not found. Set CODING_AGENTS_APPARMOR_PROFILE_FILE to a valid profile path.") | Out-Null
-                } else {
-                    $errors.Add("AppArmor profile '$profileName' is not loaded. Run: sudo apparmor_parser -r '$profilePath' or export CODING_AGENTS_DISABLE_APPARMOR=1 to override.") | Out-Null
-                }
+        $profileName = if ($env:CODING_AGENTS_APPARMOR_PROFILE_NAME) { $env:CODING_AGENTS_APPARMOR_PROFILE_NAME } else { 'coding-agents' }
+        if (-not (Test-AppArmorProfileLoaded -Name $profileName)) {
+            $profilePath = if ($env:CODING_AGENTS_APPARMOR_PROFILE_FILE) { $env:CODING_AGENTS_APPARMOR_PROFILE_FILE } else { Join-Path $resolvedRoot 'docker/profiles/apparmor-coding-agents.profile' }
+            if (-not [System.IO.Path]::IsPathRooted($profilePath)) {
+                $profilePath = Join-Path $resolvedRoot $profilePath
+            }
+            if (-not (Test-Path $profilePath)) {
+                $errors.Add("AppArmor profile file '$profilePath' not found. Set CODING_AGENTS_APPARMOR_PROFILE_FILE to a valid profile path.") | Out-Null
+            } else {
+                $errors.Add("AppArmor profile '$profileName' is not loaded. Run: sudo apparmor_parser -r '$profilePath'.") | Out-Null
             }
         }
     }
@@ -671,10 +663,6 @@ function Test-ContainerSecuritySupport {
     }
 
     $requireSeccomp = ($env:CODING_AGENTS_DISABLE_SECCOMP -ne '1')
-    $requireAppArmor = ($env:CODING_AGENTS_DISABLE_APPARMOR -ne '1')
-    if (-not $requireSeccomp -and -not $requireAppArmor) {
-        return $true
-    }
 
     $infoJson = $env:CODING_AGENTS_CONTAINER_INFO_JSON
     if (-not $infoJson) {
@@ -744,8 +732,8 @@ function Test-ContainerSecuritySupport {
         return $false
     }
 
-    if ($requireAppArmor -and -not $hasAppArmor) {
-        Write-Error "Container runtime does not report AppArmor support. Enable the module or set CODING_AGENTS_DISABLE_APPARMOR=1 to override."
+    if (-not $hasAppArmor) {
+        Write-Error "Container runtime does not report AppArmor support. Enable the AppArmor module on the host kernel."
         return $false
     }
 

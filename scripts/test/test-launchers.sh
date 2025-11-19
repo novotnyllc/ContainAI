@@ -298,13 +298,11 @@ test_shared_functions() {
     fi
     unset CODING_AGENTS_SECCOMP_PROFILE
 
-    CODING_AGENTS_DISABLE_APPARMOR=1
     if resolve_apparmor_profile_name "$PROJECT_ROOT" >/dev/null 2>&1; then
-        fail "resolve_apparmor_profile_name() should honor disable flag"
+        pass "resolve_apparmor_profile_name() locates active AppArmor profile"
     else
-        pass "resolve_apparmor_profile_name() skips when AppArmor disabled"
+        fail "resolve_apparmor_profile_name() could not verify AppArmor support"
     fi
-    unset CODING_AGENTS_DISABLE_APPARMOR
 }
 
 test_helper_network_isolation() {
@@ -988,14 +986,14 @@ test_host_security_preflight() {
 
     source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
 
-    if CODING_AGENTS_DISABLE_SECCOMP=1 CODING_AGENTS_DISABLE_APPARMOR=1 CODING_AGENTS_DISABLE_PTRACE_SCOPE=1 CODING_AGENTS_DISABLE_SENSITIVE_TMPFS=1 verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
-        pass "Preflight allows explicit override of every guard"
-    else
-        fail "Preflight rejected explicit override scenario"
-    fi
+        if verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
+            pass "Preflight succeeds when host security prerequisites are satisfied"
+        else
+            fail "Preflight rejected valid host security configuration"
+        fi
 
     local missing_profile="$PROJECT_ROOT/tests/nonexistent-seccomp.json"
-    if CODING_AGENTS_DISABLE_APPARMOR=1 CODING_AGENTS_DISABLE_PTRACE_SCOPE=1 CODING_AGENTS_DISABLE_SENSITIVE_TMPFS=1 CODING_AGENTS_SECCOMP_PROFILE="$missing_profile" verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
+    if CODING_AGENTS_SECCOMP_PROFILE="$missing_profile" verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
         fail "Preflight should fail when seccomp profile is missing"
     else
         pass "Seccomp profile requirement enforced"
@@ -1008,23 +1006,17 @@ test_container_security_preflight() {
     source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
 
     local good_json='{"SecurityOptions":["name=seccomp","name=apparmor"]}'
-    if CODING_AGENTS_CONTAINER_INFO_JSON="$good_json" CODING_AGENTS_DISABLE_SECCOMP=0 CODING_AGENTS_DISABLE_APPARMOR=0 verify_container_security_support >/dev/null 2>&1; then
-        pass "Container preflight passes when runtime reports both features"
-    else
-        fail "Container preflight rejected valid runtime JSON"
-    fi
+        if CODING_AGENTS_CONTAINER_INFO_JSON="$good_json" CODING_AGENTS_DISABLE_SECCOMP=0 verify_container_security_support >/dev/null 2>&1; then
+            pass "Container preflight passes when runtime reports seccomp feature"
+        else
+            fail "Container preflight rejected valid runtime JSON"
+        fi
 
     local missing_apparmor='{"SecurityOptions":["name=seccomp"]}'
-    if CODING_AGENTS_CONTAINER_INFO_JSON="$missing_apparmor" CODING_AGENTS_DISABLE_SECCOMP=0 CODING_AGENTS_DISABLE_APPARMOR=0 verify_container_security_support >/dev/null 2>&1; then
+    if CODING_AGENTS_CONTAINER_INFO_JSON="$missing_apparmor" CODING_AGENTS_DISABLE_SECCOMP=0 verify_container_security_support >/dev/null 2>&1; then
         fail "Container preflight should fail when AppArmor missing"
     else
         pass "AppArmor requirement enforced when runtime lacks support"
-    fi
-
-    if CODING_AGENTS_CONTAINER_INFO_JSON="$missing_apparmor" CODING_AGENTS_DISABLE_APPARMOR=1 verify_container_security_support >/dev/null 2>&1; then
-        pass "AppArmor override bypasses container check"
-    else
-        fail "AppArmor override should allow launch without runtime support"
     fi
 }
 
