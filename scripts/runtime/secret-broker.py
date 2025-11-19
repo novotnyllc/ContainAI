@@ -32,6 +32,9 @@ DEFAULT_STUBS = [
     "serena",
     "sequential-thinking",
     "fetch",
+    "agent_copilot_cli",
+    "agent_codex_cli",
+    "agent_claude_cli",
 ]
 ISSUE_WINDOW_SECONDS = int(os.environ.get("CODING_AGENTS_BROKER_RATE_WINDOW", "60"))
 ISSUE_WINDOW_LIMIT = int(os.environ.get("CODING_AGENTS_BROKER_RATE_LIMIT", "30"))

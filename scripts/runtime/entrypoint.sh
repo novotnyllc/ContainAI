@@ -4,10 +4,15 @@ set -euo pipefail
 AGENT_USERNAME="${CODING_AGENTS_USER:-agentuser}"
 AGENT_UID=$(id -u "$AGENT_USERNAME" 2>/dev/null || echo 1000)
 AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo 1000)
+AGENT_CLI_USERNAME="${CODING_AGENTS_CLI_USER:-agentcli}"
+AGENT_CLI_UID=$(id -u "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_UID")
+AGENT_CLI_GID=$(id -g "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_GID")
 BASEFS_DIR="${CODING_AGENTS_BASEFS:-/opt/coding-agents/basefs}"
 TOOLCACHE_DIR="${CODING_AGENTS_TOOLCACHE:-/toolcache}"
 PTRACE_SCOPE_VALUE="${CODING_AGENTS_PTRACE_SCOPE:-3}"
 CAP_TMPFS_SIZE="${CODING_AGENTS_CAP_TMPFS_SIZE:-16m}"
+DATA_TMPFS_SIZE="${CODING_AGENTS_DATA_TMPFS_SIZE:-64m}"
+SECRETS_TMPFS_SIZE="${CODING_AGENTS_SECRET_TMPFS_SIZE:-32m}"
 
 is_mountpoint() {
     local path="$1"
@@ -15,7 +20,7 @@ is_mountpoint() {
         mountpoint -q "$path"
         return $?
     fi
-    grep -qs "[[:space:]]$path[[:space:]]" /proc/mounts
+    grep -qs "[[:space:]]${path}[[:space:]]" /proc/mounts
 }
 
 enforce_ptrace_scope() {
@@ -68,18 +73,31 @@ harden_proc_visibility() {
 prepare_sensitive_tmpfs() {
     local path="$1"
     local size="${2:-16m}"
+    local owner_uid="${3:-$AGENT_UID}"
+    local owner_gid="${4:-$AGENT_GID}"
+    local dir_mode="${5:-700}"
     if [ "${CODING_AGENTS_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
         return
     fi
     mkdir -p "$path"
     if ! is_mountpoint "$path"; then
-        if ! mount -t tmpfs -o "size=$size,nosuid,nodev,noexec,mode=700" tmpfs "$path" >/dev/null 2>&1; then
+        if ! mount -t tmpfs -o "size=$size,nosuid,nodev,noexec,mode=$dir_mode" tmpfs "$path" >/dev/null 2>&1; then
             echo "⚠️  Failed to mount tmpfs at $path" >&2
         fi
     else
-        mount -o remount,nosuid,nodev,noexec,mode=700 "$path" >/dev/null 2>&1 || true
+        mount -o remount,nosuid,nodev,noexec,mode="$dir_mode" "$path" >/dev/null 2>&1 || true
     fi
-    chown "$AGENT_UID:$AGENT_GID" "$path" 2>/dev/null || true
+    chown "$owner_uid:$owner_gid" "$path" 2>/dev/null || true
+    chmod "$dir_mode" "$path" 2>/dev/null || true
+    mount --make-private "$path" >/dev/null 2>&1 || true
+    mount --make-unbindable "$path" >/dev/null 2>&1 || true
+}
+
+prepare_agent_task_runner_paths() {
+    local log_root="/run/agent-task-runner"
+    mkdir -p "$log_root"
+    chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$log_root" 2>/dev/null || true
+    chmod 0770 "$log_root" 2>/dev/null || true
 }
 
 ensure_dir_owned() {
@@ -150,6 +168,185 @@ install_host_capabilities() {
     return 0
 }
 
+link_agent_data_target() {
+    local data_home="$1"
+    local rel_path="$2"
+    local kind="$3"
+    local source_path="${data_home}/${rel_path}"
+    local dest_path="/home/${AGENT_USERNAME}/${rel_path}"
+    if [ "$kind" = "dir" ]; then
+        mkdir -p "$source_path"
+    else
+        mkdir -p "$(dirname "$source_path")"
+        : >"$source_path"
+    fi
+    mkdir -p "$(dirname "$dest_path")"
+    rm -rf -- "$dest_path"
+    ln -sfn "$source_path" "$dest_path"
+    chown -h "$AGENT_UID:$AGENT_GID" "$dest_path" 2>/dev/null || true
+}
+
+link_agent_data_roots() {
+    local agent="$1"
+    local data_home="$2"
+    case "$agent" in
+        copilot)
+            link_agent_data_target "$data_home" ".copilot" "dir"
+            ;;
+        codex)
+            link_agent_data_target "$data_home" ".codex" "dir"
+            ;;
+        claude)
+            link_agent_data_target "$data_home" ".claude" "dir"
+            link_agent_data_target "$data_home" ".claude.json" "file"
+            ;;
+    esac
+}
+
+install_host_agent_data() {
+    local root="$1"
+    local dest_root="/run/agent-data"
+    local session_id="${HOST_SESSION_ID:-default}"
+    local imported=1
+    local -a agents=("copilot" "codex" "claude")
+
+    for agent in "${agents[@]}"; do
+        local src_dir="$root/${agent}/data/${session_id}"
+        local tar_path="$src_dir/data-import.tar"
+        local manifest_path="$src_dir/manifest.json"
+        local key_path="$src_dir/data-hmac.key"
+        local dest_dir="${dest_root}/${agent}/${session_id}"
+        local data_home="${dest_dir}/home"
+
+        mkdir -p -- "$data_home"
+        chmod 0770 "$dest_dir" "$data_home" 2>/dev/null || true
+
+        if [ -f "$tar_path" ] && [ -s "$tar_path" ]; then
+            rm -rf -- "$data_home"
+            mkdir -p -- "$data_home"
+            if tar --extract --file "$tar_path" --directory "$data_home" --no-same-owner --no-same-permissions >/dev/null 2>&1; then
+                imported=0
+                chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$data_home" 2>/dev/null || true
+                find "$data_home" -type d -exec chmod 0770 {} + 2>/dev/null || true
+                find "$data_home" -type f -exec chmod 0660 {} + 2>/dev/null || true
+                echo "📦 Imported ${agent} data payload"
+            else
+                echo "⚠️  Failed to extract data import tar for ${agent}" >&2
+                rm -rf -- "$data_home"
+                mkdir -p -- "$data_home"
+            fi
+        fi
+
+        if [ -f "$manifest_path" ]; then
+            cp "$manifest_path" "$dest_dir/import-manifest.json"
+            chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir/import-manifest.json" 2>/dev/null || true
+            chmod 0660 "$dest_dir/import-manifest.json" 2>/dev/null || true
+        fi
+        if [ -f "$key_path" ]; then
+            cp "$key_path" "$dest_dir/data-hmac.key"
+            chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir/data-hmac.key" 2>/dev/null || true
+            chmod 0660 "$dest_dir/data-hmac.key" 2>/dev/null || true
+        fi
+
+        chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir" 2>/dev/null || true
+        link_agent_data_roots "$agent" "$data_home"
+        if [ "$agent" = "${AGENT_NAME:-}" ]; then
+            export CODING_AGENTS_AGENT_DATA_HOME="$data_home"
+            export CODING_AGENTS_AGENT_HOME="/home/${AGENT_USERNAME}"
+        fi
+    done
+
+    return $imported
+}
+
+ensure_agent_data_fallback() {
+    local agent="$1"
+    local session_id="${HOST_SESSION_ID:-default}"
+    local fallback_dir="/run/agent-data/${agent}/${session_id}/home"
+    mkdir -p "$fallback_dir"
+    if [ "$(id -u)" -eq 0 ]; then
+        chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "/run/agent-data/${agent}" 2>/dev/null || true
+    fi
+    link_agent_data_roots "$agent" "$fallback_dir"
+    if [ "$agent" = "${AGENT_NAME:-}" ]; then
+        export CODING_AGENTS_AGENT_DATA_HOME="$fallback_dir"
+        export CODING_AGENTS_AGENT_HOME="/home/${AGENT_USERNAME}"
+    fi
+}
+
+start_agent_task_runnerd() {
+    if [ ! -x /usr/local/bin/agent-task-runnerd ]; then
+        return
+    fi
+    local socket_path="${AGENT_TASK_RUNNER_SOCKET:-/run/agent-task-runner.sock}"
+    local log_dir="/run/agent-task-runner"
+    mkdir -p "$log_dir"
+    if [ -S "$socket_path" ]; then
+        rm -f "$socket_path"
+    fi
+    if /usr/local/bin/agent-task-runnerd \
+        --socket "$socket_path" \
+        --log "$log_dir/events.log" \
+        --policy "${CODING_AGENTS_RUNNER_POLICY:-observe}" \
+        >/dev/null 2>&1 & then
+        :
+    else
+        echo "⚠️  Failed to launch agent-task-runnerd" >&2
+    fi
+}
+
+export_agent_data_payload() {
+    local packager="/usr/local/bin/package-agent-data.py"
+    local agent="${AGENT_NAME:-}"
+    local session_id="${HOST_SESSION_ID:-}"
+    local data_root="/run/agent-data"
+    local export_root="/run/agent-data-export"
+
+    if [ -z "$agent" ] || [ -z "$session_id" ]; then
+        return 0
+    fi
+    if [ ! -x "$packager" ]; then
+        return 0
+    fi
+
+    local source_dir="${data_root}/${agent}/${session_id}"
+    local data_home="${source_dir}/home"
+    if [ ! -d "$data_home" ]; then
+        return 0
+    fi
+
+    local key_path="${source_dir}/data-hmac.key"
+    if [ ! -f "$key_path" ]; then
+        echo "⚠️  Missing data HMAC key for ${agent}; skipping export" >&2
+        return 0
+    fi
+
+    local agent_export_dir="${export_root}/${agent}/${session_id}"
+    rm -rf -- "$agent_export_dir"
+    mkdir -p -- "$agent_export_dir"
+
+    local tar_path="${agent_export_dir}/data-export.tar"
+    local manifest_path="${agent_export_dir}/data-export.manifest.json"
+
+    if python3 "$packager" \
+        --agent "$agent" \
+        --session-id "$session_id" \
+        --home-path "$data_home" \
+        --tar "$tar_path" \
+        --manifest "$manifest_path" \
+        --hmac-key-file "$key_path"; then
+        if [ -s "$tar_path" ]; then
+            echo "📤 Prepared ${agent} data export payload"
+        else
+            rm -f "$tar_path" "$manifest_path"
+            rmdir --ignore-fail-on-non-empty "$agent_export_dir" 2>/dev/null || true
+        fi
+    else
+        echo "⚠️  Failed to package ${agent} data export payload" >&2
+        rm -rf -- "$agent_export_dir"
+    fi
+}
+
 prepare_rootfs_mounts() {
     umask 0002
     ensure_dir_owned "/workspace" 0775
@@ -191,7 +388,25 @@ if [ "$(id -u)" -eq 0 ]; then
     prepare_rootfs_mounts
     enforce_ptrace_scope
     harden_proc_visibility
-    prepare_sensitive_tmpfs "/home/${AGENT_USERNAME}/.config/coding-agents/capabilities" "$CAP_TMPFS_SIZE"
+    prepare_sensitive_tmpfs "/home/${AGENT_USERNAME}/.config/coding-agents/capabilities" "$CAP_TMPFS_SIZE" "$AGENT_UID" "$AGENT_GID" "700"
+    prepare_sensitive_tmpfs "/run/agent-secrets" "$SECRETS_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
+    prepare_sensitive_tmpfs "/run/agent-data" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
+    prepare_sensitive_tmpfs "/run/agent-data-export" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
+    prepare_agent_task_runner_paths
+    CODING_AGENTS_AGENT_DATA_STAGED=0
+    if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
+        if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
+            echo "📂 Agent data caches staged under /run/agent-data"
+        fi
+        CODING_AGENTS_AGENT_DATA_STAGED=1
+    fi
+    if [ "$CODING_AGENTS_AGENT_DATA_STAGED" -ne 1 ] && [ -n "${AGENT_NAME:-}" ]; then
+        ensure_agent_data_fallback "$AGENT_NAME"
+        CODING_AGENTS_AGENT_DATA_STAGED=1
+    fi
+    export CODING_AGENTS_AGENT_DATA_STAGED
+    start_agent_task_runnerd
+    export CODING_AGENTS_RUNNER_STARTED=1
     if command -v gosu >/dev/null 2>&1; then
         exec gosu "$AGENT_USERNAME" /usr/local/bin/entrypoint.sh "$@"
     elif command -v sudo >/dev/null 2>&1; then
@@ -202,6 +417,12 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
 fi
 
+AGENT_TASK_RUNNER_SOCKET="${AGENT_TASK_RUNNER_SOCKET:-/run/agent-task-runner.sock}"
+export AGENT_TASK_RUNNER_SOCKET
+if [ "${CODING_AGENTS_RUNNER_STARTED:-0}" != "1" ]; then
+    start_agent_task_runnerd
+fi
+
 echo "🚀 Starting Coding Agents Container..."
 
 
@@ -209,6 +430,8 @@ echo "🚀 Starting Coding Agents Container..."
 cleanup_on_shutdown() {
     echo ""
     echo "📤 Container shutting down..."
+
+    export_agent_data_payload
     
     # Check if auto-commit/push is enabled (default: true)
     AUTO_COMMIT="${AUTO_COMMIT_ON_SHUTDOWN:-true}"
@@ -234,7 +457,6 @@ cleanup_on_shutdown() {
                 # Get repository and branch info
                 REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
                 BRANCH=$(git branch --show-current 2>/dev/null)
-                TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
                 
                 # Stage all changes (tracked and untracked)
                 git add -A 2>/dev/null || {
@@ -280,11 +502,12 @@ cleanup_on_shutdown() {
 
 # Generate intelligent commit message based on git status
 generate_auto_commit_message() {
-    local agent_name="${AGENT_NAME:-unknown}"
     
     # Get git diff summary
-    local diff_stat=$(git diff --cached --stat 2>/dev/null | tail -1)
-    local files_changed=$(git diff --cached --name-only 2>/dev/null | head -10)
+    local diff_stat
+    diff_stat=$(git diff --cached --stat 2>/dev/null | tail -1)
+    local files_changed
+    files_changed=$(git diff --cached --name-only 2>/dev/null | head -10)
     
     # Try to generate commit message using the active AI agent
     local ai_message=""
@@ -347,7 +570,8 @@ Only output the commit message, nothing else."
     if [ "$modified" -gt 0 ]; then msg_parts+=("$modified modified"); fi
     if [ "$deleted" -gt 0 ]; then msg_parts+=("$deleted deleted"); fi
     
-    local changes=$(IFS=", "; echo "${msg_parts[*]}")
+    local changes
+    changes=$(IFS=", "; echo "${msg_parts[*]}")
     echo "chore: auto-commit ($changes)"
 }
 
@@ -441,6 +665,17 @@ if [ -n "${HOST_CAPABILITY_ROOT:-}" ] && [ -d "${HOST_CAPABILITY_ROOT:-}" ]; the
     fi
 fi
 
+if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ "${CODING_AGENTS_AGENT_DATA_STAGED:-0}" != "1" ]; then
+    if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
+        echo "📂 Agent data caches staged under /run/agent-data"
+        CODING_AGENTS_AGENT_DATA_STAGED=1
+    fi
+fi
+
+if [ -n "${AGENT_NAME:-}" ] && [ -z "${CODING_AGENTS_AGENT_DATA_HOME:-}" ]; then
+    ensure_agent_data_fallback "$AGENT_NAME"
+fi
+
 if [ "$HOST_CONFIG_DEPLOYED" = false ] && [ -f "/workspace/config.toml" ]; then
     /usr/local/bin/setup-mcp-configs.sh 2>&1 | grep -E "^(ERROR|WARN)" || true
 fi
@@ -454,6 +689,7 @@ fi
 # Load MCP secrets from host mount if available
 if [ -f "/home/agentuser/.mcp-secrets.env" ]; then
     set -a
+    # shellcheck source=/home/agentuser/.mcp-secrets.env disable=SC1091
     source /home/agentuser/.mcp-secrets.env
     set +a
 fi
@@ -478,7 +714,7 @@ elif [ -f ~/.git-credentials ]; then
 fi
 
 if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
-    key_count=$(ssh-add -l 2>/dev/null | grep -v "no identities" | wc -l)
+    key_count=$(ssh-add -l 2>/dev/null | grep -cv "no identities" || true)
     if [ "$key_count" -gt 0 ]; then
         auth_status="${auth_status}ssh:${key_count}keys "
     fi

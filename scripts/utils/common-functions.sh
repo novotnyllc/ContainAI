@@ -1268,6 +1268,112 @@ run_python_tool() {
     "$container_cmd" "${docker_args[@]}"
 }
 
+get_container_label() {
+    local container_name="$1"
+    local label_key="$2"
+    local value
+    value=$(container_cli inspect -f "{{ index .Config.Labels \"${label_key}\" }}" "$container_name" 2>/dev/null || true)
+    if [ "$value" = "<no value>" ]; then
+        value=""
+    fi
+    printf '%s' "$value"
+}
+
+copy_agent_data_exports() {
+    local container_name="$1"
+    local agent_name="$2"
+    local dest_root="$3"
+    local container_path="/run/agent-data-export/${agent_name}"
+
+    if [ -z "$agent_name" ]; then
+        return 1
+    fi
+
+    mkdir -p "$dest_root"
+    local output
+    if ! output=$(container_cli cp "${container_name}:${container_path}" "$dest_root" 2>&1); then
+        if echo "$output" | grep -qi "no such file"; then
+            return 1
+        fi
+        echo "⚠️  Failed to copy agent data export: $output" >&2
+        return 1
+    fi
+    return 0
+}
+
+merge_agent_data_exports() {
+    local agent_name="$1"
+    local staged_dir="$2"
+    local repo_root="$3"
+    local home_dir="$4"
+    local script_path="$repo_root/scripts/utils/package-agent-data.py"
+
+    if [ ! -d "$staged_dir" ] || [ ! -f "$script_path" ]; then
+        return 1
+    fi
+
+    local merged=false
+    shopt -s nullglob
+    local manifests=("$staged_dir"/*.manifest.json)
+    if [ ${#manifests[@]} -eq 0 ]; then
+        shopt -u nullglob
+        return 1
+    fi
+
+    local manifest
+    for manifest in "${manifests[@]}"; do
+        local tar_path="${manifest%.manifest.json}.tar"
+        [ -f "$tar_path" ] || continue
+        local args=("--mode" "merge" "--agent" "$agent_name" "--manifest" "$manifest" "--tar" "$tar_path" "--target-home" "$home_dir")
+        if run_python_tool "$script_path" --mount "$staged_dir" --mount "$home_dir" -- "${args[@]}" >/dev/null 2>&1; then
+            merged=true
+            rm -f "$manifest" "$tar_path"
+        else
+            echo "⚠️  Failed to merge data export manifest $(basename "$manifest")" >&2
+        fi
+    done
+    shopt -u nullglob
+
+    if [ "$merged" = true ]; then
+        echo "📥 Merged ${agent_name} data export into host profile"
+        return 0
+    fi
+    return 1
+}
+
+process_agent_data_exports() {
+    local container_name="$1"
+    local repo_root="$2"
+    local home_dir="$3"
+    local staging_root="${4:-}"
+
+    if [ -z "$container_name" ] || [ -z "$repo_root" ] || [ -z "$home_dir" ]; then
+        return 0
+    fi
+
+    local agent_name
+    agent_name=$(get_container_label "$container_name" "coding-agents.agent")
+    if [ -z "$agent_name" ]; then
+        return 0
+    fi
+
+    local cleanup_dir=false
+    if [ -z "$staging_root" ]; then
+        staging_root=$(mktemp -d "${TMPDIR:-/tmp}/agent-export.XXXXXX")
+        cleanup_dir=true
+    fi
+
+    if copy_agent_data_exports "$container_name" "$agent_name" "$staging_root"; then
+        local staged_path="$staging_root/${agent_name}"
+        merge_agent_data_exports "$agent_name" "$staged_path" "$repo_root" "$home_dir"
+        rm -rf "$staged_path"
+    fi
+
+    if [ "$cleanup_dir" = true ]; then
+        rm -rf "$staging_root"
+    fi
+}
+
 # Pull and tag image with retry logic
 pull_and_tag_image() {
     local target="$1"
@@ -1400,10 +1506,26 @@ remove_container_with_sidecars() {
     local repo_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' "$container_name" 2>/dev/null || true)
     local local_remote_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.local-remote" }}' "$container_name" 2>/dev/null || true)
     
-    # Push changes first
-    if [ "$(get_container_status "$container_name")" = "running" ]; then
-        push_to_local "$container_name" "$skip_push"
+    local repo_root="${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
+    local home_dir="${HOME:-}"
+    if [ -z "$home_dir" ] && command -v getent >/dev/null 2>&1; then
+        home_dir="$(getent passwd "$(id -u)" | awk -F: '{print $6}' 2>/dev/null || true)"
     fi
+    [ -n "$home_dir" ] || home_dir="/tmp"
+    local container_status
+    container_status=$(get_container_status "$container_name")
+
+    # Push changes first while container is running
+    if [ "$container_status" = "running" ]; then
+        push_to_local "$container_name" "$skip_push"
+        echo "⏹️  Stopping container to finalize exports..."
+        if ! container_cli stop "$container_name" >/dev/null 2>&1; then
+            echo "⚠️  Failed to stop container gracefully; exports may be incomplete" >&2
+        fi
+        container_status=$(get_container_status "$container_name")
+    fi
+
+    process_agent_data_exports "$container_name" "$repo_root" "$home_dir"
     
     # Get associated resources
     local proxy_container=$(get_proxy_container "$container_name")

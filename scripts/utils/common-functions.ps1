@@ -1485,6 +1485,159 @@ function Invoke-PythonTool {
     return ($LASTEXITCODE -eq 0)
 }
 
+function Get-ContainerLabel {
+    param(
+        [string]$ContainerName,
+        [string]$LabelKey
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ContainerName) -or [string]::IsNullOrWhiteSpace($LabelKey)) {
+        return $null
+    }
+
+    try {
+        $format = "{{ index .Config.Labels \"$LabelKey\" }}"
+        $value = Invoke-ContainerCli -CliArgs @('inspect', '-f', $format, $ContainerName) 2> $null
+        if ($value -and $value -eq '<no value>') {
+            return $null
+        }
+        return $value
+    } catch {
+        return $null
+    }
+}
+
+function Copy-AgentDataExports {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [Parameter(Mandatory = $true)][string]$AgentName,
+        [Parameter(Mandatory = $true)][string]$DestinationRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($AgentName)) {
+        return $false
+    }
+
+    if (-not (Test-Path $DestinationRoot)) {
+        New-Item -ItemType Directory -Path $DestinationRoot -Force | Out-Null
+    }
+
+    $containerPath = "/run/agent-data-export/$AgentName"
+    $cli = Get-ContainerCli
+    $output = & $cli cp "$ContainerName:$containerPath" $DestinationRoot 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        if ($output -match 'No such' -or $output -match 'not found') {
+            return $false
+        }
+        Write-AgentMessage -Message "⚠️  Failed to copy agent data export for $AgentName: $output" -Color Yellow
+        return $false
+    }
+
+    return $true
+}
+
+function Merge-AgentDataExports {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)][string]$AgentName,
+        [Parameter(Mandatory = $true)][string]$StagedDir,
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$HomeDir
+    )
+
+    if (-not (Test-Path $StagedDir -PathType Container)) {
+        return $false
+    }
+
+    $scriptPath = Join-Path $RepoRoot "scripts/utils/package-agent-data.py"
+    if (-not (Test-Path $scriptPath -PathType Leaf)) {
+        return $false
+    }
+
+    $manifests = Get-ChildItem -LiteralPath $StagedDir -Filter *.manifest.json -File -ErrorAction SilentlyContinue
+    if (-not $manifests) {
+        return $false
+    }
+
+    $merged = $false
+    foreach ($manifest in $manifests) {
+        $tarName = ($manifest.Name -replace '\.manifest\.json$', '') + '.tar'
+        $tarPath = Join-Path $manifest.DirectoryName $tarName
+        if (-not (Test-Path $tarPath -PathType Leaf)) {
+            continue
+        }
+
+        $args = @('--mode', 'merge', '--agent', $AgentName, '--manifest', $manifest.FullName, '--tar', $tarPath, '--target-home', $HomeDir)
+        $result = Invoke-PythonTool -ScriptPath $scriptPath -MountPaths @($StagedDir, $HomeDir) -ScriptArgs $args
+        if ($result) {
+            $merged = $true
+            Remove-Item -LiteralPath $manifest.FullName -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $tarPath -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-AgentMessage -Message "⚠️  Failed to merge data export manifest $($manifest.Name)" -Color Yellow
+        }
+    }
+
+    if ($merged) {
+        Write-AgentMessage -Message "📥 Merged $AgentName data export into host profile" -Color Cyan
+        return $true
+    }
+
+    return $false
+}
+
+function Process-AgentDataExports {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [Parameter()][string]$RepoRoot,
+        [Parameter()][string]$HomeDir,
+        [Parameter()][string]$StagingRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ContainerName)) { return }
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+        $RepoRoot = if ($env:CODING_AGENTS_REPO_ROOT) { $env:CODING_AGENTS_REPO_ROOT } else { $script:RepoRootDefault }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($HomeDir)) {
+        $HomeDir = $HOME
+    }
+
+    if (-not (Test-Path $RepoRoot)) { return }
+    if (-not (Test-Path $HomeDir)) { return }
+
+    $agentName = Get-ContainerLabel -ContainerName $ContainerName -LabelKey 'coding-agents.agent'
+    if ([string]::IsNullOrWhiteSpace($agentName)) {
+        return
+    }
+
+    $cleanup = $false
+    if ([string]::IsNullOrWhiteSpace($StagingRoot)) {
+        $StagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("agent-export-" + [System.IO.Path]::GetRandomFileName())
+        New-Item -ItemType Directory -Path $StagingRoot -Force | Out-Null
+        $cleanup = $true
+    }
+
+    try {
+        if (Copy-AgentDataExports -ContainerName $ContainerName -AgentName $agentName -DestinationRoot $StagingRoot) {
+            $stagedPath = Join-Path $StagingRoot $agentName
+            if (Test-Path $stagedPath) {
+                Merge-AgentDataExports -AgentName $agentName -StagedDir $stagedPath -RepoRoot $RepoRoot -HomeDir $HomeDir | Out-Null
+                Remove-Item -LiteralPath $stagedPath -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } finally {
+        if ($cleanup -and (Test-Path $StagingRoot)) {
+            Remove-Item -LiteralPath $StagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Update-AgentImage {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification='Idempotent operation - safe to run without confirmation')]
     param(
@@ -1661,10 +1814,23 @@ function Remove-ContainerWithSidecars {
     $repoPath = Invoke-ContainerCli -CliArgs @('inspect', '-f', '{{ index .Config.Labels "coding-agents.repo-path" }}', $ContainerName) 2> $null
     $localRemotePath = Invoke-ContainerCli -CliArgs @('inspect', '-f', '{{ index .Config.Labels "coding-agents.local-remote" }}', $ContainerName) 2> $null
 
-    # Push changes first
-    if ((Get-ContainerStatus $ContainerName) -eq "running") {
+    $containerStatus = Get-ContainerStatus $ContainerName
+
+    # Push changes first while container is running
+    if ($containerStatus -eq "running") {
         Push-ToLocal -ContainerName $ContainerName -SkipPush:$SkipPush
+        Write-AgentMessage -Message "⏹️  Stopping container to finalize exports..." -Color Cyan
+        try {
+            Invoke-ContainerCli -CliArgs @('stop', $ContainerName) 2> $null | Out-Null
+        } catch {
+            Write-AgentMessage -Message "⚠️  Failed to stop container gracefully; exports may be incomplete" -Color Yellow
+        }
+        $containerStatus = Get-ContainerStatus $ContainerName
     }
+
+    $repoRoot = if ($env:CODING_AGENTS_REPO_ROOT) { $env:CODING_AGENTS_REPO_ROOT } else { $script:RepoRootDefault }
+    $homeDir = if ($HOME) { $HOME } else { [Environment]::GetFolderPath('UserProfile') }
+    Process-AgentDataExports -ContainerName $ContainerName -RepoRoot $repoRoot -HomeDir $homeDir
 
     # Get associated resources
     $proxyContainer = Get-ProxyContainer $ContainerName

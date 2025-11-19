@@ -114,6 +114,7 @@ LOCAL_REMOTE_URL=""
 LOCAL_REPO_PATH_VALUE=""
 TMPFS_LARGE_SIZE="${CODING_AGENTS_TMPFS_LARGE:-2g}"
 TMPFS_SMALL_SIZE="${CODING_AGENTS_TMPFS_SMALL:-512m}"
+TMPFS_SECRET_SIZE="${CODING_AGENTS_TMPFS_SECRETS:-32m}"
 SESSION_ARTIFACT_DIR=""
 SESSION_CONFIG_OUTPUT=""
 SESSION_MANIFEST_PATH=""
@@ -126,6 +127,13 @@ DEFAULT_BROKER_STUBS=("github" "uno" "msftdocs" "playwright" "context7" "serena"
 BROKER_STUBS=("${DEFAULT_BROKER_STUBS[@]}")
 declare -A MCP_SECRET_VALUES=()
 declare -A SESSION_STUB_SECRETS=()
+declare -A SESSION_SECRET_FILE_SOURCES=()
+declare -A AGENT_CLI_SECRET_TYPES=()
+declare -A AGENT_CLI_SECRET_SOURCES=()
+declare -A AGENT_CLI_SECRET_DIGESTS=()
+declare -A AGENT_CLI_SECRET_NAMES_BY_STUB=()
+declare -A AGENT_CLI_AGENT_NAME_BY_STUB=()
+declare -a AGENT_CLI_STUBS=()
 LAUNCHER_HEAD_HASH=$(get_git_head_hash "$REPO_ROOT" 2>/dev/null || echo "")
 TRUSTED_PATHS=("scripts/launchers" "scripts/runtime" "docker/profiles")
 TRUSTED_TREE_HASHES_RAW=$(collect_trusted_tree_hashes "$REPO_ROOT" "${TRUSTED_PATHS[@]}")
@@ -141,27 +149,46 @@ if [ -n "$TRUSTED_TREE_HASHES_RAW" ]; then
     done <<< "$TRUSTED_TREE_HASHES_RAW"
 fi
 
+# Ensure ephemeral session assets are removed as soon as the agent container exits
 cleanup_run_agent_volumes() {
     local container_name="${CONTAINER_NAME:-}"
-    if [ -z "$container_name" ]; then
-        return 0
-    fi
+    local container_running=false
 
-    if container_exists "$container_name" >/dev/null 2>&1; then
-        return 0
-    fi
-
-    local suffix volume
-    for suffix in workspace home toolcache; do
-        volume=$(get_container_volume_name "$container_name" "$suffix")
-        if container_cli volume inspect "$volume" >/dev/null 2>&1; then
-            container_cli volume rm "$volume" >/dev/null 2>&1 || true
+    if [ -n "$container_name" ] && container_exists "$container_name" >/dev/null 2>&1; then
+        local status
+        status=$(get_container_status "$container_name")
+        if [ "$status" = "running" ] || [ "$status" = "created" ]; then
+            container_running=true
+        else
+            container_cli rm -f "$container_name" >/dev/null 2>&1 || true
         fi
-    done
+    fi
 
     if [ -n "$SESSION_ARTIFACT_DIR" ] && [ -d "$SESSION_ARTIFACT_DIR" ]; then
         rm -rf "$SESSION_ARTIFACT_DIR"
     fi
+
+    if [ "$container_running" = true ]; then
+        return 0
+    fi
+
+    local spec suffix volume_name
+    local -a volume_specs=(
+        "workspace:${WORKSPACE_VOLUME:-}"
+        "home:${HOME_VOLUME:-}"
+        "toolcache:${TOOLCACHE_VOLUME:-}"
+    )
+
+    for spec in "${volume_specs[@]}"; do
+        suffix=${spec%%:*}
+        volume_name=${spec#*:}
+        if [ -z "$volume_name" ] && [ -n "$container_name" ]; then
+            volume_name=$(get_container_volume_name "$container_name" "$suffix")
+        fi
+        if [ -n "$volume_name" ] && container_cli volume inspect "$volume_name" >/dev/null 2>&1; then
+            container_cli volume rm "$volume_name" >/dev/null 2>&1 || true
+        fi
+    done
 }
 trap cleanup_run_agent_volumes EXIT
 
@@ -236,6 +263,250 @@ resolve_secret_value() {
     return 1
 }
 
+compute_sha256_for_file() {
+    local path="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$path" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$path" | awk '{print $1}'
+    else
+        echo "" && return 1
+    fi
+}
+
+compute_sha256_for_string() {
+    local value="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$value" | sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$value" | shasum -a 256 | awk '{print $1}'
+    else
+        echo "" && return 1
+    fi
+}
+
+append_unique_value() {
+    local value="$1"
+    shift || true
+    local existing
+    for existing in "$@"; do
+        if [ "$existing" = "$value" ]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+register_agent_cli_secret() {
+    local agent_name="$1"
+    local stub_name="$2"
+    local secret_name="$3"
+    local source_type="$4"  # file|inline
+    local source_label="$5" # manifest label/path description
+    local data_source="$6"  # file path or literal value
+    local digest_value="$7"
+
+    if append_unique_value "$stub_name" "${BROKER_STUBS[@]}"; then
+        BROKER_STUBS+=("$stub_name")
+    fi
+    if append_unique_value "$stub_name" "${AGENT_CLI_STUBS[@]}"; then
+        AGENT_CLI_STUBS+=("$stub_name")
+    fi
+
+    local current="${SESSION_STUB_SECRETS[$stub_name]:-}"
+    if [ -n "$current" ]; then
+        SESSION_STUB_SECRETS["$stub_name"]="$current $secret_name"
+    else
+        SESSION_STUB_SECRETS["$stub_name"]="$secret_name"
+    fi
+
+    if [ "$source_type" = "file" ]; then
+        SESSION_SECRET_FILE_SOURCES["$secret_name"]="$data_source"
+    else
+        MCP_SECRET_VALUES["$secret_name"]="$data_source"
+    fi
+
+    AGENT_CLI_SECRET_TYPES["$secret_name"]="$source_type"
+    AGENT_CLI_SECRET_SOURCES["$secret_name"]="$source_label"
+    AGENT_CLI_SECRET_DIGESTS["$secret_name"]="$digest_value"
+    AGENT_CLI_SECRET_NAMES_BY_STUB["$stub_name"]="${AGENT_CLI_SECRET_NAMES_BY_STUB[$stub_name]:+${AGENT_CLI_SECRET_NAMES_BY_STUB[$stub_name]} }$secret_name"
+    AGENT_CLI_AGENT_NAME_BY_STUB["$stub_name"]="$agent_name"
+}
+
+detect_copilot_cli_secret() {
+    local host_cfg="${HOME}/.copilot/config.json"
+    if [ ! -f "$host_cfg" ]; then
+        echo "❌ Copilot credentials not found at $host_cfg" >&2
+        if [ "${CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
+            echo "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
+            return 1
+        fi
+        exit 1
+    fi
+    local digest
+    digest=$(compute_sha256_for_file "$host_cfg") || digest=""
+    register_agent_cli_secret "copilot" "agent_copilot_cli" "copilot_cli_config_json" "file" "$host_cfg" "$host_cfg" "$digest"
+    echo "🔐 Copilot CLI credential detected (sha256=${digest:-unknown})"
+}
+
+detect_codex_cli_secret() {
+    local host_cfg="${HOME}/.codex/auth.json"
+    if [ ! -f "$host_cfg" ]; then
+        echo "❌ Codex credentials not found at $host_cfg" >&2
+        if [ "${CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
+            echo "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
+            return 1
+        fi
+        exit 1
+    fi
+    local digest
+    digest=$(compute_sha256_for_file "$host_cfg") || digest=""
+    register_agent_cli_secret "codex" "agent_codex_cli" "codex_cli_auth_json" "file" "$host_cfg" "$host_cfg" "$digest"
+    echo "🔐 Codex CLI credential detected (sha256=${digest:-unknown})"
+}
+
+detect_claude_cli_secret() {
+    local file_cfg="${HOME}/.claude/.credentials.json"
+    if [ -f "$file_cfg" ]; then
+        local digest
+        digest=$(compute_sha256_for_file "$file_cfg") || digest=""
+        register_agent_cli_secret "claude" "agent_claude_cli" "claude_cli_credentials" "file" "$file_cfg" "$file_cfg" "$digest"
+        echo "🔐 Claude CLI credential detected from $file_cfg (sha256=${digest:-unknown})"
+        return 0
+    fi
+    if [ -n "${CLAUDE_API_KEY:-}" ]; then
+        local digest
+        digest=$(compute_sha256_for_string "$CLAUDE_API_KEY") || digest=""
+        register_agent_cli_secret "claude" "agent_claude_cli" "claude_cli_credentials" "inline" "env:CLAUDE_API_KEY" "$CLAUDE_API_KEY" "$digest"
+        echo "🔐 Claude CLI credential detected from CLAUDE_API_KEY environment (sha256=${digest:-unknown})"
+        return 0
+    fi
+    echo "❌ Claude credentials missing (expected ~/.claude/.credentials.json or CLAUDE_API_KEY)" >&2
+    if [ "${CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
+        echo "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
+        return 1
+    fi
+    exit 1
+}
+
+detect_agent_cli_secrets() {
+    case "$AGENT" in
+        copilot)
+            detect_copilot_cli_secret || true
+            ;;
+        codex)
+            detect_codex_cli_secret || true
+            ;;
+        claude)
+            detect_claude_cli_secret || true
+            ;;
+    esac
+}
+
+write_agent_cli_manifest() {
+    local manifest_path="$1"
+    local stub="$2"
+    local agent_name="$3"
+    local session_id="$4"
+    local secret_list="$5"
+    local metadata_lines=""
+    local secret
+    for secret in $secret_list; do
+        local label="${AGENT_CLI_SECRET_SOURCES[$secret]:-unknown}"
+        local digest="${AGENT_CLI_SECRET_DIGESTS[$secret]:-}"
+        metadata_lines+="$secret|$label|$digest"
+        metadata_lines+=$'\n'
+    done
+    AGENT_CLI_SECRET_META="$metadata_lines" python3 - "$manifest_path" "$agent_name" "$stub" "$session_id" <<'PY'
+import json
+import os
+import sys
+
+if len(sys.argv) < 5:
+    raise SystemExit(1)
+
+manifest_path = sys.argv[1]
+agent_name = sys.argv[2]
+stub_name = sys.argv[3]
+session_id = sys.argv[4]
+meta = os.environ.get("AGENT_CLI_SECRET_META", "").strip().splitlines()
+entries = []
+for line in meta:
+    if not line.strip():
+        continue
+    parts = line.split("|", 2)
+    if len(parts) != 3:
+        continue
+    entries.append({
+        "name": parts[0],
+        "source": parts[1],
+        "sha256": parts[2],
+    })
+doc = {
+    "agent": agent_name,
+    "stub": stub_name,
+    "session": session_id,
+    "secrets": entries,
+}
+with open(manifest_path, "w", encoding="utf-8") as handle:
+    json.dump(doc, handle, indent=2)
+PY
+}
+
+stage_agent_cli_capability_bundles() {
+    local stub
+    for stub in "${AGENT_CLI_STUBS[@]}"; do
+        local agent_name="${AGENT_CLI_AGENT_NAME_BY_STUB[$stub]:-}"
+        [ -n "$agent_name" ] || continue
+        local source_dir="$BROKER_CAP_DIR/$stub"
+        if [ ! -d "$source_dir" ]; then
+            echo "⚠️  Capability directory missing for stub '$stub'" >&2
+            continue
+        fi
+        local dest_root="$SESSION_CONFIG_OUTPUT/$agent_name/cli"
+        mkdir -p "$dest_root/capabilities"
+        cp -a "$source_dir/." "$dest_root/capabilities/" >/dev/null 2>&1 || true
+        write_agent_cli_manifest "$dest_root/manifest.json" "$stub" "$agent_name" "$SESSION_ID" "${AGENT_CLI_SECRET_NAMES_BY_STUB[$stub]}"
+    done
+}
+
+package_agent_data_payload() {
+    local agent_name="$1"
+    local packager_script="$REPO_ROOT/scripts/utils/package-agent-data.py"
+    if [ ! -f "$packager_script" ]; then
+        return 0
+    fi
+    local session_dir="$SESSION_CONFIG_OUTPUT/$agent_name/data/$SESSION_ID"
+    mkdir -p "$session_dir"
+    local tar_path="$session_dir/data-import.tar"
+    local manifest_path="$session_dir/manifest.json"
+    local key_path="$session_dir/data-hmac.key"
+    ensure_data_hmac_key "$agent_name" "$SESSION_ID" "$key_path"
+    local -a runner_mounts=("--mount" "$SESSION_CONFIG_OUTPUT")
+    local -a packager_args=(
+        "--agent" "$agent_name"
+        "--session-id" "$SESSION_ID"
+        "--tar" "$tar_path"
+        "--manifest" "$manifest_path"
+        "--hmac-key-file" "$key_path"
+    )
+    if [ -n "${HOME:-}" ]; then
+        packager_args+=("--home-path" "$HOME")
+    fi
+    if run_python_tool "$packager_script" "${runner_mounts[@]}" -- "${packager_args[@]}" >/dev/null 2>&1; then
+        if [ -f "$tar_path" ] && [ -s "$tar_path" ]; then
+            chmod 600 "$tar_path" 2>/dev/null || true
+            echo "📦 Packaged ${agent_name} data import archive"
+        else
+            rm -f "$tar_path" "$manifest_path"
+            echo "ℹ️  No host data discovered for ${agent_name} data import"
+        fi
+    else
+        echo "⚠️  Failed to package host data for agent '${agent_name}'" >&2
+        rm -f "$tar_path" "$manifest_path"
+    fi
+}
+
 parse_stub_secret_manifest() {
     local file="$1"
     [ -f "$file" ] || return 0
@@ -253,6 +524,31 @@ parse_stub_secret_manifest() {
 }
 
 store_stub_secrets() {
+ensure_data_hmac_key() {
+    local agent_name="$1"
+    local session_id="$2"
+    local dest_path="$3"
+    if [ ! -f "$dest_path" ]; then
+        local key_hex
+        if command -v openssl >/dev/null 2>&1; then
+            key_hex=$(openssl rand -hex 32 2>/dev/null || true)
+        fi
+        if [ -z "$key_hex" ]; then
+            key_hex=$(python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+)
+        fi
+        printf '%s\n' "$key_hex" > "$dest_path"
+        chmod 600 "$dest_path" 2>/dev/null || true
+    fi
+    local host_store="${HOME}/.config/coding-agents/data-hmac/${agent_name}"
+    mkdir -p "$host_store"
+    cp "$dest_path" "$host_store/${session_id}.key"
+    chmod 600 "$host_store/${session_id}.key" 2>/dev/null || true
+}
+
     local broker_script="$1"
     local stub
     for stub in "${!SESSION_STUB_SECRETS[@]}"; do
@@ -260,6 +556,14 @@ store_stub_secrets() {
         [ -n "$names" ] || continue
         local name
         for name in $names; do
+            local file_source="${SESSION_SECRET_FILE_SOURCES[$name]:-}"
+            if [ -n "$file_source" ]; then
+                if ! run_python_tool "$broker_script" -- store --stub "$stub" --name "$name" --from-file "$file_source" >/dev/null 2>&1; then
+                    echo "❌ Failed to store secret '$name' for stub '$stub'" >&2
+                    return 1
+                fi
+                continue
+            fi
             local value
             value=$(resolve_secret_value "$name") || value=""
             if [ -z "$value" ]; then
@@ -740,6 +1044,8 @@ else
     echo "⚠️  Session config renderer missing at $RENDERER_SCRIPT" >&2
 fi
 
+detect_agent_cli_secrets
+
 if ! ensure_broker_ready; then
     echo "❌ Secret broker health check failed" >&2
     exit 1
@@ -773,6 +1079,12 @@ if [ ${#SESSION_STUB_SECRETS[@]} -gt 0 ]; then
         exit 1
     fi
 fi
+
+if [ ${#AGENT_CLI_STUBS[@]} -gt 0 ]; then
+    stage_agent_cli_capability_bundles
+fi
+
+package_agent_data_payload "$AGENT"
 
 # Check for branch conflicts in local repos (only when creating isolated branches)
 if [ "$SOURCE_TYPE" = "local" ] && [ "$USE_CURRENT_BRANCH" != "true" ]; then
@@ -884,8 +1196,8 @@ fi
 # Build docker arguments
 AUTO_PUSH_VALUE=$([ "$NO_PUSH" = true ] && echo "false" || echo "true")
 
-DOCKER_ARGS=(
-    "run" "-d" "--rm"
+DOCKER_ARGS+=(
+    "run" "-d"
     "--name" "$CONTAINER_NAME"
     "--hostname" "$CONTAINER_NAME"
     "-e" "TZ=$TZ_VALUE"
@@ -896,12 +1208,16 @@ DOCKER_ARGS=(
     "-e" "AUTO_PUSH_ON_SHUTDOWN=$AUTO_PUSH_VALUE"
     "-e" "AGENT_SESSION_MODE=supervised"
     "-e" "AGENT_SESSION_NAME=agent"
+    "-e" "AGENT_NAME=$AGENT"
     "-e" "HOST_SESSION_ID=$SESSION_ID"
     "-e" "HOST_SESSION_CONFIG_SHA256=$SESSION_CONFIG_SHA256"
     "-e" "HOST_TRUSTED_TREES=$TRUSTED_TREE_HASHES_ENV"
     "-e" "HOST_LAUNCHER_HEAD=$LAUNCHER_HEAD_HASH"
     "-e" "HOST_SESSION_CONFIG_ROOT=$SESSION_CONFIG_ROOT_IN_CONTAINER"
     "-e" "HOST_CAPABILITY_ROOT=${SESSION_CONFIG_ROOT_IN_CONTAINER}/capabilities"
+    "-e" "CODING_AGENTS_AGENT_SECRET_ROOT=/run/agent-secrets"
+    "-e" "CODING_AGENTS_AGENT_DATA_ROOT=/run/agent-data"
+    "-e" "CODING_AGENTS_SECRET_TMPFS_SIZE=${TMPFS_SECRET_SIZE}"
     "--label" "coding-agents.type=agent"
     "--label" "coding-agents.agent=$AGENT"
     "--label" "coding-agents.repo=$REPO_NAME"
@@ -974,6 +1290,7 @@ TMPFS_MOUNTS=(
     "/var/cache/debconf:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
     "/var/lib/dpkg:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
     "${SESSION_CONFIG_ROOT_IN_CONTAINER}:rw,nosuid,nodev,noexec,mode=750"
+    "/run/agent-secrets:rw,nosuid,nodev,noexec,size=${TMPFS_SECRET_SIZE},mode=750"
 )
 
 for tmpfs_mount in "${TMPFS_MOUNTS[@]}"; do

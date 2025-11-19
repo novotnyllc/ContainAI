@@ -44,6 +44,12 @@ docker --version
 # or
 podman --version
 
+Agent data lives under `/run/agent-data/<agent>/<session>/home` with read/write permissions only for `agentcli`. `agentuser` interacts with it via symlinks (`~/.copilot`, `~/.codex`, `~/.claude`) that point into that tmpfs. This prevents host bind mounts from exposing user secrets or history files. Inspect the mount options to confirm:
+```bash
+ agentuser@container:/workspace$ findmnt /run/agent-data
+ TARGET           SOURCE FSTYPE OPTIONS
+ /run/agent-data  tmpfs  tmpfs  rw,nosuid,nodev,noexec,mode=0770,private
+ ```
 # Check VS Code version
 code --version
 
@@ -197,8 +203,9 @@ See [CLI Reference](cli-reference.md) for all available options.
 When VS Code is attached to a container:
 
 - **Workspace:** `/workspace` (your repository root inside the container)
-- **Home:** `/home/agentuser` (agent user's home directory)
+- **Home:** `/home/agentuser` (workspace user home directory)
 - **Config:** `/home/agentuser/.config/` (MCP and agent configurations)
+- **CLI user:** `agentcli` (non-login account that owns `/run/agent-secrets` and `/run/agent-data`)
 - **Extensions:** VS Code extensions run inside the container (optional)
 
 **Visual Indicators:**
@@ -242,6 +249,8 @@ agentuser@abc123:/workspace$ pwd
 
 agentuser@abc123:/workspace$ whoami
 agentuser
+agentuser@abc123:/workspace$ id -nG
+agentuser agentcli
 
 agentuser@abc123:/workspace$ which gh
 /usr/bin/gh
