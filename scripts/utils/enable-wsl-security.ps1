@@ -96,7 +96,7 @@ function Get-WslSecurityStatus {
     }
 }
 
-function Ensure-WindowsKernelConfig {
+function Set-WindowsKernelConfig {
     param(
         [string]$WslConfig,
         [string]$KernelLine
@@ -133,7 +133,7 @@ function Ensure-WindowsKernelConfig {
     Write-Host "   -> Created [wsl2] stanza with kernelCommandLine" -ForegroundColor Green
 }
 
-function Ensure-WslLinuxConfig {
+function Set-WslLinuxConfig {
     param([string]$WslExe)
 
     $script = "if ! grep -q 'systemd=true' /etc/wsl.conf 2>/dev/null; then printf '\n[boot]\nsystemd=true\n' >> /etc/wsl.conf; fi; if ! grep -q 'securityfs' /etc/fstab 2>/dev/null; then echo 'none /sys/kernel/security securityfs defaults 0 0' >> /etc/fstab; fi"
@@ -187,13 +187,13 @@ if (-not $Force) {
 Write-Host "`n🚀 Applying fixes..." -ForegroundColor Cyan
 
 if ($status.WindowsNeedsUpdate) {
-    Ensure-WindowsKernelConfig -WslConfig $WslConfigPath -KernelLine $KernelParams
+    Set-WindowsKernelConfig -WslConfig $WslConfigPath -KernelLine $KernelParams
 } else {
     Write-Host "   -> Windows kernelCommandLine already satisfies requirements" -ForegroundColor DarkGray
 }
 
 if ($status.NeedsSystemd -or $status.NeedsSecurityFs) {
-    Ensure-WslLinuxConfig -WslExe $wslExePath
+    Set-WslLinuxConfig -WslExe $wslExePath
 } else {
     Write-Host "   -> Linux boot settings already satisfy requirements" -ForegroundColor DarkGray
 }
