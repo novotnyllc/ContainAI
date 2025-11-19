@@ -2,7 +2,12 @@
 # Tests all core functionality: naming, labels, auto-push, shared functions
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter(Position=0, ValueFromRemainingArguments=$true)]
+    [string[]]$Tests,
+    [switch]$List,
+    [switch]$Help
+)
 
 $ErrorActionPreference = "Stop"
 $InformationPreference = "Continue"
@@ -815,6 +820,8 @@ function Test-CodexCliHelper {
     '{"refresh_token":"unit-test","access_token":"abc"}' | Set-Content -LiteralPath $secretFile -Encoding UTF8
 
     $previousConfig = $env:CODING_AGENTS_CONFIG_DIR
+    $previousSecretRoot = $env:CODING_AGENTS_AGENT_SECRET_ROOT
+    $previousDataHome = $env:CODING_AGENTS_AGENT_DATA_HOME
     $env:CODING_AGENTS_CONFIG_DIR = $envDir
 
     $issueMounts = @($configRoot, $capDir)
@@ -852,8 +859,12 @@ function Test-CodexCliHelper {
         $env:CODING_AGENTS_AGENT_HOME = $agentHome
         $env:CODING_AGENTS_AGENT_CAP_ROOT = $capDir
         $env:CODING_AGENTS_CAPABILITY_UNSEAL = Join-Path $ProjectRoot "scripts/runtime/capability-unseal.py"
+        $secretRoot = Join-Path $agentHome ".agent-secrets"
+        New-Item -ItemType Directory -Path $secretRoot -Force | Out-Null
+        $env:CODING_AGENTS_AGENT_SECRET_ROOT = $secretRoot
+        $env:CODING_AGENTS_AGENT_DATA_HOME = $agentHome
 
-        $bashResult = & $bashCmd.Source $helperScript 2> $null
+        $bashResult = & $bashCmd.Source $helperScript 2>&1
         if ($LASTEXITCODE -eq 0) {
             Pass "prepare-codex-secrets decrypts bundle"
             $authFile = Join-Path $agentHome ".codex/auth.json"
@@ -863,7 +874,7 @@ function Test-CodexCliHelper {
                 Fail "Codex auth.json missing or incorrect"
             }
         } else {
-            Fail "prepare-codex-secrets failed"
+            Fail "prepare-codex-secrets failed: $bashResult"
         }
 
     }
@@ -876,6 +887,16 @@ function Test-CodexCliHelper {
         Remove-Item Env:CODING_AGENTS_AGENT_HOME -ErrorAction SilentlyContinue
         Remove-Item Env:CODING_AGENTS_AGENT_CAP_ROOT -ErrorAction SilentlyContinue
         Remove-Item Env:CODING_AGENTS_CAPABILITY_UNSEAL -ErrorAction SilentlyContinue
+        if ($previousSecretRoot) {
+            $env:CODING_AGENTS_AGENT_SECRET_ROOT = $previousSecretRoot
+        } else {
+            Remove-Item Env:CODING_AGENTS_AGENT_SECRET_ROOT -ErrorAction SilentlyContinue
+        }
+        if ($previousDataHome) {
+            $env:CODING_AGENTS_AGENT_DATA_HOME = $previousDataHome
+        } else {
+            Remove-Item Env:CODING_AGENTS_AGENT_DATA_HOME -ErrorAction SilentlyContinue
+        }
         Remove-Item $configRoot -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item $capDir -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item $secretFile -Force -ErrorAction SilentlyContinue
@@ -911,6 +932,8 @@ function Test-ClaudeCliHelper {
     '{"api_key":"file-secret","workspace_id":"dev"}' | Set-Content -LiteralPath $secretFile -Encoding UTF8
 
     $previousConfig = $env:CODING_AGENTS_CONFIG_DIR
+    $previousSecretRoot = $env:CODING_AGENTS_AGENT_SECRET_ROOT
+    $previousDataHome = $env:CODING_AGENTS_AGENT_DATA_HOME
     $storeMounts = @($configRoot)
     $fileCapDir = $null
     $inlineCapDir = $null
@@ -960,8 +983,12 @@ function Test-ClaudeCliHelper {
         $env:CODING_AGENTS_AGENT_HOME = $agentHomeFile
         $env:CODING_AGENTS_AGENT_CAP_ROOT = $fileCapDir
         $env:CODING_AGENTS_CAPABILITY_UNSEAL = Join-Path $ProjectRoot "scripts/runtime/capability-unseal.py"
+        $secretRootFile = Join-Path $agentHomeFile ".agent-secrets"
+        New-Item -ItemType Directory -Path $secretRootFile -Force | Out-Null
+        $env:CODING_AGENTS_AGENT_SECRET_ROOT = $secretRootFile
+        $env:CODING_AGENTS_AGENT_DATA_HOME = $agentHomeFile
 
-        & $bashCmd.Source $helperScript 2> $null
+        $fileHelperResult = & $bashCmd.Source $helperScript 2>&1
         if ($LASTEXITCODE -eq 0) {
             Pass "prepare-claude-secrets decrypts file-based bundle"
             $fileCreds = Join-Path $agentHomeFile ".claude/.credentials.json"
@@ -972,7 +999,7 @@ function Test-ClaudeCliHelper {
                 Fail "Claude credentials missing expected JSON payload"
             }
         } else {
-            Fail "prepare-claude-secrets failed for file-based bundle"
+            Fail "prepare-claude-secrets failed for file-based bundle: $fileHelperResult"
         }
 
         # Inline API key scenario
@@ -1010,8 +1037,12 @@ function Test-ClaudeCliHelper {
         $null = New-Item -ItemType Directory -Path $agentHomeInline -Force
         $env:CODING_AGENTS_AGENT_HOME = $agentHomeInline
         $env:CODING_AGENTS_AGENT_CAP_ROOT = $inlineCapDir
+        $secretRootInline = Join-Path $agentHomeInline ".agent-secrets"
+        New-Item -ItemType Directory -Path $secretRootInline -Force | Out-Null
+        $env:CODING_AGENTS_AGENT_SECRET_ROOT = $secretRootInline
+        $env:CODING_AGENTS_AGENT_DATA_HOME = $agentHomeInline
 
-        & $bashCmd.Source $helperScript 2> $null
+        $inlineHelperResult = & $bashCmd.Source $helperScript 2>&1
         if ($LASTEXITCODE -eq 0) {
             Pass "prepare-claude-secrets decrypts inline bundle"
             $inlineCreds = Join-Path $agentHomeInline ".claude/.credentials.json"
@@ -1022,7 +1053,7 @@ function Test-ClaudeCliHelper {
                 Fail "Claude credentials missing synthesized API key"
             }
         } else {
-            Fail "prepare-claude-secrets failed for inline bundle"
+            Fail "prepare-claude-secrets failed for inline bundle: $inlineHelperResult"
         }
 
     }
@@ -1035,6 +1066,16 @@ function Test-ClaudeCliHelper {
         Remove-Item Env:CODING_AGENTS_AGENT_HOME -ErrorAction SilentlyContinue
         Remove-Item Env:CODING_AGENTS_AGENT_CAP_ROOT -ErrorAction SilentlyContinue
         Remove-Item Env:CODING_AGENTS_CAPABILITY_UNSEAL -ErrorAction SilentlyContinue
+        if ($previousSecretRoot) {
+            $env:CODING_AGENTS_AGENT_SECRET_ROOT = $previousSecretRoot
+        } else {
+            Remove-Item Env:CODING_AGENTS_AGENT_SECRET_ROOT -ErrorAction SilentlyContinue
+        }
+        if ($previousDataHome) {
+            $env:CODING_AGENTS_AGENT_DATA_HOME = $previousDataHome
+        } else {
+            Remove-Item Env:CODING_AGENTS_AGENT_DATA_HOME -ErrorAction SilentlyContinue
+        }
         if ($configRoot) { Remove-Item $configRoot -Recurse -Force -ErrorAction SilentlyContinue }
         if ($secretFile) { Remove-Item $secretFile -Force -ErrorAction SilentlyContinue }
         if ($fileCapDir) { Remove-Item $fileCapDir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1076,7 +1117,14 @@ function Test-HostSecurityPreflight {
         $env:CODING_AGENTS_DISABLE_SENSITIVE_TMPFS = "1"
         $env:CODING_AGENTS_SECCOMP_PROFILE = Join-Path $ProjectRoot "tests/nonexistent-seccomp.json"
 
-        if (Test-HostSecurityPrereqs -RepoRoot $ProjectRoot) {
+        $seccompCheckPassed = $true
+        try {
+            $seccompCheckPassed = Test-HostSecurityPrereqs -RepoRoot $ProjectRoot
+        } catch {
+            $seccompCheckPassed = $false
+        }
+
+        if ($seccompCheckPassed) {
             Fail "Preflight should fail when seccomp profile is missing"
         } else {
             Pass "Seccomp profile requirement enforced"
@@ -1104,7 +1152,13 @@ function Test-ContainerSecurityPreflight {
     $env:CODING_AGENTS_CONTAINER_INFO_JSON = $goodJson
     $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
     $env:CODING_AGENTS_DISABLE_APPARMOR = "0"
-    if (Test-ContainerSecuritySupport) {
+    $preflightPassed = $false
+    try {
+        $preflightPassed = Test-ContainerSecuritySupport
+    } catch {
+        $preflightPassed = $false
+    }
+    if ($preflightPassed) {
         Pass "Container preflight passes when runtime reports both features"
     } else {
         Fail "Container preflight rejected valid runtime JSON"
@@ -1113,14 +1167,26 @@ function Test-ContainerSecurityPreflight {
     $env:CODING_AGENTS_CONTAINER_INFO_JSON = $missingAppArmor
     $env:CODING_AGENTS_DISABLE_SECCOMP = "0"
     $env:CODING_AGENTS_DISABLE_APPARMOR = "0"
-    if (Test-ContainerSecuritySupport) {
+    $appArmorCheckPassed = $false
+    try {
+        $appArmorCheckPassed = Test-ContainerSecuritySupport
+    } catch {
+        $appArmorCheckPassed = $false
+    }
+    if ($appArmorCheckPassed) {
         Fail "Container preflight should fail when AppArmor missing"
     } else {
         Pass "AppArmor requirement enforced when runtime lacks support"
     }
 
     $env:CODING_AGENTS_DISABLE_APPARMOR = "1"
-    if (Test-ContainerSecuritySupport) {
+    $overridePassed = $false
+    try {
+        $overridePassed = Test-ContainerSecuritySupport
+    } catch {
+        $overridePassed = $false
+    }
+    if ($overridePassed) {
         Pass "AppArmor override bypasses container check"
     } else {
         Fail "AppArmor override should allow launch without runtime support"
@@ -1527,11 +1593,123 @@ function Test-LauncherWrappers {
     }
 }
 
+# =========================================================================
+# Test Selection Helpers
+# =========================================================================
+
+$AllTests = @(
+    "Initialize-TestRepo",
+    "Test-ContainerRuntimeDetection",
+    "Test-SharedFunctions",
+    "Test-HelperNetworkIsolation",
+    "Test-AuditLoggingPipeline",
+    "Test-SeccompPtraceBlock",
+    "Test-HostSecurityPreflight",
+    "Test-ContainerSecurityPreflight",
+    "Test-SessionConfigRenderer",
+    "Test-SecretBrokerCli",
+    "Test-CodexCliHelper",
+    "Test-ClaudeCliHelper",
+    "Test-LocalRemotePush",
+    "Test-LocalRemoteFallbackPush",
+    "Test-SecureRemoteSync",
+    "Test-ContainerNaming",
+    "Test-ContainerLabelsTest",
+    "Test-ImagePull",
+    "Test-BranchSanitization",
+    "Test-MultipleAgents",
+    "Test-LabelFiltering",
+    "Test-WslPathConversion",
+    "Test-PromptFallbackRepoSetup",
+    "Test-BranchNameSanitization",
+    "Test-ContainerStatus",
+    "Test-LauncherWrappers",
+    "Test-ListAgents",
+    "Test-RemoveAgent"
+)
+
+$TestActionMap = @{
+    "Initialize-TestRepo"           = { Initialize-TestRepo }
+    "Test-ContainerRuntimeDetection" = { Test-ContainerRuntimeDetection }
+    "Test-SharedFunctions"           = { Test-SharedFunctions }
+    "Test-HelperNetworkIsolation"    = { Test-HelperNetworkIsolation }
+    "Test-AuditLoggingPipeline"      = { Test-AuditLoggingPipeline }
+    "Test-SeccompPtraceBlock"        = { Test-SeccompPtraceBlock }
+    "Test-HostSecurityPreflight"     = { Test-HostSecurityPreflight }
+    "Test-ContainerSecurityPreflight" = { Test-ContainerSecurityPreflight }
+    "Test-SessionConfigRenderer"     = { Test-SessionConfigRenderer }
+    "Test-SecretBrokerCli"           = { Test-SecretBrokerCli }
+    "Test-CodexCliHelper"            = { Test-CodexCliHelper }
+    "Test-ClaudeCliHelper"           = { Test-ClaudeCliHelper }
+    "Test-LocalRemotePush"           = { Test-LocalRemotePush }
+    "Test-LocalRemoteFallbackPush"   = { Test-LocalRemoteFallbackPush }
+    "Test-SecureRemoteSync"          = { Test-SecureRemoteSync }
+    "Test-ContainerNaming"           = { Test-ContainerNaming }
+    "Test-ContainerLabelsTest"       = { Test-ContainerLabelsTest }
+    "Test-ImagePull"                 = { Test-ImagePull }
+    "Test-BranchSanitization"        = { Test-BranchSanitization }
+    "Test-MultipleAgents"            = { Test-MultipleAgents }
+    "Test-LabelFiltering"            = { Test-LabelFiltering }
+    "Test-WslPathConversion"         = { Test-WslPathConversion }
+    "Test-PromptFallbackRepoSetup"   = { Test-PromptFallbackRepoSetup }
+    "Test-BranchNameSanitization"    = { Test-BranchNameSanitization }
+    "Test-ContainerStatus"           = { Test-ContainerStatus }
+    "Test-LauncherWrappers"          = { Test-LauncherWrappers }
+    "Test-ListAgents"                = { Test-ListAgents }
+    "Test-RemoveAgent"               = { Test-RemoveAgent }
+}
+
+function Show-Usage {
+    Write-Output "Usage: pwsh scripts/test/test-launchers.ps1 [all|TestName ...] [-List] [-Help]"
+    Write-Output ""
+    Write-Output "Examples:"
+    Write-Output "  pwsh scripts/test/test-launchers.ps1";
+    Write-Output "  pwsh scripts/test/test-launchers.ps1 all";
+    Write-Output "  pwsh scripts/test/test-launchers.ps1 Test-SecretBrokerCli Test-SessionConfigRenderer";
+    Write-Output "  pwsh scripts/test/test-launchers.ps1 -List"
+}
+
+function Show-AvailableTests {
+    $AllTests | ForEach-Object { Write-Output $_ }
+}
+
 # ============================================================================
 # Main Test Execution
 # ============================================================================
 
 function Main {
+    if ($Help) {
+        Show-Usage
+        return
+    }
+
+    if ($List) {
+        Show-AvailableTests
+        return
+    }
+
+    $selectedTests = @()
+    if (-not $Tests -or ($Tests.Count -eq 1 -and $Tests[0].ToLowerInvariant() -eq "all")) {
+        $selectedTests = $AllTests
+    } else {
+        foreach ($testArg in $Tests) {
+            if ($testArg.ToLowerInvariant() -eq "all") {
+                $selectedTests = $AllTests
+                break
+            }
+            $resolved = $AllTests | Where-Object { $_.ToLowerInvariant() -eq $testArg.ToLowerInvariant() } | Select-Object -First 1
+            if (-not $resolved) {
+                Write-TestLine -Color Red -Message "Unknown test: $testArg"
+                Write-TestLine -Color Yellow -Message "Available tests:"
+                foreach ($available in $AllTests) {
+                    Write-TestLine -Color Yellow -Message "  $available"
+                }
+                exit 1
+            }
+            $selectedTests += $resolved
+        }
+    }
+
     Write-TestLine -Color Cyan -Message "+===========================================================+"
     Write-TestLine -Color Cyan -Message "|   Coding Agents Launcher Test Suite (PowerShell)          |"
     Write-TestLine -Color Cyan -Message "+===========================================================+"
@@ -1541,40 +1719,13 @@ function Main {
 
     Confirm-LinuxContainerEnvironment
 
-    $tests = @(
-        @{ Name = "Initialize-TestRepo"; Action = { Initialize-TestRepo } },
-        @{ Name = "Test-ContainerRuntimeDetection"; Action = { Test-ContainerRuntimeDetection } },
-        @{ Name = "Test-SharedFunctions"; Action = { Test-SharedFunctions } },
-        @{ Name = "Test-HelperNetworkIsolation"; Action = { Test-HelperNetworkIsolation } },
-        @{ Name = "Test-AuditLoggingPipeline"; Action = { Test-AuditLoggingPipeline } },
-        @{ Name = "Test-SeccompPtraceBlock"; Action = { Test-SeccompPtraceBlock } },
-        @{ Name = "Test-HostSecurityPreflight"; Action = { Test-HostSecurityPreflight } },
-        @{ Name = "Test-ContainerSecurityPreflight"; Action = { Test-ContainerSecurityPreflight } },
-        @{ Name = "Test-SessionConfigRenderer"; Action = { Test-SessionConfigRenderer } },
-        @{ Name = "Test-SecretBrokerCli"; Action = { Test-SecretBrokerCli } },
-        @{ Name = "Test-CodexCliHelper"; Action = { Test-CodexCliHelper } },
-        @{ Name = "Test-ClaudeCliHelper"; Action = { Test-ClaudeCliHelper } },
-        @{ Name = "Test-LocalRemotePush"; Action = { Test-LocalRemotePush } },
-        @{ Name = "Test-LocalRemoteFallbackPush"; Action = { Test-LocalRemoteFallbackPush } },
-        @{ Name = "Test-SecureRemoteSync"; Action = { Test-SecureRemoteSync } },
-        @{ Name = "Test-ContainerNaming"; Action = { Test-ContainerNaming } },
-        @{ Name = "Test-ContainerLabelsTest"; Action = { Test-ContainerLabelsTest } },
-        @{ Name = "Test-ImagePull"; Action = { Test-ImagePull } },
-        @{ Name = "Test-BranchSanitization"; Action = { Test-BranchSanitization } },
-        @{ Name = "Test-MultipleAgents"; Action = { Test-MultipleAgents } },
-        @{ Name = "Test-LabelFiltering"; Action = { Test-LabelFiltering } },
-        @{ Name = "Test-WslPathConversion"; Action = { Test-WslPathConversion } },
-        @{ Name = "Test-PromptFallbackRepoSetup"; Action = { Test-PromptFallbackRepoSetup } },
-        @{ Name = "Test-BranchNameSanitization"; Action = { Test-BranchNameSanitization } },
-        @{ Name = "Test-ContainerStatus"; Action = { Test-ContainerStatus } },
-        @{ Name = "Test-LauncherWrappers"; Action = { Test-LauncherWrappers } },
-        @{ Name = "Test-ListAgents"; Action = { Test-ListAgents } },
-        @{ Name = "Test-RemoveAgent"; Action = { Test-RemoveAgent } }
-    )
-
     try {
-        foreach ($test in $tests) {
-            Invoke-Test -Name $test.Name -Action $test.Action
+        if ($selectedTests -notcontains "Initialize-TestRepo") {
+            Invoke-Test -Name "Initialize-TestRepo" -Action $TestActionMap["Initialize-TestRepo"]
+        }
+
+        foreach ($testName in $selectedTests) {
+            Invoke-Test -Name $testName -Action $TestActionMap[$testName]
         }
     } finally {
         Clear-TestEnvironment

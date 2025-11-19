@@ -11,11 +11,18 @@ INTEGRATION_SCRIPT="$PROJECT_ROOT/scripts/test/integration-test-impl.sh"
 
 DIND_IMAGE="${TEST_ISOLATION_IMAGE:-docker:25.0-dind}"
 DIND_CONTAINER="${TEST_ISOLATION_CONTAINER:-coding-agents-test-dind-$RANDOM}"
+DIND_CLIENT_IMAGE_DEFAULT="${DIND_IMAGE/-dind/-cli}"
+if [[ "$DIND_CLIENT_IMAGE_DEFAULT" == "$DIND_IMAGE" ]]; then
+    DIND_CLIENT_IMAGE_DEFAULT="docker:cli"
+fi
+DIND_CLIENT_IMAGE="${TEST_ISOLATION_CLIENT_IMAGE:-$DIND_CLIENT_IMAGE_DEFAULT}"
+DIND_RUN_DIR=""
 ISOLATION_MODE="${TEST_ISOLATION_MODE:-dind}"
 DIND_STARTED=false
 TEST_ARGS=()
 WITH_HOST_SECRETS=false
 HOST_SECRETS_FILE=""
+DEFAULT_TRIVY_VERSION="${TEST_ISOLATION_TRIVY_VERSION:-0.50.2}"
 
 if [[ -n "${TEST_ISOLATION_DOCKER_RUN_FLAGS:-}" ]]; then
     # shellcheck disable=SC2206
@@ -36,6 +43,14 @@ cleanup() {
             docker rm -f "$DIND_CONTAINER" >/dev/null 2>&1 || true
         fi
     fi
+
+    if [[ "${TEST_PRESERVE_RESOURCES:-false}" == "true" ]]; then
+        if [[ -n "$DIND_RUN_DIR" ]]; then
+            echo "Shared /run directory preserved at: $DIND_RUN_DIR"
+        fi
+    else
+        purge_dind_run_dir "$DIND_RUN_DIR"
+    fi
     exit $exit_code
 }
 
@@ -49,6 +64,28 @@ print_dind_logs() {
         echo "Unable to retrieve logs from $DIND_CONTAINER"
     fi
     echo "--- End logs ---"
+}
+
+initialize_dind_run_dir() {
+    if [[ -n "$DIND_RUN_DIR" && -d "$DIND_RUN_DIR" ]]; then
+        return
+    fi
+    if ! DIND_RUN_DIR=$(mktemp -d -t coding-agents-dind-run-XXXXXX); then
+        echo "Error: Unable to create shared /run directory for DinD"
+        exit 1
+    fi
+    chmod 1777 "$DIND_RUN_DIR"
+}
+
+purge_dind_run_dir() {
+    local dir="$1"
+    if [[ -z "$dir" || ! -d "$dir" ]]; then
+        return
+    fi
+    if ! docker run --rm -v "$dir":/run alpine:3.19 sh -c 'rm -rf /run/*' >/dev/null 2>&1; then
+        echo "Warning: Unable to scrub shared /run directory automatically ($dir)"
+    fi
+    rm -rf "$dir" >/dev/null 2>&1 || true
 }
 
 usage() {
@@ -72,10 +109,12 @@ OPTIONS:
 ENVIRONMENT VARIABLES:
     TEST_ISOLATION_IMAGE            Override Docker-in-Docker image (default: docker:25.0-dind)
     TEST_ISOLATION_CONTAINER        Override container name
+    TEST_ISOLATION_CLIENT_IMAGE     Override helper CLI image used to probe DinD readiness
     TEST_ISOLATION_STARTUP_TIMEOUT  Daemon startup wait time in seconds (default: 180)
     TEST_PRESERVE_RESOURCES         Same as --preserve flag
     TEST_ISOLATION_MODE             Default isolation mode (dind | host)
     TEST_ISOLATION_DOCKER_RUN_FLAGS Extra docker run flags when using DinD
+    TEST_ISOLATION_TRIVY_VERSION    Override Trivy version fetched inside DinD (default: 0.50.2)
 
 EXAMPLES:
   # Quick validation (recommended for development)
@@ -206,10 +245,12 @@ start_dind() {
     else
         echo "  docker run flags: <none>"
     fi
+    initialize_dind_run_dir
     if ! docker run -d \
-        ${DIND_RUN_FLAGS[@]} \
+        "${DIND_RUN_FLAGS[@]}" \
         --name "$DIND_CONTAINER" \
         -v "$PROJECT_ROOT":/workspace:ro \
+        -v "$DIND_RUN_DIR":/run \
         -e DOCKER_TLS_CERTDIR= \
         "$DIND_IMAGE" >/dev/null 2>&1; then
         echo "Error: Failed to start Docker-in-Docker container"
@@ -226,7 +267,7 @@ wait_for_daemon() {
     local max_retries=${TEST_ISOLATION_STARTUP_TIMEOUT:-180}
     local last_progress=0
     local last_error=""
-    local docker_exec_output=""
+    local docker_probe_output=""
     while true; do
         local state
         state=$(docker inspect -f '{{.State.Status}}' "$DIND_CONTAINER" 2>/dev/null || echo "missing")
@@ -237,11 +278,14 @@ wait_for_daemon() {
             exit 1
         fi
 
-        if docker_exec_output=$(docker exec "$DIND_CONTAINER" docker info 2>&1); then
+        if docker_probe_output=$(docker run --rm \
+            -v "$DIND_RUN_DIR":/run \
+            "$DIND_CLIENT_IMAGE" \
+            -H unix:///run/docker.sock info 2>&1); then
             echo "  ✓ Docker daemon ready after ${retries}s"
             break
         fi
-        last_error=$docker_exec_output
+        last_error=$docker_probe_output
         retries=$((retries + 1))
         
         # Progress indicator every 10 seconds
@@ -272,6 +316,67 @@ bootstrap_tools() {
         exit 1
     fi
     echo "  ✓ Tooling installed"
+}
+
+detect_host_trivy() {
+    if [[ -n "${CODING_AGENTS_TRIVY_BIN:-}" ]]; then
+        if command -v "${CODING_AGENTS_TRIVY_BIN}" >/dev/null 2>&1; then
+            command -v "${CODING_AGENTS_TRIVY_BIN}"
+            return
+        fi
+        echo "  ⚠️  CODING_AGENTS_TRIVY_BIN is set to '${CODING_AGENTS_TRIVY_BIN}' but it is not executable" >&2
+    fi
+    if command -v trivy >/dev/null 2>&1; then
+        command -v trivy
+        return
+    fi
+    return 1
+}
+
+ensure_trivy_inside_isolation() {
+    echo "  Ensuring Trivy CLI is available inside isolation..."
+    if docker exec "$DIND_CONTAINER" sh -c "command -v trivy >/dev/null 2>&1"; then
+        echo "  ✓ Trivy already present"
+        return
+    fi
+
+    local host_trivy
+    if host_trivy=$(detect_host_trivy); then
+        echo "  Copying host Trivy binary ($host_trivy)"
+        if ! docker cp "$host_trivy" "$DIND_CONTAINER:/usr/local/bin/trivy" >/dev/null 2>&1; then
+            echo "  ✗ Failed to copy host Trivy binary into isolation"
+            exit 1
+        fi
+        docker exec "$DIND_CONTAINER" chmod +x /usr/local/bin/trivy >/dev/null 2>&1 || true
+        echo "  ✓ Trivy copied from host"
+        return
+    fi
+
+    echo "  Host Trivy binary not found, downloading v${DEFAULT_TRIVY_VERSION}..."
+    local install_script
+    read -r -d '' install_script <<'EOF'
+set -euo pipefail
+if command -v trivy >/dev/null 2>&1; then
+    exit 0
+fi
+apk add --no-cache curl tar >/dev/null 2>&1
+arch="$(uname -m)"
+case "$arch" in
+    x86_64|amd64) pkg_arch="64bit" ;;
+    arm64|aarch64) pkg_arch="ARM64" ;;
+    armv7l|armv7) pkg_arch="ARM" ;;
+    *) echo "Unsupported architecture for automatic Trivy install: $arch" >&2; exit 1 ;;
+esac
+tmpdir="$(mktemp -d)"
+curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${pkg_arch}.tar.gz" | tar -xz -C "$tmpdir" trivy
+install -m 0755 "$tmpdir/trivy" /usr/local/bin/trivy
+rm -rf "$tmpdir"
+EOF
+    if ! docker exec -e TRIVY_VERSION="$DEFAULT_TRIVY_VERSION" "$DIND_CONTAINER" sh -c "$install_script"; then
+        echo "  ✗ Failed to install Trivy inside isolation"
+        exit 1
+    fi
+    echo "  ✓ Trivy ${DEFAULT_TRIVY_VERSION} installed via download"
 }
 
 run_integration_tests() {
@@ -321,5 +426,6 @@ else
     start_dind
     wait_for_daemon
     bootstrap_tools
+    ensure_trivy_inside_isolation
     run_integration_tests
 fi

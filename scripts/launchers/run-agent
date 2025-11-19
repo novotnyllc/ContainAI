@@ -1198,6 +1198,7 @@ AUTO_PUSH_VALUE=$([ "$NO_PUSH" = true ] && echo "false" || echo "true")
 
 DOCKER_ARGS+=(
     "run" "-d"
+    "--privileged"
     "--name" "$CONTAINER_NAME"
     "--hostname" "$CONTAINER_NAME"
     "-e" "TZ=$TZ_VALUE"

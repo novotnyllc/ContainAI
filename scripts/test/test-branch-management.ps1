@@ -28,6 +28,11 @@ $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TEST_REPO_DIR = Join-Path $env:TEMP "test-branch-mgmt-$TEST_SESSION_ID"
 $FAILED_TESTS = 0
 $PASSED_TESTS = 0
+$debugFlag = $env:CODING_AGENTS_BRANCH_TEST_DEBUG
+if ([string]::IsNullOrEmpty($debugFlag)) {
+    $debugFlag = '0'
+}
+$SUPPRESS_CLEANUP_EXIT = $debugFlag -ne '0'
 
 # Source common functions to test
 . "$SCRIPT_DIR\..\utils\common-functions.ps1"
@@ -110,8 +115,10 @@ function Cleanup {
     }
     
     Write-TestSummary
-    
-    exit ($FAILED_TESTS -gt 0 ? 1 : 0)
+
+    if (-not $SUPPRESS_CLEANUP_EXIT) {
+        exit ($FAILED_TESTS -gt 0 ? 1 : 0)
+    }
 }
 
 function Write-TestSummary {
@@ -264,7 +271,7 @@ function Test-RenameGitBranch {
         New-GitBranch -RepoPath $TEST_REPO_DIR -BranchName "branch-to-rename" | Out-Null
         
         # Rename it
-        if (Rename-GitBranch -RepoPath $TEST_REPO_DIR -OldBranchName "branch-to-rename" -NewBranchName "renamed-branch") {
+        if (Rename-GitBranch -RepoPath $TEST_REPO_DIR -OldName "branch-to-rename" -NewName "renamed-branch") {
             Write-Pass "Rename-GitBranch successfully renamed branch"
             Assert-BranchNotExists -RepoPath $TEST_REPO_DIR -BranchName "branch-to-rename"
             Assert-BranchExists -RepoPath $TEST_REPO_DIR -BranchName "renamed-branch"
@@ -286,7 +293,7 @@ function Test-RemoveGitBranch {
         Assert-BranchExists -RepoPath $TEST_REPO_DIR -BranchName "branch-to-remove"
         
         # Remove it
-        if (Remove-GitBranch -RepoPath $TEST_REPO_DIR -BranchName "branch-to-remove" -Force $true) {
+        if (Remove-GitBranch -RepoPath $TEST_REPO_DIR -BranchName "branch-to-remove" -Force $true -Confirm:$false) {
             Write-Pass "Remove-GitBranch successfully removed branch"
             Assert-BranchNotExists -RepoPath $TEST_REPO_DIR -BranchName "branch-to-remove"
         } else {
@@ -393,7 +400,7 @@ function Test-BranchArchivingWithTimestamp {
         $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
         $archiveName = "copilot/feature-archived-$timestamp"
         
-        if (Rename-GitBranch -RepoPath $TEST_REPO_DIR -OldBranchName "copilot/feature" -NewBranchName $archiveName) {
+        if (Rename-GitBranch -RepoPath $TEST_REPO_DIR -OldName "copilot/feature" -NewName $archiveName) {
             Write-Pass "Branch archived with timestamp"
             Assert-BranchNotExists -RepoPath $TEST_REPO_DIR -BranchName "copilot/feature"
             Assert-BranchExists -RepoPath $TEST_REPO_DIR -BranchName $archiveName

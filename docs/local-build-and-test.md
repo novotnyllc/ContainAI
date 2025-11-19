@@ -44,13 +44,15 @@ Set `CODING_AGENTS_IMAGE_OWNER=your-org` before running the script if you publis
 
 | Test Type | Command | Notes |
 |-----------|---------|-------|
-| Launcher unit tests (bash) | `./scripts/test/test-launchers.sh` | Fast (≈2 min). Validates naming, labels, repo handling. |
-| Launcher unit tests (PowerShell) | `pwsh scripts/test/test-launchers.ps1` | Mirrors bash coverage for Windows paths. |
+| Launcher unit tests (bash) | `./scripts/test/test-launchers.sh [all|TEST_NAME ...]` | Fast (≈2 min). Run everything or target specific cases (see `--list`). |
+| Launcher unit tests (PowerShell) | `pwsh scripts/test/test-launchers.ps1 [all|Test-Name ...]` | Mirrors bash coverage; accepts `-List` plus individual test names. |
 | Branch management unit tests (bash) | `./scripts/test/test-branch-management.sh` | Exercises git branch helpers + cleanup. |
 | Branch management unit tests (PowerShell) | `pwsh scripts/test/test-branch-management.ps1` | Same coverage in PS. |
 | Integration tests – launchers mode | `./scripts/test/integration-test.sh --mode launchers` | Reuses lightweight mock images; end-to-end launcher coverage. |
 | Integration tests – full mode | `./scripts/test/integration-test.sh --mode full` | Builds every image inside Docker-in-Docker; best for pre-PR validation. |
 | Integration tests – host secrets | `./scripts/test/integration-test.sh --mode launchers --isolation host --with-host-secrets` | Runs on the host Docker daemon, mounts your `mcp-secrets.env`, and exercises the `run-<agent> --prompt` path (currently Copilot) to verify live secrets. |
+
+> Tip: Use `./scripts/test/test-launchers.sh --list` (bash) or `pwsh scripts/test/test-launchers.ps1 -List` (PowerShell) to enumerate available launcher tests, then pass one or more names to run only the scenarios you need.
 
 Tips:
 - Use `--preserve` with the integration harness to keep the temporary Docker-in-Docker environment alive for debugging.

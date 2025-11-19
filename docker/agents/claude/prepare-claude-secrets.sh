@@ -83,7 +83,7 @@ main() {
 
     local tmp_file
     tmp_file=$(mktemp)
-    trap 'rm -f "$tmp_file"' EXIT
+    trap 'rm -f "${tmp_file:-}"' EXIT
 
     if ! "$UNSEAL_BIN" --stub "$STUB_NAME" --secret "$SECRET_NAME" --cap-root "$cap_root" --format raw >"$tmp_file"; then
         echo "Failed to decrypt Claude credential bundle" >&2

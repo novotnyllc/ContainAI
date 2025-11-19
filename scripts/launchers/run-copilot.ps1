@@ -38,6 +38,9 @@ param(
     [switch]$Force,
 
     [Parameter(Mandatory=$false)]
+    [string]$Prompt,
+
+    [Parameter(Mandatory=$false)]
     [switch]$Help
 )
 
@@ -50,6 +53,7 @@ if ($Help) {
         "Launch GitHub Copilot CLI in an ephemeral container.",
         "",
         "Options mirror run-agent; see docs/cli-reference.md for details.",
+        "-Prompt <text>        Launch a prompt-only session (no repo sync).",
         "Example: .\run-copilot.ps1 -Branch feature/api"
     ) | ForEach-Object { Write-Output $_ }
     exit 0
@@ -69,6 +73,7 @@ if ($PSBoundParameters.ContainsKey('Gpu')) { $argsList += @('-Gpu', $Gpu) }
 if ($NoPush) { $argsList += '-NoPush' }
 if ($UseCurrentBranch) { $argsList += '-UseCurrentBranch' }
 if ($Force) { $argsList += '-Force' }
+if ($PSBoundParameters.ContainsKey('Prompt')) { $argsList += @('-Prompt', $Prompt) }
 
 & $RunAgent @argsList
 exit $LASTEXITCODE

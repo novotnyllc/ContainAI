@@ -348,6 +348,14 @@ test_agent_data_packager() {
     out_dir=$(mktemp -d)
     local tar_path="$out_dir/import.tar"
     local manifest_path="$out_dir/manifest.json"
+    local key_file="$out_dir/hmac.key"
+    local secure_tar_path="$out_dir/import-secure.tar"
+    local secure_manifest_path="$out_dir/manifest-secure.json"
+
+    python3 - <<'PY' > "$key_file"
+import secrets
+print(secrets.token_hex(32))
+PY
 
     if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
         --agent copilot \
@@ -372,7 +380,65 @@ test_agent_data_packager() {
     manifest_content=$(cat "$manifest_path")
     assert_contains "$manifest_content" '.copilot/sessions/chat.json' "Manifest records session path"
     assert_contains "$manifest_content" '.copilot/logs/agent.log' "Manifest records log path"
-    assert_contains "$manifest_content" '"session":"test-session"' "Manifest tagged with session id"
+    assert_contains "$manifest_content" '"session": "test-session"' "Manifest tagged with session id"
+
+    local missing_hmac_target
+    missing_hmac_target=$(mktemp -d)
+    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+        --mode merge \
+        --agent copilot \
+        --session-id test-session \
+        --target-home "$missing_hmac_target" \
+        --tar "$tar_path" \
+        --manifest "$manifest_path" \
+        --require-hmac \
+        --hmac-key-file "$key_file"; then
+        fail "Merge should fail when manifest lacks HMAC metadata"
+    else
+        pass "Require-HMAC merge rejects manifests without HMAC entries"
+    fi
+    rm -rf "$missing_hmac_target"
+
+    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+        --agent copilot \
+        --session-id secure-session \
+        --home-path "$temp_home" \
+        --tar "$secure_tar_path" \
+        --manifest "$secure_manifest_path" \
+        --hmac-key-file "$key_file"; then
+        pass "Packager produced HMAC-protected outputs"
+    else
+        fail "Packager failed when HMAC key supplied"
+        rm -rf "$temp_home" "$out_dir"
+        return
+    fi
+
+    local secure_manifest_content
+    secure_manifest_content=$(cat "$secure_manifest_path")
+    assert_contains "$secure_manifest_content" '"hmac":' "Manifest records HMAC metadata"
+
+    local secure_target_home
+    secure_target_home=$(mktemp -d)
+    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+        --mode merge \
+        --agent copilot \
+        --session-id secure-session \
+        --target-home "$secure_target_home" \
+        --tar "$secure_tar_path" \
+        --manifest "$secure_manifest_path" \
+        --require-hmac \
+        --hmac-key-file "$key_file"; then
+        pass "Merge succeeds with matching HMAC metadata"
+    else
+        fail "Merge failed despite valid HMAC metadata"
+    fi
+
+    if [ -f "$secure_target_home/.copilot/sessions/chat.json" ]; then
+        pass "Secure merge restored session file"
+    else
+        fail "Secure merge missing session file"
+    fi
+    rm -rf "$secure_target_home"
 
     rm -rf "$temp_home/.copilot/sessions" "$temp_home/.copilot/logs"
     if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
@@ -718,7 +784,7 @@ test_codex_cli_helper() {
     cap_dir=$(mktemp -d)
     env_dir="$config_root/config"
     mkdir -p "$env_dir"
-    secret_file=$(mktemp)
+    secret_file="$config_root/codex-auth.json"
     printf '{"refresh_token":"unit-test","access_token":"abc"}' >"$secret_file"
 
     local previous_config="${CODING_AGENTS_CONFIG_DIR:-}"
@@ -806,7 +872,7 @@ test_claude_cli_helper() {
     config_root=$(mktemp -d)
     env_dir="$config_root/config"
     mkdir -p "$env_dir"
-    secret_file=$(mktemp)
+    secret_file="$config_root/claude-auth.json"
     printf '{"api_key":"file-secret","workspace_id":"dev"}' >"$secret_file"
 
     local previous_config="${CODING_AGENTS_CONFIG_DIR:-}"
@@ -840,13 +906,16 @@ test_claude_cli_helper() {
         fail "Claude capability (file) redemption failed"
     fi
 
-    local agent_home_file
+    local agent_home_file secret_root_file
     agent_home_file=$(mktemp -d)
+    secret_root_file="$agent_home_file/run-secrets"
+    mkdir -p "$secret_root_file"
     mkdir -p "$agent_home_file/.config/coding-agents/claude"
     printf '{"projects":{}}' >"$agent_home_file/.config/coding-agents/claude/.claude.json"
 
     if CODING_AGENTS_AGENT_HOME="$agent_home_file" \
         CODING_AGENTS_AGENT_CAP_ROOT="$file_cap_dir" \
+        CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root_file" \
         CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/scripts/runtime/capability-unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-claude-secrets decrypts file-based bundle"
@@ -883,11 +952,14 @@ test_claude_cli_helper() {
         fail "Claude capability (inline) redemption failed"
     fi
 
-    local agent_home_inline
+    local agent_home_inline secret_root_inline
     agent_home_inline=$(mktemp -d)
+    secret_root_inline="$agent_home_inline/run-secrets"
+    mkdir -p "$secret_root_inline"
 
     if CODING_AGENTS_AGENT_HOME="$agent_home_inline" \
         CODING_AGENTS_AGENT_CAP_ROOT="$inline_cap_dir" \
+        CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root_inline" \
         CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/scripts/runtime/capability-unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-claude-secrets decrypts inline bundle"
@@ -1328,46 +1400,134 @@ test_launcher_wrappers() {
     done
 }
 
+# List of available tests in default order
+ALL_TESTS=(
+    "setup_test_repo"
+    "test_container_runtime_detection"
+    "test_shared_functions"
+    "test_helper_network_isolation"
+    "test_agent_data_packager"
+    "test_audit_logging_pipeline"
+    "test_seccomp_ptrace_block"
+    "test_host_security_preflight"
+    "test_container_security_preflight"
+    "test_trusted_path_enforcement"
+    "test_session_config_renderer"
+    "test_secret_broker_cli"
+    "test_codex_cli_helper"
+    "test_claude_cli_helper"
+    "test_local_remote_push"
+    "test_local_remote_fallback_push"
+    "test_secure_remote_sync"
+    "test_wsl_path_conversion"
+    "test_container_naming"
+    "test_container_labels"
+    "test_image_pull"
+    "test_branch_sanitization"
+    "test_multiple_agents"
+    "test_label_filtering"
+    "test_container_status"
+    "test_prompt_fallback_repo_setup"
+    "test_launcher_wrappers"
+    "test_list_agents"
+    "test_remove_agent"
+)
+
+print_usage() {
+    cat <<'USAGE'
+Usage: scripts/test/test-launchers.sh [all|TEST_NAME ...]
+
+Run the full suite by default or provide specific test function names.
+
+Options:
+  all          Run every test (default when no args specified)
+  TEST_NAME    Run one or more named tests
+  --list       Display available test names
+  -h, --help   Show this help text
+USAGE
+}
+
+list_available_tests() {
+    printf '%s\n' "${ALL_TESTS[@]}"
+}
+
+is_valid_test() {
+    local candidate="$1"
+    local name
+    for name in "${ALL_TESTS[@]}"; do
+        if [ "$candidate" = "$name" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Main test execution
 main() {
+    local selected_tests=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                print_usage
+                exit 0
+                ;;
+            --list)
+                list_available_tests
+                exit 0
+                ;;
+            all)
+                selected_tests=("all")
+                shift
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                selected_tests+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [ ${#selected_tests[@]} -eq 0 ] || { [ ${#selected_tests[@]} -eq 1 ] && [ "${selected_tests[0]}" = "all" ]; }; then
+        selected_tests=("${ALL_TESTS[@]}")
+    fi
+
+    local test_name
+    for test_name in "${selected_tests[@]}"; do
+        if ! is_valid_test "$test_name"; then
+            echo "❌ Unknown test: $test_name" >&2
+            echo "Available tests:" >&2
+            list_available_tests >&2
+            exit 1
+        fi
+    done
+
     echo "╔═══════════════════════════════════════════════════════════╗"
     echo "║      Coding Agents Launcher Test Suite                   ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
     echo "Testing from: $PROJECT_ROOT"
     echo ""
-    
-    run_test "setup_test_repo" setup_test_repo
-    run_test "test_container_runtime_detection" test_container_runtime_detection
-    run_test "test_shared_functions" test_shared_functions
-    run_test "test_helper_network_isolation" test_helper_network_isolation
-    run_test "test_agent_data_packager" test_agent_data_packager
-    run_test "test_audit_logging_pipeline" test_audit_logging_pipeline
-    run_test "test_seccomp_ptrace_block" test_seccomp_ptrace_block
-    run_test "test_host_security_preflight" test_host_security_preflight
-    run_test "test_container_security_preflight" test_container_security_preflight
-    run_test "test_trusted_path_enforcement" test_trusted_path_enforcement
-    run_test "test_session_config_renderer" test_session_config_renderer
-    run_test "test_secret_broker_cli" test_secret_broker_cli
-    run_test "test_codex_cli_helper" test_codex_cli_helper
-    run_test "test_claude_cli_helper" test_claude_cli_helper
-    run_test "test_local_remote_push" test_local_remote_push
-    run_test "test_local_remote_fallback_push" test_local_remote_fallback_push
-    run_test "test_secure_remote_sync" test_secure_remote_sync
-    run_test "test_wsl_path_conversion" test_wsl_path_conversion
-    run_test "test_container_naming" test_container_naming
-    run_test "test_container_labels" test_container_labels
-    run_test "test_image_pull" test_image_pull
-    run_test "test_branch_sanitization" test_branch_sanitization
-    run_test "test_multiple_agents" test_multiple_agents
-    run_test "test_label_filtering" test_label_filtering
-    run_test "test_container_status" test_container_status
-    run_test "test_prompt_fallback_repo_setup" test_prompt_fallback_repo_setup
-    run_test "test_launcher_wrappers" test_launcher_wrappers
-    run_test "test_list_agents" test_list_agents
-    run_test "test_remove_agent" test_remove_agent
-    
+
+    local setup_needed=1
+    for test_name in "${selected_tests[@]}"; do
+        if [ "$test_name" = "setup_test_repo" ]; then
+            setup_needed=0
+            break
+        fi
+    done
+
+    if [ $setup_needed -eq 1 ]; then
+        run_test "setup_test_repo" setup_test_repo
+    fi
+
+    for test_name in "${selected_tests[@]}"; do
+        run_test "$test_name" "$test_name"
+    done
+
     # Cleanup happens in trap
 }
 
-main
+main "$@"
