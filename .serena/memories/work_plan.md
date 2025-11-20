@@ -1,4 +1,4 @@
-# Secret Credential HTTPS Work Plan (2025-11-19)
+# Work Plan
 
 ## Open Work
 
