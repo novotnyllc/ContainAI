@@ -7,5 +7,5 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\utils\wsl-shim.ps1")
-$exitCode = Invoke-CodingAgentsWslScript -ScriptRelativePath "scripts\launchers\run-agent" -Arguments $Arguments
+$exitCode = Invoke-CodingAgentsWslScript -ScriptRelativePath "host\launchers\run-agent" -Arguments $Arguments
 exit $exitCode

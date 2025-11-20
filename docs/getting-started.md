@@ -360,7 +360,7 @@ Add launcher scripts to your PATH for easy access:
 ```
 
 **What this does:**
-- Adds `scripts/launchers` to your PATH
+- Adds `host/launchers` to your PATH
 - Allows you to run `run-copilot`, `launch-agent`, etc. from anywhere
 
 **Activate the changes:**
