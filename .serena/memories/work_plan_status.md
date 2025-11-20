@@ -1,0 +1,30 @@
+# Work Plan Status (reconciled)
+
+- **0.1 Host vs container script boundary** – InProgress. `host/launchers/*` and `host/utils/*` exist and are referenced by tests (`scripts/test/test-launchers.sh:483,1229`), but legacy layouts (`scripts/install.*`, shared tests) still live at repo root and container helpers remain under `docker/`; no repo-wide build/test wiring showing a completed split.
+- **0.2 Dev/Prod entrypoints** – TODO. No dev/prod launcher pairings found; existing entrypoints are `host/launchers/run-*.{sh,ps1}` without mode toggles.
+- **0.3 Dogfooding readiness** – TODO. No installer/smoke-test scripts for prod layout; only current `scripts/install.*` present.
+- **0.4 Build automation** – TODO. Current workflows (`.github/workflows/build-base.yml`, `build-runtime-images.yml`, `test-launchers.yml`) build images/tests but do not package host tree or push GHCR artifacts per new layout.
+- **0.5 GHCR/secrets documentation** – TODO. Docs mention GHCR pulls (`docs/local-build-and-test.md`) but no dedicated secrets/runbook.
+- **3.1 Command MCP stubs** – TODO. No dedicated stub binaries; only `host/utils/convert-toml-to-mcp.py` exists and legacy shared stub absent.
+- **3.2 HTTPS/SSE helper proxies** – TODO. No helper daemons or launcher hooks under `host/utils`/`host/launchers`.
+- **3.3 Session config rewrites** – TODO. `host/utils/convert-toml-to-mcp.py` does not emit transports to stub/helper sockets; `setup-mcp-configs.sh` absent.
+- **3.4 Helper lifecycle hooks** – TODO. No audit/health/tmpfs cleanup hooks found in launchers or `host/utils/common-functions.sh`.
+- **4.1 Trust store strategy** – TODO. No curated CA bundles or helper trust selection logic in repo.
+- **4.2 Certificate/Public key pinning** – TODO. No schema/enforcement for pins in config conversion scripts.
+- **4.3 Trust overrides command** – TODO. No `coding-agents trust` tooling or trust-overrides path management implemented.
+- **5.1 `audit-agent` command** – TODO. No audit-agent launcher scripts or helpers; only mentions in docs (`docs/secret-credential-architecture.md`).
+- **5.2 Launcher events** – TODO. Launchers lack extended `log_security_event` coverage for helper lifecycle/integrity/env-detect (no occurrences beyond legacy tests).
+- **6.1 Documentation refresh** – TODO. Docs still reflect prior architecture; no updates for helper/trust/audit/integrity flows.
+- **6.2 Operator runbooks** – TODO. No dedicated runbooks for helper logs/TLS pins/audit tarball handling.
+- **7.1 Unit/integration coverage** – TODO. No tests for HTTPS helpers/TLS pin/enhanced check-health/Windows shim delegations beyond existing launcher tests.
+- **7.2 CI enforcement** – TODO. `.github/workflows/test-launchers.yml` lacks shellcheck/PSScriptAnalyzer/helper linters.
+- **7.3 Telemetry verification** – TODO. No tests asserting audit events or helper lifecycle emissions.
+- **8.1 Dual-artifact integrity model** – TODO. No syft/CycloneDX/SHA256SUMS steps in CI or build scripts.
+- **8.2 Signed tarball & hardcoded SHA** – TODO. No Sigstore/OIDC signing or baked hashes in installers.
+- **8.3 Immutable system install + blue/green** – TODO. No versioned system install roots or blue/green swap logic.
+- **8.4 Env-detect script** – TODO. No `env-detect.sh/ps1` under `host/utils`.
+- **8.5 Integrity-check script** – TODO. No integrity check script or launch gating referencing `SHA256SUMS`.
+- **8.6 Health-check/Doctor** – TODO. `host/utils/check-health.*` exist but do not enforce Podman/AppArmor/signature checks per spec.
+- **8.8 Enforcement policies** – TODO. Launchers/installers do not require system scope or emit audit events for enforcement.
+- **9.1 Harden docker proxy rules** – Done. `docker/proxy/squid.conf` and related tests (`scripts/test/integration-test-impl.sh::test_squid_proxy_hardening`, `scripts/test/README.md`) present and aligned with work plan.
+- **9.2 Enforce proxy rate limits** – Done. Added Squid request/response size caps (10 MB request, 100 MB response) with custom error page, enhanced logging, and integration tests validating blocks and telemetry (`docker/proxy/squid.conf`, `docker/proxy/error_pages/ERR_TOO_BIG`, `docker/proxy/Dockerfile`, `scripts/test/integration-test-impl.sh`).

@@ -1,0 +1,20 @@
+<!--
+Custom Squid error page for oversized payloads.
+Rendered when request_body_max_size or reply_body_max_size is exceeded.
+-->
+<html>
+<head>
+    <title>Request Blocked: Payload Too Large</title>
+</head>
+<body>
+    <h1>Request Blocked: Payload Too Large</h1>
+    <p>The proxy refused this transfer because it crossed enforced limits.</p>
+    <ul>
+        <li>Maximum request body: 10 MB</li>
+        <li>Maximum response body: 100 MB</li>
+    </ul>
+    <p>Timestamp: %T</p>
+    <p>Request ID (if provided): %rid</p>
+    <p>Contact your administrator if this was unexpected.</p>
+</body>
+</html>

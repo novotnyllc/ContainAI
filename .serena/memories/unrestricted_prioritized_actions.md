@@ -6,8 +6,6 @@
 2. **Proxy-First Networking & Monitoring**
    - Make Squid proxy the default, expand allowlists to cover required dev/MCP domains, block RFC1918/metadata ranges, and stream per-session logs + token-bucket alerts back to the host for auditing.
 
-3. **Secret Broker (Shared Credential Exposure Control)**
-   - Introduce the broker that hands out short-lived copies of shared API tokens, injects them via env vars, wipes them on teardown, and records which session accessed the secret even though upstream services cannot issue per-agent credentials.
 
 4. **Snapshot & Writable-Path Controls (Package-Safe)**
    - Automate git snapshots/tags, provide rollback helpers, enforce writable-path whitelist with package-manager scratch overlays + `safe_pkg` wrapper so dev builds continue to work while preventing stealthy tampering of system files.
