@@ -35,6 +35,10 @@
 - **8.6 Health-check/Doctor** – Finish `scripts/utils/check-health.sh` so it blocks Podman, validates AppArmor/WSL posture, verifies Sigstore signatures, and integrates with launcher UX/docs. Dependencies: 8.3, 8.5, and 6.x documentation work.
 - **8.8 Enforcement policies** – Ensure launchers/installers require system scope, block unsupported runtimes, rely only on `sha256sum`, and emit audit events when policies trigger. Dependencies: 8.3, 8.5, 7.3.
 
+### Epic 9 – Network Security Hardening
+- **9.1 Harden docker proxy rules** – Update `docker/proxy/squid.conf` (and related Docker proxy settings) to block access to cloud metadata endpoints (169.254.169.254, 169.254.0.0/16) and private RFC1918 ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) while keeping required MCP/package-manager traffic functional. Dependencies: 3.2 and existing proxy container plumbing.
+- **9.2 Enforce proxy rate limits** – Add squid/dnsmasq rules that cap request payloads at 10 MB and responses at 100 MB, returning clear errors when limits trigger. Tie the limits into telemetry so launches log violations. Dependencies: 9.1, feeds 5.2/7.3.
+
 ## Completed Work (For Reference)
 - **Epic 1 – Agent CLI Secret Import/Export**: Secret discovery, capability packaging, container helpers, and data import/export flow are implemented with regression tests.
 - **Epic 2 – Agent Namespace & Exec Interception**: UID split, CLI wrappers, seccomp interception, sandboxing, and explicit exec/run integration all ship with tests.
