@@ -4,7 +4,7 @@
     Installs CodingAgents launchers on Windows hosts.
 .DESCRIPTION
     Ensures WSL is available, runs prerequisite & health checks inside WSL,
-    and adds scripts\launchers to the user's PATH so commands like run-copilot
+    and adds host\launchers to the user's PATH so commands like run-copilot
     are available from any PowerShell prompt.
 #>
 [CmdletBinding()]

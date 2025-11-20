@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Verify that all prerequisites for CodingAgents are installed and configured
-# Usage: ./scripts/verify-prerequisites.sh
+# Usage: ./host/utils/verify-prerequisites.sh
+# Checks if the host environment meets the requirements for running CodingAgents.
 
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 COMMON_FUNCTIONS="$REPO_ROOT/host/utils/common-functions.sh"
 if [ ! -f "$COMMON_FUNCTIONS" ]; then
     echo "Unable to locate $COMMON_FUNCTIONS" >&2

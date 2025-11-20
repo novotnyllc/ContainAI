@@ -7,7 +7,11 @@
 #>
 $ErrorActionPreference = "Stop"
 
+# Detect Linux environment
+$script:IsLinux = $IsLinux -or ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.OS -match 'Linux')
+
 function Get-WslExecutablePath {
+    if ($script:IsLinux) { return $null }
     $candidate = Get-Command wsl.exe -ErrorAction SilentlyContinue
     if ($null -ne $candidate) {
         return $candidate.Source
@@ -25,6 +29,11 @@ function Convert-ToWslPath {
     )
 
     $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath
+    
+    if ($script:IsLinux) {
+        return $resolved
+    }
+
     $output = & $script:WslExePath wslpath -u "$resolved" 2>&1
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($output)) {
         throw "Could not translate path '$resolved' to a WSL path. Output: $output"
@@ -42,6 +51,16 @@ function Invoke-CodingAgentsWslScript {
     $scriptPath = Join-Path $script:RepoRootPath $ScriptRelativePath
     if (-not (Test-Path -LiteralPath $scriptPath)) {
         throw "Unable to locate Bash script '$ScriptRelativePath' under repo root."
+    }
+
+    if ($script:IsLinux) {
+        # On Linux, execute directly with bash
+        $bashArgs = @($scriptPath)
+        if ($Arguments) {
+            $bashArgs += $Arguments
+        }
+        & bash $bashArgs
+        return $LASTEXITCODE
     }
 
     $workingDir = (Get-Location).ProviderPath
