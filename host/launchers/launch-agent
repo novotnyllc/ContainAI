@@ -8,8 +8,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
+detect_environment_profile
+REPO_ROOT="$CODING_AGENTS_ROOT"
+
+if [ "$CODING_AGENTS_PROFILE" = "dev" ]; then
+    maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
+fi
+
+if ! run_integrity_check_if_needed; then
+    echo "❌ Integrity verification failed; aborting launch." >&2
+    exit 1
+fi
 
 if ! ensure_prerequisites_verified "$REPO_ROOT"; then
     exit 1
@@ -21,8 +30,10 @@ fi
 
 TRUSTED_PATHS=("host/launchers" "docker/runtime" "docker/profiles")
 TRUSTED_TREE_LABEL="launcher + helper files"
-if ! ensure_trusted_paths_clean "$REPO_ROOT" "$TRUSTED_TREE_LABEL" "${TRUSTED_PATHS[@]}"; then
-    exit 1
+if [ "$CODING_AGENTS_PROFILE" = "dev" ]; then
+    if ! ensure_trusted_paths_clean "$REPO_ROOT" "$TRUSTED_TREE_LABEL" "${TRUSTED_PATHS[@]}"; then
+        exit 1
+    fi
 fi
 
 if [ "$SOURCE_TYPE" = "local" ] && [ -f "$SOURCE/config.toml" ]; then
@@ -772,10 +783,10 @@ if [ -n "$NAME" ]; then
         echo "   Container names must start with alphanumeric characters and may include . _ -"
         exit 1
     fi
-    CONTAINER_NAME="${AGENT}-${NAME}"
+    CONTAINER_NAME="${AGENT}-${NAME}$(get_profile_suffix)"
     WORKSPACE_NAME="$NAME"
 else
-    CONTAINER_NAME="${AGENT}-${REPO_NAME}-${SAFE_BRANCH}"
+    CONTAINER_NAME="${AGENT}-${REPO_NAME}-${SAFE_BRANCH}$(get_profile_suffix)"
     WORKSPACE_NAME="$REPO_NAME"
 fi
 
@@ -1060,6 +1071,7 @@ DOCKER_ARGS=(
     "-e" "AGENT_BRANCH=$AGENT_BRANCH"
     "-e" "NETWORK_POLICY=$NETWORK_POLICY_ENV"
     "-e" "AUTO_PUSH_ON_SHUTDOWN=$AUTO_PUSH_VALUE"
+    "-e" "CODING_AGENTS_PROFILE=$CODING_AGENTS_PROFILE"
     "-e" "AGENT_SESSION_MODE=shell"
     "-e" "AGENT_SESSION_SHELL_BIN=/bin/bash"
     "-e" "AGENT_SESSION_SHELL_ARGS=-l"
@@ -1073,6 +1085,7 @@ DOCKER_ARGS=(
     "-e" "CODING_AGENTS_AGENT_DATA_ROOT=/run/agent-data"
     "-e" "CODING_AGENTS_SECRET_TMPFS_SIZE=${TMPFS_SECRET_SIZE}"
     "--label" "coding-agents.type=agent"
+    "--label" "coding-agents.profile=$CODING_AGENTS_PROFILE"
     "--label" "coding-agents.agent=$AGENT"
     "--label" "coding-agents.repo=$REPO_NAME"
     "--label" "coding-agents.branch=$AGENT_BRANCH"

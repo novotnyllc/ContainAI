@@ -16,6 +16,8 @@ LONG_RUNNING_SLEEP=3600
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_REPO_DIR="/tmp/test-coding-agents-repo"
+PROFILE_SUFFIX=""
+[ "${CODING_AGENTS_PROFILE:-dev}" = "dev" ] && PROFILE_SUFFIX="-dev"
 FAILED_TESTS=0
 PASSED_TESTS=0
 
@@ -185,7 +187,7 @@ create_test_container() {
     local repo="$2"
     local branch="$3"
     local sanitized_branch="${branch//\//-}"
-    local container_name="${agent}-${repo}-${sanitized_branch}"
+    local container_name="${agent}-${repo}-${sanitized_branch}${PROFILE_SUFFIX}"
 
     if docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" | grep -q "^${container_name}$"; then
         docker rm -f "$container_name" >/dev/null 2>&1 || true
@@ -1201,6 +1203,70 @@ test_secure_remote_sync() {
     rm -rf "$agent_workspace" "$bare_dir"
 }
 
+test_env_detection_profiles() {
+    test_section "Testing environment profile detection"
+
+    local output
+    output=$("$PROJECT_ROOT/host/utils/env-detect.sh" --format env)
+    local dev_root=""
+    local dev_mode=""
+    while IFS='=' read -r key value; do
+        case "$key" in
+            CODING_AGENTS_PROFILE) dev_mode="$value" ;;
+            CODING_AGENTS_ROOT) dev_root="$value" ;;
+        esac
+    done <<< "$output"
+    if [ "$dev_mode" = "dev" ] && [ "$dev_root" = "$PROJECT_ROOT" ]; then
+        pass "Default detection prefers dev profile in git repo"
+    else
+        fail "Default detection did not pick dev profile (mode=$dev_mode root=$dev_root)"
+    fi
+
+    local prod_fake
+    prod_fake=$(mktemp -d)
+    mkdir -p "$prod_fake/host/launchers"
+    output=$(CODING_AGENTS_PROFILE= CODING_AGENTS_MODE= CODING_AGENTS_FORCE_MODE=prod CODING_AGENTS_PROD_ROOT="$prod_fake" "$PROJECT_ROOT/host/utils/env-detect.sh" --format env)
+    local prod_mode=""
+    local prod_root=""
+    while IFS='=' read -r key value; do
+        case "$key" in
+            CODING_AGENTS_PROFILE) prod_mode="$value" ;;
+            CODING_AGENTS_ROOT) prod_root="$value" ;;
+        esac
+    done <<< "$output"
+    if [ "$prod_mode" = "prod" ] && [ "$prod_root" = "$prod_fake" ]; then
+        pass "Prod detection selects configured prod root"
+    else
+        fail "Prod detection failed (mode=$prod_mode root=$prod_root)"
+    fi
+
+    rm -rf "$prod_fake"
+}
+
+test_integrity_check_behaviors() {
+    test_section "Testing integrity check enforcement"
+
+    local temp_root
+    temp_root=$(mktemp -d)
+    echo "abc" > "$temp_root/payload.txt"
+    (cd "$temp_root" && sha256sum payload.txt > SHA256SUMS)
+
+    if CODING_AGENTS_PROFILE=prod CODING_AGENTS_ROOT="$temp_root" CODING_AGENTS_SHA256_FILE="$temp_root/SHA256SUMS" "$PROJECT_ROOT/host/utils/integrity-check.sh" >/dev/null 2>&1; then
+        pass "Integrity check passes for untampered prod payload"
+    else
+        fail "Integrity check failed for valid prod payload"
+    fi
+
+    echo "tamper" >> "$temp_root/payload.txt"
+    if CODING_AGENTS_PROFILE=prod CODING_AGENTS_ROOT="$temp_root" CODING_AGENTS_SHA256_FILE="$temp_root/SHA256SUMS" "$PROJECT_ROOT/host/utils/integrity-check.sh" >/dev/null 2>&1; then
+        fail "Integrity check should fail after tampering in prod"
+    else
+        pass "Integrity check fails when payload modified in prod"
+    fi
+
+    rm -rf "$temp_root"
+}
+
 # Test: Container naming convention
 test_container_naming() {
     test_section "Testing container naming convention"
@@ -1216,7 +1282,7 @@ test_container_naming() {
 test_container_labels() {
     test_section "Testing container labels"
     
-    local container_name="copilot-test-coding-agents-repo-main"
+    local container_name="copilot-test-coding-agents-repo-main${PROFILE_SUFFIX}"
     verify_container_labels "$container_name" "copilot" "test-coding-agents-repo" "main"
 }
 
@@ -1228,8 +1294,8 @@ test_list_agents() {
     
     local output=$("$PROJECT_ROOT/host/launchers/list-agents")
     
-    assert_contains "$output" "copilot-test-coding-agents-repo-main" "list-agents shows copilot container"
-    assert_contains "$output" "codex-test-coding-agents-repo-develop" "list-agents shows codex container"
+    assert_contains "$output" "copilot-test-coding-agents-repo-main${PROFILE_SUFFIX}" "list-agents shows copilot container"
+    assert_contains "$output" "codex-test-coding-agents-repo-develop${PROFILE_SUFFIX}" "list-agents shows codex container"
     assert_contains "$output" "NAME" "list-agents shows header"
 }
 
@@ -1237,7 +1303,7 @@ test_list_agents() {
 test_remove_agent() {
     test_section "Testing remove-agent command"
     
-    local container_name="codex-test-coding-agents-repo-develop"
+    local container_name="codex-test-coding-agents-repo-develop${PROFILE_SUFFIX}"
     create_test_container "codex" "test-coding-agents-repo" "develop" >/dev/null
     
     # Remove with --no-push flag (since test container doesn't have git)
@@ -1372,7 +1438,7 @@ test_container_status() {
     
     source "$PROJECT_ROOT/host/utils/common-functions.sh"
     
-    local container_name="copilot-test-coding-agents-repo-main"
+    local container_name="copilot-test-coding-agents-repo-main${PROFILE_SUFFIX}"
     
     # Test get_container_status
     local status=$(get_container_status "$container_name")
@@ -1446,6 +1512,8 @@ ALL_TESTS=(
     "setup_test_repo"
     "test_container_runtime_detection"
     "test_shared_functions"
+    "test_env_detection_profiles"
+    "test_integrity_check_behaviors"
     "test_helper_network_isolation"
     "test_agent_data_packager"
     "test_audit_logging_pipeline"

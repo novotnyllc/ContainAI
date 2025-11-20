@@ -22,8 +22,8 @@
 - **8.1 Dual-artifact integrity model** – TODO. No syft/CycloneDX/SHA256SUMS steps in CI or build scripts.
 - **8.2 Signed tarball & hardcoded SHA** – TODO. No Sigstore/OIDC signing or baked hashes in installers.
 - **8.3 Immutable system install + blue/green** – TODO. No versioned system install roots or blue/green swap logic.
-- **8.4 Env-detect script** – TODO. No `env-detect.sh/ps1` under `host/utils`.
-- **8.5 Integrity-check script** – TODO. No integrity check script or launch gating referencing `SHA256SUMS`.
+- **8.4 Env-detect script** – Done. Added `host/utils/env-detect.sh` and `host/utils/env-detect.ps1` with dev/prod detection (prefers git repo for dev, falls back to prod installs), wired into launchers via `common-functions.sh`.
+- **8.5 Integrity-check script** – Done. Added `host/utils/integrity-check.sh` and `host/utils/integrity-check.ps1`; launchers invoke it (prod fails on mismatch/missing SHA256SUMS, dev warns). Tests cover detection and tamper failure (`scripts/test/test-launchers.sh::test_integrity_check_behaviors`).
 - **8.6 Health-check/Doctor** – TODO. `host/utils/check-health.*` exist but do not enforce Podman/AppArmor/signature checks per spec.
 - **8.8 Enforcement policies** – TODO. Launchers/installers do not require system scope or emit audit events for enforcement.
 - **9.1 Harden docker proxy rules** – Done. `docker/proxy/squid.conf` and related tests (`scripts/test/integration-test-impl.sh::test_squid_proxy_hardening`, `scripts/test/README.md`) present and aligned with work plan.
