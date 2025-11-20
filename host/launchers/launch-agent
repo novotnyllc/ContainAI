@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034,SC2016
 # Launch a coding agent in an isolated container with its own git workspace
 # The container runs persistently for VS Code Remote connection
 
@@ -6,6 +7,7 @@ set -e
 
 # Source shared functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=host/utils/common-functions.sh
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
 detect_environment_profile
@@ -109,8 +111,8 @@ declare -a AGENT_CLI_STUBS=()
 
 trim_whitespace() {
     local value="$1"
-    value="${value#${value%%[![:space:]]*}}"
-    value="${value%${value##*[![:space:]]}}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
     printf '%s' "$value"
 }
 
@@ -429,7 +431,7 @@ parse_stub_secret_manifest() {
         line=$(trim_whitespace "$line")
         [ -n "$line" ] || continue
         local stub="${line%% *}"
-        local rest="${line#${stub}}"
+        local rest="${line#"${stub}"}"
         rest=$(trim_whitespace "$rest")
         [ -n "$stub" ] || continue
         [ -n "$rest" ] || continue
@@ -679,7 +681,11 @@ else
     LOCAL_REPO_PATH_VALUE="$WSL_PATH"
 
     if [ "$NO_PUSH" != true ]; then
-        REMOTE_HASH=$(printf "%s" "$SOURCE" | (command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum) | awk '{print $1}')
+        if command -v shasum >/dev/null 2>&1; then
+            REMOTE_HASH=$(printf "%s" "$SOURCE" | shasum -a 256 | awk '{print $1}')
+        else
+            REMOTE_HASH=$(printf "%s" "$SOURCE" | sha256sum | awk '{print $1}')
+        fi
         REMOTE_HASH=${REMOTE_HASH:0:16}
         LOCAL_REMOTE_DIR="${CODING_AGENTS_LOCAL_REMOTES_DIR:-${HOME}/.coding-agents/local-remotes}"
         LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
@@ -719,22 +725,6 @@ fi
 is_agent_branch() {
     local branch_name="$1"
     [[ "$branch_name" =~ ^(copilot|codex|claude)/ ]]
-}
-
-# Helper: Find next available session number
-    local session_dir="$SESSION_CONFIG_OUTPUT/$agent_name/data/$SESSION_ID"
-    mkdir -p "$session_dir"
-    local tar_path="$session_dir/data-import.tar"
-    local manifest_path="$session_dir/manifest.json"
-    local key_path="$session_dir/data-hmac.key"
-    ensure_data_hmac_key "$agent_name" "$SESSION_ID" "$key_path"
-    cd "$repo_path"
-    while git show-ref --verify --quiet "refs/heads/${agent}/session-${n}" 2>/dev/null; do
-        ((n++))
-    done
-    cd - > /dev/null
-        "--manifest" "$manifest_path"
-        "--hmac-key-file" "$key_path"
 }
 
 # Determine branch name with safety checks
@@ -1308,7 +1298,7 @@ DOCKER_ARGS+=(
 echo "📦 Creating container..."
 CONTAINER_ID=$(container_cli "${DOCKER_ARGS[@]}")
 
-if [ $? -ne 0 ]; then
+if [ -z "$CONTAINER_ID" ]; then
     echo "❌ Failed to create container"
     [ "$USE_SQUID" = true ] && container_cli rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1
     [ "$USE_SQUID" = true ] && container_cli network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1
@@ -1327,9 +1317,7 @@ fi
 # Setup repository inside container
 echo "📥 Setting up repository..."
 SETUP_SCRIPT=$(generate_repo_setup_script "$SOURCE_TYPE" "$GIT_URL" "$WSL_PATH" "$AGENT_BRANCH")
-echo "$SETUP_SCRIPT" | container_cli exec -i "$CONTAINER_NAME" bash
-
-if [ $? -ne 0 ]; then
+if ! echo "$SETUP_SCRIPT" | container_cli exec -i "$CONTAINER_NAME" bash; then
     echo "❌ Failed to setup repository"
     container_cli rm -f "$CONTAINER_NAME"
     exit 1

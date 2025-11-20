@@ -989,31 +989,19 @@ validate_image_name() {
 sanitize_branch_name() {
     local branch="$1"
     local sanitized
-    
-    # Replace slashes with dashes
+
     sanitized="${branch//\//-}"
     sanitized="${sanitized//\\/-}"
-    
-    # Replace any other invalid characters with dashes
-    sanitized=$(echo "$sanitized" | sed 's/[^a-zA-Z0-9._-]/-/g')
-    
-    # Collapse multiple dashes
-    sanitized=$(echo "$sanitized" | sed 's/-\+/-/g')
-    
-    # Remove leading special characters
-    sanitized=$(echo "$sanitized" | sed 's/^[._-]\+//')
-    
-    # Remove trailing special characters
-    sanitized=$(echo "$sanitized" | sed 's/[._-]\+$//')
-    
-    # Convert to lowercase
+    sanitized="${sanitized//[^[:alnum:]._-]/-}"
+    sanitized=$(printf '%s' "$sanitized" | tr -s '-')
+    sanitized="${sanitized##[-._]*}"
+    sanitized="${sanitized%%[-._]*}"
     sanitized=$(echo "$sanitized" | tr '[:upper:]' '[:lower:]')
-    
-    # Ensure non-empty result
+
     if [ -z "$sanitized" ]; then
         sanitized="branch"
     fi
-    
+
     echo "$sanitized"
 }
 
@@ -1088,8 +1076,11 @@ get_current_branch() {
 convert_to_wsl_path() {
     local path="$1"
     if [[ "$path" =~ ^[A-Z]: ]]; then
-        local drive=$(echo "$path" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')
-        local rest=$(echo "$path" | cut -d: -f2 | tr '\\' '/')
+        local drive
+        drive=$(echo "$path" | cut -d: -f1 | tr '[:upper:]' '[:lower:]')
+        local rest
+        # shellcheck disable=SC1003
+        rest=$(echo "$path" | cut -d: -f2 | tr '\\' '/')
         echo "/mnt/${drive}${rest}"
     else
         echo "$path"
@@ -1342,7 +1333,8 @@ merge_agent_data_exports() {
 
     local merged=false
     while IFS= read -r -d '' manifest_path; do
-        local base_name="$(basename "$manifest_path" .manifest.json)"
+        local base_name
+        base_name="$(basename "$manifest_path" .manifest.json)"
         local tar_path="${manifest_path%.manifest.json}.tar"
         if [ ! -f "$tar_path" ]; then
             echo "⚠️  Missing tarball for ${agent_name} payload ${base_name}; skipping" >&2
@@ -1461,7 +1453,7 @@ pull_and_tag_image() {
     local attempt=0
     local pulled=false
 
-    while [ $attempt -lt $max_retries ] && [ "$pulled" = "false" ]; do
+    while [ "$attempt" -lt "$max_retries" ] && [ "$pulled" = "false" ]; do
         attempt=$((attempt + 1))
 
         if [ $attempt -gt 1 ]; then
@@ -1472,8 +1464,8 @@ pull_and_tag_image() {
             container_cli tag "$registry_image" "$local_image" 2>/dev/null || true
             pulled=true
         else
-            if [ $attempt -lt $max_retries ]; then
-                sleep $retry_delay
+            if [ "$attempt" -lt "$max_retries" ]; then
+                sleep "$retry_delay"
             fi
         fi
     done
@@ -1506,6 +1498,7 @@ push_to_local() {
     fi
     
     echo "💾 Pushing changes to local remote..."
+    # shellcheck disable=SC2016
     container_cli exec "$container_name" bash -c '
         cd /workspace
         if [ -n "$(git status --porcelain)" ]; then
@@ -1557,9 +1550,12 @@ remove_container_with_sidecars() {
     fi
     
     # Get container labels to find repo and branch info
-    local agent_branch=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container_name" 2>/dev/null || true)
-    local repo_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' "$container_name" 2>/dev/null || true)
-    local local_remote_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.local-remote" }}' "$container_name" 2>/dev/null || true)
+    local agent_branch
+    agent_branch=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container_name" 2>/dev/null || true)
+    local repo_path
+    repo_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' "$container_name" 2>/dev/null || true)
+    local local_remote_path
+    local_remote_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.local-remote" }}' "$container_name" 2>/dev/null || true)
     
     local repo_root="${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
     local home_dir="${HOME:-}"
@@ -1583,8 +1579,10 @@ remove_container_with_sidecars() {
     process_agent_data_exports "$container_name" "$repo_root" "$home_dir"
     
     # Get associated resources
-    local proxy_container=$(get_proxy_container "$container_name")
-    local proxy_network=$(get_proxy_network "$container_name")
+    local proxy_container
+    proxy_container=$(get_proxy_container "$container_name")
+    local proxy_network
+    proxy_network=$(get_proxy_network "$container_name")
     
     # Remove main container
     echo "🗑️  Removing container: $container_name"
@@ -1598,7 +1596,8 @@ remove_container_with_sidecars() {
     
     # Remove network if exists and no containers attached
     if [ -n "$proxy_network" ]; then
-        local attached=$(container_cli network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$proxy_network" 2>/dev/null)
+        local attached
+        attached=$(container_cli network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$proxy_network" 2>/dev/null)
         if [ -z "$attached" ]; then
             echo "🗑️  Removing network: $proxy_network"
             container_cli network rm "$proxy_network" 2>/dev/null || true
@@ -1655,7 +1654,8 @@ ensure_squid_proxy() {
     
     # Check if proxy exists
     if container_exists "$proxy_container"; then
-        local state=$(get_container_status "$proxy_container")
+        local state
+        state=$(get_container_status "$proxy_container")
         if [ "$state" != "running" ]; then
             container_cli start "$proxy_container" >/dev/null
         fi
@@ -1675,11 +1675,6 @@ ensure_squid_proxy() {
 
 # Generate repository setup script for container
 generate_repo_setup_script() {
-    local source_type="$1"
-    local git_url="$2"
-    local wsl_path="$3"
-    local agent_branch="$4"
-    
     cat << 'SETUP_SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail

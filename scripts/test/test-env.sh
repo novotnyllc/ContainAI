@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck source=scripts/test/test-config.sh
 # Test environment setup and teardown utilities
 set -euo pipefail
 
@@ -6,19 +7,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Source test configuration
+# shellcheck source=scripts/test/test-config.sh disable=SC1091
 source "$SCRIPT_DIR/test-config.sh"
 
 # Constants for timing and retries
 REGISTRY_STARTUP_TIMEOUT=30
 REGISTRY_POLL_INTERVAL=1
-CONTAINER_STARTUP_WAIT=2
-LONG_RUNNING_SLEEP=3600
+export CONTAINER_STARTUP_WAIT=2
+export LONG_RUNNING_SLEEP=3600
 
 FIXTURE_CONFIG_FILE="$TEST_MOCK_SECRETS_DIR/config.toml"
 FIXTURE_GH_TOKEN_FILE="$TEST_MOCK_SECRETS_DIR/gh-token.txt"
 TEST_PROXY_STARTED="false"
 SECRET_SCANNER_BIN="${CODING_AGENTS_TRIVY_BIN:-}"
-SECRET_SCAN_ARGS=(image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress)
+SECRET_SCAN_ARGS=(image --scanners secret --severity HIGH --severity CRITICAL --exit-code 1 --no-progress)
 
 ensure_secret_scanner() {
     if [[ -n "$SECRET_SCANNER_BIN" ]]; then
@@ -83,7 +85,7 @@ start_mock_proxy() {
     
     # Wait for listener to be ready with health check polling
     echo -n "  Waiting for proxy listener"
-    for i in {1..10}; do
+    for _ in {1..10}; do
         if docker exec "$TEST_PROXY_CONTAINER" nc -z localhost 3128 2>/dev/null; then
             echo " ✓"
             return 0
@@ -130,7 +132,7 @@ start_local_registry() {
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         -p 5555:5000 \
-        registry:2 2>&1 >/dev/null; then
+        registry:2 >/dev/null 2>&1; then
         echo "  ✗ Failed to start registry container"
         return 1
     fi

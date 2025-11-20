@@ -26,9 +26,6 @@ set -euo pipefail
 CREDENTIAL_SOCKET="${CREDENTIAL_SOCKET:-/tmp/git-credential-proxy.sock}"
 SOCKET_TIMEOUT=5  # seconds
 
-# Security: Never allow credential storage in container
-ALLOW_CREDENTIAL_STORAGE=false
-
 # Read the credential request from stdin with size limit
 read_credential_request() {
     local line

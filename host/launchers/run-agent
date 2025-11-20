@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034,SC2016
 # Launch an ephemeral coding agent session that auto-attaches to the agent CLI
 # Containers auto-clean on exit but keep all git safeguards and host mounts
 
@@ -6,6 +7,7 @@ set -e
 
 # Source shared functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=host/utils/common-functions.sh
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
 detect_environment_profile
@@ -167,7 +169,7 @@ validate_extra_docker_args() {
     local -a args=("$@")
     local idx=0
     local total=${#args[@]}
-    while [ $idx -lt $total ]; do
+    while [ "$idx" -lt "$total" ]; do
         local current="${args[$idx]}"
         for forbidden in "${FORBIDDEN_EXTRA_ARGS[@]}"; do
             if [ -n "$forbidden" ] && [ "$current" = "$forbidden" ]; then
@@ -180,7 +182,7 @@ validate_extra_docker_args() {
                 fail_forbidden_extra_arg "$current" "launcher already manages the minimal capability set"
                 ;;
             --security-opt)
-                if [ $((idx + 1)) -ge $total ]; then
+                if [ $((idx + 1)) -ge "$total" ]; then
                     fail_forbidden_extra_arg "--security-opt" "requires a non-empty value"
                 fi
                 local next_value="${args[$((idx + 1))]}"
@@ -255,8 +257,8 @@ trap cleanup_run_agent_volumes EXIT
 
 trim_whitespace() {
     local value="$1"
-    value="${value#${value%%[![:space:]]*}}"
-    value="${value%${value##*[![:space:]]}}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
     printf '%s' "$value"
 }
 
@@ -576,7 +578,7 @@ parse_stub_secret_manifest() {
         line=$(trim_whitespace "$line")
         [ -n "$line" ] || continue
         local stub="${line%% *}"
-        local rest="${line#${stub}}"
+        local rest="${line#"${stub}"}"
         rest=$(trim_whitespace "$rest")
         [ -n "$stub" ] || continue
         [ -n "$rest" ] || continue
@@ -863,7 +865,11 @@ else
         LOCAL_REPO_PATH_VALUE="$WSL_PATH"
 
         if [ "$NO_PUSH" != true ]; then
-            REMOTE_HASH=$(printf "%s" "$SOURCE" | (command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum) | awk '{print $1}')
+            if command -v shasum >/dev/null 2>&1; then
+                REMOTE_HASH=$(printf "%s" "$SOURCE" | shasum -a 256 | awk '{print $1}')
+            else
+                REMOTE_HASH=$(printf "%s" "$SOURCE" | sha256sum | awk '{print $1}')
+            fi
             REMOTE_HASH=${REMOTE_HASH:0:16}
             LOCAL_REMOTE_DIR="${CODING_AGENTS_LOCAL_REMOTES_DIR:-${HOME}/.coding-agents/local-remotes}"
             LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
@@ -1522,7 +1528,7 @@ DOCKER_ARGS+=("$IMAGE_NAME")
 echo "📦 Creating container..."
 CONTAINER_ID=$(container_cli "${DOCKER_ARGS[@]}")
 
-if [ $? -ne 0 ]; then
+if [ -z "$CONTAINER_ID" ]; then
     echo "❌ Failed to create container"
     [ "$USE_SQUID" = true ] && container_cli rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1
     [ "$USE_SQUID" = true ] && container_cli network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1
@@ -1541,9 +1547,7 @@ fi
 # Setup repository inside container
 echo "📥 Setting up repository..."
 SETUP_SCRIPT=$(generate_repo_setup_script "$SOURCE_TYPE" "$GIT_URL" "$WSL_PATH" "$AGENT_BRANCH")
-echo "$SETUP_SCRIPT" | container_cli exec -i "$CONTAINER_NAME" bash
-
-if [ $? -ne 0 ]; then
+if ! echo "$SETUP_SCRIPT" | container_cli exec -i "$CONTAINER_NAME" bash; then
     echo "❌ Failed to setup repository"
     container_cli rm -f "$CONTAINER_NAME"
     exit 1

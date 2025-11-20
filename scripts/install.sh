@@ -41,9 +41,11 @@ if grep -q "$LAUNCHERS_PATH" "$RC_FILE" 2>/dev/null; then
     echo "✓ Launchers already in $RC_FILE"
 else
     # Add to rc file
-    echo "" >> "$RC_FILE"
-    echo "# Coding Agents launchers" >> "$RC_FILE"
-    echo "export PATH=\"$LAUNCHERS_PATH:\$PATH\"" >> "$RC_FILE"
+    {
+        echo ""
+        echo "# Coding Agents launchers"
+        echo "export PATH=\"$LAUNCHERS_PATH:\$PATH\""
+    } >> "$RC_FILE"
     
     echo "✓ Added to $RC_FILE"
     echo ""

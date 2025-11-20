@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2054,SC2162
 # Build script for the coding agents containers
 
 set -euo pipefail

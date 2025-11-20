@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck source=host/utils/common-functions.sh
 set -euo pipefail
 
 usage() {
@@ -66,7 +67,8 @@ if [ ! -d "$HOST_REPO/.git" ]; then
 fi
 
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-# shellcheck source=../utils/common-functions.sh
+# shellcheck source=host/utils/common-functions.sh
+# shellcheck disable=SC1091
 source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
 LOCK_FILE="$BARE_REPO/.coding-agents-sync.lock"

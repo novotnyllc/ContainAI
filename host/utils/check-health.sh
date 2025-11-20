@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # CodingAgents Doctor: Diagnoses system readiness and security posture.
+# shellcheck source-path=SCRIPTDIR source=common-functions.sh
 # Usage: ./host/utils/check-health.sh
 
 set -u
@@ -121,7 +122,7 @@ if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
     if [[ "$KERNEL_VER" =~ ^([0-9]+)\.([0-9]+) ]]; then
         MAJOR=${BASH_REMATCH[1]}
         MINOR=${BASH_REMATCH[2]}
-        if [ "$MAJOR" -lt 5 ] || ([ "$MAJOR" -eq 5 ] && [ "$MINOR" -lt 10 ]); then
+        if [ "$MAJOR" -lt 5 ] || { [ "$MAJOR" -eq 5 ] && [ "$MINOR" -lt 10 ]; }; then
              warn "WSL: Kernel too old ($KERNEL_VER)" "Run 'wsl --update' in PowerShell for better security."
         else
              pass "WSL: Kernel v$KERNEL_VER (Supported)"
@@ -173,8 +174,11 @@ else
         pass "$CONTAINER_CMD v$SERVER_VER is running"
         
         # Check Backend Type
+        # shellcheck disable=SC2034
+        # shellcheck disable=SC2034
         IS_DESKTOP=0
         if echo "$INFO" | grep -q "Docker Desktop"; then
+            # shellcheck disable=SC2034
             IS_DESKTOP=1
             pass "Backend: Docker Desktop (Safe VM Isolation)"
         elif [ "$IS_WSL" -eq 1 ]; then
@@ -225,7 +229,6 @@ fi
 header "Launcher Security Gates"
 
 if load_common_functions; then
-    CODING_AGENTS_REPO_ROOT="$REPO_ROOT"
     host_output=$(verify_host_security_prereqs "$REPO_ROOT" 2>&1)
     host_status=$?
     if [ $host_status -eq 0 ]; then

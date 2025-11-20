@@ -32,8 +32,6 @@ for container in $containers; do
     status=$(get_container_status "$container")
     agent=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.agent" }}' "$container" 2>/dev/null || echo "unknown")
     branch=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container" 2>/dev/null || echo "unknown")
-    repo=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.repo" }}' "$container" 2>/dev/null || echo "unknown")
-    
     # Color code status
     case "$status" in
         running)

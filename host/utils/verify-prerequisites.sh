@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2001
 # Usage: ./host/utils/verify-prerequisites.sh
 # Checks if the host environment meets the requirements for running CodingAgents.
 
@@ -14,7 +15,6 @@ fi
 
 # shellcheck disable=SC1090
 source "$COMMON_FUNCTIONS"
-CODING_AGENTS_REPO_ROOT="$REPO_ROOT"
 
 # Colors for output
 RED='\033[0;31m'
@@ -66,7 +66,7 @@ if command -v docker &> /dev/null; then
     DOCKER_MAJOR=$(echo "$DOCKER_VERSION" | cut -d. -f1)
     DOCKER_MINOR=$(echo "$DOCKER_VERSION" | cut -d. -f2)
     
-    if [ "$DOCKER_MAJOR" -lt 20 ] || ([ "$DOCKER_MAJOR" -eq 20 ] && [ "$DOCKER_MINOR" -lt 10 ]); then
+    if [ "$DOCKER_MAJOR" -lt 20 ] || { [ "$DOCKER_MAJOR" -eq 20 ] && [ "$DOCKER_MINOR" -lt 10 ]; }; then
         print_warning "Docker version $DOCKER_VERSION is old. Recommend 20.10.0+"
     fi
 else
