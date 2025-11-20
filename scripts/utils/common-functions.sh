@@ -55,12 +55,6 @@ _collect_prereq_fingerprint() {
         entries+=("docker=missing")
     fi
 
-    if command -v podman >/dev/null 2>&1; then
-        entries+=("podman=$(podman --version 2>/dev/null | tr -d '\r')")
-    else
-        entries+=("podman=missing")
-    fi
-
     if command -v socat >/dev/null 2>&1; then
         entries+=("socat=$(socat -V 2>/dev/null | head -1 | tr -d '\r')")
     else
@@ -519,35 +513,22 @@ maybe_check_launcher_updates() {
     fi
 }
 
-# Detect container runtime (docker or podman)
+# Detect container runtime (Docker only)
 get_container_runtime() {
-    # Check for CONTAINER_RUNTIME environment variable first
     if [ -n "${CONTAINER_RUNTIME:-}" ]; then
-        if command -v "$CONTAINER_RUNTIME" &> /dev/null; then
-            echo "$CONTAINER_RUNTIME"
+        if [ "$CONTAINER_RUNTIME" = "docker" ] && command -v docker &> /dev/null; then
+            echo "docker"
             return 0
         fi
-    fi
-    
-    # Auto-detect: prefer docker, fall back to podman
-    if command -v docker &> /dev/null && docker info > /dev/null 2>&1; then
         echo "docker"
         return 0
-    elif command -v podman &> /dev/null && podman info > /dev/null 2>&1; then
-        echo "podman"
-        return 0
     fi
-    
-    # Check if either exists but not running
+
     if command -v docker &> /dev/null; then
         echo "docker"
         return 0
-    elif command -v podman &> /dev/null; then
-        echo "podman"
-        return 0
     fi
-    
-    # Neither found
+
     return 1
 }
 
@@ -597,7 +578,7 @@ issue_session_capabilities() {
     return 1
 }
 
-# Cache the active container CLI (docker or podman) so downstream helpers can reuse it
+# Cache the active container CLI (docker only) so downstream helpers can reuse it
 get_active_container_cmd() {
     if [ -n "${CODING_AGENTS_CONTAINER_CMD:-}" ]; then
         echo "$CODING_AGENTS_CONTAINER_CMD"
@@ -882,7 +863,7 @@ PY
     fi
 
     if [ $has_seccomp -ne 1 ]; then
-        echo "❌ Container runtime does not report seccomp support. Update Docker/Podman to a build with seccomp enabled." >&2
+        echo "❌ Container runtime does not report seccomp support. Update Docker to a build with seccomp enabled." >&2
         return 1
     fi
 
@@ -1060,7 +1041,7 @@ convert_to_wsl_path() {
     fi
 }
 
-# Check if container runtime (Docker/Podman) is running
+# Check if container runtime (Docker) is running
 check_docker_running() {
     local runtime
     runtime=$(get_container_runtime 2>/dev/null || true)
@@ -1072,30 +1053,10 @@ check_docker_running() {
         fi
     fi
 
-    echo "⚠️  Container runtime not running. Checking installation..."
+    echo "⚠️  Docker daemon not running. Checking installation..."
 
-    local detected_runtime=""
-    if command -v docker &> /dev/null; then
-        detected_runtime="docker"
-    elif command -v podman &> /dev/null; then
-        detected_runtime="podman"
-    else
-        echo "❌ No container runtime found. Please install one:"
-        echo "   Docker: https://www.docker.com/products/docker-desktop"
-        echo "   Podman: https://podman.io/getting-started/installation"
-        return 1
-    fi
-
-    if [ "$detected_runtime" = "podman" ]; then
-        echo "ℹ️  Using Podman as container runtime"
-
-        if podman info > /dev/null 2>&1; then
-            CODING_AGENTS_CONTAINER_CMD="podman"
-            return 0
-        fi
-
-        echo "❌ Podman is installed but not working properly"
-        echo "   Try: podman system reset"
+    if ! command -v docker &> /dev/null; then
+        echo "❌ Docker CLI not found. Install Docker Desktop or Docker Engine from https://docs.docker.com/get-docker/."
         return 1
     fi
 

@@ -3,8 +3,7 @@
 ## Development Workflow
 
 ### Prerequisites
-- **Container Runtime**: Docker or Podman (scripts auto-detect)
-  - Docker Desktop or Podman Desktop recommended
+- **Container Runtime**: Docker Desktop (macOS/Windows) or Docker Engine (Linux)
 - **Git** configured with `user.name` and `user.email`
 - **GitHub CLI** authenticated: `gh auth login`
 - **PowerShell 7+** (Windows) or **Bash** (Linux/macOS)

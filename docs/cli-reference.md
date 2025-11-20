@@ -638,7 +638,7 @@ connect-agent.ps1 [[-Name] <String>] [OPTIONS]
 
 #### Behavior
 
-1. Validates Docker/Podman is running
+1. Validates Docker is running
 2. Detects running agent containers (label `coding-agents.type=agent`)
 3. If multiple containers are running, prompts for explicit `--name`
 4. Executes `agent-session attach` inside the container so you land in the managed tmux session
@@ -686,7 +686,7 @@ This script takes no arguments.
 #### Checks
 
 **Required:**
-- ✅ Docker or Podman installed and version ≥20.10.0 (Docker) or ≥3.0.0 (Podman)
+- ✅ Docker installed and version ≥20.10.0
 - ✅ Container daemon running
 - ✅ Git installed
 - ✅ Git `user.name` configured
@@ -710,8 +710,6 @@ This script takes no arguments.
 ```
 ⏳ Checking prerequisites...
 ✓ Docker installed (version 25.0.0)
-  OR
-✓ Podman installed (version 4.5.0)
 ✓ Container daemon is running
 ✓ Git installed (version 2.43.0)
 ✓ Git user.name configured: John Doe

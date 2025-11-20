@@ -54,8 +54,8 @@ echo "  CodingAgents Prerequisites Check"
 echo "======================================"
 echo ""
 
-# Check Docker or Podman installation
-print_checking "Container runtime (Docker or Podman)"
+# Check Docker installation
+print_checking "Container runtime (Docker)"
 CONTAINER_CMD=""
 if command -v docker &> /dev/null; then
     DOCKER_VERSION=$(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)
@@ -69,21 +69,9 @@ if command -v docker &> /dev/null; then
     if [ "$DOCKER_MAJOR" -lt 20 ] || ([ "$DOCKER_MAJOR" -eq 20 ] && [ "$DOCKER_MINOR" -lt 10 ]); then
         print_warning "Docker version $DOCKER_VERSION is old. Recommend 20.10.0+"
     fi
-elif command -v podman &> /dev/null; then
-    PODMAN_VERSION=$(podman --version | grep -oP '\d+\.\d+\.\d+' | head -1)
-    print_success "Podman installed (version $PODMAN_VERSION)"
-    CONTAINER_CMD="podman"
-    
-    # Check if Podman version is recent enough (3.0.0+)
-    PODMAN_MAJOR=$(echo "$PODMAN_VERSION" | cut -d. -f1)
-    
-    if [ "$PODMAN_MAJOR" -lt 3 ]; then
-        print_warning "Podman version $PODMAN_VERSION is old. Recommend 3.0.0+"
-    fi
 else
-    print_error "Neither Docker nor Podman is installed"
+    print_error "Docker is not installed"
     echo "         Install Docker from: https://docs.docker.com/get-docker/"
-    echo "         Or Podman from: https://podman.io/getting-started/installation"
 fi
 
 # Check if container runtime is running
@@ -93,11 +81,7 @@ if [ -n "$CONTAINER_CMD" ]; then
         print_success "$CONTAINER_CMD daemon is running"
     else
         print_error "$CONTAINER_CMD daemon is not running"
-        if [ "$CONTAINER_CMD" = "docker" ]; then
-            echo "         Start Docker Desktop or run: sudo systemctl start docker"
-        else
-            echo "         Start Podman service: sudo systemctl start podman"
-        fi
+        echo "         Start Docker Desktop or run: sudo systemctl start docker"
     fi
 fi
 

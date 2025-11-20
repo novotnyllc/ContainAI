@@ -230,7 +230,7 @@ test_container_runtime_detection() {
     
     # Test get_container_runtime function
     local runtime=$(get_container_runtime)
-    if [ -n "$runtime" ] && { [ "$runtime" = "docker" ] || [ "$runtime" = "podman" ]; }; then
+    if [ "$runtime" = "docker" ]; then
         pass "get_container_runtime() detected runtime: $runtime"
     else
         fail "get_container_runtime() returned invalid runtime: '$runtime'"

@@ -20,10 +20,8 @@ Use **`launch-agent`** only when you need:
 
 ### On Your Host Machine
 
-1. **Container Runtime**: Docker or Podman
-   - **Docker**: Docker Desktop (with WSL2 on Windows) - [docker.com](https://www.docker.com/products/docker-desktop)
-   - **Podman**: Podman Desktop or CLI - [podman.io](https://podman.io/getting-started/installation)
-   - Scripts auto-detect which runtime is available
+1. **Container Runtime**: Docker Desktop (with WSL2 on Windows) or Docker Engine (Linux) - [docker.com](https://www.docker.com/products/docker-desktop)
+   - Scripts require Docker to be installed and running
 2. **Host Git configuration and credentials**: Whatever identity/credential helpers you already use on the host (SSH keys, credential store, GitHub CLI, etc.). Containers inherit them automatically—no extra setup required inside the container.
 3. **socat** on the host (used for credential and GPG proxies). On Linux/macOS install via package manager; on Windows install inside WSL.
 
@@ -50,7 +48,7 @@ CONTEXT7_API_KEY=your_key_here
 
 `scripts/verify-prerequisites.sh` (and `.ps1` on Windows) now run automatically before every launcher execution. The scripts gather a fingerprint of:
 - The prerequisite script hash
-- Your runtime versions (Docker, Podman, socat, git, gh)
+- Your runtime versions (Docker, socat, git, gh)
 - Host architecture (`uname -s -m`)
 
 Results are cached at `~/.config/coding-agents/cache/prereq-check`. Launchers silently skip the check when the cache fingerprint matches. When anything changes, you will see:

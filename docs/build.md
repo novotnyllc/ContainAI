@@ -4,10 +4,7 @@ This guide is for developers who want to build and publish the coding agent cont
 
 ## Prerequisites
 
-- **Container Runtime**: Docker or Podman
-  - Docker: Requires BuildKit enabled (default in recent versions)
-  - Podman: Native support for BuildKit-compatible builds
-  - Set `CONTAINER_RUNTIME=podman` to force Podman usage
+- **Container Runtime**: Docker 20.10+ (Desktop or Engine) with BuildKit enabled (default in recent versions)
 - Git
 - (Optional) GitHub Container Registry access for publishing
 
@@ -298,7 +295,7 @@ done
 
 Launchers automatically pass both security profiles:
 
-- **Seccomp:** No additional setup—Docker/Podman read `docker/profiles/seccomp-coding-agents.json` directly.
+- **Seccomp:** No additional setup—Docker reads `docker/profiles/seccomp-coding-agents.json` directly.
 - **AppArmor:** Ensure the profile is loaded on Linux hosts:
 
 ```bash

@@ -26,15 +26,15 @@ This guide will walk you through setting up CodingAgents from scratch, even if y
 Before you begin, you'll need:
 
 - **Operating System**: Windows 10/11 (with WSL2), macOS 10.15+, or Linux
-- **Container Runtime**: Docker 20.10+ or Podman 3.0+
+- **Container Runtime**: Docker 20.10+ (Docker Desktop or Docker Engine)
 - **Disk Space**: 5GB minimum (10GB recommended)
 - **RAM**: 8GB minimum (16GB recommended for multiple agents)
 - **Internet Connection**: Required for downloading images and cloning repositories
-- **Administrator Access**: May be needed for Docker/Podman installation
+- **Administrator Access**: May be needed for Docker installation
 
-## Step 1: Install Docker or Podman
+## Step 1: Install Docker
 
-You need a container runtime to run the coding agents in isolated environments. Choose either Docker or Podman:
+You need Docker to run the coding agents in isolated environments.
 
 ### Docker (Recommended for Windows/Mac)
 
@@ -139,58 +139,6 @@ docker --version
 docker ps
 # Should show empty table (not an error)
 ```
-
-### Podman (Alternative, recommended for Linux)
-
-Podman is a daemonless container engine compatible with Docker commands.
-
-#### Linux
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install -y podman socat
-```
-
-**Fedora/RHEL:**
-```bash
-sudo dnf install -y podman socat
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S podman
-```
-
-#### macOS
-
-**Homebrew:**
-```bash
-brew install podman
-podman machine init
-podman machine start
-```
-
-#### Windows
-
-Podman for Windows requires WSL2:
-
-1. Install WSL2 (see Docker instructions above)
-2. Download [Podman for Windows](https://github.com/containers/podman/releases)
-3. Run the installer
-4. Initialize: `podman machine init`
-5. Start: `podman machine start`
-
-**Verify installation:**
-```bash
-podman --version
-# Should show: podman version 3.0.0 or higher
-
-podman ps
-# Should show empty table (not an error)
-```
-
-**Note:** CodingAgents scripts automatically detect and use either `docker` or `podman` commands.
 
 ## Step 2: Check Git Configuration (Host)
 

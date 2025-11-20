@@ -1,12 +1,12 @@
 # Running CodingAgents Containers
 
-This guide distills everything you need to launch Copilot, Codex, or Claude containers as a daily user. It assumes you already cloned this repository and have Docker or Podman available.
+This guide distills everything you need to launch Copilot, Codex, or Claude containers as a daily user. It assumes you already cloned this repository and have Docker available.
 
 ## 1. Prerequisites Checklist
 
 | Requirement | Why it matters | How to verify |
 |-------------|----------------|---------------|
-| Docker Desktop, Podman, or Docker Engine | Containers run in an OCI runtime | `docker info` or `podman info` should succeed |
+| Docker Desktop or Docker Engine | Containers run in an OCI runtime | `docker info` should succeed |
 | `socat` | Used for Git/GPG proxy relays | `socat -V` (or install via package manager) |
 | Git identity configured | Commits created in containers reuse host identity | `git config --global user.name` |
 | Host credentials/token already authenticated | Launchers mount host-side auth (Copilot, git, etc.) read-only | Sign into services on the host before launching |
@@ -123,7 +123,7 @@ If you need to customize MCP servers, edit `config.toml` in your repository or s
 
 | Symptom | Fix |
 |---------|-----|
-| `docker: command not found` | Install Docker or Podman, or ensure it is on PATH |
+| `docker: command not found` | Install Docker or ensure it is on PATH |
 | Launcher hangs on pull | Run `docker login ghcr.io` so GHCR pulls succeed |
 | Container exits immediately | Check repo cleanliness; some launchers refuse to start with uncommitted changes unless you pass `--force` |
 | VS Code cannot attach | Ensure Dev Containers extension is installed and Docker API is reachable |
