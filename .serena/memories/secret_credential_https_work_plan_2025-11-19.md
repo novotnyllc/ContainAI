@@ -2,6 +2,13 @@
 
 ## Open Work
 
+### Epic 0 – Host/Container Split & Dogfooding Readiness
+- **0.1 Host vs container script boundary** – Restructure the repo so host launchers/utilities live under a dedicated tree (e.g., `host/` or `scripts/host/`) while container-only helpers/stubs live under `docker/` or image contexts. Update build/test tooling to consume the new layout so the split is obvious to contributors. Dependencies: feeds Epics 3, 5, 8.
+- **0.2 Dev/Prod entrypoints** – Provide parallel host entrypoints (`dev` vs `prod`) that run tests/debug flows directly from the repo while preparing the prod bundle for release. Ensure Dev paths keep today’s editable workflow, Prod paths source files from the new host tree, and both share test coverage. Dependencies: 0.1, informs 8.3–8.5.
+- **0.3 Dogfooding readiness** – Once the split is in place, add scripts/docs for maintainers to install the “Prod” layout locally (integrity enforced) while still iterating via the dev tree. Include smoke tests that validate both modes. Dependencies: 0.2, feeds 6.x and 7.x.
+- **0.4 Build automation** – Add build scripts (bash + PowerShell) and GitHub Actions pipelines that package the host tree, build agent images, and push artifacts to GHCR using the new layout. Include dry-run steps for dev mode so we can iterate before publishing. Dependencies: 0.1–0.2, informs Epic 8.
+- **0.5 GHCR/secrets documentation** – Author a doc under `docs/` detailing how to configure GHCR repositories, GitHub Actions secrets, and required PAT/oidc permissions so contributors can reproduce releases. Dependencies: 0.4, feeds 6.1 and 6.2.
+
 ### Epic 3 – MCP Stub & Helper Improvements
 - **3.1 Command MCP stubs** – Build dedicated stub binaries per MCP with unique UIDs, sandbox policies, and tmpfs cleanup so vendor agents never call the legacy shared `mcp-stub.py`. Dependencies: none.
 - **3.2 HTTPS/SSE helper proxies** – Implement helper daemons plus launcher hooks that redeem HTTPS/SSE capabilities, expose localhost sockets, and enforce outbound network rules. Dependencies: none (feeds 4.x and 5.x).
