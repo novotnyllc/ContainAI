@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-COMMON_FUNCTIONS="$REPO_ROOT/scripts/utils/common-functions.sh"
+COMMON_FUNCTIONS="$REPO_ROOT/host/utils/common-functions.sh"
 if [ ! -f "$COMMON_FUNCTIONS" ]; then
     echo "Unable to locate $COMMON_FUNCTIONS" >&2
     exit 1

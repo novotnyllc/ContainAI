@@ -1,6 +1,6 @@
 # Secret Credential Isolation Architecture
 
-This document explains how Coding Agents restricts access to long-lived credentials (Copilot/Codex/Context7, MCP bearer tokens, GitHub PATs, etc.) while still allowing immutable MCP binaries to run unmodified. It is written from the perspective of the trusted launcher (`scripts/launchers/*`) and the host-resident secret broker they coordinate with.
+This document explains how Coding Agents restricts access to long-lived credentials (Copilot/Codex/Context7, MCP bearer tokens, GitHub PATs, etc.) while still allowing immutable MCP binaries to run unmodified. It is written from the perspective of the trusted launcher (`host/launchers/*`) and the host-resident secret broker they coordinate with.
 
 ## Objectives
 
@@ -15,7 +15,7 @@ This document explains how Coding Agents restricts access to long-lived credenti
 | --- | --- | --- |
 | `launch-agent` / `run-agent` (host) | Trusted | Builds containers, hashes stubs, requests broker capabilities, wires tmpfs mounts.
 | Secret Broker (host daemon) | Trusted | Stores master secrets, validates capabilities, streams secrets via one-time handles.
-| Git tree attestation (`scripts/launchers/**`, stubs) | Trusted data | Launcher verifies these paths are clean vs. `HEAD` (and records the tree hash) before secrets are issued, so bits exactly match the current commit.
+| Git tree attestation (`host/launchers/**`, stubs) | Trusted data | Launcher verifies these paths are clean vs. `HEAD` (and records the tree hash) before secrets are issued, so bits exactly match the current commit.
 | Agent container runtime | Partially trusted | Runs untrusted code but with seccomp/AppArmor, read-only roots, and dedicated tmpfs for sensitive material.
 | MCP Stub Wrappers | Trusted binaries inside container | Immutable helpers responsible for redeeming capabilities and launching MCPs.
 | Squid proxy | Shared service | Provides egress filtering/logging only; never stores credentials.
@@ -169,12 +169,12 @@ Static API keys cannot be rotated on demand, so safeguards focus on limiting exp
 
 ## Capability Unseal Utility
 
-Agent CLI helpers now rely on `scripts/runtime/capability-unseal.py` to turn sealed blobs back into plaintext configs once they are inside the hardened tmpfs. The script understands the broker token format, verifies the embedded HMAC/session key, and refuses to operate if a bundle was tampered with or redeemed twice. Base images install it at `/usr/local/bin/capability-unseal`, so helpers such as `prepare-copilot-secrets.sh` can decrypt `agent_*` capabilities without re-implementing the sealing logic.
+Agent CLI helpers now rely on `docker/runtime/capability-unseal.py` to turn sealed blobs back into plaintext configs once they are inside the hardened tmpfs. The script understands the broker token format, verifies the embedded HMAC/session key, and refuses to operate if a bundle was tampered with or redeemed twice. Base images install it at `/usr/local/bin/capability-unseal`, so helpers such as `prepare-copilot-secrets.sh` can decrypt `agent_*` capabilities without re-implementing the sealing logic.
 
 Example host-side inspection:
 
 ```bash
-python3 scripts/runtime/capability-unseal.py \ 
+python3 docker/runtime/capability-unseal.py \ 
     --stub agent_copilot_cli \ 
     --secret copilot_cli_config_json \ 
     --cap-root ~/.config/coding-agents/capabilities \ 
@@ -379,6 +379,6 @@ sequenceDiagram
 This approach lets us persist the useful artifacts (logs, history, saved sessions) while preventing arbitrary file writes back onto the host. It also guarantees that the same data the CLI expects is present every time without reopening the attack surface that came with raw bind mounts.
 
 **Implementation status (Nov 2025)**
-- Host launchers (bash + PowerShell) now call `scripts/utils/package-agent-data.py` before every session, writing a per-agent `data-import.tar` plus manifest under `/run/coding-agents/<agent>/data`. The manifest captures SHA-256 digests so the host can validate what was staged.
+- Host launchers (bash + PowerShell) now call `host/utils/package-agent-data.py` before every session, writing a per-agent `data-import.tar` plus manifest under `/run/coding-agents/<agent>/data`. The manifest captures SHA-256 digests so the host can validate what was staged.
 - `entrypoint.sh` provisions a dedicated tmpfs (`/run/agent-data`) sized via `CODING_AGENTS_DATA_TMPFS_SIZE` (default 64 MiB) and unpacks each available import tar into `/run/agent-data/<agent>` with `chmod 700` semantics before the CLI boots.
 - Launcher tests include a packager regression case to ensure the helper continues to emit manifests/tars when host data exists and suppresses empty archives when nothing matches the whitelist.

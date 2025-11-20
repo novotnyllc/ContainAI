@@ -38,7 +38,7 @@ This file contains repository-specific guidance for working with the Coding Agen
 
 ## Coding Conventions 
 
-- **Windows shims**: `scripts/utils/wsl-shim.ps1` handles WSL detection and path conversion. Keep individual `.ps1` entrypoints minimal—dot-source the shim, pass arguments through, and propagate exit codes.
+- **Windows shims**: `host/utils/wsl-shim.ps1` handles WSL detection and path conversion. Keep individual `.ps1` entrypoints minimal—dot-source the shim, pass arguments through, and propagate exit codes.
 - **Bash**: Use `set -euo pipefail`, quote variables, prefer POSIX-friendly syntax unless Bash-only needed.
 - **Shared Behavior**: Fixes belong in bash. After updating a bash workflow, regenerate or adjust the corresponding shim (if any) plus its tests so Windows callers still reach the new logic.
 - **Tests First-Class**: Whenever you change branch/remote handling or setup scripts, update both bash and PowerShell launcher tests plus integration tests to reflect the new guarantees.

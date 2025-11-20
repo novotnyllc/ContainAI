@@ -337,8 +337,8 @@ done
 
 echo ""
 echo "🚀 Launch an agent container with:"
-echo "   ./scripts/launchers/run-agent copilot /path/to/your/repo"
-echo "   # or use the shortcuts like ./scripts/launchers/run-copilot ."
+echo "   ./host/launchers/run-agent copilot /path/to/your/repo"
+echo "   # or use the shortcuts like ./host/launchers/run-copilot ."
 
 echo ""
 echo "   Or using docker-compose:"

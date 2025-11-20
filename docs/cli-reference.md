@@ -2,7 +2,7 @@
 
 Complete reference for all CodingAgents launcher scripts and their arguments.
 
-> **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They no longer implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh scripts\launchers\run-copilot.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
+> **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They no longer implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh host\launchers\run-copilot.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
 
 ## Table of Contents
 
@@ -34,7 +34,7 @@ Ephemeral containers that auto-remove on exit. Best for quick coding sessions.
 
 Launch GitHub Copilot CLI in the current directory.
 
-**Location:** `scripts/launchers/run-copilot` (bash), `run-copilot.ps1` (PowerShell)
+**Location:** `host/launchers/run-copilot` (bash), `host/launchers/run-copilot.ps1` (PowerShell)
 
 #### Synopsis
 
@@ -214,7 +214,7 @@ run-claude --prompt "List repo services that need MCP"
 
 Launch OpenAI Codex in the current directory.
 
-**Location:** `scripts/launchers/run-codex` (bash), `run-codex.ps1` (PowerShell)
+**Location:** `host/launchers/run-codex` (bash), `host/launchers/run-codex.ps1` (PowerShell)
 
 #### Synopsis
 
@@ -256,7 +256,7 @@ All [run-copilot](#run-copilot) examples apply - just replace `run-copilot` with
 
 Launch Anthropic Claude in the current directory.
 
-**Location:** `scripts/launchers/run-claude` (bash), `run-claude.ps1` (PowerShell)
+**Location:** `host/launchers/run-claude` (bash), `host/launchers/run-claude.ps1` (PowerShell)
 
 #### Synopsis
 
@@ -302,7 +302,7 @@ Persistent containers for long-running work with VS Code integration.
 
 Launch an agent in a persistent background container with branch isolation.
 
-**Location:** `scripts/launchers/launch-agent` (bash), `launch-agent.ps1` (PowerShell)
+**Location:** `host/launchers/launch-agent` (bash), `host/launchers/launch-agent.ps1` (PowerShell)
 
 #### Synopsis
 
@@ -365,7 +365,7 @@ launch-agent <AGENT> [<SOURCE>] [OPTIONS]
 
 #### Integrity, Audit, and Overrides
 
-- **Trusted file enforcement:** Before starting a container, `launch-agent` checks that `scripts/launchers/**`, stub helpers, and `docker/profiles/**` match `HEAD`. If anything is dirty, the launch aborts unless you create an override token at `~/.config/coding-agents/overrides/allow-dirty` (configurable via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`). Every override is logged.
+- **Trusted file enforcement:** Before starting a container, `launch-agent` checks that `host/launchers/**`, stub helpers, and `docker/profiles/**` match `HEAD`. If anything is dirty, the launch aborts unless you create an override token at `~/.config/coding-agents/overrides/allow-dirty` (configurable via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`). Every override is logged.
 - **Session manifest logging:** The host renders a per-session config, computes its SHA256, exports it via `CODING_AGENTS_SESSION_CONFIG_SHA256`, and writes a `session-config` event to the audit log. Compare this hash with what helper tooling reports to ensure configs were not tampered with in transit.
 - **Audit log location:** Structured JSON events (`session-config`, `capabilities-issued`, `override-used`) are appended to `~/.config/coding-agents/security-events.log`. Override via `CODING_AGENTS_AUDIT_LOG=/path/to/file` if you need alternate storage. All events are also forwarded to `systemd-cat -t coding-agents-launcher` when available.
 - **Helper sandbox controls:** By default helper containers run with `--network none`, tmpfs-backed `/tmp` + `/var/tmp`, `--cap-drop ALL`, and the ptrace-blocking seccomp profile. Tune with environment variables before launching:
@@ -488,7 +488,7 @@ launch-agent copilot C:\production-repo `
 
 **Connect to container:**
 - VS Code: Dev Containers → Attach to Running Container
-- Terminal: `scripts/launchers/connect-agent --name {container-name}` (preferred) or `docker exec -it {container-name} bash`
+- Terminal: `host/launchers/connect-agent --name {container-name}` (preferred) or `docker exec -it {container-name} bash`
 
 **Stop container:**
 ```bash
@@ -513,7 +513,7 @@ docker stop {container-name}
 
 List all running agent containers.
 
-**Location:** `scripts/launchers/list-agents` (bash), `list-agents.ps1` (PowerShell)
+**Location:** `host/launchers/list-agents` (bash), `host/launchers/list-agents.ps1` (PowerShell)
 
 #### Synopsis
 
@@ -561,7 +561,7 @@ claude    claude-docs-update           exited      docs          claude/update
 
 Remove agent container(s).
 
-**Location:** `scripts/launchers/remove-agent` (bash), `remove-agent.ps1` (PowerShell)
+**Location:** `host/launchers/remove-agent` (bash), `host/launchers/remove-agent.ps1` (PowerShell)
 
 #### Synopsis
 
@@ -616,7 +616,7 @@ remove-agent copilot-myapp-feature -Force
 
 Attach to the tmux session inside a running agent container.
 
-**Location:** `scripts/launchers/connect-agent` (bash), `connect-agent.ps1` (PowerShell)
+**Location:** `host/launchers/connect-agent` (bash), `host/launchers/connect-agent.ps1` (PowerShell)
 
 #### Synopsis
 
@@ -667,16 +667,16 @@ connect-agent.ps1 -Name copilot-myapp-feature
 
 Check that all prerequisites are installed and configured.
 
-**Location:** `scripts/verify-prerequisites.sh` (bash), `verify-prerequisites.ps1` (PowerShell)
+**Location:** `host/utils/verify-prerequisites.sh` (bash), `host/utils/verify-prerequisites.ps1` (PowerShell)
 
 #### Synopsis
 
 ```bash
-./scripts/verify-prerequisites.sh
+./host/utils/verify-prerequisites.sh
 ```
 
 ```powershell
-.\scripts\verify-prerequisites.ps1
+.\host\utils\verify-prerequisites.ps1
 ```
 
 #### No Arguments
@@ -749,11 +749,11 @@ Add launcher scripts to PATH.
 
 **Linux/Mac:**
 - Detects shell (bash or zsh)
-- Adds `export PATH="$REPO/scripts/launchers:$PATH"` to rc file
+- Adds `export PATH="$REPO/host/launchers:$PATH"` to rc file
 - Prints instructions to reload shell
 
 **Windows:**
-- Adds `$REPO\scripts\launchers` to User PATH (registry)
+- Adds `$REPO\host\launchers` to User PATH (registry)
 - Changes take effect in new PowerShell windows
 
 #### Examples
@@ -777,26 +777,26 @@ If script fails, manually add to PATH:
 
 **Linux (bash):**
 ```bash
-echo 'export PATH="/path/to/CodingAgents/scripts/launchers:$PATH"' >> ~/.bashrc
+echo 'export PATH="/path/to/CodingAgents/host/launchers:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 **Mac (zsh):**
 ```bash
-echo 'export PATH="/path/to/CodingAgents/scripts/launchers:$PATH"' >> ~/.zshrc
+echo 'export PATH="/path/to/CodingAgents/host/launchers:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 **Windows (PowerShell - Temporary):**
 ```powershell
-$env:PATH += ";E:\dev\CodingAgents\scripts\launchers"
+$env:PATH += ";E:\dev\CodingAgents\host\launchers"
 ```
 
 **Windows (PowerShell - Permanent):**
 ```powershell
 [Environment]::SetEnvironmentVariable(
     "Path",
-    "$env:PATH;E:\dev\CodingAgents\scripts\launchers",
+    "$env:PATH;E:\dev\CodingAgents\host\launchers",
     [EnvironmentVariableTarget]::User
 )
 ```

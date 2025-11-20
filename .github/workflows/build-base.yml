@@ -6,14 +6,14 @@ on:
       - main
     paths:
       - 'docker/base/Dockerfile'
-      - 'scripts/runtime/install-dotnet-preview.sh'
+      - 'docker/runtime/install-dotnet-preview.sh'
       - '.github/workflows/build-base.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'docker/base/Dockerfile'
-      - 'scripts/runtime/install-dotnet-preview.sh'
+      - 'docker/runtime/install-dotnet-preview.sh'
   workflow_dispatch:
 
 env:

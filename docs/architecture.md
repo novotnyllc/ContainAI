@@ -164,7 +164,7 @@ Integrate the same check into CI for all agent variants so every published artif
 
 Each launcher refuses to touch secrets until the host proves it can enforce the required guardrails:
 
-1. `verify_host_security_prereqs` confirms seccomp/AppArmor profiles exist, ptrace scope can be hardened, tmpfs enforcement is enabled, and the trusted file set (`scripts/launchers`, `scripts/runtime`, `docker/profiles`) matches `HEAD`.
+1. `verify_host_security_prereqs` confirms seccomp/AppArmor profiles exist, ptrace scope can be hardened, tmpfs enforcement is enabled, and the trusted file set (`host/launchers`, `docker/runtime`, `docker/profiles`) matches `HEAD`.
 2. `verify_container_security_support` inspects `docker info` to ensure the runtime enforces the requested profiles.
 
 ```mermaid
@@ -335,7 +335,7 @@ flowchart TB
 **Benefits:**
 - Containers stay isolated from GitHub credentials and cannot accidentally force-push.
 - Host bare repo captures every commit even if the container is deleted.
-- A background daemon (`scripts/runtime/sync-local-remote.{sh,ps1}`) watches the bare repo and fast-forwards the host working tree after every push unless `CODING_AGENTS_DISABLE_AUTO_SYNC=1`.
+- A background daemon (`host/utils/sync-local-remote.{sh,ps1}`) watches the bare repo and fast-forwards the host working tree after every push unless `CODING_AGENTS_DISABLE_AUTO_SYNC=1`.
 - You choose when (or if) agent output is published upstream.
 - Users can still add their own remotes inside the container, but only after an explicit opt-in.
 
@@ -486,7 +486,7 @@ flowchart TB
 ### Agent Task Runner Daemon
 
 - `agentcli-exec` installs a libseccomp filter so that every `execve`/`execveat` inside the `agentcli` namespace is paused and inspected by `agent-task-runnerd` before it runs.
-- Both helpers ship from the Rust crate at `scripts/runtime/agent-task-runner`, eliminating the previous C implementations per the secure-language requirement.
+- Both helpers ship from the Rust crate at `docker/runtime/agent-task-runner`, eliminating the previous C implementations per the secure-language requirement.
 - `agent-task-runnerd` (shipped in `/usr/local/bin/agent-task-runnerd`) listens on `/run/agent-task-runner.sock`, receives the seccomp notification FD over SCM_RIGHTS, reconstructs the target command from the paused task’s memory, and appends a JSON log line to `/run/agent-task-runner/events.log`.
 - Operators choose `CODING_AGENTS_RUNNER_POLICY=observe|enforce` at runtime. Observe mode resumes the syscall after logging; enforce mode denies any exec whose binary lives under `/run/agent-secrets` or `/run/agent-data`, preventing helper processes from inheriting sensitive tmpfs mounts even if wrappers are bypassed.
 - Because the filter is attached inside the container rather than via Docker’s seccomp profile, the interception works for every vendor CLI (Copilot, Codex, Claude) regardless of future runtime changes.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CodingAgents Doctor: Diagnoses system readiness and security posture.
-# Usage: ./scripts/utils/check-health.sh
+# Usage: ./host/utils/check-health.sh
 
 set -u
 
@@ -112,8 +112,8 @@ if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
     if [ -d /run/systemd/system ]; then
         pass "WSL: Systemd is active"
     else
-        fail "WSL: Systemd is disabled" "Run './scripts/utils/fix-wsl-security.sh' to enable."
-        suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
+        fail "WSL: Systemd is disabled" "Run './host/utils/fix-wsl-security.sh' to enable."
+        suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
     fi
 
     # B. Kernel Version
@@ -133,8 +133,8 @@ if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
         pass "WSL: AppArmor is active"
         HOST_APPARMOR_ACTIVE=1
     else
-        fail "WSL: AppArmor DISABLED" "Your agents are running unconfined! Run './scripts/utils/fix-wsl-security.sh' immediately."
-        suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
+        fail "WSL: AppArmor DISABLED" "Your agents are running unconfined! Run './host/utils/fix-wsl-security.sh' immediately."
+        suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
     fi
 
 elif [ "$OS_TYPE" = "Darwin" ]; then
@@ -238,9 +238,9 @@ if load_common_functions; then
         elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then
             suggest_fix "$REPO_ROOT/scripts/install.sh"
         elif printf '%s' "$host_output" | grep -qi "AppArmor kernel support not detected"; then
-            suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
+            suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
         elif [ "${IS_WSL:-0}" -eq 1 ]; then
-            suggest_fix "$REPO_ROOT/scripts/utils/fix-wsl-security.sh"
+            suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
         else
             suggest_fix "$REPO_ROOT/scripts/install.sh"
         fi
@@ -260,7 +260,7 @@ if load_common_functions; then
         done <<< "$container_output"
     fi
 else
-    warn "Security helper load failed" "Unable to run launcher guard checks; inspect scripts/utils/common-functions.sh"
+    warn "Security helper load failed" "Unable to run launcher guard checks; inspect host/utils/common-functions.sh"
 fi
 
 # --- SUMMARY ---

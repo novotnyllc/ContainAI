@@ -17,13 +17,13 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptRoot = Split-Path -Parent $PSCommandPath
 $RepoRoot = Split-Path -Parent $ScriptRoot
-$LaunchersPath = Join-Path $RepoRoot 'scripts\launchers'
+$LaunchersPath = Join-Path $RepoRoot 'host\launchers'
 
 if (-not (Test-Path -LiteralPath $LaunchersPath)) {
     throw "Launchers directory not found: $LaunchersPath"
 }
 
-. (Join-Path $ScriptRoot 'utils\wsl-shim.ps1')
+. (Join-Path $RepoRoot 'host\utils\wsl-shim.ps1')
 
 function Invoke-WslScript {
     param(
@@ -92,8 +92,8 @@ Write-Host "Installing CodingAgents launchers..." -ForegroundColor Cyan
 if ($SkipChecks) {
     Write-Host "Skipping prerequisite and health checks (--SkipChecks)." -ForegroundColor Yellow
 } else {
-    Invoke-WslScript -RelativePath 'scripts/verify-prerequisites.sh' -Description 'Prerequisite verification'
-    Invoke-WslScript -RelativePath 'scripts/utils/check-health.sh' -Description 'System health check'
+    Invoke-WslScript -RelativePath 'host/utils/verify-prerequisites.sh' -Description 'Prerequisite verification'
+    Invoke-WslScript -RelativePath 'host/utils/check-health.sh' -Description 'System health check'
 }
 
 Ensure-LaunchersOnPath -PathToAdd $LaunchersPath

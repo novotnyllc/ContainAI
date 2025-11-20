@@ -64,10 +64,10 @@ code --list-extensions | Select-String "ms-vscode-remote.remote-containers"
 1. **Start a coding agent container:**
    ```powershell
    # Windows PowerShell
-   .\scripts\launchers\run-copilot.ps1
+   .\host\launchers\run-copilot.ps1
    
    # Or bash (Git Bash, WSL)
-   ./scripts/launchers/run-copilot
+   ./host/launchers/run-copilot
    ```
 
 2. **Attach VS Code:**
@@ -161,16 +161,16 @@ For full control over launch options:
 3. **Launch with options:**
    ```powershell
    # Basic launch
-   .\scripts\launchers\run-copilot.ps1
+   .\host\launchers\run-copilot.ps1
    
    # With custom resources
-   .\scripts\launchers\run-copilot.ps1 --cpu 8 --memory 16g
+   .\host\launchers\run-copilot.ps1 --cpu 8 --memory 16g
    
    # With branch isolation
-   .\scripts\launchers\run-copilot.ps1 --branch feature/new-api
+   .\host\launchers\run-copilot.ps1 --branch feature/new-api
    
    # With custom name
-   .\scripts\launchers\run-copilot.ps1 --name my-experiment
+   .\host\launchers\run-copilot.ps1 --name my-experiment
    ```
 
 4. **Attach VS Code** (see [Connecting to a Running Container](#connecting-to-a-running-container))
@@ -181,7 +181,7 @@ For advanced users:
 
 ```powershell
 # Using launch-agent script directly
-.\scripts\launchers\launch-agent.ps1 `
+.\host\launchers\launch-agent.ps1 `
   --agent copilot `
   --cpu 4 `
   --memory 8g `
@@ -495,12 +495,12 @@ You can run multiple agent containers simultaneously and switch between them in 
 
 1. **Start first agent:**
    ```powershell
-   .\scripts\launchers\run-copilot.ps1 --name copilot-main
+   .\host\launchers\run-copilot.ps1 --name copilot-main
    ```
 
 2. **Start second agent:**
    ```powershell
-   .\scripts\launchers\run-claude.ps1 --name claude-experiment
+   .\host\launchers\run-claude.ps1 --name claude-experiment
    ```
 
 3. **Switch between containers in VS Code:**
@@ -516,13 +516,13 @@ Work on different branches in separate containers:
 
 ```powershell
 # Container for main branch
-.\scripts\launchers\run-copilot.ps1 --name copilot-main
+.\host\launchers\run-copilot.ps1 --name copilot-main
 
 # Container for feature branch
-.\scripts\launchers\run-copilot.ps1 --branch feature/api-refactor --name copilot-feature
+.\host\launchers\run-copilot.ps1 --branch feature/api-refactor --name copilot-feature
 
 # Container for experiment (current branch)
-.\scripts\launchers\run-copilot.ps1 --use-current-branch --name copilot-experiment
+.\host\launchers\run-copilot.ps1 --use-current-branch --name copilot-experiment
 ```
 
 **VS Code workflow:**
@@ -538,13 +538,13 @@ Allocate more resources for heavy workloads:
 
 ```powershell
 # High-performance configuration
-.\scripts\launchers\run-copilot.ps1 `
+.\host\launchers\run-copilot.ps1 `
   --cpu 8 `
   --memory 16g `
   --name copilot-perf
 
 # GPU support (if available)
-.\scripts\launchers\run-copilot.ps1 `
+.\host\launchers\run-copilot.ps1 `
   --cpu 8 `
   --memory 16g `
   --gpu all `

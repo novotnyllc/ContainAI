@@ -37,7 +37,7 @@
 - **8.1 Dual-artifact integrity model** – Add CI steps that run `syft`, emit CycloneDX `sbom.json`, compute canonical `SHA256SUMS`, and bundle both into `coding-agents.tar.gz` for installers. Dependencies: none (feeds 8.2 & 8.5).
 - **8.2 Signed tarball & hardcoded SHA** – Sign the release tarball with Sigstore/OIDC, publish `SHA256SUMS`, and bake the tarball hash into installers for offline verification. Dependencies: 8.1.
 - **8.3 Immutable system install + blue/green** – Enforce installs under system-owned roots with versioned directories and blue/green swaps, rejecting user-writable paths. Dependencies: 8.1–8.2.
-- **8.4 Env-detect script** – Deliver `scripts/runtime/env-detect.sh` that selects Prod vs Dev profiles based on install state and exposes the right config roots. Dependencies: 8.3 and 8.1.
+- **8.4 Env-detect script** – Deliver `host/utils/env-detect.sh` that selects Prod vs Dev profiles based on install state and exposes the right config roots. Dependencies: 8.3 and 8.1.
 - **8.5 Integrity-check script** – Run `sha256sum -c SHA256SUMS` before launches in Prod mode, aborting and logging on mismatch while allowing warnings in Dev. Dependencies: 8.1 and 8.4.
 - **8.6 Health-check/Doctor** – Finish `scripts/utils/check-health.sh` so it blocks Podman, validates AppArmor/WSL posture, verifies Sigstore signatures, and integrates with launcher UX/docs. Dependencies: 8.3, 8.5, and 6.x documentation work.
 - **8.8 Enforcement policies** – Ensure launchers/installers require system scope, block unsupported runtimes, rely only on `sha256sum`, and emit audit events when policies trigger. Dependencies: 8.3, 8.5, 7.3.

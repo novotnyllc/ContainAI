@@ -11,7 +11,7 @@ CODING_AGENTS_OVERRIDE_DIR="${CODING_AGENTS_OVERRIDE_DIR:-${CODING_AGENTS_CONFIG
 CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-${CODING_AGENTS_OVERRIDE_DIR}/allow-dirty}"
 CODING_AGENTS_CACHE_DIR="${CODING_AGENTS_CACHE_DIR:-${CODING_AGENTS_CONFIG_DIR}/cache}"
 CODING_AGENTS_PREREQ_CACHE_FILE="${CODING_AGENTS_PREREQ_CACHE_FILE:-${CODING_AGENTS_CACHE_DIR}/prereq-check}"
-CODING_AGENTS_BROKER_SCRIPT="${CODING_AGENTS_BROKER_SCRIPT:-${CODING_AGENTS_REPO_ROOT_DEFAULT}/scripts/runtime/secret-broker.py}"
+CODING_AGENTS_BROKER_SCRIPT="${CODING_AGENTS_BROKER_SCRIPT:-${CODING_AGENTS_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py}"
 CODING_AGENTS_AUDIT_LOG="${CODING_AGENTS_AUDIT_LOG:-${CODING_AGENTS_CONFIG_DIR}/security-events.log}"
 CODING_AGENTS_HELPER_NETWORK_POLICY="${CODING_AGENTS_HELPER_NETWORK_POLICY:-loopback}"
 CODING_AGENTS_HELPER_PIDS_LIMIT="${CODING_AGENTS_HELPER_PIDS_LIMIT:-64}"
@@ -39,7 +39,7 @@ _sha256_file() {
 
 _collect_prereq_fingerprint() {
     local repo_root="$1"
-    local script_path="$repo_root/scripts/verify-prerequisites.sh"
+    local script_path="$repo_root/host/utils/verify-prerequisites.sh"
     local entries=()
     if [ -f "$script_path" ]; then
         local script_hash
@@ -87,7 +87,7 @@ ensure_prerequisites_verified() {
     if [ "${CODING_AGENTS_DISABLE_AUTO_PREREQ_CHECK:-0}" = "1" ]; then
         return 0
     fi
-    local script_path="$repo_root/scripts/verify-prerequisites.sh"
+    local script_path="$repo_root/host/utils/verify-prerequisites.sh"
     if [ ! -x "$script_path" ]; then
         return 0
     fi
@@ -539,7 +539,7 @@ get_secret_broker_script() {
         echo "$candidate"
         return 0
     fi
-    candidate="${CODING_AGENTS_REPO_ROOT_DEFAULT}/scripts/runtime/secret-broker.py"
+    candidate="${CODING_AGENTS_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py"
     if [ -x "$candidate" ]; then
         echo "$candidate"
         return 0
@@ -623,7 +623,7 @@ is_wsl_environment() {
 
 wsl_security_helper_path() {
     local repo_root="${1:-${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}}"
-    echo "$repo_root/scripts/utils/fix-wsl-security.sh"
+    echo "$repo_root/host/utils/fix-wsl-security.sh"
 }
 
 resolve_seccomp_profile_path() {
@@ -739,7 +739,7 @@ verify_host_security_prereqs() {
             if [ -x "$helper_script" ]; then
                 errors+=("AppArmor kernel support not detected (WSL 2). Run '$helper_script --check' to audit your Windows configuration, then rerun '$helper_script' (optionally with --force) to apply the fixes and restart WSL.")
             else
-                errors+=("AppArmor kernel support not detected (WSL 2). Use the WSL security helper under scripts/utils to enable AppArmor on the host kernel.")
+                errors+=("AppArmor kernel support not detected (WSL 2). Use the WSL security helper under host/utils to enable AppArmor on the host kernel.")
             fi
         else
             errors+=("AppArmor kernel support not detected. Enable AppArmor to continue.")
@@ -749,9 +749,9 @@ verify_host_security_prereqs() {
         local profile_file="$repo_root/docker/profiles/apparmor-coding-agents.profile"
         if ! apparmor_profile_loaded "$profile"; then
             if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
-                warnings+=("Unable to verify AppArmor profile '$profile' without elevated privileges. Re-run './scripts/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$profile_file'.")
+                warnings+=("Unable to verify AppArmor profile '$profile' without elevated privileges. Re-run './host/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$profile_file'.")
             elif [ "$current_uid" -ne 0 ] && [ -f "$profile_file" ]; then
-                warnings+=("AppArmor profile '$profile' verification skipped (requires sudo). Rerun './scripts/utils/check-health.sh' with sudo to confirm.")
+                warnings+=("AppArmor profile '$profile' verification skipped (requires sudo). Rerun './host/utils/check-health.sh' with sudo to confirm.")
             elif [ -f "$profile_file" ]; then
                 errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'.")
             else
@@ -1276,7 +1276,7 @@ merge_agent_data_exports() {
     local staged_dir="$2"
     local repo_root="$3"
     local home_dir="$4"
-    local packager="$repo_root/scripts/utils/package-agent-data.py"
+    local packager="$repo_root/host/utils/package-agent-data.py"
 
     if [ -z "$agent_name" ] || [ ! -d "$staged_dir" ] || [ ! -f "$packager" ]; then
         return 1

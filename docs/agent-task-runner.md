@@ -13,13 +13,13 @@ This document explains the Rust-based control plane that mediates every process 
 
 | Program | Location | Role | Key Inputs / Outputs |
 | --- | --- | --- | --- |
-| `agent-task-runnerd` | `scripts/runtime/agent-task-runner/src/agent_task_runnerd.rs` | Master daemon. Owns the Unix seqpacket socket, tracks registered vendors, accepts `MSG_RUN_REQUEST` frames, and spawns sandbox helpers. Also handles seccomp user notifications for any `execve`/`execveat` attempted by vendor binaries. | Inputs: socket payloads, seccomp notifications, policy config. Outputs: audit log entries, sandbox processes, JSON responses to clients. |
-| `agent-task-runnerctl` | `scripts/runtime/agent-task-runner/src/agent_task_runnerctl.rs` | Lightweight client invoked by wrappers (`install-agent-cli-wrappers.sh`). It builds a JSON payload (argv, env, cwd, session metadata) and relays STDIN/STDOUT/STDERR over the socket. | Inputs: CLI flags, environment variables. Outputs: framed protocol messages, propagated exit code. |
-| `agentcli-exec` | `scripts/runtime/agent-task-runner/src/agentcli_exec.rs` | Shim that renames the vendor binary on disk, installs the seccomp filter, and ensures every `execve` traps into `agent-task-runnerd`. | Inputs: original CLI path. Outputs: instrumented vendor CLI process plus seccomp listener FD. |
-| `agent-task-sandbox` | `scripts/runtime/agent-task-runner/src/agent_task_sandbox.rs` | Helper executed by the daemon to unshare namespaces, drop privileges to `agentuser`, remount sensitive paths as sealed tmpfs, apply AppArmor + seccomp, and finally `execve` the requested command. | Inputs: daemon-provided argv/env, hide-path list, AppArmor profile. Outputs: isolated workload process tree. |
-| `channel.rs` | `scripts/runtime/agent-task-runner/src/channel.rs` | Shared wrapper around Unix seqpacket sockets. Handles framing, size enforcement, and JSON helpers for both the client and daemon. | Inputs: `OwnedFd`. Outputs: strongly-typed header/payload tuples. |
+| `agent-task-runnerd` | `docker/runtime/agent-task-runner/src/agent_task_runnerd.rs` | Master daemon. Owns the Unix seqpacket socket, tracks registered vendors, accepts `MSG_RUN_REQUEST` frames, and spawns sandbox helpers. Also handles seccomp user notifications for any `execve`/`execveat` attempted by vendor binaries. | Inputs: socket payloads, seccomp notifications, policy config. Outputs: audit log entries, sandbox processes, JSON responses to clients. |
+| `agent-task-runnerctl` | `docker/runtime/agent-task-runner/src/agent_task_runnerctl.rs` | Lightweight client invoked by wrappers (`install-agent-cli-wrappers.sh`). It builds a JSON payload (argv, env, cwd, session metadata) and relays STDIN/STDOUT/STDERR over the socket. | Inputs: CLI flags, environment variables. Outputs: framed protocol messages, propagated exit code. |
+| `agentcli-exec` | `docker/runtime/agent-task-runner/src/agentcli_exec.rs` | Shim that renames the vendor binary on disk, installs the seccomp filter, and ensures every `execve` traps into `agent-task-runnerd`. | Inputs: original CLI path. Outputs: instrumented vendor CLI process plus seccomp listener FD. |
+| `agent-task-sandbox` | `docker/runtime/agent-task-runner/src/agent_task_sandbox.rs` | Helper executed by the daemon to unshare namespaces, drop privileges to `agentuser`, remount sensitive paths as sealed tmpfs, apply AppArmor + seccomp, and finally `execve` the requested command. | Inputs: daemon-provided argv/env, hide-path list, AppArmor profile. Outputs: isolated workload process tree. |
+| `channel.rs` | `docker/runtime/agent-task-runner/src/channel.rs` | Shared wrapper around Unix seqpacket sockets. Handles framing, size enforcement, and JSON helpers for both the client and daemon. | Inputs: `OwnedFd`. Outputs: strongly-typed header/payload tuples. |
 
-These programs are shipped inside every agent container by the `docker/base/Dockerfile` builder stage (`cargo build --release --locked`). Wrapper scripts (`scripts/runtime/install-agent-cli-wrappers.sh`) rename the vendor binaries and ensure all user-facing subcommands call `agent-task-runnerctl`.
+These programs are shipped inside every agent container by the `docker/base/Dockerfile` builder stage (`cargo build --release --locked`). Wrapper scripts (`docker/runtime/install-agent-cli-wrappers.sh`) rename the vendor binaries and ensure all user-facing subcommands call `agent-task-runnerctl`.
 
 ## 3. Control Plane Flow
 
@@ -70,7 +70,7 @@ sequenceDiagram
 
 | Check | Command | Purpose |
 | --- | --- | --- |
-| Rust unit tests | `cd scripts/runtime/agent-task-runner && cargo test` | Validates protocol helpers, CLI parsing, sandbox helpers. Required before any doc/code change lands. |
+| Rust unit tests | `cd docker/runtime/agent-task-runner && cargo test` | Validates protocol helpers, CLI parsing, sandbox helpers. Required before any doc/code change lands. |
 | Seccomp filter check | `cargo test -- --ignored` (future work) | Ensures deny list stays synchronized with policy doc. |
 | Container build | `scripts/build/build.sh --from-source` → choose option 2 (local build) | Rebuilds the base image using the same multi-stage Dockerfile that CI uses, guaranteeing runner binaries are reproducible. |
 | Integration tests | `scripts/test/integration-test.sh --mode launchers` | Spins up mock images and verifies wrappers invoke `agent-task-runnerctl`, run socket mediation, and capture seccomp events. |
@@ -82,4 +82,4 @@ sequenceDiagram
 - `docs/local-build-and-test.md` – How to rebuild the base image and run the test suites mentioned above.
 - `docs/architecture.md` – High-level system diagram; this document drills into the runner-specific portion of that graph.
 
-For questions or change requests, contact the security owner listed in `CODEOWNERS` for the `scripts/runtime/agent-task-runner/**` path. Any modification to runner binaries **must** include updates to this document and the security review notes.
+For questions or change requests, contact the security owner listed in `CODEOWNERS` for the `docker/runtime/agent-task-runner/**` path. Any modification to runner binaries **must** include updates to this document and the security review notes.

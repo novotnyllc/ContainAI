@@ -244,4 +244,4 @@ When you run `launch-agent`:
 ⚠️ **Keep secure:**
 - `~/.config/coding-agents/mcp-secrets.env` (host-only, outside any git repo)
 - Don't commit `.env` files with real tokens
-- Avoid modifying `scripts/launchers` or `scripts/runtime` without understanding how it affects manifest hashes
+- Avoid modifying `host/launchers` or `docker/runtime` without understanding how it affects manifest hashes

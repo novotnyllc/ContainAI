@@ -19,7 +19,7 @@ FAILED_TESTS=0
 PASSED_TESTS=0
 
 # Source common functions to test
-source "$SCRIPT_DIR/../utils/common-functions.sh"
+source "$SCRIPT_DIR/../../host/utils/common-functions.sh"
 
 # ============================================================================
 # Docker Detection and Setup

@@ -4,16 +4,16 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'scripts/launchers/**'
-      - 'scripts/utils/**'
+      - 'host/launchers/**'
+      - 'host/utils/**'
       - 'scripts/test/**'
       - 'docker/**'
       - '.github/workflows/test-launchers.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'scripts/launchers/**'
-      - 'scripts/utils/**'
+      - 'host/launchers/**'
+      - 'host/utils/**'
       - 'scripts/test/**'
       - 'docker/**'
       - '.github/workflows/test-launchers.yml'

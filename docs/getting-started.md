@@ -259,13 +259,13 @@ Run the verification script to check all prerequisites:
 **Linux/Mac:**
 ```bash
 cd CodingAgents  # If you've already cloned (Step 6)
-./scripts/verify-prerequisites.sh
+./host/utils/verify-prerequisites.sh
 ```
 
 **Windows:**
 ```powershell
 cd CodingAgents  # If you've already cloned (Step 6)
-.\scripts\verify-prerequisites.ps1
+.\host\utils\verify-prerequisites.ps1
 ```
 
 **Expected Output:**
@@ -383,7 +383,7 @@ source ~/.zshrc
 which run-copilot    # Linux/Mac
 where.exe run-copilot  # Windows
 
-# Should show path to scripts/launchers/run-copilot
+# Should show path to host/launchers/run-copilot
 ```
 
 ## Step 9: First Launch
@@ -528,10 +528,10 @@ Later, reattach from the host even if VS Code isn't connected:
 
 ```bash
 # Bash
-scripts/launchers/connect-agent --name copilot-myproject-feature-auth
+host/launchers/connect-agent --name copilot-myproject-feature-auth
 
 # PowerShell
-scripts\launchers\connect-agent.ps1 -Name copilot-myproject-feature-auth
+host\launchers\connect-agent.ps1 -Name copilot-myproject-feature-auth
 
 # When only one agent is running, omit --name
 connect-agent

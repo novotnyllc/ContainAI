@@ -67,7 +67,7 @@ fi
 
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source=../utils/common-functions.sh
-source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
 LOCK_FILE="$BARE_REPO/.coding-agents-sync.lock"
 LAST_SHA=""

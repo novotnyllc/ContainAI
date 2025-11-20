@@ -1,6 +1,6 @@
 # Secret Credential Isolation Architecture
 
-This document explains how Coding Agents restricts access to long-lived credentials (Copilot/Codex/Context7, MCP bearer tokens, GitHub PATs, etc.) while still allowing immutable MCP binaries to run unmodified. It is written from the perspective of the trusted launcher (`scripts/launchers/*`) and the host-resident secret broker they coordinate with.
+This document explains how Coding Agents restricts access to long-lived credentials (Copilot/Codex/Context7, MCP bearer tokens, GitHub PATs, etc.) while still allowing immutable MCP binaries to run unmodified. It is written from the perspective of the trusted launcher (`host/launchers/*`) and the host-resident secret broker they coordinate with.
 
 ## Objectives
 
@@ -15,7 +15,7 @@ This document explains how Coding Agents restricts access to long-lived credenti
 | --- | --- | --- |
 | `launch-agent` / `run-agent` (host) | Trusted | Builds containers, hashes stubs, requests broker capabilities, wires tmpfs mounts.
 | Secret Broker (host daemon) | Trusted | Stores master secrets, validates capabilities, streams secrets via one-time handles.
-| Git tree attestation (`scripts/launchers/**`, stubs) | Trusted data | Launcher verifies these paths are clean vs. `HEAD` (and records the tree hash) before secrets are issued, so bits exactly match the current commit.
+| Git tree attestation (`host/launchers/**`, stubs) | Trusted data | Launcher verifies these paths are clean vs. `HEAD` (and records the tree hash) before secrets are issued, so bits exactly match the current commit.
 | Agent container runtime | Partially trusted | Runs untrusted code but with seccomp/AppArmor, read-only roots, and dedicated tmpfs for sensitive material.
 | MCP Stub Wrappers | Trusted binaries inside container | Immutable helpers responsible for redeeming capabilities and launching MCPs.
 | Squid proxy | Shared service | Provides egress filtering/logging only; never stores credentials.
@@ -150,7 +150,7 @@ Key points:
 
 ### `audit-agent`: On-Demand Session Inventory
 
-To help operators and developers validate a running session, we introduce `scripts/launchers/audit-agent` (with matching PowerShell). The command produces a signed JSON report describing the configuration, files, mounts, UIDs, and capability handles associated with an agent container without requiring any manual `docker exec` inspection.
+To help operators and developers validate a running session, we introduce `host/launchers/audit-agent` (with matching PowerShell). The command produces a signed JSON report describing the configuration, files, mounts, UIDs, and capability handles associated with an agent container without requiring any manual `docker exec` inspection.
 
 #### Invocation
 
@@ -504,7 +504,7 @@ When we talk about an “agent” in this document we mean the upstream binaries
 1. **Binary shim (best effort path detection).** During image build we rename the real binary (e.g., `/usr/bin/github-copilot-cli` → `.real`) and install a wrapper that exports `AGENT_TASK_RUNNER_SOCKET` and reroutes any *explicit* subcommands (like `copilot exec`) through the socket. This covers the common cases we control.
 2. **Seccomp exec interception (enforced logging + policy).** Regardless of what the vendor binary tries to run, we apply a seccomp filter to the `agentcli` namespace that places `execve` and `execveat` behind a user-notification handler:
     - When the CLI (or any library it loads) issues an `execve`, the kernel pauses the call and notifies the in-container `agent-task-runnerd` via the seccomp user-notification FD. `agentcli-exec` automatically registers the FD and tags the connection with the current agent name/binary.
-    - Both `agentcli-exec` and `agent-task-runnerd` are compiled from the Rust crate in `scripts/runtime/agent-task-runner`, satisfying the "safe language" requirement and replacing the legacy C helpers.
+    - Both `agentcli-exec` and `agent-task-runnerd` are compiled from the Rust crate in `docker/runtime/agent-task-runner`, satisfying the "safe language" requirement and replacing the legacy C helpers.
     - The daemon reconstructs the syscall target (path, argv pointer) straight from the paused task’s memory, writes a JSON log line to `/run/agent-task-runner/events.log`, and evaluates the request against the policy selected via `CODING_AGENTS_RUNNER_POLICY` (`observe` by default, `enforce` to block access to paths under `/run/agent-secrets` or `/run/agent-data`). Allowed commands resume transparently via `SECCOMP_USER_NOTIF_FLAG_CONTINUE`; denied commands return `EPERM`, preventing helpers from reaching the sensitive tmpfs even if wrappers were bypassed.
     - Because every exec is observed, we gain deterministic auditability today and can tighten policy in future phases without modifying vendor binaries. When the explicit runner socket integration lands, the same daemon will reuse these logs as ground truth before proxying STDIO.
 
@@ -537,7 +537,7 @@ sequenceDiagram
 This approach lets us persist the useful artifacts (logs, history, saved sessions) while preventing arbitrary file writes back onto the host. It also guarantees that the same data the CLI expects is present every time without reopening the attack surface that came with raw bind mounts.
 
 **Implementation status (Nov 2025)**
-- Both launcher stacks now package host data via `scripts/utils/package-agent-data.py`, placing `data-import.tar` + manifest pairs beneath `/run/coding-agents/<agent>/data` for every agent that has matching inputs.
+- Both launcher stacks now package host data via `host/utils/package-agent-data.py`, placing `data-import.tar` + manifest pairs beneath `/run/coding-agents/<agent>/data` for every agent that has matching inputs.
 - The container entrypoint provisions `/run/agent-data` as a tmpfs (size tuned via `CODING_AGENTS_DATA_TMPFS_SIZE`) and unpacks any staged tarballs into `/run/agent-data/<agent>` prior to starting the vendor CLI, keeping caches in tmpfs-only storage owned by the agent user.
 - Vendor CLIs are rewritten to wrappers that export `AGENT_TASK_RUNNER_SOCKET`/helper metadata and execute the preserved `.real` binary via the setuid helper `/usr/local/bin/agentcli-exec`, ensuring every session runs as `agentcli`.
 - Launcher regression tests cover the packager helper to ensure manifests contain session metadata and that empty imports do not generate stale tarballs.

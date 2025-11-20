@@ -50,7 +50,7 @@ Full end-to-end system validation with two modes:
 | Integration tests – host secrets | `./scripts/test/integration-test.sh --mode launchers --with-host-secrets` | Copies your `mcp-secrets.env` into the isolated DinD harness (or uses the host daemon if you pass `--isolation host`) and exercises the `run-<agent> --prompt` path (currently Copilot) to verify live secrets. |
 
 > **Why there isn't a PowerShell integration harness**
-> The PowerShell launchers (`run-*.ps1`) are thin wrappers that forward arguments to the shared bash implementation (`scripts/launchers/run-agent`). The integration suite manipulates containers, DinD, and git state entirely through bash, so duplicating the 800+ line harness in PowerShell would provide no extra coverage. We rely on the existing PowerShell unit tests (`test-launchers.ps1`, `test-branch-management.ps1`) to guard the PS entrypoints and keep all end-to-end validation centralized in the bash integration runner.
+> The PowerShell launchers (`run-*.ps1`) are thin wrappers that forward arguments to the shared bash implementation (`host/launchers/run-agent`). The integration suite manipulates containers, DinD, and git state entirely through bash, so duplicating the 800+ line harness in PowerShell would provide no extra coverage. We rely on the existing PowerShell unit tests (`test-launchers.ps1`, `test-branch-management.ps1`) to guard the PS entrypoints and keep all end-to-end validation centralized in the bash integration runner.
 | Feature / Guarantee                          | Automated Coverage                                                                                              | Notes |
 |----------------------------------------------|------------------------------------------------------------------------------------------------------------------|-------|
 | Container launch, labels, workspace mounts   | `integration-test.sh`: launcher execution, label, networking, workspace, env-variable tests                      | Ensures runtime wiring matches docs. |
@@ -59,7 +59,7 @@ Full end-to-end system validation with two modes:
 | MCP config conversion                        | `integration-test.sh::test_mcp_configuration_generation`                                                         | Exercises `/usr/local/bin/setup-mcp-configs.sh` with mock config.toml. |
 | Network proxy modes (`restricted` / `squid`) | `integration-test.sh::test_network_proxy_modes`                                                                  | Uses mock proxy container + `--network none` to ensure wiring behaves. |
 | Proxy hardening (metadata/RFC1918 blocks)    | `integration-test.sh::test_squid_proxy_hardening`                                                                | Builds the Squid image and ensures private/link-local ranges are denied while allowed domains still transit. |
-| Shared utility functions                     | `integration-test.sh::test_shared_functions` + unit suites                                                       | Guards regressions in `scripts/utils/common-functions.*`. |
+| Shared utility functions                     | `integration-test.sh::test_shared_functions` + unit suites                                                       | Guards regressions in `host/utils/common-functions.*`. |
 | Runtime secret handling                      | Mock fixtures under `scripts/test/fixtures/mock-secrets` ensure no real credentials are required for tests       | Fixtures copied into isolated workspace. |
 
 ## Test Files
@@ -153,7 +153,7 @@ Integration tests run inside an isolated Docker-in-Docker environment for reprod
 Tests run automatically on:
 - Push to `main` or `develop` branches
 - Pull requests targeting `main` or `develop`
-- Changes to `scripts/launchers/`, `scripts/utils/`, `scripts/test/`, or `docker/`
+- Changes to `host/launchers/`, `host/utils/`, `scripts/test/`, or `docker/`
 
 See `.github/workflows/test-launchers.yml` for workflow details.
 

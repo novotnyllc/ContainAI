@@ -16,8 +16,8 @@ HOST_SECRETS_FILE="${TEST_HOST_SECRETS_FILE:-}"
 source "$SCRIPT_DIR/test-config.sh"
 # shellcheck source=scripts/test/test-env.sh disable=SC1091
 source "$SCRIPT_DIR/test-env.sh"
-# shellcheck source=scripts/utils/common-functions.sh disable=SC1091
-source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+# shellcheck source=host/utils/common-functions.sh disable=SC1091
+source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
 # Test tracking
 FAILED_TESTS=0
@@ -932,7 +932,7 @@ test_host_prompt_mode() {
 
     local agent="copilot"
     local prompt="Return the words: host secrets OK."
-    local run_copilot="$PROJECT_ROOT/scripts/launchers/run-$agent"
+    local run_copilot="$PROJECT_ROOT/host/launchers/run-$agent"
     local branch
     branch=$(next_agent_branch_name "$agent")
     local marker="prompt-hook-${agent}.txt"

@@ -226,7 +226,7 @@ verify_container_labels() {
 test_container_runtime_detection() {
     test_section "Container Runtime Detection"
     
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
     
     # Test get_container_runtime function
     local runtime=$(get_container_runtime)
@@ -258,7 +258,7 @@ test_container_runtime_detection() {
 test_shared_functions() {
     test_section "Testing shared functions"
     
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
     
     # Test get_repo_name
     local repo_name=$(get_repo_name "$TEST_REPO_DIR")
@@ -309,7 +309,7 @@ test_shared_functions() {
 test_helper_network_isolation() {
     test_section "Helper network isolation"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local helper_dir="$HOME/.coding-agents-tests"
     mkdir -p "$helper_dir"
@@ -356,7 +356,7 @@ import secrets
 print(secrets.token_hex(32))
 PY
 
-    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
         --agent copilot \
         --session-id test-session \
         --home-path "$temp_home" \
@@ -383,7 +383,7 @@ PY
 
     local missing_hmac_target
     missing_hmac_target=$(mktemp -d)
-    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
         --mode merge \
         --agent copilot \
         --session-id test-session \
@@ -398,7 +398,7 @@ PY
     fi
     rm -rf "$missing_hmac_target"
 
-    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
         --agent copilot \
         --session-id secure-session \
         --home-path "$temp_home" \
@@ -418,7 +418,7 @@ PY
 
     local secure_target_home
     secure_target_home=$(mktemp -d)
-    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
         --mode merge \
         --agent copilot \
         --session-id secure-session \
@@ -440,7 +440,7 @@ PY
     rm -rf "$secure_target_home"
 
     rm -rf "$temp_home/.copilot/sessions" "$temp_home/.copilot/logs"
-    if python3 "$PROJECT_ROOT/scripts/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
         --agent copilot \
         --session-id empty-session \
         --home-path "$temp_home" \
@@ -461,7 +461,7 @@ PY
 test_audit_logging_pipeline() {
     test_section "Audit logging pipeline"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local log_file
     log_file=$(mktemp /tmp/helper-audit.XXXXXX.log)
@@ -480,15 +480,15 @@ test_audit_logging_pipeline() {
     temp_repo=$(mktemp -d)
     pushd "$temp_repo" >/dev/null
     git init -q
-    mkdir -p scripts/launchers
-    echo "echo hi" > scripts/launchers/tool.sh
-    git add scripts/launchers/tool.sh >/dev/null
+    mkdir -p host/launchers
+    echo "echo hi" > host/launchers/tool.sh
+    git add host/launchers/tool.sh >/dev/null
     git commit -q -m "init"
-    echo "# dirty" >> scripts/launchers/tool.sh
+    echo "# dirty" >> host/launchers/tool.sh
     popd >/dev/null
 
     CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$override_token" \
-        ensure_trusted_paths_clean "$temp_repo" "test stubs" "scripts/launchers" >/dev/null 2>&1
+        ensure_trusted_paths_clean "$temp_repo" "test stubs" "host/launchers" >/dev/null 2>&1
     if grep -q '"event":"override-used"' "$log_file"; then
         pass "Override usage recorded"
     else
@@ -555,22 +555,22 @@ test_trusted_path_enforcement() {
     temp_repo=$(mktemp -d)
     pushd "$temp_repo" >/dev/null
     git init -q
-    mkdir -p scripts/launchers
-    echo "echo hi" > scripts/launchers/foo.sh
-    git add scripts/launchers/foo.sh >/dev/null
+    mkdir -p host/launchers
+    echo "echo hi" > host/launchers/foo.sh
+    git add host/launchers/foo.sh >/dev/null
     git commit -q -m "init"
     popd >/dev/null
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
-    if ensure_trusted_paths_clean "$temp_repo" "test" "scripts/launchers"; then
+    if ensure_trusted_paths_clean "$temp_repo" "test" "host/launchers"; then
         pass "Clean trusted paths allowed"
     else
         fail "Clean trusted paths should pass"
     fi
 
-    echo "# dirty" >> "$temp_repo/scripts/launchers/foo.sh"
-    if ensure_trusted_paths_clean "$temp_repo" "test" "scripts/launchers"; then
+    echo "# dirty" >> "$temp_repo/host/launchers/foo.sh"
+    if ensure_trusted_paths_clean "$temp_repo" "test" "host/launchers"; then
         fail "Dirty trusted paths should fail"
     else
         pass "Dirty trusted paths blocked"
@@ -578,7 +578,7 @@ test_trusted_path_enforcement() {
 
     local override_token="$temp_repo/allow-dirty"
     touch "$override_token"
-    if CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$override_token" ensure_trusted_paths_clean "$temp_repo" "test" "scripts/launchers" >/dev/null 2>&1; then
+    if CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$override_token" ensure_trusted_paths_clean "$temp_repo" "test" "host/launchers" >/dev/null 2>&1; then
         pass "Override token permits dirty paths"
     else
         fail "Override token should allow launch"
@@ -596,12 +596,12 @@ test_trusted_path_enforcement() {
 test_session_config_renderer() {
     test_section "Session config renderer"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local output_dir
     output_dir=$(mktemp -d)
     local session_id="test-session-$$"
-    local renderer="$PROJECT_ROOT/scripts/utils/render-session-config.py"
+    local renderer="$PROJECT_ROOT/host/utils/render-session-config.py"
     local render_args=(
         "--config" "$PROJECT_ROOT/config.toml"
         "--output" "$output_dir"
@@ -647,13 +647,13 @@ test_session_config_renderer() {
 test_secret_broker_cli() {
     test_section "Secret broker CLI"
 
-    local broker_script="$PROJECT_ROOT/scripts/runtime/secret-broker.py"
+    local broker_script="$PROJECT_ROOT/host/utils/secret-broker.py"
     if [ ! -x "$broker_script" ]; then
         fail "secret-broker.py missing or not executable"
         return
     fi
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local config_root
     config_root=$(mktemp -d)
@@ -741,7 +741,7 @@ PY
     fi
 
     local unsealed
-    if unsealed=$("$PROJECT_ROOT/scripts/runtime/capability-unseal.py" --stub alpha --secret TEST_SECRET --cap-root "$cap_dir" --format raw 2>/dev/null); then
+    if unsealed=$("$PROJECT_ROOT/docker/runtime/capability-unseal.py" --stub alpha --secret TEST_SECRET --cap-root "$cap_dir" --format raw 2>/dev/null); then
         if [ "$unsealed" = "super-secret" ]; then
             pass "capability-unseal retrieves sealed secret"
         else
@@ -769,7 +769,7 @@ PY
 test_codex_cli_helper() {
     test_section "Codex CLI helper"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local helper_script="$PROJECT_ROOT/docker/agents/codex/prepare-codex-secrets.sh"
     if [ ! -x "$helper_script" ]; then
@@ -777,7 +777,7 @@ test_codex_cli_helper() {
         return
     fi
 
-    local broker_script="$PROJECT_ROOT/scripts/runtime/secret-broker.py"
+    local broker_script="$PROJECT_ROOT/host/utils/secret-broker.py"
     local config_root cap_dir env_dir secret_file
     config_root=$(mktemp -d)
     cap_dir=$(mktemp -d)
@@ -824,7 +824,7 @@ test_codex_cli_helper() {
     if CODING_AGENTS_AGENT_HOME="$agent_home" \
         CODING_AGENTS_AGENT_CAP_ROOT="$cap_dir" \
         CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root" \
-        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/scripts/runtime/capability-unseal.py" \
+        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-codex-secrets decrypts bundle"
     else
@@ -858,7 +858,7 @@ test_codex_cli_helper() {
 test_claude_cli_helper() {
     test_section "Claude CLI helper"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local helper_script="$PROJECT_ROOT/docker/agents/claude/prepare-claude-secrets.sh"
     if [ ! -x "$helper_script" ]; then
@@ -866,7 +866,7 @@ test_claude_cli_helper() {
         return
     fi
 
-    local broker_script="$PROJECT_ROOT/scripts/runtime/secret-broker.py"
+    local broker_script="$PROJECT_ROOT/host/utils/secret-broker.py"
     local config_root env_dir secret_file
     config_root=$(mktemp -d)
     env_dir="$config_root/config"
@@ -915,7 +915,7 @@ test_claude_cli_helper() {
     if CODING_AGENTS_AGENT_HOME="$agent_home_file" \
         CODING_AGENTS_AGENT_CAP_ROOT="$file_cap_dir" \
         CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root_file" \
-        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/scripts/runtime/capability-unseal.py" \
+        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-claude-secrets decrypts file-based bundle"
     else
@@ -959,7 +959,7 @@ test_claude_cli_helper() {
     if CODING_AGENTS_AGENT_HOME="$agent_home_inline" \
         CODING_AGENTS_AGENT_CAP_ROOT="$inline_cap_dir" \
         CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root_inline" \
-        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/scripts/runtime/capability-unseal.py" \
+        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-claude-secrets decrypts inline bundle"
     else
@@ -985,7 +985,7 @@ test_claude_cli_helper() {
 test_host_security_preflight() {
     test_section "Host security preflight"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
         if verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
             pass "Preflight succeeds when host security prerequisites are satisfied"
@@ -1013,7 +1013,7 @@ test_host_security_preflight() {
 test_container_security_preflight() {
     test_section "Container security preflight"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local good_json='{"SecurityOptions":["name=seccomp","name=apparmor"]}'
         if CODING_AGENTS_CONTAINER_INFO_JSON="$good_json" verify_container_security_support >/dev/null 2>&1; then
@@ -1033,7 +1033,7 @@ test_container_security_preflight() {
 test_local_remote_push() {
     test_section "Testing secure local remote push"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local workspace_dir
     workspace_dir=$(mktemp -d)
@@ -1086,7 +1086,7 @@ test_local_remote_push() {
 test_local_remote_fallback_push() {
     test_section "Testing local remote fallback push"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local workspace_dir
     workspace_dir=$(mktemp -d)
@@ -1137,7 +1137,7 @@ test_local_remote_fallback_push() {
 test_secure_remote_sync() {
     test_section "Testing secure remote host sync"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local agent_branch="copilot/session-sync"
     local bare_dir
@@ -1226,7 +1226,7 @@ test_list_agents() {
     
     create_test_container "codex" "test-coding-agents-repo" "develop" >/dev/null
     
-    local output=$("$PROJECT_ROOT/scripts/launchers/list-agents")
+    local output=$("$PROJECT_ROOT/host/launchers/list-agents")
     
     assert_contains "$output" "copilot-test-coding-agents-repo-main" "list-agents shows copilot container"
     assert_contains "$output" "codex-test-coding-agents-repo-develop" "list-agents shows codex container"
@@ -1241,7 +1241,7 @@ test_remove_agent() {
     create_test_container "codex" "test-coding-agents-repo" "develop" >/dev/null
     
     # Remove with --no-push flag (since test container doesn't have git)
-    "$PROJECT_ROOT/scripts/launchers/remove-agent" "$container_name" --no-push
+    "$PROJECT_ROOT/host/launchers/remove-agent" "$container_name" --no-push
     
     # Verify container is removed
     if ! docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" | grep -q "^${container_name}$"; then
@@ -1255,7 +1255,7 @@ test_remove_agent() {
 test_image_pull() {
     test_section "Testing image pull functionality"
     
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
     
     # Test pull_and_tag_image (will pull copilot image if available)
     # This is a smoke test - it should not fail even if image doesn't exist
@@ -1328,7 +1328,7 @@ test_label_filtering() {
 test_wsl_path_conversion() {
     test_section "Testing WSL path conversion"
     
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
     
     # Test Windows path conversion
     local wsl_path=$(convert_to_wsl_path "C:\\Users\\test\\project")
@@ -1342,7 +1342,7 @@ test_wsl_path_conversion() {
 test_prompt_fallback_repo_setup() {
     test_section "Testing prompt fallback workspace preparation"
 
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local setup_script
     setup_script=$(generate_repo_setup_script "prompt" "" "" "")
@@ -1370,7 +1370,7 @@ test_prompt_fallback_repo_setup() {
 test_container_status() {
     test_section "Testing container status functions"
     
-    source "$PROJECT_ROOT/scripts/utils/common-functions.sh"
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
     
     local container_name="copilot-test-coding-agents-repo-main"
     
@@ -1393,7 +1393,7 @@ test_launcher_wrappers() {
 
     local wrappers=("run-copilot" "run-codex" "run-claude")
     for wrapper in "${wrappers[@]}"; do
-        local script_path="$PROJECT_ROOT/scripts/launchers/${wrapper}"
+        local script_path="$PROJECT_ROOT/host/launchers/${wrapper}"
         if output=$("$script_path" --help 2>&1); then
             assert_contains "$output" "Usage: run-agent" "${wrapper} --help displays usage"
             assert_contains "$output" "--prompt" "${wrapper} --help documents --prompt"

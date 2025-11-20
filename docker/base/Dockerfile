@@ -11,7 +11,7 @@ RUN install -d -o nonroot -g nonroot /agent-task-runner
 USER nonroot
 
 WORKDIR /agent-task-runner
-COPY --chown=nonroot:nonroot scripts/runtime/agent-task-runner/ ./
+COPY --chown=nonroot:nonroot docker/runtime/agent-task-runner/ ./
 RUN cargo build --release --locked
 
 # Base image for coding agents container
@@ -165,22 +165,22 @@ RUN set -eux; \
     rm -rf "$tmp_dir"
 
 # Copy .NET preview installer script
-COPY --chown=root:root scripts/runtime/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
+COPY --chown=root:root docker/runtime/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
 RUN chmod +x /usr/local/bin/install-dotnet-preview.sh
 
 # Session and runtime helpers
-COPY --chown=root:root scripts/runtime/agent-session /usr/local/bin/agent-session
-COPY --chown=root:root scripts/runtime/agent-session-runner /usr/local/bin/agent-session-runner
-COPY --chown=root:root scripts/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY --chown=root:root scripts/runtime/git-credential-host-helper.sh /usr/local/bin/git-credential-host-helper.sh
-COPY --chown=root:root scripts/runtime/git-credential-proxy-server.sh /usr/local/bin/git-credential-proxy-server.sh
-COPY --chown=root:root scripts/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
-COPY --chown=root:root scripts/runtime/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
-COPY --chown=root:root scripts/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
-COPY --chown=root:root scripts/runtime/mcp-stub.py /usr/local/bin/mcp-stub
-COPY --chown=root:root scripts/runtime/capability-unseal.py /usr/local/bin/capability-unseal
-COPY --chown=root:root scripts/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
-COPY --chown=root:root scripts/utils/package-agent-data.py /usr/local/bin/package-agent-data.py
+COPY --chown=root:root docker/runtime/agent-session /usr/local/bin/agent-session
+COPY --chown=root:root docker/runtime/agent-session-runner /usr/local/bin/agent-session-runner
+COPY --chown=root:root docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=root:root docker/runtime/git-credential-host-helper.sh /usr/local/bin/git-credential-host-helper.sh
+COPY --chown=root:root host/utils/git-credential-proxy-server.sh /usr/local/bin/git-credential-proxy-server.sh
+COPY --chown=root:root docker/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
+COPY --chown=root:root host/utils/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
+COPY --chown=root:root docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
+COPY --chown=root:root docker/runtime/mcp-stub.py /usr/local/bin/mcp-stub
+COPY --chown=root:root docker/runtime/capability-unseal.py /usr/local/bin/capability-unseal
+COPY --chown=root:root host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
+COPY --chown=root:root host/utils/package-agent-data.py /usr/local/bin/package-agent-data.py
 RUN chmod +x \
     /usr/local/bin/agent-session \
     /usr/local/bin/agent-session-runner \
@@ -219,7 +219,7 @@ RUN chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runne
     chmod 4755 /usr/local/bin/agentcli-exec && \
     chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl
 
-COPY --chown=root:root scripts/runtime/install-agent-cli-wrappers.sh /usr/local/bin/install-agent-cli-wrappers.sh
+COPY --chown=root:root docker/runtime/install-agent-cli-wrappers.sh /usr/local/bin/install-agent-cli-wrappers.sh
 RUN chmod +x /usr/local/bin/install-agent-cli-wrappers.sh && \
     /usr/local/bin/install-agent-cli-wrappers.sh github-copilot-cli:copilot codex:codex claude:claude && \
     rm /usr/local/bin/install-agent-cli-wrappers.sh
