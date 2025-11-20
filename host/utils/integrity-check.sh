@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Verifies SHA256SUMS for Coding Agents installs.
+# shellcheck source-path=SCRIPTDIR source=common-functions.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

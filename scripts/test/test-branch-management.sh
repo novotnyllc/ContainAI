@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1091,SC2155,SC2034
 # Comprehensive test suite for branch management features
 # Tests branch conflict detection, archiving, unmerged commits, and cleanup
 

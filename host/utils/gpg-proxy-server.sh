@@ -63,7 +63,8 @@ rm -f "$SOCKET_PATH"
 
 # Log function
 log() {
-    local msg=$(echo "$*" | tr -d '\000-\037' | head -c 500)
+    local msg
+    msg=$(echo "$*" | tr -d '\000-\037' | head -c 500)
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >> "$LOG_FILE"
 }
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1091,SC2155,SC2015,SC2207,SC2086,SC1007
 # Automated test suite for launcher scripts
 # Tests all core functionality: naming, labels, auto-push, shared functions
 
