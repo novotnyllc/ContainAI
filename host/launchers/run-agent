@@ -8,6 +8,18 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
+detect_environment_profile
+REPO_ROOT="$CODING_AGENTS_ROOT"
+
+if [ "$CODING_AGENTS_PROFILE" = "dev" ]; then
+    maybe_check_launcher_updates "$REPO_ROOT" "run-agent"
+fi
+
+if ! run_integrity_check_if_needed; then
+    echo "❌ Integrity verification failed; aborting run." >&2
+    exit 1
+fi
+
 print_run_agent_usage() {
         cat <<'EOF'
 Usage: run-agent <agent> [SOURCE] [OPTIONS]
@@ -48,9 +60,6 @@ Examples:
     run-agent copilot . -b feature-api -y          # Auto-replace existing agent branch
 EOF
 }
-
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-maybe_check_launcher_updates "$REPO_ROOT" "run-agent"
 
 WANTS_HELP=false
 for arg in "$@"; do
@@ -979,10 +988,10 @@ if [ -n "$NAME" ]; then
         echo "   Container names must start with alphanumeric characters and may include . _ -"
         exit 1
     fi
-    CONTAINER_NAME="${AGENT}-${NAME}"
+    CONTAINER_NAME="${AGENT}-${NAME}$(get_profile_suffix)"
     WORKSPACE_NAME="$NAME"
 else
-    CONTAINER_NAME="${AGENT}-${REPO_NAME}-${SAFE_BRANCH}"
+    CONTAINER_NAME="${AGENT}-${REPO_NAME}-${SAFE_BRANCH}$(get_profile_suffix)"
     WORKSPACE_NAME="$REPO_NAME"
 fi
 
@@ -1275,6 +1284,7 @@ DOCKER_ARGS+=(
     "-e" "AGENT_SESSION_MODE=supervised"
     "-e" "AGENT_SESSION_NAME=agent"
     "-e" "AGENT_NAME=$AGENT"
+    "-e" "CODING_AGENTS_PROFILE=$CODING_AGENTS_PROFILE"
     "-e" "HOST_SESSION_ID=$SESSION_ID"
     "-e" "HOST_SESSION_CONFIG_SHA256=$SESSION_CONFIG_SHA256"
     "-e" "HOST_TRUSTED_TREES=$TRUSTED_TREE_HASHES_ENV"
@@ -1285,6 +1295,7 @@ DOCKER_ARGS+=(
     "-e" "CODING_AGENTS_AGENT_DATA_ROOT=/run/agent-data"
     "-e" "CODING_AGENTS_SECRET_TMPFS_SIZE=${TMPFS_SECRET_SIZE}"
     "--label" "coding-agents.type=agent"
+    "--label" "coding-agents.profile=$CODING_AGENTS_PROFILE"
     "--label" "coding-agents.agent=$AGENT"
     "--label" "coding-agents.repo=$REPO_NAME"
     "--label" "coding-agents.branch=$AGENT_BRANCH"

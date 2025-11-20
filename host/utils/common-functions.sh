@@ -5,7 +5,13 @@ set -euo pipefail
 COMMON_FUNCTIONS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CODING_AGENTS_REPO_ROOT_DEFAULT=$(cd "$COMMON_FUNCTIONS_DIR/../.." && pwd)
 
-CODING_AGENTS_CONFIG_DIR="${HOME}/.config/coding-agents"
+CODING_AGENTS_PROFILE="${CODING_AGENTS_PROFILE:-dev}"
+CODING_AGENTS_ROOT="${CODING_AGENTS_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
+# Defaults for dev; overridden by env-detect at runtime. Prod uses system paths set by env-detect.
+CODING_AGENTS_CONFIG_DIR="${CODING_AGENTS_CONFIG_DIR:-${HOME}/.config/coding-agents-dev}"
+CODING_AGENTS_DATA_ROOT="${CODING_AGENTS_DATA_ROOT:-${HOME}/.local/share/coding-agents-dev}"
+CODING_AGENTS_CACHE_ROOT="${CODING_AGENTS_CACHE_ROOT:-${HOME}/.cache/coding-agents-dev}"
+CODING_AGENTS_SHA256_FILE="${CODING_AGENTS_SHA256_FILE:-${CODING_AGENTS_ROOT}/SHA256SUMS}"
 CODING_AGENTS_HOST_CONFIG_FILE="${CODING_AGENTS_HOST_CONFIG:-${CODING_AGENTS_CONFIG_DIR}/host-config.env}"
 CODING_AGENTS_OVERRIDE_DIR="${CODING_AGENTS_OVERRIDE_DIR:-${CODING_AGENTS_CONFIG_DIR}/overrides}"
 CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-${CODING_AGENTS_OVERRIDE_DIR}/allow-dirty}"
@@ -17,6 +23,14 @@ CODING_AGENTS_HELPER_NETWORK_POLICY="${CODING_AGENTS_HELPER_NETWORK_POLICY:-loop
 CODING_AGENTS_HELPER_PIDS_LIMIT="${CODING_AGENTS_HELPER_PIDS_LIMIT:-64}"
 CODING_AGENTS_HELPER_MEMORY="${CODING_AGENTS_HELPER_MEMORY:-512m}"
 DEFAULT_LAUNCHER_UPDATE_POLICY="prompt"
+
+get_profile_suffix() {
+    if [ "${CODING_AGENTS_PROFILE:-dev}" = "dev" ]; then
+        printf '%s' "-dev"
+    else
+        printf ''
+    fi
+}
 
 _sha256_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -345,6 +359,47 @@ log_override_usage() {
         "$(json_escape_string "$label")" \
         "$dirty_json")
     log_security_event "override-used" "$payload"
+}
+
+detect_environment_profile() {
+    local env_detect_script="$COMMON_FUNCTIONS_DIR/env-detect.sh"
+    if [ ! -x "$env_detect_script" ]; then
+        echo "⚠️  Unable to detect environment profile (missing env-detect.sh)" >&2
+        return 1
+    fi
+    local output
+    if ! output=$("$env_detect_script" --format env); then
+        echo "❌ Environment detection failed" >&2
+        return 1
+    fi
+    while IFS='=' read -r key value; do
+        [ -z "$key" ] && continue
+        case "$key" in
+            CODING_AGENTS_PROFILE) CODING_AGENTS_PROFILE="$value" ;;
+            CODING_AGENTS_ROOT) CODING_AGENTS_ROOT="$value" ;;
+            CODING_AGENTS_CONFIG_ROOT) CODING_AGENTS_CONFIG_DIR="$value" ;;
+            CODING_AGENTS_DATA_ROOT) CODING_AGENTS_DATA_ROOT="$value" ;;
+            CODING_AGENTS_CACHE_ROOT)
+                CODING_AGENTS_CACHE_ROOT="$value"
+                CODING_AGENTS_CACHE_DIR="$value"
+                ;;
+            CODING_AGENTS_SHA256_FILE) CODING_AGENTS_SHA256_FILE="$value" ;;
+        esac
+    done <<< "$output"
+    export CODING_AGENTS_PROFILE CODING_AGENTS_ROOT CODING_AGENTS_CONFIG_DIR CODING_AGENTS_DATA_ROOT CODING_AGENTS_CACHE_ROOT CODING_AGENTS_SHA256_FILE
+    return 0
+}
+
+run_integrity_check_if_needed() {
+    local integrity_script="$COMMON_FUNCTIONS_DIR/integrity-check.sh"
+    if [ ! -x "$integrity_script" ]; then
+        echo "⚠️  Missing integrity-check.sh; skipping integrity validation" >&2
+        return 0
+    fi
+    if "$integrity_script" --mode "$CODING_AGENTS_PROFILE" --root "$CODING_AGENTS_ROOT" --sums "$CODING_AGENTS_SHA256_FILE"; then
+        return 0
+    fi
+    return 1
 }
 
 ensure_trusted_paths_clean() {
