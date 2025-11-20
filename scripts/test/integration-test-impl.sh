@@ -230,7 +230,7 @@ wait_for_agent_branch() {
     local branch="$1"
     local timeout="${2:-60}"
     local elapsed=0
-    while [ $elapsed -lt $timeout ]; do
+    while [ "$elapsed" -lt "$timeout" ]; do
         if git -C "$TEST_REPO_DIR" rev-parse --verify --quiet "$branch" >/dev/null 2>&1; then
             return 0
         fi
@@ -670,6 +670,156 @@ PY
     stop_mock_proxy
 }
 
+test_squid_proxy_hardening() {
+    test_section "Testing squid proxy hardening rules"
+
+    local proxy_image="coding-agents-proxy:test-hardened"
+    if ! docker image inspect "$proxy_image" >/dev/null 2>&1; then
+        echo "Building proxy image for hardening test..."
+        if ! docker build -f "$PROJECT_ROOT/docker/proxy/Dockerfile" -t "$proxy_image" "$PROJECT_ROOT"; then
+            fail "Failed to build squid proxy image"
+            return
+        fi
+    fi
+
+    local proxy_network="test-squid-net-${TEST_LABEL_SESSION//[^a-zA-Z0-9_.-]/-}"
+    local proxy_container="${TEST_PROXY_CONTAINER}-squid"
+    local allowed_container="${TEST_PROXY_CONTAINER}-allowed"
+    local proxy_ip="203.0.113.20"
+    local allowed_ip="203.0.113.10"
+    local allowed_domain="allowed.test"
+    local proxy_url="http://${proxy_ip}:3128"
+
+    cleanup_proxy_resources() {
+        if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+            echo "Preserving squid proxy resources ($proxy_container, $allowed_container, $proxy_network)"
+            return
+        fi
+        docker rm -f "$proxy_container" "$allowed_container" >/dev/null 2>&1 || true
+        docker network rm "$proxy_network" >/dev/null 2>&1 || true
+    }
+
+    docker network create \
+        --subnet 203.0.113.0/24 \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        "$proxy_network" 2>/dev/null || true
+
+    if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
+        fail "Failed to create isolated proxy network"
+        cleanup_proxy_resources
+        return
+    fi
+
+    if ! docker run -d \
+        --name "$allowed_container" \
+        --network "$proxy_network" \
+        --ip "$allowed_ip" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        "$TEST_CODEX_IMAGE" \
+        sh -c "cd /tmp && python3 -m http.server 8080 >/tmp/http.log 2>&1"
+    then
+        fail "Failed to start allowed test server"
+        cleanup_proxy_resources
+        return
+    fi
+
+    if ! docker run -d \
+        --name "$proxy_container" \
+        --network "$proxy_network" \
+        --ip "$proxy_ip" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        -e "SQUID_ALLOWED_DOMAINS=${allowed_domain}" \
+        "$proxy_image"
+    then
+        fail "Failed to start squid proxy container"
+        cleanup_proxy_resources
+        return
+    fi
+
+    local ready=false
+    for _ in {1..10}; do
+        if docker exec "$proxy_container" bash -c "exec 3<>/dev/tcp/localhost/3128" >/dev/null 2>&1; then
+            ready=true
+            docker exec "$proxy_container" bash -c "exec 3>&-"
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$ready" = false ]; then
+        fail "Squid proxy did not become ready"
+        cleanup_proxy_resources
+        return
+    fi
+
+    if docker run --rm \
+        --network "$proxy_network" \
+        --add-host "${allowed_domain}:${allowed_ip}" \
+        -e "HTTP_PROXY=$proxy_url" \
+        -e "HTTPS_PROXY=$proxy_url" \
+        "$TEST_CODEX_IMAGE" \
+        python3 - <<'PY'
+import os
+import sys
+import urllib.error
+import urllib.request
+
+proxy = os.environ["HTTP_PROXY"]
+handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+opener = urllib.request.build_opener(handler)
+response = opener.open("http://allowed.test:8080", timeout=5)
+body = response.read()
+sys.exit(0 if body else 1)
+PY
+    then
+        pass "Squid allows traffic to permitted domain outside private ranges"
+    else
+        fail "Squid blocked or failed allowed domain request"
+    fi
+
+    if docker run --rm \
+        --network "$proxy_network" \
+        -e "HTTP_PROXY=$proxy_url" \
+        -e "HTTPS_PROXY=$proxy_url" \
+        "$TEST_CODEX_IMAGE" \
+        python3 - <<'PY'
+import os
+import sys
+import urllib.error
+import urllib.request
+
+proxy = os.environ["HTTP_PROXY"]
+handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+opener = urllib.request.build_opener(handler)
+
+def should_block(url: str) -> bool:
+    try:
+        opener.open(url, timeout=3)
+    except Exception:
+        return True
+    return False
+
+targets = [
+    "http://169.254.169.254",
+    "http://10.0.0.1",
+    "http://172.16.0.1",
+    "http://192.168.1.1",
+]
+
+sys.exit(0 if all(should_block(url) for url in targets) else 1)
+PY
+    then
+        pass "Squid blocks metadata and RFC1918 destinations"
+    else
+        fail "Squid allowed private or metadata destination"
+    fi
+
+    cleanup_proxy_resources
+}
+
 test_multiple_agents() {
     test_section "Testing multiple agents simultaneously"
     
@@ -905,6 +1055,7 @@ run_all_tests() {
     test_agent_task_runner_seccomp
     test_mcp_configuration_generation
     test_network_proxy_modes
+    test_squid_proxy_hardening
     test_multiple_agents
     test_container_isolation
     test_cleanup_on_exit

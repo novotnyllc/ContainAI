@@ -43,7 +43,7 @@
 - **8.8 Enforcement policies** – Ensure launchers/installers require system scope, block unsupported runtimes, rely only on `sha256sum`, and emit audit events when policies trigger. Dependencies: 8.3, 8.5, 7.3.
 
 ### Epic 9 – Network Security Hardening
-- **9.1 Harden docker proxy rules** – Update `docker/proxy/squid.conf` (and related Docker proxy settings) to block access to cloud metadata endpoints (169.254.169.254, 169.254.0.0/16) and private RFC1918 ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) while keeping required MCP/package-manager traffic functional. Dependencies: 3.2 and existing proxy container plumbing.
+- **9.1 Harden docker proxy rules** (Status: Done) – Update `docker/proxy/squid.conf` (and related Docker proxy settings) to block access to cloud metadata endpoints (169.254.169.254, 169.254.0.0/16) and private RFC1918 ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) while keeping required MCP/package-manager traffic functional. Files: docker/proxy/squid.conf; scripts/test/integration-test-impl.sh; scripts/test/README.md. Tests: integration-test.sh::test_squid_proxy_hardening (added); lint: shellcheck docker/proxy/entrypoint.sh scripts/test/integration-test-impl.sh.
 - **9.2 Enforce proxy rate limits** – Add squid/dnsmasq rules that cap request payloads at 10 MB and responses at 100 MB, returning clear errors when limits trigger. Tie the limits into telemetry so launches log violations. Dependencies: 9.1, feeds 5.2/7.3.
 
 ## Completed Work (For Reference)

@@ -58,6 +58,7 @@ Full end-to-end system validation with two modes:
 | Branch/auto-push safety                      | `test-branch-management.sh` / `.ps1` unit suites                                                                 | Bash & PowerShell parity. |
 | MCP config conversion                        | `integration-test.sh::test_mcp_configuration_generation`                                                         | Exercises `/usr/local/bin/setup-mcp-configs.sh` with mock config.toml. |
 | Network proxy modes (`restricted` / `squid`) | `integration-test.sh::test_network_proxy_modes`                                                                  | Uses mock proxy container + `--network none` to ensure wiring behaves. |
+| Proxy hardening (metadata/RFC1918 blocks)    | `integration-test.sh::test_squid_proxy_hardening`                                                                | Builds the Squid image and ensures private/link-local ranges are denied while allowed domains still transit. |
 | Shared utility functions                     | `integration-test.sh::test_shared_functions` + unit suites                                                       | Guards regressions in `scripts/utils/common-functions.*`. |
 | Runtime secret handling                      | Mock fixtures under `scripts/test/fixtures/mock-secrets` ensure no real credentials are required for tests       | Fixtures copied into isolated workspace. |
 
