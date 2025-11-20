@@ -20,7 +20,13 @@ AGENT_CONFIG_TARGETS: Dict[str, str] = {
     "codex": "/home/agentuser/.config/codex/mcp/config.json",
     "claude": "/home/agentuser/.config/claude/mcp/config.json",
 }
-STUB_COMMAND = "/usr/local/bin/mcp-stub"
+STUB_COMMAND_TEMPLATE = "/home/agentuser/.local/bin/mcp-stub-{name}"
+HELPER_LISTEN_HOST = "127.0.0.1"
+HELPER_PORT_BASE = 52100
+DEFAULT_CONFIG_ROOT = pathlib.Path(os.environ.get("CODING_AGENTS_CONFIG_ROOT", Path.home() / ".config" / "coding-agents-dev"))
+DEFAULT_HELPER_ACL_CONFIG = pathlib.Path(
+    os.environ.get("CODING_AGENTS_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
+)
 ENV_PATTERN = re.compile(r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)")
 DEFAULT_SECRET_PATHS = [
     pathlib.Path("~/.config/coding-agents/mcp-secrets.env").expanduser(),
@@ -86,6 +92,75 @@ def _collect_placeholders(value) -> Set[str]:
         for item in value.values():
             names.update(_collect_placeholders(item))
     return names
+
+
+def _load_acl_policies(path: pathlib.Path) -> Dict[str, Dict[str, Dict[str, List[str]]]]:
+    if not path.exists():
+        return {"helpers": {}, "agents": {}}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return {"helpers": {}, "agents": {}}
+    helpers_raw = data.get("helpers", []) if isinstance(data, dict) else data
+    agents_raw = data.get("agents", []) if isinstance(data, dict) else []
+    helpers: Dict[str, Dict[str, List[str]]] = {}
+    agents: Dict[str, Dict[str, List[str]]] = {}
+    for entry, target in ((helpers_raw, helpers), (agents_raw, agents)):
+        for item in entry:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not name:
+                continue
+            allow = item.get("allow") or item.get("domains") or []
+            block = item.get("block") or item.get("deny") or []
+            if not isinstance(allow, list) or not isinstance(block, list):
+                continue
+            target[name] = {"allow": [str(d) for d in allow], "block": [str(d) for d in block]}
+    return {"helpers": helpers, "agents": agents}
+
+
+def _write_squid_acls(output_path: pathlib.Path, helpers: List[Dict[str, object]], policies: Dict[str, Dict[str, Dict[str, List[str]]]]) -> None:
+    lines: List[str] = [
+        "# Auto-generated helper ACLs",
+        "# Each helper must present X-CA-Helper header; allow lists are per helper",
+    ]
+    agent_policies = policies.get("agents", {})
+    for agent_name, policy in agent_policies.items():
+        lines.append(f"acl agent_hdr_{agent_name} req_header X-CA-Agent {agent_name}")
+        if policy.get("block"):
+            lines.append(f"acl agent_block_{agent_name} dstdomain {' '.join(policy['block'])}")
+            lines.append(f"http_access deny agent_hdr_{agent_name} agent_block_{agent_name}")
+        if policy.get("allow"):
+            lines.append(f"acl agent_allow_{agent_name} dstdomain {' '.join(policy['allow'])}")
+            lines.append(f"http_access allow agent_hdr_{agent_name} agent_allow_{agent_name}")
+        else:
+            lines.append(f"http_access allow agent_hdr_{agent_name} allowed_domains")
+
+    seen = set()
+    helper_policies = policies.get("helpers", {})
+    for helper in helpers:
+        name = str(helper.get("name", "")).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        lines.append(f"acl helper_hdr_{name} req_header X-CA-Helper {name}")
+        policy = helper_policies.get(name, {})
+        allow_domains = policy.get("allow", [])
+        block_domains = policy.get("block", [])
+        if block_domains:
+            lines.append(f"acl helper_block_{name} dstdomain {' '.join(block_domains)}")
+            lines.append(f"http_access deny helper_hdr_{name} helper_block_{name}")
+        if allow_domains:
+            lines.append(f"acl helper_allow_{name} dstdomain {' '.join(allow_domains)}")
+            lines.append(f"http_access allow helper_hdr_{name} helper_allow_{name}")
+        else:
+            lines.append(f"http_access allow helper_hdr_{name} allowed_domains")
+    if not seen:
+        lines.append("acl helper_hdr_default req_header X-CA-Helper .")
+        lines.append("http_access allow helper_hdr_default allowed_domains")
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _encode_stub_spec(spec: Dict) -> str:
@@ -167,9 +242,16 @@ def _resolve_value(value, secrets: Dict[str, str]):
     return value
 
 
-def _render_remote_server(name: str, settings: Dict, secrets: Dict[str, str], warnings: List[str]) -> Dict:
+def _render_remote_server(
+    name: str,
+    settings: Dict,
+    secrets: Dict[str, str],
+    warnings: List[str],
+    next_port,
+) -> Tuple[Dict, Dict]:
     rendered: Dict = {}
     bearer_var = settings.get("bearer_token_env_var")
+    bearer_token = None
     for key, value in settings.items():
         if key == "bearer_token_env_var":
             continue
@@ -177,12 +259,24 @@ def _render_remote_server(name: str, settings: Dict, secrets: Dict[str, str], wa
     if bearer_var:
         token = secrets.get(bearer_var) or os.environ.get(bearer_var)
         if token:
+            bearer_token = token
             rendered["bearerToken"] = token
         else:
             warnings.append(
                 f"⚠️  Missing bearer token '{bearer_var}' for MCP server '{name}'"
             )
-    return rendered
+    listen_port = next_port()
+    listen_addr = f"{HELPER_LISTEN_HOST}:{listen_port}"
+    target_url = rendered.get("url") or ""
+    rendered["url"] = f"http://{listen_addr}"
+    helper_entry = {
+        "name": name,
+        "listen": listen_addr,
+        "target": target_url,
+    }
+    if bearer_token:
+        helper_entry["bearerToken"] = bearer_token
+    return rendered, helper_entry
 
 
 def _render_stub_server(
@@ -227,9 +321,12 @@ def _render_stub_server(
         spec["cwd"] = str(cwd)
 
     rendered_entry = dict(config)
-    rendered_entry["command"] = STUB_COMMAND
+    rendered_entry["command"] = STUB_COMMAND_TEMPLATE.format(name=name)
     rendered_entry["args"] = []
-    rendered_entry["env"] = {"CODING_AGENTS_STUB_SPEC": _encode_stub_spec(spec)}
+    rendered_entry["env"] = {
+        "CODING_AGENTS_STUB_SPEC": _encode_stub_spec(spec),
+        "CODING_AGENTS_STUB_NAME": name,
+    }
     return rendered_entry, stub_secrets
 
 
@@ -249,6 +346,14 @@ def render_configs(
     config_data: Dict = {}
     source_exists = config_path is not None and config_path.exists()
     config_sha = _sha256_file(config_path) if source_exists else None
+    helpers: List[Dict] = []
+    acl_policies = _load_acl_policies(DEFAULT_HELPER_ACL_CONFIG)
+    port_counter = {"value": HELPER_PORT_BASE}
+
+    def _next_port() -> int:
+        port = port_counter["value"]
+        port_counter["value"] += 1
+        return port
 
     if source_exists:
         config_data = _read_toml(config_path)
@@ -271,7 +376,11 @@ def render_configs(
                 stub_secret_map[server_name] = stub_secrets
             stubbed_server_names.append(server_name)
         else:
-            rendered_servers[server_name] = _render_remote_server(server_name, settings, secrets, warnings)
+            rendered_entry, helper = _render_remote_server(
+                server_name, settings, secrets, warnings, _next_port
+            )
+            rendered_servers[server_name] = rendered_entry
+            helpers.append(helper)
 
     files: List[Dict] = []
     all_server_names = sorted(source_servers.keys())
@@ -303,6 +412,9 @@ def render_configs(
             }
         )
 
+    acl_path = output_dir / "squid-acls.conf"
+    _write_squid_acls(acl_path, helpers, acl_policies)
+
     manifest = {
         "sessionId": session_id,
         "generatedAt": generated_at,
@@ -314,6 +426,8 @@ def render_configs(
         "allServers": all_server_names,
         "stubSecrets": stub_secret_map,
         "files": files,
+        "helpers": helpers,
+        "helperAclPath": str(acl_path),
     }
 
     manifest_path = output_dir / "manifest.json"
@@ -333,6 +447,9 @@ def render_configs(
     manifest["manifestPath"] = str(manifest_path)
     manifest["manifestSha256"] = _sha256_file(manifest_path)
     manifest["stubSecretFile"] = str(stub_secret_path)
+    helpers_path = output_dir / "helpers.json"
+    helpers_path.write_text(json.dumps(helpers, indent=2, sort_keys=True), encoding="utf-8")
+    manifest["helpersPath"] = str(helpers_path)
     if warnings:
         for warning in warnings:
             print(warning, file=sys.stderr)

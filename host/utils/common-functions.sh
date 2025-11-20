@@ -1687,6 +1687,10 @@ ensure_squid_proxy() {
     local proxy_image="$3"
     local agent_container="$4"
     local squid_allowed_domains="${5:-*.github.com,*.githubcopilot.com,*.nuget.org}"
+    local helper_acl_file="${6:-}"
+    local proxy_log_dir="${7:-}"
+    local agent_id="${8:-}"
+    local session_id="${9:-}"
     
     # Create network if needed
     if ! container_cli network inspect "$network_name" >/dev/null 2>&1; then
@@ -1702,15 +1706,28 @@ ensure_squid_proxy() {
         fi
     else
         # Create new proxy
-        container_cli run -d \
-            --name "$proxy_container" \
-            --hostname "$proxy_container" \
-            --network "$network_name" \
-            --restart unless-stopped \
-            -e "SQUID_ALLOWED_DOMAINS=$squid_allowed_domains" \
-            --label "coding-agents.proxy-of=$agent_container" \
-            --label "coding-agents.proxy-image=$proxy_image" \
-            "$proxy_image" >/dev/null
+        local -a proxy_args=(
+            -d
+            --name "$proxy_container"
+            --hostname "$proxy_container"
+            --network "$network_name"
+            --restart unless-stopped
+            -e "SQUID_ALLOWED_DOMAINS=$squid_allowed_domains"
+            --label "coding-agents.proxy-of=$agent_container"
+            --label "coding-agents.proxy-image=$proxy_image"
+        )
+        if [ -n "$helper_acl_file" ] && [ -f "$helper_acl_file" ]; then
+            proxy_args+=("-v" "$helper_acl_file:/etc/squid/helper-acls.conf:ro")
+        fi
+        if [ -n "$proxy_log_dir" ]; then
+            mkdir -p "$proxy_log_dir"
+            proxy_args+=("-v" "$proxy_log_dir:/var/log/squid")
+            proxy_args+=("-e" "SQUID_LOG_DIR=/var/log/squid")
+        fi
+        [ -n "$agent_id" ] && proxy_args+=("-e" "CA_AGENT_ID=$agent_id")
+        [ -n "$session_id" ] && proxy_args+=("-e" "CA_SESSION_ID=$session_id")
+        proxy_args+=("$proxy_image")
+        container_cli run "${proxy_args[@]}" >/dev/null
     fi
 }
 

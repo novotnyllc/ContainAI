@@ -980,6 +980,156 @@ PY
     cleanup_proxy_resources
 }
 
+test_mcp_helper_proxy_enforced() {
+    test_section "Testing MCP helper enforced proxy egress"
+
+    local proxy_image="coding-agents-proxy:test-hardened"
+    if ! docker image inspect "$proxy_image" >/dev/null 2>&1; then
+        echo "Building proxy image for helper proxy test..."
+        if ! docker build -f "$PROJECT_ROOT/docker/proxy/Dockerfile" -t "$proxy_image" "$PROJECT_ROOT"; then
+            fail "Failed to build squid proxy image"
+            return
+        fi
+    fi
+
+    local proxy_network="test-helper-net-${TEST_LABEL_SESSION//[^a-zA-Z0-9_.-]/-}"
+    local proxy_container="${TEST_PROXY_CONTAINER}-helper-proxy"
+    local helper_container="${TEST_PROXY_CONTAINER}-helper"
+    local allowed_container="${TEST_PROXY_CONTAINER}-helper-allowed"
+    local helper_acl_file
+    helper_acl_file="$(mktemp)"
+    local proxy_ip="203.0.116.20"
+    local allowed_ip="203.0.116.10"
+    local allowed_domain="allowed2.test"
+    local proxy_url="http://${proxy_ip}:3128"
+
+    cat > "$helper_acl_file" <<EOF
+# helper-specific ACLs for test
+acl helper_hdr_helper-test req_header X-CA-Helper helper-test
+acl helper_allow_helper-test dstdomain ${allowed_domain}
+http_access allow helper_hdr_helper-test helper_allow_helper-test
+EOF
+
+    cleanup_helper_resources() {
+        if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+            echo "Preserving helper proxy resources ($proxy_container, $helper_container, $allowed_container, $proxy_network)"
+            return
+        fi
+        docker rm -f "$proxy_container" "$helper_container" "$allowed_container" >/dev/null 2>&1 || true
+        docker network rm "$proxy_network" >/dev/null 2>&1 || true
+    }
+
+    docker network create \
+        --subnet 203.0.116.0/24 \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        "$proxy_network" 2>/dev/null || true
+
+    if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
+        fail "Failed to create helper proxy network"
+        cleanup_helper_resources
+        return
+    fi
+
+    # Allowed upstream server
+    if ! docker run -d \
+        --name "$allowed_container" \
+        --network "$proxy_network" \
+        --ip "$allowed_ip" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        "$TEST_CODEX_IMAGE" \
+        python3 - <<'PY'
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        return
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+server = ThreadingHTTPServer(("", 8080), Handler)
+server.serve_forever()
+PY
+    then
+        fail "Failed to start upstream server for helper test"
+        cleanup_helper_resources
+        return
+    fi
+
+    # Squid proxy
+    if ! docker run -d \
+        --name "$proxy_container" \
+        --hostname "$proxy_container" \
+        --network "$proxy_network" \
+        --ip "$proxy_ip" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        -e "SQUID_ALLOWED_DOMAINS=${allowed_domain}" \
+        -v "$helper_acl_file:/etc/squid/helper-acls.conf:ro" \
+        "$proxy_image" >/dev/null
+    then
+        fail "Failed to start helper squid proxy"
+        cleanup_helper_resources
+        return
+    fi
+
+    # Helper container with enforced egress to proxy only
+    if ! docker run -d \
+        --name "$helper_container" \
+        --network "$proxy_network" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        --cap-add NET_ADMIN \
+        -e "HTTP_PROXY=$proxy_url" \
+        -e "HTTPS_PROXY=$proxy_url" \
+        -e "NO_PROXY=" \
+        -e "CODING_AGENTS_REQUIRE_PROXY=1" \
+        -v "$PROJECT_ROOT:/workspace" \
+        "$TEST_CODEX_IMAGE" \
+        sh -c "\
+iptables -F OUTPUT && \
+iptables -P OUTPUT DROP && \
+iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT && \
+iptables -A OUTPUT -o lo -j ACCEPT && \
+iptables -A OUTPUT -p tcp -d ${proxy_ip} --dport 3128 -j ACCEPT && \
+exec python3 /workspace/docker/runtime/mcp-http-helper.py --name helper-test --listen 0.0.0.0:18080 --target http://${allowed_domain}:8080" >/dev/null
+    then
+        fail "Failed to start helper container with enforced proxy"
+        cleanup_helper_resources
+        return
+    fi
+
+    sleep 2
+
+    local health
+    health=$(docker exec "$helper_container" curl -s --max-time 3 http://127.0.0.1:18080/health || true)
+    if echo "$health" | grep -q '"status": "ok"'; then
+        pass "Helper health endpoint responds via proxy"
+    else
+        fail "Helper health endpoint unavailable"
+    fi
+
+    if docker exec "$helper_container" curl -s --max-time 5 http://127.0.0.1:18080/ | grep -q "ok"; then
+        pass "Helper successfully proxies through squid with header enforcement"
+    else
+        fail "Helper failed to proxy through squid"
+    fi
+
+    # Direct egress without proxy should fail due to firewall
+    if docker exec "$helper_container" env -u HTTP_PROXY -u HTTPS_PROXY curl --max-time 3 http://${allowed_domain}:8080/ >/dev/null 2>&1; then
+        fail "Helper bypassed proxy despite firewall"
+    else
+        pass "Firewall blocks direct egress without proxy"
+    fi
+
+    cleanup_helper_resources
+    rm -f "$helper_acl_file"
+}
+
 test_multiple_agents() {
     test_section "Testing multiple agents simultaneously"
     
@@ -1216,6 +1366,7 @@ run_all_tests() {
     test_mcp_configuration_generation
     test_network_proxy_modes
     test_squid_proxy_hardening
+    test_mcp_helper_proxy_enforced
     test_multiple_agents
     test_container_isolation
     test_cleanup_on_exit

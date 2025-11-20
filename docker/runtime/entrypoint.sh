@@ -13,6 +13,10 @@ PTRACE_SCOPE_VALUE="${CODING_AGENTS_PTRACE_SCOPE:-3}"
 CAP_TMPFS_SIZE="${CODING_AGENTS_CAP_TMPFS_SIZE:-16m}"
 DATA_TMPFS_SIZE="${CODING_AGENTS_DATA_TMPFS_SIZE:-64m}"
 SECRETS_TMPFS_SIZE="${CODING_AGENTS_SECRET_TMPFS_SIZE:-32m}"
+STUB_SHIM_ROOT="/home/${AGENT_USERNAME}/.local/bin"
+declare -a MCP_HELPER_PIDS=()
+declare -a MCP_HELPER_NAMES=()
+PROXY_FIREWALL_APPLIED="${PROXY_FIREWALL_APPLIED:-0}"
 
 is_mountpoint() {
     local path="$1"
@@ -93,6 +97,65 @@ prepare_sensitive_tmpfs() {
     mount --make-unbindable "$path" >/dev/null 2>&1 || true
 }
 
+parse_proxy_target() {
+    local proxy_url="$1"
+    python3 - "$proxy_url" <<'PY'
+import sys, urllib.parse, socket
+url = sys.argv[1]
+parsed = urllib.parse.urlparse(url)
+host = parsed.hostname
+port = parsed.port or (443 if parsed.scheme == "https" else 80)
+if not host:
+    sys.exit(1)
+try:
+    ip = socket.gethostbyname(host)
+except Exception:
+    sys.exit(1)
+print(f"{ip}:{port}")
+PY
+}
+
+enforce_proxy_firewall() {
+    if [ "$PROXY_FIREWALL_APPLIED" = "1" ]; then
+        return
+    fi
+    local proxy_url="${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}"
+    if [ -z "$proxy_url" ]; then
+        echo "❌ Proxy firewall enforcement requires HTTP(S)_PROXY to be set" >&2
+        exit 1
+    fi
+    if ! command -v iptables >/dev/null 2>&1; then
+        echo "❌ iptables not available; cannot enforce proxy-only egress" >&2
+        exit 1
+    fi
+    local proxy_target
+    proxy_target="$(parse_proxy_target "$proxy_url")" || {
+        echo "❌ Unable to resolve proxy target from '$proxy_url'" >&2
+        exit 1
+    }
+    local proxy_ip="${proxy_target%:*}"
+    local proxy_port="${proxy_target##*:}"
+
+    # Flush and enforce OUTPUT policy
+    iptables -F OUTPUT >/dev/null 2>&1 || {
+        echo "❌ iptables flush failed; need NET_ADMIN capability" >&2
+        exit 1
+    }
+    iptables -P OUTPUT DROP
+    iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A OUTPUT -o lo -j ACCEPT
+    # Allow DNS to Docker resolver
+    iptables -A OUTPUT -p udp -d 127.0.0.11 --dport 53 -j ACCEPT
+    iptables -A OUTPUT -p tcp -d 127.0.0.11 --dport 53 -j ACCEPT
+    # Allow proxy traffic only
+    iptables -A OUTPUT -p tcp -d "$proxy_ip" --dport "$proxy_port" -j ACCEPT
+    iptables -A OUTPUT -p tcp -d "$proxy_ip" --dport 80 -j ACCEPT
+    iptables -A OUTPUT -p tcp -d "$proxy_ip" --dport 443 -j ACCEPT
+    PROXY_FIREWALL_APPLIED=1
+    export PROXY_FIREWALL_APPLIED
+    echo "🔒 Egress restricted to proxy ${proxy_ip}:${proxy_port}"
+}
+
 prepare_agent_task_runner_paths() {
     local log_root="/run/agent-task-runner"
     mkdir -p "$log_root"
@@ -166,6 +229,110 @@ install_host_capabilities() {
     find "$target" -type d -exec chmod 0700 {} + 2>/dev/null || true
     find "$target" -type f -exec chmod 0600 {} + 2>/dev/null || true
     return 0
+}
+
+ensure_stub_binaries() {
+    local servers_file="$1"
+    local runner="/usr/local/bin/mcp-stub-runner"
+    [ -x "$runner" ] || return 0
+    [ -f "$servers_file" ] || return 0
+    mkdir -p "$STUB_SHIM_ROOT"
+    while IFS= read -r stub; do
+        [ -z "$stub" ] && continue
+        local dest="${STUB_SHIM_ROOT}/mcp-stub-${stub}"
+        if [ ! -e "$dest" ]; then
+            ln -s "$runner" "$dest" 2>/dev/null || true
+        fi
+    done < "$servers_file"
+}
+
+create_stub_links_from_configs() {
+    local runner="/usr/local/bin/mcp-stub-runner"
+    [ -x "$runner" ] || return 0
+    if [ "$#" -eq 0 ]; then
+        return 0
+    fi
+    mkdir -p "$STUB_SHIM_ROOT"
+    python3 - "$@" <<'PY' | while IFS= read -r stub; do
+import json, sys
+stubs = set()
+for path in sys.argv[1:]:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        continue
+    if not isinstance(data, dict):
+        continue
+    servers = data.get("mcpServers") or {}
+    for _, cfg in servers.items():
+        if not isinstance(cfg, dict):
+            continue
+        env = cfg.get("env") or {}
+        stub = env.get("CODING_AGENTS_STUB_NAME")
+        if not stub:
+            cmd = cfg.get("command", "")
+            if isinstance(cmd, str) and "mcp-stub-" in cmd:
+                stub = cmd.split("/")[-1].replace("mcp-stub-", "", 1)
+        if stub:
+            stubs.add(stub)
+for stub in sorted(stubs):
+    print(stub)
+PY
+    do
+        [ -z "$stub" ] && continue
+        local dest="${STUB_SHIM_ROOT}/mcp-stub-${stub}"
+        if [ ! -e "$dest" ]; then
+            ln -s "$runner" "$dest" 2>/dev/null || true
+        fi
+    done
+}
+
+parse_helper_definitions() {
+    local helper_file="$1"
+    [ -f "$helper_file" ] || return 0
+    python3 - "$helper_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+except Exception:
+    sys.exit(0)
+helpers = raw if isinstance(raw, list) else raw.get("helpers", [])
+for helper in helpers:
+    name = helper.get("name")
+    listen = helper.get("listen")
+    target = helper.get("target")
+    bearer = helper.get("bearerToken", "")
+    if not name or not listen or not target:
+        continue
+    print(f"{name}|{listen}|{target}|{bearer}")
+PY
+}
+
+start_mcp_helpers() {
+    local helper_file="$1"
+    [ -f "$helper_file" ] || return 0
+    mkdir -p /run/mcp-helpers
+    local line
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        IFS='|' read -r helper_name helper_listen helper_target helper_bearer <<< "$line"
+        local log_file="/run/mcp-helpers/${helper_name}.log"
+        local cmd=(env CODING_AGENTS_REQUIRE_PROXY=1 CODING_AGENTS_AGENT_ID="${AGENT_NAME:-}" CODING_AGENTS_SESSION_ID="${HOST_SESSION_ID:-}" python3 /usr/local/bin/mcp-http-helper.py --name "$helper_name" --listen "$helper_listen" --target "$helper_target")
+        if [ -n "$helper_bearer" ]; then
+            cmd+=("--bearer-token" "$helper_bearer")
+        fi
+        "${cmd[@]}" >"$log_file" 2>&1 &
+        local pid=$!
+        MCP_HELPER_PIDS+=("$pid")
+        MCP_HELPER_NAMES+=("$helper_name")
+        if command -v curl >/dev/null 2>&1; then
+            curl --silent --max-time 2 "http://${helper_listen}/health" >/dev/null 2>&1 || \
+                echo "⚠️  Helper ${helper_name} failed health check on ${helper_listen}" >&2
+        fi
+    done < <(parse_helper_definitions "$helper_file" || true)
 }
 
 link_agent_data_target() {
@@ -418,6 +585,7 @@ if [ "$(id -u)" -eq 0 ]; then
     prepare_sensitive_tmpfs "/run/agent-secrets" "$SECRETS_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
     prepare_sensitive_tmpfs "/run/agent-data" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
     prepare_sensitive_tmpfs "/run/agent-data-export" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
+    enforce_proxy_firewall
     prepare_agent_task_runner_paths
     CODING_AGENTS_AGENT_DATA_STAGED=0
     if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
@@ -448,6 +616,7 @@ export AGENT_TASK_RUNNER_SOCKET
 if [ "${CODING_AGENTS_RUNNER_STARTED:-0}" != "1" ]; then
     start_agent_task_runnerd
 fi
+enforce_proxy_firewall
 
 echo "🚀 Starting Coding Agents Container..."
 
@@ -458,7 +627,14 @@ cleanup_on_shutdown() {
     echo "📤 Container shutting down..."
 
     export_agent_data_payload
-    
+
+    if [ ${#MCP_HELPER_PIDS[@]} -gt 0 ]; then
+        for helper_pid in "${MCP_HELPER_PIDS[@]}"; do
+            kill "$helper_pid" >/dev/null 2>&1 || true
+        done
+    fi
+    rm -rf /run/mcp-helpers /run/mcp-stubs
+
     # Check if auto-commit/push is enabled (default: true)
     AUTO_COMMIT="${AUTO_COMMIT_ON_SHUTDOWN:-true}"
     AUTO_PUSH="${AUTO_PUSH_ON_SHUTDOWN:-true}"
@@ -702,8 +878,41 @@ if [ -n "${AGENT_NAME:-}" ] && [ -z "${CODING_AGENTS_AGENT_DATA_HOME:-}" ]; then
     ensure_agent_data_fallback "$AGENT_NAME"
 fi
 
+HELPER_MANIFEST_PATH=""
+if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
+    servers_file="$HOST_SESSION_CONFIG_ROOT/servers.txt"
+    ensure_stub_binaries "$servers_file"
+    helper_candidate="$HOST_SESSION_CONFIG_ROOT/helpers.json"
+    if [ -f "$helper_candidate" ]; then
+        HELPER_MANIFEST_PATH="$helper_candidate"
+    fi
+fi
+
 if [ "$HOST_CONFIG_DEPLOYED" = false ] && [ -f "/workspace/config.toml" ]; then
     /usr/local/bin/setup-mcp-configs.sh 2>&1 | grep -E "^(ERROR|WARN)" || true
+fi
+
+create_stub_links_from_configs \
+    "/home/${AGENT_USERNAME}/.config/github-copilot/mcp/config.json" \
+    "/home/${AGENT_USERNAME}/.config/codex/mcp/config.json" \
+    "/home/${AGENT_USERNAME}/.config/claude/mcp/config.json"
+
+if [ -z "$HELPER_MANIFEST_PATH" ]; then
+    HELPER_MANIFEST_PATH="/home/${AGENT_USERNAME}/.config/coding-agents/helpers.json"
+fi
+
+if [ -n "$HELPER_MANIFEST_PATH" ] && [ ! -f "$HELPER_MANIFEST_PATH" ]; then
+    for _ in {1..5}; do
+        [ -f "$HELPER_MANIFEST_PATH" ] && break
+        sleep 0.2
+    done
+fi
+
+if [ -f "$HELPER_MANIFEST_PATH" ]; then
+    echo "🔧 Starting MCP helper proxies from ${HELPER_MANIFEST_PATH}"
+    start_mcp_helpers "$HELPER_MANIFEST_PATH"
+else
+    echo "ℹ️  No MCP helper manifest found; remote helpers not started"
 fi
 
 # Index project with Serena for faster semantic operations (silent unless error)

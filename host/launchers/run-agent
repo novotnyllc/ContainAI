@@ -109,7 +109,7 @@ BRANCH=""
 BRANCH_FROM_FLAG=false
 NAME=""
 DOTNET_PREVIEW=""
-NETWORK_PROXY="allow-all"
+NETWORK_PROXY="squid"
 CPU="4"
 MEMORY="8g"
 GPU=""
@@ -808,17 +808,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate network proxy option
+# Validate network proxy option (enforce squid or restricted)
 case "$NETWORK_PROXY" in
-    allow-all|none|restricted|squid) ;;
+    restricted|squid) ;;
+    allow-all|none)
+        echo "⚠️  Network proxy '$NETWORK_PROXY' is no longer permitted; forcing squid mode"
+        NETWORK_PROXY="squid"
+        ;;
     *)
         echo "❌ Error: Invalid --network-proxy value '$NETWORK_PROXY'"
         exit 1
         ;;
 esac
-
-# Treat 'none' as alias for allow-all
-[ "$NETWORK_PROXY" = "none" ] && NETWORK_PROXY="allow-all"
 
 
 # Check Docker
@@ -1048,6 +1049,14 @@ TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
 
 # Squid allowed domains
 SQUID_ALLOWED_DOMAINS="*.github.com,*.githubcopilot.com,*.nuget.org,*.npmjs.org,*.pypi.org,*.python.org,*.microsoft.com,*.docker.io,registry-1.docker.io,api.githubcopilot.com,learn.microsoft.com,platform.uno,*.githubusercontent.com,*.azureedge.net"
+if [ "$NETWORK_PROXY" = "restricted" ] && [ -n "${CODING_AGENTS_ALLOWED_DOMAINS:-}" ]; then
+    SQUID_ALLOWED_DOMAINS="$CODING_AGENTS_ALLOWED_DOMAINS"
+elif [ "$NETWORK_PROXY" != "restricted" ]; then
+    SQUID_ALLOWED_DOMAINS="."
+fi
+SQUID_HELPER_ACL_FILE="$SESSION_CONFIG_OUTPUT/squid-acls.conf"
+PROXY_LOG_ROOT="${HOME}/.coding-agents/logs/proxy"
+PROXY_LOG_DIR="${PROXY_LOG_ROOT}/$(date +%Y%m%d-%H%M%S)-$(uuidgen)"
 
 # Determine network mode
 NETWORK_MODE="bridge"
@@ -1067,7 +1076,10 @@ case "$NETWORK_PROXY" in
         PROXY_URL="http://${PROXY_CONTAINER_NAME}:3128"
         ;;
     *)
-        NETWORK_POLICY_ENV="allow-all"
+        NETWORK_MODE="$PROXY_NETWORK_NAME"
+        NETWORK_POLICY_ENV="squid"
+        USE_SQUID=true
+        PROXY_URL="http://${PROXY_CONTAINER_NAME}:3128"
         ;;
 esac
 
@@ -1120,6 +1132,41 @@ if [ -f "$RENDERER_SCRIPT" ]; then
             stub_secret_file="$SESSION_CONFIG_OUTPUT/stub-secrets.txt"
             if [ -f "$stub_secret_file" ]; then
                 parse_stub_secret_manifest "$stub_secret_file"
+            fi
+            helper_file="$SESSION_CONFIG_OUTPUT/helpers.json"
+            if [ -f "$helper_file" ]; then
+                helper_payload=$(python3 - "$helper_file" "$servers_file" <<'PY'
+import json, sys
+helpers_path = sys.argv[1]
+servers_path = sys.argv[2] if len(sys.argv) > 2 else None
+try:
+    with open(helpers_path, "r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+except Exception:
+    sys.exit(0)
+helpers = raw if isinstance(raw, list) else raw.get("helpers", [])
+cleaned = []
+for helper in helpers:
+    if not isinstance(helper, dict):
+        continue
+    name = helper.get("name")
+    listen = helper.get("listen")
+    target = helper.get("target")
+    if name and listen and target:
+        cleaned.append({"name": name, "listen": listen, "target": target})
+servers = []
+if servers_path:
+    try:
+        with open(servers_path, "r", encoding="utf-8") as handle:
+            servers = [line.strip() for line in handle if line.strip()]
+    except Exception:
+        servers = []
+print(json.dumps({"helpers": cleaned, "stubs": servers}))
+PY
+)
+                if [ -n "${helper_payload:-}" ]; then
+                    log_security_event "helper-plan" "$helper_payload"
+                fi
             fi
         fi
     else
@@ -1257,7 +1304,7 @@ if container_exists "$CONTAINER_NAME"; then
         EXISTING_NETWORK=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_NETWORK_NAME")
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
-        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS"
+        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$PROXY_LOG_DIR" "$AGENT" "$SESSION_ID"
     fi
     
     if [ "$STATE" = "running" ]; then
@@ -1275,7 +1322,7 @@ fi
 
 # Setup squid proxy if needed
 if [ "$USE_SQUID" = true ]; then
-    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS"
+    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$PROXY_LOG_DIR" "$AGENT" "$SESSION_ID"
 fi
 
 # Build docker arguments
@@ -1497,8 +1544,8 @@ DOCKER_ARGS+=(
     "--network" "$NETWORK_MODE"
     "--read-only"
     "--cap-drop=ALL"
-    # Only SYS_ADMIN is re-added for the entrypoint mount remaps
     "--cap-add=SYS_ADMIN"
+    "--cap-add=NET_ADMIN"
     "--security-opt" "no-new-privileges:true"
     "--pids-limit=4096"
     "--cpus=$CPU"

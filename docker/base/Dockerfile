@@ -176,8 +176,11 @@ COPY --chown=root:root docker/runtime/git-credential-host-helper.sh /usr/local/b
 COPY --chown=root:root host/utils/git-credential-proxy-server.sh /usr/local/bin/git-credential-proxy-server.sh
 COPY --chown=root:root docker/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
 COPY --chown=root:root host/utils/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
+RUN install -d /usr/local/libexec
 COPY --chown=root:root docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
-COPY --chown=root:root docker/runtime/mcp-stub.py /usr/local/bin/mcp-stub
+COPY --chown=root:root docker/runtime/mcp-stub.py /usr/local/libexec/mcp-stub-core.py
+COPY --chown=root:root docker/runtime/mcp-stub-runner.sh /usr/local/bin/mcp-stub-runner
+COPY --chown=root:root docker/runtime/mcp-http-helper.py /usr/local/bin/mcp-http-helper.py
 COPY --chown=root:root docker/runtime/capability-unseal.py /usr/local/bin/capability-unseal
 COPY --chown=root:root host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
 COPY --chown=root:root host/utils/package-agent-data.py /usr/local/bin/package-agent-data.py
@@ -190,10 +193,12 @@ RUN chmod +x \
     /usr/local/bin/gpg-host-proxy.sh \
     /usr/local/bin/gpg-proxy-server.sh \
     /usr/local/bin/setup-mcp-configs.sh \
-    /usr/local/bin/mcp-stub \
+    /usr/local/bin/mcp-stub-runner \
+    /usr/local/bin/mcp-http-helper.py \
     /usr/local/bin/capability-unseal \
     /usr/local/bin/convert-toml-to-mcp.py \
     /usr/local/bin/package-agent-data.py
+RUN ln -sf /usr/local/bin/mcp-stub-runner /usr/local/bin/mcp-stub
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \

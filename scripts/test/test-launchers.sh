@@ -615,10 +615,18 @@ test_session_config_renderer() {
         "--container" "test-container"
     )
 
+    local render_ok=0
     if run_python_tool "$renderer" --mount "$output_dir" -- "${render_args[@]}" >/dev/null 2>&1; then
+        render_ok=1
+    elif python3 "$renderer" "${render_args[@]}" >/dev/null 2>&1; then
+        render_ok=1
+    fi
+
+    if [ "$render_ok" -eq 1 ]; then
         local manifest="$output_dir/manifest.json"
         local config_json="$output_dir/github-copilot/config.json"
         local servers_file="$output_dir/servers.txt"
+        local helpers_file="$output_dir/helpers.json"
         if [ -f "$manifest" ]; then
             pass "Manifest generated"
         else
@@ -639,6 +647,42 @@ test_session_config_renderer() {
             fi
         else
             fail "servers.txt missing"
+        fi
+        if [ -f "$helpers_file" ] && [ -s "$helpers_file" ]; then
+            pass "helpers.json generated"
+        else
+            fail "helpers.json missing"
+        fi
+        if python3 - "$config_json" "$helpers_file" <<'PY'
+import json, sys
+config_path, helpers_path = sys.argv[1:]
+config = json.load(open(config_path, "r", encoding="utf-8"))
+helpers_raw = json.load(open(helpers_path, "r", encoding="utf-8"))
+helpers = helpers_raw if isinstance(helpers_raw, list) else helpers_raw.get("helpers", [])
+servers = config.get("mcpServers") or {}
+
+playwright = servers.get("playwright") or {}
+if not isinstance(playwright, dict):
+    sys.exit(1)
+cmd = playwright.get("command", "")
+env = playwright.get("env", {})
+if "mcp-stub-playwright" not in cmd or "CODING_AGENTS_STUB_SPEC" not in env:
+    sys.exit(1)
+
+msftdocs = servers.get("msftdocs") or {}
+if not isinstance(msftdocs, dict):
+    sys.exit(1)
+url = msftdocs.get("url", "")
+if not str(url).startswith("http://127.0.0.1:"):
+    sys.exit(1)
+
+if not any(isinstance(h, dict) and h.get("name") == "msftdocs" and str(h.get("target", "")).startswith("https://") for h in helpers):
+    sys.exit(1)
+PY
+        then
+            pass "Stub/remote MCP entries rewritten to stubs/helpers"
+        else
+            fail "MCP config rewrite validation failed"
         fi
     else
         fail "render-session-config.py failed via python runner"

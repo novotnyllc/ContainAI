@@ -4,6 +4,7 @@ Convert config.toml to agent-specific MCP JSON configurations.
 Reads a single source of truth (config.toml) and generates config files for each agent.
 """
 
+import base64
 import json
 import os
 import re
@@ -19,6 +20,13 @@ DEFAULT_AGENTS = {
     "codex": "~/.config/codex/mcp",
     "claude": "~/.config/claude/mcp",
 }
+STUB_COMMAND_TEMPLATE = "/home/agentuser/.local/bin/mcp-stub-{name}"
+HELPER_LISTEN_HOST = "127.0.0.1"
+HELPER_PORT_BASE = 52100
+DEFAULT_CONFIG_ROOT = Path(os.environ.get("CODING_AGENTS_CONFIG_ROOT", Path.home() / ".config" / "coding-agents-dev"))
+DEFAULT_HELPER_ACL_CONFIG = Path(
+    os.environ.get("CODING_AGENTS_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
+)
 
 
 def load_secret_file(path):
@@ -106,9 +114,24 @@ def resolve_value(value, secrets):
     return value
 
 
-def convert_server_config(name, settings, secrets, missing_tokens):
+def collect_placeholders(value):
+    names = set()
+    if isinstance(value, str):
+        for match in ENV_PATTERN.finditer(value):
+            names.add(match.group("braced") or match.group("bare"))
+    elif isinstance(value, list):
+        for item in value:
+            names.update(collect_placeholders(item))
+    elif isinstance(value, dict):
+        for item in value.values():
+            names.update(collect_placeholders(item))
+    return names
+
+
+def convert_remote_server(name, settings, secrets, missing_tokens, next_port):
     converted = {}
     bearer_var = settings.get("bearer_token_env_var")
+    bearer_token = None
 
     for key, value in settings.items():
         if key == "bearer_token_env_var":
@@ -118,11 +141,67 @@ def convert_server_config(name, settings, secrets, missing_tokens):
     if bearer_var:
         token = resolve_var(bearer_var, secrets)
         if token:
+            bearer_token = token
             converted["bearerToken"] = token
         else:
             missing_tokens.append((name, bearer_var))
 
-    return converted
+    listen_port = next_port()
+    listen_addr = f"{HELPER_LISTEN_HOST}:{listen_port}"
+    target_url = converted.get("url")
+    converted["url"] = f"http://{listen_addr}"
+    helper_entry = {"name": name, "listen": listen_addr, "target": target_url}
+    if bearer_token:
+        helper_entry["bearerToken"] = bearer_token
+    return converted, helper_entry
+
+
+def convert_stub_server(name, settings, secrets, warnings):
+    config = dict(settings)
+    command = str(config.pop("command", "")).strip()
+    if not command:
+        raise ValueError(f"MCP server '{name}' is missing a command")
+
+    raw_args = config.pop("args", []) or []
+    args = [str(item) for item in raw_args]
+    raw_env = config.pop("env", {}) or {}
+    env = {str(k): str(v) for k, v in raw_env.items()}
+    cwd = config.pop("cwd", None)
+    config.pop("bearer_token_env_var", None)
+
+    placeholders = collect_placeholders(command)
+    placeholders.update(collect_placeholders(args))
+    placeholders.update(collect_placeholders(env))
+    if cwd:
+        placeholders.update(collect_placeholders(cwd))
+
+    available = {k for k, v in secrets.items() if v} | {k for k, v in os.environ.items() if v}
+    stub_secrets = sorted(name for name in placeholders if name in available)
+    missing = sorted(name for name in placeholders if name not in available)
+    for placeholder in missing:
+        warnings.append(
+            f"⚠️  Secret '{placeholder}' referenced by MCP server '{name}' is not defined"
+        )
+
+    spec = {
+        "stub": name,
+        "server": name,
+        "command": command,
+        "args": args,
+        "env": env,
+        "secrets": stub_secrets,
+    }
+    if cwd:
+        spec["cwd"] = str(cwd)
+
+    rendered_entry = dict(config)
+    rendered_entry["command"] = STUB_COMMAND_TEMPLATE.format(name=name)
+    rendered_entry["args"] = []
+    rendered_entry["env"] = {
+        "CODING_AGENTS_STUB_SPEC": base64.b64encode(json.dumps(spec, sort_keys=True).encode("utf-8")).decode("ascii"),
+        "CODING_AGENTS_STUB_NAME": name,
+    }
+    return rendered_entry
 
 
 def convert_toml_to_mcp(toml_path):
@@ -146,10 +225,24 @@ def convert_toml_to_mcp(toml_path):
 
     secrets = collect_secrets()
     missing_tokens = []
-    resolved_servers = {
-        name: convert_server_config(name, settings, secrets, missing_tokens)
-        for name, settings in mcp_servers.items()
-    }
+    warnings = []
+    helpers = []
+    port_state = {"value": HELPER_PORT_BASE}
+
+    def next_port():
+        value = port_state["value"]
+        port_state["value"] += 1
+        return value
+
+    resolved_servers = {}
+    for name, settings in mcp_servers.items():
+        settings = dict(settings or {})
+        if "command" in settings:
+            resolved_servers[name] = convert_stub_server(name, settings, secrets, warnings)
+        else:
+            rendered, helper_entry = convert_remote_server(name, settings, secrets, missing_tokens, next_port)
+            resolved_servers[name] = rendered
+            helpers.append(helper_entry)
 
     agents = dict(DEFAULT_AGENTS)
 
@@ -167,9 +260,21 @@ def convert_toml_to_mcp(toml_path):
             print(f"❌ Error writing {agent_name} config: {exc}", file=sys.stderr)
             return False
 
+    helper_manifest = {"helpers": helpers, "source": str(toml_path)}
+    helper_path = os.path.expanduser("~/.config/coding-agents/helpers.json")
+    os.makedirs(os.path.dirname(helper_path), exist_ok=True)
+    try:
+        with open(helper_path, "w", encoding="utf-8") as handle:
+            json.dump(helper_manifest, handle, indent=2, sort_keys=True)
+    except Exception as exc:  # pylint: disable=broad-except
+        print(f"⚠️  Unable to write helper manifest: {exc}", file=sys.stderr)
+
     print("✅ MCP configurations generated for all agents")
     print(f"   Servers configured: {', '.join(resolved_servers.keys())}")
     print(f"   Config source: {toml_path}")
+    if helpers:
+        helper_names = ", ".join(helper["name"] for helper in helpers)
+        print(f"   Helper proxies: {helper_names}")
 
     if missing_tokens:
         for server_name, env_var in missing_tokens:
@@ -177,6 +282,8 @@ def convert_toml_to_mcp(toml_path):
                 f"⚠️  Missing secret '{env_var}' for MCP server '{server_name}' (bearer token not injected)",
                 file=sys.stderr,
             )
+    for warning in warnings:
+        print(warning, file=sys.stderr)
 
     return True
 
