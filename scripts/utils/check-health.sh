@@ -85,7 +85,7 @@ echo -e "${BLUE}CodingAgents System Diagnosis${NC}"
 header "User Context"
 if [ "$(id -u)" -eq 0 ]; then
     pass "Running as Root (System Install Ready)"
-    # Warn if they are running as root but inside a user namespace (e.g. rootless podman)
+    # Warn if they are running as root but inside a user namespace
     if [ "$(cat /proc/self/uid_map 2>/dev/null | awk '{print $1}')" != "0" ]; then
         info "Note: You appear to be root inside a user namespace."
     fi
@@ -162,12 +162,10 @@ header "Container Engine"
 CONTAINER_CMD=""
 if command -v docker >/dev/null; then
     CONTAINER_CMD="docker"
-elif command -v podman >/dev/null; then
-    CONTAINER_CMD="podman"
 fi
 
 if [ -z "$CONTAINER_CMD" ]; then
-    fail "No Container Engine" "Install Docker Desktop or Podman."
+    fail "No Container Engine" "Install Docker Desktop or Docker Engine."
 else
     # Inspect the runtime
     if INFO=$("$CONTAINER_CMD" info --format '{{json .}}' 2>/dev/null); then
@@ -194,14 +192,6 @@ else
              fi
         fi
         
-        # Check User Namespaces (Podman)
-        if [ "$CONTAINER_CMD" = "podman" ]; then
-             if echo "$INFO" | grep -q "rootless"; then
-                 pass "Mode: Rootless (Good)"
-             else
-                 warn "Mode: Rootful" "Running as root is riskier on Linux."
-             fi
-        fi
     else
         fail "$CONTAINER_CMD is installed but NOT running" "Start the service or desktop app."
     fi
@@ -264,7 +254,7 @@ if load_common_functions; then
     if container_output=$(verify_container_security_support 2>&1); then
         pass "Runtime enforcement: container advertises seccomp+AppArmor"
     else
-        fail "Runtime enforcement failed" "Update Docker/Podman so it reports seccomp & AppArmor."
+        fail "Runtime enforcement failed" "Update Docker so it reports seccomp & AppArmor."
         while IFS= read -r line; do
             [ -n "$line" ] && info "$line"
         done <<< "$container_output"

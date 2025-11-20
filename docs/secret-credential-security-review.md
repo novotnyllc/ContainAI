@@ -11,7 +11,7 @@ Coding Agents executes immutable vendor-provided CLI binaries (Copilot, Codex, C
 - Credential redemption helpers (`prepare-*-secrets.sh`) and the new data import/export workers.
 - Monitoring surfaces (audit log, agent-task-runner events, `audit-agent`).
 
-Out of scope: upstream SaaS services, developer laptops beyond launcher preflight, and infrastructure hardening of Docker/Podman itself.
+Out of scope: upstream SaaS services, developer laptops beyond launcher preflight, and infrastructure hardening of Docker itself.
 
 ## 2. Threat Model & Assumptions
 

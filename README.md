@@ -22,7 +22,7 @@ Features include MCP server support for extended capabilities, automated git ope
 **New to Docker or containers?** See the [detailed getting started guide](docs/getting-started.md).
 
 **Prerequisites:**
-- ✅ Docker or Podman installed and running (the launchers auto-detect which one to use)
+- ✅ Docker installed and running (Desktop on macOS/Windows, Engine on Linux)
 - ℹ️  Host Git credentials/config are reused automatically—no container-side setup needed
 
 **Quick verification:**
@@ -139,9 +139,8 @@ Unlike running agents directly on your machine:
 
 ## Requirements
 
-- **Container Runtime**: Docker or Podman
-  - Docker Desktop (with WSL2 on Windows) or Podman Desktop/CLI
-  - Scripts auto-detect available runtime
+- **Container Runtime**: Docker Desktop (macOS/Windows) or Docker Engine (Linux)
+  - Scripts require Docker 20.10+ to launch agents
 - **socat**: Required for credential and GPG proxy servers
   - Linux/Mac: `apt-get install socat` or `brew install socat`
   - Windows: Available in WSL2 (install in WSL: `sudo apt-get install socat`)

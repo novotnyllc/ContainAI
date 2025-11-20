@@ -322,14 +322,14 @@ function Test-NewFeature {
 ## Prerequisites
 
 ### Integration Tests
-- Docker daemon with `--privileged` container support (Podman not supported)
+- Docker daemon with `--privileged` container support
 - Git installed and configured
 - Bash 4.0+ (Linux/macOS/WSL)
 - ~5GB disk space for DinD container and builds (full mode)
 - No real GitHub/API tokens required (uses mock credentials)
 
 ### Unit Tests
-- **Container Runtime**: Docker or Podman (scripts auto-detect)
+- **Container Runtime**: Docker (scripts require Docker Desktop or Docker Engine)
 - Git installed and configured
 - Bash 4.0+ or PowerShell 5.1+
 - Minimal disk space
@@ -431,7 +431,7 @@ rm -rf /tmp/test-coding-agents-repo-<PID>
 ## Troubleshooting
 
 ### "Docker is not running"
-Ensure Docker or Podman is running before executing tests. Scripts automatically detect which container runtime is available.
+Ensure Docker Desktop or Docker Engine is running before executing tests.
 
 ### "Permission denied"
 Make bash test script executable: `chmod +x scripts/test/test-launchers.sh`

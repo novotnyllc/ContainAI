@@ -165,7 +165,7 @@ Integrate the same check into CI for all agent variants so every published artif
 Each launcher refuses to touch secrets until the host proves it can enforce the required guardrails:
 
 1. `verify_host_security_prereqs` confirms seccomp/AppArmor profiles exist, ptrace scope can be hardened, tmpfs enforcement is enabled, and the trusted file set (`scripts/launchers`, `scripts/runtime`, `docker/profiles`) matches `HEAD`.
-2. `verify_container_security_support` inspects `docker info` / `podman info` to ensure the runtime enforces the requested profiles.
+2. `verify_container_security_support` inspects `docker info` to ensure the runtime enforces the requested profiles.
 
 ```mermaid
 flowchart LR

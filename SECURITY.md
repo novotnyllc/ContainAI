@@ -9,7 +9,7 @@ This document outlines security considerations for using and contributing to the
 Before any container is created, the launchers execute two dedicated preflight checks:
 
 - `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-coding-agents.profile` or enable AppArmor in WSL via `scripts/utils/fix-wsl-security.sh`.
-- `verify_container_security_support` inspects `docker info` / `podman info` JSON to ensure the selected runtime reports seccomp and AppArmor support. The launch aborts immediately if either feature is missing.
+- `verify_container_security_support` inspects `docker info` JSON to ensure the runtime reports seccomp and AppArmor support. The launch aborts immediately if either feature is missing.
 
 ```mermaid
 flowchart LR

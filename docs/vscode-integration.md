@@ -33,16 +33,14 @@ code --install-extension ms-vscode-remote.remote-containers
 
 ### Required Tools
 
-- Docker 20.10+ or Podman 3.0+ (running and accessible)
+- Docker 20.10+ (Docker Desktop or Docker Engine) running and accessible
 - VS Code 1.80+
 - Git (for repository operations)
 
 **Verify installation:**
 ```powershell
-# Check Docker/Podman
+# Check Docker
 docker --version
-# or
-podman --version
 
 Agent data lives under `/run/agent-data/<agent>/<session>/home` with read/write permissions only for `agentcli`. `agentuser` interacts with it via symlinks (`~/.copilot`, `~/.codex`, `~/.claude`) that point into that tmpfs. This prevents host bind mounts from exposing user secrets or history files. Inspect the mount options to confirm:
 ```bash
@@ -177,7 +175,7 @@ For full control over launch options:
 
 4. **Attach VS Code** (see [Connecting to a Running Container](#connecting-to-a-running-container))
 
-### Method 2: Direct Docker/Podman Command
+### Method 2: Direct Docker Command
 
 For advanced users:
 
@@ -261,7 +259,7 @@ agentuser@abc123:/workspace$ which gh
 - Node.js, npm, npx
 - .NET SDK (if using .NET preview)
 - Python (depending on agent image)
-- Container runtime (Docker-in-Docker or Podman)
+- Container runtime client (Docker-in-Docker)
 
 **Common terminal operations:**
 ```bash
@@ -703,7 +701,7 @@ docker container prune --filter "label=coding-agent=true"
    ```powershell
    docker info
    ```
-   - If error, ensure Docker/Podman is running
+   - If error, ensure Docker is running
 
 ### VS Code Can't Attach to Container
 

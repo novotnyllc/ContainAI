@@ -66,24 +66,14 @@ git push origin copilot/feature-auth
 
 ### Force Specific Container Runtime
 
-By default, scripts auto-detect Docker or Podman. To force a specific runtime:
+By default, scripts auto-detect the first `docker` CLI on your PATH. To pin a specific Docker binary (for example, a custom install location), set `CONTAINER_RUNTIME=docker` before launching:
 
 ```bash
-# Force Podman
-export CONTAINER_RUNTIME=podman
-./run-copilot
-
-# Force Docker
 export CONTAINER_RUNTIME=docker
 launch-agent copilot
 ```
 
 ```powershell
-# Force Podman
-$env:CONTAINER_RUNTIME = "podman"
-.\run-copilot.ps1
-
-# Force Docker  
 $env:CONTAINER_RUNTIME = "docker"
 .\launch-agent.ps1 copilot
 ```

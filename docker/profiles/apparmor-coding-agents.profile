@@ -11,7 +11,7 @@ profile coding-agents flags=(attach_disconnected,mediate_deleted) {
   file,
   umount,
 
-  # Host processes (dockerd/podman) may send signals for lifecycle operations
+  # Host processes (dockerd) may send signals for lifecycle operations
   signal (receive) peer=unconfined,
   # Containers may signal one another when sharing the same profile
   signal (send,receive) peer=coding-agents,
