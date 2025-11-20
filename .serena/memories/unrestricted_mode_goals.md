@@ -20,10 +20,6 @@
 - Category: Networking Goal
 - Description: MCP and developer tooling that require internet access must continue to function, but outbound requests should traverse an enforcement point (proxy/egress controller) that logs activity, blocks prohibited domains (metadata endpoints, private nets), and can throttle bulk transfers to deter exfiltration.
 
-## GOAL-UX-02: Prompt Budgeting
-- Category: UX Goal
-- Description: Prompts are reserved for Tier 3 actions (e.g., pushing to protected remotes, changing security baselines, requesting extra secrets). Tier 2 actions may require logging/rate limits but no prompt. Everything else is silent.
-
 ## GOAL-MON-01: Observability & Kill Switch
 - Category: Security Goal
 - Description: Every unrestricted session should produce auditable network/proxy logs and git snapshots; operators must have a one-step kill switch that stops the container and revokes temporary credentials without additional prompts.
