@@ -6,8 +6,8 @@ This document expands on `docs/secret-credential-architecture.md` for the purpos
 
 Coding Agents executes immutable vendor-provided CLI binaries (Copilot, Codex, Claude, MCP servers) inside per-session containers while exporting long-lived host credentials on demand. The security objective is to prevent those binaries—or any code they launch—from exfiltrating brokered secrets or escalating privileges, without modifying the vendor executables themselves. This review covers:
 
-- Host-side launchers (`scripts/launchers/*.sh|ps1`), secret broker (`scripts/runtime/secret-broker.py`), and packaging helpers.
-- Container bootstrap (`docker/agents/**`, `scripts/runtime/entrypoint.sh`) plus the Rust runner (`scripts/runtime/agent-task-runner/**`).
+- Host-side launchers (`host/launchers/*.sh|ps1`), secret broker (`host/utils/secret-broker.py`), and packaging helpers.
+- Container bootstrap (`docker/agents/**`, `docker/runtime/entrypoint.sh`) plus the Rust runner (`docker/runtime/agent-task-runner/**`).
 - Credential redemption helpers (`prepare-*-secrets.sh`) and the new data import/export workers.
 - Monitoring surfaces (audit log, agent-task-runner events, `audit-agent`).
 
@@ -44,7 +44,7 @@ flowchart LR
     end
 
     subgraph ContainerSemi[Partially Trusted Container]
-        EP[scripts/runtime/entrypoint.sh]
+        EP[docker/runtime/entrypoint.sh]
         ATR[agent-task-runnerd + agentcli-exec]
         WR[agent CLI wrappers]
         VC[Vendor CLI binary]
@@ -83,12 +83,12 @@ Assumptions:
 
 | Component | Location | Key Responsibilities | Relevant Artifacts |
 | --- | --- | --- | --- |
-| Launchers (`run-agent`, `run-codex`, etc.) | Host | Attest git state, request capabilities, package host data, configure container args | `scripts/launchers/**` |
-| Secret Broker | Host | Store master secrets, issue per-stub capabilities, log issuance | `scripts/runtime/secret-broker.py` |
-| Entry point | Container | Mount tmpfs, start `agent-task-runnerd`, drop privileges | `scripts/runtime/entrypoint.sh` |
-| `agent-task-runnerd` + `agentcli-exec` | Container | Intercept all exec, fork sandboxed workloads, enforce policies/logging | `scripts/runtime/agent-task-runner/src/**` |
+| Launchers (`run-agent`, `run-codex`, etc.) | Host | Attest git state, request capabilities, package host data, configure container args | `host/launchers/**` |
+| Secret Broker | Host | Store master secrets, issue per-stub capabilities, log issuance | `host/utils/secret-broker.py` |
+| Entry point | Container | Mount tmpfs, start `agent-task-runnerd`, drop privileges | `docker/runtime/entrypoint.sh` |
+| `agent-task-runnerd` + `agentcli-exec` | Container | Intercept all exec, fork sandboxed workloads, enforce policies/logging | `docker/runtime/agent-task-runner/src/**` |
 | Credential helpers (`prepare-*-secrets.sh`) | Container | Redeem capabilities into tmpfs, hydrate CLI configs | `docker/agents/*/prepare-*-secrets.sh` |
-| Data packager/import/export | Host + container | Copy whitelisted agent data into tmpfs and merge exports post-run | `scripts/utils/package-agent-data.py`, `docker/agents/*/prepare-agent-data.sh` |
+| Data packager/import/export | Host + container | Copy whitelisted agent data into tmpfs and merge exports post-run | `host/utils/package-agent-data.py`, `docker/agents/*/prepare-agent-data.sh` |
 | Audit + diagnostics | Host + container | Record manifests, capability usage, runner events, produce signed reports | `audit-agent`, `security-events.log` |
 
 ## 4. Credential Lifecycle
@@ -138,7 +138,7 @@ Wrappers therefore remain extremely small: they rename the vendor binary, export
 
 ### 5.1 Seccomp Policy (Shipping Today)
 
-The Rust crate installs a user-notification filter defined in `scripts/runtime/agent-task-runner/src/seccomp.rs`. The filter has two phases:
+The Rust crate installs a user-notification filter defined in `docker/runtime/agent-task-runner/src/seccomp.rs`. The filter has two phases:
 
 1. **Trap phase** – Registers `execve`/`execveat` with `SECCOMP_FILTER_FLAG_NEW_LISTENER`, forcing the kernel to pause the calling thread and send a notification to `agent-task-runnerd`. The notification includes the syscall number, argument registers, tid/pid, and a file descriptor that the daemon uses to respond. No process leaves this pause without an explicit `SECCOMP_IOCTL_NOTIF_SEND` from the daemon.
 2. **Enforcement phase** – After the daemon approves and forks the sandbox, it applies the “coding-agents-task” seccomp profile to the spawned workload. That profile blocks syscall classes that could expose secrets or break out of the namespace.
@@ -262,8 +262,8 @@ Guarantees:
 | Compromised MCP stub exfiltrates other MCP keys | Per-MCP UID + tmpfs + network policy limited to approved domains; capability scoped to stub hash/session | `docker/agents/*/init-*.sh`, broker capability manifest |
 | Replay attack using leaked capability | Manifest pins session ID, namespace, expiry; helpers verify environment before redeeming | `capability-unseal.py`, helper scripts |
 | Helper tampering / dirty launcher tree | Launcher refuses to start if trusted paths dirty; override token required (audited) | `run-agent`, `security-events.log` |
-| Lack of audit trail | `security-events.log`, `agent-task-runner/events.log`, `audit-agent` signed reports | `scripts/launchers/common`, `scripts/runtime/agent-task-runner/src/events.rs`, `scripts/launchers/audit-agent` |
-| Data persistence leaks arbitrary files | Packager imports only whitelisted globs, tmpfs prevents direct host mounts, signed exports verify before merge | `scripts/utils/package-agent-data.py`, `prepare-agent-data.sh` |
+| Lack of audit trail | `security-events.log`, `agent-task-runner/events.log`, `audit-agent` signed reports | `host/launchers/common`, `docker/runtime/agent-task-runner/src/events.rs`, `host/launchers/audit-agent` |
+| Data persistence leaks arbitrary files | Packager imports only whitelisted globs, tmpfs prevents direct host mounts, signed exports verify before merge | `host/utils/package-agent-data.py`, `prepare-agent-data.sh` |
 
 ## 8. Verification & Monitoring
 
@@ -292,7 +292,7 @@ Guarantees:
 - `docs/secret-credential-architecture.md` – functional narrative.
 - `AGENTS.md` + `docs/security-workflows.md` – operational procedures.
 - `.serena/memories/secret_credential_https_backlog.md` – implementation backlog with Epic tracking.
-- `scripts/runtime/agent-task-runner/src/*` – runner source of truth.
-- `scripts/launchers/audit-agent` – inspection tooling referenced in this review.
+- `docker/runtime/agent-task-runner/src/*` – runner source of truth.
+- `host/launchers/audit-agent` – inspection tooling referenced in this review.
 
 This document should accompany security assessment packets alongside CI evidence (test logs, audit artifacts) to demonstrate that every control is implemented, tested, and monitored.

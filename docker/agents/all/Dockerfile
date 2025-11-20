@@ -8,11 +8,11 @@ USER root
 
 # Copy MCP configuration scripts from build context root
 # Build context is project root, so scripts/ is directly accessible
-COPY --chown=agentuser:agentuser scripts/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
-COPY --chown=agentuser:agentuser scripts/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
-COPY --chown=agentuser:agentuser scripts/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY --chown=agentuser:agentuser scripts/runtime/git-credential-host-helper.sh /usr/local/bin/git-credential-host-helper.sh
-COPY --chown=agentuser:agentuser scripts/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
+COPY --chown=agentuser:agentuser host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
+COPY --chown=agentuser:agentuser docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
+COPY --chown=agentuser:agentuser docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=agentuser:agentuser docker/runtime/git-credential-host-helper.sh /usr/local/bin/git-credential-host-helper.sh
+COPY --chown=agentuser:agentuser docker/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
 
 RUN chmod +x /usr/local/bin/convert-toml-to-mcp.py \
     /usr/local/bin/setup-mcp-configs.sh \

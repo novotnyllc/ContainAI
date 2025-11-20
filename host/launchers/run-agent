@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Launch a coding agent in an isolated container with its own git workspace
-# The container runs persistently for VS Code Remote connection
+# Launch an ephemeral coding agent session that auto-attaches to the agent CLI
+# Containers auto-clean on exit but keep all git safeguards and host mounts
 
 set -e
 
@@ -8,8 +8,76 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
+print_run_agent_usage() {
+        cat <<'EOF'
+Usage: run-agent <agent> [SOURCE] [OPTIONS]
+
+Agent types: copilot, codex, claude
+
+SOURCE can be:
+    • Local path to a git repository (default: current directory)
+    • Git URL (https://...)
+
+Options:
+    -b, --branch BRANCH         Branch name (creates <agent>/<branch>)
+    --name NAME                 Custom container name
+    --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)
+    --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)
+    --cpu NUM                   CPU limit (default: 4)
+    --memory SIZE               Memory limit (default: 8g)
+    --gpu SPEC                  GPU specification (e.g., 'all' or 'device=0')
+    --no-push                   Disable auto-push on container shutdown
+    --use-current-branch        Use current branch instead of creating agent branch (unsafe)
+    --prompt PROMPT             Prompt execution (reuses current repo when available)
+    -y, --force                 Automatically replace existing agent branch without prompting
+    -h, --help                  Show this help
+
+Branch Behavior:
+    • Without --branch: creates unique session branch <agent>/session-N
+    • With --branch: creates <agent>/<branch>
+    • Already on agent branch: reuses that branch
+    • Use --use-current-branch to work directly on current branch
+    • Existing agent branches prompt for replacement
+    • Branches with unmerged commits are archived before replacement
+
+Examples:
+    run-agent copilot                              # Copilot in current directory
+    run-agent codex . -b refactor-db               # Codex in current dir, custom branch
+    run-agent copilot https://github.com/user/repo # Copilot from GitHub
+    run-agent claude /path/to/repo --name my-workspace
+    run-agent copilot . -b feature-api -y          # Auto-replace existing agent branch
+EOF
+}
+
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
+maybe_check_launcher_updates "$REPO_ROOT" "run-agent"
+
+WANTS_HELP=false
+for arg in "$@"; do
+        case "$arg" in
+                -h|--help)
+                        WANTS_HELP=true
+                        break
+                        ;;
+        esac
+done
+
+if $WANTS_HELP; then
+        if [[ $# -eq 0 || "$1" == "-"* ]]; then
+                print_run_agent_usage
+                exit 0
+        fi
+        help_agent="$1"
+        case "$help_agent" in
+                copilot|codex|claude) ;;
+                *)
+                        echo "❌ Error: Invalid agent type '$help_agent'"
+                        exit 1
+                        ;;
+        esac
+        print_run_agent_usage
+        exit 0
+fi
 
 if ! ensure_prerequisites_verified "$REPO_ROOT"; then
     exit 1
@@ -18,50 +86,6 @@ fi
 if ! verify_host_security_prereqs "$REPO_ROOT"; then
     exit 1
 fi
-
-TRUSTED_PATHS=("scripts/launchers" "scripts/runtime" "docker/profiles")
-TRUSTED_TREE_LABEL="launcher + helper files"
-if ! ensure_trusted_paths_clean "$REPO_ROOT" "$TRUSTED_TREE_LABEL" "${TRUSTED_PATHS[@]}"; then
-    exit 1
-fi
-
-if [ "$SOURCE_TYPE" = "local" ] && [ -f "$SOURCE/config.toml" ]; then
-    SESSION_CONFIG_SOURCE="$SOURCE/config.toml"
-fi
-
-if [ -z "$SESSION_CONFIG_SOURCE" ] && [ -f "${HOME}/.config/coding-agents/config.toml" ]; then
-    SESSION_CONFIG_SOURCE="${HOME}/.config/coding-agents/config.toml"
-fi
-
-LAUNCHER_HEAD_HASH=$(get_git_head_hash "$REPO_ROOT" 2>/dev/null || echo "")
-TRUSTED_TREE_HASHES_RAW=$(collect_trusted_tree_hashes "$REPO_ROOT" "${TRUSTED_PATHS[@]}")
-TRUSTED_TREE_HASHES_ENV=$(printf '%s' "$TRUSTED_TREE_HASHES_RAW" | tr '\n' ',' | sed 's/,$//')
-
-if [ -n "$LAUNCHER_HEAD_HASH" ]; then
-    echo "🔒 Launcher commit: $LAUNCHER_HEAD_HASH"
-fi
-if [ -n "$TRUSTED_TREE_HASHES_RAW" ]; then
-    echo "   Trusted tree hashes:"
-    while IFS= read -r entry; do
-        [ -z "$entry" ] && continue
-        echo "     • $entry"
-    done <<< "$TRUSTED_TREE_HASHES_RAW"
-fi
-
-SESSION_ARTIFACT_DIR=""
-cleanup_session_artifacts() {
-    if [ -n "$SESSION_ARTIFACT_DIR" ] && [ -d "$SESSION_ARTIFACT_DIR" ]; then
-        rm -rf "$SESSION_ARTIFACT_DIR"
-    fi
-}
-trap cleanup_session_artifacts EXIT
-
-SESSION_CONFIG_OUTPUT=""
-SESSION_MANIFEST_PATH=""
-SESSION_CONFIG_SHA256=""
-SESSION_CONFIG_SOURCE=""
-SESSION_CONFIG_RENDERED=false
-SESSION_ID_BASE=$(date -u +"%Y%m%dT%H%M%SZ")
 
 # Default values
 AGENT=""
@@ -77,6 +101,13 @@ GPU=""
 NO_PUSH=false
 FORCE=false
 USE_CURRENT_BRANCH=false
+PROMPT_MODE=false
+PROMPT_TEXT=""
+SOURCE_SPECIFIED=false
+SOURCE_TYPE=""
+REPO_NAME=""
+GIT_URL=""
+WSL_PATH=""
 LOCAL_REMOTE_HOST_PATH=""
 LOCAL_REMOTE_WSL_PATH=""
 LOCAL_REMOTE_URL=""
@@ -84,6 +115,14 @@ LOCAL_REPO_PATH_VALUE=""
 TMPFS_LARGE_SIZE="${CODING_AGENTS_TMPFS_LARGE:-2g}"
 TMPFS_SMALL_SIZE="${CODING_AGENTS_TMPFS_SMALL:-512m}"
 TMPFS_SECRET_SIZE="${CODING_AGENTS_TMPFS_SECRETS:-32m}"
+SESSION_ARTIFACT_DIR=""
+SESSION_CONFIG_OUTPUT=""
+SESSION_MANIFEST_PATH=""
+SESSION_CONFIG_SHA256=""
+SESSION_CONFIG_SOURCE=""
+SESSION_CONFIG_RENDERED=false
+SESSION_ID_BASE=$(date -u +"%Y%m%dT%H%M%SZ")
+SESSION_CONFIG_ROOT_IN_CONTAINER="/run/coding-agents"
 DEFAULT_BROKER_STUBS=("github" "uno" "msftdocs" "playwright" "context7" "serena" "sequential-thinking" "fetch")
 BROKER_STUBS=("${DEFAULT_BROKER_STUBS[@]}")
 declare -A MCP_SECRET_VALUES=()
@@ -95,6 +134,115 @@ declare -A AGENT_CLI_SECRET_DIGESTS=()
 declare -A AGENT_CLI_SECRET_NAMES_BY_STUB=()
 declare -A AGENT_CLI_AGENT_NAME_BY_STUB=()
 declare -a AGENT_CLI_STUBS=()
+FORBIDDEN_EXTRA_ARGS=("--privileged" "--pid=host" "--network=host" "--ipc=host" "--uts=host")
+FORBIDDEN_SECURITY_VALUES=("seccomp=unconfined" "apparmor=unconfined" "no-new-privileges=false")
+
+fail_forbidden_extra_arg() {
+    local arg="$1"
+    local reason="$2"
+    echo "❌ CODING_AGENTS_EXTRA_DOCKER_ARGS cannot include '$arg' ${reason:+($reason)}" >&2
+    echo "   These options break the container security model and can impact the host system." >&2
+    exit 1
+}
+
+validate_security_opt_value() {
+    local value="$1"
+    for forbidden in "${FORBIDDEN_SECURITY_VALUES[@]}"; do
+        if [ "$value" = "$forbidden" ]; then
+            fail_forbidden_extra_arg "--security-opt $value" "because security hardening would be disabled"
+        fi
+    done
+}
+
+validate_extra_docker_args() {
+    local -a args=("$@")
+    local idx=0
+    local total=${#args[@]}
+    while [ $idx -lt $total ]; do
+        local current="${args[$idx]}"
+        for forbidden in "${FORBIDDEN_EXTRA_ARGS[@]}"; do
+            if [ -n "$forbidden" ] && [ "$current" = "$forbidden" ]; then
+                fail_forbidden_extra_arg "$current" "because host namespaces must stay isolated"
+            fi
+        done
+        case "$current" in
+            "") ;;
+            --cap-add|--cap-add=*)
+                fail_forbidden_extra_arg "$current" "launcher already manages the minimal capability set"
+                ;;
+            --security-opt)
+                if [ $((idx + 1)) -ge $total ]; then
+                    fail_forbidden_extra_arg "--security-opt" "requires a non-empty value"
+                fi
+                local next_value="${args[$((idx + 1))]}"
+                validate_security_opt_value "$next_value"
+                idx=$((idx + 1))
+                ;;
+            --security-opt=*)
+                local inline_value="${current#--security-opt=}"
+                validate_security_opt_value "$inline_value"
+                ;;
+        esac
+        idx=$((idx + 1))
+    done
+}
+LAUNCHER_HEAD_HASH=$(get_git_head_hash "$REPO_ROOT" 2>/dev/null || echo "")
+TRUSTED_PATHS=("host/launchers" "docker/runtime" "docker/profiles")
+TRUSTED_TREE_HASHES_RAW=$(collect_trusted_tree_hashes "$REPO_ROOT" "${TRUSTED_PATHS[@]}")
+TRUSTED_TREE_HASHES_ENV=$(printf '%s' "$TRUSTED_TREE_HASHES_RAW" | tr '\n' ',' | sed 's/,$//')
+if [ -n "$LAUNCHER_HEAD_HASH" ]; then
+    echo "🔒 Launcher commit: $LAUNCHER_HEAD_HASH"
+fi
+if [ -n "$TRUSTED_TREE_HASHES_RAW" ]; then
+    echo "   Trusted tree hashes:"
+    while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        echo "     • $entry"
+    done <<< "$TRUSTED_TREE_HASHES_RAW"
+fi
+
+# Ensure ephemeral session assets are removed as soon as the agent container exits
+cleanup_run_agent_volumes() {
+    local container_name="${CONTAINER_NAME:-}"
+    local container_running=false
+
+    if [ -n "$container_name" ] && container_exists "$container_name" >/dev/null 2>&1; then
+        local status
+        status=$(get_container_status "$container_name")
+        if [ "$status" = "running" ] || [ "$status" = "created" ]; then
+            container_running=true
+        else
+            container_cli rm -f "$container_name" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if [ -n "$SESSION_ARTIFACT_DIR" ] && [ -d "$SESSION_ARTIFACT_DIR" ]; then
+        rm -rf "$SESSION_ARTIFACT_DIR"
+    fi
+
+    if [ "$container_running" = true ]; then
+        return 0
+    fi
+
+    local spec suffix volume_name
+    local -a volume_specs=(
+        "workspace:${WORKSPACE_VOLUME:-}"
+        "home:${HOME_VOLUME:-}"
+        "toolcache:${TOOLCACHE_VOLUME:-}"
+    )
+
+    for spec in "${volume_specs[@]}"; do
+        suffix=${spec%%:*}
+        volume_name=${spec#*:}
+        if [ -z "$volume_name" ] && [ -n "$container_name" ]; then
+            volume_name=$(get_container_volume_name "$container_name" "$suffix")
+        fi
+        if [ -n "$volume_name" ] && container_cli volume inspect "$volume_name" >/dev/null 2>&1; then
+            container_cli volume rm "$volume_name" >/dev/null 2>&1 || true
+        fi
+    done
+}
+trap cleanup_run_agent_volumes EXIT
 
 trim_whitespace() {
     local value="$1"
@@ -139,9 +287,7 @@ load_mcp_secret_values() {
             local value="${line#*=}"
             name=$(trim_whitespace "$name")
             value=$(trim_whitespace "$value")
-            if [ -z "$name" ]; then
-                continue
-            fi
+            [ -n "$name" ] || continue
             if [ -n "$value" ] && [[ ( "$value" == "\""*"\"" ) || ( "$value" == "'"*"'" ) ]]; then
                 value="${value:1:${#value}-2}"
             fi
@@ -207,9 +353,9 @@ register_agent_cli_secret() {
     local agent_name="$1"
     local stub_name="$2"
     local secret_name="$3"
-    local source_type="$4"
-    local source_label="$5"
-    local data_source="$6"
+    local source_type="$4"  # file|inline
+    local source_label="$5" # manifest label/path description
+    local data_source="$6"  # file path or literal value
     local digest_value="$7"
 
     if append_unique_value "$stub_name" "${BROKER_STUBS[@]}"; then
@@ -378,20 +524,23 @@ stage_agent_cli_capability_bundles() {
 
 package_agent_data_payload() {
     local agent_name="$1"
-    local packager_script="$REPO_ROOT/scripts/utils/package-agent-data.py"
+    local packager_script="$REPO_ROOT/host/utils/package-agent-data.py"
     if [ ! -f "$packager_script" ]; then
         return 0
     fi
-    local data_dir="$SESSION_CONFIG_OUTPUT/$agent_name/data"
-    mkdir -p "$data_dir"
-    local tar_path="$data_dir/data-import.tar"
-    local manifest_path="$data_dir/manifest.json"
+    local session_dir="$SESSION_CONFIG_OUTPUT/$agent_name/data/$SESSION_ID"
+    mkdir -p "$session_dir"
+    local tar_path="$session_dir/data-import.tar"
+    local manifest_path="$session_dir/manifest.json"
+    local key_path="$session_dir/data-hmac.key"
+    ensure_data_hmac_key "$agent_name" "$SESSION_ID" "$key_path"
     local -a runner_mounts=("--mount" "$SESSION_CONFIG_OUTPUT")
     local -a packager_args=(
         "--agent" "$agent_name"
         "--session-id" "$SESSION_ID"
         "--tar" "$tar_path"
         "--manifest" "$manifest_path"
+        "--hmac-key-file" "$key_path"
     )
     if [ -n "${HOME:-}" ]; then
         packager_args+=("--home-path" "$HOME")
@@ -427,6 +576,31 @@ parse_stub_secret_manifest() {
 }
 
 store_stub_secrets() {
+ensure_data_hmac_key() {
+    local agent_name="$1"
+    local session_id="$2"
+    local dest_path="$3"
+    if [ ! -f "$dest_path" ]; then
+        local key_hex
+        if command -v openssl >/dev/null 2>&1; then
+            key_hex=$(openssl rand -hex 32 2>/dev/null || true)
+        fi
+        if [ -z "$key_hex" ]; then
+            key_hex=$(python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+)
+        fi
+        printf '%s\n' "$key_hex" > "$dest_path"
+        chmod 600 "$dest_path" 2>/dev/null || true
+    fi
+    local host_store="${HOME}/.config/coding-agents/data-hmac/${agent_name}"
+    mkdir -p "$host_store"
+    cp "$dest_path" "$host_store/${session_id}.key"
+    chmod 600 "$host_store/${session_id}.key" 2>/dev/null || true
+}
+
     local broker_script="$1"
     local stub
     for stub in "${!SESSION_STUB_SECRETS[@]}"; do
@@ -488,35 +662,55 @@ seal_stub_capabilities() {
     return 0
 }
 
-ensure_data_hmac_key() {
-    local agent_name="$1"
-    local session_id="$2"
-    local dest_path="$3"
-    if [ ! -f "$dest_path" ]; then
-        local key_hex
-        if command -v openssl >/dev/null 2>&1; then
-            key_hex=$(openssl rand -hex 32 2>/dev/null || true)
+run_prompt_session() {
+    echo ""
+    echo "💡 Running prompt session inside container"
+    echo "   Prompt: $PROMPT_TEXT"
+
+    local exec_cmd status=0
+    case "$AGENT" in
+        copilot)
+            exec_cmd='github-copilot-cli exec "$PROMPT_INPUT"'
+            ;;
+        codex)
+            exec_cmd='codex exec "$PROMPT_INPUT"'
+            ;;
+        claude)
+            exec_cmd='claude -p "$PROMPT_INPUT"'
+            ;;
+        *)
+            echo "❌ Prompt mode is not supported for agent '$AGENT'" >&2
+            return 1
+            ;;
+    esac
+
+    if container_cli exec -e PROMPT_INPUT="$PROMPT_TEXT" "$CONTAINER_NAME" bash -lc "$exec_cmd"; then
+        status=0
+        if [ -n "${CODING_AGENTS_PROMPT_POST_HOOK:-}" ]; then
+            echo "🛠️  Running prompt post-hook command"
+            if container_cli exec "$CONTAINER_NAME" bash -lc "${CODING_AGENTS_PROMPT_POST_HOOK}"; then
+                echo "✅ Prompt post-hook completed"
+            else
+                local hook_status=$?
+                echo "⚠️  Prompt post-hook failed inside container (exit $hook_status)" >&2
+            fi
         fi
-        if [ -z "$key_hex" ]; then
-            key_hex=$(python3 - <<'PY'
-import secrets
-print(secrets.token_hex(32))
-PY
-)
-        fi
-        printf '%s\n' "$key_hex" > "$dest_path"
-        chmod 600 "$dest_path" 2>/dev/null || true
+        echo ""
+        echo "✅ Prompt session completed"
+    else
+        status=$?
+        echo ""
+        echo "❌ Prompt session failed inside container (exit $status)" >&2
     fi
-    local host_store="${HOME}/.config/coding-agents/data-hmac/${agent_name}"
-    mkdir -p "$host_store"
-    cp "$dest_path" "$host_store/${session_id}.key"
-    chmod 600 "$host_store/${session_id}.key" 2>/dev/null || true
+
+    container_cli stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    return $status
 }
 
 # First argument must be agent type
 if [[ $# -eq 0 || "$1" == "-"* ]]; then
     echo "❌ Error: Agent type is required as first argument"
-    echo "Usage: launch-agent <agent> [SOURCE] [OPTIONS]"
+    echo "Usage: run-agent <agent> [SOURCE] [OPTIONS]"
     echo "Agent types: copilot, codex, claude"
     exit 1
 fi
@@ -578,46 +772,22 @@ while [[ $# -gt 0 ]]; do
             FORCE=true
             shift
             ;;
+        --prompt)
+            if [[ $# -lt 2 ]]; then
+                echo "❌ Error: --prompt requires a prompt" >&2
+                exit 1
+            fi
+            PROMPT_MODE=true
+            PROMPT_TEXT="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: launch-agent <agent> [SOURCE] [OPTIONS]"
-            echo ""
-            echo "Agent types: copilot, codex, claude"
-            echo ""
-            echo "SOURCE can be:"
-            echo "  • Local path to a git repository (default: current directory)"
-            echo "  • Git URL (https://...)"
-            echo ""
-            echo "Options:"
-            echo "  -b, --branch BRANCH         Branch name (creates <agent>/<branch>)"
-            echo "  --name NAME                 Custom container name"
-            echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)"
-            echo "  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)"
-            echo "  --cpu NUM                   CPU limit (default: 4)"
-            echo "  --memory SIZE               Memory limit (default: 8g)"
-            echo "  --gpu SPEC                  GPU specification (e.g., 'all' or 'device=0')"
-            echo "  --no-push                   Disable auto-push on container shutdown"
-            echo "  --use-current-branch        Use current branch instead of creating agent branch (unsafe)"
-            echo "  -y, --force                 Automatically replace existing agent branch without prompting"
-            echo "  -h, --help                  Show this help"
-            echo ""
-            echo "Branch Behavior:"
-            echo "  • Without --branch: creates unique session branch <agent>/session-N"
-            echo "  • With --branch: creates <agent>/<branch>"
-            echo "  • Already on agent branch: reuses that branch"
-            echo "  • Use --use-current-branch to work directly on current branch"
-            echo "  • Existing agent branches prompt for replacement"
-            echo "  • Branches with unmerged commits are archived before replacement"
-            echo ""
-            echo "Examples:"
-            echo "  launch-agent copilot                              # Copilot in current directory"
-            echo "  launch-agent codex . -b refactor-db               # Codex in current dir, custom branch"
-            echo "  launch-agent copilot https://github.com/user/repo # Copilot from GitHub"
-            echo "  launch-agent claude /path/to/repo --name my-workspace"
-            echo "  launch-agent copilot . -b feature-api -y          # Auto-replace existing agent branch"
+            print_run_agent_usage
             exit 0
             ;;
         *)
             SOURCE="$1"
+            SOURCE_SPECIFIED=true
             shift
             ;;
     esac
@@ -635,6 +805,7 @@ esac
 # Treat 'none' as alias for allow-all
 [ "$NETWORK_PROXY" = "none" ] && NETWORK_PROXY="allow-all"
 
+
 # Check Docker
 check_docker_running || exit 1
 if ! verify_container_security_support; then
@@ -644,47 +815,86 @@ CONTAINER_CLI=$(get_active_container_cmd)
 
 # Determine if source is URL or local path
 if [[ "$SOURCE" =~ ^https?:// ]]; then
-    IS_URL=true
     SOURCE_TYPE="url"
     REPO_NAME=$(basename "$SOURCE" .git)
     GIT_URL="$SOURCE"
     WSL_PATH=""
 else
-    IS_URL=false
-    SOURCE_TYPE="local"
-    SOURCE=$(realpath "$SOURCE")
-    
-    # Check if git repository
-    if [ ! -d "$SOURCE/.git" ]; then
-        echo "❌ Error: $SOURCE is not a git repository"
+    if ! SOURCE=$(realpath "$SOURCE" 2>/dev/null); then
+        echo "❌ Error: Source path does not exist: $SOURCE"
         exit 1
     fi
-    
-    REPO_NAME=$(basename "$SOURCE")
-    cd "$SOURCE"
-    cd - > /dev/null
-    WSL_PATH=$(convert_to_wsl_path "$SOURCE")
-    GIT_URL=""
-    LOCAL_REPO_PATH_VALUE="$WSL_PATH"
 
-    if [ "$NO_PUSH" != true ]; then
-        REMOTE_HASH=$(printf "%s" "$SOURCE" | (command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum) | awk '{print $1}')
-        REMOTE_HASH=${REMOTE_HASH:0:16}
-        LOCAL_REMOTE_DIR="${CODING_AGENTS_LOCAL_REMOTES_DIR:-${HOME}/.coding-agents/local-remotes}"
-        LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
-        mkdir -p "$LOCAL_REMOTE_DIR"
-        if [ ! -d "$LOCAL_REMOTE_HOST_PATH" ]; then
-            git init --bare "$LOCAL_REMOTE_HOST_PATH" >/dev/null
+    # Auto-detect repo root when using default SOURCE
+    if [ ! -d "$SOURCE/.git" ] && [ "$SOURCE_SPECIFIED" != true ]; then
+        AUTO_ROOT=$(git -C "$SOURCE" rev-parse --show-toplevel 2>/dev/null || true)
+        if [ -n "$AUTO_ROOT" ]; then
+            SOURCE=$(realpath "$AUTO_ROOT" 2>/dev/null || echo "$AUTO_ROOT")
         fi
-        LOCAL_REMOTE_WSL_PATH=$(convert_to_wsl_path "$LOCAL_REMOTE_HOST_PATH")
-        LOCAL_REMOTE_URL="file:///tmp/local-remote"
-        LOCAL_REPO_PATH_VALUE="$LOCAL_REMOTE_URL"
     fi
 
-    if [ "$NO_PUSH" != true ] && [ -z "$LOCAL_REMOTE_URL" ]; then
-        echo "❌ Failed to configure secure local remote for auto-push"
-        exit 1
+    if [ ! -d "$SOURCE/.git" ]; then
+        if [ "$PROMPT_MODE" = true ]; then
+            SOURCE_TYPE="prompt"
+            REPO_NAME="prompt"
+            SOURCE="prompt-only"
+        else
+            echo "❌ Error: $SOURCE is not a git repository"
+            exit 1
+        fi
     fi
+
+    if [ "$SOURCE_TYPE" != "prompt" ]; then
+        SOURCE_TYPE="local"
+        REPO_NAME=$(basename "$SOURCE")
+        cd "$SOURCE"
+        cd - > /dev/null
+        WSL_PATH=$(convert_to_wsl_path "$SOURCE")
+        GIT_URL=""
+        LOCAL_REPO_PATH_VALUE="$WSL_PATH"
+
+        if [ "$NO_PUSH" != true ]; then
+            REMOTE_HASH=$(printf "%s" "$SOURCE" | (command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum) | awk '{print $1}')
+            REMOTE_HASH=${REMOTE_HASH:0:16}
+            LOCAL_REMOTE_DIR="${CODING_AGENTS_LOCAL_REMOTES_DIR:-${HOME}/.coding-agents/local-remotes}"
+            LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
+            mkdir -p "$LOCAL_REMOTE_DIR"
+            if [ ! -d "$LOCAL_REMOTE_HOST_PATH" ]; then
+                git init --bare "$LOCAL_REMOTE_HOST_PATH" >/dev/null
+            fi
+            LOCAL_REMOTE_WSL_PATH=$(convert_to_wsl_path "$LOCAL_REMOTE_HOST_PATH")
+            LOCAL_REMOTE_URL="file:///tmp/local-remote"
+            LOCAL_REPO_PATH_VALUE="$LOCAL_REMOTE_URL"
+        fi
+
+        if [ "$NO_PUSH" != true ] && [ -z "$LOCAL_REMOTE_URL" ]; then
+            echo "❌ Failed to configure secure local remote for auto-push"
+            exit 1
+        fi
+    fi
+fi
+
+PROMPT_ONLY_SESSION=false
+if [ "$SOURCE_TYPE" = "prompt" ]; then
+    PROMPT_ONLY_SESSION=true
+fi
+
+if [ "$PROMPT_ONLY_SESSION" = true ] && [ "$NO_PUSH" != true ]; then
+    NO_PUSH=true
+fi
+
+if [ "$SOURCE_TYPE" = "prompt" ] && [ -z "$BRANCH" ]; then
+    BRANCH="prompt-session"
+fi
+
+[ -n "$REPO_NAME" ] || REPO_NAME="prompt"
+
+if [ -z "$SESSION_CONFIG_SOURCE" ] && [ "$SOURCE_TYPE" = "local" ] && [ -f "$SOURCE/config.toml" ]; then
+    SESSION_CONFIG_SOURCE="$SOURCE/config.toml"
+fi
+
+if [ -z "$SESSION_CONFIG_SOURCE" ] && [ -f "${HOME}/.config/coding-agents/config.toml" ]; then
+    SESSION_CONFIG_SOURCE="${HOME}/.config/coding-agents/config.toml"
 fi
 
 if [ "$USE_CURRENT_BRANCH" = "true" ]; then
@@ -711,19 +921,16 @@ is_agent_branch() {
 }
 
 # Helper: Find next available session number
-    local session_dir="$SESSION_CONFIG_OUTPUT/$agent_name/data/$SESSION_ID"
-    mkdir -p "$session_dir"
-    local tar_path="$session_dir/data-import.tar"
-    local manifest_path="$session_dir/manifest.json"
-    local key_path="$session_dir/data-hmac.key"
-    ensure_data_hmac_key "$agent_name" "$SESSION_ID" "$key_path"
+find_next_session() {
+    local repo_path="$1"
+    local agent="$2"
+    local n=1
     cd "$repo_path"
     while git show-ref --verify --quiet "refs/heads/${agent}/session-${n}" 2>/dev/null; do
         ((n++))
     done
     cd - > /dev/null
-        "--manifest" "$manifest_path"
-        "--hmac-key-file" "$key_path"
+    echo "$n"
 }
 
 # Determine branch name with safety checks
@@ -781,7 +988,7 @@ fi
 
 if ! validate_container_name "$CONTAINER_NAME"; then
     echo "❌ Error: Generated container name '$CONTAINER_NAME' is invalid"
-    echo "   Adjust --name, repository, or branch values to avoid unsupported characters"
+    echo "   Adjust --name, repository, or branch to avoid spaces and special characters"
     exit 1
 fi
 
@@ -790,9 +997,15 @@ SESSION_CONFIG_OUTPUT="$SESSION_ARTIFACT_DIR/session-config"
 mkdir -p "$SESSION_CONFIG_OUTPUT"
 SESSION_ID="${CONTAINER_NAME}-${SESSION_ID_BASE}-${RANDOM}"
 
-WORKSPACE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "workspace")
-HOME_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "home")
-TOOLCACHE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "toolcache")
+if [ -z "$WORKSPACE_VOLUME" ]; then
+    WORKSPACE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "workspace")
+fi
+if [ -z "$HOME_VOLUME" ]; then
+    HOME_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "home")
+fi
+if [ -z "$TOOLCACHE_VOLUME" ]; then
+    TOOLCACHE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "toolcache")
+fi
 
 # Determine agent branch (handle case where BRANCH is already agent/branch format)
 if [ "$USE_CURRENT_BRANCH" = "true" ]; then
@@ -843,8 +1056,7 @@ if [ "$USE_SQUID" = true ]; then
     pull_and_tag_image "proxy"
 fi
 
-SESSION_CONFIG_ROOT_IN_CONTAINER="/run/coding-agents"
-RENDERER_SCRIPT="$REPO_ROOT/scripts/utils/render-session-config.py"
+RENDERER_SCRIPT="$REPO_ROOT/host/utils/render-session-config.py"
 TRUSTED_HASH_ARGS=()
 if [ -n "$TRUSTED_TREE_HASHES_RAW" ]; then
     while IFS= read -r entry; do
@@ -1050,7 +1262,7 @@ fi
 # Build docker arguments
 AUTO_PUSH_VALUE=$([ "$NO_PUSH" = true ] && echo "false" || echo "true")
 
-DOCKER_ARGS=(
+DOCKER_ARGS+=(
     "run" "-d"
     "--name" "$CONTAINER_NAME"
     "--hostname" "$CONTAINER_NAME"
@@ -1060,9 +1272,9 @@ DOCKER_ARGS=(
     "-e" "AGENT_BRANCH=$AGENT_BRANCH"
     "-e" "NETWORK_POLICY=$NETWORK_POLICY_ENV"
     "-e" "AUTO_PUSH_ON_SHUTDOWN=$AUTO_PUSH_VALUE"
-    "-e" "AGENT_SESSION_MODE=shell"
-    "-e" "AGENT_SESSION_SHELL_BIN=/bin/bash"
-    "-e" "AGENT_SESSION_SHELL_ARGS=-l"
+    "-e" "AGENT_SESSION_MODE=supervised"
+    "-e" "AGENT_SESSION_NAME=agent"
+    "-e" "AGENT_NAME=$AGENT"
     "-e" "HOST_SESSION_ID=$SESSION_ID"
     "-e" "HOST_SESSION_CONFIG_SHA256=$SESSION_CONFIG_SHA256"
     "-e" "HOST_TRUSTED_TREES=$TRUSTED_TREE_HASHES_ENV"
@@ -1085,7 +1297,6 @@ DOCKER_ARGS=(
     "-v" "${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
 )
 
-# Writable volumes for workspace, home, and tool cache
 DOCKER_ARGS+=(
     "--mount" "type=volume,src=${WORKSPACE_VOLUME},dst=/workspace"
     "--mount" "type=volume,src=${HOME_VOLUME},dst=/home/agentuser"
@@ -1095,7 +1306,7 @@ DOCKER_ARGS+=(
 # Add source-specific vars
 if [ "$SOURCE_TYPE" = "url" ]; then
     DOCKER_ARGS+=("-e" "GIT_URL=$GIT_URL")
-else
+elif [ "$SOURCE_TYPE" = "local" ]; then
     LOCAL_REPO_ENV_VALUE="${LOCAL_REPO_PATH_VALUE:-$WSL_PATH}"
     DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$LOCAL_REPO_ENV_VALUE")
     DOCKER_ARGS+=("-v" "${WSL_PATH}:/tmp/source-repo:ro")
@@ -1105,6 +1316,11 @@ else
         DOCKER_ARGS+=("-v" "${LOCAL_REMOTE_WSL_PATH}:/tmp/local-remote")
         DOCKER_ARGS+=("--label" "coding-agents.local-remote=$LOCAL_REMOTE_HOST_PATH")
     fi
+elif [ "$SOURCE_TYPE" = "prompt" ]; then
+    DOCKER_ARGS+=("-e" "PROMPT_ONLY_MODE=true")
+else
+    echo "❌ Internal error: unknown SOURCE_TYPE '$SOURCE_TYPE'" >&2
+    exit 1
 fi
 
 [ -n "$DOTNET_PREVIEW" ] && DOCKER_ARGS+=("-e" "DOTNET_PREVIEW_CHANNEL=$DOTNET_PREVIEW")
@@ -1149,7 +1365,7 @@ done
 
 # Start git credential proxy server on host if not already running
 CREDENTIAL_SOCKET_PATH="${HOME}/.config/coding-agents/git-credential.sock"
-CREDENTIAL_PROXY_SCRIPT="$SCRIPT_DIR/../runtime/git-credential-proxy-server.sh"
+CREDENTIAL_PROXY_SCRIPT="$SCRIPT_DIR/../utils/git-credential-proxy-server.sh"
 
 if [ ! -S "$CREDENTIAL_SOCKET_PATH" ]; then
     if [ -f "$CREDENTIAL_PROXY_SCRIPT" ]; then
@@ -1179,7 +1395,7 @@ fi
 
 # Start GPG proxy server on host if not already running and GPG signing is configured
 GPG_SOCKET_PATH="${HOME}/.config/coding-agents/gpg-proxy.sock"
-GPG_PROXY_SCRIPT="$SCRIPT_DIR/../runtime/gpg-proxy-server.sh"
+GPG_PROXY_SCRIPT="$SCRIPT_DIR/../utils/gpg-proxy-server.sh"
 GPG_SIGNING_ENABLED=false
 
 if git config commit.gpgsign 2>/dev/null | grep -q "true"; then
@@ -1234,7 +1450,7 @@ if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
 fi
 
 if [ "$SSH_AGENT_SOCKET_MOUNTED" = false ] && [ -d "${HOME}/.ssh" ]; then
-    echo "⚠️  SSH agent socket not available; host SSH keys will not be forwarded. Start ssh-agent before running launch-agent."
+    echo "⚠️  SSH agent socket not available; host SSH keys will not be forwarded. Start ssh-agent before running run-agent."
 fi
 
 if [ "$GPG_SIGNING_ENABLED" = true ] && [ ! -S "$GPG_SOCKET_PATH" ]; then
@@ -1249,7 +1465,7 @@ fi
 
 APPARMOR_PROFILE_NAME=""
 if APPARMOR_PROFILE_NAME=$(resolve_apparmor_profile_name "$REPO_ROOT"); then
-    true
+    :
 else
     APPARMOR_PROFILE_NAME=""
 fi
@@ -1260,6 +1476,8 @@ DOCKER_ARGS+=(
     "--network" "$NETWORK_MODE"
     "--read-only"
     "--cap-drop=ALL"
+    # Only SYS_ADMIN is re-added for the entrypoint mount remaps
+    "--cap-add=SYS_ADMIN"
     "--security-opt" "no-new-privileges:true"
     "--pids-limit=4096"
     "--cpus=$CPU"
@@ -1283,13 +1501,11 @@ fi
 if [ -n "${CODING_AGENTS_EXTRA_DOCKER_ARGS:-}" ]; then
     # shellcheck disable=SC2206
     EXTRA_DOCKER_ARGS=(${CODING_AGENTS_EXTRA_DOCKER_ARGS})
+    validate_extra_docker_args "${EXTRA_DOCKER_ARGS[@]}"
     DOCKER_ARGS+=("${EXTRA_DOCKER_ARGS[@]}")
 fi
 
-DOCKER_ARGS+=(
-    "$IMAGE_NAME"
-    "sleep" "infinity"
-)
+DOCKER_ARGS+=("$IMAGE_NAME")
 
 # Create container
 echo "📦 Creating container..."
@@ -1323,25 +1539,58 @@ if [ $? -ne 0 ]; then
 fi
 
 if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ] && [ "${CODING_AGENTS_DISABLE_AUTO_SYNC:-0}" != "1" ]; then
-    SYNC_SCRIPT="$REPO_ROOT/scripts/runtime/sync-local-remote.sh"
+    SYNC_SCRIPT="$REPO_ROOT/host/utils/sync-local-remote.sh"
     if [ -x "$SYNC_SCRIPT" ]; then
         mkdir -p "${HOME}/.coding-agents/logs"
         LOG_FILE="${HOME}/.coding-agents/logs/${CONTAINER_NAME}-sync.log"
         "$SYNC_SCRIPT" \
             --bare "$LOCAL_REMOTE_HOST_PATH" \
-            --repo "$SOURCE" \
+            --repo "$RESOLVED_PATH" \
             --branch "$AGENT_BRANCH" \
             --container "$CONTAINER_NAME" \
             >>"$LOG_FILE" 2>&1 &
     fi
 fi
 
+if [ "$USE_SQUID" = true ]; then
+    (
+        container_cli wait "$CONTAINER_NAME" >/dev/null 2>&1 || true
+        container_cli rm -f "$PROXY_CONTAINER_NAME" >/dev/null 2>&1 || true
+        container_cli network rm "$PROXY_NETWORK_NAME" >/dev/null 2>&1 || true
+    ) &
+fi
+
 echo ""
 echo "✅ Container '$CONTAINER_NAME' is ready!"
-echo ""
-echo "Connect via:"
-echo "  • VS Code: Attach to running container '$CONTAINER_NAME'"
-echo "  • Terminal: $CONTAINER_CLI exec -it $CONTAINER_NAME bash"
-echo ""
-echo "Repository: /workspace"
-echo "Branch: $AGENT_BRANCH"
+if [ "$PROMPT_MODE" = true ]; then
+    run_prompt_session
+    exit $?
+fi
+
+echo "🔗 Attaching to agent session (detach with Ctrl+B, then D)..."
+container_cli exec -it "$CONTAINER_NAME" agent-session attach
+ATTACH_STATUS=$?
+
+if [ $ATTACH_STATUS -ne 0 ]; then
+    if container_cli ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        echo "⚠️  Unable to attach. Re-run: $SCRIPT_DIR/connect-agent --name $CONTAINER_NAME"
+    else
+        echo "❌ Agent session exited before it was ready."
+    fi
+    exit $ATTACH_STATUS
+fi
+
+if container_cli ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo ""
+    echo "ℹ️  Session detached but container is still running."
+    echo "   Reconnect: $SCRIPT_DIR/connect-agent --name $CONTAINER_NAME"
+    echo "   Stop later: $CONTAINER_CLI stop $CONTAINER_NAME"
+else
+    echo ""
+    echo "✅ Agent session complete. Container stopped."
+fi
+
+if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ]; then
+    echo "🔄 Syncing agent branch back to host repository..."
+    sync_local_remote_to_host "$RESOLVED_PATH" "$LOCAL_REMOTE_HOST_PATH" "$AGENT_BRANCH"
+fi

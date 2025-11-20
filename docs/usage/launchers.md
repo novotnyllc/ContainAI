@@ -266,8 +266,8 @@ No conflicts!
 Every agent container now starts a managed tmux session so you can pause work without stopping the container—**this includes `run-*` containers**.
 
 - **Detach:** Press `Ctrl+B`, then `D` while inside the agent session. The session (Copilot/Codex/Claude or a shell) keeps running in the background.
-- **Reconnect (Bash):** `scripts/launchers/connect-agent --name <container>`
-- **Reconnect (PowerShell):** `scripts\launchers\connect-agent.ps1 -Name <container>`
+- **Reconnect (Bash):** `host/launchers/connect-agent --name <container>`
+- **Reconnect (PowerShell):** `host\launchers\connect-agent.ps1 -Name <container>`
 - If only one agent container is running, `connect-agent` automatically attaches to it. Otherwise, pass the container name (see `list-agents`).
 - `run-*` launchers attach you to tmux immediately after the container starts. When you detach, the container keeps running until you exit the tmux session or remove the container, so you can hop back in with `connect-agent` just like persistent sessions.
 - `launch-agent` containers also expose a ready-to-use shell session through `connect-agent`, making it easy to hop in and out without VS Code.

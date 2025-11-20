@@ -15,8 +15,8 @@ This guide distills everything you need to launch Copilot, Codex, or Claude cont
 Run the automated verifier any time:
 
 ```bash
-./scripts/verify-prerequisites.sh      # Linux/macOS
-powershell -File scripts/verify-prerequisites.ps1  # Windows
+./host/utils/verify-prerequisites.sh      # Linux/macOS
+powershell -File host/utils/verify-prerequisites.ps1  # Windows
 ```
 
 ## 2. Install the Launchers (One Time)
@@ -26,9 +26,9 @@ powershell -File scripts/verify-prerequisites.ps1  # Windows
 powershell -File scripts/install.ps1   # Windows
 ```
 
-Installation simply adds the `scripts/launchers` directory to your PATH so you can call `run-*`/`launch-*` from any repository. You can also add the folder manually if you prefer to keep control of your shell profile.
+Installation simply adds the `host/launchers` directory to your PATH so you can call `run-*`/`launch-*` from any repository. You can also add the folder manually if you prefer to keep control of your shell profile.
 
-> **Windows note:** The PowerShell entrypoints are WSL shims. They require WSL 2 and forward arguments to the bash scripts verbatim. `scripts\install.ps1` adds the launchers to your PATH so `run-copilot` works anywhere. When passing GNU-style flags (`--prompt`, `--network-proxy squid`, etc.) from PowerShell, use `--%` before the first flag (`pwsh scripts\launchers\run-copilot.ps1 --% --prompt "Status"`) so PowerShell does not treat them as native parameters.
+> **Windows note:** The PowerShell entrypoints are WSL shims. They require WSL 2 and forward arguments to the bash scripts verbatim. `scripts\install.ps1` adds the launchers to your PATH so `run-copilot` works anywhere. When passing GNU-style flags (`--prompt`, `--network-proxy squid`, etc.) from PowerShell, use `--%` before the first flag (`pwsh host\launchers\run-copilot.ps1 --% --prompt "Status"`) so PowerShell does not treat them as native parameters.
 
 ## 3. Launch Patterns
 

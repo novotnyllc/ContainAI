@@ -282,7 +282,7 @@ API_KEY = "$SERVICE_API_KEY"
 ```bash
 # Exit and restart the container
 exit
-./scripts/launchers/run-copilot  # or your preferred agent
+./host/launchers/run-copilot  # or your preferred agent
 ```
 
 ## Per-Agent Configuration
@@ -397,7 +397,7 @@ echo ${CODING_AGENTS_MCP_SECRETS_FILE:-$MCP_SECRETS_FILE}
 You can also re-run the renderer directly to surface warnings before launching an agent:
 
 ```bash
-python scripts/utils/render-session-config.py \
+python host/utils/render-session-config.py \
    --output /tmp/mcp-dry-run \
    --session-id test \
    --network-policy allow-all \

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Install coding-agents launchers to PATH
-# Adds scripts/launchers directory to ~/.bashrc or ~/.zshrc
+# Adds host/launchers directory to ~/.bashrc or ~/.zshrc
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LAUNCHERS_PATH="$REPO_ROOT/scripts/launchers"
+LAUNCHERS_PATH="$REPO_ROOT/host/launchers"
 
 if [[ ! -d "$LAUNCHERS_PATH" ]]; then
     echo "ERROR: Launchers directory not found: $LAUNCHERS_PATH"
@@ -16,12 +16,12 @@ fi
 echo "Installing launchers to PATH..."
 
 echo "Running Coding Agents prerequisite and health checks..."
-if ! "$REPO_ROOT/scripts/verify-prerequisites.sh"; then
+if ! "$REPO_ROOT/host/utils/verify-prerequisites.sh"; then
     echo "❌ Prerequisite verification failed. Resolve the issues above and re-run scripts/install.sh."
     exit 1
 fi
 
-if ! "$REPO_ROOT/scripts/utils/check-health.sh"; then
+if ! "$REPO_ROOT/host/utils/check-health.sh"; then
     echo "❌ Health check failed. Resolve the issues above and re-run scripts/install.sh."
     exit 1
 fi

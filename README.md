@@ -27,8 +27,8 @@ Features include MCP server support for extended capabilities, automated git ope
 
 **Quick verification:**
 ```bash
-./scripts/verify-prerequisites.sh  # Linux/Mac
-.\scripts\verify-prerequisites.ps1 # Windows
+./host/utils/verify-prerequisites.sh  # Linux/Mac
+.\host\utils\verify-prerequisites.ps1 # Windows
 ```
 
 **Note:** The verification script only reports what it finds. If it warns that GitHub CLI isn't installed, you can ignore it unless your host actually uses GitHub CLI for auth—the containers just inherit whatever credentials already exist on the host.
@@ -45,7 +45,7 @@ cd ~/my-project
 run-copilot                  # or run-codex / run-claude
 ```
 
-> **Windows note:** Every `.ps1` in this repository is a thin shim that launches the matching bash script inside your default WSL 2 distribution. Install and enable WSL (`wsl --install`, restart) before running the PowerShell commands above. `scripts\install.ps1` runs the same prerequisite + health checks via WSL and adds `scripts\launchers` to your user PATH so commands like `run-copilot` work from any PowerShell prompt.
+> **Windows note:** Every `.ps1` in this repository is a thin shim that launches the matching bash script inside your default WSL 2 distribution. Install and enable WSL (`wsl --install`, restart) before running the PowerShell commands above. `scripts\install.ps1` runs the same prerequisite + health checks via WSL and adds `host\launchers` to your user PATH so commands like `run-copilot` work from any PowerShell prompt.
 
 That's it! You're coding with AI in an isolated container. For a deeper walkthrough (network modes, container management, VS Code), read [docs/running-agents.md](docs/running-agents.md).
 

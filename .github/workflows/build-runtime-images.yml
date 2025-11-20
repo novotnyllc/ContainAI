@@ -6,8 +6,8 @@ on:
       - 'docker/agents/**'
       - 'docker/proxy/**'
       - 'docker/base/Dockerfile'
-      - 'scripts/runtime/**'
-      - 'scripts/utils/convert-toml-to-mcp.py'
+      - 'docker/runtime/**'
+      - 'host/utils/convert-toml-to-mcp.py'
       - 'agent-configs/**'
       - '.github/workflows/build-runtime-images.yml'
   pull_request:
@@ -15,8 +15,8 @@ on:
       - 'docker/agents/**'
       - 'docker/proxy/**'
       - 'docker/base/Dockerfile'
-      - 'scripts/runtime/**'
-      - 'scripts/utils/convert-toml-to-mcp.py'
+      - 'docker/runtime/**'
+      - 'host/utils/convert-toml-to-mcp.py'
       - 'agent-configs/**'
       - '.github/workflows/build-runtime-images.yml'
   workflow_dispatch:

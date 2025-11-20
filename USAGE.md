@@ -12,7 +12,7 @@ Use **`launch-agent`** only when you need:
 - Network proxy controls
 - Multiple persistent agents on the same repo
 
-> **Windows shells:** All `.ps1` files in this repo are thin wrappers that call the bash scripts inside your default WSL 2 distro. Install/enable WSL 2, then run `pwsh scripts\launchers\run-copilot.ps1 --% --prompt "..."` (use `--%` to stop PowerShell from interpreting GNU-style `--flags`). Every option documented below uses the bash syntax; the PowerShell wrappers forward those arguments verbatim. Running `scripts\install.ps1` adds `scripts\launchers` to your PATH so you can invoke `run-copilot`, `launch-agent`, etc. directly from any PowerShell prompt.
+> **Windows shells:** All `.ps1` files in this repo are thin wrappers that call the bash scripts inside your default WSL 2 distro. Install/enable WSL 2, then run `pwsh host\launchers\run-copilot.ps1 --% --prompt "..."` (use `--%` to stop PowerShell from interpreting GNU-style `--flags`). Every option documented below uses the bash syntax; the PowerShell wrappers forward those arguments verbatim. Running `scripts\install.ps1` adds `host\launchers` to your PATH so you can invoke `run-copilot`, `launch-agent`, etc. directly from any PowerShell prompt.
 
 ## What You Need
 
@@ -35,19 +35,19 @@ Agents use authentication configs from your host machine (mounted read-only):
 
 #### How agent credentials stay brokered
 - You authenticate on the host (`github-copilot-cli auth login`, `codex auth login`, `claude auth login`, etc.), so long-lived OAuth tokens live only under your home directory.
-- Every `run-*`/`launch-agent` command asks the host-side secret broker (`scripts/runtime/secret-broker.py`) to seal the credentials and emit per-session capability bundles **before** Docker starts.
+- Every `run-*`/`launch-agent` command asks the host-side secret broker (`host/utils/secret-broker.py`) to seal the credentials and emit per-session capability bundles **before** Docker starts.
 - The launcher copies those capabilities into `/run/coding-agents` (a tmpfs) and bind-mounts the relevant CLI config directories read-only. Inside the container, the trusted stubs/credential proxies redeem the capability, load the secret into their private tmpfs, and scrub it when the session ends.
 - Because the broker is the only component that ever touches the raw secret file, neither your repository nor the container filesystem ever stores the plaintext tokens.
 
 #### Verify the secret broker (optional but recommended)
 ```bash
-./scripts/runtime/secret-broker.py health           # confirms broker.d files and permissions
+./host/utils/secret-broker.py health           # confirms broker.d files and permissions
 ls -l ~/.config/coding-agents/broker.d              # shows keys.json/state.json/secrets.json on the host
 tail -n5 ~/.config/coding-agents/security-events.log # see capability issuance events
 ```
 
-- The broker auto-initializes when you run any launcher, but you can force a bootstrap with `./scripts/runtime/secret-broker.py init`.
-- To stage static API keys manually (rare), run `./scripts/runtime/secret-broker.py store --stub context7 --name api_key --from-env CONTEXT7_API_KEY` and repeat per stub. Full command details live in `docs/secret-broker-architecture.md`.
+- The broker auto-initializes when you run any launcher, but you can force a bootstrap with `./host/utils/secret-broker.py init`.
+- To stage static API keys manually (rare), run `./host/utils/secret-broker.py store --stub context7 --name api_key --from-env CONTEXT7_API_KEY` and repeat per stub. Full command details live in `docs/secret-broker-architecture.md`.
 
 ### Optional: MCP Server API Keys
 
@@ -174,5 +174,5 @@ The usage content has been split into focused guides so you can jump directly to
 - Prefer the **`run-*` launchers** for day-to-day work; use `launch-agent` only when you truly need a persistent container.
 - Prerequisite checks now run automatically before each launch and cache their results, so you only need to fix issues when the script reports them.
 - Published container images are pulled for you—running `scripts/build.*` is only required when you want to pre-load the cache or build a custom image.
-- Every container (including `run-*`) uses a managed tmux session, so you can detach with `Ctrl+B, D` and reconnect later with `scripts/launchers/connect-agent*`.
+- Every container (including `run-*`) uses a managed tmux session, so you can detach with `Ctrl+B, D` and reconnect later with `host/launchers/connect-agent*`.
 **When to disable:**

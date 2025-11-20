@@ -8,7 +8,7 @@ This document outlines security considerations for using and contributing to the
 
 Before any container is created, the launchers execute two dedicated preflight checks:
 
-- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-coding-agents.profile` or enable AppArmor in WSL via `scripts/utils/fix-wsl-security.sh`.
+- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-coding-agents.profile` or enable AppArmor in WSL via `host/utils/fix-wsl-security.sh`.
 - `verify_container_security_support` inspects `docker info` JSON to ensure the runtime reports seccomp and AppArmor support. The launch aborts immediately if either feature is missing.
 
 ```mermaid
@@ -59,14 +59,14 @@ Authentication uses OAuth from your host machine, but secrets are now gated by t
 
 ### Session Config Integrity & Audit Logging
 
-- **Host-rendered configs:** `scripts/utils/render-session-config.py` merges `config.toml`, runtime facts (session ID, container name, helper mounts), and broker capabilities before any containerized code runs. The manifest SHA256 is stored in `CODING_AGENTS_SESSION_CONFIG_SHA256` and logged so helpers can confirm they received the expected configuration.
+- **Host-rendered configs:** `host/utils/render-session-config.py` merges `config.toml`, runtime facts (session ID, container name, helper mounts), and broker capabilities before any containerized code runs. The manifest SHA256 is stored in `CODING_AGENTS_SESSION_CONFIG_SHA256` and logged so helpers can confirm they received the expected configuration.
 - **Structured audit log:** Every launch records `session-config`, `capabilities-issued`, and `override-used` events in `~/.config/coding-agents/security-events.log` (override via `CODING_AGENTS_AUDIT_LOG`). Entries are mirrored to `journald` as `coding-agents-launcher` and include timestamp, git `HEAD`, trusted tree hashes, and issued capability IDs.
 - **Immutable file perms:** Audit logs, manifest outputs, and capability bundles are written with `umask 077` and stored on tmpfs mounts owned by dedicated helper users; agent workloads only receive read-only bind mounts.
 - **Verification:** Tail the log with `tail -f ~/.config/coding-agents/security-events.log` to confirm manifest hashes and capability issuance before connecting to long-lived sessions.
 
 ### Override Workflow
 
-- **Token location:** Dirty trusted files (e.g., `scripts/launchers/**`, stub binaries) block launches unless you create `~/.config/coding-agents/overrides/allow-dirty` (customize via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`).
+- **Token location:** Dirty trusted files (e.g., `host/launchers/**`, stub binaries) block launches unless you create `~/.config/coding-agents/overrides/allow-dirty` (customize via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`).
 - **Mandatory logging:** Any time the override token is present, `launch-agent` emits an `override-used` audit event listing the repo, label, and paths that were dirty so reviewers can prove the deviation was deliberate.
 - **Removal:** Delete the token once local testing is complete to restore strict git cleanliness enforcement and avoid accumulating noisy audit entries.
 

@@ -6,6 +6,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "..\utils\wsl-shim.ps1")
+. (Join-Path $PSScriptRoot "..\..\host\utils\wsl-shim.ps1")
 $exitCode = Invoke-CodingAgentsWslScript -ScriptRelativePath "scripts\test\test-config.sh" -Arguments $Arguments
 exit $exitCode

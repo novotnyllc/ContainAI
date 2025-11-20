@@ -97,7 +97,7 @@ pwsh scripts/test/test-branch-management.ps1
 
 ### Typical Development Cycle
 
-1. **Make code changes** to scripts in `scripts/launchers/` or `scripts/utils/`
+1. **Make code changes** to scripts in `host/launchers/` or `host/utils/`
 
 2. **Run relevant unit tests immediately**:
    ```bash
@@ -108,7 +108,7 @@ pwsh scripts/test/test-branch-management.ps1
 3. **If tests pass, test manually** with a real container:
    ```bash
    # Launch an agent to test manually
-   ./scripts/launchers/launch-agent copilot . --branch test-feature
+   ./host/launchers/launch-agent copilot . --branch test-feature
    ```
 
 4. **Before committing**, run full unit tests:
@@ -176,7 +176,7 @@ All PowerShell scripts must pass PSScriptAnalyzer with **PSGallery** settings:
 Install-Module -Name PSScriptAnalyzer -Scope CurrentUser
 
 # Check all scripts
-$results = Get-ChildItem -Path "scripts" -Filter "*.ps1" -Recurse | 
+$results = Get-ChildItem -Path "host" -Filter "*.ps1" -Recurse | 
     ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Settings PSGallery }
 
 # Should return no errors or warnings
@@ -201,7 +201,7 @@ $results | Where-Object {$_.Severity -in @('Error','Warning')}
 - **No hardcoded secrets** - use environment variables or mock values in tests
 - **Complete error handling** - every external command should handle failures
 - **Descriptive error messages** - tell users what went wrong and how to fix it
-- **Runtime parity** - bash is the source of truth; Windows `.ps1` shims must invoke the same bash scripts via `scripts/utils/wsl-shim.ps1`
+- **Runtime parity** - bash is the source of truth; Windows `.ps1` shims must invoke the same bash scripts via `host/utils/wsl-shim.ps1`
 - **Test coverage** - all new functions need corresponding tests
 
 ## Script Parity
@@ -209,7 +209,7 @@ $results | Where-Object {$_.Severity -in @('Error','Warning')}
 ### Windows WSL shims
 
 Bash scripts contain all runtime logic. Windows support is delivered through thin `.ps1` wrappers that:
-1. dot-source `scripts/utils/wsl-shim.ps1`
+1. dot-source `host/utils/wsl-shim.ps1`
 2. call `Invoke-CodingAgentsWslScript -ScriptRelativePath '<target bash script>' -Arguments $Arguments`
 3. exit with the propagated status code
 
@@ -219,16 +219,17 @@ Only scripts that touch native Windows settings (for example `enable-wsl-securit
 
 ```
 coding-agents/
-├── scripts/
+├── host/
 │   ├── launchers/           # User-facing scripts
 │   │   ├── launch-agent     # Bash version
 │   │   ├── launch-agent.ps1 # PowerShell version
 │   │   ├── remove-agent     # Remove containers
 │   │   ├── list-agents      # List running agents
 │   │   └── run-*            # Quick launch scripts
-│   ├── utils/               # Shared functions
-│   │   ├── common-functions.sh   # Bash library
-│   │   └── wsl-shim.ps1          # Shared Windows shim helper
+│   └── utils/               # Shared functions
+│       ├── common-functions.sh   # Bash library
+│       └── wsl-shim.ps1          # Shared Windows shim helper
+├── scripts/
 │   └── test/                # Test suites
 │       ├── test-launchers.sh     # Unit tests (bash)
 │       ├── test-launchers.ps1    # Unit tests (PowerShell)
