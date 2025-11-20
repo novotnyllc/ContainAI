@@ -718,7 +718,43 @@ test_squid_proxy_hardening() {
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         "$TEST_CODEX_IMAGE" \
-        sh -c "cd /tmp && python3 -m http.server 8080 >/tmp/http.log 2>&1"
+        python3 - <<'PY'
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+SMALL_SIZE = 5 * 1024 * 1024
+LARGE_SIZE = 120 * 1024 * 1024
+
+small_body = b"A" * SMALL_SIZE
+large_body = b"B" * LARGE_SIZE
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        return
+
+    def _send_body(self, body: bytes):
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/small":
+            self._send_body(small_body)
+        elif self.path == "/big":
+            self._send_body(large_body)
+        else:
+            self._send_body(b"ok")
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        data = self.rfile.read(length)
+        self._send_body(str(len(data)).encode())
+
+
+server = ThreadingHTTPServer(("", 8080), Handler)
+server.serve_forever()
+PY
     then
         fail "Failed to start allowed test server"
         cleanup_proxy_resources
@@ -815,6 +851,130 @@ PY
         pass "Squid blocks metadata and RFC1918 destinations"
     else
         fail "Squid allowed private or metadata destination"
+    fi
+
+    if docker run --rm \
+        --network "$proxy_network" \
+        --add-host "${allowed_domain}:${allowed_ip}" \
+        -e "HTTP_PROXY=$proxy_url" \
+        -e "HTTPS_PROXY=$proxy_url" \
+        "$TEST_CODEX_IMAGE" \
+        python3 - <<'PY'
+import os
+import sys
+import urllib.request
+
+proxy = os.environ["HTTP_PROXY"]
+handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+opener = urllib.request.build_opener(handler)
+
+response = opener.open("http://allowed.test:8080/small", timeout=10)
+body = response.read()
+
+sys.exit(0 if len(body) == 5 * 1024 * 1024 else 1)
+PY
+    then
+        pass "Squid allows small responses within limit"
+    else
+        fail "Squid blocked an in-limit response"
+    fi
+
+    if docker run --rm \
+        --network "$proxy_network" \
+        --add-host "${allowed_domain}:${allowed_ip}" \
+        -e "HTTP_PROXY=$proxy_url" \
+        -e "HTTPS_PROXY=$proxy_url" \
+        "$TEST_CODEX_IMAGE" \
+        python3 - <<'PY'
+import os
+import sys
+import urllib.error
+import urllib.request
+
+proxy = os.environ["HTTP_PROXY"]
+handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+opener = urllib.request.build_opener(handler)
+
+try:
+    opener.open("http://allowed.test:8080/big", timeout=15).read()
+    sys.exit(1)
+except urllib.error.HTTPError as exc:
+    sys.exit(0 if exc.code in (403, 413, 503) else 1)
+except Exception:
+    sys.exit(0)
+PY
+    then
+        pass "Squid blocks oversized responses (>100MB)"
+    else
+        fail "Squid failed to enforce response size limit"
+    fi
+
+    if docker run --rm \
+        --network "$proxy_network" \
+        --add-host "${allowed_domain}:${allowed_ip}" \
+        -e "HTTP_PROXY=$proxy_url" \
+        -e "HTTPS_PROXY=$proxy_url" \
+        "$TEST_CODEX_IMAGE" \
+        python3 - <<'PY'
+import os
+import sys
+import urllib.request
+
+proxy = os.environ["HTTP_PROXY"]
+handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+opener = urllib.request.build_opener(handler)
+
+payload = b"Z" * (1024 * 1024)
+req = urllib.request.Request("http://allowed.test:8080/echo", data=payload, method="POST")
+resp = opener.open(req, timeout=10)
+body = resp.read().decode()
+sys.exit(0 if body.strip() == str(len(payload)) else 1)
+PY
+    then
+        pass "Squid allows small request bodies within limit"
+    else
+        fail "Squid blocked an in-limit request body"
+    fi
+
+    if docker run --rm \
+        --network "$proxy_network" \
+        --add-host "${allowed_domain}:${allowed_ip}" \
+        -e "HTTP_PROXY=$proxy_url" \
+        -e "HTTPS_PROXY=$proxy_url" \
+        "$TEST_CODEX_IMAGE" \
+        python3 - <<'PY'
+import os
+import sys
+import urllib.error
+import urllib.request
+
+proxy = os.environ["HTTP_PROXY"]
+handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+opener = urllib.request.build_opener(handler)
+
+payload = b"Y" * (11 * 1024 * 1024)
+req = urllib.request.Request("http://allowed.test:8080/echo", data=payload, method="POST")
+
+try:
+    opener.open(req, timeout=15).read()
+    sys.exit(1)
+except urllib.error.HTTPError as exc:
+    sys.exit(0 if exc.code in (403, 413, 503) else 1)
+except Exception:
+    sys.exit(0)
+PY
+    then
+        pass "Squid blocks oversized request bodies (>10MB)"
+    else
+        fail "Squid failed to enforce request size limit"
+    fi
+
+    local proxy_log
+    proxy_log=$(docker exec "$proxy_container" sh -c "cat /var/log/squid/access.log" 2>/dev/null || true)
+    if echo "$proxy_log" | grep -q "ERR_TOO_BIG"; then
+        pass "Squid logs rate-limit violations for telemetry"
+    else
+        fail "Squid did not log rate-limit violations"
     fi
 
     cleanup_proxy_resources

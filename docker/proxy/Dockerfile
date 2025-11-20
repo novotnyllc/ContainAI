@@ -11,6 +11,7 @@ RUN apt-get update \
 # Build context is project root, so docker/proxy/ is the correct path
 COPY docker/proxy/squid.conf /etc/squid/squid.conf
 COPY docker/proxy/entrypoint.sh /entrypoint.sh
+COPY docker/proxy/error_pages/ERR_TOO_BIG /usr/share/squid/errors/en/ERR_TOO_BIG
 RUN chmod +x /entrypoint.sh \
     && mkdir -p /var/log/squid /var/spool/squid \
     && chown -R proxy:proxy /var/log/squid /var/spool/squid
