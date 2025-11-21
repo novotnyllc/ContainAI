@@ -357,7 +357,7 @@ Report issues related to:
 docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
 
 # Or rebuild locally
-./scripts/build.sh
+./scripts/build/build-dev.sh
 ```
 
 ### Version Pinning
@@ -405,4 +405,3 @@ All data processing happens locally:
 ## Questions?
 
 For security questions that are not vulnerabilities, open a GitHub issue with the `security` label.
-

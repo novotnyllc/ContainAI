@@ -33,12 +33,24 @@ FAIL=0
 WARN=0
 declare -a FIX_COMMAND=()
 HOST_APPARMOR_ACTIVE=0
+COSIGN_BIN="${COSIGN_BIN:-cosign}"
+ENV_DETECTED=0
 
 header() { echo -e "\n${CYAN}🏥 $1${NC}"; echo "----------------------------------------"; }
 pass()   { echo -e "${GREEN}✅ $1${NC}"; ((PASS++)); }
 warn()   { echo -e "${YELLOW}⚠️  $1${NC}"; echo "   💡 $2"; ((WARN++)); }
 fail()   { echo -e "${RED}❌ $1${NC}"; echo "   👉 Fix: $2"; ((FAIL++)); }
 info()   { echo -e "   ℹ️  $1"; }
+
+load_env_profile() {
+    local env_script="$SCRIPT_DIR/env-detect.sh"
+    if [ -x "$env_script" ]; then
+        if env_output=$("$env_script" --format env 2>/dev/null); then
+            eval "$env_output"
+            ENV_DETECTED=1
+        fi
+    fi
+}
 
 suggest_fix() {
     if [ ${#FIX_COMMAND[@]} -eq 0 ]; then
@@ -80,7 +92,48 @@ prompt_fix_command() {
     fi
 }
 
+verify_sigstore_artifacts() {
+    local install_root="${CODING_AGENTS_ROOT:-$REPO_ROOT}"
+    local release_root=""
+
+    if [ -L "$install_root/current" ]; then
+        release_root="$(readlink -f "$install_root/current" || true)"
+    elif [ -d "$install_root/releases" ]; then
+        release_root="$install_root"
+    fi
+
+    if [ -z "$release_root" ] || [ ! -d "$release_root" ]; then
+        warn "Sigstore: no release tree found" "Install via host/utils/install-package.sh to enable signature verification."
+        return
+    fi
+
+    local tarball
+    tarball=$(find "$release_root" -maxdepth 1 -name 'coding-agents-*.tar.gz' | head -n 1)
+    if [ -z "$tarball" ]; then
+        warn "Sigstore: tarball copy missing" "Installers now retain tarball+sig for verification; reinstall to restore."
+        return
+    fi
+
+    local sig="$tarball.sig"
+    if [ ! -f "$sig" ]; then
+        warn "Sigstore: signature missing" "Repackage with scripts/release/package.sh --sign to produce $sig"
+        return
+    fi
+
+    if ! command -v "$COSIGN_BIN" >/dev/null 2>&1; then
+        warn "Sigstore: cosign not available" "Install cosign to verify $sig"
+        return
+    fi
+
+    if COSIGN_EXPERIMENTAL=1 "$COSIGN_BIN" verify-blob --signature "$sig" "$tarball" >/dev/null 2>&1; then
+        pass "Sigstore: tarball signature verified"
+    else
+        fail "Sigstore verification failed" "Rebuild package or verify signing identity."
+    fi
+}
+
 echo -e "${BLUE}CodingAgents System Diagnosis${NC}"
+load_env_profile
 
 # --- 1. PRIVILEGE CHECK ---
 header "User Context"
@@ -164,9 +217,17 @@ CONTAINER_CMD=""
 if command -v docker >/dev/null; then
     CONTAINER_CMD="docker"
 fi
+PODMAN_PRESENT=0
+if command -v podman >/dev/null 2>&1; then
+    PODMAN_PRESENT=1
+fi
 
 if [ -z "$CONTAINER_CMD" ]; then
-    fail "No Container Engine" "Install Docker Desktop or Docker Engine."
+    if [ $PODMAN_PRESENT -eq 1 ]; then
+        fail "Podman detected (unsupported)" "Install Docker Desktop or Docker Engine; Podman lacks required seccomp/AppArmor parity."
+    else
+        fail "No Container Engine" "Install Docker Desktop or Docker Engine."
+    fi
 else
     # Inspect the runtime
     if INFO=$("$CONTAINER_CMD" info --format '{{json .}}' 2>/dev/null); then
@@ -199,6 +260,10 @@ else
     else
         fail "$CONTAINER_CMD is installed but NOT running" "Start the service or desktop app."
     fi
+fi
+
+if [ $PODMAN_PRESENT -eq 1 ] && [ "$CONTAINER_CMD" = "docker" ]; then
+    warn "Podman detected in PATH" "Launchers enforce Docker; ensure Docker remains default and remove Podman if socket hijacks occur."
 fi
 
 # --- 4. NETWORK ---
@@ -265,6 +330,10 @@ if load_common_functions; then
 else
     warn "Security helper load failed" "Unable to run launcher guard checks; inspect host/utils/common-functions.sh"
 fi
+
+# --- 7. INTEGRITY & SIGNATURE ---
+header "Integrity & Signature"
+verify_sigstore_artifacts
 
 # --- SUMMARY ---
 echo ""

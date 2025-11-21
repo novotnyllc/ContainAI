@@ -87,8 +87,19 @@ git clone https://github.com/novotnyllc/coding-agents.git
 cd coding-agents
 
 # Build images
-./scripts/build.sh  # Linux/Mac
-.\scripts\build.ps1 # Windows
+./scripts/build/build-dev.sh  # Linux/Mac (dev namespace)
+pwsh scripts/build/build-dev.ps1 --% # Windows
 ```
 
 See [docs/build.md](../build.md) for details on customizing the build.
+
+## Installing the Signed Bundle (dogfooding)
+
+CI publishes a single bundle per tagged release:
+- `coding-agents-<version>.tar.gz` containing `payload.tar.gz`, `payload.sha256`, `attestation.intoto.jsonl`, `cosign`, `cosign-root.pem`.
+
+Install it directly (no extra tools required):
+```bash
+sudo ./host/utils/install-package.sh --version vX.Y.Z --repo <owner/repo>
+```
+The installer verifies the payload hash and attestation using the bundled cosign, runs integrity-check over SHA256SUMS, and performs a blue/green swap under `/opt/coding-agents/releases/<version>`.

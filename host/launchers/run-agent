@@ -13,6 +13,10 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 detect_environment_profile
 REPO_ROOT="$CODING_AGENTS_ROOT"
 
+if ! enforce_prod_install_root; then
+    exit 1
+fi
+
 if [ "$CODING_AGENTS_PROFILE" = "dev" ]; then
     maybe_check_launcher_updates "$REPO_ROOT" "run-agent"
 fi
@@ -1033,11 +1037,11 @@ fi
 
 PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
 PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
-PROXY_IMAGE="coding-agents-proxy:local"
+PROXY_IMAGE="${CODING_AGENTS_IMAGE_PREFIX}-proxy:${CODING_AGENTS_IMAGE_TAG}"
 
 # Pull latest image
 pull_and_tag_image "$AGENT"
-IMAGE_NAME="coding-agents-${AGENT}:local"
+IMAGE_NAME="${CODING_AGENTS_IMAGE_PREFIX}-${AGENT}:${CODING_AGENTS_IMAGE_TAG}"
 
 # Get timezone
 TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"

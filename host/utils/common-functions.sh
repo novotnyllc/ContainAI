@@ -5,13 +5,17 @@ set -euo pipefail
 COMMON_FUNCTIONS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CODING_AGENTS_REPO_ROOT_DEFAULT=$(cd "$COMMON_FUNCTIONS_DIR/../.." && pwd)
 
-CODING_AGENTS_PROFILE="${CODING_AGENTS_PROFILE:-dev}"
-CODING_AGENTS_ROOT="${CODING_AGENTS_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
-# Defaults for dev; overridden by env-detect at runtime. Prod uses system paths set by env-detect.
-CODING_AGENTS_CONFIG_DIR="${CODING_AGENTS_CONFIG_DIR:-${HOME}/.config/coding-agents-dev}"
-CODING_AGENTS_DATA_ROOT="${CODING_AGENTS_DATA_ROOT:-${HOME}/.local/share/coding-agents-dev}"
-CODING_AGENTS_CACHE_ROOT="${CODING_AGENTS_CACHE_ROOT:-${HOME}/.cache/coding-agents-dev}"
-CODING_AGENTS_SHA256_FILE="${CODING_AGENTS_SHA256_FILE:-${CODING_AGENTS_ROOT}/SHA256SUMS}"
+CODING_AGENTS_PROFILE_FILE="${CODING_AGENTS_PROFILE_FILE:-$CODING_AGENTS_REPO_ROOT_DEFAULT/profile.env}"
+CODING_AGENTS_PROFILE="dev"
+CODING_AGENTS_ROOT="$CODING_AGENTS_REPO_ROOT_DEFAULT"
+# Defaults for dev; overridden by env-detect profile file.
+CODING_AGENTS_CONFIG_DIR="${HOME}/.config/coding-agents-dev"
+CODING_AGENTS_DATA_ROOT="${HOME}/.local/share/coding-agents-dev"
+CODING_AGENTS_CACHE_ROOT="${HOME}/.cache/coding-agents-dev"
+CODING_AGENTS_SHA256_FILE="${CODING_AGENTS_ROOT}/SHA256SUMS"
+CODING_AGENTS_IMAGE_PREFIX="coding-agents-dev"
+CODING_AGENTS_IMAGE_TAG="devlocal"
+CODING_AGENTS_REGISTRY="ghcr.io/novotnyllc"
 CODING_AGENTS_HOST_CONFIG_FILE="${CODING_AGENTS_HOST_CONFIG:-${CODING_AGENTS_CONFIG_DIR}/host-config.env}"
 CODING_AGENTS_OVERRIDE_DIR="${CODING_AGENTS_OVERRIDE_DIR:-${CODING_AGENTS_CONFIG_DIR}/overrides}"
 CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-${CODING_AGENTS_OVERRIDE_DIR}/allow-dirty}"
@@ -368,7 +372,7 @@ detect_environment_profile() {
         return 1
     fi
     local output
-    if ! output=$("$env_detect_script" --format env); then
+    if ! output=$("$env_detect_script" --format env --profile-file "$CODING_AGENTS_PROFILE_FILE"); then
         echo "❌ Environment detection failed" >&2
         return 1
     fi
@@ -384,9 +388,12 @@ detect_environment_profile() {
                 CODING_AGENTS_CACHE_DIR="$value"
                 ;;
             CODING_AGENTS_SHA256_FILE) CODING_AGENTS_SHA256_FILE="$value" ;;
+            CODING_AGENTS_IMAGE_PREFIX) CODING_AGENTS_IMAGE_PREFIX="$value" ;;
+            CODING_AGENTS_IMAGE_TAG) CODING_AGENTS_IMAGE_TAG="$value" ;;
+            CODING_AGENTS_REGISTRY) CODING_AGENTS_REGISTRY="$value" ;;
         esac
     done <<< "$output"
-    export CODING_AGENTS_PROFILE CODING_AGENTS_ROOT CODING_AGENTS_CONFIG_DIR CODING_AGENTS_DATA_ROOT CODING_AGENTS_CACHE_ROOT CODING_AGENTS_SHA256_FILE
+    export CODING_AGENTS_PROFILE CODING_AGENTS_ROOT CODING_AGENTS_CONFIG_DIR CODING_AGENTS_DATA_ROOT CODING_AGENTS_CACHE_ROOT CODING_AGENTS_SHA256_FILE CODING_AGENTS_IMAGE_PREFIX CODING_AGENTS_IMAGE_TAG CODING_AGENTS_REGISTRY
     return 0
 }
 
@@ -400,6 +407,32 @@ run_integrity_check_if_needed() {
         return 0
     fi
     return 1
+}
+
+enforce_prod_install_root() {
+    if [ "${CODING_AGENTS_PROFILE:-dev}" != "prod" ]; then
+        return 0
+    fi
+    local root="${CODING_AGENTS_ROOT:-}"
+    if [ -z "$root" ] || [ ! -d "$root" ]; then
+        echo "❌ Prod profile requires an installed root. Run host/utils/install-package.sh first." >&2
+        log_security_event "enforcement" '{"reason":"missing-prod-root"}' >/dev/null 2>&1 || true
+        return 1
+    fi
+    local parent owner
+    parent=$(dirname "$root")
+    owner=$(stat -c "%U" "$parent" 2>/dev/null || echo "")
+    if [ "$(id -u)" -ne 0 ] && [ "$owner" != "root" ]; then
+        echo "❌ Prod root must be system-owned (parent owner: $owner). Rejecting $root" >&2
+        log_security_event "enforcement" '{"reason":"non-system-root","root":"'"$(json_escape_string "$root")"'"}' >/dev/null 2>&1 || true
+        return 1
+    fi
+    if [[ "$root" =~ ^$HOME ]]; then
+        echo "❌ Prod root cannot reside under user home ($root)" >&2
+        log_security_event "enforcement" '{"reason":"user-writable-root","root":"'"$(json_escape_string "$root")"'"}' >/dev/null 2>&1 || true
+        return 1
+    fi
+    return 0
 }
 
 ensure_trusted_paths_clean() {
@@ -1428,25 +1461,33 @@ pull_and_tag_image() {
     local retry_delay="${3:-2}"
     local registry_image=""
     local local_image=""
+    local registry_prefix="${CODING_AGENTS_REGISTRY:-ghcr.io/novotnyllc}"
+    local prefix="${CODING_AGENTS_IMAGE_PREFIX:-coding-agents-dev}"
+    local tag="${CODING_AGENTS_IMAGE_TAG:-devlocal}"
 
     case "$target" in
         base)
-            registry_image="ghcr.io/novotnyllc/coding-agents-base:latest"
-            local_image="coding-agents-base:local"
+            registry_image="${registry_prefix}/${prefix}-base:${tag}"
+            local_image="${prefix}-base:${tag}"
             ;;
         all|all-agents)
-            registry_image="ghcr.io/novotnyllc/coding-agents:latest"
-            local_image="coding-agents:local"
+            registry_image="${registry_prefix}/${prefix}:${tag}"
+            local_image="${prefix}:${tag}"
             ;;
         proxy)
-            registry_image="ghcr.io/novotnyllc/coding-agents-proxy:latest"
-            local_image="coding-agents-proxy:local"
+            registry_image="${registry_prefix}/${prefix}-proxy:${tag}"
+            local_image="${prefix}-proxy:${tag}"
             ;;
         *)
-            registry_image="ghcr.io/novotnyllc/coding-agents-${target}:latest"
-            local_image="coding-agents-${target}:local"
+            registry_image="${registry_prefix}/${prefix}-${target}:${tag}"
+            local_image="${prefix}-${target}:${tag}"
             ;;
     esac
+
+    if [ "${CODING_AGENTS_PROFILE:-dev}" = "dev" ]; then
+        echo "⏭️  Dev profile: using local image ${local_image} (skip registry pull)"
+        return 0
+    fi
 
     echo "📦 Checking for image updates (${target})..."
 

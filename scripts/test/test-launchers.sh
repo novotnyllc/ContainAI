@@ -1211,34 +1211,52 @@ test_env_detection_profiles() {
     output=$("$PROJECT_ROOT/host/utils/env-detect.sh" --format env)
     local dev_root=""
     local dev_mode=""
+    local dev_prefix=""
+    local dev_tag=""
+    local dev_registry=""
     while IFS='=' read -r key value; do
         case "$key" in
             CODING_AGENTS_PROFILE) dev_mode="$value" ;;
             CODING_AGENTS_ROOT) dev_root="$value" ;;
+            CODING_AGENTS_IMAGE_PREFIX) dev_prefix="$value" ;;
+            CODING_AGENTS_IMAGE_TAG) dev_tag="$value" ;;
+            CODING_AGENTS_REGISTRY) dev_registry="$value" ;;
         esac
     done <<< "$output"
-    if [ "$dev_mode" = "dev" ] && [ "$dev_root" = "$PROJECT_ROOT" ]; then
-        pass "Default detection prefers dev profile in git repo"
+    if [ "$dev_mode" = "dev" ] && [ "$dev_root" = "$PROJECT_ROOT" ] && [ "$dev_prefix" = "coding-agents-dev" ] && [ "$dev_tag" = "devlocal" ]; then
+        pass "Default detection prefers dev profile in git repo with dev image names"
     else
-        fail "Default detection did not pick dev profile (mode=$dev_mode root=$dev_root)"
+        fail "Default detection did not pick dev profile (mode=$dev_mode root=$dev_root prefix=$dev_prefix tag=$dev_tag)"
     fi
 
     local prod_fake
     prod_fake=$(mktemp -d)
     mkdir -p "$prod_fake/host/launchers"
-    output=$(CODING_AGENTS_PROFILE= CODING_AGENTS_MODE= CODING_AGENTS_FORCE_MODE=prod CODING_AGENTS_PROD_ROOT="$prod_fake" "$PROJECT_ROOT/host/utils/env-detect.sh" --format env)
+    cat > "$prod_fake/profile.env" <<'EOF'
+PROFILE=prod
+IMAGE_PREFIX=coding-agents
+IMAGE_TAG=1.2.3
+REGISTRY=ghcr.io/example
+EOF
+    output=$("$PROJECT_ROOT/host/utils/env-detect.sh" --format env --profile-file "$prod_fake/profile.env" --prod-root "$prod_fake")
     local prod_mode=""
     local prod_root=""
+    local prod_prefix=""
+    local prod_tag=""
+    local prod_registry=""
     while IFS='=' read -r key value; do
         case "$key" in
             CODING_AGENTS_PROFILE) prod_mode="$value" ;;
             CODING_AGENTS_ROOT) prod_root="$value" ;;
+            CODING_AGENTS_IMAGE_PREFIX) prod_prefix="$value" ;;
+            CODING_AGENTS_IMAGE_TAG) prod_tag="$value" ;;
+            CODING_AGENTS_REGISTRY) prod_registry="$value" ;;
         esac
     done <<< "$output"
-    if [ "$prod_mode" = "prod" ] && [ "$prod_root" = "$prod_fake" ]; then
+    if [ "$prod_mode" = "prod" ] && [ "$prod_root" = "$prod_fake" ] && [ "$prod_prefix" = "coding-agents" ] && [ "$prod_tag" = "1.2.3" ] && [ "$prod_registry" = "ghcr.io/example" ]; then
         pass "Prod detection selects configured prod root"
     else
-        fail "Prod detection failed (mode=$prod_mode root=$prod_root)"
+        fail "Prod detection failed (mode=$prod_mode root=$prod_root prefix=$prod_prefix tag=$prod_tag registry=$prod_registry)"
     fi
 
     rm -rf "$prod_fake"
@@ -1252,14 +1270,14 @@ test_integrity_check_behaviors() {
     echo "abc" > "$temp_root/payload.txt"
     (cd "$temp_root" && sha256sum payload.txt > SHA256SUMS)
 
-    if CODING_AGENTS_PROFILE=prod CODING_AGENTS_ROOT="$temp_root" CODING_AGENTS_SHA256_FILE="$temp_root/SHA256SUMS" "$PROJECT_ROOT/host/utils/integrity-check.sh" >/dev/null 2>&1; then
+    if "$PROJECT_ROOT/host/utils/integrity-check.sh" --mode prod --root "$temp_root" --sums "$temp_root/SHA256SUMS" >/dev/null 2>&1; then
         pass "Integrity check passes for untampered prod payload"
     else
         fail "Integrity check failed for valid prod payload"
     fi
 
     echo "tamper" >> "$temp_root/payload.txt"
-    if CODING_AGENTS_PROFILE=prod CODING_AGENTS_ROOT="$temp_root" CODING_AGENTS_SHA256_FILE="$temp_root/SHA256SUMS" "$PROJECT_ROOT/host/utils/integrity-check.sh" >/dev/null 2>&1; then
+    if "$PROJECT_ROOT/host/utils/integrity-check.sh" --mode prod --root "$temp_root" --sums "$temp_root/SHA256SUMS" >/dev/null 2>&1; then
         fail "Integrity check should fail after tampering in prod"
     else
         pass "Integrity check fails when payload modified in prod"

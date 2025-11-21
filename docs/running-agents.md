@@ -127,7 +127,7 @@ If you need to customize MCP servers, edit `config.toml` in your repository or s
 | Launcher hangs on pull | Run `docker login ghcr.io` so GHCR pulls succeed |
 | Container exits immediately | Check repo cleanliness; some launchers refuse to start with uncommitted changes unless you pass `--force` |
 | VS Code cannot attach | Ensure Dev Containers extension is installed and Docker API is reachable |
-| Proxy launch fails | Pull `ghcr.io/novotnyllc/coding-agents-proxy:latest` or run `scripts/build/build.sh --agents proxy --from-source` to rebuild |
+| Proxy launch fails | Build dev proxy locally (`scripts/build/build-dev.sh --agents proxy`) or pull the published proxy tag pinned in `host/profile.env` |
 
 ## 8. Learn More
 

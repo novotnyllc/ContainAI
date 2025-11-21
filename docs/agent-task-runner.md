@@ -57,7 +57,7 @@ sequenceDiagram
 | Policy enforcement even when wrappers fail | `agentcli-exec` installs a seccomp user-notification filter on `execve`/`execveat`; daemon can deny or allow after inspecting `/proc/<pid>/exe`. | Violations return `EPERM` and increment anomaly counter. |
 | Namespace, AppArmor, seccomp applied before user code | `agent-task-sandbox` unshares, remounts hide paths (`--hide`), drops to `agentuser`, calls `prctl(PR_SET_NO_NEW_PRIVS,1)`, then loads the `coding-agents-task` profile before final `execve`. | Prevents privileged syscalls (ptrace, mount, perf, raw sockets, etc.). |
 | STDIO integrity | seqpacket channel ensures message boundaries and backpressure; client handles EINTR and closes STDIN cleanly on EOF, so signal delivery is deterministic. | See `channel.rs` + `FSIZE` guard. |
-| Build reproducibility | `docker/base/Dockerfile` builds all runner binaries in an isolated stage (`cargo build --release --locked`). CI uses the same Dockerfile to produce release artifacts. | `scripts/build/build.sh --from-source` reuses that stage locally. |
+| Build reproducibility | `docker/base/Dockerfile` builds all runner binaries in an isolated stage (`cargo build --release --locked`). CI uses the same Dockerfile to produce release artifacts. | `scripts/build/build-dev.sh` rebuilds dev-scoped images; prod builds are pinned and produced in CI. |
 
 ## 5. Audit Surfaces & Incident Response Hooks
 
@@ -72,7 +72,7 @@ sequenceDiagram
 | --- | --- | --- |
 | Rust unit tests | `cd docker/runtime/agent-task-runner && cargo test` | Validates protocol helpers, CLI parsing, sandbox helpers. Required before any doc/code change lands. |
 | Seccomp filter check | `cargo test -- --ignored` (future work) | Ensures deny list stays synchronized with policy doc. |
-| Container build | `scripts/build/build.sh --from-source` → choose option 2 (local build) | Rebuilds the base image using the same multi-stage Dockerfile that CI uses, guaranteeing runner binaries are reproducible. |
+| Container build | `scripts/build/build-dev.sh` | Rebuilds the base image in the dev namespace; CI handles prod tags. |
 | Integration tests | `scripts/test/integration-test.sh --mode launchers` | Spins up mock images and verifies wrappers invoke `agent-task-runnerctl`, run socket mediation, and capture seccomp events. |
 
 ## 7. Related Documents

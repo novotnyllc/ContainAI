@@ -532,7 +532,7 @@ docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
 
 **Or build locally:**
 ```bash
-./scripts/build/build.sh       # Linux/Mac
+./scripts/build/build-dev.sh       # Linux/Mac (dev namespace, proxy included)
 .\scripts\build\build.ps1      # Windows
 ```
 
@@ -578,7 +578,7 @@ docker build --no-cache -f docker/base/Dockerfile .
 
 **5. Try with BuildKit:**
 ```bash
-DOCKER_BUILDKIT=1 ./scripts/build/build.sh
+DOCKER_BUILDKIT=1 ./scripts/build/build-dev.sh
 ```
 
 ### Image Too Large

@@ -312,10 +312,10 @@ Build all images from source (useful for development or customization). You can 
 **Linux/Mac:**
 ```bash
 # Build everything
-./scripts/build/build.sh
+./scripts/build/build-dev.sh
 
 # Build only Copilot + proxy
-./scripts/build/build.sh --agents copilot,proxy
+./scripts/build/build-dev.sh --agents copilot,proxy
 ```
 
 **Windows:**

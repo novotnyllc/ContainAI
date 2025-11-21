@@ -75,9 +75,11 @@ docker pull ghcr.io/novotnyllc/coding-agents-claude:latest
 git clone https://github.com/novotnyllc/coding-agents.git
 cd coding-agents
 
-# Build images
-./scripts/build.sh  # Linux/Mac
-.\scripts\build.ps1 # Windows
+# Build dev images (namespaced coding-agents-dev-*:devlocal)
+./scripts/build/build-dev.sh  # Linux/Mac
+pwsh scripts/build/build-dev.ps1 --%  # Windows (calls WSL bash)
+
+# Prod images are built/pinned by CI and shipped via signed packages (see docs/ghcr-publishing.md).
 ```
 
 See [docs/build.md](docs/build.md) for details.

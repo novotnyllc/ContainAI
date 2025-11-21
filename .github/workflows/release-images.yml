@@ -1,0 +1,133 @@
+name: Release Images
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+    - 'v*'
+    - 'v*-stage'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  validate:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io/novotnyllc
+      IMAGE_PREFIX: coding-agents-dev
+      IMAGE_TAG: dev-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build dev images (no push)
+        run: docker compose -f docker-compose.yml build base agents copilot codex claude proxy
+      - name: Generate SBOM (Anchore)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          output-file: dist/${{ env.IMAGE_TAG }}/sbom.json
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine channel
+        id: channel
+        run: |
+          ref="${GITHUB_REF##*/}"
+          if [[ "$ref" == *-stage ]]; then
+            echo "prefix=coding-agents-stage" >> $GITHUB_OUTPUT
+            echo "tag=$ref" >> $GITHUB_OUTPUT
+          else
+            echo "prefix=coding-agents" >> $GITHUB_OUTPUT
+            echo "tag=$ref" >> $GITHUB_OUTPUT
+          fi
+      - name: Stamp profile
+        run: |
+          PREFIX="${{ steps.channel.outputs.prefix }}"
+          TAG="${{ steps.channel.outputs.tag }}"
+          {
+            echo "PROFILE=prod"
+            echo "IMAGE_PREFIX=${PREFIX}"
+            echo "IMAGE_TAG=${TAG}"
+            echo "REGISTRY=ghcr.io/${{ github.repository_owner }}"
+          } > host/profile.env
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push images via compose
+        env:
+          REGISTRY: ghcr.io/${{ github.repository_owner }}
+          IMAGE_PREFIX: ${{ steps.channel.outputs.prefix }}
+          IMAGE_TAG: ${{ steps.channel.outputs.tag }}
+        run: |
+          docker compose -f docker-compose.yml build base agents copilot codex claude proxy
+          docker compose -f docker-compose.yml push base agents copilot codex claude proxy
+      - name: Prepare dist directory
+        run: mkdir -p dist/${{ steps.channel.outputs.tag }}
+      - name: Generate SBOM (Anchore)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          output-file: dist/${{ steps.channel.outputs.tag }}/sbom.json
+      - name: Build payload and initial bundle
+        run: |
+          VERSION=${{ steps.channel.outputs.tag }}
+          OUT=dist/${VERSION}
+          ./scripts/release/package.sh --version "$VERSION" --out dist --sbom "$OUT/sbom.json"
+      - name: Generate bundle SBOM (Anchore)
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+          output-file: dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
+      - name: Attest bundle provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+          push-to-registry: false
+      - name: Attest bundle SBOM
+        uses: actions/attest-sbom@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+          sbom-path: dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
+      - name: Download attestation artifacts
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz.intoto.jsonl" "$OUT/bundle-provenance.intoto.jsonl"
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --predicate-type "https://slsa.dev/provenance/v1" --subject "$OUT/bundle.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}" || true
+          if [[ -f "$OUT/bundle.sbom.json.intoto.jsonl" ]]; then mv "$OUT/bundle.sbom.json.intoto.jsonl" "$OUT/bundle-sbom.intoto.jsonl"; fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coding-agents-${{ steps.channel.outputs.tag }}
+          path: |
+            dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+            dist/${{ steps.channel.outputs.tag }}/bundle-provenance.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/bundle-sbom.intoto.jsonl
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.channel.outputs.tag }}
+          files: |
+            dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+            dist/${{ steps.channel.outputs.tag }}/bundle-provenance.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/bundle-sbom.intoto.jsonl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -472,7 +472,7 @@ launch-agent copilot C:\production-repo `
 
 #### Behavior
   # Build only Copilot + proxy
-  ./scripts/build/build.sh --agents copilot,proxy
+  ./scripts/build/build-dev.sh --agents copilot,proxy
 
 
 1. Validates source (path or URL)
@@ -809,12 +809,12 @@ $env:PATH += ";E:\dev\CodingAgents\host\launchers"
 
 Build container images from source.
 
-**Location:** `scripts/build/build.sh` (bash), `scripts/build/build.ps1` (PowerShell)
+**Location:** `scripts/build/build-dev.sh` (bash), `scripts/build/build-dev.ps1` (PowerShell) — dev-only; prod builds are CI-managed.
 
 #### Synopsis
 
 ```bash
-./scripts/build/build.sh [OPTIONS]
+./scripts/build/build-dev.sh [OPTIONS]
 ```
 
 ```powershell
@@ -856,13 +856,13 @@ Choice [1-2]:
 
 ```bash
 # Build all images (Linux/Mac)
-./scripts/build/build.sh
+./scripts/build/build-dev.sh
 
 # Build all images (Windows)
 .\scripts\build\build.ps1
 
 # With BuildKit (faster, better caching)
-DOCKER_BUILDKIT=1 ./scripts/build/build.sh
+DOCKER_BUILDKIT=1 ./scripts/build/build-dev.sh
 
 # Windows with BuildKit
 $env:DOCKER_BUILDKIT=1
