@@ -9,7 +9,7 @@ This guide shows how to use Visual Studio Code to work with agent containers, in
 - [Connecting to a Running Container](#connecting-to-a-running-container)
 - [Starting a New Container from VS Code](#starting-a-new-container-from-vs-code)
 - [Working Inside the Container](#working-inside-the-container)
-- [Interacting with the Coding Agent](#interacting-with-the-coding-agent)
+- [Interacting with the Agent](#interacting-with-the-agent)
 - [Advanced Workflows](#advanced-workflows)
 - [Troubleshooting](#troubleshooting)
 
@@ -721,7 +721,7 @@ docker container prune --filter "label=coding-agent=true"
    ```
 
 3. **Container needs a long-running process:**
-   - Coding agent containers use `sleep infinity` or interactive shell
+   - ContainAI containers use `sleep infinity` or interactive shell
    - Verify: `docker logs copilot-agent` (should not show immediate exit)
 
 4. **Restart VS Code:**

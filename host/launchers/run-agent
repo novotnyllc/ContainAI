@@ -1284,7 +1284,7 @@ if [ "$SOURCE_TYPE" = "local" ] && [ "$USE_CURRENT_BRANCH" != "true" ]; then
     fi
 fi
 
-echo "🚀 Launching Coding Agent..."
+echo "🚀 Launching ContainAI..."
 echo "🎯 Agent: $AGENT"
 echo "📁 Source: $SOURCE ($SOURCE_TYPE)"
 echo "🌿 Branch: $AGENT_BRANCH"
