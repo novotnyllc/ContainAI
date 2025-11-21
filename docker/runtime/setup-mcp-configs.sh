@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Convert config.toml to agent-specific MCP configurations
 # This script reads the single source of truth (config.toml in the workspace)
-# and generates the appropriate config files for each coding agent
+# and generates the appropriate config files for each agent
 
 set -euo pipefail
 

@@ -1,6 +1,6 @@
 # VS Code Integration Guide
 
-This guide shows how to use Visual Studio Code to work with coding agent containers, including connecting to running instances, starting new containers, and interacting with the agent workspace.
+This guide shows how to use Visual Studio Code to work with agent containers, including connecting to running instances, starting new containers, and interacting with the agent workspace.
 
 ## Table of Contents
 
@@ -61,7 +61,7 @@ code --list-extensions | Select-String "ms-vscode-remote.remote-containers"
 
 ### Method 1: Launch Agent, Then Attach VS Code
 
-1. **Start a coding agent container:**
+1. **Start a agent container:**
    ```powershell
    # Windows PowerShell
    .\host\launchers\run-copilot.ps1
@@ -110,7 +110,7 @@ code --list-extensions | Select-String "ms-vscode-remote.remote-containers"
 # List all running containers
 docker ps
 
-# Filter coding agent containers
+# Filter agent containers
 docker ps --filter "name=agent"
 ```
 

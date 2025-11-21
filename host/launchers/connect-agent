@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Attach to a running coding agent container via tmux session
+# Attach to a running agent container via tmux session
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

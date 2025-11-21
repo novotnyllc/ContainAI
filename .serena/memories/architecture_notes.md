@@ -3,7 +3,7 @@
 ## Container Design
 
 ### Base Image
-- **OS**: Ubuntu 22.04 LTS
+- **OS**: Ubuntu 24.04 LTS
 - **User**: `agentuser` (UID 1000, GID 1000)
 - **Purpose**: Common foundation for all agent images
 - **Size**: ~4GB
@@ -11,7 +11,7 @@
 
 ### Agent Images
 - **Types**: copilot, codex, claude
-- **Based on**: `coding-agents:local` (base image)
+- **Based on**: `containai:local` (base image)
 - **Size**: +10 MB each
 - **Purpose**: Specialized validation and default commands
 
@@ -68,7 +68,7 @@ Branches with unmerged work are automatically renamed:
 - **Claude**: Uses Claude CLI authentication (mounted from `~/.config/claude`)
 
 ### MCP Secrets
-- Stored in `~/.config/coding-agents/mcp-secrets.env` on host
+- Stored in `~/.config/containai/mcp-secrets.env` on host
 - Mounted read-only at `/home/agentuser/.mcp-secrets.env` in container
 - Contains API keys for MCP servers (Context7, GitHub, etc.)
 - Not tracked in git, not baked into images
@@ -143,23 +143,23 @@ Branches with unmerged work are automatically renamed:
 
 Every agent container has these labels:
 ```
-coding-agents.type=agent
-coding-agents.agent={copilot|codex|claude}
-coding-agents.repo={repo-name}
-coding-agents.branch={branch-name}
-coding-agents.repo-path={absolute-path}
+containai.type=agent
+containai.agent={copilot|codex|claude}
+containai.repo={repo-name}
+containai.branch={branch-name}
+containai.repo-path={absolute-path}
 ```
 
 Optional labels (for proxy mode):
 ```
-coding-agents.proxy-container={proxy-container-name}
-coding-agents.proxy-network={network-name}
+containai.proxy-container={proxy-container-name}
+containai.proxy-network={network-name}
 ```
 
 Test containers:
 ```
-coding-agents.test=true
-coding-agents.test-session={PID}
+containai.test=true
+containai.test-session={PID}
 ```
 
 ## Volume Mounts
@@ -170,7 +170,7 @@ coding-agents.test-session={PID}
 - `~/.config/github-copilot` → `/home/agentuser/.config/github-copilot`
 - `~/.config/codex` → `/home/agentuser/.config/codex`
 - `~/.config/claude` → `/home/agentuser/.config/claude`
-- `~/.config/coding-agents/mcp-secrets.env` → `/home/agentuser/.mcp-secrets.env`
+- `~/.config/containai/mcp-secrets.env` → `/home/agentuser/.mcp-secrets.env`
 
 ### Read-Write
 - `{repo-path}` → `/workspace` (agent's isolated copy)

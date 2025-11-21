@@ -1,6 +1,6 @@
 # Build Guide for Container Authors
 
-This guide is for developers who want to build and publish the coding agent container images.
+This guide is for developers who want to build and publish the agent container images.
 
 ## Prerequisites
 

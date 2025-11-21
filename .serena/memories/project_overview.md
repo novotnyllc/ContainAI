@@ -1,4 +1,4 @@
-# CodingAgents Project Overview
+# ContainAI Project Overview
 
 ## Purpose
 Run AI coding agents (GitHub Copilot, OpenAI Codex, Anthropic Claude) in isolated Docker/Podman containers with OAuth authentication and MCP (Model Context Protocol) server support.
@@ -22,7 +22,7 @@ Run AI coding agents (GitHub Copilot, OpenAI Codex, Anthropic Claude) in isolate
 
 ## Repository Structure
 ```
-coding-agents/
+containai/
 ├── agent-configs/       # Custom instructions for AI agents (deployed to containers)
 ├── docker/             # Container definitions and compose files
 │   ├── base/          # Base image Dockerfile

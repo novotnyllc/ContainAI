@@ -15,7 +15,7 @@ Model Context Protocol (MCP) servers extend the capabilities of AI agents by pro
 
 ## What is MCP?
 
-Model Context Protocol is a standard for connecting AI agents to external tools and data sources. MCP servers act as bridges between your coding agent and services like:
+Model Context Protocol is a standard for connecting AI agents to external tools and data sources. MCP servers act as bridges between your agent and services like:
 
 - **GitHub**: Repositories, issues, pull requests, workflows
 - **Documentation**: Microsoft Learn, library docs, API references  
@@ -625,7 +625,7 @@ Secrets never enter the container as files. The launcher renders configs on the 
 
 ### Using Alternative MCP Client
 
-By default, MCP config is used by the coding agent's built-in MCP client. You can also:
+By default, MCP config is used by the agent's built-in MCP client. You can also:
 
 1. **VS Code MCP Extension:** Point to same config
 2. **Claude Desktop:** Symlink config

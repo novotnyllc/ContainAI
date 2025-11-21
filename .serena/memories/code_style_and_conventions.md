@@ -98,11 +98,11 @@ command || {
 
 ### Docker Labels
 - All agent containers must have:
-  - `coding-agents.type=agent`
-  - `coding-agents.agent={copilot|codex|claude}`
-  - `coding-agents.repo={repo-name}`
-  - `coding-agents.branch={branch-name}`
-  - `coding-agents.repo-path={absolute-path}`
+  - `containai.type=agent`
+  - `containai.agent={copilot|codex|claude}`
+  - `containai.repo={repo-name}`
+  - `containai.branch={branch-name}`
+  - `containai.repo-path={absolute-path}`
 
 ### Git Branches
 - Agent branches: `{agent}/{base-branch}`
@@ -110,9 +110,9 @@ command || {
 - Archived branches: `{agent}/{branch}-archived-{timestamp}`
 
 ### Test Isolation
-- Test containers: `label=coding-agents.test=true`
-- Test sessions: `label=coding-agents.test-session={PID}`
-- Test repos: `/tmp/test-coding-agents-repo-{PID}` (bash) or `$env:TEMP\test-coding-agents-{PID}` (PowerShell)
+- Test containers: `label=containai.test=true`
+- Test sessions: `label=containai.test-session={PID}`
+- Test repos: `/tmp/test-containai-repo-{PID}` (bash) or `$env:TEMP\test-containai-{PID}` (PowerShell)
 
 ## File Naming
 

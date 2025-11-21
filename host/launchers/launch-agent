@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034,SC2016
-# Launch a coding agent in an isolated container with its own git workspace
+# Launch an agent in an isolated container with its own git workspace
 # The container runs persistently for VS Code Remote connection
 
 set -e

@@ -1,8 +1,8 @@
-# PowerShell Language Support Implementation Plan for Serena in CodingAgents
+# PowerShell Language Support Implementation Plan for Serena in ContainAI
 
 ## Executive Summary
 
-This plan outlines adding PowerShell language server support to Serena by integrating **PowerShell Editor Services (PSES)** into the CodingAgents container environment. Since Serena is installed via `uvx` from git, we'll fork Serena and add PowerShell support following their language addition guide.
+This plan outlines adding PowerShell language server support to Serena by integrating **PowerShell Editor Services (PSES)** into the ContainAI container environment. Since Serena is installed via `uvx` from git, we'll fork Serena and add PowerShell support following their language addition guide.
 
 ## 1. Architecture Overview
 
@@ -567,7 +567,7 @@ markers =
     powershell: PowerShell language server tests
 ```
 
-### Phase 5: Integration with CodingAgents
+### Phase 5: Integration with ContainAI
 
 #### Update `config.toml` to use forked Serena:
 
@@ -592,11 +592,11 @@ args = ["--from", "git+https://github.com/YOUR-USERNAME/serena@powershell-suppor
 
 ### Week 3: Testing
 - [ ] Write comprehensive unit tests
-- [ ] Test in CodingAgents container
+- [ ] Test in ContainAI container
 - [ ] Fix bugs and edge cases
 
 ### Week 4: Integration
-- [ ] Update CodingAgents config
+- [ ] Update ContainAI config
 - [ ] Write documentation
 - [ ] Consider submitting PR to Serena upstream
 
@@ -607,7 +607,7 @@ args = ["--from", "git+https://github.com/YOUR-USERNAME/serena@powershell-suppor
 ✅ Cross-file references work (module imports, function calls)  
 ✅ Tests pass with >90% coverage  
 ✅ Documentation is complete and accurate  
-✅ Works seamlessly in CodingAgents workflow
+✅ Works seamlessly in ContainAI workflow
 
 ## 5. Resources
 

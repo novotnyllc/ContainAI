@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034,SC2016
-# Launch an ephemeral coding agent session that auto-attaches to the agent CLI
+# Launch an ephemeral agent session that auto-attaches to the agent CLI
 # Containers auto-clean on exit but keep all git safeguards and host mounts
 
 set -e
