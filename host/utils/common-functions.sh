@@ -1976,6 +1976,12 @@ start_proxy_log_pipeline() {
     local broker_name="${proxy_container}-log-broker"
     local forwarder_name="${proxy_container}-log-forwarder"
     local broker_port="4433"
+    local forwarder_image="${LOG_FORWARDER_IMAGE:-${CONTAINAI_IMAGE_PREFIX:-containai-dev}-log-forwarder:${CONTAINAI_IMAGE_TAG:-devlocal}}"
+    local broker_image="${LOG_BROKER_IMAGE:-$forwarder_image}"
+    local forwarder_seccomp="${LOG_FORWARDER_SECCOMP_PROFILE_PATH:-${SECCOMP_PROFILE_PATH:-}}"
+    local forwarder_apparmor="${LOG_FORWARDER_APPARMOR_PROFILE:-containai-log-forwarder}"
+    local broker_seccomp="${LOG_BROKER_SECCOMP_PROFILE_PATH:-${SECCOMP_PROFILE_PATH:-}}"
+    local broker_apparmor="${LOG_BROKER_APPARMOR_PROFILE:-containai-log-forwarder}"
 
     mkdir -p "$log_dir" "$cert_dir"
     generate_log_broker_certs "$cert_dir"
@@ -1989,11 +1995,20 @@ start_proxy_log_pipeline() {
 
     if ! container_cli run -d --name "$broker_name" --hostname "$broker_name" \
         --network "$proxy_network" \
+        --read-only \
+        --cap-drop=ALL \
+        --security-opt "no-new-privileges:true" \
+        ${broker_seccomp:+--security-opt "seccomp=${broker_seccomp}"} \
+        ${broker_apparmor:+--security-opt "apparmor=${broker_apparmor}"} \
+        --pids-limit 128 \
+        --memory 128m \
+        -u 65532:65532 \
         -v "$cert_dir:/certs:ro" \
         -v "$log_dir:/logs" \
+        --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,mode=755 \
         --label "containai.log-of=$proxy_container" \
         --label "containai.log-role=broker" \
-        "$CONTAINAI_PROXY_IMAGE_FALLBACK" \
+        "$broker_image" \
         sh -c "openssl s_server -quiet -accept ${broker_port} -cert /certs/log-server.crt -key /certs/log-server.key -CAfile /certs/log-ca.crt -Verify 1 >>/logs/access.log 2>>/logs/broker.err"
     then
         echo "❌ Failed to start log broker container $broker_name" >&2
@@ -2002,13 +2017,21 @@ start_proxy_log_pipeline() {
 
     if ! container_cli run -d --name "$forwarder_name" --hostname "$forwarder_name" \
         --network "$proxy_network" \
+        --read-only \
+        --cap-drop=ALL \
+        --security-opt "no-new-privileges:true" \
+        ${forwarder_seccomp:+--security-opt "seccomp=${forwarder_seccomp}"} \
+        ${forwarder_apparmor:+--security-opt "apparmor=${forwarder_apparmor}"} \
+        --pids-limit 128 \
+        --memory 128m \
+        -u 65532:65532 \
         --volumes-from "$proxy_container":ro \
         -v "$cert_dir:/certs:ro" \
-        -v "$log_dir:/logs" \
+        --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,mode=755 \
         --label "containai.log-of=$proxy_container" \
         --label "containai.log-role=forwarder" \
-        "$CONTAINAI_PROXY_IMAGE_FALLBACK" \
-        sh -c "tail -F /var/log/squid/access.log | openssl s_client -quiet -connect ${broker_name}:${broker_port} -cert /certs/log-client.crt -key /certs/log-client.key -CAfile /certs/log-ca.crt >/dev/null 2>>/logs/forwarder.err"
+        "$forwarder_image" \
+        sh -c "touch /var/log/squid/access.log && tail -F /var/log/squid/access.log | openssl s_client -quiet -connect ${broker_name}:${broker_port} -cert /certs/log-client.crt -key /certs/log-client.key -CAfile /certs/log-ca.crt >/dev/null 2>>/tmp/forwarder.err"
     then
         echo "❌ Failed to start log forwarder container $forwarder_name" >&2
         container_cli rm -f "$broker_name" >/dev/null 2>&1 || true
