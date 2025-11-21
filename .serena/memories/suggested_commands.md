@@ -1,4 +1,4 @@
-# Suggested Commands for CodingAgents
+# Suggested Commands for ContainAI
 
 ## System (Windows with WSL2)
 
