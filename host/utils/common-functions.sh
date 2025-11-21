@@ -416,7 +416,7 @@ enforce_prod_install_root() {
     fi
     local root="${CONTAINAI_ROOT:-}"
     if [ -z "$root" ] || [ ! -d "$root" ]; then
-        echo "❌ Prod profile requires an installed root. Run host/utils/install-package.sh first." >&2
+        echo "❌ Prod profile requires an installed root. Run host/utils/install-release.sh first." >&2
         log_security_event "enforcement" '{"reason":"missing-prod-root"}' >/dev/null 2>&1 || true
         return 1
     fi
@@ -717,10 +717,10 @@ wsl_security_helper_path() {
 
 resolve_seccomp_profile_path() {
     local repo_root="$1"
-    local default_candidate="$repo_root/host/profiles/seccomp-containai.json"
+    local default_candidate="$repo_root/host/profiles/seccomp-containai-agent.json"
     local asset_candidate=""
 
-    asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai.json"
+    asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai-agent.json"
 
     if [ -f "$default_candidate" ]; then
         echo "$default_candidate"
@@ -741,9 +741,13 @@ resolve_seccomp_profile_path() {
 
 ensure_security_assets_current() {
     local repo_root="$1"
-    local seccomp_repo="$repo_root/host/profiles/seccomp-containai.json"
-    local apparmor_repo="$repo_root/host/profiles/apparmor-containai.profile"
+    local seccomp_repo="$repo_root/host/profiles/seccomp-containai-agent.json"
+    local apparmor_repo="$repo_root/host/profiles/apparmor-containai-agent.profile"
     local manifest_path="${CONTAINAI_SECURITY_ASSET_DIR%/}/containai-profiles.sha256"
+    local manifest_repo="$repo_root/host/profiles/containai-profiles.sha256"
+    if [ ! -f "$manifest_path" ] && [ -f "$manifest_repo" ]; then
+        manifest_path="$manifest_repo"
+    fi
 
     local seccomp_path
     if ! seccomp_path=$(resolve_seccomp_profile_path "$repo_root"); then
@@ -753,8 +757,8 @@ ensure_security_assets_current() {
     local manifest_seccomp_hash=""
     local manifest_apparmor_hash=""
     if [ -f "$manifest_path" ]; then
-        manifest_seccomp_hash=$(awk '/seccomp-containai.json/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
-        manifest_apparmor_hash=$(awk '/apparmor-containai.profile/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
+        manifest_seccomp_hash=$(awk '/seccomp-containai-agent.json/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
+        manifest_apparmor_hash=$(awk '/apparmor-containai-agent.profile/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
     fi
 
     local hash_repo hash_active
@@ -842,10 +846,10 @@ apparmor_profile_loaded() {
 resolve_apparmor_profile_name() {
     local repo_root="$1"
     local profile="containai"
-    local profile_file="$repo_root/host/profiles/apparmor-containai.profile"
+    local profile_file="$repo_root/host/profiles/apparmor-containai-agent.profile"
     local asset_candidate=""
 
-    asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai.profile"
+    asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai-agent.profile"
     if [ ! -f "$profile_file" ] && [ -n "$asset_candidate" ] && [ -f "$asset_candidate" ]; then
         profile_file="$asset_candidate"
     fi
@@ -888,8 +892,8 @@ verify_host_security_prereqs() {
         profiles_file_readable=1
     fi
 
-    local default_seccomp_profile="$repo_root/host/profiles/seccomp-containai.json"
-    local installed_seccomp_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai.json"
+    local default_seccomp_profile="$repo_root/host/profiles/seccomp-containai-agent.json"
+    local installed_seccomp_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai-agent.json"
 
     if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
         if [ -n "$installed_seccomp_profile" ]; then
@@ -915,8 +919,8 @@ verify_host_security_prereqs() {
         fi
     else
         local profile="containai"
-        local profile_file="$repo_root/host/profiles/apparmor-containai.profile"
-        local installed_apparmor_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai.profile"
+        local profile_file="$repo_root/host/profiles/apparmor-containai-agent.profile"
+        local installed_apparmor_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai-agent.profile"
         if [ ! -f "$profile_file" ] && [ -n "$installed_apparmor_profile" ] && [ -f "$installed_apparmor_profile" ]; then
             profile_file="$installed_apparmor_profile"
         fi

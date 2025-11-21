@@ -188,73 +188,33 @@ jobs:
         uses: anchore/sbom-action@v0
         with:
           path: dist/${{ steps.channel.outputs.tag }}/payload-src
-          output-file: dist/${{ steps.channel.outputs.tag }}/payload.sbom.json
+          output-file: dist/${{ steps.channel.outputs.tag }}/payload-src/payload.sbom.json
       - name: Attest payload SBOM
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: dist/${{ steps.channel.outputs.tag }}/payload.sbom.json
+          subject-path: dist/${{ steps.channel.outputs.tag }}/payload-src/payload.sbom.json
           push-to-registry: false
       - name: Download payload SBOM attestation
         run: |
           OUT=dist/${{ steps.channel.outputs.tag }}
-          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/payload.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
-          mv "$OUT/payload.sbom.json.intoto.jsonl" "$OUT/payload.sbom.intoto.jsonl"
-      - name: Build payload and initial bundle
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/payload-src/payload.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/payload-src/payload.sbom.json.intoto.jsonl" "$OUT/payload-src/payload.sbom.intoto.jsonl"
+      - name: Build payload
         run: |
           VERSION=${{ steps.channel.outputs.tag }}
           OUT=dist/${VERSION}
-          ./scripts/release/package.sh --version "$VERSION" --out dist --payload-dir "$OUT/payload-src" --sbom "$OUT/payload.sbom.json" --sbom-att "$OUT/payload.sbom.intoto.jsonl"
-      - name: Attest bundle provenance
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-path: dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
-          push-to-registry: false
-      - name: Download attestation artifacts
-        run: |
-          OUT=dist/${{ steps.channel.outputs.tag }}
-          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/containai-${{ steps.channel.outputs.tag }}.tar.gz" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
-          mv "$OUT/containai-${{ steps.channel.outputs.tag }}.tar.gz.intoto.jsonl" "$OUT/bundle-provenance.intoto.jsonl"
+          ./scripts/release/package.sh --version "$VERSION" --out dist --payload-dir "$OUT/payload-src" --sbom "$OUT/payload-src/payload.sbom.json" --sbom-att "$OUT/payload-src/payload.sbom.intoto.jsonl"
       - name: Upload artifact
+        id: upload-payload
         uses: actions/upload-artifact@v4
         with:
-          name: containai-${{ steps.channel.outputs.tag }}
-          path: |
-            dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
-            dist/${{ steps.channel.outputs.tag }}/bundle-provenance.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/payload.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/payload.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-base.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-base.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-main.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-main.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.intoto.jsonl
+          name: containai-payload-${{ steps.channel.outputs.tag }}
+          path: dist/${{ steps.channel.outputs.tag }}/containai-payload-${{ steps.channel.outputs.tag }}.tar
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.channel.outputs.tag }}
           files: |
-            dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
-            dist/${{ steps.channel.outputs.tag }}/bundle-provenance.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/payload.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/payload.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-base.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-base.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-main.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-main.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/containai-payload-${{ steps.channel.outputs.tag }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

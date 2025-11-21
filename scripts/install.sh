@@ -66,8 +66,8 @@ PY
 install_security_assets() {
     local dry_run="${1:-0}"
     local asset_dir="$SECURITY_ASSET_DIR"
-    local src_seccomp="$SECURITY_PROFILES_DIR/seccomp-containai.json"
-    local src_apparmor="$SECURITY_PROFILES_DIR/apparmor-containai.profile"
+    local src_seccomp="$SECURITY_PROFILES_DIR/seccomp-containai-agent.json"
+    local src_apparmor="$SECURITY_PROFILES_DIR/apparmor-containai-agent.profile"
     local manifest_path="$asset_dir/$SECURITY_MANIFEST_NAME"
 
     echo "Syncing security profiles to $asset_dir..."
@@ -76,8 +76,8 @@ install_security_assets() {
         exit 1
     fi
 
-    local target_seccomp="$asset_dir/seccomp-containai.json"
-    local target_apparmor="$asset_dir/apparmor-containai.profile"
+    local target_seccomp="$asset_dir/seccomp-containai-agent.json"
+    local target_apparmor="$asset_dir/apparmor-containai-agent.profile"
 
     local repo_seccomp_hash repo_apparmor_hash target_seccomp_hash target_apparmor_hash
     repo_seccomp_hash=$(file_sha256 "$src_seccomp")
@@ -101,7 +101,11 @@ install_security_assets() {
         if [[ ${#cleaner[@]} -gt 0 || "$(id -u)" -eq 0 ]]; then
             "${cleaner[@]}" rm -f \
                 "$asset_dir/seccomp-coding-agents.json" \
-                "$asset_dir/apparmor-coding-agents.profile" >/dev/null 2>&1 || true
+                "$asset_dir/apparmor-coding-agents.profile" \
+                "$asset_dir/seccomp-containai.json" \
+                "$asset_dir/apparmor-containai.profile" \
+                "$asset_dir/seccomp-containai-agent.json" \
+                "$asset_dir/apparmor-containai-agent.profile" >/dev/null 2>&1 || true
         fi
         return 0
     fi
@@ -123,13 +127,17 @@ install_security_assets() {
     "${runner[@]}" install -d -m 0755 "$asset_dir"
     "${runner[@]}" install -m 0644 "$src_seccomp" "$target_seccomp"
     "${runner[@]}" install -m 0644 "$src_apparmor" "$target_apparmor"
-    printf "seccomp-containai.json %s\napparmor-containai.profile %s\n" \
+    printf "seccomp-containai-agent.json %s\napparmor-containai-agent.profile %s\n" \
         "$repo_seccomp_hash" "$repo_apparmor_hash" | "${runner[@]}" tee "$manifest_path" >/dev/null
 
     # Remove legacy names to avoid stale policy usage.
     "${runner[@]}" rm -f \
         "$asset_dir/seccomp-coding-agents.json" \
-        "$asset_dir/apparmor-coding-agents.profile"
+        "$asset_dir/apparmor-coding-agents.profile" \
+        "$asset_dir/seccomp-containai.json" \
+        "$asset_dir/apparmor-containai.profile" \
+        "$asset_dir/seccomp-containai-agent.json" \
+        "$asset_dir/apparmor-containai-agent.profile"
 
     echo "✓ Security assets synced to $asset_dir"
 }

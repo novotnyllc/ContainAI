@@ -13,21 +13,20 @@ This doc explains how to build, sign, and publish ContainAI artifacts to GitHub 
 # Dev-only: build images locally (agents + proxy, dev namespace)
 ./scripts/build/build-dev.sh
 
-# CI: stamp host/profile.env with prod values, then create bundle
+# CI: stamp host/profile.env with prod values, then create payload
 ./scripts/release/package.sh --version v1.2.3 --out dist --sbom dist/v1.2.3/sbom.json --cosign-asset dist/v1.2.3/cosign
 ```
 
 Artifacts land in `dist/<version>/`:
-- `containai-<version>.tar.gz` (bundle: payload.tar.gz + payload.sha256 + attestation + cosign + root)
-- `payload.tar.gz` (host tree + SBOM + tools)
-- `payload.sha256` (hash of payload.tar.gz)
+- `payload/` directory (host tree + SBOM + tools + SHA256SUMS + payload.sha256)
+- `containai-payload-<version>.tar.gz` (payload tarball for release upload; preserves executable bits)
 - `sbom.json` (CycloneDX)
 
-Attestation is added in CI via `actions/attest-build-provenance` and repack step.
+Attestation is added in CI via `actions/deploy-artifact@v4` / release upload (GitHub produces the attestation for the uploaded zip automatically).
 
 ## Install (Prod / Dogfood)
 ```bash
-sudo ./host/utils/install-package.sh --version v1.2.3 --repo owner/repo
+sudo ./host/utils/install-release.sh --version v1.2.3 --repo owner/repo
 ```
 Blue/green swap lives under `/opt/containai/releases/<version>` with `current`/`previous` symlinks. Install copies the tarball + signature so `check-health` can verify sigstore.
 
@@ -54,10 +53,8 @@ Recommended workflow steps:
 3. Generate SBOM (GitHub action)
 4. Fetch cosign (static)
 5. `scripts/release/package.sh --version $GIT_TAG --out dist --sbom dist/$GIT_TAG/sbom.json --cosign-asset dist/$GIT_TAG/cosign`
-6. Attest payload.tar.gz via `actions/attest-build-provenance`
-7. Repack bundle including attestation + cosign
-8. Build/push images using IMAGE_PREFIX/IMAGE_TAG from profile.env (proxy mandatory)
-9. Upload `containai-$GIT_TAG.tar.gz` as release asset
+6. Upload `dist/$GIT_TAG/containai-payload-$GIT_TAG.tar.gz` as the release asset (GitHub will attach attestation)
+7. Build/push images using IMAGE_PREFIX/IMAGE_TAG from profile.env (proxy mandatory)
 
 ## Troubleshooting
 - `syft not available`: install syft or rerun with `--skip-sbom` (dev only).

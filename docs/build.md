@@ -248,8 +248,8 @@ Current approximate sizes:
 - No secrets in images
 - Security opt: `no-new-privileges:true`
 - Read-only mounts for auth
-- Seccomp profile: `host/profiles/seccomp-containai.json` blocks ptrace/clone3/mount/setns
-- AppArmor profile: `host/profiles/apparmor-containai.profile` denies `/proc` and `/sys` writes
+- Seccomp profile: `host/profiles/seccomp-containai-agent.json` blocks ptrace/clone3/mount/setns
+- AppArmor profile: `host/profiles/apparmor-containai-agent.profile` denies `/proc` and `/sys` writes
 - Image secret scanning with Trivy (`--scanners secret`) on base/all-agents/specialized variants
 
 ⚠️ **Future improvements:**
@@ -295,11 +295,11 @@ done
 
 Launchers automatically pass both security profiles:
 
-- **Seccomp:** No additional setup—Docker reads `host/profiles/seccomp-containai.json` directly.
+- **Seccomp:** No additional setup—Docker reads `host/profiles/seccomp-containai-agent.json` directly.
 - **AppArmor:** Ensure the profile is loaded on Linux hosts:
 
 ```bash
-sudo apparmor_parser -r host/profiles/apparmor-containai.profile
+sudo apparmor_parser -r host/profiles/apparmor-containai-agent.profile
 ```
 
 Environment overrides:

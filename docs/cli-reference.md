@@ -205,7 +205,7 @@ run-claude --prompt "List repo services that need MCP"
 - **Image:** `containai-copilot:local`
 - **Working Dir:** `/workspace`
 - **Network:** Bridge (internet access)
-- **Security:** `no-new-privileges:true`, seccomp `host/profiles/seccomp-containai.json`, AppArmor profile `containai` (if supported)
+- **Security:** `no-new-privileges:true`, seccomp `host/profiles/seccomp-containai-agent.json`, AppArmor profile `containai-agent` 
 - **Removal:** Automatic on exit (`--rm`)
 
 ---
@@ -725,13 +725,22 @@ This script takes no arguments.
 
 ### install
 
-Add launcher scripts to PATH.
+Add launcher scripts to PATH or install from a packaged release.
 
-**Location:** `scripts/install.sh` (bash), `scripts/install.ps1` (PowerShell)
+**Locations:**
+- Bootstrap (curlable): `install.sh` (bash) - downloads the release bundle and runs the installer
+- Dev/local: `scripts/install.sh` (bash), `scripts/install.ps1` (PowerShell)
 
 #### Synopsis
 
 ```bash
+# End-user install (latest release)
+curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash
+
+# Pin a version
+curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash -s -- --version vX.Y.Z
+
+# Dev/local install from a checked-out repo
 ./scripts/install.sh [OPTIONS]
 ```
 
@@ -746,6 +755,10 @@ Add launcher scripts to PATH.
 | `-h, --help` (bash)<br>`-Help` (PowerShell) | flag | Show help |
 
 #### Behavior
+**Bootstrap (install.sh):**
+- Downloads `containai-<version>.tar.gz` from GitHub Releases (defaults to latest tag)
+- Extracts payload and runs the bundled `host/utils/install-release.sh` with the local assets (no repo/git required)
+- Installs into `/opt/containai` by default (override via `CONTAINAI_INSTALL_ROOT` or `--install-root`)
 
 **Linux/Mac:**
 - Detects shell (bash or zsh)
@@ -997,7 +1010,7 @@ Scripts respect these environment variables:
 | `USERPROFILE` | Windows scripts | User profile directory |
 
 AppArmor and seccomp enforcement are mandatory for every launch. The built-in
-profiles under `host/profiles/` must exist on the host; rerun
+ profiles under `host/profiles/` must exist on the host; rerun
 `scripts/install.sh` if the assets are missing.
 
 ### Setting Environment Variables

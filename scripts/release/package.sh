@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Builds a self-contained bundle:
-#   containai-<version>.tar.gz containing:
-#     - payload.tar.gz (host tree + tools)
-#     - payload.sha256 (hash of payload.tar.gz)
-#     - attestation.intoto.jsonl (from CI attestation action)
+# Prepares the payload directory and tar/tar.gz artifacts for release upload.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,7 +18,7 @@ print_help() {
     cat <<'EOF'
 Usage: package.sh [--version X] [--out DIR] [--skip-sbom] [--sbom FILE] [--sbom-att FILE] [--attestation FILE] [--include-docker]
 
-Outputs dist/<version>/containai-<version>.tar.gz containing payload + attestations.
+Outputs dist/<version>/payload/, dist/<version>/containai-payload-<version>.tar, and dist/<version>/containai-payload-<version>.tar.gz.
 
 Options:
   --version X         Release version (default git describe)
@@ -30,7 +26,7 @@ Options:
   --skip-sbom         Do not include SBOM (dev only)
   --sbom FILE         Pre-generated SBOM to embed
   --sbom-att FILE     Attestation bundle (intoto) for the SBOM file
-  --attestation FILE  Attestation bundle (intoto) for payload.tar.gz
+  --attestation FILE  Attestation bundle (intoto) for payload artifact
   --include-docker    Include docker/ tree in payload
   --payload-dir DIR   Use an existing payload directory instead of copying sources (must contain final payload contents)
 EOF
@@ -71,7 +67,7 @@ else
     mkdir -p "$PAYLOAD_DIR"
 fi
 
-echo "📦 Building bundle v$VERSION"
+echo "📦 Building payload v$VERSION"
 echo "Output dir: $DEST_DIR"
 
 copy_path() {
@@ -88,6 +84,7 @@ if [[ -z "$PAYLOAD_DIR_OVERRIDE" ]]; then
         "$PROJECT_ROOT/SECURITY.md"
         "$PROJECT_ROOT/USAGE.md"
         "$PROJECT_ROOT/LICENSE"
+        "$PROJECT_ROOT/install.sh"
     )
     [[ $INCLUDE_DOCKER -eq 1 ]] && include_paths+=("$PROJECT_ROOT/docker")
 
@@ -121,28 +118,34 @@ find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum > SHA
 popd >/dev/null
 
 mkdir -p "$DEST_DIR"
-pushd "$WORK_DIR" >/dev/null
-tar -czf "$DEST_DIR/payload.tar.gz" "$PAYLOAD_ROOT"
+
+# Create a deterministic top-level payload directory for upload-artifact/release upload
+PAYLOAD_OUT="$DEST_DIR/payload"
+rm -rf "$PAYLOAD_OUT"
+cp -a "$PAYLOAD_DIR"/. "$PAYLOAD_OUT/"
+
+# Hash the canonical SHA256SUMS file to produce a single payload digest
+pushd "$PAYLOAD_OUT" >/dev/null
+PAYLOAD_HASH=$(sha256sum SHA256SUMS | awk '{print $1}')
+echo "$PAYLOAD_HASH  SHA256SUMS" > payload.sha256
 popd >/dev/null
 
-PAYLOAD_HASH=$(sha256sum "$DEST_DIR/payload.tar.gz" | awk '{print $1}')
-echo "$PAYLOAD_HASH  payload.tar.gz" > "$DEST_DIR/payload.sha256"
+echo ""
+echo "Packaging payload tar and tar.gz..."
+TAR_NAME="containai-payload-${VERSION}.tar"
+TAR_PATH="$DEST_DIR/$TAR_NAME"
+TAR_GZ_PATH="$DEST_DIR/$TAR_NAME.gz"
+rm -f "$TAR_PATH" "$TAR_GZ_PATH"
+(cd "$PAYLOAD_OUT" && tar -cf "$TAR_PATH" .)
+gzip -c "$TAR_PATH" > "$TAR_GZ_PATH"
 
-mkdir -p "$WORK_DIR/bundle"
-cp "$DEST_DIR/payload.tar.gz" "$WORK_DIR/bundle/"
-cp "$DEST_DIR/payload.sha256" "$WORK_DIR/bundle/"
 if [[ -n "$ATTESTATION_FILE" ]]; then
-    cp "$ATTESTATION_FILE" "$WORK_DIR/bundle/attestation.intoto.jsonl"
-else
-    echo '{"attestation":"placeholder"}' > "$WORK_DIR/bundle/attestation.intoto.jsonl"
+    cp "$ATTESTATION_FILE" "$DEST_DIR/payload.attestation.intoto.jsonl"
 fi
-if [[ -f "$PAYLOAD_DIR/tools/cosign-root.pem" ]]; then
-    cp "$PAYLOAD_DIR/tools/cosign-root.pem" "$WORK_DIR/bundle/cosign-root.pem"
-fi
-
-BUNDLE_NAME="containai-$VERSION.tar.gz"
-tar -czf "$DEST_DIR/$BUNDLE_NAME" -C "$WORK_DIR/bundle" .
 
 echo ""
-echo "Bundle created: $DEST_DIR/$BUNDLE_NAME"
-echo "Contains: payload.tar.gz, payload.sha256, attestation.intoto.jsonl (if provided)"
+echo "Payload outputs:"
+echo " - $PAYLOAD_OUT"
+echo " - $TAR_PATH (for artifact upload; actions will zip it)"
+echo " - $TAR_GZ_PATH (for release asset)"
+echo "Upload the tar as the artifact; attach the .tar.gz to the release. GitHub will handle attestation on upload."

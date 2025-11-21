@@ -26,14 +26,18 @@ if ! "$PROJECT_ROOT/scripts/release/package.sh" --version "$VERSION" --out "$DIS
     exit 1
 fi
 
-BUNDLE="$DIST_DIR/$VERSION/containai-$VERSION.tar.gz"
-BUNDLE_ATTEST="$DIST_DIR/$VERSION/containai-$VERSION.tar.gz.intoto.jsonl"
-[[ -f "$BUNDLE" ]] || { echo "❌ Bundle missing"; exit 1; }
-echo '{"attestation":"placeholder"}' > "$BUNDLE_ATTEST"
+PAYLOAD_DIR="$DIST_DIR/$VERSION/payload"
+[[ -d "$PAYLOAD_DIR" ]] || { echo "❌ Payload directory missing"; exit 1; }
+[[ -f "$PAYLOAD_DIR/host/profiles/seccomp-containai-agent.json" ]] || { echo "❌ seccomp profile missing in payload"; exit 1; }
+[[ -f "$PAYLOAD_DIR/install.sh" ]] || { echo "❌ install.sh missing in payload"; exit 1; }
+
+# Simulate release artifact tar.gz
+PAYLOAD_TGZ="$DIST_DIR/$VERSION/containai-payload-$VERSION.tar.gz"
+tar -czf "$PAYLOAD_TGZ" -C "$PAYLOAD_DIR" .
 
 INSTALL_ROOT="$WORK_DIR/install"
 echo "🏗️  Installing to $INSTALL_ROOT"
-"$PROJECT_ROOT/host/utils/install-package.sh" \
+"$PROJECT_ROOT/host/utils/install-release.sh" \
     --version "$VERSION" \
     --asset-dir "$DIST_DIR/$VERSION" \
     --repo "local/test" \
@@ -45,7 +49,7 @@ CURRENT_PATH="$(readlink -f "$INSTALL_ROOT/current")"
 [[ -f "$CURRENT_PATH/install.meta" ]] || { echo "❌ install.meta missing"; exit 1; }
 
 echo "🔍 Verifying install via --verify-only"
-"$PROJECT_ROOT/host/utils/install-package.sh" \
+"$PROJECT_ROOT/host/utils/install-release.sh" \
     --version "$VERSION" \
     --asset-dir "$DIST_DIR/$VERSION" \
     --repo "local/test" \

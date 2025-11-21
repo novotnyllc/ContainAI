@@ -93,13 +93,13 @@ pwsh scripts/build/build-dev.ps1 --% # Windows
 
 See [docs/build.md](../build.md) for details on customizing the build.
 
-## Installing the Signed Bundle (dogfooding)
+## Installing the Signed Payload (dogfooding)
 
-CI publishes a single bundle per tagged release:
-- `containai-<version>.tar.gz` containing `payload.tar.gz`, `payload.sha256`, `attestation.intoto.jsonl`, `cosign`, `cosign-root.pem`.
+CI publishes a single versioned artifact per tagged release:
+- `containai-payload-<version>.tar.gz` (payload tarball; GitHub attaches attestation automatically)
 
 Install it directly (no extra tools required):
 ```bash
-sudo ./host/utils/install-package.sh --version vX.Y.Z --repo <owner/repo>
+sudo ./host/utils/install-release.sh --version vX.Y.Z --repo <owner/repo>
 ```
-The installer verifies the payload hash and attestation using the bundled cosign, runs integrity-check over SHA256SUMS, and performs a blue/green swap under `/opt/containai/releases/<version>`.
+The installer verifies `payload.sha256` against `SHA256SUMS`, runs integrity-check over SHA256SUMS, and performs a blue/green swap under `/opt/containai/releases/<version>`.

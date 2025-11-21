@@ -347,7 +347,13 @@ docker images | grep containai
 
 ## Step 8: Install Launcher Scripts
 
-Add launcher scripts to your PATH for easy access:
+If you're installing from a packaged release (no repo checkout), run the curlable installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash
+```
+
+If you're working from a local clone, add launcher scripts to your PATH:
 
 **Linux/Mac:**
 ```bash

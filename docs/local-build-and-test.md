@@ -49,6 +49,6 @@ For deeper explanations of each suite, consult [scripts/test/README.md](../scrip
 
 - Build a local bundle (for smoke only): `./scripts/release/package.sh --version vX.Y.Z --out dist --skip-sbom --cosign-asset /path/to/cosign`
 - Prod publishing happens in GitHub Actions; dev script does not push.
-- Install signed packages (dogfooding): `sudo ./host/utils/install-package.sh --version vX.Y.Z --repo owner/repo` (downloads bundle, verifies hash + attestation, installs)
+- Install signed packages (dogfooding): `sudo ./host/utils/install-release.sh --version vX.Y.Z --repo owner/repo` (downloads bundle, verifies hash + attestation, installs)
 
 See [docs/ghcr-publishing.md](ghcr-publishing.md) for GHCR secrets, signing, and workflow recommendations.

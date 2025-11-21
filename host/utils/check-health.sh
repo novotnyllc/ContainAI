@@ -103,7 +103,7 @@ verify_sigstore_artifacts() {
     fi
 
     if [ -z "$release_root" ] || [ ! -d "$release_root" ]; then
-        warn "Sigstore: no release tree found" "Install via host/utils/install-package.sh to enable signature verification."
+        warn "Sigstore: no release tree found" "Install via host/utils/install-release.sh to enable signature verification."
         return
     fi
 
@@ -300,7 +300,7 @@ if load_common_functions; then
         pass "Host enforcement: seccomp & AppArmor present"
     else
         fail "Host enforcement failed" "Resolve the errors below (see suggested fix)."
-        profile_file="$REPO_ROOT/host/profiles/apparmor-containai.profile"
+        profile_file="$REPO_ROOT/host/profiles/apparmor-containai-agent.profile"
         if printf '%s' "$host_output" | grep -q "AppArmor profile 'containai' is not loaded"; then
             suggest_fix sudo apparmor_parser -r "$profile_file"
         elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then
