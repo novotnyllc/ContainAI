@@ -202,7 +202,7 @@ validate_extra_docker_args() {
     done
 }
 LAUNCHER_HEAD_HASH=$(get_git_head_hash "$REPO_ROOT" 2>/dev/null || echo "")
-TRUSTED_PATHS=("host/launchers" "docker/runtime" "docker/profiles")
+TRUSTED_PATHS=("host/launchers" "docker/runtime" "host/profiles")
 TRUSTED_TREE_HASHES_RAW=$(collect_trusted_tree_hashes "$REPO_ROOT" "${TRUSTED_PATHS[@]}")
 TRUSTED_TREE_HASHES_ENV=$(printf '%s' "$TRUSTED_TREE_HASHES_RAW" | tr '\n' ',' | sed 's/,$//')
 if [ -n "$LAUNCHER_HEAD_HASH" ]; then
@@ -1528,6 +1528,9 @@ fi
 SECCOMP_PROFILE_PATH=""
 if ! SECCOMP_PROFILE_PATH=$(resolve_seccomp_profile_path "$REPO_ROOT"); then
     echo "❌ Seccomp profile missing. Run scripts/install.sh to reinstall the host security assets and retry."
+    exit 1
+fi
+if ! ensure_security_assets_current "$REPO_ROOT"; then
     exit 1
 fi
 

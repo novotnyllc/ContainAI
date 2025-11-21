@@ -21,6 +21,7 @@ CONTAINAI_OVERRIDE_DIR="${CONTAINAI_OVERRIDE_DIR:-${CONTAINAI_CONFIG_DIR}/overri
 CONTAINAI_DIRTY_OVERRIDE_TOKEN="${CONTAINAI_DIRTY_OVERRIDE_TOKEN:-${CONTAINAI_OVERRIDE_DIR}/allow-dirty}"
 CONTAINAI_CACHE_DIR="${CONTAINAI_CACHE_DIR:-${CONTAINAI_CONFIG_DIR}/cache}"
 CONTAINAI_PREREQ_CACHE_FILE="${CONTAINAI_PREREQ_CACHE_FILE:-${CONTAINAI_CACHE_DIR}/prereq-check}"
+CONTAINAI_SECURITY_ASSET_DIR="${CONTAINAI_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}/profiles"
 CONTAINAI_BROKER_SCRIPT="${CONTAINAI_BROKER_SCRIPT:-${CONTAINAI_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py}"
 CONTAINAI_AUDIT_LOG="${CONTAINAI_AUDIT_LOG:-${CONTAINAI_CONFIG_DIR}/security-events.log}"
 CONTAINAI_HELPER_NETWORK_POLICY="${CONTAINAI_HELPER_NETWORK_POLICY:-loopback}"
@@ -716,15 +717,83 @@ wsl_security_helper_path() {
 
 resolve_seccomp_profile_path() {
     local repo_root="$1"
-    local candidate="$repo_root/docker/profiles/seccomp-containai.json"
+    local default_candidate="$repo_root/host/profiles/seccomp-containai.json"
+    local asset_candidate=""
 
-    if [ -f "$candidate" ]; then
-        echo "$candidate"
+    asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai.json"
+
+    if [ -f "$default_candidate" ]; then
+        echo "$default_candidate"
         return 0
     fi
 
-    echo "❌ Seccomp profile not found at $candidate. Run scripts/install.sh to reinstall the host security assets." >&2
+    if [ -n "$asset_candidate" ] && [ -f "$asset_candidate" ]; then
+        echo "$asset_candidate"
+        return 0
+    fi
+
+    echo "❌ Seccomp profile not found at $default_candidate. Run scripts/install.sh to reinstall the host security assets." >&2
+    if [ -n "$asset_candidate" ] && [ "$asset_candidate" != "$default_candidate" ]; then
+        echo "   Looked for installed copy at $asset_candidate but it was missing." >&2
+    fi
     return 1
+}
+
+ensure_security_assets_current() {
+    local repo_root="$1"
+    local seccomp_repo="$repo_root/host/profiles/seccomp-containai.json"
+    local apparmor_repo="$repo_root/host/profiles/apparmor-containai.profile"
+    local manifest_path="${CONTAINAI_SECURITY_ASSET_DIR%/}/containai-profiles.sha256"
+
+    local seccomp_path
+    if ! seccomp_path=$(resolve_seccomp_profile_path "$repo_root"); then
+        return 1
+    fi
+
+    local manifest_seccomp_hash=""
+    local manifest_apparmor_hash=""
+    if [ -f "$manifest_path" ]; then
+        manifest_seccomp_hash=$(awk '/seccomp-containai.json/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
+        manifest_apparmor_hash=$(awk '/apparmor-containai.profile/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
+    fi
+
+    local hash_repo hash_active
+    hash_repo=$(_sha256_file "$seccomp_repo" 2>/dev/null || echo "")
+    if [ -z "$hash_repo" ]; then
+        hash_repo="$manifest_seccomp_hash"
+    fi
+    hash_active=$(_sha256_file "$seccomp_path" 2>/div/null || echo "")
+
+    if [ -n "$hash_repo" ] && [ -n "$hash_active" ]; then
+        if [ "$hash_repo" != "$hash_active" ]; then
+            echo "❌ Seccomp profile is outdated. Run 'sudo ./scripts/install.sh' to refresh host security assets." >&2
+            return 1
+        fi
+    else
+        echo "❌ Unable to verify seccomp profile freshness (missing reference hash). Run 'sudo ./scripts/install.sh' to reinstall host security assets." >&2
+        return 1
+    fi
+
+    local apparmor_path=""
+    if apparmor_path=$(resolve_apparmor_profile_name "$repo_root"); then
+        if [ -f "$apparmor_path" ]; then
+            local aa_repo_hash aa_active_hash
+            aa_repo_hash=$(_sha256_file "$apparmor_repo" 2>/dev/null || echo "")
+            if [ -z "$aa_repo_hash" ]; then
+                aa_repo_hash="$manifest_apparmor_hash"
+            fi
+            aa_active_hash=$(_sha256_file "$apparmor_path" 2>/dev/null || echo "")
+            if [ -n "$aa_repo_hash" ] && [ -n "$aa_active_hash" ] && [ "$aa_repo_hash" != "$aa_active_hash" ]; then
+                echo "❌ AppArmor profile is outdated. Run 'sudo ./scripts/install.sh' to refresh host security assets." >&2
+                return 1
+            elif [ -z "$aa_repo_hash" ] || [ -z "$aa_active_hash" ]; then
+                echo "❌ Unable to verify AppArmor profile freshness (missing reference hash). Run 'sudo ./scripts/install.sh' to reinstall host security assets." >&2
+                return 1
+            fi
+        fi
+    fi
+
+    return 0
 }
 
 is_apparmor_supported() {
@@ -773,7 +842,13 @@ apparmor_profile_loaded() {
 resolve_apparmor_profile_name() {
     local repo_root="$1"
     local profile="containai"
-    local profile_file="$repo_root/docker/profiles/apparmor-containai.profile"
+    local profile_file="$repo_root/host/profiles/apparmor-containai.profile"
+    local asset_candidate=""
+
+    asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai.profile"
+    if [ ! -f "$profile_file" ] && [ -n "$asset_candidate" ] && [ -f "$asset_candidate" ]; then
+        profile_file="$asset_candidate"
+    fi
 
     if ! is_apparmor_supported; then
         return 1
@@ -813,9 +888,15 @@ verify_host_security_prereqs() {
         profiles_file_readable=1
     fi
 
+    local default_seccomp_profile="$repo_root/host/profiles/seccomp-containai.json"
+    local installed_seccomp_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai.json"
+
     if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
-        local default_profile="$repo_root/docker/profiles/seccomp-containai.json"
-        errors+=("Seccomp profile not found at $default_profile. Run scripts/install.sh to reinstall the host security assets before launching agents.")
+        if [ -n "$installed_seccomp_profile" ]; then
+            errors+=("Seccomp profile not found at $default_seccomp_profile (or $installed_seccomp_profile). Run scripts/install.sh to reinstall the host security assets before launching agents.")
+        else
+            errors+=("Seccomp profile not found at $default_seccomp_profile. Run scripts/install.sh to reinstall the host security assets before launching agents.")
+        fi
     fi
 
     if ! is_linux_host; then
@@ -834,7 +915,11 @@ verify_host_security_prereqs() {
         fi
     else
         local profile="containai"
-        local profile_file="$repo_root/docker/profiles/apparmor-containai.profile"
+        local profile_file="$repo_root/host/profiles/apparmor-containai.profile"
+        local installed_apparmor_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai.profile"
+        if [ ! -f "$profile_file" ] && [ -n "$installed_apparmor_profile" ] && [ -f "$installed_apparmor_profile" ]; then
+            profile_file="$installed_apparmor_profile"
+        fi
         if ! apparmor_profile_loaded "$profile"; then
             if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
                 warnings+=("Unable to verify AppArmor profile '$profile' without elevated privileges. Re-run './host/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$profile_file'.")
@@ -843,7 +928,11 @@ verify_host_security_prereqs() {
             elif [ -f "$profile_file" ]; then
                 errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'.")
             else
-                errors+=("AppArmor profile file '$profile_file' not found. Run scripts/install.sh to restore the host security profiles.")
+                if [ -n "$installed_apparmor_profile" ]; then
+                    errors+=("AppArmor profile file '$profile_file' not found (also checked $installed_apparmor_profile). Run scripts/install.sh to restore the host security profiles.")
+                else
+                    errors+=("AppArmor profile file '$profile_file' not found. Run scripts/install.sh to restore the host security profiles.")
+                fi
             fi
         fi
     fi

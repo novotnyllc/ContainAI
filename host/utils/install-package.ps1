@@ -41,6 +41,7 @@ $Payload = Join-Path $DownloadDir "payload.tar.gz"
 $PayloadSha = Join-Path $DownloadDir "payload.sha256"
 $Attestation = Join-Path $DownloadDir "attestation.intoto.jsonl"
 $CosignRoot = Join-Path $DownloadDir "cosign-root.pem"
+$IsDevAssets = [bool]$AssetDir
 
 function Get-ReleaseAsset([string]$Name, [string]$Dest) {
     $token = $env:GITHUB_TOKEN
@@ -82,7 +83,13 @@ function Test-Attestation {
     if (-not (Test-Path $AttestationPath)) { Write-Die "Attestation missing; cannot verify provenance." }
     $rawAtt = Get-Content $AttestationPath -Raw
     $bundle = $rawAtt | ConvertFrom-Json
-    if ($bundle.attestation -eq "placeholder") { Write-Output "Skipping attestation verification (placeholder dev build)"; return }
+    if ($bundle.attestation -eq "placeholder") {
+        if ($IsDevAssets) {
+            Write-Warning "Placeholder attestation detected (dev asset-dir); skipping verification"
+            return
+        }
+        Write-Die "Placeholder attestation not allowed in prod/stage"
+    }
     Write-Output "Verifying attestation via system crypto"
     $envObj = if ($bundle.envelope) { $bundle.envelope } else { $bundle }
     $payloadB64 = $envObj.payload
@@ -141,7 +148,22 @@ $sbomAtt = Join-Path $ReleaseDir "payload.sbom.json.intoto.jsonl"
 if ((Test-Path $sbomPath) -and (Test-Path $sbomAtt)) {
     Test-Attestation -SubjectPath $sbomPath -AttestationPath $sbomAtt
 } else {
-    Write-Warning "SBOM or SBOM attestation missing; skipping SBOM verification"
+    if (-not $IsDevAssets) { Write-Die "SBOM or SBOM attestation missing in payload" }
+    Write-Warning "SBOM or SBOM attestation missing (dev asset-dir); skipping SBOM verification"
+}
+
+$imageSbomDir = Join-Path $ReleaseDir "image-sboms"
+if (Test-Path $imageSbomDir) {
+    Get-ChildItem -Path $imageSbomDir -Filter "image-*.sbom.json" -File | ForEach-Object {
+        $sbom = $_.FullName
+        $att = "$sbom.intoto.jsonl"
+        if (Test-Path $att) {
+            Test-Attestation -SubjectPath $sbom -AttestationPath $att
+        } else {
+            if (-not $IsDevAssets) { Write-Die "Missing attestation for image SBOM $sbom" }
+            Write-Warning "Missing attestation for image SBOM $sbom (dev asset-dir); skipping"
+        }
+    }
 }
 
 $currentLink = Join-Path $InstallRoot "current"

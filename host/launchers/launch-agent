@@ -30,7 +30,7 @@ if ! verify_host_security_prereqs "$REPO_ROOT"; then
     exit 1
 fi
 
-TRUSTED_PATHS=("host/launchers" "docker/runtime" "docker/profiles")
+TRUSTED_PATHS=("host/launchers" "docker/runtime" "host/profiles")
 TRUSTED_TREE_LABEL="launcher + helper files"
 if [ "$CONTAINAI_PROFILE" = "dev" ]; then
     if ! ensure_trusted_paths_clean "$REPO_ROOT" "$TRUSTED_TREE_LABEL" "${TRUSTED_PATHS[@]}"; then
@@ -1247,6 +1247,9 @@ fi
 SECCOMP_PROFILE_PATH=""
 if ! SECCOMP_PROFILE_PATH=$(resolve_seccomp_profile_path "$REPO_ROOT"); then
     echo "❌ Seccomp profile missing. Run scripts/install.sh to reinstall the host security assets and retry."
+    exit 1
+fi
+if ! ensure_security_assets_current "$REPO_ROOT"; then
     exit 1
 fi
 

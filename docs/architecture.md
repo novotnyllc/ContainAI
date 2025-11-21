@@ -164,7 +164,7 @@ Integrate the same check into CI for all agent variants so every published artif
 
 Each launcher refuses to touch secrets until the host proves it can enforce the required guardrails:
 
-1. `verify_host_security_prereqs` confirms seccomp/AppArmor profiles exist, ptrace scope can be hardened, tmpfs enforcement is enabled, and the trusted file set (`host/launchers`, `docker/runtime`, `docker/profiles`) matches `HEAD`.
+1. `verify_host_security_prereqs` confirms seccomp/AppArmor profiles exist, ptrace scope can be hardened, tmpfs enforcement is enabled, and the trusted file set (`host/launchers`, `docker/runtime`, `host/profiles`) matches `HEAD`.
 2. `verify_container_security_support` inspects `docker info` to ensure the runtime enforces the requested profiles.
 
 ```mermaid
@@ -476,7 +476,7 @@ flowchart TB
 
 - Container runs as non-root user (UID 1000)
 - `--security-opt no-new-privileges:true`
-- Seccomp: `docker/profiles/seccomp-containai.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
+- Seccomp: `host/profiles/seccomp-containai.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
 - AppArmor: `containai` profile denies writes to `/proc`, `/sys`, and prevents `mount`
 - Root filesystem mounted read-only with tmpfs overlays only for `/tmp`, `/var/tmp`, `/run`, apt/dpkg paths
 - Package managers (pip/pipx, npm/yarn/pnpm, Playwright, uv, cargo/rustup, bun, NuGet/dotnet) write inside the shared `/toolcache` volume

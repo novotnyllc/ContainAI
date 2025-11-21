@@ -300,7 +300,7 @@ if load_common_functions; then
         pass "Host enforcement: seccomp & AppArmor present"
     else
         fail "Host enforcement failed" "Resolve the errors below (see suggested fix)."
-        profile_file="$REPO_ROOT/docker/profiles/apparmor-containai.profile"
+        profile_file="$REPO_ROOT/host/profiles/apparmor-containai.profile"
         if printf '%s' "$host_output" | grep -q "AppArmor profile 'containai' is not loaded"; then
             suggest_fix sudo apparmor_parser -r "$profile_file"
         elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then

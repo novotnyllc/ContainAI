@@ -205,7 +205,7 @@ run-claude --prompt "List repo services that need MCP"
 - **Image:** `containai-copilot:local`
 - **Working Dir:** `/workspace`
 - **Network:** Bridge (internet access)
-- **Security:** `no-new-privileges:true`, seccomp `docker/profiles/seccomp-containai.json`, AppArmor profile `containai` (if supported)
+- **Security:** `no-new-privileges:true`, seccomp `host/profiles/seccomp-containai.json`, AppArmor profile `containai` (if supported)
 - **Removal:** Automatic on exit (`--rm`)
 
 ---
@@ -365,7 +365,7 @@ launch-agent <AGENT> [<SOURCE>] [OPTIONS]
 
 #### Integrity, Audit, and Overrides
 
-- **Trusted file enforcement:** Before starting a container, `launch-agent` checks that `host/launchers/**`, stub helpers, and `docker/profiles/**` match `HEAD`. If anything is dirty, the launch aborts unless you create an override token at `~/.config/containai/overrides/allow-dirty` (configurable via `CONTAINAI_DIRTY_OVERRIDE_TOKEN`). Every override is logged.
+- **Trusted file enforcement:** Before starting a container, `launch-agent` checks that `host/launchers/**`, stub helpers, and `host/profiles/**` match `HEAD`. If anything is dirty, the launch aborts unless you create an override token at `~/.config/containai/overrides/allow-dirty` (configurable via `CONTAINAI_DIRTY_OVERRIDE_TOKEN`). Every override is logged.
 - **Session manifest logging:** The host renders a per-session config, computes its SHA256, exports it via `CONTAINAI_SESSION_CONFIG_SHA256`, and writes a `session-config` event to the audit log. Compare this hash with what helper tooling reports to ensure configs were not tampered with in transit.
 - **Audit log location:** Structured JSON events (`session-config`, `capabilities-issued`, `override-used`) are appended to `~/.config/containai/security-events.log`. Override via `CONTAINAI_AUDIT_LOG=/path/to/file` if you need alternate storage. All events are also forwarded to `systemd-cat -t containai-launcher` when available.
 - **Helper sandbox controls:** By default helper containers run with `--network none`, tmpfs-backed `/tmp` + `/var/tmp`, `--cap-drop ALL`, and the ptrace-blocking seccomp profile. Tune with environment variables before launching:
@@ -997,7 +997,7 @@ Scripts respect these environment variables:
 | `USERPROFILE` | Windows scripts | User profile directory |
 
 AppArmor and seccomp enforcement are mandatory for every launch. The built-in
-profiles under `docker/profiles/` must exist on the host; rerun
+profiles under `host/profiles/` must exist on the host; rerun
 `scripts/install.sh` if the assets are missing.
 
 ### Setting Environment Variables

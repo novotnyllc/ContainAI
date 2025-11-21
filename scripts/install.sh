@@ -7,6 +7,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LAUNCHERS_PATH="$REPO_ROOT/host/launchers"
+SECURITY_ASSET_DIR="${CONTAINAI_ROOT:-$REPO_ROOT}/profiles"
+SECURITY_PROFILES_DIR="$REPO_ROOT/host/profiles"
+SECURITY_MANIFEST_NAME="containai-profiles.sha256"
+CHECK_ONLY=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --check-only)
+            CHECK_ONLY=1
+            shift
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            echo "Usage: $0 [--check-only]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 if [[ ! -d "$LAUNCHERS_PATH" ]]; then
     echo "ERROR: Launchers directory not found: $LAUNCHERS_PATH"
@@ -15,16 +33,113 @@ fi
 
 echo "Installing launchers to PATH..."
 
-echo "Running ContainAI prerequisite and health checks..."
-if ! "$REPO_ROOT/host/utils/verify-prerequisites.sh"; then
-    echo "❌ Prerequisite verification failed. Resolve the issues above and re-run scripts/install.sh."
-    exit 1
+if [[ $CHECK_ONLY -eq 0 ]]; then
+    echo "Running ContainAI prerequisite and health checks..."
+    if ! "$REPO_ROOT/host/utils/verify-prerequisites.sh"; then
+        echo "❌ Prerequisite verification failed. Resolve the issues above and re-run scripts/install.sh."
+        exit 1
+    fi
+
+    if ! "$REPO_ROOT/host/utils/check-health.sh"; then
+        echo "❌ Health check failed. Resolve the issues above and re-run scripts/install.sh."
+        exit 1
+    fi
+else
+    echo "Checking security assets only (skipping prerequisite and health checks)..."
 fi
 
-if ! "$REPO_ROOT/host/utils/check-health.sh"; then
-    echo "❌ Health check failed. Resolve the issues above and re-run scripts/install.sh."
-    exit 1
+file_sha256() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+    else
+        python3 - "$file" <<'PY'
+import hashlib, sys, pathlib
+path = pathlib.Path(sys.argv[1])
+print(hashlib.sha256(path.read_bytes()).hexdigest())
+PY
+    fi
+}
+
+install_security_assets() {
+    local dry_run="${1:-0}"
+    local asset_dir="$SECURITY_ASSET_DIR"
+    local src_seccomp="$SECURITY_PROFILES_DIR/seccomp-containai.json"
+    local src_apparmor="$SECURITY_PROFILES_DIR/apparmor-containai.profile"
+    local manifest_path="$asset_dir/$SECURITY_MANIFEST_NAME"
+
+    echo "Syncing security profiles to $asset_dir..."
+    if [[ ! -f "$src_seccomp" || ! -f "$src_apparmor" ]]; then
+        echo "❌ Security profiles missing under $SECURITY_PROFILES_DIR. Verify your checkout or regenerate profiles." >&2
+        exit 1
+    fi
+
+    local target_seccomp="$asset_dir/seccomp-containai.json"
+    local target_apparmor="$asset_dir/apparmor-containai.profile"
+
+    local repo_seccomp_hash repo_apparmor_hash target_seccomp_hash target_apparmor_hash
+    repo_seccomp_hash=$(file_sha256 "$src_seccomp")
+    repo_apparmor_hash=$(file_sha256 "$src_apparmor")
+    if [[ -f "$target_seccomp" ]]; then
+        target_seccomp_hash=$(file_sha256 "$target_seccomp")
+    fi
+    if [[ -f "$target_apparmor" ]]; then
+        target_apparmor_hash=$(file_sha256 "$target_apparmor")
+    fi
+
+    if [[ "$repo_seccomp_hash" = "${target_seccomp_hash:-}" ]] && [[ "$repo_apparmor_hash" = "${target_apparmor_hash:-}" ]]; then
+        echo "✓ Security assets already current at $asset_dir"
+        # Clean legacy names if we already have permissions; ignore failures quietly.
+        local cleaner=()
+        if [[ "$(id -u)" -eq 0 ]]; then
+            cleaner=()
+        elif command -v sudo >/dev/null 2>&1; then
+            cleaner=(sudo)
+        fi
+        if [[ ${#cleaner[@]} -gt 0 || "$(id -u)" -eq 0 ]]; then
+            "${cleaner[@]}" rm -f \
+                "$asset_dir/seccomp-coding-agents.json" \
+                "$asset_dir/apparmor-coding-agents.profile" >/dev/null 2>&1 || true
+        fi
+        return 0
+    fi
+
+    if [[ "$dry_run" -eq 1 ]]; then
+        echo "↻ Security assets differ from repo; run with sudo ./scripts/install.sh to update."
+        return 1
+    fi
+
+    local runner=()
+    if [[ "$(id -u)" -ne 0 ]]; then
+        if command -v sudo >/dev/null 2>&1; then
+            runner=(sudo)
+        else
+            echo "⚠️  sudo not available; attempting to write security assets without elevation." >&2
+        fi
+    fi
+
+    "${runner[@]}" install -d -m 0755 "$asset_dir"
+    "${runner[@]}" install -m 0644 "$src_seccomp" "$target_seccomp"
+    "${runner[@]}" install -m 0644 "$src_apparmor" "$target_apparmor"
+    printf "seccomp-containai.json %s\napparmor-containai.profile %s\n" \
+        "$repo_seccomp_hash" "$repo_apparmor_hash" | "${runner[@]}" tee "$manifest_path" >/dev/null
+
+    # Remove legacy names to avoid stale policy usage.
+    "${runner[@]}" rm -f \
+        "$asset_dir/seccomp-coding-agents.json" \
+        "$asset_dir/apparmor-coding-agents.profile"
+
+    echo "✓ Security assets synced to $asset_dir"
+}
+
+if [[ $CHECK_ONLY -eq 1 ]]; then
+    install_security_assets 1
+    exit $?
 fi
+
+install_security_assets
 
 # Determine shell rc file
 if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$SHELL" == *"zsh"* ]]; then

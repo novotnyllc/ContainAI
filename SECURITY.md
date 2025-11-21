@@ -8,7 +8,7 @@ This document outlines security considerations for using and contributing to the
 
 Before any container is created, the launchers execute two dedicated preflight checks:
 
-- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-containai.profile` or enable AppArmor in WSL via `host/utils/fix-wsl-security.sh`.
+- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `host/profiles/apparmor-containai.profile` or enable AppArmor in WSL via `host/utils/fix-wsl-security.sh`.
 - `verify_container_security_support` inspects `docker info` JSON to ensure the runtime reports seccomp and AppArmor support. The launch aborts immediately if either feature is missing.
 
 ```mermaid
@@ -29,8 +29,8 @@ Each AI agent runs in an isolated Docker container with:
 
 - **Non-root user:** All containers run as `agentuser` (UID 1000)
 - **No privilege escalation:** `--security-opt no-new-privileges:true` is always set
-- **Curated seccomp:** `docker/profiles/seccomp-containai.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
-- **AppArmor confinement:** `docker/profiles/apparmor-containai.profile` is loaded as `containai` to deny `/proc` and `/sys` writes
+- **Curated seccomp:** `host/profiles/seccomp-containai.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
+- **AppArmor confinement:** `host/profiles/apparmor-containai.profile` is loaded as `containai` to deny `/proc` and `/sys` writes
 - **Capabilities dropped:** `--cap-drop=ALL` removes all Linux capabilities
 - **Process limits:** `--pids-limit=4096` prevents fork bomb attacks
 - **Resource limits:** CPU and memory limits prevent resource exhaustion

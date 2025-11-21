@@ -288,10 +288,27 @@ test_shared_functions() {
 
     local seccomp_path
     if seccomp_path=$(resolve_seccomp_profile_path "$PROJECT_ROOT"); then
-        assert_equals "$PROJECT_ROOT/docker/profiles/seccomp-containai.json" "$seccomp_path" "resolve_seccomp_profile_path() returns built-in profile"
+        assert_equals "$PROJECT_ROOT/host/profiles/seccomp-containai.json" "$seccomp_path" "resolve_seccomp_profile_path() returns built-in profile"
     else
         fail "resolve_seccomp_profile_path() failed to locate built-in profile"
     fi
+
+    # Fallback to installed asset dir when repo copy is unavailable
+    local temp_asset_dir
+    temp_asset_dir=$(mktemp -d)
+    local backup_profile="$temp_asset_dir/seccomp-containai.json.bak"
+    cp "$PROJECT_ROOT/host/profiles/seccomp-containai.json" "$temp_asset_dir/seccomp-containai.json"
+    if mv "$PROJECT_ROOT/host/profiles/seccomp-containai.json" "$backup_profile"; then
+        if seccomp_path=$(CONTAINAI_ROOT="$temp_asset_dir" resolve_seccomp_profile_path "$PROJECT_ROOT"); then
+            assert_equals "$temp_asset_dir/seccomp-containai.json" "$seccomp_path" "resolve_seccomp_profile_path() falls back to installed copy"
+        else
+            fail "resolve_seccomp_profile_path() did not locate installed copy"
+        fi
+        mv "$backup_profile" "$PROJECT_ROOT/host/profiles/seccomp-containai.json"
+    else
+        fail "Unable to move built-in seccomp profile for fallback test"
+    fi
+    rm -rf "$temp_asset_dir"
 
     local fake_root
     fake_root=$(mktemp -d)
@@ -507,7 +524,7 @@ test_audit_logging_pipeline() {
 test_seccomp_ptrace_block() {
     test_section "Seccomp ptrace enforcement"
 
-    local profile="$PROJECT_ROOT/docker/profiles/seccomp-containai.json"
+    local profile="$PROJECT_ROOT/host/profiles/seccomp-containai.json"
     if [ ! -f "$profile" ]; then
         fail "Seccomp profile missing at $profile"
         return
@@ -1040,7 +1057,7 @@ test_host_security_preflight() {
             fail "Preflight rejected valid host security configuration"
         fi
 
-    local seccomp_profile="$PROJECT_ROOT/docker/profiles/seccomp-containai.json"
+    local seccomp_profile="$PROJECT_ROOT/host/profiles/seccomp-containai.json"
     local temp_dir
     temp_dir=$(mktemp -d)
     local temp_backup="$temp_dir/seccomp-containai.json"
@@ -1535,7 +1552,7 @@ test_launcher_wrappers() {
 test_seccomp_mount_block() {
     test_section "Seccomp mount enforcement"
 
-    local profile="$PROJECT_ROOT/docker/profiles/seccomp-containai.json"
+    local profile="$PROJECT_ROOT/host/profiles/seccomp-containai.json"
     if [ ! -f "$profile" ]; then
         fail "Seccomp profile missing at $profile"
         return
