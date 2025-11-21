@@ -63,18 +63,21 @@ fi
 
 SESSION_ARTIFACT_DIR=""
 cleanup_session_artifacts() {
-    if [ -n "$SESSION_ARTIFACT_DIR" ] && [ -d "$SESSION_ARTIFACT_DIR" ]; then
-        rm -rf "$SESSION_ARTIFACT_DIR"
+    local cache_root="${CONTAINAI_SESSION_CACHE:-${HOME:-/tmp}/.containai/session-cache}"
+    if [ -n "$CONTAINER_NAME" ] && [ -d "$cache_root/${CONTAINER_NAME}" ]; then
+        rm -rf "$cache_root/${CONTAINER_NAME}"
     fi
 }
 trap cleanup_session_artifacts EXIT
 
 SESSION_CONFIG_OUTPUT=""
+SESSION_ID_FILE=""
 SESSION_MANIFEST_PATH=""
 SESSION_CONFIG_SHA256=""
 SESSION_CONFIG_SOURCE=""
 SESSION_CONFIG_RENDERED=false
 SESSION_ID_BASE=$(date -u +"%Y%m%dT%H%M%SZ")
+SESSION_CACHE_ROOT="${CONTAINAI_SESSION_CACHE:-${HOME}/.containai/session-cache}"
 
 # Default values
 AGENT=""
@@ -83,7 +86,7 @@ BRANCH=""
 BRANCH_FROM_FLAG=false
 NAME=""
 DOTNET_PREVIEW=""
-NETWORK_PROXY="allow-all"
+NETWORK_PROXY="squid"
 CPU="4"
 MEMORY="8g"
 GPU=""
@@ -636,17 +639,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate network proxy option
+# Validate network proxy option (proxy required)
 case "$NETWORK_PROXY" in
-    allow-all|none|restricted|squid) ;;
+    squid) ;;
+    allow-all|none|restricted)
+        echo "⚠️  Network proxy '$NETWORK_PROXY' is not allowed; forcing squid mode"
+        NETWORK_PROXY="squid"
+        ;;
     *)
         echo "❌ Error: Invalid --network-proxy value '$NETWORK_PROXY'"
         exit 1
         ;;
 esac
-
-# Treat 'none' as alias for allow-all
-[ "$NETWORK_PROXY" = "none" ] && NETWORK_PROXY="allow-all"
 
 # Check Docker
 check_docker_running || exit 1
@@ -786,10 +790,29 @@ if ! validate_container_name "$CONTAINER_NAME"; then
     exit 1
 fi
 
-SESSION_ARTIFACT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/containai-session.XXXXXXXX" 2>/dev/null || mktemp -d)
+SESSION_ARTIFACT_DIR="${SESSION_CACHE_ROOT}/${CONTAINER_NAME}"
 SESSION_CONFIG_OUTPUT="$SESSION_ARTIFACT_DIR/session-config"
 mkdir -p "$SESSION_CONFIG_OUTPUT"
-SESSION_ID="${CONTAINER_NAME}-${SESSION_ID_BASE}-${RANDOM}"
+SESSION_ID_FILE="$SESSION_CONFIG_OUTPUT/session.id"
+if [ -f "$SESSION_ID_FILE" ]; then
+    SESSION_ID=$(cat "$SESSION_ID_FILE")
+else
+    SESSION_ID="${CONTAINER_NAME}-${SESSION_ID_BASE}-${RANDOM}"
+    printf '%s\n' "$SESSION_ID" > "$SESSION_ID_FILE"
+fi
+SESSION_MITM_DIR="$SESSION_CONFIG_OUTPUT/mitm"
+PROXY_MITM_CA_CERT="$SESSION_MITM_DIR/proxy-ca.crt"
+PROXY_MITM_CA_KEY="$SESSION_MITM_DIR/proxy-ca.key"
+if [ -f "$PROXY_MITM_CA_CERT" ] && [ -f "$PROXY_MITM_CA_KEY" ]; then
+    chmod 600 "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY" 2>/dev/null || true
+else
+    if ! generate_session_mitm_ca "$SESSION_MITM_DIR"; then
+        echo "❌ Failed to generate per-session MITM CA" >&2
+        exit 1
+    fi
+    PROXY_MITM_CA_CERT="$SESSION_MITM_DIR/proxy-ca.crt"
+    PROXY_MITM_CA_KEY="$SESSION_MITM_DIR/proxy-ca.key"
+fi
 
 WORKSPACE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "workspace")
 HOME_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "home")
@@ -817,32 +840,13 @@ TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
 
 # Squid allowed domains
 SQUID_ALLOWED_DOMAINS="*.github.com,*.githubcopilot.com,*.nuget.org,*.npmjs.org,*.pypi.org,*.python.org,*.microsoft.com,*.docker.io,registry-1.docker.io,api.githubcopilot.com,learn.microsoft.com,platform.uno,*.githubusercontent.com,*.azureedge.net"
+SQUID_HELPER_ACL_FILE="$SESSION_CONFIG_OUTPUT/squid-acls.conf"
 
 # Determine network mode
-NETWORK_MODE="bridge"
-NETWORK_POLICY_ENV="allow-all"
-USE_SQUID=false
-PROXY_URL=""
-
-case "$NETWORK_PROXY" in
-    restricted)
-        NETWORK_MODE="none"
-        NETWORK_POLICY_ENV="restricted"
-        ;;
-    squid)
-        NETWORK_MODE="$PROXY_NETWORK_NAME"
-        NETWORK_POLICY_ENV="squid"
-        USE_SQUID=true
-        PROXY_URL="http://${PROXY_CONTAINER_NAME}:3128"
-        ;;
-    *)
-        NETWORK_POLICY_ENV="allow-all"
-        ;;
-esac
-
-if [ "$USE_SQUID" = true ]; then
-    pull_and_tag_image "proxy"
-fi
+NETWORK_MODE="$PROXY_NETWORK_NAME"
+NETWORK_POLICY_ENV="squid"
+PROXY_URL="http://${PROXY_CONTAINER_NAME}:3128"
+pull_and_tag_image "proxy"
 
 SESSION_CONFIG_ROOT_IN_CONTAINER="/run/containai"
 RENDERER_SCRIPT="$REPO_ROOT/host/utils/render-session-config.py"
@@ -1027,7 +1031,7 @@ if container_exists "$CONTAINER_NAME"; then
         EXISTING_NETWORK=$(container_cli inspect -f '{{ index .Config.Labels "containai.proxy-network" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_NETWORK_NAME")
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
-        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS"
+        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
     fi
     
     if [ "$STATE" = "running" ]; then
@@ -1045,7 +1049,7 @@ fi
 
 # Setup squid proxy if needed
 if [ "$USE_SQUID" = true ]; then
-    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS"
+    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
 fi
 
 # Build docker arguments

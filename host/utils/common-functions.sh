@@ -1677,6 +1677,7 @@ remove_container_with_sidecars() {
     local container_name="$1"
     local skip_push="${2:-false}"
     local keep_branch="${3:-false}"
+    local cache_root="${CONTAINAI_SESSION_CACHE:-${HOME:-/tmp}/.containai/session-cache}"
     
     if ! container_exists "$container_name"; then
         echo "❌ Container '$container_name' does not exist"
@@ -1738,6 +1739,12 @@ remove_container_with_sidecars() {
         fi
     fi
 
+    # Remove cached session artifacts for this container
+    if [ -n "$cache_root" ] && [ -d "$cache_root/${container_name}" ]; then
+        echo "🧹 Removing session cache: $cache_root/${container_name}"
+        rm -rf "$cache_root/${container_name}" || true
+    fi
+
     if [ -n "$agent_branch" ] && [ -n "$repo_path" ] && [ -d "$repo_path" ] && [ -n "$local_remote_path" ]; then
         echo ""
         echo "🔄 Syncing agent branch back to host repository..."
@@ -1773,6 +1780,43 @@ remove_container_with_sidecars() {
     echo "✅ Cleanup complete"
 }
 
+# Generate per-session MITM CA for the Squid proxy
+generate_session_mitm_ca() {
+    local output_dir="$1"
+    if [ -z "$output_dir" ]; then
+        echo "❌ MITM CA output directory not provided" >&2
+        return 1
+    fi
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "❌ openssl is required to generate MITM CA materials" >&2
+        return 1
+    fi
+    mkdir -p "$output_dir"
+    local original_umask
+    original_umask=$(umask)
+    umask 077
+    local ca_key="$output_dir/proxy-ca.key"
+    local ca_cert="$output_dir/proxy-ca.crt"
+    if ! openssl req -x509 -newkey rsa:4096 -sha256 -days 2 -nodes \
+        -subj "/CN=ContainAI Proxy MITM CA" \
+        -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
+        -addext "subjectKeyIdentifier=hash" \
+        -addext "authorityKeyIdentifier=keyid:always,issuer" \
+        -keyout "$ca_key" \
+        -out "$ca_cert" >/dev/null 2>&1; then
+        umask "$original_umask"
+        echo "❌ Failed to generate MITM CA materials" >&2
+        return 1
+    fi
+    umask "$original_umask"
+    chmod 600 "$ca_key" "$ca_cert" || true
+    SESSION_MITM_CA_CERT="$ca_cert"
+    SESSION_MITM_CA_KEY="$ca_key"
+    export SESSION_MITM_CA_CERT SESSION_MITM_CA_KEY
+    return 0
+}
+
 # Ensure squid proxy is running (for launch-agent)
 ensure_squid_proxy() {
     local network_name="$1"
@@ -1781,47 +1825,57 @@ ensure_squid_proxy() {
     local agent_container="$4"
     local squid_allowed_domains="${5:-*.github.com,*.githubcopilot.com,*.nuget.org}"
     local helper_acl_file="${6:-}"
-    local proxy_log_dir="${7:-}"
-    local agent_id="${8:-}"
-    local session_id="${9:-}"
+    local agent_id="${7:-}"
+    local session_id="${8:-}"
+    local mitm_ca_cert="${9:-${SESSION_MITM_CA_CERT:-}}"
+    local mitm_ca_key="${10:-${SESSION_MITM_CA_KEY:-}}"
+    
+    if [ -z "$mitm_ca_cert" ] || [ -z "$mitm_ca_key" ] || [ ! -f "$mitm_ca_cert" ] || [ ! -f "$mitm_ca_key" ]; then
+        echo "❌ MITM CA certificate and key are required to start the Squid proxy" >&2
+        return 1
+    fi
     
     # Create network if needed
     if ! container_cli network inspect "$network_name" >/dev/null 2>&1; then
         container_cli network create "$network_name" >/dev/null
     fi
     
-    # Check if proxy exists
+    # Recreate proxy to ensure per-session CA and ACLs are applied
     if container_exists "$proxy_container"; then
-        local state
-        state=$(get_container_status "$proxy_container")
-        if [ "$state" != "running" ]; then
-            container_cli start "$proxy_container" >/dev/null
-        fi
-    else
-        # Create new proxy
-        local -a proxy_args=(
-            -d
-            --name "$proxy_container"
-            --hostname "$proxy_container"
-            --network "$network_name"
-            --restart unless-stopped
-            -e "SQUID_ALLOWED_DOMAINS=$squid_allowed_domains"
-            --label "containai.proxy-of=$agent_container"
-            --label "containai.proxy-image=$proxy_image"
-        )
-        if [ -n "$helper_acl_file" ] && [ -f "$helper_acl_file" ]; then
-            proxy_args+=("-v" "$helper_acl_file:/etc/squid/helper-acls.conf:ro")
-        fi
-        if [ -n "$proxy_log_dir" ]; then
-            mkdir -p "$proxy_log_dir"
-            proxy_args+=("-v" "$proxy_log_dir:/var/log/squid")
-            proxy_args+=("-e" "SQUID_LOG_DIR=/var/log/squid")
-        fi
-        [ -n "$agent_id" ] && proxy_args+=("-e" "CA_AGENT_ID=$agent_id")
-        [ -n "$session_id" ] && proxy_args+=("-e" "CA_SESSION_ID=$session_id")
-        proxy_args+=("$proxy_image")
-        container_cli run "${proxy_args[@]}" >/dev/null
+        container_cli rm -f "$proxy_container" >/dev/null 2>&1 || true
     fi
+    
+    if ! container_cli image inspect "$proxy_image" >/dev/null 2>&1; then
+        echo "📥 Proxy image '$proxy_image' not found locally; pulling..." >&2
+        if ! container_cli pull "$proxy_image" >/dev/null 2>&1; then
+            echo "❌ Failed to pull proxy image '$proxy_image'" >&2
+            return 1
+        fi
+    fi
+    
+    local -a proxy_args=(
+        -d
+        --name "$proxy_container"
+        --hostname "$proxy_container"
+        --network "$network_name"
+        --restart no
+        -e "SQUID_ALLOWED_DOMAINS=$squid_allowed_domains"
+        -e "SQUID_MITM_CA_CERT=/etc/squid/mitm/ca.crt"
+        -e "SQUID_MITM_CA_KEY=/etc/squid/mitm/ca.key"
+        --tmpfs "/var/log/squid:rw,nosuid,nodev,noexec,size=64m,mode=750"
+        --tmpfs "/var/spool/squid:rw,nosuid,nodev,noexec,size=128m,mode=750"
+        --label "containai.proxy-of=$agent_container"
+        --label "containai.proxy-image=$proxy_image"
+        -v "$mitm_ca_cert:/etc/squid/mitm/ca.crt:ro"
+        -v "$mitm_ca_key:/etc/squid/mitm/ca.key:ro"
+    )
+    if [ -n "$helper_acl_file" ] && [ -f "$helper_acl_file" ]; then
+        proxy_args+=("-v" "$helper_acl_file:/etc/squid/helper-acls.conf:ro")
+    fi
+    [ -n "$agent_id" ] && proxy_args+=("-e" "CA_AGENT_ID=$agent_id")
+    [ -n "$session_id" ] && proxy_args+=("-e" "CA_SESSION_ID=$session_id")
+    proxy_args+=("$proxy_image")
+    container_cli run "${proxy_args[@]}" >/dev/null
 }
 
 # Generate repository setup script for container

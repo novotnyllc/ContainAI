@@ -1409,6 +1409,57 @@ test_image_pull() {
     pass "pull_and_tag_image() executes without error"
 }
 
+# Test: MITM CA generation and rotation
+test_mitm_ca_generation() {
+    test_section "Testing MITM CA generation"
+    
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
+    local ca_dir
+    ca_dir=$(mktemp -d "${TMPDIR:-/tmp}/test-mitm-ca.XXXXXX")
+    if ! generate_session_mitm_ca "$ca_dir"; then
+        fail "generate_session_mitm_ca failed"
+        rm -rf "$ca_dir"
+        return
+    fi
+
+    local ca_crt="$ca_dir/proxy-ca.crt"
+    local ca_key="$ca_dir/proxy-ca.key"
+    if [ ! -f "$ca_crt" ] || [ ! -f "$ca_key" ]; then
+        fail "MITM CA files not created"
+        rm -rf "$ca_dir"
+        return
+    fi
+
+    local key_perms
+    key_perms=$(stat -c "%a" "$ca_key" 2>/dev/null || stat -f "%Lp" "$ca_key")
+    if [ "$key_perms" != "600" ]; then
+        fail "MITM CA key permissions are $key_perms (expected 600)"
+        rm -rf "$ca_dir"
+        return
+    fi
+
+    local first_fingerprint
+    first_fingerprint=$(openssl x509 -in "$ca_crt" -noout -fingerprint -sha256 2>/dev/null | tr -d ':' | awk -F= '{print $2}')
+    if [ -z "$first_fingerprint" ]; then
+        fail "Unable to read MITM CA fingerprint"
+        rm -rf "$ca_dir"
+        return
+    fi
+
+    # Regenerate to ensure rotation produces a new CA
+    generate_session_mitm_ca "$ca_dir" >/dev/null 2>&1 || true
+    local second_fingerprint
+    second_fingerprint=$(openssl x509 -in "$ca_crt" -noout -fingerprint -sha256 2>/dev/null | tr -d ':' | awk -F= '{print $2}')
+
+    if [ -n "$second_fingerprint" ] && [ "$second_fingerprint" != "$first_fingerprint" ]; then
+        pass "MITM CA rotates when regenerated and enforces strict permissions"
+    else
+        fail "MITM CA did not rotate on regeneration"
+    fi
+
+    rm -rf "$ca_dir"
+}
+
 # Test: Branch name sanitization
 test_branch_sanitization() {
     test_section "Testing branch name sanitization"
@@ -1612,6 +1663,7 @@ ALL_TESTS=(
     "test_container_naming"
     "test_container_labels"
     "test_image_pull"
+    "test_mitm_ca_generation"
     "test_branch_sanitization"
     "test_multiple_agents"
     "test_label_filtering"

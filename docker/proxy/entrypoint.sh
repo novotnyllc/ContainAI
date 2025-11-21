@@ -4,13 +4,23 @@ set -euo pipefail
 SQUID_CONF=${SQUID_CONF:-/etc/squid/squid.conf}
 SQUID_CACHE_DIR=${SQUID_CACHE_DIR:-/var/spool/squid}
 SQUID_LOG_DIR=${SQUID_LOG_DIR:-/var/log/squid}
+SQUID_SSL_DB_DIR=${SQUID_SSL_DB_DIR:-/var/spool/squid/ssl_db}
+SQUID_SSL_DB_SIZE_MB=${SQUID_SSL_DB_SIZE_MB:-16}
+SQUID_CRT_TOOL=${SQUID_CRT_TOOL:-/usr/lib/squid/security_file_certgen}
 ALLOWED_DOMAINS_FILE=/etc/squid/allowed-domains.txt
 HELPER_ACLS_FILE=/etc/squid/helper-acls.conf
 AGENT_HEADERS_FILE=/etc/squid/agent-headers.conf
+MITM_CA_CERT=${SQUID_MITM_CA_CERT:-}
+MITM_CA_KEY=${SQUID_MITM_CA_KEY:-}
+
+if [ -z "$MITM_CA_CERT" ] || [ -z "$MITM_CA_KEY" ] || [ ! -f "$MITM_CA_CERT" ] || [ ! -f "$MITM_CA_KEY" ]; then
+    echo "❌ MITM CA cert/key missing (expected SQUID_MITM_CA_CERT and SQUID_MITM_CA_KEY pointing to readable files)" >&2
+    exit 1
+fi
 
 # Ensure directories exist with correct ownership
-mkdir -p "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$ALLOWED_DOMAINS_FILE")"
-chown -R proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR"
+mkdir -p "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$SQUID_SSL_DB_DIR" "$(dirname "$ALLOWED_DOMAINS_FILE")"
+chown -R proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$SQUID_SSL_DB_DIR"
 
 # Generate allowed domains file from environment variable
 if [ -n "${SQUID_ALLOWED_DOMAINS:-}" ]; then
@@ -38,6 +48,16 @@ cat > "$AGENT_HEADERS_FILE" <<EOF
 request_header_add X-CA-Agent ${CA_AGENT_ID:-unknown} all
 request_header_add X-CA-Session ${CA_SESSION_ID:-unknown} all
 EOF
+
+# Initialize ssl_crtd cache
+if [ ! -d "$SQUID_SSL_DB_DIR" ] || [ -z "$(ls -A "$SQUID_SSL_DB_DIR" 2>/dev/null)" ]; then
+    echo "🔐 Initializing ssl_crtd cache at $SQUID_SSL_DB_DIR..."
+    if ! "$SQUID_CRT_TOOL" -c -s "$SQUID_SSL_DB_DIR" -M "${SQUID_SSL_DB_SIZE_MB}MB"; then
+        echo "❌ Failed to initialize ssl_crtd cache" >&2
+        exit 1
+    fi
+    chown -R proxy:proxy "$SQUID_SSL_DB_DIR"
+fi
 
 # Initialize cache if needed
 if [ ! -f "$SQUID_CACHE_DIR/00/00000000" ]; then
