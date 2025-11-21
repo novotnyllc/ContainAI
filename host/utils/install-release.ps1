@@ -54,7 +54,7 @@ function Find-PayloadDir {
     return @{ Dir = $payloadDir; Sha = $payloadSha; ShaSums = $sha.FullName }
 }
 
-function Verify-PayloadHash {
+function Test-PayloadHash {
     param([string]$ShaFile, [string]$ShaSumsPath)
     $expected = (Get-Content -Path $ShaFile -TotalCount 1).Split(' ',[System.StringSplitOptions]::RemoveEmptyEntries)[0]
     if (-not $expected) { Write-Die "Expected hash for SHA256SUMS not found in payload.sha256" }
@@ -65,7 +65,7 @@ function Verify-PayloadHash {
     Write-Output "SHA256 verified for payload contents"
 }
 
-function Extract-PayloadTar {
+function Expand-PayloadTar {
     param([string]$TarGzPath, [string]$Destination)
     if (Test-Path $Destination) { Remove-Item -Recurse -Force $Destination }
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
@@ -99,7 +99,7 @@ try {
     }
 
     if ($AssetPath) {
-        Extract-PayloadTar -TarGzPath $AssetPath -Destination (Join-Path $ExtractDir "payload")
+        Expand-PayloadTar -TarGzPath $AssetPath -Destination (Join-Path $ExtractDir "payload")
         $payloadInfo = Find-PayloadDir -BasePath (Join-Path $ExtractDir "payload")
     } else {
         # If we have no zip but AssetDir points to extracted payload
@@ -111,7 +111,7 @@ try {
     $payloadSha = $payloadInfo.Sha
     $shaSumsPath = $payloadInfo.ShaSums
 
-    Verify-PayloadHash -ShaFile $payloadSha -ShaSumsPath $shaSumsPath
+    Test-PayloadHash -ShaFile $payloadSha -ShaSumsPath $shaSumsPath
 
     Write-Output "📦 Installing ContainAI $Version to $ReleaseDir"
     if (Test-Path $ReleaseDir) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ReleaseDir }
@@ -121,7 +121,7 @@ try {
     $profileDir = Join-Path $ReleaseDir "host/profiles"
     if (Test-Path $profileDir) {
         . (Join-Path $PSScriptRoot "security-enforce.ps1")
-        Require-AppArmorStrict -ProfileDir $profileDir
+        Invoke-AppArmorStrict -ProfileDir $profileDir
     }
 
     & "$PSScriptRoot/integrity-check.ps1" -Mode prod -Root $ReleaseDir -Sums (Join-Path $ReleaseDir "SHA256SUMS")
@@ -134,7 +134,7 @@ try {
     }
     New-Item -Force -ItemType SymbolicLink -Path $currentLink -Target $ReleaseDir | Out-Null
 
-    @" 
+    @"
 version=$Version
 installed_at=$(Get-Date -Format s -AsUTC)Z
 payload_asset=$PayloadAssetName
