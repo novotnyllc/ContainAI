@@ -16,9 +16,9 @@ LONG_RUNNING_SLEEP=3600
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TEST_REPO_DIR="/tmp/test-coding-agents-repo"
+TEST_REPO_DIR="/tmp/test-containai-repo"
 PROFILE_SUFFIX=""
-[ "${CODING_AGENTS_PROFILE:-dev}" = "dev" ] && PROFILE_SUFFIX="-dev"
+[ "${CONTAINAI_PROFILE:-dev}" = "dev" ] && PROFILE_SUFFIX="-dev"
 FAILED_TESTS=0
 PASSED_TESTS=0
 
@@ -35,7 +35,7 @@ cleanup() {
     while [ $attempt -lt $max_attempts ]; do
         removed=true
         local containers
-        containers=$(docker ps -aq --filter "label=coding-agents.test=true" 2>/dev/null || true)
+        containers=$(docker ps -aq --filter "label=containai.test=true" 2>/dev/null || true)
         if [ -n "$containers" ]; then
             echo "  Removing containers (attempt $((attempt+1))/$max_attempts)..."
             echo "$containers" | xargs -r docker rm -f 2>/dev/null || true
@@ -196,11 +196,11 @@ create_test_container() {
     
     docker run -d \
         --name "$container_name" \
-        --label "coding-agents.test=true" \
-        --label "coding-agents.type=agent" \
-        --label "coding-agents.agent=$agent" \
-        --label "coding-agents.repo=$repo" \
-        --label "coding-agents.branch=$branch" \
+        --label "containai.test=true" \
+        --label "containai.type=agent" \
+        --label "containai.agent=$agent" \
+        --label "containai.repo=$repo" \
+        --label "containai.branch=$branch" \
         alpine:latest sleep $LONG_RUNNING_SLEEP >/dev/null
     
     echo "$container_name"
@@ -212,10 +212,10 @@ verify_container_labels() {
     local repo="$3"
     local branch="$4"
     
-    assert_label_exists "$container_name" "coding-agents.type" "agent"
-    assert_label_exists "$container_name" "coding-agents.agent" "$agent"
-    assert_label_exists "$container_name" "coding-agents.repo" "$repo"
-    assert_label_exists "$container_name" "coding-agents.branch" "$branch"
+    assert_label_exists "$container_name" "containai.type" "agent"
+    assert_label_exists "$container_name" "containai.agent" "$agent"
+    assert_label_exists "$container_name" "containai.repo" "$repo"
+    assert_label_exists "$container_name" "containai.branch" "$branch"
 }
 
 # ============================================================================
@@ -265,7 +265,7 @@ test_shared_functions() {
     
     # Test get_repo_name
     local repo_name=$(get_repo_name "$TEST_REPO_DIR")
-    assert_equals "test-coding-agents-repo" "$repo_name" "get_repo_name() returns correct name"
+    assert_equals "test-containai-repo" "$repo_name" "get_repo_name() returns correct name"
     
     # Test get_current_branch
     cd "$TEST_REPO_DIR"
@@ -288,7 +288,7 @@ test_shared_functions() {
 
     local seccomp_path
     if seccomp_path=$(resolve_seccomp_profile_path "$PROJECT_ROOT"); then
-        assert_equals "$PROJECT_ROOT/docker/profiles/seccomp-coding-agents.json" "$seccomp_path" "resolve_seccomp_profile_path() returns built-in profile"
+        assert_equals "$PROJECT_ROOT/docker/profiles/seccomp-containai.json" "$seccomp_path" "resolve_seccomp_profile_path() returns built-in profile"
     else
         fail "resolve_seccomp_profile_path() failed to locate built-in profile"
     fi
@@ -314,7 +314,7 @@ test_helper_network_isolation() {
 
     source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
-    local helper_dir="$HOME/.coding-agents-tests"
+    local helper_dir="$HOME/.containai-tests"
     mkdir -p "$helper_dir"
     local script
     script=$(mktemp "$helper_dir/helper-net.XXXXXX.py")
@@ -468,7 +468,7 @@ test_audit_logging_pipeline() {
 
     local log_file
     log_file=$(mktemp /tmp/helper-audit.XXXXXX.log)
-    export CODING_AGENTS_AUDIT_LOG="$log_file"
+    export CONTAINAI_AUDIT_LOG="$log_file"
 
     log_security_event "unit-test" '{"ok":true}'
     if grep -q '"event":"unit-test"' "$log_file"; then
@@ -490,7 +490,7 @@ test_audit_logging_pipeline() {
     echo "# dirty" >> host/launchers/tool.sh
     popd >/dev/null
 
-    CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$override_token" \
+    CONTAINAI_DIRTY_OVERRIDE_TOKEN="$override_token" \
         ensure_trusted_paths_clean "$temp_repo" "test stubs" "host/launchers" >/dev/null 2>&1
     if grep -q '"event":"override-used"' "$log_file"; then
         pass "Override usage recorded"
@@ -500,14 +500,14 @@ test_audit_logging_pipeline() {
 
     rm -rf "$temp_repo" "$override_token"
     rm -f "$log_file"
-    unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
-    unset CODING_AGENTS_AUDIT_LOG
+    unset CONTAINAI_DIRTY_OVERRIDE_TOKEN
+    unset CONTAINAI_AUDIT_LOG
 }
 
 test_seccomp_ptrace_block() {
     test_section "Seccomp ptrace enforcement"
 
-    local profile="$PROJECT_ROOT/docker/profiles/seccomp-coding-agents.json"
+    local profile="$PROJECT_ROOT/docker/profiles/seccomp-containai.json"
     if [ ! -f "$profile" ]; then
         fail "Seccomp profile missing at $profile"
         return
@@ -541,15 +541,15 @@ PY
 test_trusted_path_enforcement() {
     test_section "Trusted path enforcement"
 
-    local saved_override_token="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-}"
-    unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
+    local saved_override_token="${CONTAINAI_DIRTY_OVERRIDE_TOKEN:-}"
+    unset CONTAINAI_DIRTY_OVERRIDE_TOKEN
 
     if ! command -v git >/dev/null 2>&1; then
         fail "Git is required for trusted path tests"
         if [ -n "$saved_override_token" ]; then
-            CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
+            CONTAINAI_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
         else
-            unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
+            unset CONTAINAI_DIRTY_OVERRIDE_TOKEN
         fi
         return
     fi
@@ -581,7 +581,7 @@ test_trusted_path_enforcement() {
 
     local override_token="$temp_repo/allow-dirty"
     touch "$override_token"
-    if CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$override_token" ensure_trusted_paths_clean "$temp_repo" "test" "host/launchers" >/dev/null 2>&1; then
+    if CONTAINAI_DIRTY_OVERRIDE_TOKEN="$override_token" ensure_trusted_paths_clean "$temp_repo" "test" "host/launchers" >/dev/null 2>&1; then
         pass "Override token permits dirty paths"
     else
         fail "Override token should allow launch"
@@ -590,9 +590,9 @@ test_trusted_path_enforcement() {
     rm -rf "$temp_repo"
 
     if [ -n "$saved_override_token" ]; then
-        CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
+        CONTAINAI_DIRTY_OVERRIDE_TOKEN="$saved_override_token"
     else
-        unset CODING_AGENTS_DIRTY_OVERRIDE_TOKEN
+        unset CONTAINAI_DIRTY_OVERRIDE_TOKEN
     fi
 }
 
@@ -666,7 +666,7 @@ if not isinstance(playwright, dict):
     sys.exit(1)
 cmd = playwright.get("command", "")
 env = playwright.get("env", {})
-if "mcp-stub-playwright" not in cmd or "CODING_AGENTS_STUB_SPEC" not in env:
+if "mcp-stub-playwright" not in cmd or "CONTAINAI_STUB_SPEC" not in env:
     sys.exit(1)
 
 msftdocs = servers.get("msftdocs") or {}
@@ -714,7 +714,7 @@ test_secret_broker_cli() {
     local sealed_dir="$cap_dir/alpha/secrets"
     local redeem_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- issue --session-id test-session --output "$cap_dir" --stubs alpha >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- issue --session-id test-session --output "$cap_dir" --stubs alpha >/dev/null 2>&1; then
         pass "Capability issuance succeeds"
     else
         fail "Capability issuance failed"
@@ -730,13 +730,13 @@ test_secret_broker_cli() {
         fail "Capability token file missing"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${config_mounts[@]}" -- store --stub alpha --name TEST_SECRET --value super-secret >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${config_mounts[@]}" -- store --stub alpha --name TEST_SECRET --value super-secret >/dev/null 2>&1; then
         pass "Broker secret store succeeds"
     else
         fail "Broker secret store failed"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET >/dev/null 2>&1; then
         pass "Capability redemption seals secret"
     else
         fail "Capability redemption failed"
@@ -798,13 +798,13 @@ PY
         fail "capability-unseal script failed"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret TEST_SECRET >/dev/null 2>&1; then
         fail "Redeeming same capability twice should fail"
     else
         pass "Capability redemption is single-use"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${config_mounts[@]}" -- health >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${config_mounts[@]}" -- health >/dev/null 2>&1; then
         pass "Broker health check succeeds"
     else
         fail "Broker health check failed"
@@ -833,21 +833,21 @@ test_codex_cli_helper() {
     secret_file="$config_root/codex-auth.json"
     printf '{"refresh_token":"unit-test","access_token":"abc"}' >"$secret_file"
 
-    local previous_config="${CODING_AGENTS_CONFIG_DIR:-}"
+    local previous_config="${CONTAINAI_CONFIG_DIR:-}"
     local issue_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
     local store_mounts=("--mount" "$config_root")
     local redeem_mounts=("--mount" "$config_root" "--mount" "$cap_dir")
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- issue --session-id codex-helper --output "$cap_dir" --stubs agent_codex_cli >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- issue --session-id codex-helper --output "$cap_dir" --stubs agent_codex_cli >/dev/null 2>&1; then
         pass "Codex capability issuance succeeds"
     else
         fail "Codex capability issuance failed"
         rm -rf "$config_root" "$cap_dir" "$secret_file"
-        [ -n "$previous_config" ] && CODING_AGENTS_CONFIG_DIR="$previous_config" || unset CODING_AGENTS_CONFIG_DIR
+        [ -n "$previous_config" ] && CONTAINAI_CONFIG_DIR="$previous_config" || unset CONTAINAI_CONFIG_DIR
         return
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_codex_cli --name codex_cli_auth_json --from-file "$secret_file" >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_codex_cli --name codex_cli_auth_json --from-file "$secret_file" >/dev/null 2>&1; then
         pass "Codex secret stored"
     else
         fail "Codex secret store failed"
@@ -859,7 +859,7 @@ test_codex_cli_helper() {
         fail "Codex capability token missing"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret codex_cli_auth_json >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- redeem --capability "$token_file" --secret codex_cli_auth_json >/dev/null 2>&1; then
         pass "Codex capability redemption seals secret"
     else
         fail "Codex capability redemption failed"
@@ -868,10 +868,10 @@ test_codex_cli_helper() {
     local agent_home secret_root
     agent_home=$(mktemp -d)
     secret_root="$agent_home/run-secrets"
-    if CODING_AGENTS_AGENT_HOME="$agent_home" \
-        CODING_AGENTS_AGENT_CAP_ROOT="$cap_dir" \
-        CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root" \
-        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
+    if CONTAINAI_AGENT_HOME="$agent_home" \
+        CONTAINAI_AGENT_CAP_ROOT="$cap_dir" \
+        CONTAINAI_AGENT_SECRET_ROOT="$secret_root" \
+        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-codex-secrets decrypts bundle"
     else
@@ -894,9 +894,9 @@ test_codex_cli_helper() {
     fi
 
     if [ -n "$previous_config" ]; then
-        CODING_AGENTS_CONFIG_DIR="$previous_config"
+        CONTAINAI_CONFIG_DIR="$previous_config"
     else
-        unset CODING_AGENTS_CONFIG_DIR
+        unset CONTAINAI_CONFIG_DIR
     fi
     rm -rf "$config_root" "$cap_dir" "$agent_home"
     rm -f "$secret_file"
@@ -921,7 +921,7 @@ test_claude_cli_helper() {
     secret_file="$config_root/claude-auth.json"
     printf '{"api_key":"file-secret","workspace_id":"dev"}' >"$secret_file"
 
-    local previous_config="${CODING_AGENTS_CONFIG_DIR:-}"
+    local previous_config="${CONTAINAI_CONFIG_DIR:-}"
 
     local file_cap_dir inline_cap_dir
     file_cap_dir=$(mktemp -d)
@@ -930,23 +930,23 @@ test_claude_cli_helper() {
 
     local issue_file_mounts=("--mount" "$config_root" "--mount" "$file_cap_dir")
     local redeem_file_mounts=("--mount" "$config_root" "--mount" "$file_cap_dir")
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_file_mounts[@]}" -- issue --session-id claude-helper-file --output "$file_cap_dir" --stubs agent_claude_cli >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_file_mounts[@]}" -- issue --session-id claude-helper-file --output "$file_cap_dir" --stubs agent_claude_cli >/dev/null 2>&1; then
         pass "Claude capability issuance (file) succeeds"
     else
         fail "Claude capability issuance (file) failed"
         rm -rf "$config_root" "$file_cap_dir" "$inline_cap_dir"
         rm -f "$secret_file"
-        [ -n "$previous_config" ] && CODING_AGENTS_CONFIG_DIR="$previous_config" || unset CODING_AGENTS_CONFIG_DIR
+        [ -n "$previous_config" ] && CONTAINAI_CONFIG_DIR="$previous_config" || unset CONTAINAI_CONFIG_DIR
         return
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_claude_cli --name claude_cli_credentials --from-file "$secret_file" >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_claude_cli --name claude_cli_credentials --from-file "$secret_file" >/dev/null 2>&1; then
         pass "Claude secret (file) stored"
     else
         fail "Claude secret (file) store failed"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_file_mounts[@]}" -- redeem --capability "$(find "$file_cap_dir" -name '*.json' | head -n 1)" --secret claude_cli_credentials >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_file_mounts[@]}" -- redeem --capability "$(find "$file_cap_dir" -name '*.json' | head -n 1)" --secret claude_cli_credentials >/dev/null 2>&1; then
         pass "Claude capability (file) redemption seals secret"
     else
         fail "Claude capability (file) redemption failed"
@@ -956,13 +956,13 @@ test_claude_cli_helper() {
     agent_home_file=$(mktemp -d)
     secret_root_file="$agent_home_file/run-secrets"
     mkdir -p "$secret_root_file"
-    mkdir -p "$agent_home_file/.config/coding-agents/claude"
-    printf '{"projects":{}}' >"$agent_home_file/.config/coding-agents/claude/.claude.json"
+    mkdir -p "$agent_home_file/.config/containai/claude"
+    printf '{"projects":{}}' >"$agent_home_file/.config/containai/claude/.claude.json"
 
-    if CODING_AGENTS_AGENT_HOME="$agent_home_file" \
-        CODING_AGENTS_AGENT_CAP_ROOT="$file_cap_dir" \
-        CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root_file" \
-        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
+    if CONTAINAI_AGENT_HOME="$agent_home_file" \
+        CONTAINAI_AGENT_CAP_ROOT="$file_cap_dir" \
+        CONTAINAI_AGENT_SECRET_ROOT="$secret_root_file" \
+        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-claude-secrets decrypts file-based bundle"
     else
@@ -980,19 +980,19 @@ test_claude_cli_helper() {
     local issue_inline_mounts=("--mount" "$config_root" "--mount" "$inline_cap_dir")
     local redeem_inline_mounts=("--mount" "$config_root" "--mount" "$inline_cap_dir")
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_inline_mounts[@]}" -- issue --session-id claude-helper-inline --output "$inline_cap_dir" --stubs agent_claude_cli >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_inline_mounts[@]}" -- issue --session-id claude-helper-inline --output "$inline_cap_dir" --stubs agent_claude_cli >/dev/null 2>&1; then
         pass "Claude capability issuance (inline) succeeds"
     else
         fail "Claude capability issuance (inline) failed"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_claude_cli --name claude_cli_credentials --value "$inline_secret" >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- store --stub agent_claude_cli --name claude_cli_credentials --value "$inline_secret" >/dev/null 2>&1; then
         pass "Claude secret (inline) stored"
     else
         fail "Claude secret (inline) store failed"
     fi
 
-    if CODING_AGENTS_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_inline_mounts[@]}" -- redeem --capability "$(find "$inline_cap_dir" -name '*.json' | head -n 1)" --secret claude_cli_credentials >/dev/null 2>&1; then
+    if CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_inline_mounts[@]}" -- redeem --capability "$(find "$inline_cap_dir" -name '*.json' | head -n 1)" --secret claude_cli_credentials >/dev/null 2>&1; then
         pass "Claude capability (inline) redemption seals secret"
     else
         fail "Claude capability (inline) redemption failed"
@@ -1003,10 +1003,10 @@ test_claude_cli_helper() {
     secret_root_inline="$agent_home_inline/run-secrets"
     mkdir -p "$secret_root_inline"
 
-    if CODING_AGENTS_AGENT_HOME="$agent_home_inline" \
-        CODING_AGENTS_AGENT_CAP_ROOT="$inline_cap_dir" \
-        CODING_AGENTS_AGENT_SECRET_ROOT="$secret_root_inline" \
-        CODING_AGENTS_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
+    if CONTAINAI_AGENT_HOME="$agent_home_inline" \
+        CONTAINAI_AGENT_CAP_ROOT="$inline_cap_dir" \
+        CONTAINAI_AGENT_SECRET_ROOT="$secret_root_inline" \
+        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-claude-secrets decrypts inline bundle"
     else
@@ -1021,9 +1021,9 @@ test_claude_cli_helper() {
     fi
 
     if [ -n "$previous_config" ]; then
-        CODING_AGENTS_CONFIG_DIR="$previous_config"
+        CONTAINAI_CONFIG_DIR="$previous_config"
     else
-        unset CODING_AGENTS_CONFIG_DIR
+        unset CONTAINAI_CONFIG_DIR
     fi
     rm -rf "$config_root" "$file_cap_dir" "$inline_cap_dir" "$agent_home_file" "$agent_home_inline"
     rm -f "$secret_file"
@@ -1040,10 +1040,10 @@ test_host_security_preflight() {
             fail "Preflight rejected valid host security configuration"
         fi
 
-    local seccomp_profile="$PROJECT_ROOT/docker/profiles/seccomp-coding-agents.json"
+    local seccomp_profile="$PROJECT_ROOT/docker/profiles/seccomp-containai.json"
     local temp_dir
     temp_dir=$(mktemp -d)
-    local temp_backup="$temp_dir/seccomp-coding-agents.json"
+    local temp_backup="$temp_dir/seccomp-containai.json"
     if mv "$seccomp_profile" "$temp_backup"; then
         if verify_host_security_prereqs "$PROJECT_ROOT" >/dev/null 2>&1; then
             fail "Preflight should fail when seccomp profile is missing"
@@ -1063,14 +1063,14 @@ test_container_security_preflight() {
     source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
     local good_json='{"SecurityOptions":["name=seccomp","name=apparmor"]}'
-        if CODING_AGENTS_CONTAINER_INFO_JSON="$good_json" verify_container_security_support >/dev/null 2>&1; then
+        if CONTAINAI_CONTAINER_INFO_JSON="$good_json" verify_container_security_support >/dev/null 2>&1; then
             pass "Container preflight passes when runtime reports seccomp feature"
         else
             fail "Container preflight rejected valid runtime JSON"
         fi
 
     local missing_apparmor='{"SecurityOptions":["name=seccomp"]}'
-    if CODING_AGENTS_CONTAINER_INFO_JSON="$missing_apparmor" verify_container_security_support >/dev/null 2>&1; then
+    if CONTAINAI_CONTAINER_INFO_JSON="$missing_apparmor" verify_container_security_support >/dev/null 2>&1; then
         fail "Container preflight should fail when AppArmor missing"
     else
         pass "AppArmor requirement enforced when runtime lacks support"
@@ -1225,11 +1225,11 @@ test_secure_remote_sync() {
     fi
     docker run -d \
         --name "$container_name" \
-        --label "coding-agents.test=true" \
-        --label "coding-agents.type=agent" \
-        --label "coding-agents.branch=$agent_branch" \
-        --label "coding-agents.repo-path=$TEST_REPO_DIR" \
-        --label "coding-agents.local-remote=$bare_repo" \
+        --label "containai.test=true" \
+        --label "containai.type=agent" \
+        --label "containai.branch=$agent_branch" \
+        --label "containai.repo-path=$TEST_REPO_DIR" \
+        --label "containai.local-remote=$bare_repo" \
         alpine:latest sleep 60 >/dev/null
 
     if remove_container_with_sidecars "$container_name" "true" "true" >/dev/null 2>&1; then
@@ -1260,14 +1260,14 @@ test_env_detection_profiles() {
     local dev_registry=""
     while IFS='=' read -r key value; do
         case "$key" in
-            CODING_AGENTS_PROFILE) dev_mode="$value" ;;
-            CODING_AGENTS_ROOT) dev_root="$value" ;;
-            CODING_AGENTS_IMAGE_PREFIX) dev_prefix="$value" ;;
-            CODING_AGENTS_IMAGE_TAG) dev_tag="$value" ;;
-            CODING_AGENTS_REGISTRY) dev_registry="$value" ;;
+            CONTAINAI_PROFILE) dev_mode="$value" ;;
+            CONTAINAI_ROOT) dev_root="$value" ;;
+            CONTAINAI_IMAGE_PREFIX) dev_prefix="$value" ;;
+            CONTAINAI_IMAGE_TAG) dev_tag="$value" ;;
+            CONTAINAI_REGISTRY) dev_registry="$value" ;;
         esac
     done <<< "$output"
-    if [ "$dev_mode" = "dev" ] && [ "$dev_root" = "$PROJECT_ROOT" ] && [ "$dev_prefix" = "coding-agents-dev" ] && [ "$dev_tag" = "devlocal" ]; then
+    if [ "$dev_mode" = "dev" ] && [ "$dev_root" = "$PROJECT_ROOT" ] && [ "$dev_prefix" = "containai-dev" ] && [ "$dev_tag" = "devlocal" ]; then
         pass "Default detection prefers dev profile in git repo with dev image names"
     else
         fail "Default detection did not pick dev profile (mode=$dev_mode root=$dev_root prefix=$dev_prefix tag=$dev_tag)"
@@ -1278,7 +1278,7 @@ test_env_detection_profiles() {
     mkdir -p "$prod_fake/host/launchers"
     cat > "$prod_fake/profile.env" <<'EOF'
 PROFILE=prod
-IMAGE_PREFIX=coding-agents
+IMAGE_PREFIX=containai
 IMAGE_TAG=1.2.3
 REGISTRY=ghcr.io/example
 EOF
@@ -1290,14 +1290,14 @@ EOF
     local prod_registry=""
     while IFS='=' read -r key value; do
         case "$key" in
-            CODING_AGENTS_PROFILE) prod_mode="$value" ;;
-            CODING_AGENTS_ROOT) prod_root="$value" ;;
-            CODING_AGENTS_IMAGE_PREFIX) prod_prefix="$value" ;;
-            CODING_AGENTS_IMAGE_TAG) prod_tag="$value" ;;
-            CODING_AGENTS_REGISTRY) prod_registry="$value" ;;
+            CONTAINAI_PROFILE) prod_mode="$value" ;;
+            CONTAINAI_ROOT) prod_root="$value" ;;
+            CONTAINAI_IMAGE_PREFIX) prod_prefix="$value" ;;
+            CONTAINAI_IMAGE_TAG) prod_tag="$value" ;;
+            CONTAINAI_REGISTRY) prod_registry="$value" ;;
         esac
     done <<< "$output"
-    if [ "$prod_mode" = "prod" ] && [ "$prod_root" = "$prod_fake" ] && [ "$prod_prefix" = "coding-agents" ] && [ "$prod_tag" = "1.2.3" ] && [ "$prod_registry" = "ghcr.io/example" ]; then
+    if [ "$prod_mode" = "prod" ] && [ "$prod_root" = "$prod_fake" ] && [ "$prod_prefix" = "containai" ] && [ "$prod_tag" = "1.2.3" ] && [ "$prod_registry" = "ghcr.io/example" ]; then
         pass "Prod detection selects configured prod root"
     else
         fail "Prod detection failed (mode=$prod_mode root=$prod_root prefix=$prod_prefix tag=$prod_tag registry=$prod_registry)"
@@ -1334,7 +1334,7 @@ test_integrity_check_behaviors() {
 test_container_naming() {
     test_section "Testing container naming convention"
     
-    local container_name=$(create_test_container "copilot" "test-coding-agents-repo" "main")
+    local container_name=$(create_test_container "copilot" "test-containai-repo" "main")
     
     assert_container_exists "$container_name"
     assert_contains "$container_name" "copilot-" "Container name starts with agent"
@@ -1345,20 +1345,20 @@ test_container_naming() {
 test_container_labels() {
     test_section "Testing container labels"
     
-    local container_name="copilot-test-coding-agents-repo-main${PROFILE_SUFFIX}"
-    verify_container_labels "$container_name" "copilot" "test-coding-agents-repo" "main"
+    local container_name="copilot-test-containai-repo-main${PROFILE_SUFFIX}"
+    verify_container_labels "$container_name" "copilot" "test-containai-repo" "main"
 }
 
 # Test: list-agents command
 test_list_agents() {
     test_section "Testing list-agents command"
     
-    create_test_container "codex" "test-coding-agents-repo" "develop" >/dev/null
+    create_test_container "codex" "test-containai-repo" "develop" >/dev/null
     
     local output=$("$PROJECT_ROOT/host/launchers/list-agents")
     
-    assert_contains "$output" "copilot-test-coding-agents-repo-main${PROFILE_SUFFIX}" "list-agents shows copilot container"
-    assert_contains "$output" "codex-test-coding-agents-repo-develop${PROFILE_SUFFIX}" "list-agents shows codex container"
+    assert_contains "$output" "copilot-test-containai-repo-main${PROFILE_SUFFIX}" "list-agents shows copilot container"
+    assert_contains "$output" "codex-test-containai-repo-develop${PROFILE_SUFFIX}" "list-agents shows codex container"
     assert_contains "$output" "NAME" "list-agents shows header"
 }
 
@@ -1366,8 +1366,8 @@ test_list_agents() {
 test_remove_agent() {
     test_section "Testing remove-agent command"
     
-    local container_name="codex-test-coding-agents-repo-develop${PROFILE_SUFFIX}"
-    create_test_container "codex" "test-coding-agents-repo" "develop" >/dev/null
+    local container_name="codex-test-containai-repo-develop${PROFILE_SUFFIX}"
+    create_test_container "codex" "test-containai-repo" "develop" >/dev/null
     
     # Remove with --no-push flag (since test container doesn't have git)
     "$PROJECT_ROOT/host/launchers/remove-agent" "$container_name" --no-push
@@ -1399,10 +1399,10 @@ test_branch_sanitization() {
     cd "$TEST_REPO_DIR"
     git checkout -q -b "feature/test-branch"
     
-    local container_name=$(create_test_container "copilot" "test-coding-agents-repo" "feature/test-branch")
+    local container_name=$(create_test_container "copilot" "test-containai-repo" "feature/test-branch")
     
     assert_container_exists "$container_name"
-    assert_label_exists "$container_name" "coding-agents.branch" "feature/test-branch"
+    assert_label_exists "$container_name" "containai.branch" "feature/test-branch"
     
     docker rm -f "$container_name" >/dev/null
 }
@@ -1419,7 +1419,7 @@ test_multiple_agents() {
     local containers=()
     
     for agent in "${agents[@]}"; do
-        containers+=($(create_test_container "$agent" "test-coding-agents-repo" "main"))
+        containers+=($(create_test_container "$agent" "test-containai-repo" "main"))
     done
     
     # Verify all coexist
@@ -1435,7 +1435,7 @@ test_label_filtering() {
     test_section "Testing label-based filtering"
     
     # Filter by type=agent
-    local agent_count=$(docker ps -a --filter "label=coding-agents.type=agent" --filter "label=coding-agents.test=true" --format "{{.Names}}" | wc -l)
+    local agent_count=$(docker ps -a --filter "label=containai.type=agent" --filter "label=containai.test=true" --format "{{.Names}}" | wc -l)
     
     if [ $agent_count -ge 3 ]; then
         pass "Label filtering finds multiple agent containers (found: $agent_count)"
@@ -1444,7 +1444,7 @@ test_label_filtering() {
     fi
     
     # Filter by specific agent
-    local copilot_count=$(docker ps -a --filter "label=coding-agents.agent=copilot" --filter "label=coding-agents.test=true" --format "{{.Names}}" | wc -l)
+    local copilot_count=$(docker ps -a --filter "label=containai.agent=copilot" --filter "label=containai.test=true" --format "{{.Names}}" | wc -l)
     
     if [ $copilot_count -ge 1 ]; then
         pass "Label filtering finds copilot containers (found: $copilot_count)"
@@ -1501,7 +1501,7 @@ test_container_status() {
     
     source "$PROJECT_ROOT/host/utils/common-functions.sh"
     
-    local container_name="copilot-test-coding-agents-repo-main${PROFILE_SUFFIX}"
+    local container_name="copilot-test-containai-repo-main${PROFILE_SUFFIX}"
     
     # Test get_container_status
     local status=$(get_container_status "$container_name")
@@ -1535,7 +1535,7 @@ test_launcher_wrappers() {
 test_seccomp_mount_block() {
     test_section "Seccomp mount enforcement"
 
-    local profile="$PROJECT_ROOT/docker/profiles/seccomp-coding-agents.json"
+    local profile="$PROJECT_ROOT/docker/profiles/seccomp-containai.json"
     if [ ! -f "$profile" ]; then
         fail "Seccomp profile missing at $profile"
         return
@@ -1678,7 +1678,7 @@ main() {
     done
 
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║      Coding Agents Launcher Test Suite                   ║"
+    echo "║      ContainAI Launcher Test Suite                   ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
     echo "Testing from: $PROJECT_ROOT"

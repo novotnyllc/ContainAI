@@ -1,4 +1,4 @@
-# Getting Started with Coding Agents
+# Getting Started with ContainAI
 
 Use this guide to get your host ready and understand what happens the first time you launch an agent container.
 
@@ -37,7 +37,7 @@ Agents use authentication configs from your host machine (mounted read-only):
 
 ### Optional: MCP Server API Keys
 
-If using MCP servers, create `~/.config/coding-agents/mcp-secrets.env`. The launcher reads this file on the **host**, feeds it into the session renderer, and stages the values inside the secret broker—containers never need the plaintext copy.
+If using MCP servers, create `~/.config/containai/mcp-secrets.env`. The launcher reads this file on the **host**, feeds it into the session renderer, and stages the values inside the secret broker—containers never need the plaintext copy.
 
 ```bash
 GITHUB_TOKEN=ghp_your_token_here
@@ -51,13 +51,13 @@ CONTEXT7_API_KEY=your_key_here
 - Your runtime versions (Docker, socat, git, gh)
 - Host architecture (`uname -s -m`)
 
-Results are cached at `~/.config/coding-agents/cache/prereq-check`. Launchers silently skip the check when the cache fingerprint matches. When anything changes, you will see:
+Results are cached at `~/.config/containai/cache/prereq-check`. Launchers silently skip the check when the cache fingerprint matches. When anything changes, you will see:
 
 ```
 🔍 Running prerequisite verification (first launch or dependency change detected)...
 ```
 
-If the script succeeds, the fingerprint and timestamp are updated. If it fails, the launcher aborts so you can address the missing dependency. Advanced users can temporarily bypass the automatic run by exporting `CODING_AGENTS_DISABLE_AUTO_PREREQ_CHECK=1`, but keeping it enabled ensures your host stays compliant.
+If the script succeeds, the fingerprint and timestamp are updated. If it fails, the launcher aborts so you can address the missing dependency. Advanced users can temporarily bypass the automatic run by exporting `CONTAINAI_DISABLE_AUTO_PREREQ_CHECK=1`, but keeping it enabled ensures your host stays compliant.
 
 You can always run the scripts manually:
 
@@ -72,9 +72,9 @@ pwsh -File scripts/verify-prerequisites.ps1
 The launchers automatically pull the correct image the first time you run them. If you prefer to pre-fetch (e.g., limited bandwidth during work hours) you still can:
 
 ```bash
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
-docker pull ghcr.io/novotnyllc/coding-agents-codex:latest
-docker pull ghcr.io/novotnyllc/coding-agents-claude:latest
+docker pull ghcr.io/novotnyllc/containai-copilot:latest
+docker pull ghcr.io/novotnyllc/containai-codex:latest
+docker pull ghcr.io/novotnyllc/containai-claude:latest
 ```
 
 ## Optional: Build Images Locally
@@ -83,8 +83,8 @@ You only need to run the build scripts if you are pre-loading your local cache o
 
 ```bash
 # Get the repository
-git clone https://github.com/novotnyllc/coding-agents.git
-cd coding-agents
+git clone https://github.com/novotnyllc/containai.git
+cd containai
 
 # Build images
 ./scripts/build/build-dev.sh  # Linux/Mac (dev namespace)
@@ -96,10 +96,10 @@ See [docs/build.md](../build.md) for details on customizing the build.
 ## Installing the Signed Bundle (dogfooding)
 
 CI publishes a single bundle per tagged release:
-- `coding-agents-<version>.tar.gz` containing `payload.tar.gz`, `payload.sha256`, `attestation.intoto.jsonl`, `cosign`, `cosign-root.pem`.
+- `containai-<version>.tar.gz` containing `payload.tar.gz`, `payload.sha256`, `attestation.intoto.jsonl`, `cosign`, `cosign-root.pem`.
 
 Install it directly (no extra tools required):
 ```bash
 sudo ./host/utils/install-package.sh --version vX.Y.Z --repo <owner/repo>
 ```
-The installer verifies the payload hash and attestation using the bundled cosign, runs integrity-check over SHA256SUMS, and performs a blue/green swap under `/opt/coding-agents/releases/<version>`.
+The installer verifies the payload hash and attestation using the bundled cosign, runs integrity-check over SHA256SUMS, and performs a blue/green swap under `/opt/containai/releases/<version>`.

@@ -1,6 +1,6 @@
 # GitHub Copilot CLI image
 # Launches directly into Copilot interactive mode
-ARG BASE_IMAGE=coding-agents:local
+ARG BASE_IMAGE=containai:local
 FROM ${BASE_IMAGE}
 
 USER root

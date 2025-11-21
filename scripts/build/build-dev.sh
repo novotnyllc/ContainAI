@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dev-only helper to build Coding Agents dev images (namespaced to avoid prod overlap).
+# Dev-only helper to build ContainAI dev images (namespaced to avoid prod overlap).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,7 +11,7 @@ print_help() {
     cat <<'EOF'
 Usage: scripts/build/build-dev.sh [options]
 
-Builds dev-scoped images (coding-agents-dev-*) tagged as :devlocal using docker compose.
+Builds dev-scoped images (containai-dev-*) tagged as :devlocal using docker compose.
 
 Options:
   --agents LIST    Comma-separated agents (copilot,codex,claude,all). Default: all (proxy always built)
@@ -84,4 +84,4 @@ select_services() {
 mapfile -t services < <(select_services)
 echo "🏗️  Building dev images (${services[*]}) via $COMPOSE_FILE"
 docker compose -f "$COMPOSE_FILE" build "${services[@]}"
-echo "✅ Dev images built and tagged as :devlocal (coding-agents-dev-*)."
+echo "✅ Dev images built and tagged as :devlocal (containai-dev-*)."

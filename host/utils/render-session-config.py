@@ -23,13 +23,13 @@ AGENT_CONFIG_TARGETS: Dict[str, str] = {
 STUB_COMMAND_TEMPLATE = "/home/agentuser/.local/bin/mcp-stub-{name}"
 HELPER_LISTEN_HOST = "127.0.0.1"
 HELPER_PORT_BASE = 52100
-DEFAULT_CONFIG_ROOT = pathlib.Path(os.environ.get("CODING_AGENTS_CONFIG_ROOT", Path.home() / ".config" / "coding-agents-dev"))
+DEFAULT_CONFIG_ROOT = pathlib.Path(os.environ.get("CONTAINAI_CONFIG_ROOT", Path.home() / ".config" / "containai-dev"))
 DEFAULT_HELPER_ACL_CONFIG = pathlib.Path(
-    os.environ.get("CODING_AGENTS_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
+    os.environ.get("CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
 )
 ENV_PATTERN = re.compile(r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)")
 DEFAULT_SECRET_PATHS = [
-    pathlib.Path("~/.config/coding-agents/mcp-secrets.env").expanduser(),
+    pathlib.Path("~/.config/containai/mcp-secrets.env").expanduser(),
     pathlib.Path("~/.mcp-secrets.env").expanduser(),
 ]
 
@@ -64,7 +64,7 @@ def _load_secret_file(path: pathlib.Path) -> Dict[str, str]:
 def _collect_secrets(explicit_files: List[pathlib.Path]) -> Dict[str, str]:
     candidates: List[pathlib.Path] = []
     seen: Set[str] = set()
-    env_override = os.environ.get("CODING_AGENTS_MCP_SECRETS_FILE") or os.environ.get("MCP_SECRETS_FILE")
+    env_override = os.environ.get("CONTAINAI_MCP_SECRETS_FILE") or os.environ.get("MCP_SECRETS_FILE")
     if env_override:
         candidates.append(pathlib.Path(env_override).expanduser())
     candidates.extend(explicit_files)
@@ -324,8 +324,8 @@ def _render_stub_server(
     rendered_entry["command"] = STUB_COMMAND_TEMPLATE.format(name=name)
     rendered_entry["args"] = []
     rendered_entry["env"] = {
-        "CODING_AGENTS_STUB_SPEC": _encode_stub_spec(spec),
-        "CODING_AGENTS_STUB_NAME": name,
+        "CONTAINAI_STUB_SPEC": _encode_stub_spec(spec),
+        "CONTAINAI_STUB_NAME": name,
     }
     return rendered_entry, stub_secrets
 

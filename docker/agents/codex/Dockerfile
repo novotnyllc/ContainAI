@@ -1,6 +1,6 @@
 # Codex CLI image
 # Launches directly into Codex
-ARG BASE_IMAGE=coding-agents:local
+ARG BASE_IMAGE=containai:local
 FROM ${BASE_IMAGE}
 
 USER root
@@ -11,7 +11,7 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-codex-auth.sh && \
     echo 'if [ ! -s "$HOME/.codex/auth.json" ]; then' >> /usr/local/bin/validate-codex-auth.sh && \
     echo '  echo "⚠️  WARNING: Codex credential bundle missing!" >&2' >> /usr/local/bin/validate-codex-auth.sh && \
     echo '  echo "   Ensure run-agent detected ~/.codex/auth.json on the host" >&2' >> /usr/local/bin/validate-codex-auth.sh && \
-    echo '  echo "   or set CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1 to bypass" >&2' >> /usr/local/bin/validate-codex-auth.sh && \
+    echo '  echo "   or set CONTAINAI_ALLOW_AGENT_WITHOUT_SECRETS=1 to bypass" >&2' >> /usr/local/bin/validate-codex-auth.sh && \
     echo 'fi' >> /usr/local/bin/validate-codex-auth.sh && \
     chmod +x /usr/local/bin/validate-codex-auth.sh
 

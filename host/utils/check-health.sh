@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CodingAgents Doctor: Diagnoses system readiness and security posture.
+# ContainAI Doctor: Diagnoses system readiness and security posture.
 # shellcheck source-path=SCRIPTDIR source=common-functions.sh
 # Usage: ./host/utils/check-health.sh
 
@@ -93,7 +93,7 @@ prompt_fix_command() {
 }
 
 verify_sigstore_artifacts() {
-    local install_root="${CODING_AGENTS_ROOT:-$REPO_ROOT}"
+    local install_root="${CONTAINAI_ROOT:-$REPO_ROOT}"
     local release_root=""
 
     if [ -L "$install_root/current" ]; then
@@ -108,7 +108,7 @@ verify_sigstore_artifacts() {
     fi
 
     local tarball
-    tarball=$(find "$release_root" -maxdepth 1 -name 'coding-agents-*.tar.gz' | head -n 1)
+    tarball=$(find "$release_root" -maxdepth 1 -name 'containai-*.tar.gz' | head -n 1)
     if [ -z "$tarball" ]; then
         warn "Sigstore: tarball copy missing" "Installers now retain tarball+sig for verification; reinstall to restore."
         return
@@ -132,7 +132,7 @@ verify_sigstore_artifacts() {
     fi
 }
 
-echo -e "${BLUE}CodingAgents System Diagnosis${NC}"
+echo -e "${BLUE}ContainAI System Diagnosis${NC}"
 load_env_profile
 
 # --- 1. PRIVILEGE CHECK ---
@@ -300,8 +300,8 @@ if load_common_functions; then
         pass "Host enforcement: seccomp & AppArmor present"
     else
         fail "Host enforcement failed" "Resolve the errors below (see suggested fix)."
-        profile_file="$REPO_ROOT/docker/profiles/apparmor-coding-agents.profile"
-        if printf '%s' "$host_output" | grep -q "AppArmor profile 'coding-agents' is not loaded"; then
+        profile_file="$REPO_ROOT/docker/profiles/apparmor-containai.profile"
+        if printf '%s' "$host_output" | grep -q "AppArmor profile 'containai' is not loaded"; then
             suggest_fix sudo apparmor_parser -r "$profile_file"
         elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then
             suggest_fix "$REPO_ROOT/scripts/install.sh"

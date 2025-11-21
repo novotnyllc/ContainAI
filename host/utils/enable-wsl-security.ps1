@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Audits and configures WSL 2 so AppArmor is always available to Coding Agents.
+Audits and configures WSL 2 so AppArmor is always available to ContainAI.
 .DESCRIPTION
 Validates both the Windows-side .wslconfig kernel parameters and the Linux-side
 systemd/securityfs requirements. Supports a check-only mode so Linux prereq

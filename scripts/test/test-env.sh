@@ -19,7 +19,7 @@ export LONG_RUNNING_SLEEP=3600
 FIXTURE_CONFIG_FILE="$TEST_MOCK_SECRETS_DIR/config.toml"
 FIXTURE_GH_TOKEN_FILE="$TEST_MOCK_SECRETS_DIR/gh-token.txt"
 TEST_PROXY_STARTED="false"
-SECRET_SCANNER_BIN="${CODING_AGENTS_TRIVY_BIN:-}"
+SECRET_SCANNER_BIN="${CONTAINAI_TRIVY_BIN:-}"
 SECRET_SCAN_ARGS=(image --scanners secret --severity HIGH --severity CRITICAL --exit-code 1 --no-progress)
 
 ensure_secret_scanner() {
@@ -28,7 +28,7 @@ ensure_secret_scanner() {
             SECRET_SCANNER_BIN="$(command -v "$SECRET_SCANNER_BIN")"
             return
         fi
-        echo "❌ CODING_AGENTS_TRIVY_BIN is set to '$SECRET_SCANNER_BIN' but it is not executable"
+        echo "❌ CONTAINAI_TRIVY_BIN is set to '$SECRET_SCANNER_BIN' but it is not executable"
         exit 1
     fi
     if command -v trivy >/dev/null 2>&1; then
@@ -36,7 +36,7 @@ ensure_secret_scanner() {
         return
     fi
     echo "❌ Trivy CLI is required for automatic image secret scanning" >&2
-    echo "   Install it from https://aquasecurity.github.io/trivy or set CODING_AGENTS_TRIVY_BIN" >&2
+    echo "   Install it from https://aquasecurity.github.io/trivy or set CONTAINAI_TRIVY_BIN" >&2
     exit 1
 }
 
@@ -248,12 +248,12 @@ pull_and_tag_test_images() {
         echo "Pulling $agent image..."
         
         local source_registry="${TEST_SOURCE_REGISTRY:-ghcr.io/yourusername}"
-        local source_image="${source_registry}/coding-agents-${agent}:latest"
+        local source_image="${source_registry}/containai-${agent}:latest"
         if docker pull "$source_image" >/dev/null 2>&1; then
             echo "  ✓ Pulled $source_image"
         else
             echo "  ⚠️  Warning: Could not pull $source_image from registry"
-            source_image="coding-agents-${agent}:latest"
+            source_image="containai-${agent}:latest"
             if docker image inspect "$source_image" >/dev/null 2>&1; then
                 echo "  ✓ Using local image: $source_image"
             else
@@ -336,7 +336,7 @@ setup_test_repository() {
     cat > README.md << 'EOF'
 # Test Repository
 
-This is a test repository for the coding agents test suite.
+This is a test repository for the ContainAI test suite.
 EOF
     
     mkdir -p src

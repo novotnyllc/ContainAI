@@ -205,20 +205,20 @@ fn parse_args(argv: &[String]) -> Result<Options> {
     let mut socket_path = DEFAULT_SOCKET_PATH.to_string();
     let mut log_path = DEFAULT_LOG_PATH.to_string();
     let mut policy_mode = PolicyMode::Observe;
-    let sandbox_bin = env::var("CODING_AGENTS_RUNNER_SANDBOX")
+    let sandbox_bin = env::var("CONTAINAI_RUNNER_SANDBOX")
         .unwrap_or_else(|_| "/usr/local/bin/agent-task-sandbox".into());
-    let unshare_bin = env::var("CODING_AGENTS_UNSHARE_BIN").unwrap_or_else(|_| "unshare".into());
-    let agent_user = env::var("CODING_AGENTS_RUNNER_USER").unwrap_or_else(|_| "agentuser".into());
+    let unshare_bin = env::var("CONTAINAI_UNSHARE_BIN").unwrap_or_else(|_| "unshare".into());
+    let agent_user = env::var("CONTAINAI_RUNNER_USER").unwrap_or_else(|_| "agentuser".into());
     let workspace_dir =
-        env::var("CODING_AGENTS_WORKSPACE_DIR").unwrap_or_else(|_| "/workspace".into());
+        env::var("CONTAINAI_WORKSPACE_DIR").unwrap_or_else(|_| "/workspace".into());
     let home_dir =
-        env::var("CODING_AGENTS_AGENT_HOME").unwrap_or_else(|_| format!("/home/{agent_user}"));
-    let apparmor_profile = match env::var("CODING_AGENTS_TASK_APPARMOR") {
+        env::var("CONTAINAI_AGENT_HOME").unwrap_or_else(|_| format!("/home/{agent_user}"));
+    let apparmor_profile = match env::var("CONTAINAI_TASK_APPARMOR") {
         Ok(value) if value.eq_ignore_ascii_case("none") || value.trim().is_empty() => None,
         Ok(value) => Some(value),
-        Err(_) => Some("coding-agents-task".into()),
+        Err(_) => Some("containai-task".into()),
     };
-    let hide_paths = env::var("CODING_AGENTS_RUNNER_HIDE_PATHS")
+    let hide_paths = env::var("CONTAINAI_RUNNER_HIDE_PATHS")
         .unwrap_or_else(|_| "/run/agent-secrets:/run/agent-data:/run/agent-data-export".into())
         .split(':')
         .filter(|p| !p.is_empty())
@@ -448,7 +448,7 @@ fn handle_run_session(
     let binary_name = request
         .binary
         .clone()
-        .or_else(|| env::var("CODING_AGENTS_AGENT_BINARY").ok())
+        .or_else(|| env::var("CONTAINAI_AGENT_BINARY").ok())
         .unwrap_or_else(|| "agent-cli".into());
     let command_label = request
         .argv
@@ -575,14 +575,14 @@ fn build_environment_map(
         .clone()
         .or_else(|| env::var("AGENT_NAME").ok())
     {
-        env_map.insert("CODING_AGENTS_AGENT_NAME".into(), agent);
+        env_map.insert("CONTAINAI_AGENT_NAME".into(), agent);
     }
     if let Some(session) = request
         .session_id
         .clone()
         .or_else(|| env::var("HOST_SESSION_ID").ok())
     {
-        env_map.insert("CODING_AGENTS_SESSION_ID".into(), session);
+        env_map.insert("CONTAINAI_SESSION_ID".into(), session);
     }
 
     if let Some(extra_env) = &request.env {
@@ -663,12 +663,12 @@ fn spawn_sandboxed_command(
     command.stderr(Stdio::piped());
     command.env_clear();
     command.env("RUNNER_ENV_JSON", serde_json::to_string(env_map)?);
-    command.env("CODING_AGENTS_RUNNER_HIDE_PATHS", hide_concat);
+    command.env("CONTAINAI_RUNNER_HIDE_PATHS", hide_concat);
     if let Some(profile) = &options.apparmor_profile {
-        command.env("CODING_AGENTS_TASK_APPARMOR", profile);
+        command.env("CONTAINAI_TASK_APPARMOR", profile);
     }
-    command.env("CODING_AGENTS_WORKSPACE_DIR", &cwd_string);
-    command.env("CODING_AGENTS_RUNNER_USER", &options.agent_user);
+    command.env("CONTAINAI_WORKSPACE_DIR", &cwd_string);
+    command.env("CONTAINAI_RUNNER_USER", &options.agent_user);
 
     command.spawn().context("failed to spawn sandbox helper")
 }

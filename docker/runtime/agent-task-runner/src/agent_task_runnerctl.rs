@@ -72,8 +72,8 @@ fn parse_args() -> Result<Options> {
         env::var("AGENT_TASK_RUNNER_SOCKET").unwrap_or_else(|_| DEFAULT_SOCKET_PATH.into());
     let mut cwd = None;
     let mut session_id = env::var("HOST_SESSION_ID").ok();
-    let mut agent = env::var("CODING_AGENTS_AGENT_NAME").ok();
-    let mut binary = env::var("CODING_AGENTS_AGENT_BINARY").ok();
+    let mut agent = env::var("CONTAINAI_AGENT_NAME").ok();
+    let mut binary = env::var("CONTAINAI_AGENT_BINARY").ok();
     let mut env_pairs = Vec::new();
     let mut argv: Vec<String> = Vec::new();
 
@@ -129,7 +129,7 @@ fn parse_args() -> Result<Options> {
 }
 
 /// Validates a `KEY=VALUE` string and enforces the uppercase
-/// `CODING_AGENTS_*` style environment requirements.
+/// `CONTAINAI_*` style environment requirements.
 fn parse_env_pair(pair: &str) -> Result<(String, String)> {
     let mut parts = pair.splitn(2, '=');
     let key = parts

@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#!
 .SYNOPSIS
-    Installs CodingAgents launchers on Windows hosts.
+    Installs ContainAI launchers on Windows hosts.
 .DESCRIPTION
     Ensures WSL is available, runs prerequisite & health checks inside WSL,
     and adds host\launchers to the user's PATH so commands like run-copilot
@@ -32,7 +32,7 @@ function Invoke-WslScript {
     )
 
     Write-Host "Running $Description..." -ForegroundColor Cyan
-    $code = Invoke-CodingAgentsWslScript -ScriptRelativePath $RelativePath
+    $code = Invoke-ContainAIWslScript -ScriptRelativePath $RelativePath
     if ($code -ne 0) {
         throw "❌ $Description failed. Resolve the errors above and rerun scripts\\install.ps1."
     }
@@ -88,7 +88,7 @@ function Ensure-LaunchersOnPath {
     }
 }
 
-Write-Host "Installing CodingAgents launchers..." -ForegroundColor Cyan
+Write-Host "Installing ContainAI launchers..." -ForegroundColor Cyan
 if ($SkipChecks) {
     Write-Host "Skipping prerequisite and health checks (--SkipChecks)." -ForegroundColor Yellow
 } else {

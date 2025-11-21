@@ -34,8 +34,8 @@ jobs:
       contents: read
       packages: write
     env:
-      IMAGE_NAME: coding-agents
-      CACHE_SCOPE: runtime-coding-agents
+      IMAGE_NAME: containai
+      CACHE_SCOPE: runtime-containai
     outputs:
       image-ref: ${{ steps.image_ref.outputs.ref }}
     steps:
@@ -79,7 +79,7 @@ jobs:
             --load \
             --cache-from type=gha,scope=${{ env.CACHE_SCOPE }} \
             --cache-to type=gha,scope=${{ env.CACHE_SCOPE }},mode=max \
-            --build-arg BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/coding-agents-base:latest \
+            --build-arg BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-base:latest \
             -t ${{ env.IMAGE_NAME }}:scan \
             -f docker/agents/all/Dockerfile \
             .
@@ -97,7 +97,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/coding-agents-base:latest
+            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-base:latest
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
           cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max
           platforms: linux/amd64,linux/arm64
@@ -124,19 +124,19 @@ jobs:
     strategy:
       matrix:
         include:
-          - image: coding-agents-copilot
+          - image: containai-copilot
             dockerfile: docker/agents/copilot/Dockerfile
             cache: runtime-copilot
             requires-base: true
-          - image: coding-agents-codex
+          - image: containai-codex
             dockerfile: docker/agents/codex/Dockerfile
             cache: runtime-codex
             requires-base: true
-          - image: coding-agents-claude
+          - image: containai-claude
             dockerfile: docker/agents/claude/Dockerfile
             cache: runtime-claude
             requires-base: true
-          - image: coding-agents-proxy
+          - image: containai-proxy
             dockerfile: docker/proxy/Dockerfile
             cache: runtime-proxy
             requires-base: false

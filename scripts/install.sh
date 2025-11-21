@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install coding-agents launchers to PATH
+# Install containai launchers to PATH
 # Adds host/launchers directory to ~/.bashrc or ~/.zshrc
 
 set -euo pipefail
@@ -15,7 +15,7 @@ fi
 
 echo "Installing launchers to PATH..."
 
-echo "Running Coding Agents prerequisite and health checks..."
+echo "Running ContainAI prerequisite and health checks..."
 if ! "$REPO_ROOT/host/utils/verify-prerequisites.sh"; then
     echo "❌ Prerequisite verification failed. Resolve the issues above and re-run scripts/install.sh."
     exit 1
@@ -43,7 +43,7 @@ else
     # Add to rc file
     {
         echo ""
-        echo "# Coding Agents launchers"
+        echo "# ContainAI launchers"
         echo "export PATH=\"$LAUNCHERS_PATH:\$PATH\""
     } >> "$RC_FILE"
     

@@ -1,4 +1,4 @@
-# Coding Agents MCP Configuration
+# ContainAI MCP Configuration
 # This config.toml defines MCP servers shared across all agents
 # Agent-specific settings live in agent-configs/<agent>/
 

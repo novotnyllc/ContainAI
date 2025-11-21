@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEFAULT_SOCKET="${HOME}/.config/coding-agents/git-credential.sock"
-DEFAULT_LOG="${HOME}/.config/coding-agents/git-credential-proxy.log"
+DEFAULT_SOCKET="${HOME}/.config/containai/git-credential.sock"
+DEFAULT_LOG="${HOME}/.config/containai/git-credential-proxy.log"
 # shellcheck disable=SC2034
 MAX_REQUEST_SIZE=4096
 MAX_CONNECTIONS=10

@@ -1,6 +1,6 @@
 # Secret Credential Isolation Architecture
 
-This document explains how Coding Agents restricts access to long-lived credentials (Copilot/Codex/Context7, MCP bearer tokens, GitHub PATs, etc.) while still allowing immutable MCP binaries to run unmodified. It is written from the perspective of the trusted launcher (`host/launchers/*`) and the host-resident secret broker they coordinate with.
+This document explains how ContainAI restricts access to long-lived credentials (Copilot/Codex/Context7, MCP bearer tokens, GitHub PATs, etc.) while still allowing immutable MCP binaries to run unmodified. It is written from the perspective of the trusted launcher (`host/launchers/*`) and the host-resident secret broker they coordinate with.
 
 ## Objectives
 
@@ -76,7 +76,7 @@ Key points:
 
 ## Mutual Authentication & Session-Derived Secrets
 
-- During installation (or first run), the broker creates random per-stub shared keys under `~/.config/coding-agents/broker.d/secrets.json` and never places them in git or containers.
+- During installation (or first run), the broker creates random per-stub shared keys under `~/.config/containai/broker.d/secrets.json` and never places them in git or containers.
 - When a stub redeems a capability, it signs the request with `HMAC(shared_key, nonce || capability_id)`; the broker validates before streaming any secret.
 - Static upstream secrets (e.g., Context7) are envelope-encrypted per session: `session_key = HMAC(master_secret, session_id || timestamp)`. The broker transmits `Enc(session_key, api_secret)` plus the nonce so that leaking a tmpfs only reveals ciphertext tied to that session.
 - All tmpfs mounts that hold configs, shared keys, or decrypted secrets are mounted as private, `nosuid,nodev,noexec`, and use dedicated UIDs so other processes—even within the same container—cannot traverse them.
@@ -85,27 +85,27 @@ Key points:
 ## Additional Hardening Controls
 
 - **Syscall + namespace isolation** – Every stub and helper runs inside its own PID namespace with `ptrace` fully disabled and `procfs` mount options `hidepid=2,gid=agentproc` so agent workloads cannot inspect other processes.
-- **Broker sandboxing** – The broker executes as a `systemd --user` service with `ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges=yes`, `PrivateTmp=yes`, and a custom seccomp filter limited to file/socket syscalls. Per-stub mutual-auth keys reside in `~/.config/coding-agents/broker.d/` with `chmod 600` and `chattr +i` so only the host user can edit them.
+- **Broker sandboxing** – The broker executes as a `systemd --user` service with `ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges=yes`, `PrivateTmp=yes`, and a custom seccomp filter limited to file/socket syscalls. Per-stub mutual-auth keys reside in `~/.config/containai/broker.d/` with `chmod 600` and `chattr +i` so only the host user can edit them.
 - **Rate limiting & watchdog** – The broker enforces per-session capability quotas and exponential backoff on repeated failures; a host-side watchdog halts new launches if the broker exits, loses its seccomp/AppArmor profiles, or detects tampering with the shared-key store.
 - **Immutable audit trail** – Issuance events (including generated config SHA256, git tree hash, capability IDs) are logged to `journald` with persistent storage and mirrored to an append-only file. Optional off-host shipping (scp/HTTPS) provides tamper-evident history.
-- **Dev overrides** – If developers need to run with modified launchers/stubs, they create a host-only override token (e.g., `~/.config/coding-agents/overrides/allow-dirty`). Launcher requires the token and logs its use so deviations are explicit.
+- **Dev overrides** – If developers need to run with modified launchers/stubs, they create a host-only override token (e.g., `~/.config/containai/overrides/allow-dirty`). Launcher requires the token and logs its use so deviations are explicit.
 
 ### Helper Sandbox Policies
 
-- **Network policy:** Helper runners default to `--network none`, exposing only loopback IPC. Override with `CODING_AGENTS_HELPER_NETWORK_POLICY=host|bridge|<docker-network>` if a specific helper truly requires egress.
+- **Network policy:** Helper runners default to `--network none`, exposing only loopback IPC. Override with `CONTAINAI_HELPER_NETWORK_POLICY=host|bridge|<docker-network>` if a specific helper truly requires egress.
 - **Tmpfs isolation:** `/tmp` and `/var/tmp` inside helper containers are tmpfs mounts (`nosuid,nodev,noexec`) sized 64MB/32MB to prevent secrets from ever touching disk.
-- **Resource clamps:** `CODING_AGENTS_HELPER_PIDS_LIMIT` (default `64`) and `CODING_AGENTS_HELPER_MEMORY` (default `512m`) bound helper processes so compromised helpers cannot starve the host.
-- **Seccomp/AppArmor parity:** `resolve_seccomp_profile_path` injects the same ptrace-denying profile used by the main agent, and AppArmor (when available) assigns helpers to the `coding-agents` profile to block filesystem escapes.
+- **Resource clamps:** `CONTAINAI_HELPER_PIDS_LIMIT` (default `64`) and `CONTAINAI_HELPER_MEMORY` (default `512m`) bound helper processes so compromised helpers cannot starve the host.
+- **Seccomp/AppArmor parity:** `resolve_seccomp_profile_path` injects the same ptrace-denying profile used by the main agent, and AppArmor (when available) assigns helpers to the `containai` profile to block filesystem escapes.
 
 ### Audit Trail & Override Workflow
 
-- **Log location:** Unless overridden via `CODING_AGENTS_AUDIT_LOG`, launchers append newline-delimited JSON to `~/.config/coding-agents/security-events.log` and mirror each event to `systemd-cat -t coding-agents-launcher`.
+- **Log location:** Unless overridden via `CONTAINAI_AUDIT_LOG`, launchers append newline-delimited JSON to `~/.config/containai/security-events.log` and mirror each event to `systemd-cat -t containai-launcher`.
 - **Event taxonomy:**
     - `session-config` – session ID, manifest SHA256, git `HEAD`, trusted tree hashes
     - `capabilities-issued` – session ID, requested stubs, capability IDs emitted by the broker
     - `override-used` – repo path, label, and list of trusted files that were dirty when the override token was honored
-- **Operational use:** Tail the file during development (`tail -f ~/.config/coding-agents/security-events.log`) to capture manifest hashes for change-management tickets, or feed it into your SIEM/log shipper.
-- **Override tokens:** A launch only succeeds on dirty trusted files if `~/.config/coding-agents/overrides/allow-dirty` (configurable via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`) exists. Deleting the token immediately restores strict enforcement, and every use is auditable via the log above.
+- **Operational use:** Tail the file during development (`tail -f ~/.config/containai/security-events.log`) to capture manifest hashes for change-management tickets, or feed it into your SIEM/log shipper.
+- **Override tokens:** A launch only succeeds on dirty trusted files if `~/.config/containai/overrides/allow-dirty` (configurable via `CONTAINAI_DIRTY_OVERRIDE_TOKEN`) exists. Deleting the token immediately restores strict enforcement, and every use is auditable via the log above.
 
 ## Secret Redemption and MCP Launch Flow
 
@@ -163,7 +163,7 @@ Static API keys cannot be rotated on demand, so safeguards focus on limiting exp
 
 ## Revocation and Monitoring
 
-- **Kill switch** (`coding-agents kill <session>`): Signals the broker to revoke all capabilities for that session, wipe tmpfs mounts, and stop the container.
+- **Kill switch** (`containai kill <session>`): Signals the broker to revoke all capabilities for that session, wipe tmpfs mounts, and stop the container.
 - **Telemetry**: Broker emits structured logs for issuance, redemption, and policy failures; Squid provides complementary outbound request logs for correlation.
 - **Anomaly detection**: Excess secret requests, mismatched PID namespaces, or attempts to use expired tokens trigger automatic revocation and optional container teardown.
 
@@ -177,7 +177,7 @@ Example host-side inspection:
 python3 docker/runtime/capability-unseal.py \ 
     --stub agent_copilot_cli \ 
     --secret copilot_cli_config_json \ 
-    --cap-root ~/.config/coding-agents/capabilities \ 
+    --cap-root ~/.config/containai/capabilities \ 
     --format raw > /tmp/copilot-config.json
 ```
 
@@ -212,7 +212,7 @@ flowchart LR
     host["Host ~/.copilot/config.json\n(copilot_tokens, logged_in_users)"]
     launcher["run-agent / launch-agent\n(secret preflight)"]
     broker["secret-broker.py\n(issue capability)"]
-    bundle["/run/coding-agents/copilot\ncapability + tmpfs"]
+    bundle["/run/containai/copilot\ncapability + tmpfs"]
     stub["prepare-copilot-secrets\n(container helper)"]
     cli["github-copilot-cli\n(token cache ready)"]
 
@@ -224,7 +224,7 @@ flowchart LR
 - `init-copilot-config.sh` tries to copy from `$HOME/.copilot`, but that directory points to the container home volume, not the host mount.
 
 **Implementation plan**
-1. Extend `run-agent` / `launch-agent` (bash & PowerShell) to detect `${HOME}/.copilot/config.json` on the host, hash it, and request a capability from `secret-broker.py` (new stub `agent_copilot_cli`). Store the sealed blob plus manifest metadata under `/run/coding-agents/copilot/<session>.cap` (tmpfs, `0700`).
+1. Extend `run-agent` / `launch-agent` (bash & PowerShell) to detect `${HOME}/.copilot/config.json` on the host, hash it, and request a capability from `secret-broker.py` (new stub `agent_copilot_cli`). Store the sealed blob plus manifest metadata under `/run/containai/copilot/<session>.cap` (tmpfs, `0700`).
 2. Add a bind mount for the capability directory and a tmpfs destination (e.g., `/run/agent-secrets/copilot`) in the Docker arguments so only the helper UID can read it. Stop mounting the entire host `~/.copilot` tree once the broker path is live.
 3. Replace `init-copilot-config.sh` with a helper (`prepare-copilot-secrets.sh`) that redeems the capability, extracts `copilot_tokens`, `last_logged_in_user`, and `logged_in_users`, writes them into `/home/agentuser/.copilot/config.json` (`chmod 600`), and invokes the existing `merge-copilot-tokens.py` for backward compatibility.
 4. Teach the helper to fall back to broker-provided GitHub CLI tokens if Copilot config is missing, while logging an audit event so operators know which identity was used.
@@ -237,7 +237,7 @@ flowchart LR
     hostCodex["Host ~/.codex/auth.json\n(refresh + access tokens)"]
     launcherCodex["run-agent / launch-agent\n(agent=codex)"]
     brokerCodex["secret-broker.py\n(issue agent_codex_cli)"]
-    bundleCodex["/run/coding-agents/codex\ncapability, manifest"]
+    bundleCodex["/run/containai/codex\ncapability, manifest"]
     stubCodex["prepare-codex-secrets\n(container helper)"]
     codexCli["codex CLI\nready to exec"]
 
@@ -250,15 +250,15 @@ flowchart LR
 
 **Implementation plan**
 1. Define a Codex credential descriptor (JSON pointer to `refresh_token`, `access_token`, `expires_at`) and teach `run-agent` / `launch-agent` to read `~/.codex/auth.json` and call `secret-broker.py issue --stub agent_codex_cli --path ~/.codex/auth.json --json-schema codex_auth`.
-2. Mount the resulting capability (e.g., `/run/coding-agents/codex/<session>.cap`) plus an empty tmpfs destination (`/run/agent-secrets/codex`) into the container with dedicated ownership.
+2. Mount the resulting capability (e.g., `/run/containai/codex/<session>.cap`) plus an empty tmpfs destination (`/run/agent-secrets/codex`) into the container with dedicated ownership.
 3. Add a container helper (`prepare-codex-secrets.sh`), invoked from the entrypoint before the CLI launches, that redeems the capability, reconstructs `auth.json`, writes it to `/home/agentuser/.codex/auth.json`, and sets `chmod 600`. The helper should also populate `/home/agentuser/.config/codex/` with any non-secret defaults.
 4. Modify `docker/agents/codex/Dockerfile` CMD to run the helper + validation script before `codex`. Remove the expectation that users must bind-mount their entire host config tree.
 5. Extend launcher tests to assert that Codex sessions fail fast (with actionable messages) when `~/.codex/auth.json` is absent or when the broker rejects the capability, ensuring we never launch Codex without secrets wired correctly.
 
 **Implementation status (Nov 2025)**
-- Host launchers now treat `agent_codex_cli` as a first-class stub: when `~/.codex/auth.json` exists they load it, derive a SHA-256 digest for audit trails, and include the sealed bundle plus manifest under `/run/coding-agents/codex/cli` before copying into the container.
+- Host launchers now treat `agent_codex_cli` as a first-class stub: when `~/.codex/auth.json` exists they load it, derive a SHA-256 digest for audit trails, and include the sealed bundle plus manifest under `/run/containai/codex/cli` before copying into the container.
 - `docker/agents/codex/prepare-codex-secrets.sh` ships inside the Codex image, redeeming the sealed blob via `capability-unseal` (or a test override) and persisting `auth.json` with restrictive permissions; the image CMD runs this helper before `codex` executes.
-- Unit tests in both launcher suites execute the helper out-of-container by overriding `CODING_AGENTS_AGENT_HOME`, `CODING_AGENTS_AGENT_CAP_ROOT`, and `CODING_AGENTS_CAPABILITY_UNSEAL`, verifying the decrypted payload matches the broker fixture so regressions are caught without a full container spin-up.
+- Unit tests in both launcher suites execute the helper out-of-container by overriding `CONTAINAI_AGENT_HOME`, `CONTAINAI_AGENT_CAP_ROOT`, and `CONTAINAI_CAPABILITY_UNSEAL`, verifying the decrypted payload matches the broker fixture so regressions are caught without a full container spin-up.
 
 ### Anthropic Claude CLI (`~/.claude/.credentials.json`)
 
@@ -267,7 +267,7 @@ flowchart LR
     hostClaude["Host ~/.claude/.credentials.json\nor CLAUDE_API_KEY"]
     launcherClaude["run-agent / launch-agent\n(agent=claude)"]
     brokerClaude["secret-broker.py\n(issue agent_claude_cli)"]
-    bundleClaude["/run/coding-agents/claude\ncapability"]
+    bundleClaude["/run/containai/claude\ncapability"]
     stubClaude["prepare-claude-secrets\n(container helper)"]
     claudeCli["claude CLI"]
 
@@ -280,15 +280,15 @@ flowchart LR
 
 **Implementation plan**
 1. Expand launcher preflights to look for either `~/.claude/.credentials.json` or `CLAUDE_API_KEY` on the host. Whichever is present gets sealed through the broker via the `agent_claude_cli` stub; if both exist, prefer the JSON file but note the choice in the audit log.
-2. Deliver the capability to `/run/coding-agents/claude/<session>.cap` and mount a tmpfs target (`/run/agent-secrets/claude`) into the container under a helper-specific UID.
+2. Deliver the capability to `/run/containai/claude/<session>.cap` and mount a tmpfs target (`/run/agent-secrets/claude`) into the container under a helper-specific UID.
 3. Replace `init-claude-config.sh` with `prepare-claude-secrets.sh` that redeems the capability, writes `.credentials.json` (or synthesizes it from `CLAUDE_API_KEY`), and ensures `/home/agentuser/.claude` never leaves tmpfs. Validation should now fail closed if the capability is missing or unreadable.
 4. Update the Claude Dockerfile entrypoint to run `prepare-claude-secrets.sh && validate-claude-auth.sh && claude`, ensuring credentials always exist before the CLI boots.
 5. Add launcher tests that simulate both file-based and env-based Claude secrets, verifying that only the selected form appears inside the container tmpfs and that audit logs record the fallback path.
 
 **Implementation status (Nov 2025)**
-- Bash + PowerShell launchers already hash-check either `~/.claude/.credentials.json` or `CLAUDE_API_KEY`, prefer the file form, and stage the resulting `agent_claude_cli` capability plus manifest beneath `/run/coding-agents/claude/cli/capabilities` before every container launch.
+- Bash + PowerShell launchers already hash-check either `~/.claude/.credentials.json` or `CLAUDE_API_KEY`, prefer the file form, and stage the resulting `agent_claude_cli` capability plus manifest beneath `/run/containai/claude/cli/capabilities` before every container launch.
 - `docker/agents/claude/prepare-claude-secrets.sh` now ships in the image, redeems the sealed `claude_cli_credentials` bundle through `capability-unseal`, seeds `.claude.json` defaults, and materializes `.claude/.credentials.json` (synthesizing JSON from a bare API key when needed) prior to running `claude`; `validate-claude-auth.sh` now exits non-zero if that credential file is missing so launches fail closed.
-- Launcher unit tests `test_claude_cli_helper` (bash) and `Test-ClaudeCliHelper` (PowerShell) run the helper out of container using overridden `CODING_AGENTS_AGENT_HOME` / `CODING_AGENTS_AGENT_CAP_ROOT`, covering both JSON and inline-secret flows to guard against regressions without spinning up Docker.
+- Launcher unit tests `test_claude_cli_helper` (bash) and `Test-ClaudeCliHelper` (PowerShell) run the helper out of container using overridden `CONTAINAI_AGENT_HOME` / `CONTAINAI_AGENT_CAP_ROOT`, covering both JSON and inline-secret flows to guard against regressions without spinning up Docker.
 
 Across all three agents, the broker-issued capability flow keeps long-lived host secrets resident on the host while still letting the containerized CLI authenticate. The steps above bring the implementation in line with the documented security model and give operators traceability for every time an agent consumes a host identity.
 
@@ -304,7 +304,7 @@ Authenticating the CLI is only half of the story; each agent also relies on non-
 
 Design principles:
 
-1. **Immutable import envelope** – Host launcher packs allowed files into a tarball, records SHA256 per entry, and places it in `/run/coding-agents/<agent>/data-import.tar` (tmpfs, `chmod 600`).
+1. **Immutable import envelope** – Host launcher packs allowed files into a tarball, records SHA256 per entry, and places it in `/run/containai/<agent>/data-import.tar` (tmpfs, `chmod 600`).
 2. **Dedicated data tmpfs** – Containers mount `/run/agent-data/<agent>` as tmpfs owned by a new UID `agentcli` with `chmod 700`. The helper unpacks the import tar here before launching the CLI.
 3. **Export tokens** – On shutdown, the helper re-packages only whitelisted paths into `/run/agent-data-export/<agent>/<session>.tar`, signs the manifest (HMAC with broker-issued per-agent key), and notifies the host via a shutdown hook (existing auto-push path).
 4. **Host merge worker** – After the container exits, the launcher copies the export tar back to the host, validates the signature + file hashes, and merges into the real `~/.agent/` tree:
@@ -333,12 +333,12 @@ Every time an agent CLI needs to run user-supplied code (e.g., `github-copilot-c
 1. CLI sends `{command, env, cwd}` JSON to the runner whenever it would have spawned a process—whether that's due to a `run/exec` subcommand invoked by a human or an automated tool invocation generated by the agent itself.
 2. Runner validates the request, spawns a process as `agentuser` inside a fresh pid+mount namespace that **does not** include `/run/agent-data/<agent>` or `/run/agent-secrets/<agent>`.
 3. Runner bind-mounts only `/workspace`, `/home/agentuser`, `/tmp`, and the network policy tmpfs required for the command. Because the sensitive mounts were marked unbindable/private in step 1, they cannot be re-shared into this namespace.
-4. Runner applies `no_new_privs`, seccomp profile, and an AppArmor label (`coding-agents-task`) that explicitly denies access to `/run/agent-*` even if the process later attempts to mount or open those paths via `/proc/self/fd` tricks.
+4. Runner applies `no_new_privs`, seccomp profile, and an AppArmor label (`containai-task`) that explicitly denies access to `/run/agent-*` even if the process later attempts to mount or open those paths via `/proc/self/fd` tricks.
 5. STDIN/STDOUT/STDERR of the spawned process are proxied back to the CLI over the socket, giving the CLI the illusion that it executed the command locally.
 
 With this split, arbitrary subprocesses launched during a prompt run are **never** executed within the `agentcli` namespace, so they cannot observe or exfiltrate the agent data mount. Even if a prompt asks the agent to run `cat /run/agent-data/copilot/config.json`, the request goes through the runner and gets denied by both the mount topology (path not present) and AppArmor policy.
 
-If an operator truly needs shell access with the same visibility as the CLI (for debugging the cache), we expose a gated `coding-agents with-agentcli <cmd>` helper that requires an override token plus MFA challenge before mapping the caller into the control-plane namespace. This keeps day-to-day workloads locked down while preserving a break-glass path.
+If an operator truly needs shell access with the same visibility as the CLI (for debugging the cache), we expose a gated `containai with-agentcli <cmd>` helper that requires an override token plus MFA challenge before mapping the caller into the control-plane namespace. This keeps day-to-day workloads locked down while preserving a break-glass path.
 
 ##### How Existing CLIs Learn About the Runner
 
@@ -367,7 +367,7 @@ sequenceDiagram
 
     Host->>Host: Collect whitelisted files (table above)
     Host->>Host: Create tar + manifest + HMAC
-    Host->>Import: Drop tar inside /run/coding-agents/<agent>/data-import.tar
+    Host->>Import: Drop tar inside /run/containai/<agent>/data-import.tar
     Import->>CLI: Unpack tar into /run/agent-data/<agent>
     CLI->>CLI: Read/write within tmpfs
     CLI-->>Export: Exit triggers export helper
@@ -379,6 +379,6 @@ sequenceDiagram
 This approach lets us persist the useful artifacts (logs, history, saved sessions) while preventing arbitrary file writes back onto the host. It also guarantees that the same data the CLI expects is present every time without reopening the attack surface that came with raw bind mounts.
 
 **Implementation status (Nov 2025)**
-- Host launchers (bash + PowerShell) now call `host/utils/package-agent-data.py` before every session, writing a per-agent `data-import.tar` plus manifest under `/run/coding-agents/<agent>/data`. The manifest captures SHA-256 digests so the host can validate what was staged.
-- `entrypoint.sh` provisions a dedicated tmpfs (`/run/agent-data`) sized via `CODING_AGENTS_DATA_TMPFS_SIZE` (default 64 MiB) and unpacks each available import tar into `/run/agent-data/<agent>` with `chmod 700` semantics before the CLI boots.
+- Host launchers (bash + PowerShell) now call `host/utils/package-agent-data.py` before every session, writing a per-agent `data-import.tar` plus manifest under `/run/containai/<agent>/data`. The manifest captures SHA-256 digests so the host can validate what was staged.
+- `entrypoint.sh` provisions a dedicated tmpfs (`/run/agent-data`) sized via `CONTAINAI_DATA_TMPFS_SIZE` (default 64 MiB) and unpacks each available import tar into `/run/agent-data/<agent>` with `chmod 700` semantics before the CLI boots.
 - Launcher tests include a packager regression case to ensure the helper continues to emit manifests/tars when host data exists and suppresses empty archives when nothing matches the whitelist.

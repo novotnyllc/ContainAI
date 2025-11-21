@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose and fix common issues with CodingAgents.
+This guide helps you diagnose and fix common issues with ContainAI.
 
 ## Table of Contents
 
@@ -437,8 +437,8 @@ ping docker.io
 If network issues persist, download images on another machine:
 ```bash
 # On machine with internet:
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
-docker save coding-agents-copilot:latest > copilot.tar
+docker pull ghcr.io/novotnyllc/containai-copilot:latest
+docker save containai-copilot:latest > copilot.tar
 
 # Transfer copilot.tar to your machine
 
@@ -484,7 +484,7 @@ launch-agent copilot . --network-proxy allow-all
 Check proxy logs:
 ```bash
 # Find proxy container
-docker ps --filter "label=coding-agents.type=proxy"
+docker ps --filter "label=containai.type=proxy"
 
 # Check logs
 docker logs <proxy-container-name>
@@ -519,7 +519,7 @@ launch-agent copilot . --network-proxy allow-all
 
 **Symptoms:**
 ```
-Unable to find image 'coding-agents-copilot:latest' locally
+Unable to find image 'containai-copilot:latest' locally
 Error: No such image
 ```
 
@@ -527,7 +527,7 @@ Error: No such image
 
 **Pull image:**
 ```bash
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
+docker pull ghcr.io/novotnyllc/containai-copilot:latest
 ```
 
 **Or build locally:**
@@ -538,7 +538,7 @@ docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
 
 **Verify:**
 ```bash
-docker images | grep coding-agents
+docker images | grep containai
 ```
 
 ### Image Build Fails
@@ -811,7 +811,7 @@ sudo apparmor_parser -R /etc/apparmor.d/docker
 
 **1. Use pre-built images:**
 ```bash
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
+docker pull ghcr.io/novotnyllc/containai-copilot:latest
 # Faster than building locally
 ```
 
@@ -917,7 +917,7 @@ docker system df
 → Run `docker system prune -a`
 
 **"Unable to find image"**
-→ Pull image: `docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest`
+→ Pull image: `docker pull ghcr.io/novotnyllc/containai-copilot:latest`
 
 **"Network timed out"**
 → Check internet connection and firewall
@@ -978,7 +978,7 @@ sudo systemctl restart docker
 
 If you're stuck:
 
-1. **Check existing issues:** [GitHub Issues](https://github.com/novotnyllac/CodingAgents/issues)
+1. **Check existing issues:** [GitHub Issues](https://github.com/novotnyllac/ContainAI/issues)
 2. **Run diagnostics:** Include output from diagnostic commands above
 3. **Create new issue:** Provide:
    - OS and version

@@ -2,9 +2,9 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [ValidateSet("dev","prod")]
-    [string]$Mode = $env:CODING_AGENTS_PROFILE,
-    [string]$Root = $env:CODING_AGENTS_ROOT,
-    [string]$SumsPath = $env:CODING_AGENTS_SHA256_FILE,
+    [string]$Mode = $env:CONTAINAI_PROFILE,
+    [string]$Root = $env:CONTAINAI_ROOT,
+    [string]$SumsPath = $env:CONTAINAI_SHA256_FILE,
     [ValidateSet("text","json")]
     [string]$Format = "text",
     [switch]$FailDevMissing

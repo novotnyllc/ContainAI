@@ -1,7 +1,7 @@
-# All-agents derived image
-# Contains all coding agents ready to use
+# All containai derived image
+# Contains all agents ready to use
 # Authentication comes from host mounts at runtime
-ARG BASE_IMAGE=ghcr.io/novotnyllc/coding-agents-base:latest
+ARG BASE_IMAGE=ghcr.io/novotnyllc/containai-base:latest
 FROM ${BASE_IMAGE}
 
 USER root

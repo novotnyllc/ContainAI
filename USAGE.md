@@ -36,14 +36,14 @@ Agents use authentication configs from your host machine (mounted read-only):
 #### How agent credentials stay brokered
 - You authenticate on the host (`github-copilot-cli auth login`, `codex auth login`, `claude auth login`, etc.), so long-lived OAuth tokens live only under your home directory.
 - Every `run-*`/`launch-agent` command asks the host-side secret broker (`host/utils/secret-broker.py`) to seal the credentials and emit per-session capability bundles **before** Docker starts.
-- The launcher copies those capabilities into `/run/coding-agents` (a tmpfs) and bind-mounts the relevant CLI config directories read-only. Inside the container, the trusted stubs/credential proxies redeem the capability, load the secret into their private tmpfs, and scrub it when the session ends.
+- The launcher copies those capabilities into `/run/containai` (a tmpfs) and bind-mounts the relevant CLI config directories read-only. Inside the container, the trusted stubs/credential proxies redeem the capability, load the secret into their private tmpfs, and scrub it when the session ends.
 - Because the broker is the only component that ever touches the raw secret file, neither your repository nor the container filesystem ever stores the plaintext tokens.
 
 #### Verify the secret broker (optional but recommended)
 ```bash
 ./host/utils/secret-broker.py health           # confirms broker.d files and permissions
-ls -l ~/.config/coding-agents/broker.d              # shows keys.json/state.json/secrets.json on the host
-tail -n5 ~/.config/coding-agents/security-events.log # see capability issuance events
+ls -l ~/.config/containai/broker.d              # shows keys.json/state.json/secrets.json on the host
+tail -n5 ~/.config/containai/security-events.log # see capability issuance events
 ```
 
 - The broker auto-initializes when you run any launcher, but you can force a bootstrap with `./host/utils/secret-broker.py init`.
@@ -51,7 +51,7 @@ tail -n5 ~/.config/coding-agents/security-events.log # see capability issuance e
 
 ### Optional: MCP Server API Keys
 
-If using MCP servers, create `~/.config/coding-agents/mcp-secrets.env`. The launcher reads this file on the **host**, feeds it into the session renderer, and stages the values inside the secret broker—containers never need the plaintext copy.
+If using MCP servers, create `~/.config/containai/mcp-secrets.env`. The launcher reads this file on the **host**, feeds it into the session renderer, and stages the values inside the secret broker—containers never need the plaintext copy.
 
 ```bash
 GITHUB_TOKEN=ghp_your_token_here
@@ -63,19 +63,19 @@ CONTEXT7_API_KEY=your_key_here
 The launchers automatically pull the correct image the first time you run them. If you prefer to pre-fetch (e.g., limited bandwidth during work hours) you still can:
 
 ```bash
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
-docker pull ghcr.io/novotnyllc/coding-agents-codex:latest
-docker pull ghcr.io/novotnyllc/coding-agents-claude:latest
+docker pull ghcr.io/novotnyllc/containai-copilot:latest
+docker pull ghcr.io/novotnyllc/containai-codex:latest
+docker pull ghcr.io/novotnyllc/containai-claude:latest
 ```
 
 ## Optional: Build Images Locally
 
 ```bash
 # Get the repository
-git clone https://github.com/novotnyllc/coding-agents.git
-cd coding-agents
+git clone https://github.com/novotnyllc/containai.git
+cd containai
 
-# Build dev images (namespaced coding-agents-dev-*:devlocal)
+# Build dev images (namespaced containai-dev-*:devlocal)
 ./scripts/build/build-dev.sh  # Linux/Mac
 pwsh scripts/build/build-dev.ps1 --%  # Windows (calls WSL bash)
 
@@ -101,10 +101,10 @@ All containers follow the pattern: `{agent}-{repo}-{branch}`
 
 **Container labels** (for filtering and automation):
 ```bash
-coding-agents.type=agent       # Identifies agent containers
-coding-agents.agent=copilot    # Which agent (copilot/codex/claude)
-coding-agents.repo=myapp       # Repository name
-coding-agents.branch=main      # Branch name
+containai.type=agent       # Identifies agent containers
+containai.agent=copilot    # Which agent (copilot/codex/claude)
+containai.repo=myapp       # Repository name
+containai.branch=main      # Branch name
 ```
 
 ## Prompt Mode

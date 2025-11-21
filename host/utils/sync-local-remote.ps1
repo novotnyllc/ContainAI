@@ -7,5 +7,5 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "wsl-shim.ps1")
-$exitCode = Invoke-CodingAgentsWslScript -ScriptRelativePath "host\utils\sync-local-remote.sh" -Arguments $Arguments
+$exitCode = Invoke-ContainAIWslScript -ScriptRelativePath "host\utils\sync-local-remote.sh" -Arguments $Arguments
 exit $exitCode

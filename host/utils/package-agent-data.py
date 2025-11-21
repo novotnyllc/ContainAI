@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package or merge agent data payloads for Coding Agents."""
+"""Package or merge agent data payloads for ContainAI."""
 from __future__ import annotations
 
 import argparse
@@ -255,7 +255,7 @@ def merge_agent_data(
                 print(f"[data] unable to extract '{rel_path}'", file=sys.stderr)
                 return False
 
-            tmp_root = target_home / ".coding-agents-tmp"
+            tmp_root = target_home / ".containai-tmp"
             tmp_path, digest_actual = _write_temp_copy(fileobj, tmp_root)
             if digest_expected and digest_actual != digest_expected:
                 tmp_path.unlink(missing_ok=True)
@@ -290,7 +290,7 @@ def merge_agent_data(
 
             processed += 1
 
-    tmp_root = target_home / ".coding-agents-tmp"
+    tmp_root = target_home / ".containai-tmp"
     if tmp_root.exists():
         shutil.rmtree(tmp_root, ignore_errors=True)
 

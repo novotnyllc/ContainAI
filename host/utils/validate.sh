@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-echo "🔍 Validating Coding Agents Container Setup..."
+echo "🔍 Validating ContainAI Container Setup..."
 echo ""
 
 ERRORS=0
@@ -131,7 +131,7 @@ echo ""
 
 # Check MCP configuration
 echo "Checking MCP configuration..."
-CONFIG_FILE="/home/agentuser/.config/coding-agents/config.toml"
+CONFIG_FILE="/home/agentuser/.config/containai/config.toml"
 if [ -f "$CONFIG_FILE" ]; then
     check_pass "MCP config file exists"
 else

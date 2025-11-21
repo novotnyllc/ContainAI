@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       REGISTRY: ghcr.io/novotnyllc
-      IMAGE_PREFIX: coding-agents-dev
+      IMAGE_PREFIX: containai-dev
       IMAGE_TAG: dev-${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -47,10 +47,10 @@ jobs:
         run: |
           ref="${GITHUB_REF##*/}"
           if [[ "$ref" == *-stage ]]; then
-            echo "prefix=coding-agents-stage" >> $GITHUB_OUTPUT
+            echo "prefix=containai-stage" >> $GITHUB_OUTPUT
             echo "tag=$ref" >> $GITHUB_OUTPUT
           else
-            echo "prefix=coding-agents" >> $GITHUB_OUTPUT
+            echo "prefix=containai" >> $GITHUB_OUTPUT
             echo "tag=$ref" >> $GITHUB_OUTPUT
           fi
       - name: Stamp profile
@@ -92,31 +92,31 @@ jobs:
       - name: Generate bundle SBOM (Anchore)
         uses: anchore/sbom-action@v0
         with:
-          path: dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+          path: dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
           output-file: dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
       - name: Attest bundle provenance
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+          subject-path: dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
           push-to-registry: false
       - name: Attest bundle SBOM
         uses: actions/attest-sbom@v1
         with:
-          subject-path: dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+          subject-path: dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
           sbom-path: dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
       - name: Download attestation artifacts
         run: |
           OUT=dist/${{ steps.channel.outputs.tag }}
-          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
-          mv "$OUT/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz.intoto.jsonl" "$OUT/bundle-provenance.intoto.jsonl"
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/containai-${{ steps.channel.outputs.tag }}.tar.gz" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/containai-${{ steps.channel.outputs.tag }}.tar.gz.intoto.jsonl" "$OUT/bundle-provenance.intoto.jsonl"
           gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --predicate-type "https://slsa.dev/provenance/v1" --subject "$OUT/bundle.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}" || true
           if [[ -f "$OUT/bundle.sbom.json.intoto.jsonl" ]]; then mv "$OUT/bundle.sbom.json.intoto.jsonl" "$OUT/bundle-sbom.intoto.jsonl"; fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coding-agents-${{ steps.channel.outputs.tag }}
+          name: containai-${{ steps.channel.outputs.tag }}
           path: |
-            dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+            dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
             dist/${{ steps.channel.outputs.tag }}/bundle-provenance.intoto.jsonl
             dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
             dist/${{ steps.channel.outputs.tag }}/bundle-sbom.intoto.jsonl
@@ -125,7 +125,7 @@ jobs:
         with:
           tag_name: ${{ steps.channel.outputs.tag }}
           files: |
-            dist/${{ steps.channel.outputs.tag }}/coding-agents-${{ steps.channel.outputs.tag }}.tar.gz
+            dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
             dist/${{ steps.channel.outputs.tag }}/bundle-provenance.intoto.jsonl
             dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
             dist/${{ steps.channel.outputs.tag }}/bundle-sbom.intoto.jsonl

@@ -1,6 +1,6 @@
-# AI Coding Agents in Containers
+# ContainAI
 
-Run AI coding agents (GitHub Copilot, OpenAI Codex, Anthropic Claude) in isolated Docker containers with controlled network access. Each agent operates in its own workspace with branch isolation, enabling multiple agents to work on the same repository without conflicts while maintaining privacy and security.
+Run AI agents, initially GitHub Copilot, OpenAI Codex, Anthropic Claude, in isolated Docker containers with controlled network access. Each agent operates in its own workspace with branch isolation, enabling multiple agents to work on the same repository without conflicts while maintaining privacy and security.
 
 Containers provide network restrictions (full isolation or monitored proxy access), separate git branches for each agent, and VS Code integration via Dev Containers. Agents can be launched as ephemeral instances that auto-remove on exit, or as persistent background containers for long-running tasks.
 
@@ -132,9 +132,9 @@ Unlike running agents directly on your machine:
 ## Security Model Highlights
 
 - **Host-rendered manifests** – `render-session-config.py` hashes trusted launcher/runtime files, merges your `config.toml`, and records a manifest SHA256 before a container is created.
-- **Secret broker enforcement** – launchers stage API keys inside the broker, receive sealed capabilities, and copy them into `/run/coding-agents` (tmpfs). Only the trusted `mcp-stub` inside the container can redeem those capabilities.
+- **Secret broker enforcement** – launchers stage API keys inside the broker, receive sealed capabilities, and copy them into `/run/containai` (tmpfs). Only the trusted `mcp-stub` inside the container can redeem those capabilities.
 - **Tight threat boundaries** – secrets live either on the host or inside stub-owned tmpfs mounts. Even if an agent workspace is compromised, it cannot read the manifest, capability bundle, or broker socket.
-- **Image secret scanning** – every `coding-agents-*` image must pass `trivy --scanners secret` before tagging/publishing so leaked tokens are caught before distribution.
+- **Image secret scanning** – every `containai-*` image must pass `trivy --scanners secret` before tagging/publishing so leaked tokens are caught before distribution.
 - **Legacy fallback logged** – the older `setup-mcp-configs.sh` converter still exists for compatibility, but it only runs if the host skips manifest rendering (which the launchers no longer do by default).
 
 ## Requirements

@@ -1,6 +1,6 @@
 # Network Proxy Configuration
 
-The coding agents can be launched with different network access policies to control outbound connectivity.
+The agents can be launched with different network access policies to control outbound connectivity.
 
 ## Network Modes
 
@@ -21,7 +21,7 @@ The coding agents can be launched with different network access policies to cont
 - **Logging**: Requests recorded at `/var/log/squid/access.log` inside proxy container
 - **Launch**: `./launch-agent copilot --network-proxy squid`
 - **Artifacts**:
-  - **Image**: `coding-agents-proxy:local`
+  - **Image**: `containai-proxy:local`
   - **Sidecar**: `<agent>-<repo>-proxy`
   - **Network**: `<agent>-<repo>-net`
   - **Proxy URL** (in agent container): `http://<sidecar>:3128`

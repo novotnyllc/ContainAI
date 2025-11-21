@@ -3,33 +3,33 @@
 set -euo pipefail
 
 COMMON_FUNCTIONS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-CODING_AGENTS_REPO_ROOT_DEFAULT=$(cd "$COMMON_FUNCTIONS_DIR/../.." && pwd)
+CONTAINAI_REPO_ROOT_DEFAULT=$(cd "$COMMON_FUNCTIONS_DIR/../.." && pwd)
 
-CODING_AGENTS_PROFILE_FILE="${CODING_AGENTS_PROFILE_FILE:-$CODING_AGENTS_REPO_ROOT_DEFAULT/profile.env}"
-CODING_AGENTS_PROFILE="dev"
-CODING_AGENTS_ROOT="$CODING_AGENTS_REPO_ROOT_DEFAULT"
+CONTAINAI_PROFILE_FILE="${CONTAINAI_PROFILE_FILE:-$CONTAINAI_REPO_ROOT_DEFAULT/profile.env}"
+CONTAINAI_PROFILE="dev"
+CONTAINAI_ROOT="$CONTAINAI_REPO_ROOT_DEFAULT"
 # Defaults for dev; overridden by env-detect profile file.
-CODING_AGENTS_CONFIG_DIR="${HOME}/.config/coding-agents-dev"
-CODING_AGENTS_DATA_ROOT="${HOME}/.local/share/coding-agents-dev"
-CODING_AGENTS_CACHE_ROOT="${HOME}/.cache/coding-agents-dev"
-CODING_AGENTS_SHA256_FILE="${CODING_AGENTS_ROOT}/SHA256SUMS"
-CODING_AGENTS_IMAGE_PREFIX="coding-agents-dev"
-CODING_AGENTS_IMAGE_TAG="devlocal"
-CODING_AGENTS_REGISTRY="ghcr.io/novotnyllc"
-CODING_AGENTS_HOST_CONFIG_FILE="${CODING_AGENTS_HOST_CONFIG:-${CODING_AGENTS_CONFIG_DIR}/host-config.env}"
-CODING_AGENTS_OVERRIDE_DIR="${CODING_AGENTS_OVERRIDE_DIR:-${CODING_AGENTS_CONFIG_DIR}/overrides}"
-CODING_AGENTS_DIRTY_OVERRIDE_TOKEN="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN:-${CODING_AGENTS_OVERRIDE_DIR}/allow-dirty}"
-CODING_AGENTS_CACHE_DIR="${CODING_AGENTS_CACHE_DIR:-${CODING_AGENTS_CONFIG_DIR}/cache}"
-CODING_AGENTS_PREREQ_CACHE_FILE="${CODING_AGENTS_PREREQ_CACHE_FILE:-${CODING_AGENTS_CACHE_DIR}/prereq-check}"
-CODING_AGENTS_BROKER_SCRIPT="${CODING_AGENTS_BROKER_SCRIPT:-${CODING_AGENTS_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py}"
-CODING_AGENTS_AUDIT_LOG="${CODING_AGENTS_AUDIT_LOG:-${CODING_AGENTS_CONFIG_DIR}/security-events.log}"
-CODING_AGENTS_HELPER_NETWORK_POLICY="${CODING_AGENTS_HELPER_NETWORK_POLICY:-loopback}"
-CODING_AGENTS_HELPER_PIDS_LIMIT="${CODING_AGENTS_HELPER_PIDS_LIMIT:-64}"
-CODING_AGENTS_HELPER_MEMORY="${CODING_AGENTS_HELPER_MEMORY:-512m}"
+CONTAINAI_CONFIG_DIR="${HOME}/.config/containai-dev"
+CONTAINAI_DATA_ROOT="${HOME}/.local/share/containai-dev"
+CONTAINAI_CACHE_ROOT="${HOME}/.cache/containai-dev"
+CONTAINAI_SHA256_FILE="${CONTAINAI_ROOT}/SHA256SUMS"
+CONTAINAI_IMAGE_PREFIX="containai-dev"
+CONTAINAI_IMAGE_TAG="devlocal"
+CONTAINAI_REGISTRY="ghcr.io/novotnyllc"
+CONTAINAI_HOST_CONFIG_FILE="${CONTAINAI_HOST_CONFIG:-${CONTAINAI_CONFIG_DIR}/host-config.env}"
+CONTAINAI_OVERRIDE_DIR="${CONTAINAI_OVERRIDE_DIR:-${CONTAINAI_CONFIG_DIR}/overrides}"
+CONTAINAI_DIRTY_OVERRIDE_TOKEN="${CONTAINAI_DIRTY_OVERRIDE_TOKEN:-${CONTAINAI_OVERRIDE_DIR}/allow-dirty}"
+CONTAINAI_CACHE_DIR="${CONTAINAI_CACHE_DIR:-${CONTAINAI_CONFIG_DIR}/cache}"
+CONTAINAI_PREREQ_CACHE_FILE="${CONTAINAI_PREREQ_CACHE_FILE:-${CONTAINAI_CACHE_DIR}/prereq-check}"
+CONTAINAI_BROKER_SCRIPT="${CONTAINAI_BROKER_SCRIPT:-${CONTAINAI_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py}"
+CONTAINAI_AUDIT_LOG="${CONTAINAI_AUDIT_LOG:-${CONTAINAI_CONFIG_DIR}/security-events.log}"
+CONTAINAI_HELPER_NETWORK_POLICY="${CONTAINAI_HELPER_NETWORK_POLICY:-loopback}"
+CONTAINAI_HELPER_PIDS_LIMIT="${CONTAINAI_HELPER_PIDS_LIMIT:-64}"
+CONTAINAI_HELPER_MEMORY="${CONTAINAI_HELPER_MEMORY:-512m}"
 DEFAULT_LAUNCHER_UPDATE_POLICY="prompt"
 
 get_profile_suffix() {
-    if [ "${CODING_AGENTS_PROFILE:-dev}" = "dev" ]; then
+    if [ "${CONTAINAI_PROFILE:-dev}" = "dev" ]; then
         printf '%s' "-dev"
     else
         printf ''
@@ -101,8 +101,8 @@ _collect_prereq_fingerprint() {
 }
 
 ensure_prerequisites_verified() {
-    local repo_root="${1:-${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}}"
-    if [ "${CODING_AGENTS_DISABLE_AUTO_PREREQ_CHECK:-0}" = "1" ]; then
+    local repo_root="${1:-${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}}"
+    if [ "${CONTAINAI_DISABLE_AUTO_PREREQ_CHECK:-0}" = "1" ]; then
         return 0
     fi
     local script_path="$repo_root/host/utils/verify-prerequisites.sh"
@@ -114,7 +114,7 @@ ensure_prerequisites_verified() {
     if [ -z "$fingerprint" ]; then
         return 0
     fi
-    local cache_file="$CODING_AGENTS_PREREQ_CACHE_FILE"
+    local cache_file="$CONTAINAI_PREREQ_CACHE_FILE"
     local cached=""
     if [ -f "$cache_file" ]; then
         read -r cached < "$cache_file"
@@ -279,7 +279,7 @@ collect_capability_metadata() {
 }
 
 log_security_event() {
-    if [ "${CODING_AGENTS_DISABLE_AUDIT_LOG:-0}" = "1" ]; then
+    if [ "${CONTAINAI_DISABLE_AUDIT_LOG:-0}" = "1" ]; then
         return
     fi
     local event_name="$1"
@@ -288,7 +288,7 @@ log_security_event() {
     timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     local record
     record=$(printf '{"ts":"%s","event":"%s","payload":%s}\n' "$timestamp" "$(json_escape_string "$event_name")" "$payload")
-    local log_file="$CODING_AGENTS_AUDIT_LOG"
+    local log_file="$CONTAINAI_AUDIT_LOG"
     local log_dir
     log_dir=$(dirname "$log_file")
     mkdir -p "$log_dir"
@@ -298,7 +298,7 @@ log_security_event() {
     printf '%s' "$record" >> "$log_file"
     umask "$previous_umask"
     if command -v systemd-cat >/dev/null 2>&1; then
-        printf '%s' "$record" | systemd-cat -t coding-agents-launcher >/dev/null 2>&1 || true
+        printf '%s' "$record" | systemd-cat -t containai-launcher >/dev/null 2>&1 || true
     fi
 }
 
@@ -325,10 +325,10 @@ log_capability_issuance_event() {
     local output_dir="$2"
     shift 2 || true
     local stubs=("$@")
-    local repo_root="${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
+    local repo_root="${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}"
     local git_head
     git_head=$(get_git_head_hash "$repo_root" 2>/dev/null || echo "")
-    local manifest_sha="${CODING_AGENTS_SESSION_CONFIG_SHA256:-}"
+    local manifest_sha="${CONTAINAI_SESSION_CONFIG_SHA256:-}"
     local stub_json
     stub_json=$(json_array_from_list "${stubs[@]}")
     local capabilities_json
@@ -372,28 +372,28 @@ detect_environment_profile() {
         return 1
     fi
     local output
-    if ! output=$("$env_detect_script" --format env --profile-file "$CODING_AGENTS_PROFILE_FILE"); then
+    if ! output=$("$env_detect_script" --format env --profile-file "$CONTAINAI_PROFILE_FILE"); then
         echo "❌ Environment detection failed" >&2
         return 1
     fi
     while IFS='=' read -r key value; do
         [ -z "$key" ] && continue
         case "$key" in
-            CODING_AGENTS_PROFILE) CODING_AGENTS_PROFILE="$value" ;;
-            CODING_AGENTS_ROOT) CODING_AGENTS_ROOT="$value" ;;
-            CODING_AGENTS_CONFIG_ROOT) CODING_AGENTS_CONFIG_DIR="$value" ;;
-            CODING_AGENTS_DATA_ROOT) CODING_AGENTS_DATA_ROOT="$value" ;;
-            CODING_AGENTS_CACHE_ROOT)
-                CODING_AGENTS_CACHE_ROOT="$value"
-                CODING_AGENTS_CACHE_DIR="$value"
+            CONTAINAI_PROFILE) CONTAINAI_PROFILE="$value" ;;
+            CONTAINAI_ROOT) CONTAINAI_ROOT="$value" ;;
+            CONTAINAI_CONFIG_ROOT) CONTAINAI_CONFIG_DIR="$value" ;;
+            CONTAINAI_DATA_ROOT) CONTAINAI_DATA_ROOT="$value" ;;
+            CONTAINAI_CACHE_ROOT)
+                CONTAINAI_CACHE_ROOT="$value"
+                CONTAINAI_CACHE_DIR="$value"
                 ;;
-            CODING_AGENTS_SHA256_FILE) CODING_AGENTS_SHA256_FILE="$value" ;;
-            CODING_AGENTS_IMAGE_PREFIX) CODING_AGENTS_IMAGE_PREFIX="$value" ;;
-            CODING_AGENTS_IMAGE_TAG) CODING_AGENTS_IMAGE_TAG="$value" ;;
-            CODING_AGENTS_REGISTRY) CODING_AGENTS_REGISTRY="$value" ;;
+            CONTAINAI_SHA256_FILE) CONTAINAI_SHA256_FILE="$value" ;;
+            CONTAINAI_IMAGE_PREFIX) CONTAINAI_IMAGE_PREFIX="$value" ;;
+            CONTAINAI_IMAGE_TAG) CONTAINAI_IMAGE_TAG="$value" ;;
+            CONTAINAI_REGISTRY) CONTAINAI_REGISTRY="$value" ;;
         esac
     done <<< "$output"
-    export CODING_AGENTS_PROFILE CODING_AGENTS_ROOT CODING_AGENTS_CONFIG_DIR CODING_AGENTS_DATA_ROOT CODING_AGENTS_CACHE_ROOT CODING_AGENTS_SHA256_FILE CODING_AGENTS_IMAGE_PREFIX CODING_AGENTS_IMAGE_TAG CODING_AGENTS_REGISTRY
+    export CONTAINAI_PROFILE CONTAINAI_ROOT CONTAINAI_CONFIG_DIR CONTAINAI_DATA_ROOT CONTAINAI_CACHE_ROOT CONTAINAI_SHA256_FILE CONTAINAI_IMAGE_PREFIX CONTAINAI_IMAGE_TAG CONTAINAI_REGISTRY
     return 0
 }
 
@@ -403,17 +403,17 @@ run_integrity_check_if_needed() {
         echo "⚠️  Missing integrity-check.sh; skipping integrity validation" >&2
         return 0
     fi
-    if "$integrity_script" --mode "$CODING_AGENTS_PROFILE" --root "$CODING_AGENTS_ROOT" --sums "$CODING_AGENTS_SHA256_FILE"; then
+    if "$integrity_script" --mode "$CONTAINAI_PROFILE" --root "$CONTAINAI_ROOT" --sums "$CONTAINAI_SHA256_FILE"; then
         return 0
     fi
     return 1
 }
 
 enforce_prod_install_root() {
-    if [ "${CODING_AGENTS_PROFILE:-dev}" != "prod" ]; then
+    if [ "${CONTAINAI_PROFILE:-dev}" != "prod" ]; then
         return 0
     fi
-    local root="${CODING_AGENTS_ROOT:-}"
+    local root="${CONTAINAI_ROOT:-}"
     if [ -z "$root" ] || [ ! -d "$root" ]; then
         echo "❌ Prod profile requires an installed root. Run host/utils/install-package.sh first." >&2
         log_security_event "enforcement" '{"reason":"missing-prod-root"}' >/dev/null 2>&1 || true
@@ -440,7 +440,7 @@ ensure_trusted_paths_clean() {
     shift || true
     local label="${1:-trusted files}"
     shift || true
-    local override_token="${CODING_AGENTS_DIRTY_OVERRIDE_TOKEN}"
+    local override_token="${CONTAINAI_DIRTY_OVERRIDE_TOKEN}"
     local dirty
 
     if [ -z "$repo_root" ] || [ ! -d "$repo_root/.git" ]; then
@@ -466,7 +466,7 @@ ensure_trusted_paths_clean() {
 
 _read_host_config_value() {
     local key="$1"
-    local file="$CODING_AGENTS_HOST_CONFIG_FILE"
+    local file="$CONTAINAI_HOST_CONFIG_FILE"
 
     if [ ! -f "$file" ] || [ -z "$key" ]; then
         return 0
@@ -486,7 +486,7 @@ _read_host_config_value() {
 }
 
 get_launcher_update_policy() {
-    local env_value="${CODING_AGENTS_LAUNCHER_UPDATE_POLICY:-}"
+    local env_value="${CONTAINAI_LAUNCHER_UPDATE_POLICY:-}"
     local value="$env_value"
 
     if [ -z "$value" ]; then
@@ -511,7 +511,7 @@ maybe_check_launcher_updates() {
     local context="$2"
     local policy
 
-    if [ "${CODING_AGENTS_SKIP_UPDATE_CHECK:-0}" = "1" ]; then
+    if [ "${CONTAINAI_SKIP_UPDATE_CHECK:-0}" = "1" ]; then
         return 0
     fi
 
@@ -588,7 +588,7 @@ maybe_check_launcher_updates() {
         return 0
     fi
 
-    read -p "Update Coding Agents launchers now? [Y/n]: " -r response
+    read -p "Update ContainAI launchers now? [Y/n]: " -r response
     response=${response:-Y}
     if [[ $response =~ ^[Yy]$ ]]; then
         if git -C "$repo_root" pull --ff-only >/dev/null 2>&1; then
@@ -622,12 +622,12 @@ get_container_runtime() {
 
 get_secret_broker_script() {
     local candidate
-    candidate="${CODING_AGENTS_BROKER_SCRIPT}"
+    candidate="${CONTAINAI_BROKER_SCRIPT}"
     if [ -x "$candidate" ]; then
         echo "$candidate"
         return 0
     fi
-    candidate="${CODING_AGENTS_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py"
+    candidate="${CONTAINAI_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py"
     if [ -x "$candidate" ]; then
         echo "$candidate"
         return 0
@@ -668,8 +668,8 @@ issue_session_capabilities() {
 
 # Cache the active container CLI (docker only) so downstream helpers can reuse it
 get_active_container_cmd() {
-    if [ -n "${CODING_AGENTS_CONTAINER_CMD:-}" ]; then
-        echo "$CODING_AGENTS_CONTAINER_CMD"
+    if [ -n "${CONTAINAI_CONTAINER_CMD:-}" ]; then
+        echo "$CONTAINAI_CONTAINER_CMD"
         return 0
     fi
 
@@ -679,7 +679,7 @@ get_active_container_cmd() {
         runtime="docker"
     fi
 
-    CODING_AGENTS_CONTAINER_CMD="$runtime"
+    CONTAINAI_CONTAINER_CMD="$runtime"
     echo "$runtime"
 }
 
@@ -710,13 +710,13 @@ is_wsl_environment() {
 }
 
 wsl_security_helper_path() {
-    local repo_root="${1:-${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}}"
+    local repo_root="${1:-${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}}"
     echo "$repo_root/host/utils/fix-wsl-security.sh"
 }
 
 resolve_seccomp_profile_path() {
     local repo_root="$1"
-    local candidate="$repo_root/docker/profiles/seccomp-coding-agents.json"
+    local candidate="$repo_root/docker/profiles/seccomp-containai.json"
 
     if [ -f "$candidate" ]; then
         echo "$candidate"
@@ -772,8 +772,8 @@ apparmor_profile_loaded() {
 
 resolve_apparmor_profile_name() {
     local repo_root="$1"
-    local profile="coding-agents"
-    local profile_file="$repo_root/docker/profiles/apparmor-coding-agents.profile"
+    local profile="containai"
+    local profile_file="$repo_root/docker/profiles/apparmor-containai.profile"
 
     if ! is_apparmor_supported; then
         return 1
@@ -801,7 +801,7 @@ resolve_apparmor_profile_name() {
 }
 
 verify_host_security_prereqs() {
-    local repo_root="${1:-${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}}"
+    local repo_root="${1:-${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}}"
     local errors=()
     local warnings=()
     local current_uid
@@ -814,7 +814,7 @@ verify_host_security_prereqs() {
     fi
 
     if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
-        local default_profile="$repo_root/docker/profiles/seccomp-coding-agents.json"
+        local default_profile="$repo_root/docker/profiles/seccomp-containai.json"
         errors+=("Seccomp profile not found at $default_profile. Run scripts/install.sh to reinstall the host security assets before launching agents.")
     fi
 
@@ -833,8 +833,8 @@ verify_host_security_prereqs() {
             errors+=("AppArmor kernel support not detected. Enable AppArmor to continue.")
         fi
     else
-        local profile="coding-agents"
-        local profile_file="$repo_root/docker/profiles/apparmor-coding-agents.profile"
+        local profile="containai"
+        local profile_file="$repo_root/docker/profiles/apparmor-containai.profile"
         if ! apparmor_profile_loaded "$profile"; then
             if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
                 warnings+=("Unable to verify AppArmor profile '$profile' without elevated privileges. Re-run './host/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$profile_file'.")
@@ -848,14 +848,14 @@ verify_host_security_prereqs() {
         fi
     fi
 
-    if [ "${CODING_AGENTS_DISABLE_PTRACE_SCOPE:-0}" = "1" ]; then
-        warnings+=("Ptrace scope hardening disabled via CODING_AGENTS_DISABLE_PTRACE_SCOPE=1")
+    if [ "${CONTAINAI_DISABLE_PTRACE_SCOPE:-0}" = "1" ]; then
+        warnings+=("Ptrace scope hardening disabled via CONTAINAI_DISABLE_PTRACE_SCOPE=1")
     elif is_linux_host && [ ! -e /proc/sys/kernel/yama/ptrace_scope ]; then
-        errors+=("kernel.yama.ptrace_scope is unavailable. Enable the Yama LSM or export CODING_AGENTS_DISABLE_PTRACE_SCOPE=1 to bypass (not recommended).")
+        errors+=("kernel.yama.ptrace_scope is unavailable. Enable the Yama LSM or export CONTAINAI_DISABLE_PTRACE_SCOPE=1 to bypass (not recommended).")
     fi
 
-    if [ "${CODING_AGENTS_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
-        warnings+=("Sensitive tmpfs mounting disabled via CODING_AGENTS_DISABLE_SENSITIVE_TMPFS=1")
+    if [ "${CONTAINAI_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
+        warnings+=("Sensitive tmpfs mounting disabled via CONTAINAI_DISABLE_SENSITIVE_TMPFS=1")
     fi
 
     if [ ${#errors[@]} -gt 0 ]; then
@@ -879,7 +879,7 @@ verify_host_security_prereqs() {
 }
 
 verify_container_security_support() {
-    local info_json="${CODING_AGENTS_CONTAINER_INFO_JSON:-}"
+    local info_json="${CONTAINAI_CONTAINER_INFO_JSON:-}"
     if [ -z "$info_json" ]; then
         local runtime
         runtime=$(get_active_container_cmd)
@@ -1127,7 +1127,7 @@ check_docker_running() {
 
     if [ -n "$runtime" ]; then
         if $runtime info > /dev/null 2>&1; then
-            CODING_AGENTS_CONTAINER_CMD="$runtime"
+            CONTAINAI_CONTAINER_CMD="$runtime"
             return 0
         fi
     fi
@@ -1156,7 +1156,7 @@ check_docker_running() {
                     sleep 2
                     waited=$((waited + 2))
                     if docker info > /dev/null 2>&1; then
-                        CODING_AGENTS_CONTAINER_CMD="docker"
+                        CONTAINAI_CONTAINER_CMD="docker"
                         echo "✅ Docker started successfully"
                         return 0
                     fi
@@ -1183,8 +1183,8 @@ check_docker_running() {
 }
 
 get_python_runner_image() {
-    if [ -n "${CODING_AGENTS_PYTHON_IMAGE:-}" ]; then
-        echo "$CODING_AGENTS_PYTHON_IMAGE"
+    if [ -n "${CONTAINAI_PYTHON_IMAGE:-}" ]; then
+        echo "$CONTAINAI_PYTHON_IMAGE"
     else
         echo "python:3.11-slim"
     fi
@@ -1221,7 +1221,7 @@ run_python_tool() {
     done
     local script_args=("$@")
 
-    local repo_root="${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
+    local repo_root="${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}"
     if [ ! -d "$repo_root" ]; then
         echo "❌ Repo root '$repo_root' not found for python runner" >&2
         return 1
@@ -1241,15 +1241,15 @@ run_python_tool() {
         docker_args+=("--user" "$(id -u):$(id -g)")
     fi
     docker_args+=("-e" "TZ=${TZ:-UTC}")
-    docker_args+=("--pids-limit" "$CODING_AGENTS_HELPER_PIDS_LIMIT")
+    docker_args+=("--pids-limit" "$CONTAINAI_HELPER_PIDS_LIMIT")
     docker_args+=("--security-opt" "no-new-privileges")
     docker_args+=("--cap-drop" "ALL")
 
-    if [ -n "$CODING_AGENTS_HELPER_MEMORY" ]; then
-        docker_args+=("--memory" "$CODING_AGENTS_HELPER_MEMORY")
+    if [ -n "$CONTAINAI_HELPER_MEMORY" ]; then
+        docker_args+=("--memory" "$CONTAINAI_HELPER_MEMORY")
     fi
 
-    local helper_network="${CODING_AGENTS_HELPER_NETWORK_POLICY:-loopback}"
+    local helper_network="${CONTAINAI_HELPER_NETWORK_POLICY:-loopback}"
     case "$helper_network" in
         loopback|none)
             docker_args+=("--network" "none")
@@ -1271,10 +1271,10 @@ run_python_tool() {
     while IFS='=' read -r name value; do
         [ -z "$name" ] && continue
         docker_args+=("-e" "${name}=${value}")
-    done < <(env | grep '^CODING_AGENTS_' || true)
+    done < <(env | grep '^CONTAINAI_' || true)
 
     local seccomp_profile=""
-    if [ "${CODING_AGENTS_DISABLE_HELPER_SECCOMP:-0}" != "1" ]; then
+    if [ "${CONTAINAI_DISABLE_HELPER_SECCOMP:-0}" != "1" ]; then
         seccomp_profile=$(resolve_seccomp_profile_path "$repo_root" 2>/dev/null || true)
     fi
     if [ -n "$seccomp_profile" ]; then
@@ -1361,7 +1361,7 @@ merge_agent_data_exports() {
         return 1
     fi
 
-    local key_root="$home_dir/.config/coding-agents/data-hmac/${agent_name}"
+    local key_root="$home_dir/.config/containai/data-hmac/${agent_name}"
     mkdir -p -- "$key_root"
 
     local merged=false
@@ -1395,7 +1395,7 @@ PYINNER
             continue
         fi
 
-        local output_dir="$home_dir/.coding-agents/${agent_name}/imports/${session_id}"
+        local output_dir="$home_dir/.containai/${agent_name}/imports/${session_id}"
         mkdir -p -- "$output_dir"
 
         if run_python_tool "$packager" --mount "$staged_dir" --mount "$home_dir" -- \
@@ -1432,7 +1432,7 @@ process_agent_data_exports() {
     fi
 
     local agent_name
-    agent_name=$(get_container_label "$container_name" "coding-agents.agent")
+    agent_name=$(get_container_label "$container_name" "containai.agent")
     if [ -z "$agent_name" ]; then
         return 0
     fi
@@ -1461,9 +1461,9 @@ pull_and_tag_image() {
     local retry_delay="${3:-2}"
     local registry_image=""
     local local_image=""
-    local registry_prefix="${CODING_AGENTS_REGISTRY:-ghcr.io/novotnyllc}"
-    local prefix="${CODING_AGENTS_IMAGE_PREFIX:-coding-agents-dev}"
-    local tag="${CODING_AGENTS_IMAGE_TAG:-devlocal}"
+    local registry_prefix="${CONTAINAI_REGISTRY:-ghcr.io/novotnyllc}"
+    local prefix="${CONTAINAI_IMAGE_PREFIX:-containai-dev}"
+    local tag="${CONTAINAI_IMAGE_TAG:-devlocal}"
 
     case "$target" in
         base)
@@ -1484,7 +1484,7 @@ pull_and_tag_image() {
             ;;
     esac
 
-    if [ "${CODING_AGENTS_PROFILE:-dev}" = "dev" ]; then
+    if [ "${CONTAINAI_PROFILE:-dev}" = "dev" ]; then
         echo "⏭️  Dev profile: using local image ${local_image} (skip registry pull)"
         return 0
     fi
@@ -1563,20 +1563,20 @@ push_to_local() {
 
 # List all agent containers
 list_agent_containers() {
-    container_cli ps -a --filter "label=coding-agents.type=agent" \
+    container_cli ps -a --filter "label=containai.type=agent" \
         --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}"
 }
 
 # Get proxy container name for agent
 get_proxy_container() {
     local agent_container="$1"
-    container_cli inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' "$agent_container" 2>/dev/null
+    container_cli inspect -f '{{ index .Config.Labels "containai.proxy-container" }}' "$agent_container" 2>/dev/null
 }
 
 # Get proxy network name for agent
 get_proxy_network() {
     local agent_container="$1"
-    container_cli inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' "$agent_container" 2>/dev/null
+    container_cli inspect -f '{{ index .Config.Labels "containai.proxy-network" }}' "$agent_container" 2>/dev/null
 }
 
 # Remove container and associated resources
@@ -1592,13 +1592,13 @@ remove_container_with_sidecars() {
     
     # Get container labels to find repo and branch info
     local agent_branch
-    agent_branch=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container_name" 2>/dev/null || true)
+    agent_branch=$(container_cli inspect -f '{{ index .Config.Labels "containai.branch" }}' "$container_name" 2>/dev/null || true)
     local repo_path
-    repo_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.repo-path" }}' "$container_name" 2>/dev/null || true)
+    repo_path=$(container_cli inspect -f '{{ index .Config.Labels "containai.repo-path" }}' "$container_name" 2>/dev/null || true)
     local local_remote_path
-    local_remote_path=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.local-remote" }}' "$container_name" 2>/dev/null || true)
+    local_remote_path=$(container_cli inspect -f '{{ index .Config.Labels "containai.local-remote" }}' "$container_name" 2>/dev/null || true)
     
-    local repo_root="${CODING_AGENTS_REPO_ROOT:-$CODING_AGENTS_REPO_ROOT_DEFAULT}"
+    local repo_root="${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}"
     local home_dir="${HOME:-}"
     if [ -z "$home_dir" ] && command -v getent >/dev/null 2>&1; then
         home_dir="$(getent passwd "$(id -u)" | awk -F: '{print $6}' 2>/dev/null || true)"
@@ -1713,8 +1713,8 @@ ensure_squid_proxy() {
             --network "$network_name"
             --restart unless-stopped
             -e "SQUID_ALLOWED_DOMAINS=$squid_allowed_domains"
-            --label "coding-agents.proxy-of=$agent_container"
-            --label "coding-agents.proxy-image=$proxy_image"
+            --label "containai.proxy-of=$agent_container"
+            --label "containai.proxy-image=$proxy_image"
         )
         if [ -n "$helper_acl_file" ] && [ -f "$helper_acl_file" ]; then
             proxy_args+=("-v" "$helper_acl_file:/etc/squid/helper-acls.conf:ro")
@@ -1823,7 +1823,7 @@ sync_local_remote_to_host() {
     (
         cd "$repo_path" || exit 0
 
-        local temp_ref="refs/coding-agents-sync/${agent_branch// /-}"
+        local temp_ref="refs/containai-sync/${agent_branch// /-}"
         if ! git fetch "$local_remote_path" "$agent_branch:$temp_ref" >/dev/null 2>&1; then
             echo "⚠️  Failed to fetch agent branch from secure remote" >&2
             exit 0

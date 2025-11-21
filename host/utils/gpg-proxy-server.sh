@@ -13,13 +13,13 @@
 # Usage:
 #   ./gpg-proxy-server.sh [socket-path] [log-file]
 #
-# Default socket: ~/.config/coding-agents/gpg-proxy.sock
+# Default socket: ~/.config/containai/gpg-proxy.sock
 
 set -euo pipefail
 
 # Configuration
-SOCKET_PATH="${1:-$HOME/.config/coding-agents/gpg-proxy.sock}"
-LOG_FILE="${2:-$HOME/.config/coding-agents/gpg-proxy.log}"
+SOCKET_PATH="${1:-$HOME/.config/containai/gpg-proxy.sock}"
+LOG_FILE="${2:-$HOME/.config/containai/gpg-proxy.log}"
 MAX_CONNECTIONS=5
 CONNECTION_TIMEOUT=60  # GPG can be slow (PIN entry, hardware token)
 

@@ -54,7 +54,7 @@ jobs:
       - name: Cleanup test containers
         if: always()
         run: |
-          docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
+          docker ps -aq --filter "label=containai.test=true" | xargs -r docker rm -f || true
 
   unit-test-powershell-linux:
     runs-on: ubuntu-latest
@@ -84,7 +84,7 @@ jobs:
       - name: Cleanup test containers
         if: always()
         run: |
-          docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
+          docker ps -aq --filter "label=containai.test=true" | xargs -r docker rm -f || true
 
   unit-test-powershell:
     runs-on: windows-latest
@@ -141,7 +141,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          docker ps -aq --filter "label=coding-agents.test=true" | ForEach-Object { docker rm -f $_ } 2>$null
+          docker ps -aq --filter "label=containai.test=true" | ForEach-Object { docker rm -f $_ } 2>$null
 
   # Full integration tests (launchers mode - faster)
   integration-test-launchers:
@@ -173,8 +173,8 @@ jobs:
       - name: Cleanup test resources
         if: always()
         run: |
-          docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
-          docker network ls --filter "name=test-coding-agents" --format "{{.Name}}" | xargs -r docker network rm || true
+          docker ps -aq --filter "label=containai.test=true" | xargs -r docker rm -f || true
+          docker network ls --filter "name=test-containai" --format "{{.Name}}" | xargs -r docker network rm || true
 
   # Full integration tests (full mode - on main branch only)
   integration-test-full:
@@ -207,6 +207,6 @@ jobs:
       - name: Cleanup test resources
         if: always()
         run: |
-          docker ps -aq --filter "label=coding-agents.test=true" | xargs -r docker rm -f || true
-          docker network ls --filter "name=test-coding-agents" --format "{{.Name}}" | xargs -r docker network rm || true
+          docker ps -aq --filter "label=containai.test=true" | xargs -r docker rm -f || true
+          docker network ls --filter "name=test-containai" --format "{{.Name}}" | xargs -r docker network rm || true
           docker rm -f $(docker ps -aq --filter "ancestor=registry:2") 2>/dev/null || true

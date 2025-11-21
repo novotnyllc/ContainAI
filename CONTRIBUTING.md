@@ -1,4 +1,4 @@
-# Contributing to Coding Agents
+# Contributing to ContainAI
 
 ## Development Workflow
 
@@ -13,8 +13,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/coding-agents.git
-cd coding-agents
+git clone https://github.com/your-org/containai.git
+cd containai
 
 # Run unit tests (fast, ~1-2 minutes)
 # Bash
@@ -141,7 +141,7 @@ All tests use **mock credentials** and are **completely isolated**:
 Then inspect with:
 ```bash
 # List test containers
-docker ps -a --filter "label=coding-agents.test=true"
+docker ps -a --filter "label=containai.test=true"
 
 # View container logs
 docker logs <container-name>
@@ -150,20 +150,20 @@ docker logs <container-name>
 docker inspect <container-name>
 
 # Check networks
-docker network ls | grep test-coding-agents
+docker network ls | grep test-containai
 ```
 
 #### Manual Cleanup
 If tests crash and don't clean up:
 ```bash
 # Remove all test containers
-docker ps -aq --filter "label=coding-agents.test=true" | xargs docker rm -f
+docker ps -aq --filter "label=containai.test=true" | xargs docker rm -f
 
 # Remove test networks
-docker network ls | grep test-coding-agents | awk '{print $1}' | xargs docker network rm
+docker network ls | grep test-containai | awk '{print $1}' | xargs docker network rm
 
 # Remove test repositories
-rm -rf /tmp/test-coding-agents-*
+rm -rf /tmp/test-containai-*
 ```
 
 ## Code Quality Standards
@@ -210,7 +210,7 @@ $results | Where-Object {$_.Severity -in @('Error','Warning')}
 
 Bash scripts contain all runtime logic. Windows support is delivered through thin `.ps1` wrappers that:
 1. dot-source `host/utils/wsl-shim.ps1`
-2. call `Invoke-CodingAgentsWslScript -ScriptRelativePath '<target bash script>' -Arguments $Arguments`
+2. call `Invoke-ContainAIWslScript -ScriptRelativePath '<target bash script>' -Arguments $Arguments`
 3. exit with the propagated status code
 
 Only scripts that touch native Windows settings (for example `enable-wsl-security.ps1`) should contain standalone PowerShell logic. When adding or renaming a Bash entrypoint, create the matching shim so Windows users can invoke the same behavior from PowerShell.
@@ -218,7 +218,7 @@ Only scripts that touch native Windows settings (for example `enable-wsl-securit
 ## File Structure
 
 ```
-coding-agents/
+containai/
 ├── host/
 │   ├── launchers/           # User-facing scripts
 │   │   ├── launch-agent     # Bash version
@@ -303,19 +303,19 @@ Three network modes:
 ### Container Labels
 Every agent container has labels:
 ```
-coding-agents.type=agent
-coding-agents.agent=<copilot|codex|claude>
-coding-agents.repo-path=<path>
-coding-agents.branch=<agent/branch>
-coding-agents.proxy-container=<proxy-name>  # if using squid
-coding-agents.proxy-network=<network-name>  # if using squid
+containai.type=agent
+containai.agent=<copilot|codex|claude>
+containai.repo-path=<path>
+containai.branch=<agent/branch>
+containai.proxy-container=<proxy-name>  # if using squid
+containai.proxy-network=<network-name>  # if using squid
 ```
 
 ### Test Isolation
 Tests use session IDs (process ID) for complete isolation:
-- Containers: `label=coding-agents.test-session=<PID>`
-- Networks: `test-coding-agents-net-<PID>`
-- Repositories: `/tmp/test-coding-agents-<PID>`
+- Containers: `label=containai.test-session=<PID>`
+- Networks: `test-containai-net-<PID>`
+- Repositories: `/tmp/test-containai-<PID>`
 
 This allows parallel test execution without conflicts.
 

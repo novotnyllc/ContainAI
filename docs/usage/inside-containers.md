@@ -93,7 +93,7 @@ graph TB
 
 Need to talk to GitHub from inside the container anyway? Add a remote yourself (`git remote add origin https://...`) so you consciously accept that trust boundary. The launchers will never configure it for you.
 
-Every time you `git push` to `local`, a background sync daemon fast-forwards the matching branch in your host repository. Unless you opt out with `CODING_AGENTS_DISABLE_AUTO_SYNC=1`, you can simply switch back to your host repo after a push and the commit will already be there.
+Every time you `git push` to `local`, a background sync daemon fast-forwards the matching branch in your host repository. Unless you opt out with `CONTAINAI_DISABLE_AUTO_SYNC=1`, you can simply switch back to your host repo after a push and the commit will already be there.
 
 #### Git Remote Commands
 
@@ -165,7 +165,7 @@ git pull origin main
 
 **Problem:** `git push` doesn't update GitHub
 - **Cause:** Containers still only push to the managed `local` remote.
-- **Solution:** After the auto-sync completes, switch to your host repo and run `git push origin`. If you disabled auto-sync (`CODING_AGENTS_DISABLE_AUTO_SYNC=1`), manually fetch from `~/.coding-agents/local-remotes/<hash>.git` first.
+- **Solution:** After the auto-sync completes, switch to your host repo and run `git push origin`. If you disabled auto-sync (`CONTAINAI_DISABLE_AUTO_SYNC=1`), manually fetch from `~/.containai/local-remotes/<hash>.git` first.
 
 **Problem:** Lost changes after deleting container
 - **Cause:** Forgot to `git push` before `docker rm`
@@ -195,7 +195,7 @@ args = ["-y", "@upstash/context7-mcp"]
 env = { CONTEXT7_API_KEY = "${CONTEXT7_API_KEY}" }
 ```
 
-Secrets like `CONTEXT7_API_KEY` resolve from `~/.config/coding-agents/mcp-secrets.env` during host-side rendering; the plaintext values never need to exist inside the container.
+Secrets like `CONTEXT7_API_KEY` resolve from `~/.config/containai/mcp-secrets.env` during host-side rendering; the plaintext values never need to exist inside the container.
 
 ## What Happens Behind the Scenes
 
@@ -211,7 +211,7 @@ When you run `launch-agent`:
    - Manifest + capability IDs are hashed and logged for auditing.
 
 3. **Creates container:**
-   - Mounts OAuth configs from host (read-only) and spins up `/run/coding-agents` tmpfs.
+   - Mounts OAuth configs from host (read-only) and spins up `/run/containai` tmpfs.
    - Copies the rendered manifest, agent-specific MCP JSON, and sealed capabilities into the tmpfs before any user code runs.
    - Exposes provenance data via `HOST_SESSION_*` environment variables.
 
@@ -238,10 +238,10 @@ When you run `launch-agent`:
 ✅ **Secure by default:**
 - Launchers hash trusted files and log the manifest SHA256 before any secrets are issued.
 - Secrets stay on the host broker until `mcp-stub` redeems a capability into a stub-owned tmpfs.
-- Containers run as non-root with seccomp/AppArmor, read-only rootfs, and dedicated tmpfs mounts for `/run/coding-agents`.
+- Containers run as non-root with seccomp/AppArmor, read-only rootfs, and dedicated tmpfs mounts for `/run/containai`.
 - OAuth configs and credential/GPG proxies are mounted read-only.
 
 ⚠️ **Keep secure:**
-- `~/.config/coding-agents/mcp-secrets.env` (host-only, outside any git repo)
+- `~/.config/containai/mcp-secrets.env` (host-only, outside any git repo)
 - Don't commit `.env` files with real tokens
 - Avoid modifying `host/launchers` or `docker/runtime` without understanding how it affects manifest hashes

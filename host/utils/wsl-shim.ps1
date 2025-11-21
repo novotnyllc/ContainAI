@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Shared helper that proxies CodingAgents PowerShell entrypoints into WSL.
+    Shared helper that proxies ContainAI PowerShell entrypoints into WSL.
 .DESCRIPTION
     Validates WSL availability, translates Windows paths to Linux paths, and
     executes the requested Bash script with the caller's working directory.
@@ -41,7 +41,7 @@ function Convert-ToWslPath {
     return $output.Trim()
 }
 
-function Invoke-CodingAgentsWslScript {
+function Invoke-ContainAIWslScript {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ScriptRelativePath,

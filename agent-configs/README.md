@@ -1,6 +1,6 @@
 # Agent Configuration Files
 
-This directory contains custom instruction files for AI coding agents used in containers.
+This directory contains custom instruction files for AI agents used in containers.
 
 ## Directory Structure
 

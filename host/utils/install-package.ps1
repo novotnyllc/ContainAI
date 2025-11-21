@@ -1,14 +1,14 @@
 #!/usr/bin/env pwsh
 <#!
 .SYNOPSIS
-Downloads a Coding Agents release from GitHub and installs it (blue/green).
+Downloads a ContainAI release from GitHub and installs it (blue/green).
 #>
 
 param(
     [Parameter(Mandatory = $true)]
     [string]$Version,
     [string]$Repo = $env:GITHUB_REPOSITORY,
-    [string]$InstallRoot = "/opt/coding-agents",
+    [string]$InstallRoot = "/opt/containai",
     [string]$AssetDir,
     [switch]$AllowNonRoot,
     [switch]$VerifyOnly
@@ -33,10 +33,10 @@ New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 if ($AssetDir) {
     $DownloadDir = $AssetDir
 } else {
-    $DownloadDir = New-Item -ItemType Directory -Force -Path ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "coding-agents-$Version-$(Get-Random)"))
+    $DownloadDir = New-Item -ItemType Directory -Force -Path ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "containai-$Version-$(Get-Random)"))
 }
 
-$Bundle = Join-Path $DownloadDir "coding-agents-$Version.tar.gz"
+$Bundle = Join-Path $DownloadDir "containai-$Version.tar.gz"
 $Payload = Join-Path $DownloadDir "payload.tar.gz"
 $PayloadSha = Join-Path $DownloadDir "payload.sha256"
 $Attestation = Join-Path $DownloadDir "attestation.intoto.jsonl"
@@ -56,7 +56,7 @@ function Get-ReleaseBundle {
         if (-not (Test-Path $Bundle)) { Write-Die "Bundle not found in $AssetDir" }
         return
     }
-    Get-ReleaseAsset "coding-agents-$Version.tar.gz" $Bundle
+    Get-ReleaseAsset "containai-$Version.tar.gz" $Bundle
     if (-not (Test-Path $Bundle)) { Write-Die "Bundle missing in release" }
 }
 
@@ -122,7 +122,7 @@ Expand-Bundle
 Test-PayloadHash
 Test-Attestation
 
-Write-Output "Installing Coding Agents $Version to $ReleaseDir"
+Write-Output "Installing ContainAI $Version to $ReleaseDir"
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ReleaseDir
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 & tar -xzf $Payload -C $ReleaseDir --strip-components=1

@@ -1,6 +1,6 @@
-# Getting Started with CodingAgents
+# Getting Started with ContainAI
 
-This guide will walk you through setting up CodingAgents from scratch, even if you've never used Docker or containers before. If you already have Docker installed and just need to understand the launcher workflow, skip ahead to [docs/running-agents.md](running-agents.md).
+This guide will walk you through setting up ContainAI from scratch, even if you've never used Docker or containers before. If you already have Docker installed and just need to understand the launcher workflow, skip ahead to [docs/running-agents.md](running-agents.md).
 
 **Total Time**: 20-50 minutes (first time)
 
@@ -12,7 +12,7 @@ This guide will walk you through setting up CodingAgents from scratch, even if y
 - [Step 3: Install GitHub CLI (Optional)](#step-3-install-github-cli-optional)
 - [Step 4: Authenticate GitHub CLI (Optional)](#step-4-authenticate-github-cli-optional)
 - [Step 5: Verify Your Setup](#step-5-verify-your-setup)
-- [Step 6: Clone CodingAgents](#step-6-clone-codingagents)
+- [Step 6: Clone ContainAI](#step-6-clone-ContainAI)
 - [Step 7: (Optional) Pre-fetch or Build Images](#step-7-optional-pre-fetch-or-build-images)
 - [Step 8: Install Launcher Scripts](#step-8-install-launcher-scripts)
 - [Step 9: First Launch](#step-9-first-launch)
@@ -34,9 +34,9 @@ Before you begin, you'll need:
 
 ## Step 1: Install Docker
 
-You need Docker to run the coding agents in isolated environments.
+You need Docker to run ContainAI.
 
-### Docker (Recommended for Windows/Mac)
+### Docker
 
 #### Windows
 
@@ -258,13 +258,13 @@ Run the verification script to check all prerequisites:
 
 **Linux/Mac:**
 ```bash
-cd CodingAgents  # If you've already cloned (Step 6)
+cd ContainAI  # If you've already cloned (Step 6)
 ./host/utils/verify-prerequisites.sh
 ```
 
 **Windows:**
 ```powershell
-cd CodingAgents  # If you've already cloned (Step 6)
+cd ContainAI  # If you've already cloned (Step 6)
 .\host\utils\verify-prerequisites.ps1
 ```
 
@@ -277,7 +277,7 @@ cd CodingAgents  # If you've already cloned (Step 6)
 ⚠ GitHub CLI not installed (optional - only needed for GitHub Copilot)
 ✓ Disk space available: 15.2 GB
 
-✅ Core prerequisites met! You're ready to use CodingAgents.
+✅ Core prerequisites met! You're ready to use ContainAI.
 ⚠ 1 optional tool missing (see above)
 ```
 
@@ -285,12 +285,12 @@ cd CodingAgents  # If you've already cloned (Step 6)
 
 **If you see any ❌ errors**, go back to the relevant step above.
 
-## Step 6: Clone CodingAgents
+## Step 6: Clone ContainAI
 
-Get the CodingAgents repository:
+Get the ContainAI repository:
 
 ```bash
-git clone https://github.com/novotnyllc/CodingAgents.git
+git clone https://github.com/novotnyllc/ContainAI.git
 ```
 
 ## Step 7: (Optional) Pre-fetch or Build Images
@@ -300,9 +300,9 @@ You can skip this step entirely—the launchers automatically pull whatever imag
 ### Option A: Pre-fetch pre-built images (~1 minute)
 
 ```bash
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
-docker pull ghcr.io/novotnyllc/coding-agents-codex:latest
-docker pull ghcr.io/novotnyllc/coding-agents-claude:latest
+docker pull ghcr.io/novotnyllc/containai-copilot:latest
+docker pull ghcr.io/novotnyllc/containai-codex:latest
+docker pull ghcr.io/novotnyllc/containai-claude:latest
 ```
 
 ### Option B: Build locally (~15-20 minutes)
@@ -329,10 +329,10 @@ Build all images from source (useful for development or customization). You can 
 
 **What happens during build:**
 1. Prompts for base image only if you're building one or more agent images (`copilot`, `codex`, `claude`)
-2. Builds `coding-agents-base:local` (if you choose to build locally)
-3. Builds `coding-agents:local` (shared "all agents" image) whenever agent images are selected
-4. Builds the requested specialized agent images (e.g., `coding-agents-copilot:local`)
-5. Builds `coding-agents-proxy:local` when `proxy` is part of the target list
+2. Builds `containai-base:local` (if you choose to build locally)
+3. Builds `containai:local` (shared "all agents" image) whenever agent images are selected
+4. Builds the requested specialized agent images (e.g., `containai-copilot:local`)
+5. Builds `containai-proxy:local` when `proxy` is part of the target list
 
 **Build time breakdown:**
 - Base image: ~10 minutes (if building locally, 1 min if pulling)
@@ -341,7 +341,7 @@ Build all images from source (useful for development or customization). You can 
 
 **Verify (optional):**
 ```bash
-docker images | grep coding-agents
+docker images | grep containai
 # Shows the tags you just pulled or built
 ```
 
@@ -434,17 +434,17 @@ exit  # Container auto-commits and pushes changes
 
 ### Optional: Configure Launcher Update Policy
 
-Every launcher checks whether your local CodingAgents repository is behind its upstream before starting. By default it prompts when updates are available. You can change this behavior with a tiny host-side config file:
+Every launcher checks whether your local ContainAI repository is behind its upstream before starting. By default it prompts when updates are available. You can change this behavior with a tiny host-side config file:
 
 | Platform | Config file |
 |----------|-------------|
-| Linux / macOS | `~/.config/coding-agents/host-config.env` |
-| Windows | `%USERPROFILE%\.config\coding-agents\host-config.env` |
+| Linux / macOS | `~/.config/containai/host-config.env` |
+| Windows | `%USERPROFILE%\.config\containai\host-config.env` |
 
 Example:
 
 ```ini
-# ~/.config/coding-agents/host-config.env
+# ~/.config/containai/host-config.env
 LAUNCHER_UPDATE_POLICY=prompt   # prompt | always | never
 ```
 
@@ -452,7 +452,7 @@ LAUNCHER_UPDATE_POLICY=prompt   # prompt | always | never
 - `always`: automatically `git pull --ff-only` whenever you're behind (requires clean working tree)
 - `never`: skip the check entirely (useful for air-gapped environments)
 
-You can temporarily override the policy per-process with `CODING_AGENTS_LAUNCHER_UPDATE_POLICY` in your shell or PowerShell session.
+You can temporarily override the policy per-process with `CONTAINAI_LAUNCHER_UPDATE_POLICY` in your shell or PowerShell session.
 
 ### Advanced Launch (Persistent)
 
@@ -512,9 +512,9 @@ docker stop copilot-myproject-feature-auth
 
 **Auto-push on stop**: Container automatically commits and pushes changes when stopped (unless launched with `--no-push`).
 
-- Changes are pushed to a dedicated bare repository under `~/.coding-agents/local-remotes/<repo-hash>.git` so the container never writes directly to your working tree.
-- A host-side sync daemon fast-forwards your working tree as soon as the push completes (disable with `CODING_AGENTS_DISABLE_AUTO_SYNC=1`).
-- Override the storage path by setting `CODING_AGENTS_LOCAL_REMOTES_DIR` before launching if you prefer a different secure location.
+- Changes are pushed to a dedicated bare repository under `~/.containai/local-remotes/<repo-hash>.git` so the container never writes directly to your working tree.
+- A host-side sync daemon fast-forwards your working tree as soon as the push completes (disable with `CONTAINAI_DISABLE_AUTO_SYNC=1`).
+- Override the storage path by setting `CONTAINAI_LOCAL_REMOTES_DIR` before launching if you prefer a different secure location.
 
 ## Detaching and Reconnecting
 
@@ -561,7 +561,7 @@ connect-agent
 Model Context Protocol (MCP) servers extend agent capabilities:
 
 1. See [MCP Setup Guide](mcp-setup.md)
-2. Create `~/.config/coding-agents/mcp-secrets.env` (host-only; the launcher reads it before rendering each session)
+2. Create `~/.config/containai/mcp-secrets.env` (host-only; the launcher reads it before rendering each session)
 3. Add API keys for services you want to use (GitHub token required for GitHub MCP)
 
 ### Multiple Agents
@@ -667,7 +667,7 @@ docker logs <container-name>
 
 - [Full Troubleshooting Guide](../TROUBLESHOOTING.md)
 - [Usage Guide FAQ](../USAGE.md#faq)
-- [GitHub Issues](https://github.com/novotnyllc/CodingAgents/issues)
+- [GitHub Issues](https://github.com/novotnyllc/ContainAI/issues)
 
 ## Summary
 
@@ -675,7 +675,7 @@ You've successfully:
 - ✅ Installed Docker
 - ✅ Configured Git
 - ℹ️  Optionally installed and authenticated GitHub CLI (for Copilot)
-- ✅ Cloned CodingAgents
+- ✅ Cloned ContainAI
 - ✅ Got container images
 - ✅ Installed launcher scripts
 - ✅ Launched your first agent

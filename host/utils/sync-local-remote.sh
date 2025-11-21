@@ -14,7 +14,7 @@ BARE_REPO=""
 HOST_REPO=""
 BRANCH_NAME=""
 CONTAINER_NAME=""
-INTERVAL_SECONDS="${CODING_AGENTS_LOCAL_SYNC_INTERVAL:-5}"
+INTERVAL_SECONDS="${CONTAINAI_LOCAL_SYNC_INTERVAL:-5}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -71,11 +71,11 @@ PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck disable=SC1091
 source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
-LOCK_FILE="$BARE_REPO/.coding-agents-sync.lock"
+LOCK_FILE="$BARE_REPO/.containai-sync.lock"
 LAST_SHA=""
 
 log_debug() {
-    if [ "${CODING_AGENTS_LOCAL_SYNC_DEBUG:-0}" = "1" ]; then
+    if [ "${CONTAINAI_LOCAL_SYNC_DEBUG:-0}" = "1" ]; then
         printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$1" >&2
     fi
 }

@@ -3,20 +3,20 @@
 set -euo pipefail
 
 script_name="$(basename "$0")"
-stub_name="${CODING_AGENTS_STUB_NAME:-$script_name}"
+stub_name="${CONTAINAI_STUB_NAME:-$script_name}"
 stub_name="${stub_name#mcp-stub-}"
 stub_name="${stub_name:-default}"
 
 runtime_root="/run/mcp-stubs/${stub_name}"
-core_bin="${CODING_AGENTS_STUB_CORE:-/usr/local/libexec/mcp-stub-core.py}"
+core_bin="${CONTAINAI_STUB_CORE:-/usr/local/libexec/mcp-stub-core.py}"
 
 decode_stub_from_spec() {
-    if [ -z "${CODING_AGENTS_STUB_SPEC:-}" ]; then
+    if [ -z "${CONTAINAI_STUB_SPEC:-}" ]; then
         return 0
     fi
     python3 - "$stub_name" <<'PY'
 import base64, json, os, sys
-spec_raw = os.environ.get("CODING_AGENTS_STUB_SPEC")
+spec_raw = os.environ.get("CONTAINAI_STUB_SPEC")
 expected = sys.argv[1]
 try:
     decoded = base64.b64decode(spec_raw)
@@ -40,11 +40,11 @@ umask 077
 mkdir -p "$runtime_root" "$runtime_root/tmp"
 
 # Export runtime-scoped directories to keep stub state in tmpfs
-export CODING_AGENTS_STUB_NAME="$stub_name"
-export CODING_AGENTS_STUB_RUNTIME="$runtime_root"
-export CODING_AGENTS_STUB_UID="$(python3 - <<'PY'
+export CONTAINAI_STUB_NAME="$stub_name"
+export CONTAINAI_STUB_RUNTIME="$runtime_root"
+export CONTAINAI_STUB_UID="$(python3 - <<'PY'
 import hashlib, os
-name = os.environ.get("CODING_AGENTS_STUB_NAME", "stub")
+name = os.environ.get("CONTAINAI_STUB_NAME", "stub")
 # Deterministic 16-bit uid within 20000-40000 range
 uid = 20000 + (int(hashlib.sha256(name.encode()).hexdigest(), 16) % 20000)
 print(uid)

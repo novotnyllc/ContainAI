@@ -1,6 +1,6 @@
 # Security Policy
 
-This document outlines security considerations for using and contributing to the Coding Agents project.
+This document outlines security considerations for using and contributing to the ContainAI project.
 
 ## Security Model
 
@@ -8,7 +8,7 @@ This document outlines security considerations for using and contributing to the
 
 Before any container is created, the launchers execute two dedicated preflight checks:
 
-- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-coding-agents.profile` or enable AppArmor in WSL via `host/utils/fix-wsl-security.sh`.
+- `verify_host_security_prereqs` confirms the host can enforce seccomp, AppArmor, ptrace scope hardening, and tmpfs-backed sensitive mounts. Missing profiles raise actionable errors that explain how to load `docker/profiles/apparmor-containai.profile` or enable AppArmor in WSL via `host/utils/fix-wsl-security.sh`.
 - `verify_container_security_support` inspects `docker info` JSON to ensure the runtime reports seccomp and AppArmor support. The launch aborts immediately if either feature is missing.
 
 ```mermaid
@@ -25,18 +25,18 @@ Intentional opt-outs are no longer supported. If AppArmor or seccomp are missing
 
 ### Container Isolation
 
-Each AI coding agent runs in an isolated Docker container with:
+Each AI agent runs in an isolated Docker container with:
 
 - **Non-root user:** All containers run as `agentuser` (UID 1000)
 - **No privilege escalation:** `--security-opt no-new-privileges:true` is always set
-- **Curated seccomp:** `docker/profiles/seccomp-coding-agents.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
-- **AppArmor confinement:** `docker/profiles/apparmor-coding-agents.profile` is loaded as `coding-agents` to deny `/proc` and `/sys` writes
+- **Curated seccomp:** `docker/profiles/seccomp-containai.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
+- **AppArmor confinement:** `docker/profiles/apparmor-containai.profile` is loaded as `containai` to deny `/proc` and `/sys` writes
 - **Capabilities dropped:** `--cap-drop=ALL` removes all Linux capabilities
 - **Process limits:** `--pids-limit=4096` prevents fork bomb attacks
 - **Resource limits:** CPU and memory limits prevent resource exhaustion
 - **No Docker socket access:** Containers cannot control the Docker daemon
 - **Helper sandboxing:** Helper runners inherit the same seccomp profile, run with `--network none` (unless explicitly overridden), and keep configs/secrets inside per-helper tmpfs mounts (`nosuid,nodev,noexec`)
-- **Session attestations:** Launchers render session configs on the host, compute a SHA256 manifest, and export `CODING_AGENTS_SESSION_CONFIG_SHA256` for downstream verification
+- **Session attestations:** Launchers render session configs on the host, compute a SHA256 manifest, and export `CONTAINAI_SESSION_CONFIG_SHA256` for downstream verification
 
 ### Authentication & Credentials
 
@@ -53,20 +53,20 @@ Authentication uses OAuth from your host machine, but secrets are now gated by t
 - **Secret broker sandbox:** Secrets are streamed from a host daemon that enforces per-session capabilities, mutual authentication, ptrace-safe tmpfs mounts, and immutable audit logs (see architecture doc for details)
 ### Image Secret Scanning
 
-- **Mandatory scans:** Each `coding-agents-*` image (base, all-agents, specialized) must be scanned with `trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL ...` shortly after build and again before publication. Treat any findings as build failures until resolved.
+- **Mandatory scans:** Each `containai-*` image (base, all-agents, specialized) must be scanned with `trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL ...` shortly after build and again before publication. Treat any findings as build failures until resolved.
 - **Coverage:** Integrate the scan into CI and follow the same commands locally (documented in `docs/build.md`) so contributors replicate the gate before tagging/publishing artifacts.
 - **Why it matters:** Host renderers and the secret broker keep credentials out of running containers, and the Trivy gate keeps secrets from slipping into intermediate layers, cache directories, or published tarballs.
 
 ### Session Config Integrity & Audit Logging
 
-- **Host-rendered configs:** `host/utils/render-session-config.py` merges `config.toml`, runtime facts (session ID, container name, helper mounts), and broker capabilities before any containerized code runs. The manifest SHA256 is stored in `CODING_AGENTS_SESSION_CONFIG_SHA256` and logged so helpers can confirm they received the expected configuration.
-- **Structured audit log:** Every launch records `session-config`, `capabilities-issued`, and `override-used` events in `~/.config/coding-agents/security-events.log` (override via `CODING_AGENTS_AUDIT_LOG`). Entries are mirrored to `journald` as `coding-agents-launcher` and include timestamp, git `HEAD`, trusted tree hashes, and issued capability IDs.
+- **Host-rendered configs:** `host/utils/render-session-config.py` merges `config.toml`, runtime facts (session ID, container name, helper mounts), and broker capabilities before any containerized code runs. The manifest SHA256 is stored in `CONTAINAI_SESSION_CONFIG_SHA256` and logged so helpers can confirm they received the expected configuration.
+- **Structured audit log:** Every launch records `session-config`, `capabilities-issued`, and `override-used` events in `~/.config/containai/security-events.log` (override via `CONTAINAI_AUDIT_LOG`). Entries are mirrored to `journald` as `containai-launcher` and include timestamp, git `HEAD`, trusted tree hashes, and issued capability IDs.
 - **Immutable file perms:** Audit logs, manifest outputs, and capability bundles are written with `umask 077` and stored on tmpfs mounts owned by dedicated helper users; agent workloads only receive read-only bind mounts.
-- **Verification:** Tail the log with `tail -f ~/.config/coding-agents/security-events.log` to confirm manifest hashes and capability issuance before connecting to long-lived sessions.
+- **Verification:** Tail the log with `tail -f ~/.config/containai/security-events.log` to confirm manifest hashes and capability issuance before connecting to long-lived sessions.
 
 ### Override Workflow
 
-- **Token location:** Dirty trusted files (e.g., `host/launchers/**`, stub binaries) block launches unless you create `~/.config/coding-agents/overrides/allow-dirty` (customize via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`).
+- **Token location:** Dirty trusted files (e.g., `host/launchers/**`, stub binaries) block launches unless you create `~/.config/containai/overrides/allow-dirty` (customize via `CONTAINAI_DIRTY_OVERRIDE_TOKEN`).
 - **Mandatory logging:** Any time the override token is present, `launch-agent` emits an `override-used` audit event listing the repo, label, and paths that were dirty so reviewers can prove the deviation was deliberate.
 - **Removal:** Delete the token once local testing is complete to restore strict git cleanliness enforcement and avoid accumulating noisy audit entries.
 
@@ -134,7 +134,7 @@ launch-agent copilot --network-proxy squid \
 
 ### Understanding the Risk
 
-AI coding agents can be vulnerable to **prompt injection** attacks where malicious instructions are embedded in:
+AI agents can be vulnerable to **prompt injection** attacks where malicious instructions are embedded in:
 
 - Code comments
 - File contents
@@ -217,7 +217,7 @@ Even with prompt injection, agents **cannot**:
 
 ### Reporting Prompt Injection Issues
 
-If you discover a prompt injection that bypasses these protections, please report it via [GitHub Security Advisories](https://github.com/novotnyllc/CodingAgents/security/advisories/new).
+If you discover a prompt injection that bypasses these protections, please report it via [GitHub Security Advisories](https://github.com/novotnyllc/ContainAI/security/advisories/new).
 
 ## Data Privacy
 
@@ -303,7 +303,7 @@ launch-agent copilot --use-current-branch
 
 ### Base Image
 
-The base image (`coding-agents-base:local`) contains:
+The base image (`containai-base:local`) contains:
 - Ubuntu 24.04 LTS
 - Development tools (Node.js, .NET, Python, PowerShell)
 - GitHub CLI, Playwright, MCP servers
@@ -322,7 +322,7 @@ Agent-specific images add:
 
 ### Private Disclosure
 
-For security vulnerabilities, please use [GitHub Security Advisories](https://github.com/novotnyllc/CodingAgents/security/advisories/new):
+For security vulnerabilities, please use [GitHub Security Advisories](https://github.com/novotnyllc/ContainAI/security/advisories/new):
 
 1. Click "Report a vulnerability"
 2. Provide detailed description
@@ -354,7 +354,7 @@ Report issues related to:
 
 ```bash
 # Pull latest images
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
+docker pull ghcr.io/novotnyllc/containai-copilot:latest
 
 # Or rebuild locally
 ./scripts/build/build-dev.sh
@@ -365,7 +365,7 @@ docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
 For production use, pin to specific versions:
 
 ```bash
-docker pull ghcr.io/novotnyllc/coding-agents-copilot@sha256:abc123...
+docker pull ghcr.io/novotnyllc/containai-copilot@sha256:abc123...
 ```
 
 ## Compliance Considerations

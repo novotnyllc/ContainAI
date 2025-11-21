@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Verifies SHA256SUMS for Coding Agents installs.
+# Verifies SHA256SUMS for ContainAI installs.
 # shellcheck source-path=SCRIPTDIR source=common-functions.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common-functions.sh"
 
-mode="${CODING_AGENTS_PROFILE:-${CODING_AGENTS_MODE:-dev}}"
-root="${CODING_AGENTS_ROOT:-${CODING_AGENTS_REPO_ROOT_DEFAULT}}"
-sums_path="${CODING_AGENTS_SHA256_FILE:-${root}/SHA256SUMS}"
-allow_dev_missing="${CODING_AGENTS_ALLOW_DEV_INTEGRITY_MISSING:-1}"
+mode="${CONTAINAI_PROFILE:-${CONTAINAI_MODE:-dev}}"
+root="${CONTAINAI_ROOT:-${CONTAINAI_REPO_ROOT_DEFAULT}}"
+sums_path="${CONTAINAI_SHA256_FILE:-${root}/SHA256SUMS}"
+allow_dev_missing="${CONTAINAI_ALLOW_DEV_INTEGRITY_MISSING:-1}"
 format="text"
 
 print_help() {
@@ -21,9 +21,9 @@ Behavior:
   - prod: fails hard when SHA256SUMS is missing or mismatched (exit 1)
 
 Environment:
-  CODING_AGENTS_PROFILE / CODING_AGENTS_MODE  : force profile
-  CODING_AGENTS_SHA256_FILE                   : override sums path
-  CODING_AGENTS_ALLOW_DEV_INTEGRITY_MISSING   : set 0 to fail dev missing sums
+  CONTAINAI_PROFILE / CONTAINAI_MODE  : force profile
+  CONTAINAI_SHA256_FILE                   : override sums path
+  CONTAINAI_ALLOW_DEV_INTEGRITY_MISSING   : set 0 to fail dev missing sums
 EOF
 }
 

@@ -17,11 +17,11 @@ Most users can rely on the published images that the CI system keeps in sync wit
 ### Build with docker compose (default)
 
 ```bash
-./scripts/build/build-dev.sh                           # build dev-scoped images (coding-agents-dev-*, :devlocal)
+./scripts/build/build-dev.sh                           # build dev-scoped images (containai-dev-*, :devlocal)
 ./scripts/build/build-dev.sh --agents copilot,codex     # limit to selected agents (proxy always built)
 ```
 
-Prod images are delivered by CI with signed artifacts; dev tags stay in the `coding-agents-dev-*` namespace to avoid collisions.
+Prod images are delivered by CI with signed artifacts; dev tags stay in the `containai-dev-*` namespace to avoid collisions.
 
 ## 2. Running Automated Tests
 
@@ -39,7 +39,7 @@ Prod images are delivered by CI with signed artifacts; dev tags stay in the `cod
 
 Tips:
 - Use `--preserve` with the integration harness to keep the temporary Docker-in-Docker environment alive for debugging.
-- All tests rely on mock secrets stored under `scripts/test/fixtures/mock-secrets` unless you opt into `--with-host-secrets`, which reads your real tokens from `~/.config/coding-agents/mcp-secrets.env` (or `CODING_AGENTS_MCP_SECRETS_FILE`).
+- All tests rely on mock secrets stored under `scripts/test/fixtures/mock-secrets` unless you opt into `--with-host-secrets`, which reads your real tokens from `~/.config/containai/mcp-secrets.env` (or `CONTAINAI_MCP_SECRETS_FILE`).
 - The `--with-host-secrets` flag works in both DinD and host isolation. In DinD mode, the harness securely copies your secrets file into the sandbox, deletes it after the run, and then runs a prompt-mode `--prompt` flow (currently Copilot) against your real repo. Add `--isolation host` only if you explicitly want to run on the host daemon.
 - Windows users can run the bash tests inside WSL2. The PowerShell wrappers simply call the bash versions in WSL, so the same flags apply—just prefix commands with `--%` when passing GNU-style options.
 

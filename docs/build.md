@@ -21,12 +21,12 @@ flowchart TB
         claude["claude"]
     end
     
-    subgraph allagents["All-Agents Image (Main)<br/>coding-agents:local"]
+    subgraph allagents["All-Agents Image (Main)<br/>containai:local"]
         direction TB
         all_content["• Entrypoint scripts<br/>• MCP config converter<br/>• Multi-agent support"]
     end
     
-    subgraph base["Base Image<br/>coding-agents-base:local"]
+    subgraph base["Base Image<br/>containai-base:local"]
         direction TB
         base_content["• Ubuntu 22.04<br/>• Node.js 20.x<br/>• Python 3.11<br/>• .NET SDK's 8.0, 9.0, 10.0<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
     end
@@ -47,12 +47,12 @@ flowchart TB
         claude["claude"]
     end
     
-    subgraph allagents["All-Agents Image (Main)<br/>coding-agents:local"]
+    subgraph allagents["All-Agents Image (Main)<br/>containai:local"]
         direction TB
         all_content["• Entrypoint scripts<br/>• MCP config converter<br/>• Multi-agent support"]
     end
     
-    subgraph base["Base Image<br/>coding-agents-base:local"]
+    subgraph base["Base Image<br/>containai-base:local"]
         direction TB
         base_content["• Ubuntu 22.04<br/>• Node.js 20.x<br/>• Python 3.11<br/>• .NET SDK's 8.0, 9.0, 10.0<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
     end
@@ -124,12 +124,12 @@ Each adds:
 
 ```bash
 # Tag images
-docker tag coding-agents-base:local ghcr.io/novotnyllc/coding-agents-base:latest
-docker tag coding-agents:local ghcr.io/novotnyllc/coding-agents:latest
-docker tag coding-agents-copilot:local ghcr.io/novotnyllc/coding-agents-copilot:latest
-docker tag coding-agents-codex:local ghcr.io/novotnyllc/coding-agents-codex:latest
-docker tag coding-agents-claude:local ghcr.io/novotnyllc/coding-agents-claude:latest
-docker tag coding-agents-proxy:local ghcr.io/novotnyllc/coding-agents-proxy:latest
+docker tag containai-base:local ghcr.io/novotnyllc/containai-base:latest
+docker tag containai:local ghcr.io/novotnyllc/containai:latest
+docker tag containai-copilot:local ghcr.io/novotnyllc/containai-copilot:latest
+docker tag containai-codex:local ghcr.io/novotnyllc/containai-codex:latest
+docker tag containai-claude:local ghcr.io/novotnyllc/containai-claude:latest
+docker tag containai-proxy:local ghcr.io/novotnyllc/containai-proxy:latest
 ```
 
 ### Push to Registry
@@ -139,11 +139,11 @@ docker tag coding-agents-proxy:local ghcr.io/novotnyllc/coding-agents-proxy:late
 echo $GITHUB_TOKEN | docker login ghcr.io -u clairernovotny --password-stdin
 
 # Push images
-docker push ghcr.io/novotnyllc/coding-agents-base:latest
-docker push ghcr.io/novotnyllc/coding-agents:latest
-docker push ghcr.io/novotnyllc/coding-agents-copilot:latest
-docker push ghcr.io/novotnyllc/coding-agents-codex:latest
-docker push ghcr.io/novotnyllc/coding-agents-claude:latest
+docker push ghcr.io/novotnyllc/containai-base:latest
+docker push ghcr.io/novotnyllc/containai:latest
+docker push ghcr.io/novotnyllc/containai-copilot:latest
+docker push ghcr.io/novotnyllc/containai-codex:latest
+docker push ghcr.io/novotnyllc/containai-claude:latest
 ```
 
 ### Using Published Images
@@ -151,7 +151,7 @@ docker push ghcr.io/novotnyllc/coding-agents-claude:latest
 Update Dockerfile ARG to use published base:
 
 ```dockerfile
-ARG BASE_IMAGE=ghcr.io/novotnyllc/coding-agents-base:latest
+ARG BASE_IMAGE=ghcr.io/novotnyllc/containai-base:latest
 FROM ${BASE_IMAGE}
 ```
 
@@ -159,8 +159,8 @@ Users can then:
 
 ```bash
 # Pull and use directly
-docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest
-docker run -it ghcr.io/novotnyllc/coding-agents-copilot:latest
+docker pull ghcr.io/novotnyllc/containai-copilot:latest
+docker run -it ghcr.io/novotnyllc/containai-copilot:latest
 ```
 
 ## Script Files
@@ -248,8 +248,8 @@ Current approximate sizes:
 - No secrets in images
 - Security opt: `no-new-privileges:true`
 - Read-only mounts for auth
-- Seccomp profile: `docker/profiles/seccomp-coding-agents.json` blocks ptrace/clone3/mount/setns
-- AppArmor profile: `docker/profiles/apparmor-coding-agents.profile` denies `/proc` and `/sys` writes
+- Seccomp profile: `docker/profiles/seccomp-containai.json` blocks ptrace/clone3/mount/setns
+- AppArmor profile: `docker/profiles/apparmor-containai.profile` denies `/proc` and `/sys` writes
 - Image secret scanning with Trivy (`--scanners secret`) on base/all-agents/specialized variants
 
 ⚠️ **Future improvements:**
@@ -258,17 +258,17 @@ Current approximate sizes:
 
 #### Secret Scanning Workflow
 
-The bash and PowerShell build scripts automatically invoke Trivy after every successful `docker build`. Install the CLI ahead of time (or set `CODING_AGENTS_TRIVY_BIN` to a custom path) so the scan can run locally; CI pipelines must do the same. The manual commands are documented below if you need to re-run a scan or double-check a specific tag:
+The bash and PowerShell build scripts automatically invoke Trivy after every successful `docker build`. Install the CLI ahead of time (or set `CONTAINAI_TRIVY_BIN` to a custom path) so the scan can run locally; CI pipelines must do the same. The manual commands are documented below if you need to re-run a scan or double-check a specific tag:
 
 ```bash
 # Base image
-trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL coding-agents-base:local
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai-base:local
 
 # All-agents wrapper
-trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL coding-agents:local
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai:local
 
 # Specialized images
-for image in coding-agents-copilot coding-agents-codex coding-agents-claude; do
+for image in containai-copilot containai-codex containai-claude; do
   trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL "${image}:local"
 done
 ```
@@ -295,11 +295,11 @@ done
 
 Launchers automatically pass both security profiles:
 
-- **Seccomp:** No additional setup—Docker reads `docker/profiles/seccomp-coding-agents.json` directly.
+- **Seccomp:** No additional setup—Docker reads `docker/profiles/seccomp-containai.json` directly.
 - **AppArmor:** Ensure the profile is loaded on Linux hosts:
 
 ```bash
-sudo apparmor_parser -r docker/profiles/apparmor-coding-agents.profile
+sudo apparmor_parser -r docker/profiles/apparmor-containai.profile
 ```
 
 Environment overrides:
@@ -335,13 +335,13 @@ RUN npm install -g @modelcontextprotocol/server-sequential-thinking@latest
 
 ```bash
 # Check image details
-docker images coding-agents-base:local
+docker images containai-base:local
 
 # Inspect layers
-docker history coding-agents-base:local
+docker history containai-base:local
 
 # Check for vulnerabilities (if tool installed)
-trivy image coding-agents-base:local
+trivy image containai-base:local
 ```
 
 ## Troubleshooting
@@ -353,7 +353,7 @@ trivy image coding-agents-base:local
 **Solution:**
 ```bash
 # Update package lists
-docker build --no-cache -f Dockerfile.base -t coding-agents-base:local .
+docker build --no-cache -f Dockerfile.base -t containai-base:local .
 ```
 
 ### Python package installation fails
@@ -445,7 +445,7 @@ A: Yes, but ensure it has all required packages. Ubuntu 24.04 LTS is recommended
 A: Matches the first user on most Linux/WSL2 systems, preventing permission issues with mounted volumes.
 
 **Q: Do I need all specialized images?**  
-A: No. The `coding-agents:local` all-agents image can run any agent. Specialized images are convenience wrappers.
+A: No. The `containai:local` all-agents image can run any agent. Specialized images are convenience wrappers.
 
 **Q: Can I add more MCP servers to the base image?**  
 A: Yes, but consider if they should be pre-installed (bloats image) or installed at runtime (slower startup).

@@ -13,7 +13,7 @@ import pathlib
 import sys
 from typing import Dict, List, Tuple
 
-DEFAULT_CAP_ROOT = pathlib.Path("~/.config/coding-agents/capabilities").expanduser()
+DEFAULT_CAP_ROOT = pathlib.Path("~/.config/containai/capabilities").expanduser()
 
 
 class CapabilityError(RuntimeError):

@@ -2,63 +2,63 @@ version: "3.9"
 
 x-image: &img
   registry: ${REGISTRY:-ghcr.io/novotnyllc}
-  prefix: ${IMAGE_PREFIX:-coding-agents-dev}
+  prefix: ${IMAGE_PREFIX:-containai-dev}
   tag: ${IMAGE_TAG:-devlocal}
 
 services:
   base:
-    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}-base:${IMAGE_TAG:-devlocal}
+    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}-base:${IMAGE_TAG:-devlocal}
     build:
       context: .
       dockerfile: docker/base/Dockerfile
     profiles: ["build"]
 
   agents:
-    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}:${IMAGE_TAG:-devlocal}
+    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}:${IMAGE_TAG:-devlocal}
     build:
       context: .
       dockerfile: docker/agents/all/Dockerfile
       args:
-        BASE_IMAGE: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}-base:${IMAGE_TAG:-devlocal}
+        BASE_IMAGE: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}-base:${IMAGE_TAG:-devlocal}
     depends_on:
       - base
     profiles: ["build", "agents"]
 
   copilot:
-    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}-copilot:${IMAGE_TAG:-devlocal}
+    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}-copilot:${IMAGE_TAG:-devlocal}
     build:
       context: .
       dockerfile: docker/agents/copilot/Dockerfile
       args:
-        BASE_IMAGE: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}:${IMAGE_TAG:-devlocal}
+        BASE_IMAGE: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}:${IMAGE_TAG:-devlocal}
     depends_on:
       - agents
     profiles: ["copilot", "agents"]
 
   codex:
-    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}-codex:${IMAGE_TAG:-devlocal}
+    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}-codex:${IMAGE_TAG:-devlocal}
     build:
       context: .
       dockerfile: docker/agents/codex/Dockerfile
       args:
-        BASE_IMAGE: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}:${IMAGE_TAG:-devlocal}
+        BASE_IMAGE: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}:${IMAGE_TAG:-devlocal}
     depends_on:
       - agents
     profiles: ["codex", "agents"]
 
   claude:
-    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}-claude:${IMAGE_TAG:-devlocal}
+    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}-claude:${IMAGE_TAG:-devlocal}
     build:
       context: .
       dockerfile: docker/agents/claude/Dockerfile
       args:
-        BASE_IMAGE: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}:${IMAGE_TAG:-devlocal}
+        BASE_IMAGE: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}:${IMAGE_TAG:-devlocal}
     depends_on:
       - agents
     profiles: ["claude", "agents"]
 
   proxy:
-    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-coding-agents-dev}-proxy:${IMAGE_TAG:-devlocal}
+    image: ${REGISTRY:-ghcr.io/novotnyllc}/${IMAGE_PREFIX:-containai-dev}-proxy:${IMAGE_TAG:-devlocal}
     build:
       context: .
       dockerfile: docker/proxy/Dockerfile

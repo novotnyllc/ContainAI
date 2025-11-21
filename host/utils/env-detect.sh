@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Detects Coding Agents profile based on signed profile file (no env overrides).
+# Detects ContainAI profile based on signed profile file (no env overrides).
 # Emits key=value pairs so callers can eval/export them.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_DEFAULT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-profile_file="${CODING_AGENTS_PROFILE_FILE:-$REPO_ROOT_DEFAULT/profile.env}"
+profile_file="${CONTAINAI_PROFILE_FILE:-$REPO_ROOT_DEFAULT/profile.env}"
 profile=""
 image_prefix=""
 image_tag=""
 registry=""
 repo_root="$REPO_ROOT_DEFAULT"
-prod_root_default="/opt/coding-agents/current"
+prod_root_default="/opt/containai/current"
 prod_root="$prod_root_default"
 format="env"
 
@@ -20,7 +20,7 @@ print_help() {
     cat <<'EOF'
 Usage: env-detect.sh [--format env|json] [--profile-file PATH] [--repo-root PATH] [--prod-root PATH]
 
-Detects Coding Agents profile using profile.env:
+Detects ContainAI profile using profile.env:
   PROFILE=dev|prod
   IMAGE_PREFIX=<docker image prefix>
   IMAGE_TAG=<docker tag>
@@ -58,7 +58,7 @@ load_profile() {
         source "$file"
     fi
     profile="${PROFILE:-dev}"
-    image_prefix="${IMAGE_PREFIX:-coding-agents-dev}"
+    image_prefix="${IMAGE_PREFIX:-containai-dev}"
     image_tag="${IMAGE_TAG:-devlocal}"
     registry="${REGISTRY:-ghcr.io/novotnyllc}"
 }
@@ -86,28 +86,28 @@ esac
 
 if [ "$profile" = "prod" ]; then
     root=$(resolve_path "$prod_root")
-    config_root="/etc/coding-agents"
-    data_root="/var/lib/coding-agents"
-    cache_root="/var/cache/coding-agents"
+    config_root="/etc/containai"
+    data_root="/var/lib/containai"
+    cache_root="/var/cache/containai"
 else
     root=$(resolve_path "$repo_root")
-    config_root="${HOME}/.config/coding-agents-dev"
-    data_root="${HOME}/.local/share/coding-agents-dev"
-    cache_root="${HOME}/.cache/coding-agents-dev"
+    config_root="${HOME}/.config/containai-dev"
+    data_root="${HOME}/.local/share/containai-dev"
+    cache_root="${HOME}/.cache/containai-dev"
 fi
 
-sha_file="${CODING_AGENTS_SHA256_FILE:-${root}/SHA256SUMS}"
+sha_file="${CONTAINAI_SHA256_FILE:-${root}/SHA256SUMS}"
 
 emit_env() {
-    printf 'CODING_AGENTS_PROFILE=%s\n' "$profile"
-    printf 'CODING_AGENTS_ROOT=%s\n' "$root"
-    printf 'CODING_AGENTS_CONFIG_ROOT=%s\n' "$config_root"
-    printf 'CODING_AGENTS_DATA_ROOT=%s\n' "$data_root"
-    printf 'CODING_AGENTS_CACHE_ROOT=%s\n' "$cache_root"
-    printf 'CODING_AGENTS_SHA256_FILE=%s\n' "$sha_file"
-    printf 'CODING_AGENTS_IMAGE_PREFIX=%s\n' "$image_prefix"
-    printf 'CODING_AGENTS_IMAGE_TAG=%s\n' "$image_tag"
-    printf 'CODING_AGENTS_REGISTRY=%s\n' "$registry"
+    printf 'CONTAINAI_PROFILE=%s\n' "$profile"
+    printf 'CONTAINAI_ROOT=%s\n' "$root"
+    printf 'CONTAINAI_CONFIG_ROOT=%s\n' "$config_root"
+    printf 'CONTAINAI_DATA_ROOT=%s\n' "$data_root"
+    printf 'CONTAINAI_CACHE_ROOT=%s\n' "$cache_root"
+    printf 'CONTAINAI_SHA256_FILE=%s\n' "$sha_file"
+    printf 'CONTAINAI_IMAGE_PREFIX=%s\n' "$image_prefix"
+    printf 'CONTAINAI_IMAGE_TAG=%s\n' "$image_tag"
+    printf 'CONTAINAI_REGISTRY=%s\n' "$registry"
 }
 
 emit_json() {

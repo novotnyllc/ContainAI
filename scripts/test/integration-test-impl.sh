@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Comprehensive integration test suite for coding agents
+# Comprehensive integration test suite for ContainAI
 # Supports two modes: full (build all) and launchers (use registry images)
 # No real secrets required - completely isolated testing
 
@@ -41,7 +41,7 @@ usage() {
     cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Comprehensive integration test suite for coding agents.
+Comprehensive integration test suite for ContainAI.
 
 MODES:
   --mode full         Build all images in isolated environment (no registry push)
@@ -74,13 +74,13 @@ resolve_host_secrets_file() {
     if [[ -n "$HOST_SECRETS_FILE" ]]; then
         candidates+=("$HOST_SECRETS_FILE")
     fi
-    if [[ -n "${CODING_AGENTS_MCP_SECRETS_FILE:-}" ]]; then
-        candidates+=("${CODING_AGENTS_MCP_SECRETS_FILE}")
+    if [[ -n "${CONTAINAI_MCP_SECRETS_FILE:-}" ]]; then
+        candidates+=("${CONTAINAI_MCP_SECRETS_FILE}")
     fi
     if [[ -n "${MCP_SECRETS_FILE:-}" ]]; then
         candidates+=("${MCP_SECRETS_FILE}")
     fi
-    candidates+=("${HOME}/.config/coding-agents/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
+    candidates+=("${HOME}/.config/containai/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
 
     local candidate resolved
     for candidate in "${candidates[@]}"; do
@@ -103,7 +103,7 @@ ensure_host_secrets_ready() {
         if ! HOST_SECRETS_FILE=$(resolve_host_secrets_file); then
             cat >&2 <<'EOF'
 ❌ --with-host-secrets requested but no mcp-secrets.env file was found.
-Provide CODING_AGENTS_MCP_SECRETS_FILE, MCP_SECRETS_FILE, or place the file under ~/.config/coding-agents/.
+Provide CONTAINAI_MCP_SECRETS_FILE, MCP_SECRETS_FILE, or place the file under ~/.config/containai/.
 EOF
             exit 1
         fi
@@ -295,10 +295,10 @@ docker run -d \\
     --name "$container_name" \\
     --label "$TEST_LABEL_TEST" \\
     --label "$TEST_LABEL_SESSION" \\
-    --label "coding-agents.type=agent" \\
-    --label "coding-agents.agent=copilot" \\
-    --label "coding-agents.repo=test-repo" \\
-    --label "coding-agents.branch=main" \\
+    --label "containai.type=agent" \\
+    --label "containai.agent=copilot" \\
+    --label "containai.repo=test-repo" \\
+    --label "containai.branch=main" \\
     --network "$TEST_NETWORK" \\
     -v "$TEST_REPO_DIR:/workspace" \\
     -e "GH_TOKEN=$TEST_GH_TOKEN" \\
@@ -326,10 +326,10 @@ test_container_labels() {
     
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
     
-    assert_container_has_label "$container_name" "coding-agents.type" "agent"
-    assert_container_has_label "$container_name" "coding-agents.agent" "copilot"
-    assert_container_has_label "$container_name" "coding-agents.repo" "test-repo"
-    assert_container_has_label "$container_name" "coding-agents.branch" "main"
+    assert_container_has_label "$container_name" "containai.type" "agent"
+    assert_container_has_label "$container_name" "containai.agent" "copilot"
+    assert_container_has_label "$container_name" "containai.repo" "test-repo"
+    assert_container_has_label "$container_name" "containai.branch" "main"
 }
 
 test_container_networking() {
@@ -673,7 +673,7 @@ PY
 test_squid_proxy_hardening() {
     test_section "Testing squid proxy hardening rules"
 
-    local proxy_image="coding-agents-proxy:test-hardened"
+    local proxy_image="containai-proxy:test-hardened"
     if ! docker image inspect "$proxy_image" >/dev/null 2>&1; then
         echo "Building proxy image for hardening test..."
         if ! docker build -f "$PROJECT_ROOT/docker/proxy/Dockerfile" -t "$proxy_image" "$PROJECT_ROOT"; then
@@ -983,7 +983,7 @@ PY
 test_mcp_helper_proxy_enforced() {
     test_section "Testing MCP helper enforced proxy egress"
 
-    local proxy_image="coding-agents-proxy:test-hardened"
+    local proxy_image="containai-proxy:test-hardened"
     if ! docker image inspect "$proxy_image" >/dev/null 2>&1; then
         echo "Building proxy image for helper proxy test..."
         if ! docker build -f "$PROJECT_ROOT/docker/proxy/Dockerfile" -t "$proxy_image" "$PROJECT_ROOT"; then
@@ -1087,7 +1087,7 @@ PY
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
-        -e "CODING_AGENTS_REQUIRE_PROXY=1" \
+        -e "CONTAINAI_REQUIRE_PROXY=1" \
         -v "$PROJECT_ROOT:/workspace" \
         "$TEST_CODEX_IMAGE" \
         sh -c "\
@@ -1149,8 +1149,8 @@ test_multiple_agents() {
             --name "$container_name" \
             --label "$TEST_LABEL_TEST" \
             --label "$TEST_LABEL_SESSION" \
-            --label "coding-agents.type=agent" \
-            --label "coding-agents.agent=$agent" \
+            --label "containai.type=agent" \
+            --label "containai.agent=$agent" \
             --network "$TEST_NETWORK" \
             -v "$TEST_REPO_DIR:/workspace" \
             "$test_image" \
@@ -1260,8 +1260,8 @@ test_host_prompt_mode() {
     local exit_code=0
 
     pushd "$TEST_REPO_DIR" >/dev/null
-    if ! CODING_AGENTS_MCP_SECRETS_FILE="$HOST_SECRETS_FILE" \
-        CODING_AGENTS_PROMPT_POST_HOOK="$hook_script" \
+    if ! CONTAINAI_MCP_SECRETS_FILE="$HOST_SECRETS_FILE" \
+        CONTAINAI_PROMPT_POST_HOOK="$hook_script" \
         "$run_copilot" --prompt "$prompt" >"$tmp_output" 2>&1; then
         exit_code=$?
     fi
@@ -1315,7 +1315,7 @@ test_shared_functions() {
     # Test get_repo_name
     local repo_name
     repo_name=$(get_repo_name "$TEST_REPO_DIR")
-    if [[ "$repo_name" =~ test-coding-agents-repo ]]; then
+    if [[ "$repo_name" =~ test-containai-repo ]]; then
         pass "get_repo_name() works in test environment"
     else
         fail "get_repo_name() failed (got: $repo_name)"
@@ -1341,7 +1341,7 @@ test_shared_functions() {
 run_all_tests() {
     echo ""
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║      Coding Agents Integration Test Suite                ║"
+    echo "║      ContainAI Integration Test Suite                ║"
     echo "║      Mode: $(printf '%-46s' "$TEST_MODE")║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""

@@ -14,7 +14,7 @@ WORKDIR /agent-task-runner
 COPY --chown=nonroot:nonroot docker/runtime/agent-task-runner/ ./
 RUN cargo build --release --locked
 
-# Base image for coding agents container
+# Base image for containai container
 # This is a DEVELOPMENT container - agents need build tools to compile code!
 FROM ubuntu:24.04
 
@@ -251,7 +251,7 @@ RUN set -eux; \
 
 # Snapshot mutable root directories so they can be restored into tmpfs overlays at runtime
 RUN set -eux; \
-    snapshot_root="/opt/coding-agents/basefs"; \
+    snapshot_root="/opt/containai/basefs"; \
     mkdir -p "${snapshot_root}/var/lib/dpkg" \
         "${snapshot_root}/var/lib/apt" \
         "${snapshot_root}/var/cache/apt" \
@@ -280,8 +280,8 @@ ENV PATH="/home/agentuser/.local/bin:${PATH}"
 ENV PATH="/home/agentuser/.cargo/bin:${PATH}"
 ENV PATH="/toolcache/pipx/bin:${PATH}"
 
-ENV CODING_AGENTS_BASEFS=/opt/coding-agents/basefs \
-    CODING_AGENTS_TOOLCACHE=/toolcache \
+ENV CONTAINAI_BASEFS=/opt/containai/basefs \
+    CONTAINAI_TOOLCACHE=/toolcache \
     PIP_CACHE_DIR=/toolcache/pip \
     PIPX_HOME=/toolcache/pipx \
     PIPX_BIN_DIR=/toolcache/pipx/bin \

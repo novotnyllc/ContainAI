@@ -4,7 +4,7 @@ This document expands on `docs/secret-credential-architecture.md` for the purpos
 
 ## 1. Executive Summary & Scope
 
-Coding Agents executes immutable vendor-provided CLI binaries (Copilot, Codex, Claude, MCP servers) inside per-session containers while exporting long-lived host credentials on demand. The security objective is to prevent those binaries—or any code they launch—from exfiltrating brokered secrets or escalating privileges, without modifying the vendor executables themselves. This review covers:
+ContainAI executes immutable vendor-provided CLI binaries (Copilot, Codex, Claude, MCP servers) inside per-session containers while exporting long-lived host credentials on demand. The security objective is to prevent those binaries—or any code they launch—from exfiltrating brokered secrets or escalating privileges, without modifying the vendor executables themselves. This review covers:
 
 - Host-side launchers (`host/launchers/*.sh|ps1`), secret broker (`host/utils/secret-broker.py`), and packaging helpers.
 - Container bootstrap (`docker/agents/**`, `docker/runtime/entrypoint.sh`) plus the Rust runner (`docker/runtime/agent-task-runner/**`).
@@ -124,7 +124,7 @@ sequenceDiagram
 
 Revocation:
 
-- Launcher or operator invokes `coding-agents kill <session>` → broker revokes remaining capabilities, wipes tmpfs, and instructs Docker to stop the container.
+- Launcher or operator invokes `containai kill <session>` → broker revokes remaining capabilities, wipes tmpfs, and instructs Docker to stop the container.
 - Capability manifests include expiry timestamps and session IDs; helpers refuse redemption after expiry or if run outside the expected namespace.
 
 ## 5. Execution Mediation & Sandbox Guarantees
@@ -141,7 +141,7 @@ Wrappers therefore remain extremely small: they rename the vendor binary, export
 The Rust crate installs a user-notification filter defined in `docker/runtime/agent-task-runner/src/seccomp.rs`. The filter has two phases:
 
 1. **Trap phase** – Registers `execve`/`execveat` with `SECCOMP_FILTER_FLAG_NEW_LISTENER`, forcing the kernel to pause the calling thread and send a notification to `agent-task-runnerd`. The notification includes the syscall number, argument registers, tid/pid, and a file descriptor that the daemon uses to respond. No process leaves this pause without an explicit `SECCOMP_IOCTL_NOTIF_SEND` from the daemon.
-2. **Enforcement phase** – After the daemon approves and forks the sandbox, it applies the “coding-agents-task” seccomp profile to the spawned workload. That profile blocks syscall classes that could expose secrets or break out of the namespace.
+2. **Enforcement phase** – After the daemon approves and forks the sandbox, it applies the “containai-task” seccomp profile to the spawned workload. That profile blocks syscall classes that could expose secrets or break out of the namespace.
 
 | Category | Syscalls denied | Rationale |
 | --- | --- | --- |
@@ -160,7 +160,7 @@ Once the daemon allows the `execve`, it forks a helper that executes `agent_task
 1. **Unshares namespaces** – Calls `unshare(CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC | CLONE_NEWUTS)` while it still runs as root, creating a fresh mount + pid namespace for the workload.
 2. **Masks sensitive mounts** – Replaces `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` with anonymous tmpfs mounts owned by root and mounted `mode=000,MS_PRIVATE|MS_UNBINDABLE`. Even if a file descriptor leaked, bind propagation cannot re-introduce the original paths.
 3. **Drops privileges** – Uses `setresgid`/`setresuid` to switch to `agentuser`, clears supplementary groups, and calls `prctl(PR_SET_NO_NEW_PRIVS, 1)`.
-4. **Loads AppArmor/SELinux profile** – Applies the `coding-agents-task` label that confines filesystem access to `/workspace`, `/home/agentuser`, `/tmp`, `/var/tmp`, and the runner pipe FDs.
+4. **Loads AppArmor/SELinux profile** – Applies the `containai-task` label that confines filesystem access to `/workspace`, `/home/agentuser`, `/tmp`, `/var/tmp`, and the runner pipe FDs.
 5. **Attaches seccomp profile** – Loads the deny list summarized above for the lifetime of the process tree.
 6. **Executes workload** – Finally `execve`s the user command with STDIO wired back to the runner so outputs flow to the vendor CLI.
 
@@ -208,7 +208,7 @@ sequenceDiagram
     end
     rect rgba(255,244,214,0.4)
     R->>S: Fork sandbox, unshare pid/mount, mask /run/agent-*
-    R->>S: Apply PR_SET_NO_NEW_PRIVS, seccomp, AppArmor `coding-agents-task`
+    R->>S: Apply PR_SET_NO_NEW_PRIVS, seccomp, AppArmor `containai-task`
     S->>U: execve user command as agentuser with limited mounts
     U-->>C: STDIO tunneled through runner socket
     R-->>Logs: Emit audit event (allowed/denied, hash, argv)
@@ -220,7 +220,7 @@ Sandbox invariants:
 - `/run/agent-secrets/*` and `/run/agent-data/*` are private tmpfs mounts owned by `agentcli` or per-stub UIDs; sandboxed workloads never see those paths because the mount propagation is `MS_PRIVATE|MS_UNBINDABLE`.
 - `PR_SET_NO_NEW_PRIVS` blocks setuid binaries or ambient capability acquisition.
 - Seccomp profile denies `ptrace`, `process_vm_*`, `mount`, `pivot_root`, and `unshare` for spawned workloads.
-- AppArmor profile (`coding-agents-task`) restricts filesystem access to `/workspace`, `/home/agentuser`, `/tmp`, and helper sockets.
+- AppArmor profile (`containai-task`) restricts filesystem access to `/workspace`, `/home/agentuser`, `/tmp`, and helper sockets.
 
 ## 6. Data Persistence & Sync Controls
 
@@ -258,7 +258,7 @@ Guarantees:
 | Threat | Control(s) | Evidence |
 | --- | --- | --- |
 | Vendor binary reads host secrets directly | Secrets stored only on host, broker issues sealed capability; inside container secrets live in tmpfs owned by helper UID | `run-agent`, `prepare-*-secrets.sh`, broker logs |
-| Prompt instructs agent to `cat /run/agent-secrets/...` | Runner sandbox spawns commands in separate namespace without secret mounts; AppArmor denies paths even if accessible | `agent_task_sandbox.rs`, `coding-agents-task` profile |
+| Prompt instructs agent to `cat /run/agent-secrets/...` | Runner sandbox spawns commands in separate namespace without secret mounts; AppArmor denies paths even if accessible | `agent_task_sandbox.rs`, `containai-task` profile |
 | Compromised MCP stub exfiltrates other MCP keys | Per-MCP UID + tmpfs + network policy limited to approved domains; capability scoped to stub hash/session | `docker/agents/*/init-*.sh`, broker capability manifest |
 | Replay attack using leaked capability | Manifest pins session ID, namespace, expiry; helpers verify environment before redeeming | `capability-unseal.py`, helper scripts |
 | Helper tampering / dirty launcher tree | Launcher refuses to start if trusted paths dirty; override token required (audited) | `run-agent`, `security-events.log` |
@@ -275,7 +275,7 @@ Guarantees:
   - `agent-task-runner/events.log` logs every exec attempt with allow/deny decision.
   - `audit-agent` generates signed inventories for live sessions.
   - Squid proxy emits outbound request logs correlated by session ID.
-- **Operational response:** `coding-agents kill <session>` revokes capabilities and tears down containers; logs allow root-cause investigation.
+- **Operational response:** `containai kill <session>` revokes capabilities and tears down containers; logs allow root-cause investigation.
 
 ## 9. Residual Risks & Mitigations in Progress
 

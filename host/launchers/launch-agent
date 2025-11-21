@@ -11,9 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/common-functions.sh"
 
 detect_environment_profile
-REPO_ROOT="$CODING_AGENTS_ROOT"
+REPO_ROOT="$CONTAINAI_ROOT"
 
-if [ "$CODING_AGENTS_PROFILE" = "dev" ]; then
+if [ "$CONTAINAI_PROFILE" = "dev" ]; then
     maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
 fi
 
@@ -32,7 +32,7 @@ fi
 
 TRUSTED_PATHS=("host/launchers" "docker/runtime" "docker/profiles")
 TRUSTED_TREE_LABEL="launcher + helper files"
-if [ "$CODING_AGENTS_PROFILE" = "dev" ]; then
+if [ "$CONTAINAI_PROFILE" = "dev" ]; then
     if ! ensure_trusted_paths_clean "$REPO_ROOT" "$TRUSTED_TREE_LABEL" "${TRUSTED_PATHS[@]}"; then
         exit 1
     fi
@@ -42,8 +42,8 @@ if [ "$SOURCE_TYPE" = "local" ] && [ -f "$SOURCE/config.toml" ]; then
     SESSION_CONFIG_SOURCE="$SOURCE/config.toml"
 fi
 
-if [ -z "$SESSION_CONFIG_SOURCE" ] && [ -f "${HOME}/.config/coding-agents/config.toml" ]; then
-    SESSION_CONFIG_SOURCE="${HOME}/.config/coding-agents/config.toml"
+if [ -z "$SESSION_CONFIG_SOURCE" ] && [ -f "${HOME}/.config/containai/config.toml" ]; then
+    SESSION_CONFIG_SOURCE="${HOME}/.config/containai/config.toml"
 fi
 
 LAUNCHER_HEAD_HASH=$(get_git_head_hash "$REPO_ROOT" 2>/dev/null || echo "")
@@ -94,9 +94,9 @@ LOCAL_REMOTE_HOST_PATH=""
 LOCAL_REMOTE_WSL_PATH=""
 LOCAL_REMOTE_URL=""
 LOCAL_REPO_PATH_VALUE=""
-TMPFS_LARGE_SIZE="${CODING_AGENTS_TMPFS_LARGE:-2g}"
-TMPFS_SMALL_SIZE="${CODING_AGENTS_TMPFS_SMALL:-512m}"
-TMPFS_SECRET_SIZE="${CODING_AGENTS_TMPFS_SECRETS:-32m}"
+TMPFS_LARGE_SIZE="${CONTAINAI_TMPFS_LARGE:-2g}"
+TMPFS_SMALL_SIZE="${CONTAINAI_TMPFS_SMALL:-512m}"
+TMPFS_SECRET_SIZE="${CONTAINAI_TMPFS_SECRETS:-32m}"
 DEFAULT_BROKER_STUBS=("github" "uno" "msftdocs" "playwright" "context7" "serena" "sequential-thinking" "fetch")
 BROKER_STUBS=("${DEFAULT_BROKER_STUBS[@]}")
 declare -A MCP_SECRET_VALUES=()
@@ -119,13 +119,13 @@ trim_whitespace() {
 load_mcp_secret_values() {
     local -a candidates=()
     declare -A seen_map=()
-    if [ -n "${CODING_AGENTS_MCP_SECRETS_FILE:-}" ]; then
-        candidates+=("${CODING_AGENTS_MCP_SECRETS_FILE}")
+    if [ -n "${CONTAINAI_MCP_SECRETS_FILE:-}" ]; then
+        candidates+=("${CONTAINAI_MCP_SECRETS_FILE}")
     fi
     if [ -n "${MCP_SECRETS_FILE:-}" ]; then
         candidates+=("${MCP_SECRETS_FILE}")
     fi
-    candidates+=("${HOME}/.config/coding-agents/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
+    candidates+=("${HOME}/.config/containai/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
     local candidate resolved
     for candidate in "${candidates[@]}"; do
         [ -n "$candidate" ] || continue
@@ -256,8 +256,8 @@ detect_copilot_cli_secret() {
     local host_cfg="${HOME}/.copilot/config.json"
     if [ ! -f "$host_cfg" ]; then
         echo "❌ Copilot credentials not found at $host_cfg" >&2
-        if [ "${CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
-            echo "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
+        if [ "${CONTAINAI_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
+            echo "   Continuing due to CONTAINAI_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
             return 1
         fi
         exit 1
@@ -272,8 +272,8 @@ detect_codex_cli_secret() {
     local host_cfg="${HOME}/.codex/auth.json"
     if [ ! -f "$host_cfg" ]; then
         echo "❌ Codex credentials not found at $host_cfg" >&2
-        if [ "${CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
-            echo "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
+        if [ "${CONTAINAI_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
+            echo "   Continuing due to CONTAINAI_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
             return 1
         fi
         exit 1
@@ -301,8 +301,8 @@ detect_claude_cli_secret() {
         return 0
     fi
     echo "❌ Claude credentials missing (expected ~/.claude/.credentials.json or CLAUDE_API_KEY)" >&2
-    if [ "${CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
-        echo "   Continuing due to CODING_AGENTS_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
+    if [ "${CONTAINAI_ALLOW_AGENT_WITHOUT_SECRETS:-0}" = "1" ]; then
+        echo "   Continuing due to CONTAINAI_ALLOW_AGENT_WITHOUT_SECRETS=1" >&2
         return 1
     fi
     exit 1
@@ -461,7 +461,7 @@ store_stub_secrets() {
                 echo "⚠️  Missing secret '$name' for stub '$stub'" >&2
                 continue
             fi
-            if ! CODING_AGENTS_SECRET_VALUE="$value" run_python_tool "$broker_script" -- store --stub "$stub" --name "$name" --from-env CODING_AGENTS_SECRET_VALUE >/dev/null 2>&1; then
+            if ! CONTAINAI_SECRET_VALUE="$value" run_python_tool "$broker_script" -- store --stub "$stub" --name "$name" --from-env CONTAINAI_SECRET_VALUE >/dev/null 2>&1; then
                 echo "❌ Failed to store secret '$name' for stub '$stub'" >&2
                 return 1
             fi
@@ -520,7 +520,7 @@ PY
         printf '%s\n' "$key_hex" > "$dest_path"
         chmod 600 "$dest_path" 2>/dev/null || true
     fi
-    local host_store="${HOME}/.config/coding-agents/data-hmac/${agent_name}"
+    local host_store="${HOME}/.config/containai/data-hmac/${agent_name}"
     mkdir -p "$host_store"
     cp "$dest_path" "$host_store/${session_id}.key"
     chmod 600 "$host_store/${session_id}.key" 2>/dev/null || true
@@ -687,7 +687,7 @@ else
             REMOTE_HASH=$(printf "%s" "$SOURCE" | sha256sum | awk '{print $1}')
         fi
         REMOTE_HASH=${REMOTE_HASH:0:16}
-        LOCAL_REMOTE_DIR="${CODING_AGENTS_LOCAL_REMOTES_DIR:-${HOME}/.coding-agents/local-remotes}"
+        LOCAL_REMOTE_DIR="${CONTAINAI_LOCAL_REMOTES_DIR:-${HOME}/.containai/local-remotes}"
         LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
         mkdir -p "$LOCAL_REMOTE_DIR"
         if [ ! -d "$LOCAL_REMOTE_HOST_PATH" ]; then
@@ -786,7 +786,7 @@ if ! validate_container_name "$CONTAINER_NAME"; then
     exit 1
 fi
 
-SESSION_ARTIFACT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/coding-agents-session.XXXXXXXX" 2>/dev/null || mktemp -d)
+SESSION_ARTIFACT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/containai-session.XXXXXXXX" 2>/dev/null || mktemp -d)
 SESSION_CONFIG_OUTPUT="$SESSION_ARTIFACT_DIR/session-config"
 mkdir -p "$SESSION_CONFIG_OUTPUT"
 SESSION_ID="${CONTAINER_NAME}-${SESSION_ID_BASE}-${RANDOM}"
@@ -806,11 +806,11 @@ fi
 
 PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
 PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
-PROXY_IMAGE="coding-agents-proxy:local"
+PROXY_IMAGE="containai-proxy:local"
 
 # Pull latest image
 pull_and_tag_image "$AGENT"
-IMAGE_NAME="coding-agents-${AGENT}:local"
+IMAGE_NAME="containai-${AGENT}:local"
 
 # Get timezone
 TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
@@ -844,7 +844,7 @@ if [ "$USE_SQUID" = true ]; then
     pull_and_tag_image "proxy"
 fi
 
-SESSION_CONFIG_ROOT_IN_CONTAINER="/run/coding-agents"
+SESSION_CONFIG_ROOT_IN_CONTAINER="/run/containai"
 RENDERER_SCRIPT="$REPO_ROOT/host/utils/render-session-config.py"
 TRUSTED_HASH_ARGS=()
 if [ -n "$TRUSTED_TREE_HASHES_RAW" ]; then
@@ -922,7 +922,7 @@ fi
 
 BROKER_CAP_DIR="$SESSION_CONFIG_OUTPUT/capabilities"
 mkdir -p "$BROKER_CAP_DIR"
-export CODING_AGENTS_SESSION_CONFIG_SHA256="${SESSION_CONFIG_SHA256:-}"
+export CONTAINAI_SESSION_CONFIG_SHA256="${SESSION_CONFIG_SHA256:-}"
 if ! issue_session_capabilities "$SESSION_ID" "$BROKER_CAP_DIR" "${BROKER_STUBS[@]}"; then
     echo "❌ Failed to issue capability tokens" >&2
     exit 1
@@ -1023,8 +1023,8 @@ if container_exists "$CONTAINER_NAME"; then
     
     # Handle existing proxy if squid mode
     if [ "$USE_SQUID" = true ]; then
-        EXISTING_PROXY=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.proxy-container" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_CONTAINER_NAME")
-        EXISTING_NETWORK=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.proxy-network" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_NETWORK_NAME")
+        EXISTING_PROXY=$(container_cli inspect -f '{{ index .Config.Labels "containai.proxy-container" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_CONTAINER_NAME")
+        EXISTING_NETWORK=$(container_cli inspect -f '{{ index .Config.Labels "containai.proxy-network" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_NETWORK_NAME")
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
         ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS"
@@ -1061,7 +1061,7 @@ DOCKER_ARGS=(
     "-e" "AGENT_BRANCH=$AGENT_BRANCH"
     "-e" "NETWORK_POLICY=$NETWORK_POLICY_ENV"
     "-e" "AUTO_PUSH_ON_SHUTDOWN=$AUTO_PUSH_VALUE"
-    "-e" "CODING_AGENTS_PROFILE=$CODING_AGENTS_PROFILE"
+    "-e" "CONTAINAI_PROFILE=$CONTAINAI_PROFILE"
     "-e" "AGENT_SESSION_MODE=shell"
     "-e" "AGENT_SESSION_SHELL_BIN=/bin/bash"
     "-e" "AGENT_SESSION_SHELL_ARGS=-l"
@@ -1071,18 +1071,18 @@ DOCKER_ARGS=(
     "-e" "HOST_LAUNCHER_HEAD=$LAUNCHER_HEAD_HASH"
     "-e" "HOST_SESSION_CONFIG_ROOT=$SESSION_CONFIG_ROOT_IN_CONTAINER"
     "-e" "HOST_CAPABILITY_ROOT=${SESSION_CONFIG_ROOT_IN_CONTAINER}/capabilities"
-    "-e" "CODING_AGENTS_AGENT_SECRET_ROOT=/run/agent-secrets"
-    "-e" "CODING_AGENTS_AGENT_DATA_ROOT=/run/agent-data"
-    "-e" "CODING_AGENTS_SECRET_TMPFS_SIZE=${TMPFS_SECRET_SIZE}"
-    "--label" "coding-agents.type=agent"
-    "--label" "coding-agents.profile=$CODING_AGENTS_PROFILE"
-    "--label" "coding-agents.agent=$AGENT"
-    "--label" "coding-agents.repo=$REPO_NAME"
-    "--label" "coding-agents.branch=$AGENT_BRANCH"
-    "--label" "coding-agents.network-policy=$NETWORK_POLICY_ENV"
-    "--label" "coding-agents.volume.workspace=$WORKSPACE_VOLUME"
-    "--label" "coding-agents.volume.home=$HOME_VOLUME"
-    "--label" "coding-agents.volume.toolcache=$TOOLCACHE_VOLUME"
+    "-e" "CONTAINAI_AGENT_SECRET_ROOT=/run/agent-secrets"
+    "-e" "CONTAINAI_AGENT_DATA_ROOT=/run/agent-data"
+    "-e" "CONTAINAI_SECRET_TMPFS_SIZE=${TMPFS_SECRET_SIZE}"
+    "--label" "containai.type=agent"
+    "--label" "containai.profile=$CONTAINAI_PROFILE"
+    "--label" "containai.agent=$AGENT"
+    "--label" "containai.repo=$REPO_NAME"
+    "--label" "containai.branch=$AGENT_BRANCH"
+    "--label" "containai.network-policy=$NETWORK_POLICY_ENV"
+    "--label" "containai.volume.workspace=$WORKSPACE_VOLUME"
+    "--label" "containai.volume.home=$HOME_VOLUME"
+    "--label" "containai.volume.toolcache=$TOOLCACHE_VOLUME"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
     "-v" "${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"
@@ -1102,11 +1102,11 @@ else
     LOCAL_REPO_ENV_VALUE="${LOCAL_REPO_PATH_VALUE:-$WSL_PATH}"
     DOCKER_ARGS+=("-e" "LOCAL_REPO_PATH=$LOCAL_REPO_ENV_VALUE")
     DOCKER_ARGS+=("-v" "${WSL_PATH}:/tmp/source-repo:ro")
-    DOCKER_ARGS+=("--label" "coding-agents.repo-path=$RESOLVED_PATH")
+    DOCKER_ARGS+=("--label" "containai.repo-path=$RESOLVED_PATH")
     if [ -n "${LOCAL_REMOTE_WSL_PATH:-}" ]; then
         DOCKER_ARGS+=("-e" "LOCAL_REMOTE_URL=${LOCAL_REMOTE_URL}")
         DOCKER_ARGS+=("-v" "${LOCAL_REMOTE_WSL_PATH}:/tmp/local-remote")
-        DOCKER_ARGS+=("--label" "coding-agents.local-remote=$LOCAL_REMOTE_HOST_PATH")
+        DOCKER_ARGS+=("--label" "containai.local-remote=$LOCAL_REMOTE_HOST_PATH")
     fi
 fi
 
@@ -1121,16 +1121,16 @@ if [ "$USE_SQUID" = true ]; then
         "-e" "https_proxy=$PROXY_URL"
         "-e" "NO_PROXY=localhost,127.0.0.1,.internal,::1"
         "-e" "no_proxy=localhost,127.0.0.1,.internal,::1"
-        "--label" "coding-agents.proxy-container=$PROXY_CONTAINER_NAME"
-        "--label" "coding-agents.proxy-network=$PROXY_NETWORK_NAME"
-        "--label" "coding-agents.proxy-image=$PROXY_IMAGE"
+        "--label" "containai.proxy-container=$PROXY_CONTAINER_NAME"
+        "--label" "containai.proxy-network=$PROXY_NETWORK_NAME"
+        "--label" "containai.proxy-image=$PROXY_IMAGE"
     )
 fi
 
 # Add optional agent configs
 [ -d "${HOME}/.config/codex" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/codex:/home/agentuser/.config/codex:ro")
 [ -d "${HOME}/.config/claude" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
-[ -f "${HOME}/.config/coding-agents/mcp-secrets.env" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/coding-agents/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
+[ -f "${HOME}/.config/containai/mcp-secrets.env" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/containai/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
 
 TMPFS_MOUNTS=(
     "/tmp:rw,nosuid,nodev,size=${TMPFS_LARGE_SIZE},mode=1777"
@@ -1151,7 +1151,7 @@ for tmpfs_mount in "${TMPFS_MOUNTS[@]}"; do
 done
 
 # Start git credential proxy server on host if not already running
-CREDENTIAL_SOCKET_PATH="${HOME}/.config/coding-agents/git-credential.sock"
+CREDENTIAL_SOCKET_PATH="${HOME}/.config/containai/git-credential.sock"
 CREDENTIAL_PROXY_SCRIPT="$SCRIPT_DIR/../utils/git-credential-proxy-server.sh"
 
 if [ ! -S "$CREDENTIAL_SOCKET_PATH" ]; then
@@ -1181,7 +1181,7 @@ if [ ! -S "$CREDENTIAL_SOCKET_PATH" ]; then
 fi
 
 # Start GPG proxy server on host if not already running and GPG signing is configured
-GPG_SOCKET_PATH="${HOME}/.config/coding-agents/gpg-proxy.sock"
+GPG_SOCKET_PATH="${HOME}/.config/containai/gpg-proxy.sock"
 GPG_PROXY_SCRIPT="$SCRIPT_DIR/../utils/gpg-proxy-server.sh"
 GPG_SIGNING_ENABLED=false
 
@@ -1283,9 +1283,9 @@ if [ -n "$GPU" ]; then
     DOCKER_ARGS+=("--gpus=$GPU")
 fi
 
-if [ -n "${CODING_AGENTS_EXTRA_DOCKER_ARGS:-}" ]; then
+if [ -n "${CONTAINAI_EXTRA_DOCKER_ARGS:-}" ]; then
     # shellcheck disable=SC2206
-    EXTRA_DOCKER_ARGS=(${CODING_AGENTS_EXTRA_DOCKER_ARGS})
+    EXTRA_DOCKER_ARGS=(${CONTAINAI_EXTRA_DOCKER_ARGS})
     DOCKER_ARGS+=("${EXTRA_DOCKER_ARGS[@]}")
 fi
 
@@ -1323,11 +1323,11 @@ if ! echo "$SETUP_SCRIPT" | container_cli exec -i "$CONTAINER_NAME" bash; then
     exit 1
 fi
 
-if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ] && [ "${CODING_AGENTS_DISABLE_AUTO_SYNC:-0}" != "1" ]; then
+if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ] && [ "${CONTAINAI_DISABLE_AUTO_SYNC:-0}" != "1" ]; then
     SYNC_SCRIPT="$REPO_ROOT/host/utils/sync-local-remote.sh"
     if [ -x "$SYNC_SCRIPT" ]; then
-        mkdir -p "${HOME}/.coding-agents/logs"
-        LOG_FILE="${HOME}/.coding-agents/logs/${CONTAINER_NAME}-sync.log"
+        mkdir -p "${HOME}/.containai/logs"
+        LOG_FILE="${HOME}/.containai/logs/${CONTAINER_NAME}-sync.log"
         "$SYNC_SCRIPT" \
             --bare "$LOCAL_REMOTE_HOST_PATH" \
             --repo "$SOURCE" \

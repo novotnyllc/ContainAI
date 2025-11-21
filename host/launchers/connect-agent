@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 select_container() {
-    mapfile -t containers < <($CONTAINER_CMD ps --filter "label=coding-agents.type=agent" --format '{{.Names}}')
+    mapfile -t containers < <($CONTAINER_CMD ps --filter "label=containai.type=agent" --format '{{.Names}}')
     if [ ${#containers[@]} -eq 0 ]; then
         echo "No running agent containers found. Launch one with run-<agent> or launch-agent." >&2
         exit 1

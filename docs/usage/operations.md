@@ -19,7 +19,7 @@ If you see:
 
 Check the host secrets file exists (the renderer reads it before each launch):
 ```bash
-ls ~/.config/coding-agents/mcp-secrets.env
+ls ~/.config/containai/mcp-secrets.env
 ```
 
 Verify tokens are valid:
@@ -193,7 +193,7 @@ A: No if using published images. Yes if making custom changes.
 A: Inside the container at `/workspace`. They're persistent until you remove the container.
 
 **Q: How do I get my changes out?**  
-A: Inside the container run `git push` to update the managed `local` remote. A background sync fast-forwards the matching branch in your host repo, so you can immediately `git push origin <branch>` from the host when you're ready. (If you set `CODING_AGENTS_DISABLE_AUTO_SYNC=1`, manually `git fetch ~/.coding-agents/local-remotes/<hash>.git <branch>` before pushing.)
+A: Inside the container run `git push` to update the managed `local` remote. A background sync fast-forwards the matching branch in your host repo, so you can immediately `git push origin <branch>` from the host when you're ready. (If you set `CONTAINAI_DISABLE_AUTO_SYNC=1`, manually `git fetch ~/.containai/local-remotes/<hash>.git <branch>` before pushing.)
 
 **Q: Can I edit files from host while container is running?**  
 A: No, the workspace is isolated inside the container. Use VS Code Remote to edit.

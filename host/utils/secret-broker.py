@@ -18,8 +18,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
-CONFIG_ROOT = pathlib.Path(os.environ.get("CODING_AGENTS_CONFIG_DIR", pathlib.Path.home() / ".config" / "coding-agents"))
-BROKER_DIR = pathlib.Path(os.environ.get("CODING_AGENTS_BROKER_DIR", CONFIG_ROOT / "broker.d"))
+CONFIG_ROOT = pathlib.Path(os.environ.get("CONTAINAI_CONFIG_DIR", pathlib.Path.home() / ".config" / "containai"))
+BROKER_DIR = pathlib.Path(os.environ.get("CONTAINAI_BROKER_DIR", CONFIG_ROOT / "broker.d"))
 KEY_FILE = BROKER_DIR / "keys.json"
 STATE_FILE = BROKER_DIR / "state.json"
 SECRETS_FILE = BROKER_DIR / "secrets.json"
@@ -36,9 +36,9 @@ DEFAULT_STUBS = [
     "agent_codex_cli",
     "agent_claude_cli",
 ]
-ISSUE_WINDOW_SECONDS = int(os.environ.get("CODING_AGENTS_BROKER_RATE_WINDOW", "60"))
-ISSUE_WINDOW_LIMIT = int(os.environ.get("CODING_AGENTS_BROKER_RATE_LIMIT", "30"))
-DEFAULT_TTL_MINUTES = int(os.environ.get("CODING_AGENTS_BROKER_TTL", "30"))
+ISSUE_WINDOW_SECONDS = int(os.environ.get("CONTAINAI_BROKER_RATE_WINDOW", "60"))
+ISSUE_WINDOW_LIMIT = int(os.environ.get("CONTAINAI_BROKER_RATE_LIMIT", "30"))
+DEFAULT_TTL_MINUTES = int(os.environ.get("CONTAINAI_BROKER_TTL", "30"))
 
 
 def _ensure_dir(path: pathlib.Path) -> None:
@@ -69,7 +69,7 @@ def _write_json(path: pathlib.Path, data: Dict) -> None:
 
 
 def _maybe_lock_file(path: pathlib.Path) -> None:
-    if os.environ.get("CODING_AGENTS_BROKER_IMMUTABLE", "1") != "1":
+    if os.environ.get("CONTAINAI_BROKER_IMMUTABLE", "1") != "1":
         return
     if os.name != "posix":  # chattr only on Linux
         return

@@ -24,8 +24,8 @@ if ! "$PROJECT_ROOT/scripts/release/package.sh" --version "$VERSION" --out "$DIS
     exit 1
 fi
 
-BUNDLE="$DIST_DIR/$VERSION/coding-agents-$VERSION.tar.gz"
-BUNDLE_ATTEST="$DIST_DIR/$VERSION/coding-agents-$VERSION.tar.gz.intoto.jsonl"
+BUNDLE="$DIST_DIR/$VERSION/containai-$VERSION.tar.gz"
+BUNDLE_ATTEST="$DIST_DIR/$VERSION/containai-$VERSION.tar.gz.intoto.jsonl"
 [[ -f "$BUNDLE" ]] || { echo "❌ Bundle missing"; exit 1; }
 echo '{"attestation":"placeholder"}' > "$BUNDLE_ATTEST"
 

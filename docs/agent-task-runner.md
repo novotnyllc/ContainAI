@@ -1,6 +1,6 @@
 # Agent Task Runner Security Notes
 
-This document explains the Rust-based control plane that mediates every process launched inside Coding Agents containers. It is written for security auditors who need to understand how the runner components interact, which invariants they enforce, and how those guarantees are verified in CI and release builds.
+This document explains the Rust-based control plane that mediates every process launched inside ContainAI containers. It is written for security auditors who need to understand how the runner components interact, which invariants they enforce, and how those guarantees are verified in CI and release builds.
 
 ## 1. High-Level Goals
 
@@ -23,7 +23,7 @@ These programs are shipped inside every agent container by the `docker/base/Dock
 
 ## 3. Control Plane Flow
 
-1. **Launcher metadata** – Host launchers populate `HOST_SESSION_ID`, `CODING_AGENTS_AGENT_NAME`, `CODING_AGENTS_AGENT_BINARY`, and expose `/run/agent-task-runner.sock` inside the container.
+1. **Launcher metadata** – Host launchers populate `HOST_SESSION_ID`, `CONTAINAI_AGENT_NAME`, `CONTAINAI_AGENT_BINARY`, and expose `/run/agent-task-runner.sock` inside the container.
 2. **Wrapper invocation** – When a user runs `copilot exec` (or equivalent), the wrapper executes `/usr/local/bin/agent-task-runnerctl --session <id> --agent <name> --binary <path> -- <user command>`.
 3. **Runner request** – `agent-task-runnerctl` connects to the seqpacket socket, sends `MSG_RUN_REQUEST`, and streams STDIN in-band. All options and environment overrides are serialized in the payload so the daemon can validate them before any process spawns.
 4. **Sandbox creation** – The daemon validates policy (hide paths, workspace dir, session scope) and calls into `agent-task-sandbox`. That helper unshares namespaces, masks `/run/agent-*`, drops to `agentuser`, applies the AppArmor enforce profile plus seccomp task filter, and finally `execve`s the requested binary.
@@ -55,7 +55,7 @@ sequenceDiagram
 | Secrets never leave tmpfs | Entrypoint mounts `/run/agent-secrets` and `/run/agent-data` as `tmpfs` with `mode=000`; sandbox helper remounts them private/unbindable and workloads run as `agentuser`. | Documented in `docs/secret-credential-security-review.md` §4–5. |
 | Every workload is logged | Runner assigns each command the agent/binary/session metadata carried by the wrapper and emits structured JSON events (`/run/agent-task-runner/events.log`). | Log format defined in `agent_task_runnerd.rs` (`Event` struct). |
 | Policy enforcement even when wrappers fail | `agentcli-exec` installs a seccomp user-notification filter on `execve`/`execveat`; daemon can deny or allow after inspecting `/proc/<pid>/exe`. | Violations return `EPERM` and increment anomaly counter. |
-| Namespace, AppArmor, seccomp applied before user code | `agent-task-sandbox` unshares, remounts hide paths (`--hide`), drops to `agentuser`, calls `prctl(PR_SET_NO_NEW_PRIVS,1)`, then loads the `coding-agents-task` profile before final `execve`. | Prevents privileged syscalls (ptrace, mount, perf, raw sockets, etc.). |
+| Namespace, AppArmor, seccomp applied before user code | `agent-task-sandbox` unshares, remounts hide paths (`--hide`), drops to `agentuser`, calls `prctl(PR_SET_NO_NEW_PRIVS,1)`, then loads the `containai-task` profile before final `execve`. | Prevents privileged syscalls (ptrace, mount, perf, raw sockets, etc.). |
 | STDIO integrity | seqpacket channel ensures message boundaries and backpressure; client handles EINTR and closes STDIN cleanly on EOF, so signal delivery is deterministic. | See `channel.rs` + `FSIZE` guard. |
 | Build reproducibility | `docker/base/Dockerfile` builds all runner binaries in an isolated stage (`cargo build --release --locked`). CI uses the same Dockerfile to produce release artifacts. | `scripts/build/build-dev.sh` rebuilds dev-scoped images; prod builds are pinned and produced in CI. |
 

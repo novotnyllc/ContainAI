@@ -1,6 +1,6 @@
 # Architecture
 
-High-level design of the AI coding agents container system.
+High-level design of ContainAI.
 
 ## Design Principles
 
@@ -18,7 +18,7 @@ flowchart TB
     subgraph host["HOST SYSTEM"]
         direction TB
         auth["Authentication (OAuth)<br/>• ~/.config/gh/<br/>• ~/.config/github-copilot/<br/>• ~/.config/codex/<br/>• ~/.config/claude/"]
-        secrets["Secret Inputs<br/>• ~/.config/coding-agents/mcp-secrets.env<br/>• env overrides"]
+        secrets["Secret Inputs<br/>• ~/.config/containai/mcp-secrets.env<br/>• env overrides"]
         repo["Source Repository<br/>• /path/to/repo"]
         renderer["Session Renderer<br/>• render-session-config.py<br/>• hashes trusted trees<br/>• encodes stub manifests"]
         broker["Secret Broker<br/>• per-stub shared keys<br/>• issues + redeems capabilities"]
@@ -29,7 +29,7 @@ flowchart TB
     subgraph container["CONTAINER (isolated)"]
         direction TB
         workspace["Workspace (/workspace)<br/>• git clone/copy<br/>• user code only"]
-        tmpfs["Session tmpfs (/run/coding-agents)<br/>• stub specs<br/>• sealed capabilities<br/>• decrypted secrets"]
+        tmpfs["Session tmpfs (/run/containai)<br/>• stub specs<br/>• sealed capabilities<br/>• decrypted secrets"]
         mcpstub["mcp-stub wrappers<br/>• broker-only secret redemption<br/>• launches MCP processes"]
         agents["Agents (Copilot/Codex/Claude)"]
     end
@@ -59,7 +59,7 @@ Prompt (`--prompt`) sessions reuse the exact same trust chain. When you launch t
 | Zone | Examples | Trust Level | Guarantees |
 | --- | --- | --- | --- |
 | Host enclave | launchers, `render-session-config.py`, secret broker, audit logs | **Trusted** | Hash-verified scripts, seccomp/AppArmor enforced, never runs user code |
-| Session tmpfs | `/run/coding-agents`, capability directories, decrypted secrets | **Constrained** | Mounted `nosuid,nodev,noexec`, owned by stub-specific UIDs, cleared on exit |
+| Session tmpfs | `/run/containai`, capability directories, decrypted secrets | **Constrained** | Mounted `nosuid,nodev,noexec`, owned by stub-specific UIDs, cleared on exit |
 | Agent workspace | `/workspace`, user shells, MCP child processes | **Untrusted** | Read-only view of auth configs, cannot access tmpfs or broker sockets |
 
 Only the launcher can talk directly to the broker. Agent processes must call `mcp-stub`, which checks that the manifest hash, capability scope, and PID namespace match the session before opening a memfd with decrypted data. If any layer fails integrity checks, the broker refuses to stream secrets and the MCP launch aborts.
@@ -72,17 +72,17 @@ Only the launcher can talk directly to the broker. Agent processes must call `mc
 flowchart TB
     subgraph specialized["Specialized Images (Optional)"]
         direction TB
-        spec_content["• coding-agents-copilot:local<br/>• coding-agents-codex:local<br/>• coding-agents-claude:local<br/>+ Auth validation<br/>+ Agent-specific CMD"]
+        spec_content["• containai-copilot:local<br/>• containai-codex:local<br/>• containai-claude:local<br/>+ Auth validation<br/>+ Agent-specific CMD"]
     end
     
     subgraph allagents["All-Agents Image"]
         direction TB
-        all_content["• coding-agents:local<br/>+ entrypoint.sh (session bootstrap)<br/>+ mcp-stub helper<br/>+ legacy setup-mcp-configs shim"]
+        all_content["• containai:local<br/>+ entrypoint.sh (session bootstrap)<br/>+ mcp-stub helper<br/>+ legacy setup-mcp-configs shim"]
     end
     
     subgraph base["Base Image"]
         direction TB
-        base_content["• coding-agents-base:local<br/>• Ubuntu 24.04<br/>• Node.js 20.x<br/>• Python 3.12<br/>• .NET SDK 8.0, 9.0, 10.0<br/>• .NET workloads (Aspire, MAUI, WASM)<br/>• PowerShell<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
+        base_content["• containai-base:local<br/>• Ubuntu 24.04<br/>• Node.js 20.x<br/>• Python 3.12<br/>• .NET SDK 8.0, 9.0, 10.0<br/>• .NET workloads (Aspire, MAUI, WASM)<br/>• PowerShell<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
     end
     
     specialized -->|FROM| allagents
@@ -93,7 +93,7 @@ flowchart TB
     style base fill:#d4edda,stroke:#28a745
 ```
 
-### Base Image (coding-agents-base:local)
+### Base Image (containai-base:local)
 
 **Purpose:** Reusable foundation with all language runtimes and tools
 
@@ -116,7 +116,7 @@ During container startup the entrypoint mounts `/run/agent-secrets`, `/run/agent
 
 The base image also ships a small setuid helper (`/usr/local/bin/agentcli-exec`) and rewrites the vendor binaries (`github-copilot-cli`, `codex`, `claude`) to wrappers that export `AGENT_TASK_RUNNER_SOCKET`/helper metadata before invoking the real binary as `agentcli`. This ensures every CLI session automatically runs inside the locked-down UID split without asking operators to change workflows.
 
-### All-Agents Image (coding-agents:local)
+### All-Agents Image (containai:local)
 
 **Purpose:** Production-ready image with runtime scripts
 
@@ -132,15 +132,15 @@ The base image also ships a small setuid helper (`/usr/local/bin/agentcli-exec`)
 
 ### Specialized Images
 
-**coding-agents-copilot:local:**
+**containai-copilot:local:**
 - Validates `~/.config/github-copilot/` or `~/.config/gh/` mounted
 - Default CMD: `github-copilot-cli`
 
-**coding-agents-codex:local:**
+**containai-codex:local:**
 - Validates `~/.config/codex/` mounted
 - Default CMD: `codex`
 
-**coding-agents-claude:local:**
+**containai-claude:local:**
 - Validates `~/.config/claude/` mounted
 - Default CMD: `claude`
 
@@ -152,8 +152,8 @@ The base image also ships a small setuid helper (`/usr/local/bin/agentcli-exec`)
 To keep the "stateless image" guarantee enforceable, every build (local or CI) must finish with a container secret scan before the image is tagged or published. We currently use [Trivy](https://aquasecurity.github.io/trivy) with its secret scanner enabled:
 
 ```bash
-trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL coding-agents-base:local
-trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL coding-agents:local
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai-base:local
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai:local
 ```
 
 Integrate the same check into CI for all agent variants so every published artifact proves it passed the scanner. If any token-shaped string or committed credential is detected, the build should fail and the image must not be pushed. Combined with host-rendered manifests and broker-enforced runtime secrets, this keeps secrets out of layers and intermediate build cache.
@@ -181,7 +181,7 @@ flowchart LR
 Before any container spins up, `render-session-config.py` runs on the host:
 
 - Reads repo-level `config.toml`, agent-specific overrides, and CLI flags.
-- Collects secrets from `~/.config/coding-agents/mcp-secrets.env` (plus overrides) without exposing them to the workspace.
+- Collects secrets from `~/.config/containai/mcp-secrets.env` (plus overrides) without exposing them to the workspace.
 - Emits a session manifest with the session ID, network policy, trusted tree hashes, and per-stub wiring (servers, command lines, env placeholders).
 - Writes `servers.txt` and `stub-secrets.txt` so launchers know which MCP stubs need credentials.
 
@@ -196,7 +196,7 @@ The launcher then:
 With secrets staged, the launcher creates the container:
 
 - Exposes repo/branch metadata via environment variables (`HOST_SESSION_ID`, `HOST_SESSION_CONFIG_ROOT`, `HOST_CAPABILITY_ROOT`).
-- Mounts `/run/coding-agents` as a dedicated tmpfs (`nosuid,nodev,noexec,mode=750`).
+- Mounts `/run/containai` as a dedicated tmpfs (`nosuid,nodev,noexec,mode=750`).
 - Copies the rendered manifest, per-agent MCP config JSON, and sealed capabilities into that tmpfs **before** any user code runs.
 - Mounts OAuth configs (`~/.config/gh`, `~/.config/github-copilot`, etc.) read-only, along with credential/GPG proxy sockets when available.
 
@@ -206,7 +206,7 @@ With secrets staged, the launcher creates the container:
 
 1. Re-enforces ptrace scope, `/proc` hardening, and tmpfs ownership under `agentuser` while mounting CLI-sensitive tmpfs as `agentcli` with `nosuid,nodev,noexec` guardrails.
 2. Verifies and installs the host-provided manifest + MCP configs under `~/.config/<agent>/mcp/`.
-3. Copies sealed capabilities into `/home/agentuser/.config/coding-agents/capabilities` (also tmpfs).
+3. Copies sealed capabilities into `/home/agentuser/.config/containai/capabilities` (also tmpfs).
 4. Falls back to `setup-mcp-configs.sh` **only** if the host did not provide a manifest (legacy mode).
 5. Configures git credential + GPG proxies, strips upstream remotes, and wires the managed local remote plus auto-commit hooks.
 
@@ -290,7 +290,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    create["Host: create ~/.config/coding-agents/mcp-secrets.env"]
+    create["Host: create ~/.config/containai/mcp-secrets.env"]
     populate["Host: add GITHUB_TOKEN, CONTEXT7_API_KEY, ..."]
     renderer["render-session-config.py resolves placeholders"]
     brokerStore["Secret broker seals values per stub"]
@@ -335,7 +335,7 @@ flowchart TB
 **Benefits:**
 - Containers stay isolated from GitHub credentials and cannot accidentally force-push.
 - Host bare repo captures every commit even if the container is deleted.
-- A background daemon (`host/utils/sync-local-remote.{sh,ps1}`) watches the bare repo and fast-forwards the host working tree after every push unless `CODING_AGENTS_DISABLE_AUTO_SYNC=1`.
+- A background daemon (`host/utils/sync-local-remote.{sh,ps1}`) watches the bare repo and fast-forwards the host working tree after every push unless `CONTAINAI_DISABLE_AUTO_SYNC=1`.
 - You choose when (or if) agent output is published upstream.
 - Users can still add their own remotes inside the container, but only after an explicit opt-in.
 
@@ -362,7 +362,7 @@ flowchart TB
     workspace["Workspace"]
     configToml["config.toml (single source of truth)"]
     renderer["render-session-config.py<br/>(host)"]
-    manifest["Session manifest + stub spec<br/>/run/coding-agents"]
+    manifest["Session manifest + stub spec<br/>/run/containai"]
     agentCfgs["Per-agent config.json<br/>~/.config/<agent>/mcp/"]
     stub["mcp-stub"]
     broker["Secret broker"]
@@ -381,7 +381,7 @@ flowchart TB
     style mcp fill:#f8d7da,stroke:#721c24
 ```
 
-`render-session-config.py` now runs entirely on the host. It parses `config.toml`, expands `${VAR}` placeholders using secrets loaded from `~/.config/coding-agents/mcp-secrets.env`, and writes fully-resolved JSON configs for each agent into the session tmpfs. The container no longer needs to read your plaintext secrets file; only the manifest and sealed capabilities cross the boundary.
+`render-session-config.py` now runs entirely on the host. It parses `config.toml`, expands `${VAR}` placeholders using secrets loaded from `~/.config/containai/mcp-secrets.env`, and writes fully-resolved JSON configs for each agent into the session tmpfs. The container no longer needs to read your plaintext secrets file; only the manifest and sealed capabilities cross the boundary.
 
 ### Example config.toml
 
@@ -413,7 +413,7 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 ```
 
-The renderer substitutes `${VAR}` placeholders before the configs enter the container. Secrets therefore exist only in two places: your encrypted host broker store and the stub-specific tmpfs mounted at `/run/coding-agents`. When an MCP server launches, `mcp-stub` injects the decrypted values into its private tmpfs and removes them as soon as the process exits.
+The renderer substitutes `${VAR}` placeholders before the configs enter the container. Secrets therefore exist only in two places: your encrypted host broker store and the stub-specific tmpfs mounted at `/run/containai`. When an MCP server launches, `mcp-stub` injects the decrypted values into its private tmpfs and removes them as soon as the process exits.
 
 ## Multi-Agent Workflow
 
@@ -476,8 +476,8 @@ flowchart TB
 
 - Container runs as non-root user (UID 1000)
 - `--security-opt no-new-privileges:true`
-- Seccomp: `docker/profiles/seccomp-coding-agents.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
-- AppArmor: `coding-agents` profile denies writes to `/proc`, `/sys`, and prevents `mount`
+- Seccomp: `docker/profiles/seccomp-containai.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
+- AppArmor: `containai` profile denies writes to `/proc`, `/sys`, and prevents `mount`
 - Root filesystem mounted read-only with tmpfs overlays only for `/tmp`, `/var/tmp`, `/run`, apt/dpkg paths
 - Package managers (pip/pipx, npm/yarn/pnpm, Playwright, uv, cargo/rustup, bun, NuGet/dotnet) write inside the shared `/toolcache` volume
 - Read-only mounts for authentication
@@ -488,7 +488,7 @@ flowchart TB
 - `agentcli-exec` installs a libseccomp filter so that every `execve`/`execveat` inside the `agentcli` namespace is paused and inspected by `agent-task-runnerd` before it runs.
 - Both helpers ship from the Rust crate at `docker/runtime/agent-task-runner`, eliminating the previous C implementations per the secure-language requirement.
 - `agent-task-runnerd` (shipped in `/usr/local/bin/agent-task-runnerd`) listens on `/run/agent-task-runner.sock`, receives the seccomp notification FD over SCM_RIGHTS, reconstructs the target command from the paused task’s memory, and appends a JSON log line to `/run/agent-task-runner/events.log`.
-- Operators choose `CODING_AGENTS_RUNNER_POLICY=observe|enforce` at runtime. Observe mode resumes the syscall after logging; enforce mode denies any exec whose binary lives under `/run/agent-secrets` or `/run/agent-data`, preventing helper processes from inheriting sensitive tmpfs mounts even if wrappers are bypassed.
+- Operators choose `CONTAINAI_RUNNER_POLICY=observe|enforce` at runtime. Observe mode resumes the syscall after logging; enforce mode denies any exec whose binary lives under `/run/agent-secrets` or `/run/agent-data`, preventing helper processes from inheriting sensitive tmpfs mounts even if wrappers are bypassed.
 - Because the filter is attached inside the container rather than via Docker’s seccomp profile, the interception works for every vendor CLI (Copilot, Codex, Claude) regardless of future runtime changes.
 
 ### Secret Management

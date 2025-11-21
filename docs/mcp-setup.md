@@ -1,6 +1,6 @@
 # MCP (Model Context Protocol) Setup Guide
 
-Model Context Protocol (MCP) servers extend the capabilities of AI coding agents by providing access to external tools, APIs, and data sources. This guide explains how to configure MCP servers for use with CodingAgents.
+Model Context Protocol (MCP) servers extend the capabilities of AI agents by providing access to external tools, APIs, and data sources. This guide explains how to configure MCP servers for use with ContainAI.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ Model Context Protocol is a standard for connecting AI agents to external tools 
 
 ## Available MCP Servers
 
-CodingAgents includes the following MCP servers in all images:
+ContainAI includes the following MCP servers in all images:
 
 | Server | Purpose | Authentication Required |
 |--------|---------|------------------------|
@@ -62,15 +62,15 @@ Hundreds of servers are available for databases, cloud services, APIs, and devel
 
 MCP configuration is managed through two mechanisms:
 
-1. **Secrets file**: `~/.config/coding-agents/mcp-secrets.env` - API keys and tokens
-2. **Config file**: `~/.config/coding-agents/config.toml` - Server configurations
+1. **Secrets file**: `~/.config/containai/mcp-secrets.env` - API keys and tokens
+2. **Config file**: `~/.config/containai/config.toml` - Server configurations
 
 ### Host-side rendering
 
-CodingAgents now resolves `config.toml` **before** a container starts. The launcher invokes `render-session-config.py`, which:
+ContainAI now resolves `config.toml` **before** a container starts. The launcher invokes `render-session-config.py`, which:
 
-- Reads your repo-level `config.toml` plus any `~/.config/coding-agents/config[-<agent>].toml` overrides.
-- Loads secrets from `~/.config/coding-agents/mcp-secrets.env` (or `MCP_SECRETS_FILE`) while still on the host.
+- Reads your repo-level `config.toml` plus any `~/.config/containai/config[-<agent>].toml` overrides.
+- Loads secrets from `~/.config/containai/mcp-secrets.env` (or `MCP_SECRETS_FILE`) while still on the host.
 - Substitutes `$VAR` / `${VAR}` placeholders everywhere they appear (arguments, env blocks, `bearer_token_env_var`, etc.).
 - Emits fully resolved JSON configs for each agent (`~/.config/<agent>/mcp/config.json` inside the container) and a stub manifest that maps servers → `mcp-stub` command lines.
 
@@ -96,7 +96,7 @@ sequenceDiagram
    Render-->>Launch: Session manifest + stub spec (hash recorded)
    Launch->>Broker: Store secrets + request capabilities per stub
    Broker-->>Launch: Sealed capability bundle (scoped to session)
-   Launch->>Ctr: docker run + copy manifest/capabilities into /run/coding-agents
+   Launch->>Ctr: docker run + copy manifest/capabilities into /run/containai
    Ctr->>Stub: entrypoint installs configs, enforces tmpfs ownership
    note over Stub,Broker: Agent later requests MCP access
    Stub->>Broker: Redeem capability token for server-specific secret
@@ -118,21 +118,21 @@ Key points:
 
 ```bash
 # Copy the example
-cp mcp-secrets.env.example ~/.config/coding-agents/mcp-secrets.env
+cp mcp-secrets.env.example ~/.config/containai/mcp-secrets.env
 
 # Or create directory if needed
-mkdir -p ~/.config/coding-agents
+mkdir -p ~/.config/containai
 ```
 
 **Windows:**
 ```powershell
-mkdir $env:USERPROFILE\.config\coding-agents -Force
-copy mcp-secrets.env.example $env:USERPROFILE\.config\coding-agents\mcp-secrets.env
+mkdir $env:USERPROFILE\.config\containai -Force
+copy mcp-secrets.env.example $env:USERPROFILE\.config\containai\mcp-secrets.env
 ```
 
 ### 2. Add your API keys
 
-Edit `~/.config/coding-agents/mcp-secrets.env`:
+Edit `~/.config/containai/mcp-secrets.env`:
 
 ```bash
 # GitHub Personal Access Token
@@ -150,7 +150,7 @@ CONTEXT7_API_KEY=your_context7_key_here
 
 **Linux/Mac:**
 ```bash
-chmod 600 ~/.config/coding-agents/mcp-secrets.env
+chmod 600 ~/.config/containai/mcp-secrets.env
 ```
 
 **Windows:**
@@ -192,7 +192,7 @@ chmod 600 ~/.config/coding-agents/mcp-secrets.env
 
 ### Default Configuration
 
-CodingAgents ships with a default `config.toml` that includes all built-in MCP servers.
+ContainAI ships with a default `config.toml` that includes all built-in MCP servers.
 
 **View default config:**
 ```bash
@@ -201,10 +201,10 @@ cat config.toml
 
 ### Custom Configuration
 
-Create your own config at `~/.config/coding-agents/config.toml`:
+Create your own config at `~/.config/containai/config.toml`:
 
 ```toml
-# ~/.config/coding-agents/config.toml
+# ~/.config/containai/config.toml
 
 # GitHub MCP Server
 [mcp.servers.github]
@@ -254,21 +254,21 @@ args = ["/usr/local/bin/mcp-server-serena"]
 
 1. **Find the server** in the [MCP Server Registry](https://github.com/modelcontextprotocol/servers)
 2. **Check requirements**: Note the npm package name and required environment variables
-3. **Add secrets** to `~/.config/coding-agents/mcp-secrets.env`
-4. **Add configuration** to `~/.config/coding-agents/config.toml`
+3. **Add secrets** to `~/.config/containai/mcp-secrets.env`
+4. **Add configuration** to `~/.config/containai/config.toml`
 5. **Restart container** for changes to take effect
 
 **Example: Add a Third-Party MCP Server**
 
 1. Add API key to secrets file:
 ```bash
-# ~/.config/coding-agents/mcp-secrets.env
+# ~/.config/containai/mcp-secrets.env
 SERVICE_API_KEY=your_api_key_here
 ```
 
 2. Add server to config file:
 ```toml
-# ~/.config/coding-agents/config.toml
+# ~/.config/containai/config.toml
 # Example using a hypothetical web search server
 [mcp.servers.search-service]
 command = "npx"
@@ -290,7 +290,7 @@ exit
 You can create agent-specific configurations:
 
 ```bash
-~/.config/coding-agents/
+~/.config/containai/
 ├── config.toml              # Default for all agents
 ├── config-copilot.toml      # GitHub Copilot specific
 ├── config-codex.toml        # OpenAI Codex specific
@@ -306,7 +306,7 @@ You can create agent-specific configurations:
 **Example agent-specific config:**
 
 ```toml
-# ~/.config/coding-agents/config-copilot.toml
+# ~/.config/containai/config-copilot.toml
 # Only enable minimal servers for Copilot
 
 [mcp.servers.github]
@@ -327,13 +327,13 @@ args = ["-y", "@microsoft/mcp-server-docs"]
 
 ```bash
 # Check secrets file
-ls -la ~/.config/coding-agents/mcp-secrets.env
+ls -la ~/.config/containai/mcp-secrets.env
 
 # Check config file
-ls -la ~/.config/coding-agents/config.toml
+ls -la ~/.config/containai/config.toml
 
 # Or on Windows
-dir $env:USERPROFILE\.config\coding-agents\
+dir $env:USERPROFILE\.config\containai\
 ```
 
 ### 2. Launch container and check
@@ -385,13 +385,13 @@ ls -la /tmp/
 **Check:**
 ```bash
 # Confirm the host secrets file exists
-ls -la ~/.config/coding-agents/mcp-secrets.env
+ls -la ~/.config/containai/mcp-secrets.env
 
 # Ensure the expected keys are present
-grep GITHUB_TOKEN ~/.config/coding-agents/mcp-secrets.env
+grep GITHUB_TOKEN ~/.config/containai/mcp-secrets.env
 
 # If you override the location, verify the launcher sees it
-echo ${CODING_AGENTS_MCP_SECRETS_FILE:-$MCP_SECRETS_FILE}
+echo ${CONTAINAI_MCP_SECRETS_FILE:-$MCP_SECRETS_FILE}
 ```
 
 You can also re-run the renderer directly to surface warnings before launching an agent:
@@ -408,7 +408,7 @@ python host/utils/render-session-config.py \
 ```
 
 **Solution:**
-- Add the missing key/value pairs to `~/.config/coding-agents/mcp-secrets.env` (or the override path)
+- Add the missing key/value pairs to `~/.config/containai/mcp-secrets.env` (or the override path)
 - Re-launch the agent so the host renderer can rebuild the manifest with the updated secrets
 
 ### Environment Variables Not Expanding
@@ -418,7 +418,7 @@ python host/utils/render-session-config.py \
 **Cause:** Token not in `mcp-secrets.env`
 
 **Solution:**
-1. Verify secrets file has token: `cat ~/.config/coding-agents/mcp-secrets.env`
+1. Verify secrets file has token: `cat ~/.config/containai/mcp-secrets.env`
 2. Check for typos in variable names (case-sensitive)
 3. Ensure no quotes around values in secrets file
 
@@ -536,7 +536,7 @@ launch-agent copilot .
 
 **Symptom:**
 ```
-Error: EACCES: permission denied, open '/home/<user>/.config/coding-agents/mcp-secrets.env'
+Error: EACCES: permission denied, open '/home/<user>/.config/containai/mcp-secrets.env'
 ```
 
 **Cause:** Your user account cannot read the secrets file, so the host renderer fails before the container launches.
@@ -544,10 +544,10 @@ Error: EACCES: permission denied, open '/home/<user>/.config/coding-agents/mcp-s
 **Solution (run on host):**
 ```bash
 # Fix ownership
-chown $USER:$USER ~/.config/coding-agents/mcp-secrets.env
+chown $USER:$USER ~/.config/containai/mcp-secrets.env
 
 # Fix permissions (read-only for user)
-chmod 600 ~/.config/coding-agents/mcp-secrets.env
+chmod 600 ~/.config/containai/mcp-secrets.env
 ```
 
 ### MCP Server Crashes
@@ -603,10 +603,10 @@ Rotate tokens regularly:
 **Linux/Mac:**
 ```bash
 # Secrets should be user-readable only
-chmod 600 ~/.config/coding-agents/mcp-secrets.env
+chmod 600 ~/.config/containai/mcp-secrets.env
 
 # Config can be more permissive
-chmod 644 ~/.config/coding-agents/config.toml
+chmod 644 ~/.config/containai/config.toml
 ```
 
 ### 4. Never Commit Secrets
@@ -614,12 +614,12 @@ chmod 644 ~/.config/coding-agents/config.toml
 ```bash
 # Add to .gitignore
 echo "mcp-secrets.env" >> .gitignore
-echo ".config/coding-agents/mcp-secrets.env" >> .gitignore
+echo ".config/containai/mcp-secrets.env" >> .gitignore
 ```
 
 ### 5. Container Isolation
 
-Secrets never enter the container as files. The launcher renders configs on the host, stores sealed capabilities in `/run/coding-agents`, and MCP binaries can only read tokens by calling the trusted `mcp-stub` helper. Verify each run prints `🔐 Session MCP config manifest: <sha>`—that indicates host rendering succeeded and no plaintext secrets were copied into the workspace volume.
+Secrets never enter the container as files. The launcher renders configs on the host, stores sealed capabilities in `/run/containai`, and MCP binaries can only read tokens by calling the trusted `mcp-stub` helper. Verify each run prints `🔐 Session MCP config manifest: <sha>`—that indicates host rendering succeeded and no plaintext secrets were copied into the workspace volume.
 
 ## Advanced Configuration
 
@@ -674,11 +674,11 @@ MY_API_KEY = "$MY_API_KEY"
 
 ## Summary
 
-1. ✅ Copy `mcp-secrets.env.example` to `~/.config/coding-agents/mcp-secrets.env`
+1. ✅ Copy `mcp-secrets.env.example` to `~/.config/containai/mcp-secrets.env`
 2. ✅ Add your API keys (GitHub token required, others optional)
 3. ✅ Secure the file with `chmod 600`
-4. ✅ Customize `~/.config/coding-agents/config.toml` if needed
+4. ✅ Customize `~/.config/containai/config.toml` if needed
 5. ✅ Launch agent - MCP servers auto-configured
 6. ✅ Test by asking agent to use MCP capabilities
 
-Need help? See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) or [open an issue](https://github.com/novotnyllc/CodingAgents/issues).
+Need help? See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) or [open an issue](https://github.com/novotnyllc/ContainAI/issues).

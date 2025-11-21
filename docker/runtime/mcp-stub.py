@@ -19,9 +19,9 @@ import sys
 from typing import Dict, Iterable, List, Tuple
 
 PLACEHOLDER_PATTERN = re.compile(r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)")
-DEFAULT_CAP_ROOT = os.path.expanduser("~/.config/coding-agents/capabilities")
-SPEC_ENV_VAR = "CODING_AGENTS_STUB_SPEC"
-CAP_ROOT_ENV_VAR = "CODING_AGENTS_CAP_ROOT"
+DEFAULT_CAP_ROOT = os.path.expanduser("~/.config/containai/capabilities")
+SPEC_ENV_VAR = "CONTAINAI_STUB_SPEC"
+CAP_ROOT_ENV_VAR = "CONTAINAI_CAP_ROOT"
 
 
 class StubError(RuntimeError):

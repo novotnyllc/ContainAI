@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Installs a Coding Agents bundle from GitHub Releases (or local asset dir).
+# Installs a ContainAI bundle from GitHub Releases (or local asset dir).
 # Bundle layout:
-#   coding-agents-<version>.tar.gz containing payload.tar.gz, payload.sha256,
+#   containai-<version>.tar.gz containing payload.tar.gz, payload.sha256,
 #   attestation.intoto.jsonl, cosign-root.pem.
 # Payload layout:
 #   host/, agent-configs/, config.toml, sbom.json, tools/cosign-root.pem, SHA256SUMS.
@@ -18,7 +18,7 @@ source "$SCRIPT_DIR/common-functions.sh"
 
 VERSION=""
 REPO="${GITHUB_REPOSITORY:-}"
-INSTALL_ROOT="/opt/coding-agents"
+INSTALL_ROOT="/opt/containai"
 ASSET_DIR=""
 ALLOW_NONROOT=0
 VERIFY_ONLY=0
@@ -36,7 +36,7 @@ Options:
   --version TAG      Release tag to install
   --repo OWNER/REPO  GitHub repo (default: GITHUB_REPOSITORY env)
   --asset-dir PATH   Use local assets (tarball/SHA256SUMS/sbom/attestation) instead of downloading (testing)
-  --install-root P   Install prefix (default: /opt/coding-agents)
+  --install-root P   Install prefix (default: /opt/containai)
   --allow-nonroot    Permit non-root installs (testing only)
   --verify-only      Only verify current install (no download/extract)
 EOF
@@ -98,8 +98,8 @@ else
     BUNDLE_DIR="$(mktemp -d)"
     trap 'rm -rf "$BUNDLE_DIR"' EXIT
 fi
-BUNDLE_PATH="$BUNDLE_DIR/coding-agents-${VERSION}.tar.gz"
-BUNDLE_ATTEST_PATH="$BUNDLE_DIR/coding-agents-${VERSION}.tar.gz.intoto.jsonl"
+BUNDLE_PATH="$BUNDLE_DIR/containai-${VERSION}.tar.gz"
+BUNDLE_ATTEST_PATH="$BUNDLE_DIR/containai-${VERSION}.tar.gz.intoto.jsonl"
 EXTRACT_DIR="$(mktemp -d)"
 PAYLOAD_PATH="$EXTRACT_DIR/payload.tar.gz"
 PAYLOAD_SHA_PATH="$EXTRACT_DIR/payload.sha256"
@@ -129,7 +129,7 @@ download_release_assets() {
         [[ -f "$BUNDLE_ATTEST_PATH" ]] || echo "⚠️  Attestation asset missing in $ASSET_DIR (dev mode?)"
         return
     fi
-    fetch_asset "coding-agents-${VERSION}.tar.gz" "$BUNDLE_PATH"
+    fetch_asset "containai-${VERSION}.tar.gz" "$BUNDLE_PATH"
     fetch_asset "bundle-provenance.intoto.jsonl" "$BUNDLE_ATTEST_PATH"
     [[ -f "$BUNDLE_PATH" ]] || die "Bundle not found in release"
     [[ -f "$BUNDLE_ATTEST_PATH" ]] || die "Attestation not found in release assets"
@@ -239,7 +239,7 @@ extract_bundle
 verify_payload_hash
 verify_attestation
 
-echo "📦 Installing Coding Agents $VERSION to $RELEASE_ROOT"
+echo "📦 Installing ContainAI $VERSION to $RELEASE_ROOT"
 rm -rf "$RELEASE_ROOT"
 mkdir -p "$RELEASE_ROOT"
 

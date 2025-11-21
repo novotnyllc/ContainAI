@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2001
 # Usage: ./host/utils/verify-prerequisites.sh
-# Checks if the host environment meets the requirements for running CodingAgents.
+# Checks if the host environment meets the requirements for running ContainAI.
 
 set -euo pipefail
 
@@ -50,7 +50,7 @@ print_warning() {
 
 echo ""
 echo "======================================"
-echo "  CodingAgents Prerequisites Check"
+echo "  ContainAI Prerequisites Check"
 echo "======================================"
 echo ""
 
@@ -234,10 +234,10 @@ echo ""
 
 if [ $FAILED -eq 0 ]; then
     if [ $WARNINGS -eq 0 ]; then
-        echo -e "${GREEN}✓ All prerequisites met!${NC} You're ready to use CodingAgents."
+        echo -e "${GREEN}✓ All prerequisites met!${NC} You're ready to use ContainAI."
         echo ""
         echo "Next steps:"
-        echo "  1. Get images:      docker pull ghcr.io/novotnyllc/coding-agents-copilot:latest"
+        echo "  1. Get images:      docker pull ghcr.io/novotnyllc/containai-copilot:latest"
         echo "  2. Install scripts: ./scripts/install.sh"
         echo "  3. First launch:    run-copilot"
         exit 0
@@ -248,7 +248,7 @@ if [ $FAILED -eq 0 ]; then
     fi
 else
     echo -e "${RED}✗ Some prerequisites are missing.${NC}"
-    echo "Please address the errors above before using CodingAgents."
+    echo "Please address the errors above before using ContainAI."
     echo ""
     echo "See docs/getting-started.md for detailed setup instructions."
     exit 1

@@ -3,16 +3,16 @@ set -euo pipefail
 
 STUB_NAME="agent_claude_cli"
 SECRET_NAME="claude_cli_credentials"
-AGENT_HOME="${CODING_AGENTS_AGENT_HOME:-/home/agentuser}"
-AGENT_SECRET_ROOT="${CODING_AGENTS_AGENT_SECRET_ROOT:-/run/agent-secrets}"
-DEFAULT_CAP_ROOT="${CODING_AGENTS_CAP_ROOT_OVERRIDE:-${AGENT_HOME}/.config/coding-agents/capabilities}"
-AGENT_CLI_CAP_ROOT="${CODING_AGENTS_AGENT_CAP_ROOT:-/run/coding-agents/claude/cli/capabilities}"
+AGENT_HOME="${CONTAINAI_AGENT_HOME:-/home/agentuser}"
+AGENT_SECRET_ROOT="${CONTAINAI_AGENT_SECRET_ROOT:-/run/agent-secrets}"
+DEFAULT_CAP_ROOT="${CONTAINAI_CAP_ROOT_OVERRIDE:-${AGENT_HOME}/.config/containai/capabilities}"
+AGENT_CLI_CAP_ROOT="${CONTAINAI_AGENT_CAP_ROOT:-/run/containai/claude/cli/capabilities}"
 DEST_DIR="${AGENT_SECRET_ROOT}/claude"
 DEST_FILE="${DEST_DIR}/.credentials.json"
 CLI_DIR="${AGENT_HOME}/.claude"
-GLOBAL_CFG_SOURCE="${AGENT_HOME}/.config/coding-agents/claude/.claude.json"
+GLOBAL_CFG_SOURCE="${AGENT_HOME}/.config/containai/claude/.claude.json"
 GLOBAL_CFG_DEST="${AGENT_HOME}/.claude.json"
-UNSEAL_BIN="${CODING_AGENTS_CAPABILITY_UNSEAL:-/usr/local/bin/capability-unseal}"
+UNSEAL_BIN="${CONTAINAI_CAPABILITY_UNSEAL:-/usr/local/bin/capability-unseal}"
 
 link_cli_dir() {
     local target="$1"

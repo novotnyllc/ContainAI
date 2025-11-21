@@ -1,6 +1,6 @@
 #include <tunables/global>
 
-profile coding-agents flags=(attach_disconnected,mediate_deleted) {
+profile containai flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
   #include <abstractions/nameservice>
   #include <abstractions/user-tmp>
@@ -14,7 +14,7 @@ profile coding-agents flags=(attach_disconnected,mediate_deleted) {
   # Host processes (dockerd) may send signals for lifecycle operations
   signal (receive) peer=unconfined,
   # Containers may signal one another when sharing the same profile
-  signal (send,receive) peer=coding-agents,
+  signal (send,receive) peer=containai,
 
   deny @{PROC}/* w,
   deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9]*}/** w,
@@ -34,5 +34,5 @@ profile coding-agents flags=(attach_disconnected,mediate_deleted) {
   deny /sys/kernel/security/** rwklx,
 
   # Suppress ptrace denials when using ps inside the container
-  ptrace (trace,read,tracedby,readby) peer=coding-agents,
+  ptrace (trace,read,tracedby,readby) peer=containai,
 }

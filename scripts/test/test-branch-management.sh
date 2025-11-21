@@ -61,7 +61,7 @@ cleanup() {
     echo "🧹 Cleaning up test resources..."
     
     # Remove test containers
-    docker ps -aq --filter "label=coding-agents.test-session=${TEST_SESSION_ID}" | xargs -r docker rm -f 2>/dev/null || true
+    docker ps -aq --filter "label=containai.test-session=${TEST_SESSION_ID}" | xargs -r docker rm -f 2>/dev/null || true
     
     # Remove test networks
     docker network ls --filter "name=test-branch-mgmt-${TEST_SESSION_ID}" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
@@ -351,10 +351,10 @@ test_container_branch_cleanup() {
     local container_name="copilot-test-cleanup-${TEST_SESSION_ID}"
     docker run -d \
         --name "$container_name" \
-        --label "coding-agents.test-session=${TEST_SESSION_ID}" \
-        --label "coding-agents.type=agent" \
-        --label "coding-agents.branch=copilot/cleanup-test" \
-        --label "coding-agents.repo-path=$TEST_REPO_DIR" \
+        --label "containai.test-session=${TEST_SESSION_ID}" \
+        --label "containai.type=agent" \
+        --label "containai.branch=copilot/cleanup-test" \
+        --label "containai.repo-path=$TEST_REPO_DIR" \
         alpine:latest sleep 60 >/dev/null
     
     # Simulate removal with branch cleanup
@@ -382,10 +382,10 @@ test_preserve_branch_with_unmerged_commits() {
     local container_name="copilot-test-preserve-${TEST_SESSION_ID}"
     docker run -d \
         --name "$container_name" \
-        --label "coding-agents.test-session=${TEST_SESSION_ID}" \
-        --label "coding-agents.type=agent" \
-        --label "coding-agents.branch=copilot/preserve-test" \
-        --label "coding-agents.repo-path=$TEST_REPO_DIR" \
+        --label "containai.test-session=${TEST_SESSION_ID}" \
+        --label "containai.type=agent" \
+        --label "containai.branch=copilot/preserve-test" \
+        --label "containai.repo-path=$TEST_REPO_DIR" \
         alpine:latest sleep 60 >/dev/null
     
     # Remove container (should preserve branch due to unmerged commits)

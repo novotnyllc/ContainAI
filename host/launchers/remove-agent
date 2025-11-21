@@ -54,7 +54,7 @@ if [ -z "$CONTAINER_NAME" ]; then
     echo "Usage: remove-agent <container-name> [--no-push] [--keep-branch]"    
     echo ""
     echo "Available containers:"
-    container_cli ps -a --filter "label=coding-agents.type=agent" --format "  • {{.Names}}" 2>/dev/null
+    container_cli ps -a --filter "label=containai.type=agent" --format "  • {{.Names}}" 2>/dev/null
     exit 1
 fi
 

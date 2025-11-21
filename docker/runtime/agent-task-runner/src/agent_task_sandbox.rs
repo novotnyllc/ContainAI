@@ -44,15 +44,15 @@ impl Config {
     fn parse() -> Result<Self> {
         let mut args = env::args_os().skip(1);
         let default_user =
-            env::var("CODING_AGENTS_RUNNER_USER").unwrap_or_else(|_| "agentuser".to_string());
+            env::var("CONTAINAI_RUNNER_USER").unwrap_or_else(|_| "agentuser".to_string());
         let default_cwd =
-            env::var("CODING_AGENTS_WORKSPACE_DIR").unwrap_or_else(|_| "/workspace".to_string());
-        let default_profile = match env::var("CODING_AGENTS_TASK_APPARMOR") {
+            env::var("CONTAINAI_WORKSPACE_DIR").unwrap_or_else(|_| "/workspace".to_string());
+        let default_profile = match env::var("CONTAINAI_TASK_APPARMOR") {
             Ok(value) if value.eq_ignore_ascii_case("none") || value.trim().is_empty() => None,
             Ok(value) => Some(value),
-            Err(_) => Some("coding-agents-task".to_string()),
+            Err(_) => Some("containai-task".to_string()),
         };
-        let hide_env = env::var("CODING_AGENTS_RUNNER_HIDE_PATHS").ok();
+        let hide_env = env::var("CONTAINAI_RUNNER_HIDE_PATHS").ok();
         let mut hide_paths = parse_hide_paths(hide_env);
 
         let mut user = default_user;
@@ -272,7 +272,7 @@ fn exec_command(config: &Config) -> Result<()> {
     let mut argv: Vec<OsString> = Vec::new();
     if let Some(profile) = &config.apparmor_profile {
         let aa_exec =
-            env::var("CODING_AGENTS_AA_EXEC_PATH").unwrap_or_else(|_| "/usr/bin/aa-exec".into());
+            env::var("CONTAINAI_AA_EXEC_PATH").unwrap_or_else(|_| "/usr/bin/aa-exec".into());
         if Path::new(&aa_exec).exists() {
             argv.push(OsString::from(aa_exec));
             argv.push(OsString::from("-p"));

@@ -10,7 +10,7 @@ INTEGRATION_SCRIPT="$PROJECT_ROOT/scripts/test/integration-test-impl.sh"
 # that Docker can mount. No conversion needed.
 
 DIND_IMAGE="${TEST_ISOLATION_IMAGE:-docker:25.0-dind}"
-DIND_CONTAINER="${TEST_ISOLATION_CONTAINER:-coding-agents-test-dind-$RANDOM}"
+DIND_CONTAINER="${TEST_ISOLATION_CONTAINER:-containai-test-dind-$RANDOM}"
 DIND_CLIENT_IMAGE_DEFAULT="${DIND_IMAGE/-dind/-cli}"
 if [[ "$DIND_CLIENT_IMAGE_DEFAULT" == "$DIND_IMAGE" ]]; then
     DIND_CLIENT_IMAGE_DEFAULT="docker:cli"
@@ -22,7 +22,7 @@ DIND_STARTED=false
 TEST_ARGS=()
 WITH_HOST_SECRETS=false
 HOST_SECRETS_FILE=""
-DIND_SECRETS_PATH="/run/coding-agents/mcp-secrets.env"
+DIND_SECRETS_PATH="/run/containai/mcp-secrets.env"
 DEFAULT_TRIVY_VERSION="${TEST_ISOLATION_TRIVY_VERSION:-0.50.2}"
 
 if [[ -n "${TEST_ISOLATION_DOCKER_RUN_FLAGS:-}" ]]; then
@@ -103,7 +103,7 @@ initialize_dind_run_dir() {
     if [[ -n "$DIND_RUN_DIR" && -d "$DIND_RUN_DIR" ]]; then
         return
     fi
-    if ! DIND_RUN_DIR=$(mktemp -d -t coding-agents-dind-run-XXXXXX); then
+    if ! DIND_RUN_DIR=$(mktemp -d -t containai-dind-run-XXXXXX); then
         echo "Error: Unable to create shared /run directory for DinD"
         exit 1
     fi
@@ -123,7 +123,7 @@ purge_dind_run_dir() {
 
 usage() {
     cat <<EOF
-Run the Coding Agents integration test suite.
+Run the ContainAI integration test suite.
 
 This script runs all integration tests inside an isolated Docker-in-Docker
 environment to ensure reproducibility and prevent host daemon contamination.
@@ -168,13 +168,13 @@ resolve_host_secrets_file() {
     local -a candidates=()
     local -A seen=()
 
-    if [[ -n "${CODING_AGENTS_MCP_SECRETS_FILE:-}" ]]; then
-        candidates+=("${CODING_AGENTS_MCP_SECRETS_FILE}")
+    if [[ -n "${CONTAINAI_MCP_SECRETS_FILE:-}" ]]; then
+        candidates+=("${CONTAINAI_MCP_SECRETS_FILE}")
     fi
     if [[ -n "${MCP_SECRETS_FILE:-}" ]]; then
         candidates+=("${MCP_SECRETS_FILE}")
     fi
-    candidates+=("${HOME}/.config/coding-agents/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
+    candidates+=("${HOME}/.config/containai/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
 
     local candidate resolved
     for candidate in "${candidates[@]}"; do
@@ -243,7 +243,7 @@ if [[ "$WITH_HOST_SECRETS" == "true" ]]; then
     if ! HOST_SECRETS_FILE=$(resolve_host_secrets_file); then
         cat >&2 <<EOF
 Error: Unable to locate host secrets file.
-Set CODING_AGENTS_MCP_SECRETS_FILE, MCP_SECRETS_FILE, or populate ~/.config/coding-agents/mcp-secrets.env
+Set CONTAINAI_MCP_SECRETS_FILE, MCP_SECRETS_FILE, or populate ~/.config/containai/mcp-secrets.env
 EOF
         exit 1
     fi
@@ -348,12 +348,12 @@ bootstrap_tools() {
 }
 
 detect_host_trivy() {
-    if [[ -n "${CODING_AGENTS_TRIVY_BIN:-}" ]]; then
-        if command -v "${CODING_AGENTS_TRIVY_BIN}" >/dev/null 2>&1; then
-            command -v "${CODING_AGENTS_TRIVY_BIN}"
+    if [[ -n "${CONTAINAI_TRIVY_BIN:-}" ]]; then
+        if command -v "${CONTAINAI_TRIVY_BIN}" >/dev/null 2>&1; then
+            command -v "${CONTAINAI_TRIVY_BIN}"
             return
         fi
-        echo "  ⚠️  CODING_AGENTS_TRIVY_BIN is set to '${CODING_AGENTS_TRIVY_BIN}' but it is not executable" >&2
+        echo "  ⚠️  CONTAINAI_TRIVY_BIN is set to '${CONTAINAI_TRIVY_BIN}' but it is not executable" >&2
     fi
     if command -v trivy >/dev/null 2>&1; then
         command -v trivy
@@ -424,7 +424,7 @@ run_integration_tests() {
         exec_env+=(
             "-e" "TEST_WITH_HOST_SECRETS=true"
             "-e" "TEST_HOST_SECRETS_FILE=$DIND_SECRETS_PATH"
-            "-e" "CODING_AGENTS_MCP_SECRETS_FILE=$DIND_SECRETS_PATH"
+            "-e" "CONTAINAI_MCP_SECRETS_FILE=$DIND_SECRETS_PATH"
         )
     fi
 
@@ -449,7 +449,7 @@ run_on_host() {
     echo "Running integration suite directly on host Docker daemon"
     echo ""
     if [[ "$WITH_HOST_SECRETS" == "true" ]]; then
-        CODING_AGENTS_MCP_SECRETS_FILE="$HOST_SECRETS_FILE" \
+        CONTAINAI_MCP_SECRETS_FILE="$HOST_SECRETS_FILE" \
         TEST_WITH_HOST_SECRETS="true" \
         TEST_HOST_SECRETS_FILE="$HOST_SECRETS_FILE" \
         bash "$INTEGRATION_SCRIPT" "${TEST_ARGS[@]}"

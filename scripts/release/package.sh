@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds a self-contained bundle:
-#   coding-agents-<version>.tar.gz containing:
+#   containai-<version>.tar.gz containing:
 #     - payload.tar.gz (host tree + tools)
 #     - payload.sha256 (hash of payload.tar.gz)
 #     - attestation.intoto.jsonl (from CI attestation action)
@@ -21,7 +21,7 @@ print_help() {
     cat <<'EOF'
 Usage: package.sh [--version X] [--out DIR] [--skip-sbom] [--sbom FILE] [--attestation FILE] [--include-docker]
 
-Outputs dist/<version>/coding-agents-<version>.tar.gz containing payload + attestation.
+Outputs dist/<version>/containai-<version>.tar.gz containing payload + attestation.
 
 Options:
   --version X         Release version (default git describe)
@@ -125,7 +125,7 @@ if [[ -f "$PAYLOAD_DIR/tools/cosign-root.pem" ]]; then
     cp "$PAYLOAD_DIR/tools/cosign-root.pem" "$WORK_DIR/bundle/cosign-root.pem"
 fi
 
-BUNDLE_NAME="coding-agents-$VERSION.tar.gz"
+BUNDLE_NAME="containai-$VERSION.tar.gz"
 tar -czf "$DEST_DIR/$BUNDLE_NAME" -C "$WORK_DIR/bundle" .
 
 echo ""

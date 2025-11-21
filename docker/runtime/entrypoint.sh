@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AGENT_USERNAME="${CODING_AGENTS_USER:-agentuser}"
+AGENT_USERNAME="${CONTAINAI_USER:-agentuser}"
 AGENT_UID=$(id -u "$AGENT_USERNAME" 2>/dev/null || echo 1000)
 AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo 1000)
-AGENT_CLI_USERNAME="${CODING_AGENTS_CLI_USER:-agentcli}"
+AGENT_CLI_USERNAME="${CONTAINAI_CLI_USER:-agentcli}"
 AGENT_CLI_UID=$(id -u "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_UID")
 AGENT_CLI_GID=$(id -g "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_GID")
-BASEFS_DIR="${CODING_AGENTS_BASEFS:-/opt/coding-agents/basefs}"
-TOOLCACHE_DIR="${CODING_AGENTS_TOOLCACHE:-/toolcache}"
-PTRACE_SCOPE_VALUE="${CODING_AGENTS_PTRACE_SCOPE:-3}"
-CAP_TMPFS_SIZE="${CODING_AGENTS_CAP_TMPFS_SIZE:-16m}"
-DATA_TMPFS_SIZE="${CODING_AGENTS_DATA_TMPFS_SIZE:-64m}"
-SECRETS_TMPFS_SIZE="${CODING_AGENTS_SECRET_TMPFS_SIZE:-32m}"
+BASEFS_DIR="${CONTAINAI_BASEFS:-/opt/containai/basefs}"
+TOOLCACHE_DIR="${CONTAINAI_TOOLCACHE:-/toolcache}"
+PTRACE_SCOPE_VALUE="${CONTAINAI_PTRACE_SCOPE:-3}"
+CAP_TMPFS_SIZE="${CONTAINAI_CAP_TMPFS_SIZE:-16m}"
+DATA_TMPFS_SIZE="${CONTAINAI_DATA_TMPFS_SIZE:-64m}"
+SECRETS_TMPFS_SIZE="${CONTAINAI_SECRET_TMPFS_SIZE:-32m}"
 STUB_SHIM_ROOT="/home/${AGENT_USERNAME}/.local/bin"
 declare -a MCP_HELPER_PIDS=()
 declare -a MCP_HELPER_NAMES=()
@@ -29,7 +29,7 @@ is_mountpoint() {
 
 enforce_ptrace_scope() {
     local target="$PTRACE_SCOPE_VALUE"
-    if [ "${CODING_AGENTS_DISABLE_PTRACE_SCOPE:-0}" = "1" ]; then
+    if [ "${CONTAINAI_DISABLE_PTRACE_SCOPE:-0}" = "1" ]; then
         return
     fi
     if [ ! -w /proc/sys/kernel/yama/ptrace_scope ]; then
@@ -50,10 +50,10 @@ enforce_ptrace_scope() {
 }
 
 harden_proc_visibility() {
-    if [ "${CODING_AGENTS_DISABLE_PROC_HARDENING:-0}" = "1" ]; then
+    if [ "${CONTAINAI_DISABLE_PROC_HARDENING:-0}" = "1" ]; then
         return
     fi
-    local group="${CODING_AGENTS_PROC_GROUP:-agentproc}"
+    local group="${CONTAINAI_PROC_GROUP:-agentproc}"
     if ! getent group "$group" >/dev/null 2>&1; then
         if ! groupadd --system "$group" >/dev/null 2>&1; then
             echo "⚠️  Unable to create $group group for /proc hardening" >&2
@@ -80,7 +80,7 @@ prepare_sensitive_tmpfs() {
     local owner_uid="${3:-$AGENT_UID}"
     local owner_gid="${4:-$AGENT_GID}"
     local dir_mode="${5:-700}"
-    if [ "${CODING_AGENTS_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
+    if [ "${CONTAINAI_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
         return
     fi
     mkdir -p "$path"
@@ -207,7 +207,7 @@ install_host_session_configs() {
     done
 
     if [ -f "$manifest" ]; then
-        local manifest_dest="/home/${AGENT_USERNAME}/.config/coding-agents/session-manifest.json"
+        local manifest_dest="/home/${AGENT_USERNAME}/.config/containai/session-manifest.json"
         ensure_dir_owned "$(dirname "$manifest_dest")" 0700
         cp "$manifest" "$manifest_dest"
         chown "$AGENT_UID:$AGENT_GID" "$manifest_dest" 2>/dev/null || true
@@ -219,7 +219,7 @@ install_host_session_configs() {
 
 install_host_capabilities() {
     local root="$1"
-    local target="/home/${AGENT_USERNAME}/.config/coding-agents/capabilities"
+    local target="/home/${AGENT_USERNAME}/.config/containai/capabilities"
     if [ ! -d "$root" ]; then
         return 1
     fi
@@ -269,7 +269,7 @@ for path in sys.argv[1:]:
         if not isinstance(cfg, dict):
             continue
         env = cfg.get("env") or {}
-        stub = env.get("CODING_AGENTS_STUB_NAME")
+        stub = env.get("CONTAINAI_STUB_NAME")
         if not stub:
             cmd = cfg.get("command", "")
             if isinstance(cmd, str) and "mcp-stub-" in cmd:
@@ -320,7 +320,7 @@ start_mcp_helpers() {
         [ -z "$line" ] && continue
         IFS='|' read -r helper_name helper_listen helper_target helper_bearer <<< "$line"
         local log_file="/run/mcp-helpers/${helper_name}.log"
-        local cmd=(env CODING_AGENTS_REQUIRE_PROXY=1 CODING_AGENTS_AGENT_ID="${AGENT_NAME:-}" CODING_AGENTS_SESSION_ID="${HOST_SESSION_ID:-}" python3 /usr/local/bin/mcp-http-helper.py --name "$helper_name" --listen "$helper_listen" --target "$helper_target")
+        local cmd=(env CONTAINAI_REQUIRE_PROXY=1 CONTAINAI_AGENT_ID="${AGENT_NAME:-}" CONTAINAI_SESSION_ID="${HOST_SESSION_ID:-}" python3 /usr/local/bin/mcp-http-helper.py --name "$helper_name" --listen "$helper_listen" --target "$helper_target")
         if [ -n "$helper_bearer" ]; then
             cmd+=("--bearer-token" "$helper_bearer")
         fi
@@ -444,8 +444,8 @@ install_host_agent_data() {
         chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir" 2>/dev/null || true
         link_agent_data_roots "$agent" "$data_home"
         if [ "$agent" = "${AGENT_NAME:-}" ]; then
-            export CODING_AGENTS_AGENT_DATA_HOME="$data_home"
-            export CODING_AGENTS_AGENT_HOME="/home/${AGENT_USERNAME}"
+            export CONTAINAI_AGENT_DATA_HOME="$data_home"
+            export CONTAINAI_AGENT_HOME="/home/${AGENT_USERNAME}"
         fi
     done
 
@@ -462,8 +462,8 @@ ensure_agent_data_fallback() {
     fi
     link_agent_data_roots "$agent" "$fallback_dir"
     if [ "$agent" = "${AGENT_NAME:-}" ]; then
-        export CODING_AGENTS_AGENT_DATA_HOME="$fallback_dir"
-        export CODING_AGENTS_AGENT_HOME="/home/${AGENT_USERNAME}"
+        export CONTAINAI_AGENT_DATA_HOME="$fallback_dir"
+        export CONTAINAI_AGENT_HOME="/home/${AGENT_USERNAME}"
     fi
 }
 
@@ -480,7 +480,7 @@ start_agent_task_runnerd() {
     if /usr/local/bin/agent-task-runnerd \
         --socket "$socket_path" \
         --log "$log_dir/events.log" \
-        --policy "${CODING_AGENTS_RUNNER_POLICY:-observe}" \
+        --policy "${CONTAINAI_RUNNER_POLICY:-observe}" \
         >/dev/null 2>&1 & then
         :
     else
@@ -581,26 +581,26 @@ if [ "$(id -u)" -eq 0 ]; then
     prepare_rootfs_mounts
     enforce_ptrace_scope
     harden_proc_visibility
-    prepare_sensitive_tmpfs "/home/${AGENT_USERNAME}/.config/coding-agents/capabilities" "$CAP_TMPFS_SIZE" "$AGENT_UID" "$AGENT_GID" "700"
+    prepare_sensitive_tmpfs "/home/${AGENT_USERNAME}/.config/containai/capabilities" "$CAP_TMPFS_SIZE" "$AGENT_UID" "$AGENT_GID" "700"
     prepare_sensitive_tmpfs "/run/agent-secrets" "$SECRETS_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
     prepare_sensitive_tmpfs "/run/agent-data" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
     prepare_sensitive_tmpfs "/run/agent-data-export" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
     enforce_proxy_firewall
     prepare_agent_task_runner_paths
-    CODING_AGENTS_AGENT_DATA_STAGED=0
+    CONTAINAI_AGENT_DATA_STAGED=0
     if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
         if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
             echo "📂 Agent data caches staged under /run/agent-data"
         fi
-        CODING_AGENTS_AGENT_DATA_STAGED=1
+        CONTAINAI_AGENT_DATA_STAGED=1
     fi
-    if [ "$CODING_AGENTS_AGENT_DATA_STAGED" -ne 1 ] && [ -n "${AGENT_NAME:-}" ]; then
+    if [ "$CONTAINAI_AGENT_DATA_STAGED" -ne 1 ] && [ -n "${AGENT_NAME:-}" ]; then
         ensure_agent_data_fallback "$AGENT_NAME"
-        CODING_AGENTS_AGENT_DATA_STAGED=1
+        CONTAINAI_AGENT_DATA_STAGED=1
     fi
-    export CODING_AGENTS_AGENT_DATA_STAGED
+    export CONTAINAI_AGENT_DATA_STAGED
     start_agent_task_runnerd
-    export CODING_AGENTS_RUNNER_STARTED=1
+    export CONTAINAI_RUNNER_STARTED=1
     if command -v gosu >/dev/null 2>&1; then
         exec gosu "$AGENT_USERNAME" /usr/local/bin/entrypoint.sh "$@"
     elif command -v sudo >/dev/null 2>&1; then
@@ -613,12 +613,12 @@ fi
 
 AGENT_TASK_RUNNER_SOCKET="${AGENT_TASK_RUNNER_SOCKET:-/run/agent-task-runner.sock}"
 export AGENT_TASK_RUNNER_SOCKET
-if [ "${CODING_AGENTS_RUNNER_STARTED:-0}" != "1" ]; then
+if [ "${CONTAINAI_RUNNER_STARTED:-0}" != "1" ]; then
     start_agent_task_runnerd
 fi
 enforce_proxy_firewall
 
-echo "🚀 Starting Coding Agents Container..."
+echo "🚀 Starting ContainAI Container..."
 
 
 # Cleanup function to push changes before shutdown
@@ -867,14 +867,14 @@ if [ -n "${HOST_CAPABILITY_ROOT:-}" ] && [ -d "${HOST_CAPABILITY_ROOT:-}" ]; the
     fi
 fi
 
-if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ "${CODING_AGENTS_AGENT_DATA_STAGED:-0}" != "1" ]; then
+if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ "${CONTAINAI_AGENT_DATA_STAGED:-0}" != "1" ]; then
     if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
         echo "📂 Agent data caches staged under /run/agent-data"
-        CODING_AGENTS_AGENT_DATA_STAGED=1
+        CONTAINAI_AGENT_DATA_STAGED=1
     fi
 fi
 
-if [ -n "${AGENT_NAME:-}" ] && [ -z "${CODING_AGENTS_AGENT_DATA_HOME:-}" ]; then
+if [ -n "${AGENT_NAME:-}" ] && [ -z "${CONTAINAI_AGENT_DATA_HOME:-}" ]; then
     ensure_agent_data_fallback "$AGENT_NAME"
 fi
 
@@ -898,7 +898,7 @@ create_stub_links_from_configs \
     "/home/${AGENT_USERNAME}/.config/claude/mcp/config.json"
 
 if [ -z "$HELPER_MANIFEST_PATH" ]; then
-    HELPER_MANIFEST_PATH="/home/${AGENT_USERNAME}/.config/coding-agents/helpers.json"
+    HELPER_MANIFEST_PATH="/home/${AGENT_USERNAME}/.config/containai/helpers.json"
 fi
 
 if [ -n "$HELPER_MANIFEST_PATH" ] && [ ! -f "$HELPER_MANIFEST_PATH" ]; then

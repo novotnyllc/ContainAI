@@ -19,10 +19,10 @@ All containers follow the pattern: `{agent}-{repo}-{branch}`
 
 **Container labels** (for filtering and automation):
 ```bash
-coding-agents.type=agent       # Identifies agent containers
-coding-agents.agent=copilot    # Which agent (copilot/codex/claude)
-coding-agents.repo=myapp       # Repository name
-coding-agents.branch=main      # Branch name
+containai.type=agent       # Identifies agent containers
+containai.agent=copilot    # Which agent (copilot/codex/claude)
+containai.repo=myapp       # Repository name
+containai.branch=main      # Branch name
 ```
 
 ## Auto-Commit and Auto-Push Safety Features
@@ -125,7 +125,7 @@ run-claude.ps1
 - Creates container named `{agent}-{repo}-{branch}`
 - Auto-removes container on exit
 - Auto-pushes changes to local remote before exit (unless --no-push)
-- Keeps a background sync daemon running to fast-forward your host repo after every push (disable with `CODING_AGENTS_DISABLE_AUTO_SYNC=1`)
+- Keeps a background sync daemon running to fast-forward your host repo after every push (disable with `CONTAINAI_DISABLE_AUTO_SYNC=1`)
 - Removes upstream git remotes so the container cannot reach your GitHub origin; publish from the host repo when you're ready
 - Interactive shell, exit with Ctrl+D or detach via tmux (see below)
 
@@ -294,7 +294,7 @@ claude-website-develop    Up 30 min    claude     develop
 ```
 
 **Features:**
-- Filters by `coding-agents.type=agent` label
+- Filters by `containai.type=agent` label
 - Shows container name, status, agent type, and branch
 - Color-coded status (green=running, red=stopped)
 - Empty list if no agent containers running

@@ -1,6 +1,6 @@
 # GHCR Publishing & Secrets Guide
 
-This doc explains how to build, sign, and publish Coding Agents artifacts to GitHub Container Registry (GHCR) with the new host/container split.
+This doc explains how to build, sign, and publish ContainAI artifacts to GitHub Container Registry (GHCR) with the new host/container split.
 
 ## Prerequisites
 - Docker Desktop/Engine with `docker compose`
@@ -18,7 +18,7 @@ This doc explains how to build, sign, and publish Coding Agents artifacts to Git
 ```
 
 Artifacts land in `dist/<version>/`:
-- `coding-agents-<version>.tar.gz` (bundle: payload.tar.gz + payload.sha256 + attestation + cosign + root)
+- `containai-<version>.tar.gz` (bundle: payload.tar.gz + payload.sha256 + attestation + cosign + root)
 - `payload.tar.gz` (host tree + SBOM + tools)
 - `payload.sha256` (hash of payload.tar.gz)
 - `sbom.json` (CycloneDX)
@@ -29,14 +29,14 @@ Attestation is added in CI via `actions/attest-build-provenance` and repack step
 ```bash
 sudo ./host/utils/install-package.sh --version v1.2.3 --repo owner/repo
 ```
-Blue/green swap lives under `/opt/coding-agents/releases/<version>` with `current`/`previous` symlinks. Install copies the tarball + signature so `check-health` can verify sigstore.
+Blue/green swap lives under `/opt/containai/releases/<version>` with `current`/`previous` symlinks. Install copies the tarball + signature so `check-health` can verify sigstore.
 
 ## Publish to GHCR
 Prod pushes happen in CI; dev script never pushes. CI should stamp `host/profile.env` with:
 
 ```
 PROFILE=prod
-IMAGE_PREFIX=coding-agents
+IMAGE_PREFIX=containai
 IMAGE_TAG=<immutable tag>
 REGISTRY=ghcr.io/<owner>
 ```
@@ -57,7 +57,7 @@ Recommended workflow steps:
 6. Attest payload.tar.gz via `actions/attest-build-provenance`
 7. Repack bundle including attestation + cosign
 8. Build/push images using IMAGE_PREFIX/IMAGE_TAG from profile.env (proxy mandatory)
-9. Upload `coding-agents-$GIT_TAG.tar.gz` as release asset
+9. Upload `containai-$GIT_TAG.tar.gz` as release asset
 
 ## Troubleshooting
 - `syft not available`: install syft or rerun with `--skip-sbom` (dev only).

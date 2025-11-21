@@ -82,8 +82,8 @@ def _make_handler(state: _ProxyState):
             body = self.rfile.read(content_length) if content_length > 0 else None
             headers = _filter_headers(self.headers)
             headers["X-CA-Helper"] = state.name
-            agent = os.environ.get("CODING_AGENTS_AGENT_ID")
-            session = os.environ.get("CODING_AGENTS_SESSION_ID")
+            agent = os.environ.get("CONTAINAI_AGENT_ID")
+            session = os.environ.get("CONTAINAI_SESSION_ID")
             if agent:
                 headers["X-CA-Agent"] = agent
             if session:
@@ -149,7 +149,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--timeout", dest="timeout", type=int, default=DEFAULT_TIMEOUT, help="Upstream timeout seconds")
     args = parser.parse_args(argv)
 
-    require_proxy = os.environ.get("CODING_AGENTS_REQUIRE_PROXY", "0") not in ("0", "", "false", "False")
+    require_proxy = os.environ.get("CONTAINAI_REQUIRE_PROXY", "0") not in ("0", "", "false", "False")
     if require_proxy and not any(os.environ.get(v) for v in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")):
         parser.error("proxy required but HTTP(S)_PROXY not set")
 

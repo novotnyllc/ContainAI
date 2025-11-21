@@ -1,6 +1,6 @@
 # Test Suite
 
-Comprehensive automated testing for the CodingAgents project, including unit tests and integration tests.
+Comprehensive automated testing for the ContainAI project, including unit tests and integration tests.
 
 ## Overview
 
@@ -209,7 +209,7 @@ See `.github/workflows/test-launchers.yml` for workflow details.
 
 **Container Operations**:
 - Container naming follows `{agent}-{repo}-{branch}` pattern
-- All containers have required labels including `coding-agents.branch` and `coding-agents.repo-path`
+- All containers have required labels including `containai.branch` and `containai.repo-path`
 - List and remove operations
 - Label-based filtering
 - Branch conflict detection and resolution
@@ -239,7 +239,7 @@ Each test function:
 4. Cleans up test resources
 
 ### Cleanup Phase
-- Removes all test containers (labeled `coding-agents.test=true`)
+- Removes all test containers (labeled `containai.test=true`)
 - Removes temporary test repository
 - Reports final pass/fail counts
 - Exits with code 1 if any tests failed (CI-friendly)
@@ -395,37 +395,37 @@ Use `--preserve` flag to keep resources for debugging:
 Then manually inspect:
 ```bash
 # View test containers
-docker ps -a --filter "label=coding-agents.test-session=<PID>"
+docker ps -a --filter "label=containai.test-session=<PID>"
 
 # View test images
-docker images | grep "localhost:5555/test-coding-agents"
+docker images | grep "localhost:5555/test-containai"
 
 # View test network
-docker network ls | grep "test-coding-agents-net"
+docker network ls | grep "test-containai-net"
 
 # View test repository
-ls -la /tmp/test-coding-agents-repo-<PID>
+ls -la /tmp/test-containai-repo-<PID>
 ```
 
 Manual cleanup:
 ```bash
 # Remove all test containers from session
-docker ps -aq --filter "label=coding-agents.test-session=<PID>" | xargs docker rm -f
+docker ps -aq --filter "label=containai.test-session=<PID>" | xargs docker rm -f
 
 # Remove test network
-docker network rm test-coding-agents-net-<PID>
+docker network rm test-containai-net-<PID>
 
 # Remove test registry
 docker rm -f test-registry-<PID>
 
 # Remove test repository
-rm -rf /tmp/test-coding-agents-repo-<PID>
+rm -rf /tmp/test-containai-repo-<PID>
 ```
 
 ## Notes
 
-- **Unit tests** use containers labeled `coding-agents.test=true`
-- **Integration tests** use `coding-agents.test-session=<PID>` for isolation
+- **Unit tests** use containers labeled `containai.test=true`
+- **Integration tests** use `containai.test-session=<PID>` for isolation
 - Temporary repositories created with unique PIDs to avoid conflicts
 - All resources cleaned up automatically (unless `--preserve` specified)
 - Tests run independently and can be executed in any order
@@ -442,18 +442,18 @@ Make bash test script executable: `chmod +x scripts/test/test-launchers.sh`
 ### "Test containers still present"
 Manually clean up test containers:
 ```bash
-docker rm -f $(docker ps -aq --filter "label=coding-agents.test=true")
+docker rm -f $(docker ps -aq --filter "label=containai.test=true")
 ```
 
 ### "Temporary repository not removed"
 Manually clean up (bash):
 ```bash
-rm -rf /tmp/coding-agents-test-*
+rm -rf /tmp/containai-test-*
 ```
 
 Manually clean up (PowerShell):
 ```powershell
-Remove-Item "$env:TEMP\coding-agents-test-*" -Recurse -Force
+Remove-Item "$env:TEMP\containai-test-*" -Recurse -Force
 ```
 
 ## Contributing
@@ -466,4 +466,4 @@ When modifying launcher scripts or shared functions:
 
 ## License
 
-Tests are part of the CodingAgents project and follow the same license.
+Tests are part of the ContainAI project and follow the same license.

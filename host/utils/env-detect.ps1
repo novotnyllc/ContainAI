@@ -14,14 +14,14 @@ if (-not $RepoRoot) {
 }
 
 if (-not $ProdRoot) {
-    $ProdRoot = $env:CODING_AGENTS_PROD_ROOT
-    if (-not $ProdRoot) { $ProdRoot = $env:CODING_AGENTS_INSTALL_ROOT }
-    if (-not $ProdRoot) { $ProdRoot = "/opt/coding-agents/current" }
+    $ProdRoot = $env:CONTAINAI_PROD_ROOT
+    if (-not $ProdRoot) { $ProdRoot = $env:CONTAINAI_INSTALL_ROOT }
+    if (-not $ProdRoot) { $ProdRoot = "/opt/containai/current" }
 }
 
-$mode = $env:CODING_AGENTS_PROFILE
-if (-not $mode) { $mode = $env:CODING_AGENTS_MODE }
-if (-not $mode -and $env:CODING_AGENTS_FORCE_MODE) { $mode = $env:CODING_AGENTS_FORCE_MODE }
+$mode = $env:CONTAINAI_PROFILE
+if (-not $mode) { $mode = $env:CONTAINAI_MODE }
+if (-not $mode -and $env:CONTAINAI_FORCE_MODE) { $mode = $env:CONTAINAI_FORCE_MODE }
 
 if (-not $mode) {
     if (Test-Path (Join-Path $ProdRoot "host/launchers")) {
@@ -37,23 +37,23 @@ if ($mode -notin @("dev","prod")) {
 
 if ($mode -eq "prod") {
     $root = (Resolve-Path $ProdRoot).Path
-    $configRoot = $env:CODING_AGENTS_CONFIG_ROOT
-    if (-not $configRoot) { $configRoot = "/etc/coding-agents" }
-    $dataRoot = $env:CODING_AGENTS_DATA_ROOT
-    if (-not $dataRoot) { $dataRoot = "/var/lib/coding-agents" }
-    $cacheRoot = $env:CODING_AGENTS_CACHE_ROOT
-    if (-not $cacheRoot) { $cacheRoot = "/var/cache/coding-agents" }
+    $configRoot = $env:CONTAINAI_CONFIG_ROOT
+    if (-not $configRoot) { $configRoot = "/etc/containai" }
+    $dataRoot = $env:CONTAINAI_DATA_ROOT
+    if (-not $dataRoot) { $dataRoot = "/var/lib/containai" }
+    $cacheRoot = $env:CONTAINAI_CACHE_ROOT
+    if (-not $cacheRoot) { $cacheRoot = "/var/cache/containai" }
 } else {
     $root = (Resolve-Path $RepoRoot).Path
-    $configRoot = $env:CODING_AGENTS_CONFIG_ROOT
-    if (-not $configRoot) { $configRoot = "$HOME/.config/coding-agents-dev" }
-    $dataRoot = $env:CODING_AGENTS_DATA_ROOT
-    if (-not $dataRoot) { $dataRoot = "$HOME/.local/share/coding-agents-dev" }
-    $cacheRoot = $env:CODING_AGENTS_CACHE_ROOT
-    if (-not $cacheRoot) { $cacheRoot = "$HOME/.cache/coding-agents-dev" }
+    $configRoot = $env:CONTAINAI_CONFIG_ROOT
+    if (-not $configRoot) { $configRoot = "$HOME/.config/containai-dev" }
+    $dataRoot = $env:CONTAINAI_DATA_ROOT
+    if (-not $dataRoot) { $dataRoot = "$HOME/.local/share/containai-dev" }
+    $cacheRoot = $env:CONTAINAI_CACHE_ROOT
+    if (-not $cacheRoot) { $cacheRoot = "$HOME/.cache/containai-dev" }
 }
 
-$shaFile = $env:CODING_AGENTS_SHA256_FILE
+$shaFile = $env:CONTAINAI_SHA256_FILE
 if (-not $shaFile) { $shaFile = Join-Path $root "SHA256SUMS" }
 
 switch ($Format) {
@@ -70,12 +70,12 @@ switch ($Format) {
     }
     "env" {
         @(
-            "CODING_AGENTS_PROFILE=$mode"
-            "CODING_AGENTS_ROOT=$root"
-            "CODING_AGENTS_CONFIG_ROOT=$configRoot"
-            "CODING_AGENTS_DATA_ROOT=$dataRoot"
-            "CODING_AGENTS_CACHE_ROOT=$cacheRoot"
-            "CODING_AGENTS_SHA256_FILE=$shaFile"
+            "CONTAINAI_PROFILE=$mode"
+            "CONTAINAI_ROOT=$root"
+            "CONTAINAI_CONFIG_ROOT=$configRoot"
+            "CONTAINAI_DATA_ROOT=$dataRoot"
+            "CONTAINAI_CACHE_ROOT=$cacheRoot"
+            "CONTAINAI_SHA256_FILE=$shaFile"
         ) -join "`n"
     }
 }

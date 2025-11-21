@@ -1,4 +1,4 @@
-# Running CodingAgents Containers
+# Running ContainAI Containers
 
 This guide distills everything you need to launch Copilot, Codex, or Claude containers as a daily user. It assumes you already cloned this repository and have Docker available.
 
@@ -97,7 +97,7 @@ Naming format: `{agent}-{repo}-{branch}` (sanitized). Labels expose repo path, b
 | Flag | Behavior |
 |------|----------|
 | `--network-proxy restricted` | Launches the container with `--network none` for fully offline sessions |
-| `--network-proxy squid` | Spawns a Squid sidecar (`coding-agents-proxy:local`) that logs traffic through the inspectable proxy |
+| `--network-proxy squid` | Spawns a Squid sidecar (`containai-proxy:local`) that logs traffic through the inspectable proxy |
 | (default) | Normal Docker networking |
 
 Proxy images now pull automatically the first time you choose Squid mode, so you do not have to run build scripts manually.
@@ -114,10 +114,10 @@ You can still use the tmux session from a terminal, so detaching in VS Code will
 ## 6. Secrets, MCP, and Configs
 
 - Launchers render a session manifest on the host, hash the Docker + runtime files, and stage MCP configs per agent.
-- API keys never leave the host: `secret-broker.py` seals them and places a capability bundle in `/run/coding-agents` (tmpfs) inside the container.
+- API keys never leave the host: `secret-broker.py` seals them and places a capability bundle in `/run/containai` (tmpfs) inside the container.
 - Every MCP server entry goes through the trusted `mcp-stub`, so even if an agent is compromised it does not learn the raw credential.
 
-If you need to customize MCP servers, edit `config.toml` in your repository or set `~/.config/coding-agents/mcp-secrets.env`. The setup flow is covered in detail in [docs/mcp-setup.md](mcp-setup.md).
+If you need to customize MCP servers, edit `config.toml` in your repository or set `~/.config/containai/mcp-secrets.env`. The setup flow is covered in detail in [docs/mcp-setup.md](mcp-setup.md).
 
 ## 7. Troubleshooting Quick Reference
 

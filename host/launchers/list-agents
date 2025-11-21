@@ -12,7 +12,7 @@ echo "🤖 Active Agent Containers"
 echo ""
 
 # Get all agent containers
-containers=$(container_cli ps -a --filter "label=coding-agents.type=agent" --format "{{.Names}}" 2>/dev/null)
+containers=$(container_cli ps -a --filter "label=containai.type=agent" --format "{{.Names}}" 2>/dev/null)
 
 if [ -z "$containers" ]; then
     echo "No agent containers found"
@@ -30,8 +30,8 @@ printf "%s\n" "$(printf '%.0s─' {1..100})"
 # List each container
 for container in $containers; do
     status=$(get_container_status "$container")
-    agent=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.agent" }}' "$container" 2>/dev/null || echo "unknown")
-    branch=$(container_cli inspect -f '{{ index .Config.Labels "coding-agents.branch" }}' "$container" 2>/dev/null || echo "unknown")
+    agent=$(container_cli inspect -f '{{ index .Config.Labels "containai.agent" }}' "$container" 2>/dev/null || echo "unknown")
+    branch=$(container_cli inspect -f '{{ index .Config.Labels "containai.branch" }}' "$container" 2>/dev/null || echo "unknown")
     # Color code status
     case "$status" in
         running)

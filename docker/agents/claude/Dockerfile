@@ -1,6 +1,6 @@
 # Claude CLI image
 # Launches directly into Claude
-ARG BASE_IMAGE=coding-agents:local
+ARG BASE_IMAGE=containai:local
 FROM ${BASE_IMAGE}
 
 USER root
@@ -16,9 +16,9 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-claude-auth.sh && \
 	chmod +x /usr/local/bin/validate-claude-auth.sh
 
 # Copy Claude config template and init helper
-RUN mkdir -p /home/agentuser/.config/coding-agents/claude && \
-	chown -R agentuser:agentuser /home/agentuser/.config/coding-agents
-COPY --chown=agentuser:agentuser agent-configs/claude/.claude.json /home/agentuser/.config/coding-agents/claude/.claude.json
+RUN mkdir -p /home/agentuser/.config/containai/claude && \
+	chown -R agentuser:agentuser /home/agentuser/.config/containai
+COPY --chown=agentuser:agentuser agent-configs/claude/.claude.json /home/agentuser/.config/containai/claude/.claude.json
 COPY docker/agents/claude/prepare-claude-secrets.sh /usr/local/bin/prepare-claude-secrets.sh
 RUN chmod +x /usr/local/bin/prepare-claude-secrets.sh
 

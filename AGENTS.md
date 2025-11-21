@@ -1,6 +1,6 @@
-# Coding Agents Repository
+# ContainAI Repository
 
-This file contains repository-specific guidance for working with the Coding Agents codebase.
+This file contains repository-specific guidance for working with the ContainAI codebase.
 
 # Required Tools and Workflows
 
@@ -23,7 +23,7 @@ This file contains repository-specific guidance for working with the Coding Agen
 
 ## Repository Structure
 
-- `agent-configs/` - Custom instruction files for coding agents (copied to containers)
+- `agent-configs/` - Custom instruction files for agents (copied to containers)
 - `docker/` - Container definitions and compose configurations
 - `scripts/` - Utility scripts (bash plus thin Windows shims)
 - `config.toml` - MCP server configuration template
@@ -45,7 +45,7 @@ This file contains repository-specific guidance for working with the Coding Agen
 
 ## Agent Configuration
 
-Custom instructions for AI coding agents are stored in `agent-configs/`
+Custom instructions for AI agents are stored in `agent-configs/`
 
 These files are automatically copied to containers and applied per agent.
 

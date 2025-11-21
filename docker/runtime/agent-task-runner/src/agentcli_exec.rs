@@ -50,7 +50,7 @@ fn real_main() -> Result<()> {
 }
 
 fn switch_user() -> Result<()> {
-    let user_name = get_env("CODING_AGENTS_CLI_USER").unwrap_or_else(|| "agentcli".to_owned());
+    let user_name = get_env("CONTAINAI_CLI_USER").unwrap_or_else(|| "agentcli".to_owned());
     let user = User::from_name(&user_name)
         .context("failed to lookup agentcli user")?
         .ok_or_else(|| anyhow::anyhow!("user '{user_name}' not found"))?;
@@ -69,8 +69,8 @@ fn setup_runner(socket_path: &str) -> Result<()> {
             return Ok(());
         }
     };
-    let agent_name = get_env("CODING_AGENTS_AGENT_NAME");
-    let binary_name = get_env("CODING_AGENTS_AGENT_BINARY");
+    let agent_name = get_env("CONTAINAI_AGENT_NAME");
+    let binary_name = get_env("CONTAINAI_AGENT_BINARY");
     if let Err(err) = register_with_runner(
         socket_path,
         notify_fd.as_raw_fd(),

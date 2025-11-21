@@ -65,14 +65,14 @@ jobs:
             --builder "${{ steps.buildx.outputs.name }}" \
             --platform linux/amd64 \
             --load \
-            --cache-from type=gha,scope=coding-agents-base \
-            --cache-to type=gha,scope=coding-agents-base,mode=max \
-            -t coding-agents-base:scan \
+            --cache-from type=gha,scope=containai-base \
+            --cache-to type=gha,scope=containai-base,mode=max \
+            -t containai-base:scan \
             -f docker/base/Dockerfile \
             .
 
       - name: Scan base image for embedded secrets
-        run: trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress coding-agents-base:scan
+        run: trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress containai-base:scan
 
       - name: Build and push base image
         id: build
@@ -83,8 +83,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=coding-agents-base
-          cache-to: type=gha,scope=coding-agents-base,mode=max
+          cache-from: type=gha,scope=containai-base
+          cache-to: type=gha,scope=containai-base,mode=max
           platforms: linux/amd64,linux/arm64
 
       - name: Generate artifact attestation

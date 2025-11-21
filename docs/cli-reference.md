@@ -1,6 +1,6 @@
 # Command-Line Reference
 
-Complete reference for all CodingAgents launcher scripts and their arguments.
+Complete reference for all ContainAI launcher scripts and their arguments.
 
 > **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They no longer implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh host\launchers\run-copilot.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
 
@@ -28,7 +28,7 @@ Complete reference for all CodingAgents launcher scripts and their arguments.
 
 Ephemeral containers that auto-remove on exit. Best for quick coding sessions.
 
-> **Auto-update:** Launchers check whether the CodingAgents repository is behind its upstream before starting and prompt you to sync. Configure the behavior via `~/.config/coding-agents/host-config.env` (Linux/macOS) or `%USERPROFILE%\.config\coding-agents\host-config.env` (Windows) by setting `LAUNCHER_UPDATE_POLICY=prompt|always|never`.
+> **Auto-update:** Launchers check whether the ContainAI repository is behind its upstream before starting and prompt you to sync. Configure the behavior via `~/.config/containai/host-config.env` (Linux/macOS) or `%USERPROFILE%\.config\containai\host-config.env` (Windows) by setting `LAUNCHER_UPDATE_POLICY=prompt|always|never`.
 
 ### run-copilot
 
@@ -171,7 +171,7 @@ run-claude --prompt "List repo services that need MCP"
 #### Behavior
 
 1. Validates the path exists and is a git repository whenever a repo is involved (prompt sessions reuse the same validation and only fall back to an empty workspace when no repo is detected)
-2. Pulls latest `coding-agents-copilot:local` image
+2. Pulls latest `containai-copilot:local` image
 3. Creates ephemeral container with:
    - Repository mounted at `/workspace`
    - **Branch isolation** (if `-b` specified) or current branch (default)
@@ -184,11 +184,11 @@ run-claude --prompt "List repo services that need MCP"
   - Pushes to the secure local remote (bare repo) so work is preserved even if the container is removed
    - Container auto-removes
 
-> **Auto-push storage:** For local repositories, commits are written to `~/.coding-agents/local-remotes/<repo-hash>.git`. Fetch from that bare repo to bring changes back into your working tree, or set `CODING_AGENTS_LOCAL_REMOTES_DIR` before launching to change the location.
+> **Auto-push storage:** For local repositories, commits are written to `~/.containai/local-remotes/<repo-hash>.git`. Fetch from that bare repo to bring changes back into your working tree, or set `CONTAINAI_LOCAL_REMOTES_DIR` before launching to change the location.
 
 > **Upstream access:** The container starts without any GitHub origin remote. Only the managed `local` remote is configured so you must publish from the host repository (or explicitly add a remote yourself inside the container).
 
-> **Host sync:** After every push to `local`, the host working tree fast-forwards automatically unless you set `CODING_AGENTS_DISABLE_AUTO_SYNC=1`.
+> **Host sync:** After every push to `local`, the host working tree fast-forwards automatically unless you set `CONTAINAI_DISABLE_AUTO_SYNC=1`.
 
 **Prompt sessions (all agents):** Passing `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) auto-runs the agent-specific CLI (`github-copilot-cli exec "$prompt"`, `codex exec "$prompt"`, or `claude -p "$prompt"`). When you launch it from inside a Git repository (or pass a repo/SOURCE argument), the workspace mirrors a normal session with branch isolation, auto-commit, and auto-push (unless you explicitly pass `--no-push`). If no repo exists, the launcher falls back to a synthetic empty workspace, disables auto-push because there is nowhere to push, and still tears down the container as soon as the CLI returns—perfect for diagnostics and the `--with-host-secrets` integration path.
 
@@ -202,10 +202,10 @@ run-claude --prompt "List repo services that need MCP"
 #### Container Details
 
 - **Name:** `copilot-{repo}-{branch}`
-- **Image:** `coding-agents-copilot:local`
+- **Image:** `containai-copilot:local`
 - **Working Dir:** `/workspace`
 - **Network:** Bridge (internet access)
-- **Security:** `no-new-privileges:true`, seccomp `docker/profiles/seccomp-coding-agents.json`, AppArmor profile `coding-agents` (if supported)
+- **Security:** `no-new-privileges:true`, seccomp `docker/profiles/seccomp-containai.json`, AppArmor profile `containai` (if supported)
 - **Removal:** Automatic on exit (`--rm`)
 
 ---
@@ -247,7 +247,7 @@ All [run-copilot](#run-copilot) examples apply - just replace `run-copilot` with
 #### Container Details
 
 - **Name:** `codex-{repo}-{branch}` or `codex-{name}`
-- **Image:** `coding-agents-codex:local`
+- **Image:** `containai-codex:local`
 - Same behavior as `run-copilot`
 
 ---
@@ -289,7 +289,7 @@ All [run-copilot](#run-copilot) examples apply - just replace `run-copilot` with
 #### Container Details
 
 - **Name:** `claude-{repo}-{branch}` or `claude-{name}`
-- **Image:** `coding-agents-claude:local`
+- **Image:** `containai-claude:local`
 - Same behavior as `run-copilot`
 
 ---
@@ -365,18 +365,18 @@ launch-agent <AGENT> [<SOURCE>] [OPTIONS]
 
 #### Integrity, Audit, and Overrides
 
-- **Trusted file enforcement:** Before starting a container, `launch-agent` checks that `host/launchers/**`, stub helpers, and `docker/profiles/**` match `HEAD`. If anything is dirty, the launch aborts unless you create an override token at `~/.config/coding-agents/overrides/allow-dirty` (configurable via `CODING_AGENTS_DIRTY_OVERRIDE_TOKEN`). Every override is logged.
-- **Session manifest logging:** The host renders a per-session config, computes its SHA256, exports it via `CODING_AGENTS_SESSION_CONFIG_SHA256`, and writes a `session-config` event to the audit log. Compare this hash with what helper tooling reports to ensure configs were not tampered with in transit.
-- **Audit log location:** Structured JSON events (`session-config`, `capabilities-issued`, `override-used`) are appended to `~/.config/coding-agents/security-events.log`. Override via `CODING_AGENTS_AUDIT_LOG=/path/to/file` if you need alternate storage. All events are also forwarded to `systemd-cat -t coding-agents-launcher` when available.
+- **Trusted file enforcement:** Before starting a container, `launch-agent` checks that `host/launchers/**`, stub helpers, and `docker/profiles/**` match `HEAD`. If anything is dirty, the launch aborts unless you create an override token at `~/.config/containai/overrides/allow-dirty` (configurable via `CONTAINAI_DIRTY_OVERRIDE_TOKEN`). Every override is logged.
+- **Session manifest logging:** The host renders a per-session config, computes its SHA256, exports it via `CONTAINAI_SESSION_CONFIG_SHA256`, and writes a `session-config` event to the audit log. Compare this hash with what helper tooling reports to ensure configs were not tampered with in transit.
+- **Audit log location:** Structured JSON events (`session-config`, `capabilities-issued`, `override-used`) are appended to `~/.config/containai/security-events.log`. Override via `CONTAINAI_AUDIT_LOG=/path/to/file` if you need alternate storage. All events are also forwarded to `systemd-cat -t containai-launcher` when available.
 - **Helper sandbox controls:** By default helper containers run with `--network none`, tmpfs-backed `/tmp` + `/var/tmp`, `--cap-drop ALL`, and the ptrace-blocking seccomp profile. Tune with environment variables before launching:
-  - `CODING_AGENTS_HELPER_NETWORK_POLICY=loopback|none|host|bridge|<docker-network>`
-  - `CODING_AGENTS_HELPER_PIDS_LIMIT` (default `64`)
-  - `CODING_AGENTS_HELPER_MEMORY` (default `512m`)
+  - `CONTAINAI_HELPER_NETWORK_POLICY=loopback|none|host|bridge|<docker-network>`
+  - `CONTAINAI_HELPER_PIDS_LIMIT` (default `64`)
+  - `CONTAINAI_HELPER_MEMORY` (default `512m`)
 
 To inspect recent events quickly:
 
 ```bash
-tail -f ~/.config/coding-agents/security-events.log
+tail -f ~/.config/containai/security-events.log
 ```
 
 Run `bash scripts/test/test-launchers.sh --list` to discover available launcher tests, then provide `all` or explicit names (for example, `bash scripts/test/test-launchers.sh test_agent_data_packager test_helper_network_isolation`) after modifying launcher logic. PowerShell users can do the same with `pwsh scripts/test/test-launchers.ps1 -List` and `pwsh scripts/test/test-launchers.ps1 Test-SecretBrokerCli`.
@@ -499,7 +499,7 @@ docker stop {container-name}
 #### Container Details
 
 - **Name:** `{agent}-{repo}-{branch}` or `{agent}-{name}`
-- **Image:** `coding-agents-{agent}:local`
+- **Image:** `containai-{agent}:local`
 - **Working Dir:** `/workspace`
 - **Command:** `sleep infinity` (runs in background)
 - **Removal:** Manual (`docker rm`) after stop
@@ -639,7 +639,7 @@ connect-agent.ps1 [[-Name] <String>] [OPTIONS]
 #### Behavior
 
 1. Validates Docker is running
-2. Detects running agent containers (label `coding-agents.type=agent`)
+2. Detects running agent containers (label `containai.type=agent`)
 3. If multiple containers are running, prompts for explicit `--name`
 4. Executes `agent-session attach` inside the container so you land in the managed tmux session
 5. Falls back to `docker exec -it ... bash` if the helper is missing (older containers)
@@ -717,7 +717,7 @@ This script takes no arguments.
 ⚠ GitHub CLI not installed (optional - only needed for GitHub Copilot/authentication)
 ✓ Disk space available: 42.5 GB
 
-✅ Core prerequisites met! You're ready to use CodingAgents.
+✅ Core prerequisites met! You're ready to use ContainAI.
 ⚠ 1 optional tool missing (see above)
 ```
 
@@ -777,26 +777,26 @@ If script fails, manually add to PATH:
 
 **Linux (bash):**
 ```bash
-echo 'export PATH="/path/to/CodingAgents/host/launchers:$PATH"' >> ~/.bashrc
+echo 'export PATH="/path/to/ContainAI/host/launchers:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 **Mac (zsh):**
 ```bash
-echo 'export PATH="/path/to/CodingAgents/host/launchers:$PATH"' >> ~/.zshrc
+echo 'export PATH="/path/to/ContainAI/host/launchers:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 **Windows (PowerShell - Temporary):**
 ```powershell
-$env:PATH += ";E:\dev\CodingAgents\host\launchers"
+$env:PATH += ";E:\dev\ContainAI\host\launchers"
 ```
 
 **Windows (PowerShell - Permanent):**
 ```powershell
 [Environment]::SetEnvironmentVariable(
     "Path",
-    "$env:PATH;E:\dev\CodingAgents\host\launchers",
+    "$env:PATH;E:\dev\ContainAI\host\launchers",
     [EnvironmentVariableTarget]::User
 )
 ```
@@ -830,7 +830,7 @@ Build container images from source.
 
 **Notes:**
 - The base-image prompt only appears when at least one agent image (`copilot`, `codex`, `claude`) is selected.
-- Specialized images depend on `coding-agents:local` and will trigger its build automatically.
+- Specialized images depend on `containai:local` and will trigger its build automatically.
 
 #### Interactive Prompts
 
@@ -847,10 +847,10 @@ Choice [1-2]:
 
 #### Build Order (per requested targets)
 
-1. **Base image** (`coding-agents-base:local`) – only when building agent images
-2. **All-agents image** (`coding-agents:local`) – prerequisite for agent-specific images
-3. **Selected specialized images** – `coding-agents-copilot:local`, `coding-agents-codex:local`, `coding-agents-claude:local`
-4. **Proxy image** (`coding-agents-proxy:local`) – built when requested
+1. **Base image** (`containai-base:local`) – only when building agent images
+2. **All-agents image** (`containai:local`) – prerequisite for agent-specific images
+3. **Selected specialized images** – `containai-copilot:local`, `containai-codex:local`, `containai-claude:local`
+4. **Proxy image** (`containai-proxy:local`) – built when requested
 
 #### Examples
 
@@ -893,12 +893,12 @@ $env:DOCKER_BUILDKIT=1
 ✅ Build complete!
 
 Images created:
-  coding-agents-base:local
-  coding-agents:local
-  coding-agents-copilot:local
-  coding-agents-codex:local
-  coding-agents-claude:local
-  coding-agents-proxy:local
+  containai-base:local
+  containai:local
+  containai-copilot:local
+  containai-codex:local
+  containai-claude:local
+  containai-proxy:local
 
 Next steps:
   1. Install launchers: ./scripts/install.sh
@@ -968,7 +968,7 @@ Next steps:
 1. On exit, trap executes
 2. Checks if container still exists
 3. Commits changes: `git add -A`, `git commit`
-4. Pushes to the per-repo bare remote under `~/.coding-agents/local-remotes` (unless `--no-push`)
+4. Pushes to the per-repo bare remote under `~/.containai/local-remotes` (unless `--no-push`)
 5. Container auto-removes (`--rm`)
 
 4. Starts a managed tmux session so you can detach/reconnect (`Ctrl+B`, then `D`)
@@ -980,7 +980,7 @@ Next steps:
 3. Container stops but persists
 4. Manual removal: `docker rm`
 
-**Note:** Git now pushes to the managed bare repo path automatically. Fetch from that path (or set `CODING_AGENTS_LOCAL_REMOTES_DIR` to customize the location) to bring changes into your working tree.
+**Note:** Git now pushes to the managed bare repo path automatically. Fetch from that path (or set `CONTAINAI_LOCAL_REMOTES_DIR` to customize the location) to bring changes into your working tree.
 
 ---
 

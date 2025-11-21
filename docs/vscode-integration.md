@@ -84,7 +84,7 @@ code --list-extensions | Select-String "ms-vscode-remote.remote-containers"
 
 ### Method 2: Launch from VS Code's Integrated Terminal
 
-1. **Open VS Code on the host** (outside of any container) and load the CodingAgents repository so the launchers are on your PATH.
+1. **Open VS Code on the host** (outside of any container) and load the ContainAI repository so the launchers are on your PATH.
 2. **Open the integrated terminal:** `` Ctrl+` ``.
 3. **Run a launcher from your project directory:**
    ```bash
@@ -155,7 +155,7 @@ For full control over launch options:
 1. **Open integrated terminal:** `` Ctrl+` `` (backtick)
 2. **Navigate to repository root:**
    ```powershell
-   cd e:\dev\CodingAgents
+   cd e:\dev\ContainAI
    ```
 
 3. **Launch with options:**
@@ -320,11 +320,11 @@ VS Code extensions can run either on your **local machine** or **inside the cont
 
 ---
 
-## Interacting with the Coding Agent
+## Interacting with the Agent
 
 ### Understanding the Agent Architecture
 
-Coding agents run as **interactive shell sessions** inside the container. When you launch an agent, it starts a persistent session that you can interact with.
+Agents run as **interactive shell sessions** inside the container. When you launch an agent, it starts a persistent session that you can interact with.
 
 **Agent startup process:**
 1. Container starts with environment configured
@@ -574,7 +574,7 @@ If the agent runs a web server or API:
 **Method 3: Via launch script**
 ```powershell
 # Add port mapping when launching
-docker run -p 3000:3000 coding-agents/copilot:latest
+docker run -p 3000:3000 containai/copilot:latest
 ```
 
 ### Debugging Inside Container
@@ -750,7 +750,7 @@ docker container prune --filter "label=coding-agent=true"
    # From host
    docker inspect copilot-agent --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
    
-   # Should show: E:\dev\CodingAgents -> /workspace
+   # Should show: E:\dev\ContainAI -> /workspace
    ```
 
 4. **Check file permissions:**
@@ -847,8 +847,8 @@ docker container prune --filter "label=coding-agent=true"
    ```powershell
    docker run -it --rm `
      --name copilot-debug `
-     -v E:\dev\CodingAgents:/workspace `
-     coding-agents/copilot:latest `
+     -v E:\dev\ContainAI:/workspace `
+     containai/copilot:latest `
      /bin/bash
    
    # Debug inside container
@@ -905,7 +905,7 @@ You now know how to:
 ✅ **Launch** new containers from VS Code  
 ✅ **Navigate** the container filesystem in Explorer  
 ✅ **Execute** commands in the container terminal  
-✅ **Interact** with coding agents via terminal and extensions  
+✅ **Interact** with ContainAI via terminal and extensions  
 ✅ **Work** with Git and source control inside containers  
 ✅ **Debug** code running in containers  
 ✅ **Troubleshoot** common VS Code container issues  

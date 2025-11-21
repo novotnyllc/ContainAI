@@ -1,4 +1,4 @@
-# Dockerfile for the Squid proxy sidecar used by coding agents
+# Dockerfile for the Squid proxy sidecar used by containai
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive

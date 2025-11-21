@@ -57,7 +57,7 @@ The credential proxy uses a **READ-ONLY** socket-based architecture to provide m
 flowchart TB
    subgraph Host
       server["git-credential-proxy-server.sh\n• Listens on Unix socket (mode 600)\n• Validates all inputs\n• Read-only: only 'get'\n• Rate limits connections\n• Delegates to git credential fill\n• Audit logs every request"]
-      socket["~/.config/coding-agents/git-credential.sock"]
+      socket["~/.config/containai/git-credential.sock"]
       server --> socket
    end
 
@@ -169,7 +169,7 @@ All inputs validated with strict rules:
 - Success/failure
 - Denial reasons
 
-**Log Location:** `~/.config/coding-agents/git-credential-proxy.log`
+**Log Location:** `~/.config/containai/git-credential-proxy.log`
 
 **What We DON'T Log (Security):**
 - Passwords or tokens (never logged)
@@ -315,8 +315,8 @@ Server auto-starts when launching container:
 
 # Or start manually:
 ./host/utils/git-credential-proxy-server.sh \
-    ~/.config/coding-agents/git-credential.sock \
-    ~/.config/coding-agents/git-credential-proxy.log
+    ~/.config/containai/git-credential.sock \
+    ~/.config/containai/git-credential-proxy.log
 ```
 
 ### Monitoring
@@ -325,10 +325,10 @@ Check server status:
 
 ```bash
 # Check if socket exists
-ls -la ~/.config/coding-agents/git-credential.sock
+ls -la ~/.config/containai/git-credential.sock
 
 # View recent logs
-tail -f ~/.config/coding-agents/git-credential-proxy.log
+tail -f ~/.config/containai/git-credential-proxy.log
 
 # Count active connections (approximate)
 cat /tmp/git-cred-proxy-*.count 2>/dev/null || echo "0"

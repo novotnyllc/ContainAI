@@ -3,14 +3,14 @@ set -euo pipefail
 
 STUB_NAME="agent_codex_cli"
 SECRET_NAME="codex_cli_auth_json"
-AGENT_HOME="${CODING_AGENTS_AGENT_HOME:-/home/agentuser}"
-AGENT_SECRET_ROOT="${CODING_AGENTS_AGENT_SECRET_ROOT:-/run/agent-secrets}"
-DEFAULT_CAP_ROOT="${CODING_AGENTS_CAP_ROOT_OVERRIDE:-${AGENT_HOME}/.config/coding-agents/capabilities}"
-AGENT_CLI_CAP_ROOT="${CODING_AGENTS_AGENT_CAP_ROOT:-/run/coding-agents/codex/cli/capabilities}"
+AGENT_HOME="${CONTAINAI_AGENT_HOME:-/home/agentuser}"
+AGENT_SECRET_ROOT="${CONTAINAI_AGENT_SECRET_ROOT:-/run/agent-secrets}"
+DEFAULT_CAP_ROOT="${CONTAINAI_CAP_ROOT_OVERRIDE:-${AGENT_HOME}/.config/containai/capabilities}"
+AGENT_CLI_CAP_ROOT="${CONTAINAI_AGENT_CAP_ROOT:-/run/containai/codex/cli/capabilities}"
 DEST_DIR="${AGENT_SECRET_ROOT}/codex"
 DEST_FILE="${DEST_DIR}/auth.json"
 CLI_DIR="${AGENT_HOME}/.codex"
-UNSEAL_BIN="${CODING_AGENTS_CAPABILITY_UNSEAL:-/usr/local/bin/capability-unseal}"
+UNSEAL_BIN="${CONTAINAI_CAPABILITY_UNSEAL:-/usr/local/bin/capability-unseal}"
 
 link_cli_dir() {
     local target="$1"

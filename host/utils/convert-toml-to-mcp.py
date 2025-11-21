@@ -23,9 +23,9 @@ DEFAULT_AGENTS = {
 STUB_COMMAND_TEMPLATE = "/home/agentuser/.local/bin/mcp-stub-{name}"
 HELPER_LISTEN_HOST = "127.0.0.1"
 HELPER_PORT_BASE = 52100
-DEFAULT_CONFIG_ROOT = Path(os.environ.get("CODING_AGENTS_CONFIG_ROOT", Path.home() / ".config" / "coding-agents-dev"))
+DEFAULT_CONFIG_ROOT = Path(os.environ.get("CONTAINAI_CONFIG_ROOT", Path.home() / ".config" / "containai-dev"))
 DEFAULT_HELPER_ACL_CONFIG = Path(
-    os.environ.get("CODING_AGENTS_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
+    os.environ.get("CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
 )
 
 
@@ -70,7 +70,7 @@ def collect_secrets():
         [
             "/home/agentuser/.mcp-secrets.env",
             str(Path.home() / ".mcp-secrets.env"),
-            str(Path.home() / ".config/coding-agents/mcp-secrets.env"),
+            str(Path.home() / ".config/containai/mcp-secrets.env"),
         ]
     )
 
@@ -198,8 +198,8 @@ def convert_stub_server(name, settings, secrets, warnings):
     rendered_entry["command"] = STUB_COMMAND_TEMPLATE.format(name=name)
     rendered_entry["args"] = []
     rendered_entry["env"] = {
-        "CODING_AGENTS_STUB_SPEC": base64.b64encode(json.dumps(spec, sort_keys=True).encode("utf-8")).decode("ascii"),
-        "CODING_AGENTS_STUB_NAME": name,
+        "CONTAINAI_STUB_SPEC": base64.b64encode(json.dumps(spec, sort_keys=True).encode("utf-8")).decode("ascii"),
+        "CONTAINAI_STUB_NAME": name,
     }
     return rendered_entry
 
@@ -261,7 +261,7 @@ def convert_toml_to_mcp(toml_path):
             return False
 
     helper_manifest = {"helpers": helpers, "source": str(toml_path)}
-    helper_path = os.path.expanduser("~/.config/coding-agents/helpers.json")
+    helper_path = os.path.expanduser("~/.config/containai/helpers.json")
     os.makedirs(os.path.dirname(helper_path), exist_ok=True)
     try:
         with open(helper_path, "w", encoding="utf-8") as handle:

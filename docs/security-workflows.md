@@ -43,7 +43,7 @@ sequenceDiagram
 
     Launcher->>SecretBroker: Register requested MCP servers + scopes
     SecretBroker-->>CapabilityBundle: Issue sealed tokens on tmpfs
-    Launcher->>Container: Bind-mount /run/coding-agents with bundle
+    Launcher->>Container: Bind-mount /run/containai with bundle
     Container->>MCPStub: Start server via trusted wrapper
     MCPStub->>CapabilityBundle: Redeem sealed token (one-time)
     CapabilityBundle-->>MCPStub: Ephemeral credentials
@@ -54,7 +54,7 @@ sequenceDiagram
 **Defenses**
 - Capabilities live in tmpfs with `0700` permissions owned by the stub user.
 - Tokens are single-use and audience-bound, so exfiltrated blobs are worthless.
-- Launchers optionally merge `~/.config/coding-agents/mcp-secrets.env` for hosts that prefer .env-style inputs.
+- Launchers optionally merge `~/.config/containai/mcp-secrets.env` for hosts that prefer .env-style inputs.
 
 ## 3. CI Build & Security Gates
 
