@@ -135,10 +135,10 @@ remove-agent.ps1 codex-myproject-auth -NoPush
 docker ps -a
 
 # List agent containers only
-docker ps -a --filter "label=coding-agents.type=agent"
+docker ps -a --filter "label=containai.type=agent"
 
 # Remove all test containers
-docker ps -aq --filter "label=coding-agents.test=true" | xargs docker rm -f
+docker ps -aq --filter "label=containai.test=true" | xargs docker rm -f
 
 # Check container logs
 docker logs container-name
@@ -190,15 +190,15 @@ pwsh scripts/test/test-branch-management.ps1
 ./scripts/test/integration-test.sh --mode full --preserve
 
 # Then inspect
-docker ps -a --filter "label=coding-agents.test-session=<PID>"
+docker ps -a --filter "label=containai.test-session=<PID>"
 docker logs <container-name>
-docker network ls | grep test-coding-agents
-ls -la /tmp/test-coding-agents-repo-<PID>
+docker network ls | grep test-containai
+ls -la /tmp/test-containai-repo-<PID>
 
 # Manual cleanup after inspection
-docker ps -aq --filter "label=coding-agents.test-session=<PID>" | xargs docker rm -f
-docker network rm test-coding-agents-net-<PID>
-rm -rf /tmp/test-coding-agents-repo-<PID>
+docker ps -aq --filter "label=containai.test-session=<PID>" | xargs docker rm -f
+docker network rm test-containai-net-<PID>
+rm -rf /tmp/test-containai-repo-<PID>
 ```
 
 ## Common Utilities
