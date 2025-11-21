@@ -1409,6 +1409,41 @@ test_image_pull() {
     pass "pull_and_tag_image() executes without error"
 }
 
+test_mitm_log_forwarding() {
+    test_section "Testing MITM log forwarding pipeline"
+
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
+
+    local proxy_container="containai-test-proxy-$RANDOM"
+    local log_dir
+    log_dir=$(mktemp -d "${TMPDIR:-/tmp}/containai-proxy-log.XXXXXX")
+    local cert_dir="$log_dir/certs"
+    local port_file="$log_dir/port"
+    local broker_pid="$log_dir/broker.pid"
+    local forwarder_pid="$log_dir/forwarder.pid"
+    local broker_port
+    broker_port=$(find_free_port)
+
+    generate_log_broker_certs "$cert_dir"
+
+    docker run -d --name "$proxy_container" --entrypoint sh "$TEST_CODEX_IMAGE" -c 'i=0; while true; do echo \"log-$i\"; i=$((i+1)); sleep 1; done' >/dev/null
+
+    start_proxy_log_broker "$log_dir" "$cert_dir" "$port_file" "$broker_pid" "$broker_port"
+    start_proxy_log_forwarder "$proxy_container" "$cert_dir" "$broker_port" "$log_dir" "$forwarder_pid"
+
+    sleep 3
+
+    if [ -f "$log_dir/access.log" ] && grep -q \"log-\" "$log_dir/access.log"; then
+        pass "Log forwarding captured proxy output via TLS broker"
+    else
+        fail "Log forwarding did not capture proxy output"
+    fi
+
+    stop_proxy_log_pipeline "$log_dir"
+    docker rm -f "$proxy_container" >/dev/null 2>&1 || true
+    rm -rf "$log_dir"
+}
+
 # Test: MITM CA generation and rotation
 test_mitm_ca_generation() {
     test_section "Testing MITM CA generation"
@@ -1643,6 +1678,7 @@ ALL_TESTS=(
     "setup_test_repo"
     "test_container_runtime_detection"
     "test_shared_functions"
+    "test_mitm_log_forwarding"
     "test_env_detection_profiles"
     "test_integrity_check_behaviors"
     "test_helper_network_isolation"
@@ -1663,6 +1699,7 @@ ALL_TESTS=(
     "test_container_naming"
     "test_container_labels"
     "test_image_pull"
+    "test_mitm_log_forwarding"
     "test_mitm_ca_generation"
     "test_branch_sanitization"
     "test_multiple_agents"

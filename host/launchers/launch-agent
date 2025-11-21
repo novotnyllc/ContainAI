@@ -67,6 +67,9 @@ cleanup_session_artifacts() {
     if [ -n "$CONTAINER_NAME" ] && [ -d "$cache_root/${CONTAINER_NAME}" ]; then
         rm -rf "$cache_root/${CONTAINER_NAME}"
     fi
+    if [ -n "$PROXY_CONTAINER_NAME" ]; then
+        stop_proxy_log_pipeline "$PROXY_CONTAINER_NAME"
+    fi
 }
 trap cleanup_session_artifacts EXIT
 
@@ -102,6 +105,8 @@ TMPFS_SMALL_SIZE="${CONTAINAI_TMPFS_SMALL:-512m}"
 TMPFS_SECRET_SIZE="${CONTAINAI_TMPFS_SECRETS:-32m}"
 DEFAULT_BROKER_STUBS=("github" "uno" "msftdocs" "playwright" "context7" "serena" "sequential-thinking" "fetch")
 BROKER_STUBS=("${DEFAULT_BROKER_STUBS[@]}")
+PROXY_SECCOMP_PROFILE_PATH="${REPO_ROOT}/docker/profiles/seccomp-containai-proxy.json"
+PROXY_APPARMOR_PROFILE="containai-proxy"
 declare -A MCP_SECRET_VALUES=()
 declare -A SESSION_STUB_SECRETS=()
 declare -A SESSION_SECRET_FILE_SOURCES=()
@@ -841,6 +846,13 @@ TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
 # Squid allowed domains
 SQUID_ALLOWED_DOMAINS="*.github.com,*.githubcopilot.com,*.nuget.org,*.npmjs.org,*.pypi.org,*.python.org,*.microsoft.com,*.docker.io,registry-1.docker.io,api.githubcopilot.com,learn.microsoft.com,platform.uno,*.githubusercontent.com,*.azureedge.net"
 SQUID_HELPER_ACL_FILE="$SESSION_CONFIG_OUTPUT/squid-acls.conf"
+PROXY_LOG_ROOT="${HOME}/.containai/logs/proxy"
+PROXY_LOG_DIR="${PROXY_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
+PROXY_LOG_CERT_DIR="${SESSION_CONFIG_OUTPUT}/log-broker"
+PROXY_LOG_PORT_FILE="${PROXY_LOG_DIR}/port"
+PROXY_BROKER_PID_FILE="${PROXY_LOG_DIR}/broker.pid"
+PROXY_FORWARDER_PID_FILE="${PROXY_LOG_DIR}/forwarder.pid"
+PROXY_LOG_PORT="$(find_free_port)"
 
 # Determine network mode
 NETWORK_MODE="$PROXY_NETWORK_NAME"
@@ -1032,6 +1044,8 @@ if container_exists "$CONTAINER_NAME"; then
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
         ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
+        start_proxy_log_broker "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT_FILE" "$PROXY_BROKER_PID_FILE" "$PROXY_LOG_PORT"
+        start_proxy_log_forwarder "$PROXY_CONTAINER_NAME" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT" "$PROXY_LOG_DIR" "$PROXY_FORWARDER_PID_FILE"
     fi
     
     if [ "$STATE" = "running" ]; then
@@ -1050,6 +1064,8 @@ fi
 # Setup squid proxy if needed
 if [ "$USE_SQUID" = true ]; then
     ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
+    start_proxy_log_broker "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT_FILE" "$PROXY_BROKER_PID_FILE" "$PROXY_LOG_PORT"
+    start_proxy_log_forwarder "$PROXY_CONTAINER_NAME" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT" "$PROXY_LOG_DIR" "$PROXY_FORWARDER_PID_FILE"
 fi
 
 # Build docker arguments
@@ -1059,6 +1075,8 @@ DOCKER_ARGS=(
     "run" "-d"
     "--name" "$CONTAINER_NAME"
     "--hostname" "$CONTAINER_NAME"
+    "--security-opt" "apparmor=containai"
+    "--security-opt" "seccomp=$SECCOMP_PROFILE_PATH"
     "-e" "TZ=$TZ_VALUE"
     "-e" "SOURCE_TYPE=$SOURCE_TYPE"
     "-e" "REPO_NAME=$WORKSPACE_NAME"

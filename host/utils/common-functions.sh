@@ -1817,7 +1817,67 @@ generate_session_mitm_ca() {
     return 0
 }
 
+generate_log_broker_certs() {
+    local output_dir="$1"
+    mkdir -p "$output_dir"
+    local original_umask
+    original_umask=$(umask)
+    umask 077
+    local ca_key="$output_dir/log-ca.key"
+    local ca_crt="$output_dir/log-ca.crt"
+    local server_key="$output_dir/log-server.key"
+    local server_crt="$output_dir/log-server.crt"
+    local client_key="$output_dir/log-client.key"
+    local client_crt="$output_dir/log-client.crt"
+
+    if [ ! -f "$ca_crt" ] || [ ! -f "$ca_key" ]; then
+        openssl req -x509 -newkey rsa:2048 -nodes -subj "/CN=ContainAI Log Broker CA" -days 2 \
+            -keyout "$ca_key" -out "$ca_crt" >/dev/null 2>&1 || true
+    fi
+    if [ ! -f "$server_crt" ] || [ ! -f "$server_key" ]; then
+        openssl req -new -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout "$server_key" -out "$output_dir/server.csr" >/dev/null 2>&1 || true
+        openssl x509 -req -in "$output_dir/server.csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial -out "$server_crt" -days 2 -sha256 >/dev/null 2>&1 || true
+    fi
+    if [ ! -f "$client_crt" ] || [ ! -f "$client_key" ]; then
+        openssl req -new -newkey rsa:2048 -nodes -subj "/CN=containai-forwarder" -keyout "$client_key" -out "$output_dir/client.csr" >/dev/null 2>&1 || true
+        openssl x509 -req -in "$output_dir/client.csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial -out "$client_crt" -days 2 -sha256 >/dev/null 2>&1 || true
+    fi
+    chmod 600 "$ca_key" "$ca_crt" "$server_key" "$server_crt" "$client_key" "$client_crt" 2>/dev/null || true
+    umask "$original_umask"
+}
+
+find_free_port() {
+    python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+port = s.getsockname()[1]
+s.close()
+print(port)
+PY
+}
+
 # Ensure squid proxy is running (for launch-agent)
+start_proxy_log_streamer() {
+    local proxy_container="$1"
+    local log_dir="$2"
+    local agent="$3"
+    local session="$4"
+    [ -z "$proxy_container" ] && return 0
+    [ -z "$log_dir" ] && return 0
+    mkdir -p "$log_dir"
+    local log_file="$log_dir/access.log"
+    local meta_file="$log_dir/meta"
+    printf "agent=%s\nsession=%s\ncontainer=%s\n" "${agent:-unknown}" "${session:-unknown}" "$proxy_container" > "$meta_file"
+    if ! container_exists "$proxy_container"; then
+        echo "⚠️  Proxy container $proxy_container not found for log streaming" >&2
+        return 1
+    fi
+    nohup container_cli logs -f "$proxy_container" >"$log_file" 2>&1 &
+    echo $! > "$log_dir/streamer.pid"
+    return 0
+}
+
 ensure_squid_proxy() {
     local network_name="$1"
     local proxy_container="$2"
@@ -1829,6 +1889,8 @@ ensure_squid_proxy() {
     local session_id="${8:-}"
     local mitm_ca_cert="${9:-${SESSION_MITM_CA_CERT:-}}"
     local mitm_ca_key="${10:-${SESSION_MITM_CA_KEY:-}}"
+    local proxy_seccomp="${PROXY_SECCOMP_PROFILE_PATH:-${SECCOMP_PROFILE_PATH:-}}"
+    local proxy_apparmor="${PROXY_APPARMOR_PROFILE:-containai-proxy}"
     
     if [ -z "$mitm_ca_cert" ] || [ -z "$mitm_ca_key" ] || [ ! -f "$mitm_ca_cert" ] || [ ! -f "$mitm_ca_key" ]; then
         echo "❌ MITM CA certificate and key are required to start the Squid proxy" >&2
@@ -1852,18 +1914,25 @@ ensure_squid_proxy() {
             return 1
         fi
     fi
-    
+
     local -a proxy_args=(
         -d
         --name "$proxy_container"
         --hostname "$proxy_container"
         --network "$network_name"
         --restart no
+        --read-only
+        --cap-drop=ALL
+        --security-opt "no-new-privileges:true"
+        ${proxy_seccomp:+--security-opt "seccomp=${proxy_seccomp}"}
+        ${proxy_apparmor:+--security-opt "apparmor=${proxy_apparmor}"}
+        --pids-limit 256
         -e "SQUID_ALLOWED_DOMAINS=$squid_allowed_domains"
         -e "SQUID_MITM_CA_CERT=/etc/squid/mitm/ca.crt"
         -e "SQUID_MITM_CA_KEY=/etc/squid/mitm/ca.key"
         --tmpfs "/var/log/squid:rw,nosuid,nodev,noexec,size=64m,mode=750"
         --tmpfs "/var/spool/squid:rw,nosuid,nodev,noexec,size=128m,mode=750"
+        --tmpfs "/var/run/squid:rw,nosuid,nodev,noexec,size=16m,mode=750"
         --label "containai.proxy-of=$agent_container"
         --label "containai.proxy-image=$proxy_image"
         -v "$mitm_ca_cert:/etc/squid/mitm/ca.crt:ro"
@@ -1879,6 +1948,87 @@ ensure_squid_proxy() {
 }
 
 # Generate repository setup script for container
+start_proxy_log_streamer() {
+    local proxy_container="$1"
+    local log_dir="$2"
+    local agent="$3"
+    local session="$4"
+    [ -z "$proxy_container" ] && return 0
+    [ -z "$log_dir" ] && return 0
+    mkdir -p "$log_dir"
+    local log_file="$log_dir/access.log"
+    local meta_file="$log_dir/meta"
+    printf "agent=%s\nsession=%s\ncontainer=%s\n" "${agent:-unknown}" "${session:-unknown}" "$proxy_container" > "$meta_file"
+    if ! container_exists "$proxy_container"; then
+        echo "⚠️  Proxy container $proxy_container not found for log streaming" >&2
+        return 1
+    fi
+    nohup container_cli logs -f "$proxy_container" >"$log_file" 2>&1 &
+    echo $! > "$log_dir/streamer.pid"
+    return 0
+}
+
+start_proxy_log_pipeline() {
+    local proxy_container="$1"
+    local proxy_network="$2"
+    local log_dir="$3"
+    local cert_dir="$4"
+    local broker_name="${proxy_container}-log-broker"
+    local forwarder_name="${proxy_container}-log-forwarder"
+    local broker_port="4433"
+
+    mkdir -p "$log_dir" "$cert_dir"
+    generate_log_broker_certs "$cert_dir"
+
+    if ! container_exists "$proxy_container"; then
+        echo "❌ Cannot start log pipeline; proxy container '$proxy_container' missing" >&2
+        return 1
+    fi
+
+    stop_proxy_log_pipeline "$proxy_container"
+
+    if ! container_cli run -d --name "$broker_name" --hostname "$broker_name" \
+        --network "$proxy_network" \
+        -v "$cert_dir:/certs:ro" \
+        -v "$log_dir:/logs" \
+        --label "containai.log-of=$proxy_container" \
+        --label "containai.log-role=broker" \
+        "$CONTAINAI_PROXY_IMAGE_FALLBACK" \
+        sh -c "openssl s_server -quiet -accept ${broker_port} -cert /certs/log-server.crt -key /certs/log-server.key -CAfile /certs/log-ca.crt -Verify 1 >>/logs/access.log 2>>/logs/broker.err"
+    then
+        echo "❌ Failed to start log broker container $broker_name" >&2
+        return 1
+    fi
+
+    if ! container_cli run -d --name "$forwarder_name" --hostname "$forwarder_name" \
+        --network "$proxy_network" \
+        --volumes-from "$proxy_container":ro \
+        -v "$cert_dir:/certs:ro" \
+        -v "$log_dir:/logs" \
+        --label "containai.log-of=$proxy_container" \
+        --label "containai.log-role=forwarder" \
+        "$CONTAINAI_PROXY_IMAGE_FALLBACK" \
+        sh -c "tail -F /var/log/squid/access.log | openssl s_client -quiet -connect ${broker_name}:${broker_port} -cert /certs/log-client.crt -key /certs/log-client.key -CAfile /certs/log-ca.crt >/dev/null 2>>/logs/forwarder.err"
+    then
+        echo "❌ Failed to start log forwarder container $forwarder_name" >&2
+        container_cli rm -f "$broker_name" >/dev/null 2>&1 || true
+        return 1
+    fi
+    return 0
+}
+
+stop_proxy_log_pipeline() {
+    local proxy_container="$1"
+    if [ -z "$proxy_container" ]; then
+        return 0
+    fi
+    local ids
+    ids=$(container_cli ps -aq --filter "label=containai.log-of=${proxy_container}" 2>/dev/null || true)
+    if [ -n "$ids" ]; then
+        container_cli rm -f $ids >/dev/null 2>&1 || true
+    fi
+}
+
 generate_repo_setup_script() {
     cat << 'SETUP_SCRIPT'
 #!/usr/bin/env bash

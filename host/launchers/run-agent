@@ -225,6 +225,7 @@ cleanup_run_agent_volumes() {
 
     local cache_root="${CONTAINAI_SESSION_CACHE:-${HOME:-/tmp}/.containai/session-cache}"
     local cache_dir=""
+    local proxy_container="${PROXY_CONTAINER_NAME:-}"
     if [ -n "$container_name" ]; then
         cache_dir="$cache_root/${container_name}"
     fi
@@ -264,6 +265,7 @@ cleanup_run_agent_volumes() {
     if [ -n "$cache_dir" ] && [ -d "$cache_dir" ]; then
         rm -rf "$cache_dir"
     fi
+    [ -n "$proxy_container" ] && stop_proxy_log_pipeline "$proxy_container"
 }
 trap cleanup_run_agent_volumes EXIT
 
@@ -1082,6 +1084,9 @@ elif [ "$NETWORK_PROXY" != "restricted" ]; then
     SQUID_ALLOWED_DOMAINS="."
 fi
 SQUID_HELPER_ACL_FILE="$SESSION_CONFIG_OUTPUT/squid-acls.conf"
+PROXY_LOG_ROOT="${HOME}/.containai/logs/proxy"
+PROXY_LOG_DIR="${PROXY_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
+PROXY_LOG_CERT_DIR="${SESSION_CONFIG_OUTPUT}/log-broker"
 
 # Determine network mode
 NETWORK_MODE="bridge"
@@ -1330,6 +1335,8 @@ if container_exists "$CONTAINER_NAME"; then
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
         ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
+        start_proxy_log_broker "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT_FILE" "$PROXY_BROKER_PID_FILE" "$PROXY_LOG_PORT"
+        start_proxy_log_forwarder "$PROXY_CONTAINER_NAME" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT" "$PROXY_LOG_DIR" "$PROXY_FORWARDER_PID_FILE"
     fi
     
     if [ "$STATE" = "running" ]; then
@@ -1348,6 +1355,7 @@ fi
 # Setup squid proxy if needed
 if [ "$USE_SQUID" = true ]; then
     ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
+    start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR"
 fi
 
 # Build docker arguments
@@ -1357,6 +1365,8 @@ DOCKER_ARGS+=(
     "run" "-d"
     "--name" "$CONTAINER_NAME"
     "--hostname" "$CONTAINER_NAME"
+    "--security-opt" "apparmor=containai"
+    "--security-opt" "seccomp=$SECCOMP_PROFILE_PATH"
     "-e" "TZ=$TZ_VALUE"
     "-e" "SOURCE_TYPE=$SOURCE_TYPE"
     "-e" "REPO_NAME=$WORKSPACE_NAME"
@@ -1559,6 +1569,9 @@ fi
 if ! ensure_security_assets_current "$REPO_ROOT"; then
     exit 1
 fi
+
+PROXY_SECCOMP_PROFILE_PATH="${REPO_ROOT}/docker/profiles/seccomp-containai-proxy.json"
+PROXY_APPARMOR_PROFILE="containai-proxy"
 
 APPARMOR_PROFILE_NAME=""
 if APPARMOR_PROFILE_NAME=$(resolve_apparmor_profile_name "$REPO_ROOT"); then
