@@ -193,6 +193,8 @@ install_host_session_configs() {
         ["codex"]="/home/${AGENT_USERNAME}/.config/codex/mcp"
         ["claude"]="/home/${AGENT_USERNAME}/.config/claude/mcp"
     )
+    local trust_bundle_src="${HOST_MITM_CA_CERT:-$root/mitm/proxy-ca.crt}"
+    local trust_bundle_dest="/usr/local/share/ca-certificates/containai-proxy.crt"
 
     for agent in "${!targets[@]}"; do
         local src="$root/${agent}/config.json"
@@ -212,6 +214,21 @@ install_host_session_configs() {
         cp "$manifest" "$manifest_dest"
         chown "$AGENT_UID:$AGENT_GID" "$manifest_dest" 2>/dev/null || true
         chmod 0600 "$manifest_dest" 2>/dev/null || true
+    fi
+
+    # Install proxy CA if provided
+    if [ -f "$trust_bundle_src" ]; then
+        echo "🔐 Installing proxy MITM CA into trust store"
+        cp "$trust_bundle_src" "$trust_bundle_dest"
+        chown root:root "$trust_bundle_dest" 2>/dev/null || true
+        chmod 644 "$trust_bundle_dest" 2>/dev/null || true
+        if command -v update-ca-certificates >/dev/null 2>&1; then
+            update-ca-certificates >/dev/null 2>&1 || true
+        fi
+        SSL_CERT_FILE="$trust_bundle_dest"
+        REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
+        export SSL_CERT_FILE
+        export REQUESTS_CA_BUNDLE
     fi
 
     return $installed
@@ -320,7 +337,8 @@ start_mcp_helpers() {
         [ -z "$line" ] && continue
         IFS='|' read -r helper_name helper_listen helper_target helper_bearer <<< "$line"
         local log_file="/run/mcp-helpers/${helper_name}.log"
-        local cmd=(env CONTAINAI_REQUIRE_PROXY=1 CONTAINAI_AGENT_ID="${AGENT_NAME:-}" CONTAINAI_SESSION_ID="${HOST_SESSION_ID:-}" python3 /usr/local/bin/mcp-http-helper.py --name "$helper_name" --listen "$helper_listen" --target "$helper_target")
+        local helper_ca="${SSL_CERT_FILE:-${HOST_MITM_CA_CERT:-}}"
+        local cmd=(env CONTAINAI_REQUIRE_PROXY=1 CONTAINAI_AGENT_ID="${AGENT_NAME:-}" CONTAINAI_SESSION_ID="${HOST_SESSION_ID:-}" SSL_CERT_FILE="$helper_ca" REQUESTS_CA_BUNDLE="$helper_ca" python3 /usr/local/bin/mcp-http-helper.py --name "$helper_name" --listen "$helper_listen" --target "$helper_target")
         if [ -n "$helper_bearer" ]; then
             cmd+=("--bearer-token" "$helper_bearer")
         fi
@@ -849,6 +867,10 @@ fi
 
 HOST_CONFIG_DEPLOYED=false
 if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
+    if [ ! -f "${HOST_MITM_CA_CERT:-${HOST_SESSION_CONFIG_ROOT}/mitm/proxy-ca.crt}" ]; then
+        echo "❌ MITM CA missing in session artifacts; expected ${HOST_MITM_CA_CERT:-${HOST_SESSION_CONFIG_ROOT}/mitm/proxy-ca.crt}" >&2
+        exit 1
+    fi
     echo "🔐 Applying host-rendered MCP configs (session ${HOST_SESSION_ID:-unknown})"
     if install_host_session_configs "$HOST_SESSION_CONFIG_ROOT"; then
         HOST_CONFIG_DEPLOYED=true
