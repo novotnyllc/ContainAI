@@ -154,8 +154,10 @@ verify_payload_hash() {
     echo "✅ SHA256 verified for payload.tar.gz"
 }
 
-verify_attestation() {
-    [[ -f "$BUNDLE_ATTEST_PATH" ]] || die "Attestation file missing; cannot verify provenance"
+verify_attestation_for() {
+    local subject="$1"
+    local att_file="$2"
+    [[ -f "$att_file" ]] || die "Attestation file missing; cannot verify provenance"
     command -v openssl >/dev/null 2>&1 || die "openssl required for attestation verification"
 
     extract_field() {
@@ -163,14 +165,19 @@ verify_attestation() {
         grep -o "\"${key}\":[^\"]*\"[^\"]*\"" "$file" | head -1 | sed "s/.*\"${key}\":\"//; s/\"$//"
     }
 
-    if grep -q '"attestation":"placeholder"' "$BUNDLE_ATTEST_PATH"; then
-        echo "⚠️  Placeholder attestation detected (dev build); skipping attestation verification"
-        return
+    local is_placeholder=0
+    if grep -q '"attestation":"placeholder"' "$att_file"; then
+        is_placeholder=1
+        if [[ -n "$ASSET_DIR" ]]; then
+            echo "⚠️  Placeholder attestation detected (dev asset-dir); skipping verification"
+            return
+        fi
+        die "Attestation is a placeholder; not allowed in prod installs"
     fi
 
-    att_payload=$(extract_field "payload" "$BUNDLE_ATTEST_PATH")
-    att_sig=$(extract_field "sig" "$BUNDLE_ATTEST_PATH")
-    att_cert=$(extract_field "cert" "$BUNDLE_ATTEST_PATH" | sed 's#\\/#/#g')
+    att_payload=$(extract_field "payload" "$att_file")
+    att_sig=$(extract_field "sig" "$att_file")
+    att_cert=$(extract_field "cert" "$att_file" | sed 's#\\/#/#g')
     [[ -n "$att_payload" && -n "$att_sig" && -n "$att_cert" ]] || die "Attestation missing payload/sig/cert"
 
     local cert_path="$EXTRACT_DIR/cert.pem"
@@ -182,8 +189,14 @@ verify_attestation() {
 
     expected_sha=$(grep -o '"sha256":"[^"]*' "$payload_bin" | head -1 | sed 's/.*"sha256":"//')
     [[ -n "$expected_sha" ]] || die "No digest in attestation payload"
-    actual_sha=$(sha256sum "$BUNDLE_PATH" | awk '{print $1}')
-    [[ "$expected_sha" == "$actual_sha" ]] || die "Attested digest mismatch (expected $expected_sha got $actual_sha)"
+    actual_sha=$(sha256sum "$subject" | awk '{print $1}')
+    if [[ "$expected_sha" != "$actual_sha" ]]; then
+        if [[ $is_placeholder -eq 1 && -n "$ASSET_DIR" ]]; then
+            echo "⚠️  Placeholder attestation mismatch allowed in dev asset mode"
+        else
+            die "Attested digest mismatch (expected $expected_sha got $actual_sha)"
+        fi
+    fi
 
     local sig_bin="$EXTRACT_DIR/payload.sig"
     printf '%s' "$att_sig" | base64 -d > "$sig_bin" || die "Unable to decode signature"
@@ -237,7 +250,7 @@ fi
 download_release_assets
 extract_bundle
 verify_payload_hash
-verify_attestation
+verify_attestation_for "$BUNDLE_PATH" "$BUNDLE_ATTEST_PATH"
 
 echo "📦 Installing ContainAI $VERSION to $RELEASE_ROOT"
 rm -rf "$RELEASE_ROOT"
@@ -248,6 +261,32 @@ copy_release_metadata "$RELEASE_ROOT"
 
 if ! "$SCRIPT_DIR/integrity-check.sh" --mode prod --root "$RELEASE_ROOT" --sums "$RELEASE_ROOT/SHA256SUMS"; then
     die "Integrity validation failed after extraction"
+fi
+
+if [[ -f "$RELEASE_ROOT/payload.sbom.json" && -f "$RELEASE_ROOT/payload.sbom.json.intoto.jsonl" ]]; then
+    verify_attestation_for "$RELEASE_ROOT/payload.sbom.json" "$RELEASE_ROOT/payload.sbom.json.intoto.jsonl"
+else
+    if [[ -z "$ASSET_DIR" ]]; then
+        die "SBOM or attestation missing in payload"
+    else
+        echo "⚠️  SBOM or attestation missing in payload (dev asset-dir); skipping SBOM verify"
+    fi
+fi
+
+image_sbom_dir="$RELEASE_ROOT/image-sboms"
+if [[ -d "$image_sbom_dir" ]]; then
+    while IFS= read -r -d '' sbom; do
+        attest="${sbom}.intoto.jsonl"
+        if [[ -f "$attest" ]]; then
+            verify_attestation_for "$sbom" "$attest"
+        else
+            if [[ -z "$ASSET_DIR" ]]; then
+                die "Missing attestation for image SBOM: $sbom"
+            else
+                echo "⚠️  Missing attestation for image SBOM $sbom (dev asset-dir); skipping"
+            fi
+        fi
+    done < <(find "$image_sbom_dir" -maxdepth 1 -type f -name "image-*.sbom.json" -print0)
 fi
 
 swap_symlinks "$RELEASE_ROOT"

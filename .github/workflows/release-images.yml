@@ -69,6 +69,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare dist directory
+        run: mkdir -p dist/${{ steps.channel.outputs.tag }}
+      - name: Prepare payload directory
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          PAYDIR=$OUT/payload-src
+          rm -rf "$PAYDIR"
+          mkdir -p "$PAYDIR"
+          rsync -a --delete --exclude '.git/' host agent-configs "$PAYDIR/"
+          rsync -a config.toml README.md SECURITY.md USAGE.md LICENSE "$PAYDIR/"
       - name: Build and push images via compose
         env:
           REGISTRY: ghcr.io/${{ github.repository_owner }}
@@ -77,40 +87,133 @@ jobs:
         run: |
           docker compose -f docker-compose.yml build base agents copilot codex claude proxy
           docker compose -f docker-compose.yml push base agents copilot codex claude proxy
-      - name: Prepare dist directory
-        run: mkdir -p dist/${{ steps.channel.outputs.tag }}
-      - name: Generate SBOM (Anchore)
+      - name: Generate image SBOM (base)
         uses: anchore/sbom-action@v0
         with:
-          path: .
-          output-file: dist/${{ steps.channel.outputs.tag }}/sbom.json
+          image: ghcr.io/${{ github.repository_owner }}/${{ steps.channel.outputs.prefix }}-base:${{ steps.channel.outputs.tag }}
+          output-file: dist/${{ steps.channel.outputs.tag }}/image-base.sbom.json
+      - name: Attest image SBOM (base)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/image-base.sbom.json
+          push-to-registry: false
+      - name: Download image SBOM attestation (base)
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/image-base.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/image-base.sbom.json.intoto.jsonl" "$OUT/image-base.sbom.intoto.jsonl"
+      - name: Generate image SBOM (main)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/${{ steps.channel.outputs.prefix }}:${{ steps.channel.outputs.tag }}
+          output-file: dist/${{ steps.channel.outputs.tag }}/image-main.sbom.json
+      - name: Attest image SBOM (main)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/image-main.sbom.json
+          push-to-registry: false
+      - name: Download image SBOM attestation (main)
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/image-main.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/image-main.sbom.json.intoto.jsonl" "$OUT/image-main.sbom.intoto.jsonl"
+      - name: Generate image SBOM (copilot)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/${{ steps.channel.outputs.prefix }}-copilot:${{ steps.channel.outputs.tag }}
+          output-file: dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.json
+      - name: Attest image SBOM (copilot)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.json
+          push-to-registry: false
+      - name: Download image SBOM attestation (copilot)
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/image-copilot.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/image-copilot.sbom.json.intoto.jsonl" "$OUT/image-copilot.sbom.intoto.jsonl"
+      - name: Generate image SBOM (codex)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/${{ steps.channel.outputs.prefix }}-codex:${{ steps.channel.outputs.tag }}
+          output-file: dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.json
+      - name: Attest image SBOM (codex)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.json
+          push-to-registry: false
+      - name: Download image SBOM attestation (codex)
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/image-codex.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/image-codex.sbom.json.intoto.jsonl" "$OUT/image-codex.sbom.intoto.jsonl"
+      - name: Generate image SBOM (claude)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/${{ steps.channel.outputs.prefix }}-claude:${{ steps.channel.outputs.tag }}
+          output-file: dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.json
+      - name: Attest image SBOM (claude)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.json
+          push-to-registry: false
+      - name: Download image SBOM attestation (claude)
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/image-claude.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/image-claude.sbom.json.intoto.jsonl" "$OUT/image-claude.sbom.intoto.jsonl"
+      - name: Generate image SBOM (proxy)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/${{ steps.channel.outputs.prefix }}-proxy:${{ steps.channel.outputs.tag }}
+          output-file: dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.json
+      - name: Attest image SBOM (proxy)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.json
+          push-to-registry: false
+      - name: Download image SBOM attestation (proxy)
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/image-proxy.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/image-proxy.sbom.json.intoto.jsonl" "$OUT/image-proxy.sbom.intoto.jsonl"
+      - name: Stage image SBOMs into payload
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          PAYDIR=$OUT/payload-src/image-sboms
+          mkdir -p "$PAYDIR"
+          cp "$OUT"/image-*.sbom.json "$PAYDIR"/
+          cp "$OUT"/image-*.sbom.intoto.jsonl "$PAYDIR"/
+      - name: Generate payload SBOM (Anchore)
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/${{ steps.channel.outputs.tag }}/payload-src
+          output-file: dist/${{ steps.channel.outputs.tag }}/payload.sbom.json
+      - name: Attest payload SBOM
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/${{ steps.channel.outputs.tag }}/payload.sbom.json
+          push-to-registry: false
+      - name: Download payload SBOM attestation
+        run: |
+          OUT=dist/${{ steps.channel.outputs.tag }}
+          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/payload.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
+          mv "$OUT/payload.sbom.json.intoto.jsonl" "$OUT/payload.sbom.intoto.jsonl"
       - name: Build payload and initial bundle
         run: |
           VERSION=${{ steps.channel.outputs.tag }}
           OUT=dist/${VERSION}
-          ./scripts/release/package.sh --version "$VERSION" --out dist --sbom "$OUT/sbom.json"
-      - name: Generate bundle SBOM (Anchore)
-        uses: anchore/sbom-action@v0
-        with:
-          path: dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
-          output-file: dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
+          ./scripts/release/package.sh --version "$VERSION" --out dist --payload-dir "$OUT/payload-src" --sbom "$OUT/payload.sbom.json" --sbom-att "$OUT/payload.sbom.intoto.jsonl"
       - name: Attest bundle provenance
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
           push-to-registry: false
-      - name: Attest bundle SBOM
-        uses: actions/attest-sbom@v1
-        with:
-          subject-path: dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
-          sbom-path: dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
       - name: Download attestation artifacts
         run: |
           OUT=dist/${{ steps.channel.outputs.tag }}
           gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --subject "$OUT/containai-${{ steps.channel.outputs.tag }}.tar.gz" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}"
           mv "$OUT/containai-${{ steps.channel.outputs.tag }}.tar.gz.intoto.jsonl" "$OUT/bundle-provenance.intoto.jsonl"
-          gh attestation download --repo "${{ github.repository }}" --workflow "${{ github.workflow }}" --ref "${{ github.ref }}" --predicate-type "https://slsa.dev/provenance/v1" --subject "$OUT/bundle.sbom.json" --dir "$OUT" --token "${{ secrets.GITHUB_TOKEN }}" || true
-          if [[ -f "$OUT/bundle.sbom.json.intoto.jsonl" ]]; then mv "$OUT/bundle.sbom.json.intoto.jsonl" "$OUT/bundle-sbom.intoto.jsonl"; fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -118,8 +221,20 @@ jobs:
           path: |
             dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
             dist/${{ steps.channel.outputs.tag }}/bundle-provenance.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/bundle-sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/payload.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/payload.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-base.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-base.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-main.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-main.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.intoto.jsonl
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -127,7 +242,19 @@ jobs:
           files: |
             dist/${{ steps.channel.outputs.tag }}/containai-${{ steps.channel.outputs.tag }}.tar.gz
             dist/${{ steps.channel.outputs.tag }}/bundle-provenance.intoto.jsonl
-            dist/${{ steps.channel.outputs.tag }}/bundle.sbom.json
-            dist/${{ steps.channel.outputs.tag }}/bundle-sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/payload.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/payload.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-base.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-base.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-main.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-main.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-copilot.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-codex.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-claude.sbom.intoto.jsonl
+            dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.json
+            dist/${{ steps.channel.outputs.tag }}/image-proxy.sbom.intoto.jsonl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

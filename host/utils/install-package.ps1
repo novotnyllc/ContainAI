@@ -75,8 +75,12 @@ function Test-PayloadHash {
 }
 
 function Test-Attestation {
-    if (-not (Test-Path $Attestation)) { Write-Die "Attestation missing; cannot verify provenance." }
-    $rawAtt = Get-Content $Attestation -Raw
+    param(
+        [string]$SubjectPath,
+        [string]$AttestationPath
+    )
+    if (-not (Test-Path $AttestationPath)) { Write-Die "Attestation missing; cannot verify provenance." }
+    $rawAtt = Get-Content $AttestationPath -Raw
     $bundle = $rawAtt | ConvertFrom-Json
     if ($bundle.attestation -eq "placeholder") { Write-Output "Skipping attestation verification (placeholder dev build)"; return }
     Write-Output "Verifying attestation via system crypto"
@@ -90,7 +94,7 @@ function Test-Attestation {
     $payloadParsed = $payloadJson | ConvertFrom-Json
     $expected = $payloadParsed.subject[0].digest.sha256
     if (-not $expected) { Write-Die "No digest in attested payload" }
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Payload).Hash.ToLower()
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $SubjectPath).Hash.ToLower()
     if ($expected.ToLower() -ne $actual) { Write-Die "Attested digest mismatch (expected $expected got $actual)" }
     $certPem = $certEscaped -replace "\\n","`n"
     $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::UTF8.GetBytes($certPem))
@@ -120,7 +124,7 @@ if ($VerifyOnly) {
 Get-ReleaseBundle
 Expand-Bundle
 Test-PayloadHash
-Test-Attestation
+Test-Attestation -SubjectPath $Payload -AttestationPath $Attestation
 
 Write-Output "Installing ContainAI $Version to $ReleaseDir"
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ReleaseDir
@@ -131,6 +135,14 @@ if (Test-Path $CosignRoot) { Copy-Item -LiteralPath $CosignRoot -Destination (Jo
 if (Test-Path $Attestation) { Copy-Item -LiteralPath $Attestation -Destination (Join-Path $ReleaseDir "attestation.intoto.jsonl") }
 
 & "$PSScriptRoot/integrity-check.ps1" -Mode prod -Root $ReleaseDir -Sums (Join-Path $ReleaseDir "SHA256SUMS")
+
+$sbomPath = Join-Path $ReleaseDir "payload.sbom.json"
+$sbomAtt = Join-Path $ReleaseDir "payload.sbom.json.intoto.jsonl"
+if ((Test-Path $sbomPath) -and (Test-Path $sbomAtt)) {
+    Test-Attestation -SubjectPath $sbomPath -AttestationPath $sbomAtt
+} else {
+    Write-Warning "SBOM or SBOM attestation missing; skipping SBOM verification"
+}
 
 $currentLink = Join-Path $InstallRoot "current"
 $previousLink = Join-Path $InstallRoot "previous"

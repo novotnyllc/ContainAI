@@ -12,14 +12,16 @@ BIN_DIR="$WORK_DIR/bin"
 mkdir -p "$BIN_DIR"
 export PATH="$BIN_DIR:$PATH"
 
-SBOM_FILE="$WORK_DIR/sbom.json"
+SBOM_FILE="$WORK_DIR/payload.sbom.json"
 echo '{"bomFormat":"CycloneDX","dependencies":[]}' > "$SBOM_FILE"
+SBOM_ATTEST="$WORK_DIR/payload.sbom.json.intoto.jsonl"
+echo '{"attestation":"placeholder"}' > "$SBOM_ATTEST"
 
 VERSION="test-$(date +%s)"
 DIST_DIR="$WORK_DIR/dist"
 
 echo "🔨 Running package.sh..."
-if ! "$PROJECT_ROOT/scripts/release/package.sh" --version "$VERSION" --out "$DIST_DIR" --sbom "$SBOM_FILE"; then
+if ! "$PROJECT_ROOT/scripts/release/package.sh" --version "$VERSION" --out "$DIST_DIR" --sbom "$SBOM_FILE" --sbom-att "$SBOM_ATTEST"; then
     echo "❌ package.sh failed" >&2
     exit 1
 fi

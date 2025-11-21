@@ -4,7 +4,6 @@
 #     - payload.tar.gz (host tree + tools)
 #     - payload.sha256 (hash of payload.tar.gz)
 #     - attestation.intoto.jsonl (from CI attestation action)
-#     - cosign (optional, shipped from CI)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,22 +13,26 @@ VERSION=""
 OUT_DIR="$PROJECT_ROOT/dist"
 SKIP_SBOM=0
 SBOM_SOURCE=""
+SBOM_ATTEST=""
 ATTESTATION_FILE=""
 INCLUDE_DOCKER=0
+PAYLOAD_DIR_OVERRIDE=""
 
 print_help() {
     cat <<'EOF'
-Usage: package.sh [--version X] [--out DIR] [--skip-sbom] [--sbom FILE] [--attestation FILE] [--include-docker]
+Usage: package.sh [--version X] [--out DIR] [--skip-sbom] [--sbom FILE] [--sbom-att FILE] [--attestation FILE] [--include-docker]
 
-Outputs dist/<version>/containai-<version>.tar.gz containing payload + attestation.
+Outputs dist/<version>/containai-<version>.tar.gz containing payload + attestations.
 
 Options:
   --version X         Release version (default git describe)
   --out DIR           Output directory (default: dist)
   --skip-sbom         Do not include SBOM (dev only)
   --sbom FILE         Pre-generated SBOM to embed
+  --sbom-att FILE     Attestation bundle (intoto) for the SBOM file
   --attestation FILE  Attestation bundle (intoto) for payload.tar.gz
   --include-docker    Include docker/ tree in payload
+  --payload-dir DIR   Use an existing payload directory instead of copying sources (must contain final payload contents)
 EOF
 }
 
@@ -39,8 +42,10 @@ while [[ $# -gt 0 ]]; do
         --out) OUT_DIR="$2"; shift 2 ;;
         --skip-sbom) SKIP_SBOM=1; shift ;;
         --sbom) SBOM_SOURCE="$2"; shift 2 ;;
+        --sbom-att) SBOM_ATTEST="$2"; shift 2 ;;
         --attestation) ATTESTATION_FILE="$2"; shift 2 ;;
         --include-docker) INCLUDE_DOCKER=1; shift ;;
+        --payload-dir) PAYLOAD_DIR_OVERRIDE="$2"; shift 2 ;;
         -h|--help) print_help; exit 0 ;;
         *) echo "Unknown arg: $1" >&2; print_help >&2; exit 1 ;;
     esac
@@ -58,8 +63,13 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 PAYLOAD_ROOT="payload"
-PAYLOAD_DIR="$WORK_DIR/$PAYLOAD_ROOT"
-mkdir -p "$PAYLOAD_DIR"
+if [[ -n "$PAYLOAD_DIR_OVERRIDE" ]]; then
+    PAYLOAD_DIR="$PAYLOAD_DIR_OVERRIDE"
+    mkdir -p "$PAYLOAD_DIR"
+else
+    PAYLOAD_DIR="$WORK_DIR/$PAYLOAD_ROOT"
+    mkdir -p "$PAYLOAD_DIR"
+fi
 
 echo "📦 Building bundle v$VERSION"
 echo "Output dir: $DEST_DIR"
@@ -69,22 +79,24 @@ copy_path() {
     if [ -e "$src" ]; then rsync -a --delete --exclude '.git/' "$src" "$dest"; fi
 }
 
-include_paths=(
-    "$PROJECT_ROOT/host"
-    "$PROJECT_ROOT/agent-configs"
-    "$PROJECT_ROOT/config.toml"
-    "$PROJECT_ROOT/README.md"
-    "$PROJECT_ROOT/SECURITY.md"
-    "$PROJECT_ROOT/USAGE.md"
-    "$PROJECT_ROOT/LICENSE"
-)
-[[ $INCLUDE_DOCKER -eq 1 ]] && include_paths+=("$PROJECT_ROOT/docker")
+if [[ -z "$PAYLOAD_DIR_OVERRIDE" ]]; then
+    include_paths=(
+        "$PROJECT_ROOT/host"
+        "$PROJECT_ROOT/agent-configs"
+        "$PROJECT_ROOT/config.toml"
+        "$PROJECT_ROOT/README.md"
+        "$PROJECT_ROOT/SECURITY.md"
+        "$PROJECT_ROOT/USAGE.md"
+        "$PROJECT_ROOT/LICENSE"
+    )
+    [[ $INCLUDE_DOCKER -eq 1 ]] && include_paths+=("$PROJECT_ROOT/docker")
 
-for path in "${include_paths[@]}"; do
-    copy_path "$path" "$PAYLOAD_DIR/"
-done
+    for path in "${include_paths[@]}"; do
+        copy_path "$path" "$PAYLOAD_DIR/"
+    done
+fi
 
-SBOM_PATH="$PAYLOAD_DIR/sbom.json"
+SBOM_PATH="$PAYLOAD_DIR/payload.sbom.json"
 if [[ -n "$SBOM_SOURCE" ]]; then
     cp "$SBOM_SOURCE" "$SBOM_PATH"
 elif [[ $SKIP_SBOM -eq 1 ]]; then
@@ -92,6 +104,9 @@ elif [[ $SKIP_SBOM -eq 1 ]]; then
 else
     echo "❌ SBOM source not provided. Pass --sbom FILE or --skip-sbom." >&2
     exit 1
+fi
+if [[ -n "$SBOM_ATTEST" ]]; then
+    cp "$SBOM_ATTEST" "$PAYLOAD_DIR/payload.sbom.json.intoto.jsonl"
 fi
 
 mkdir -p "$PAYLOAD_DIR/tools"
