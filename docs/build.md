@@ -229,7 +229,7 @@ sudo apparmor_parser -r host/profiles/apparmor-containai-agent.profile
 ```
 
 Environment overrides:
-None. The built-in profiles under `host/profiles/` are mandatory; rerun `scripts/install.sh` to reinstall them if they are missing.
+None. The built-in profiles under `host/profiles/` are mandatory; rerun `scripts/setup-local-dev.sh` to reinstall them if they are missing.
 
 ## Maintenance
 

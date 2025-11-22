@@ -757,7 +757,7 @@ resolve_security_asset_path() {
         return 0
     fi
 
-    echo "❌ ${label} not found at $default_candidate. Run scripts/install.sh to reinstall the host security assets." >&2
+    echo "❌ ${label} not found at $default_candidate. Run scripts/setup-local-dev.sh to reinstall the host security assets." >&2
     if [ -n "$asset_candidate" ] && [ "$asset_candidate" != "$default_candidate" ]; then
     echo "   Looked for installed copy at $asset_candidate but it was missing." >&2
     fi
@@ -831,11 +831,11 @@ ensure_security_assets_current() {
 
     if [ -n "$hash_repo" ] && [ -n "$hash_active" ]; then
         if [ "$hash_repo" != "$hash_active" ]; then
-            echo "❌ Seccomp profile is outdated. Run 'sudo ./scripts/install.sh' to refresh host security assets." >&2
+            echo "❌ Seccomp profile is outdated. Run 'sudo ./scripts/setup-local-dev.sh' to refresh host security assets." >&2
             return 1
         fi
     else
-        echo "❌ Unable to verify seccomp profile freshness (missing reference hash). Run 'sudo ./scripts/install.sh' to reinstall host security assets." >&2
+        echo "❌ Unable to verify seccomp profile freshness (missing reference hash). Run 'sudo ./scripts/setup-local-dev.sh' to reinstall host security assets." >&2
         return 1
     fi
 
@@ -849,10 +849,10 @@ ensure_security_assets_current() {
             fi
             aa_active_hash=$(_sha256_file "$apparmor_path" 2>/dev/null || echo "")
             if [ -n "$aa_repo_hash" ] && [ -n "$aa_active_hash" ] && [ "$aa_repo_hash" != "$aa_active_hash" ]; then
-                echo "❌ AppArmor profile is outdated. Run 'sudo ./scripts/install.sh' to refresh host security assets." >&2
+                echo "❌ AppArmor profile is outdated. Run 'sudo ./scripts/setup-local-dev.sh' to refresh host security assets." >&2
                 return 1
             elif [ -z "$aa_repo_hash" ] || [ -z "$aa_active_hash" ]; then
-                echo "❌ Unable to verify AppArmor profile freshness (missing reference hash). Run 'sudo ./scripts/install.sh' to reinstall host security assets." >&2
+                echo "❌ Unable to verify AppArmor profile freshness (missing reference hash). Run 'sudo ./scripts/setup-local-dev.sh' to reinstall host security assets." >&2
                 return 1
             fi
         fi
@@ -925,7 +925,7 @@ resolve_apparmor_profile_name() {
     fi
 
     if [ ! -f "$profile_file" ]; then
-        echo "⚠️  AppArmor profile file not found at $profile_file. Run scripts/install.sh to restore the host security profiles." >&2
+        echo "⚠️  AppArmor profile file not found at $profile_file. Run scripts/setup-local-dev.sh to restore the host security profiles." >&2
         return 1
     fi
 
@@ -956,12 +956,23 @@ verify_host_security_prereqs() {
     local default_seccomp_profile="$repo_root/host/profiles/seccomp-containai-agent.json"
     local installed_seccomp_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai-agent.json"
 
+    # Check Agent Seccomp
     if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
         if [ -n "$installed_seccomp_profile" ]; then
-            errors+=("Seccomp profile not found at $default_seccomp_profile (or $installed_seccomp_profile). Run scripts/install.sh to reinstall the host security assets before launching agents.")
+            errors+=("Agent seccomp profile not found at $default_seccomp_profile (or $installed_seccomp_profile). Run scripts/setup-local-dev.sh to reinstall the host security assets.")
         else
-            errors+=("Seccomp profile not found at $default_seccomp_profile. Run scripts/install.sh to reinstall the host security assets before launching agents.")
+            errors+=("Agent seccomp profile not found at $default_seccomp_profile. Run scripts/setup-local-dev.sh to reinstall the host security assets.")
         fi
+    fi
+
+    # Check Proxy Seccomp
+    if ! resolve_security_asset_path "$repo_root" "seccomp-containai-proxy.json" "Proxy seccomp profile" >/dev/null 2>&1; then
+        errors+=("Proxy seccomp profile not found. Run scripts/setup-local-dev.sh to reinstall the host security assets.")
+    fi
+
+    # Check Log Forwarder Seccomp
+    if ! resolve_security_asset_path "$repo_root" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile" >/dev/null 2>&1; then
+        errors+=("Log forwarder seccomp profile not found. Run scripts/setup-local-dev.sh to reinstall the host security assets.")
     fi
 
     if ! is_linux_host; then
@@ -979,27 +990,29 @@ verify_host_security_prereqs() {
             errors+=("AppArmor kernel support not detected. Enable AppArmor to continue.")
         fi
     else
-        local profile="containai-agent"
-        local profile_file="$repo_root/host/profiles/apparmor-containai-agent.profile"
-        local installed_apparmor_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai-agent.profile"
-        if [ ! -f "$profile_file" ] && [ -n "$installed_apparmor_profile" ] && [ -f "$installed_apparmor_profile" ]; then
-            profile_file="$installed_apparmor_profile"
-        fi
-        if ! apparmor_profile_loaded "$profile"; then
-            if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
-                warnings+=("Unable to verify AppArmor profile '$profile' without elevated privileges. Re-run './host/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$profile_file'.")
-            elif [ "$current_uid" -ne 0 ] && [ -f "$profile_file" ]; then
-                warnings+=("AppArmor profile '$profile' verification skipped (requires sudo). Rerun './host/utils/check-health.sh' with sudo to confirm.")
-            elif [ -f "$profile_file" ]; then
-                errors+=("AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'.")
-            else
-                if [ -n "$installed_apparmor_profile" ]; then
-                    errors+=("AppArmor profile file '$profile_file' not found (also checked $installed_apparmor_profile). Run scripts/install.sh to restore the host security profiles.")
+        local profiles_to_check=("containai-agent" "containai-proxy" "containai-log-forwarder")
+        local p_name p_file p_installed
+
+        for p_name in "${profiles_to_check[@]}"; do
+            p_file="$repo_root/host/profiles/apparmor-${p_name}.profile"
+            p_installed="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-${p_name}.profile"
+            
+            if [ ! -f "$p_file" ] && [ -n "$p_installed" ] && [ -f "$p_installed" ]; then
+                p_file="$p_installed"
+            fi
+
+            if ! apparmor_profile_loaded "$p_name"; then
+                if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
+                    warnings+=("Unable to verify AppArmor profile '$p_name' without elevated privileges. Re-run './host/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$p_file'.")
+                elif [ "$current_uid" -ne 0 ] && [ -f "$p_file" ]; then
+                    warnings+=("AppArmor profile '$p_name' verification skipped (requires sudo). Rerun './host/utils/check-health.sh' with sudo to confirm.")
+                elif [ -f "$p_file" ]; then
+                    errors+=("AppArmor profile '$p_name' is not loaded. Run: sudo apparmor_parser -r '$p_file'.")
                 else
-                    errors+=("AppArmor profile file '$profile_file' not found. Run scripts/install.sh to restore the host security profiles.")
+                    errors+=("AppArmor profile file '$p_file' not found. Run scripts/setup-local-dev.sh to restore the host security profiles.")
                 fi
             fi
-        fi
+        done
     fi
 
     if [ "${CONTAINAI_DISABLE_PTRACE_SCOPE:-0}" = "1" ]; then

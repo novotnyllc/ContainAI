@@ -39,7 +39,7 @@ Features include MCP server support for extended capabilities, automated git ope
 
 ```bash
 # 1. Install launchers once
-./scripts/install.sh        # Linux/Mac
+./scripts/setup-local-dev.sh        # Linux/Mac
 .\scripts\install.ps1      # Windows PowerShell
 
 # 2. Launch an agent from any repository (image pulls automatically)

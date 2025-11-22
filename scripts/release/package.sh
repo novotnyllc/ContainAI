@@ -113,7 +113,7 @@ if [[ -z "$PAYLOAD_DIR_OVERRIDE" ]]; then
         "$PROJECT_ROOT/SECURITY.md"
         "$PROJECT_ROOT/USAGE.md"
         "$PROJECT_ROOT/LICENSE"
-        "$PROJECT_ROOT/install.sh"
+        "$PROJECT_ROOT/scripts/setup-local-dev.sh"
     )
     [[ $INCLUDE_DOCKER -eq 1 ]] && include_paths+=("$PROJECT_ROOT/docker")
 

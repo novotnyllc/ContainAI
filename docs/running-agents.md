@@ -22,8 +22,8 @@ powershell -File host/utils/verify-prerequisites.ps1  # Windows
 ## 2. Install the Launchers (One Time)
 
 ```bash
-./scripts/install.sh          # Linux/macOS
-powershell -File scripts/install.ps1   # Windows
+./scripts/setup-local-dev.sh          # Linux/macOS
+powershell -File scripts/setup-local-dev.ps1   # Windows
 ```
 
 Installation simply adds the `host/launchers` directory to your PATH so you can call `run-*`/`launch-*` from any repository. You can also add the folder manually if you prefer to keep control of your shell profile.

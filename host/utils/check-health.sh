@@ -304,13 +304,13 @@ if load_common_functions; then
         if printf '%s' "$host_output" | grep -q "AppArmor profile 'containai' is not loaded"; then
             suggest_fix sudo apparmor_parser -r "$profile_file"
         elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then
-            suggest_fix "$REPO_ROOT/scripts/install.sh"
+            suggest_fix "$REPO_ROOT/scripts/setup-local-dev.sh"
         elif printf '%s' "$host_output" | grep -qi "AppArmor kernel support not detected"; then
             suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
         elif [ "${IS_WSL:-0}" -eq 1 ]; then
             suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
         else
-            suggest_fix "$REPO_ROOT/scripts/install.sh"
+            suggest_fix "$REPO_ROOT/scripts/setup-local-dev.sh"
         fi
     fi
     if [ -n "$host_output" ]; then

@@ -731,7 +731,7 @@ Add launcher scripts to PATH or install from a packaged release.
 
 **Locations:**
 - Bootstrap (curlable): `install.sh` (bash) - downloads the release bundle and runs the installer
-- Dev/local: `scripts/install.sh` (bash), `scripts/install.ps1` (PowerShell)
+- Dev/local: `scripts/setup-local-dev.sh` (bash), `scripts/setup-local-dev.ps1` (PowerShell)
 
 #### Synopsis
 
@@ -743,7 +743,7 @@ curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh
 curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash -s -- --version vX.Y.Z
 
 # Dev/local install from a checked-out repo
-./scripts/install.sh [OPTIONS]
+./scripts/setup-local-dev.sh [OPTIONS]
 ```
 
 ```powershell
@@ -775,7 +775,7 @@ curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh
 
 ```bash
 # Install on Linux/Mac
-./scripts/install.sh
+./scripts/setup-local-dev.sh
 
 # Then reload shell
 source ~/.bashrc  # or ~/.zshrc
@@ -916,7 +916,7 @@ Images created:
   containai-proxy:local
 
 Next steps:
-  1. Install launchers: ./scripts/install.sh
+  1. Install launchers: ./scripts/setup-local-dev.sh
   2. Launch an agent:   run-copilot-dev (use run-copilot in prod bundles)
 ```
 
@@ -1013,7 +1013,7 @@ Scripts respect these environment variables:
 
 AppArmor and seccomp enforcement are mandatory for every launch. The built-in
  profiles under `host/profiles/` must exist on the host; rerun
-`scripts/install.sh` if the assets are missing.
+`scripts/setup-local-dev.sh` if the assets are missing.
 
 ### Setting Environment Variables
 

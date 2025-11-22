@@ -238,7 +238,7 @@ if [ $FAILED -eq 0 ]; then
         echo ""
         echo "Next steps:"
         echo "  1. Get images:      docker pull ghcr.io/novotnyllc/containai-copilot:latest"
-        echo "  2. Install scripts: ./scripts/install.sh"
+        echo "  2. Install scripts: ./scripts/setup-local-dev.sh"
         echo "  3. First launch:    run-copilot"
         exit 0
     else

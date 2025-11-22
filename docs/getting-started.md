@@ -357,7 +357,7 @@ If you're working from a local clone, add launcher scripts to your PATH:
 
 **Linux/Mac:**
 ```bash
-./scripts/install.sh
+./scripts/setup-local-dev.sh
 ```
 
 **Windows:**
