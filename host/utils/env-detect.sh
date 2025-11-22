@@ -7,10 +7,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_DEFAULT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 profile_file="${CONTAINAI_PROFILE_FILE:-$REPO_ROOT_DEFAULT/profile.env}"
-profile=""
-image_prefix=""
-image_tag=""
-registry=""
+profile_default="dev"
+image_prefix_default="containai-dev"
+image_tag_default="devlocal"
+registry_default="ghcr.io/novotnyllc"
+profile="$profile_default"
+image_prefix="$image_prefix_default"
+image_tag="$image_tag_default"
+registry="$registry_default"
+profile_loaded=0
+profile_env_set=0
+image_prefix_env_set=0
+image_tag_env_set=0
+registry_env_set=0
 repo_root="$REPO_ROOT_DEFAULT"
 prod_root_default="/opt/containai/current"
 prod_root="$prod_root_default"
@@ -51,16 +60,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+[[ -n "${PROFILE:-}" ]] && profile_env_set=1
+[[ -n "${IMAGE_PREFIX:-}" ]] && image_prefix_env_set=1
+[[ -n "${IMAGE_TAG:-}" ]] && image_tag_env_set=1
+[[ -n "${REGISTRY:-}" ]] && registry_env_set=1
+
 load_profile() {
     local file="$1"
     if [ -f "$file" ]; then
         # shellcheck disable=SC1090
         source "$file"
+        profile_loaded=1
+        [[ -n "${PROFILE:-}" ]] && profile_env_set=1
+        [[ -n "${IMAGE_PREFIX:-}" ]] && image_prefix_env_set=1
+        [[ -n "${IMAGE_TAG:-}" ]] && image_tag_env_set=1
+        [[ -n "${REGISTRY:-}" ]] && registry_env_set=1
     fi
-    profile="${PROFILE:-dev}"
-    image_prefix="${IMAGE_PREFIX:-containai-dev}"
-    image_tag="${IMAGE_TAG:-devlocal}"
-    registry="${REGISTRY:-ghcr.io/novotnyllc}"
+    profile="${PROFILE:-$profile}"
+    image_prefix="${IMAGE_PREFIX:-$image_prefix}"
+    image_tag="${IMAGE_TAG:-$image_tag}"
+    registry="${REGISTRY:-$registry}"
 }
 
 load_profile "$profile_file"
@@ -75,6 +94,36 @@ resolve_path() {
         cd "$(dirname "$path")" 2>/dev/null && pwd -P
     ) | sed "s|\$|/$(basename "$path")|" || echo "$path"
 }
+
+detect_prod_install() {
+    local candidate="$1"
+    local meta="$candidate/install.meta"
+    if [ ! -f "$meta" ]; then
+        return 1
+    fi
+    local version
+    version=$(awk -F= '/^version=/ {print $2; exit}' "$meta" 2>/dev/null || true)
+    profile="prod"
+    prod_root="$candidate"
+    if [ $image_prefix_env_set -eq 0 ]; then
+        image_prefix="containai"
+    fi
+    if [ $image_tag_env_set -eq 0 ]; then
+        image_tag="${version:-$image_tag_default}"
+    fi
+    if [ $registry_env_set -eq 0 ]; then
+        registry="$registry_default"
+    fi
+    return 0
+}
+
+if [ $profile_loaded -eq 0 ] && [ $profile_env_set -eq 0 ]; then
+    for candidate in "$prod_root" "$REPO_ROOT_DEFAULT"; do
+        if detect_prod_install "$candidate"; then
+            break
+        fi
+    done
+fi
 
 case "$profile" in
     dev|prod) ;;

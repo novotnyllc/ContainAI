@@ -1321,6 +1321,36 @@ EOF
     fi
 
     rm -rf "$prod_fake"
+
+    local prod_meta
+    prod_meta=$(mktemp -d)
+    mkdir -p "$prod_meta/host/launchers"
+    cat > "$prod_meta/install.meta" <<'EOF'
+version=v9.9.9
+installed_at=now
+repo=local/test
+EOF
+    output=$("$PROJECT_ROOT/host/utils/env-detect.sh" --format env --prod-root "$prod_meta")
+    local auto_mode=""
+    local auto_root=""
+    local auto_prefix=""
+    local auto_tag=""
+    local auto_registry=""
+    while IFS='=' read -r key value; do
+        case "$key" in
+            CONTAINAI_PROFILE) auto_mode="$value" ;;
+            CONTAINAI_ROOT) auto_root="$value" ;;
+            CONTAINAI_IMAGE_PREFIX) auto_prefix="$value" ;;
+            CONTAINAI_IMAGE_TAG) auto_tag="$value" ;;
+            CONTAINAI_REGISTRY) auto_registry="$value" ;;
+        esac
+    done <<< "$output"
+    if [ "$auto_mode" = "prod" ] && [ "$auto_root" = "$(cd "$prod_meta" && pwd)" ] && [ "$auto_prefix" = "containai" ] && [ "$auto_tag" = "v9.9.9" ] && [ "$auto_registry" = "ghcr.io/novotnyllc" ]; then
+        pass "Install metadata triggers prod detection without profile.env"
+    else
+        fail "Install metadata auto-detect failed (mode=$auto_mode root=$auto_root prefix=$auto_prefix tag=$auto_tag registry=$auto_registry)"
+    fi
+    rm -rf "$prod_meta"
 }
 
 test_integrity_check_behaviors() {

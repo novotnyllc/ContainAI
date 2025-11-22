@@ -16,6 +16,11 @@ Use **`launch-agent`** only when you need:
 - Network proxy controls
 - Multiple persistent agents on the same repo
 
+## Choose Dev vs. Prod
+
+- **Dev (editable from repo)**: Clone the repo and run `./host/launchers/run-codex .` (or `run-copilot`/`run-claude`). `./host/utils/env-detect.sh --format env` should report `CONTAINAI_PROFILE=dev` with roots under your home directory. Quick smoke: `./scripts/test/test-launchers.sh test_env_detection_profiles`.
+- **Prod (installed bundle)**: Install the signed payload: `curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash -s -- --version vX.Y.Z`. Running `sudo /opt/containai/current/host/utils/env-detect.sh --prod-root /opt/containai/current --format env` should show `CONTAINAI_PROFILE=prod` and point to system config/data roots. Launchers live under `/opt/containai/current/host/launchers`.
+
 ## What You Need
 
 ### On Your Host Machine
