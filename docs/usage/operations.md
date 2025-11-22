@@ -115,14 +115,14 @@ Quick commands are listed here; see [docs/cli-reference.md](../cli-reference.md)
 ### Run Agent (Recommended)
 ```bash
 # Bash
-run-copilot [directory] [--no-push] [--help]
-run-codex [directory] [--no-push] [--help]
-run-claude [directory] [--no-push] [--help]
+run-copilot-dev [directory] [--no-push] [--help]   # use run-copilot in prod bundles
+run-codex-dev [directory] [--no-push] [--help]
+run-claude-dev [directory] [--no-push] [--help]
 
 # PowerShell
-run-copilot.ps1 [directory] [-NoPush] [-Help]
-run-codex.ps1 [directory] [-NoPush] [-Help]
-run-claude.ps1 [directory] [-NoPush] [-Help]
+run-copilot-dev.ps1 [directory] [-NoPush] [-Help]
+run-codex-dev.ps1 [directory] [-NoPush] [-Help]
+run-claude-dev.ps1 [directory] [-NoPush] [-Help]
 ```
 
 **Parameters:**
@@ -133,10 +133,10 @@ run-claude.ps1 [directory] [-NoPush] [-Help]
 ### Launch Agent (Advanced)
 ```powershell
 # PowerShell
-.\launch-agent.ps1 <agent> [source] [-Branch name] [-Name custom]
+.\host\launchers\entrypoints\launch-agent-dev.ps1 <agent> [source] [-Branch name] [-Name custom]
 
 # Bash
-./launch-agent <agent> [source] [-b name] [--name custom]
+./host/launchers/entrypoints/launch-agent-dev <agent> [source] [-b name] [--name custom]
 ```
 
 **Parameters:**
@@ -152,7 +152,7 @@ For container management (stop, start, remove), see [docs/usage/launchers.md](la
 ### Single agent, quick task
 
 ```powershell
-.\launch-agent.ps1 copilot
+.\host\launchers\entrypoints\launch-agent-dev.ps1 copilot
 # Work in container
 # Push changes
 docker rm -f copilot-myrepo
@@ -161,7 +161,7 @@ docker rm -f copilot-myrepo
 ### Long-term development
 
 ```powershell
-.\launch-agent.ps1 copilot C:\projects\app -b feature-api
+.\host\launchers\entrypoints\launch-agent-dev.ps1 copilot C:\projects\app -b feature-api
 # Connect from VS Code
 # Work over days/weeks
 # Container persists until you remove it

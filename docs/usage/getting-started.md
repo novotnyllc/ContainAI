@@ -4,7 +4,7 @@ Use this guide to get your host ready and understand what happens the first time
 
 ## Recommended Approach: Ephemeral Containers
 
-For most use cases, use the **`run-*` scripts** (run-copilot, run-codex, run-claude). These create temporary containers that:
+For most use cases, use the **`run-*` scripts** (run-copilot-dev/run-copilot/run-copilot-nightly depending on channel). These create temporary containers that:
 - Launch instantly
 - Auto-remove when you exit (no cleanup needed)
 - Auto-push changes before exit (safe by default)

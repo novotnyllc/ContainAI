@@ -2,16 +2,16 @@
 
 Complete reference for all ContainAI launcher scripts and their arguments.
 
-> **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They no longer implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh host\launchers\run-copilot.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
+> **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They no longer implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh host\launchers\entrypoints\run-copilot-dev.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
 >
 > **Channels:** Launcher entrypoints live under `host/launchers/entrypoints`. In repo clones use the `-dev` names (e.g., `run-copilot-dev`), prod bundles drop the suffix (`run-copilot`), and nightly builds use `-nightly`. Use `host/utils/prepare-entrypoints.sh --channel nightly|prod` when you need to generate alternate names.
 
 ## Table of Contents
 
 - [Quick Launch Scripts](#quick-launch-scripts)
-  - [run-copilot](#run-copilot)
-  - [run-codex](#run-codex)
-  - [run-claude](#run-claude)
+  - [run-copilot-dev](#run-copilot-dev) (use run-copilot/run-copilot-nightly in packaged channels)
+  - [run-codex-dev](#run-codex-dev)
+  - [run-claude-dev](#run-claude-dev)
 - [Advanced Launch Script](#advanced-launch-script)
   - [launch-agent](#launch-agent)
 - [Management Scripts](#management-scripts)
@@ -32,7 +32,7 @@ Ephemeral containers that auto-remove on exit. Best for quick coding sessions.
 
 > **Auto-update:** Launchers check whether the ContainAI repository is behind its upstream before starting and prompt you to sync. Configure the behavior via `~/.config/containai/host-config.env` (Linux/macOS) or `%USERPROFILE%\.config\containai\host-config.env` (Windows) by setting `LAUNCHER_UPDATE_POLICY=prompt|always|never`.
 
-### run-copilot
+### run-copilot-dev
 
 Launch GitHub Copilot CLI in the current directory.
 
@@ -41,11 +41,11 @@ Launch GitHub Copilot CLI in the current directory.
 #### Synopsis
 
 ```bash
-run-copilot [REPO_PATH] [OPTIONS]
+run-copilot-dev [REPO_PATH] [OPTIONS]
 ```
 
 ```powershell
-.\run-copilot.ps1 [[-RepoPath] <String>] [OPTIONS]
+.\host\launchers\entrypoints\run-copilot-dev.ps1 [[-RepoPath] <String>] [OPTIONS]
 ```
 
 #### Arguments
@@ -78,96 +78,96 @@ run-copilot [REPO_PATH] [OPTIONS]
 **Basic usage:**
 ```bash
 # Launch in current directory
-run-copilot
+run-copilot-dev
 
 # Launch in specific directory
-run-copilot ~/my-project
-run-copilot /path/to/repo
+run-copilot-dev ~/my-project
+run-copilot-dev /path/to/repo
 
 # Windows
-.\run-copilot.ps1 C:\Projects\MyApp
+.\host\launchers\entrypoints\run-copilot-dev.ps1 C:\Projects\MyApp
 ```
 
 **With branch isolation:**
 ```bash
 # Create copilot/feature branch
-run-copilot -b feature
+run-copilot-dev -b feature
 
 # Use current branch (no isolation)
-run-copilot --use-current-branch
+run-copilot-dev --use-current-branch
 
 # Windows
-.\run-copilot.ps1 -Branch feature
-.\run-copilot.ps1 -UseCurrentBranch
+.\host\launchers\entrypoints\run-copilot-dev.ps1 -Branch feature
+.\host\launchers\entrypoints\run-copilot-dev.ps1 -UseCurrentBranch
 ```
 
 **With custom name:**
 ```bash
 # Custom container name
-run-copilot --name my-session
+run-copilot-dev --name my-session
 
 # Windows
-.\run-copilot.ps1 -Name my-session
+.\host\launchers\entrypoints\run-copilot-dev.ps1 -Name my-session
 ```
 
 **With network controls:**
 ```bash
 # Restricted network (no internet)
-run-copilot --network-proxy restricted
+run-copilot-dev --network-proxy restricted
 
 # Monitored proxy
-run-copilot --network-proxy squid
+run-copilot-dev --network-proxy squid
 
 # Windows
-.\run-copilot.ps1 -NetworkProxy restricted
+.\host\launchers\entrypoints\run-copilot-dev.ps1 -NetworkProxy restricted
 ```
 
 **With resource limits:**
 ```bash
 # More CPUs and memory
-run-copilot --cpu 8 --memory 16g
+run-copilot-dev --cpu 8 --memory 16g
 
 # Minimal resources
-run-copilot --cpu 2 --memory 4g
+run-copilot-dev --cpu 2 --memory 4g
 
 # Windows
-.\run-copilot.ps1 -Cpu 8 -Memory 16g
+.\host\launchers\entrypoints\run-copilot-dev.ps1 -Cpu 8 -Memory 16g
 ```
 
 **With GPU:**
 ```bash
 # Use all GPUs
-run-copilot --gpu all
+run-copilot-dev --gpu all
 
 # Specific GPU
-run-copilot --gpu device=0
+run-copilot-dev --gpu device=0
 
 # Windows
-.\run-copilot.ps1 -Gpu all
+.\host\launchers\entrypoints\run-copilot-dev.ps1 -Gpu all
 ```
 
 **Disable auto-push:**
 ```bash
 # Skip git push on exit
-run-copilot --no-push
+run-copilot-dev --no-push
 
 # Windows
-.\run-copilot.ps1 -NoPush
+.\host\launchers\entrypoints\run-copilot-dev.ps1 -NoPush
 ```
 
 **Combined options:**
 ```bash
 # Full example
-run-copilot ~/my-project -b feature-api --cpu 8 --memory 16g --network-proxy squid
+run-copilot-dev ~/my-project -b feature-api --cpu 8 --memory 16g --network-proxy squid
 
 # Windows
-.\run-copilot.ps1 C:\Projects\MyApp -Branch feature-api -Cpu 8 -Memory 16g -NetworkProxy squid
+.\host\launchers\entrypoints\run-copilot-dev.ps1 C:\Projects\MyApp -Branch feature-api -Cpu 8 -Memory 16g -NetworkProxy squid
 
 # Ask a one-off question (no repo required)
-run-copilot --prompt "Return the words: host secrets OK."
+run-copilot-dev --prompt "Return the words: host secrets OK."
 # Equivalent Codex/Claude examples
-run-codex --prompt "Summarize CONTRIBUTING.md"
-run-claude --prompt "List repo services that need MCP"
+run-codex-dev --prompt "Summarize CONTRIBUTING.md"
+run-claude-dev --prompt "List repo services that need MCP"
 ```
 
 #### Behavior
@@ -230,7 +230,7 @@ run-codex [REPO_PATH] [OPTIONS]
 
 #### Arguments and Options
 
-See [run-copilot](#run-copilot) - identical arguments and options, just different agent.
+See [run-copilot-dev](#run-copilot-dev) - identical arguments and options, just different agent.
 
 Supports all options:
 - `-b, --branch` - Branch isolation
@@ -244,7 +244,7 @@ Supports all options:
 
 #### Examples
 
-All [run-copilot](#run-copilot) examples apply - just replace `run-copilot` with `run-codex`.
+All [run-copilot-dev](#run-copilot-dev) examples apply - just replace `run-copilot-dev` with `run-codex-dev`.
 
 #### Container Details
 
@@ -286,7 +286,7 @@ Supports all options:
 
 #### Examples
 
-All [run-copilot](#run-copilot) examples apply - just replace `run-copilot` with `run-claude`.
+All [run-copilot-dev](#run-copilot-dev) examples apply - just replace `run-copilot-dev` with `run-claude-dev`.
 
 #### Container Details
 
@@ -917,7 +917,7 @@ Images created:
 
 Next steps:
   1. Install launchers: ./scripts/install.sh
-  2. Launch an agent:   run-copilot
+  2. Launch an agent:   run-copilot-dev (use run-copilot in prod bundles)
 ```
 
 ---
