@@ -2,6 +2,8 @@
 
 This guide is for developers who want to build and publish the agent container images. CI owns publishing to GHCR; local builds should mirror the same graph (base → containai → variants) and prefer digests over `--load`.
 
+For local development instructions, see [local-build-and-test.md](local-build-and-test.md).
+
 ## Prerequisites
 
 - **Container Runtime**: Docker 20.10+ (Desktop or Engine) with BuildKit enabled (default in recent versions)
@@ -93,7 +95,7 @@ Each adds:
 
 ### entrypoint.sh
 
-**Location:** `scripts/entrypoint.sh` → `/usr/local/bin/entrypoint.sh`
+**Location:** `docker/runtime/entrypoint.sh` → `/usr/local/bin/entrypoint.sh`
 
 **Purpose:**
 - Display repository info
@@ -107,7 +109,7 @@ Each adds:
 
 ### setup-mcp-configs.sh
 
-**Location:** `scripts/setup-mcp-configs.sh` → `/usr/local/bin/setup-mcp-configs.sh`
+**Location:** `docker/runtime/setup-mcp-configs.sh` → `/usr/local/bin/setup-mcp-configs.sh`
 
 **Purpose:**
 - Check for `/workspace/config.toml`
@@ -118,7 +120,7 @@ Each adds:
 
 ### convert-toml-to-mcp.py
 
-**Location:** `scripts/convert-toml-to-mcp.py` → `/usr/local/bin/convert-toml-to-mcp.py`
+**Location:** `host/utils/convert-toml-to-mcp.py` → `/usr/local/bin/convert-toml-to-mcp.py`
 
 **Purpose:**
 - Parse TOML config
@@ -184,18 +186,18 @@ Current approximate sizes:
 
 #### Secret Scanning Workflow
 
-The bash and PowerShell build scripts automatically invoke Trivy after every successful `docker build`. Install the CLI ahead of time (or set `CONTAINAI_TRIVY_BIN` to a custom path) so the scan can run locally; CI pipelines must do the same. The manual commands are documented below if you need to re-run a scan or double-check a specific tag:
+The CI pipelines automatically invoke Trivy after every successful `docker build`. Install the CLI ahead of time (or set `CONTAINAI_TRIVY_BIN` to a custom path) so the scan can run locally. The manual commands are documented below if you need to re-run a scan or double-check a specific tag:
 
 ```bash
 # Base image
-trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai-base:local
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai-dev-base:devlocal
 
 # All-agents wrapper
-trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai:local
+trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai-dev:devlocal
 
 # Specialized images
-for image in containai-copilot containai-codex containai-claude; do
-  trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL "${image}:local"
+for image in containai-dev-copilot containai-dev-codex containai-dev-claude; do
+  trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL "${image}:devlocal"
 done
 ```
 
@@ -261,13 +263,13 @@ RUN npm install -g @modelcontextprotocol/server-sequential-thinking@latest
 
 ```bash
 # Check image details
-docker images containai-base:local
+docker images containai-dev-base:devlocal
 
 # Inspect layers
-docker history containai-base:local
+docker history containai-dev-base:devlocal
 
 # Check for vulnerabilities (if tool installed)
-trivy image containai-base:local
+trivy image containai-dev-base:devlocal
 ```
 
 ## Troubleshooting
@@ -279,7 +281,7 @@ trivy image containai-base:local
 **Solution:**
 ```bash
 # Update package lists
-docker build --no-cache -f Dockerfile.base -t containai-base:local .
+docker build --no-cache -f Dockerfile.base -t containai-dev-base:devlocal .
 ```
 
 ### Python package installation fails
