@@ -116,7 +116,7 @@ jobs:
           push: ${{ needs.determine-context.outputs.push == 'true' }}
           tags: ${{ steps.taglist.outputs.tags }}
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
-          cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max
+          cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max,compression=zstd
           platforms: linux/amd64,linux/arm64
 
       - name: Install Trivy CLI
@@ -211,7 +211,7 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ needs.build-base.outputs.image_ref }}
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
-          cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max
+          cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max,compression=zstd
           platforms: linux/amd64,linux/arm64
 
       - name: Install Trivy CLI
@@ -324,7 +324,7 @@ jobs:
           tags: ${{ steps.taglist.outputs.tags }}
           build-args: ${{ matrix.base_arg }}
           cache-from: type=gha,scope=${{ matrix.cache }}
-          cache-to: type=gha,scope=${{ matrix.cache }},mode=max
+          cache-to: type=gha,scope=${{ matrix.cache }},mode=max,compression=zstd
           platforms: linux/amd64,linux/arm64
 
       - name: Install Trivy CLI

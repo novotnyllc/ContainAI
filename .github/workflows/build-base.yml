@@ -14,6 +14,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout repository
@@ -43,25 +45,6 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Install Trivy CLI
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.53.0
-
-      - name: Build linux/amd64 image for scanning
-        run: |
-          docker buildx build \
-            --builder "${{ steps.buildx.outputs.name }}" \
-            --platform linux/amd64 \
-            --load \
-            --cache-from type=gha,scope=containai-base \
-            --cache-to type=gha,scope=containai-base,mode=max \
-            -t containai-base:scan \
-            -f docker/base/Dockerfile \
-            .
-
-      - name: Scan base image for embedded secrets
-        run: trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress containai-base:scan
-
       - name: Build and push base image
         id: build
         uses: docker/build-push-action@v5
@@ -72,8 +55,19 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=containai-base
-          cache-to: type=gha,scope=containai-base,mode=max
+          cache-to: type=gha,scope=containai-base,mode=max,compression=zstd
           platforms: linux/amd64,linux/arm64
+
+      - name: Install Trivy CLI
+        if: github.event_name != 'pull_request'
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.53.0
+
+      - name: Scan base image by digest
+        if: github.event_name != 'pull_request'
+        run: |
+          trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
       - name: Generate artifact attestation
         if: github.event_name != 'pull_request'
