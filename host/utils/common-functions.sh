@@ -416,9 +416,17 @@ run_integrity_check_if_needed() {
         echo "⚠️  Missing integrity-check.sh; skipping integrity validation" >&2
         return 0
     fi
-    if "$integrity_script" --mode "$CONTAINAI_PROFILE" --root "$CONTAINAI_ROOT" --sums "$CONTAINAI_SHA256_FILE"; then
+    local enforcement_profile="${CONTAINAI_PROFILE:-dev}"
+    if [ "${CONTAINAI_LAUNCHER_CHANNEL:-}" = "nightly" ]; then
+        enforcement_profile="prod"
+    fi
+    if "$integrity_script" --mode "$enforcement_profile" --root "$CONTAINAI_ROOT" --sums "$CONTAINAI_SHA256_FILE"; then
         return 0
     fi
+    if [ "$enforcement_profile" = "prod" ]; then
+        log_security_event "enforcement" '{"reason":"integrity-failed"}' >/dev/null 2>&1 || true
+    fi
+    echo "❌ Integrity verification failed for $CONTAINAI_ROOT (profile: $CONTAINAI_PROFILE, channel: ${CONTAINAI_LAUNCHER_CHANNEL:-dev})" >&2
     return 1
 }
 
