@@ -61,13 +61,15 @@ code --list-extensions | Select-String "ms-vscode-remote.remote-containers"
 
 ### Method 1: Launch Agent, Then Attach VS Code
 
-1. **Start a agent container:**
+1. **Start an agent container (pick the channel-specific launcher name):**
    ```powershell
    # Windows PowerShell
-   .\host\launchers\run-copilot.ps1
+   .\host\launchers\entrypoints\run-copilot-dev.ps1  # dev clone
+   .\host\launchers\entrypoints\run-copilot.ps1      # prod bundle
+   .\host\launchers\entrypoints\run-copilot-nightly.ps1 # nightly smoke
    
    # Or bash (Git Bash, WSL)
-   ./host/launchers/run-copilot
+   ./host/launchers/entrypoints/run-copilot-dev
    ```
 
 2. **Attach VS Code:**
@@ -86,10 +88,10 @@ code --list-extensions | Select-String "ms-vscode-remote.remote-containers"
 
 1. **Open VS Code on the host** (outside of any container) and load the ContainAI repository so the launchers are on your PATH.
 2. **Open the integrated terminal:** `` Ctrl+` ``.
-3. **Run a launcher from your project directory:**
+3. **Run a launcher from your project directory (dev/prod/nightly as needed):**
    ```bash
    cd ~/my-project
-   run-copilot        # or run-codex / run-claude
+    run-copilot-dev        # or run-codex-dev / run-claude-dev
    ```
 4. **Attach VS Code** using the steps in Method 1 once the container is running.
 

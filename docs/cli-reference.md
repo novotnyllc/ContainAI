@@ -3,6 +3,8 @@
 Complete reference for all ContainAI launcher scripts and their arguments.
 
 > **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They no longer implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh host\launchers\run-copilot.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
+>
+> **Channels:** Launcher entrypoints live under `host/launchers/entrypoints`. In repo clones use the `-dev` names (e.g., `run-copilot-dev`), prod bundles drop the suffix (`run-copilot`), and nightly builds use `-nightly`. Use `host/utils/prepare-entrypoints.sh --channel nightly|prod` when you need to generate alternate names.
 
 ## Table of Contents
 
@@ -34,7 +36,7 @@ Ephemeral containers that auto-remove on exit. Best for quick coding sessions.
 
 Launch GitHub Copilot CLI in the current directory.
 
-**Location:** `host/launchers/run-copilot` (bash), `host/launchers/run-copilot.ps1` (PowerShell)
+**Location:** `host/launchers/entrypoints/run-copilot-<channel>` (bash), `host/launchers/entrypoints/run-copilot-<channel>.ps1` (PowerShell) where `<channel>` is `dev` in repo clones, empty in prod bundles, or `nightly` for nightly builds.
 
 #### Synopsis
 

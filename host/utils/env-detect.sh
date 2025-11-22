@@ -11,15 +11,33 @@ profile_default="dev"
 image_prefix_default="containai-dev"
 image_tag_default="devlocal"
 registry_default="ghcr.io/novotnyllc"
+image_digest_default=""
+image_digest_copilot_default=""
+image_digest_codex_default=""
+image_digest_claude_default=""
+image_digest_proxy_default=""
+image_digest_log_fwd_default=""
 profile="$profile_default"
 image_prefix="$image_prefix_default"
 image_tag="$image_tag_default"
 registry="$registry_default"
+image_digest="$image_digest_default"
+image_digest_copilot="$image_digest_copilot_default"
+image_digest_codex="$image_digest_codex_default"
+image_digest_claude="$image_digest_claude_default"
+image_digest_proxy="$image_digest_proxy_default"
+image_digest_log_fwd="$image_digest_log_fwd_default"
 profile_loaded=0
 profile_env_set=0
 image_prefix_env_set=0
 image_tag_env_set=0
 registry_env_set=0
+image_digest_env_set=0
+image_digest_copilot_env_set=0
+image_digest_codex_env_set=0
+image_digest_claude_env_set=0
+image_digest_proxy_env_set=0
+image_digest_log_fwd_env_set=0
 repo_root="$REPO_ROOT_DEFAULT"
 prod_root_default="/opt/containai/current"
 prod_root="$prod_root_default"
@@ -64,6 +82,12 @@ done
 [[ -n "${IMAGE_PREFIX:-}" ]] && image_prefix_env_set=1
 [[ -n "${IMAGE_TAG:-}" ]] && image_tag_env_set=1
 [[ -n "${REGISTRY:-}" ]] && registry_env_set=1
+[[ -n "${IMAGE_DIGEST:-}" ]] && image_digest_env_set=1
+[[ -n "${IMAGE_DIGEST_COPILOT:-}" ]] && image_digest_copilot_env_set=1
+[[ -n "${IMAGE_DIGEST_CODEX:-}" ]] && image_digest_codex_env_set=1
+[[ -n "${IMAGE_DIGEST_CLAUDE:-}" ]] && image_digest_claude_env_set=1
+[[ -n "${IMAGE_DIGEST_PROXY:-}" ]] && image_digest_proxy_env_set=1
+[[ -n "${IMAGE_DIGEST_LOG_FORWARDER:-}" ]] && image_digest_log_fwd_env_set=1
 
 load_profile() {
     local file="$1"
@@ -75,11 +99,23 @@ load_profile() {
         [[ -n "${IMAGE_PREFIX:-}" ]] && image_prefix_env_set=1
         [[ -n "${IMAGE_TAG:-}" ]] && image_tag_env_set=1
         [[ -n "${REGISTRY:-}" ]] && registry_env_set=1
+        [[ -n "${IMAGE_DIGEST:-}" ]] && image_digest_env_set=1
+        [[ -n "${IMAGE_DIGEST_COPILOT:-}" ]] && image_digest_copilot_env_set=1
+        [[ -n "${IMAGE_DIGEST_CODEX:-}" ]] && image_digest_codex_env_set=1
+        [[ -n "${IMAGE_DIGEST_CLAUDE:-}" ]] && image_digest_claude_env_set=1
+        [[ -n "${IMAGE_DIGEST_PROXY:-}" ]] && image_digest_proxy_env_set=1
+        [[ -n "${IMAGE_DIGEST_LOG_FORWARDER:-}" ]] && image_digest_log_fwd_env_set=1
     fi
     profile="${PROFILE:-$profile}"
     image_prefix="${IMAGE_PREFIX:-$image_prefix}"
     image_tag="${IMAGE_TAG:-$image_tag}"
     registry="${REGISTRY:-$registry}"
+    image_digest="${IMAGE_DIGEST:-$image_digest}"
+    image_digest_copilot="${IMAGE_DIGEST_COPILOT:-$image_digest_copilot}"
+    image_digest_codex="${IMAGE_DIGEST_CODEX:-$image_digest_codex}"
+    image_digest_claude="${IMAGE_DIGEST_CLAUDE:-$image_digest_claude}"
+    image_digest_proxy="${IMAGE_DIGEST_PROXY:-$image_digest_proxy}"
+    image_digest_log_fwd="${IMAGE_DIGEST_LOG_FORWARDER:-$image_digest_log_fwd}"
 }
 
 load_profile "$profile_file"
@@ -114,6 +150,24 @@ detect_prod_install() {
     if [ $registry_env_set -eq 0 ]; then
         registry="$registry_default"
     fi
+    if [ $image_digest_env_set -eq 0 ]; then
+        image_digest="$image_digest_default"
+    fi
+    if [ $image_digest_copilot_env_set -eq 0 ]; then
+        image_digest_copilot="$image_digest_copilot_default"
+    fi
+    if [ $image_digest_codex_env_set -eq 0 ]; then
+        image_digest_codex="$image_digest_codex_default"
+    fi
+    if [ $image_digest_claude_env_set -eq 0 ]; then
+        image_digest_claude="$image_digest_claude_default"
+    fi
+    if [ $image_digest_proxy_env_set -eq 0 ]; then
+        image_digest_proxy="$image_digest_proxy_default"
+    fi
+    if [ $image_digest_log_fwd_env_set -eq 0 ]; then
+        image_digest_log_fwd="$image_digest_log_fwd_default"
+    fi
     return 0
 }
 
@@ -132,6 +186,25 @@ case "$profile" in
         exit 1
         ;;
 esac
+
+if [ "$profile" = "prod" ]; then
+    if [ -z "$image_digest" ]; then
+        echo "Prod profile requires IMAGE_DIGEST in $profile_file (pin images by digest)" >&2
+        exit 1
+    fi
+    if [ -z "$image_digest_copilot" ] || [ -z "$image_digest_codex" ] || [ -z "$image_digest_claude" ]; then
+        echo "Prod profile requires IMAGE_DIGEST_COPILOT/CODEX/CLAUDE in $profile_file" >&2
+        exit 1
+    fi
+    if [ -z "$image_digest_proxy" ] || [ -z "$image_digest_log_fwd" ]; then
+        echo "Prod profile requires IMAGE_DIGEST_PROXY and IMAGE_DIGEST_LOG_FORWARDER in $profile_file" >&2
+        exit 1
+    fi
+    if [ -z "$image_tag" ] || [ -z "$image_prefix" ] || [ -z "$registry" ]; then
+        echo "Prod profile requires IMAGE_PREFIX, IMAGE_TAG, and REGISTRY in $profile_file" >&2
+        exit 1
+    fi
+fi
 
 if [ "$profile" = "prod" ]; then
     root=$(resolve_path "$prod_root")
@@ -157,6 +230,12 @@ emit_env() {
     printf 'CONTAINAI_IMAGE_PREFIX=%s\n' "$image_prefix"
     printf 'CONTAINAI_IMAGE_TAG=%s\n' "$image_tag"
     printf 'CONTAINAI_REGISTRY=%s\n' "$registry"
+    printf 'CONTAINAI_IMAGE_DIGEST=%s\n' "$image_digest"
+    printf 'CONTAINAI_IMAGE_DIGEST_COPILOT=%s\n' "$image_digest_copilot"
+    printf 'CONTAINAI_IMAGE_DIGEST_CODEX=%s\n' "$image_digest_codex"
+    printf 'CONTAINAI_IMAGE_DIGEST_CLAUDE=%s\n' "$image_digest_claude"
+    printf 'CONTAINAI_IMAGE_DIGEST_PROXY=%s\n' "$image_digest_proxy"
+    printf 'CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER=%s\n' "$image_digest_log_fwd"
 }
 
 emit_json() {
@@ -169,7 +248,13 @@ emit_json() {
     printf '"sha256File":"%s",' "$sha_file"
     printf '"imagePrefix":"%s",' "$image_prefix"
     printf '"imageTag":"%s",' "$image_tag"
-    printf '"registry":"%s"' "$registry"
+    printf '"registry":"%s",' "$registry"
+    printf '"imageDigest":"%s",' "$image_digest"
+    printf '"imageDigestCopilot":"%s",' "$image_digest_copilot"
+    printf '"imageDigestCodex":"%s",' "$image_digest_codex"
+    printf '"imageDigestClaude":"%s",' "$image_digest_claude"
+    printf '"imageDigestProxy":"%s",' "$image_digest_proxy"
+    printf '"imageDigestLogForwarder":"%s"' "$image_digest_log_fwd"
     printf '}\n'
 }
 

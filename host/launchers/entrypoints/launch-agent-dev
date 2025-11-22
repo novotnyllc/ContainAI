@@ -8,13 +8,13 @@ set -e
 # Source shared functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=host/utils/common-functions.sh
-source "$SCRIPT_DIR/../utils/common-functions.sh"
+source "$SCRIPT_DIR/../../utils/common-functions.sh"
 
 detect_environment_profile
 REPO_ROOT="$CONTAINAI_ROOT"
 
 if [ "$CONTAINAI_PROFILE" = "dev" ]; then
-    maybe_check_launcher_updates "$REPO_ROOT" "launch-agent"
+    maybe_check_launcher_updates "$REPO_ROOT" "launch-agent-dev"
 fi
 
 if ! run_integrity_check_if_needed; then
@@ -65,7 +65,7 @@ SESSION_ARTIFACT_DIR=""
 cleanup_session_artifacts() {
     local cache_root="${CONTAINAI_SESSION_CACHE:-${HOME:-/tmp}/.containai/session-cache}"
     if [ -n "$CONTAINER_NAME" ] && [ -d "$cache_root/${CONTAINER_NAME}" ]; then
-        rm -rf "$cache_root/${CONTAINER_NAME}"
+        rm -rf "${cache_root:?}/${CONTAINER_NAME}"
     fi
     if [ -n "$PROXY_CONTAINER_NAME" ]; then
         stop_proxy_log_pipeline "$PROXY_CONTAINER_NAME"
@@ -838,13 +838,16 @@ fi
 
 PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
 PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
-PROXY_IMAGE="containai-proxy:local"
-LOG_FORWARDER_IMAGE="${CONTAINAI_LOG_FORWARDER_IMAGE:-containai-log-forwarder:local}"
+PROXY_IMAGE="$(if [ -n "${CONTAINAI_IMAGE_DIGEST_PROXY:-}" ]; then echo "containai-proxy@${CONTAINAI_IMAGE_DIGEST_PROXY}"; else echo "containai-proxy:local"; fi)"
+LOG_FORWARDER_IMAGE="$(if [ -n "${CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER:-}" ]; then echo "containai-log-forwarder@${CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER}"; else echo "containai-log-forwarder:local"; fi)"
 LOG_BROKER_IMAGE="${CONTAINAI_LOG_BROKER_IMAGE:-$LOG_FORWARDER_IMAGE}"
 
 # Pull latest image
 pull_and_tag_image "$AGENT"
 IMAGE_NAME="containai-${AGENT}:local"
+if [ -n "${CONTAINAI_IMAGE_DIGEST:-}" ]; then
+    IMAGE_NAME="containai-${AGENT}@${CONTAINAI_IMAGE_DIGEST}"
+fi
 
 # Get timezone
 TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
@@ -1046,8 +1049,7 @@ if container_exists "$CONTAINER_NAME"; then
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
         ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
-        start_proxy_log_broker "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT_FILE" "$PROXY_BROKER_PID_FILE" "$PROXY_LOG_PORT"
-        start_proxy_log_forwarder "$PROXY_CONTAINER_NAME" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT" "$PROXY_LOG_DIR" "$PROXY_FORWARDER_PID_FILE"
+        start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR"
     fi
     
     if [ "$STATE" = "running" ]; then

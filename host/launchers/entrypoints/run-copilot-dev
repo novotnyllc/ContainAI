@@ -2,4 +2,4 @@
 # Convenience wrapper that delegates to run-agent with the Copilot image
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/run-agent" copilot "$@"
+exec "$SCRIPT_DIR/../run-agent" copilot "$@"

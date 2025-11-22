@@ -1065,15 +1065,37 @@ else
     AGENT_BRANCH="${AGENT}/${BRANCH}"
 fi
 
-PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
-PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
-PROXY_IMAGE="${CONTAINAI_IMAGE_PREFIX}-proxy:${CONTAINAI_IMAGE_TAG}"
-LOG_FORWARDER_IMAGE="${CONTAINAI_LOG_FORWARDER_IMAGE:-${CONTAINAI_IMAGE_PREFIX}-log-forwarder:${CONTAINAI_IMAGE_TAG}}"
-LOG_BROKER_IMAGE="${CONTAINAI_LOG_BROKER_IMAGE:-$LOG_FORWARDER_IMAGE}"
+build_image_ref() {
+    local agent="$1"
+    local base="${CONTAINAI_IMAGE_PREFIX}-${agent}"
+    local digest_var=""
+    case "$agent" in
+        copilot) digest_var="$CONTAINAI_IMAGE_DIGEST_COPILOT" ;;
+        codex) digest_var="$CONTAINAI_IMAGE_DIGEST_CODEX" ;;
+        claude) digest_var="$CONTAINAI_IMAGE_DIGEST_CLAUDE" ;;
+        proxy) digest_var="$CONTAINAI_IMAGE_DIGEST_PROXY" ;;
+        log-forwarder) digest_var="$CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER" ;;
+        *) digest_var="$CONTAINAI_IMAGE_DIGEST" ;;
+    esac
+    if [ -n "$digest_var" ]; then
+        printf '%s@%s\n' "$base" "$digest_var"
+        return
+    fi
+    if [ "$CONTAINAI_PROFILE" = "prod" ]; then
+        echo "❌ Prod profile requires image digests for all components (missing for $agent)." >&2
+        exit 1
+    fi
+    printf '%s:%s\n' "$base" "$CONTAINAI_IMAGE_TAG"
+}
 
 # Pull latest image
 pull_and_tag_image "$AGENT"
-IMAGE_NAME="${CONTAINAI_IMAGE_PREFIX}-${AGENT}:${CONTAINAI_IMAGE_TAG}"
+IMAGE_NAME="$(build_image_ref "$AGENT")"
+PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
+PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
+PROXY_IMAGE="$(build_image_ref "proxy")"
+LOG_FORWARDER_IMAGE="${CONTAINAI_LOG_FORWARDER_IMAGE:-$(build_image_ref "log-forwarder")}"
+LOG_BROKER_IMAGE="${CONTAINAI_LOG_BROKER_IMAGE:-$LOG_FORWARDER_IMAGE}"
 
 # Get timezone
 TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
@@ -1089,6 +1111,9 @@ SQUID_HELPER_ACL_FILE="$SESSION_CONFIG_OUTPUT/squid-acls.conf"
 PROXY_LOG_ROOT="${HOME}/.containai/logs/proxy"
 PROXY_LOG_DIR="${PROXY_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
 PROXY_LOG_CERT_DIR="${SESSION_CONFIG_OUTPUT}/log-broker"
+# Default port file/port; ensure non-empty for log broker/forwarder helpers
+PROXY_LOG_PORT_FILE="${SESSION_CONFIG_OUTPUT}/proxy-log.port"
+PROXY_LOG_PORT="4433"
 
 # Determine network mode
 NETWORK_MODE="bridge"

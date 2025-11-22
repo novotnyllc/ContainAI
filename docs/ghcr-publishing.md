@@ -14,7 +14,7 @@ This doc explains how to build, sign, and publish ContainAI artifacts to GitHub 
 ./scripts/build/build-dev.sh
 
 # CI: stamp host/profile.env with prod values, then create payload
-./scripts/release/package.sh --version v1.2.3 --out dist --sbom dist/v1.2.3/sbom.json --cosign-asset dist/v1.2.3/cosign
+CONTAINAI_LAUNCHER_CHANNEL=prod ./scripts/release/package.sh --version v1.2.3 --out dist --sbom dist/v1.2.3/sbom.json --cosign-asset dist/v1.2.3/cosign
 ```
 
 Artifacts land in `dist/<version>/`:
@@ -31,13 +31,19 @@ sudo ./host/utils/install-release.sh --version v1.2.3 --repo owner/repo
 Blue/green swap lives under `/opt/containai/releases/<version>` with `current`/`previous` symlinks. Install copies the tarball + signature so `check-health` can verify sigstore.
 
 ## Publish to GHCR
-Prod pushes happen in CI; dev script never pushes. CI should stamp `host/profile.env` with:
+Prod pushes happen in CI; dev script never pushes. CI should stamp `host/profile.env` with digests for every image:
 
 ```
 PROFILE=prod
 IMAGE_PREFIX=containai
 IMAGE_TAG=<immutable tag>
 REGISTRY=ghcr.io/<owner>
+IMAGE_DIGEST=sha256:<main image>
+IMAGE_DIGEST_COPILOT=sha256:<copilot image>
+IMAGE_DIGEST_CODEX=sha256:<codex image>
+IMAGE_DIGEST_CLAUDE=sha256:<claude image>
+IMAGE_DIGEST_PROXY=sha256:<proxy image>
+IMAGE_DIGEST_LOG_FORWARDER=sha256:<log-forwarder image>
 ```
 
 before running package/signing so launchers are pinned to the released container versions (proxy included).
@@ -49,12 +55,14 @@ before running package/signing so launchers are pinned to the released container
 
 Recommended workflow steps:
 1. `actions/checkout`
-2. Write `host/profile.env` with prod values (see above)
+2. Write `host/profile.env` with prod values (see above) **including all IMAGE_DIGEST* entries**
 3. Generate SBOM (GitHub action)
 4. Fetch cosign (static)
-5. `scripts/release/package.sh --version $GIT_TAG --out dist --sbom dist/$GIT_TAG/sbom.json --cosign-asset dist/$GIT_TAG/cosign`
+5. `CONTAINAI_LAUNCHER_CHANNEL=prod CONTAINAI_IMAGE_DIGEST=$DIGEST CONTAINAI_IMAGE_DIGEST_COPILOT=$DIGEST_COPILOT CONTAINAI_IMAGE_DIGEST_CODEX=$DIGEST_CODEX CONTAINAI_IMAGE_DIGEST_CLAUDE=$DIGEST_CLAUDE CONTAINAI_IMAGE_DIGEST_PROXY=$DIGEST_PROXY CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER=$DIGEST_LOG scripts/release/package.sh --version $GIT_TAG --out dist --sbom dist/$GIT_TAG/sbom.json --cosign-asset dist/$GIT_TAG/cosign`
 6. Upload `dist/$GIT_TAG/containai-payload-$GIT_TAG.tar.gz` as the release asset (GitHub will attach attestation)
 7. Build/push images using IMAGE_PREFIX/IMAGE_TAG from profile.env (proxy mandatory)
+
+For nightly builds, set `CONTAINAI_LAUNCHER_CHANNEL=nightly` and provide all IMAGE_DIGEST* variables when invoking `package.sh` to emit `run-*-nightly` entrypoints in the payload.
 
 ## Troubleshooting
 - `syft not available`: install syft or rerun with `--skip-sbom` (dev only).

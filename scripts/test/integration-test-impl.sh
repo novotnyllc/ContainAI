@@ -283,11 +283,22 @@ test_launcher_script_execution() {
     
     cd "$TEST_REPO_DIR"
     
-    # Test copilot launcher
+    # Test copilot launcher (channel-aware)
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
+    local channel="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
+    local launcher_name="run-copilot-dev"
+    case "$channel" in
+        prod) launcher_name="run-copilot" ;;
+        nightly) launcher_name="run-copilot-nightly" ;;
+        dev) ;;
+        *)
+            fail "Unsupported launcher channel: $channel"
+            return
+            ;;
+    esac
     
-    # Create a mock run-copilot that uses test images
-    cat > /tmp/test-run-copilot << EOF
+    # Create a mock launcher that uses test images
+    cat > "/tmp/test-${launcher_name}" << EOF
 #!/usr/bin/env bash
 source "$SCRIPT_DIR/test-config.sh"
 
@@ -306,10 +317,10 @@ docker run -d \\
     sleep $LONG_RUNNING_SLEEP
 EOF
     
-    chmod +x /tmp/test-run-copilot
+    chmod +x "/tmp/test-${launcher_name}"
     
     # Execute launcher
-    if /tmp/test-run-copilot; then
+    if "/tmp/test-${launcher_name}"; then
         pass "Launcher script executed successfully"
     else
         fail "Launcher script failed"

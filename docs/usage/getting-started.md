@@ -18,8 +18,9 @@ Use **`launch-agent`** only when you need:
 
 ## Choose Dev vs. Prod
 
-- **Dev (editable from repo)**: Clone the repo and run `./host/launchers/run-codex .` (or `run-copilot`/`run-claude`). `./host/utils/env-detect.sh --format env` should report `CONTAINAI_PROFILE=dev` with roots under your home directory. Quick smoke: `./scripts/test/test-launchers.sh test_env_detection_profiles`.
-- **Prod (installed bundle)**: Install the signed payload: `curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash -s -- --version vX.Y.Z`. Running `sudo /opt/containai/current/host/utils/env-detect.sh --prod-root /opt/containai/current --format env` should show `CONTAINAI_PROFILE=prod` and point to system config/data roots. Launchers live under `/opt/containai/current/host/launchers`.
+- **Dev (editable from repo)**: Clone the repo and run `./host/launchers/entrypoints/run-codex-dev .` (or `run-copilot-dev`/`run-claude-dev`). `./host/utils/env-detect.sh --format env` should report `CONTAINAI_PROFILE=dev` with roots under your home directory. Quick smoke: `./scripts/test/test-launchers.sh test_env_detection_profiles`.
+- **Prod (installed bundle)**: Install the signed payload: `curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash -s -- --version vX.Y.Z`. Running `sudo /opt/containai/current/host/utils/env-detect.sh --prod-root /opt/containai/current --format env` should show `CONTAINAI_PROFILE=prod` and point to system config/data roots. Launchers live under `/opt/containai/current/host/launchers/entrypoints` and are named without a suffix (e.g., `run-copilot`).
+- **Nightly channel**: Generate nightly entrypoints with `./host/utils/prepare-entrypoints.sh --channel nightly` (or set `CONTAINAI_LAUNCHER_CHANNEL=nightly` when running `scripts/release/package.sh`). Nightly launchers use the `-nightly` suffix (e.g., `run-copilot-nightly`).
 
 ## What You Need
 

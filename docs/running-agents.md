@@ -28,19 +28,19 @@ powershell -File scripts/install.ps1   # Windows
 
 Installation simply adds the `host/launchers` directory to your PATH so you can call `run-*`/`launch-*` from any repository. You can also add the folder manually if you prefer to keep control of your shell profile.
 
-> **Windows note:** The PowerShell entrypoints are WSL shims. They require WSL 2 and forward arguments to the bash scripts verbatim. `scripts\install.ps1` adds the launchers to your PATH so `run-copilot` works anywhere. When passing GNU-style flags (`--prompt`, `--network-proxy squid`, etc.) from PowerShell, use `--%` before the first flag (`pwsh host\launchers\run-copilot.ps1 --% --prompt "Status"`) so PowerShell does not treat them as native parameters.
+> **Windows note:** The PowerShell entrypoints are WSL shims. They require WSL 2 and forward arguments to the bash scripts verbatim. `scripts\install.ps1` adds `host\launchers\entrypoints` to your PATH so channel-specific launchers work anywhere (`run-copilot-dev` in repo clones, `run-copilot` in prod bundles, `run-copilot-nightly` for nightly smoke). When passing GNU-style flags (`--prompt`, `--network-proxy squid`, etc.) from PowerShell, use `--%` before the first flag (`pwsh host\launchers\entrypoints\run-copilot-dev.ps1 --% --prompt "Status"`) so PowerShell does not treat them as native parameters.
 
 ## 3. Launch Patterns
 
 ### Ephemeral (Default)
 
-Use the `run-*` shortcuts when you want the container to disappear after the session:
+Use the `run-*` shortcuts when you want the container to disappear after the session (pick the suffix for your channel: `-dev` in repo clones, none for prod bundles, `-nightly` for nightly builds):
 
 ```bash
 cd ~/my-repo
-run-copilot                # or run-codex / run-claude
-run-copilot --no-push      # skip the safety auto-push
-run-copilot ~/other/repo   # explicit repo path
+run-copilot-dev                # or run-codex-dev / run-claude-dev
+run-copilot-dev --no-push      # skip the safety auto-push
+run-copilot-dev ~/other/repo   # explicit repo path
 ```
 
 Ephemeral containers:
@@ -68,12 +68,12 @@ This is also the path exercised by `./scripts/test/integration-test.sh --with-ho
 
 ### Persistent (Long-Running)
 
-`launch-agent` keeps the container alive until you remove it:
+`launch-agent` keeps the container alive until you remove it (use `launch-agent-dev`, `launch-agent`, or `launch-agent-nightly` per channel):
 
 ```bash
-launch-agent copilot                # uses current repo + branch
-launch-agent codex --branch api-fixes
-launch-agent claude ~/proj --network-proxy restricted
+launch-agent-dev copilot                # uses current repo + branch
+launch-agent-dev codex --branch api-fixes
+launch-agent-dev claude ~/proj --network-proxy restricted
 ```
 
 Persistent containers gain extra management features:

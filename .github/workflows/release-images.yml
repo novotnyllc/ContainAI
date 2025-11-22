@@ -53,16 +53,6 @@ jobs:
             echo "prefix=containai" >> $GITHUB_OUTPUT
             echo "tag=$ref" >> $GITHUB_OUTPUT
           fi
-      - name: Stamp profile
-        run: |
-          PREFIX="${{ steps.channel.outputs.prefix }}"
-          TAG="${{ steps.channel.outputs.tag }}"
-          {
-            echo "PROFILE=prod"
-            echo "IMAGE_PREFIX=${PREFIX}"
-            echo "IMAGE_TAG=${TAG}"
-            echo "REGISTRY=ghcr.io/${{ github.repository_owner }}"
-          } > host/profile.env
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -87,6 +77,55 @@ jobs:
         run: |
           docker compose -f docker-compose.yml build base agents copilot codex claude proxy
           docker compose -f docker-compose.yml push base agents copilot codex claude proxy
+      - name: Build and push log-forwarder
+        env:
+          REGISTRY: ghcr.io/${{ github.repository_owner }}
+          IMAGE_PREFIX: ${{ steps.channel.outputs.prefix }}
+          IMAGE_TAG: ${{ steps.channel.outputs.tag }}
+        run: |
+          docker build -f docker/log-forwarder/Dockerfile -t "${REGISTRY}/${IMAGE_PREFIX}-log-forwarder:${IMAGE_TAG}" .
+          docker push "${REGISTRY}/${IMAGE_PREFIX}-log-forwarder:${IMAGE_TAG}"
+      - name: Stamp profile with digests
+        env:
+          PREFIX: ${{ steps.channel.outputs.prefix }}
+          TAG: ${{ steps.channel.outputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          images=(
+            "${PREFIX}:${TAG}"
+            "${PREFIX}-copilot:${TAG}"
+            "${PREFIX}-codex:${TAG}"
+            "${PREFIX}-claude:${TAG}"
+            "${PREFIX}-proxy:${TAG}"
+            "${PREFIX}-log-forwarder:${TAG}"
+          )
+          declare -A digests
+          for img in "${images[@]}"; do
+            full="ghcr.io/${OWNER}/${img}"
+            digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$full" | cut -d@ -f2)
+            if [[ -z "$digest" ]]; then
+                echo "Digest not found for $full" >&2
+                exit 1
+            fi
+            digests["$img"]="$digest"
+          done
+          cat > host/profile.env <<EOF
+PROFILE=prod
+IMAGE_PREFIX=${PREFIX}
+IMAGE_TAG=${TAG}
+REGISTRY=ghcr.io/${OWNER}
+IMAGE_DIGEST=${digests["${PREFIX}:${TAG}"]}
+IMAGE_DIGEST_COPILOT=${digests["${PREFIX}-copilot:${TAG}"]}
+IMAGE_DIGEST_CODEX=${digests["${PREFIX}-codex:${TAG}"]}
+IMAGE_DIGEST_CLAUDE=${digests["${PREFIX}-claude:${TAG}"]}
+IMAGE_DIGEST_PROXY=${digests["${PREFIX}-proxy:${TAG}"]}
+IMAGE_DIGEST_LOG_FORWARDER=${digests["${PREFIX}-log-forwarder:${TAG}"]}
+EOF
+          OUT=dist/${TAG}
+          PAYDIR=$OUT/payload-src
+          if [[ -d "$PAYDIR/host" ]]; then
+            cp host/profile.env "$PAYDIR/host/profile.env"
+          fi
       - name: Generate image SBOM (base)
         uses: anchore/sbom-action@v0
         with:
@@ -203,6 +242,9 @@ jobs:
         run: |
           VERSION=${{ steps.channel.outputs.tag }}
           OUT=dist/${VERSION}
+          set -a
+          source host/profile.env
+          set +a
           ./scripts/release/package.sh --version "$VERSION" --out dist --payload-dir "$OUT/payload-src" --sbom "$OUT/payload-src/payload.sbom.json" --sbom-att "$OUT/payload-src/payload.sbom.intoto.jsonl"
       - name: Upload artifact
         id: upload-payload

@@ -13,6 +13,7 @@ SBOM_ATTEST=""
 ATTESTATION_FILE=""
 INCLUDE_DOCKER=0
 PAYLOAD_DIR_OVERRIDE=""
+LAUNCHER_CHANNEL="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
 
 print_help() {
     cat <<'EOF'
@@ -29,6 +30,7 @@ Options:
   --attestation FILE  Attestation bundle (intoto) for payload artifact
   --include-docker    Include docker/ tree in payload
   --payload-dir DIR   Use an existing payload directory instead of copying sources (must contain final payload contents)
+  --launcher-channel  Channel for launcher entrypoints (dev|prod|nightly, default: $CONTAINAI_LAUNCHER_CHANNEL or dev)
 EOF
 }
 
@@ -42,6 +44,7 @@ while [[ $# -gt 0 ]]; do
         --attestation) ATTESTATION_FILE="$2"; shift 2 ;;
         --include-docker) INCLUDE_DOCKER=1; shift ;;
         --payload-dir) PAYLOAD_DIR_OVERRIDE="$2"; shift 2 ;;
+        --launcher-channel) LAUNCHER_CHANNEL="$2"; shift 2 ;;
         -h|--help) print_help; exit 0 ;;
         *) echo "Unknown arg: $1" >&2; print_help >&2; exit 1 ;;
     esac
@@ -52,6 +55,28 @@ if [[ -z "$VERSION" ]]; then
         VERSION="$(git -C "$PROJECT_ROOT" describe --tags --always --dirty 2>/dev/null || true)"
     fi
     VERSION="${VERSION:-0.0.0-dev}"
+fi
+
+if [[ "$LAUNCHER_CHANNEL" != "dev" ]]; then
+    missing_digests=()
+    req_vars=(
+        IMAGE_DIGEST
+        IMAGE_DIGEST_COPILOT
+        IMAGE_DIGEST_CODEX
+        IMAGE_DIGEST_CLAUDE
+        IMAGE_DIGEST_PROXY
+        IMAGE_DIGEST_LOG_FORWARDER
+    )
+    for v in "${req_vars[@]}"; do
+        val="${!v:-${CONTAINAI_IMAGE_DIGEST:-}}"
+        if [[ -z "$val" ]]; then
+            missing_digests+=("$v")
+        fi
+    done
+    if [[ ${#missing_digests[@]} -gt 0 ]]; then
+        echo "❌ LAUNCHER_CHANNEL=$LAUNCHER_CHANNEL requires image digests for all components (missing: ${missing_digests[*]})." >&2
+        exit 1
+    fi
 fi
 
 DEST_DIR="$OUT_DIR/$VERSION"
@@ -110,6 +135,26 @@ mkdir -p "$PAYLOAD_DIR/tools"
 COSIGN_ROOT_SOURCE="$PROJECT_ROOT/host/utils/cosign-root.pem"
 if [[ -f "$COSIGN_ROOT_SOURCE" ]]; then
     cp "$COSIGN_ROOT_SOURCE" "$PAYLOAD_DIR/tools/cosign-root.pem"
+fi
+
+# Generate channel-specific launcher entrypoints
+ENTRYPOINTS_DIR_SRC="$PAYLOAD_DIR/host/launchers/entrypoints"
+if [[ -d "$ENTRYPOINTS_DIR_SRC" ]]; then
+    if [[ "$LAUNCHER_CHANNEL" = "dev" ]]; then
+        ENTRYPOINTS_DIR_OUT="$ENTRYPOINTS_DIR_SRC"
+    else
+        ENTRYPOINTS_DIR_OUT="$PAYLOAD_DIR/host/launchers/entrypoints-${LAUNCHER_CHANNEL}"
+        rm -rf "$ENTRYPOINTS_DIR_OUT"
+        cp -a "$ENTRYPOINTS_DIR_SRC"/. "$ENTRYPOINTS_DIR_OUT"/
+    fi
+    if ! "$PAYLOAD_DIR/host/utils/prepare-entrypoints.sh" --channel "$LAUNCHER_CHANNEL" --source "$ENTRYPOINTS_DIR_OUT" --dest "$ENTRYPOINTS_DIR_OUT"; then
+        echo "❌ Failed to prepare launcher entrypoints for channel $LAUNCHER_CHANNEL" >&2
+        exit 1
+    fi
+    if [[ "$ENTRYPOINTS_DIR_OUT" != "$ENTRYPOINTS_DIR_SRC" ]]; then
+        rm -rf "$ENTRYPOINTS_DIR_SRC"
+        mv "$ENTRYPOINTS_DIR_OUT" "$ENTRYPOINTS_DIR_SRC"
+    fi
 fi
 
 # SHA256SUMS inside payload for integrity-check (exclude self)

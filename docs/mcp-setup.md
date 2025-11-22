@@ -91,7 +91,7 @@ sequenceDiagram
    participant Stub as mcp-stub
    participant MCP as MCP Server
 
-   Dev->>Launch: run-copilot / run-codex
+   Dev->>Launch: run-copilot-<channel> / run-codex-<channel>
    Launch->>Render: Provide config.toml + secrets file path
    Render-->>Launch: Session manifest + stub spec (hash recorded)
    Launch->>Broker: Store secrets + request capabilities per stub
@@ -282,7 +282,7 @@ API_KEY = "$SERVICE_API_KEY"
 ```bash
 # Exit and restart the container
 exit
-./host/launchers/run-copilot  # or your preferred agent
+./host/launchers/entrypoints/run-copilot-dev  # or your preferred agent (use run-copilot for prod bundles)
 ```
 
 ## Per-Agent Configuration
@@ -525,7 +525,7 @@ docker stop <container>
 docker rm <container>
 
 # Launch again
-launch-agent copilot .
+launch-agent-dev copilot .
 ```
 
 **For ephemeral containers:**

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Install containai launchers to PATH
-# Adds host/launchers directory to ~/.bashrc or ~/.zshrc
+# Adds host/launchers/entrypoints directory to ~/.bashrc or ~/.zshrc
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LAUNCHERS_PATH="$REPO_ROOT/host/launchers"
+LAUNCHERS_PATH="$REPO_ROOT/host/launchers/entrypoints"
 SECURITY_ASSET_DIR="${CONTAINAI_ROOT:-$REPO_ROOT}/profiles"
 SECURITY_PROFILES_DIR="$REPO_ROOT/host/profiles"
 SECURITY_MANIFEST_NAME="containai-profiles.sha256"

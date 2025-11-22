@@ -487,3 +487,13 @@ $RECYCLE.BIN/
 
 # CI-stamped profile
 host/profile.env
+
+# Generated launcher entrypoints (prod/nightly)
+host/launchers/entrypoints/run-copilot
+host/launchers/entrypoints/run-codex
+host/launchers/entrypoints/run-claude
+host/launchers/entrypoints/launch-agent
+host/launchers/entrypoints/list-agents
+host/launchers/entrypoints/remove-agent
+host/launchers/entrypoints/connect-agent
+host/launchers/entrypoints/*-nightly

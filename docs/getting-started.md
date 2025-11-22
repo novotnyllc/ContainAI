@@ -366,8 +366,8 @@ If you're working from a local clone, add launcher scripts to your PATH:
 ```
 
 **What this does:**
-- Adds `host/launchers` to your PATH
-- Allows you to run `run-copilot`, `launch-agent`, etc. from anywhere
+- Adds `host/launchers/entrypoints` to your PATH
+- Allows you to run channel-aware launchers (`run-copilot-dev` from repo clones; `run-copilot`/`run-copilot-nightly` from packaged installs) from anywhere
 
 **Activate the changes:**
 
@@ -386,10 +386,10 @@ source ~/.zshrc
 
 **Verify:**
 ```bash
-which run-copilot    # Linux/Mac
-where.exe run-copilot  # Windows
+which run-copilot-dev    # Linux/Mac
+where.exe run-copilot-dev  # Windows
 
-# Should show path to host/launchers/run-copilot
+# Should show path to host/launchers/entrypoints/run-copilot-dev
 ```
 
 ## Step 9: First Launch
@@ -406,11 +406,11 @@ flowchart LR
 
 ### Quick Launch (Ephemeral)
 
-Navigate to any git repository and run:
+Navigate to any git repository and run (pick the right channel: `run-copilot-dev` in repo clones, `run-copilot` in prod bundles, `run-copilot-nightly` for nightly):
 
 ```bash
 cd ~/my-project  # Navigate to your project
-run-copilot
+run-copilot-dev
 ```
 
 **What happens:**
@@ -549,10 +549,10 @@ connect-agent
 
 ### Explore Features
 
-- **Network Isolation**: `launch-agent copilot . --network-proxy restricted`
-- **Resource Limits**: `run-copilot --cpu 8 --memory 16g`
-- **GPU Support**: `run-copilot --gpu all`
-- **Custom Branches**: `launch-agent copilot . -b my-feature`
+- **Network Isolation**: `launch-agent-dev copilot . --network-proxy restricted`
+- **Resource Limits**: `run-copilot-dev --cpu 8 --memory 16g` (use `run-copilot` in prod bundles)
+- **GPU Support**: `run-copilot-dev --gpu all`
+- **Custom Branches**: `launch-agent-dev copilot . -b my-feature`
 
 ### Read Documentation
 

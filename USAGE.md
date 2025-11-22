@@ -1,6 +1,6 @@
 # Usage Guide
 
-For most use cases, use the **`run-*` scripts** (run-copilot, run-codex, run-claude). These create temporary containers that:
+For most use cases, use the **`run-*` scripts** (run-copilot-dev/run-copilot/run-copilot-nightly depending on channel). These create temporary containers that:
 - Launch instantly
 - Auto-remove when you exit (no cleanup needed)
 - Auto-push changes before exit (safe by default)
@@ -12,7 +12,9 @@ Use **`launch-agent`** only when you need:
 - Network proxy controls
 - Multiple persistent agents on the same repo
 
-> **Windows shells:** All `.ps1` files in this repo are thin wrappers that call the bash scripts inside your default WSL 2 distro. Install/enable WSL 2, then run `pwsh host\launchers\run-copilot.ps1 --% --prompt "..."` (use `--%` to stop PowerShell from interpreting GNU-style `--flags`). Every option documented below uses the bash syntax; the PowerShell wrappers forward those arguments verbatim. Running `scripts\install.ps1` adds `host\launchers` to your PATH so you can invoke `run-copilot`, `launch-agent`, etc. directly from any PowerShell prompt.
+> **Channels:** Launcher entrypoints live under `host/launchers/entrypoints`. Repo clones use the `-dev` suffix (e.g., `run-copilot-dev`/`launch-agent-dev`), prod bundles drop the suffix (`run-copilot`), and nightly builds use `-nightly`. Generate channel-specific names with `host/utils/prepare-entrypoints.sh --channel nightly|prod`.
+
+> **Windows shells:** All `.ps1` files in this repo are thin wrappers that call the bash scripts inside your default WSL 2 distro. Install/enable WSL 2, then run `pwsh host\launchers\entrypoints\run-copilot-dev.ps1 --% --prompt "..."` (use `--%` to stop PowerShell from interpreting GNU-style `--flags`). Every option documented below uses the bash syntax; the PowerShell wrappers forward those arguments verbatim. Running `scripts\install.ps1` adds `host\launchers\entrypoints` to your PATH so you can invoke the channel-specific launchers directly from any PowerShell prompt.
 
 ## What You Need
 

@@ -13,7 +13,7 @@ sequenceDiagram
     participant Docker
     participant Container
 
-    User->>Launcher: run-copilot / launch-agent
+    User->>Launcher: run-copilot-<channel> / launch-agent-<channel>
     Launcher->>Launcher: Verify prerequisites (docker info, repo status)
     Launcher->>Docker: Pull tagged images (base/all/agent/proxy)
     Launcher->>Launcher: Render session manifest + MCP configs

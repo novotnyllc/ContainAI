@@ -2,7 +2,8 @@
 # Remove agent container with optional auto-push
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../utils/common-functions.sh"
+# shellcheck source=host/utils/common-functions.sh
+source "$SCRIPT_DIR/../../utils/common-functions.sh"
 
 # Parse arguments
 CONTAINER_NAME=""

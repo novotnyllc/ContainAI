@@ -2,7 +2,8 @@
 # List all active agent containers
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../utils/common-functions.sh"
+# shellcheck source=host/utils/common-functions.sh
+source "$SCRIPT_DIR/../../utils/common-functions.sh"
 
 # Check Docker
 check_docker_running || exit 1
@@ -18,7 +19,7 @@ if [ -z "$containers" ]; then
     echo "No agent containers found"
     echo ""
     echo "Launch an agent with:"
-    echo "  run-copilot      # Quick launch in current directory"
+    echo "  run-copilot-dev      # Quick launch in current directory (prod bundles ship without -dev)"
     echo "  launch-agent     # Advanced launch with options"
     exit 0
 fi

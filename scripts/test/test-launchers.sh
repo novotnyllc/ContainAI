@@ -1268,6 +1268,7 @@ test_secure_remote_sync() {
 test_env_detection_profiles() {
     test_section "Testing environment profile detection"
 
+    # shellcheck disable=SC2034
     local output
     output=$("$PROJECT_ROOT/host/utils/env-detect.sh" --format env)
     local dev_root=""
@@ -1275,6 +1276,7 @@ test_env_detection_profiles() {
     local dev_prefix=""
     local dev_tag=""
     local dev_registry=""
+    local dev_digest=""
     while IFS='=' read -r key value; do
         case "$key" in
             CONTAINAI_PROFILE) dev_mode="$value" ;;
@@ -1282,9 +1284,10 @@ test_env_detection_profiles() {
             CONTAINAI_IMAGE_PREFIX) dev_prefix="$value" ;;
             CONTAINAI_IMAGE_TAG) dev_tag="$value" ;;
             CONTAINAI_REGISTRY) dev_registry="$value" ;;
+            CONTAINAI_IMAGE_DIGEST) dev_digest="$value" ;;
         esac
     done <<< "$output"
-    if [ "$dev_mode" = "dev" ] && [ "$dev_root" = "$PROJECT_ROOT" ] && [ "$dev_prefix" = "containai-dev" ] && [ "$dev_tag" = "devlocal" ]; then
+    if [ "$dev_mode" = "dev" ] && [ "$dev_root" = "$PROJECT_ROOT" ] && [ "$dev_prefix" = "containai-dev" ] && [ "$dev_tag" = "devlocal" ] && [ "$dev_registry" = "ghcr.io/novotnyllc" ] && [ -z "$dev_digest" ]; then
         pass "Default detection prefers dev profile in git repo with dev image names"
     else
         fail "Default detection did not pick dev profile (mode=$dev_mode root=$dev_root prefix=$dev_prefix tag=$dev_tag)"
@@ -1298,6 +1301,12 @@ PROFILE=prod
 IMAGE_PREFIX=containai
 IMAGE_TAG=1.2.3
 REGISTRY=ghcr.io/example
+IMAGE_DIGEST=sha256:deadbeef
+IMAGE_DIGEST_COPILOT=sha256:deadbeef-copilot
+IMAGE_DIGEST_CODEX=sha256:deadbeef-codex
+IMAGE_DIGEST_CLAUDE=sha256:deadbeef-claude
+IMAGE_DIGEST_PROXY=sha256:deadbeef-proxy
+IMAGE_DIGEST_LOG_FORWARDER=sha256:deadbeef-log
 EOF
     output=$("$PROJECT_ROOT/host/utils/env-detect.sh" --format env --profile-file "$prod_fake/profile.env" --prod-root "$prod_fake")
     local prod_mode=""
@@ -1305,6 +1314,12 @@ EOF
     local prod_prefix=""
     local prod_tag=""
     local prod_registry=""
+    local prod_digest=""
+    local prod_digest_copilot=""
+    local prod_digest_codex=""
+    local prod_digest_claude=""
+    local prod_digest_proxy=""
+    local prod_digest_log=""
     while IFS='=' read -r key value; do
         case "$key" in
             CONTAINAI_PROFILE) prod_mode="$value" ;;
@@ -1312,9 +1327,15 @@ EOF
             CONTAINAI_IMAGE_PREFIX) prod_prefix="$value" ;;
             CONTAINAI_IMAGE_TAG) prod_tag="$value" ;;
             CONTAINAI_REGISTRY) prod_registry="$value" ;;
+            CONTAINAI_IMAGE_DIGEST) prod_digest="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_COPILOT) prod_digest_copilot="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_CODEX) prod_digest_codex="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_CLAUDE) prod_digest_claude="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_PROXY) prod_digest_proxy="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER) prod_digest_log="$value" ;;
         esac
     done <<< "$output"
-    if [ "$prod_mode" = "prod" ] && [ "$prod_root" = "$prod_fake" ] && [ "$prod_prefix" = "containai" ] && [ "$prod_tag" = "1.2.3" ] && [ "$prod_registry" = "ghcr.io/example" ]; then
+    if [ "$prod_mode" = "prod" ] && [ "$prod_root" = "$prod_fake" ] && [ "$prod_prefix" = "containai" ] && [ "$prod_tag" = "1.2.3" ] && [ "$prod_registry" = "ghcr.io/example" ] && [ "$prod_digest" = "sha256:deadbeef" ] && [ "$prod_digest_copilot" = "sha256:deadbeef-copilot" ] && [ "$prod_digest_codex" = "sha256:deadbeef-codex" ] && [ "$prod_digest_claude" = "sha256:deadbeef-claude" ] && [ "$prod_digest_proxy" = "sha256:deadbeef-proxy" ] && [ "$prod_digest_log" = "sha256:deadbeef-log" ]; then
         pass "Prod detection selects configured prod root"
     else
         fail "Prod detection failed (mode=$prod_mode root=$prod_root prefix=$prod_prefix tag=$prod_tag registry=$prod_registry)"
@@ -1330,12 +1351,18 @@ version=v9.9.9
 installed_at=now
 repo=local/test
 EOF
-    output=$("$PROJECT_ROOT/host/utils/env-detect.sh" --format env --prod-root "$prod_meta")
+    output=$(IMAGE_DIGEST=sha256:meta IMAGE_DIGEST_COPILOT=sha256:meta-copilot IMAGE_DIGEST_CODEX=sha256:meta-codex IMAGE_DIGEST_CLAUDE=sha256:meta-claude IMAGE_DIGEST_PROXY=sha256:meta-proxy IMAGE_DIGEST_LOG_FORWARDER=sha256:meta-log "$PROJECT_ROOT/host/utils/env-detect.sh" --format env --prod-root "$prod_meta")
     local auto_mode=""
     local auto_root=""
     local auto_prefix=""
     local auto_tag=""
     local auto_registry=""
+    local auto_digest=""
+    local auto_digest_copilot=""
+    local auto_digest_codex=""
+    local auto_digest_claude=""
+    local auto_digest_proxy=""
+    local auto_digest_log=""
     while IFS='=' read -r key value; do
         case "$key" in
             CONTAINAI_PROFILE) auto_mode="$value" ;;
@@ -1343,9 +1370,15 @@ EOF
             CONTAINAI_IMAGE_PREFIX) auto_prefix="$value" ;;
             CONTAINAI_IMAGE_TAG) auto_tag="$value" ;;
             CONTAINAI_REGISTRY) auto_registry="$value" ;;
+            CONTAINAI_IMAGE_DIGEST) auto_digest="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_COPILOT) auto_digest_copilot="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_CODEX) auto_digest_codex="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_CLAUDE) auto_digest_claude="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_PROXY) auto_digest_proxy="$value" ;;
+            CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER) auto_digest_log="$value" ;;
         esac
     done <<< "$output"
-    if [ "$auto_mode" = "prod" ] && [ "$auto_root" = "$(cd "$prod_meta" && pwd)" ] && [ "$auto_prefix" = "containai" ] && [ "$auto_tag" = "v9.9.9" ] && [ "$auto_registry" = "ghcr.io/novotnyllc" ]; then
+    if [ "$auto_mode" = "prod" ] && [ "$auto_root" = "$(cd "$prod_meta" && pwd)" ] && [ "$auto_prefix" = "containai" ] && [ "$auto_tag" = "v9.9.9" ] && [ "$auto_registry" = "ghcr.io/novotnyllc" ] && [ "$auto_digest" = "sha256:meta" ] && [ "$auto_digest_copilot" = "sha256:meta-copilot" ] && [ "$auto_digest_codex" = "sha256:meta-codex" ] && [ "$auto_digest_claude" = "sha256:meta-claude" ] && [ "$auto_digest_proxy" = "sha256:meta-proxy" ] && [ "$auto_digest_log" = "sha256:meta-log" ]; then
         pass "Install metadata triggers prod detection without profile.env"
     else
         fail "Install metadata auto-detect failed (mode=$auto_mode root=$auto_root prefix=$auto_prefix tag=$auto_tag registry=$auto_registry)"
@@ -1653,9 +1686,10 @@ test_container_status() {
 test_launcher_wrappers() {
     test_section "Testing launcher wrapper scripts"
 
-    local wrappers=("run-copilot" "run-codex" "run-claude")
+    local wrappers=("run-copilot-dev" "run-codex-dev" "run-claude-dev")
+    local entrypoints="$PROJECT_ROOT/host/launchers/entrypoints"
     for wrapper in "${wrappers[@]}"; do
-        local script_path="$PROJECT_ROOT/host/launchers/${wrapper}"
+        local script_path="$entrypoints/${wrapper}"
         if output=$("$script_path" --help 2>&1); then
             assert_contains "$output" "Usage: run-agent" "${wrapper} --help displays usage"
             assert_contains "$output" "--prompt" "${wrapper} --help documents --prompt"
@@ -1663,6 +1697,51 @@ test_launcher_wrappers() {
             fail "${wrapper} --help failed (exit $?)"
         fi
     done
+}
+
+test_prepare_entrypoints_channels() {
+    test_section "Preparing entrypoints for channels"
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    cp -a "$PROJECT_ROOT/host/launchers/entrypoints" "$tmp_dir/src"
+    mkdir -p "$tmp_dir/out"
+
+    if "$PROJECT_ROOT/host/utils/prepare-entrypoints.sh" --channel nightly --source "$tmp_dir/src" --dest "$tmp_dir/out"; then
+        if [ -x "$tmp_dir/out/run-copilot-nightly" ] && [ -x "$tmp_dir/out/run-codex-nightly" ]; then
+            pass "Nightly entrypoints generated"
+        else
+            fail "Nightly entrypoints missing"
+        fi
+    else
+        fail "prepare-entrypoints.sh failed for nightly channel"
+    fi
+
+    if "$PROJECT_ROOT/host/utils/prepare-entrypoints.sh" --channel prod --source "$tmp_dir/src" --dest "$tmp_dir/out"; then
+        if [ -x "$tmp_dir/out/run-claude" ] && [ -x "$tmp_dir/out/run-copilot" ]; then
+            pass "Prod entrypoints generated"
+        else
+            fail "Prod entrypoints missing"
+        fi
+    else
+        fail "prepare-entrypoints.sh failed for prod channel"
+    fi
+
+    rm -rf "$tmp_dir"
+}
+
+test_package_requires_digest_non_dev() {
+    test_section "Package guard requires digest for non-dev"
+    local tmp_out
+    tmp_out=$(mktemp -d)
+    local sbom="$tmp_out/sbom.json"
+    echo '{"bomFormat":"CycloneDX","components":[]}' > "$sbom"
+    if CONTAINAI_LAUNCHER_CHANNEL=nightly "$PROJECT_ROOT/scripts/release/package.sh" --version "vtest" --out "$tmp_out" --sbom "$sbom" >/dev/null 2>&1; then
+        fail "package.sh should fail without CONTAINAI_IMAGE_DIGEST when LAUNCHER_CHANNEL=nightly"
+    else
+        pass "package.sh rejects nightly channel without digest"
+    fi
+    rm -rf "$tmp_out"
 }
 
 test_seccomp_mount_block() {
@@ -1737,6 +1816,8 @@ ALL_TESTS=(
     "test_container_status"
     "test_prompt_fallback_repo_setup"
     "test_launcher_wrappers"
+    "test_prepare_entrypoints_channels"
+    "test_package_requires_digest_non_dev"
     "test_list_agents"
     "test_remove_agent"
     "test_seccomp_mount_block"

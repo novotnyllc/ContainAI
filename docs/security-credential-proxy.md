@@ -311,7 +311,7 @@ Server auto-starts when launching container:
 
 ```bash
 # Launcher script handles this automatically
-./host/launchers/launch-agent copilot
+./host/launchers/entrypoints/launch-agent-dev copilot
 
 # Or start manually:
 ./host/utils/git-credential-proxy-server.sh \

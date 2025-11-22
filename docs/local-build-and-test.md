@@ -8,7 +8,7 @@ Most users can rely on the published images that the CI system keeps in sync wit
 
 ## Dev vs. Prod entrypoints
 
-- **Dev (from repo)**: Run launchers directly from your clone (`./host/launchers/run-codex .` etc.). `./host/utils/env-detect.sh --format env` should return `CONTAINAI_PROFILE=dev`. Use this path for editing scripts/images; tags stay in the `containai-dev-*` namespace.
+- **Dev (from repo)**: Run launchers directly from your clone (`./host/launchers/entrypoints/run-codex-dev .` etc.). `./host/utils/env-detect.sh --format env` should return `CONTAINAI_PROFILE=dev`. Use this path for editing scripts/images; tags stay in the `containai-dev-*` namespace.
 - **Prod (installed)**: Install the signed payload with `./host/utils/install-release.sh --version vX.Y.Z --repo owner/repo` (or via `install.sh`). `sudo /opt/containai/current/host/utils/env-detect.sh --prod-root /opt/containai/current --format env` should return `CONTAINAI_PROFILE=prod` and the system config/data roots. Use these entrypoints for dogfooding and release verification.
 
 ## 1. Decide: Build vs. Pull (Compose-backed)

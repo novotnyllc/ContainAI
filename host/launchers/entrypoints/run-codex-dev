@@ -2,4 +2,4 @@
 # Convenience wrapper that delegates to run-agent with the Codex image
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/run-agent" codex "$@"
+exec "$SCRIPT_DIR/../run-agent" codex "$@"

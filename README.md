@@ -33,6 +33,8 @@ Features include MCP server support for extended capabilities, automated git ope
 
 **Note:** The verification script only reports what it finds. If it warns that GitHub CLI isn't installed, you can ignore it unless your host actually uses GitHub CLI for auth—the containers just inherit whatever credentials already exist on the host.
 
+**Launcher channels:** Entry points live under `host/launchers/entrypoints/`. In repo clones use the `-dev` names (e.g., `run-copilot-dev`), prod bundles drop the suffix (e.g., `run-copilot`), and nightly builds use `-nightly`. Use `host/utils/prepare-entrypoints.sh --channel nightly|prod` to generate the desired set.
+
 **Get running in 2 steps (images auto-pull on first launch):**
 
 ```bash
@@ -42,10 +44,10 @@ Features include MCP server support for extended capabilities, automated git ope
 
 # 2. Launch an agent from any repository (image pulls automatically)
 cd ~/my-project
-run-copilot                  # or run-codex / run-claude
+run-copilot-dev              # or run-codex-dev / run-claude-dev
 ```
 
-> **Windows note:** Every `.ps1` in this repository is a thin shim that launches the matching bash script inside your default WSL 2 distribution. Install and enable WSL (`wsl --install`, restart) before running the PowerShell commands above. `scripts\install.ps1` runs the same prerequisite + health checks via WSL and adds `host\launchers` to your user PATH so commands like `run-copilot` work from any PowerShell prompt.
+> **Windows note:** Every `.ps1` in this repository is a thin shim that launches the matching bash script inside your default WSL 2 distribution. Install and enable WSL (`wsl --install`, restart) before running the PowerShell commands above. `scripts\install.ps1` runs the same prerequisite + health checks via WSL and adds `host\launchers\entrypoints` to your user PATH so commands like `run-copilot-dev` (or `run-copilot` in prod bundles) work from any PowerShell prompt.
 
 That's it! You're coding with AI in an isolated container. For a deeper walkthrough (network modes, container management, VS Code), read [docs/running-agents.md](docs/running-agents.md).
 
@@ -80,41 +82,43 @@ Behind the scenes the launcher hashed its own files, rendered a per-session MCP 
 
 ## Examples
 
+All examples use the channel-specific launcher names: `run-<agent>-dev` in repo clones, `run-<agent>` in prod bundles, and `run-<agent>-nightly` for nightly builds.
+
 **Recommended: Quick ephemeral sessions:**
 ```bash
 cd ~/my-project
-run-copilot              # Launch and work, auto-removes on exit
-run-codex --no-push      # Launch without auto-push
-run-claude ~/other-proj  # Launch on specific directory
+run-copilot-dev              # Launch and work, auto-removes on exit
+run-codex-dev --no-push      # Launch without auto-push
+run-claude-dev ~/other-proj  # Launch on specific directory
 ```
 
 **Advanced: Persistent workspaces (for long-running tasks):**
 ```bash
 cd ~/my-project
-launch-agent copilot                      # Copilot on current branch
-launch-agent codex                        # Codex on current branch
-launch-agent copilot --branch feature-api  # Copilot on feature-api branch
+launch-agent-dev copilot                      # Copilot on current branch
+launch-agent-dev codex                        # Codex on current branch
+launch-agent-dev copilot --branch feature-api  # Copilot on feature-api branch
 ```
 
 **Multiple agents on same repo:**
 ```bash
 cd ~/my-project
-launch-agent copilot --branch main     # copilot-myproject-main
-launch-agent codex --branch api-v2     # codex-myproject-api-v2
-launch-agent claude --branch refactor  # claude-myproject-refactor
+launch-agent-dev copilot --branch main     # copilot-myproject-main
+launch-agent-dev codex --branch api-v2     # codex-myproject-api-v2
+launch-agent-dev claude --branch refactor  # claude-myproject-refactor
 ```
 
 **Advanced: Network controls:**
 ```bash
-launch-agent copilot --network-proxy restricted   # Block outbound traffic
-launch-agent copilot --network-proxy squid        # Proxy with logging
+launch-agent-dev copilot --network-proxy restricted   # Block outbound traffic
+launch-agent-dev copilot --network-proxy squid        # Proxy with logging
 ```
 
 **Container management (for persistent containers):**
 ```bash
-list-agents                            # Show all running containers
-remove-agent copilot-myproject-main    # Remove with auto-push
-remove-agent codex-myproject-auth --no-push  # Remove without push
+list-agents-dev                            # Show all running containers
+remove-agent-dev copilot-myproject-main    # Remove with auto-push
+remove-agent-dev codex-myproject-auth --no-push  # Remove without push
 ```
 
 See [USAGE.md](USAGE.md) for complete examples and advanced scenarios.

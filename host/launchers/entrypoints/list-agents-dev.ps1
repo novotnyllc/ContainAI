@@ -6,6 +6,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "..\utils\wsl-shim.ps1")
-$exitCode = Invoke-ContainAIWslScript -ScriptRelativePath "host\launchers\run-copilot" -Arguments $Arguments
+. (Join-Path $PSScriptRoot "..\..\utils\wsl-shim.ps1")
+$exitCode = Invoke-ContainAIWslScript -ScriptRelativePath "host\launchers\entrypoints\list-agents-dev" -Arguments $Arguments
 exit $exitCode

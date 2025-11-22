@@ -6,6 +6,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "..\utils\wsl-shim.ps1")
-$exitCode = Invoke-ContainAIWslScript -ScriptRelativePath "host\launchers\list-agents" -Arguments $Arguments
+. (Join-Path $PSScriptRoot "..\..\utils\wsl-shim.ps1")
+$exitCode = Invoke-ContainAIWslScript -ScriptRelativePath "host\launchers\entrypoints\remove-agent-dev" -Arguments $Arguments
 exit $exitCode
