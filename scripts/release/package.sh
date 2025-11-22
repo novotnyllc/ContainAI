@@ -8,6 +8,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VERSION=""
 OUT_DIR="$PROJECT_ROOT/dist"
 SKIP_SBOM=0
+GENERATE_SBOM=0
 SBOM_SOURCE=""
 SBOM_ATTEST=""
 ATTESTATION_FILE=""
@@ -25,6 +26,7 @@ Options:
   --version X         Release version (default git describe)
   --out DIR           Output directory (default: dist)
   --skip-sbom         Do not include SBOM (dev only)
+  --generate-sbom     Generate SBOM with syft from the assembled payload
   --sbom FILE         Pre-generated SBOM to embed
   --sbom-att FILE     Attestation bundle (intoto) for the SBOM file
   --attestation FILE  Attestation bundle (intoto) for payload artifact
@@ -39,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         --version) VERSION="$2"; shift 2 ;;
         --out) OUT_DIR="$2"; shift 2 ;;
         --skip-sbom) SKIP_SBOM=1; shift ;;
+        --generate-sbom) GENERATE_SBOM=1; shift ;;
         --sbom) SBOM_SOURCE="$2"; shift 2 ;;
         --sbom-att) SBOM_ATTEST="$2"; shift 2 ;;
         --attestation) ATTESTATION_FILE="$2"; shift 2 ;;
@@ -123,6 +126,12 @@ if [[ -n "$SBOM_SOURCE" ]]; then
     cp "$SBOM_SOURCE" "$SBOM_PATH"
 elif [[ $SKIP_SBOM -eq 1 ]]; then
     echo '{"sbom":"skipped"}' > "$SBOM_PATH"
+elif [[ $GENERATE_SBOM -eq 1 ]]; then
+    if ! command -v syft >/dev/null 2>&1; then
+        echo "❌ syft is required to generate SBOM (install syft or pass --sbom FILE)" >&2
+        exit 1
+    fi
+    syft dir:"$PAYLOAD_DIR" -o cyclonedx-json > "$SBOM_PATH"
 else
     echo "❌ SBOM source not provided. Pass --sbom FILE or --skip-sbom." >&2
     exit 1

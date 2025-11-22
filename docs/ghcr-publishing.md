@@ -1,70 +1,42 @@
-# GHCR Publishing & Secrets Guide
+# GHCR Publishing, Metadata, and Retention Runbook
 
-This doc explains how to build, sign, and publish ContainAI artifacts to GitHub Container Registry (GHCR) with the new host/container split.
+This runbook covers how the single build graph publishes container images, payload artifacts, and channel metadata to GHCR. All artifacts are public and immutable by digest; moving tags (`dev`/`nightly`/`prod`/release) are applied only after every image succeeds.
 
-## Prerequisites
-- Docker Desktop/Engine with `docker compose`
-- GHCR login: `echo "$PAT" | docker login ghcr.io -u <user> --password-stdin`
-- Optional signing: `cosign` installed; `COSIGN_KEY` or keyless OIDC identity available
-- Optional SBOM: `syft` installed (packaging will fail without `--skip-sbom`)
+## Build graph overview
+- Workflow: `.github/workflows/build-runtime-images.yml`
+- Jobs: build base → build `containai` → build variants (`-copilot`, `-codex`, `-claude`, `-proxy`, `-log-forwarder`) → finalize tags → publish payload → publish metadata → retention/visibility.
+- Tagging: every build pushes only the immutable `sha-<commit>` tag. The finalize step re-tags the same digest to `dev`/`nightly`/`prod` (and release tag for `v*`) in a single imagetools call.
+- Caches: GHA cache scopes per image (`containai-base`, `runtime-containai`, etc.).
+- Scanning: Trivy secret scan runs by digest after push; no `--load`/tarball outputs.
+- Attestations: `actions/attest-build-provenance@v1` for every image and the payload artifact.
 
-## Build & Package (Dev/Prod)
-```bash
-# Dev-only: build images locally (agents + proxy, dev namespace)
-./scripts/build/build-dev.sh
+## Public artifacts
+- Images: `ghcr.io/<owner>/containai[-*]:sha-*` plus moving tags after finalize.
+- Payload OCI: `ghcr.io/<owner>/containai-payload:<version>` (layer `application/vnd.containai.payload.layer.v1+gzip` + CycloneDX SBOM). Attested.
+- Channel metadata OCI: `ghcr.io/<owner>/containai-metadata:<channel>` and `:channels` containing:
+  - `channel`, `version`, `immutable_tag`, `moving_tags`
+  - `images` (array of repo/digest objects for base + variants)
+  - `payload` ref/digest
+  - `generated_at` timestamp
+- Visibility: workflow `cleanup-ghcr` step forces packages public via `gh api` PATCH on each container package.
 
-# CI: stamp host/profile.env with prod values, then create payload
-CONTAINAI_LAUNCHER_CHANNEL=prod ./scripts/release/package.sh --version v1.2.3 --out dist --sbom dist/v1.2.3/sbom.json --cosign-asset dist/v1.2.3/cosign
-```
+## Required permissions/secrets
+- GitHub Actions OIDC permissions: `packages: write`, `id-token: write`, `attestations: write`, `contents: read`.
+- No PAT required for defaults; keep `GITHUB_TOKEN` scoped to repo.
+- (Optional) `GHCR_PAT` if running workflows from forks or requiring cross-org pushes.
 
-Artifacts land in `dist/<version>/`:
-- `payload/` directory (host tree + SBOM + tools + SHA256SUMS + payload.sha256)
-- `containai-payload-<version>.tar.gz` (payload tarball for release upload; preserves executable bits)
-- `sbom.json` (CycloneDX)
+## Retention policy
+- `actions/delete-package-versions@v4` keeps recent digests: containai (15), base/variants (10), payload/metadata (10). Moving tags are reapplied after each run.
+- Retention job runs after publish; adjust counts before changing image cadence.
 
-Attestation is added in CI via `actions/deploy-artifact@v4` / release upload (GitHub produces the attestation for the uploaded zip automatically).
+## How to run or recover builds
+- Triggered on pushes to `main`, PRs (build only), nightly schedule, and workflow_dispatch (channel override).
+- To rerun a failed publish: rerun workflow from Actions UI; final tagging ensures moving tags are updated atomically only when all images succeed.
+- To manually retag a release: dispatch the workflow with `channel=prod` and `version=vX.Y.Z`; the finalize step will retag the existing `sha-*` digests.
 
-## Install (Prod / Dogfood)
-```bash
-sudo ./host/utils/install-release.sh --version v1.2.3 --repo owner/repo
-```
-Blue/green swap lives under `/opt/containai/releases/<version>` with `current`/`previous` symlinks. Install copies the tarball + signature so `check-health` can verify sigstore.
-
-## Publish to GHCR
-Prod pushes happen in CI; dev script never pushes. CI should stamp `host/profile.env` with digests for every image:
-
-```
-PROFILE=prod
-IMAGE_PREFIX=containai
-IMAGE_TAG=<immutable tag>
-REGISTRY=ghcr.io/<owner>
-IMAGE_DIGEST=sha256:<main image>
-IMAGE_DIGEST_COPILOT=sha256:<copilot image>
-IMAGE_DIGEST_CODEX=sha256:<codex image>
-IMAGE_DIGEST_CLAUDE=sha256:<claude image>
-IMAGE_DIGEST_PROXY=sha256:<proxy image>
-IMAGE_DIGEST_LOG_FORWARDER=sha256:<log-forwarder image>
-```
-
-before running package/signing so launchers are pinned to the released container versions (proxy included).
-
-### GitHub Actions secrets
-- `GHCR_PAT` (or OIDC workflow permissions `packages: write`)
-- `COSIGN_PASSWORD` / `COSIGN_KEY` if using key-based signing
-- Optional: `SYFT_DOWNLOAD_URL` if pinning syft in CI
-
-Recommended workflow steps:
-1. `actions/checkout`
-2. Write `host/profile.env` with prod values (see above) **including all IMAGE_DIGEST* entries**
-3. Generate SBOM (GitHub action)
-4. Fetch cosign (static)
-5. `CONTAINAI_LAUNCHER_CHANNEL=prod CONTAINAI_IMAGE_DIGEST=$DIGEST CONTAINAI_IMAGE_DIGEST_COPILOT=$DIGEST_COPILOT CONTAINAI_IMAGE_DIGEST_CODEX=$DIGEST_CODEX CONTAINAI_IMAGE_DIGEST_CLAUDE=$DIGEST_CLAUDE CONTAINAI_IMAGE_DIGEST_PROXY=$DIGEST_PROXY CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER=$DIGEST_LOG scripts/release/package.sh --version $GIT_TAG --out dist --sbom dist/$GIT_TAG/sbom.json --cosign-asset dist/$GIT_TAG/cosign`
-6. Upload `dist/$GIT_TAG/containai-payload-$GIT_TAG.tar.gz` as the release asset (GitHub will attach attestation)
-7. Build/push images using IMAGE_PREFIX/IMAGE_TAG from profile.env (proxy mandatory)
-
-For nightly builds, set `CONTAINAI_LAUNCHER_CHANNEL=nightly` and provide all IMAGE_DIGEST* variables when invoking `package.sh` to emit `run-*-nightly` entrypoints in the payload.
-
-## Troubleshooting
-- `syft not available`: install syft or rerun with `--skip-sbom` (dev only).
-- `cosign verify-blob` fails: ensure bundle contains cosign + attestation and matches payload hash; rebuild if missing.
-- Podman detected: check-health will block; install Docker Desktop/Engine instead.
+## Release/ops checklist
+- Confirm workflow succeeded: base + all variants, payload push, metadata push, cleanup.
+- Verify channel metadata: `oras pull ghcr.io/<owner>/containai-metadata:<channel>` and inspect `channels.json`.
+- Verify payload digest: compare manifest layer digest vs. local `sha256sum` of `containai-payload-<version>.tar.gz`.
+- Ensure packages remain public (check GHCR UI) and retention job succeeded.
+- Proxy base validation: run `docker run --rm --security-opt seccomp=docker/profiles/seccomp-containai-proxy.json --security-opt apparmor=containai-proxy ghcr.io/<owner>/containai-proxy:<tag> squid -v` to confirm profiles still apply on debian-slim.

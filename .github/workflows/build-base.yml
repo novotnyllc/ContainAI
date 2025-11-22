@@ -1,20 +1,8 @@
 name: Build and Push Base Image
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'docker/base/Dockerfile'
-      - 'docker/runtime/install-dotnet-preview.sh'
-      - '.github/workflows/build-base.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'docker/base/Dockerfile'
-      - 'docker/runtime/install-dotnet-preview.sh'
   workflow_dispatch:
+  workflow_call:
 
 env:
   REGISTRY: ghcr.io

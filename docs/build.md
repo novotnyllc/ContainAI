@@ -1,6 +1,6 @@
 # Build Guide for Container Authors
 
-This guide is for developers who want to build and publish the agent container images.
+This guide is for developers who want to build and publish the agent container images. CI owns publishing to GHCR; local builds should mirror the same graph (base → containai → variants) and prefer digests over `--load`.
 
 ## Prerequisites
 
@@ -15,46 +15,19 @@ The container system uses a **layered architecture**:
 ```mermaid
 flowchart TB
     subgraph specialized["Specialized Images (Optional)"]
-        direction LR
         copilot["copilot"]
         codex["codex"]
         claude["claude"]
     end
     
-    subgraph allagents["All-Agents Image (Main)<br/>containai:local"]
+    subgraph allagents["All-Agents Image (Main)<br/>containai"]
         direction TB
         all_content["• Entrypoint scripts<br/>• MCP config converter<br/>• Multi-agent support"]
     end
     
-    subgraph base["Base Image<br/>containai-base:local"]
+    subgraph base["Base Image<br/>containai-base"]
         direction TB
-        base_content["• Ubuntu 22.04<br/>• Node.js 20.x<br/>• Python 3.11<br/>• .NET SDK's 8.0, 9.0, 10.0<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
-    end
-    
-    specialized -->|builds from| allagents
-    allagents -->|builds from| base
-    
-    style specialized fill:#e1f5ff,stroke:#0366d6
-    style allagents fill:#fff3cd,stroke:#856404
-    style base fill:#d4edda,stroke:#28a745
-```
-
-```mermaid
-flowchart TB
-    subgraph specialized["Specialized Images (Optional)"]
-        copilot["copilot"]
-        codex["codex"]
-        claude["claude"]
-    end
-    
-    subgraph allagents["All-Agents Image (Main)<br/>containai:local"]
-        direction TB
-        all_content["• Entrypoint scripts<br/>• MCP config converter<br/>• Multi-agent support"]
-    end
-    
-    subgraph base["Base Image<br/>containai-base:local"]
-        direction TB
-        base_content["• Ubuntu 22.04<br/>• Node.js 20.x<br/>• Python 3.11<br/>• .NET SDK's 8.0, 9.0, 10.0<br/>• GitHub CLI<br/>• Playwright<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
+        base_content["• Ubuntu 24.04<br/>• Node.js 20.x<br/>• Python 3.12<br/>• .NET SDKs 8/9/10<br/>• GitHub CLI<br/>• Playwright deps<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
     end
     
     specialized --> allagents
@@ -80,21 +53,11 @@ flowchart TB
 - All auth comes from runtime mounts
 - Image can be published publicly
 
-**Package installations:**
-```dockerfile
-# System packages via apt
-curl, git, build-essential, sudo, zsh, vim, nano, jq, unzip
-
-# Language runtimes
-Node.js 20.x, Python 3.12, .NET SDK 8.0/9.0/10.0, PowerShell
-
-# Tools
-GitHub CLI (gh), Playwright, MCP servers
-
-# Python packages
-tomli (for TOML parsing)
-pipx, uv (package managers)
-```
+**Package installations (high level):**
+- System packages: curl, git, build-essential, sudo, zsh, jq, unzip, tmux, gosu, seccomp headers
+- Language runtimes: Node.js 20.x, Python 3.12, .NET SDK 8/9/10, PowerShell
+- Tools: GitHub CLI (gh), Playwright dependencies, MCP servers
+- Python packages: tomli, pipx, uv
 
 ### All-Agents Image (Dockerfile)
 
@@ -120,48 +83,9 @@ Each adds:
 
 ## Publishing to Registry
 
-### Tag for GitHub Container Registry
-
-```bash
-# Tag images
-docker tag containai-base:local ghcr.io/novotnyllc/containai-base:latest
-docker tag containai:local ghcr.io/novotnyllc/containai:latest
-docker tag containai-copilot:local ghcr.io/novotnyllc/containai-copilot:latest
-docker tag containai-codex:local ghcr.io/novotnyllc/containai-codex:latest
-docker tag containai-claude:local ghcr.io/novotnyllc/containai-claude:latest
-docker tag containai-proxy:local ghcr.io/novotnyllc/containai-proxy:latest
-```
-
-### Push to Registry
-
-```bash
-# Login to GitHub Container Registry
-echo $GITHUB_TOKEN | docker login ghcr.io -u clairernovotny --password-stdin
-
-# Push images
-docker push ghcr.io/novotnyllc/containai-base:latest
-docker push ghcr.io/novotnyllc/containai:latest
-docker push ghcr.io/novotnyllc/containai-copilot:latest
-docker push ghcr.io/novotnyllc/containai-codex:latest
-docker push ghcr.io/novotnyllc/containai-claude:latest
-```
-
-### Using Published Images
-
-Update Dockerfile ARG to use published base:
-
-```dockerfile
-ARG BASE_IMAGE=ghcr.io/novotnyllc/containai-base:latest
-FROM ${BASE_IMAGE}
-```
-
-Users can then:
-
-```bash
-# Pull and use directly
-docker pull ghcr.io/novotnyllc/containai-copilot:latest
-docker run -it ghcr.io/novotnyllc/containai-copilot:latest
-```
+- CI handles publishing: `.github/workflows/build-runtime-images.yml` builds base → containai → variants, pushes immutable `sha-*` tags, then re-tags `dev`/`nightly`/`prod`/release after all images succeed. Trivy scans run by digest; no `--load` tarballs.
+- Payload + SBOM are pushed as a public OCI artifact; channel metadata (`containai-metadata`) is pushed as JSON OCI for installer channel resolution.
+- Local pushes are discouraged. For local testing, prefer `docker buildx build --output=type=oci` and avoid tagging `latest` in GHCR.
 
 ## Script Files
 

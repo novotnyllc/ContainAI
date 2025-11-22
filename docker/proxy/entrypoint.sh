@@ -1,5 +1,12 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
+
+clear_containai_env() {
+    for name in $(env | sed -n 's/^\(CONTAINAI_[^=]*\)=.*/\1/p'); do
+        unset "$name"
+    done
+}
+clear_containai_env
 
 SQUID_CONF=${SQUID_CONF:-/etc/squid/squid.conf}
 SQUID_CACHE_DIR=${SQUID_CACHE_DIR:-/var/spool/squid}

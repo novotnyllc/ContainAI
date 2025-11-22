@@ -1,5 +1,5 @@
 # Dockerfile for the Squid proxy sidecar used by containai
-FROM ubuntu:24.04
+FROM debian:12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 

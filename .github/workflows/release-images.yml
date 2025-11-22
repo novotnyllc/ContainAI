@@ -1,11 +1,7 @@
 name: Release Images
 
 on:
-  push:
-    branches: [ main ]
-    tags:
-    - 'v*'
-    - 'v*-stage'
+  workflow_dispatch:
 
 permissions:
   contents: write

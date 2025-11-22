@@ -1,25 +1,43 @@
-name: Build and Push Runtime Images
+name: Build and Publish Images
 
 on:
   push:
+    branches:
+      - main
     paths:
-      - 'docker/agents/**'
-      - 'docker/proxy/**'
-      - 'docker/base/Dockerfile'
-      - 'docker/runtime/**'
-      - 'host/utils/convert-toml-to-mcp.py'
+      - 'docker/**'
+      - 'host/**'
       - 'agent-configs/**'
+      - 'scripts/**'
+      - 'config.toml'
       - '.github/workflows/build-runtime-images.yml'
   pull_request:
+    branches:
+      - main
     paths:
-      - 'docker/agents/**'
-      - 'docker/proxy/**'
-      - 'docker/base/Dockerfile'
-      - 'docker/runtime/**'
-      - 'host/utils/convert-toml-to-mcp.py'
+      - 'docker/**'
+      - 'host/**'
       - 'agent-configs/**'
+      - 'scripts/**'
+      - 'config.toml'
       - '.github/workflows/build-runtime-images.yml'
+  schedule:
+    - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Channel to publish (dev, nightly, prod)'
+        required: false
+        default: dev
+        type: choice
+        options:
+          - dev
+          - nightly
+          - prod
+      version:
+        description: 'Optional version tag (defaults to channel for dev/nightly or git tag for prod)'
+        required: false
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -27,17 +45,72 @@ env:
   TRIVY_VERSION: v0.53.0
 
 jobs:
-  build-all-agents:
-    name: Build all-agents image
+  determine-context:
+    name: Determine channel/tags
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.channel.outputs.channel }}
+      version: ${{ steps.channel.outputs.version }}
+      immutable_tag: ${{ steps.channel.outputs.immutable_tag }}
+      moving_tags: ${{ steps.channel.outputs.moving_tags }}
+      push: ${{ steps.channel.outputs.push }}
+    steps:
+      - id: channel
+        env:
+          DISPATCH_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.channel || '' }}
+          DISPATCH_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || '' }}
+          GH_EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          channel="${DISPATCH_CHANNEL:-}"
+          version="${DISPATCH_VERSION:-}"
+          if [ -z "$channel" ]; then
+            if [ "$GH_EVENT_NAME" = "schedule" ]; then
+              channel="nightly"
+            elif [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+              channel="prod"
+            else
+              channel="dev"
+            fi
+          fi
+          if [ -z "$version" ]; then
+            if [ "$channel" = "prod" ] && [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+              version="$REF_NAME"
+            else
+              version="$channel"
+            fi
+          fi
+          immutable_tag="sha-${GITHUB_SHA}"
+          moving_tags="$channel"
+          if [ "$channel" = "prod" ] && [ -n "$version" ] && [ "$version" != "$channel" ]; then
+            moving_tags="$moving_tags\n$version"
+          fi
+          push_flag="true"
+          if [ "$GH_EVENT_NAME" = "pull_request" ]; then
+            push_flag="false"
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "immutable_tag=$immutable_tag" >> "$GITHUB_OUTPUT"
+          echo "push=$push_flag" >> "$GITHUB_OUTPUT"
+          printf "moving_tags<<'EOF'\n%s\nEOF\n" "$moving_tags" >> "$GITHUB_OUTPUT"
+
+  build-base:
+    name: Build base image
+    needs: determine-context
+    if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     env:
-      IMAGE_NAME: containai
-      CACHE_SCOPE: runtime-containai
+      IMAGE_NAME: containai-base
+      CACHE_SCOPE: containai-base
     outputs:
-      image-ref: ${{ steps.image_ref.outputs.ref }}
+      digest: ${{ steps.build.outputs.digest }}
+      image_ref: ${{ steps.image_ref.outputs.ref }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,63 +120,46 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
+        if: needs.determine-context.outputs.push == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Install Trivy CLI
+      - name: Compose tags
+        id: taglist
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
+          tags="${repo}:${{ needs.determine-context.outputs.immutable_tag }}"
+          printf "tags=%s\n" "$tags" >> "$GITHUB_OUTPUT"
 
-      - name: Build linux/amd64 image for scanning
-        run: |
-          docker buildx build \
-            --builder "${{ steps.buildx.outputs.name }}" \
-            --platform linux/amd64 \
-            --load \
-            --cache-from type=gha,scope=${{ env.CACHE_SCOPE }} \
-            --cache-to type=gha,scope=${{ env.CACHE_SCOPE }},mode=max \
-            --build-arg BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-base:latest \
-            -t ${{ env.IMAGE_NAME }}:scan \
-            -f docker/agents/all/Dockerfile \
-            .
-
-      - name: Scan image for embedded secrets
-        run: trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress ${{ env.IMAGE_NAME }}:scan
-
-      - name: Build and push runtime image
+      - name: Build and push base image
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: docker/agents/all/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-base:latest
+          file: ./docker/base/Dockerfile
+          push: ${{ needs.determine-context.outputs.push == 'true' }}
+          tags: ${{ steps.taglist.outputs.tags }}
           cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
           cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max
           platforms: linux/amd64,linux/arm64
 
+      - name: Install Trivy CLI
+        if: needs.determine-context.outputs.push == 'true'
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
+
+      - name: Scan base image by digest
+        if: needs.determine-context.outputs.push == 'true'
+        run: |
+          trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+
       - name: Generate artifact attestation
-        if: github.event_name != 'pull_request'
+        if: needs.determine-context.outputs.push == 'true'
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}
@@ -114,32 +170,42 @@ jobs:
         id: image_ref
         run: echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
 
-  build-runtime-variants:
-    name: Build ${{ matrix.image }} image
+      - name: Upload digest artifact
+        if: needs.determine-context.outputs.push == 'true'
+        run: |
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
+          mkdir -p dist/digests
+          cat > dist/digests/${{ env.IMAGE_NAME }}.json <<EOF
+{"image":"${{ env.IMAGE_NAME }}","repository":"$repo","digest":"${{ steps.build.outputs.digest }}"}
+EOF
+        shell: bash
+
+      - name: Publish digest artifact
+        if: needs.determine-context.outputs.push == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ env.IMAGE_NAME }}
+          path: dist/digests/${{ env.IMAGE_NAME }}.json
+          if-no-files-found: error
+
+  build-containai:
+    name: Build containai image
+    needs:
+      - determine-context
+      - build-base
+    if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
-    needs: build-all-agents
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        include:
-          - image: containai-copilot
-            dockerfile: docker/agents/copilot/Dockerfile
-            cache: runtime-copilot
-            requires-base: true
-          - image: containai-codex
-            dockerfile: docker/agents/codex/Dockerfile
-            cache: runtime-codex
-            requires-base: true
-          - image: containai-claude
-            dockerfile: docker/agents/claude/Dockerfile
-            cache: runtime-claude
-            requires-base: true
-          - image: containai-proxy
-            dockerfile: docker/proxy/Dockerfile
-            cache: runtime-proxy
-            requires-base: false
+      id-token: write
+      attestations: write
+    env:
+      IMAGE_NAME: containai
+      CACHE_SCOPE: runtime-containai
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image_ref: ${{ steps.image_ref.outputs.ref }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -149,71 +215,496 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
+        if: needs.determine-context.outputs.push == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Compose tags
+        id: taglist
+        run: |
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
+          tags="${repo}:${{ needs.determine-context.outputs.immutable_tag }}"
+          printf "tags=%s\n" "$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+          context: .
+          file: docker/agents/all/Dockerfile
+          push: ${{ needs.determine-context.outputs.push == 'true' }}
+          tags: ${{ steps.taglist.outputs.tags }}
+          build-args: |
+            BASE_IMAGE=${{ needs.build-base.outputs.image_ref }}
+          cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
+          cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max
+          platforms: linux/amd64,linux/arm64
 
       - name: Install Trivy CLI
+        if: needs.determine-context.outputs.push == 'true'
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
             | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
 
-      - name: Build linux/amd64 image for scanning
-        env:
-          BASE_FROM_ALL: ${{ needs.build-all-agents.outputs.image-ref }}
+      - name: Scan image by digest
+        if: needs.determine-context.outputs.push == 'true'
         run: |
-          BUILD_ARGS=()
-          if [ "${{ matrix.requires-base }}" = "true" ]; then
-            BUILD_ARGS+=(--build-arg "BASE_IMAGE=${BASE_FROM_ALL}")
-          fi
+          trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
-          docker buildx build \
-            --builder "${{ steps.buildx.outputs.name }}" \
-            --platform linux/amd64 \
-            --load \
-            --cache-from type=gha,scope=${{ matrix.cache }} \
-            --cache-to type=gha,scope=${{ matrix.cache }},mode=max \
-            "${BUILD_ARGS[@]}" \
-            -t ${{ matrix.image }}:scan \
-            -f ${{ matrix.dockerfile }} \
-            .
+      - name: Generate artifact attestation
+        if: needs.determine-context.outputs.push == 'true'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
-      - name: Scan image for embedded secrets
-        run: trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress ${{ matrix.image }}:scan
+      - name: Export image reference
+        id: image_ref
+        run: echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push runtime image
+      - name: Upload digest artifact
+        if: needs.determine-context.outputs.push == 'true'
+        run: |
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
+          mkdir -p dist/digests
+          cat > dist/digests/${{ env.IMAGE_NAME }}.json <<EOF
+{"image":"${{ env.IMAGE_NAME }}","repository":"$repo","digest":"${{ steps.build.outputs.digest }}"}
+EOF
+        shell: bash
+
+      - name: Publish digest artifact
+        if: needs.determine-context.outputs.push == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ env.IMAGE_NAME }}
+          path: dist/digests/${{ env.IMAGE_NAME }}.json
+          if-no-files-found: error
+
+  build-variants:
+    name: Build variant images
+    needs:
+      - determine-context
+      - build-base
+      - build-containai
+    if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: containai-copilot
+            dockerfile: docker/agents/copilot/Dockerfile
+            cache: runtime-copilot
+            base_arg: BASE_IMAGE=${{ needs.build-containai.outputs.image_ref }}
+          - image: containai-codex
+            dockerfile: docker/agents/codex/Dockerfile
+            cache: runtime-codex
+            base_arg: BASE_IMAGE=${{ needs.build-containai.outputs.image_ref }}
+          - image: containai-claude
+            dockerfile: docker/agents/claude/Dockerfile
+            cache: runtime-claude
+            base_arg: BASE_IMAGE=${{ needs.build-containai.outputs.image_ref }}
+          - image: containai-proxy
+            dockerfile: docker/proxy/Dockerfile
+            cache: runtime-proxy
+            base_arg: ""
+          - image: containai-log-forwarder
+            dockerfile: docker/log-forwarder/Dockerfile
+            cache: runtime-log-forwarder
+            base_arg: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: needs.determine-context.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compose tags
+        id: taglist
+        run: |
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
+          tags="${repo}:${{ needs.determine-context.outputs.immutable_tag }}"
+          printf "tags=%s\n" "$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: ${{ matrix.requires-base && format('BASE_IMAGE={0}', needs.build-all-agents.outputs.image-ref) || '' }}
+          push: ${{ needs.determine-context.outputs.push == 'true' }}
+          tags: ${{ steps.taglist.outputs.tags }}
+          build-args: ${{ matrix.base_arg }}
           cache-from: type=gha,scope=${{ matrix.cache }}
           cache-to: type=gha,scope=${{ matrix.cache }},mode=max
           platforms: linux/amd64,linux/arm64
 
+      - name: Install Trivy CLI
+        if: needs.determine-context.outputs.push == 'true'
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
+
+      - name: Scan image by digest
+        if: needs.determine-context.outputs.push == 'true'
+        run: |
+          trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
+
       - name: Generate artifact attestation
-        if: github.event_name != 'pull_request'
+        if: needs.determine-context.outputs.push == 'true'
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+      - name: Upload digest artifact
+        if: needs.determine-context.outputs.push == 'true'
+        run: |
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
+          mkdir -p dist/digests
+          cat > dist/digests/${{ matrix.image }}.json <<EOF
+{"image":"${{ matrix.image }}","repository":"$repo","digest":"${{ steps.build.outputs.digest }}"}
+EOF
+        shell: bash
+
+      - name: Publish digest artifact
+        if: needs.determine-context.outputs.push == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ matrix.image }}
+          path: dist/digests/${{ matrix.image }}.json
+          if-no-files-found: error
+
+  finalize-tags:
+    name: Finalize tags and collect digests
+    needs:
+      - determine-context
+      - build-base
+      - build-containai
+      - build-variants
+    if: ${{ needs.determine-context.outputs.push == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      images: ${{ steps.combine.outputs.images }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download digest artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: digests
+          pattern: image-digest-*
+          merge-multiple: true
+
+      - name: Combine digests
+        id: combine
+        run: |
+          mapfile -t files < <(find digests -name "*.json" -type f)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No digest artifacts found" >&2
+            exit 1
+          fi
+          jq -s 'map(.)' "${files[@]}" > digests/all.json
+          echo "images=$(jq -c . digests/all.json)" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Apply moving tags
+        run: |
+          moving_tags="${{ needs.determine-context.outputs.moving_tags }}"
+          sha_tag="${{ needs.determine-context.outputs.immutable_tag }}"
+          jq -c '.[]' digests/all.json | while read -r item; do
+            repo=$(echo "$item" | jq -r '.repository')
+            digest=$(echo "$item" | jq -r '.digest')
+            args=(--tag "${repo}:${sha_tag}")
+            while IFS= read -r tag; do
+              [ -z "$tag" ] && continue
+              args+=(--tag "${repo}:${tag}")
+            done <<< "$moving_tags"
+            docker buildx imagetools create "${args[@]}" "${repo}@${digest}"
+          done
+        shell: bash
+
+  publish-payload:
+    name: Package and publish payload artifact
+    needs:
+      - determine-context
+      - finalize-tags
+    if: ${{ needs.determine-context.outputs.push == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.determine-context.outputs.version }}
+      CHANNEL: ${{ needs.determine-context.outputs.channel }}
+    outputs:
+      payload_ref: ${{ steps.push.outputs.ref }}
+      payload_digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
+
+      - name: Set image digest env
+        id: digests
+        run: |
+          images='${{ needs.finalize-tags.outputs.images }}'
+          get_digest() {
+            echo "$images" | jq -r --arg name "$1" '.[] | select(.image==$name) | .digest'
+          }
+          cat >> "$GITHUB_ENV" <<EOF
+IMAGE_DIGEST=$(get_digest "containai")
+IMAGE_DIGEST_COPILOT=$(get_digest "containai-copilot")
+IMAGE_DIGEST_CODEX=$(get_digest "containai-codex")
+IMAGE_DIGEST_CLAUDE=$(get_digest "containai-claude")
+IMAGE_DIGEST_PROXY=$(get_digest "containai-proxy")
+IMAGE_DIGEST_LOG_FORWARDER=$(get_digest "containai-log-forwarder")
+EOF
+        shell: bash
+
+      - name: Package payload
+        run: |
+          scripts/release/package.sh \
+            --version "$VERSION" \
+            --out dist \
+            --generate-sbom \
+            --launcher-channel "$CHANNEL"
+        env:
+          IMAGE_DIGEST: ${{ env.IMAGE_DIGEST }}
+          IMAGE_DIGEST_COPILOT: ${{ env.IMAGE_DIGEST_COPILOT }}
+          IMAGE_DIGEST_CODEX: ${{ env.IMAGE_DIGEST_CODEX }}
+          IMAGE_DIGEST_CLAUDE: ${{ env.IMAGE_DIGEST_CLAUDE }}
+          IMAGE_DIGEST_PROXY: ${{ env.IMAGE_DIGEST_PROXY }}
+          IMAGE_DIGEST_LOG_FORWARDER: ${{ env.IMAGE_DIGEST_LOG_FORWARDER }}
+
+      - name: Set payload paths
+        id: payload_paths
+        run: |
+          echo "tar=dist/${VERSION}/containai-payload-${VERSION}.tar" >> "$GITHUB_OUTPUT"
+          echo "targz=dist/${VERSION}/containai-payload-${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "sbom=dist/${VERSION}/payload/payload.sbom.json" >> "$GITHUB_OUTPUT"
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Push payload artifact
+        id: push
+        run: |
+          ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-payload:${VERSION}"
+          oras push "$ref" \
+            --artifact-type application/vnd.containai.payload.v1 \
+            --digest-file payload.digest \
+            "${{ steps.payload_paths.outputs.targz }}:application/vnd.containai.payload.layer.v1+gzip" \
+            "${{ steps.payload_paths.outputs.sbom }}:application/vnd.cyclonedx+json"
+          digest=$(cat payload.digest)
+          echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref@${digest#*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest payload artifact
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-payload
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  publish-metadata:
+    name: Publish channel metadata
+    needs:
+      - determine-context
+      - finalize-tags
+      - publish-payload
+    if: ${{ needs.determine-context.outputs.push == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CHANNEL: ${{ needs.determine-context.outputs.channel }}
+      VERSION: ${{ needs.determine-context.outputs.version }}
+      IMMUTABLE_TAG: ${{ needs.determine-context.outputs.immutable_tag }}
+      MOVING_TAGS: ${{ needs.determine-context.outputs.moving_tags }}
+      PAYLOAD_DIGEST: ${{ needs.publish-payload.outputs.payload_digest }}
+      PAYLOAD_REF: ${{ needs.publish-payload.outputs.payload_ref }}
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Prepare metadata
+        id: metadata
+        run: |
+          images='${{ needs.finalize-tags.outputs.images }}'
+          cat > channels.json <<EOF
+{
+  "channel": "$CHANNEL",
+  "version": "$VERSION",
+  "immutable_tag": "$IMMUTABLE_TAG",
+  "moving_tags": $(printf '%s\n' "$MOVING_TAGS" | jq -R -s 'split("\n")|map(select(length>0))'),
+  "images": $(echo "$images" | jq -c '.'),
+  "payload": {
+    "ref": "$PAYLOAD_REF",
+    "digest": "$PAYLOAD_DIGEST"
+  },
+  "generated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+          cat channels.json
+
+      - name: Push metadata artifact
+        run: |
+          ref_base="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-metadata"
+          oras push "${ref_base}:${CHANNEL}" \
+            --artifact-type application/vnd.containai.metadata.v1+json \
+            --digest-file metadata.digest \
+            channels.json:application/json
+          # Keep a canonical tag for channel resolution
+          oras push "${ref_base}:channels" \
+            --artifact-type application/vnd.containai.metadata.v1+json \
+            channels.json:application/json
+
+  cleanup-ghcr:
+    name: Retention and visibility
+    needs:
+      - determine-context
+      - finalize-tags
+      - publish-payload
+      - publish-metadata
+    if: ${{ needs.determine-context.outputs.push == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Ensure packages are public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          packages=(containai-base containai containai-copilot containai-codex containai-claude containai-proxy containai-log-forwarder containai-payload containai-metadata)
+          for pkg in "${packages[@]}"; do
+            if ! gh api --method PATCH "/orgs/${OWNER}/packages/container/${pkg}/settings" -f visibility=public 2>/dev/null; then
+              gh api --method PATCH "/user/packages/container/${pkg}/settings" -f visibility=public 2>/dev/null || true
+            fi
+          done
+
+      - name: Cleanup old image versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai
+          package-type: container
+          min-versions-to-keep: 15
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup base image versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai-base
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup variant image versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai-copilot
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup codex image versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai-codex
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup claude image versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai-claude
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup proxy image versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai-proxy
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup log forwarder versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai-log-forwarder
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup payload/metadata versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai-payload
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup metadata versions
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: containai-metadata
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -28,6 +28,12 @@ Most users can rely on the published images that the CI system keeps in sync wit
 
 Prod images are delivered by CI with signed artifacts; dev tags stay in the `containai-dev-*` namespace to avoid collisions.
 
+### Build with buildx (bounded cache, no tarballs)
+- Use the docker driver with local caches to avoid filling disk: `docker buildx build --platform linux/amd64 --cache-from type=local,src=.buildx-cache/base --cache-to type=local,dest=.buildx-cache/base,mode=max -f docker/base/Dockerfile .`
+- Reuse the base digest for agent builds to skip duplicate layers: `BASE_IMAGE=ghcr.io/<owner>/containai-base@<digest> docker buildx build --platform linux/amd64 --cache-from type=local,src=.buildx-cache/containai --cache-to type=local,dest=.buildx-cache/containai,mode=max -f docker/agents/all/Dockerfile .`
+- Avoid `--load` when possible; prefer digests and `--output=type=oci` for local testing. If you must run locally, load only the final image (not every stage).
+- Cleanup: `docker buildx prune -af --filter until=24h` and `rm -rf .buildx-cache/*` to reclaim space; remove stale local tags with `docker image prune`.
+
 ## 2. Running Automated Tests
 
 | Test Type | Command | Notes |

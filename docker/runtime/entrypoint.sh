@@ -1,18 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AGENT_USERNAME="${CONTAINAI_USER:-agentuser}"
+# Capture caller-provided CONTAINAI_* values, then drop them from the environment
+# to avoid leaking user-supplied values into child processes. We later export
+# sanitized values explicitly when needed.
+CA_USER="${CONTAINAI_USER:-agentuser}"
+CA_CLI_USER="${CONTAINAI_CLI_USER:-agentcli}"
+CA_BASEFS="${CONTAINAI_BASEFS:-/opt/containai/basefs}"
+CA_TOOLCACHE="${CONTAINAI_TOOLCACHE:-/toolcache}"
+CA_PTRACE_SCOPE="${CONTAINAI_PTRACE_SCOPE:-3}"
+CA_CAP_TMPFS_SIZE="${CONTAINAI_CAP_TMPFS_SIZE:-16m}"
+CA_DATA_TMPFS_SIZE="${CONTAINAI_DATA_TMPFS_SIZE:-64m}"
+CA_SECRET_TMPFS_SIZE="${CONTAINAI_SECRET_TMPFS_SIZE:-32m}"
+CA_DISABLE_PTRACE_SCOPE="${CONTAINAI_DISABLE_PTRACE_SCOPE:-0}"
+CA_DISABLE_PROC_HARDENING="${CONTAINAI_DISABLE_PROC_HARDENING:-0}"
+CA_PROC_GROUP="${CONTAINAI_PROC_GROUP:-agentproc}"
+CA_DISABLE_SENSITIVE_TMPFS="${CONTAINAI_DISABLE_SENSITIVE_TMPFS:-0}"
+CA_RUNNER_POLICY="${CONTAINAI_RUNNER_POLICY:-observe}"
+CA_AGENT_DATA_STAGED="${CONTAINAI_AGENT_DATA_STAGED:-0}"
+CA_RUNNER_STARTED="${CONTAINAI_RUNNER_STARTED:-0}"
+CA_AGENT_DATA_HOME="${CONTAINAI_AGENT_DATA_HOME:-}"
+CA_AGENT_HOME="${CONTAINAI_AGENT_HOME:-}"
+
+clear_containai_env() {
+    for name in $(env | sed -n 's/^\(CONTAINAI_[^=]*\)=.*/\1/p'); do
+        unset "$name"
+    done
+}
+clear_containai_env
+
+AGENT_USERNAME="$CA_USER"
 AGENT_UID=$(id -u "$AGENT_USERNAME" 2>/dev/null || echo 1000)
 AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo 1000)
-AGENT_CLI_USERNAME="${CONTAINAI_CLI_USER:-agentcli}"
+AGENT_CLI_USERNAME="$CA_CLI_USER"
 AGENT_CLI_UID=$(id -u "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_UID")
 AGENT_CLI_GID=$(id -g "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_GID")
-BASEFS_DIR="${CONTAINAI_BASEFS:-/opt/containai/basefs}"
-TOOLCACHE_DIR="${CONTAINAI_TOOLCACHE:-/toolcache}"
-PTRACE_SCOPE_VALUE="${CONTAINAI_PTRACE_SCOPE:-3}"
-CAP_TMPFS_SIZE="${CONTAINAI_CAP_TMPFS_SIZE:-16m}"
-DATA_TMPFS_SIZE="${CONTAINAI_DATA_TMPFS_SIZE:-64m}"
-SECRETS_TMPFS_SIZE="${CONTAINAI_SECRET_TMPFS_SIZE:-32m}"
+BASEFS_DIR="$CA_BASEFS"
+TOOLCACHE_DIR="$CA_TOOLCACHE"
+PTRACE_SCOPE_VALUE="$CA_PTRACE_SCOPE"
+CAP_TMPFS_SIZE="$CA_CAP_TMPFS_SIZE"
+DATA_TMPFS_SIZE="$CA_DATA_TMPFS_SIZE"
+SECRETS_TMPFS_SIZE="$CA_SECRET_TMPFS_SIZE"
+DISABLE_PTRACE_SCOPE="$CA_DISABLE_PTRACE_SCOPE"
+DISABLE_PROC_HARDENING="$CA_DISABLE_PROC_HARDENING"
+PROC_GROUP="$CA_PROC_GROUP"
+DISABLE_SENSITIVE_TMPFS="$CA_DISABLE_SENSITIVE_TMPFS"
+RUNNER_POLICY="$CA_RUNNER_POLICY"
+AGENT_DATA_STAGED="$CA_AGENT_DATA_STAGED"
+RUNNER_STARTED="$CA_RUNNER_STARTED"
+AGENT_DATA_HOME="$CA_AGENT_DATA_HOME"
+AGENT_HOME="$CA_AGENT_HOME"
+
 STUB_SHIM_ROOT="/home/${AGENT_USERNAME}/.local/bin"
 declare -a MCP_HELPER_PIDS=()
 declare -a MCP_HELPER_NAMES=()
@@ -29,7 +67,7 @@ is_mountpoint() {
 
 enforce_ptrace_scope() {
     local target="$PTRACE_SCOPE_VALUE"
-    if [ "${CONTAINAI_DISABLE_PTRACE_SCOPE:-0}" = "1" ]; then
+    if [ "$DISABLE_PTRACE_SCOPE" = "1" ]; then
         return
     fi
     if [ ! -w /proc/sys/kernel/yama/ptrace_scope ]; then
@@ -50,10 +88,10 @@ enforce_ptrace_scope() {
 }
 
 harden_proc_visibility() {
-    if [ "${CONTAINAI_DISABLE_PROC_HARDENING:-0}" = "1" ]; then
+    if [ "$DISABLE_PROC_HARDENING" = "1" ]; then
         return
     fi
-    local group="${CONTAINAI_PROC_GROUP:-agentproc}"
+    local group="$PROC_GROUP"
     if ! getent group "$group" >/dev/null 2>&1; then
         if ! groupadd --system "$group" >/dev/null 2>&1; then
             echo "⚠️  Unable to create $group group for /proc hardening" >&2
@@ -80,7 +118,7 @@ prepare_sensitive_tmpfs() {
     local owner_uid="${3:-$AGENT_UID}"
     local owner_gid="${4:-$AGENT_GID}"
     local dir_mode="${5:-700}"
-    if [ "${CONTAINAI_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
+    if [ "$DISABLE_SENSITIVE_TMPFS" = "1" ]; then
         return
     fi
     mkdir -p "$path"
@@ -462,8 +500,10 @@ install_host_agent_data() {
         chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir" 2>/dev/null || true
         link_agent_data_roots "$agent" "$data_home"
         if [ "$agent" = "${AGENT_NAME:-}" ]; then
-            export CONTAINAI_AGENT_DATA_HOME="$data_home"
-            export CONTAINAI_AGENT_HOME="/home/${AGENT_USERNAME}"
+            AGENT_DATA_HOME="$data_home"
+            AGENT_HOME="/home/${AGENT_USERNAME}"
+            export CONTAINAI_AGENT_DATA_HOME="$AGENT_DATA_HOME"
+            export CONTAINAI_AGENT_HOME="$AGENT_HOME"
         fi
     done
 
@@ -480,8 +520,10 @@ ensure_agent_data_fallback() {
     fi
     link_agent_data_roots "$agent" "$fallback_dir"
     if [ "$agent" = "${AGENT_NAME:-}" ]; then
-        export CONTAINAI_AGENT_DATA_HOME="$fallback_dir"
-        export CONTAINAI_AGENT_HOME="/home/${AGENT_USERNAME}"
+        AGENT_DATA_HOME="$fallback_dir"
+        AGENT_HOME="/home/${AGENT_USERNAME}"
+        export CONTAINAI_AGENT_DATA_HOME="$AGENT_DATA_HOME"
+        export CONTAINAI_AGENT_HOME="$AGENT_HOME"
     fi
 }
 
@@ -498,7 +540,7 @@ start_agent_task_runnerd() {
     if /usr/local/bin/agent-task-runnerd \
         --socket "$socket_path" \
         --log "$log_dir/events.log" \
-        --policy "${CONTAINAI_RUNNER_POLICY:-observe}" \
+        --policy "$RUNNER_POLICY" \
         >/dev/null 2>&1 & then
         :
     else
@@ -605,20 +647,35 @@ if [ "$(id -u)" -eq 0 ]; then
     prepare_sensitive_tmpfs "/run/agent-data-export" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
     enforce_proxy_firewall
     prepare_agent_task_runner_paths
-    CONTAINAI_AGENT_DATA_STAGED=0
+    AGENT_DATA_STAGED=0
     if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
         if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
             echo "📂 Agent data caches staged under /run/agent-data"
         fi
-        CONTAINAI_AGENT_DATA_STAGED=1
+        AGENT_DATA_STAGED=1
     fi
-    if [ "$CONTAINAI_AGENT_DATA_STAGED" -ne 1 ] && [ -n "${AGENT_NAME:-}" ]; then
+    if [ "$AGENT_DATA_STAGED" -ne 1 ] && [ -n "${AGENT_NAME:-}" ]; then
         ensure_agent_data_fallback "$AGENT_NAME"
-        CONTAINAI_AGENT_DATA_STAGED=1
+        AGENT_DATA_STAGED=1
     fi
-    export CONTAINAI_AGENT_DATA_STAGED
+    export CONTAINAI_AGENT_DATA_STAGED="$AGENT_DATA_STAGED"
     start_agent_task_runnerd
-    export CONTAINAI_RUNNER_STARTED=1
+    RUNNER_STARTED=1
+    export CONTAINAI_RUNNER_STARTED="$RUNNER_STARTED"
+    export CONTAINAI_USER="$AGENT_USERNAME"
+    export CONTAINAI_CLI_USER="$AGENT_CLI_USERNAME"
+    export CONTAINAI_BASEFS="$BASEFS_DIR"
+    export CONTAINAI_TOOLCACHE="$TOOLCACHE_DIR"
+    export CONTAINAI_PTRACE_SCOPE="$PTRACE_SCOPE_VALUE"
+    export CONTAINAI_CAP_TMPFS_SIZE="$CAP_TMPFS_SIZE"
+    export CONTAINAI_DATA_TMPFS_SIZE="$DATA_TMPFS_SIZE"
+    export CONTAINAI_SECRET_TMPFS_SIZE="$SECRETS_TMPFS_SIZE"
+    export CONTAINAI_DISABLE_PTRACE_SCOPE="$DISABLE_PTRACE_SCOPE"
+    export CONTAINAI_DISABLE_PROC_HARDENING="$DISABLE_PROC_HARDENING"
+    export CONTAINAI_PROC_GROUP="$PROC_GROUP"
+    export CONTAINAI_DISABLE_SENSITIVE_TMPFS="$DISABLE_SENSITIVE_TMPFS"
+    export CONTAINAI_RUNNER_POLICY="$RUNNER_POLICY"
+
     if command -v gosu >/dev/null 2>&1; then
         exec gosu "$AGENT_USERNAME" /usr/local/bin/entrypoint.sh "$@"
     elif command -v sudo >/dev/null 2>&1; then
@@ -631,7 +688,7 @@ fi
 
 AGENT_TASK_RUNNER_SOCKET="${AGENT_TASK_RUNNER_SOCKET:-/run/agent-task-runner.sock}"
 export AGENT_TASK_RUNNER_SOCKET
-if [ "${CONTAINAI_RUNNER_STARTED:-0}" != "1" ]; then
+if [ "${RUNNER_STARTED:-0}" != "1" ]; then
     start_agent_task_runnerd
 fi
 enforce_proxy_firewall
@@ -889,14 +946,15 @@ if [ -n "${HOST_CAPABILITY_ROOT:-}" ] && [ -d "${HOST_CAPABILITY_ROOT:-}" ]; the
     fi
 fi
 
-if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ "${CONTAINAI_AGENT_DATA_STAGED:-0}" != "1" ]; then
+if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ "${AGENT_DATA_STAGED:-0}" != "1" ]; then
     if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
         echo "📂 Agent data caches staged under /run/agent-data"
-        CONTAINAI_AGENT_DATA_STAGED=1
+        AGENT_DATA_STAGED=1
+        export CONTAINAI_AGENT_DATA_STAGED="$AGENT_DATA_STAGED"
     fi
 fi
 
-if [ -n "${AGENT_NAME:-}" ] && [ -z "${CONTAINAI_AGENT_DATA_HOME:-}" ]; then
+if [ -n "${AGENT_NAME:-}" ] && [ -z "${AGENT_DATA_HOME:-${CONTAINAI_AGENT_DATA_HOME:-}}" ]; then
     ensure_agent_data_fallback "$AGENT_NAME"
 fi
 
