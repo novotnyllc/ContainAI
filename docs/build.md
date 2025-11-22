@@ -81,11 +81,13 @@ Each adds:
 - Warns if missing (doesn't fail)
 - Changes CMD to launch agent directly
 
-## Publishing to Registry
+## Publishing to Registry (CI-driven)
 
-- CI handles publishing: `.github/workflows/build-runtime-images.yml` builds base → containai → variants, pushes immutable `sha-*` tags, then re-tags `dev`/`nightly`/`prod`/release after all images succeed. Trivy scans run by digest; no `--load` tarballs.
-- Payload + SBOM are pushed as a public OCI artifact; channel metadata (`containai-metadata`) is pushed as JSON OCI for installer channel resolution.
-- Local pushes are discouraged. For local testing, prefer `docker buildx build --output=type=oci` and avoid tagging `latest` in GHCR.
+- CI workflow `.github/workflows/build-runtime-images.yml` builds base → containai → variants, pushes immutable `sha-<commit>` tags, then re-tags `dev`/`nightly`/`prod`/release only after all images succeed. Trivy scans run by digest; no `--load` tarballs.
+- Payload + SBOM publish as a public OCI artifact (`containai-payload:<tag>`), attested in CI.
+- Channel metadata publishes as a public OCI artifact (`containai-metadata:<channel>` and `:channels`) for installer resolution.
+- GHCR packages are forced public and pruned (keep recent digests) in the workflow.
+- Local pushes are discouraged; for local testing use `docker buildx build --output=type=oci` and avoid tagging `latest` in GHCR.
 
 ## Script Files
 

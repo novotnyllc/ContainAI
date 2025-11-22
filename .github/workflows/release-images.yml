@@ -87,36 +87,11 @@ jobs:
           TAG: ${{ steps.channel.outputs.tag }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          images=(
-            "${PREFIX}:${TAG}"
-            "${PREFIX}-copilot:${TAG}"
-            "${PREFIX}-codex:${TAG}"
-            "${PREFIX}-claude:${TAG}"
-            "${PREFIX}-proxy:${TAG}"
-            "${PREFIX}-log-forwarder:${TAG}"
-          )
-          declare -A digests
-          for img in "${images[@]}"; do
-            full="ghcr.io/${OWNER}/${img}"
-            digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$full" | cut -d@ -f2)
-            if [[ -z "$digest" ]]; then
-                echo "Digest not found for $full" >&2
-                exit 1
-            fi
-            digests["$img"]="$digest"
-          done
-          cat > host/profile.env <<EOF
-PROFILE=prod
-IMAGE_PREFIX=${PREFIX}
-IMAGE_TAG=${TAG}
-REGISTRY=ghcr.io/${OWNER}
-IMAGE_DIGEST=${digests["${PREFIX}:${TAG}"]}
-IMAGE_DIGEST_COPILOT=${digests["${PREFIX}-copilot:${TAG}"]}
-IMAGE_DIGEST_CODEX=${digests["${PREFIX}-codex:${TAG}"]}
-IMAGE_DIGEST_CLAUDE=${digests["${PREFIX}-claude:${TAG}"]}
-IMAGE_DIGEST_PROXY=${digests["${PREFIX}-proxy:${TAG}"]}
-IMAGE_DIGEST_LOG_FORWARDER=${digests["${PREFIX}-log-forwarder:${TAG}"]}
-EOF
+          scripts/release/write-profile-env.sh \
+            --prefix "${PREFIX}" \
+            --tag "${TAG}" \
+            --owner "${OWNER}" \
+            --out host/profile.env
           OUT=dist/${TAG}
           PAYDIR=$OUT/payload-src
           if [[ -d "$PAYDIR/host" ]]; then

@@ -108,6 +108,7 @@ if [[ -z "$PAYLOAD_DIR_OVERRIDE" ]]; then
         "$PROJECT_ROOT/host"
         "$PROJECT_ROOT/agent-configs"
         "$PROJECT_ROOT/config.toml"
+        "$PROJECT_ROOT/docs"
         "$PROJECT_ROOT/README.md"
         "$PROJECT_ROOT/SECURITY.md"
         "$PROJECT_ROOT/USAGE.md"

@@ -117,7 +117,10 @@ PY
 fetch_metadata() {
     local channel="$1" manifest_path="$WORKDIR/metadata-manifest.json"
     if ! oci_fetch_manifest "$METADATA_REPO" "$channel" "$manifest_path"; then
-        return 1
+        # fallback to consolidated tag if available
+        if ! oci_fetch_manifest "$METADATA_REPO" "channels" "$manifest_path"; then
+            return 1
+        fi
     fi
     local layer_digest
     if ! layer_digest=$(oci_layer_digest "$manifest_path" "application/json" "application/"); then

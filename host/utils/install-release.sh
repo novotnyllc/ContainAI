@@ -108,6 +108,9 @@ find_payload_dir() {
     PAYLOAD_SHA_PATH="$PAYLOAD_DIR/payload.sha256"
     SHA256SUMS_PATH="$sha_file"
     [[ -f "$PAYLOAD_SHA_PATH" ]] || die "payload.sha256 missing alongside SHA256SUMS"
+    SBOM_PATH="$PAYLOAD_DIR/payload.sbom.json"
+    SBOM_ATTEST_PATH="$PAYLOAD_DIR/payload.sbom.json.intoto.jsonl"
+    [[ -f "$SBOM_PATH" ]] || die "payload.sbom.json missing in payload assets"
 }
 
 extract_payload_asset() {
@@ -156,6 +159,18 @@ verify_payload_hash() {
         die "Payload hash mismatch; expected $expected got $actual"
     fi
     echo "✅ SHA256 verified for payload contents"
+    local sbom_sum
+    sbom_sum=$(awk '/payload.sbom.json/ {print $1}' "$SHA256SUMS_PATH" || true)
+    if [[ -n "$sbom_sum" ]]; then
+        local sbom_actual
+        sbom_actual=$(sha256sum "$SBOM_PATH" | awk '{print $1}')
+        if [[ "$sbom_actual" != "$sbom_sum" ]]; then
+            die "SBOM hash mismatch; expected $sbom_sum got $sbom_actual"
+        fi
+        echo "✅ SBOM verified against SHA256SUMS"
+    else
+        echo "⚠️  SBOM entry not present in SHA256SUMS; skipping SBOM hash verification" >&2
+    fi
 }
 
 swap_symlinks() {
@@ -197,6 +212,12 @@ enforce_security_profiles_strict "$RELEASE_ROOT"
 
 if ! "$SCRIPT_DIR/integrity-check.sh" --mode prod --root "$RELEASE_ROOT" --sums "$RELEASE_ROOT/SHA256SUMS"; then
     die "Integrity validation failed after extraction"
+fi
+
+if [[ -f "$SBOM_ATTEST_PATH" ]]; then
+    echo "ℹ️  SBOM attestation detected: $SBOM_ATTEST_PATH"
+else
+    echo "⚠️  SBOM attestation not provided; continuing without attestation verification" >&2
 fi
 
 swap_symlinks "$RELEASE_ROOT"

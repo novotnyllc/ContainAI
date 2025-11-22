@@ -62,38 +62,11 @@ jobs:
           GH_EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          channel="${DISPATCH_CHANNEL:-}"
-          version="${DISPATCH_VERSION:-}"
-          if [ -z "$channel" ]; then
-            if [ "$GH_EVENT_NAME" = "schedule" ]; then
-              channel="nightly"
-            elif [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
-              channel="prod"
-            else
-              channel="dev"
-            fi
-          fi
-          if [ -z "$version" ]; then
-            if [ "$channel" = "prod" ] && [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
-              version="$REF_NAME"
-            else
-              version="$channel"
-            fi
-          fi
-          immutable_tag="sha-${GITHUB_SHA}"
-          moving_tags="$channel"
-          if [ "$channel" = "prod" ] && [ -n "$version" ] && [ "$version" != "$channel" ]; then
-            moving_tags="$moving_tags\n$version"
-          fi
-          push_flag="true"
-          if [ "$GH_EVENT_NAME" = "pull_request" ]; then
-            push_flag="false"
-          fi
-          echo "channel=$channel" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "immutable_tag=$immutable_tag" >> "$GITHUB_OUTPUT"
-          echo "push=$push_flag" >> "$GITHUB_OUTPUT"
-          printf "moving_tags<<'EOF'\n%s\nEOF\n" "$moving_tags" >> "$GITHUB_OUTPUT"
+          scripts/ci/determine-channel.sh \
+            --event-name "$GH_EVENT_NAME" \
+            --ref-name "$REF_NAME" \
+            --dispatch-channel "$DISPATCH_CHANNEL" \
+            --dispatch-version "$DISPATCH_VERSION"
 
   build-base:
     name: Build base image
@@ -175,9 +148,7 @@ jobs:
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
           mkdir -p dist/digests
-          cat > dist/digests/${{ env.IMAGE_NAME }}.json <<EOF
-{"image":"${{ env.IMAGE_NAME }}","repository":"$repo","digest":"${{ steps.build.outputs.digest }}"}
-EOF
+          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "${{ env.IMAGE_NAME }}" "$repo" "${{ steps.build.outputs.digest }}" > dist/digests/${{ env.IMAGE_NAME }}.json
         shell: bash
 
       - name: Publish digest artifact
@@ -272,9 +243,7 @@ EOF
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
           mkdir -p dist/digests
-          cat > dist/digests/${{ env.IMAGE_NAME }}.json <<EOF
-{"image":"${{ env.IMAGE_NAME }}","repository":"$repo","digest":"${{ steps.build.outputs.digest }}"}
-EOF
+          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "${{ env.IMAGE_NAME }}" "$repo" "${{ steps.build.outputs.digest }}" > dist/digests/${{ env.IMAGE_NAME }}.json
         shell: bash
 
       - name: Publish digest artifact
@@ -383,9 +352,7 @@ EOF
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
           mkdir -p dist/digests
-          cat > dist/digests/${{ matrix.image }}.json <<EOF
-{"image":"${{ matrix.image }}","repository":"$repo","digest":"${{ steps.build.outputs.digest }}"}
-EOF
+          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "${{ matrix.image }}" "$repo" "${{ steps.build.outputs.digest }}" > dist/digests/${{ matrix.image }}.json
         shell: bash
 
       - name: Publish digest artifact
@@ -442,18 +409,10 @@ EOF
 
       - name: Apply moving tags
         run: |
-          moving_tags="${{ needs.determine-context.outputs.moving_tags }}"
-          sha_tag="${{ needs.determine-context.outputs.immutable_tag }}"
-          jq -c '.[]' digests/all.json | while read -r item; do
-            repo=$(echo "$item" | jq -r '.repository')
-            digest=$(echo "$item" | jq -r '.digest')
-            args=(--tag "${repo}:${sha_tag}")
-            while IFS= read -r tag; do
-              [ -z "$tag" ] && continue
-              args+=(--tag "${repo}:${tag}")
-            done <<< "$moving_tags"
-            docker buildx imagetools create "${args[@]}" "${repo}@${digest}"
-          done
+          scripts/ci/apply-moving-tags.sh \
+            --digests digests/all.json \
+            --immutable-tag "${{ needs.determine-context.outputs.immutable_tag }}" \
+            --moving-tags "${{ needs.determine-context.outputs.moving_tags }}"
         shell: bash
 
   publish-payload:
@@ -496,14 +455,14 @@ EOF
           get_digest() {
             echo "$images" | jq -r --arg name "$1" '.[] | select(.image==$name) | .digest'
           }
-          cat >> "$GITHUB_ENV" <<EOF
-IMAGE_DIGEST=$(get_digest "containai")
-IMAGE_DIGEST_COPILOT=$(get_digest "containai-copilot")
-IMAGE_DIGEST_CODEX=$(get_digest "containai-codex")
-IMAGE_DIGEST_CLAUDE=$(get_digest "containai-claude")
-IMAGE_DIGEST_PROXY=$(get_digest "containai-proxy")
-IMAGE_DIGEST_LOG_FORWARDER=$(get_digest "containai-log-forwarder")
-EOF
+          {
+            echo "IMAGE_DIGEST=$(get_digest 'containai')"
+            echo "IMAGE_DIGEST_COPILOT=$(get_digest 'containai-copilot')"
+            echo "IMAGE_DIGEST_CODEX=$(get_digest 'containai-codex')"
+            echo "IMAGE_DIGEST_CLAUDE=$(get_digest 'containai-claude')"
+            echo "IMAGE_DIGEST_PROXY=$(get_digest 'containai-proxy')"
+            echo "IMAGE_DIGEST_LOG_FORWARDER=$(get_digest 'containai-log-forwarder')"
+          } >> "$GITHUB_ENV"
         shell: bash
 
       - name: Package payload
@@ -583,21 +542,15 @@ EOF
       - name: Prepare metadata
         id: metadata
         run: |
-          images='${{ needs.finalize-tags.outputs.images }}'
-          cat > channels.json <<EOF
-{
-  "channel": "$CHANNEL",
-  "version": "$VERSION",
-  "immutable_tag": "$IMMUTABLE_TAG",
-  "moving_tags": $(printf '%s\n' "$MOVING_TAGS" | jq -R -s 'split("\n")|map(select(length>0))'),
-  "images": $(echo "$images" | jq -c '.'),
-  "payload": {
-    "ref": "$PAYLOAD_REF",
-    "digest": "$PAYLOAD_DIGEST"
-  },
-  "generated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-}
-EOF
+          scripts/ci/write-channels-json.sh \
+            --channel "$CHANNEL" \
+            --version "$VERSION" \
+            --immutable "$IMMUTABLE_TAG" \
+            --moving-tags "${{ needs.determine-context.outputs.moving_tags }}" \
+            --images-json '${{ needs.finalize-tags.outputs.images }}' \
+            --payload-ref "$PAYLOAD_REF" \
+            --payload-digest "$PAYLOAD_DIGEST" \
+            --out channels.json
           cat channels.json
 
       - name: Push metadata artifact
