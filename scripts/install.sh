@@ -134,8 +134,6 @@ install_security_assets() {
     "${runner[@]}" rm -f \
         "$asset_dir/seccomp-coding-agents.json" \
         "$asset_dir/apparmor-coding-agents.profile" \
-        "$asset_dir/seccomp-containai.json" \
-        "$asset_dir/apparmor-containai.profile" \
         "$asset_dir/seccomp-containai-agent.json" \
         "$asset_dir/apparmor-containai-agent.profile"
 

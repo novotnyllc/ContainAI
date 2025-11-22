@@ -845,7 +845,7 @@ apparmor_profile_loaded() {
 
 resolve_apparmor_profile_name() {
     local repo_root="$1"
-    local profile="containai"
+    local profile="containai-agent"
     local profile_file="$repo_root/host/profiles/apparmor-containai-agent.profile"
     local asset_candidate=""
 
@@ -918,7 +918,7 @@ verify_host_security_prereqs() {
             errors+=("AppArmor kernel support not detected. Enable AppArmor to continue.")
         fi
     else
-        local profile="containai"
+        local profile="containai-agent"
         local profile_file="$repo_root/host/profiles/apparmor-containai-agent.profile"
         local installed_apparmor_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai-agent.profile"
         if [ ! -f "$profile_file" ] && [ -n "$installed_apparmor_profile" ] && [ -f "$installed_apparmor_profile" ]; then
