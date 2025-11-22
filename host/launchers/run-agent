@@ -1088,8 +1088,10 @@ build_image_ref() {
     printf '%s:%s\n' "$base" "$CONTAINAI_IMAGE_TAG"
 }
 
-# Pull latest image
-pull_and_tag_image "$AGENT"
+# Pull latest image (dev only)
+if [ "${CONTAINAI_PROFILE:-dev}" = "dev" ]; then
+    pull_and_tag_image "$AGENT"
+fi
 IMAGE_NAME="$(build_image_ref "$AGENT")"
 PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
 PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
@@ -1141,7 +1143,9 @@ case "$NETWORK_PROXY" in
 esac
 
 if [ "$USE_SQUID" = true ]; then
-    pull_and_tag_image "proxy"
+    if [ "${CONTAINAI_PROFILE:-dev}" = "dev" ]; then
+        pull_and_tag_image "proxy"
+    fi
 fi
 
 RENDERER_SCRIPT="$REPO_ROOT/host/utils/render-session-config.py"

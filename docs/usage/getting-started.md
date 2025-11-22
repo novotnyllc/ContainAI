@@ -77,35 +77,12 @@ pwsh -File scripts/verify-prerequisites.ps1
 
 The launchers automatically pull the correct image the first time you run them. If you prefer to pre-fetch (e.g., limited bandwidth during work hours) you still can:
 
-```bash
-docker pull ghcr.io/novotnyllc/containai-copilot:latest
-docker pull ghcr.io/novotnyllc/containai-codex:latest
-docker pull ghcr.io/novotnyllc/containai-claude:latest
-```
-
-## Optional: Build Images Locally
-
-You only need to run the build scripts if you are pre-loading your local cache or developing custom images. Everyone else can rely on the published images that `run-*`/`launch-agent` pull automatically.
+Pull the images corresponding to your channel (e.g., `dev`, `prod`, `nightly`). **Do not use `latest`**.
 
 ```bash
-# Get the repository
-git clone https://github.com/novotnyllc/containai.git
-cd containai
-
-# Build images
-./scripts/build/build-dev.sh  # Linux/Mac (dev namespace)
-pwsh scripts/build/build-dev.ps1 --% # Windows
+docker pull ghcr.io/novotnyllc/containai-copilot:dev
+docker pull ghcr.io/novotnyllc/containai-codex:dev
+docker pull ghcr.io/novotnyllc/containai-claude:dev
 ```
 
-See [docs/build.md](../build.md) for details on customizing the build.
 
-## Installing the Signed Payload (dogfooding)
-
-CI publishes a single versioned artifact per tagged release:
-- `containai-payload-<version>.tar.gz` (payload tarball; GitHub attaches attestation automatically)
-
-Install it directly (no extra tools required):
-```bash
-sudo ./host/utils/install-release.sh --version vX.Y.Z --repo <owner/repo>
-```
-The installer verifies `payload.sha256` against `SHA256SUMS`, runs integrity-check over SHA256SUMS, and performs a blue/green swap under `/opt/containai/releases/<version>`.

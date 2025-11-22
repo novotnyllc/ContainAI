@@ -1656,31 +1656,8 @@ pull_and_tag_image() {
         return 0
     fi
 
-    echo "📦 Checking for image updates (${target})..."
-
-    local attempt=0
-    local pulled=false
-
-    while [ "$attempt" -lt "$max_retries" ] && [ "$pulled" = "false" ]; do
-        attempt=$((attempt + 1))
-
-        if [ $attempt -gt 1 ]; then
-            echo "  ⚠️  Retry attempt $attempt of $max_retries..."
-        fi
-
-        if container_cli pull --quiet "$registry_image" 2>/dev/null; then
-            container_cli tag "$registry_image" "$local_image" 2>/dev/null || true
-            pulled=true
-        else
-            if [ "$attempt" -lt "$max_retries" ]; then
-                sleep "$retry_delay"
-            fi
-        fi
-    done
-
-    if [ "$pulled" = "false" ]; then
-        echo "  ⚠️  Warning: Could not pull latest image, using cached version"
-    fi
+    echo "❌ Error: Pulling by tag is not allowed for profile '$CONTAINAI_PROFILE'. Use digests." >&2
+    return 1
 }
 
 # Check if container exists

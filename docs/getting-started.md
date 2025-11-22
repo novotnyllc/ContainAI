@@ -299,10 +299,12 @@ You can skip this step entirely—the launchers automatically pull whatever imag
 
 ### Option A: Pre-fetch pre-built images (~1 minute)
 
+Pull the images corresponding to your channel (e.g., `dev`, `prod`, `nightly`). **Do not use `latest`**.
+
 ```bash
-docker pull ghcr.io/novotnyllc/containai-copilot:latest
-docker pull ghcr.io/novotnyllc/containai-codex:latest
-docker pull ghcr.io/novotnyllc/containai-claude:latest
+docker pull ghcr.io/novotnyllc/containai-copilot:dev
+docker pull ghcr.io/novotnyllc/containai-codex:dev
+docker pull ghcr.io/novotnyllc/containai-claude:dev
 ```
 
 ### Option B: Build locally (~15-20 minutes)
@@ -415,7 +417,7 @@ run-copilot-dev
 
 **What happens:**
 1. Checks that directory is a git repository
-2. Pulls latest image if available
+2. Pulls the image for your channel (e.g., `dev`) if available
 3. Creates ephemeral container
 4. Mounts your repository at `/workspace`
 5. Drops you into a shell with GitHub Copilot CLI
@@ -674,6 +676,42 @@ docker logs <container-name>
 - [Full Troubleshooting Guide](../TROUBLESHOOTING.md)
 - [Usage Guide FAQ](../USAGE.md#faq)
 - [GitHub Issues](https://github.com/novotnyllc/ContainAI/issues)
+
+## Uninstalling ContainAI
+
+To completely remove ContainAI from your system:
+
+1.  **Stop all running agents**:
+    ```bash
+    docker stop $(docker ps -q --filter name=containai-*)
+    ```
+
+2.  **Remove Docker resources**:
+    ```bash
+    # Remove containers
+    docker rm $(docker ps -aq --filter name=containai-*)
+    
+    # Remove images
+    docker rmi $(docker images -q ghcr.io/novotnyllc/containai-*)
+    
+    # Remove volumes (optional - deletes cached data)
+    docker volume rm $(docker volume ls -q --filter name=containai-*)
+    ```
+
+3.  **Remove the repository**:
+    ```bash
+    rm -rf ~/ContainAI  # Or wherever you cloned it
+    ```
+
+4.  **Remove configuration**:
+    ```bash
+    rm -rf ~/.config/containai
+    rm -rf ~/.containai
+    ```
+
+5.  **Clean up PATH**:
+    - Edit your shell profile (`~/.bashrc`, `~/.zshrc`, or PowerShell profile).
+    - Remove the lines adding `host/launchers/entrypoints` to your PATH.
 
 ## Summary
 

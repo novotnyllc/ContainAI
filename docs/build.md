@@ -345,7 +345,11 @@ jobs:
           context: .
           file: Dockerfile.base
           push: true
-          tags: ghcr.io/${{ github.repository }}-base:latest
+          # We push immutable tags (sha) first, then promote to channel tags (dev/prod)
+          # We avoid 'latest' to ensure launchers always use pinned versions
+          tags: |
+            ghcr.io/${{ github.repository }}-base:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository }}-base:dev
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-base:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-base:buildcache,mode=max
       
@@ -355,7 +359,11 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          # We push immutable tags (sha) first, then promote to channel tags (dev/prod)
+          # We avoid 'latest' to ensure launchers always use pinned versions
+          tags: |
+            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository }}:dev
           build-args: BASE_IMAGE=ghcr.io/${{ github.repository }}-base:latest
 ```
 

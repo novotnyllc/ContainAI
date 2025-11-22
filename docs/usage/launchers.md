@@ -121,7 +121,7 @@ run-claude-dev.ps1
 - `[directory]` - Specify directory (default: current directory)
 
 **Behavior:**
-- Pulls latest image automatically
+- Pulls the image for your channel (e.g., `dev`) automatically
 - Creates container named `{agent}-{repo}-{branch}`
 - Auto-removes container on exit
 - Auto-pushes changes to local remote before exit (unless --no-push)

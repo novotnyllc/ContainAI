@@ -849,8 +849,10 @@ PROXY_IMAGE="$(if [ -n "${CONTAINAI_IMAGE_DIGEST_PROXY:-}" ]; then echo "contain
 LOG_FORWARDER_IMAGE="$(if [ -n "${CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER:-}" ]; then echo "containai-log-forwarder@${CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER}"; else echo "containai-log-forwarder:local"; fi)"
 LOG_BROKER_IMAGE="${CONTAINAI_LOG_BROKER_IMAGE:-$LOG_FORWARDER_IMAGE}"
 
-# Pull latest image
-pull_and_tag_image "$AGENT"
+# Pull latest image (dev only)
+if [ "${CONTAINAI_PROFILE:-dev}" = "dev" ]; then
+    pull_and_tag_image "$AGENT"
+fi
 IMAGE_NAME="containai-${AGENT}:local"
 if [ -n "${CONTAINAI_IMAGE_DIGEST:-}" ]; then
     IMAGE_NAME="containai-${AGENT}@${CONTAINAI_IMAGE_DIGEST}"
@@ -870,7 +872,9 @@ PROXY_LOG_CERT_DIR="${SESSION_CONFIG_OUTPUT}/log-broker"
 NETWORK_MODE="$PROXY_NETWORK_NAME"
 NETWORK_POLICY_ENV="squid"
 PROXY_URL="http://${PROXY_CONTAINER_NAME}:3128"
-pull_and_tag_image "proxy"
+if [ "${CONTAINAI_PROFILE:-dev}" = "dev" ]; then
+    pull_and_tag_image "proxy"
+fi
 
 SESSION_CONFIG_ROOT_IN_CONTAINER="/run/containai"
 RENDERER_SCRIPT="$REPO_ROOT/host/utils/render-session-config.py"

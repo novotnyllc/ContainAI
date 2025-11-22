@@ -80,6 +80,11 @@ if [[ "$LAUNCHER_CHANNEL" != "dev" ]]; then
         echo "❌ LAUNCHER_CHANNEL=$LAUNCHER_CHANNEL requires image digests for all components (missing: ${missing_digests[*]})." >&2
         exit 1
     fi
+
+    if [[ ! -f "$PROJECT_ROOT/host/profile.env" ]]; then
+        echo "❌ LAUNCHER_CHANNEL=$LAUNCHER_CHANNEL requires host/profile.env to be present (run write-profile-env.sh first)." >&2
+        exit 1
+    fi
 fi
 
 DEST_DIR="$OUT_DIR/$VERSION"

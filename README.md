@@ -66,18 +66,27 @@ Behind the scenes the launcher hashed its own files, rendered a per-session MCP 
 
 ## Documentation
 
+### Core Guides
 - **[USAGE.md](USAGE.md)** - Complete user guide (start here!)
 - **[docs/getting-started.md](docs/getting-started.md)** - First-time setup walkthrough
 - **[docs/running-agents.md](docs/running-agents.md)** - Everyday launcher workflow, networking, and VS Code tips
-- **[docs/vscode-integration.md](docs/vscode-integration.md)** - Using VS Code with containers
+- **[docs/operations.md](docs/operations.md)** - **(New)** System administration, updates, and disaster recovery
+- **[docs/security-model.md](docs/security-model.md)** - **(New)** Trust boundaries, threat model, and isolation architecture
+
+### Reference
+- **[docs/configuration.md](docs/configuration.md)** - **(New)** Comprehensive reference for environment variables and config files
 - **[docs/cli-reference.md](docs/cli-reference.md)** - All command-line options
+- **[docs/glossary.md](docs/glossary.md)** - **(New)** Definitions of core terms (Payload, Broker, Sidecar, etc.)
+- **[CHANGELOG.md](CHANGELOG.md)** - **(New)** Release history
+
+### Advanced Topics
+- **[docs/vscode-integration.md](docs/vscode-integration.md)** - Using VS Code with containers
 - **[docs/mcp-setup.md](docs/mcp-setup.md)** - MCP server configuration
 - **[docs/local-build-and-test.md](docs/local-build-and-test.md)** - Pulling or rebuilding images plus running tests locally
-- **[docs/build.md](docs/build.md)** - Image architecture details and publishing guidance
+- **[docs/build.md](docs/build.md)** - Image architecture details
+- **[docs/ghcr-publishing.md](docs/ghcr-publishing.md)** - CI/CD and supply chain security runbook
 - **[docs/architecture.md](docs/architecture.md)** - System design and architecture
-- **[docs/security-workflows.md](docs/security-workflows.md)** - Mermaid sequence diagrams for launch, secrets, and CI security gates
 - **[docs/network-proxy.md](docs/network-proxy.md)** - Network modes and Squid proxy
-- **[scripts/test/README.md](scripts/test/README.md)** - Automated test suite (CI and local)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guidelines
 
 ## Examples
