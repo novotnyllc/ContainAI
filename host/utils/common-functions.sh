@@ -735,12 +735,17 @@ wsl_security_helper_path() {
     echo "$repo_root/host/utils/fix-wsl-security.sh"
 }
 
-resolve_seccomp_profile_path() {
+resolve_security_asset_path() {
     local repo_root="$1"
-    local default_candidate="$repo_root/host/profiles/seccomp-containai-agent.json"
-    local asset_candidate=""
+    local filename="$2"
+    local label="${3:-$filename}"
 
-    asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai-agent.json"
+    if [ -z "$repo_root" ] || [ -z "$filename" ]; then
+        return 1
+    fi
+
+    local default_candidate="$repo_root/host/profiles/$filename"
+    local asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/$filename"
 
     if [ -f "$default_candidate" ]; then
         echo "$default_candidate"
@@ -752,11 +757,47 @@ resolve_seccomp_profile_path() {
         return 0
     fi
 
-    echo "❌ Seccomp profile not found at $default_candidate. Run scripts/install.sh to reinstall the host security assets." >&2
+    echo "❌ ${label} not found at $default_candidate. Run scripts/install.sh to reinstall the host security assets." >&2
     if [ -n "$asset_candidate" ] && [ "$asset_candidate" != "$default_candidate" ]; then
-        echo "   Looked for installed copy at $asset_candidate but it was missing." >&2
+    echo "   Looked for installed copy at $asset_candidate but it was missing." >&2
     fi
     return 1
+}
+
+# Backward-compatible helper for the agent seccomp profile; use resolve_security_asset_path directly where possible.
+resolve_seccomp_profile_path() {
+    resolve_security_asset_path "$1" "seccomp-containai-agent.json" "Agent seccomp profile"
+}
+
+load_security_profiles() {
+    local repo_root="$1"
+    local agent_seccomp proxy_seccomp log_forwarder_seccomp apparmor_profile=""
+
+    if ! agent_seccomp=$(resolve_security_asset_path "$repo_root" "seccomp-containai-agent.json" "Agent seccomp profile"); then
+        return 1
+    fi
+    if ! proxy_seccomp=$(resolve_security_asset_path "$repo_root" "seccomp-containai-proxy.json" "Proxy seccomp profile"); then
+        return 1
+    fi
+    if ! log_forwarder_seccomp=$(resolve_security_asset_path "$repo_root" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile"); then
+        return 1
+    fi
+
+    if ! ensure_security_assets_current "$repo_root"; then
+        return 1
+    fi
+
+    if apparmor_profile=$(resolve_apparmor_profile_name "$repo_root"); then
+        :
+    else
+        apparmor_profile=""
+    fi
+
+    SECCOMP_PROFILE_PATH="$agent_seccomp"
+    PROXY_SECCOMP_PROFILE_PATH="$proxy_seccomp"
+    LOG_FORWARDER_SECCOMP_PROFILE_PATH="$log_forwarder_seccomp"
+    LOG_BROKER_SECCOMP_PROFILE_PATH="$log_forwarder_seccomp"
+    APPARMOR_PROFILE_NAME="$apparmor_profile"
 }
 
 ensure_security_assets_current() {

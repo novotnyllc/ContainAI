@@ -105,10 +105,17 @@ TMPFS_SMALL_SIZE="${CONTAINAI_TMPFS_SMALL:-512m}"
 TMPFS_SECRET_SIZE="${CONTAINAI_TMPFS_SECRETS:-32m}"
 DEFAULT_BROKER_STUBS=("github" "uno" "msftdocs" "playwright" "context7" "serena" "sequential-thinking" "fetch")
 BROKER_STUBS=("${DEFAULT_BROKER_STUBS[@]}")
-PROXY_SECCOMP_PROFILE_PATH="${REPO_ROOT}/host/profiles/seccomp-containai-proxy.json"
+PROXY_SECCOMP_PROFILE_PATH=""
+LOG_FORWARDER_SECCOMP_PROFILE_PATH=""
+LOG_BROKER_SECCOMP_PROFILE_PATH=""
+if ! PROXY_SECCOMP_PROFILE_PATH=$(resolve_security_asset_path "$REPO_ROOT" "seccomp-containai-proxy.json" "Proxy seccomp profile"); then
+    exit 1
+fi
+if ! LOG_FORWARDER_SECCOMP_PROFILE_PATH=$(resolve_security_asset_path "$REPO_ROOT" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile"); then
+    exit 1
+fi
+LOG_BROKER_SECCOMP_PROFILE_PATH="$LOG_FORWARDER_SECCOMP_PROFILE_PATH"
 PROXY_APPARMOR_PROFILE="containai-proxy"
-LOG_FORWARDER_SECCOMP_PROFILE_PATH="${REPO_ROOT}/host/profiles/seccomp-containai-log-forwarder.json"
-LOG_BROKER_SECCOMP_PROFILE_PATH="${REPO_ROOT}/host/profiles/seccomp-containai-log-forwarder.json"
 LOG_FORWARDER_APPARMOR_PROFILE="containai-log-forwarder"
 LOG_BROKER_APPARMOR_PROFILE="containai-log-forwarder"
 declare -A MCP_SECRET_VALUES=()
@@ -1270,20 +1277,8 @@ if [ "$GPG_SIGNING_ENABLED" = true ] && [ ! -S "$GPG_SOCKET_PATH" ]; then
     echo "⚠️  Commit signing is enabled but gpg-proxy socket was not created. Signing will be disabled; run gpg-proxy-server.sh or disable commit.gpgsign."
 fi
 
-SECCOMP_PROFILE_PATH=""
-if ! SECCOMP_PROFILE_PATH=$(resolve_seccomp_profile_path "$REPO_ROOT"); then
-    echo "❌ Seccomp profile missing. Run scripts/install.sh to reinstall the host security assets and retry."
+if ! load_security_profiles "$REPO_ROOT"; then
     exit 1
-fi
-if ! ensure_security_assets_current "$REPO_ROOT"; then
-    exit 1
-fi
-
-APPARMOR_PROFILE_NAME=""
-if APPARMOR_PROFILE_NAME=$(resolve_apparmor_profile_name "$REPO_ROOT"); then
-    true
-else
-    APPARMOR_PROFILE_NAME=""
 fi
 
 # Final args

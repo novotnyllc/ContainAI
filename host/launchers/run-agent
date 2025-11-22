@@ -1349,28 +1349,12 @@ echo "🏷️  Container: $CONTAINER_NAME"
 echo "🐳 Image: $IMAGE_NAME"
 echo "🌐 Network policy: $NETWORK_POLICY_ENV"
 echo ""
-SECCOMP_PROFILE_PATH=""
-if ! SECCOMP_PROFILE_PATH=$(resolve_seccomp_profile_path "$REPO_ROOT"); then
-    echo "❌ Seccomp profile missing. Run scripts/install.sh to reinstall the host security assets and retry."
+if ! load_security_profiles "$REPO_ROOT"; then
     exit 1
 fi
-if ! ensure_security_assets_current "$REPO_ROOT"; then
-    exit 1
-fi
-
-PROXY_SECCOMP_PROFILE_PATH="${REPO_ROOT}/host/profiles/seccomp-containai-proxy.json"
 PROXY_APPARMOR_PROFILE="containai-proxy"
-LOG_FORWARDER_SECCOMP_PROFILE_PATH="${REPO_ROOT}/host/profiles/seccomp-containai-log-forwarder.json"
-LOG_BROKER_SECCOMP_PROFILE_PATH="${REPO_ROOT}/host/profiles/seccomp-containai-log-forwarder.json"
 LOG_FORWARDER_APPARMOR_PROFILE="containai-log-forwarder"
 LOG_BROKER_APPARMOR_PROFILE="containai-log-forwarder"
-
-APPARMOR_PROFILE_NAME=""
-if APPARMOR_PROFILE_NAME=$(resolve_apparmor_profile_name "$REPO_ROOT"); then
-    :
-else
-    APPARMOR_PROFILE_NAME=""
-fi
 # Check if container already exists
 if container_exists "$CONTAINER_NAME"; then
     echo "📦 Container '$CONTAINER_NAME' already exists"
