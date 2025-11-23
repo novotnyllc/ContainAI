@@ -72,5 +72,5 @@ fi
     echo "version=${version}"
     echo "immutable_tag=${immutable_tag}"
     echo "push=${push_flag}"
-    printf "moving_tags<<'EOF'\n%s\nEOF\n" "$moving_tags"
+    printf "moving_tags<<EOF\n%s\nEOF\n" "$moving_tags"
 } >> "${GITHUB_OUTPUT}"
