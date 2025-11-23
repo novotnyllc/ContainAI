@@ -55,6 +55,9 @@ jobs:
       moving_tags: ${{ steps.channel.outputs.moving_tags }}
       push: ${{ steps.channel.outputs.push }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - id: channel
         env:
           DISPATCH_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.channel || '' }}
