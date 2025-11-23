@@ -465,6 +465,17 @@ jobs:
           } >> "$GITHUB_ENV"
         shell: bash
 
+      - name: Generate profile.env
+        run: |
+          scripts/release/write-profile-env.sh \
+            --prefix containai \
+            --tag "$VERSION" \
+            --owner "${{ env.IMAGE_NAMESPACE }}" \
+            --out host/profile.env \
+            --channel "$CHANNEL" \
+            --registry "${{ env.REGISTRY }}" \
+            --mode env
+
       - name: Package payload
         run: |
           scripts/release/package.sh \

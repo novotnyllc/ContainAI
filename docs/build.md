@@ -91,6 +91,9 @@ Each adds:
 - GHCR packages are forced public and pruned (keep recent digests) in the workflow.
 - Local pushes are discouraged; for local testing use `docker buildx build --output=type=oci` and avoid tagging `latest` in GHCR.
 
+**Note on Release Packaging:**
+The `scripts/release/package.sh` script enforces strict pinning for non-dev builds. It requires `host/profile.env` to be present and contain the exact image digests (`IMAGE_DIGEST`, `IMAGE_DIGEST_COPILOT`, etc.). In CI, this file is generated dynamically from the build outputs before packaging. For local release testing, run `scripts/release/write-profile-env.sh` first.
+
 ## Script Files
 
 ### entrypoint.sh
