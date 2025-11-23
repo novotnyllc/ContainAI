@@ -133,10 +133,12 @@ Usage: $(basename "$0") [OPTIONS]
 OPTIONS:
     --mode launchers    Test with existing/mock images (default, ~5-10 minutes)
     --mode full         Build all images from Dockerfiles (~15-25 minutes)
+    --filter REGEX      Run only tests matching the regex
     --preserve          Keep test resources after completion for debugging
     --isolation dind    Run tests inside Docker-in-Docker (default)
     --isolation host    Run tests directly on host Docker daemon (optional, skips DinD risk)
     --with-host-secrets Enable host-secrets prompt tests (copies secrets into isolation when needed)
+    --no-persist-cache  Do not persist Docker cache between runs (default: cache is persisted)
     --help              Show this help message
 
 ENVIRONMENT VARIABLES:
@@ -206,6 +208,14 @@ while [[ $# -gt 0 ]]; do
             TEST_ARGS+=("$1" "$2")
             shift 2
             ;;
+        --filter)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --filter requires an argument" >&2
+                exit 1
+            fi
+            TEST_ARGS+=("$1" "$2")
+            shift 2
+            ;;
         --preserve)
             TEST_ARGS+=("$1")
             shift
@@ -221,6 +231,14 @@ while [[ $# -gt 0 ]]; do
         --with-host-secrets)
             WITH_HOST_SECRETS=true
             TEST_ARGS+=("$1")
+            shift
+            ;;
+        --persist-cache)
+            PERSIST_CACHE=true
+            shift
+            ;;
+        --no-persist-cache)
+            PERSIST_CACHE=false
             shift
             ;;
         *)
@@ -269,20 +287,37 @@ fi
 start_dind() {
     echo "Starting isolated Docker daemon ($DIND_IMAGE)..."
     echo "  Mounting: $PROJECT_ROOT -> /workspace (read-only)"
+    
+    initialize_dind_run_dir
+
+    local -a docker_args=(
+        "${DIND_RUN_FLAGS[@]}"
+        "--name" "$DIND_CONTAINER"
+        "-v" "$PROJECT_ROOT:/workspace:ro"
+        "-v" "$DIND_RUN_DIR:/run"
+        "-e" "DOCKER_TLS_CERTDIR="
+    )
+
+    if [[ "${PERSIST_CACHE:-true}" == "true" ]]; then
+        local cache_dir="${HOME}/.cache/containai/dind-docker"
+        mkdir -p "$cache_dir"
+        echo "  Mounting cache: $cache_dir -> /var/lib/docker"
+        docker_args+=("-v" "$cache_dir:/var/lib/docker")
+    fi
+
     if [[ ${#DIND_RUN_FLAGS[@]} -gt 0 ]]; then
         echo "  docker run flags: ${DIND_RUN_FLAGS[*]}"
     else
         echo "  docker run flags: <none>"
     fi
-    initialize_dind_run_dir
-    if ! docker run -d \
-        "${DIND_RUN_FLAGS[@]}" \
-        --name "$DIND_CONTAINER" \
-        -v "$PROJECT_ROOT":/workspace:ro \
-        -v "$DIND_RUN_DIR":/run \
-        -e DOCKER_TLS_CERTDIR= \
-        "$DIND_IMAGE" >/dev/null 2>&1; then
+    
+    local run_output
+    if ! run_output=$(docker run -d \
+        "${docker_args[@]}" \
+        "$DIND_IMAGE" 2>&1); then
         echo "Error: Failed to start Docker-in-Docker container"
+        echo "Docker error output:"
+        echo "$run_output" | sed 's/^/  /'
         echo "This may indicate missing --privileged support or image pull failure"
         print_dind_logs
         exit 1
@@ -345,6 +380,81 @@ bootstrap_tools() {
         exit 1
     fi
     echo "  ✓ Tooling installed"
+}
+
+inject_base_image() {
+    # Source config to get TEST_BASE_IMAGE
+    # We run in a subshell to avoid polluting the parent environment with test-config variables
+    (
+        # shellcheck source=scripts/test/test-config.sh
+        source "$SCRIPT_DIR/test-config.sh"
+        local host_image="containai-test-base:cache"
+        
+        echo "  Checking base image freshness..."
+        local needs_build=true
+        
+        if docker image inspect "$host_image" >/dev/null 2>&1; then
+            # Check if image is newer than source files to avoid unnecessary rebuilds
+            local image_created
+            image_created=$(docker image inspect --format='{{.Created}}' "$host_image")
+            local image_ts
+            image_ts=$(date -d "$image_created" +%s 2>/dev/null || echo 0)
+            
+            # Check relevant source directories for modification time
+            local source_ts
+            source_ts=$(find docker/base docker/runtime host/utils -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)
+            source_ts=${source_ts:-$(date +%s)} # Default to now (force build) if find fails
+            
+            if [[ "$image_ts" -ge "$source_ts" ]]; then
+                needs_build=false
+                echo "  ✓ Base image up-to-date (skipping host build)"
+            fi
+        fi
+
+        if [[ "$needs_build" == "true" ]]; then
+            echo "  Building base image on host for caching..."
+            # Always build to ensure we have the latest changes.
+            if ! docker build -f docker/base/Dockerfile -t "$host_image" "$PROJECT_ROOT" >/dev/null 2>&1; then
+                echo "  ⚠️  Host build failed, retrying with output to debug..."
+                if ! docker build -f docker/base/Dockerfile -t "$host_image" "$PROJECT_ROOT"; then
+                    echo "  ⚠️  Failed to build base image on host, skipping injection"
+                    return 0
+                fi
+            fi
+        fi
+
+        # Check if image already exists in DinD with same ID to avoid unnecessary copy
+        local host_id
+        host_id=$(docker inspect --format='{{.Id}}' "$host_image")
+        
+        local dind_id
+        dind_id=$(docker exec "$DIND_CONTAINER" docker inspect --format='{{.Id}}' "$TEST_BASE_IMAGE" 2>/dev/null || echo "missing")
+
+        if [[ "$host_id" == "$dind_id" ]]; then
+             echo "  ✓ Base image already present in isolation (checksum match)"
+             return 0
+        fi
+
+        echo "  Injecting base image into isolation..."
+        # We pipe the save output to the load input
+        if ! docker save "$host_image" | docker exec -i "$DIND_CONTAINER" docker load >/dev/null; then
+            echo "  ⚠️  Failed to inject base image"
+            return 0
+        fi
+
+        if [[ "${PERSIST_CACHE:-true}" != "true" ]]; then
+             echo "  (Tip: Cache persistence is disabled. Enable it by removing --no-persist-cache for faster runs)"
+        fi
+        
+        echo "  Tagging injected image as $TEST_BASE_IMAGE..."
+        if ! docker exec "$DIND_CONTAINER" docker tag "$host_image" "$TEST_BASE_IMAGE"; then
+             echo "  ⚠️  Failed to tag injected image"
+        fi
+
+        # Prune dangling images in DinD to keep cache size in check
+        # This removes old versions of the base image that are no longer tagged
+        docker exec "$DIND_CONTAINER" docker image prune -f >/dev/null 2>&1 || true
+    )
 }
 
 detect_host_trivy() {
@@ -464,6 +574,7 @@ else
     start_dind
     wait_for_daemon
     bootstrap_tools
+    inject_base_image
     ensure_trivy_inside_isolation
     stage_host_secrets_inside_dind
     run_integration_tests

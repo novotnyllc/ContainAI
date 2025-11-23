@@ -1801,6 +1801,9 @@ remove_container_with_sidecars() {
     proxy_container=$(get_proxy_container "$container_name")
     local proxy_network
     proxy_network=$(get_proxy_network "$container_name")
+    if [ -n "$proxy_container" ]; then
+        stop_proxy_log_pipeline "$proxy_container"
+    fi
     
     # Remove main container
     echo "🗑️  Removing container: $container_name"
@@ -1902,7 +1905,19 @@ generate_session_mitm_ca() {
 
 generate_log_broker_certs() {
     local output_dir="$1"
+
+    if [ -z "$output_dir" ]; then
+        echo "❌ Log broker cert output directory not provided" >&2
+        return 1
+    fi
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "❌ openssl is required to generate log broker certificates" >&2
+        return 1
+    fi
+
     mkdir -p "$output_dir"
+    chmod 700 "$output_dir" 2>/dev/null || true
+
     local original_umask
     original_umask=$(umask)
     umask 077
@@ -1912,21 +1927,37 @@ generate_log_broker_certs() {
     local server_crt="$output_dir/log-server.crt"
     local client_key="$output_dir/log-client.key"
     local client_crt="$output_dir/log-client.crt"
+    local ok=true
 
     if [ ! -f "$ca_crt" ] || [ ! -f "$ca_key" ]; then
-        openssl req -x509 -newkey rsa:2048 -nodes -subj "/CN=ContainAI Log Broker CA" -days 2 \
-            -keyout "$ca_key" -out "$ca_crt" >/dev/null 2>&1 || true
+        if ! openssl req -x509 -newkey rsa:2048 -nodes -subj "/CN=ContainAI Log Broker CA" -days 2 \
+            -keyout "$ca_key" -out "$ca_crt" >/dev/null 2>&1; then
+            ok=false
+        fi
     fi
     if [ ! -f "$server_crt" ] || [ ! -f "$server_key" ]; then
-        openssl req -new -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout "$server_key" -out "$output_dir/server.csr" >/dev/null 2>&1 || true
-        openssl x509 -req -in "$output_dir/server.csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial -out "$server_crt" -days 2 -sha256 >/dev/null 2>&1 || true
+        if ! openssl req -new -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout "$server_key" -out "$output_dir/server.csr" >/dev/null 2>&1; then
+            ok=false
+        elif ! openssl x509 -req -in "$output_dir/server.csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial -out "$server_crt" -days 2 -sha256 >/dev/null 2>&1; then
+            ok=false
+        fi
     fi
     if [ ! -f "$client_crt" ] || [ ! -f "$client_key" ]; then
-        openssl req -new -newkey rsa:2048 -nodes -subj "/CN=containai-forwarder" -keyout "$client_key" -out "$output_dir/client.csr" >/dev/null 2>&1 || true
-        openssl x509 -req -in "$output_dir/client.csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial -out "$client_crt" -days 2 -sha256 >/dev/null 2>&1 || true
+        if ! openssl req -new -newkey rsa:2048 -nodes -subj "/CN=containai-forwarder" -keyout "$client_key" -out "$output_dir/client.csr" >/dev/null 2>&1; then
+            ok=false
+        elif ! openssl x509 -req -in "$output_dir/client.csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial -out "$client_crt" -days 2 -sha256 >/dev/null 2>&1; then
+            ok=false
+        fi
     fi
-    chmod 600 "$ca_key" "$ca_crt" "$server_key" "$server_crt" "$client_key" "$client_crt" 2>/dev/null || true
     umask "$original_umask"
+
+    chmod 600 "$ca_key" "$ca_crt" "$server_key" "$server_crt" "$client_key" "$client_crt" 2>/dev/null || true
+
+    if [ "$ok" = false ]; then
+        echo "❌ Failed to generate log broker certificates in $output_dir" >&2
+        return 1
+    fi
+    return 0
 }
 
 find_free_port() {
@@ -2056,6 +2087,8 @@ start_proxy_log_pipeline() {
     local proxy_network="$2"
     local log_dir="$3"
     local cert_dir="$4"
+    local agent_id="${5:-}"
+    local session_id="${6:-}"
     local broker_name="${proxy_container}-log-broker"
     local forwarder_name="${proxy_container}-log-forwarder"
     local broker_port="4433"
@@ -2065,13 +2098,36 @@ start_proxy_log_pipeline() {
     local forwarder_apparmor="${LOG_FORWARDER_APPARMOR_PROFILE:-containai-log-forwarder}"
     local broker_seccomp="${LOG_BROKER_SECCOMP_PROFILE_PATH:-${SECCOMP_PROFILE_PATH:-}}"
     local broker_apparmor="${LOG_BROKER_APPARMOR_PROFILE:-containai-log-forwarder}"
+    local run_user
+    local proxy_image=""
+    run_user="$(id -u):$(id -g)"
 
     mkdir -p "$log_dir" "$cert_dir"
-    generate_log_broker_certs "$cert_dir"
+    chmod 750 "$log_dir" 2>/dev/null || true
+
+    if ! generate_log_broker_certs "$cert_dir"; then
+        return 1
+    fi
+    chmod 640 "$cert_dir"/* 2>/dev/null || true
 
     if ! container_exists "$proxy_container"; then
         echo "❌ Cannot start log pipeline; proxy container '$proxy_container' missing" >&2
         return 1
+    fi
+
+    if ! container_cli image inspect "$forwarder_image" >/dev/null 2>&1; then
+        local proxy_image
+        proxy_image=$(container_cli inspect -f '{{.Config.Image}}' "$proxy_container" 2>/dev/null || true)
+        if [ -n "$proxy_image" ]; then
+            forwarder_image="$proxy_image"
+            broker_image="$proxy_image"
+        else
+            echo "❌ No log forwarder image available and proxy image unknown" >&2
+            return 1
+        fi
+    fi
+    if ! container_cli image inspect "$broker_image" >/dev/null 2>&1; then
+        broker_image="$forwarder_image"
     fi
 
     stop_proxy_log_pipeline "$proxy_container"
@@ -2085,12 +2141,14 @@ start_proxy_log_pipeline() {
         ${broker_apparmor:+--security-opt "apparmor=${broker_apparmor}"} \
         --pids-limit 128 \
         --memory 128m \
-        -u 65532:65532 \
+        -u "$run_user" \
         -v "$cert_dir:/certs:ro" \
         -v "$log_dir:/logs" \
         --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,mode=755 \
         --label "containai.log-of=$proxy_container" \
         --label "containai.log-role=broker" \
+        ${agent_id:+--label "containai.agent=${agent_id}"} \
+        ${session_id:+--label "containai.session=${session_id}"} \
         "$broker_image" \
         sh -c "openssl s_server -quiet -accept ${broker_port} -cert /certs/log-server.crt -key /certs/log-server.key -CAfile /certs/log-ca.crt -Verify 1 >>/logs/access.log 2>>/logs/broker.err"
     then
@@ -2107,12 +2165,14 @@ start_proxy_log_pipeline() {
         ${forwarder_apparmor:+--security-opt "apparmor=${forwarder_apparmor}"} \
         --pids-limit 128 \
         --memory 128m \
-        -u 65532:65532 \
+        -u "$run_user" \
         --volumes-from "$proxy_container":ro \
         -v "$cert_dir:/certs:ro" \
         --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,mode=755 \
         --label "containai.log-of=$proxy_container" \
         --label "containai.log-role=forwarder" \
+        ${agent_id:+--label "containai.agent=${agent_id}"} \
+        ${session_id:+--label "containai.session=${session_id}"} \
         "$forwarder_image" \
         sh -c "touch /var/log/squid/access.log && tail -F /var/log/squid/access.log | openssl s_client -quiet -connect ${broker_name}:${broker_port} -cert /certs/log-client.crt -key /certs/log-client.key -CAfile /certs/log-ca.crt >/dev/null 2>>/tmp/forwarder.err"
     then

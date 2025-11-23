@@ -1113,9 +1113,6 @@ SQUID_HELPER_ACL_FILE="$SESSION_CONFIG_OUTPUT/squid-acls.conf"
 PROXY_LOG_ROOT="${HOME}/.containai/logs/proxy"
 PROXY_LOG_DIR="${PROXY_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
 PROXY_LOG_CERT_DIR="${SESSION_CONFIG_OUTPUT}/log-broker"
-# Default port file/port; ensure non-empty for log broker/forwarder helpers
-PROXY_LOG_PORT_FILE="${SESSION_CONFIG_OUTPUT}/proxy-log.port"
-PROXY_LOG_PORT="4433"
 
 # Determine network mode
 NETWORK_MODE="bridge"
@@ -1371,8 +1368,7 @@ if container_exists "$CONTAINER_NAME"; then
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
         ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
-        start_proxy_log_broker "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT_FILE" "$PROXY_BROKER_PID_FILE" "$PROXY_LOG_PORT"
-        start_proxy_log_forwarder "$PROXY_CONTAINER_NAME" "$PROXY_LOG_CERT_DIR" "$PROXY_LOG_PORT" "$PROXY_LOG_DIR" "$PROXY_FORWARDER_PID_FILE"
+        start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$AGENT" "$SESSION_ID"
     fi
     
     if [ "$STATE" = "running" ]; then
@@ -1391,7 +1387,7 @@ fi
 # Setup squid proxy if needed
 if [ "$USE_SQUID" = true ]; then
     ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
-    start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR"
+    start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$AGENT" "$SESSION_ID"
 fi
 
 # Build docker arguments

@@ -17,17 +17,24 @@ SQUID_CRT_TOOL=${SQUID_CRT_TOOL:-/usr/lib/squid/security_file_certgen}
 ALLOWED_DOMAINS_FILE=/etc/squid/allowed-domains.txt
 HELPER_ACLS_FILE=/etc/squid/helper-acls.conf
 AGENT_HEADERS_FILE=/etc/squid/agent-headers.conf
-MITM_CA_CERT=${SQUID_MITM_CA_CERT:-}
-MITM_CA_KEY=${SQUID_MITM_CA_KEY:-}
+MITM_CA_CERT=${SQUID_MITM_CA_CERT:-/etc/squid/mitm/ca.crt}
+MITM_CA_KEY=${SQUID_MITM_CA_KEY:-/etc/squid/mitm/ca.key}
 
-if [ -z "$MITM_CA_CERT" ] || [ -z "$MITM_CA_KEY" ] || [ ! -f "$MITM_CA_CERT" ] || [ ! -f "$MITM_CA_KEY" ]; then
-    echo "❌ MITM CA cert/key missing (expected SQUID_MITM_CA_CERT and SQUID_MITM_CA_KEY pointing to readable files)" >&2
-    exit 1
+if [ ! -f "$MITM_CA_CERT" ] || [ ! -f "$MITM_CA_KEY" ]; then
+    echo "🔐 Generating new MITM CA certificate..."
+    mkdir -p "$(dirname "$MITM_CA_CERT")"
+    openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
+        -keyout "$MITM_CA_KEY" -out "$MITM_CA_CERT" \
+        -subj "/CN=ContainAI MITM CA/O=ContainAI" 2>/dev/null
+    chown -R proxy:proxy "$(dirname "$MITM_CA_CERT")"
+    chmod 600 "$MITM_CA_KEY"
+    chmod 644 "$MITM_CA_CERT"
+    echo "✅ MITM CA generated at $MITM_CA_CERT"
 fi
 
 # Ensure directories exist with correct ownership
-mkdir -p "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$SQUID_SSL_DB_DIR" "$(dirname "$ALLOWED_DOMAINS_FILE")"
-chown -R proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$SQUID_SSL_DB_DIR"
+mkdir -p "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$SQUID_SSL_DB_DIR")" "$(dirname "$ALLOWED_DOMAINS_FILE")"
+chown -R proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$SQUID_SSL_DB_DIR")"
 
 # Generate allowed domains file from environment variable
 if [ -n "${SQUID_ALLOWED_DOMAINS:-}" ]; then
@@ -59,17 +66,18 @@ EOF
 # Initialize ssl_crtd cache
 if [ ! -d "$SQUID_SSL_DB_DIR" ] || [ -z "$(ls -A "$SQUID_SSL_DB_DIR" 2>/dev/null)" ]; then
     echo "🔐 Initializing ssl_crtd cache at $SQUID_SSL_DB_DIR..."
-    if ! "$SQUID_CRT_TOOL" -c -s "$SQUID_SSL_DB_DIR" -M "${SQUID_SSL_DB_SIZE_MB}MB"; then
+    if ! su -s /bin/sh proxy -c "$SQUID_CRT_TOOL -c -s $SQUID_SSL_DB_DIR -M ${SQUID_SSL_DB_SIZE_MB}MB"; then
         echo "❌ Failed to initialize ssl_crtd cache" >&2
         exit 1
     fi
-    chown -R proxy:proxy "$SQUID_SSL_DB_DIR"
 fi
 
 # Initialize cache if needed
 if [ ! -f "$SQUID_CACHE_DIR/00/00000000" ]; then
     echo "🧱 Initializing Squid cache directories..."
     /usr/sbin/squid -z -f "$SQUID_CONF"
+    # squid -z might leave a pid file, remove it to avoid "Squid is already running" error
+    rm -f /run/squid.pid
 fi
 
 # Start Squid in foreground so docker can manage lifecycle

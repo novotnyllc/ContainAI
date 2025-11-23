@@ -428,10 +428,31 @@ cleanup_test_images() {
     echo "Removing test images..."
     
     # Remove test images from local registry namespace
+    # Exclude the base image if we are persisting cache, to avoid re-loading it next time
+    local filter_arg="reference=${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/*"
+    
     local images
-    images=$(docker images --filter "reference=${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/*" -q 2>/dev/null || true)
+    images=$(docker images --filter "$filter_arg" -q 2>/dev/null || true)
+    
     if [ -z "${images}" ]; then
         echo "  No test images to remove"
+        return 0
+    fi
+
+    # If persisting cache, we want to keep the base image so we don't have to reload it
+    if [ "${PERSIST_CACHE:-true}" = "true" ]; then
+        local base_id
+        base_id=$(docker images -q "$TEST_BASE_IMAGE" 2>/dev/null || true)
+        
+        if [ -n "$base_id" ]; then
+            echo "  Preserving base image ($TEST_BASE_IMAGE) for cache persistence"
+            # Filter out the base image ID from the list of images to delete
+            images=$(echo "$images" | grep -v "$base_id" || true)
+        fi
+    fi
+    
+    if [ -z "${images}" ]; then
+        echo "  No other test images to remove"
         return 0
     fi
     

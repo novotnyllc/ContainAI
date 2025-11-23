@@ -334,7 +334,6 @@ for path in sys.argv[1:]:
 for stub in sorted(stubs):
     print(stub)
 PY
-    do
         [ -z "$stub" ] && continue
         local dest="${STUB_SHIM_ROOT}/mcp-stub-${stub}"
         if [ ! -e "$dest" ]; then

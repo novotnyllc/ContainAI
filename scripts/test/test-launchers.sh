@@ -1481,18 +1481,14 @@ test_mitm_log_forwarding() {
     local log_dir
     log_dir=$(mktemp -d "${TMPDIR:-/tmp}/containai-proxy-log.XXXXXX")
     local cert_dir="$log_dir/certs"
-    local port_file="$log_dir/port"
-    local broker_pid="$log_dir/broker.pid"
-    local forwarder_pid="$log_dir/forwarder.pid"
-    local broker_port
-    broker_port=$(find_free_port)
+    local proxy_network="bridge"
 
     generate_log_broker_certs "$cert_dir"
 
     docker run -d --name "$proxy_container" --entrypoint sh "$TEST_CODEX_IMAGE" -c 'mkdir -p /var/log/squid; touch /var/log/squid/access.log; i=0; while true; do echo \"log-$i\" >> /var/log/squid/access.log; i=$((i+1)); sleep 1; done' >/dev/null
 
-    start_proxy_log_broker "$log_dir" "$cert_dir" "$port_file" "$broker_pid" "$broker_port"
-    start_proxy_log_forwarder "$proxy_container" "$cert_dir" "$broker_port" "$log_dir" "$forwarder_pid"
+    LOG_FORWARDER_IMAGE="$TEST_CODEX_IMAGE" LOG_BROKER_IMAGE="$TEST_CODEX_IMAGE" \
+        start_proxy_log_pipeline "$proxy_container" "$proxy_network" "$log_dir" "$cert_dir"
 
     sleep 3
 

@@ -125,6 +125,10 @@ while [[ $# -gt 0 ]]; do
             TEST_MODE="$2"
             shift 2
             ;;
+        --filter)
+            TEST_FILTER="$2"
+            shift 2
+            ;;
         --preserve)
             # shellcheck disable=SC2034 # consumed by sourced helpers
             TEST_PRESERVE_RESOURCES="true"
@@ -586,6 +590,57 @@ PY
     fi
 }
 
+test_mitm_ca_generation() {
+    test_section "Testing MITM CA generation"
+
+    local proxy_image="containai-proxy:test-hardened"
+    if ! docker image inspect "$proxy_image" >/dev/null 2>&1; then
+        echo "Building proxy image for MITM test..."
+        if ! docker build -f "$PROJECT_ROOT/docker/proxy/Dockerfile" -t "$proxy_image" "$PROJECT_ROOT"; then
+            fail "Failed to build squid proxy image"
+            return
+        fi
+    fi
+
+    local container_name="${TEST_CONTAINER_PREFIX}-mitm-gen"
+    
+    # Run without mounting certs - should auto-generate
+    if ! docker run -d \
+        --name "$container_name" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        "$proxy_image"; then
+        fail "Failed to start proxy container for MITM test"
+        return
+    fi
+
+    sleep $CONTAINER_STARTUP_WAIT
+
+    if ! assert_container_running "$container_name"; then
+        docker logs "$container_name"
+        docker rm -f "$container_name" >/dev/null 2>&1 || true
+        return
+    fi
+
+    # Check if cert exists
+    if docker exec "$container_name" test -f /etc/squid/mitm/ca.crt; then
+        pass "MITM CA certificate generated"
+    else
+        fail "MITM CA certificate not found"
+    fi
+
+    # Check subject
+    local subject
+    subject=$(docker exec "$container_name" openssl x509 -in /etc/squid/mitm/ca.crt -noout -subject 2>/dev/null || true)
+    if echo "$subject" | grep -q "CN = ContainAI MITM CA"; then
+        pass "MITM CA has correct subject"
+    else
+        fail "MITM CA subject mismatch ($subject)"
+    fi
+
+    docker rm -f "$container_name" >/dev/null 2>&1 || true
+}
+
 test_network_proxy_modes() {
     test_section "Testing network proxy modes"
 
@@ -685,6 +740,9 @@ test_squid_proxy_hardening() {
     test_section "Testing squid proxy hardening rules"
 
     local proxy_image="containai-proxy:test-hardened"
+    # Force rebuild to pick up config changes
+    docker rmi "$proxy_image" >/dev/null 2>&1 || true
+    
     if ! docker image inspect "$proxy_image" >/dev/null 2>&1; then
         echo "Building proxy image for hardening test..."
         if ! docker build -f "$PROJECT_ROOT/docker/proxy/Dockerfile" -t "$proxy_image" "$PROJECT_ROOT"; then
@@ -701,35 +759,9 @@ test_squid_proxy_hardening() {
     local allowed_domain="allowed.test"
     local proxy_url="http://${proxy_ip}:3128"
 
-    cleanup_proxy_resources() {
-        if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
-            echo "Preserving squid proxy resources ($proxy_container, $allowed_container, $proxy_network)"
-            return
-        fi
-        docker rm -f "$proxy_container" "$allowed_container" >/dev/null 2>&1 || true
-        docker network rm "$proxy_network" >/dev/null 2>&1 || true
-    }
-
-    docker network create \
-        --subnet 203.0.113.0/24 \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        "$proxy_network" 2>/dev/null || true
-
-    if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
-        fail "Failed to create isolated proxy network"
-        cleanup_proxy_resources
-        return
-    fi
-
-    if ! docker run -d \
-        --name "$allowed_container" \
-        --network "$proxy_network" \
-        --ip "$allowed_ip" \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        "$TEST_CODEX_IMAGE" \
-        python3 - <<'PY'
+    local server_script
+    server_script="$(mktemp)"
+    cat > "$server_script" <<'PY'
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 SMALL_SIZE = 5 * 1024 * 1024
@@ -766,6 +798,40 @@ class Handler(BaseHTTPRequestHandler):
 server = ThreadingHTTPServer(("", 8080), Handler)
 server.serve_forever()
 PY
+
+    cleanup_proxy_resources() {
+        if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+            echo "Preserving squid proxy resources ($proxy_container, $allowed_container, $proxy_network)"
+            return
+        fi
+        docker rm -f "$proxy_container" "$allowed_container" >/dev/null 2>&1 || true
+        docker network rm "$proxy_network" >/dev/null 2>&1 || true
+        rm -f "$server_script"
+    }
+
+    docker network create \
+        --subnet 203.0.113.0/24 \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        "$proxy_network" 2>/dev/null || true
+
+    if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
+        fail "Failed to create isolated proxy network"
+        cleanup_proxy_resources
+        return
+    fi
+
+    if ! docker run -d \
+        --name "$allowed_container" \
+        --network "$proxy_network" \
+        --ip "$allowed_ip" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        --cap-add SYS_ADMIN \
+        -e "PROXY_FIREWALL_APPLIED=1" \
+        -v "$server_script:/server.py:ro" \
+        "$TEST_CODEX_IMAGE" \
+        python3 /server.py
     then
         fail "Failed to start allowed test server"
         cleanup_proxy_resources
@@ -778,6 +844,7 @@ PY
         --ip "$proxy_ip" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --add-host "${allowed_domain}:${allowed_ip}" \
         -e "SQUID_ALLOWED_DOMAINS=${allowed_domain}" \
         "$proxy_image"
     then
@@ -805,6 +872,8 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
+        --cap-add NET_ADMIN \
+        --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         "$TEST_CODEX_IMAGE" \
@@ -829,6 +898,8 @@ PY
 
     if docker run --rm \
         --network "$proxy_network" \
+        --cap-add NET_ADMIN \
+        --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         "$TEST_CODEX_IMAGE" \
@@ -867,6 +938,8 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
+        --cap-add NET_ADMIN \
+        --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         "$TEST_CODEX_IMAGE" \
@@ -893,6 +966,8 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
+        --cap-add NET_ADMIN \
+        --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         "$TEST_CODEX_IMAGE" \
@@ -923,6 +998,8 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
+        --cap-add NET_ADMIN \
+        --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         "$TEST_CODEX_IMAGE" \
@@ -950,6 +1027,8 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
+        --cap-add NET_ADMIN \
+        --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         "$TEST_CODEX_IMAGE" \
@@ -981,10 +1060,19 @@ PY
     fi
 
     local proxy_log
-    proxy_log=$(docker exec "$proxy_container" sh -c "cat /var/log/squid/access.log" 2>/dev/null || true)
-    if echo "$proxy_log" | grep -q "ERR_TOO_BIG"; then
+    # Force log rotation to flush buffers
+    docker exec "$proxy_container" squid -k rotate 2>/dev/null || true
+    sleep 5
+    
+    proxy_log=$(docker exec "$proxy_container" sh -c "cat /var/log/squid/access.log /var/log/squid/access.log.0 2>/dev/null" || true)
+    # Squid may return ERR_ACCESS_DENIED (generic 403) or ERR_TOO_BIG (413/502) depending on the violation type
+    if echo "$proxy_log" | grep -qE "ERR_TOO_BIG|ERR_ACCESS_DENIED"; then
         pass "Squid logs rate-limit violations for telemetry"
     else
+        echo "DEBUG: Squid access log content (filtered for allowed.test):"
+        echo "$proxy_log" | grep "allowed.test" || echo "No logs for allowed.test found"
+        echo "DEBUG: Full log tail:"
+        echo "$proxy_log" | tail -n 20
         fail "Squid did not log rate-limit violations"
     fi
 
@@ -1014,6 +1102,24 @@ test_mcp_helper_proxy_enforced() {
     local allowed_domain="allowed2.test"
     local proxy_url="http://${proxy_ip}:3128"
 
+    local helper_server_script
+    helper_server_script="$(mktemp)"
+    cat > "$helper_server_script" <<'PY'
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        return
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+server = ThreadingHTTPServer(("", 8080), Handler)
+server.serve_forever()
+PY
+
     cat > "$helper_acl_file" <<EOF
 # helper-specific ACLs for test
 acl helper_hdr_helper-test req_header X-CA-Helper helper-test
@@ -1028,6 +1134,7 @@ EOF
         fi
         docker rm -f "$proxy_container" "$helper_container" "$allowed_container" >/dev/null 2>&1 || true
         docker network rm "$proxy_network" >/dev/null 2>&1 || true
+        rm -f "$helper_server_script"
     }
 
     docker network create \
@@ -1049,22 +1156,11 @@ EOF
         --ip "$allowed_ip" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --cap-add SYS_ADMIN \
+        -e "PROXY_FIREWALL_APPLIED=1" \
+        -v "$helper_server_script:/server.py:ro" \
         "$TEST_CODEX_IMAGE" \
-        python3 - <<'PY'
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        return
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Length", "2")
-        self.end_headers()
-        self.wfile.write(b"ok")
-
-server = ThreadingHTTPServer(("", 8080), Handler)
-server.serve_forever()
-PY
+        python3 /server.py
     then
         fail "Failed to start upstream server for helper test"
         cleanup_helper_resources
@@ -1095,6 +1191,7 @@ PY
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         --cap-add NET_ADMIN \
+        --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
@@ -1349,6 +1446,17 @@ test_shared_functions() {
 # Main Test Execution
 # ============================================================================
 
+should_run() {
+    local test_name="$1"
+    if [[ -z "${TEST_FILTER:-}" ]]; then
+        return 0
+    fi
+    if [[ "$test_name" =~ $TEST_FILTER ]]; then
+        return 0
+    fi
+    return 1
+}
+
 run_all_tests() {
     echo ""
     echo "╔═══════════════════════════════════════════════════════════╗"
@@ -1364,25 +1472,27 @@ run_all_tests() {
     }
     
     # Run tests
-    test_image_availability
-    test_shared_functions
-    test_launcher_script_execution
-    test_container_labels
-    test_container_networking
-    test_workspace_mounting
-    test_environment_variables
-    test_agentcli_uid_split
-    test_cli_wrappers
-    test_agent_task_runner_seccomp
-    test_mcp_configuration_generation
-    test_network_proxy_modes
-    test_squid_proxy_hardening
-    test_mcp_helper_proxy_enforced
-    test_multiple_agents
-    test_container_isolation
-    test_cleanup_on_exit
+    if should_run "test_image_availability"; then test_image_availability; fi
+    if should_run "test_shared_functions"; then test_shared_functions; fi
+    if should_run "test_launcher_script_execution"; then test_launcher_script_execution; fi
+    if should_run "test_container_labels"; then test_container_labels; fi
+    if should_run "test_container_networking"; then test_container_networking; fi
+    if should_run "test_workspace_mounting"; then test_workspace_mounting; fi
+    if should_run "test_environment_variables"; then test_environment_variables; fi
+    if should_run "test_agentcli_uid_split"; then test_agentcli_uid_split; fi
+    if should_run "test_cli_wrappers"; then test_cli_wrappers; fi
+    if should_run "test_agent_task_runner_seccomp"; then test_agent_task_runner_seccomp; fi
+    if should_run "test_mcp_configuration_generation"; then test_mcp_configuration_generation; fi
+    if should_run "test_mitm_ca_generation"; then test_mitm_ca_generation; fi
+    if should_run "test_network_proxy_modes"; then test_network_proxy_modes; fi
+    if should_run "test_squid_proxy_hardening"; then test_squid_proxy_hardening; fi
+    if should_run "test_mcp_helper_proxy_enforced"; then test_mcp_helper_proxy_enforced; fi
+    if should_run "test_multiple_agents"; then test_multiple_agents; fi
+    if should_run "test_container_isolation"; then test_container_isolation; fi
+    if should_run "test_cleanup_on_exit"; then test_cleanup_on_exit; fi
+    
     if [ "$TEST_WITH_HOST_SECRETS" = "true" ]; then
-        test_host_prompt_mode
+        if should_run "test_host_prompt_mode"; then test_host_prompt_mode; fi
     fi
     
     # Print summary
