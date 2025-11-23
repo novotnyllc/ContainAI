@@ -904,6 +904,35 @@ apparmor_profile_loaded() {
     return 1
 }
 
+ensure_apparmor_profile_loaded() {
+    local profile="$1"
+    local profile_file="$2"
+
+    if apparmor_profile_loaded "$profile"; then
+        return 0
+    fi
+
+    if ! is_apparmor_supported; then
+        return 1
+    fi
+
+    if [ -z "$profile_file" ] || [ ! -f "$profile_file" ]; then
+        return 1
+    fi
+
+    if [ "$(id -u 2>/dev/null || echo 1)" != "0" ]; then
+        return 1
+    fi
+
+    if command -v apparmor_parser >/dev/null 2>&1; then
+        if apparmor_parser -r -T -W "$profile_file" >/dev/null 2>&1 && apparmor_profile_loaded "$profile"; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 resolve_apparmor_profile_name() {
     local repo_root="$1"
     local profile="containai-agent"
@@ -1002,6 +1031,9 @@ verify_host_security_prereqs() {
             fi
 
             if ! apparmor_profile_loaded "$p_name"; then
+                if ensure_apparmor_profile_loaded "$p_name" "$p_file"; then
+                    continue
+                fi
                 if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
                     warnings+=("Unable to verify AppArmor profile '$p_name' without elevated privileges. Re-run './host/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$p_file'.")
                 elif [ "$current_uid" -ne 0 ] && [ -f "$p_file" ]; then
