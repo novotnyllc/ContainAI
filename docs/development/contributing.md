@@ -239,7 +239,7 @@ containai/
 │       ├── test-env.sh           # Test environment utilities
 │       ├── test-config.sh        # Test configuration (bash)
 │       └── test-config.ps1       # Test configuration (PowerShell)
-└── CONTRIBUTING.md          # This file
+└── docs/development/contributing.md          # This file
 ```
 
 ## Submitting Changes

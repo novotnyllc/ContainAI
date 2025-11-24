@@ -54,7 +54,7 @@ Tips:
 - The `--with-host-secrets` flag works in both DinD and host isolation. In DinD mode, the harness securely copies your secrets file into the sandbox, deletes it after the run, and then runs a prompt-mode `--prompt` flow (currently Copilot) against your real repo. Add `--isolation host` only if you explicitly want to run on the host daemon.
 - Windows users can run the bash tests inside WSL2. The PowerShell wrappers simply call the bash versions in WSL, so the same flags apply—just prefix commands with `--%` when passing GNU-style options.
 
-For deeper explanations of each suite, consult [scripts/test/README.md](../scripts/test/README.md).
+For deeper explanations of each suite, consult [scripts/test/README.md](../../scripts/test/README.md).
 
 ## 3. Publishing Changes
 

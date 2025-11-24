@@ -75,14 +75,14 @@ We strip the container of ability to attack the host kernel.
 Standard containers are passive. We inject an active supervisor: the **Agent Task Runner** (Rust).
 
   * **Mechanism:** Uses `SECCOMP_RET_USER_NOTIF` to intercept every `execve` call at the kernel level.
-  * **Why this beats gVisor:** gVisor provides "Blind Isolation" (containing the blast). Our Task Runner provides **Semantic Mediation** (preventing the blast). It validates arguments (e.g., blocking `rm -rf /`) *before* execution and injects credentials JIT—capabilities gVisor lacks due to missing user-notification support.
+  * **Why this beats gVisor:** gVisor provides "Blind Isolation" (containing the blast). Our Task Runner provides **Semantic Mediation** (preventing the blast). It validates execution paths (e.g., blocking execution of binaries from sensitive mounts) *before* execution.
   * **Sanitization:** Spawns approved commands in a **Sanitized Namespace**, unmounting sensitive paths so tools cannot see secrets.
 
 #### Layer 3: Identity Brokerage (The Wallet)
 
   * **The Broker:** A host daemon (`secret-broker.py`) holds master keys.
   * **The Protocol:** The container holds only a short-lived "Capability Token."
-  * **The Handshake:** When a tool needs a key, a stub binary exchanges the token for the real key, injects it into **RAM** (`tmpfs`) for milliseconds, executes the request, and wipes memory.
+  * **The Handshake:** When a tool needs a key, a stub binary exchanges the token for the real key, injects it into the process environment/memory for milliseconds, executes the request, and the process exits. Secrets are never written to disk.
 
 #### Layer 4: Network Governance
 

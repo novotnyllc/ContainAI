@@ -1,6 +1,6 @@
 # Getting Started with ContainAI
 
-This guide covers the installation and basic usage of ContainAI. You do not need to clone the repository—just run the installer. If you are developing or contributing, see [Building from Source](building-from-source.md).
+This guide covers the installation and basic usage of ContainAI. You do not need to clone the repository—just run the installer. If you prefer to install from source or need a custom setup, see [Manual Installation](usage/manual-installation.md).
 
 ## TL;DR
 

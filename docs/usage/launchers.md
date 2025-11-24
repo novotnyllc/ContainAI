@@ -137,7 +137,25 @@ run-codex --no-push      # Launch without auto-push
 run-claude ~/other-proj  # Launch on specific directory
 ```
 
-### 2. Persistent Launchers (`launch-agent`) - ADVANCED
+### 2. Prompt Sessions
+
+When you only need an answer (no repo work), pass `--prompt "<prompt>"` (same flag on Windows via the shim) to **any** `run-*` launcher:
+
+```bash
+run-copilot --prompt "Return the words: host secrets OK."
+run-codex --prompt "Describe the branching policy"
+run-claude --prompt "List required secrets"
+```
+
+Characteristics:
+- Works uniformly for Copilot, Codex, and Claude. The launcher invokes the correct CLI (`github-copilot-cli exec`, `codex exec`, or `claude -p`) inside the container and exits once the response has streamed.
+- Reuses your current Git repository automatically (auto-detecting the repo root even when you run from a subdirectory) and falls back to an empty workspace only when no repo exists.
+- Accepts repo arguments plus `--branch` or `--use-current-branch` just like a normal session. Auto-push stays enabled whenever a real repo is mounted and is only forced off when the launcher has to synthesize an empty workspace.
+- Uses the same security preflights, manifest hashing, and secret-broker flow as repo-backed sessions, so host secrets remain protected.
+
+This is also the path exercised by `./scripts/test/integration-test.sh --with-host-secrets`, so documenting and testing it ensures parity across all agents.
+
+### 3. Persistent Launchers (`launch-agent`) - ADVANCED
 
 For long-running tasks or when you need advanced features. Containers run in background and support branch management, network controls, and .NET preview installs.
 
@@ -239,7 +257,7 @@ launch-agent copilot --network-proxy restricted   # No outbound network
 launch-agent copilot --network-proxy squid        # Proxy with logging
 ```
 
-See [docs/network-proxy.md](../network-proxy.md) for network configuration details.
+See [docs/usage/network-proxy.md](network-proxy.md) for network configuration details.
 
 ## Multiple Agents, Same Repo
 

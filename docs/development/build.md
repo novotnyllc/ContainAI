@@ -395,5 +395,5 @@ A: Yes, but consider if they should be pre-installed (bloats image) or installed
 ---
 
 **Next Steps:**
-- See [../USAGE.md](../USAGE.md) for end-user guide
+- See [../USAGE.md](../../USAGE.md) for end-user guide
 - See [architecture.md](architecture.md) for system design

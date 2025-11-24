@@ -1,6 +1,6 @@
-# Building ContainAI from Source
+# Manual Installation (From Source)
 
-This guide covers how to build ContainAI from source and set up a local development environment. For standard installation, see [Getting Started](getting-started.md).
+This guide covers how to install ContainAI from source. For the standard automatic installation, see [Getting Started](../getting-started.md).
 
 **Total Time**: 20-50 minutes (first time)
 
@@ -572,11 +572,11 @@ connect-agent
 
 ### Read Documentation
 
-- [Usage Guide](../USAGE.md) - Detailed usage patterns
+- [Usage Guide](../../USAGE.md) - Detailed usage patterns
 - [Architecture](architecture.md) - How it works
 - [Network Proxy](network-proxy.md) - Network isolation modes
 - [MCP Setup](mcp-setup.md) - Configure Model Context Protocol servers
-- [Contributing](../CONTRIBUTING.md) - Development guide
+- [Contributing](../../CONTRIBUTING.md) - Development guide
 
 ### Configure MCP Servers (Optional)
 
@@ -687,8 +687,8 @@ docker logs <container-name>
 
 ### More Help
 
-- [Full Troubleshooting Guide](../TROUBLESHOOTING.md)
-- [Usage Guide FAQ](../USAGE.md#faq)
+- [Full Troubleshooting Guide](troubleshooting.md)
+- [Usage Guide FAQ](../../USAGE.md#faq)
 - [GitHub Issues](https://github.com/novotnyllc/ContainAI/issues)
 
 ## Uninstalling ContainAI

@@ -33,6 +33,7 @@ Each AI agent runs in an isolated Docker container with:
 - **AppArmor confinement:** `host/profiles/apparmor-containai-agent.profile` is loaded as `containai-agent` to deny `/proc` and `/sys` writes
 - **Capabilities dropped:** `--cap-drop=ALL` removes all Linux capabilities
 - **Process limits:** `--pids-limit=4096` prevents fork bomb attacks
+- **Active Process Supervision:** The `agent-task-runner` daemon monitors process execution (via `seccomp` notifications) to enforce policy and log activity
 - **Resource limits:** CPU and memory limits prevent resource exhaustion
 - **No Docker socket access:** Containers cannot control the Docker daemon
 - **Helper sandboxing:** Helper runners inherit the same seccomp profile, run with `--network none` (unless explicitly overridden), and keep configs/secrets inside per-helper tmpfs mounts (`nosuid,nodev,noexec`)

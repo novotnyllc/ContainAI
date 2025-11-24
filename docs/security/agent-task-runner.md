@@ -52,7 +52,7 @@ sequenceDiagram
 
 | Guarantee | Mechanism | Notes |
 | --- | --- | --- |
-| Secrets never leave tmpfs | Entrypoint mounts `/run/agent-secrets` and `/run/agent-data` as `tmpfs` with `mode=000`; sandbox helper remounts them private/unbindable and workloads run as `agentuser`. | Documented in `docs/secret-credential-security-review.md` §4–5. |
+| Secrets never leave tmpfs | Entrypoint mounts `/run/agent-secrets` and `/run/agent-data` as `tmpfs` with `mode=000`; sandbox helper remounts them private/unbindable and workloads run as `agentuser`. | Documented in [secret-credential-security-review.md](secret-credential-security-review.md) §4–5. |
 | Every workload is logged | Runner assigns each command the agent/binary/session metadata carried by the wrapper and emits structured JSON events (`/run/agent-task-runner/events.log`). | Log format defined in `agent_task_runnerd.rs` (`Event` struct). |
 | Policy enforcement even when wrappers fail | `agentcli-exec` installs a seccomp user-notification filter on `execve`/`execveat`; daemon can deny or allow after inspecting `/proc/<pid>/exe`. | Violations return `EPERM` and increment anomaly counter. |
 | Namespace, AppArmor, seccomp applied before user code | `agent-task-sandbox` unshares, remounts hide paths (`--hide`), drops to `agentuser`, calls `prctl(PR_SET_NO_NEW_PRIVS,1)`, then loads the `containai-task` profile before final `execve`. | Prevents privileged syscalls (ptrace, mount, perf, raw sockets, etc.). |
@@ -77,9 +77,9 @@ sequenceDiagram
 
 ## 7. Related Documents
 
-- `docs/secret-credential-security-review.md` – Broader architecture, threat model, and credential lifecycle.
-- `docs/security-workflows.md` – Incident response procedures and audit tooling.
-- `docs/local-build-and-test.md` – How to rebuild the base image and run the test suites mentioned above.
-- `docs/architecture.md` – High-level system diagram; this document drills into the runner-specific portion of that graph.
+- [secret-credential-security-review.md](secret-credential-security-review.md) – Broader architecture, threat model, and credential lifecycle.
+- [workflows.md](workflows.md) – Incident response procedures and audit tooling.
+- [development/workflow.md](../development/workflow.md) – How to rebuild the base image and run the test suites mentioned above.
+- [architecture.md](architecture.md) – High-level system diagram; this document drills into the runner-specific portion of that graph.
 
 For questions or change requests, contact the security owner listed in `CODEOWNERS` for the `docker/runtime/agent-task-runner/**` path. Any modification to runner binaries **must** include updates to this document and the security review notes.

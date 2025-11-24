@@ -110,7 +110,7 @@ Most users should use `launch-agent` instead.
 
 ## Command Reference
 
-Quick commands are listed here; see [docs/cli-reference.md](../cli-reference.md) for the complete list and flag reference.
+Quick commands are listed here; see [docs/usage/cli-reference.md](cli-reference.md) for the complete list and flag reference.
 
 ### Run Agent (Recommended)
 ```bash
@@ -213,7 +213,7 @@ A: Yes, use `docker exec -it <container> bash` for a terminal.
 ---
 
 **Next Steps:**
-- See [docs/build.md](../build.md) if building images yourself
-- See [docs/architecture.md](../architecture.md) for system design
-- See [docs/network-proxy.md](../network-proxy.md) for network configuration
+- See [docs/development/build.md](../development/build.md) if building images yourself
+- See [docs/security/architecture.md](../security/architecture.md) for system design
+- See [docs/usage/network-proxy.md](network-proxy.md) for network configuration
 - See [scripts/test/README.md](../../scripts/test/README.md) for testing procedures

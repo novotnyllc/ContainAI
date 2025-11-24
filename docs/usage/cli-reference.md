@@ -1044,8 +1044,8 @@ $env:TZ = "America/New_York"
 ## Further Reading
 
 - [Getting Started Guide](getting-started.md) - First-time setup
-- [Usage Guide](../USAGE.md) - Detailed usage patterns
+- [Usage Guide](../../USAGE.md) - Detailed usage patterns
 - [MCP Setup](mcp-setup.md) - Configure MCP servers
-- [Troubleshooting](../TROUBLESHOOTING.md) - Common issues
+- [Troubleshooting](troubleshooting.md) - Common issues
 - [Architecture](architecture.md) - How it works
-- [Contributing](../CONTRIBUTING.md) - Development guide
+- [Contributing](../../CONTRIBUTING.md) - Development guide

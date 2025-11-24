@@ -571,19 +571,28 @@ flowchart TB
 flowchart TB
     dev["Developer (create config.toml)"]
     toml["Container /workspace/config.toml"]
-    converter["convert-toml-to-mcp.py"]
-    json["Agent-specific JSON configs"]
-    mcp["MCP servers activated"]
-    
+    renderer["render-session-config.py<br/>(host)"]
+    manifest["Session manifest + stub spec<br/>/run/containai"]
+    agentCfgs["Per-agent config.json<br/>~/.config/<agent>/mcp/"]
+    stub["mcp-stub"]
+    broker["Secret broker"]
+    mcp["MCP servers"]
+
     dev --> toml
-    toml -->|"startup script"| converter
-    converter -->|"parse + convert"| json
-    json -->|"agents read"| mcp
-    
+    toml -->|"read by"| renderer
+    renderer -->|"generates"| manifest
+    manifest -->|"mounted to"| agentCfgs
+    agentCfgs -->|"read by"| stub
+    stub -->|"redeems secrets"| broker
+    stub -->|"launches"| mcp
+
     style dev fill:#e1f5ff,stroke:#0366d6
     style toml fill:#fff3cd,stroke:#856404
-    style converter fill:#d4edda,stroke:#28a745
-    style json fill:#d4edda,stroke:#28a745
+    style renderer fill:#d4edda,stroke:#28a745
+    style manifest fill:#fff3cd,stroke:#856404
+    style agentCfgs fill:#d4edda,stroke:#28a745
+    style stub fill:#d4edda,stroke:#28a745
+    style broker fill:#d4edda,stroke:#28a745
     style mcp fill:#f8d7da,stroke:#721c24
 ```
 
@@ -678,6 +687,6 @@ flowchart TB
 ---
 
 **For more details:**
-- [build.md](build.md) - Building and publishing images
-- [../USAGE.md](../USAGE.md) - Using the agents
-- [network-proxy.md](network-proxy.md) - Network configuration
+- [build.md](../development/build.md) - Building and publishing images
+- [../USAGE.md](../../USAGE.md) - Using the agents
+- [network-proxy.md](../usage/network-proxy.md) - Network configuration

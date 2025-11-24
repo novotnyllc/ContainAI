@@ -670,7 +670,7 @@ MY_API_KEY = "$MY_API_KEY"
 - [MCP Server Registry](https://github.com/modelcontextprotocol/servers)
 - [Building MCP Servers](https://modelcontextprotocol.io/docs/building-servers)
 - [MCP SDK Documentation](https://github.com/modelcontextprotocol/typescript-sdk)
-- [Security Best Practices](../SECURITY.md)
+- [Security Best Practices](../../SECURITY.md)
 
 ## Summary
 
@@ -681,4 +681,4 @@ MY_API_KEY = "$MY_API_KEY"
 5. ✅ Launch agent - MCP servers auto-configured
 6. ✅ Test by asking agent to use MCP capabilities
 
-Need help? See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) or [open an issue](https://github.com/novotnyllc/ContainAI/issues).
+Need help? See [TROUBLESHOOTING.md](troubleshooting.md) or [open an issue](https://github.com/novotnyllc/ContainAI/issues).

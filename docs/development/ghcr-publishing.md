@@ -177,10 +177,16 @@ sequenceDiagram
 ### OCI Artifacts
 - **Payload**: `ghcr.io/<owner>/containai-payload`
     - Contains the installer scripts and host tools.
-    - Media Type: `application/vnd.containai.payload.layer.v1+gzip`
+    - Artifact Type: `application/vnd.containai.payload.v1`
+    - Layer Type: `application/vnd.containai.payload.layer.v1+gzip`
+- **Installer**: `ghcr.io/<owner>/containai-installer`
+    - Contains the standalone installer script.
+    - Artifact Type: `application/vnd.containai.installer.v1`
+    - Layer Type: `application/vnd.containai.installer.v1+sh`
 - **Metadata**: `ghcr.io/<owner>/containai-metadata`
     - Contains the JSON mapping of channels to versions.
-    - Media Type: `application/vnd.oci.image.config.v1+json`
+    - Artifact Type: `application/vnd.containai.metadata.v1+json`
+    - Layer Type: `application/json`
 
 ## Operations & Recovery
 
