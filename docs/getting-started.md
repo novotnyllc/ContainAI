@@ -12,11 +12,12 @@ This guide will walk you through setting up ContainAI from scratch, even if you'
 - [Step 3: Install GitHub CLI (Optional)](#step-3-install-github-cli-optional)
 - [Step 4: Authenticate GitHub CLI (Optional)](#step-4-authenticate-github-cli-optional)
 - [Step 5: Verify Your Setup](#step-5-verify-your-setup)
-- [Step 6: Clone ContainAI](#step-6-clone-ContainAI)
+- [Step 6: Clone ContainAI](#step-6-clone-containai)
 - [Step 7: (Optional) Pre-fetch or Build Images](#step-7-optional-pre-fetch-or-build-images)
-- [Step 8: Install Launcher Scripts](#step-8-install-launcher-scripts)
-- [Step 9: First Launch](#step-9-first-launch)
-- [Step 10: Connect from VS Code](#step-10-connect-from-vs-code-optional)
+- [Step 8: Install Security Profiles (Linux/WSL)](#step-8-install-security-profiles-linuxwsl)
+- [Step 9: Install Launcher Scripts](#step-9-install-launcher-scripts)
+- [Step 10: First Launch](#step-10-first-launch)
+- [Step 11: Connect from VS Code](#step-11-connect-from-vs-code-optional)
 - [Detaching and Reconnecting](#detaching-and-reconnecting)
 - [Next Steps](#next-steps)
 - [Troubleshooting](#troubleshooting)
@@ -347,7 +348,20 @@ docker images | grep containai
 # Shows the tags you just pulled or built
 ```
 
-## Step 8: Install Launcher Scripts
+## Step 8: Install Security Profiles (Linux/WSL)
+
+On Linux/WSL, AppArmor must be active and the ContainAI profiles must be loaded locally. Docker Desktop on macOS/Windows already runs inside a VM with AppArmor enabled, so you can skip this step there. Reload the profiles any time you pull changes that touch `host/profiles/*.profile`.
+
+```bash
+sudo apt-get install -y apparmor-utils  # if apparmor_parser is missing
+sudo apparmor_parser -r host/profiles/apparmor-containai-agent.profile
+sudo apparmor_parser -r host/profiles/apparmor-containai-proxy.profile
+sudo apparmor_parser -r host/profiles/apparmor-containai-log-forwarder.profile
+```
+
+`host/utils/check-health.sh` will warn if the loaded profiles drift from the repo. Re-running the three commands above keeps the kernel copies in sync with your working tree.
+
+## Step 9: Install Launcher Scripts
 
 If you're installing from a packaged release (no repo checkout), run the curlable installer:
 
@@ -394,7 +408,7 @@ where.exe run-copilot-dev  # Windows
 # Should show path to host/launchers/entrypoints/run-copilot-dev
 ```
 
-## Step 9: First Launch
+## Step 10: First Launch
 
 Time to launch your first agent! Before any container starts, the launcher automatically verifies host security requirements and seeds the secret broker.
 
@@ -487,7 +501,7 @@ docker ps
 # Should show running container: copilot-myproject-feature-auth
 ```
 
-## Step 10: Connect from VS Code (Optional)
+## Step 11: Connect from VS Code (Optional)
 
 For the best experience, connect VS Code to your running container:
 

@@ -40,7 +40,6 @@ seccomp-containai-log-forwarder.json $seccomp_fwd_hash
 apparmor-containai-log-forwarder.profile $apparmor_fwd_hash
 EOF
 
-    # AppArmor is mandatory; require parser and enabled kernel flag.
     if ! command -v apparmor_parser >/dev/null 2>&1; then
         die "AppArmor tools missing; install apparmor-utils and retry."
     fi

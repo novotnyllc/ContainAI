@@ -12,6 +12,13 @@ This document details the bootstrap installation process, focusing on channel re
 
 The installer operates as a stateless bootstrapper that resolves a "Channel" (e.g., `dev`, `prod`) to a specific immutable "Payload Digest". It then fetches that payload from GHCR without requiring authentication.
 
+### Transport Delivery
+
+- **Prod/Tagged**: Publish `containai-<tag>.tar.gz` as a GitHub Release asset with a DSSE attestation. Installer verifies transport and SBOM attestations; failures are fatal.
+- **Nightly/Dev**: Push payload tar to OCI and generate cosign bundles for transport + SBOM stored as CI artifacts. Installer detects channel from the bundled `profile.env` (sourced from `artifacts/publish/profile.env`) and only tolerates missing attestations for `channel=dev`; all other channels fail closed.
+
+The installer extracts the contents, verifies `SHA256SUMS` across the extracted files, and uses `tools/cosign-root.pem` to validate attestations.
+
 ```mermaid
 flowchart LR
     User["User"] -->|Runs| Script["install.sh"]
@@ -137,13 +144,13 @@ To test the installer with a local build:
 
 1. **Build the payload**:
    ```bash
-   ./scripts/build/build-payload.sh
+   ./scripts/release/package.sh --version dev --out artifacts/publish
    ```
 2. **Run the installer in local mode**:
    ```bash
-   ./install.sh --local-payload ./dist/containai-payload.tar.gz
+   ./install.sh --local-payload ./artifacts/publish/dev-<gitsha>/containai-dev-<gitsha>.tar.gz
    ```
-   This bypasses the GHCR fetch and verification steps, using the local tarball instead.
+   The tarball path lives under the git-ignored `artifacts/publish/<version>/` tree (printed by `package.sh`). This bypasses the GHCR fetch and verification steps, using the local tarball instead.
 
 ## Windows Integration
 

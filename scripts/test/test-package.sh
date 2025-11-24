@@ -4,57 +4,105 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ARTIFACTS_ROOT="$PROJECT_ROOT/artifacts"
 
-WORK_DIR="$(mktemp -d)"
+mkdir -p "$ARTIFACTS_ROOT/test"
+WORK_DIR="$(mktemp -d "$ARTIFACTS_ROOT/test/work-XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 BIN_DIR="$WORK_DIR/bin"
 mkdir -p "$BIN_DIR"
 export PATH="$BIN_DIR:$PATH"
 
-SBOM_FILE="$WORK_DIR/payload.sbom.json"
-echo '{"bomFormat":"CycloneDX","dependencies":[]}' > "$SBOM_FILE"
-SBOM_ATTEST="$WORK_DIR/payload.sbom.json.intoto.jsonl"
-echo '{"attestation":"placeholder"}' > "$SBOM_ATTEST"
+UTILS_DIR="$WORK_DIR/utils"
+rsync -a "$PROJECT_ROOT/host/utils/" "$UTILS_DIR/"
 
 VERSION="test-$(date +%s)"
-DIST_DIR="$WORK_DIR/dist"
+OUT_DIR="$ARTIFACTS_ROOT/test/publish"
+PROFILE_ENV="$OUT_DIR/profile.env"
+
+mkdir -p "$(dirname "$PROFILE_ENV")"
+cat > "$PROFILE_ENV" <<'EOF'
+PROFILE=dev
+IMAGE_PREFIX=containai-test
+IMAGE_TAG=dev
+REGISTRY=ghcr.io/containai/test
+IMAGE_DIGEST=sha256:dummy
+IMAGE_DIGEST_COPILOT=sha256:dummy
+IMAGE_DIGEST_CODEX=sha256:dummy
+IMAGE_DIGEST_CLAUDE=sha256:dummy
+IMAGE_DIGEST_PROXY=sha256:dummy
+IMAGE_DIGEST_LOG_FORWARDER=sha256:dummy
+EOF
+
+# Overwrite security-enforce.sh in the copied utils to avoid AppArmor loading (test-only).
+cat > "$UTILS_DIR/security-enforce.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source=host/utils/common-functions.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common-functions.sh"
+
+enforce_security_profiles_strict() {
+    local install_root="$1"
+    local profile_dir="$install_root/host/profiles"
+    local seccomp_agent="$profile_dir/seccomp-containai-agent.json"
+    local seccomp_proxy="$profile_dir/seccomp-containai-proxy.json"
+    local seccomp_fwd="$profile_dir/seccomp-containai-log-forwarder.json"
+    [[ -f "$seccomp_agent" && -f "$seccomp_proxy" && -f "$seccomp_fwd" ]] || die "Seccomp profiles missing in $profile_dir"
+    [[ -f "$profile_dir/apparmor-containai-agent.profile" ]] || die "AppArmor profile missing in $profile_dir"
+    [[ -f "$profile_dir/apparmor-containai-proxy.profile" ]] || die "AppArmor proxy profile missing in $profile_dir"
+    [[ -f "$profile_dir/apparmor-containai-log-forwarder.profile" ]] || die "AppArmor log-forwarder profile missing in $profile_dir"
+    # Skip apparmor_parser invocation in smoke test to avoid sudo/kernel requirements.
+}
+
+if [[ "${1:-}" == "--verify" ]]; then
+    enforce_security_profiles_strict "${2:-}"
+fi
+EOF
+chmod +x "$UTILS_DIR/security-enforce.sh"
+
+# Allow non-root installs in tests by removing the root guard in the copied installer.
+perl -0pi -e 's/^if \[\[ \$\(id -u\) -ne 0 \]\]; then\n    die "System installs must run as root"\nfi\n\n//' "$UTILS_DIR/install-release.sh"
+# Remove install_parent ownership enforcement for test installs.
+perl -0777 -pi -e 's/install_parent="\$\(cd "\$\(dirname "\$INSTALL_ROOT"\)" && pwd\)"\n.*?\nEXTRACT_DIR="\$\(mktemp -d\)"/EXTRACT_DIR="$(mktemp -d)"/s' "$UTILS_DIR/install-release.sh"
+# Point cosign root to the local copy for offline tests and relax installer integrity (tests only).
+COSIGN_LOCAL_URL="file://$UTILS_DIR/cosign-root.pem"
+COSIGN_LOCAL_SHA=$(sha256sum "$UTILS_DIR/cosign-root.pem" | awk '{print $1}')
+perl -0777 -pi -e "s#^COSIGN_ROOT_URL=.*#COSIGN_ROOT_URL=\"$COSIGN_LOCAL_URL\"#; s/^COSIGN_ROOT_EXPECTED_SHA256=.*/COSIGN_ROOT_EXPECTED_SHA256=\"$COSIGN_LOCAL_SHA\"/; s/^INSTALLER_SELF_SHA256=.*/INSTALLER_SELF_SHA256=\"RELAXED\"/; s/verify_self_integrity\\(\\)\\s*{.*?}\\n/verify_self_integrity(){ :; }\\n/s; s/fetch_trust_anchor\\(\\)\\s*{.*?}\\n/fetch_trust_anchor(){ TRUST_ANCHOR_PATH=\"$UTILS_DIR/cosign-root.pem\"; }\\n/s" "$UTILS_DIR/install-release.sh"
+perl -0777 -pi -e 's/Function\s+Assert-SelfIntegrity\s*{.*?}\s*/Function Assert-SelfIntegrity { return }\n/is; s/\$InstallerSelfSha256\s*=\s*\"[^\"]*\"/\$InstallerSelfSha256 = "RELAXED"/' "$UTILS_DIR/install-release.ps1"
 
 echo "🔨 Running package.sh..."
-if ! "$PROJECT_ROOT/scripts/release/package.sh" --version "$VERSION" --out "$DIST_DIR" --sbom "$SBOM_FILE" --sbom-att "$SBOM_ATTEST"; then
+if ! "$PROJECT_ROOT/scripts/release/package.sh" --version "$VERSION" --out "$OUT_DIR" --profile-env "$PROFILE_ENV"; then
     echo "❌ package.sh failed" >&2
     exit 1
 fi
 
-PAYLOAD_DIR="$DIST_DIR/$VERSION/payload"
+PAYLOAD_DIR="$OUT_DIR/$VERSION/payload"
 [[ -d "$PAYLOAD_DIR" ]] || { echo "❌ Payload directory missing"; exit 1; }
 [[ -f "$PAYLOAD_DIR/host/profiles/seccomp-containai-agent.json" ]] || { echo "❌ seccomp profile missing in payload"; exit 1; }
 [[ -f "$PAYLOAD_DIR/install.sh" ]] || { echo "❌ install.sh missing in payload"; exit 1; }
 
-# Simulate release artifact tar.gz
-PAYLOAD_TGZ="$DIST_DIR/$VERSION/containai-payload-$VERSION.tar.gz"
-tar -czf "$PAYLOAD_TGZ" -C "$PAYLOAD_DIR" .
+PAYLOAD_TGZ="$OUT_DIR/$VERSION/containai-$VERSION.tar.gz"
+[[ -f "$PAYLOAD_TGZ" ]] || { echo "❌ Expected transport tarball missing: $PAYLOAD_TGZ"; exit 1; }
 
 INSTALL_ROOT="$WORK_DIR/install"
 echo "🏗️  Installing to $INSTALL_ROOT"
-"$PROJECT_ROOT/host/utils/install-release.sh" \
+"$UTILS_DIR/install-release.sh" \
     --version "$VERSION" \
-    --asset-dir "$DIST_DIR/$VERSION" \
+    --asset-dir "$OUT_DIR/$VERSION" \
     --repo "local/test" \
-    --install-root "$INSTALL_ROOT" \
-    --allow-nonroot
+    --install-root "$INSTALL_ROOT"
 
 CURRENT_PATH="$(readlink -f "$INSTALL_ROOT/current")"
 [[ -d "$CURRENT_PATH" ]] || { echo "❌ current symlink missing"; exit 1; }
 [[ -f "$CURRENT_PATH/install.meta" ]] || { echo "❌ install.meta missing"; exit 1; }
 
 echo "🔍 Verifying install via --verify-only"
-"$PROJECT_ROOT/host/utils/install-release.sh" \
+"$UTILS_DIR/install-release.sh" \
     --version "$VERSION" \
-    --asset-dir "$DIST_DIR/$VERSION" \
+    --asset-dir "$OUT_DIR/$VERSION" \
     --repo "local/test" \
     --install-root "$INSTALL_ROOT" \
-    --allow-nonroot \
     --verify-only
 
 echo "✅ Packaging/install smoke tests passed"

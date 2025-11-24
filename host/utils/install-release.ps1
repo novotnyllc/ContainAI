@@ -1,18 +1,10 @@
 #!/usr/bin/env pwsh
 <#!
 .SYNOPSIS
-Installs a ContainAI release artifact (tar.gz) from GitHub Releases or a local asset directory.
+Thin PowerShell shim that delegates ContainAI installs to the canonical Bash installer via WSL.
 
 .DESCRIPTION
-Expects a versioned payload asset named containai-payload-<version>.tar.gz that contains:
-  - host/, agent-configs/, config.toml, tools/, SBOM files
-  - SHA256SUMS and payload.sha256 (hash of SHA256SUMS)
-
-Steps:
-  - Download or locate the payload tar.gz (or an already-extracted payload dir)
-  - Verify payload.sha256 against SHA256SUMS
-  - Copy payload into <install-root>/releases/<version>, write profile manifest
-  - Run integrity-check with the embedded SHA256SUMS
+Keeps installer logic in one place (host/utils/install-release.sh). Performs minimal validation and WSL path conversion, then executes the Bash script with the provided arguments.
 #>
 
 [CmdletBinding()]
@@ -22,126 +14,85 @@ param(
     [string]$Repo = $env:GITHUB_REPOSITORY,
     [string]$InstallRoot = "/opt/containai",
     [string]$AssetDir,
-    [switch]$AllowNonRoot,
     [switch]$VerifyOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Write-Die($Message) { Write-Error $Message; exit 1 }
+$InstallerSelfSha256 = "__INSTALLER_SELF_SHA256__"
 
-if (-not $Repo) { Write-Die "--Repo or GITHUB_REPOSITORY env is required" }
-
-$PayloadAssetName = "containai-payload-$Version.tar.gz"
-$ReleaseDir = Join-Path $InstallRoot "releases/$Version"
-$ExtractDir = New-Item -ItemType Directory -Force -Path ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "containai-$Version-$(Get-Random)"))
-$AssetPath = $null
-
-if (-not $AllowNonRoot) {
-    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    if (-not $isAdmin) { Write-Die "System installs require Administrator/root; use -AllowNonRoot only for tests." }
-    if ($InstallRoot.StartsWith($env:USERPROFILE)) { Write-Die "Install root cannot be under the current user profile." }
+function Assert-SelfIntegrity {
+    if ($InstallerSelfSha256 -eq "__INSTALLER_SELF_SHA256__") { throw "Installer self-hash not injected; repackage artifacts." }
+    $content = Get-Content -Raw -LiteralPath $MyInvocation.MyCommand.Path
+    $redacted = [regex]::Replace($content, 'InstallerSelfSha256="[^"]*"', 'InstallerSelfSha256="__REDACTED__"')
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($redacted)
+    $computed = ($hasher.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join ""
+    if ($computed -ne $InstallerSelfSha256.ToLower()) {
+        throw "Installer integrity check failed; expected $InstallerSelfSha256 got $computed"
+    }
 }
 
-function Find-PayloadDir {
-    param([string]$BasePath)
-    $sha = Get-ChildItem -Path $BasePath -Filter "SHA256SUMS" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $sha) { Write-Die "SHA256SUMS not found in payload assets" }
-    $payloadDir = $sha.Directory.FullName
-    $payloadSha = Join-Path $payloadDir "payload.sha256"
-    if (-not (Test-Path $payloadSha)) { Write-Die "payload.sha256 missing alongside SHA256SUMS" }
-    return @{ Dir = $payloadDir; Sha = $payloadSha; ShaSums = $sha.FullName }
-}
+Assert-SelfIntegrity
 
-function Test-PayloadHash {
-    param([string]$ShaFile, [string]$ShaSumsPath)
-    $expected = (Get-Content -Path $ShaFile -TotalCount 1).Split(' ',[System.StringSplitOptions]::RemoveEmptyEntries)[0]
-    if (-not $expected) { Write-Die "Expected hash for SHA256SUMS not found in payload.sha256" }
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $ShaSumsPath).Hash
-    if ($actual.ToLower() -ne $expected.ToLower()) {
-        Write-Die "Payload hash mismatch (expected $expected got $actual)"
+. "$PSScriptRoot/wsl-shim.ps1"
+
+if (-not $Repo) { throw "--Repo or GITHUB_REPOSITORY env is required" }
+
+$wslInstallRoot = Convert-ToWslPath -Path $InstallRoot
+
+$argsList = @("--version", $Version, "--install-root", $wslInstallRoot, "--repo", $Repo)
+if ($AssetDir) { $argsList += @("--asset-dir", (Convert-ToWslPath -Path $AssetDir)) }
+if ($VerifyOnly) { $argsList += "--verify-only" }
+
+$exitCode = Invoke-ContainAIWslScript -ScriptRelativePath "host/utils/install-release.sh" -Arguments $argsList
+if ($exitCode -ne 0) { exit $exitCode }
+
+if (-not $VerifyOnly) {
+    $wslExe = Get-WslExecutablePath
+    if ($null -ne $wslExe) {
+        $launchersWsl = "$wslInstallRoot/current/host/launchers/entrypoints"
+        $utilsWsl = "$wslInstallRoot/current/host/utils"
+
+        $launchersWin = (& $wslExe wslpath -w $launchersWsl 2>&1).Trim()
+        $utilsWin = (& $wslExe wslpath -w $utilsWsl 2>&1).Trim()
+
+        if ([string]::IsNullOrWhiteSpace($launchersWin) -or [string]::IsNullOrWhiteSpace($utilsWin)) {
+            Write-Warning "Could not translate WSL install paths to Windows paths; PATH update skipped."
+        } else {
+            $shimRoot = Join-Path $env:LOCALAPPDATA "ContainAI"
+            $shimLaunchers = Join-Path $shimRoot "host\launchers\entrypoints"
+            $shimUtils = Join-Path $shimRoot "host\utils"
+
+            New-Item -ItemType Directory -Force -Path $shimLaunchers | Out-Null
+            New-Item -ItemType Directory -Force -Path $shimUtils | Out-Null
+
+            try {
+                Copy-Item -Recurse -Force -Filter *.ps1 -Path (Join-Path $launchersWin '*') -Destination $shimLaunchers
+                Copy-Item -Recurse -Force -Filter *.ps1 -Path (Join-Path $utilsWin '*') -Destination $shimUtils
+                Write-Output "✓ Synced PowerShell shims to $shimRoot"
+            } catch {
+                Write-Warning ("Failed to sync PowerShell shims to {0}: {1}" -f $shimRoot, $_)
+            }
+
+            # Add Windows shim launchers to PATH.
+            $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+            $inUserPath = ($userPath -split ';') -contains $shimLaunchers
+            if (-not $inUserPath) {
+                $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $shimLaunchers } else { "$shimLaunchers;$userPath" }
+                [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+                Write-Output "✓ Added $shimLaunchers to your User PATH."
+            } else {
+                Write-Output "✓ Launchers already present in User PATH."
+            }
+
+            if (-not (($env:Path -split ';') -contains $shimLaunchers)) {
+                $env:Path = "$shimLaunchers;$env:Path"
+                Write-Output "✓ Updated current session PATH."
+            }
+
+            Write-Output "Launchers available via: $shimLaunchers"
+        }
     }
-    Write-Output "SHA256 verified for payload contents"
-}
-
-function Expand-PayloadTar {
-    param([string]$TarGzPath, [string]$Destination)
-    if (Test-Path $Destination) { Remove-Item -Recurse -Force $Destination }
-    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-    tar -xzf $TarGzPath -C $Destination
-}
-
-if ($VerifyOnly) {
-    Write-Output "🔍 Verifying existing install at $InstallRoot/current"
-    $current = Join-Path $InstallRoot "current"
-    if (-not (Test-Path $current)) { Write-Die "No current symlink under $InstallRoot" }
-    $target = (Get-Item $current).Target
-    if (-not (Test-Path $target)) { Write-Die "Current symlink target missing: $target" }
-    & "$PSScriptRoot/integrity-check.ps1" -Mode prod -Root $target -Sums (Join-Path $target "SHA256SUMS")
-    Write-Output "✅ Existing install verified."
-    exit 0
-}
-
-try {
-    if ($AssetDir) {
-        $candidateTar = Join-Path $AssetDir $PayloadAssetName
-        if (Test-Path $candidateTar) { $AssetPath = $candidateTar }
-    }
-    if (-not $AssetPath) {
-        $tempZip = Join-Path $ExtractDir $PayloadAssetName
-        $headers = @{}
-        if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)" }
-        $url = "https://github.com/$Repo/releases/download/$Version/$PayloadAssetName"
-        Write-Output "⬇️  Fetching $PayloadAssetName"
-        Invoke-WebRequest -Uri $url -OutFile $tempZip -Headers $headers -UseBasicParsing -ErrorAction Stop
-        $AssetPath = $tempZip
-    }
-
-    if ($AssetPath) {
-        Expand-PayloadTar -TarGzPath $AssetPath -Destination (Join-Path $ExtractDir "payload")
-        $payloadInfo = Find-PayloadDir -BasePath (Join-Path $ExtractDir "payload")
-    } else {
-        # If we have no zip but AssetDir points to extracted payload
-        if (-not $AssetDir) { Write-Die "No payload asset found" }
-        $payloadInfo = Find-PayloadDir -BasePath $AssetDir
-    }
-
-    $payloadDir = $payloadInfo.Dir
-    $payloadSha = $payloadInfo.Sha
-    $shaSumsPath = $payloadInfo.ShaSums
-
-    Test-PayloadHash -ShaFile $payloadSha -ShaSumsPath $shaSumsPath
-
-    Write-Output "📦 Installing ContainAI $Version to $ReleaseDir"
-    if (Test-Path $ReleaseDir) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ReleaseDir }
-    New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
-    Copy-Item -Recurse -Force -Path (Join-Path $payloadDir '*') -Destination $ReleaseDir
-
-    $profileDir = Join-Path $ReleaseDir "host/profiles"
-    if (Test-Path $profileDir) {
-        . (Join-Path $PSScriptRoot "security-enforce.ps1")
-        Invoke-AppArmorStrict -ProfileDir $profileDir
-    }
-
-    & "$PSScriptRoot/integrity-check.ps1" -Mode prod -Root $ReleaseDir -Sums (Join-Path $ReleaseDir "SHA256SUMS")
-
-    $currentLink = Join-Path $InstallRoot "current"
-    $previousLink = Join-Path $InstallRoot "previous"
-    if (Test-Path $currentLink) {
-        $target = (Get-Item $currentLink).Target
-        New-Item -Force -ItemType SymbolicLink -Path $previousLink -Target $target | Out-Null
-    }
-    New-Item -Force -ItemType SymbolicLink -Path $currentLink -Target $ReleaseDir | Out-Null
-
-    @"
-version=$Version
-installed_at=$(Get-Date -Format s -AsUTC)Z
-payload_asset=$PayloadAssetName
-repo=$Repo
-"@ | Set-Content -LiteralPath (Join-Path $ReleaseDir "install.meta")
-
-    Write-Output "✅ Install complete. Current -> $ReleaseDir"
-} finally {
-    if (Test-Path $ExtractDir) { Remove-Item -Recurse -Force $ExtractDir -ErrorAction SilentlyContinue }
 }

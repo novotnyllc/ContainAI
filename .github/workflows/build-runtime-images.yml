@@ -43,6 +43,8 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAMESPACE: ${{ github.repository_owner }}
   TRIVY_VERSION: v0.53.0
+  ARTIFACTS_ROOT: artifacts
+  ARTIFACTS_PUBLISH: artifacts/publish
 
 jobs:
   determine-context:
@@ -71,8 +73,8 @@ jobs:
             --dispatch-channel "$DISPATCH_CHANNEL" \
             --dispatch-version "$DISPATCH_VERSION"
 
-  build-base:
-    name: Build base image
+  build-base-arch:
+    name: Build base image (${{ matrix.arch_slug }})
     needs: determine-context
     if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
@@ -81,12 +83,12 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"containai-base-amd64"}]' || '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"containai-base-amd64"},{"arch":"linux/arm64","arch_slug":"arm64","cache_scope":"containai-base-arm64"}]') }}
     env:
       IMAGE_NAME: containai-base
-      CACHE_SCOPE: containai-base
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      image_ref: ${{ steps.image_ref.outputs.ref }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -94,6 +96,8 @@ jobs:
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: ${{ github.event_name == 'pull_request' && 'docker' || 'docker-container' }}
 
       - name: Log in to Container Registry
         if: needs.determine-context.outputs.push == 'true'
@@ -107,20 +111,36 @@ jobs:
         id: taglist
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
-          tags="${repo}:${{ needs.determine-context.outputs.immutable_tag }}"
-          printf "tags=%s\n" "$tags" >> "$GITHUB_OUTPUT"
+          arch_tag="${repo}:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+          printf "tag=%s\n" "$arch_tag" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push base image
+      - name: Build and push base image (${{ matrix.arch_slug }})
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./docker/base/Dockerfile
           push: ${{ needs.determine-context.outputs.push == 'true' }}
-          tags: ${{ steps.taglist.outputs.tags }}
-          cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
-          cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max,compression=zstd
-          platforms: linux/amd64,linux/arm64
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.taglist.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,scope=${{ matrix.cache_scope }},mode=max,compression=zstd
+          platforms: ${{ matrix.arch }}
+
+      - name: Save base image tar (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p image-tars
+          docker save "${{ steps.taglist.outputs.tag }}" | gzip > "image-tars/containai-base-${{ matrix.arch_slug }}.tar.gz"
+        shell: bash
+
+      - name: Upload base image tar (PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-tar-${{ matrix.arch_slug }}
+          path: image-tars/containai-base-${{ matrix.arch_slug }}.tar.gz
+          if-no-files-found: error
 
       - name: Install Trivy CLI
         if: needs.determine-context.outputs.push == 'true'
@@ -142,31 +162,82 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-      - name: Export image reference
-        id: image_ref
-        run: echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload digest artifact
+      - name: Upload arch digest artifact
         if: needs.determine-context.outputs.push == 'true'
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
-          mkdir -p dist/digests
-          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "${{ env.IMAGE_NAME }}" "$repo" "${{ steps.build.outputs.digest }}" > dist/digests/${{ env.IMAGE_NAME }}.json
+          mkdir -p "${{ env.ARTIFACTS_ROOT }}/digests"
+          printf '{"image":"%s","repository":"%s","arch":"%s","tag":"%s","digest":"%s","ref":"%s@%s"}\n' \
+            "${{ env.IMAGE_NAME }}" "$repo" "${{ matrix.arch }}" "${{ steps.taglist.outputs.tag }}" "${{ steps.build.outputs.digest }}" "$repo" "${{ steps.build.outputs.digest }}" \
+            > "${{ env.ARTIFACTS_ROOT }}/digests/${{ env.IMAGE_NAME }}-${{ matrix.arch_slug }}.json"
         shell: bash
 
-      - name: Publish digest artifact
+      - name: Publish arch digest artifact
         if: needs.determine-context.outputs.push == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: image-digest-${{ env.IMAGE_NAME }}
-          path: dist/digests/${{ env.IMAGE_NAME }}.json
+          name: arch-digest-${{ env.IMAGE_NAME }}-${{ matrix.arch_slug }}
+          path: ${{ env.ARTIFACTS_ROOT }}/digests/${{ env.IMAGE_NAME }}-${{ matrix.arch_slug }}.json
           if-no-files-found: error
 
-  build-containai:
-    name: Build containai image
+  assemble-base-manifest:
+    name: Assemble base manifest
     needs:
       - determine-context
-      - build-base
+      - build-base-arch
+    if: ${{ needs.determine-context.outputs.push == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download arch digests
+        uses: actions/download-artifact@v4
+        with:
+          path: arch-digests/base
+          pattern: arch-digest-containai-base-*
+          merge-multiple: true
+
+      - name: Create manifest
+        id: manifest
+        run: |
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-base"
+          mapfile -t tags < <(jq -r '.tag' arch-digests/base/*.json | sed '/^$/d')
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "No arch tags found for manifest assembly" >&2
+            exit 1
+          fi
+          docker buildx imagetools create --tag "${repo}:${{ needs.determine-context.outputs.immutable_tag }}" "${tags[@]}"
+          digest=$(docker buildx imagetools inspect "${repo}:${{ needs.determine-context.outputs.immutable_tag }}" | awk '/Digest:/ {print $2; exit}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          mkdir -p "${{ env.ARTIFACTS_ROOT }}/digests"
+          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "containai-base" "$repo" "$digest" > "${{ env.ARTIFACTS_ROOT }}/digests/containai-base.json"
+
+      - name: Publish manifest digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-digest-containai-base
+          path: ${{ env.ARTIFACTS_ROOT }}/digests/containai-base.json
+          if-no-files-found: error
+
+  build-containai-arch:
+    name: Build containai image (${{ matrix.arch_slug }})
+    needs:
+      - determine-context
+      - build-base-arch
     if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
@@ -174,19 +245,41 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"runtime-containai-amd64"}]' || '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"runtime-containai-amd64"},{"arch":"linux/arm64","arch_slug":"arm64","cache_scope":"runtime-containai-arm64"}]') }}
     env:
       IMAGE_NAME: containai
-      CACHE_SCOPE: runtime-containai
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      image_ref: ${{ steps.image_ref.outputs.ref }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download base image tar (PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: base-tar-${{ matrix.arch_slug }}
+          path: image-tars/base
+
+      - name: Load base image (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          gunzip -c image-tars/base/containai-base-${{ matrix.arch_slug }}.tar.gz | docker load
+        shell: bash
+
+      - name: Retag base image for local use (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker tag "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-base:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}" \
+            "containai-base:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+        shell: bash
+
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: ${{ github.event_name == 'pull_request' && 'docker' || 'docker-container' }}
 
       - name: Log in to Container Registry
         if: needs.determine-context.outputs.push == 'true'
@@ -196,26 +289,53 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Select base image reference
+        id: base_image
+        run: |
+          if [ "${{ needs.determine-context.outputs.push }}" = "true" ]; then
+            base_ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-base:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+          else
+            base_ref="containai-base:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+          fi
+          echo "tag=$base_ref" >> "$GITHUB_OUTPUT"
+        shell: bash
+
       - name: Compose tags
         id: taglist
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
-          tags="${repo}:${{ needs.determine-context.outputs.immutable_tag }}"
-          printf "tags=%s\n" "$tags" >> "$GITHUB_OUTPUT"
+          arch_tag="${repo}:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+          printf "tag=%s\n" "$arch_tag" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push image
+      - name: Build and push image (single-arch)
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/agents/all/Dockerfile
           push: ${{ needs.determine-context.outputs.push == 'true' }}
-          tags: ${{ steps.taglist.outputs.tags }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.taglist.outputs.tag }}
           build-args: |
-            BASE_IMAGE=${{ needs.build-base.outputs.image_ref }}
-          cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}
-          cache-to: type=gha,scope=${{ env.CACHE_SCOPE }},mode=max,compression=zstd
-          platforms: linux/amd64,linux/arm64
+            BASE_IMAGE=${{ steps.base_image.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,scope=${{ matrix.cache_scope }},mode=max,compression=zstd
+          platforms: ${{ matrix.arch }}
+
+      - name: Save containai image tar (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p image-tars
+          docker save "${{ steps.taglist.outputs.tag }}" | gzip > "image-tars/containai-${{ matrix.arch_slug }}.tar.gz"
+        shell: bash
+
+      - name: Upload containai image tar (PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-tar-${{ matrix.arch_slug }}
+          path: image-tars/containai-${{ matrix.arch_slug }}.tar.gz
+          if-no-files-found: error
 
       - name: Install Trivy CLI
         if: needs.determine-context.outputs.push == 'true'
@@ -237,32 +357,82 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-      - name: Export image reference
-        id: image_ref
-        run: echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload digest artifact
+      - name: Upload arch digest artifact
         if: needs.determine-context.outputs.push == 'true'
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
-          mkdir -p dist/digests
-          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "${{ env.IMAGE_NAME }}" "$repo" "${{ steps.build.outputs.digest }}" > dist/digests/${{ env.IMAGE_NAME }}.json
+          mkdir -p "${{ env.ARTIFACTS_ROOT }}/digests"
+          printf '{"image":"%s","repository":"%s","arch":"%s","tag":"%s","digest":"%s","ref":"%s@%s"}\n' \
+            "${{ env.IMAGE_NAME }}" "$repo" "${{ matrix.arch }}" "${{ steps.taglist.outputs.tag }}" "${{ steps.build.outputs.digest }}" "$repo" "${{ steps.build.outputs.digest }}" \
+            > "${{ env.ARTIFACTS_ROOT }}/digests/${{ env.IMAGE_NAME }}-${{ matrix.arch_slug }}.json"
         shell: bash
 
-      - name: Publish digest artifact
+      - name: Publish arch digest artifact
         if: needs.determine-context.outputs.push == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: image-digest-${{ env.IMAGE_NAME }}
-          path: dist/digests/${{ env.IMAGE_NAME }}.json
+          name: arch-digest-${{ env.IMAGE_NAME }}-${{ matrix.arch_slug }}
+          path: ${{ env.ARTIFACTS_ROOT }}/digests/${{ env.IMAGE_NAME }}-${{ matrix.arch_slug }}.json
           if-no-files-found: error
 
-  build-variants:
-    name: Build variant images
+  assemble-containai-manifest:
+    name: Assemble containai manifest
     needs:
       - determine-context
-      - build-base
-      - build-containai
+      - build-containai-arch
+    if: ${{ needs.determine-context.outputs.push == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download arch digests
+        uses: actions/download-artifact@v4
+        with:
+          path: arch-digests/containai
+          pattern: arch-digest-containai-*
+          merge-multiple: true
+
+      - name: Create manifest
+        id: manifest
+        run: |
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai"
+          mapfile -t tags < <(jq -r 'select(.image=="containai") | .tag' arch-digests/containai/*.json | sed '/^$/d')
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "No arch tags found for manifest assembly" >&2
+            exit 1
+          fi
+          docker buildx imagetools create --tag "${repo}:${{ needs.determine-context.outputs.immutable_tag }}" "${tags[@]}"
+          digest=$(docker buildx imagetools inspect "${repo}:${{ needs.determine-context.outputs.immutable_tag }}" | awk '/Digest:/ {print $2; exit}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          mkdir -p "${{ env.ARTIFACTS_ROOT }}/digests"
+          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "containai" "$repo" "$digest" > "${{ env.ARTIFACTS_ROOT }}/digests/containai.json"
+
+      - name: Publish manifest digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-digest-containai
+          path: ${{ env.ARTIFACTS_ROOT }}/digests/containai.json
+          if-no-files-found: error
+
+  build-variants-arch:
+    name: Build variant image (${{ matrix.image }} / ${{ matrix.arch_slug }})
+    needs:
+      - determine-context
+      - build-containai-arch
     if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
@@ -273,34 +443,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - image: containai-copilot
-            dockerfile: docker/agents/copilot/Dockerfile
-            cache: runtime-copilot
-            base_arg: BASE_IMAGE=${{ needs.build-containai.outputs.image_ref }}
-          - image: containai-codex
-            dockerfile: docker/agents/codex/Dockerfile
-            cache: runtime-codex
-            base_arg: BASE_IMAGE=${{ needs.build-containai.outputs.image_ref }}
-          - image: containai-claude
-            dockerfile: docker/agents/claude/Dockerfile
-            cache: runtime-claude
-            base_arg: BASE_IMAGE=${{ needs.build-containai.outputs.image_ref }}
-          - image: containai-proxy
-            dockerfile: docker/proxy/Dockerfile
-            cache: runtime-proxy
-            base_arg: ""
-          - image: containai-log-forwarder
-            dockerfile: docker/log-forwarder/Dockerfile
-            cache: runtime-log-forwarder
-            base_arg: ""
+        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64"}]' || '[{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/arm64","arch_slug":"arm64"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/arm64","arch_slug":"arm64"}]') }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download containai image tar (PR, when needed)
+        if: github.event_name == 'pull_request' && matrix.base_from_containai
+        uses: actions/download-artifact@v4
+        with:
+          name: containai-tar-${{ matrix.arch_slug }}
+          path: image-tars/containai
+
+      - name: Load containai image (PR, when needed)
+        if: github.event_name == 'pull_request' && matrix.base_from_containai
+        run: |
+          gunzip -c image-tars/containai/containai-${{ matrix.arch_slug }}.tar.gz | docker load
+        shell: bash
+
+      - name: Retag containai image for local use (PR, when needed)
+        if: github.event_name == 'pull_request' && matrix.base_from_containai
+        run: |
+          docker tag "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}" \
+            "containai:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+        shell: bash
+
       - name: Set up Docker Buildx
-        id: buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: ${{ github.event_name == 'pull_request' && 'docker' || 'docker-container' }}
 
       - name: Log in to Container Registry
         if: needs.determine-context.outputs.push == 'true'
@@ -310,25 +481,53 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Select base image reference
+        if: matrix.base_from_containai
+        id: base_image
+        run: |
+          if [ "${{ needs.determine-context.outputs.push }}" = "true" ]; then
+            base_ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+          else
+            base_ref="containai:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+          fi
+          echo "tag=$base_ref" >> "$GITHUB_OUTPUT"
+        shell: bash
+
       - name: Compose tags
         id: taglist
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
-          tags="${repo}:${{ needs.determine-context.outputs.immutable_tag }}"
-          printf "tags=%s\n" "$tags" >> "$GITHUB_OUTPUT"
+          arch_tag="${repo}:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
+          printf "tag=%s\n" "$arch_tag" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push image
+      - name: Build and push image (single-arch)
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: ${{ needs.determine-context.outputs.push == 'true' }}
-          tags: ${{ steps.taglist.outputs.tags }}
-          build-args: ${{ matrix.base_arg }}
-          cache-from: type=gha,scope=${{ matrix.cache }}
-          cache-to: type=gha,scope=${{ matrix.cache }},mode=max,compression=zstd
-          platforms: linux/amd64,linux/arm64
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.taglist.outputs.tag }}
+          build-args: ${{ matrix.base_from_containai && format('BASE_IMAGE={0}', steps.base_image.outputs.tag) || '' }}
+          cache-from: type=gha,scope=${{ matrix.cache }}-${{ matrix.arch_slug }}
+          cache-to: type=gha,scope=${{ matrix.cache }}-${{ matrix.arch_slug }},mode=max,compression=zstd
+          platforms: ${{ matrix.arch }}
+
+      - name: Save variant image tar (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p image-tars
+          docker save "${{ steps.taglist.outputs.tag }}" | gzip > "image-tars/${{ matrix.image }}-${{ matrix.arch_slug }}.tar.gz"
+        shell: bash
+
+      - name: Upload variant image tar (PR)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: variant-tar-${{ matrix.image }}-${{ matrix.arch_slug }}
+          path: image-tars/${{ matrix.image }}-${{ matrix.arch_slug }}.tar.gz
+          if-no-files-found: error
 
       - name: Install Trivy CLI
         if: needs.determine-context.outputs.push == 'true'
@@ -350,29 +549,93 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-      - name: Upload digest artifact
+      - name: Upload arch digest artifact
         if: needs.determine-context.outputs.push == 'true'
         run: |
           repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
-          mkdir -p dist/digests
-          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "${{ matrix.image }}" "$repo" "${{ steps.build.outputs.digest }}" > dist/digests/${{ matrix.image }}.json
+          mkdir -p "${{ env.ARTIFACTS_ROOT }}/digests"
+          printf '{"image":"%s","repository":"%s","arch":"%s","tag":"%s","digest":"%s","ref":"%s@%s"}\n' \
+            "${{ matrix.image }}" "$repo" "${{ matrix.arch }}" "${{ steps.taglist.outputs.tag }}" "${{ steps.build.outputs.digest }}" "$repo" "${{ steps.build.outputs.digest }}" \
+            > "${{ env.ARTIFACTS_ROOT }}/digests/${{ matrix.image }}-${{ matrix.arch_slug }}.json"
         shell: bash
 
-      - name: Publish digest artifact
+      - name: Publish arch digest artifact
         if: needs.determine-context.outputs.push == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: image-digest-${{ matrix.image }}
-          path: dist/digests/${{ matrix.image }}.json
+          name: arch-digest-${{ matrix.image }}-${{ matrix.arch_slug }}
+          path: ${{ env.ARTIFACTS_ROOT }}/digests/${{ matrix.image }}-${{ matrix.arch_slug }}.json
+          if-no-files-found: error
+
+  assemble-variant-manifest:
+    name: Assemble variant manifests (${{ matrix.image }})
+    needs:
+      - determine-context
+      - build-variants-arch
+    if: ${{ needs.determine-context.outputs.push == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - containai-copilot
+          - containai-codex
+          - containai-claude
+          - containai-proxy
+          - containai-log-forwarder
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download arch digests
+        uses: actions/download-artifact@v4
+        with:
+          path: arch-digests/${{ matrix.image }}
+          pattern: arch-digest-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - name: Create manifest
+        id: manifest
+        run: |
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
+          mapfile -t tags < <(jq -r '.tag' arch-digests/${{ matrix.image }}/*.json | sed '/^$/d')
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "No arch tags found for manifest assembly" >&2
+            exit 1
+          fi
+          docker buildx imagetools create --tag "${repo}:${{ needs.determine-context.outputs.immutable_tag }}" "${tags[@]}"
+          digest=$(docker buildx imagetools inspect "${repo}:${{ needs.determine-context.outputs.immutable_tag }}" | awk '/Digest:/ {print $2; exit}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          mkdir -p "${{ env.ARTIFACTS_ROOT }}/digests"
+          printf '{"image":"%s","repository":"%s","digest":"%s"}\n' "${{ matrix.image }}" "$repo" "$digest" > "${{ env.ARTIFACTS_ROOT }}/digests/${{ matrix.image }}.json"
+
+      - name: Publish manifest digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-digest-${{ matrix.image }}
+          path: ${{ env.ARTIFACTS_ROOT }}/digests/${{ matrix.image }}.json
           if-no-files-found: error
 
   finalize-tags:
     name: Finalize tags and collect digests
     needs:
       - determine-context
-      - build-base
-      - build-containai
-      - build-variants
+      - assemble-base-manifest
+      - assemble-containai-manifest
+      - assemble-variant-manifest
     if: ${{ needs.determine-context.outputs.push == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -394,11 +657,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download digest artifacts
+      - name: Download manifest digests
         uses: actions/download-artifact@v4
         with:
           path: digests
-          pattern: image-digest-*
+          pattern: manifest-digest-*
           merge-multiple: true
 
       - name: Combine digests
@@ -406,7 +669,7 @@ jobs:
         run: |
           mapfile -t files < <(find digests -name "*.json" -type f)
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "No digest artifacts found" >&2
+            echo "No manifest digest artifacts found" >&2
             exit 1
           fi
           jq -s 'map(.)' "${files[@]}" > digests/all.json
@@ -450,10 +713,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install syft
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
-
       - name: Set image digest env
         id: digests
         run: |
@@ -473,22 +732,74 @@ jobs:
 
       - name: Generate profile.env
         run: |
+          mkdir -p "${{ env.ARTIFACTS_PUBLISH }}"
           scripts/release/write-profile-env.sh \
             --prefix containai \
             --tag "$VERSION" \
             --owner "${{ env.IMAGE_NAMESPACE }}" \
-            --out host/profile.env \
+            --out "${{ env.ARTIFACTS_PUBLISH }}/profile.env" \
             --channel "$CHANNEL" \
             --registry "${{ env.REGISTRY }}" \
             --mode env
 
-      - name: Package payload
+      - name: Ensure artifacts dir
+        run: mkdir -p "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}"
+
+      - name: Build payload (no packaging)
         run: |
-          scripts/release/package.sh \
+          scripts/release/build-payload.sh \
             --version "$VERSION" \
-            --out dist \
-            --generate-sbom \
-            --launcher-channel "$CHANNEL"
+            --out "${{ env.ARTIFACTS_PUBLISH }}" \
+            --profile-env "${{ env.ARTIFACTS_PUBLISH }}/profile.env"
+        env:
+          IMAGE_DIGEST: ${{ env.IMAGE_DIGEST }}
+          IMAGE_DIGEST_COPILOT: ${{ env.IMAGE_DIGEST_COPILOT }}
+          IMAGE_DIGEST_CODEX: ${{ env.IMAGE_DIGEST_CODEX }}
+          IMAGE_DIGEST_CLAUDE: ${{ env.IMAGE_DIGEST_CLAUDE }}
+          IMAGE_DIGEST_PROXY: ${{ env.IMAGE_DIGEST_PROXY }}
+          IMAGE_DIGEST_LOG_FORWARDER: ${{ env.IMAGE_DIGEST_LOG_FORWARDER }}
+
+      - name: Generate SBOM from payload (GitHub Action)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ${{ env.ARTIFACTS_PUBLISH }}/${{ env.VERSION }}/payload
+          output-file: ${{ env.ARTIFACTS_PUBLISH }}/${{ env.VERSION }}/payload/payload.sbom.json
+
+      - name: Attest payload SBOM (GitHub attestation)
+        if: ${{ env.CHANNEL != 'dev' }}
+        id: attest_sbom
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ env.ARTIFACTS_PUBLISH }}/${{ env.VERSION }}/payload/payload.sbom.json
+
+      - name: Persist SBOM attestation bundle into payload
+        if: ${{ env.CHANNEL != 'dev' }}
+        run: |
+          cp "${{ steps.attest_sbom.outputs.bundle-path }}" "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload/payload.sbom.json.intoto.jsonl"
+
+      - name: Refresh payload checksums
+        run: |
+          pushd "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload" >/dev/null
+          find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          PAYLOAD_HASH=$(sha256sum SHA256SUMS | awk '{print $1}')
+          echo "$PAYLOAD_HASH  SHA256SUMS" > payload.sha256
+          popd >/dev/null
+
+      - name: Attest payload directory (GitHub attestation)
+        if: ${{ env.CHANNEL != 'dev' }}
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            ${{ env.ARTIFACTS_PUBLISH }}/${{ env.VERSION }}/payload/**/*
+
+      - name: Package payload and transport (final)
+        run: |
+          scripts/release/package-artifacts.sh \
+            --version "$VERSION" \
+            --out "${{ env.ARTIFACTS_PUBLISH }}" \
+            --launcher-channel "$CHANNEL" \
+            --payload-dir "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload" \
+            --profile-env "${{ env.ARTIFACTS_PUBLISH }}/profile.env"
         env:
           IMAGE_DIGEST: ${{ env.IMAGE_DIGEST }}
           IMAGE_DIGEST_COPILOT: ${{ env.IMAGE_DIGEST_COPILOT }}
@@ -500,21 +811,21 @@ jobs:
       - name: Set payload paths
         id: payload_paths
         run: |
-          echo "tar=dist/${VERSION}/containai-payload-${VERSION}.tar" >> "$GITHUB_OUTPUT"
-          echo "targz=dist/${VERSION}/containai-payload-${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "sbom=dist/${VERSION}/payload/payload.sbom.json" >> "$GITHUB_OUTPUT"
+          echo "payload_targz=${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "transport_targz=${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/containai-${VERSION}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "sbom=${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload/payload.sbom.json" >> "$GITHUB_OUTPUT"
 
       - name: Set up ORAS
         uses: oras-project/setup-oras@v1
 
-      - name: Push payload artifact
+      - name: Push payload artifact (registry)
         id: push
         run: |
           ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-payload:${VERSION}"
           oras push "$ref" \
             --artifact-type application/vnd.containai.payload.v1 \
             --digest-file payload.digest \
-            "${{ steps.payload_paths.outputs.targz }}:application/vnd.containai.payload.layer.v1+gzip" \
+            "${{ steps.payload_paths.outputs.payload_targz }}:application/vnd.containai.payload.layer.v1+gzip" \
             "${{ steps.payload_paths.outputs.sbom }}:application/vnd.cyclonedx+json"
           digest=$(cat payload.digest)
           echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
@@ -526,6 +837,33 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-payload
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+      - name: Attest transport tarball (GitHub attestation)
+        if: ${{ env.CHANNEL != 'dev' }}
+        id: attest_transport
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ steps.payload_paths.outputs.transport_targz }}
+
+      - name: Save transport attestation bundle
+        if: ${{ env.CHANNEL != 'dev' }}
+        run: |
+          cp "${{ steps.attest_transport.outputs.bundle-path }}" "${{ steps.payload_paths.outputs.transport_targz }}.intoto.jsonl"
+
+      - name: Upload transport tar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transport-tarball
+          path: ${{ steps.payload_paths.outputs.transport_targz }}
+          if-no-files-found: error
+
+      - name: Upload transport attestation artifact
+        if: ${{ env.CHANNEL != 'dev' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: transport-tarball-attestation
+          path: ${{ steps.payload_paths.outputs.transport_targz }}.intoto.jsonl
+          if-no-files-found: error
 
   publish-metadata:
     name: Publish channel metadata
@@ -610,74 +948,83 @@ jobs:
             fi
           done
 
-      - name: Cleanup old image versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai
-          package-type: container
-          min-versions-to-keep: 15
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cleanup container versions with prod retention
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          cutoff_ts=$(date -u -d '180 days ago' +%s)
+          declare -A min_keep=(
+            [containai]=15
+            [containai-base]=10
+            [containai-copilot]=10
+            [containai-codex]=10
+            [containai-claude]=10
+            [containai-proxy]=10
+            [containai-log-forwarder]=10
+            [containai-payload]=10
+            [containai-metadata]=10
+          )
 
-      - name: Cleanup base image versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai-base
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch_versions() {
+            local pkg="$1"
+            local res
+            if res=$(gh api -H "Accept: application/vnd.github+json" \
+              "/orgs/${OWNER}/packages/container/${pkg}/versions?per_page=100" 2>/dev/null); then
+              echo "$res"
+            else
+              gh api -H "Accept: application/vnd.github+json" \
+                "/user/packages/container/${pkg}/versions?per_page=100"
+            fi
+          }
 
-      - name: Cleanup variant image versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai-copilot
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+          for pkg in "${!min_keep[@]}"; do
+            echo "Processing $pkg..."
+            json=$(fetch_versions "$pkg") || { echo "Failed to list versions for $pkg" >&2; continue; }
+            count=$(jq 'length' <<<"$json")
+            if [[ "$count" -eq 0 ]]; then
+              echo "No versions for $pkg"; continue
+            fi
 
-      - name: Cleanup codex image versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai-codex
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+            prod_entries=$(jq -r '[.[] | {id:.id, updated:(.updated_at|fromdate), tags:(.metadata.container.tags // [])}]' <<<"$json")
+            latest_prod_id=$(jq -r 'map(select(.tags|index("prod"))) | max_by(.updated) | .id // empty' <<<"$prod_entries")
+            keep_ids=()
 
-      - name: Cleanup claude image versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai-claude
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+            # Keep anything updated within the last 6 months
+            while IFS= read -r id; do keep_ids+=("$id"); done < <(
+              jq -r --argjson cutoff "$cutoff_ts" '.[] | select(.updated >= $cutoff) | .id' <<<"$prod_entries")
 
-      - name: Cleanup proxy image versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai-proxy
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+            # Keep prod-tagged within 6 months or latest prod regardless of age
+            while IFS= read -r id; do keep_ids+=("$id"); done < <(
+              jq -r --argjson cutoff "$cutoff_ts" --arg latest "$latest_prod_id" '
+                .[] | select((.tags|index("prod")) and ((.updated >= $cutoff) or (.id == ($latest|tonumber)))) | .id'
+              <<<"$prod_entries")
 
-      - name: Cleanup log forwarder versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai-log-forwarder
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+            # Non-prod retention: keep newest N
+            keep_nonprod=$(jq -r --argjson n "${min_keep[$pkg]}" '
+              [.[] | select(.tags|index("prod")|not) | {id, updated}] | sort_by(.updated) | reverse | .[:$n] | .[].id'
+              <<<"$prod_entries")
+            while IFS= read -r id; do [[ -n "$id" ]] && keep_ids+=("$id"); done <<<"$keep_nonprod"
 
-      - name: Cleanup payload/metadata versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai-payload
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+            # Deduplicate keep_ids
+            declare -A keep_map=()
+            for id in "${keep_ids[@]}"; do keep_map[$id]=1; done
 
-      - name: Cleanup metadata versions
-        uses: actions/delete-package-versions@v4
-        with:
-          package-name: containai-metadata
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+            delete_ids=()
+            while IFS= read -r id; do
+              [[ -z "$id" ]] && continue
+              if [[ -z "${keep_map[$id]:-}" ]]; then
+                delete_ids+=("$id")
+              fi
+            done < <(jq -r '.[].id' <<<"$prod_entries")
+
+            for id in "${delete_ids[@]}"; do
+              echo "Deleting $pkg version $id"
+              gh api --method DELETE \
+                "/orgs/${OWNER}/packages/container/${pkg}/versions/${id}" 2>/dev/null \
+                || gh api --method DELETE \
+                  "/user/packages/container/${pkg}/versions/${id}" 2>/dev/null \
+                || echo "⚠️  Failed to delete $pkg version $id" >&2
+            done
+          done
