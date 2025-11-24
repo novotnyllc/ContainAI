@@ -43,6 +43,56 @@ get_profile_suffix() {
     fi
 }
 
+_resolve_apparmor_channel() {
+    local channel="${CONTAINAI_LAUNCHER_CHANNEL:-${CONTAINAI_PROFILE:-dev}}"
+    case "$channel" in
+        prod|nightly|dev) ;; 
+        *) channel="dev" ;;
+    esac
+    printf '%s' "$channel"
+}
+
+_format_apparmor_profile_name() {
+    local base="$1"
+    local channel="$2"
+    if [ -z "$base" ]; then
+        return 1
+    fi
+    printf '%s-%s' "$base" "$channel"
+}
+
+_render_channel_apparmor_profile() {
+    local profile_name="$1"
+    local base_name="$2"
+    local source_file="$3"
+
+    if [ -z "$profile_name" ] || [ -z "$base_name" ] || [ -z "$source_file" ] || [ ! -f "$source_file" ]; then
+        return 1
+    fi
+
+    local cache_dir
+    cache_dir="${CONTAINAI_CACHE_DIR%/}/apparmor"
+    mkdir -p "$cache_dir"
+    local rendered_file="$cache_dir/${profile_name}.profile"
+
+    python3 - <<'PY'
+import pathlib, re, sys
+
+profile_name, base_name, source_path, rendered_path = sys.argv[1:]
+text = pathlib.Path(source_path).read_text()
+pattern = re.compile(r"^(\s*profile\s+)" + re.escape(base_name) + r"(\b)", re.MULTILINE)
+if not pattern.search(text):
+    sys.exit(1)
+text = pattern.sub(r"\1" + profile_name + r"\2", text, count=1)
+pathlib.Path(rendered_path).write_text(text)
+PY
+    if [ -f "$rendered_file" ]; then
+        echo "$rendered_file"
+        return 0
+    fi
+    return 1
+}
+
 _sha256_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum | awk '{print $1}'
@@ -769,6 +819,62 @@ resolve_seccomp_profile_path() {
     resolve_security_asset_path "$1" "seccomp-containai-agent.json" "Agent seccomp profile"
 }
 
+_resolve_channel_apparmor_profile() {
+    local repo_root="$1"
+    local base_name="$2"
+    local filename="$3"
+    local label="$4"
+
+    local channel
+    channel=$(_resolve_apparmor_channel)
+    local profile_name
+    profile_name=$(_format_apparmor_profile_name "$base_name" "$channel") || return 1
+
+    if ! is_apparmor_supported; then
+        return 1
+    fi
+
+    if apparmor_profile_loaded "$profile_name"; then
+        echo "$profile_name"
+        return 0
+    fi
+
+    local profile_file="$repo_root/host/profiles/$filename"
+    local asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/$filename"
+    if [ ! -f "$profile_file" ] && [ -n "$asset_candidate" ] && [ -f "$asset_candidate" ]; then
+        profile_file="$asset_candidate"
+    fi
+
+    if [ ! -f "$profile_file" ]; then
+        echo "⚠️  ${label} file not found at $profile_file. Run scripts/setup-local-dev.sh to restore the host security profiles." >&2
+        return 1
+    fi
+
+    if [ "$(id -u 2>/dev/null || echo 1)" != "0" ]; then
+        echo "⚠️  ${label} '${profile_name}' not loaded (requires sudo). Run: sudo apparmor_parser -r '$profile_file'" >&2
+        return 1
+    fi
+
+    if ! command -v apparmor_parser >/dev/null 2>&1; then
+        echo "⚠️  apparmor_parser not available; cannot load ${label} '${profile_name}'." >&2
+        return 1
+    fi
+
+    local rendered_profile
+    if ! rendered_profile=$(_render_channel_apparmor_profile "$profile_name" "$base_name" "$profile_file"); then
+        echo "❌ Unable to render ${label} for channel '$channel'" >&2
+        return 1
+    fi
+
+    if apparmor_parser -r -T -W "$rendered_profile" >/dev/null 2>&1 && apparmor_profile_loaded "$profile_name"; then
+        echo "$profile_name"
+        return 0
+    fi
+
+    echo "⚠️  AppArmor profile '$profile_name' is not loaded. Run: sudo apparmor_parser -r '$rendered_profile'" >&2
+    return 1
+}
+
 load_security_profiles() {
     local repo_root="$1"
     local agent_seccomp proxy_seccomp log_forwarder_seccomp apparmor_profile=""
@@ -787,11 +893,18 @@ load_security_profiles() {
         return 1
     fi
 
-    if apparmor_profile=$(resolve_apparmor_profile_name "$repo_root"); then
+    # Resolve channel-specific AppArmor profile names and ensure they are loaded.
+    if apparmor_profile=$(_resolve_channel_apparmor_profile "$repo_root" "containai-agent" "apparmor-containai-agent.profile" "Agent AppArmor profile"); then
         :
     else
         apparmor_profile=""
     fi
+
+    local channel
+    channel=$(_resolve_apparmor_channel)
+    PROXY_APPARMOR_PROFILE=$(_format_apparmor_profile_name "containai-proxy" "$channel")
+    LOG_FORWARDER_APPARMOR_PROFILE=$(_format_apparmor_profile_name "containai-log-forwarder" "$channel")
+    LOG_BROKER_APPARMOR_PROFILE="$LOG_FORWARDER_APPARMOR_PROFILE"
 
     SECCOMP_PROFILE_PATH="$agent_seccomp"
     PROXY_SECCOMP_PROFILE_PATH="$proxy_seccomp"
@@ -839,22 +952,21 @@ ensure_security_assets_current() {
         return 1
     fi
 
-    local apparmor_path=""
-    if apparmor_path=$(resolve_apparmor_profile_name "$repo_root"); then
-        if [ -f "$apparmor_path" ]; then
-            local aa_repo_hash aa_active_hash
-            aa_repo_hash=$(_sha256_file "$apparmor_repo" 2>/dev/null || echo "")
-            if [ -z "$aa_repo_hash" ]; then
-                aa_repo_hash="$manifest_apparmor_hash"
-            fi
-            aa_active_hash=$(_sha256_file "$apparmor_path" 2>/dev/null || echo "")
-            if [ -n "$aa_repo_hash" ] && [ -n "$aa_active_hash" ] && [ "$aa_repo_hash" != "$aa_active_hash" ]; then
-                echo "❌ AppArmor profile is outdated. Run 'sudo ./scripts/setup-local-dev.sh' to refresh host security assets." >&2
-                return 1
-            elif [ -z "$aa_repo_hash" ] || [ -z "$aa_active_hash" ]; then
-                echo "❌ Unable to verify AppArmor profile freshness (missing reference hash). Run 'sudo ./scripts/setup-local-dev.sh' to reinstall host security assets." >&2
-                return 1
-            fi
+    local apparmor_candidate
+    apparmor_candidate=$(resolve_security_asset_path "$repo_root" "apparmor-containai-agent.profile" "Agent AppArmor profile" 2>/dev/null || true)
+    if [ -n "$apparmor_candidate" ] && [ -f "$apparmor_candidate" ]; then
+        local aa_repo_hash aa_active_hash
+        aa_repo_hash=$(_sha256_file "$apparmor_repo" 2>/dev/null || echo "")
+        if [ -z "$aa_repo_hash" ]; then
+            aa_repo_hash="$manifest_apparmor_hash"
+        fi
+        aa_active_hash=$(_sha256_file "$apparmor_candidate" 2>/dev/null || echo "")
+        if [ -n "$aa_repo_hash" ] && [ -n "$aa_active_hash" ] && [ "$aa_repo_hash" != "$aa_active_hash" ]; then
+            echo "❌ AppArmor profile is outdated. Run 'sudo ./scripts/setup-local-dev.sh' to refresh host security assets." >&2
+            return 1
+        elif [ -z "$aa_repo_hash" ] || [ -z "$aa_active_hash" ]; then
+            echo "❌ Unable to verify AppArmor profile freshness (missing reference hash). Run 'sudo ./scripts/setup-local-dev.sh' to reinstall host security assets." >&2
+            return 1
         fi
     fi
 
@@ -935,38 +1047,7 @@ ensure_apparmor_profile_loaded() {
 
 resolve_apparmor_profile_name() {
     local repo_root="$1"
-    local profile="containai-agent"
-    local profile_file="$repo_root/host/profiles/apparmor-containai-agent.profile"
-    local asset_candidate=""
-
-    asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-containai-agent.profile"
-    if [ ! -f "$profile_file" ] && [ -n "$asset_candidate" ] && [ -f "$asset_candidate" ]; then
-        profile_file="$asset_candidate"
-    fi
-
-    if ! is_apparmor_supported; then
-        return 1
-    fi
-
-    if apparmor_profile_loaded "$profile"; then
-        echo "$profile"
-        return 0
-    fi
-
-    if [ ! -f "$profile_file" ]; then
-        echo "⚠️  AppArmor profile file not found at $profile_file. Run scripts/setup-local-dev.sh to restore the host security profiles." >&2
-        return 1
-    fi
-
-    if [ "$(id -u 2>/dev/null || echo 1)" = "0" ] && command -v apparmor_parser >/dev/null 2>&1; then
-        if apparmor_parser -r -T -W "$profile_file" >/dev/null 2>&1 && apparmor_profile_loaded "$profile"; then
-            echo "$profile"
-            return 0
-        fi
-    fi
-
-    echo "⚠️  AppArmor profile '$profile' is not loaded. Run: sudo apparmor_parser -r '$profile_file'" >&2
-    return 1
+    _resolve_channel_apparmor_profile "$repo_root" "containai-agent" "apparmor-containai-agent.profile" "Agent AppArmor profile"
 }
 
 verify_host_security_prereqs() {
@@ -1019,30 +1100,40 @@ verify_host_security_prereqs() {
             errors+=("AppArmor kernel support not detected. Enable AppArmor to continue.")
         fi
     else
-        local profiles_to_check=("containai-agent" "containai-proxy" "containai-log-forwarder")
-        local p_name p_file p_installed
+        local channel
+        channel=$(_resolve_apparmor_channel)
+        local bases=("containai-agent" "containai-proxy" "containai-log-forwarder")
+        local files=("apparmor-containai-agent.profile" "apparmor-containai-proxy.profile" "apparmor-containai-log-forwarder.profile")
+        local idx base file_name p_name p_file p_installed label
 
-        for p_name in "${profiles_to_check[@]}"; do
-            p_file="$repo_root/host/profiles/apparmor-${p_name}.profile"
-            p_installed="${CONTAINAI_SECURITY_ASSET_DIR%/}/apparmor-${p_name}.profile"
-            
+        for idx in "${!bases[@]}"; do
+            base="${bases[$idx]}"
+            file_name="${files[$idx]}"
+            p_name=$(_format_apparmor_profile_name "$base" "$channel")
+            p_file="$repo_root/host/profiles/$file_name"
+            p_installed="${CONTAINAI_SECURITY_ASSET_DIR%/}/$file_name"
+            label="${base//-/ }"
+
             if [ ! -f "$p_file" ] && [ -n "$p_installed" ] && [ -f "$p_installed" ]; then
                 p_file="$p_installed"
             fi
 
-            if ! apparmor_profile_loaded "$p_name"; then
-                if ensure_apparmor_profile_loaded "$p_name" "$p_file"; then
-                    continue
-                fi
-                if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
-                    warnings+=("Unable to verify AppArmor profile '$p_name' without elevated privileges. Re-run './host/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$p_file'.")
-                elif [ "$current_uid" -ne 0 ] && [ -f "$p_file" ]; then
-                    warnings+=("AppArmor profile '$p_name' verification skipped (requires sudo). Rerun './host/utils/check-health.sh' with sudo to confirm.")
-                elif [ -f "$p_file" ]; then
-                    errors+=("AppArmor profile '$p_name' is not loaded. Run: sudo apparmor_parser -r '$p_file'.")
-                else
-                    errors+=("AppArmor profile file '$p_file' not found. Run scripts/setup-local-dev.sh to restore the host security profiles.")
-                fi
+            if apparmor_profile_loaded "$p_name"; then
+                continue
+            fi
+
+            if _resolve_channel_apparmor_profile "$repo_root" "$base" "$file_name" "${label^} AppArmor profile" >/dev/null 2>&1; then
+                continue
+            fi
+
+            if [ "$profiles_file_readable" -eq 0 ] && [ "$current_uid" -ne 0 ]; then
+                warnings+=("Unable to verify AppArmor profile '$p_name' without elevated privileges. Re-run './host/utils/check-health.sh' with sudo or run: sudo apparmor_parser -r '$p_file'.")
+            elif [ "$current_uid" -ne 0 ] && [ -f "$p_file" ]; then
+                warnings+=("AppArmor profile '$p_name' verification skipped (requires sudo). Rerun './host/utils/check-health.sh' with sudo to confirm.")
+            elif [ -f "$p_file" ]; then
+                errors+=("AppArmor profile '$p_name' not loaded. Run: sudo apparmor_parser -r '$p_file'")
+            else
+                errors+=("AppArmor profile file missing for '$p_name'. Run scripts/setup-local-dev.sh to reinstall the host security assets.")
             fi
         done
     fi

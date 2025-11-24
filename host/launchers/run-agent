@@ -1353,9 +1353,6 @@ echo ""
 if ! load_security_profiles "$REPO_ROOT"; then
     exit 1
 fi
-PROXY_APPARMOR_PROFILE="containai-proxy"
-LOG_FORWARDER_APPARMOR_PROFILE="containai-log-forwarder"
-LOG_BROKER_APPARMOR_PROFILE="containai-log-forwarder"
 # Check if container already exists
 if container_exists "$CONTAINER_NAME"; then
     echo "📦 Container '$CONTAINER_NAME' already exists"

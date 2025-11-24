@@ -23,6 +23,18 @@ enforce_security_profiles_strict() {
     [[ -f "$seccomp_fwd" ]] || die "Seccomp log-forwarder profile missing at $seccomp_fwd"
     [[ -f "$apparmor_fwd" ]] || die "AppArmor log-forwarder profile missing at $apparmor_fwd"
 
+    local channel
+    channel=$(_resolve_apparmor_channel)
+    local apparmor_agent_name apparmor_proxy_name apparmor_fwd_name
+    apparmor_agent_name=$(_format_apparmor_profile_name "containai-agent" "$channel")
+    apparmor_proxy_name=$(_format_apparmor_profile_name "containai-proxy" "$channel")
+    apparmor_fwd_name=$(_format_apparmor_profile_name "containai-log-forwarder" "$channel")
+
+    local rendered_agent rendered_proxy rendered_fwd
+    rendered_agent=$(_render_channel_apparmor_profile "$apparmor_agent_name" "containai-agent" "$apparmor_agent") || die "Unable to render AppArmor agent profile for channel $channel"
+    rendered_proxy=$(_render_channel_apparmor_profile "$apparmor_proxy_name" "containai-proxy" "$apparmor_proxy") || die "Unable to render AppArmor proxy profile for channel $channel"
+    rendered_fwd=$(_render_channel_apparmor_profile "$apparmor_fwd_name" "containai-log-forwarder" "$apparmor_fwd") || die "Unable to render AppArmor log-forwarder profile for channel $channel"
+
     # Write manifest for runtime freshness checks
     local seccomp_hash apparmor_hash seccomp_proxy_hash apparmor_proxy_hash seccomp_fwd_hash apparmor_fwd_hash
     seccomp_hash=$(sha256sum "$seccomp_agent" | awk '{print $1}')
@@ -47,14 +59,14 @@ EOF
     if [[ ! -r "$enabled_flag" ]] || ! grep -qi '^y' "$enabled_flag" 2>/dev/null; then
         die "AppArmor is disabled; enable AppArmor to continue."
     fi
-    if ! apparmor_parser -r "$apparmor_agent"; then
-        die "Failed to load AppArmor profile 'containai' via apparmor_parser."
+    if ! apparmor_parser -r "$rendered_agent"; then
+        die "Failed to load AppArmor profile '$apparmor_agent_name' via apparmor_parser."
     fi
-    if ! apparmor_parser -r "$apparmor_proxy"; then
-        die "Failed to load AppArmor profile 'containai-proxy' via apparmor_parser."
+    if ! apparmor_parser -r "$rendered_proxy"; then
+        die "Failed to load AppArmor profile '$apparmor_proxy_name' via apparmor_parser."
     fi
-    if ! apparmor_parser -r "$apparmor_fwd"; then
-        die "Failed to load AppArmor profile 'containai-log-forwarder' via apparmor_parser."
+    if ! apparmor_parser -r "$rendered_fwd"; then
+        die "Failed to load AppArmor profile '$apparmor_fwd_name' via apparmor_parser."
     fi
 }
 
