@@ -6,7 +6,10 @@ This guide is for people **using** ContainAI. You do not need to clone the repos
 
 ```
 # Install the latest release channel (default: prod)
-curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash
+
+# Install nightly
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash -s -- --channel nightly
 
 # Verify host security after install (Linux/macOS/WSL)
 sudo /opt/containai/current/host/utils/check-health.sh
@@ -17,7 +20,7 @@ sudo /opt/containai/current/host/utils/check-health.sh
 /opt/containai/current/host/launchers/entrypoints/run-claude --help
 ```
 
-The installer downloads the signed payload, verifies hashes/attestations (enforced on prod/nightly), installs to `/opt/containai`, and loads the required AppArmor profiles. It prompts for sudo when needed.
+The installer self-verifies from GHCR (Sigstore/Fulcio), verifies the payload attestation, installs to `/opt/containai`, and loads the required AppArmor profiles. It prompts for sudo when needed.
 
 ## Prerequisites
 

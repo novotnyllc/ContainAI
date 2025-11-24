@@ -17,6 +17,24 @@ Features include MCP server support for extended capabilities, automated git ope
 - **Network controls**: Restricted mode (`--network none`) or Squid proxy sidecar for monitoring
 - **Broker-enforced secrets**: Session manifests + `mcp-stub` wrappers keep MCP API keys off disk and scoped per container
 
+## Installation
+
+**Prerequisites:**
+- ✅ Docker installed and running (Desktop on macOS/Windows, Engine on Linux)
+- ✅ `curl`, `tar`, `openssl` installed on the host
+
+**Install via curl (Recommended):**
+
+```bash
+# Install latest production release
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash
+
+# Install nightly build
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash -s -- --channel nightly
+```
+
+The installer self-verifies from GHCR (Sigstore/Fulcio), then downloads and verifies the payload before installing. All pulls are anonymous; GitHub rate limits apply.
+
 ## Quick Start (5 Minutes)
 
 **New to Docker or containers?** See the [detailed getting started guide](docs/getting-started.md).

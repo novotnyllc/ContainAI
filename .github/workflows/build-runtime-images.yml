@@ -496,7 +496,7 @@ jobs:
       - name: Compose tags
         id: taglist
         run: |
-          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
           arch_tag="${repo}:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
           printf "tag=%s\n" "$arch_tag" >> "$GITHUB_OUTPUT"
 
@@ -818,6 +818,16 @@ jobs:
       - name: Set up ORAS
         uses: oras-project/setup-oras@v1
 
+      - name: Generate payload bundle (file-level attestation)
+        id: payload_bundle
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ steps.payload_paths.outputs.payload_targz }}
+          push-to-registry: false
+
+      - name: Ensure payload bundle exists
+        run: test -f "${{ steps.payload_bundle.outputs.bundle-path }}"
+
       - name: Push payload artifact (registry)
         id: push
         run: |
@@ -826,7 +836,8 @@ jobs:
             --artifact-type application/vnd.containai.payload.v1 \
             --digest-file payload.digest \
             "${{ steps.payload_paths.outputs.payload_targz }}:application/vnd.containai.payload.layer.v1+gzip" \
-            "${{ steps.payload_paths.outputs.sbom }}:application/vnd.cyclonedx+json"
+            "${{ steps.payload_paths.outputs.sbom }}:application/vnd.cyclonedx+json" \
+            "${{ steps.payload_bundle.outputs.bundle-path }}":application/vnd.in-toto+json
           digest=$(cat payload.digest)
           echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
           echo "ref=$ref@${digest#*@}" >> "$GITHUB_OUTPUT"
@@ -864,6 +875,77 @@ jobs:
           name: transport-tarball-attestation
           path: ${{ steps.payload_paths.outputs.transport_targz }}.intoto.jsonl
           if-no-files-found: error
+
+  publish-installer:
+    name: Publish installer artifact
+    needs:
+      - determine-context
+    if: ${{ needs.determine-context.outputs.push == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.determine-context.outputs.version }}
+      CHANNEL: ${{ needs.determine-context.outputs.channel }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Prepare installer artifact
+        run: |
+          cp install.sh installer.sh
+          gzip -c installer.sh > installer.sh.gz
+
+      - name: Generate installer bundle (file-level attestation)
+        id: installer_bundle
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: installer.sh.gz
+          push-to-registry: false
+
+      - name: Ensure installer bundle exists
+        run: test -f "${{ steps.installer_bundle.outputs.bundle-path }}"
+
+      - name: Push installer artifact
+        id: push
+        run: |
+          ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-installer:${VERSION}"
+          oras push "$ref" \
+            --artifact-type application/vnd.containai.installer.v1 \
+            --digest-file installer.digest \
+            installer.sh.gz:application/vnd.containai.installer.v1+sh \
+            "${{ steps.installer_bundle.outputs.bundle-path }}":application/vnd.in-toto+json
+          digest=$(cat installer.digest)
+          echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Tag installer with channel
+        if: ${{ env.CHANNEL != 'dev' }}
+        run: |
+          oras tag "${{ steps.push.outputs.ref }}" "${{ env.CHANNEL }}"
+          if [[ "${{ env.CHANNEL }}" == "prod" ]]; then
+            oras tag "${{ steps.push.outputs.ref }}" "latest"
+          fi
+
+      - name: Attest installer artifact
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-installer
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 
   publish-metadata:
     name: Publish channel metadata

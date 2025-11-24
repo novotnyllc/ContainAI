@@ -201,27 +201,6 @@ detect_channel() {
     echo "ℹ️  Detected channel: $CHANNEL"
 }
 
-fetch_trust_anchor() {
-    if [[ "$COSIGN_ROOT_URL" == "__COSIGN_ROOT_URL__" ]]; then
-        die "cosign root URL not injected; repackage artifacts."
-    fi
-    if [[ "$COSIGN_ROOT_EXPECTED_SHA256" == "__COSIGN_ROOT_SHA256__" ]]; then
-        die "cosign root hash not injected; repackage artifacts."
-    fi
-    local dest
-    dest="$(mktemp "$EXTRACT_DIR/cosign-root.XXXXXX.pem")"
-    echo "⬇️  Fetching cosign root from pinned URL"
-    if ! curl -fL -o "$dest" "$COSIGN_ROOT_URL"; then
-        die "Failed to download cosign root from $COSIGN_ROOT_URL"
-    fi
-    local cosign_hash
-    cosign_hash=$(sha256sum "$dest" | awk '{print $1}')
-    if [[ "$cosign_hash" != "$COSIGN_ROOT_EXPECTED_SHA256" ]]; then
-        die "cosign-root.pem hash mismatch; expected $COSIGN_ROOT_EXPECTED_SHA256 got $cosign_hash"
-    fi
-    TRUST_ANCHOR_PATH="$dest"
-}
-
 verify_payload_hash() {
     if [[ -f "$PAYLOAD_SHA_PATH" ]]; then
         local expected
