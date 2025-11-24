@@ -94,9 +94,8 @@ Passed via `--network-proxy` flag or `NETWORK_PROXY` environment variable.
 
 | Mode | Description |
 |------|-------------|
-| `allow-all` | (Default) Full outbound network access. |
-| `restricted` | No network access (`--network none`). |
-| `squid` | Forces traffic through the Squid sidecar proxy. |
+| `squid` | (Default) Forces traffic through the Squid sidecar proxy (full access). |
+| `restricted` | Forces traffic through Squid with a strict allowlist. |
 
 ## Resource Limits
 

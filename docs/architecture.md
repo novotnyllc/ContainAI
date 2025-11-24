@@ -15,7 +15,7 @@ High-level design of ContainAI.
 
 ```mermaid
 flowchart TB
-    subgraph host["HOST SYSTEM"]
+    subgraph host["HOST SYSTEM (Trusted)"]
         direction TB
         auth["Authentication (OAuth)<br/>• ~/.config/gh/<br/>• ~/.config/github-copilot/<br/>• ~/.config/codex/<br/>• ~/.config/claude/"]
         secrets["Secret Inputs<br/>• ~/.config/containai/mcp-secrets.env<br/>• env overrides"]
@@ -26,12 +26,16 @@ flowchart TB
 
     launcher["launch-agent / run-agent<br/>• security preflight<br/>• capability issuance<br/>• tmpfs + mount orchestration"]
 
-    subgraph container["CONTAINER (isolated)"]
+    subgraph container["CONTAINER (Untrusted / Isolated)"]
         direction TB
         workspace["Workspace (/workspace)<br/>• git clone/copy<br/>• user code only"]
         tmpfs["Session tmpfs (/run/containai)<br/>• stub specs<br/>• sealed capabilities<br/>• decrypted secrets"]
         mcpstub["mcp-stub wrappers<br/>• broker-only secret redemption<br/>• launches MCP processes"]
         agents["Agents (Copilot/Codex/Claude)"]
+    end
+
+    subgraph shared["SHARED SERVICES"]
+        proxy["Squid Proxy<br/>• Egress filtering<br/>• Audit logging"]
     end
 
     auth --> renderer
@@ -43,11 +47,14 @@ flowchart TB
     launcher --> container
     container -->|uses read-only mounts| auth
     tmpfs --> mcpstub --> agents
+    agents -->|Network Traffic| proxy
 
     style host fill:#e1f5ff,stroke:#0366d6
     style container fill:#fff3cd,stroke:#856404
     style launcher fill:#d4edda,stroke:#28a745
     style broker fill:#d4edda,stroke:#28a745
+    style shared fill:#f8f9fa,stroke:#6c757d
+    style proxy fill:#e2e3e5,stroke:#383d41
 ```
 
 Launchers refuse to proceed if seccomp, AppArmor, ptrace scope, or tmpfs protections cannot be enforced. After the host passes all checks, `render-session-config.py` emits a signed manifest, stub specs, and capability requests. The secret broker produces sealed capability bundles for each MCP stub; those bundles are copied into the container’s private tmpfs before any untrusted workload starts. MCP binaries can only access secrets by invoking the trusted `mcp-stub` helper, which redeems a capability against the broker and injects decrypted values into stub-owned tmpfs.
@@ -58,9 +65,10 @@ Prompt (`--prompt`) sessions reuse the exact same trust chain. When you launch t
 
 | Zone | Examples | Trust Level | Guarantees |
 | --- | --- | --- | --- |
-| Host enclave | launchers, `render-session-config.py`, secret broker, audit logs | **Trusted** | Hash-verified scripts, seccomp/AppArmor enforced, never runs user code |
-| Session tmpfs | `/run/containai`, capability directories, decrypted secrets | **Constrained** | Mounted `nosuid,nodev,noexec`, owned by stub-specific UIDs, cleared on exit |
-| Agent workspace | `/workspace`, user shells, MCP child processes | **Untrusted** | Read-only view of auth configs, cannot access tmpfs or broker sockets |
+| **Host Enclave** | launchers, `render-session-config.py`, secret broker, audit logs | **Trusted (TCB)** | Hash-verified scripts, seccomp/AppArmor enforced, never runs user code. Compromise here is fatal. |
+| **Session tmpfs** | `/run/containai`, capability directories, decrypted secrets | **Constrained** | Mounted `nosuid,nodev,noexec`, owned by stub-specific UIDs, cleared on exit. Accessible only by specific stubs. |
+| **Agent Workspace** | `/workspace`, user shells, MCP child processes | **Untrusted** | Read-only view of auth configs, cannot access tmpfs or broker sockets. Runs arbitrary model code. |
+| **Shared Services** | Squid Proxy, Log Forwarder | **Trusted Bridge** | Enforces network policy and logs traffic. Does not store secrets. |
 
 Only the launcher can talk directly to the broker. Agent processes must call `mcp-stub`, which checks that the manifest hash, capability scope, and PID namespace match the session before opening a memfd with decrypted data. If any layer fails integrity checks, the broker refuses to stream secrets and the MCP launch aborts.
 
@@ -506,10 +514,10 @@ flowchart TB
 
 ### Network Isolation
 
-Containers use default bridge network:
-- Can access internet (for git, npm, etc.)
-- Cannot access host services by default
-- No port exposure (unless explicitly added)
+Containers use a dedicated network with a mandatory proxy sidecar:
+- **Default (Squid):** All outbound HTTP/HTTPS traffic is routed through a Squid proxy sidecar for auditing. Direct internet access is blocked.
+- **Restricted:** (`--network-proxy restricted`) Traffic is routed through Squid but restricted to a strict allowlist of domains.
+- **No Port Exposure:** Containers do not expose ports to the host by default.
 
 ## Data Flow
 

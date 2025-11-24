@@ -63,7 +63,7 @@ run-copilot-dev [REPO_PATH] [OPTIONS]
 | `-b, --branch BRANCH` (bash)<br>`-Branch BRANCH` (PowerShell) | string | none | Branch name (creates `<agent>/<branch>`) |
 | `--name NAME` (bash)<br>`-Name NAME` (PowerShell) | string | none | Custom container name |
 | `--dotnet-preview CHANNEL` (bash)<br>`-DotNetPreview CHANNEL` (PowerShell) | string | none | .NET preview SDK channel (e.g., `11.0`) |
-| `--network-proxy MODE` (bash)<br>`-NetworkProxy MODE` (PowerShell) | string | `allow-all` | Network mode: `allow-all`, `restricted`, `squid` |
+| `--network-proxy MODE` (bash)<br>`-NetworkProxy MODE` (PowerShell) | string | `squid` | Network mode: `squid`, `restricted` |
 | `--cpu NUM` (bash)<br>`-Cpu NUM` (PowerShell) | string | `4` | CPU limit (e.g., `2`, `4`, `8`, `0.5`) |
 | `--memory SIZE` (bash)<br>`-Memory SIZE` (PowerShell) | string | `8g` | Memory limit (e.g., `4g`, `8g`, `16g`) |
 | `--gpu SPEC` (bash)<br>`-Gpu SPEC` (PowerShell) | string | none | GPU specification (e.g., `all`, `device=0`, `device=0,1`) |
@@ -332,7 +332,7 @@ launch-agent <AGENT> [<SOURCE>] [OPTIONS]
 | `-b, --branch BRANCH` (bash)<br>`-Branch BRANCH` (PowerShell) | string | auto-generated | Branch name (creates `{agent}/{branch}`) |
 | `--name NAME` (bash)<br>`-Name NAME` (PowerShell) | string | auto-generated | Custom container name |
 | `--dotnet-preview CHANNEL` (bash)<br>`-DotNetPreview CHANNEL` (PowerShell) | string | none | .NET preview SDK channel (e.g., `11.0`) |
-| `--network-proxy MODE` (bash)<br>`-NetworkProxy MODE` (PowerShell) | string | `allow-all` | Network mode: `allow-all`, `restricted`, `squid` |
+| `--network-proxy MODE` (bash)<br>`-NetworkProxy MODE` (PowerShell) | string | `squid` | Network mode: `squid`, `restricted` |
 | `--cpu NUM` (bash)<br>`-Cpu NUM` (PowerShell) | string | `4` | CPU limit |
 | `--memory SIZE` (bash)<br>`-Memory SIZE` (PowerShell) | string | `8g` | Memory limit |
 | `--gpu SPEC` (bash)<br>`-Gpu SPEC` (PowerShell) | string | none | GPU specification |
@@ -361,9 +361,8 @@ launch-agent <AGENT> [<SOURCE>] [OPTIONS]
 
 | Mode | Network Access | Use Case |
 |------|---------------|----------|
-| `allow-all` | Full internet | Default, maximum flexibility |
-| `restricted` | None (`--network none`) | Maximum security, no external access |
-| `squid` | Monitored proxy | Audit network requests, domain whitelist |
+| `squid` | Monitored proxy | Default, audit network requests, full access |
+| `restricted` | Allowlist only | Maximum security, restricted domains only |
 
 #### Integrity, Audit, and Overrides
 

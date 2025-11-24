@@ -13,26 +13,26 @@ This document explains how ContainAI restricts access to long-lived credentials 
 
 | Component | Trust Level | Responsibility |
 | --- | --- | --- |
-| `launch-agent` / `run-agent` (host) | Trusted | Builds containers, hashes stubs, requests broker capabilities, wires tmpfs mounts.
-| Secret Broker (host daemon) | Trusted | Stores master secrets, validates capabilities, streams secrets via one-time handles.
-| Git tree attestation (`host/launchers/**`, stubs) | Trusted data | Launcher verifies these paths are clean vs. `HEAD` (and records the tree hash) before secrets are issued, so bits exactly match the current commit.
-| Agent container runtime | Partially trusted | Runs untrusted code but with seccomp/AppArmor, read-only roots, and dedicated tmpfs for sensitive material.
-| MCP Stub Wrappers | Trusted binaries inside container | Immutable helpers responsible for redeeming capabilities and launching MCPs.
-| Squid proxy | Shared service | Provides egress filtering/logging only; never stores credentials.
+| `launch-agent` / `run-agent` (host) | **Trusted (TCB)** | Builds containers, hashes stubs, requests broker capabilities, wires tmpfs mounts.
+| Secret Broker (host daemon) | **Trusted (TCB)** | Stores master secrets, validates capabilities, streams secrets via one-time handles.
+| Git tree attestation (`host/launchers/**`, stubs) | **Trusted Data** | Launcher verifies these paths are clean vs. `HEAD` (and records the tree hash) before secrets are issued.
+| Agent container runtime | **Untrusted** | Runs untrusted code but with seccomp/AppArmor, read-only roots, and dedicated tmpfs for sensitive material.
+| MCP Stub Wrappers | **Trusted Binaries** | Immutable helpers inside the container responsible for redeeming capabilities and launching MCPs.
+| Squid proxy | **Trusted Bridge** | Provides egress filtering/logging only; never stores credentials.
 
 ### Trust Boundary Overview
 
-The diagram below mirrors the Microsoft Threat Modeling Tool convention by explicitly drawing the trust boundaries around the host launcher, the partially trusted container, and shared network services.
+The diagram below mirrors the Microsoft Threat Modeling Tool convention by explicitly drawing the trust boundaries around the host launcher, the untrusted container, and shared network services.
 
 ```mermaid
 flowchart LR
-    subgraph Host_Boundary["Trust Boundary: Host (Trusted)"]
+    subgraph Host_Boundary["Trust Boundary: Host (Trusted TCB)"]
         LA["launch-agent / run-agent"]
         BR["Secret Broker"]
         GA["Git tree attestor"]
     end
 
-    subgraph Container_Boundary["Trust Boundary: Agent Container (Partially trusted)"]
+    subgraph Container_Boundary["Trust Boundary: Agent Container (Untrusted)"]
         RT["Container runtime + seccomp/AppArmor"]
         VC["Vendor Agent CLI (agentcli UID)"]
         ST["MCP stubs / helpers"]

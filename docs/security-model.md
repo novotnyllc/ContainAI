@@ -48,15 +48,76 @@ Helper processes that bridge the gap between the Host and the Container.
 - **Restricted**: (`--network-proxy restricted`) The container is launched with `--network none`. No external access is possible.
 - **DNS**: The container uses the host's DNS settings but cannot access localhost services unless explicitly configured.
 
-## Threat Model
+## Threat Model & Attack Surface
 
-| Threat | Mitigation |
-|--------|------------|
-| **Malicious Model Output** | Container isolation, non-root user, read-only mounts. |
-| **Secret Exfiltration** | Secrets not in ENV; traffic logged via Proxy; short-lived tokens. |
-| **Filesystem Corruption** | Read-only source mount; Git-based sync mechanism. |
-| **Privilege Escalation** | `no-new-privileges`, Seccomp, AppArmor, dropped capabilities. |
-| **Network Scanning** | Isolated Docker network; Proxy enforcement. |
+The following diagram illustrates the primary attack surfaces and the corresponding security controls.
+
+```mermaid
+flowchart TB
+    subgraph attacker["Attacker Capabilities"]
+        malicious_model["Malicious Model Output<br/>(Hallucinations, Bad Code)"]
+        prompt_injection["Prompt Injection<br/>(Malicious Instructions)"]
+        compromised_dep["Compromised Dependency<br/>(Malicious npm/pip package)"]
+    end
+
+    subgraph container["Agent Container (Untrusted)"]
+        agent_process["Agent Process<br/>(UID 1000)"]
+        workspace["Workspace<br/>(/workspace)"]
+        mcp_stub["MCP Stub<br/>(Trusted Helper)"]
+    end
+
+    subgraph host["Host System (Trusted)"]
+        kernel["Linux Kernel<br/>(Seccomp + AppArmor)"]
+        broker["Secret Broker<br/>(Holds Keys)"]
+        fs["Host Filesystem"]
+    end
+
+    malicious_model -->|Executes via| agent_process
+    prompt_injection -->|Influences| agent_process
+    compromised_dep -->|Runs inside| agent_process
+
+    agent_process -->|Blocked by Seccomp/AppArmor| kernel
+    agent_process -->|Blocked by Read-Only Mount| fs
+    agent_process -->|Blocked by Broker Policy| broker
+
+    mcp_stub -->|Authorized Request| broker
+    broker -->|Sealed Secret| mcp_stub
+
+    style attacker fill:#f8d7da,stroke:#721c24
+    style container fill:#fff3cd,stroke:#856404
+    style host fill:#d4edda,stroke:#28a745
+```
+
+| Threat | Description | Mitigation |
+|--------|-------------|------------|
+| **Malicious Model Output** | The AI generates code that deletes files or exfiltrates data. | **Container Isolation**: Read-only root, copy-on-write workspace. **Network Policy**: Egress filtering via Squid. |
+| **Prompt Injection** | An attacker embeds instructions in a file that the agent reads, hijacking its behavior. | **Least Privilege**: Agent runs as non-root. **No Secrets**: Secrets are not in env vars. **Restricted Network**: Can block outbound calls. |
+| **Supply Chain Attack** | The agent installs a malicious package (npm/pip) that tries to steal credentials. | **Secret Broker**: Credentials are not on disk. **Seccomp**: Blocks `ptrace` and other snooping syscalls. **Ephemeral**: Container is destroyed after use. |
+| **Container Escape** | The agent tries to break out of the container to access the host. | **Hardened Runtime**: `no-new-privileges`, `cap-drop=ALL`, strict Seccomp/AppArmor profiles. |
+| **Secret Exfiltration** | The agent tries to send secrets to a remote server. | **Traffic Analysis**: All outbound traffic logged via Squid. **Short-lived Tokens**: Secrets are ephemeral. |
+
+## Defense in Depth
+
+We employ a multi-layered security approach:
+
+### Layer 1: Kernel Hardening
+- **Seccomp**: We use a custom profile (`host/profiles/seccomp-containai-agent.json`) that blocks dangerous syscalls like `ptrace`, `mount`, `keyctl`, and `bpf`.
+- **AppArmor**: A mandatory access control profile (`containai-agent`) restricts file access (deny `/proc`, `/sys` writes) and capabilities, even if the process somehow gains root.
+- **Capabilities**: All Linux capabilities are dropped (`--cap-drop=ALL`).
+
+### Layer 2: Process Isolation
+- **User Namespaces**: The agent runs as a non-root user (`UID 1000`).
+- **No New Privileges**: The `no-new-privileges` flag prevents the process from gaining privileges via setuid binaries.
+- **PID Limits**: Strict limits on the number of processes (`--pids-limit`) prevent fork bombs.
+
+### Layer 3: Identity & Secret Management
+- **Secret Broker**: Secrets are never stored on the container's disk. They are brokered Just-In-Time (JIT) into memory (`tmpfs`) only when needed by a specific MCP stub.
+- **Memory-Only**: Secrets are injected via `memfd_create` or tmpfs and are wiped immediately after use.
+
+### Layer 4: Network Governance
+- **Sidecar Proxy**: All HTTP/HTTPS traffic is routed through a transparent Squid proxy sidecar.
+- **Egress Filtering**: By default, traffic is allowed but logged. In `restricted` mode, all outbound traffic is blocked.
+- **DNS**: The container uses the host's DNS but cannot access localhost services unless explicitly configured.
 
 ## Audit & Compliance
 

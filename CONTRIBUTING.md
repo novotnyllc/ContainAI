@@ -295,10 +295,9 @@ Each agent gets its own branch: `<agent>/<base-branch>`
 - **Cleanup**: Branches deleted when container removed (unless unmerged)
 
 ### Network Isolation
-Three network modes:
-- **allow-all**: Full internet access (default)
-- **restricted**: No network access
-- **squid**: HTTP proxy with whitelist (*.github.com, *.nuget.org, etc.)
+Two network modes:
+- **squid**: HTTP proxy with full access (default)
+- **restricted**: HTTP proxy with strict allowlist (*.github.com, *.nuget.org, etc.)
 
 ### Container Labels
 Every agent container has labels:

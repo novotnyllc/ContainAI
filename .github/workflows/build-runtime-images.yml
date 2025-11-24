@@ -834,11 +834,14 @@ jobs:
           ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-payload:${VERSION}"
           oras push "$ref" \
             --artifact-type application/vnd.containai.payload.v1 \
-            --digest-file payload.digest \
             "${{ steps.payload_paths.outputs.payload_targz }}:application/vnd.containai.payload.layer.v1+gzip" \
             "${{ steps.payload_paths.outputs.sbom }}:application/vnd.cyclonedx+json" \
             "${{ steps.payload_bundle.outputs.bundle-path }}":application/vnd.in-toto+json
-          digest=$(cat payload.digest)
+          digest=$(oras manifest fetch --descriptor "$ref" | jq -r '.digest // empty')
+          if [[ -z "$digest" ]]; then
+            echo "Failed to resolve payload digest from registry" >&2
+            exit 1
+          fi
           echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
           echo "ref=$ref@${digest#*@}" >> "$GITHUB_OUTPUT"
 
@@ -880,6 +883,7 @@ jobs:
     name: Publish installer artifact
     needs:
       - determine-context
+      - publish-metadata
     if: ${{ needs.determine-context.outputs.push == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -887,6 +891,9 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    outputs:
+      ref: ${{ steps.push.outputs.ref }}
+      digest: ${{ steps.push.outputs.digest }}
     env:
       VERSION: ${{ needs.determine-context.outputs.version }}
       CHANNEL: ${{ needs.determine-context.outputs.channel }}
@@ -925,10 +932,13 @@ jobs:
           ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-installer:${VERSION}"
           oras push "$ref" \
             --artifact-type application/vnd.containai.installer.v1 \
-            --digest-file installer.digest \
             installer.sh.gz:application/vnd.containai.installer.v1+sh \
             "${{ steps.installer_bundle.outputs.bundle-path }}":application/vnd.in-toto+json
-          digest=$(cat installer.digest)
+          digest=$(oras manifest fetch --descriptor "$ref" | jq -r '.digest // empty')
+          if [[ -z "$digest" ]]; then
+            echo "Failed to resolve installer digest from registry" >&2
+            exit 1
+          fi
           echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
@@ -946,6 +956,49 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-installer
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  cleanup-partial:
+    name: Cleanup partial publishes
+    needs:
+      - determine-context
+      - publish-payload
+      - publish-metadata
+      - publish-installer
+    if: ${{ always() && needs.determine-context.outputs.push == 'true' && (needs.publish-installer.result != 'success' || needs.publish-metadata.result != 'success' || needs.publish-payload.result != 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    env:
+      CHANNEL: ${{ needs.determine-context.outputs.channel }}
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Cleanup payload artifact
+        if: ${{ needs.publish-payload.outputs.payload_ref != '' }}
+        run: |
+          echo "Cleaning payload at ${{ needs.publish-payload.outputs.payload_ref }}"
+          oras manifest delete "${{ needs.publish-payload.outputs.payload_ref }}" || true
+
+      - name: Cleanup metadata artifact
+        run: |
+          ref_base="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-metadata"
+          echo "Cleaning metadata tags"
+          oras manifest delete "${ref_base}:${CHANNEL}" || true
+          oras manifest delete "${ref_base}:channels" || true
+
+      - name: Cleanup installer artifact
+        if: ${{ needs.publish-installer.outputs.ref != '' }}
+        run: |
+          echo "Cleaning installer at ${{ needs.publish-installer.outputs.ref }}"
+          oras manifest delete "${{ needs.publish-installer.outputs.ref }}" || true
 
   publish-metadata:
     name: Publish channel metadata
@@ -998,7 +1051,6 @@ jobs:
           ref_base="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-metadata"
           oras push "${ref_base}:${CHANNEL}" \
             --artifact-type application/vnd.containai.metadata.v1+json \
-            --digest-file metadata.digest \
             channels.json:application/json
           # Keep a canonical tag for channel resolution
           oras push "${ref_base}:channels" \

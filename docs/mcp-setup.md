@@ -400,7 +400,7 @@ You can also re-run the renderer directly to surface warnings before launching a
 python host/utils/render-session-config.py \
    --output /tmp/mcp-dry-run \
    --session-id test \
-   --network-policy allow-all \
+   --network-policy squid \
    --repo repo \
    --agent github-copilot \
    --container dry-run \

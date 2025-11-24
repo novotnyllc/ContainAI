@@ -76,21 +76,7 @@ Authentication uses OAuth from your host machine, but secrets are now gated by t
 
 Three network modes are available:
 
-#### 1. Allow-All (Default)
-- Standard Docker bridge network
-- Agent has normal outbound internet access
-- Use for: General development, trusted workspaces
-
-#### 2. Restricted Mode
-```bash
-launch-agent copilot --network-proxy restricted
-run-copilot --network-proxy restricted
-```
-- No outbound network access (`--network none`)
-- Agent can only access local files
-- Use for: Sensitive codebases, compliance requirements, offline work
-
-#### 3. Squid Proxy Mode
+#### 1. Squid Proxy Mode (Default)
 ```bash
 launch-agent copilot --network-proxy squid
 run-copilot --network-proxy squid
@@ -101,6 +87,15 @@ run-copilot --network-proxy squid
 - Use for: Auditing, monitoring, investigating agent behavior
 
 **Squid proxy logs contain full URLs and may include sensitive data.** Review logs before sharing.
+
+#### 2. Restricted Mode
+```bash
+launch-agent copilot --network-proxy restricted
+run-copilot --network-proxy restricted
+```
+- Outbound network access restricted to strict allowlist
+- Agent can only access allowed domains (GitHub, Microsoft, etc.)
+- Use for: Sensitive codebases, compliance requirements, untrusted code
 
 ### Default Allowed Domains (Squid Mode)
 
@@ -161,7 +156,7 @@ If an agent reads this file, it might interpret the comment as an instruction ra
 
 2. **Network controls:** Restrict outbound access to prevent data exfiltration
    ```bash
-   # Block all outbound network access
+   # Restrict outbound network access
    run-copilot --network-proxy restricted
    ```
 
@@ -211,7 +206,7 @@ Even with prompt injection, agents **cannot**:
 - Escape the container (no privileged mode, no Docker socket)
 - Access your host filesystem (except mounted workspace)
 - Modify authentication credentials (mounted read-only)
-- Make network requests in `restricted` mode
+- Make arbitrary network requests in `restricted` mode
 - Bypass Squid whitelist in `squid` mode
 - Gain elevated privileges (no-new-privileges enforced)
 
@@ -230,7 +225,6 @@ If you discover a prompt injection that bypasses these protections, please repor
 ### What Gets Shared
 
 - **Agent API calls:** Agents send prompts/code to their respective services (GitHub, OpenAI, Anthropic)
-- **Network requests:** In `allow-all` mode, agents can make arbitrary outbound requests
 - **Squid logs:** In `squid` mode, all HTTP/HTTPS requests are logged locally
 
 ### Best Practices

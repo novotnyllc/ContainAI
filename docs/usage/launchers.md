@@ -177,7 +177,7 @@ launch-agent copilot https://github.com/user/repo --branch add-tests
 | `--no-push` | Disable auto-push on shutdown | `--no-push` |
 | `--use-current-branch` | Work directly on current branch instead of creating agent branch | `--use-current-branch` |
 | `--dotnet-preview` | Install .NET preview SDK | `--dotnet-preview 11.0` |
-| `--network-proxy` | Network mode: `allow-all` (default), `restricted`, `squid` | `--network-proxy restricted` |
+| `--network-proxy` | Network mode: `squid` (default), `restricted` | `--network-proxy restricted` |
 
 **Branch Management:**
 

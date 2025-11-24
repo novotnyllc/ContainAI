@@ -471,12 +471,12 @@ sudo systemctl restart docker
 
 **For network=restricted:**
 
-This is expected! Restricted mode (`--network none`) blocks all network access.
+This is expected! Restricted mode blocks all network access except for allowed domains.
 
 **To allow network:**
 ```bash
-# Remove restriction
-launch-agent copilot . --network-proxy allow-all
+# Use default squid proxy (full access)
+launch-agent copilot . --network-proxy squid
 ```
 
 **For network=squid:**
@@ -508,9 +508,9 @@ Edit `launch-agent` script:
 SQUID_ALLOWED_DOMAINS="*.github.com,*.npmjs.org,*.pypi.org,YOUR_DOMAIN.com"
 ```
 
-**Option 2: Use allow-all mode**
+**Option 2: Customize allowlist**
 ```bash
-launch-agent copilot . --network-proxy allow-all
+launch-agent copilot . --network-proxy squid --squid-domains "YOUR_DOMAIN.com"
 ```
 
 ## Image Issues
