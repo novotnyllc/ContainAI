@@ -61,6 +61,33 @@ flowchart LR
     class Host_Boundary,Container_Boundary,Shared_Services boundary;
 ```
 
+## Secret Handling & MCP Enforcement
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Launcher
+    participant SecretBroker
+    participant CapabilityBundle
+    participant Container
+    participant MCPStub
+    participant MCPServer
+
+    Launcher->>SecretBroker: Register requested MCP servers + scopes
+    SecretBroker-->>CapabilityBundle: Issue sealed tokens on tmpfs
+    Launcher->>Container: Bind-mount /run/containai with bundle
+    Container->>MCPStub: Start server via trusted wrapper
+    MCPStub->>CapabilityBundle: Redeem sealed token (one-time)
+    CapabilityBundle-->>MCPStub: Ephemeral credentials
+    MCPStub->>MCPServer: Establish session using scoped creds
+    MCPServer-->>MCPStub: Responses routed to agent tools
+```
+
+**Defenses**
+- Capabilities live in tmpfs with `0700` permissions owned by the stub user.
+- Tokens are single-use and audience-bound, so exfiltrated blobs are worthless.
+- Launchers optionally merge `~/.config/containai/mcp-secrets.env` for hosts that prefer .env-style inputs.
+
 ## Automatic Initialization & Health Guarantees
 
 Any launcher command that issues, stores, redeems, or health-checks secrets triggers `_ensure_broker_files`, which performs the following idempotent operations:

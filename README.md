@@ -1,16 +1,25 @@
 # ContainAI
 
-**Run AI agents like GitHub Copilot, OpenAI Codex, and Anthropic Claude in isolated, secure Docker containers.**
+**Run autonomous AI agents like GitHub Copilot, OpenAI Codex, and Anthropic Claude in isolated, secure Docker containers.**
 
-ContainAI provides a secure runtime for AI coding agents. Each agent operates in its own isolated container with a dedicated workspace and git branch, preventing conflicts and keeping your host environment clean. It enforces strict network policies, manages secrets securely without exposing them to the container filesystem, and integrates seamlessly with VS Code.
+ContainAI provides a secure runtime for autonomous agents. While optimized for coding assistants, it supports any agentic workflow that requires shell access and file manipulation. It lets you run one or more "unrestricted" agents per repository, each inside its own hardened container and Git branch, integrated with your existing tools (.NET, VS Code, GitHub, etc.), with a security model that assumes the agent is untrusted and keeps your host, your secrets, and your main branches safe.
 
-## Why ContainAI?
+## The Problem
 
-- **🛡️ Total Isolation**: Agents run in Docker containers, not on your host machine. No messy config files or accidental overwrites.
-- **🔐 Secure by Default**: Secrets are injected into memory only when needed. Network traffic is monitored via a sidecar proxy.
-- **🌿 Branch Management**: Agents automatically work on isolated branches (e.g., `copilot/feature-auth`), keeping your main branch clean.
-- **🚀 Multi-Agent Collaboration**: Run Copilot, Claude, and Codex simultaneously on the same repository without them fighting over files.
-- **🔌 VS Code Native**: Connect to any agent container instantly using the Dev Containers extension.
+Once an autonomous agent can run shell commands, install dependencies, and modify files, you face critical risks:
+*   **Unsafe Execution**: `rm -rf` accidents, broken dev environments, and sensitive file leaks.
+*   **Multi-Agent Chaos**: Conflicting edits and unreviewable mixtures of machine and human changes.
+*   **Secret Sprawl**: Hard-coding keys in containers or checking them into repos is a non-starter.
+
+## The Solution
+
+ContainAI answers these problems with a practical, security-first workflow:
+*   **🛡️ Total Isolation**: Agents run in hardened Docker containers (non-root, seccomp, AppArmor), not on your host.
+*   **🌿 Branch Management**: Each agent gets its own isolated branch (e.g., `copilot/feature-auth`). You review and merge changes like any other contributor.
+*   **🔐 Secure Secrets**: Secrets live in a host-side broker and are injected into memory only when needed. They never touch the container disk.
+*   **🚀 Multi-Agent Collaboration**: Run multiple autonomous agents simultaneously on the same repository without conflicts.
+*   **🔌 VS Code Native**: Connect to any agent container instantly using the Dev Containers extension.
+*   **dotnet First**: First-class support for .NET 8/9/10, PowerShell, and WSL2, alongside standard Linux tools.
 
 ## Installation
 
@@ -79,28 +88,40 @@ launch-agent claude --branch refactor-ui
 connect-agent
 ```
 
-## Security & Network Control
+## Security Philosophy
 
-ContainAI puts you in control of what agents can access.
+We assume the agent is **untrusted**. ContainAI enforces a defense-in-depth security model:
 
--   **Squid Proxy (Default)**: All outbound traffic is routed through a monitoring proxy. You can audit logs to see exactly what the agent is accessing.
--   **Restricted Mode**: Lock down the container to a strict allowlist of domains (GitHub, package registries).
-    ```bash
-    run-copilot --network-proxy restricted
-    ```
--   **Secret Safety**: API keys and credentials are never stored in the container image or written to the container's disk. They are streamed from your host only when requested by a verified process.
+1.  **Isolation by Default**: Containers run as non-root users with dropped capabilities, strict seccomp profiles blocking dangerous syscalls, and AppArmor confinement.
+2.  **Least Privilege**: Only the host launcher and broker are trusted. The container only sees the repo checkout and necessary tools.
+3.  **No Secrets on Disk**: Secrets are brokered Just-In-Time (JIT) into memory (`tmpfs`) only when needed by a specific MCP stub.
+4.  **Network Governance**:
+    -   **Squid Proxy (Default)**: All outbound traffic is routed through a monitoring proxy for audit logging.
+    -   **Restricted Mode**: Lock down the container to a strict allowlist of domains.
+        ```bash
+        run-copilot --network-proxy restricted
+        ```
 
 ## Documentation
 
-*   **[Usage Guide](USAGE.md)**: Detailed command reference and workflows.
-*   **[Getting Started](docs/getting-started.md)**: In-depth setup and first-run guide.
-*   **[Network Configuration](docs/network-proxy.md)**: Details on proxy modes and allowlists.
-*   **[VS Code Integration](docs/vscode-integration.md)**: How to use the Dev Containers extension.
-*   **[Troubleshooting](TROUBLESHOOTING.md)**: Solutions for common issues.
+### 📚 Usage
+*   **[Getting Started](docs/getting-started.md)**: Installation and first-run guide.
+*   **[Launcher Workflows](docs/usage/launchers.md)**: Detailed guide on `run-*` and `launch-agent`.
+*   **[VS Code Integration](docs/usage/vscode-integration.md)**: Using Dev Containers.
+*   **[Network Configuration](docs/usage/network-proxy.md)**: Proxy modes and allowlists.
+*   **[Troubleshooting](docs/usage/troubleshooting.md)**: Common issues and solutions.
+
+### 🛠️ Development
+*   **[Contributing](docs/development/contributing.md)**: Guide for building from source and running tests.
+*   **[Build Process](docs/development/build.md)**: How images are built and published.
+
+### 🔒 Security
+*   **[Security Model](docs/security/model.md)**: Trust boundaries and isolation mechanisms.
+*   **[Architecture](docs/security/architecture.md)**: System design and data flow.
 
 ## Contributing
 
-We welcome contributions! If you want to build ContainAI from source, develop new features, or run the test suite, please read our **[Developer Guide](CONTRIBUTING.md)**.
+We welcome contributions! If you want to build ContainAI from source, develop new features, or run the test suite, please read our **[Developer Guide](docs/development/contributing.md)**.
 
 ---
 

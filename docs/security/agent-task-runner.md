@@ -78,7 +78,7 @@ sequenceDiagram
 ## 7. Related Documents
 
 - [secret-credential-security-review.md](secret-credential-security-review.md) – Broader architecture, threat model, and credential lifecycle.
-- [workflows.md](workflows.md) – Incident response procedures and audit tooling.
+- [administration.md](administration.md) – Operations guide, audit logs, and system health.
 - [development/workflow.md](../development/workflow.md) – How to rebuild the base image and run the test suites mentioned above.
 - [architecture.md](architecture.md) – High-level system diagram; this document drills into the runner-specific portion of that graph.
 

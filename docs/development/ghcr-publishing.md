@@ -8,6 +8,33 @@ This runbook details the CI/CD pipeline that builds, secures, and publishes the 
 - **Security Auditors**: Focus on the [Supply Chain Security](#supply-chain-security-auditor-view) section for SBOMs, attestation, and provenance.
 - **Developers/Consumers**: Focus on the [Verification Flow](#verification-flow-consumer-view) to validate artifact integrity.
 
+## CI Build & Security Gates
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant GitHubActions as GitHub Actions
+    participant Buildx as Docker Buildx
+    participant Trivy
+    participant Attestor as Build Provenance
+    participant GHCR
+
+    GitHubActions->>Buildx: Build base image (linux/amd64, arm64)
+    Buildx-->>GitHubActions: Digest + metadata
+    GitHubActions->>Trivy: Scan image (secret scanner HIGH/CRITICAL)
+    Trivy-->>GitHubActions: Pass/fail
+    GitHubActions->>Buildx: Build specialized images referencing base digest
+    GitHubActions->>Attestor: Generate SLSA provenance (non-PR only)
+    Attestor-->>GitHubActions: Signed statement
+    GitHubActions->>GHCR: Push tags when not a pull request
+    GHCR-->>Users: Latest published images for launcher syncs
+```
+
+**Highlights**
+- Pull requests still build and scan images but skip pushes/attestations.
+- Build matrices ensure the Squid proxy and each agent image share the same vetted base digest.
+- The `scripts/build` helpers mirror this workflow locally so developers can test the same steps before opening a PR.
+
 ## GitHub Repository Setup
 
 To enable this pipeline, the following configuration is required on the GitHub repository.

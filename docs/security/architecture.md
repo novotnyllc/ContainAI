@@ -168,7 +168,34 @@ Integrate the same check into CI for all agent variants so every published artif
 
 ## Launch Flow
 
-### 0. Security Preflight
+#### 1. Launcher Boot Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant Launcher
+    participant SecretBroker
+    participant Docker
+    participant Container
+
+    User->>Launcher: run-copilot-<channel> / launch-agent-<channel>
+    Launcher->>Launcher: Verify prerequisites (docker info, repo status)
+    Launcher->>Docker: Pull tagged images (base/all/agent/proxy)
+    Launcher->>Launcher: Render session manifest + MCP configs
+    Launcher->>SecretBroker: Request sealed capability bundle
+    SecretBroker-->>Launcher: Capability payload (no raw secrets)
+    Launcher->>Docker: docker run ... (mount repo, broker sockets, tmpfs)
+    Docker-->>Container: Start container + tmux session
+    Container-->>User: Shell/VS Code ready, agent tools start inside tmux
+```
+
+**Key takeaways**
+- Hashes of launch scripts and runtime assets are recorded before container creation.
+- Every launch path pulls published images by default; `--from-source` is reserved for contributors.
+- The broker handshake happens on the host so containers never see plaintext secrets at rest.
+
+#### 2. Security Preflight
 
 Each launcher refuses to touch secrets until the host proves it can enforce the required guardrails:
 
@@ -184,7 +211,7 @@ flowchart LR
     class gitState,hostCheck,runtimeCheck,sessionRender,brokerInit,containerStart stage;
 ```
 
-### 1. Session Rendering & Capability Issuance
+#### 3. Session Rendering & Capability Issuance
 
 Before any container spins up, `render-session-config.py` runs on the host:
 
@@ -199,7 +226,7 @@ The launcher then:
 2. Requests sealed capabilities for every stub declared in the manifest.
 3. Records the manifest SHA256 and capability IDs in the audit log.
 
-### 2. Container Creation
+#### 4. Container Creation
 
 With secrets staged, the launcher creates the container:
 
@@ -208,7 +235,7 @@ With secrets staged, the launcher creates the container:
 - Copies the rendered manifest, per-agent MCP config JSON, and sealed capabilities into that tmpfs **before** any user code runs.
 - Mounts OAuth configs (`~/.config/gh`, `~/.config/github-copilot`, etc.) read-only, along with credential/GPG proxy sockets when available.
 
-### 3. Entrypoint & Stub Initialization
+#### 5. Entrypoint & Stub Initialization
 
 `entrypoint.sh` executes inside the container with the following responsibilities:
 
@@ -220,7 +247,7 @@ With secrets staged, the launcher creates the container:
 
 Actual MCP servers never see raw secrets. When Copilot/Codex/Claude launches a server, it invokes `/usr/local/bin/mcp-stub`. The stub selects the correct capability, asks the host broker to redeem it, receives the decrypted secret through a memfd, writes it inside its private tmpfs, and finally `exec`s the true MCP command.
 
-### 4. Container Ready
+#### 6. Container Ready
 
 - Workspace initialized at `/workspace` with isolated branch.
 - Agent session (tmux) started and ready for CLI or VS Code attachments.
