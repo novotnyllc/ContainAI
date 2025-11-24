@@ -31,7 +31,7 @@ sequenceDiagram
 ```
 
 **Highlights**
-- Pull requests still build and scan images but skip pushes/attestations.
+- Pull requests build and scan images but skip pushes/attestations.
 - Build matrices ensure the Squid proxy and each agent image share the same vetted base digest.
 - The `scripts/build` helpers mirror this workflow locally so developers can test the same steps before opening a PR.
 
@@ -159,9 +159,9 @@ flowchart LR
 ```
 
 ### Key Security Controls
-1.  **Immutable Tags**: We never overwrite tags during the build phase. We push unique `sha-<commit>` tags first. Only after all checks pass do we apply mutable tags like `dev`.
+1.  **Immutable Tags**: The pipeline avoids overwriting tags during the build phase. We push unique `sha-<commit>` tags first. Only after all checks pass do we apply mutable tags like `dev`.
 2.  **SLSA Provenance**: Every image and artifact is signed using GitHub's OIDC identity, linking the artifact back to the specific workflow run and commit.
-3.  **Secret Scanning**: Trivy runs against the *built image* before it is promoted. If a secret is found, the pipeline fails, and the `dev` tag is never updated.
+3.  **Secret Scanning**: Trivy runs against the *built image* before it is promoted. If a secret is found, the pipeline fails, and the `dev` tag remains unchanged.
 
 ## Verification Flow (Consumer View)
 

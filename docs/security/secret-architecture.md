@@ -1,6 +1,6 @@
 # Secret Credential Isolation Architecture
 
-This document explains how ContainAI restricts access to long-lived credentials (Copilot/Codex/Context7, MCP bearer tokens, GitHub PATs, etc.) while still allowing immutable MCP binaries to run unmodified. It is written from the perspective of the trusted launcher (`host/launchers/*`) and the host-resident secret broker they coordinate with.
+This document explains how ContainAI restricts access to long-lived credentials (Copilot/Codex/Context7, MCP bearer tokens, GitHub PATs, etc.) while allowing immutable MCP binaries to run unmodified. It is written from the perspective of the trusted launcher (`host/launchers/*`) and the host-resident secret broker they coordinate with.
 
 ## Objectives
 
@@ -188,7 +188,7 @@ audit-agent --session <session-id> [--output /path/report.tar.gz] [--format json
 - `--session` (required) identifies the running container. Shortcuts like `--latest` read `~/.config/containai/session-manifests/last.json`.
 - `--output` (optional) writes the resulting tarball to a custom location; default is `~/.config/containai/audit/<session>-audit.tar.gz`.
 - `--format table` controls the textual summary printed to `stdout`, but the authoritative artifact is always the tarball.
-- `--include-secrets` inlines decrypted values (Base64) instead of redacting them with `*****`. Use only when absolutely necessary; the flag is logged as an `audit-agent` event so reviewers know secrets were exported.
+- `--include-secrets` inlines decrypted values (Base64) rather than redacting them with `*****`. Use only when absolutely necessary; the flag is logged as an `audit-agent` event so reviewers know secrets were exported.
 
 #### Data Sources and Collection Steps
 
@@ -226,7 +226,7 @@ By default every sensitive field (`apiKey`, `copilot_tokens`, `capabilityBlob`, 
 {"event":"audit-agent","session":"abcd...","includeSecrets":true,"timestamp":"..."}
 ```
 
-This balance lets day-to-day troubleshooting rely on redacted manifests while still providing a break-glass path for deep debugging.
+This balance lets day-to-day troubleshooting rely on redacted manifests while providing a break-glass path for deep debugging.
 
 #### Output Guarantees
 
@@ -259,8 +259,8 @@ Key points:
 - MCP entries come in two flavors:
     1. **Command-based** (e.g., Serena, Playwright). These follow the exec-intercept + stub flow shown above: the runner launches the stub under a dedicated UID, secrets live inside stub tmpfs, and STDIO/IPC is bridged back to the vendor agent.
     2. **HTTPS/SSE endpoints** (e.g., Context7, GitHub MCP, Microsoft Learn). The vendor agent connects to a localhost helper (Unix socket or 127.0.0.1) that we inject into the generated config; that helper redeems the capability and forwards traffic to the real remote endpoint over a constrained network policy.
-- Even for HTTPS/SSE entries, exec interception matters because any helper the agent spawns while handling responses still goes through the runner and therefore cannot read `/run/agent-secrets` or the config directories. The only components that ever see decrypted HTTPS secrets are the localhost helper proxy and (optionally) the vendor agent process running inside the sealed `agentcli` namespace.
-- Command-based MCPs retain stubs to provide per-server UIDs, tmpfs cleanup, network/seccomp policy enforcement, and broker-audited lifecycle management. HTTPS MCPs rely on the vendor agent’s namespace isolation to keep secrets away from untrusted subprocesses while still allowing the agent to embed tokens in outbound requests.
+- Even for HTTPS/SSE entries, exec interception matters because any helper the agent spawns while handling responses goes through the runner and therefore cannot read `/run/agent-secrets` or the config directories. The only components that ever see decrypted HTTPS secrets are the localhost helper proxy and (optionally) the vendor agent process running inside the sealed `agentcli` namespace.
+- Command-based MCPs retain stubs to provide per-server UIDs, tmpfs cleanup, network/seccomp policy enforcement, and broker-audited lifecycle management. HTTPS MCPs rely on the vendor agent’s namespace isolation to keep secrets away from untrusted subprocesses while allowing the agent to embed tokens in outbound requests.
 
 ### Vendor Agent MCP Invocation
 
@@ -286,7 +286,7 @@ sequenceDiagram
     Note over VA,CFG: STDIO entries are rewritten to stub binaries
 ```
 
-Because the config already references stub binaries, no vendor code change is required: the agent still “launches what the config tells it,” but now that command resolves to `prepare-serena-stub` (for example) rather than the raw MCP binary. The launcher performs this translation while generating the session config:
+Because the config already references stub binaries, no vendor code change is required: the agent “launches what the config tells it,” but that command resolves to `prepare-serena-stub` (for example) rather than the raw MCP binary. The launcher performs this translation while generating the session config:
 
 1. Parse every MCP entry.
 2. For `command` transports, replace `command` and `args` with the stub executable and required arguments (`--cap-path`, `--session-id`, etc.).
@@ -304,9 +304,9 @@ When an MCP definition advertises an HTTPS or SSE transport, the launcher does *
 3. Terminates the agent’s inbound HTTPS request, rewrites it as needed (headers, auth), and establishes the outbound TLS/SSE session to the remote MCP.
 4. Streams responses back over the localhost connection so the vendor agent experiences a normal HTTPS MCP even though the secrets never leave the helper namespace.
 
-Only in rare debug scenarios (gated by an override token) will the config embed the upstream URL directly. Otherwise, the helper proxy allows us to enforce DNS allow-lists, certificate pinning, rate limits, and auditing exactly as we do for command-based stubs while still honoring the MCP’s HTTPS protocol requirements.
+Only in rare debug scenarios (gated by an override token) will the config embed the upstream URL directly. Otherwise, the helper proxy allows us to enforce DNS allow-lists, certificate pinning, rate limits, and auditing exactly as we do for command-based stubs while honoring the MCP’s HTTPS protocol requirements.
 
-### Why MCP Stubs Still Exist (Command Mode)
+### Why MCP Stubs Exist (Command Mode)
 
 For command-based MCPs, the seccomp intercept removes the need for vendor binaries to spawn helper processes directly, but the stub layer continues to provide guarantees the vendor agent does not implement. Treat the vendor agent as “trusted for intent” and the stub as “trusted for containment”:
 
@@ -316,7 +316,7 @@ For command-based MCPs, the seccomp intercept removes the need for vendor binari
 4. **Fine-grained outbound policy** – Stubs ship with server-specific seccomp filters, DNS allow-lists, TLS pinning, filesystem visibility, and rate-limiters. Rebuilding those rules inside each vendor binary would be brittle and difficult to audit.
 5. **Lifecycle hygiene + auditing** – When a stub exits, it scrubs tmpfs, closes broker descriptors, emits audit events, and can revoke the capability. Without that cleanup, command MCPs would leak decrypted secrets and disappear from the security log.
 
-HTTPS/SSE MCPs do not require a stub because the vendor agent itself makes the network call and already sits inside the restricted `agentcli` namespace. The intercept layer ensures only that process can read the generated config and send authenticated traffic; everything it spawns still goes through the task runner and therefore cannot reach the secrets.
+HTTPS/SSE MCPs do not require a stub because the vendor agent itself makes the network call and already sits inside the restricted `agentcli` namespace. The intercept layer ensures only that process can read the generated config and send authenticated traffic; everything it spawns goes through the task runner and therefore cannot reach the secrets.
 
 ## Handling Static Secrets (e.g., Context7)
 
@@ -347,14 +347,14 @@ Agents interact with MCPs through multiple transports (STDIO, SSE, HTTPS) while 
 1. **STDIO MCPs (in-container)**
     - Each MCP stub is executed under a dedicated UID (for example `mcp_context7`).
     - The stub forks the immutable MCP binary and keeps its stdin/stdout pipes connected to the requesting agent process (`agentuser`). Linux permissions allow this because the pipes are created before dropping privileges; only the stub-owned tmpfs with secrets/config is protected via ownership + `chmod 600`.
-    - Result: untrusted agent code can still speak STDIO, but it cannot read the MCP’s credential storage area.
+    - Result: untrusted agent code can speak STDIO, but it cannot read the MCP’s credential storage area.
 
 2. **SSE or HTTPS MCPs (host helpers)**
     - `launch-agent` spawns host-side helpers under per-MCP system users (or `systemd --user` slices). Helpers redeem their capability tokens, keep secrets in their private tmpfs, and expose only an authenticated Unix socket or localhost HTTPS endpoint to the agent container.
     - The container connects over that socket/TLS channel (optionally through the Squid proxy for auditing). Since only the helper’s UID can access the tmpfs and capability, secrets never enter the agent namespace.
 
 3. **Mixed mode / chained MCPs**
-    - Some agents launch additional MCPs from within the first MCP (e.g., tool runners). Each requested MCP still has its own UID + capability; the first stub merely acts as a broker client and never gains direct read access to the secondary MCP secrets.
+    - Some agents launch additional MCPs from within the first MCP (e.g., tool runners). Each requested MCP has its own UID + capability; the first stub merely acts as a broker client and never gains direct read access to the secondary MCP secrets.
 
 In every transport, the data path (pipes, sockets, HTTP) remains compatible with the MCP’s expectations, while the credential path is locked to the stub’s UID via tmpfs ownership and broker-issued capabilities.
 
@@ -376,16 +376,13 @@ flowchart LR
     host --> launcher --> broker --> bundle --> stub --> cli
 ```
 
-**Current gap**
-- Launchers only mount `~/.config/github-copilot` / `~/.config/gh`; the actual Copilot CLI state lives under `~/.copilot/config.json`, so tokens never enter the container.
-- `init-copilot-config.sh` tries to copy from `$HOME/.copilot`, but that directory points to the container home volume, not the host mount.
+Launchers detect `${HOME}/.copilot/config.json` on the host, hash it, and request a capability from `secret-broker.py` (stub `agent_copilot_cli`). They store the sealed blob plus manifest metadata under `/run/containai/copilot/<session>.cap` (tmpfs, `0700`).
 
-**Implementation plan**
-1. Extend `run-agent` / `launch-agent` (bash & PowerShell) to detect `${HOME}/.copilot/config.json` on the host, hash it, and request a capability from `secret-broker.py` (new stub `agent_copilot_cli`). Store the sealed blob plus manifest metadata under `/run/containai/copilot/<session>.cap` (tmpfs, `0700`).
-2. Add a bind mount for the capability directory and a tmpfs destination (e.g., `/run/agent-secrets/copilot`) in the Docker arguments so only the helper UID can read it. Stop mounting the entire host `~/.copilot` tree once the broker path is live.
-3. Replace `init-copilot-config.sh` with a helper (`prepare-copilot-secrets.sh`) that redeems the capability, extracts `copilot_tokens`, `last_logged_in_user`, and `logged_in_users`, writes them into `/home/agentuser/.copilot/config.json` (`chmod 600`), and invokes the existing `merge-copilot-tokens.py` for backward compatibility.
-4. Teach the helper to fall back to broker-provided GitHub CLI tokens if Copilot config is missing, while logging an audit event so operators know which identity was used.
-5. Add unit/integration tests (`scripts/test/test-launchers.{sh,ps1}`) that create a fake `~/.copilot/config.json`, run the launcher with `--with-host-secrets`, and assert the container manifest contains a Copilot capability mount. Tests should also verify that the helper refuses to run unless the capability hash matches the broker response.
+A bind mount for the capability directory and a tmpfs destination (e.g., `/run/agent-secrets/copilot`) are added to the Docker arguments so only the helper UID can read it. The host `~/.copilot` tree is not mounted.
+
+The helper `prepare-copilot-secrets.sh` redeems the capability, extracts `copilot_tokens`, `last_logged_in_user`, and `logged_in_users`, writes them into `/home/agentuser/.copilot/config.json` (`chmod 600`), and invokes `merge-copilot-tokens.py`.
+
+The helper falls back to broker-provided GitHub CLI tokens if Copilot config is missing, while logging an audit event so operators know which identity was used.
 
 ### OpenAI Codex CLI (`~/.codex/auth.json`)
 
@@ -401,21 +398,18 @@ flowchart LR
     hostCodex --> launcherCodex --> brokerCodex --> bundleCodex --> stubCodex --> codexCli
 ```
 
-**Current gap**
-- Launchers only mount `~/.config/codex`, but Codex CLI stores OAuth tokens under `~/.codex/auth.json`. No code copies those tokens into the container, so `codex exec` always prompts for auth.
-- Secret broker is never invoked for Codex, so there is no audit trail for when host tokens would be consumed.
+`run-agent` / `launch-agent` read `~/.codex/auth.json` and call `secret-broker.py issue --stub agent_codex_cli --path ~/.codex/auth.json --json-schema codex_auth`.
 
-**Implementation plan**
-1. Define a Codex credential descriptor (JSON pointer to `refresh_token`, `access_token`, `expires_at`) and teach `run-agent` / `launch-agent` to read `~/.codex/auth.json` and call `secret-broker.py issue --stub agent_codex_cli --path ~/.codex/auth.json --json-schema codex_auth`.
-2. Mount the resulting capability (e.g., `/run/containai/codex/<session>.cap`) plus an empty tmpfs destination (`/run/agent-secrets/codex`) into the container with dedicated ownership.
-3. Add a container helper (`prepare-codex-secrets.sh`), invoked from the entrypoint before the CLI launches, that redeems the capability, reconstructs `auth.json`, writes it to `/home/agentuser/.codex/auth.json`, and sets `chmod 600`. The helper should also populate `/home/agentuser/.config/codex/` with any non-secret defaults.
-4. Modify `docker/agents/codex/Dockerfile` CMD to run the helper + validation script before `codex`. Remove the expectation that users must bind-mount their entire host config tree.
-5. Extend launcher tests to assert that Codex sessions fail fast (with actionable messages) when `~/.codex/auth.json` is absent or when the broker rejects the capability, ensuring we never launch Codex without secrets wired correctly.
+The resulting capability (e.g., `/run/containai/codex/<session>.cap`) plus an empty tmpfs destination (`/run/agent-secrets/codex`) are mounted into the container with dedicated ownership.
 
-**Implementation status (Nov 2025)**
-- `run-agent` / `launch-agent` (bash + PowerShell) now hash-check `~/.codex/auth.json`, request `agent_codex_cli` capabilities from the broker, and copy the sealed bundle plus manifest into `/run/containai/codex/cli/capabilities` before the container starts.
-- `docker/agents/codex/prepare-codex-secrets.sh` redeems `codex_cli_auth_json` via `capability-unseal` and writes `/home/agentuser/.codex/auth.json` (chmod 600) entirely from tmpfs; CMD now executes the helper prior to `codex` so launches fail closed if secrets are missing.
-- Launcher unit tests `test_codex_cli_helper` (bash) and `Test-CodexCliHelper` (PowerShell) simulate capability issuance, invoke the helper with overridden paths, and verify that the decrypted payload matches the stored fixture—guarding against regressions without needing to boot a container.
+A container helper (`prepare-codex-secrets.sh`), invoked from the entrypoint before the CLI launches, redeems the capability, reconstructs `auth.json`, writes it to `/home/agentuser/.codex/auth.json`, and sets `chmod 600`. The helper also populates `/home/agentuser/.config/codex/` with any non-secret defaults.
+
+`docker/agents/codex/Dockerfile` CMD runs the helper + validation script before `codex`.
+
+**Implementation status**
+- `run-agent` / `launch-agent` (bash + PowerShell) hash-check `~/.codex/auth.json`, request `agent_codex_cli` capabilities from the broker, and copy the sealed bundle plus manifest into `/run/containai/codex/cli/capabilities` before the container starts.
+- `docker/agents/codex/prepare-codex-secrets.sh` redeems `codex_cli_auth_json` via `capability-unseal` and writes `/home/agentuser/.codex/auth.json` (chmod 600) entirely from tmpfs; CMD executes the helper prior to `codex` so launches fail closed if secrets are missing.
+- Launcher unit tests `test_codex_cli_helper` (bash) and `Test-CodexCliHelper` (PowerShell) simulate capability issuance, invoke the helper with overridden paths, and verify that the decrypted payload matches the stored fixture.
 
 ### Anthropic Claude CLI (`~/.claude/.credentials.json`)
 
@@ -431,23 +425,20 @@ flowchart LR
     hostClaude --> launcherClaude --> brokerClaude --> bundleClaude --> stubClaude --> claudeCli
 ```
 
-**Current gap**
-- The legacy `init-claude-config.sh` expected `$HOME/.claude/.credentials.json`, yet launchers never mounted the host `~/.claude` directory—so launches historically proceeded without credentials even though `validate-claude-auth.sh` warned. The new helper removes that behavior, but we retain the documentation for historical context.
-- There was no consistent way to feed raw `CLAUDE_API_KEY` env vars through the broker when developers preferred not to store JSON files on disk; the capability + helper pipeline now normalizes that path.
+Launcher preflights look for either `~/.claude/.credentials.json` or `CLAUDE_API_KEY` on the host. Whichever is present gets sealed through the broker via the `agent_claude_cli` stub; if both exist, the JSON file is preferred but the choice is noted in the audit log.
 
-**Implementation plan**
-1. Expand launcher preflights to look for either `~/.claude/.credentials.json` or `CLAUDE_API_KEY` on the host. Whichever is present gets sealed through the broker via the `agent_claude_cli` stub; if both exist, prefer the JSON file but note the choice in the audit log.
-2. Deliver the capability to `/run/containai/claude/<session>.cap` and mount a tmpfs target (`/run/agent-secrets/claude`) into the container under a helper-specific UID.
-3. Replace `init-claude-config.sh` with `prepare-claude-secrets.sh` that redeems the capability, writes `.credentials.json` (or synthesizes it from `CLAUDE_API_KEY`), and ensures `/home/agentuser/.claude` never leaves tmpfs. Validation should now fail closed if the capability is missing or unreadable.
-4. Update the Claude Dockerfile entrypoint to run `prepare-claude-secrets.sh && validate-claude-auth.sh && claude`, ensuring credentials always exist before the CLI boots.
-5. Add launcher tests that simulate both file-based and env-based Claude secrets, verifying that only the selected form appears inside the container tmpfs and that audit logs record the fallback path.
+The capability is delivered to `/run/containai/claude/<session>.cap` and a tmpfs target (`/run/agent-secrets/claude`) is mounted into the container under a helper-specific UID.
 
-**Implementation status (Nov 2025)**
-- Host launchers now treat `agent_claude_cli` the same as Copilot/Codex: they hash whichever credential source is present (favoring `~/.claude/.credentials.json`), request a broker capability, and sync both the sealed bundle and manifest into `/run/containai/claude/cli/capabilities` ahead of container start so the helper can operate entirely from tmpfs.
-- The Claude image bundles `prepare-claude-secrets.sh`, which redeems `claude_cli_credentials`, copies default `.claude.json` settings, and emits a chmod 600 `.claude/.credentials.json` derived from either the full JSON payload or a bare `CLAUDE_API_KEY`; `validate-claude-auth.sh` now errors out if that file is missing, preventing the CLI from launching without secrets.
-- New regression tests (`test_claude_cli_helper` in bash and `Test-ClaudeCliHelper` in PowerShell) exercise the helper with both JSON and inline fixtures by overriding `CONTAINAI_AGENT_HOME`, `CONTAINAI_AGENT_CAP_ROOT`, and `CONTAINAI_CAPABILITY_UNSEAL`, ensuring capability redemption + file synthesis stays in lockstep across shells.
+`prepare-claude-secrets.sh` redeems the capability, writes `.credentials.json` (or synthesizes it from `CLAUDE_API_KEY`), and ensures `/home/agentuser/.claude` never leaves tmpfs. Validation fails closed if the capability is missing or unreadable.
 
-Across all three agents, the broker-issued capability flow keeps long-lived host secrets resident on the host while still letting the containerized CLI authenticate. The steps above bring the implementation in line with the documented security model and give operators traceability for every time an agent consumes a host identity.
+The Claude Dockerfile entrypoint runs `prepare-claude-secrets.sh && validate-claude-auth.sh && claude`, ensuring credentials always exist before the CLI boots.
+
+**Implementation status**
+- Host launchers treat `agent_claude_cli` the same as Copilot/Codex: they hash whichever credential source is present (favoring `~/.claude/.credentials.json`), request a broker capability, and sync both the sealed bundle and manifest into `/run/containai/claude/cli/capabilities` ahead of container start so the helper can operate entirely from tmpfs.
+- The Claude image bundles `prepare-claude-secrets.sh`, which redeems `claude_cli_credentials`, copies default `.claude.json` settings, and emits a chmod 600 `.claude/.credentials.json` derived from either the full JSON payload or a bare `CLAUDE_API_KEY`; `validate-claude-auth.sh` errors out if that file is missing, preventing the CLI from launching without secrets.
+- Regression tests (`test_claude_cli_helper` in bash and `Test-ClaudeCliHelper` in PowerShell) exercise the helper with both JSON and inline fixtures by overriding `CONTAINAI_AGENT_HOME`, `CONTAINAI_AGENT_CAP_ROOT`, and `CONTAINAI_CAPABILITY_UNSEAL`, ensuring capability redemption + file synthesis stays in lockstep across shells.
+
+Across all three agents, the broker-issued capability flow keeps long-lived host secrets resident on the host while letting the containerized CLI authenticate. The steps above bring the implementation in line with the documented security model and give operators traceability for every time an agent consumes a host identity.
 
 ### Host Agent Data Synchronization & Isolation
 
@@ -474,10 +465,10 @@ Design principles:
 - **Split identities:** The interactive shell continues to run as `agentuser`, but the CLI binary starts under `agentcli` using `setpriv --reuid agentcli --regid agentcli --init-groups --no-new-privs`. Only `agentcli` owns `/run/agent-data/<agent>` and `/run/agent-secrets/<agent>`.
 - **Seccomp/AppArmor overlays:** Extend the existing profiles with path rules that confine `agentcli` to `/run/agent-*` plus `/home/agentuser/.config/<agent>` and prevent `agentuser` (and child processes it spawns) from traversing those directories. Linux `chmod 700` already blocks sibling UIDs; the profiles add enforcement even if privilege escalation is attempted.
 - **PID namespace guard:** Launch the CLI inside its own PID namespace (`unshare --pid --fork --mount-proc`) so tools started by developers (or malicious scripts) cannot `ptrace` or inspect `/proc/<pid>` to locate the data tmpfs.
-- **Runner bootstrap + mount masking:** `entrypoint.sh` now spawns `agent-task-runnerd` before it drops privileges to `agentuser`, so the daemon keeps the capabilities required for `unshare`/mount operations. Each sandbox invocation immediately replaces `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` with sealed tmpfs mounts (`mode 000`) and sets `PR_SET_NO_NEW_PRIVS`, preventing child processes from remounting or inheriting the sensitive tmpfs even if they discover the original paths.
-- **Helper-mediated IPC only:** Child processes spawned by the CLI inherit the `agentcli` UID, so they can still operate. Any other background tasks (running as `agentuser`) must go through the helper’s Unix socket if they need read-only access (e.g., to tail logs).
+- **Runner bootstrap + mount masking:** `entrypoint.sh` spawns `agent-task-runnerd` before it drops privileges to `agentuser`, so the daemon keeps the capabilities required for `unshare`/mount operations. Each sandbox invocation immediately replaces `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` with sealed tmpfs mounts (`mode 000`) and sets `PR_SET_NO_NEW_PRIVS`, preventing child processes from remounting or inheriting the sensitive tmpfs even if they discover the original paths.
+- **Helper-mediated IPC only:** Child processes spawned by the CLI inherit the `agentcli` UID, so they can operate. Any other background tasks (running as `agentuser`) must go through the helper’s Unix socket if they need read-only access (e.g., to tail logs).
 
-**Why the CLI still runs as `agentcli`:** We treat the CLI front-end as a control plane that may read/write its private cache, but we no longer allow it (or its descendants) to execute arbitrary repo commands inside that namespace. The wrapper script performs these steps atomically:
+**Why the CLI runs as `agentcli`:** We treat the CLI front-end as a control plane that may read/write its private cache, but we do not allow it (or its descendants) to execute arbitrary repo commands inside that namespace. The wrapper script performs these steps atomically:
 
 1. `prepare-<agent>-secrets.sh` runs as root, wires tmpfs, and marks the mount tree `MS_PRIVATE|MS_UNBINDABLE` so it cannot be propagated to child namespaces.
 2. It executes `unshare --mount --pid --fork --mount-proc -- setpriv --reuid agentcli --regid agentcli --init-groups --no-new-privs --reset-env /usr/local/bin/<agent>-cli-wrapper`.
@@ -486,7 +477,7 @@ Design principles:
 
 #### Task Execution Without Data Access
 
-Every time an agent CLI needs to run user-supplied code (e.g., `github-copilot-cli exec`, `codex exec`, `claude -p`), it now speaks to a dedicated `agent-task-runner` helper via a Unix domain socket:
+Every time an agent CLI needs to run user-supplied code (e.g., `github-copilot-cli exec`, `codex exec`, `claude -p`), it speaks to a dedicated `agent-task-runner` helper via a Unix domain socket:
 
 1. CLI sends `{command, env, cwd}` JSON to the runner whenever it would have spawned a process—whether that's due to a `run/exec` subcommand invoked by a human or an automated tool invocation generated by the agent itself.
 2. Runner validates the request, spawns a process as `agentuser` inside a fresh pid+mount namespace that **does not** include `/run/agent-data/<agent>` or `/run/agent-secrets/<agent>`.
@@ -531,11 +522,11 @@ When we talk about an “agent” in this document we mean the upstream binaries
 1. **Binary shim (best effort path detection).** During image build we rename the real binary (e.g., `/usr/bin/github-copilot-cli` → `.real`) and install a wrapper that exports `AGENT_TASK_RUNNER_SOCKET` and reroutes any *explicit* subcommands (like `copilot exec`) through the socket. This covers the common cases we control.
 2. **Seccomp exec interception (enforced logging + policy).** Regardless of what the vendor binary tries to run, we apply a seccomp filter to the `agentcli` namespace that places `execve` and `execveat` behind a user-notification handler:
     - When the CLI (or any library it loads) issues an `execve`, the kernel pauses the call and notifies the in-container `agent-task-runnerd` via the seccomp user-notification FD. `agentcli-exec` automatically registers the FD and tags the connection with the current agent name/binary.
-    - Both `agentcli-exec` and `agent-task-runnerd` are compiled from the Rust crate in `docker/runtime/agent-task-runner`, satisfying the "safe language" requirement and replacing the legacy C helpers.
+    - Both `agentcli-exec` and `agent-task-runnerd` are compiled from the Rust crate in `docker/runtime/agent-task-runner`, satisfying the "safe language" requirement and replacing C helpers.
     - The daemon reconstructs the syscall target (path, argv pointer) straight from the paused task’s memory, writes a JSON log line to `/run/agent-task-runner/events.log`, and evaluates the request against the policy selected via `CONTAINAI_RUNNER_POLICY` (`observe` by default, `enforce` to block access to paths under `/run/agent-secrets` or `/run/agent-data`). Allowed commands resume transparently via `SECCOMP_USER_NOTIF_FLAG_CONTINUE`; denied commands return `EPERM`, preventing helpers from reaching the sensitive tmpfs even if wrappers were bypassed.
-    - Because every exec is observed, we gain deterministic auditability today and can tighten policy in future phases without modifying vendor binaries. When the explicit runner socket integration lands, the same daemon will reuse these logs as ground truth before proxying STDIO.
+    - Because every exec is observed, we gain deterministic auditability today and can tighten policy in future phases without modifying vendor binaries. The daemon reuses these logs as ground truth before proxying STDIO.
 
-If the vendor adds new execution pathways that bypass our wrapper, the seccomp layer still intercepts them. This guarantees that every process launch—whether initiated manually or automatically by the agent’s own reasoning loop—is at least audited (and optionally denied) before it can observe `/run/agent-data/<agent>`.
+If the vendor adds new execution pathways that bypass our wrapper, the seccomp layer intercepts them. This guarantees that every process launch—whether initiated manually or automatically by the agent’s own reasoning loop—is at least audited (and optionally denied) before it can observe `/run/agent-data/<agent>`.
 
 If the CLI needs to share artifacts with the general workspace (for example, download files for the repo), it should explicitly copy them into `/workspace` or `/home/agentuser`—the data tmpfs is not shared automatically.
 
@@ -563,8 +554,8 @@ sequenceDiagram
 
 This approach lets us persist the useful artifacts (logs, history, saved sessions) while preventing arbitrary file writes back onto the host. It also guarantees that the same data the CLI expects is present every time without reopening the attack surface that came with raw bind mounts.
 
-**Implementation status (Nov 2025)**
-- Both launcher stacks now package host data via `host/utils/package-agent-data.py`, placing `data-import.tar` + manifest pairs beneath `/run/containai/<agent>/data` for every agent that has matching inputs.
+**Implementation status**
+- Both launcher stacks package host data via `host/utils/package-agent-data.py`, placing `data-import.tar` + manifest pairs beneath `/run/containai/<agent>/data` for every agent that has matching inputs.
 - The container entrypoint provisions `/run/agent-data` as a tmpfs (size tuned via `CONTAINAI_DATA_TMPFS_SIZE`) and unpacks any staged tarballs into `/run/agent-data/<agent>` prior to starting the vendor CLI, keeping caches in tmpfs-only storage owned by the agent user.
 - Vendor CLIs are rewritten to wrappers that export `AGENT_TASK_RUNNER_SOCKET`/helper metadata and execute the preserved `.real` binary via the setuid helper `/usr/local/bin/agentcli-exec`, ensuring every session runs as `agentcli`.
 - Launcher regression tests cover the packager helper to ensure manifests contain session metadata and that empty imports do not generate stale tarballs.

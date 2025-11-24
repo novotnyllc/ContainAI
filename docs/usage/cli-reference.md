@@ -2,7 +2,7 @@
 
 Complete reference for all ContainAI launcher scripts and their arguments.
 
-> **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They no longer implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh host\launchers\entrypoints\run-copilot-dev.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
+> **Windows note:** `.ps1` entrypoints are shims that invoke the bash scripts inside your default WSL 2 distro. They do not implement independent PowerShell parameter parsing—pass the same GNU-style flags documented for bash (for example `--prompt`, `--network-proxy squid`). When running from PowerShell, prepend `--%` before the first flag so PowerShell stops interpreting the arguments: `pwsh host\launchers\entrypoints\run-copilot-dev.ps1 --% --prompt "Status"`. Running `scripts\install.ps1` adds the shim directory to your PATH so these commands are available globally.
 >
 > **Channels:** Launcher entrypoints live under `host/launchers/entrypoints`. In repo clones use the `-dev` names (e.g., `run-copilot-dev`), prod bundles drop the suffix (`run-copilot`), and nightly builds use `-nightly`. Use `host/utils/prepare-entrypoints.sh --channel nightly|prod` when you need to generate alternate names.
 
@@ -192,9 +192,9 @@ run-claude-dev --prompt "List repo services that need MCP"
 
 > **Host sync:** After every push to `local`, the host working tree fast-forwards automatically unless you set `CONTAINAI_DISABLE_AUTO_SYNC=1`.
 
-**Prompt sessions (all agents):** Passing `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) auto-runs the agent-specific CLI (`github-copilot-cli exec "$prompt"`, `codex exec "$prompt"`, or `claude -p "$prompt"`). When you launch it from inside a Git repository (or pass a repo/SOURCE argument), the workspace mirrors a normal session with branch isolation, auto-commit, and auto-push (unless you explicitly pass `--no-push`). If no repo exists, the launcher falls back to a synthetic empty workspace, disables auto-push because there is nowhere to push, and still tears down the container as soon as the CLI returns—perfect for diagnostics and the `--with-host-secrets` integration path.
+**Prompt sessions (all agents):** Passing `--prompt "<prompt>"` (bash) or `-Prompt "<prompt>"` (PowerShell) auto-runs the agent-specific CLI (`github-copilot-cli exec "$prompt"`, `codex exec "$prompt"`, or `claude -p "$prompt"`). When you launch it from inside a Git repository (or pass a repo/SOURCE argument), the workspace mirrors a normal session with branch isolation, auto-commit, and auto-push (unless you explicitly pass `--no-push`). If no repo exists, the launcher falls back to a synthetic empty workspace, disables auto-push because there is nowhere to push, and tears down the container as soon as the CLI returns—perfect for diagnostics and the `--with-host-secrets` integration path.
 
-**Reattach later:** `connect-agent --name <container>` reconnects to the tmux session if the container is still running (for example, if you detached with `Ctrl+B`, `D`).
+**Reattach later:** `connect-agent --name <container>` reconnects to the tmux session if the container is running (for example, if you detached with `Ctrl+B`, `D`).
 
 **Branch Behavior:**
 - Without `-b`: Works on current branch (same as `--use-current-branch`)
@@ -980,7 +980,7 @@ Next steps:
 
 **Ephemeral (`run-*`):**
 1. On exit, trap executes
-2. Checks if container still exists
+2. Checks if container exists
 3. Commits changes: `git add -A`, `git commit`
 4. Pushes to the per-repo bare remote under `~/.containai/local-remotes` (unless `--no-push`)
 5. Container auto-removes (`--rm`)
@@ -994,7 +994,7 @@ Next steps:
 3. Container stops but persists
 4. Manual removal: `docker rm`
 
-**Note:** Git now pushes to the managed bare repo path automatically. Fetch from that path (or set `CONTAINAI_LOCAL_REMOTES_DIR` to customize the location) to bring changes into your working tree.
+**Note:** Git pushes to the managed bare repo path automatically. Fetch from that path (or set `CONTAINAI_LOCAL_REMOTES_DIR` to customize the location) to bring changes into your working tree.
 
 ---
 

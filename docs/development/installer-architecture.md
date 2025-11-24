@@ -15,7 +15,7 @@ The installer operates as a stateless bootstrapper that resolves a "Channel" (e.
 ### Transport Delivery
 
 - **Prod/Tagged**: Publish `containai-<tag>.tar.gz` as a GitHub Release asset with a DSSE attestation. Installer verifies transport and SBOM attestations; failures are fatal.
-- **Nightly/Dev**: Push payload tar to OCI and generate cosign bundles for transport + SBOM stored as CI artifacts. Installer detects channel from the bundled `profile.env` (sourced from `artifacts/publish/profile.env`) and only tolerates missing attestations for `channel=dev`; all other channels fail closed.
+- **Nightly/Dev**: Push payload tar to OCI and generate cosign bundles for transport + SBOM stored as CI artifacts. Installer detects channel from the bundled `profile.env` (sourced from `artifacts/publish/profile.env`) and accepts missing attestations only for `channel=dev`; all other channels enforce strict verification.
 
 The installer extracts the contents, verifies `SHA256SUMS` across the extracted files, and uses `tools/cosign-root.pem` to validate attestations.
 
@@ -94,7 +94,7 @@ sequenceDiagram
     - `channel`: The requested channel name.
     - `version`: The resolved semantic version (e.g., `v1.2.3`).
     - `payload_digest`: The immutable SHA256 digest of the payload artifact.
-- **Fallback**: If metadata fetch fails, the installer attempts to use the channel name as a tag directly (legacy mode).
+- **Fallback**: If metadata fetch fails, the installer attempts to use the channel name as a tag directly.
 
 ### 2. Payload Artifact
 - **Reference**: `ghcr.io/<owner>/containai-payload@sha256:<digest>`
@@ -110,7 +110,7 @@ sequenceDiagram
 ### 3. Verification Model
 - **Trust Root**: The OCI Manifest from GHCR (served over HTTPS).
 - **Chain of Trust**:
-    1. HTTPS ensures we are talking to GHCR.
+    1. HTTPS verifies the connection to GHCR.
     2. The Manifest contains the SHA256 digests of the layers.
     3. The Installer calculates the SHA256 of the downloaded blobs.
     4. If `Calculated Hash == Manifest Hash`, the download is verified.
@@ -181,12 +181,12 @@ Run the installer pointing to the local payload:
 ```
 
 ### Runtime Configuration
-To prevent the runtime from attempting to pull updates or connect to external proxies, use the `restricted` network proxy mode:
+To ensure the runtime avoids attempting to pull updates or connect to external proxies, use the `restricted` network proxy mode:
 ```bash
 export NETWORK_PROXY="restricted"
 ./run-agent ...
 ```
 In this mode:
 - `NETWORK_MODE` is set to `none`.
-- No external network access is permitted.
-- The Squid Proxy and Log Forwarder sidecars are **not** started.
+- External network access is blocked.
+- The Squid Proxy and Log Forwarder sidecars remain inactive.

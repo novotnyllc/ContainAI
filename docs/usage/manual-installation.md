@@ -150,7 +150,7 @@ git config --global user.name
 git config --global user.email
 ```
 
-If those commands already return your information, you're done. If they're empty, set them once on the host so commits created from inside the container still carry your name/email.
+If those commands already return your information, you're done. If they're empty, set them once on the host so commits created from inside the container carry your name/email.
 
 ## Step 3: Install GitHub CLI (Optional)
 

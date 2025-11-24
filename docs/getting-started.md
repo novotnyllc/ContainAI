@@ -1,6 +1,6 @@
 # Getting Started with ContainAI
 
-This guide covers the installation and basic usage of ContainAI. You do not need to clone the repository—just run the installer. If you prefer to install from source or need a custom setup, see [Manual Installation](usage/manual-installation.md).
+This guide covers the installation and basic usage of ContainAI. You can install without cloning the repository—just run the installer. If you prefer to install from source or need a custom setup, see [Manual Installation](usage/manual-installation.md).
 
 ## TL;DR
 
@@ -26,7 +26,7 @@ The installer self-verifies from GHCR (Sigstore/Fulcio), verifies the payload at
 
 - **Docker**: Docker Desktop (macOS/Windows) or Docker Engine (Linux). Start Docker before launching agents.
 - **socat**: Required for credential/GPG proxying (install via package manager; on Windows install inside WSL).
-- **AppArmor (Linux/WSL)**: Must be enabled; the installer loads profiles automatically. If AppArmor is disabled, installation will fail until it is turned on.
+- **AppArmor (Linux/WSL)**: Must be enabled; the installer loads profiles automatically. Enable AppArmor to ensure successful installation.
 - **Git credentials on the host**: Whatever you normally use (SSH agent, credential helper, GitHub CLI) are reused inside the container.
 
 ## Install

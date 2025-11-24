@@ -10,7 +10,7 @@ The system is designed around three distinct trust zones:
 The host machine (developer's laptop or CI runner) is the **Trusted Computing Base (TCB)**.
 - **Assets**: Source code, SSH keys, API tokens, GPG keys.
 - **Responsibilities**: Orchestration, secret sealing, audit logging.
-- **Assumption**: The host is secure; if the host is compromised, the game is over.
+- **Assumption**: The host is secure; compromise of the host is critical.
 
 ### 2. The Agent Container (Untrusted)
 The container running the AI agent is considered **Untrusted**.
@@ -30,17 +30,17 @@ Helper processes that bridge the gap between the Host and the Container.
 ## Data Flow & Isolation
 
 ### Filesystem Isolation
-- **Source Code**: Mounted **Read-Only** by default. The agent cannot modify the source code on the host directly.
+- **Source Code**: Mounted **Read-Only** by default. The agent modifies the source code on the host only via controlled mechanisms.
 - **Workspace**: A copy-on-write overlay or temporary volume is used for the agent's working directory.
 - **Writes**: Changes are written to the container's writable layer.
 - **Sync**: To persist changes, the agent performs a `git push` to a **Local Remote** (a bare repo on the host). The host then fast-forwards its working tree. This prevents the container from corrupting the host's `.git` index or locking files.
 
 ### Secret Management
-**Principle**: Secrets are never passed as environment variables.
+**Principle**: Secrets are passed via secure mechanisms, not environment variables.
 
 1.  **Sealing**: The Launcher collects secrets from the host (e.g., `GITHUB_TOKEN`) and encrypts/seals them into a **Capability Bundle**.
 2.  **Mounting**: This bundle is mounted into the container at `/run/containai` (a RAM-backed `tmpfs`).
-3.  **Access**: The agent process cannot read the bundle directly. Instead, it makes requests to the **MCP Stub**.
+3.  **Access**: The agent process accesses the bundle only via the MCP Stub. Instead, it makes requests to the **MCP Stub**.
 4.  **Unsealing**: The MCP Stub validates the request and retrieves the specific secret from the bundle only when needed.
 
 ### Network Isolation

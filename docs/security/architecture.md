@@ -6,7 +6,7 @@ High-level design of ContainAI.
 
 1. **OAuth over API Keys**: All agent authentication uses OAuth from host
 2. **Isolation**: Each agent runs in its own container with independent workspace
-3. **No Secrets in Repo**: All authentication mounted from host at runtime
+3. **Secrets Kept Out of Repo**: All authentication mounted from host at runtime
 4. **Stateless Images**: Container images contain no secrets or user data
 5. **Secret Scanning**: Every image build and publish step runs a container-aware secret scanner so leaked tokens never ship inside layers
 6. **Persistent Workspaces**: Containers run in background, connectable from VS Code
@@ -57,20 +57,20 @@ flowchart TB
     style proxy fill:#e2e3e5,stroke:#383d41
 ```
 
-Launchers refuse to proceed if seccomp, AppArmor, ptrace scope, or tmpfs protections cannot be enforced. After the host passes all checks, `render-session-config.py` emits a signed manifest, stub specs, and capability requests. The secret broker produces sealed capability bundles for each MCP stub; those bundles are copied into the container’s private tmpfs before any untrusted workload starts. MCP binaries can only access secrets by invoking the trusted `mcp-stub` helper, which redeems a capability against the broker and injects decrypted values into stub-owned tmpfs.
+Launchers proceed only if seccomp, AppArmor, ptrace scope, and tmpfs protections are enforced. After the host passes all checks, `render-session-config.py` emits a signed manifest, stub specs, and capability requests. The secret broker produces sealed capability bundles for each MCP stub; those bundles are copied into the container’s private tmpfs before any untrusted workload starts. MCP binaries can only access secrets by invoking the trusted `mcp-stub` helper, which redeems a capability against the broker and injects decrypted values into stub-owned tmpfs.
 
-Prompt (`--prompt`) sessions reuse the exact same trust chain. When you launch them from inside a Git repository, the host still copies the repo root, generates an agent branch, and mounts the same trusted manifests; the only change is that the launcher auto-runs the agent CLI and then powers the container off. If no repository exists, the launcher falls back to a synthetic empty workspace so prompts remain available anywhere.
+Prompt (`--prompt`) sessions reuse the exact same trust chain. When you launch them from inside a Git repository, the host copies the repo root, generates an agent branch, and mounts the same trusted manifests; the only change is that the launcher auto-runs the agent CLI and then powers the container off. If no repository exists, the launcher uses a synthetic empty workspace so prompts remain available anywhere.
 
 ### Threat Boundaries
 
 | Zone | Examples | Trust Level | Guarantees |
 | --- | --- | --- | --- |
-| **Host Enclave** | launchers, `render-session-config.py`, secret broker, audit logs | **Trusted (TCB)** | Hash-verified scripts, seccomp/AppArmor enforced, never runs user code. Compromise here is fatal. |
+| **Host Enclave** | launchers, `render-session-config.py`, secret broker, audit logs | **Trusted (TCB)** | Hash-verified scripts, seccomp/AppArmor enforced, never runs user code. Compromise here is critical. |
 | **Session tmpfs** | `/run/containai`, capability directories, decrypted secrets | **Constrained** | Mounted `nosuid,nodev,noexec`, owned by stub-specific UIDs, cleared on exit. Accessible only by specific stubs. |
 | **Agent Workspace** | `/workspace`, user shells, MCP child processes | **Untrusted** | Read-only view of auth configs, cannot access tmpfs or broker sockets. Runs arbitrary model code. |
-| **Shared Services** | Squid Proxy, Log Forwarder | **Trusted Bridge** | Enforces network policy and logs traffic. Does not store secrets. |
+| **Shared Services** | Squid Proxy, Log Forwarder | **Trusted Bridge** | Enforces network policy and logs traffic. Operates without storing secrets. |
 
-Only the launcher can talk directly to the broker. Agent processes must call `mcp-stub`, which checks that the manifest hash, capability scope, and PID namespace match the session before opening a memfd with decrypted data. If any layer fails integrity checks, the broker refuses to stream secrets and the MCP launch aborts.
+Only the launcher can talk directly to the broker. Agent processes must call `mcp-stub`, which checks that the manifest hash, capability scope, and PID namespace match the session before opening a memfd with decrypted data. The broker streams secrets only if all layers pass integrity checks; otherwise, the MCP launch aborts.
 
 ## Container Architecture
 
@@ -85,7 +85,7 @@ flowchart TB
     
     subgraph allagents["All-Agents Image"]
         direction TB
-        all_content["• containai:local<br/>+ entrypoint.sh (session bootstrap)<br/>+ mcp-stub helper<br/>+ legacy setup-mcp-configs shim"]
+        all_content["• containai:local<br/>+ entrypoint.sh (session bootstrap)<br/>+ mcp-stub helper<br/>+ setup-mcp-configs shim"]
     end
     
     subgraph base["Base Image"]
@@ -118,9 +118,9 @@ flowchart TB
 **Build time:** ~10-15 minutes  
 **Size:** ~3-4 GB (Ubuntu 24.04 ~80MB, Node.js ~200MB, .NET SDKs + workloads ~2GB, Playwright ~500MB, PowerShell ~100MB, build tools ~500MB)
 
-**No authentication:** Image contains no secrets, can be published publicly.
+**No authentication:** Image remains free of secrets and can be published publicly.
 
-During container startup the entrypoint mounts `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` as tmpfs volumes owned by `agentcli` with `nosuid,nodev,noexec,private,unbindable` semantics. This keeps vendor CLI material entirely inside memory-backed storage that the workspace user (`agentuser`) can only reach via the shared `agentcli` group, preventing accidental host bind-mounts or namespace leaks.
+During container startup the entrypoint mounts `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` as tmpfs volumes owned by `agentcli` with `nosuid,nodev,noexec,private,unbindable` semantics. This keeps vendor CLI material entirely inside memory-backed storage that the workspace user (`agentuser`) can only reach via the shared `agentcli` group, avoiding accidental host bind-mounts or namespace leaks.
 
 The base image also ships a small setuid helper (`/usr/local/bin/agentcli-exec`) and rewrites the vendor binaries (`github-copilot-cli`, `codex`, `claude`) to wrappers that export `AGENT_TASK_RUNNER_SOCKET`/helper metadata before invoking the real binary as `agentcli`. This ensures every CLI session automatically runs inside the locked-down UID split without asking operators to change workflows.
 
@@ -131,7 +131,7 @@ The base image also ships a small setuid helper (`/usr/local/bin/agentcli-exec`)
 **Adds:**
 - `entrypoint.sh` – Container startup logic (enforces host-rendered manifest hashes, prepares tmpfs mounts)
 - `mcp-stub` – Broker-aware wrapper that redeems sealed capabilities before launching any MCP server
-- `setup-mcp-configs.sh` – Legacy converter kept for compatibility; new sessions rely on the host-rendered manifest but the shim remains while older images are phased out
+- `setup-mcp-configs.sh` – Converter kept for compatibility; sessions rely on the host-rendered manifest but the shim remains while older images are phased out
 
 **Build time:** ~1 minute  
 **Size:** +50 MB
@@ -157,7 +157,7 @@ The base image also ships a small setuid helper (`/usr/local/bin/agentcli-exec`)
 
 ### Image Secret Scanning
 
-To keep the "stateless image" guarantee enforceable, every build (local or CI) must finish with a container secret scan before the image is tagged or published. We currently use [Trivy](https://aquasecurity.github.io/trivy) with its secret scanner enabled:
+To keep the "stateless image" guarantee enforceable, every build (local or CI) must finish with a container secret scan before the image is tagged or published. We use [Trivy](https://aquasecurity.github.io/trivy) with its secret scanner enabled:
 
 ```bash
 trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai-base:local
@@ -242,7 +242,7 @@ With secrets staged, the launcher creates the container:
 1. Re-enforces ptrace scope, `/proc` hardening, and tmpfs ownership under `agentuser` while mounting CLI-sensitive tmpfs as `agentcli` with `nosuid,nodev,noexec` guardrails.
 2. Verifies and installs the host-provided manifest + MCP configs under `~/.config/<agent>/mcp/`.
 3. Copies sealed capabilities into `/home/agentuser/.config/containai/capabilities` (also tmpfs).
-4. Falls back to `setup-mcp-configs.sh` **only** if the host did not provide a manifest (legacy mode).
+4. Falls back to `setup-mcp-configs.sh` if the host did not provide a manifest.
 5. Configures git credential + GPG proxies, strips upstream remotes, and wires the managed local remote plus auto-commit hooks.
 
 Actual MCP servers never see raw secrets. When Copilot/Codex/Claude launches a server, it invokes `/usr/local/bin/mcp-stub`. The stub selects the correct capability, asks the host broker to redeem it, receives the decrypted secret through a memfd, writes it inside its private tmpfs, and finally `exec`s the true MCP command.
@@ -279,7 +279,7 @@ sequenceDiagram
 Properties:
 
 - When a Git repository is available, the workspace is prepared exactly like a normal session (clone/copy, isolated branch, host remotes stripped). If no repo exists, the launcher falls back to an empty workspace to keep prompts usable anywhere (and disables auto-push because there is nothing to sync).
-- Secrets, manifests, and MCP configs still route through `render-session-config.py` and the broker, preserving the same security envelope as repo-backed sessions.
+- Secrets, manifests, and MCP configs route through `render-session-config.py` and the broker, preserving the same security envelope as repo-backed sessions.
 - Source arguments plus `--branch`/`--use-current-branch` are allowed. Prompt sessions inherit the default auto-push behavior whenever a real repo is mounted, and only force `--no-push` when running against the synthetic prompt workspace.
 - Because the container shuts down as soon as the CLI returns, no tmux reattach or cleanup is necessary.
 
@@ -372,7 +372,7 @@ flowchart TB
 - Host bare repo captures every commit even if the container is deleted.
 - A background daemon (`host/utils/sync-local-remote.{sh,ps1}`) watches the bare repo and fast-forwards the host working tree after every push unless `CONTAINAI_DISABLE_AUTO_SYNC=1`.
 - You choose when (or if) agent output is published upstream.
-- Users can still add their own remotes inside the container, but only after an explicit opt-in.
+- Users can add their own remotes inside the container, but only after an explicit opt-in.
 
 ### Branch Naming
 
@@ -416,7 +416,7 @@ flowchart TB
     style mcp fill:#f8d7da,stroke:#721c24
 ```
 
-`render-session-config.py` now runs entirely on the host. It parses `config.toml`, expands `${VAR}` placeholders using secrets loaded from `~/.config/containai/mcp-secrets.env`, and writes fully-resolved JSON configs for each agent into the session tmpfs. The container no longer needs to read your plaintext secrets file; only the manifest and sealed capabilities cross the boundary.
+`render-session-config.py` runs entirely on the host. It parses `config.toml`, expands `${VAR}` placeholders using secrets loaded from `~/.config/containai/mcp-secrets.env`, and writes fully-resolved JSON configs for each agent into the session tmpfs. The container operates without reading your plaintext secrets file; only the manifest and sealed capabilities cross the boundary.
 
 ### Example config.toml
 
@@ -448,7 +448,7 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 ```
 
-The renderer substitutes `${VAR}` placeholders before the configs enter the container. Secrets therefore exist only in two places: your encrypted host broker store and the stub-specific tmpfs mounted at `/run/containai`. When an MCP server launches, `mcp-stub` injects the decrypted values into its private tmpfs and removes them as soon as the process exits.
+The renderer substitutes `${VAR}` placeholders before the configs enter the container. Secrets exist only in two places: your encrypted host broker store and the stub-specific tmpfs mounted at `/run/containai`. When an MCP server launches, `mcp-stub` injects the decrypted values into its private tmpfs and removes them as soon as the process exits.
 
 ## Multi-Agent Workflow
 
@@ -473,7 +473,7 @@ flowchart TB
     style updated fill:#fff3cd,stroke:#856404
 ```
 
-**No conflicts** because each container has independent:
+**Conflicts are avoided** because each container has independent:
 - Filesystem
 - Git branch
 - Process space
@@ -532,19 +532,19 @@ flowchart TB
 - OAuth configs on host only
 - Read-only mounts prevent modification
 - MCP secrets outside any git repo
-- No secrets in container images
+- Container images remain free of secrets
 
 **❌ Never:**
-- Commit `.env` with real tokens
-- Store secrets in workspace
-- Push `mcp-secrets.env` to git
+- Avoid committing `.env` with real tokens
+- Keep secrets out of the workspace
+- Exclude `mcp-secrets.env` from git
 
 ### Network Isolation
 
 Containers use a dedicated network with a mandatory proxy sidecar:
 - **Default (Squid):** All outbound HTTP/HTTPS traffic is routed through a Squid proxy sidecar for auditing. Direct internet access is blocked.
 - **Restricted:** (`--network-proxy restricted`) Traffic is routed through Squid but restricted to a strict allowlist of domains.
-- **No Port Exposure:** Containers do not expose ports to the host by default.
+- **No Port Exposure:** Containers expose ports to the host only when explicitly configured.
 
 ## Data Flow
 
@@ -658,25 +658,25 @@ flowchart TB
 
 **Rationale:**
 - Users already have GitHub/Copilot subscriptions
-- No need to manage separate API keys
+- Eliminates the need to manage separate API keys
 - More secure (token rotation handled by provider)
 - Respects user's existing plans and quotas
 
-### Why Copy Instead of Mount?
+### Why Copy Rather Than Mount?
 
 **Rationale:**
 - Multiple agents can work on same repo without conflicts
 - Changes isolated until explicitly pushed
-- No risk of concurrent writes to same files
+- Avoids concurrent writes to the same files
 - Each agent gets clean starting state
 
 ### Why Remove Upstream Remotes?
 
 **Rationale:**
-- Eliminates accidental pushes to sensitive GitHub branches from within the container.
+- Prevents accidental pushes to sensitive GitHub branches from within the container.
 - Keeps the container useful even when offline—only the host repo needs network access.
 - Forces a deliberate review step on the host before anything leaves the secure bare repo.
-- Still allows power users to add remotes manually when they intentionally want that capability.
+- Allows power users to add remotes manually when they intentionally want that capability.
 
 ### Why TOML for MCP Config?
 

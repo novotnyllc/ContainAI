@@ -697,13 +697,13 @@ docker container prune --filter "label=coding-agent=true"
    ```powershell
    code --list-extensions | Select-String "remote-containers"
    ```
-   - If missing, reinstall: `code --install-extension ms-vscode-remote.remote-containers`
+   - If missing, reinstall the extension: `code --install-extension ms-vscode-remote.remote-containers`
 
 4. **Check Docker socket access:**
    ```powershell
    docker info
    ```
-   - If error, ensure Docker is running
+   - If an error occurs, ensure Docker is running.
 
 ### VS Code Can't Attach to Container
 
@@ -762,7 +762,7 @@ docker container prune --filter "label=coding-agent=true"
    # Owner should be: agentuser or accessible to agentuser
    ```
 
-### Terminal Shows Host Instead of Container
+### Terminal Shows Host Rather Than Container
 
 **Symptom:** Terminal prompt shows host username, not `agentuser@container`.
 
@@ -772,7 +772,7 @@ docker container prune --filter "label=coding-agent=true"
 - **If it shows "Local":**
   1. Close terminal: Right-click terminal tab → Kill Terminal
   2. Open new terminal: `` Ctrl+` ``
-  3. Should now show container prompt
+  3. Shows container prompt
 
 ### Extensions Not Working in Container
 
@@ -818,13 +818,13 @@ docker container prune --filter "label=coding-agent=true"
    # Run on the host (outside the container)
    gh auth status
    
-   # If not authenticated (still on the host):
+   # If not authenticated (on the host):
    gh auth login
    ```
 
 4. **SSH key access:**
-   - Host `~/.ssh` is intentionally never mounted for security
-   - Ensure `ssh-agent` is running so `SSH_AUTH_SOCK` can be forwarded, or use HTTPS with GitHub CLI
+   - The system does not mount host `~/.ssh` for security.
+   - Ensure `ssh-agent` is running to forward `SSH_AUTH_SOCK`, or use HTTPS with GitHub CLI
 
 ### Container Stops Unexpectedly
 
@@ -842,7 +842,7 @@ docker container prune --filter "label=coding-agent=true"
    - Check Dockerfile: `CMD ["sleep", "infinity"]` or interactive shell
 
 3. **Resource limits:**
-   - Container may be OOM-killed if memory limit too low
+   - The container may be OOM-killed if the memory limit is too low.
    - Increase: `--memory 16g`
 
 4. **Manual start with interactive shell:**
@@ -893,14 +893,14 @@ docker container prune --filter "label=coding-agent=true"
    - High CPU/memory usage? Consider resource limits
 
 5. **Use named volumes for node_modules:**
-   - Avoid mounting `node_modules` from host (slow on Windows)
+   - Use container-local volumes for `node_modules` to improve performance on Windows.
    - Use container-local volume instead
 
 ---
 
 ## Summary
 
-You now know how to:
+You know how to:
 
 ✅ **Install** the Dev Containers extension  
 ✅ **Connect** VS Code to running agent containers  

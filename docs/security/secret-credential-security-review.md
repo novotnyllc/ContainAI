@@ -1,6 +1,6 @@
 # Secret Credential Security Review
 
-This document expands on `docs/secret-credential-architecture.md` for the purposes of a formal security review. It traces the full lifecycle of sensitive material, enumerates attacker models, maps each threat to compensating controls, and cites the concrete code paths that implement those controls.
+This document expands on `docs/security/secret-architecture.md` for the purposes of a formal security review. It traces the full lifecycle of sensitive material, enumerates attacker models, maps each threat to compensating controls, and cites the concrete code paths that implement those controls.
 
 ## 1. Executive Summary & Scope
 
@@ -129,14 +129,14 @@ Revocation:
 
 ## 5. Execution Mediation & Sandbox Guarantees
 
-Every process launched by the vendor CLI now passes through `agent-task-runnerd` twice: the wrapper intercepts any *explicit* execution subcommands (e.g., `copilot exec`, `codex run`, `claude shell`) and routes them through the runner RPC, while the seccomp path backstops everything else the binary (or its dependencies) tries to `execve`. This dual approach means we have deterministic auditing before the kernel event even fires, while still protecting against unexpected code paths inside the vendor tools.
+Every process launched by the vendor CLI passes through `agent-task-runnerd` twice: the wrapper intercepts any *explicit* execution subcommands (e.g., `copilot exec`, `codex run`, `claude shell`) and routes them through the runner RPC, while the seccomp path backstops everything else the binary (or its dependencies) tries to `execve`. This dual approach means we have deterministic auditing before the kernel event even fires, while protecting against unexpected code paths inside the vendor tools.
 
-1. **Explicit runner socket (shipping now)** – The wrappers install `/usr/local/bin/agent-task-runnerctl`, a Rust client that connects to `AGENT_TASK_RUNNER_SOCKET`, sends a `MSG_RUN_REQUEST` JSON payload (argv, cwd, env, session metadata), and then streams STDIN/STDOUT/STDERR for the command. Because this happens before the vendor binary forks, the daemon can log intent, enforce policy, and associate the request with a specific agent binary. Successful commands never need to bypass the sandbox directly; user-visible subcommands are always mediated by the runner socket first.
-2. **Seccomp user-notification path (backstop)** – Whenever the CLI (or any dependency) issues `execve`/`execveat`, the filter installed by `agentcli-exec` pauses the syscall, reports it to the daemon, and blocks or allows it based on policy. The CLI itself is unaware this interception is happening, but it guarantees that even code paths we do not control still hit the policy engine.
+1. **Explicit runner socket** – The wrappers install `/usr/local/bin/agent-task-runnerctl`, a Rust client that connects to `AGENT_TASK_RUNNER_SOCKET`, sends a `MSG_RUN_REQUEST` JSON payload (argv, cwd, env, session metadata), and then streams STDIN/STDOUT/STDERR for the command. Because this happens before the vendor binary forks, the daemon can log intent, enforce policy, and associate the request with a specific agent binary. Successful commands never need to bypass the sandbox directly; user-visible subcommands are always mediated by the runner socket first.
+2. **Seccomp user-notification path (backstop)** – Whenever the CLI (or any dependency) issues `execve`/`execveat`, the filter installed by `agentcli-exec` pauses the syscall, reports it to the daemon, and blocks or allows it based on policy. The CLI itself is unaware this interception is happening, but it guarantees that even code paths we do not control hit the policy engine.
 
 Wrappers therefore remain extremely small: they rename the vendor binary, export environment variables (socket path, session metadata), and either execute the appropriate runner RPC (`agent-task-runnerctl`) or fall back to the original binary through `agentcli-exec`. All enforcement occurs in the runner/socket/seccomp layer rather than inside vendor code.
 
-### 5.1 Seccomp Policy (Shipping Today)
+### 5.1 Seccomp Policy
 
 The Rust crate installs a user-notification filter defined in `docker/runtime/agent-task-runner/src/seccomp.rs`. The filter has two phases:
 
@@ -157,7 +157,7 @@ Any attempt to call one of the denied syscalls returns `EPERM`, is logged by the
 
 Once the daemon allows the `execve`, it forks a helper that executes `agent_task_sandbox::exec_command`. That helper:
 
-1. **Unshares namespaces** – Calls `unshare(CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC | CLONE_NEWUTS)` while it still runs as root, creating a fresh mount + pid namespace for the workload.
+1. **Unshares namespaces** – Calls `unshare(CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC | CLONE_NEWUTS)` while it runs as root, creating a fresh mount + pid namespace for the workload.
 2. **Masks sensitive mounts** – Replaces `/run/agent-secrets`, `/run/agent-data`, and `/run/agent-data-export` with anonymous tmpfs mounts owned by root and mounted `mode=000,MS_PRIVATE|MS_UNBINDABLE`. Even if a file descriptor leaked, bind propagation cannot re-introduce the original paths.
 3. **Drops privileges** – Uses `setresgid`/`setresuid` to switch to `agentuser`, clears supplementary groups, and calls `prctl(PR_SET_NO_NEW_PRIVS, 1)`.
 4. **Loads AppArmor/SELinux profile** – Applies the `containai-task` label that confines filesystem access to `/workspace`, `/home/agentuser`, `/tmp`, `/var/tmp`, and the runner pipe FDs.
@@ -200,7 +200,7 @@ sequenceDiagram
     participant U as User Command (agentuser)
 
     rect rgba(215,243,227,0.3)
-    W->>C: Launch CLI with seccomp filter (socket exported but unused for exec today)
+    W->>C: Launch CLI with seccomp filter (socket exported but unused for exec)
     end
     rect rgba(225,233,255,0.4)
     C->>R: Kernel pauses execve via seccomp notification
@@ -277,19 +277,9 @@ Guarantees:
   - Squid proxy emits outbound request logs correlated by session ID.
 - **Operational response:** `containai kill <session>` revokes capabilities and tears down containers; logs allow root-cause investigation.
 
-## 9. Residual Risks & Mitigations in Progress
+## 9. References
 
-| Risk | Status / Plan |
-| --- | --- |
-| Wrapper RPC path not yet enforced for every CLI subcommand | **Mitigated (Nov 2025):** wrappers now hand `exec`/`run`/`shell` style commands to `agent-task-runnerctl`, which speaks the documented RPC and streams STDIO via the socket; seccomp user-notification remains the fallback for anything inside the vendor binary we cannot pre-parse. |
-| Host compromise before launch | Out of scope; rely on OS hardening + developer hygiene. Future work: hardware-backed key store for broker. |
-| Broker single point of failure | Mitigated by `systemd --user` service protections; backlog item to add replication/backup before GA. |
-| Helper network policy gaps | Default `--network none` + allow-list enforced; pending work to add eBPF-based egress meter. |
-| Manual override token misuse | Overrides logged; plan to require MFA assertion when token consumed. |
-
-## 10. References
-
-- `docs/secret-credential-architecture.md` – functional narrative.
+- `docs/security/secret-architecture.md` – functional narrative.
 - `AGENTS.md` + `docs/security-workflows.md` – operational procedures.
 - `.serena/memories/secret_credential_https_backlog.md` – implementation backlog with Epic tracking.
 - `docker/runtime/agent-task-runner/src/*` – runner source of truth.

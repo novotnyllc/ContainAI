@@ -189,7 +189,7 @@ flowchart TB
 
 ### ADR 2: Rejection of gVisor
 
-**Decision:** We rely on Native Linux security (AppArmor/Seccomp) instead of gVisor (`runsc`).
+**Decision:** We rely on Native Linux security (AppArmor/Seccomp) rather than gVisor (`runsc`).
 **Reasoning:** Our core security feature, the **Agent Task Runner**, relies on `SECCOMP_RET_USER_NOTIF` to intercept commands. gVisor's Sentry kernel does not support this notification mechanism, rendering our active governance layer non-functional. Furthermore, gVisor introduces unacceptable I/O overhead for filesystem-heavy dev tasks.
 
 ### ADR 3: System-Wide Installation

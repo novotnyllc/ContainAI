@@ -67,14 +67,14 @@ MCP configuration is managed through two mechanisms:
 
 ### Host-side rendering
 
-ContainAI now resolves `config.toml` **before** a container starts. The launcher invokes `render-session-config.py`, which:
+ContainAI resolves `config.toml` **before** a container starts. The launcher invokes `render-session-config.py`, which:
 
 - Reads your repo-level `config.toml` plus any `~/.config/containai/config[-<agent>].toml` overrides.
-- Loads secrets from `~/.config/containai/mcp-secrets.env` (or `MCP_SECRETS_FILE`) while still on the host.
+- Loads secrets from `~/.config/containai/mcp-secrets.env` (or `MCP_SECRETS_FILE`) while on the host.
 - Substitutes `$VAR` / `${VAR}` placeholders everywhere they appear (arguments, env blocks, `bearer_token_env_var`, etc.).
 - Emits fully resolved JSON configs for each agent (`~/.config/<agent>/mcp/config.json` inside the container) and a stub manifest that maps servers → `mcp-stub` command lines.
 
-Because the resolved JSON lives only in the session tmpfs, containers never need direct access to your plaintext secrets file.
+Because the resolved JSON lives only in the session tmpfs, containers operate without direct access to your plaintext secrets file.
 
 ### End-to-end Secret & Stub Flow
 
@@ -155,7 +155,7 @@ chmod 600 ~/.config/containai/mcp-secrets.env
 
 **Windows:**
 - File is already protected by NTFS permissions in your user profile
-- Ensure no other users have read access
+- Ensure only the current user has read access
 
 ### Getting API Keys
 
@@ -609,7 +609,7 @@ chmod 600 ~/.config/containai/mcp-secrets.env
 chmod 644 ~/.config/containai/config.toml
 ```
 
-### 4. Never Commit Secrets
+### 4. Avoid Committing Secrets
 
 ```bash
 # Add to .gitignore
@@ -619,7 +619,7 @@ echo ".config/containai/mcp-secrets.env" >> .gitignore
 
 ### 5. Container Isolation
 
-Secrets never enter the container as files. The launcher renders configs on the host, stores sealed capabilities in `/run/containai`, and MCP binaries can only read tokens by calling the trusted `mcp-stub` helper. Verify each run prints `🔐 Session MCP config manifest: <sha>`—that indicates host rendering succeeded and no plaintext secrets were copied into the workspace volume.
+Secrets remain outside the container as files. The launcher renders configs on the host, stores sealed capabilities in `/run/containai`, and MCP binaries can only read tokens by calling the trusted `mcp-stub` helper. Verify each run prints `🔐 Session MCP config manifest: <sha>`—that indicates host rendering succeeded and no plaintext secrets were copied into the workspace volume.
 
 ## Advanced Configuration
 

@@ -7,7 +7,7 @@ This document explains the Rust-based control plane that mediates every process 
 - Interpose on *every* execution path triggered by vendor-provided CLIs (Copilot, Codex, Claude, MCP helpers) without modifying the vendor binaries.
 - Apply namespace, AppArmor, and seccomp confinement **before** any user workload obtains access to decrypted secrets under `/run/agent-secrets` or `/run/agent-data`.
 - Provide tamper-resistant audit records that correlate launcher metadata (agent, binary, session ID) with each command executed in the container.
-- Degrade safely: even if wrappers fail, the seccomp backstop still blocks unsanctioned `execve`/`execveat` calls.
+- Degrade safely: even if wrappers fail, the seccomp backstop blocks unsanctioned `execve`/`execveat` calls.
 
 ## 2. Components & Responsibilities
 
@@ -28,7 +28,7 @@ These programs are shipped inside every agent container by the `docker/base/Dock
 3. **Runner request** – `agent-task-runnerctl` connects to the seqpacket socket, sends `MSG_RUN_REQUEST`, and streams STDIN in-band. All options and environment overrides are serialized in the payload so the daemon can validate them before any process spawns.
 4. **Sandbox creation** – The daemon validates policy (hide paths, workspace dir, session scope) and calls into `agent-task-sandbox`. That helper unshares namespaces, masks `/run/agent-*`, drops to `agentuser`, applies the AppArmor enforce profile plus seccomp task filter, and finally `execve`s the requested binary.
 5. **Streaming output & exit status** – `agent-task-runnerd` relays STDOUT/STDERR frames back to the client, logs every run, and responds with `MSG_RUN_EXIT` when the sandboxed process tree terminates. The client converts this payload into a shell exit code (propagating signals as `128+signal`).
-6. **Seccomp backstop** – Independently, `agentcli-exec` ensures the vendor CLI itself cannot `execve` arbitrary binaries without notifying the daemon. Even requests that never use `agent-task-runnerctl` (e.g., CLI auto-updates) are paused until the daemon decides to allow or deny them.
+6. **Seccomp backstop** – Independently, `agentcli-exec` ensures the vendor CLI itself cannot `execve` arbitrary binaries without notifying the daemon. Even requests bypassing `agent-task-runnerctl` (e.g., CLI auto-updates) are paused until the daemon decides to allow or deny them.
 
 ```mermaid
 sequenceDiagram
@@ -52,7 +52,7 @@ sequenceDiagram
 
 | Guarantee | Mechanism | Notes |
 | --- | --- | --- |
-| Secrets never leave tmpfs | Entrypoint mounts `/run/agent-secrets` and `/run/agent-data` as `tmpfs` with `mode=000`; sandbox helper remounts them private/unbindable and workloads run as `agentuser`. | Documented in [secret-credential-security-review.md](secret-credential-security-review.md) §4–5. |
+| Secrets remain in tmpfs | Entrypoint mounts `/run/agent-secrets` and `/run/agent-data` as `tmpfs` with `mode=000`; sandbox helper remounts them private/unbindable and workloads run as `agentuser`. | Documented in [secret-credential-security-review.md](secret-credential-security-review.md) §4–5. |
 | Every workload is logged | Runner assigns each command the agent/binary/session metadata carried by the wrapper and emits structured JSON events (`/run/agent-task-runner/events.log`). | Log format defined in `agent_task_runnerd.rs` (`Event` struct). |
 | Policy enforcement even when wrappers fail | `agentcli-exec` installs a seccomp user-notification filter on `execve`/`execveat`; daemon can deny or allow after inspecting `/proc/<pid>/exe`. | Violations return `EPERM` and increment anomaly counter. |
 | Namespace, AppArmor, seccomp applied before user code | `agent-task-sandbox` unshares, remounts hide paths (`--hide`), drops to `agentuser`, calls `prctl(PR_SET_NO_NEW_PRIVS,1)`, then loads the `containai-task` profile before final `execve`. | Prevents privileged syscalls (ptrace, mount, perf, raw sockets, etc.). |

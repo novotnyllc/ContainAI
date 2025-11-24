@@ -163,7 +163,7 @@ All inputs validated with strict rules:
 **What We Log:**
 - Timestamp (ISO 8601)
 - Request ID (unique per request)
-- Operation (always 'get' currently)
+- Operation (always 'get')
 - Host being accessed
 - Username (if provided)
 - Success/failure
@@ -246,7 +246,7 @@ Could cache credentials in server memory:
 - Improves performance
 - Increases attack surface (memory dump risk)
 
-**Decision**: Currently NOT implemented - security over performance
+**Decision**: Not implemented - security over performance
 
 ## Testing
 

@@ -65,7 +65,7 @@ fatal: not a git repository
 **Solution:** Exit agent CLI first (Ctrl+D), then run git commands:
 ```bash
 copilot> ^D  # Exit agent
-$ git status  # Now works!
+$ git status  # Works!
 ```
 
 #### Managed Local Remote (no upstream origin)
@@ -91,7 +91,7 @@ graph TB
 **Default push target:** `local`  
 **Why?** Preserves work in a host-owned bare repo even if the container disappears, while keeping the container isolated from GitHub. Publishing to GitHub (or any other upstream) happens from your host git client after you review the agent's commits.
 
-Need to talk to GitHub from inside the container anyway? Add a remote yourself (`git remote add origin https://...`) so you consciously accept that trust boundary. The launchers will never configure it for you.
+Need to talk to GitHub from inside the container anyway? Add a remote yourself (`git remote add origin https://...`) so you consciously accept that trust boundary. The launchers do not configure it for you.
 
 Every time you `git push` to `local`, a background sync daemon fast-forwards the matching branch in your host repository. Unless you opt out with `CONTAINAI_DISABLE_AUTO_SYNC=1`, you can simply switch back to your host repo after a push and the commit will already be there.
 
@@ -164,7 +164,7 @@ git pull origin main
 - **Solution:** Exit agent (Ctrl+D), then run git commands
 
 **Problem:** `git push` doesn't update GitHub
-- **Cause:** Containers still only push to the managed `local` remote.
+- **Cause:** Containers only push to the managed `local` remote.
 - **Solution:** After the auto-sync completes, switch to your host repo and run `git push origin`. If you disabled auto-sync (`CONTAINAI_DISABLE_AUTO_SYNC=1`), manually fetch from `~/.containai/local-remotes/<hash>.git` first.
 
 **Problem:** Lost changes after deleting container
@@ -176,7 +176,7 @@ git pull origin main
 - **Solution:** Update on the host (e.g., `git pull origin main`), then relaunch the container so it copies the refreshed working tree.
 
 **Problem:** Need to talk to GitHub from inside the container
-- **Cause:** Remote was intentionally removed.
+- **Cause:** Remote is intentionally removed.
 - **Solution:** Manually run `git remote add origin https://github.com/user/repo.git` inside the container once you are ready to allow that access.
 
 ## MCP Configuration
@@ -195,7 +195,7 @@ args = ["-y", "@upstash/context7-mcp"]
 env = { CONTEXT7_API_KEY = "${CONTEXT7_API_KEY}" }
 ```
 
-Secrets like `CONTEXT7_API_KEY` resolve from `~/.config/containai/mcp-secrets.env` during host-side rendering; the plaintext values never need to exist inside the container.
+Secrets like `CONTEXT7_API_KEY` resolve from `~/.config/containai/mcp-secrets.env` during host-side rendering; the plaintext values remain outside the container.
 
 ## What Happens Behind the Scenes
 
@@ -243,5 +243,5 @@ When you run `launch-agent`:
 
 ⚠️ **Keep secure:**
 - `~/.config/containai/mcp-secrets.env` (host-only, outside any git repo)
-- Don't commit `.env` files with real tokens
+- Avoid committing `.env` files with real tokens
 - Avoid modifying `host/launchers` or `docker/runtime` without understanding how it affects manifest hashes

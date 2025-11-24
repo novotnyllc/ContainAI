@@ -198,7 +198,7 @@ $results | Where-Object {$_.Severity -in @('Error','Warning')}
 - Test with `shellcheck` if available
 
 ### Common Requirements
-- **No hardcoded secrets** - use environment variables or mock values in tests
+- **Avoid hardcoded secrets** - use environment variables or mock values in tests
 - **Complete error handling** - every external command should handle failures
 - **Descriptive error messages** - tell users what went wrong and how to fix it
 - **Runtime parity** - bash is the source of truth; Windows `.ps1` shims must invoke the same bash scripts via `host/utils/wsl-shim.ps1`
