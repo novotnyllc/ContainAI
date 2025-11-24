@@ -20,22 +20,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$InstallerSelfSha256 = "__INSTALLER_SELF_SHA256__"
-
-function Assert-SelfIntegrity {
-    if ($InstallerSelfSha256 -eq "__INSTALLER_SELF_SHA256__") { throw "Installer self-hash not injected; repackage artifacts." }
-    $content = Get-Content -Raw -LiteralPath $MyInvocation.MyCommand.Path
-    $redacted = [regex]::Replace($content, 'InstallerSelfSha256="[^"]*"', 'InstallerSelfSha256="__REDACTED__"')
-    $hasher = [System.Security.Cryptography.SHA256]::Create()
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($redacted)
-    $computed = ($hasher.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join ""
-    if ($computed -ne $InstallerSelfSha256.ToLower()) {
-        throw "Installer integrity check failed; expected $InstallerSelfSha256 got $computed"
-    }
-}
-
-Assert-SelfIntegrity
-
 . "$PSScriptRoot/wsl-shim.ps1"
 
 if (-not $Repo) { throw "--Repo or GITHUB_REPOSITORY env is required" }

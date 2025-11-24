@@ -35,6 +35,18 @@ curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.s
 
 The installer self-verifies from GHCR (Sigstore/Fulcio), then downloads and verifies the payload before installing. All pulls are anonymous; GitHub rate limits apply.
 
+**Windows (PowerShell via WSL):**
+
+```powershell
+# Prod
+powershell -Command "iwr https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.ps1 -OutFile install.ps1; pwsh -File install.ps1"
+
+# Nightly
+powershell -Command "iwr https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.ps1 -OutFile install.ps1; pwsh -File install.ps1 -Channel nightly"
+```
+
+The PowerShell wrapper runs the same attested `install.sh` inside WSL and then syncs launcher shims into `%LOCALAPPDATA%\ContainAI` for convenience.
+
 ## Quick Start (5 Minutes)
 
 **New to Docker or containers?** See the [detailed getting started guide](docs/getting-started.md).

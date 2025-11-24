@@ -40,20 +40,28 @@ Channels:
 Run the installer (prompts for sudo on Linux/WSL):
 
 ```
-curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash
 ```
 
 To pick a channel explicitly:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash -s -- --channel nightly
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash -s -- --channel nightly
 ```
 
 To pin a specific version:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/ContainAI/ContainAI/main/install.sh | bash -s -- --version vX.Y.Z
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash -s -- --version vX.Y.Z
 ```
+
+On Windows, download and run the PowerShell wrapper (requires WSL and Docker Desktop):
+
+```powershell
+powershell -Command "iwr https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.ps1 -OutFile install.ps1; pwsh -File install.ps1"
+```
+
+The wrapper runs the attested `install.sh` inside WSL and syncs launcher shims into `%LOCALAPPDATA%\ContainAI`.
 
 ## After Install
 
