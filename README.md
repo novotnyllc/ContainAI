@@ -1,201 +1,107 @@
 # ContainAI
 
-Run AI agents, initially GitHub Copilot, OpenAI Codex, Anthropic Claude, in isolated Docker containers with controlled network access. Each agent operates in its own workspace with branch isolation, enabling multiple agents to work on the same repository without conflicts while maintaining privacy and security.
+**Run AI agents like GitHub Copilot, OpenAI Codex, and Anthropic Claude in isolated, secure Docker containers.**
 
-Containers provide network restrictions (full isolation or monitored proxy access), separate git branches for each agent, and VS Code integration via Dev Containers. Agents can be launched as ephemeral instances that auto-remove on exit, or as persistent background containers for long-running tasks.
+ContainAI provides a secure runtime for AI coding agents. Each agent operates in its own isolated container with a dedicated workspace and git branch, preventing conflicts and keeping your host environment clean. It enforces strict network policies, manages secrets securely without exposing them to the container filesystem, and integrates seamlessly with VS Code.
 
-Features include MCP server support for extended capabilities, automated git operations, and configurable network policies. All agent activity is contained within Docker, keeping the host environment clean and prompts private.
+## Why ContainAI?
 
-## Features
-
-- **Multiple agents, no conflicts**: Each agent runs in its own isolated container
-- **OAuth authentication**: No API keys needed for agents (uses your existing subscriptions)
-- **VS Code integration**: Connect to running containers with Dev Containers extension
-- **Persistent workspaces**: Containers run in background, resume anytime
-- **Detach & resume**: Built-in tmux sessions plus `connect-agent` let you drop and reconnect without stopping containers
-- **MCP servers**: GitHub, Microsoft Docs, Playwright, Context7, Serena, and more
-- **Network controls**: Restricted mode (`--network none`) or Squid proxy sidecar for monitoring
-- **Broker-enforced secrets**: Session manifests + `mcp-stub` wrappers keep MCP API keys off disk and scoped per container
+- **🛡️ Total Isolation**: Agents run in Docker containers, not on your host machine. No messy config files or accidental overwrites.
+- **🔐 Secure by Default**: Secrets are injected into memory only when needed. Network traffic is monitored via a sidecar proxy.
+- **🌿 Branch Management**: Agents automatically work on isolated branches (e.g., `copilot/feature-auth`), keeping your main branch clean.
+- **🚀 Multi-Agent Collaboration**: Run Copilot, Claude, and Codex simultaneously on the same repository without them fighting over files.
+- **🔌 VS Code Native**: Connect to any agent container instantly using the Dev Containers extension.
 
 ## Installation
 
-**Prerequisites:**
-- ✅ Docker installed and running (Desktop on macOS/Windows, Engine on Linux)
-- ✅ `curl`, `tar`, `openssl` installed on the host
+Install the latest release with a single command. This sets up the `run-*` and `launch-agent` tools on your system.
 
-**Install via curl (Recommended):**
-
+**Linux / macOS:**
 ```bash
-# Install latest production release
 curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash
-
-# Install nightly build
-curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash -s -- --channel nightly
 ```
-
-The installer self-verifies from GHCR (Sigstore/Fulcio), then downloads and verifies the payload before installing. All pulls are anonymous; GitHub rate limits apply.
 
 **Windows (PowerShell via WSL):**
-
 ```powershell
-# Prod
 powershell -Command "iwr https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.ps1 -OutFile install.ps1; pwsh -File install.ps1"
-
-# Nightly
-powershell -Command "iwr https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.ps1 -OutFile install.ps1; pwsh -File install.ps1 -Channel nightly"
 ```
 
-The PowerShell wrapper runs the same attested `install.sh` inside WSL and then syncs launcher shims into `%LOCALAPPDATA%\ContainAI` for convenience.
+*Prerequisites: Docker Desktop (macOS/Windows) or Docker Engine (Linux).*
 
-## Quick Start (5 Minutes)
+## Quick Start
 
-**New to Docker or containers?** See the [detailed getting started guide](docs/getting-started.md).
+Once installed, you can launch an agent from any git repository on your machine.
 
-**Prerequisites:**
-- ✅ Docker installed and running (Desktop on macOS/Windows, Engine on Linux)
-- ℹ️  Host Git credentials/config are reused automatically—no container-side setup needed
+1.  **Navigate to your project:**
+    ```bash
+    cd ~/my-project
+    ```
 
-**Quick verification:**
+2.  **Launch an agent:**
+    ```bash
+    # Launch GitHub Copilot in an ephemeral container
+    run-copilot
+    ```
+
+3.  **Start coding:**
+    The agent starts in a new container, creates a dedicated branch (e.g., `copilot/session-1`), and drops you into a shell. You can also attach VS Code to this container.
+
+4.  **Finish up:**
+    When you exit, the container automatically commits your changes and pushes them to a secure local remote on your host machine before deleting itself.
+
+## Common Workflows
+
+### Ephemeral Sessions (`run-*`)
+Best for quick tasks, bug fixes, or experiments. The container is deleted when you exit, but your work is saved.
+
 ```bash
-./host/utils/verify-prerequisites.sh  # Linux/Mac
-.\host\utils\verify-prerequisites.ps1 # Windows
+# Run Copilot on the current repo
+run-copilot
+
+# Run Claude on a specific repo
+run-claude ~/projects/backend-api
+
+# Run without auto-pushing changes
+run-codex --no-push
 ```
 
-**Note:** The verification script only reports what it finds. If it warns that GitHub CLI isn't installed, you can ignore it unless your host actually uses GitHub CLI for auth—the containers just inherit whatever credentials already exist on the host.
-
-**Launcher channels:** Entry points live under `host/launchers/entrypoints/`. In repo clones use the `-dev` names (e.g., `run-copilot-dev`), prod bundles drop the suffix (e.g., `run-copilot`), and nightly builds use `-nightly`. Use `host/utils/prepare-entrypoints.sh --channel nightly|prod` to generate the desired set.
-
-**Get running in 2 steps (images auto-pull on first launch):**
+### Persistent Workspaces (`launch-agent`)
+Best for long-running features or when you need to keep the environment state (e.g., installed dependencies) across sessions.
 
 ```bash
-# 1. Install launchers once
-./scripts/setup-local-dev.sh        # Linux/Mac
-.\scripts\install.ps1      # Windows PowerShell
+# Launch a persistent background container
+launch-agent copilot
 
-# 2. Launch an agent from any repository (image pulls automatically)
-cd ~/my-project
-run-copilot-dev              # or run-codex-dev / run-claude-dev
+# Work on a specific feature branch
+launch-agent claude --branch refactor-ui
+
+# Connect to an existing session
+connect-agent
 ```
 
-> **Windows note:** Every `.ps1` in this repository is a thin shim that launches the matching bash script inside your default WSL 2 distribution. Install and enable WSL (`wsl --install`, restart) before running the PowerShell commands above. `scripts\install.ps1` runs the same prerequisite + health checks via WSL and adds `host\launchers\entrypoints` to your user PATH so commands like `run-copilot-dev` (or `run-copilot` in prod bundles) work from any PowerShell prompt.
+## Security & Network Control
 
-That's it! You're coding with AI in an isolated container. For a deeper walkthrough (network modes, container management, VS Code), read [docs/running-agents.md](docs/running-agents.md).
+ContainAI puts you in control of what agents can access.
 
-Behind the scenes the launcher hashed its own files, rendered a per-session MCP manifest on the host, asked the secret broker for sealed capability tokens, copied those artifacts into a tmpfs inside the container, and ensured every MCP server launches through the trusted `mcp-stub`. No raw API keys ever touch your workspace.
-
-**Learn more:** [Usage Guide](USAGE.md) | [Getting Started](docs/getting-started.md) | [Architecture](docs/architecture.md)
-
----
-
-## Complete Setup Guide
-
-1. **[docs/getting-started.md](docs/getting-started.md)** – full onboarding (Docker install, credential prep, first container) for new users.
-2. **[docs/running-agents.md](docs/running-agents.md)** – everyday workflows covering launch patterns, container management, networking modes, and VS Code integration.
-3. **[docs/local-build-and-test.md](docs/local-build-and-test.md)** – how to pull or rebuild images and run the unit/integration test suites before submitting a PR.
-
+-   **Squid Proxy (Default)**: All outbound traffic is routed through a monitoring proxy. You can audit logs to see exactly what the agent is accessing.
+-   **Restricted Mode**: Lock down the container to a strict allowlist of domains (GitHub, package registries).
+    ```bash
+    run-copilot --network-proxy restricted
+    ```
+-   **Secret Safety**: API keys and credentials are never stored in the container image or written to the container's disk. They are streamed from your host only when requested by a verified process.
 
 ## Documentation
 
-### Core Guides
-- **[USAGE.md](USAGE.md)** - Complete user guide (start here!)
-- **[docs/getting-started.md](docs/getting-started.md)** - First-time setup walkthrough
-- **[docs/running-agents.md](docs/running-agents.md)** - Everyday launcher workflow, networking, and VS Code tips
-- **[docs/operations.md](docs/operations.md)** - **(New)** System administration, updates, and disaster recovery
-- **[docs/security-model.md](docs/security-model.md)** - **(New)** Trust boundaries, threat model, and isolation architecture
+*   **[Usage Guide](USAGE.md)**: Detailed command reference and workflows.
+*   **[Getting Started](docs/getting-started.md)**: In-depth setup and first-run guide.
+*   **[Network Configuration](docs/network-proxy.md)**: Details on proxy modes and allowlists.
+*   **[VS Code Integration](docs/vscode-integration.md)**: How to use the Dev Containers extension.
+*   **[Troubleshooting](TROUBLESHOOTING.md)**: Solutions for common issues.
 
-### Reference
-- **[docs/configuration.md](docs/configuration.md)** - **(New)** Comprehensive reference for environment variables and config files
-- **[docs/cli-reference.md](docs/cli-reference.md)** - All command-line options
-- **[docs/glossary.md](docs/glossary.md)** - **(New)** Definitions of core terms (Payload, Broker, Sidecar, etc.)
-- **[CHANGELOG.md](CHANGELOG.md)** - **(New)** Release history
+## Contributing
 
-### Advanced Topics
-- **[docs/vscode-integration.md](docs/vscode-integration.md)** - Using VS Code with containers
-- **[docs/mcp-setup.md](docs/mcp-setup.md)** - MCP server configuration
-- **[docs/local-build-and-test.md](docs/local-build-and-test.md)** - Pulling or rebuilding images plus running tests locally
-- **[docs/build.md](docs/build.md)** - Image architecture details
-- **[docs/ghcr-publishing.md](docs/ghcr-publishing.md)** - CI/CD and supply chain security runbook
-- **[docs/architecture.md](docs/architecture.md)** - System design and architecture
-- **[docs/network-proxy.md](docs/network-proxy.md)** - Network modes and Squid proxy
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guidelines
-
-## Examples
-
-All examples use the channel-specific launcher names: `run-<agent>-dev` in repo clones, `run-<agent>` in prod bundles, and `run-<agent>-nightly` for nightly builds.
-
-**Recommended: Quick ephemeral sessions:**
-```bash
-cd ~/my-project
-run-copilot-dev              # Launch and work, auto-removes on exit
-run-codex-dev --no-push      # Launch without auto-push
-run-claude-dev ~/other-proj  # Launch on specific directory
-```
-
-**Advanced: Persistent workspaces (for long-running tasks):**
-```bash
-cd ~/my-project
-launch-agent-dev copilot                      # Copilot on current branch
-launch-agent-dev codex                        # Codex on current branch
-launch-agent-dev copilot --branch feature-api  # Copilot on feature-api branch
-```
-
-**Multiple agents on same repo:**
-```bash
-cd ~/my-project
-launch-agent-dev copilot --branch main     # copilot-myproject-main
-launch-agent-dev codex --branch api-v2     # codex-myproject-api-v2
-launch-agent-dev claude --branch refactor  # claude-myproject-refactor
-```
-
-**Advanced: Network controls:**
-```bash
-launch-agent-dev copilot --network-proxy restricted   # Block outbound traffic
-launch-agent-dev copilot --network-proxy squid        # Proxy with logging
-```
-
-**Container management (for persistent containers):**
-```bash
-list-agents-dev                            # Show all running containers
-remove-agent-dev copilot-myproject-main    # Remove with auto-push
-remove-agent-dev codex-myproject-auth --no-push  # Remove without push
-```
-
-See [USAGE.md](USAGE.md) for complete examples and advanced scenarios.
-
-## What's Different
-
-Unlike running agents directly on your machine:
-
-- ✅ **Isolated**: Each agent has its own workspace
-- ✅ **No conflicts**: Multiple agents can work on same repo
-- ✅ **Clean**: Delete container when done, no leftovers
-- ✅ **Reproducible**: Same environment everywhere
-- ✅ **Connectable**: VS Code Remote works out of the box
-
-## Security Model Highlights
-
-- **Host-rendered manifests** – `render-session-config.py` hashes trusted launcher/runtime files, merges your `config.toml`, and records a manifest SHA256 before a container is created.
-- **Secret broker enforcement** – launchers stage API keys inside the broker, receive sealed capabilities, and copy them into `/run/containai` (tmpfs). Only the trusted `mcp-stub` inside the container can redeem those capabilities.
-- **Tight threat boundaries** – secrets live either on the host or inside stub-owned tmpfs mounts. Even if an agent workspace is compromised, it cannot read the manifest, capability bundle, or broker socket.
-- **Image secret scanning** – every `containai-*` image must pass `trivy --scanners secret` before tagging/publishing so leaked tokens are caught before distribution.
-- **Legacy fallback logged** – the older `setup-mcp-configs.sh` converter still exists for compatibility, but it only runs if the host skips manifest rendering (which the launchers no longer do by default).
-
-## Requirements
-
-- **Container Runtime**: Docker Desktop (macOS/Windows) or Docker Engine (Linux)
-  - Scripts require Docker 20.10+ to launch agents
-- **socat**: Required for credential and GPG proxy servers
-  - Linux/Mac: `apt-get install socat` or `brew install socat`
-  - Windows: Available in WSL2 (install in WSL: `sudo apt-get install socat`)
-- **Trivy CLI**: Required for automatic secret scanning whenever images are built locally or in tests
-  - Install via package manager or `curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.53.0`
-- **Host Git credentials**: Whatever you already use (Git config, SSH keys, credential helpers) is mounted automatically—no container-specific setup needed
-- **Host authentications**: If you use GitHub Copilot, Claude, Codex, etc., authenticate on the host as usual and the container will reuse those tokens/configs
-
-## License
-
-MIT
+We welcome contributions! If you want to build ContainAI from source, develop new features, or run the test suite, please read our **[Developer Guide](CONTRIBUTING.md)**.
 
 ---
 
-**Questions?** See [USAGE.md](USAGE.md) for detailed guide.
+*ContainAI is an open-source project licensed under MIT.*

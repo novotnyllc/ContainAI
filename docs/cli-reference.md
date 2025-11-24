@@ -207,7 +207,7 @@ run-claude-dev --prompt "List repo services that need MCP"
 - **Image:** `containai-copilot:local`
 - **Working Dir:** `/workspace`
 - **Network:** Bridge (internet access)
-- **Security:** `no-new-privileges:true`, seccomp `host/profiles/seccomp-containai-agent.json`, AppArmor profile `containai-agent` 
+- **Security:** `no-new-privileges:true`, seccomp `host/profiles/seccomp-containai-agent.json`, AppArmor profile `containai-agent-<channel>` 
 - **Removal:** Automatic on exit (`--rm`)
 
 ---

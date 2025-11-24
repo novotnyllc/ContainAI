@@ -99,7 +99,7 @@ ContainAI uses bare git repositories in `~/.containai/local-remotes` to synchron
 ### Reinstallation
 If the installation becomes corrupted:
 
-1.  **Uninstall**: Follow the [Uninstall Guide](getting-started.md#uninstalling-containai).
+1.  **Uninstall**: Follow the [Uninstall Guide](#uninstalling-containai).
 2.  **Reinstall**: Run the `install.sh` script.
 
 ### Recovering Work
@@ -111,3 +111,43 @@ If a container is accidentally deleted but the `local-remote` exists:
 ```bash
 git clone ~/.containai/local-remotes/<hash>.git recovered-work
 ```
+
+## Uninstalling ContainAI
+
+To completely remove ContainAI from your system:
+
+1.  **Stop all running agents**:
+    ```bash
+    docker stop $(docker ps -q --filter name=containai-*)
+    ```
+
+2.  **Remove Docker resources**:
+    ```bash
+    # Remove containers
+    docker rm $(docker ps -aq --filter name=containai-*)
+    
+    # Remove images
+    docker rmi $(docker images -q ghcr.io/novotnyllc/containai-*)
+    
+    # Remove volumes (optional - deletes cached data)
+    docker volume rm $(docker volume ls -q --filter name=containai-*)
+    ```
+
+3.  **Remove the installation**:
+    **Linux / macOS:**
+    ```bash
+    sudo rm -rf /opt/containai
+    ```
+    **Windows:**
+    ```powershell
+    Remove-Item -Recurse -Force "$env:LOCALAPPDATA\ContainAI"
+    ```
+
+4.  **Remove configuration**:
+    ```bash
+    rm -rf ~/.config/containai
+    rm -rf ~/.containai
+    ```
+
+5.  **Clean up PATH**:
+    - If you added `/opt/containai/current/host/launchers/entrypoints` to your PATH, remove it from your shell profile.

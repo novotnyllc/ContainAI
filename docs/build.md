@@ -182,7 +182,7 @@ Current approximate sizes:
 - Security opt: `no-new-privileges:true`
 - Read-only mounts for auth
 - Seccomp profile: `host/profiles/seccomp-containai-agent.json` blocks ptrace/clone3/mount/setns
-- AppArmor profile: `host/profiles/apparmor-containai-agent.profile` denies `/proc` and `/sys` writes
+- AppArmor profile: `host/profiles/apparmor-containai-agent.profile` (rendered as `containai-agent-<channel>`) denies `/proc` and `/sys` writes
 - Image secret scanning with Trivy (`--scanners secret`) on base/all-agents/specialized variants
 
 ⚠️ **Future improvements:**
@@ -229,10 +229,11 @@ done
 Launchers automatically pass both security profiles:
 
 - **Seccomp:** No additional setup—Docker reads `host/profiles/seccomp-containai-agent.json` directly.
-- **AppArmor:** Ensure the profile is loaded on Linux hosts:
+- **AppArmor:** Use the helpers to render/load channel-suffixed profiles on Linux hosts:
 
 ```bash
-sudo apparmor_parser -r host/profiles/apparmor-containai-agent.profile
+sudo ./scripts/setup-local-dev.sh    # renders containai-*-<channel> and loads them
+sudo ./host/utils/check-health.sh    # verifies AppArmor/seccomp availability
 ```
 
 Environment overrides:
