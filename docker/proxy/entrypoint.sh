@@ -34,7 +34,7 @@ fi
 
 # Ensure directories exist with correct ownership
 mkdir -p "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$SQUID_SSL_DB_DIR")" "$(dirname "$ALLOWED_DOMAINS_FILE")"
-chown -R proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$SQUID_SSL_DB_DIR")"
+chown -hR proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$SQUID_SSL_DB_DIR")"
 
 # Generate allowed domains file from environment variable
 if [ -n "${SQUID_ALLOWED_DOMAINS:-}" ]; then
@@ -78,6 +78,11 @@ if [ ! -f "$SQUID_CACHE_DIR/00/00000000" ]; then
     /usr/sbin/squid -z -f "$SQUID_CONF"
     # squid -z might leave a pid file, remove it to avoid "Squid is already running" error
     rm -f /run/squid.pid
+fi
+
+# Ensure proxy user can write to stderr (for cache.log)
+if [ -e /dev/stderr ]; then
+    chown proxy:proxy /dev/stderr
 fi
 
 # Start Squid in foreground so docker can manage lifecycle

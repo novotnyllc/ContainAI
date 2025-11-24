@@ -24,6 +24,7 @@ WITH_HOST_SECRETS=false
 HOST_SECRETS_FILE=""
 DIND_SECRETS_PATH="/run/containai/mcp-secrets.env"
 DEFAULT_TRIVY_VERSION="${TEST_ISOLATION_TRIVY_VERSION:-0.50.2}"
+CACHE_DIR="${DIND_CACHE_DIR:-${HOME}/.cache/containai/dind-docker}"
 
 if [[ -n "${TEST_ISOLATION_DOCKER_RUN_FLAGS:-}" ]]; then
     # shellcheck disable=SC2206
@@ -31,6 +32,21 @@ if [[ -n "${TEST_ISOLATION_DOCKER_RUN_FLAGS:-}" ]]; then
 else
     DIND_RUN_FLAGS=(--privileged)
 fi
+
+fix_cache_permissions() {
+    if [[ "${PERSIST_CACHE:-true}" != "true" ]]; then
+        return
+    fi
+    
+    if [[ -d "$CACHE_DIR" ]]; then
+        # Use docker to fix permissions since files inside are root-owned
+        # We use alpine because it's small and likely available/cached
+        docker run --rm \
+            -v "$CACHE_DIR":/cache \
+            alpine:3.19 \
+            chown -R "$(id -u):$(id -g)" /cache >/dev/null 2>&1 || true
+    fi
+}
 
 cleanup() {
     local exit_code=$?
@@ -42,7 +58,11 @@ cleanup() {
         else
             echo ""
             echo "Cleaning up isolated Docker daemon..."
-            docker rm -f "$DIND_CONTAINER" >/dev/null 2>&1 || true
+            # Graceful stop to prevent cache corruption
+            docker stop -t 10 "$DIND_CONTAINER" >/dev/null 2>&1 || true
+            docker rm -fv "$DIND_CONTAINER" >/dev/null 2>&1 || true
+            
+            fix_cache_permissions
         fi
     fi
 
@@ -139,6 +159,7 @@ OPTIONS:
     --isolation host    Run tests directly on host Docker daemon (optional, skips DinD risk)
     --with-host-secrets Enable host-secrets prompt tests (copies secrets into isolation when needed)
     --no-persist-cache  Do not persist Docker cache between runs (default: cache is persisted)
+    --prune             Remove all cached data and stale containers, then exit
     --help              Show this help message
 
 ENVIRONMENT VARIABLES:
@@ -241,6 +262,10 @@ while [[ $# -gt 0 ]]; do
             PERSIST_CACHE=false
             shift
             ;;
+        --prune)
+            PRUNE_MODE=true
+            shift
+            ;;
         *)
             echo "Error: Unknown option '$1'" >&2
             usage
@@ -268,6 +293,35 @@ EOF
     export TEST_WITH_HOST_SECRETS="true"
     export TEST_HOST_SECRETS_FILE="$HOST_SECRETS_FILE"
 fi
+
+cleanup_stale_resources() {
+    local stale_containers
+    stale_containers=$(docker ps -aq --filter "name=containai-test-dind-")
+    if [[ -n "$stale_containers" ]]; then
+        echo "Cleaning up stale DinD containers..."
+        # shellcheck disable=SC2086
+        docker rm -fv $stale_containers >/dev/null 2>&1 || true
+    fi
+}
+
+if [[ "${PRUNE_MODE:-false}" == "true" ]]; then
+    cleanup_stale_resources
+    if [[ -d "$CACHE_DIR" ]]; then
+        echo "Purging DinD cache directory: $CACHE_DIR"
+        # Use docker to remove root-owned files in cache
+        docker run --rm \
+            -v "$(dirname "$CACHE_DIR")":/work \
+            alpine:3.19 \
+            rm -rf "/work/$(basename "$CACHE_DIR")"
+        echo "✓ Cache purged"
+    else
+        echo "Cache directory does not exist (nothing to prune)"
+    fi
+    exit 0
+fi
+
+# Clean up any stale containers from previous aborted runs before starting
+cleanup_stale_resources
 
 trap cleanup EXIT INT TERM
 
@@ -299,10 +353,9 @@ start_dind() {
     )
 
     if [[ "${PERSIST_CACHE:-true}" == "true" ]]; then
-        local cache_dir="${HOME}/.cache/containai/dind-docker"
-        mkdir -p "$cache_dir"
-        echo "  Mounting cache: $cache_dir -> /var/lib/docker"
-        docker_args+=("-v" "$cache_dir:/var/lib/docker")
+        mkdir -p "$CACHE_DIR"
+        echo "  Mounting cache: $CACHE_DIR -> /var/lib/docker"
+        docker_args+=("-v" "$CACHE_DIR:/var/lib/docker")
     fi
 
     if [[ ${#DIND_RUN_FLAGS[@]} -gt 0 ]]; then
