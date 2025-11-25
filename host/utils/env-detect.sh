@@ -4,9 +4,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT_DEFAULT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# SCRIPT_ROOT_DEFAULT: Where this script lives. NOT necessarily a git repo in prod.
+SCRIPT_ROOT_DEFAULT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-profile_file="${CONTAINAI_PROFILE_FILE:-$REPO_ROOT_DEFAULT/profile.env}"
+profile_file="${CONTAINAI_PROFILE_FILE:-$SCRIPT_ROOT_DEFAULT/profile.env}"
 profile_default="dev"
 image_prefix_default="containai-dev"
 image_tag_default="devlocal"
@@ -38,19 +39,24 @@ image_digest_codex_env_set=0
 image_digest_claude_env_set=0
 image_digest_proxy_env_set=0
 image_digest_log_fwd_env_set=0
-repo_root="$REPO_ROOT_DEFAULT"
+# install_root: ContainAI installation directory (NOT necessarily a git repo)
+install_root="$SCRIPT_ROOT_DEFAULT"
 prod_root_default="/opt/containai/current"
 prod_root="$prod_root_default"
 format="env"
 
 print_help() {
     cat <<'EOF'
-Usage: env-detect.sh [--format env|json] [--profile-file PATH] [--repo-root PATH] [--prod-root PATH]
+Usage: env-detect.sh [--format env|json] [--profile-file PATH] [--install-root PATH] [--prod-root PATH]
 
 Detects ContainAI profile using profile.env:
   PROFILE=dev|prod
   IMAGE_PREFIX=<docker image prefix>
   IMAGE_TAG=<docker tag>
+
+Options:
+  --install-root PATH   ContainAI installation directory (NOT necessarily a git repo)
+  --prod-root PATH      Production install path (default: /opt/containai/current)
 EOF
 }
 
@@ -64,7 +70,7 @@ while [[ $# -gt 0 ]]; do
             profile_file="$2"
             shift 2
             ;;
-        --repo-root) repo_root="$2"; shift 2 ;;
+        --install-root|--repo-root) install_root="$2"; shift 2 ;;
         --prod-root) prod_root="$2"; shift 2 ;;
         -h|--help)
             print_help
@@ -172,7 +178,7 @@ detect_prod_install() {
 }
 
 if [ $profile_loaded -eq 0 ] && [ $profile_env_set -eq 0 ]; then
-    for candidate in "$prod_root" "$REPO_ROOT_DEFAULT"; do
+    for candidate in "$prod_root" "$SCRIPT_ROOT_DEFAULT"; do
         if detect_prod_install "$candidate"; then
             break
         fi
@@ -212,7 +218,7 @@ if [ "$profile" = "prod" ]; then
     data_root="/var/lib/containai"
     cache_root="/var/cache/containai"
 else
-    root=$(resolve_path "$repo_root")
+    root=$(resolve_path "$install_root")
     config_root="${HOME}/.config/containai-dev"
     data_root="${HOME}/.local/share/containai-dev"
     cache_root="${HOME}/.cache/containai-dev"

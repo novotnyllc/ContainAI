@@ -218,6 +218,16 @@ _resolve_git_binary() {
     return 1
 }
 
+# ============================================================================
+# GIT-SPECIFIC FUNCTIONS
+# These functions require a git repository and will NOT work with production
+# installs at /opt/containai/current (which have no .git directory).
+# The $repo_root parameter here refers specifically to a git repository root.
+# ============================================================================
+
+# Gets the HEAD commit hash from a git repository.
+# Args: $1 - repo_root: Path to a git repository (must contain .git)
+# Returns: The HEAD commit SHA, or fails if not a git repo.
 get_git_head_hash() {
     local repo_root="$1"
     local git_bin
@@ -1938,7 +1948,7 @@ remove_container_with_sidecars() {
         container_status=$(get_container_status "$container_name")
     fi
 
-    process_agent_data_exports "$container_name" "$repo_root" "$home_dir"
+    process_agent_data_exports "$container_name" "$containai_root" "$home_dir"
     
     # Get associated resources
     local proxy_container
@@ -1972,7 +1982,7 @@ remove_container_with_sidecars() {
     # Remove cached session artifacts for this container
     if [ -n "$cache_root" ] && [ -d "$cache_root/${container_name}" ]; then
         echo "🧹 Removing session cache: $cache_root/${container_name}"
-        rm -rf "$cache_root/${container_name}" || true
+        rm -rf "${cache_root:?}/${container_name:?}" || true
     fi
 
     if [ -n "$agent_branch" ] && [ -n "$repo_path" ] && [ -d "$repo_path" ] && [ -n "$local_remote_path" ]; then
