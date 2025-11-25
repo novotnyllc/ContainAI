@@ -152,6 +152,7 @@ jobs:
         if: needs.determine-context.outputs.push == 'true'
         run: |
           trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --platform "${{ matrix.arch }}" \
             "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
       - name: Generate artifact attestation
@@ -347,6 +348,7 @@ jobs:
         if: needs.determine-context.outputs.push == 'true'
         run: |
           trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --platform "${{ matrix.arch }}" \
             "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
       - name: Generate artifact attestation
@@ -496,7 +498,7 @@ jobs:
       - name: Compose tags
         id: taglist
         run: |
-          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}"
+          repo="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}"
           arch_tag="${repo}:${{ needs.determine-context.outputs.immutable_tag }}-${{ matrix.arch_slug }}"
           printf "tag=%s\n" "$arch_tag" >> "$GITHUB_OUTPUT"
 
@@ -539,6 +541,7 @@ jobs:
         if: needs.determine-context.outputs.push == 'true'
         run: |
           trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --platform "${{ matrix.arch }}" \
             "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
 
       - name: Generate artifact attestation
