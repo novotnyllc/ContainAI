@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common-functions.sh"
 
 mode="${CONTAINAI_PROFILE:-${CONTAINAI_MODE:-dev}}"
-root="${CONTAINAI_ROOT:-${CONTAINAI_REPO_ROOT_DEFAULT}}"
+root="${CONTAINAI_ROOT:-${_CONTAINAI_SCRIPT_ROOT}}"
 sums_path="${CONTAINAI_SHA256_FILE:-${root}/SHA256SUMS}"
 allow_dev_missing="${CONTAINAI_ALLOW_DEV_INTEGRITY_MISSING:-1}"
 format="text"

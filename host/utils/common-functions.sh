@@ -3,11 +3,13 @@
 set -euo pipefail
 
 COMMON_FUNCTIONS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-CONTAINAI_REPO_ROOT_DEFAULT=$(cd "$COMMON_FUNCTIONS_DIR/../.." && pwd)
+# Internal bootstrap: where this script lives. NOT necessarily a git repo in prod.
+_CONTAINAI_SCRIPT_ROOT=$(cd "$COMMON_FUNCTIONS_DIR/../.." && pwd)
 
-CONTAINAI_PROFILE_FILE="${CONTAINAI_PROFILE_FILE:-$CONTAINAI_REPO_ROOT_DEFAULT/profile.env}"
+CONTAINAI_PROFILE_FILE="${CONTAINAI_PROFILE_FILE:-$_CONTAINAI_SCRIPT_ROOT/profile.env}"
 CONTAINAI_PROFILE="dev"
-CONTAINAI_ROOT="$CONTAINAI_REPO_ROOT_DEFAULT"
+# CONTAINAI_ROOT: The ContainAI installation directory (dev clone or prod /opt/containai/current)
+CONTAINAI_ROOT="$_CONTAINAI_SCRIPT_ROOT"
 # Defaults for dev; overridden by env-detect profile file.
 CONTAINAI_CONFIG_DIR="${HOME}/.config/containai-dev"
 CONTAINAI_DATA_ROOT="${HOME}/.local/share/containai-dev"
@@ -27,8 +29,9 @@ CONTAINAI_OVERRIDE_DIR="${CONTAINAI_OVERRIDE_DIR:-${CONTAINAI_CONFIG_DIR}/overri
 CONTAINAI_DIRTY_OVERRIDE_TOKEN="${CONTAINAI_DIRTY_OVERRIDE_TOKEN:-${CONTAINAI_OVERRIDE_DIR}/allow-dirty}"
 CONTAINAI_CACHE_DIR="${CONTAINAI_CACHE_DIR:-${CONTAINAI_CONFIG_DIR}/cache}"
 CONTAINAI_PREREQ_CACHE_FILE="${CONTAINAI_PREREQ_CACHE_FILE:-${CONTAINAI_CACHE_DIR}/prereq-check}"
-CONTAINAI_SECURITY_ASSET_DIR="${CONTAINAI_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}/profiles"
-CONTAINAI_BROKER_SCRIPT="${CONTAINAI_BROKER_SCRIPT:-${CONTAINAI_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py}"
+# Security profiles MUST be root-owned to prevent tampering. System location used by both prod and dev.
+CONTAINAI_SYSTEM_PROFILES_DIR="${CONTAINAI_SYSTEM_PROFILES_DIR:-/opt/containai/profiles}"
+CONTAINAI_BROKER_SCRIPT="${CONTAINAI_BROKER_SCRIPT:-${_CONTAINAI_SCRIPT_ROOT}/host/utils/secret-broker.py}"
 CONTAINAI_AUDIT_LOG="${CONTAINAI_AUDIT_LOG:-${CONTAINAI_CONFIG_DIR}/security-events.log}"
 CONTAINAI_HELPER_NETWORK_POLICY="${CONTAINAI_HELPER_NETWORK_POLICY:-loopback}"
 CONTAINAI_HELPER_PIDS_LIMIT="${CONTAINAI_HELPER_PIDS_LIMIT:-64}"
@@ -112,9 +115,12 @@ _sha256_file() {
     _sha256_stream < "$file"
 }
 
+# Collects a fingerprint of prerequisite check inputs for caching.
+# Args:
+#   $1: containai_root - The ContainAI installation directory
 _collect_prereq_fingerprint() {
-    local repo_root="$1"
-    local script_path="$repo_root/host/utils/verify-prerequisites.sh"
+    local containai_root="$1"
+    local script_path="$containai_root/host/utils/verify-prerequisites.sh"
     local entries=()
     if [ -f "$script_path" ]; then
         local script_hash
@@ -157,17 +163,20 @@ _collect_prereq_fingerprint() {
     printf '%s\n' "${entries[@]}" | _sha256_stream
 }
 
+# Ensures prerequisites have been verified (uses cached result if inputs unchanged).
+# Args:
+#   $1: containai_root - The ContainAI installation directory (optional, defaults to CONTAINAI_ROOT)
 ensure_prerequisites_verified() {
-    local repo_root="${1:-${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}}"
+    local containai_root="${1:-${CONTAINAI_ROOT:-$_CONTAINAI_SCRIPT_ROOT}}"
     if [ "${CONTAINAI_DISABLE_AUTO_PREREQ_CHECK:-0}" = "1" ]; then
         return 0
     fi
-    local script_path="$repo_root/host/utils/verify-prerequisites.sh"
+    local script_path="$containai_root/host/utils/verify-prerequisites.sh"
     if [ ! -x "$script_path" ]; then
         return 0
     fi
     local fingerprint
-    fingerprint=$(_collect_prereq_fingerprint "$repo_root" 2>/dev/null || echo "")
+    fingerprint=$(_collect_prereq_fingerprint "$containai_root" 2>/dev/null || echo "")
     if [ -z "$fingerprint" ]; then
         return 0
     fi
@@ -382,7 +391,7 @@ log_capability_issuance_event() {
     local output_dir="$2"
     shift 2 || true
     local stubs=("$@")
-    local repo_root="${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}"
+    local repo_root="${CONTAINAI_ROOT:-$_CONTAINAI_SCRIPT_ROOT}"
     local git_head
     git_head=$(get_git_head_hash "$repo_root" 2>/dev/null || echo "")
     local manifest_sha="${CONTAINAI_SESSION_CONFIG_SHA256:-}"
@@ -698,7 +707,7 @@ get_secret_broker_script() {
         echo "$candidate"
         return 0
     fi
-    candidate="${CONTAINAI_REPO_ROOT_DEFAULT}/host/utils/secret-broker.py"
+    candidate="${_CONTAINAI_SCRIPT_ROOT}/host/utils/secret-broker.py"
     if [ -x "$candidate" ]; then
         echo "$candidate"
         return 0
@@ -781,36 +790,54 @@ is_wsl_environment() {
 }
 
 wsl_security_helper_path() {
-    local repo_root="${1:-${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}}"
-    echo "$repo_root/host/utils/fix-wsl-security.sh"
+    local containai_root="${1:-${CONTAINAI_ROOT:-$_CONTAINAI_SCRIPT_ROOT}}"
+    echo "$containai_root/host/utils/fix-wsl-security.sh"
 }
 
+# Resolves the path to a security profile file.
+# Args:
+#   $1: containai_root - The ContainAI installation directory (NOT necessarily a git repo)
+#   $2: filename - The profile filename to find
+#   $3: label - Human-readable label for error messages (optional)
 resolve_security_asset_path() {
-    local repo_root="$1"
+    local containai_root="$1"
     local filename="$2"
     local label="${3:-$filename}"
 
-    if [ -z "$repo_root" ] || [ -z "$filename" ]; then
+    if [ -z "$containai_root" ] || [ -z "$filename" ]; then
         return 1
     fi
 
-    local default_candidate="$repo_root/host/profiles/$filename"
-    local asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/$filename"
-
-    if [ -f "$default_candidate" ]; then
-        echo "$default_candidate"
+    # SECURITY: Check system profiles location FIRST (dev setup installs here)
+    local system_candidate="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/$filename"
+    if [ -f "$system_candidate" ]; then
+        echo "$system_candidate"
         return 0
     fi
 
-    if [ -n "$asset_candidate" ] && [ -f "$asset_candidate" ]; then
-        echo "$asset_candidate"
-        return 0
+    # Check installed location (prod tarball extracts profiles to $install_root/host/profiles/)
+    local installed_candidate="$containai_root/host/profiles/$filename"
+    if [ -f "$installed_candidate" ]; then
+        # SECURITY: Profiles MUST be root-owned to prevent tampering
+        local owner
+        owner=$(stat -c "%U" "$installed_candidate" 2>/dev/null || echo "unknown")
+        if [ "$owner" = "root" ]; then
+            echo "$installed_candidate"
+            return 0
+        fi
+
+        # User-owned profiles are a security risk - reject them
+        echo "❌ ${label} found but not root-owned (security risk)." >&2
+        echo "   File: $installed_candidate (owner: $owner)" >&2
+        echo "   → Run 'sudo ./scripts/setup-local-dev.sh' to install profiles with proper ownership" >&2
+        return 1
     fi
 
-    echo "❌ ${label} not found at $default_candidate. Run scripts/setup-local-dev.sh to reinstall the host security assets." >&2
-    if [ -n "$asset_candidate" ] && [ "$asset_candidate" != "$default_candidate" ]; then
-    echo "   Looked for installed copy at $asset_candidate but it was missing." >&2
-    fi
+    # Profile not found
+    echo "❌ ${label} not found." >&2
+    echo "   System location: $system_candidate (missing)" >&2
+    echo "   Installed location: $installed_candidate (missing)" >&2
+    echo "   → Run 'sudo ./scripts/setup-local-dev.sh' to install security profiles" >&2
     return 1
 }
 
@@ -819,8 +846,14 @@ resolve_seccomp_profile_path() {
     resolve_security_asset_path "$1" "seccomp-containai-agent.json" "Agent seccomp profile"
 }
 
+# Resolves and optionally loads an AppArmor profile for a given channel.
+# Args:
+#   $1: containai_root - The ContainAI installation directory
+#   $2: base_name - Base profile name (e.g., "containai-agent")
+#   $3: filename - Profile filename
+#   $4: label - Human-readable label for messages
 _resolve_channel_apparmor_profile() {
-    local repo_root="$1"
+    local containai_root="$1"
     local base_name="$2"
     local filename="$3"
     local label="$4"
@@ -839,16 +872,12 @@ _resolve_channel_apparmor_profile() {
         return 0
     fi
 
-    local profile_file="$repo_root/host/profiles/$filename"
-    local asset_candidate="${CONTAINAI_SECURITY_ASSET_DIR%/}/$filename"
-    if [ ! -f "$profile_file" ] && [ -n "$asset_candidate" ] && [ -f "$asset_candidate" ]; then
-        profile_file="$asset_candidate"
-    fi
-
-    if [ ! -f "$profile_file" ]; then
-        echo "⚠️  ${label} file not found at $profile_file. Run scripts/setup-local-dev.sh to restore the host security profiles." >&2
+    # Use resolve_security_asset_path for consistent profile resolution with ownership checks
+    local profile_file
+    profile_file=$(resolve_security_asset_path "$containai_root" "$filename" "$label" 2>/dev/null) || {
+        echo "⚠️  ${label} file not found. Run scripts/setup-local-dev.sh to install security profiles." >&2
         return 1
-    fi
+    }
 
     if [ "$(id -u 2>/dev/null || echo 1)" != "0" ]; then
         echo "⚠️  ${label} '${profile_name}' not loaded (requires sudo). Run: sudo apparmor_parser -r '$profile_file'" >&2
@@ -875,26 +904,29 @@ _resolve_channel_apparmor_profile() {
     return 1
 }
 
+# Loads all security profiles (seccomp + AppArmor) for ContainAI.
+# Args:
+#   $1: containai_root - The ContainAI installation directory
 load_security_profiles() {
-    local repo_root="$1"
+    local containai_root="$1"
     local agent_seccomp proxy_seccomp log_forwarder_seccomp apparmor_profile=""
 
-    if ! agent_seccomp=$(resolve_security_asset_path "$repo_root" "seccomp-containai-agent.json" "Agent seccomp profile"); then
+    if ! agent_seccomp=$(resolve_security_asset_path "$containai_root" "seccomp-containai-agent.json" "Agent seccomp profile"); then
         return 1
     fi
-    if ! proxy_seccomp=$(resolve_security_asset_path "$repo_root" "seccomp-containai-proxy.json" "Proxy seccomp profile"); then
+    if ! proxy_seccomp=$(resolve_security_asset_path "$containai_root" "seccomp-containai-proxy.json" "Proxy seccomp profile"); then
         return 1
     fi
-    if ! log_forwarder_seccomp=$(resolve_security_asset_path "$repo_root" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile"); then
+    if ! log_forwarder_seccomp=$(resolve_security_asset_path "$containai_root" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile"); then
         return 1
     fi
 
-    if ! ensure_security_assets_current "$repo_root"; then
+    if ! ensure_security_assets_current "$containai_root"; then
         return 1
     fi
 
     # Resolve channel-specific AppArmor profile names and ensure they are loaded.
-    if apparmor_profile=$(_resolve_channel_apparmor_profile "$repo_root" "containai-agent" "apparmor-containai-agent.profile" "Agent AppArmor profile"); then
+    if apparmor_profile=$(_resolve_channel_apparmor_profile "$containai_root" "containai-agent" "apparmor-containai-agent.profile" "Agent AppArmor profile"); then
         :
     else
         apparmor_profile=""
@@ -913,18 +945,21 @@ load_security_profiles() {
     APPARMOR_PROFILE_NAME="$apparmor_profile"
 }
 
+# Ensures security profile assets are current (hashes match manifest).
+# Args:
+#   $1: containai_root - The ContainAI installation directory
 ensure_security_assets_current() {
-    local repo_root="$1"
-    local seccomp_repo="$repo_root/host/profiles/seccomp-containai-agent.json"
-    local apparmor_repo="$repo_root/host/profiles/apparmor-containai-agent.profile"
-    local manifest_path="${CONTAINAI_SECURITY_ASSET_DIR%/}/containai-profiles.sha256"
-    local manifest_repo="$repo_root/host/profiles/containai-profiles.sha256"
-    if [ ! -f "$manifest_path" ] && [ -f "$manifest_repo" ]; then
-        manifest_path="$manifest_repo"
+    local containai_root="$1"
+    local seccomp_source="$containai_root/host/profiles/seccomp-containai-agent.json"
+    local apparmor_source="$containai_root/host/profiles/apparmor-containai-agent.profile"
+    local manifest_path="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/containai-profiles.sha256"
+    local manifest_source="$containai_root/host/profiles/containai-profiles.sha256"
+    if [ ! -f "$manifest_path" ] && [ -f "$manifest_source" ]; then
+        manifest_path="$manifest_source"
     fi
 
     local seccomp_path
-    if ! seccomp_path=$(resolve_seccomp_profile_path "$repo_root"); then
+    if ! seccomp_path=$(resolve_seccomp_profile_path "$containai_root"); then
         return 1
     fi
 
@@ -935,15 +970,15 @@ ensure_security_assets_current() {
         manifest_apparmor_hash=$(awk '/apparmor-containai-agent.profile/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
     fi
 
-    local hash_repo hash_active
-    hash_repo=$(_sha256_file "$seccomp_repo" 2>/dev/null || echo "")
-    if [ -z "$hash_repo" ]; then
-        hash_repo="$manifest_seccomp_hash"
+    local hash_source hash_active
+    hash_source=$(_sha256_file "$seccomp_source" 2>/dev/null || echo "")
+    if [ -z "$hash_source" ]; then
+        hash_source="$manifest_seccomp_hash"
     fi
     hash_active=$(_sha256_file "$seccomp_path" 2>/div/null || echo "")
 
-    if [ -n "$hash_repo" ] && [ -n "$hash_active" ]; then
-        if [ "$hash_repo" != "$hash_active" ]; then
+    if [ -n "$hash_source" ] && [ -n "$hash_active" ]; then
+        if [ "$hash_source" != "$hash_active" ]; then
             echo "❌ Seccomp profile is outdated. Run 'sudo ./scripts/setup-local-dev.sh' to refresh host security assets." >&2
             return 1
         fi
@@ -953,18 +988,18 @@ ensure_security_assets_current() {
     fi
 
     local apparmor_candidate
-    apparmor_candidate=$(resolve_security_asset_path "$repo_root" "apparmor-containai-agent.profile" "Agent AppArmor profile" 2>/dev/null || true)
+    apparmor_candidate=$(resolve_security_asset_path "$containai_root" "apparmor-containai-agent.profile" "Agent AppArmor profile" 2>/dev/null || true)
     if [ -n "$apparmor_candidate" ] && [ -f "$apparmor_candidate" ]; then
-        local aa_repo_hash aa_active_hash
-        aa_repo_hash=$(_sha256_file "$apparmor_repo" 2>/dev/null || echo "")
-        if [ -z "$aa_repo_hash" ]; then
-            aa_repo_hash="$manifest_apparmor_hash"
+        local aa_source_hash aa_active_hash
+        aa_source_hash=$(_sha256_file "$apparmor_source" 2>/dev/null || echo "")
+        if [ -z "$aa_source_hash" ]; then
+            aa_source_hash="$manifest_apparmor_hash"
         fi
         aa_active_hash=$(_sha256_file "$apparmor_candidate" 2>/dev/null || echo "")
-        if [ -n "$aa_repo_hash" ] && [ -n "$aa_active_hash" ] && [ "$aa_repo_hash" != "$aa_active_hash" ]; then
+        if [ -n "$aa_source_hash" ] && [ -n "$aa_active_hash" ] && [ "$aa_source_hash" != "$aa_active_hash" ]; then
             echo "❌ AppArmor profile is outdated. Run 'sudo ./scripts/setup-local-dev.sh' to refresh host security assets." >&2
             return 1
-        elif [ -z "$aa_repo_hash" ] || [ -z "$aa_active_hash" ]; then
+        elif [ -z "$aa_source_hash" ] || [ -z "$aa_active_hash" ]; then
             echo "❌ Unable to verify AppArmor profile freshness (missing reference hash). Run 'sudo ./scripts/setup-local-dev.sh' to reinstall host security assets." >&2
             return 1
         fi
@@ -1045,13 +1080,19 @@ ensure_apparmor_profile_loaded() {
     return 1
 }
 
+# Resolves the AppArmor profile name for the agent.
+# Args:
+#   $1: containai_root - The ContainAI installation directory
 resolve_apparmor_profile_name() {
-    local repo_root="$1"
-    _resolve_channel_apparmor_profile "$repo_root" "containai-agent" "apparmor-containai-agent.profile" "Agent AppArmor profile"
+    local containai_root="$1"
+    _resolve_channel_apparmor_profile "$containai_root" "containai-agent" "apparmor-containai-agent.profile" "Agent AppArmor profile"
 }
 
+# Verifies all host security prerequisites (seccomp, AppArmor).
+# Args:
+#   $1: containai_root - The ContainAI installation directory (optional)
 verify_host_security_prereqs() {
-    local repo_root="${1:-${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}}"
+    local containai_root="${1:-${CONTAINAI_ROOT:-$_CONTAINAI_SCRIPT_ROOT}}"
     local errors=()
     local warnings=()
     local current_uid
@@ -1063,11 +1104,11 @@ verify_host_security_prereqs() {
         profiles_file_readable=1
     fi
 
-    local default_seccomp_profile="$repo_root/host/profiles/seccomp-containai-agent.json"
-    local installed_seccomp_profile="${CONTAINAI_SECURITY_ASSET_DIR%/}/seccomp-containai-agent.json"
+    local default_seccomp_profile="$containai_root/host/profiles/seccomp-containai-agent.json"
+    local installed_seccomp_profile="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/seccomp-containai-agent.json"
 
     # Check Agent Seccomp
-    if ! resolve_seccomp_profile_path "$repo_root" >/dev/null 2>&1; then
+    if ! resolve_seccomp_profile_path "$containai_root" >/dev/null 2>&1; then
         if [ -n "$installed_seccomp_profile" ]; then
             errors+=("Agent seccomp profile not found at $default_seccomp_profile (or $installed_seccomp_profile). Run scripts/setup-local-dev.sh to reinstall the host security assets.")
         else
@@ -1076,12 +1117,12 @@ verify_host_security_prereqs() {
     fi
 
     # Check Proxy Seccomp
-    if ! resolve_security_asset_path "$repo_root" "seccomp-containai-proxy.json" "Proxy seccomp profile" >/dev/null 2>&1; then
+    if ! resolve_security_asset_path "$containai_root" "seccomp-containai-proxy.json" "Proxy seccomp profile" >/dev/null 2>&1; then
         errors+=("Proxy seccomp profile not found. Run scripts/setup-local-dev.sh to reinstall the host security assets.")
     fi
 
     # Check Log Forwarder Seccomp
-    if ! resolve_security_asset_path "$repo_root" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile" >/dev/null 2>&1; then
+    if ! resolve_security_asset_path "$containai_root" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile" >/dev/null 2>&1; then
         errors+=("Log forwarder seccomp profile not found. Run scripts/setup-local-dev.sh to reinstall the host security assets.")
     fi
 
@@ -1090,7 +1131,7 @@ verify_host_security_prereqs() {
     elif ! is_apparmor_supported; then
         if is_wsl_environment; then
             local helper_script
-            helper_script=$(wsl_security_helper_path "$repo_root")
+            helper_script=$(wsl_security_helper_path "$containai_root")
             if [ -x "$helper_script" ]; then
                 errors+=("AppArmor kernel support not detected (WSL 2). Run '$helper_script --check' to audit your Windows configuration, then rerun '$helper_script' (optionally with --force) to apply the fixes and restart WSL.")
             else
@@ -1110,8 +1151,8 @@ verify_host_security_prereqs() {
             base="${bases[$idx]}"
             file_name="${files[$idx]}"
             p_name=$(_format_apparmor_profile_name "$base" "$channel")
-            p_file="$repo_root/host/profiles/$file_name"
-            p_installed="${CONTAINAI_SECURITY_ASSET_DIR%/}/$file_name"
+            p_file="$containai_root/host/profiles/$file_name"
+            p_installed="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/$file_name"
             label="${base//-/ }"
 
             if [ ! -f "$p_file" ] && [ -n "$p_installed" ] && [ -f "$p_installed" ]; then
@@ -1122,7 +1163,7 @@ verify_host_security_prereqs() {
                 continue
             fi
 
-            if _resolve_channel_apparmor_profile "$repo_root" "$base" "$file_name" "${label^} AppArmor profile" >/dev/null 2>&1; then
+            if _resolve_channel_apparmor_profile "$containai_root" "$base" "$file_name" "${label^} AppArmor profile" >/dev/null 2>&1; then
                 continue
             fi
 
@@ -1511,9 +1552,9 @@ run_python_tool() {
     done
     local script_args=("$@")
 
-    local repo_root="${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}"
-    if [ ! -d "$repo_root" ]; then
-        echo "❌ Repo root '$repo_root' not found for python runner" >&2
+    local containai_root="${CONTAINAI_ROOT:-$_CONTAINAI_SCRIPT_ROOT}"
+    if [ ! -d "$containai_root" ]; then
+        echo "❌ ContainAI root '$containai_root' not found for python runner" >&2
         return 1
     fi
 
@@ -1526,7 +1567,7 @@ run_python_tool() {
     local image
     image=$(get_python_runner_image)
 
-    local docker_args=("run" "--rm" "-w" "$repo_root" "-e" "PYTHONUNBUFFERED=1")
+    local docker_args=("run" "--rm" "-w" "$containai_root" "-e" "PYTHONUNBUFFERED=1")
     if command -v id >/dev/null 2>&1; then
         docker_args+=("--user" "$(id -u):$(id -g)")
     fi
@@ -1565,13 +1606,13 @@ run_python_tool() {
 
     local seccomp_profile=""
     if [ "${CONTAINAI_DISABLE_HELPER_SECCOMP:-0}" != "1" ]; then
-        seccomp_profile=$(resolve_seccomp_profile_path "$repo_root" 2>/dev/null || true)
+        seccomp_profile=$(resolve_seccomp_profile_path "$containai_root" 2>/dev/null || true)
     fi
     if [ -n "$seccomp_profile" ]; then
         docker_args+=("--security-opt" "seccomp=$seccomp_profile")
     fi
 
-    local mounts=("$repo_root")
+    local mounts=("$containai_root")
     [ -n "${HOME:-}" ] && mounts+=("$HOME")
     local mount_path
     for mount_path in "${extra_mounts[@]}"; do
@@ -1640,12 +1681,18 @@ copy_agent_data_exports() {
     return 0
 }
 
+# Merges agent data exports from a staged directory.
+# Args:
+#   $1: agent_name - Agent name
+#   $2: staged_dir - Staged directory with exports
+#   $3: containai_root - The ContainAI installation directory
+#   $4: home_dir - User home directory
 merge_agent_data_exports() {
     local agent_name="$1"
     local staged_dir="$2"
-    local repo_root="$3"
+    local containai_root="$3"
     local home_dir="$4"
-    local packager="$repo_root/host/utils/package-agent-data.py"
+    local packager="$containai_root/host/utils/package-agent-data.py"
 
     if [ -z "$agent_name" ] || [ ! -d "$staged_dir" ] || [ ! -f "$packager" ]; then
         return 1
@@ -1711,13 +1758,19 @@ PYINNER
     return 1
 }
 
+# Processes and merges agent data exports from a container.
+# Args:
+#   $1: container_name - Container name
+#   $2: containai_root - The ContainAI installation directory
+#   $3: home_dir - User home directory
+#   $4: staging_root - Staging directory (optional)
 process_agent_data_exports() {
     local container_name="$1"
-    local repo_root="$2"
+    local containai_root="$2"
     local home_dir="$3"
     local staging_root="${4:-}"
 
-    if [ -z "$container_name" ] || [ -z "$repo_root" ] || [ -z "$home_dir" ]; then
+    if [ -z "$container_name" ] || [ -z "$containai_root" ] || [ -z "$home_dir" ]; then
         return 0
     fi
 
@@ -1735,7 +1788,7 @@ process_agent_data_exports() {
 
     if copy_agent_data_exports "$container_name" "$agent_name" "$staging_root"; then
         local staged_path="$staging_root/${agent_name}"
-        merge_agent_data_exports "$agent_name" "$staged_path" "$repo_root" "$home_dir"
+        merge_agent_data_exports "$agent_name" "$staged_path" "$containai_root" "$home_dir"
         rm -rf "$staged_path"
     fi
 
@@ -1866,7 +1919,7 @@ remove_container_with_sidecars() {
     local local_remote_path
     local_remote_path=$(container_cli inspect -f '{{ index .Config.Labels "containai.local-remote" }}' "$container_name" 2>/dev/null || true)
     
-    local repo_root="${CONTAINAI_REPO_ROOT:-$CONTAINAI_REPO_ROOT_DEFAULT}"
+    local containai_root="${CONTAINAI_ROOT:-$_CONTAINAI_SCRIPT_ROOT}"
     local home_dir="${HOME:-}"
     if [ -z "$home_dir" ] && command -v getent >/dev/null 2>&1; then
         home_dir="$(getent passwd "$(id -u)" | awk -F: '{print $6}' 2>/dev/null || true)"

@@ -6,8 +6,9 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
-COMMON_FUNCTIONS="$REPO_ROOT/host/utils/common-functions.sh"
+# SCRIPT_ROOT: Where this script lives. Not necessarily a git repo in prod installs.
+SCRIPT_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+COMMON_FUNCTIONS="$SCRIPT_ROOT/host/utils/common-functions.sh"
 if [ ! -f "$COMMON_FUNCTIONS" ]; then
     echo "Unable to locate $COMMON_FUNCTIONS" >&2
     exit 1
@@ -175,7 +176,7 @@ fi
 
 # Host/container security gates
 print_checking "Host security enforcement (seccomp/AppArmor)"
-if HOST_RESULT=$(verify_host_security_prereqs "$REPO_ROOT" 2>&1); then
+if HOST_RESULT=$(verify_host_security_prereqs "$SCRIPT_ROOT" 2>&1); then
     print_success "Host prerequisites satisfied"
 else
     print_error "Host security prerequisites failed"

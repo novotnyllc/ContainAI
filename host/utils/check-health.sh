@@ -6,7 +6,8 @@
 set -u
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+# SCRIPT_ROOT: Where this script lives. Not necessarily a git repo in prod installs.
+SCRIPT_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 load_common_functions() {
     if [ -n "${COMMON_FUNCS_LOADED:-}" ]; then
@@ -65,8 +66,8 @@ prompt_fix_command() {
     fi
 
     local display_cmd
-    if [[ "${FIX_COMMAND[0]}" == "$REPO_ROOT"* ]]; then
-        display_cmd="./${FIX_COMMAND[0]#$REPO_ROOT/}"
+    if [[ "${FIX_COMMAND[0]}" == "$SCRIPT_ROOT"* ]]; then
+        display_cmd="./${FIX_COMMAND[0]#$SCRIPT_ROOT/}"
     else
         display_cmd="${FIX_COMMAND[0]}"
     fi
@@ -82,7 +83,7 @@ prompt_fix_command() {
     read -r -p "$(echo -e "${CYAN}Run ${display_cmd} now? [y/N]: ${NC}")" reply
     if [[ "$reply" =~ ^[Yy]$ || "$reply" =~ ^[Yy][Ee][Ss]$ ]]; then
         echo -e "${BLUE}▶ Executing ${display_cmd}${NC}"
-        if ( cd "$REPO_ROOT" && "${FIX_COMMAND[@]}" ); then
+        if ( cd "$SCRIPT_ROOT" && "${FIX_COMMAND[@]}" ); then
             echo -e "${GREEN}✅ Fix command completed. Re-run check-health to confirm.${NC}"
         else
             echo -e "${RED}❌ Fix command failed. Review the output above for details.${NC}"
@@ -93,7 +94,7 @@ prompt_fix_command() {
 }
 
 verify_sigstore_artifacts() {
-    local install_root="${CONTAINAI_ROOT:-$REPO_ROOT}"
+    local install_root="${CONTAINAI_ROOT:-$SCRIPT_ROOT}"
     local release_root=""
 
     if [ -L "$install_root/current" ]; then
@@ -167,7 +168,7 @@ if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
         pass "WSL: Systemd is active"
     else
         fail "WSL: Systemd is disabled" "Run './host/utils/fix-wsl-security.sh' to enable."
-        suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
+        suggest_fix "$SCRIPT_ROOT/host/utils/fix-wsl-security.sh"
     fi
 
     # B. Kernel Version
@@ -188,7 +189,7 @@ if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
         HOST_APPARMOR_ACTIVE=1
     else
         fail "WSL: AppArmor DISABLED" "Your agents are running unconfined! Run './host/utils/fix-wsl-security.sh' immediately."
-        suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
+        suggest_fix "$SCRIPT_ROOT/host/utils/fix-wsl-security.sh"
     fi
 
 elif [ "$OS_TYPE" = "Darwin" ]; then
@@ -294,23 +295,25 @@ fi
 header "Launcher Security Gates"
 
 if load_common_functions; then
-    host_output=$(verify_host_security_prereqs "$REPO_ROOT" 2>&1)
+    host_output=$(verify_host_security_prereqs "$SCRIPT_ROOT" 2>&1)
     host_status=$?
     if [ $host_status -eq 0 ]; then
         pass "Host enforcement: seccomp & AppArmor present"
     else
         fail "Host enforcement failed" "Resolve the errors below (see suggested fix)."
-        profile_file="$REPO_ROOT/host/profiles/apparmor-containai-agent.profile"
+        # Check system location first, then repo location
+        profile_file="${CONTAINAI_SYSTEM_PROFILES_DIR:-/opt/containai/profiles}/apparmor-containai-agent.profile"
+        [ ! -f "$profile_file" ] && profile_file="$SCRIPT_ROOT/host/profiles/apparmor-containai-agent.profile"
         if printf '%s' "$host_output" | grep -q "AppArmor profile 'containai' is not loaded"; then
             suggest_fix sudo apparmor_parser -r "$profile_file"
         elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then
-            suggest_fix "$REPO_ROOT/scripts/setup-local-dev.sh"
+            suggest_fix "sudo $SCRIPT_ROOT/scripts/setup-local-dev.sh"
         elif printf '%s' "$host_output" | grep -qi "AppArmor kernel support not detected"; then
-            suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
+            suggest_fix "$SCRIPT_ROOT/host/utils/fix-wsl-security.sh"
         elif [ "${IS_WSL:-0}" -eq 1 ]; then
-            suggest_fix "$REPO_ROOT/host/utils/fix-wsl-security.sh"
+            suggest_fix "$SCRIPT_ROOT/host/utils/fix-wsl-security.sh"
         else
-            suggest_fix "$REPO_ROOT/scripts/setup-local-dev.sh"
+            suggest_fix "$SCRIPT_ROOT/scripts/setup-local-dev.sh"
         fi
     fi
     if [ -n "$host_output" ]; then

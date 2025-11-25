@@ -7,7 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LAUNCHERS_PATH="$REPO_ROOT/host/launchers/entrypoints"
-SECURITY_ASSET_DIR="${CONTAINAI_ROOT:-$REPO_ROOT}/profiles"
+# Security profiles MUST be root-owned to prevent tampering - same location for dev and prod
+CONTAINAI_SYSTEM_PROFILES_DIR="${CONTAINAI_SYSTEM_PROFILES_DIR:-/opt/containai/profiles}"
+# Source profiles in repo (these get copied to system location)
 SECURITY_PROFILES_DIR="$REPO_ROOT/host/profiles"
 SECURITY_MANIFEST_NAME="containai-profiles.sha256"
 CHECK_ONLY=0
@@ -85,7 +87,7 @@ PY
 
 install_security_assets() {
     local dry_run="${1:-0}"
-    local asset_dir="$SECURITY_ASSET_DIR"
+    local asset_dir="$CONTAINAI_SYSTEM_PROFILES_DIR"
     local src_seccomp="$SECURITY_PROFILES_DIR/seccomp-containai-agent.json"
     local src_apparmor="$SECURITY_PROFILES_DIR/apparmor-containai-agent.profile"
     local src_seccomp_proxy="$SECURITY_PROFILES_DIR/seccomp-containai-proxy.json"
