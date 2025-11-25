@@ -6,6 +6,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# Source centralized base image utilities
+# shellcheck source=host/utils/base-image.sh disable=SC1091
+source "$PROJECT_ROOT/host/utils/base-image.sh"
+
 # Source test configuration
 # shellcheck source=scripts/test/test-config.sh disable=SC1091
 source "$SCRIPT_DIR/test-config.sh"
@@ -173,47 +177,49 @@ build_test_images() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Building test images in isolated environment"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
+
     cd "$PROJECT_ROOT"
-    
-    # Build base image
+
+    # Build base image using centralized utility (handles caching & cleanup)
     echo ""
     echo "Building base image..."
-    docker build \
-        -f docker/base/Dockerfile \
-        -t "$TEST_BASE_IMAGE" \
-        --build-arg BUILDKIT_INLINE_CACHE=1 \
-        . || return 1
-    scan_image_for_secrets "$TEST_BASE_IMAGE"
-    
-    # Push to local registry
+    local base_tag
+    if ! base_tag=$(build_base_image); then
+        echo "❌ Failed to build base image"
+        return 1
+    fi
+    scan_image_for_secrets "$base_tag"
+
+    # Tag for test registry and push
+    echo "  Tagging as $TEST_BASE_IMAGE..."
+    docker tag "$base_tag" "$TEST_BASE_IMAGE" || return 1
     echo "  Pushing to local registry..."
     docker push "$TEST_BASE_IMAGE" || return 1
-    
-    # Build agent images (they will pull from local registry)
+
+    # Build agent images using the base image
     local agents=("copilot" "codex" "claude")
     for agent in "${agents[@]}"; do
         echo ""
         echo "Building $agent image..."
-        
+
         # Get the test image variable name
         local agent_upper
         agent_upper=$(printf '%s' "$agent" | tr '[:lower:]' '[:upper:]')
         local image_var="TEST_${agent_upper}_IMAGE"
         local test_image="${!image_var}"
-        
+
         docker build \
             -f "docker/agents/${agent}/Dockerfile" \
             -t "$test_image" \
-            --build-arg BASE_IMAGE="$TEST_BASE_IMAGE" \
+            --build-arg BASE_IMAGE="$base_tag" \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             . || return 1
         scan_image_for_secrets "$test_image"
-        
+
         echo "  Pushing to local registry..."
         docker push "$test_image" || return 1
     done
-    
+
     echo ""
     echo "✓ All test images built successfully"
     return 0

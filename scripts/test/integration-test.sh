@@ -6,11 +6,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INTEGRATION_SCRIPT="$PROJECT_ROOT/scripts/test/integration-test-impl.sh"
 
+# Source centralized base image utilities
+# shellcheck source=host/utils/base-image.sh
+source "$PROJECT_ROOT/host/utils/base-image.sh"
+
 # When running in bash (including WSL), pwd already returns Unix-style paths
 # that Docker can mount. No conversion needed.
 
+# ============================================================================
+# Unique Run Identification (for parallel CI jobs)
+# ============================================================================
+
+generate_run_id() {
+    # Prefer CI-provided IDs for parallel job safety, fall back to timestamp-based ID
+    if [[ -n "${GITHUB_RUN_ID:-}" ]]; then
+        echo "gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-1}"
+    elif [[ -n "${CI_JOB_ID:-}" ]]; then
+        echo "ci-${CI_JOB_ID}"
+    elif [[ -n "${BUILD_ID:-}" ]]; then
+        echo "jenkins-${BUILD_ID}"
+    else
+        # Local development - use PID and timestamp for uniqueness
+        echo "local-$$-$(date +%s)"
+    fi
+}
+
+RUN_ID="$(generate_run_id)"
+RUN_TIMESTAMP="$(date +%s)"
+
 DIND_IMAGE="${TEST_ISOLATION_IMAGE:-docker:25.0-dind}"
-DIND_CONTAINER="${TEST_ISOLATION_CONTAINER:-containai-test-dind-$RANDOM}"
+DIND_CONTAINER="${TEST_ISOLATION_CONTAINER:-containai-dind-${RUN_ID}}"
+LABEL_RUN_ID="containai.test.run=${RUN_ID}"
+LABEL_CREATED="containai.test.created=${RUN_TIMESTAMP}"
 DIND_CLIENT_IMAGE_DEFAULT="${DIND_IMAGE/-dind/-cli}"
 if [[ "$DIND_CLIENT_IMAGE_DEFAULT" == "$DIND_IMAGE" ]]; then
     DIND_CLIENT_IMAGE_DEFAULT="docker:cli"
@@ -37,42 +64,53 @@ fix_cache_permissions() {
     if [[ "${PERSIST_CACHE:-true}" != "true" ]]; then
         return
     fi
-    
+
     if [[ -d "$CACHE_DIR" ]]; then
+        echo "  Fixing cache directory permissions..."
         # Use docker to fix permissions since files inside are root-owned
         # We use alpine because it's small and likely available/cached
-        docker run --rm \
+        if ! docker run --rm \
             -v "$CACHE_DIR":/cache \
             alpine:3.19 \
-            chown -R "$(id -u):$(id -g)" /cache >/dev/null 2>&1 || true
+            chown -R "$(id -u):$(id -g)" /cache 2>&1; then
+            echo "  ⚠️  Permission fix failed (may need manual: sudo chown -R \$(id -u):\$(id -g) $CACHE_DIR)"
+        fi
     fi
 }
 
 cleanup() {
     local exit_code=$?
+
+    # Disable further traps to prevent recursion
+    trap - EXIT INT TERM HUP QUIT
+
     scrub_dind_host_secrets
-    if [[ "$DIND_STARTED" == "true" ]]; then
-        if [[ "${TEST_PRESERVE_RESOURCES:-false}" == "true" ]]; then
+
+    if [[ "${TEST_PRESERVE_RESOURCES:-false}" == "true" ]]; then
+        if [[ "$DIND_STARTED" == "true" ]]; then
             echo ""
             echo "Preserving isolated Docker daemon ($DIND_CONTAINER) for debugging (TEST_PRESERVE_RESOURCES=true)"
-        else
+        fi
+        if [[ -n "$DIND_RUN_DIR" ]]; then
+            echo "Shared /run directory preserved at: $DIND_RUN_DIR"
+        fi
+    else
+        if [[ "$DIND_STARTED" == "true" ]]; then
             echo ""
             echo "Cleaning up isolated Docker daemon..."
             # Graceful stop to prevent cache corruption
             docker stop -t 10 "$DIND_CONTAINER" >/dev/null 2>&1 || true
             docker rm -fv "$DIND_CONTAINER" >/dev/null 2>&1 || true
-            
+
             fix_cache_permissions
         fi
-    fi
 
-    if [[ "${TEST_PRESERVE_RESOURCES:-false}" == "true" ]]; then
-        if [[ -n "$DIND_RUN_DIR" ]]; then
-            echo "Shared /run directory preserved at: $DIND_RUN_DIR"
-        fi
-    else
+        # Clean up any other resources from this run (networks, etc.)
+        cleanup_this_run
+
         purge_dind_run_dir "$DIND_RUN_DIR"
     fi
+
     exit $exit_code
 }
 
@@ -294,13 +332,56 @@ EOF
     export TEST_HOST_SECRETS_FILE="$HOST_SECRETS_FILE"
 fi
 
+# Clean up resources from THIS run only (scoped cleanup)
+cleanup_this_run() {
+    echo "Cleaning up resources for run: ${RUN_ID}"
+
+    # Stop and remove containers for THIS run only
+    local containers
+    containers=$(docker ps -aq --filter "label=${LABEL_RUN_ID}" 2>/dev/null || true)
+    if [[ -n "$containers" ]]; then
+        echo "$containers" | xargs docker rm -f 2>/dev/null || true
+    fi
+
+    # Remove networks for this run
+    docker network ls -q --filter "label=${LABEL_RUN_ID}" 2>/dev/null \
+        | xargs -r docker network rm 2>/dev/null || true
+}
+
+# Clean up stale resources from crashed/abandoned runs (timestamp-based)
 cleanup_stale_resources() {
-    local stale_containers
-    stale_containers=$(docker ps -aq --filter "name=containai-test-dind-")
-    if [[ -n "$stale_containers" ]]; then
-        echo "Cleaning up stale DinD containers..."
+    local max_age_seconds="${1:-7200}"  # 2 hours default
+    local now
+    now=$(date +%s)
+
+    echo "Checking for stale test resources (older than ${max_age_seconds}s)..."
+
+    # Find containers with our label prefix that are too old
+    local found_stale=false
+    while read -r container_id; do
+        [[ -z "$container_id" ]] && continue
+        local created_ts
+        created_ts=$(docker inspect --format '{{ index .Config.Labels "containai.test.created" }}' "$container_id" 2>/dev/null || echo "")
+
+        if [[ -n "$created_ts" && $((now - created_ts)) -gt $max_age_seconds ]]; then
+            echo "  Removing stale container: $container_id (age: $((now - created_ts))s)"
+            docker rm -f "$container_id" 2>/dev/null || true
+            found_stale=true
+        fi
+    done < <(docker ps -aq --filter "label=containai.test.run" 2>/dev/null || true)
+
+    # Also clean up legacy containers (old naming scheme) that might be orphaned
+    local legacy_containers
+    legacy_containers=$(docker ps -aq --filter "name=containai-test-dind-" 2>/dev/null || true)
+    if [[ -n "$legacy_containers" ]]; then
+        echo "  Removing legacy DinD containers..."
         # shellcheck disable=SC2086
-        docker rm -fv $stale_containers >/dev/null 2>&1 || true
+        docker rm -fv $legacy_containers >/dev/null 2>&1 || true
+        found_stale=true
+    fi
+
+    if [[ "$found_stale" == "false" ]]; then
+        echo "  No stale resources found"
     fi
 }
 
@@ -323,7 +404,8 @@ fi
 # Clean up any stale containers from previous aborted runs before starting
 cleanup_stale_resources
 
-trap cleanup EXIT INT TERM
+# Catch all termination signals for robust cleanup
+trap cleanup EXIT INT TERM HUP QUIT
 
 # Validate Docker is available
 if ! command -v docker >/dev/null 2>&1; then
@@ -340,13 +422,16 @@ fi
 
 start_dind() {
     echo "Starting isolated Docker daemon ($DIND_IMAGE)..."
+    echo "  Run ID: $RUN_ID"
     echo "  Mounting: $PROJECT_ROOT -> /workspace (read-only)"
-    
+
     initialize_dind_run_dir
 
     local -a docker_args=(
         "${DIND_RUN_FLAGS[@]}"
         "--name" "$DIND_CONTAINER"
+        "--label" "$LABEL_RUN_ID"
+        "--label" "$LABEL_CREATED"
         "-v" "$PROJECT_ROOT:/workspace:ro"
         "-v" "$DIND_RUN_DIR:/run"
         "-e" "DOCKER_TLS_CERTDIR="
@@ -436,77 +521,61 @@ bootstrap_tools() {
 }
 
 inject_base_image() {
-    # Source config to get TEST_BASE_IMAGE
-    # We run in a subshell to avoid polluting the parent environment with test-config variables
+    # Build base image on host using centralized utility (handles caching & cleanup)
+    # Then inject into DinD for test isolation
     (
         # shellcheck source=scripts/test/test-config.sh
         source "$SCRIPT_DIR/test-config.sh"
-        local host_image="containai-test-base:cache"
-        
-        echo "  Checking base image freshness..."
-        local needs_build=true
-        
-        if docker image inspect "$host_image" >/dev/null 2>&1; then
-            # Check if image is newer than source files to avoid unnecessary rebuilds
-            local image_created
-            image_created=$(docker image inspect --format='{{.Created}}' "$host_image")
-            local image_ts
-            image_ts=$(date -d "$image_created" +%s 2>/dev/null || echo 0)
-            
-            # Check relevant source directories for modification time
-            local source_ts
-            source_ts=$(find docker/base docker/runtime host/utils -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)
-            source_ts=${source_ts:-$(date +%s)} # Default to now (force build) if find fails
-            
-            if [[ "$image_ts" -ge "$source_ts" ]]; then
-                needs_build=false
-                echo "  ✓ Base image up-to-date (skipping host build)"
-            fi
-        fi
 
-        if [[ "$needs_build" == "true" ]]; then
-            echo "  Building base image on host for caching..."
-            # Always build to ensure we have the latest changes.
-            if ! docker build -f docker/base/Dockerfile -t "$host_image" "$PROJECT_ROOT" >/dev/null 2>&1; then
-                echo "  ⚠️  Host build failed, retrying with output to debug..."
-                if ! docker build -f docker/base/Dockerfile -t "$host_image" "$PROJECT_ROOT"; then
-                    echo "  ⚠️  Failed to build base image on host, skipping injection"
-                    return 0
-                fi
-            fi
-        fi
+        echo "  Preparing base image..."
 
-        # Check if image already exists in DinD with same ID to avoid unnecessary copy
-        local host_id
-        host_id=$(docker inspect --format='{{.Id}}' "$host_image")
-        
-        local dind_id
-        dind_id=$(docker exec "$DIND_CONTAINER" docker inspect --format='{{.Id}}' "$TEST_BASE_IMAGE" 2>/dev/null || echo "missing")
-
-        if [[ "$host_id" == "$dind_id" ]]; then
-             echo "  ✓ Base image already present in isolation (checksum match)"
-             return 0
-        fi
-
-        echo "  Injecting base image into isolation..."
-        # We pipe the save output to the load input
-        if ! docker save "$host_image" | docker exec -i "$DIND_CONTAINER" docker load >/dev/null; then
-            echo "  ⚠️  Failed to inject base image"
+        # Build on host with content-hash caching (one version per channel)
+        local host_image
+        if ! host_image=$(build_base_image); then
+            echo "  ⚠️  Failed to build base image on host, skipping injection"
             return 0
         fi
 
-        if [[ "${PERSIST_CACHE:-true}" != "true" ]]; then
-             echo "  (Tip: Cache persistence is disabled. Enable it by removing --no-persist-cache for faster runs)"
-        fi
-        
-        echo "  Tagging injected image as $TEST_BASE_IMAGE..."
-        if ! docker exec "$DIND_CONTAINER" docker tag "$host_image" "$TEST_BASE_IMAGE"; then
-             echo "  ⚠️  Failed to tag injected image"
+        # Check if DinD already has this exact image
+        local host_id
+        host_id=$(docker inspect --format='{{.Id}}' "$host_image" 2>/dev/null || echo "")
+
+        local dind_id
+        dind_id=$(docker exec "$DIND_CONTAINER" docker inspect --format='{{.Id}}' "$host_image" 2>/dev/null || echo "missing")
+
+        if [[ -n "$host_id" && "$host_id" == "$dind_id" ]]; then
+            echo "  ✓ Base image already present in isolation (checksum match)"
+        else
+            echo "  Injecting base image into isolation..."
+            # Pipe save output directly to load input
+            if ! docker save "$host_image" | docker exec -i "$DIND_CONTAINER" docker load >/dev/null; then
+                echo "  ⚠️  Failed to inject base image"
+                return 0
+            fi
+            echo "  ✓ Base image injected"
         fi
 
-        # Prune dangling images in DinD to keep cache size in check
-        # This removes old versions of the base image that are no longer tagged
+        # Tag for test suite use
+        echo "  Tagging as $TEST_BASE_IMAGE..."
+        if ! docker exec "$DIND_CONTAINER" docker tag "$host_image" "$TEST_BASE_IMAGE"; then
+            echo "  ⚠️  Failed to tag injected image"
+        fi
+
+        # Clean up old base images inside DinD (same channel only)
+        local channel="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
+        docker exec "$DIND_CONTAINER" sh -c "
+            docker images --format '{{.Repository}}:{{.Tag}}' \
+                | grep '^containai-base:${channel}-' \
+                | grep -v '$host_image' \
+                | xargs -r docker rmi 2>/dev/null || true
+        "
+
+        # Prune dangling images in DinD
         docker exec "$DIND_CONTAINER" docker image prune -f >/dev/null 2>&1 || true
+
+        if [[ "${PERSIST_CACHE:-true}" != "true" ]]; then
+            echo "  (Tip: Cache persistence is disabled. Enable with --persist-cache for faster runs)"
+        fi
     )
 }
 
