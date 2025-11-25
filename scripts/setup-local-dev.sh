@@ -35,13 +35,33 @@ echo "Installing launchers to PATH..."
 
 if [[ $CHECK_ONLY -eq 0 ]]; then
     echo "Running ContainAI prerequisite and health checks..."
+    echo ""
     if ! "$REPO_ROOT/host/utils/verify-prerequisites.sh"; then
-        echo "❌ Prerequisite verification failed. Resolve the issues above and re-run scripts/setup-local-dev.sh."
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ Prerequisite verification failed."
+        echo ""
+        echo "Review the errors marked with ✗ above and fix them, then re-run:"
+        echo "    ./scripts/setup-local-dev.sh"
+        echo ""
+        echo "Common fixes:"
+        echo "  • Docker not running    → Start Docker Desktop or: sudo systemctl start docker"
+        echo "  • Git not configured    → git config --global user.name \"Your Name\""
+        echo "                            git config --global user.email \"you@example.com\""
+        echo "  • socat missing         → sudo apt-get install socat  (Debian/Ubuntu)"
+        echo "                            brew install socat          (macOS)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         exit 1
     fi
 
     if ! "$REPO_ROOT/host/utils/check-health.sh"; then
-        echo "❌ Health check failed. Resolve the issues above and re-run scripts/setup-local-dev.sh."
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ Health check failed."
+        echo ""
+        echo "Review the errors above and fix them, then re-run:"
+        echo "    ./scripts/setup-local-dev.sh"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         exit 1
     fi
 else

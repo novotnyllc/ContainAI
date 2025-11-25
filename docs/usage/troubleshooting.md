@@ -4,6 +4,26 @@ Reference this guide when something goes wrong or when you need advanced launch 
 
 ## Troubleshooting
 
+### Setup Script Fails
+
+If `./scripts/setup-local-dev.sh` fails, look at the **full output** above the error message. Each check shows either ✓ (pass), ⚠ (warning), or ✗ (fail).
+
+**Common failures and fixes:**
+
+| Error | Fix |
+|-------|-----|
+| Docker daemon is not running | Start Docker Desktop, or run `sudo systemctl start docker` |
+| Git user.name not configured | `git config --global user.name "Your Name"` |
+| Git user.email not configured | `git config --global user.email "you@example.com"` |
+| socat is not installed | `sudo apt-get install socat` (Debian/Ubuntu) or `brew install socat` (macOS) |
+| Host security prerequisites failed | Security profiles missing - ensure you cloned the full repo |
+| Container security support missing | Docker needs seccomp/AppArmor support - use Docker Desktop or a recent Docker Engine |
+
+**Tip:** Run the prerequisite check alone to see detailed results:
+```bash
+./host/utils/verify-prerequisites.sh
+```
+
 ### Authentication Warnings
 
 If you see:
