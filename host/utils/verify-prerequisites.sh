@@ -119,16 +119,16 @@ if command -v socat &> /dev/null; then
     SOCAT_VERSION=$(socat -V 2>&1 | head -1 | grep -oP 'socat version \K[\d.]+' || echo "installed")
     print_success "socat installed (version $SOCAT_VERSION)"
 else
-    print_error "socat is not installed (required for credential/GPG proxy)"
+    socat_hint="Install socat using your package manager"
     if [ -f /etc/debian_version ]; then
-        echo "         Install: sudo apt-get install socat"
+        socat_hint="Install: sudo apt-get install socat"
     elif [ -f /etc/redhat-release ]; then
-        echo "         Install: sudo yum install socat"
+        socat_hint="Install: sudo yum install socat"
     elif [ "$(uname)" = "Darwin" ]; then
-        echo "         Install: brew install socat"
-    else
-        echo "         Install socat using your package manager"
+        socat_hint="Install: brew install socat"
     fi
+    print_error "socat is not installed (required for credential/GPG proxy)"
+    echo "         $socat_hint"
 fi
 
 # Check GitHub CLI installation (optional)
