@@ -2,6 +2,8 @@
 
 ## Development Workflow
 
+> **📚 Build System Reference:** For a comprehensive overview of the build pipeline, scripts, and artifacts, see [build-architecture.md](build-architecture.md).
+
 ### Prerequisites
 - **Container Runtime**: Docker Desktop (macOS/Windows) or Docker Engine (Linux)
 - **Git** configured with `user.name` and `user.email`

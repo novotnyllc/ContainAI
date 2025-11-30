@@ -2,6 +2,8 @@
 
 This runbook details the CI/CD pipeline that builds, secures, and publishes the ContainAI artifacts. It covers the build graph, security gates, and artifact lifecycle management.
 
+> **📚 See Also:** For a comprehensive reference of all build scripts, artifact flows, and the complete pipeline architecture, see [build-architecture.md](build-architecture.md).
+
 ## Audience & Scope
 
 - **DevOps Engineers**: Focus on the [CI/CD Pipeline](#cicd-pipeline-devops-view) for caching, tagging, and promotion strategies.

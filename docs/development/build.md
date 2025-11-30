@@ -4,6 +4,8 @@ This guide is for developers who want to build and publish the agent container i
 
 For local development instructions, see [local-build-and-test.md](local-build-and-test.md).
 
+> **📚 See Also:** For a comprehensive overview of the entire build system including CI pipelines, artifact flows, and script dependencies, see [build-architecture.md](build-architecture.md).
+
 ## Prerequisites
 
 - **Container Runtime**: Docker 20.10+ (Desktop or Engine) with BuildKit enabled (default in recent versions)
