@@ -320,7 +320,15 @@ Tests use session IDs (process ID) for complete isolation:
 
 This allows parallel test execution without conflicts.
 
-## Resources
+---
+
+## See Also
+
+- [build-architecture.md](build-architecture.md) — Complete build pipeline and script reference
+- [build.md](build.md) — Container image contents and modification
+- [ghcr-publishing.md](ghcr-publishing.md) — GitHub repository setup and operations
+
+## External Resources
 
 - [Docker Documentation](https://docs.docker.com/)
 - [PowerShell Documentation](https://docs.microsoft.com/powershell/)

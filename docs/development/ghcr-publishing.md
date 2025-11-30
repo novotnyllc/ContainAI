@@ -1,245 +1,280 @@
-# GHCR Publishing, Metadata, and Retention Runbook
+# GHCR Operations Runbook
 
-This runbook details the CI/CD pipeline that builds, secures, and publishes the ContainAI artifacts. It covers the build graph, security gates, and artifact lifecycle management.
+This runbook covers GitHub repository setup, manual operations, and disaster recovery for the ContainAI CI/CD pipeline. For the complete build pipeline architecture, see [build-architecture.md](build-architecture.md).
 
-> **📚 See Also:** For a comprehensive reference of all build scripts, artifact flows, and the complete pipeline architecture, see [build-architecture.md](build-architecture.md).
+## Audience
 
-## Audience & Scope
+| Role | Focus Areas |
+|------|-------------|
+| **Repository admins** | [GitHub Repository Setup](#github-repository-setup), [Package Visibility](#package-visibility) |
+| **Release managers** | [Manual Release](#manual-release), [Emergency Rollback](#emergency-rollback) |
+| **Security auditors** | [Supply Chain Security](#supply-chain-security), [Verification](#artifact-verification) |
 
-- **DevOps Engineers**: Focus on the [CI/CD Pipeline](#cicd-pipeline-devops-view) for caching, tagging, and promotion strategies.
-- **Security Auditors**: Focus on the [Supply Chain Security](#supply-chain-security-auditor-view) section for SBOMs, attestation, and provenance.
-- **Developers/Consumers**: Focus on the [Verification Flow](#verification-flow-consumer-view) to validate artifact integrity.
-
-## CI Build & Security Gates
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant GitHubActions as GitHub Actions
-    participant Buildx as Docker Buildx
-    participant Trivy
-    participant Attestor as Build Provenance
-    participant GHCR
-
-    GitHubActions->>Buildx: Build base image (linux/amd64, arm64)
-    Buildx-->>GitHubActions: Digest + metadata
-    GitHubActions->>Trivy: Scan image (secret scanner HIGH/CRITICAL)
-    Trivy-->>GitHubActions: Pass/fail
-    GitHubActions->>Buildx: Build specialized images referencing base digest
-    GitHubActions->>Attestor: Generate SLSA provenance (non-PR only)
-    Attestor-->>GitHubActions: Signed statement
-    GitHubActions->>GHCR: Push tags when not a pull request
-    GHCR-->>Users: Latest published images for launcher syncs
-```
-
-**Highlights**
-- Pull requests build and scan images but skip pushes/attestations.
-- Build matrices ensure the Squid proxy and each agent image share the same vetted base digest.
-- The `scripts/build` helpers mirror this workflow locally so developers can test the same steps before opening a PR.
+---
 
 ## GitHub Repository Setup
 
-To enable this pipeline, the following configuration is required on the GitHub repository.
+### Required Permissions
 
-### 1. Actions Permissions
-The workflow requires specific permissions to publish packages and generate attestations. These are defined in the workflow file but require the repository to allow **GitHub Actions to create and approve pull requests** (if applicable) and **Read and write permissions** for the `GITHUB_TOKEN`.
+The CI workflow requires these repository settings:
 
-**Settings > Actions > General > Workflow permissions:**
-- Select **Read and write permissions**.
-- Check **Allow GitHub Actions to create and approve pull requests**.
+**Settings → Actions → General → Workflow permissions:**
+- ✅ **Read and write permissions** for `GITHUB_TOKEN`
+- ✅ **Allow GitHub Actions to create and approve pull requests** (if applicable)
 
-### 2. Package Settings (GHCR)
-The pipeline automatically attempts to set package visibility to **Public**. However, for the first run or if permissions are restricted:
-1. Go to the user/org profile page.
-2. Click **Packages**.
-3. For each package (`containai`, `containai-base`, etc.):
-   - Click **Package Settings**.
-   - Scroll to **Danger Zone**.
-   - Click **Change visibility** -> **Public**.
+### Secrets
 
-### 3. Secrets
-The pipeline relies almost exclusively on the automatic `GITHUB_TOKEN`. No long-lived secrets are required for standard operations.
+The pipeline uses only automatic tokens—no long-lived secrets required:
 
 | Secret | Source | Purpose |
 |--------|--------|---------|
-| `GITHUB_TOKEN` | Automatic | Authenticating with GHCR, pushing images, managing package versions, and setting visibility. |
-| `id-token` | Automatic | OIDC token generation for SLSA provenance and Sigstore signing. |
+| `GITHUB_TOKEN` | Automatic | GHCR auth, package management, visibility |
+| `id-token` | Automatic (OIDC) | SLSA provenance, Sigstore signing |
 
-### 4. OIDC Trust
-The `id-token: write` permission is mandatory in the workflow YAML to enable OIDC. This allows the workflow to request a short-lived token from GitHub's OIDC provider, which is then used to sign the artifacts without managing private keys.
+### OIDC Configuration
 
-## CI/CD Pipeline (DevOps View)
+The `id-token: write` permission in the workflow YAML enables OIDC. This allows keyless signing via GitHub's identity provider—no private keys to manage.
 
-The build process is a directed acyclic graph (DAG) optimized for caching and security. It ensures that all variants share the exact same base layer and that no artifacts are published until all tests pass.
+---
 
-```mermaid
-flowchart TD
-    subgraph Inputs ["Inputs"]
-        Src[Source Code]
-        BaseImg[Ubuntu Base]
-    end
+## Package Visibility
 
-    subgraph Build_Stage ["Build Stage"]
-        BuildBase[Build Base Image]
-        BuildRuntime[Build Runtime]
-        BuildVariants[Build Variants]
-    end
+The pipeline automatically sets package visibility to **Public** after publishing. If this fails (first run or permission issues):
 
-    subgraph Security_Stage ["Security Stage"]
-        GenSBOM["Generate SBOM<br/>(Syft)"]
-        ScanVuln["Scan Vulnerabilities<br/>(Trivy)"]
-        ScanSecret["Scan Secrets<br/>(Trivy)"]
-    end
+1. Go to your GitHub profile/org → **Packages**
+2. For each package (`containai`, `containai-base`, `containai-payload`, etc.):
+   - Click **Package Settings**
+   - Scroll to **Danger Zone**
+   - Click **Change visibility** → **Public**
 
-    subgraph Publish_Stage ["Publish Stage"]
-        PushImmutable["Push Immutable Tags<br/>sha-xyz"]
-        Attest["Generate Attestation<br/>(GitHub OIDC)"]
-        Sign["Sign Artifacts<br/>(Sigstore)"]
-    end
+### Package List
 
-    subgraph Promote_Stage ["Promotion Stage"]
-        TagChannel["Tag Channel<br/>dev/prod"]
-        UpdateMeta[Update Metadata]
-    end
+| Package | Type | Description |
+|---------|------|-------------|
+| `containai-base` | Container | Base image with runtimes |
+| `containai` | Container | All-agents image |
+| `containai-copilot` | Container | Copilot wrapper |
+| `containai-codex` | Container | Codex wrapper |
+| `containai-claude` | Container | Claude wrapper |
+| `containai-proxy` | Container | Squid proxy sidecar |
+| `containai-log-forwarder` | Container | Log sidecar |
+| `containai-payload` | OCI Artifact | Installation bundle |
+| `containai-installer` | OCI Artifact | Standalone installer script |
+| `containai-metadata` | OCI Artifact | Channel→version mapping |
 
-    Src --> BuildBase
-    BaseImg --> BuildBase
-    BuildBase --> BuildRuntime
-    BuildRuntime --> BuildVariants
+---
 
-    BuildVariants --> GenSBOM
-    GenSBOM --> ScanVuln
-    ScanVuln --> ScanSecret
-    
-    ScanSecret --> PushImmutable
-    PushImmutable --> Attest
-    Attest --> Sign
-    Sign --> TagChannel
-    TagChannel --> UpdateMeta
-```
+## Manual Release
 
-## Supply Chain Security (Auditor View)
+### Promote to Production
 
-We employ a "secure by default" approach, ensuring every artifact is traceable to its source.
-
-```mermaid
-flowchart LR
-    subgraph CI_Environment ["Trusted CI Environment"]
-        Builder["Builder ID<br/>GitHub Actions"]
-        Source[Source Commit]
-        
-        subgraph Artifact_Generation ["Artifact Generation"]
-            Image[Container Image]
-            SBOM[CycloneDX SBOM]
-        end
-        
-        subgraph Attestation_Process ["Attestation Process"]
-            Predicate[SLSA Predicate]
-            OIDC[OIDC Token]
-        end
-    end
-
-    subgraph Registry ["GHCR"]
-        ImgManifest[Image Manifest]
-        AttManifest[Attestation Manifest]
-        SBOMBlob[SBOM Blob]
-    end
-
-    Builder -->|Builds| Image
-    Builder -->|Generates| SBOM
-    
-    Source -->|Referenced in| Predicate
-    Image -->|Referenced in| Predicate
-    SBOM -->|Referenced in| Predicate
-    
-    Predicate -->|Signed with| OIDC
-    OIDC -->|Creates| AttManifest
-    
-    Image -->|Pushed to| ImgManifest
-    SBOM -->|Pushed to| SBOMBlob
-    AttManifest -->|Attached to| ImgManifest
-```
-
-### Key Security Controls
-1.  **Immutable Tags**: The pipeline avoids overwriting tags during the build phase. We push unique `sha-<commit>` tags first. Only after all checks pass do we apply mutable tags like `dev`.
-2.  **SLSA Provenance**: Every image and artifact is signed using GitHub's OIDC identity, linking the artifact back to the specific workflow run and commit.
-3.  **Secret Scanning**: Trivy runs against the *built image* before it is promoted. If a secret is found, the pipeline fails, and the `dev` tag remains unchanged.
-
-## Verification Flow (Consumer View)
-
-Consumers can verify the integrity and provenance of the artifacts before use.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant GHCR
-    participant Policy as Policy Engine
-
-    User->>GHCR: Pull Image (digest)
-    GHCR-->>User: Image Blob
-    
-    User->>GHCR: Fetch Attestation
-    GHCR-->>User: DSSE Envelope (Signed)
-    
-    User->>Policy: Verify Signature (sigstore)
-    Policy-->>User: Valid/Invalid
-    
-    User->>Policy: Verify Predicate (SLSA)
-    Note right of Policy: Check Builder ID<br/>Check Source Repo<br/>Check Branch
-    Policy-->>User: Compliant/Non-Compliant
-    
-    User->>GHCR: Fetch SBOM
-    GHCR-->>User: CycloneDX JSON
-    User->>User: Audit Dependencies
-```
-
-## Artifact Reference
-
-### Container Images
-- `ghcr.io/<owner>/containai-base`
-- `ghcr.io/<owner>/containai` (The core runtime)
-- `ghcr.io/<owner>/containai-copilot`
-- `ghcr.io/<owner>/containai-codex`
-- `ghcr.io/<owner>/containai-claude`
-- `ghcr.io/<owner>/containai-proxy`
-
-### OCI Artifacts
-- **Payload**: `ghcr.io/<owner>/containai-payload`
-    - Contains the installer scripts and host tools.
-    - Artifact Type: `application/vnd.containai.payload.v1`
-    - Layer Type: `application/vnd.containai.payload.layer.v1+gzip`
-- **Installer**: `ghcr.io/<owner>/containai-installer`
-    - Contains the standalone installer script.
-    - Artifact Type: `application/vnd.containai.installer.v1`
-    - Layer Type: `application/vnd.containai.installer.v1+sh`
-- **Metadata**: `ghcr.io/<owner>/containai-metadata`
-    - Contains the JSON mapping of channels to versions.
-    - Artifact Type: `application/vnd.containai.metadata.v1+json`
-    - Layer Type: `application/json`
-
-## Operations & Recovery
-
-### Manual Release
 To manually promote a specific commit to `prod`:
-1. Go to the "Build Runtime Images" workflow in GitHub Actions.
-2. Click "Run workflow".
-3. Select the branch/tag.
-4. Set `channel` to `prod`.
-5. Set `version` to `v1.2.3` (optional, for semantic tagging).
 
-### Retention Policy
-We use `actions/delete-package-versions` to keep the registry clean:
-- **Dev/Nightly**: Last 10-15 versions kept.
-- **Prod**: Longer retention (configurable).
-- **Untagged**: Aggressively pruned (failed builds).
+1. Go to **Actions** → **Build and Publish Images**
+2. Click **Run workflow**
+3. Configure:
+   - **Branch**: `main` (or the branch with your commit)
+   - **Channel**: `prod`
+   - **Version**: `v1.2.3` (semantic version tag)
+4. Click **Run workflow**
 
-### Emergency Rollback
-Since `prod` is just a moving tag:
-1. Identify the previous working digest.
-2. Use `crane` or `docker buildx imagetools` to re-tag that digest as `prod`.
-   ```bash
-   docker buildx imagetools create \
-     ghcr.io/owner/containai:old-digest \
-     --tag ghcr.io/owner/containai:prod
-   ```
-   *(Repeat for all variants)*
+The workflow will:
+- Build and scan all images
+- Generate attestations
+- Apply `prod` and `v1.2.3` tags
+- Update `containai-metadata:prod`
+
+### Force Nightly Build
+
+To trigger a nightly build outside the schedule:
+
+1. Go to **Actions** → **Build and Publish Images**
+2. Click **Run workflow**
+3. Configure:
+   - **Channel**: `nightly`
+   - **Version**: (leave empty for auto-generated)
+4. Click **Run workflow**
+
+---
+
+## Emergency Rollback
+
+Since `prod` is a moving tag, rollback is fast:
+
+### 1. Find the Previous Good Digest
+
+```bash
+# List recent digests
+docker buildx imagetools inspect ghcr.io/OWNER/containai:prod
+
+# Or check GitHub Packages UI for the previous sha-* tag
+```
+
+### 2. Re-tag with imagetools
+
+```bash
+# Replace OWNER and GOOD_DIGEST
+docker buildx imagetools create \
+    ghcr.io/OWNER/containai@sha256:GOOD_DIGEST \
+    --tag ghcr.io/OWNER/containai:prod
+
+# Repeat for all affected images
+for img in containai-base containai-copilot containai-codex containai-claude containai-proxy containai-log-forwarder; do
+    docker buildx imagetools create \
+        ghcr.io/OWNER/${img}@sha256:GOOD_DIGEST_FOR_IMG \
+        --tag ghcr.io/OWNER/${img}:prod
+done
+```
+
+### 3. Update Metadata (if needed)
+
+If the payload also needs rollback:
+```bash
+# Re-tag payload artifact
+oras tag ghcr.io/OWNER/containai-payload:GOOD_VERSION prod
+
+# Re-tag metadata
+oras tag ghcr.io/OWNER/containai-metadata:GOOD_CHANNEL prod
+```
+
+---
+
+## Retention Policy
+
+The `cleanup-ghcr` job applies these retention rules:
+
+| Category | Retention | Notes |
+|----------|-----------|-------|
+| **Within 180 days** | Keep all | Recent builds preserved |
+| **Prod-tagged** | Keep indefinitely | Latest prod always kept even if old |
+| **Dev/Nightly untagged** | Keep newest 10-15 | Per-image configurable |
+| **Failed builds** | Prune aggressively | Untagged manifests removed |
+
+### Manual Cleanup
+
+If the automated cleanup misses something:
+
+```bash
+# List package versions (requires gh CLI)
+gh api /user/packages/container/containai/versions | jq '.[] | {id, tags: .metadata.container.tags}'
+
+# Delete a specific version
+gh api --method DELETE /user/packages/container/containai/versions/VERSION_ID
+```
+
+---
+
+## Supply Chain Security
+
+### Security Controls
+
+| Control | Implementation |
+|---------|----------------|
+| **Immutable tags** | `sha-<commit>` pushed first; channel tags applied only after all checks pass |
+| **SLSA provenance** | Every image signed via GitHub OIDC; linked to workflow run + commit |
+| **Secret scanning** | Trivy scans images before promotion; failures block `dev` tag update |
+| **Attestation** | DSSE envelopes attached to images and payload artifacts |
+
+### Artifact Verification
+
+Consumers can verify artifacts using the attestation:
+
+```bash
+# Verify image attestation
+gh attestation verify \
+    ghcr.io/OWNER/containai:prod \
+    --owner OWNER
+
+# Verify payload attestation
+gh attestation verify \
+    ghcr.io/OWNER/containai-payload:prod \
+    --owner OWNER
+```
+
+### SBOM Access
+
+```bash
+# Download SBOM from payload artifact
+oras pull ghcr.io/OWNER/containai-payload:VERSION \
+    --media-type application/vnd.cyclonedx+json \
+    --output sbom.json
+
+# Or extract from pulled payload tarball
+tar -xzf payload.tar.gz payload.sbom.json
+```
+
+---
+
+## Troubleshooting
+
+### Workflow Fails at Push
+
+**Symptom:** Build succeeds but push fails with 403/401
+
+**Check:**
+1. Repository permissions (Settings → Actions → General)
+2. Package exists and is linked to repository
+3. `GITHUB_TOKEN` has `packages: write` in workflow
+
+### Attestation Fails
+
+**Symptom:** `attest-build-provenance` step fails
+
+**Check:**
+1. `id-token: write` permission in job
+2. Repository is public (required for OIDC)
+3. Fulcio/Rekor services available (sigstore status page)
+
+### Package Not Public
+
+**Symptom:** Users get 401 when pulling
+
+**Fix:**
+1. Go to package settings
+2. Change visibility to Public
+3. Or ensure workflow ran the `cleanup-ghcr` job (it sets visibility)
+
+### Missing Channel Tag
+
+**Symptom:** `prod` tag not applied
+
+**Check:**
+1. Did all prior jobs succeed? (attestation, scan, etc.)
+2. Was `push` output set to `true`? (PR builds don't push)
+3. Check `apply-moving-tags.sh` step logs
+
+---
+
+## OCI Artifact Reference
+
+### Media Types
+
+| Artifact | Artifact Type | Layer Type |
+|----------|---------------|------------|
+| Payload | `application/vnd.containai.payload.v1` | `application/vnd.containai.payload.layer.v1+gzip` |
+| Installer | `application/vnd.containai.installer.v1` | `application/vnd.containai.installer.v1+sh` |
+| Metadata | `application/vnd.containai.metadata.v1+json` | `application/json` |
+| SBOM | (bundled in payload) | `application/vnd.cyclonedx+json` |
+| Attestation | (bundled in payload) | `application/vnd.in-toto+json` |
+
+### Pulling Artifacts with ORAS
+
+```bash
+# Pull payload tarball
+oras pull ghcr.io/OWNER/containai-payload:VERSION
+
+# Pull installer script
+oras pull ghcr.io/OWNER/containai-installer:VERSION
+
+# Pull channel metadata
+oras pull ghcr.io/OWNER/containai-metadata:prod
+```
+
+---
+
+## See Also
+
+- [build-architecture.md](build-architecture.md) — Complete pipeline reference with diagrams
+- [build.md](build.md) — Container image contents and modification
+- [contributing.md](contributing.md) — Development workflow
+- [../security/architecture.md](../security/architecture.md) — Security model

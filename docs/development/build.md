@@ -1,401 +1,273 @@
-# Build Guide for Container Authors
+# Container Image Reference
 
-This guide is for developers who want to build and publish the agent container images. CI owns publishing to GHCR; local builds should mirror the same graph (base → containai → variants) and prefer digests over `--load`.
+This document describes the container images that ContainAI builds, their contents, and how to modify them. For the complete build pipeline and script reference, see [build-architecture.md](build-architecture.md).
 
-For local development instructions, see [local-build-and-test.md](local-build-and-test.md).
+## Image Hierarchy
 
-> **📚 See Also:** For a comprehensive overview of the entire build system including CI pipelines, artifact flows, and script dependencies, see [build-architecture.md](build-architecture.md).
+ContainAI uses a layered image architecture where specialized images inherit from a common base:
 
-## Prerequisites
+```
+containai-base (Ubuntu 24.04 + runtimes)
+    └── containai (all-agents entrypoint)
+            ├── containai-copilot
+            ├── containai-codex
+            └── containai-claude
 
-- **Container Runtime**: Docker 20.10+ (Desktop or Engine) with BuildKit enabled (default in recent versions)
-- Git
-- (Optional) GitHub Container Registry access for publishing
-
-## Architecture Overview
-
-The container system uses a **layered architecture**:
-
-```mermaid
-flowchart TB
-    subgraph specialized["Specialized Images (Optional)"]
-        copilot["copilot"]
-        codex["codex"]
-        claude["claude"]
-    end
-    
-    subgraph allagents["All-Agents Image (Main)<br/>containai"]
-        direction TB
-        all_content["• Entrypoint scripts<br/>• MCP config converter<br/>• Multi-agent support"]
-    end
-    
-    subgraph base["Base Image<br/>containai-base"]
-        direction TB
-        base_content["• Ubuntu 24.04<br/>• Node.js 20.x<br/>• Python 3.12<br/>• .NET SDKs 8/9/10<br/>• GitHub CLI<br/>• Playwright deps<br/>• MCP servers<br/>• Non-root user (UID 1000)"]
-    end
-    
-    specialized --> allagents
-    allagents --> base
-    
-    style specialized fill:#e1f5ff,stroke:#0366d6
-    style allagents fill:#fff3cd,stroke:#856404
-    style base fill:#d4edda,stroke:#28a745
+containai-proxy (standalone Squid proxy)
+containai-log-forwarder (standalone log sidecar)
 ```
 
-## Image Details
+**Design rationale:**
+- **Base image** (~3-4 GB) changes rarely; derived images are small deltas
+- **All-agents image** supports any agent; specialized images are convenience wrappers
+- **Sidecars** are independent; they don't inherit from the agent base
 
-### Base Image (Dockerfile.base)
+---
 
-**Key decisions:**
-- Ubuntu 24.04: Latest LTS base
-- UID 1000: Matches first user on most Linux/WSL2 systems
-- Non-root: Security best practice
-- Multi-language: Node.js, Python, .NET for MCP servers and building code
-- Full .NET workloads: Enables building MAUI, Blazor, WASM, mobile apps
+## Base Image (`containai-base`)
 
-**No secrets or authentication:**
-- All auth comes from runtime mounts
-- Image can be published publicly
+**Dockerfile:** `docker/base/Dockerfile`
 
-**Package installations (high level):**
-- System packages: curl, git, build-essential, sudo, zsh, jq, unzip, tmux, gosu, seccomp headers
-- Language runtimes: Node.js 20.x, Python 3.12, .NET SDK 8/9/10, PowerShell
-- Tools: GitHub CLI (gh), Playwright dependencies, MCP servers
-- Python packages: tomli, pipx, uv
+The base image provides a complete development environment with all runtimes pre-installed.
 
-### All-Agents Image (Dockerfile)
+### Contents
 
-**Scripts copied:**
-- `/usr/local/bin/entrypoint.sh` - Startup logic
-- `/usr/local/bin/setup-mcp-configs.sh` - MCP wrapper
-- `/usr/local/bin/convert-toml-to-mcp.py` - TOML parser
+| Category | Components |
+|----------|------------|
+| **OS** | Ubuntu 24.04 LTS |
+| **System** | curl, git, build-essential, sudo, zsh, jq, unzip, tmux, gosu |
+| **Node.js** | v20.x (via NodeSource) |
+| **Python** | 3.12 (system), tomli, pipx, uv |
+| **.NET** | SDKs 8, 9, 10 with MAUI/WASM/mobile workloads |
+| **PowerShell** | Latest stable |
+| **GitHub CLI** | Latest (gh) |
+| **Playwright** | Browser dependencies (not browsers) |
+| **MCP Servers** | Pre-installed npm packages |
+| **User** | `agentuser` (UID 1000, sudo access) |
 
-**Behavior:**
-- Checks for `/workspace/config.toml`
-- Converts TOML to JSON for each agent
-- Loads optional `~/.mcp-secrets.env`
-- Validates git/gh authentication
-- Runs user command
+### Key Design Decisions
 
-### Specialized Images (Dockerfile.*)
+| Decision | Rationale |
+|----------|-----------|
+| Ubuntu 24.04 | Latest LTS with long-term security support |
+| UID 1000 | Matches first user on most Linux/WSL2 systems for volume permissions |
+| Non-root default | Security best practice; sudo available when needed |
+| Full .NET workloads | Enables MAUI, Blazor, WASM, mobile app development |
+| No secrets | All authentication via runtime mounts; image is publicly distributable |
 
-Each adds:
-- Validation script in `/usr/local/bin/validate-<agent>-auth.sh`
-- Checks for `~/.config/<agent>/` mount
-- Warns if missing (doesn't fail)
-- Changes CMD to launch agent directly
+### Modifying the Base Image
 
-## Publishing to Registry (CI-driven)
-
-- CI workflow `.github/workflows/build-runtime-images.yml` builds base → containai → variants, pushes immutable `sha-<commit>` tags, then re-tags `dev`/`nightly`/`prod`/release only after all images succeed. Trivy scans run by digest; use digests rather than `--load` tarballs.
-- Payload + SBOM publish as a public OCI artifact (`containai-payload:<tag>`), attested in CI.
-- Channel metadata publishes as a public OCI artifact (`containai-metadata:<channel>` and `:channels`) for installer resolution.
-- GHCR packages are forced public and pruned (keep recent digests) in the workflow.
-- For local testing, use `docker buildx build --output=type=oci` rather than local pushes, and avoid tagging `latest` in GHCR.
-
-**Note on Release Packaging:**
-Release packaging is split for clarity: `scripts/release/build-payload.sh` assembles `artifacts/publish/<version>/payload` (or a custom `--out` root), and `scripts/release/package-artifacts.sh` tars that directory. `scripts/release/package.sh` is a thin wrapper that runs both.
-
-Both build and packaging read channel + image digest metadata from `artifacts/publish/profile.env` (generated by the workflow step `scripts/release/write-profile-env.sh`, or a supplied `--profile-env` path). The scripts require that file to exist and to contain `PROFILE` and all `IMAGE_DIGEST_*` entries; falling back to `host/profile.env` only for compatibility.
-
-## Script Files
-
-### entrypoint.sh
-
-**Location:** `docker/runtime/entrypoint.sh` → `/usr/local/bin/entrypoint.sh`
-
-**Purpose:**
-- Display repository info
-- Configure git credential helper (gh CLI)
-- Run MCP config conversion
-- Load MCP secrets
-- Validate authentication
-- Execute user command
-
-**Called by:** Docker ENTRYPOINT
-
-### setup-mcp-configs.sh
-
-**Location:** `docker/runtime/setup-mcp-configs.sh` → `/usr/local/bin/setup-mcp-configs.sh`
-
-**Purpose:**
-- Check for `/workspace/config.toml`
-- Call Python converter script
-- Exit cleanly if no config found
-
-**Called by:** `entrypoint.sh`
-
-### convert-toml-to-mcp.py
-
-**Location:** `host/utils/convert-toml-to-mcp.py` → `/usr/local/bin/convert-toml-to-mcp.py`
-
-**Purpose:**
-- Parse TOML config
-- Extract `[mcp_servers]` section
-- Generate JSON for each agent:
-  - `~/.config/github-copilot/mcp/config.json`
-  - `~/.config/codex/mcp/config.json`
-  - `~/.config/claude/mcp/config.json`
-
-**Called by:** `setup-mcp-configs.sh`
-
-**Dependencies:** `tomli` package (installed in base image)
-
-## Image Size Optimization
-
-Current approximate sizes:
-- Base: ~3-4 GB (Ubuntu 24.04 ~80MB, Node.js ~200MB, .NET SDKs + workloads ~2GB, Playwright ~500MB, PowerShell ~100MB, build tools ~500MB)
-- All-agents: +50 MB
-- Specialized: +10 MB each
-
-**Optimization tips:**
-
-1. **Multi-stage builds** (future improvement):
-   ```dockerfile
-   FROM base as builder
-   RUN npm install -g large-package
-   
-   FROM base
-   COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
-   ```
-
-2. **Combine RUN commands:**
-   ```dockerfile
-   RUN apt-get update && \
-       apt-get install -y package1 package2 && \
-       rm -rf /var/lib/apt/lists/*
-   ```
-
-3. **Remove build dependencies:**
-   ```dockerfile
-   RUN apt-get install -y build-essential && \
-       # build something && \
-       apt-get remove -y build-essential && \
-       apt-get autoremove -y
-   ```
-
-## Security Considerations
-
-### Image Security
-
-✅ **Implemented:**
-- Non-root user (agentuser)
-- No secrets in images
-- Security opt: `no-new-privileges:true`
-- Read-only mounts for auth
-- Seccomp profile: `host/profiles/seccomp-containai-agent.json` blocks ptrace/clone3/mount/setns
-- AppArmor profile: `host/profiles/apparmor-containai-agent.profile` (rendered as `containai-agent-<channel>`) denies `/proc` and `/sys` writes
-- Image secret scanning with Trivy (`--scanners secret`) on base/all-agents/specialized variants
-
-⚠️ **Future improvements:**
-- Use distroless images for smaller attack surface
-- Implement resource limits in Dockerfiles
-
-#### Secret Scanning Workflow
-
-The CI pipelines automatically invoke Trivy after every successful `docker build`. Install the CLI ahead of time (or set `CONTAINAI_TRIVY_BIN` to a custom path) so the scan can run locally. The manual commands are documented below if you need to re-run a scan or double-check a specific tag:
-
-```bash
-# Base image
-trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai-dev-base:devlocal
-
-# All-agents wrapper
-trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL containai-dev:devlocal
-
-# Specialized images
-for image in containai-dev-copilot containai-dev-codex containai-dev-claude; do
-  trivy image --scanners secret --exit-code 1 --severity HIGH,CRITICAL "${image}:devlocal"
-done
-```
-
-`--exit-code 1` enforces a failing build when potential secrets are detected. Run the scan before tagging/publishing so flagged layers can be rebuilt without leaking artifacts.
-
-### Build Security
-
-✅ **Best practices:**
-- Pin package versions for reproducibility
-- Verify GPG signatures (GitHub CLI)
-- Use official package repositories
-- Clear apt cache after installs
-
-### Publishing Security
-
-⚠️ **Before publishing publicly:**
-- Review all Dockerfiles for hardcoded secrets
-- Scan images for vulnerabilities
-- Test images thoroughly
-- Use semantic versioning (not just `latest`)
-
-### Host Security Profiles
-
-Launchers automatically pass both security profiles:
-
-- **Seccomp:** No additional setup—Docker reads `host/profiles/seccomp-containai-agent.json` directly.
-- **AppArmor:** Use the helpers to render/load channel-suffixed profiles on Linux hosts:
-
-```bash
-sudo ./scripts/setup-local-dev.sh    # renders containai-*-<channel> and loads them
-sudo ./host/utils/check-health.sh    # verifies AppArmor/seccomp availability
-```
-
-Environment overrides:
-None. The built-in profiles under `host/profiles/` are mandatory; rerun `scripts/setup-local-dev.sh` to reinstall them if they are missing.
-
-## Maintenance
-
-### Updating Dependencies
-
-**Node.js version:**
+**Add a system package:**
 ```dockerfile
-# In Dockerfile.base
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+RUN apt-get update && \
+    apt-get install -y your-package && \
+    rm -rf /var/lib/apt/lists/*
 ```
 
-**Python version:**
+**Update Node.js version:**
 ```dockerfile
-# In Dockerfile.base
-# Python comes from Ubuntu 24.04 (3.12)
-# To use a different version, add deadsnakes PPA:
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs
+```
+
+**Add Python version (via deadsnakes):**
+```dockerfile
 RUN add-apt-repository ppa:deadsnakes/ppa && \
     apt-get update && \
     apt-get install -y python3.13
 ```
 
-**MCP servers:**
+**Add MCP server:**
 ```dockerfile
-# In Dockerfile.base
-RUN npm install -g @modelcontextprotocol/server-sequential-thinking@latest
+RUN npm install -g @modelcontextprotocol/server-your-server@latest
 ```
 
-### Monitoring Image Health
+---
 
-```bash
-# Check image details
-docker images containai-dev-base:devlocal
+## All-Agents Image (`containai`)
 
-# Inspect layers
-docker history containai-dev-base:devlocal
+**Dockerfile:** `docker/agents/all/Dockerfile`
 
-# Check for vulnerabilities (if tool installed)
-trivy image containai-dev-base:devlocal
+Adds the entrypoint scripts that configure MCP and validate authentication.
+
+### Scripts Installed
+
+| Script | Location | Purpose |
+|--------|----------|---------|
+| `entrypoint.sh` | `/usr/local/bin/` | Main startup: git config, MCP setup, auth validation |
+| `setup-mcp-configs.sh` | `/usr/local/bin/` | Detects and processes `config.toml` |
+| `convert-toml-to-mcp.py` | `/usr/local/bin/` | Converts TOML to agent-specific JSON configs |
+
+### Startup Sequence
+
+```
+ENTRYPOINT entrypoint.sh
+    ├── Display repository info
+    ├── Configure git credential helper (gh CLI)
+    ├── Run setup-mcp-configs.sh
+    │       └── convert-toml-to-mcp.py (if config.toml exists)
+    ├── Load ~/.mcp-secrets.env (if exists)
+    ├── Validate authentication
+    └── Execute user command (CMD)
 ```
 
-## Troubleshooting
+### MCP Configuration
 
-### Build fails on apt-get
+When `/workspace/config.toml` exists, the converter generates:
+- `~/.config/github-copilot/mcp/config.json`
+- `~/.config/codex/mcp/config.json`  
+- `~/.config/claude/mcp/config.json`
 
-**Issue:** Package not found or network error
+---
 
-**Solution:**
-```bash
-# Update package lists
-docker build --no-cache -f Dockerfile.base -t containai-dev-base:devlocal .
-```
+## Specialized Agent Images
 
-### Python package installation fails
+**Dockerfiles:** `docker/agents/{copilot,codex,claude}/Dockerfile`
 
-**Issue:** pip install fails
+Each specialized image adds:
+- Agent-specific validation script (`/usr/local/bin/validate-<agent>-auth.sh`)
+- Checks for `~/.config/<agent>/` mount
+- Sets CMD to launch the agent directly
 
-**Solution:**
-```bash
-# Upgrade pip in Dockerfile
-RUN python3 -m pip install --upgrade pip
-```
+These are thin wrappers (~10 MB each) for convenience. The all-agents image can run any agent.
 
-### Permission errors during build
+---
 
-**Issue:** Files owned by root
+## Sidecar Images
 
-**Solution:**
+### Proxy (`containai-proxy`)
+
+**Dockerfile:** `docker/proxy/Dockerfile`
+
+Squid-based HTTP proxy for network isolation. Supports two modes:
+- **squid**: Full internet access through proxy
+- **restricted**: Allowlist-only (*.github.com, *.nuget.org, etc.)
+
+### Log Forwarder (`containai-log-forwarder`)
+
+**Dockerfile:** `docker/log-forwarder/Dockerfile`
+
+Captures and forwards container logs. Runs as a sidecar alongside agent containers.
+
+---
+
+## Image Sizes
+
+| Image | Approximate Size | Notes |
+|-------|------------------|-------|
+| `containai-base` | ~3-4 GB | Ubuntu, Node.js, .NET SDKs, Playwright deps |
+| `containai` | +50 MB | Entrypoint scripts |
+| `containai-{agent}` | +10 MB each | Validation wrapper |
+| `containai-proxy` | ~50 MB | Alpine + Squid |
+| `containai-log-forwarder` | ~20 MB | Minimal forwarder |
+
+### Optimization Tips
+
+**Combine RUN commands** to reduce layers:
 ```dockerfile
-# Use COPY with --chown
+RUN apt-get update && \
+    apt-get install -y package1 package2 && \
+    rm -rf /var/lib/apt/lists/*
+```
+
+**Remove build dependencies** after use:
+```dockerfile
+RUN apt-get install -y build-essential && \
+    # compile something... && \
+    apt-get remove -y build-essential && \
+    apt-get autoremove -y
+```
+
+**Use multi-stage builds** for compiled artifacts:
+```dockerfile
+FROM base AS builder
+RUN npm install -g large-package
+
+FROM base
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+```
+
+---
+
+## Security
+
+### Build-Time Security
+
+| Control | Implementation |
+|---------|----------------|
+| No hardcoded secrets | All auth via runtime mounts |
+| GPG verification | GitHub CLI package signature checked |
+| Official repos only | NodeSource, Microsoft, Ubuntu |
+| Cache cleanup | `rm -rf /var/lib/apt/lists/*` after installs |
+| Secret scanning | Trivy scans every image before publish |
+
+### Runtime Security
+
+| Control | Implementation |
+|---------|----------------|
+| Non-root user | `agentuser` by default |
+| `no-new-privileges` | Docker security opt |
+| Seccomp profile | Blocks ptrace, clone3, mount, setns |
+| AppArmor profile | Denies /proc and /sys writes |
+| Read-only auth mounts | Credentials mounted read-only |
+
+See [../security/architecture.md](../security/architecture.md) for the complete security model.
+
+---
+
+## Local Development
+
+### Building Images
+
+```bash
+# Build all dev images
+./scripts/build/build-dev.sh
+
+# Build specific agents
+./scripts/build/build-dev.sh --agents copilot,codex
+
+# Manual single-image build
+docker build -f docker/base/Dockerfile -t containai-dev-base:devlocal .
+```
+
+### Running Secret Scans
+
+```bash
+# Install Trivy (or set CONTAINAI_TRIVY_BIN)
+# Then scan before publishing:
+
+trivy image --scanners secret --exit-code 1 \
+    --severity HIGH,CRITICAL containai-dev-base:devlocal
+
+# Scan all images
+for img in containai-dev-base containai-dev containai-dev-copilot; do
+    trivy image --scanners secret --exit-code 1 \
+        --severity HIGH,CRITICAL "${img}:devlocal"
+done
+```
+
+### Debugging Build Issues
+
+**Package not found:**
+```bash
+docker build --no-cache -f docker/base/Dockerfile -t containai-dev-base:devlocal .
+```
+
+**Permission errors:**
+```dockerfile
 COPY --chown=agentuser:agentuser script.sh /usr/local/bin/
 ```
 
-### Script not executable
-
-**Issue:** Permission denied
-
-**Solution:**
+**Script not executable:**
 ```dockerfile
 RUN chmod +x /usr/local/bin/script.sh
 ```
 
-## CI/CD Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Build and Push Images
-
-on:
-  push:
-    branches: [main]
-    tags: ['v*']
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Build and push base
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          # We push immutable tags (sha) first, then promote to channel tags (dev/prod)
-          # We avoid 'latest' to ensure launchers always use pinned versions
-          tags: |
-            ghcr.io/${{ github.repository }}-base:sha-${{ github.sha }}
-            ghcr.io/${{ github.repository }}-base:dev
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-base:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-base:buildcache,mode=max
-      
-      - name: Build and push all-agents
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          # We push immutable tags (sha) first, then promote to channel tags (dev/prod)
-          # We avoid 'latest' to ensure launchers always use pinned versions
-          tags: |
-            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
-            ghcr.io/${{ github.repository }}:dev
-          build-args: BASE_IMAGE=ghcr.io/${{ github.repository }}-base:latest
-```
-
-## FAQ
-
-**Q: Why separate base and derived images?**  
-A: Base image is large (~4GB) and changes rarely. Derived images are small and change frequently during development.
-
-**Q: Can I use a different base image?**  
-A: Yes, but ensure it has all required packages. Ubuntu 24.04 LTS is recommended for latest tooling and long-term support.
-
-**Q: Why UID 1000?**  
-A: Matches the first user on most Linux/WSL2 systems, preventing permission issues with mounted volumes.
-
-**Q: Do I need all specialized images?**  
-A: No. The `containai:local` all-agents image can run any agent. Specialized images are convenience wrappers.
-
-**Q: Can I add more MCP servers to the base image?**  
-A: Yes, but consider if they should be pre-installed (bloats image) or installed at runtime (slower startup).
-
 ---
 
-**Next Steps:**
-- See [../USAGE.md](../../USAGE.md) for end-user guide
-- See [architecture.md](architecture.md) for system design
+## See Also
+
+- [build-architecture.md](build-architecture.md) — Complete build pipeline and script reference
+- [ghcr-publishing.md](ghcr-publishing.md) — GitHub repository setup and operations
+- [contributing.md](contributing.md) — Development workflow and testing
+- [../security/architecture.md](../security/architecture.md) — Security model

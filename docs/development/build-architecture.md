@@ -763,7 +763,7 @@ openssl x509 -in cert.pem -text -noout | grep -A1 "1.3.6.1.4.1.57264"
 
 ## See Also
 
-- [build.md](build.md) — Container image build guide
-- [ghcr-publishing.md](ghcr-publishing.md) — GHCR publishing details
-- [contributing.md](contributing.md) — Development workflow
+- [build.md](build.md) — Container image contents and modification
+- [ghcr-publishing.md](ghcr-publishing.md) — GitHub repository setup and operations
+- [contributing.md](contributing.md) — Development workflow and testing
 - [../security/architecture.md](../security/architecture.md) — Security model
