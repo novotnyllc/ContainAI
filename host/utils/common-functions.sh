@@ -64,38 +64,6 @@ _format_apparmor_profile_name() {
     printf '%s-%s' "$base" "$channel"
 }
 
-_render_channel_apparmor_profile() {
-    local profile_name="$1"
-    local base_name="$2"
-    local source_file="$3"
-
-    if [ -z "$profile_name" ] || [ -z "$base_name" ] || [ -z "$source_file" ] || [ ! -f "$source_file" ]; then
-        return 1
-    fi
-
-    local cache_dir
-    cache_dir="${CONTAINAI_CACHE_DIR%/}/apparmor"
-    mkdir -p "$cache_dir"
-    local rendered_file="$cache_dir/${profile_name}.profile"
-
-    python3 - <<'PY'
-import pathlib, re, sys
-
-profile_name, base_name, source_path, rendered_path = sys.argv[1:]
-text = pathlib.Path(source_path).read_text()
-pattern = re.compile(r"^(\s*profile\s+)" + re.escape(base_name) + r"(\b)", re.MULTILINE)
-if not pattern.search(text):
-    sys.exit(1)
-text = pattern.sub(r"\1" + profile_name + r"\2", text, count=1)
-pathlib.Path(rendered_path).write_text(text)
-PY
-    if [ -f "$rendered_file" ]; then
-        echo "$rendered_file"
-        return 0
-    fi
-    return 1
-}
-
 _sha256_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum | awk '{print $1}'
@@ -860,18 +828,21 @@ resolve_seccomp_profile_path() {
 # Args:
 #   $1: containai_root - The ContainAI installation directory
 #   $2: base_name - Base profile name (e.g., "containai-agent")
-#   $3: filename - Profile filename
+#   $3: filename - Profile filename (ignored, kept for backward compatibility)
 #   $4: label - Human-readable label for messages
 _resolve_channel_apparmor_profile() {
     local containai_root="$1"
     local base_name="$2"
-    local filename="$3"
+    local filename="$3"  # Ignored - we use channel-specific filename
     local label="$4"
 
     local channel
     channel=$(_resolve_apparmor_channel)
     local profile_name
     profile_name=$(_format_apparmor_profile_name "$base_name" "$channel") || return 1
+    
+    # Pre-generated profile filename: apparmor-containai-agent-dev.profile
+    local channel_filename="apparmor-${base_name}-${channel}.profile"
 
     if ! is_apparmor_supported; then
         return 1
@@ -882,9 +853,9 @@ _resolve_channel_apparmor_profile() {
         return 0
     fi
 
-    # Use resolve_security_asset_path for consistent profile resolution with ownership checks
+    # Use resolve_security_asset_path with channel-specific filename
     local profile_file
-    profile_file=$(resolve_security_asset_path "$containai_root" "$filename" "$label" 2>/dev/null) || {
+    profile_file=$(resolve_security_asset_path "$containai_root" "$channel_filename" "$label" 2>/dev/null) || {
         echo "⚠️  ${label} file not found. Run scripts/setup-local-dev.sh to install security profiles." >&2
         return 1
     }
@@ -899,18 +870,13 @@ _resolve_channel_apparmor_profile() {
         return 1
     fi
 
-    local rendered_profile
-    if ! rendered_profile=$(_render_channel_apparmor_profile "$profile_name" "$base_name" "$profile_file"); then
-        echo "❌ Unable to render ${label} for channel '$channel'" >&2
-        return 1
-    fi
-
-    if apparmor_parser -r -T -W "$rendered_profile" >/dev/null 2>&1 && apparmor_profile_loaded "$profile_name"; then
+    # Load pre-generated profile directly (no rendering needed)
+    if apparmor_parser -r -T -W "$profile_file" >/dev/null 2>&1 && apparmor_profile_loaded "$profile_name"; then
         echo "$profile_name"
         return 0
     fi
 
-    echo "⚠️  AppArmor profile '$profile_name' is not loaded. Run: sudo apparmor_parser -r '$rendered_profile'" >&2
+    echo "⚠️  AppArmor profile '$profile_name' is not loaded. Run: sudo apparmor_parser -r '$profile_file'" >&2
     return 1
 }
 
@@ -960,8 +926,12 @@ load_security_profiles() {
 #   $1: containai_root - The ContainAI installation directory
 ensure_security_assets_current() {
     local containai_root="$1"
+    local channel
+    channel=$(_resolve_apparmor_channel)
+    
     local seccomp_source="$containai_root/host/profiles/seccomp-containai-agent.json"
-    local apparmor_source="$containai_root/host/profiles/apparmor-containai-agent.profile"
+    # Channel-specific apparmor profile
+    local apparmor_source="$containai_root/host/profiles/apparmor-containai-agent-${channel}.profile"
     local manifest_path="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/containai-profiles.sha256"
     local manifest_source="$containai_root/host/profiles/containai-profiles.sha256"
     if [ ! -f "$manifest_path" ] && [ -f "$manifest_source" ]; then
@@ -977,7 +947,8 @@ ensure_security_assets_current() {
     local manifest_apparmor_hash=""
     if [ -f "$manifest_path" ]; then
         manifest_seccomp_hash=$(awk '/seccomp-containai-agent.json/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
-        manifest_apparmor_hash=$(awk '/apparmor-containai-agent.profile/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
+        # Look for channel-specific apparmor profile in manifest
+        manifest_apparmor_hash=$(awk "/apparmor-containai-agent-${channel}.profile/ {print \$2}" "$manifest_path" 2>/dev/null | head -1)
     fi
 
     local hash_source hash_active
@@ -985,7 +956,7 @@ ensure_security_assets_current() {
     if [ -z "$hash_source" ]; then
         hash_source="$manifest_seccomp_hash"
     fi
-    hash_active=$(_sha256_file "$seccomp_path" 2>/div/null || echo "")
+    hash_active=$(_sha256_file "$seccomp_path" 2>/dev/null || echo "")
 
     if [ -n "$hash_source" ] && [ -n "$hash_active" ]; then
         if [ "$hash_source" != "$hash_active" ]; then
@@ -997,8 +968,10 @@ ensure_security_assets_current() {
         return 1
     fi
 
+    # Check channel-specific AppArmor profile
+    local apparmor_filename="apparmor-containai-agent-${channel}.profile"
     local apparmor_candidate
-    apparmor_candidate=$(resolve_security_asset_path "$containai_root" "apparmor-containai-agent.profile" "Agent AppArmor profile" 2>/dev/null || true)
+    apparmor_candidate=$(resolve_security_asset_path "$containai_root" "$apparmor_filename" "Agent AppArmor profile" 2>/dev/null || true)
     if [ -n "$apparmor_candidate" ] && [ -f "$apparmor_candidate" ]; then
         local aa_source_hash aa_active_hash
         aa_source_hash=$(_sha256_file "$apparmor_source" 2>/dev/null || echo "")
@@ -1154,15 +1127,17 @@ verify_host_security_prereqs() {
         local channel
         channel=$(_resolve_apparmor_channel)
         local bases=("containai-agent" "containai-proxy" "containai-log-forwarder")
-        local files=("apparmor-containai-agent.profile" "apparmor-containai-proxy.profile" "apparmor-containai-log-forwarder.profile")
-        local idx base file_name p_name p_file p_installed label
+        local idx base p_name label
+        # Use channel-specific filenames
+        local channel_file p_file p_installed
 
         for idx in "${!bases[@]}"; do
             base="${bases[$idx]}"
-            file_name="${files[$idx]}"
             p_name=$(_format_apparmor_profile_name "$base" "$channel")
-            p_file="$containai_root/host/profiles/$file_name"
-            p_installed="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/$file_name"
+            # Channel-specific filename: apparmor-containai-agent-dev.profile
+            channel_file="apparmor-${base}-${channel}.profile"
+            p_file="$containai_root/host/profiles/$channel_file"
+            p_installed="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/$channel_file"
             label="${base//-/ }"
 
             if [ ! -f "$p_file" ] && [ -n "$p_installed" ] && [ -f "$p_installed" ]; then
@@ -1173,7 +1148,7 @@ verify_host_security_prereqs() {
                 continue
             fi
 
-            if _resolve_channel_apparmor_profile "$containai_root" "$base" "$file_name" "${label^} AppArmor profile" >/dev/null 2>&1; then
+            if _resolve_channel_apparmor_profile "$containai_root" "$base" "$channel_file" "${label^} AppArmor profile" >/dev/null 2>&1; then
                 continue
             fi
 

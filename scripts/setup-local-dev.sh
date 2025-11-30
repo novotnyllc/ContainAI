@@ -12,6 +12,8 @@ CONTAINAI_SYSTEM_PROFILES_DIR="${CONTAINAI_SYSTEM_PROFILES_DIR:-/opt/containai/p
 # Source profiles in repo (these get copied to system location)
 SECURITY_PROFILES_DIR="$REPO_ROOT/host/profiles"
 SECURITY_MANIFEST_NAME="containai-profiles.sha256"
+# Channel for AppArmor profile names (dev, nightly, prod)
+CONTAINAI_LAUNCHER_CHANNEL="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
 CHECK_ONLY=0
 
 while [[ $# -gt 0 ]]; do
@@ -88,109 +90,128 @@ PY
 install_security_assets() {
     local dry_run="${1:-0}"
     local asset_dir="$CONTAINAI_SYSTEM_PROFILES_DIR"
-    local src_seccomp="$SECURITY_PROFILES_DIR/seccomp-containai-agent.json"
-    local src_apparmor="$SECURITY_PROFILES_DIR/apparmor-containai-agent.profile"
-    local src_seccomp_proxy="$SECURITY_PROFILES_DIR/seccomp-containai-proxy.json"
-    local src_apparmor_proxy="$SECURITY_PROFILES_DIR/apparmor-containai-proxy.profile"
-    local src_seccomp_fwd="$SECURITY_PROFILES_DIR/seccomp-containai-log-forwarder.json"
-    local src_apparmor_fwd="$SECURITY_PROFILES_DIR/apparmor-containai-log-forwarder.profile"
+    local channel="$CONTAINAI_LAUNCHER_CHANNEL"
     local manifest_path="$asset_dir/$SECURITY_MANIFEST_NAME"
+    local prepare_profiles="$REPO_ROOT/host/utils/prepare-profiles.sh"
 
-    echo "Syncing security profiles to $asset_dir..."
-    if [[ ! -f "$src_seccomp" || ! -f "$src_apparmor" || ! -f "$src_seccomp_proxy" || ! -f "$src_apparmor_proxy" || ! -f "$src_seccomp_fwd" || ! -f "$src_apparmor_fwd" ]]; then
-        echo "❌ Security profiles missing under $SECURITY_PROFILES_DIR. Verify your checkout or regenerate profiles." >&2
+    echo "Syncing security profiles to $asset_dir (channel: $channel)..."
+
+    # Verify source profiles exist
+    local required_sources=(
+        "$SECURITY_PROFILES_DIR/seccomp-containai-agent.json"
+        "$SECURITY_PROFILES_DIR/apparmor-containai-agent.profile"
+        "$SECURITY_PROFILES_DIR/seccomp-containai-proxy.json"
+        "$SECURITY_PROFILES_DIR/apparmor-containai-proxy.profile"
+        "$SECURITY_PROFILES_DIR/seccomp-containai-log-forwarder.json"
+        "$SECURITY_PROFILES_DIR/apparmor-containai-log-forwarder.profile"
+    )
+    for src in "${required_sources[@]}"; do
+        if [[ ! -f "$src" ]]; then
+            echo "❌ Security profile missing: $src" >&2
+            exit 1
+        fi
+    done
+
+    # Verify prepare-profiles.sh exists
+    if [[ ! -x "$prepare_profiles" ]]; then
+        echo "❌ prepare-profiles.sh not found or not executable: $prepare_profiles" >&2
         exit 1
     fi
 
-    local target_seccomp="$asset_dir/seccomp-containai-agent.json"
-    local target_apparmor="$asset_dir/apparmor-containai-agent.profile"
-    local target_seccomp_proxy="$asset_dir/seccomp-containai-proxy.json"
-    local target_apparmor_proxy="$asset_dir/apparmor-containai-proxy.profile"
-    local target_seccomp_fwd="$asset_dir/seccomp-containai-log-forwarder.json"
-    local target_apparmor_fwd="$asset_dir/apparmor-containai-log-forwarder.profile"
+    # Require AppArmor tools
+    if ! command -v apparmor_parser >/dev/null 2>&1; then
+        echo "❌ apparmor_parser not found. Install apparmor-utils package." >&2
+        exit 1
+    fi
+    local apparmor_enabled="/sys/module/apparmor/parameters/enabled"
+    if [[ ! -r "$apparmor_enabled" ]] || ! grep -qi '^y' "$apparmor_enabled" 2>/dev/null; then
+        echo "❌ AppArmor is not enabled. Enable AppArmor in your kernel." >&2
+        exit 1
+    fi
 
-    local repo_seccomp_hash repo_apparmor_hash repo_seccomp_proxy_hash repo_apparmor_proxy_hash repo_seccomp_fwd_hash repo_apparmor_fwd_hash
-    local target_seccomp_hash target_apparmor_hash target_seccomp_proxy_hash target_apparmor_proxy_hash target_seccomp_fwd_hash target_apparmor_fwd_hash
+    # Check if update is needed by comparing source hashes with existing manifest
+    local needs_update=0
+    if [[ ! -f "$manifest_path" ]]; then
+        needs_update=1
+    else
+        # Generate fresh manifest to compare
+        local temp_dir
+        temp_dir="$(mktemp -d)"
+        trap 'rm -rf "$temp_dir"' RETURN
+        
+        if "$prepare_profiles" --channel "$channel" --source "$SECURITY_PROFILES_DIR" --dest "$temp_dir" --manifest "$temp_dir/manifest" 2>/dev/null; then
+            if ! diff -q "$temp_dir/manifest" "$manifest_path" >/dev/null 2>&1; then
+                needs_update=1
+            fi
+        else
+            needs_update=1
+        fi
+    fi
 
-    repo_seccomp_hash=$(file_sha256 "$src_seccomp")
-    repo_apparmor_hash=$(file_sha256 "$src_apparmor")
-    repo_seccomp_proxy_hash=$(file_sha256 "$src_seccomp_proxy")
-    repo_apparmor_proxy_hash=$(file_sha256 "$src_apparmor_proxy")
-    repo_seccomp_fwd_hash=$(file_sha256 "$src_seccomp_fwd")
-    repo_apparmor_fwd_hash=$(file_sha256 "$src_apparmor_fwd")
-
-    if [[ -f "$target_seccomp" ]]; then target_seccomp_hash=$(file_sha256 "$target_seccomp"); fi
-    if [[ -f "$target_apparmor" ]]; then target_apparmor_hash=$(file_sha256 "$target_apparmor"); fi
-    if [[ -f "$target_seccomp_proxy" ]]; then target_seccomp_proxy_hash=$(file_sha256 "$target_seccomp_proxy"); fi
-    if [[ -f "$target_apparmor_proxy" ]]; then target_apparmor_proxy_hash=$(file_sha256 "$target_apparmor_proxy"); fi
-    if [[ -f "$target_seccomp_fwd" ]]; then target_seccomp_fwd_hash=$(file_sha256 "$target_seccomp_fwd"); fi
-    if [[ -f "$target_apparmor_fwd" ]]; then target_apparmor_fwd_hash=$(file_sha256 "$target_apparmor_fwd"); fi
-
-    if [[ "$repo_seccomp_hash" = "${target_seccomp_hash:-}" ]] && \
-       [[ "$repo_apparmor_hash" = "${target_apparmor_hash:-}" ]] && \
-       [[ "$repo_seccomp_proxy_hash" = "${target_seccomp_proxy_hash:-}" ]] && \
-       [[ "$repo_apparmor_proxy_hash" = "${target_apparmor_proxy_hash:-}" ]] && \
-       [[ "$repo_seccomp_fwd_hash" = "${target_seccomp_fwd_hash:-}" ]] && \
-       [[ "$repo_apparmor_fwd_hash" = "${target_apparmor_fwd_hash:-}" ]]; then
+    if [[ "$needs_update" -eq 0 ]]; then
         echo "✓ Security assets already current at $asset_dir"
-        # Clean legacy names if we already have permissions; ignore failures quietly.
-        local cleaner=()
-        if [[ "$(id -u)" -eq 0 ]]; then
-            cleaner=()
-        elif command -v sudo >/dev/null 2>&1; then
-            cleaner=(sudo)
+    else
+        if [[ "$dry_run" -eq 1 ]]; then
+            echo "↻ Security assets differ from repo; run with sudo ./scripts/setup-local-dev.sh to update."
+            return 1
         fi
-        if [[ ${#cleaner[@]} -gt 0 || "$(id -u)" -eq 0 ]]; then
-            "${cleaner[@]}" rm -f \
-                "$asset_dir/seccomp-coding-agents.json" \
-                "$asset_dir/apparmor-coding-agents.profile" \
-                "$asset_dir/seccomp-containai.json" \
-                "$asset_dir/apparmor-containai.profile" \
-                "$asset_dir/seccomp-containai-agent.json" \
-                "$asset_dir/apparmor-containai-agent.profile" >/dev/null 2>&1 || true
+
+        local runner=()
+        if [[ "$(id -u)" -ne 0 ]]; then
+            if command -v sudo >/dev/null 2>&1; then
+                runner=(sudo)
+            else
+                echo "❌ sudo not available; root privileges required to install security assets." >&2
+                exit 1
+            fi
         fi
-        return 0
+
+        # Create asset directory
+        "${runner[@]}" install -d -m 0755 "$asset_dir"
+
+        # Generate channel-specific profiles directly to system location
+        # Use a temp directory first, then move with proper ownership
+        local staging_dir
+        staging_dir="$(mktemp -d)"
+        
+        if ! "$prepare_profiles" --channel "$channel" --source "$SECURITY_PROFILES_DIR" --dest "$staging_dir" --manifest "$staging_dir/$SECURITY_MANIFEST_NAME"; then
+            rm -rf "$staging_dir"
+            echo "❌ Failed to generate security profiles for channel $channel" >&2
+            exit 1
+        fi
+
+        # Install generated files with proper ownership
+        for file in "$staging_dir"/*; do
+            [[ -f "$file" ]] || continue
+            local filename
+            filename="$(basename "$file")"
+            "${runner[@]}" install -m 0644 "$file" "$asset_dir/$filename"
+        done
+        rm -rf "$staging_dir"
+
+        echo "✓ Security assets synced to $asset_dir"
     fi
 
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "↻ Security assets differ from repo; run with sudo ./scripts/setup-local-dev.sh to update."
-        return 1
-    fi
-
+    # Load channel-aware AppArmor profiles
+    echo "Loading AppArmor profiles (channel: $channel)..."
     local runner=()
     if [[ "$(id -u)" -ne 0 ]]; then
-        if command -v sudo >/dev/null 2>&1; then
-            runner=(sudo)
-        else
-            echo "⚠️  sudo not available; attempting to write security assets without elevation." >&2
-        fi
+        runner=(sudo)
     fi
 
-    "${runner[@]}" install -d -m 0755 "$asset_dir"
-    "${runner[@]}" install -m 0644 "$src_seccomp" "$target_seccomp"
-    "${runner[@]}" install -m 0644 "$src_apparmor" "$target_apparmor"
-    "${runner[@]}" install -m 0644 "$src_seccomp_proxy" "$target_seccomp_proxy"
-    "${runner[@]}" install -m 0644 "$src_apparmor_proxy" "$target_apparmor_proxy"
-    "${runner[@]}" install -m 0644 "$src_seccomp_fwd" "$target_seccomp_fwd"
-    "${runner[@]}" install -m 0644 "$src_apparmor_fwd" "$target_apparmor_fwd"
+    local profile_agent="apparmor-containai-agent-${channel}.profile"
+    local profile_proxy="apparmor-containai-proxy-${channel}.profile"
+    local profile_fwd="apparmor-containai-log-forwarder-${channel}.profile"
 
-    cat <<EOF | "${runner[@]}" tee "$manifest_path" >/dev/null
-seccomp-containai-agent.json $repo_seccomp_hash
-apparmor-containai-agent.profile $repo_apparmor_hash
-seccomp-containai-proxy.json $repo_seccomp_proxy_hash
-apparmor-containai-proxy.profile $repo_apparmor_proxy_hash
-seccomp-containai-log-forwarder.json $repo_seccomp_fwd_hash
-apparmor-containai-log-forwarder.profile $repo_apparmor_fwd_hash
-EOF
-
-    # Remove legacy names to avoid stale policy usage.
-    "${runner[@]}" rm -f \
-        "$asset_dir/seccomp-coding-agents.json" \
-        "$asset_dir/apparmor-coding-agents.profile" \
-        "$asset_dir/seccomp-containai-agent.json" \
-        "$asset_dir/apparmor-containai-agent.profile"
-
-    echo "✓ Security assets synced to $asset_dir"
+    for profile_file in "$profile_agent" "$profile_proxy" "$profile_fwd"; do
+        local full_path="$asset_dir/$profile_file"
+        if [[ ! -f "$full_path" ]]; then
+            echo "❌ Generated profile not found: $full_path" >&2
+            exit 1
+        fi
+        "${runner[@]}" apparmor_parser -r "$full_path"
+        echo "  ✓ Loaded $profile_file"
+    done
 }
 
 if [[ $CHECK_ONLY -eq 1 ]]; then
