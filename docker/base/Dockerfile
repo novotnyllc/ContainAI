@@ -170,9 +170,8 @@ RUN set -eux; \
 
 # Copy .NET preview installer script
 COPY --chown=root:root docker/runtime/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
-RUN chmod +x /usr/local/bin/install-dotnet-preview.sh
 
-# Session and runtime helpers
+# Session and runtime helpers - copy all scripts in one layer
 COPY --chown=root:root docker/runtime/agent-session /usr/local/bin/agent-session
 COPY --chown=root:root docker/runtime/agent-session-runner /usr/local/bin/agent-session-runner
 COPY --chown=root:root docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -180,7 +179,6 @@ COPY --chown=root:root docker/runtime/git-credential-host-helper.sh /usr/local/b
 COPY --chown=root:root host/utils/git-credential-proxy-server.sh /usr/local/bin/git-credential-proxy-server.sh
 COPY --chown=root:root docker/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
 COPY --chown=root:root host/utils/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
-RUN install -d /usr/local/libexec
 COPY --chown=root:root docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
 COPY --chown=root:root docker/runtime/mcp-stub.py /usr/local/libexec/mcp-stub-core.py
 COPY --chown=root:root docker/runtime/mcp-stub-runner.sh /usr/local/bin/mcp-stub-runner
@@ -188,7 +186,12 @@ COPY --chown=root:root docker/runtime/mcp-http-helper.py /usr/local/bin/mcp-http
 COPY --chown=root:root docker/runtime/capability-unseal.py /usr/local/bin/capability-unseal
 COPY --chown=root:root host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
 COPY --chown=root:root host/utils/package-agent-data.py /usr/local/bin/package-agent-data.py
-RUN chmod +x \
+COPY --chown=root:root docker/runtime/install-agent-cli-wrappers.sh /usr/local/bin/install-agent-cli-wrappers.sh
+
+# Set permissions for all scripts in one layer
+RUN install -d /usr/local/libexec && \
+    chmod +x \
+    /usr/local/bin/install-dotnet-preview.sh \
     /usr/local/bin/agent-session \
     /usr/local/bin/agent-session-runner \
     /usr/local/bin/entrypoint.sh \
@@ -201,22 +204,21 @@ RUN chmod +x \
     /usr/local/bin/mcp-http-helper.py \
     /usr/local/bin/capability-unseal \
     /usr/local/bin/convert-toml-to-mcp.py \
-    /usr/local/bin/package-agent-data.py
-RUN ln -sf /usr/local/bin/mcp-stub-runner /usr/local/bin/mcp-stub
+    /usr/local/bin/package-agent-data.py \
+    /usr/local/bin/install-agent-cli-wrappers.sh && \
+    ln -sf /usr/local/bin/mcp-stub-runner /usr/local/bin/mcp-stub
 
-# Install GitHub CLI
+# Install GitHub CLI, npm global packages, and Playwright in one layer
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
     apt-get update && \
     apt-get install -y gh && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Playwright browsers and dependencies (--with-deps handles all system packages)
-RUN npm install -g \
-    @playwright/mcp@latest \
-    @modelcontextprotocol/server-sequential-thinking \
-    @githubnext/github-copilot-cli && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g \
+        @playwright/mcp@latest \
+        @modelcontextprotocol/server-sequential-thinking \
+        @githubnext/github-copilot-cli && \
     npx playwright install --with-deps chromium && \
     npm cache clean --force && \
     rm -rf /tmp/*
@@ -226,17 +228,14 @@ COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agentcli
 COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-runnerd /usr/local/bin/agent-task-runnerd
 COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-sandbox /usr/local/bin/agent-task-sandbox
 COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-runnerctl /usr/local/bin/agent-task-runnerctl
-RUN chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl && \
-    chmod 4755 /usr/local/bin/agentcli-exec && \
-    chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl
 
-COPY --chown=root:root docker/runtime/install-agent-cli-wrappers.sh /usr/local/bin/install-agent-cli-wrappers.sh
-RUN chmod +x /usr/local/bin/install-agent-cli-wrappers.sh && \
-    /usr/local/bin/install-agent-cli-wrappers.sh github-copilot-cli:copilot codex:codex claude:claude && \
-    rm /usr/local/bin/install-agent-cli-wrappers.sh
-
-# Create non-root user (reuse Ubuntu's default UID 1000 user if present)
+# Set permissions for Rust binaries, run CLI wrappers, and create users in one layer
 RUN set -eux; \
+    chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl; \
+    chmod 4755 /usr/local/bin/agentcli-exec; \
+    chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl; \
+    /usr/local/bin/install-agent-cli-wrappers.sh github-copilot-cli:copilot codex:codex claude:claude; \
+    rm /usr/local/bin/install-agent-cli-wrappers.sh; \
     if id -u agentuser >/dev/null 2>&1; then \
         true; \
     elif id -u ubuntu >/dev/null 2>&1; then \
@@ -252,11 +251,10 @@ RUN set -eux; \
         useradd -m -s /usr/sbin/nologin agentcli; \
     fi; \
     usermod -a -G agentcli agentuser >/dev/null 2>&1 || true; \
-    mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share && \
+    mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share; \
     chown -R agentuser:agentuser /workspace /home/agentuser
 
-# Snapshot mutable root directories so they can be restored into tmpfs overlays at runtime
-# Clean apt cache first to minimize snapshot size (saves ~200-500MB)
+# Snapshot mutable root dirs, prepare toolcache, and move Playwright browsers in one layer
 RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*; \
@@ -268,15 +266,11 @@ RUN set -eux; \
     cp -a /var/lib/dpkg/. "${snapshot_root}/var/lib/dpkg/"; \
     cp -a /var/lib/apt/. "${snapshot_root}/var/lib/apt/"; \
     cp -a /var/cache/apt/. "${snapshot_root}/var/cache/apt/" || true; \
-    cp -a /var/cache/debconf/. "${snapshot_root}/var/cache/debconf/" || true
-
-# Prepare shared tool cache mount point
-RUN mkdir -p /toolcache && chown agentuser:agentuser /toolcache
-
-# Move Playwright browsers to agentuser's home (installed as root above)
-# Use mv instead of cp to avoid duplicating ~500MB of browser binaries
-RUN mkdir -p /home/agentuser/.cache && \
-    mv /root/.cache/ms-playwright /home/agentuser/.cache/ && \
+    cp -a /var/cache/debconf/. "${snapshot_root}/var/cache/debconf/" || true; \
+    mkdir -p /toolcache; \
+    chown agentuser:agentuser /toolcache; \
+    mkdir -p /home/agentuser/.cache; \
+    mv /root/.cache/ms-playwright /home/agentuser/.cache/; \
     chown -R agentuser:agentuser /home/agentuser/.cache
 
 USER agentuser
@@ -308,9 +302,6 @@ ENV CONTAINAI_BASEFS=/opt/containai/basefs \
     DOTNET_USER_HOME=/toolcache/dotnet \
     NUGET_PACKAGES=/toolcache/nuget/packages \
     NUGET_HTTP_CACHE_PATH=/toolcache/nuget/http-cache
-
-# Pre-install Serena MCP server
-RUN uvx --from "git+https://github.com/oraios/serena@main" serena --help || true
 
 USER root
 
