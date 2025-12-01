@@ -300,11 +300,20 @@ test_shared_functions() {
         fail "resolve_seccomp_profile_path() failed - did setup-local-dev.sh run?"
     fi
 
-    if resolve_apparmor_profile_name "$PROJECT_ROOT" >/dev/null 2>&1; then
-        pass "resolve_apparmor_profile_name() locates active AppArmor profile"
+    # Check AppArmor profile exists at system location (loaded verification requires root)
+    local apparmor_profile="/opt/containai/profiles/apparmor-containai-agent-dev.profile"
+    if [ -f "$apparmor_profile" ]; then
+        pass "AppArmor agent profile installed at system location"
     else
-        # AppArmor may not be supported on all systems - this is a warning not a failure
-        echo -e "${YELLOW}⚠${NC} resolve_apparmor_profile_name() could not verify AppArmor (may not be supported on this system)"
+        fail "AppArmor agent profile not found at $apparmor_profile - did setup-local-dev.sh run?"
+    fi
+
+    # Full profile resolution (name lookup) requires root to read /sys/kernel/security/apparmor/profiles
+    if resolve_apparmor_profile_name "$PROJECT_ROOT" >/dev/null 2>&1; then
+        pass "resolve_apparmor_profile_name() verified profile is loaded"
+    else
+        # Profile file exists but can't verify loaded state without root - this is expected
+        echo -e "${YELLOW}⚠${NC} AppArmor profile load verification requires root (profile file exists, assuming loaded)"
     fi
 }
 
