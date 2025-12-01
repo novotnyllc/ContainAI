@@ -780,6 +780,23 @@ jobs:
         run: |
           cp "${{ steps.attest_sbom.outputs.bundle-path }}" "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload/payload.sbom.json.intoto.jsonl"
 
+      - name: Verify payload directory exists
+        run: |
+          echo "Checking payload directory after SBOM generation..."
+          echo "VERSION=$VERSION"
+          PAYLOAD_PATH="${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload"
+          echo "Expected path: $PAYLOAD_PATH"
+          if [[ -d "$PAYLOAD_PATH" ]]; then
+            echo "✓ Payload directory exists"
+            ls -la "$PAYLOAD_PATH" | head -20
+          else
+            echo "❌ Payload directory MISSING!"
+            echo "Contents of ${{ env.ARTIFACTS_PUBLISH }}:"
+            ls -la "${{ env.ARTIFACTS_PUBLISH }}" || true
+            find "${{ env.ARTIFACTS_PUBLISH }}" -type d 2>/dev/null | head -20
+            exit 1
+          fi
+
       - name: Refresh payload checksums
         run: |
           pushd "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload" >/dev/null
@@ -794,6 +811,21 @@ jobs:
         with:
           subject-path: |
             ${{ env.ARTIFACTS_PUBLISH }}/${{ env.VERSION }}/payload/**/*
+
+      - name: Debug payload directory
+        run: |
+          echo "VERSION=$VERSION"
+          echo "ARTIFACTS_PUBLISH=${{ env.ARTIFACTS_PUBLISH }}"
+          echo "Expected payload dir: ${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload"
+          echo ""
+          echo "Contents of artifacts/publish:"
+          ls -la "${{ env.ARTIFACTS_PUBLISH }}" || echo "  (directory doesn't exist)"
+          echo ""
+          echo "Contents of artifacts/publish/$VERSION:"
+          ls -la "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}" || echo "  (directory doesn't exist)"
+          echo ""
+          echo "Contents of artifacts/publish/$VERSION/payload:"
+          ls -la "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload" || echo "  (directory doesn't exist)"
 
       - name: Package payload and transport (final)
         run: |
