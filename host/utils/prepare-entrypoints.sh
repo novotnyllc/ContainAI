@@ -57,6 +57,8 @@ fi
 
 mkdir -p "$dest_dir"
 
+generated_count=0
+skipped_count=0
 for template in "$source_dir"/*-dev "$source_dir"/*-dev.ps1; do
     [ -f "$template" ] || continue
     base=$(basename "$template")
@@ -75,10 +77,23 @@ for template in "$source_dir"/*-dev "$source_dir"/*-dev.ps1; do
     esac
     target_path="$dest_dir/$target"
     if [ "$template" = "$target_path" ]; then
+        # In-place dev mode: file already exists with correct name
+        ((skipped_count++)) || true
         continue
     fi
     cp "$template" "$target_path"
     chmod --reference="$template" "$target_path" 2>/dev/null || true
+    ((generated_count++)) || true
 done
 
-echo "Prepared entrypoints for channel '$channel' in $dest_dir"
+total_count=$((generated_count + skipped_count))
+if [ "$total_count" -eq 0 ]; then
+    echo "❌ No entrypoint templates found in $source_dir" >&2
+    exit 1
+fi
+
+if [ "$skipped_count" -gt 0 ]; then
+    echo "Prepared entrypoints for channel '$channel' in $dest_dir ($skipped_count already in place)"
+else
+    echo "Prepared $generated_count entrypoints for channel '$channel' in $dest_dir"
+fi

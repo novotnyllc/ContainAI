@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 usage() {
     cat <<'EOF'
 Usage: write-profile-env.sh --prefix NAME --tag TAG --owner OWNER --out PATH [--channel CHANNEL] [--registry REGISTRY] [--mode MODE]

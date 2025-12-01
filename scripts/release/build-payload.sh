@@ -136,19 +136,21 @@ fi
 ENTRYPOINTS_DIR_SRC="$PAYLOAD_DIR_BUILD/host/launchers/entrypoints"
 if [[ -d "$ENTRYPOINTS_DIR_SRC" ]]; then
     if [[ "$LAUNCHER_CHANNEL" = "dev" ]]; then
-        ENTRYPOINTS_DIR_OUT="$ENTRYPOINTS_DIR_SRC"
+        # For dev, update in place
+        if ! "$PAYLOAD_DIR_BUILD/host/utils/prepare-entrypoints.sh" --channel "$LAUNCHER_CHANNEL" --source "$ENTRYPOINTS_DIR_SRC"; then
+            echo "❌ Failed to prepare launcher entrypoints for channel $LAUNCHER_CHANNEL" >&2
+            exit 1
+        fi
     else
-        ENTRYPOINTS_DIR_OUT="$PAYLOAD_DIR_BUILD/host/launchers/entrypoints-${LAUNCHER_CHANNEL}"
-        rm -rf "$ENTRYPOINTS_DIR_OUT"
-        cp -a "$ENTRYPOINTS_DIR_SRC"/. "$ENTRYPOINTS_DIR_OUT"/
-    fi
-    if ! "$PAYLOAD_DIR_BUILD/host/utils/prepare-entrypoints.sh" --channel "$LAUNCHER_CHANNEL" --source "$ENTRYPOINTS_DIR_OUT" --dest "$ENTRYPOINTS_DIR_OUT"; then
-        echo "❌ Failed to prepare launcher entrypoints for channel $LAUNCHER_CHANNEL" >&2
-        exit 1
-    fi
-    if [[ "$ENTRYPOINTS_DIR_OUT" != "$ENTRYPOINTS_DIR_SRC" ]]; then
+        # For non-dev channels, generate into a staging directory then replace
+        ENTRYPOINTS_STAGING="$(mktemp -d)"
+        if ! "$PAYLOAD_DIR_BUILD/host/utils/prepare-entrypoints.sh" --channel "$LAUNCHER_CHANNEL" --source "$ENTRYPOINTS_DIR_SRC" --dest "$ENTRYPOINTS_STAGING"; then
+            rm -rf "$ENTRYPOINTS_STAGING"
+            echo "❌ Failed to prepare launcher entrypoints for channel $LAUNCHER_CHANNEL" >&2
+            exit 1
+        fi
         rm -rf "$ENTRYPOINTS_DIR_SRC"
-        mv "$ENTRYPOINTS_DIR_OUT" "$ENTRYPOINTS_DIR_SRC"
+        mv "$ENTRYPOINTS_STAGING" "$ENTRYPOINTS_DIR_SRC"
     fi
 fi
 
