@@ -39,7 +39,9 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 # Convert OUT_DIR to absolute path to avoid issues with cd in subshells
-OUT_DIR="$(cd "$OUT_DIR" 2>/dev/null && pwd || mkdir -p "$OUT_DIR" && cd "$OUT_DIR" && pwd)"
+# Create directory if it doesn't exist
+mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 
 if [[ "$VERSION" =~ ^(nightly|dev)$ ]]; then
     if command -v git >/dev/null 2>&1 && git -C "$PROJECT_ROOT" rev-parse --short HEAD >/dev/null 2>&1; then
