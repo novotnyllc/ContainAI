@@ -100,16 +100,17 @@ populate_mock_workspace_assets() {
 }
 
 start_mock_proxy() {
+    if [ "$TEST_PROXY_STARTED" = "true" ]; then
+        return 0
+    fi
     echo "Starting mock HTTP proxy..."
 
-    docker network create \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        "$TEST_PROXY_NETWORK" 2>/dev/null || true
+    # Ensure network exists (it should be created by setup_test_network)
+    docker network inspect "$TEST_NETWORK" >/dev/null 2>&1 || setup_test_network
 
     docker run -d \
         --name "$TEST_PROXY_CONTAINER" \
-        --network "$TEST_PROXY_NETWORK" \
+        --network "$TEST_NETWORK" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         alpine:3.19 sh -c "apk add --no-cache busybox-extras >/dev/null && while true; do nc -l -p 3128 >/dev/null; done" >/dev/null
@@ -142,7 +143,7 @@ stop_mock_proxy() {
 
     echo "Stopping mock proxy..."
     docker rm -f "$TEST_PROXY_CONTAINER" 2>/dev/null || true
-    docker network rm "$TEST_PROXY_NETWORK" 2>/dev/null || true
+    # Network is cleaned up by cleanup_test_network
     TEST_PROXY_STARTED="false"
 }
 
@@ -530,6 +531,9 @@ setup_test_environment() {
     
     # Setup network
     setup_test_network
+    
+    # Start mock proxy
+    start_mock_proxy || return 1
     
     # Setup test repository
     setup_test_repository

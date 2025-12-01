@@ -61,6 +61,10 @@ export TEST_SKIP_REGISTRY_PUSH="${TEST_SKIP_REGISTRY_PUSH:-false}"
 # Disable launcher update checks during automated tests
 export CONTAINAI_SKIP_UPDATE_CHECK=1
 
+# Disable auto-commit/push on shutdown during tests
+export AUTO_COMMIT_ON_SHUTDOWN=false
+export AUTO_PUSH_ON_SHUTDOWN=false
+
 echo "Test configuration loaded:"
 echo "  Mode: $TEST_MODE"
 echo "  Registry: $TEST_REGISTRY"

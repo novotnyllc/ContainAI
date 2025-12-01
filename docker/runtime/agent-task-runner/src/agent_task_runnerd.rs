@@ -129,7 +129,9 @@ fn real_main() -> Result<()> {
         let ready = poll(&mut poll_fds, PollTimeout::from(500u16));
         match ready {
             Ok(0) => continue,
-            Ok(_) => {}
+            Ok(n) => {
+                eprintln!("DEBUG: poll returned {}", n);
+            }
             Err(Errno::EINTR) => continue,
             Err(err) => return Err(anyhow!(err)),
         }
@@ -139,6 +141,7 @@ fn real_main() -> Result<()> {
             .unwrap_or(PollFlags::empty())
             .contains(PollFlags::POLLIN)
         {
+            eprintln!("DEBUG: listener POLLIN");
             accept_ready = true;
         }
 
@@ -295,6 +298,7 @@ fn accept_client(
     log_file: &Arc<Mutex<File>>,
     options: &Options,
 ) -> Result<()> {
+    eprintln!("DEBUG: accept_client called");
     let conn_fd = socket::accept(listen_fd).map_err(|e| anyhow!(e))?;
     let conn = unsafe { OwnedFd::from_raw_fd(conn_fd) };
     let mut header = AgentTaskRunnerMsgHeader::new(0, 0);
@@ -345,6 +349,7 @@ fn accept_client(
 
     match header.msg_type {
         MSG_REGISTER => {
+            eprintln!("DEBUG: MSG_REGISTER received");
             let notify_fd = received_fd.ok_or_else(|| anyhow!("missing SCM_RIGHTS fd"))?;
             let mut payload = AgentTaskRunnerRegister::empty();
             if payload_buf.len() != std::mem::size_of::<AgentTaskRunnerRegister>() {
@@ -853,6 +858,7 @@ fn log_event(
     path: &str,
     action: &str,
 ) -> Result<()> {
+    eprintln!("DEBUG: log_event called for action: {}", action);
     let event = Event {
         ts: timestamp_ms(),
         pid,

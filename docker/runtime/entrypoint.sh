@@ -197,8 +197,15 @@ enforce_proxy_firewall() {
 prepare_agent_task_runner_paths() {
     local log_root="/run/agent-task-runner"
     mkdir -p "$log_root"
-    chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$log_root" 2>/dev/null || true
+    chown "$AGENT_UID:$AGENT_GID" "$log_root" 2>/dev/null || true
     chmod 0770 "$log_root" 2>/dev/null || true
+}
+
+prepare_mcp_helpers_paths() {
+    local helpers_dir="/run/mcp-helpers"
+    mkdir -p "$helpers_dir"
+    chown "$AGENT_UID:$AGENT_GID" "$helpers_dir" 2>/dev/null || true
+    chmod 0755 "$helpers_dir" 2>/dev/null || true
 }
 
 ensure_dir_owned() {
@@ -540,7 +547,7 @@ start_agent_task_runnerd() {
         --socket "$socket_path" \
         --log "$log_dir/events.log" \
         --policy "$RUNNER_POLICY" \
-        >/dev/null 2>&1 & then
+        & then
         :
     else
         echo "⚠️  Failed to launch agent-task-runnerd" >&2
@@ -646,6 +653,7 @@ if [ "$(id -u)" -eq 0 ]; then
     prepare_sensitive_tmpfs "/run/agent-data-export" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
     enforce_proxy_firewall
     prepare_agent_task_runner_paths
+    prepare_mcp_helpers_paths
     AGENT_DATA_STAGED=0
     if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
         if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
@@ -732,7 +740,7 @@ cleanup_on_shutdown() {
                 echo "💾 Uncommitted changes detected, creating automatic commit..."
                 
                 # Get repository and branch info
-                REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
+                REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
                 BRANCH=$(git branch --show-current 2>/dev/null)
                 
                 # Stage all changes (tracked and untracked)
@@ -858,6 +866,9 @@ trap cleanup_on_shutdown SIGTERM SIGINT EXIT
 # Ensure we're in the workspace directory
 cd /workspace || exit 1
 
+# Trust the workspace directory to avoid "dubious ownership" errors
+git config --global --add safe.directory /workspace 2>/dev/null || true
+
 # Display current repository information (concise)
 if [ -d .git ]; then
     branch=$(git branch --show-current 2>/dev/null || echo 'detached')
@@ -869,11 +880,15 @@ fi
 # Configure git to use generic credential helper that delegates to host's auth
 # Works with GitHub, GitLab, Bitbucket, Azure DevOps, self-hosted, etc.
 # The credential helper tries: gh CLI (for github.com) -> git-credential-store
-git config --global credential.helper ""
-git config --global credential.helper '!/usr/local/bin/git-credential-host-helper.sh'
+if git config --global credential.helper "" 2>/dev/null && \
+   git config --global credential.helper '!/usr/local/bin/git-credential-host-helper.sh' 2>/dev/null; then
+    :
+else
+    echo "⚠️  Warning: Failed to configure git credential helper (non-fatal)"
+fi
 
 # Configure git autocrlf for Windows compatibility
-git config --global core.autocrlf true
+git config --global core.autocrlf true 2>/dev/null || true
 
 # Configure commit signing if host has it configured
 # This allows verified commits while keeping signing keys secure on host
@@ -1044,7 +1059,12 @@ else
     echo "⚠️  No authentication configured - see docs/vscode-integration.md"
 fi
 
-echo "✨ Container ready | MCP: /workspace/config.toml | Auto-commit on shutdown"
+AUTO_COMMIT_MSG="Auto-commit on shutdown"
+if [ "${AUTO_COMMIT_ON_SHUTDOWN:-true}" != "true" ] && [ "${AUTO_PUSH_ON_SHUTDOWN:-true}" != "true" ]; then
+    AUTO_COMMIT_MSG="Auto-commit disabled"
+fi
+
+echo "✨ Container ready | MCP: /workspace/config.toml | $AUTO_COMMIT_MSG"
 echo ""
 
 SESSION_HELPER="/usr/local/bin/agent-session"

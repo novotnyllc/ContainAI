@@ -124,7 +124,7 @@ cleanup_old_base_images() {
         echo "$old_images" | while read -r img; do
             if [[ -n "$img" ]]; then
                 echo "  - $img" >&2
-                docker rmi "$img" 2>/dev/null || true
+                docker rmi "$img" >/dev/null 2>&1 || true
             fi
         done
     fi

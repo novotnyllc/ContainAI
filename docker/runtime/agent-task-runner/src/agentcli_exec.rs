@@ -24,6 +24,7 @@ fn main() {
 }
 
 fn real_main() -> Result<()> {
+    eprintln!("DEBUG: agentcli-exec starting");
     let mut args = env::args_os();
     let _ = args.next();
     let argv: Vec<OsString> = args.collect();
@@ -31,11 +32,18 @@ fn real_main() -> Result<()> {
         bail!("Usage: agentcli-exec <command> [args...]");
     }
 
-    switch_user()?;
-
     if let Some(socket_path) = get_env("AGENT_TASK_RUNNER_SOCKET") {
         setup_runner(&socket_path)?;
+        // Restore NoNewPrivs which was removed from seccomp loading to prevent -125 errors.
+        // This prevents the user code from gaining privileges via setuid binaries.
+        unsafe {
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                bail!("prctl(PR_SET_NO_NEW_PRIVS) failed: {}", std::io::Error::last_os_error());
+            }
+        }
     }
+
+    switch_user()?;
 
     let cstrings: Vec<CString> = argv
         .into_iter()
@@ -84,9 +92,8 @@ fn setup_runner(socket_path: &str) -> Result<()> {
 
 fn install_seccomp_filter() -> Result<OwnedFd> {
     use libseccomp_sys::{
-        scmp_filter_attr::SCMP_FLTATR_CTL_NNP, scmp_filter_ctx, seccomp_attr_set, seccomp_init,
-        seccomp_load, seccomp_notify_fd, seccomp_release, seccomp_rule_add, SCMP_ACT_ALLOW,
-        SCMP_ACT_NOTIFY,
+        scmp_filter_ctx, seccomp_init, seccomp_load, seccomp_notify_fd, seccomp_release,
+        seccomp_rule_add, SCMP_ACT_ALLOW, SCMP_ACT_NOTIFY,
     };
 
     unsafe {
@@ -94,11 +101,11 @@ fn install_seccomp_filter() -> Result<OwnedFd> {
         if ctx.is_null() {
             bail!("seccomp_init returned null");
         }
-        let rc = seccomp_attr_set(ctx, SCMP_FLTATR_CTL_NNP, 1);
-        if rc != 0 {
-            seccomp_release(ctx);
-            bail!("seccomp_attr_set failed: {rc}");
-        }
+        // let rc = seccomp_attr_set(ctx, SCMP_FLTATR_CTL_NNP, 1);
+        // if rc != 0 {
+        //     seccomp_release(ctx);
+        //     bail!("seccomp_attr_set failed: {rc}");
+        // }
         for syscall in [libc::SYS_execve, libc::SYS_execveat] {
             let rc = seccomp_rule_add(ctx, SCMP_ACT_NOTIFY, syscall as c_int, 0);
             if rc != 0 {
@@ -135,6 +142,7 @@ fn register_with_runner(
     .map_err(|e| anyhow::anyhow!(e))?;
     let addr = UnixAddr::new(socket_path).context("invalid socket path")?;
     socket::connect(sock.as_raw_fd(), &addr).map_err(|e| anyhow::anyhow!(e))?;
+    eprintln!("DEBUG: agentcli-exec connected to socket");
 
     let header = AgentTaskRunnerMsgHeader::new(
         MSG_REGISTER,
@@ -151,6 +159,7 @@ fn register_with_runner(
     let cmsg = [ControlMessage::ScmRights(&[notify_fd])];
     socket::sendmsg::<UnixAddr>(sock.as_raw_fd(), &iov, &cmsg, MsgFlags::empty(), None)
         .map_err(|e| anyhow::anyhow!(e))?;
+    eprintln!("DEBUG: agentcli-exec sent message");
     Ok(())
 }
 

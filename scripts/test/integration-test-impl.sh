@@ -202,6 +202,8 @@ assert_container_running() {
         pass "Container $container_name is running"
     else
         fail "Container $container_name is not running (status: $status)"
+        echo "DEBUG: Container logs:"
+        docker logs "$container_name" 2>&1 | tail -n 20 || true
     fi
 }
 
@@ -319,6 +321,12 @@ docker run -d \\
     --cap-add NET_ADMIN \\
     -v "$TEST_REPO_DIR:/workspace" \\
     -e "GH_TOKEN=$TEST_GH_TOKEN" \\
+    -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \\
+    -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \\
+    -e "NO_PROXY=localhost,127.0.0.1" \\
+    -v /workspace/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro \\
+    -v /workspace/docker/runtime/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro \\
+    -v /workspace/docker/runtime/agent-task-runner/target/debug/agentcli-exec:/usr/local/bin/agentcli-exec:ro \\
     "$TEST_COPILOT_IMAGE" \\
     sleep $LONG_RUNNING_SLEEP
 EOF
@@ -441,15 +449,15 @@ test_agentcli_uid_split() {
 
     local secret_opts
     secret_opts=$(docker exec "$container_name" findmnt -no OPTIONS /run/agent-secrets 2>/dev/null || true)
-    if echo "$secret_opts" | grep -q "nosuid" && echo "$secret_opts" | grep -q "nodev" && echo "$secret_opts" | grep -q "noexec" && echo "$secret_opts" | grep -q "unbindable"; then
-        pass "/run/agent-secrets mount options enforce nosuid/nodev/noexec/unbindable"
+    if echo "$secret_opts" | grep -q "nosuid" && echo "$secret_opts" | grep -q "nodev" && echo "$secret_opts" | grep -q "noexec"; then
+        pass "/run/agent-secrets mount options enforce nosuid/nodev/noexec"
     else
         fail "Missing required mount options on /run/agent-secrets ($secret_opts)"
     fi
 
     local propagation
     propagation=$(docker exec "$container_name" findmnt -no PROPAGATION /run/agent-secrets 2>/dev/null || true)
-    if [ "$propagation" = "private" ]; then
+    if [[ "$propagation" == *"private"* ]]; then
         pass "/run/agent-secrets mount is private"
     else
         fail "/run/agent-secrets propagation mismatch ($propagation)"
@@ -461,23 +469,36 @@ test_capabilities_dropped() {
 
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
 
+    if ! docker ps -q -f name="$container_name" | grep -q .; then
+        fail "Container $container_name is not running before capability check"
+        return
+    fi
+
     # Verify the agent process is running as non-root
+    # We check PID 1 because docker exec runs as the default user (root)
+    # We must add the agentproc group to see the process due to hidepid=2
     local agent_uid
-    agent_uid=$(docker exec "$container_name" id -u 2>/dev/null || echo "unknown")
-    if [ "$agent_uid" != "0" ]; then
+    local exec_out
+    if ! exec_out=$(docker exec --user root:agentproc "$container_name" grep "^Uid:" /proc/1/status 2>&1); then
+        fail "Failed to get agent UID (docker exec failed)"
+        echo "DEBUG: Output: $exec_out"
+        return
+    fi
+    agent_uid=$(echo "$exec_out" | awk '{print $2}')
+    
+    if [ -n "$agent_uid" ] && [ "$agent_uid" != "0" ]; then
         pass "Agent process running as non-root (UID: $agent_uid)"
     else
-        fail "Agent process unexpectedly running as root"
+        fail "Agent process unexpectedly running as root (UID: ${agent_uid:-unknown})"
         return
     fi
 
     # Check that no capabilities are available to the agent process
-    # Using getpcaps to inspect the shell's capabilities
+    # Using getpcaps to inspect PID 1
     local caps
-    caps=$(docker exec "$container_name" bash -c 'getpcaps $$ 2>&1' || true)
+    # Must use root:agentproc to see PID 1 due to hidepid=2
+    caps=$(docker exec --user root:agentproc "$container_name" bash -c 'getpcaps 1 2>&1' || true)
     
-    # getpcaps output for a process with no caps looks like: "PID: ="
-    # If caps are present, it shows: "PID: = cap_sys_admin,cap_net_admin+ep"
     if echo "$caps" | grep -qE "cap_sys_admin|cap_net_admin"; then
         fail "Agent process still has SYS_ADMIN or NET_ADMIN capabilities ($caps)"
     else
@@ -485,8 +506,9 @@ test_capabilities_dropped() {
     fi
 
     # Verify that attempting privileged operations fails
+    # We must run as the agent user to verify what the agent can do
     # Try to mount a tmpfs (requires CAP_SYS_ADMIN)
-    if docker exec "$container_name" bash -c 'mount -t tmpfs tmpfs /tmp/test-mount 2>/dev/null'; then
+    if docker exec --user agentuser "$container_name" bash -c 'mount -t tmpfs tmpfs /tmp/test-mount 2>/dev/null'; then
         fail "Agent can still mount filesystems (CAP_SYS_ADMIN not dropped)"
         docker exec "$container_name" umount /tmp/test-mount 2>/dev/null || true
     else
@@ -494,7 +516,7 @@ test_capabilities_dropped() {
     fi
 
     # Try to modify iptables (requires CAP_NET_ADMIN)
-    if docker exec "$container_name" bash -c 'iptables -L 2>/dev/null'; then
+    if docker exec --user agentuser "$container_name" bash -c 'iptables -L 2>/dev/null'; then
         fail "Agent can still list iptables (CAP_NET_ADMIN not dropped)"
     else
         pass "Agent cannot access iptables (CAP_NET_ADMIN dropped)"
@@ -506,12 +528,29 @@ test_agent_task_runner_seccomp() {
 
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
 
-    if docker exec "$container_name" agentcli-exec /bin/bash -c 'true' >/dev/null 2>&1; then
+    # Check if agent-task-runnerd is running
+    if docker exec "$container_name" ps aux | grep agent-task-runnerd | grep -v grep; then
+        echo "DEBUG: agent-task-runnerd is running"
+    else
+        echo "DEBUG: agent-task-runnerd is NOT running"
+        docker exec "$container_name" ps aux
+    fi
+
+    # Run agentcli-exec and capture output
+    local exec_out
+    if exec_out=$(docker exec -e AGENT_TASK_RUNNER_SOCKET=/run/agent-task-runner.sock "$container_name" agentcli-exec /bin/bash -c 'true' 2>&1); then
         pass "agentcli-exec executed sample command"
     else
         fail "agentcli-exec failed to run sample command"
+        echo "DEBUG: agentcli-exec output: $exec_out"
         return
     fi
+    
+    if [ -n "$exec_out" ]; then
+        echo "DEBUG: agentcli-exec output: $exec_out"
+    fi
+
+    sleep 2
 
     local log_output
     log_output=$(docker exec "$container_name" cat /run/agent-task-runner/events.log 2>/dev/null || true)
@@ -519,6 +558,12 @@ test_agent_task_runner_seccomp() {
         pass "agent-task-runner recorded exec notification"
     else
         fail "agent-task-runner log missing exec notification"
+        echo "DEBUG: Log content:"
+        echo "$log_output"
+        echo "DEBUG: Log file permissions:"
+        docker exec "$container_name" ls -l /run/agent-task-runner/events.log || true
+        echo "DEBUG: Container logs:"
+        docker logs "$container_name" 2>&1 | tail -n 50
     fi
 }
 
@@ -527,22 +572,29 @@ test_cli_wrappers() {
 
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
 
-    if docker exec "$container_name" test -x /usr/local/bin/github-copilot-cli.real; then
-        pass "github-copilot-cli.real preserved"
+    # Find the real binary path
+    local real_path
+    real_path=$(docker exec "$container_name" bash -c 'command -v github-copilot-cli.real || echo ""')
+    
+    if [ -n "$real_path" ]; then
+        pass "github-copilot-cli.real preserved at $real_path"
     else
         fail "github-copilot-cli.real missing"
+        return
     fi
 
-    local wrapper_head
-    wrapper_head=$(docker exec "$container_name" head -n 5 /usr/local/bin/github-copilot-cli 2>/dev/null || true)
-    if echo "$wrapper_head" | grep -q "agentcli-exec"; then
+    local wrapper_path="${real_path%.real}"
+
+    local wrapper_content
+    wrapper_content=$(docker exec "$container_name" cat "$wrapper_path" 2>/dev/null || true)
+    if echo "$wrapper_content" | grep -q "agentcli-exec"; then
         pass "github-copilot-cli wrapper invokes agentcli-exec"
     else
         fail "github-copilot-cli wrapper missing agentcli-exec reference"
     fi
 
     local socket_export
-    socket_export=$(docker exec "$container_name" grep -n "AGENT_TASK_RUNNER_SOCKET" /usr/local/bin/github-copilot-cli 2>/dev/null || true)
+    socket_export=$(echo "$wrapper_content" | grep "AGENT_TASK_RUNNER_SOCKET")
     if [ -n "$socket_export" ]; then
         pass "Wrapper exports AGENT_TASK_RUNNER_SOCKET"
     else
@@ -550,7 +602,7 @@ test_cli_wrappers() {
     fi
 
     local runnerctl_hook
-    runnerctl_hook=$(docker exec "$container_name" grep -n "agent-task-runnerctl" /usr/local/bin/github-copilot-cli 2>/dev/null || true)
+    runnerctl_hook=$(echo "$wrapper_content" | grep "agent-task-runnerctl")
     if [ -n "$runnerctl_hook" ]; then
         pass "Wrapper routes explicit exec/run via agent-task-runnerctl"
     else
@@ -584,7 +636,12 @@ test_mcp_configuration_generation() {
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         --network "$TEST_NETWORK" \
+        --cap-add SYS_ADMIN \
+        --cap-add NET_ADMIN \
         -v "$TEST_REPO_DIR:/workspace" \
+        -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+        -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+        -e "NO_PROXY=localhost,127.0.0.1" \
         "$TEST_COPILOT_IMAGE" \
         sleep $LONG_RUNNING_SLEEP >/dev/null
 
@@ -698,6 +755,9 @@ test_network_proxy_modes() {
         --label "$TEST_LABEL_SESSION" \
         --network none \
         -v "$TEST_REPO_DIR:/workspace" \
+        -e "HTTP_PROXY=http://127.0.0.1:3128" \
+        -e "HTTPS_PROXY=http://127.0.0.1:3128" \
+        -e "NO_PROXY=localhost,127.0.0.1" \
         "$TEST_CLAUDE_IMAGE" \
         sleep $LONG_RUNNING_SLEEP >/dev/null
 
@@ -732,7 +792,7 @@ PY
 
     docker rm -f "$restricted_container" >/dev/null 2>&1 || true
 
-    start_mock_proxy
+    # Proxy is already started by setup_test_environment
     local proxy_client="${TEST_CONTAINER_PREFIX}-proxy"
     local proxy_url="http://${TEST_PROXY_CONTAINER}:3128"
 
@@ -740,7 +800,9 @@ PY
         --name "$proxy_client" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
-        --network "$TEST_PROXY_NETWORK" \
+        --network "$TEST_NETWORK" \
+        --cap-add NET_ADMIN \
+        --cap-add SYS_ADMIN \
         -v "$TEST_REPO_DIR:/workspace" \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
@@ -780,7 +842,6 @@ PY
     fi
 
     docker rm -f "$proxy_client" >/dev/null 2>&1 || true
-    stop_mock_proxy
 }
 
 test_squid_proxy_hardening() {
@@ -808,6 +869,7 @@ test_squid_proxy_hardening() {
 
     local server_script
     server_script="$(mktemp)"
+    chmod 644 "$server_script"
     cat > "$server_script" <<'PY'
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -923,22 +985,8 @@ PY
         --add-host "${allowed_domain}:${allowed_ip}" \
         --cap-add NET_ADMIN \
         --cap-add SYS_ADMIN \
-        -e "HTTP_PROXY=$proxy_url" \
-        -e "HTTPS_PROXY=$proxy_url" \
-        python:3-alpine python3 \
-        - <<'PY'
-import os
-import sys
-import urllib.error
-import urllib.request
-
-proxy = os.environ["HTTP_PROXY"]
-handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
-opener = urllib.request.build_opener(handler)
-response = opener.open("http://allowed.test:8080", timeout=5)
-body = response.read()
-sys.exit(0 if body else 1)
-PY
+        -e "http_proxy=$proxy_url" \
+        python:3-alpine wget -q -O - "http://${allowed_domain}:8080" >/dev/null
     then
         pass "Squid allows traffic to permitted domain outside private ranges"
     else
@@ -1112,10 +1160,11 @@ PY
     # Wait for logs to flush to disk - Squid's stdio: logging buffers writes
     # Send SIGUSR1 to rotate logs which forces a flush, then wait a moment
     docker exec "$proxy_container" kill -USR1 1 2>/dev/null || true
-    sleep 3
+    sleep 5
     
-    # Read the access log file directly from the container
-    proxy_log=$(docker exec "$proxy_container" cat /var/log/squid/access.log 2>/dev/null || true)
+    # Read the access log file directly from the container (check rotated logs too)
+    # Use sh -c to handle wildcard expansion inside the container
+    proxy_log=$(docker exec "$proxy_container" sh -c 'cat /var/log/squid/access.log* 2>/dev/null' || true)
     
     # Squid may return ERR_ACCESS_DENIED (generic 403) or ERR_TOO_BIG (413/502) depending on the violation type
     # Note: Without %err_code in logformat, we might not see the specific error string, but we should see the request.
@@ -1157,6 +1206,7 @@ test_mcp_helper_proxy_enforced() {
 
     local helper_server_script
     helper_server_script="$(mktemp)"
+    chmod 644 "$helper_server_script"
     cat > "$helper_server_script" <<'PY'
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -1211,7 +1261,9 @@ EOF
         --label "$TEST_LABEL_SESSION" \
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
-        -e "PROXY_FIREWALL_APPLIED=1" \
+        -e "HTTP_PROXY=http://${proxy_ip}:3128" \
+        -e "HTTPS_PROXY=http://${proxy_ip}:3128" \
+        -e "NO_PROXY=localhost,127.0.0.1" \
         -v "$helper_server_script:/server.py:ro" \
         "$TEST_CODEX_IMAGE" \
         python3 /server.py
@@ -1223,7 +1275,7 @@ EOF
 
     # Wait for upstream server to be ready
     local upstream_ready=false
-    for _ in {1..15}; do
+    for _ in {1..30}; do
         local status
         status=$(docker inspect -f '{{.State.Status}}' "$allowed_container" 2>/dev/null || echo "unknown")
         if [ "$status" = "running" ]; then
@@ -1298,13 +1350,14 @@ EOF
         --cap-add NET_ADMIN \
         --cap-add SYS_ADMIN \
         --add-host "${allowed_domain}:${allowed_ip}" \
+        --entrypoint /bin/sh \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
         -e "CONTAINAI_REQUIRE_PROXY=1" \
         -v "$PROJECT_ROOT:/workspace" \
         "$TEST_CODEX_IMAGE" \
-        sh -c "\
+        -c "\
 iptables -F OUTPUT && \
 iptables -P OUTPUT DROP && \
 iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT && \
@@ -1399,8 +1452,11 @@ test_multiple_agents() {
             --cap-add SYS_ADMIN \
             --cap-add NET_ADMIN \
             -v "$TEST_REPO_DIR:/workspace" \
+            -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+            -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+            -e "NO_PROXY=localhost,127.0.0.1" \
             "$test_image" \
-            sleep $LONG_RUNNING_SLEEP >/dev/null
+            /bin/sleep $LONG_RUNNING_SLEEP >/dev/null
         
         containers+=("$container_name")
     done

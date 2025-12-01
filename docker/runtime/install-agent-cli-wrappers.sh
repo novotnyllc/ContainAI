@@ -17,8 +17,8 @@ install_wrapper() {
     local binary_path
     binary_path=$(command -v "$binary" 2>/dev/null || true)
     if [ -z "$binary_path" ]; then
-        echo "Wrapper install skipped for '$binary' (binary not found)" >&2
-        return
+        echo "Wrapper install failed for '$binary' (binary not found)" >&2
+        exit 1
     fi
 
     local real_path="${binary_path}.real"

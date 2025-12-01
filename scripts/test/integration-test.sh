@@ -204,7 +204,7 @@ ENVIRONMENT VARIABLES:
     TEST_ISOLATION_IMAGE            Override Docker-in-Docker image (default: docker:25.0-dind)
     TEST_ISOLATION_CONTAINER        Override container name
     TEST_ISOLATION_CLIENT_IMAGE     Override helper CLI image used to probe DinD readiness
-    TEST_ISOLATION_STARTUP_TIMEOUT  Daemon startup wait time in seconds (default: 180)
+    TEST_ISOLATION_STARTUP_TIMEOUT  Daemon startup wait time in seconds (default: 300)
     TEST_PRESERVE_RESOURCES         Same as --preserve flag
     TEST_ISOLATION_MODE             Default isolation mode (dind | host)
     TEST_ISOLATION_DOCKER_RUN_FLAGS Extra docker run flags when using DinD
@@ -466,7 +466,7 @@ start_dind() {
 wait_for_daemon() {
     echo "  Waiting for Docker daemon to initialize (this can take 20-30 seconds)..."
     local retries=0
-    local max_retries=${TEST_ISOLATION_STARTUP_TIMEOUT:-180}
+    local max_retries=${TEST_ISOLATION_STARTUP_TIMEOUT:-300}
     local last_progress=0
     local last_error=""
     local docker_probe_output=""
@@ -517,6 +517,8 @@ bootstrap_tools() {
         echo "  This usually indicates a network connectivity issue"
         exit 1
     fi
+    # Trust the workspace directory for git operations to avoid "dubious ownership" warnings
+    docker exec "$DIND_CONTAINER" git config --global --add safe.directory /workspace
     echo "  ✓ Tooling installed"
 }
 

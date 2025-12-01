@@ -218,7 +218,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     npm install -g \
         @playwright/mcp@latest \
         @modelcontextprotocol/server-sequential-thinking \
-        @githubnext/github-copilot-cli && \
+        @githubnext/github-copilot-cli \
+        @anthropic-ai/claude-code \
+        @openai/codex && \
     npx playwright install --with-deps chromium && \
     npm cache clean --force && \
     rm -rf /tmp/*
