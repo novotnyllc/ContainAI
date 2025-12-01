@@ -99,12 +99,14 @@ template_installers() {
     local cosign_hash
     cosign_hash=$(sha256sum "$cosign_root" | awk '{print $1}')
     perl -0777 -pi -e "s/__COSIGN_ROOT_SHA256__/$cosign_hash/" "$shell_installer"
-    if grep -q "__COSIGN_ROOT_SHA256__" "$shell_installer"; then
+    # Check that the variable assignment was replaced (not the literal comparison in runtime check)
+    if grep -qE '^COSIGN_ROOT_EXPECTED_SHA256="__COSIGN_ROOT_SHA256__"' "$shell_installer"; then
         echo "❌ cosign root hash placeholder not replaced in installer" >&2
         exit 1
     fi
     perl -0777 -pi -e "s#__COSIGN_ROOT_URL__#$cosign_url#" "$shell_installer"
-    if grep -q "__COSIGN_ROOT_URL__" "$shell_installer"; then
+    # Check that the variable assignment was replaced
+    if grep -qE '^COSIGN_ROOT_URL="__COSIGN_ROOT_URL__"' "$shell_installer"; then
         echo "❌ cosign root URL placeholder not replaced in installer" >&2
         exit 1
     fi
@@ -112,7 +114,8 @@ template_installers() {
     local shell_hash
     shell_hash=$(redacted_shell_hash "$shell_installer")
     perl -0777 -pi -e "s/INSTALLER_SELF_SHA256=\"[^\"]*\"/INSTALLER_SELF_SHA256=\"$shell_hash\"/" "$shell_installer"
-    if grep -q "__INSTALLER_SELF_SHA256__" "$shell_installer"; then
+    # Check that the variable assignment was replaced (not the literal comparison in runtime check)
+    if grep -qE '^INSTALLER_SELF_SHA256="__INSTALLER_SELF_SHA256__"' "$shell_installer"; then
         echo "❌ Installer self-hash placeholder not replaced" >&2
         exit 1
     fi
