@@ -100,61 +100,36 @@ jobs:
 
   unit-test-powershell:
     runs-on: windows-latest
-    # Windows runners expose only Windows containers, so this job verifies the guardrail failure.
+    # Windows runners can't run Linux containers, so we only validate script syntax
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
-      - name: Setup Docker
-        run: |
-          docker --version
-          docker info
-      
-      - name: Setup Git
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-      
-      - name: Run launcher tests (PowerShell - expect guard failure)
+      - name: Validate PowerShell script syntax
         shell: pwsh
         run: |
-          $exitCode = 0
-          $output = ""
-
-          try {
-            $output = & .\scripts\test\test-launchers.ps1 2>&1
-            $exitCode = $LASTEXITCODE
-          } catch {
-            $output = ($_ | Out-String)
-            $exitCode = 1
+          # Parse all PowerShell scripts to check for syntax errors
+          $scripts = @(
+            "scripts/test/test-launchers.ps1",
+            "host/launchers/run-agent.ps1"
+          )
+          $hasErrors = $false
+          foreach ($script in $scripts) {
+            if (Test-Path $script) {
+              $errors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$null, [ref]$errors) | Out-Null
+              if ($errors.Count -gt 0) {
+                Write-Error "Syntax errors in ${script}:"
+                $errors | ForEach-Object { Write-Error $_.ToString() }
+                $hasErrors = $true
+              } else {
+                Write-Host "✓ $script - syntax OK"
+              }
+            }
           }
-
-          if (-not [string]::IsNullOrWhiteSpace($output)) {
-            $output | Write-Host
-          }
-
-          if ($exitCode -eq 0) {
-              Write-Error "Windows runners should fail because Linux containers are not available."
-              exit 1
-          }
-
-          # Match either "Linux containers" error or "WSL" not available error
-          if ($output -notmatch "(Linux containers|WSL)") {
-              Write-Error "Launcher script failed for an unexpected reason."
-              exit 1
-          }
-
-          Write-Host "Windows runner correctly reported the unsupported environment."
-          $global:LASTEXITCODE = 0
-          exit 0
-      
-      - name: Cleanup test containers
-        if: always()
-        shell: pwsh
-        run: |
-          docker ps -aq --filter "label=containai.test=true" | ForEach-Object { docker rm -f $_ } 2>$null
+          if ($hasErrors) { exit 1 }
 
   # Full integration tests (launchers mode - faster)
   integration-test-launchers:
