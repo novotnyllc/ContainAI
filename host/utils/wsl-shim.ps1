@@ -7,11 +7,11 @@
 #>
 $ErrorActionPreference = "Stop"
 
-# Detect Linux environment
-$script:IsLinux = $IsLinux -or ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.OS -match 'Linux')
+# Detect Linux environment (use different name to avoid conflict with automatic $IsLinux)
+$script:RunningOnLinux = $IsLinux -or ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.OS -match 'Linux')
 
 function Get-WslExecutablePath {
-    if ($script:IsLinux) { return $null }
+    if ($script:RunningOnLinux) { return $null }
     $candidate = Get-Command wsl.exe -ErrorAction SilentlyContinue
     if ($null -ne $candidate) {
         return $candidate.Source
@@ -30,7 +30,7 @@ function Convert-ToWslPath {
 
     $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath
     
-    if ($script:IsLinux) {
+    if ($script:RunningOnLinux) {
         return $resolved
     }
 
@@ -53,7 +53,7 @@ function Invoke-ContainAIWslScript {
         throw "Unable to locate Bash script '$ScriptRelativePath' under repo root."
     }
 
-    if ($script:IsLinux) {
+    if ($script:RunningOnLinux) {
         # On Linux, execute directly with bash
         $bashArgs = @($scriptPath)
         if ($Arguments) {
