@@ -573,7 +573,8 @@ test_trusted_path_enforcement() {
     fi
 
     echo "# dirty" >> "$temp_repo/host/launchers/foo.sh"
-    if ensure_trusted_paths_clean "$temp_repo" "test" "host/launchers"; then
+    # Redirect stderr to suppress expected error message from the function
+    if ensure_trusted_paths_clean "$temp_repo" "test" "host/launchers" 2>/dev/null; then
         fail "Dirty trusted paths should fail"
     else
         pass "Dirty trusted paths blocked"
@@ -1483,6 +1484,21 @@ test_mitm_log_forwarding() {
     if [ -f "$log_dir/access.log" ] && grep -q "log-" "$log_dir/access.log"; then
         pass "Log forwarding captured proxy output via TLS broker"
     else
+        # Debug output to diagnose CI failures
+        echo "DEBUG: log_dir=$log_dir" >&2
+        echo "DEBUG: access.log exists: $([ -f "$log_dir/access.log" ] && echo yes || echo no)" >&2
+        echo "DEBUG: access.log contents:" >&2
+        cat "$log_dir/access.log" 2>&1 | head -20 >&2 || echo "(empty or missing)" >&2
+        echo "DEBUG: broker.err contents:" >&2
+        cat "$log_dir/broker.err" 2>&1 | head -20 >&2 || echo "(empty or missing)" >&2
+        echo "DEBUG: broker container logs:" >&2
+        docker logs "${proxy_container}-log-broker" 2>&1 | tail -20 >&2 || echo "(no logs)" >&2
+        echo "DEBUG: forwarder container logs:" >&2
+        docker logs "${proxy_container}-log-forwarder" 2>&1 | tail -20 >&2 || echo "(no logs)" >&2
+        echo "DEBUG: proxy container logs:" >&2
+        docker logs "$proxy_container" 2>&1 | tail -10 >&2 || echo "(no logs)" >&2
+        echo "DEBUG: container states:" >&2
+        docker ps -a --filter "name=${proxy_container}" --format "{{.Names}}: {{.Status}}" >&2
         fail "Log forwarding did not capture proxy output"
     fi
 
