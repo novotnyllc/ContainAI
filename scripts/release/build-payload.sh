@@ -151,19 +151,23 @@ fi
 # Profiles are generated with embedded channel names so they can be loaded directly
 # without runtime modification. This ensures SHA256 validation covers the exact
 # profile content that gets loaded.
-PROFILES_SOURCE="$PAYLOAD_DIR_BUILD/host/profiles"
-PROFILES_DEST="$PAYLOAD_DIR_BUILD/host/profiles"
-PROFILES_MANIFEST="$PROFILES_DEST/containai-profiles.sha256"
-if [[ -d "$PROFILES_SOURCE" ]]; then
+PROFILES_DIR="$PAYLOAD_DIR_BUILD/host/profiles"
+if [[ -d "$PROFILES_DIR" ]]; then
     echo "📦 Generating channel-specific security profiles (channel: $LAUNCHER_CHANNEL)..."
+    # Generate into a staging dir, then replace the original
+    PROFILES_STAGING="$(mktemp -d)"
     if ! "$PAYLOAD_DIR_BUILD/host/utils/prepare-profiles.sh" \
         --channel "$LAUNCHER_CHANNEL" \
-        --source "$PROFILES_SOURCE" \
-        --dest "$PROFILES_DEST" \
-        --manifest "$PROFILES_MANIFEST"; then
+        --source "$PROFILES_DIR" \
+        --dest "$PROFILES_STAGING" \
+        --manifest "$PROFILES_STAGING/containai-profiles.sha256"; then
+        rm -rf "$PROFILES_STAGING"
         echo "❌ Failed to generate security profiles for channel $LAUNCHER_CHANNEL" >&2
         exit 1
     fi
+    # Replace profiles dir with generated content
+    rm -rf "$PROFILES_DIR"
+    mv "$PROFILES_STAGING" "$PROFILES_DIR"
 fi
 
 # Ensure dev payloads carry channel metadata so installers can permit relaxed attestation rules.
