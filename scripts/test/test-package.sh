@@ -44,14 +44,15 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common-functions.sh"
 
 enforce_security_profiles_strict() {
     local install_root="$1"
+    local channel="${2:-}"
     local profile_dir="$install_root/host/profiles"
-    # Channel is determined from profile.env; default to dev for testing
-    local channel="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
+    # Channel is required
+    [[ -n "$channel" ]] || die "Channel is required"
     
-    # Seccomp profiles (not channelized)
-    local seccomp_agent="$profile_dir/seccomp-containai-agent.json"
-    local seccomp_proxy="$profile_dir/seccomp-containai-proxy.json"
-    local seccomp_fwd="$profile_dir/seccomp-containai-log-forwarder.json"
+    # Seccomp profiles (channelized: seccomp-containai-agent-dev.json)
+    local seccomp_agent="$profile_dir/seccomp-containai-agent-${channel}.json"
+    local seccomp_proxy="$profile_dir/seccomp-containai-proxy-${channel}.json"
+    local seccomp_fwd="$profile_dir/seccomp-containai-log-forwarder-${channel}.json"
     [[ -f "$seccomp_agent" && -f "$seccomp_proxy" && -f "$seccomp_fwd" ]] || die "Seccomp profiles missing in $profile_dir"
     
     # AppArmor profiles (channelized: apparmor-containai-agent-dev.profile)
@@ -62,7 +63,7 @@ enforce_security_profiles_strict() {
 }
 
 if [[ "${1:-}" == "--verify" ]]; then
-    enforce_security_profiles_strict "${2:-}"
+    enforce_security_profiles_strict "${2:-}" "${3:-}"
 fi
 EOF
 chmod +x "$UTILS_DIR/security-enforce.sh"
@@ -85,7 +86,8 @@ fi
 
 PAYLOAD_DIR="$OUT_DIR/$VERSION/payload"
 [[ -d "$PAYLOAD_DIR" ]] || { echo "❌ Payload directory missing"; exit 1; }
-[[ -f "$PAYLOAD_DIR/host/profiles/seccomp-containai-agent.json" ]] || { echo "❌ seccomp profile missing in payload"; exit 1; }
+# Seccomp profiles are now channelized (dev channel for tests)
+[[ -f "$PAYLOAD_DIR/host/profiles/seccomp-containai-agent-dev.json" ]] || { echo "❌ seccomp profile missing in payload (expected seccomp-containai-agent-dev.json)"; exit 1; }
 [[ -f "$PAYLOAD_DIR/install.sh" ]] || { echo "❌ install.sh missing in payload"; exit 1; }
 
 PAYLOAD_TGZ="$OUT_DIR/$VERSION/containai-$VERSION.tar.gz"

@@ -153,10 +153,13 @@ BROKER_STUBS=("${DEFAULT_BROKER_STUBS[@]}")
 PROXY_SECCOMP_PROFILE_PATH=""
 LOG_FORWARDER_SECCOMP_PROFILE_PATH=""
 LOG_BROKER_SECCOMP_PROFILE_PATH=""
-if ! PROXY_SECCOMP_PROFILE_PATH=$(resolve_security_asset_path "$REPO_ROOT" "seccomp-containai-proxy.json" "Proxy seccomp profile"); then
+# Use channel-specific seccomp filenames
+_proxy_seccomp_file=$(_format_seccomp_filename "containai-proxy")
+_fwd_seccomp_file=$(_format_seccomp_filename "containai-log-forwarder")
+if ! PROXY_SECCOMP_PROFILE_PATH=$(resolve_security_asset_path "$REPO_ROOT" "$_proxy_seccomp_file" "Proxy seccomp profile"); then
     exit 1
 fi
-if ! LOG_FORWARDER_SECCOMP_PROFILE_PATH=$(resolve_security_asset_path "$REPO_ROOT" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile"); then
+if ! LOG_FORWARDER_SECCOMP_PROFILE_PATH=$(resolve_security_asset_path "$REPO_ROOT" "$_fwd_seccomp_file" "Log forwarder seccomp profile"); then
     exit 1
 fi
 LOG_BROKER_SECCOMP_PROFILE_PATH="$LOG_FORWARDER_SECCOMP_PROFILE_PATH"

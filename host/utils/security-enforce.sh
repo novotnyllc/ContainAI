@@ -7,24 +7,23 @@ set -euo pipefail
 # Expects pre-generated channel-specific profiles (from prepare-profiles.sh).
 # Arguments:
 #   1: install root (release directory that already contains host/profiles)
+#   2: channel (dev|nightly|prod) - required
 enforce_security_profiles_strict() {
     local install_root="$1"
+    local channel="${2:-}"
     local profile_dir="$install_root/host/profiles"
     
-    # Detect channel from the generated channel file
-    local channel_file="$profile_dir/channel"
-    local channel="prod"
-    if [[ -f "$channel_file" ]]; then
-        channel="$(cat "$channel_file")"
+    if [[ -z "$channel" ]]; then
+        die "Channel is required for security profile enforcement"
     fi
     
     # Expected pre-generated profile filenames (channel-specific)
     local apparmor_agent="$profile_dir/apparmor-containai-agent-${channel}.profile"
     local apparmor_proxy="$profile_dir/apparmor-containai-proxy-${channel}.profile"
     local apparmor_fwd="$profile_dir/apparmor-containai-log-forwarder-${channel}.profile"
-    local seccomp_agent="$profile_dir/seccomp-containai-agent.json"
-    local seccomp_proxy="$profile_dir/seccomp-containai-proxy.json"
-    local seccomp_fwd="$profile_dir/seccomp-containai-log-forwarder.json"
+    local seccomp_agent="$profile_dir/seccomp-containai-agent-${channel}.json"
+    local seccomp_proxy="$profile_dir/seccomp-containai-proxy-${channel}.json"
+    local seccomp_fwd="$profile_dir/seccomp-containai-log-forwarder-${channel}.json"
 
     [[ -f "$seccomp_agent" ]] || die "Seccomp profile missing at $seccomp_agent"
     [[ -f "$apparmor_agent" ]] || die "AppArmor profile missing at $apparmor_agent"
@@ -41,12 +40,12 @@ enforce_security_profiles_strict() {
     apparmor_proxy_hash=$(sha256sum "$apparmor_proxy" | awk '{print $1}')
     seccomp_fwd_hash=$(sha256sum "$seccomp_fwd" | awk '{print $1}')
     apparmor_fwd_hash=$(sha256sum "$apparmor_fwd" | awk '{print $1}')
-    cat > "$profile_dir/containai-profiles.sha256" <<EOF
-seccomp-containai-agent.json $seccomp_hash
+    cat > "$profile_dir/containai-profiles-${channel}.sha256" <<EOF
+seccomp-containai-agent-${channel}.json $seccomp_hash
 apparmor-containai-agent-${channel}.profile $apparmor_hash
-seccomp-containai-proxy.json $seccomp_proxy_hash
+seccomp-containai-proxy-${channel}.json $seccomp_proxy_hash
 apparmor-containai-proxy-${channel}.profile $apparmor_proxy_hash
-seccomp-containai-log-forwarder.json $seccomp_fwd_hash
+seccomp-containai-log-forwarder-${channel}.json $seccomp_fwd_hash
 apparmor-containai-log-forwarder-${channel}.profile $apparmor_fwd_hash
 EOF
 
@@ -77,5 +76,5 @@ EOF
 }
 
 if [[ "${1:-}" == "--verify" ]]; then
-    enforce_security_profiles_strict "${2:-}"
+    enforce_security_profiles_strict "${2:-}" "${3:-}"
 fi

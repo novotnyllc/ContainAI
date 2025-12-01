@@ -151,13 +151,14 @@ for base_name in "${!APPARMOR_PROFILES[@]}"; do
     MANIFEST_ENTRIES+=("$dest_filename $(file_sha256 "$dest_file")")
 done
 
-# Copy seccomp profiles (they don't need name rewriting, but we copy for consistency)
+# Copy seccomp profiles with channel suffix for consistency
 echo ""
 echo "Copying seccomp profiles..."
 for base_name in "${!SECCOMP_PROFILES[@]}"; do
     source_file="$SOURCE_DIR/${SECCOMP_PROFILES[$base_name]}"
-    # Keep original filename for seccomp (no embedded names to change)
-    dest_filename="${SECCOMP_PROFILES[$base_name]}"
+    # Add channel suffix: seccomp-containai-agent.json -> seccomp-containai-agent-dev.json
+    source_basename="${SECCOMP_PROFILES[$base_name]}"
+    dest_filename="${source_basename%.json}-${CHANNEL}.json"
     dest_file="$DEST_DIR/$dest_filename"
 
     if [[ ! -f "$source_file" ]]; then
@@ -169,10 +170,6 @@ for base_name in "${!SECCOMP_PROFILES[@]}"; do
     echo "  ✓ Copied $dest_filename"
     MANIFEST_ENTRIES+=("$dest_filename $(file_sha256 "$dest_file")")
 done
-
-# Write channel metadata
-echo "$CHANNEL" > "$DEST_DIR/channel"
-MANIFEST_ENTRIES+=("channel $(file_sha256 "$DEST_DIR/channel")")
 
 # Write manifest if requested
 if [[ -n "$MANIFEST_PATH" ]]; then

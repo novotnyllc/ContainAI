@@ -344,7 +344,7 @@ mkdir -p "$RELEASE_ROOT"
 rsync -a "$PAYLOAD_DIR"/ "$RELEASE_ROOT"/
 
 # Write profile manifest for runtime freshness checks
-enforce_security_profiles_strict "$RELEASE_ROOT"
+enforce_security_profiles_strict "$RELEASE_ROOT" "$CHANNEL"
 
 if ! "$SCRIPT_DIR/integrity-check.sh" --mode prod --root "$RELEASE_ROOT" --sums "$RELEASE_ROOT/SHA256SUMS"; then
     die "Integrity validation failed after extraction"

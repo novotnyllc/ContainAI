@@ -292,7 +292,8 @@ test_shared_functions() {
     # Test resolve_seccomp_profile_path - profiles are installed to /opt/containai/profiles/
     # by setup-local-dev.sh which runs before tests in CI
     local seccomp_path
-    local system_profile="/opt/containai/profiles/seccomp-containai-agent.json"
+    # Channel-specific profile name (dev channel in test environment)
+    local system_profile="/opt/containai/profiles/seccomp-containai-agent-dev.json"
     
     if seccomp_path=$(resolve_seccomp_profile_path "$PROJECT_ROOT"); then
         assert_equals "$system_profile" "$seccomp_path" "resolve_seccomp_profile_path() returns system profile"
@@ -516,7 +517,8 @@ test_seccomp_ptrace_block() {
     test_section "Seccomp ptrace enforcement"
 
     # Profiles installed to /opt/containai/profiles/ by setup-local-dev.sh
-    local profile="/opt/containai/profiles/seccomp-containai-agent.json"
+    # Channel-specific profile name (dev channel in test environment)
+    local profile="/opt/containai/profiles/seccomp-containai-agent-dev.json"
     if [ ! -f "$profile" ]; then
         fail "Seccomp profile missing - did setup-local-dev.sh run?"
         return
@@ -1772,7 +1774,8 @@ test_seccomp_mount_block() {
     test_section "Seccomp mount enforcement"
 
     # Profiles installed to /opt/containai/profiles/ by setup-local-dev.sh
-    local profile="/opt/containai/profiles/seccomp-containai-agent.json"
+    # Channel-specific profile name (dev channel in test environment)
+    local profile="/opt/containai/profiles/seccomp-containai-agent-dev.json"
     if [ ! -f "$profile" ]; then
         fail "Seccomp profile missing - did setup-local-dev.sh run?"
         return

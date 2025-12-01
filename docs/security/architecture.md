@@ -511,8 +511,8 @@ flowchart TB
 
 - Container runs as non-root user (UID 1000)
 - `--security-opt no-new-privileges:true`
-- Seccomp: `host/profiles/seccomp-containai-agent.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
-- AppArmor: `containai` profile denies writes to `/proc`, `/sys`, and prevents `mount`
+- Seccomp: `seccomp-containai-agent-<channel>.json` (generated from template `host/profiles/seccomp-containai-agent.json`) blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
+- AppArmor: `containai-agent-<channel>` profile denies writes to `/proc`, `/sys`, and prevents `mount`
 - Root filesystem mounted read-only with tmpfs overlays only for `/tmp`, `/var/tmp`, `/run`, apt/dpkg paths
 - Package managers (pip/pipx, npm/yarn/pnpm, Playwright, uv, cargo/rustup, bun, NuGet/dotnet) write inside the shared `/toolcache` volume
 - Read-only mounts for authentication

@@ -101,8 +101,8 @@ flowchart TB
 We employ a multi-layered security approach:
 
 ### Layer 1: Kernel Hardening
-- **Seccomp**: We use a custom profile (`host/profiles/seccomp-containai-agent.json`) that blocks dangerous syscalls like `ptrace`, `mount`, `keyctl`, and `bpf`.
-- **AppArmor**: A mandatory access control profile (`containai-agent`) restricts file access (deny `/proc`, `/sys` writes) and capabilities, even if the process somehow gains root.
+- **Seccomp**: We use a custom profile (template: `host/profiles/seccomp-containai-agent.json`, runtime: `seccomp-containai-agent-<channel>.json`) that blocks dangerous syscalls like `ptrace`, `mount`, `keyctl`, and `bpf`.
+- **AppArmor**: A mandatory access control profile (`containai-agent-<channel>`) restricts file access (deny `/proc`, `/sys` writes) and capabilities, even if the process somehow gains root.
 - **Capabilities**: All Linux capabilities are dropped (`--cap-drop=ALL`).
 
 ### Layer 2: Process Isolation

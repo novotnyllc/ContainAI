@@ -66,8 +66,8 @@ We implement a **Defense-in-Depth** strategy using **Software-Defined Isolation*
 
 We strip the container of ability to attack the host kernel.
 
-  * **Seccomp:** Custom filter (`seccomp-containai-agent.json`) blocks dangerous syscalls (`ptrace`, `mount`, `keyctl`, `bpf`).
-  * **AppArmor:** Mandatory Access Control (`apparmor-containai-agent.profile`, rendered as `containai-agent-<channel>`) restricts the container process. Even if the agent gains root, it cannot write to `/proc`, `/sys`, or load kernel modules.
+  * **Seccomp:** Custom filter (`seccomp-containai-agent-<channel>.json`) blocks dangerous syscalls (`ptrace`, `mount`, `keyctl`, `bpf`).
+  * **AppArmor:** Mandatory Access Control (`containai-agent-<channel>`) restricts the container process. Even if the agent gains root, it cannot write to `/proc`, `/sys`, or load kernel modules.
   * **Capabilities:** All Linux capabilities dropped (`--cap-drop=ALL`); privilege escalation disabled (`no-new-privileges`).
 
 #### Layer 2: Active Process Supervision (The Semantic Firewall)

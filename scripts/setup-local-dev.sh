@@ -12,9 +12,10 @@ LAUNCHERS_PATH="$REPO_ROOT/host/launchers/entrypoints"
 readonly CONTAINAI_SYSTEM_PROFILES_DIR="/opt/containai/profiles"
 # Source profiles in repo (these get copied to system location)
 SECURITY_PROFILES_DIR="$REPO_ROOT/host/profiles"
-SECURITY_MANIFEST_NAME="containai-profiles.sha256"
-# Channel for AppArmor profile names (dev, nightly, prod)
+# Channel for profile names (dev, nightly, prod)
 CONTAINAI_LAUNCHER_CHANNEL="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
+# Manifest name includes channel for multi-channel coexistence
+SECURITY_MANIFEST_NAME="containai-profiles-${CONTAINAI_LAUNCHER_CHANNEL}.sha256"
 CHECK_ONLY=0
 
 while [[ $# -gt 0 ]]; do

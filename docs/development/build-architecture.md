@@ -396,7 +396,7 @@ The retention policy:
 ```mermaid
 flowchart TB
     subgraph payload["payload.tar.gz"]
-        host["host/<br/>├── launchers/<br/>│   ├── run-agent<br/>│   └── entrypoints/<br/>├── profiles/<br/>│   ├── apparmor-containai-agent-CHANNEL.profile<br/>│   ├── seccomp-containai-agent.json<br/>│   └── ...<br/>└── utils/<br/>    ├── install-release.sh<br/>    ├── common-functions.sh<br/>    └── ..."]
+        host["host/<br/>├── launchers/<br/>│   ├── run-agent<br/>│   └── entrypoints/<br/>├── profiles/<br/>│   ├── apparmor-containai-agent-CHANNEL.profile<br/>│   ├── seccomp-containai-agent-CHANNEL.json<br/>│   └── ...<br/>└── utils/<br/>    ├── install-release.sh<br/>    ├── common-functions.sh<br/>    └── ..."]
         
         agentconfigs["agent-configs/<br/>├── claude/<br/>├── codex/<br/>└── github-copilot/"]
         
@@ -511,7 +511,7 @@ flowchart TB
 | `*.intoto.jsonl` | Inside payload | `attest-build-provenance` | Sigstore verification |
 | `payload.tar.gz` | `artifacts/publish/<version>/` | `package-artifacts.sh` | ORAS push |
 | `containai-VERSION.tar.gz` | `artifacts/publish/<version>/` | `package-artifacts.sh` | GitHub Release asset |
-| `containai-profiles.sha256` | `/opt/containai/profiles/` | `prepare-profiles.sh` | `setup-local-dev.sh` (change detection) |
+| `containai-profiles-CHANNEL.sha256` | `/opt/containai/profiles/` | `prepare-profiles.sh` | `setup-local-dev.sh` (change detection) |
 
 ---
 
@@ -613,8 +613,8 @@ sequenceDiagram
     Note over Prepare: Python rewrites profile names:<br/>containai-agent → containai-agent-dev<br/>peer=containai-agent → peer=containai-agent-dev
     
     Prepare->>Dest: apparmor-containai-agent-dev.profile
-    Prepare->>Dest: seccomp-containai-agent.json (copy)
-    Prepare->>Dest: containai-profiles.sha256 (manifest)
+    Prepare->>Dest: seccomp-containai-agent-dev.json
+    Prepare->>Dest: containai-profiles-dev.sha256 (manifest)
     
     Dest->>AppArmor: apparmor_parser -r
     AppArmor-->>Dest: Profile loaded as containai-agent-dev

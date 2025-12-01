@@ -824,9 +824,22 @@ resolve_security_asset_path() {
     return 1
 }
 
+# Helper to get channel-specific seccomp filename.
+# Args:
+#   $1: base_name - Base profile name (e.g., "containai-agent")
+# Returns: Channel-specific filename (e.g., "seccomp-containai-agent-dev.json")
+_format_seccomp_filename() {
+    local base_name="$1"
+    local channel
+    channel=$(_resolve_apparmor_channel)  # Reuse same channel resolution
+    echo "seccomp-${base_name}-${channel}.json"
+}
+
 # Backward-compatible helper for the agent seccomp profile; use resolve_security_asset_path directly where possible.
 resolve_seccomp_profile_path() {
-    resolve_security_asset_path "$1" "seccomp-containai-agent.json" "Agent seccomp profile"
+    local filename
+    filename=$(_format_seccomp_filename "containai-agent")
+    resolve_security_asset_path "$1" "$filename" "Agent seccomp profile"
 }
 
 # Resolves and optionally loads an AppArmor profile for a given channel.
@@ -892,13 +905,18 @@ load_security_profiles() {
     local containai_root="$1"
     local agent_seccomp proxy_seccomp log_forwarder_seccomp apparmor_profile=""
 
-    if ! agent_seccomp=$(resolve_security_asset_path "$containai_root" "seccomp-containai-agent.json" "Agent seccomp profile"); then
+    local agent_seccomp_file proxy_seccomp_file log_forwarder_seccomp_file
+    agent_seccomp_file=$(_format_seccomp_filename "containai-agent")
+    proxy_seccomp_file=$(_format_seccomp_filename "containai-proxy")
+    log_forwarder_seccomp_file=$(_format_seccomp_filename "containai-log-forwarder")
+
+    if ! agent_seccomp=$(resolve_security_asset_path "$containai_root" "$agent_seccomp_file" "Agent seccomp profile"); then
         return 1
     fi
-    if ! proxy_seccomp=$(resolve_security_asset_path "$containai_root" "seccomp-containai-proxy.json" "Proxy seccomp profile"); then
+    if ! proxy_seccomp=$(resolve_security_asset_path "$containai_root" "$proxy_seccomp_file" "Proxy seccomp profile"); then
         return 1
     fi
-    if ! log_forwarder_seccomp=$(resolve_security_asset_path "$containai_root" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile"); then
+    if ! log_forwarder_seccomp=$(resolve_security_asset_path "$containai_root" "$log_forwarder_seccomp_file" "Log forwarder seccomp profile"); then
         return 1
     fi
 
@@ -934,11 +952,13 @@ ensure_security_assets_current() {
     local channel
     channel=$(_resolve_apparmor_channel)
     
+    local seccomp_filename
+    seccomp_filename=$(_format_seccomp_filename "containai-agent")
     local seccomp_source="$containai_root/host/profiles/seccomp-containai-agent.json"
     # Channel-specific apparmor profile
     local apparmor_source="$containai_root/host/profiles/apparmor-containai-agent-${channel}.profile"
-    local manifest_path="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/containai-profiles.sha256"
-    local manifest_source="$containai_root/host/profiles/containai-profiles.sha256"
+    local manifest_path="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/containai-profiles-${channel}.sha256"
+    local manifest_source="$containai_root/host/profiles/containai-profiles-${channel}.sha256"
     if [ ! -f "$manifest_path" ] && [ -f "$manifest_source" ]; then
         manifest_path="$manifest_source"
     fi
@@ -951,7 +971,8 @@ ensure_security_assets_current() {
     local manifest_seccomp_hash=""
     local manifest_apparmor_hash=""
     if [ -f "$manifest_path" ]; then
-        manifest_seccomp_hash=$(awk '/seccomp-containai-agent.json/ {print $2}' "$manifest_path" 2>/dev/null | head -1)
+        # Look for channel-specific seccomp profile in manifest
+        manifest_seccomp_hash=$(awk "/${seccomp_filename//\//\\/}/ {print \$2}" "$manifest_path" 2>/dev/null | head -1)
         # Look for channel-specific apparmor profile in manifest
         manifest_apparmor_hash=$(awk "/apparmor-containai-agent-${channel}.profile/ {print \$2}" "$manifest_path" 2>/dev/null | head -1)
     fi
@@ -1092,8 +1113,15 @@ verify_host_security_prereqs() {
         profiles_file_readable=1
     fi
 
+    local channel
+    channel=$(_resolve_apparmor_channel)
+    local seccomp_agent_file seccomp_proxy_file seccomp_fwd_file
+    seccomp_agent_file=$(_format_seccomp_filename "containai-agent")
+    seccomp_proxy_file=$(_format_seccomp_filename "containai-proxy")
+    seccomp_fwd_file=$(_format_seccomp_filename "containai-log-forwarder")
+
     local default_seccomp_profile="$containai_root/host/profiles/seccomp-containai-agent.json"
-    local installed_seccomp_profile="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/seccomp-containai-agent.json"
+    local installed_seccomp_profile="${CONTAINAI_SYSTEM_PROFILES_DIR%/}/$seccomp_agent_file"
 
     # Check Agent Seccomp
     if ! resolve_seccomp_profile_path "$containai_root" >/dev/null 2>&1; then
@@ -1105,12 +1133,12 @@ verify_host_security_prereqs() {
     fi
 
     # Check Proxy Seccomp
-    if ! resolve_security_asset_path "$containai_root" "seccomp-containai-proxy.json" "Proxy seccomp profile" >/dev/null 2>&1; then
+    if ! resolve_security_asset_path "$containai_root" "$seccomp_proxy_file" "Proxy seccomp profile" >/dev/null 2>&1; then
         errors+=("Proxy seccomp profile not found. Run scripts/setup-local-dev.sh to reinstall the host security assets.")
     fi
 
     # Check Log Forwarder Seccomp
-    if ! resolve_security_asset_path "$containai_root" "seccomp-containai-log-forwarder.json" "Log forwarder seccomp profile" >/dev/null 2>&1; then
+    if ! resolve_security_asset_path "$containai_root" "$seccomp_fwd_file" "Log forwarder seccomp profile" >/dev/null 2>&1; then
         errors+=("Log forwarder seccomp profile not found. Run scripts/setup-local-dev.sh to reinstall the host security assets.")
     fi
 

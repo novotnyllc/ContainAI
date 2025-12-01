@@ -167,7 +167,7 @@ if [[ -d "$PROFILES_DIR" ]]; then
         --channel "$LAUNCHER_CHANNEL" \
         --source "$PROFILES_DIR" \
         --dest "$PROFILES_STAGING" \
-        --manifest "$PROFILES_STAGING/containai-profiles.sha256"; then
+        --manifest "$PROFILES_STAGING/containai-profiles-${CHANNEL}.sha256"; then
         rm -rf "$PROFILES_STAGING"
         echo "❌ Failed to generate security profiles for channel $LAUNCHER_CHANNEL" >&2
         exit 1
