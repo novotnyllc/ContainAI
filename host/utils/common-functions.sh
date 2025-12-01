@@ -2313,7 +2313,7 @@ start_proxy_log_pipeline() {
         ${agent_id:+--label "containai.agent=${agent_id}"} \
         ${session_id:+--label "containai.session=${session_id}"} \
         "$forwarder_image" \
-        sh -c "tail -F /var/log/squid/access.log 2>/dev/null | socat -u - OPENSSL:${broker_name}:${broker_port},cert=/certs/log-client.crt,key=/certs/log-client.key,cafile=/certs/log-ca.crt,verify=1 2>>/tmp/forwarder.err"
+        sh -c "echo 'Forwarder starting' >&2; ls -la /certs/ >&2; ls -la /var/log/squid/ >&2; which socat >&2; tail -F /var/log/squid/access.log 2>/dev/null | socat -d -u - OPENSSL:${broker_name}:${broker_port},cert=/certs/log-client.crt,key=/certs/log-client.key,cafile=/certs/log-ca.crt,verify=1 2>&1 | tee -a /tmp/forwarder.err"
     then
         echo "❌ Failed to start log forwarder container $forwarder_name" >&2
         container_cli rm -f "$broker_name" >/dev/null 2>&1 || true

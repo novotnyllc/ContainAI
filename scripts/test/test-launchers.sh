@@ -1511,7 +1511,8 @@ DOCKERFILE
         echo "DEBUG: broker.err contents:" >&2
         cat "$log_dir/broker.err" 2>&1 | head -20 >&2 || echo "(empty or missing)" >&2
         echo "DEBUG: forwarder.err contents (from tmpfs):" >&2
-        docker cp "${proxy_container}-log-forwarder:/tmp/forwarder.err" - 2>/dev/null | tar -xO 2>&1 | head -20 >&2 || echo "(empty or missing)" >&2
+        # Use docker exec to cat the file directly instead of docker cp + tar
+        docker exec "${proxy_container}-log-forwarder" cat /tmp/forwarder.err 2>&1 | head -20 >&2 || echo "(container not running or file missing)" >&2
         echo "DEBUG: broker container logs:" >&2
         docker logs "${proxy_container}-log-broker" 2>&1 | tail -20 >&2 || echo "(no logs)" >&2
         echo "DEBUG: forwarder container logs:" >&2
