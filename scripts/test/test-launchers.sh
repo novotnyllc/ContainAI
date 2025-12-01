@@ -1460,13 +1460,16 @@ DOCKERFILE
     local log_dir
     log_dir=$(mktemp -d "${TMPDIR:-/tmp}/containai-proxy-log.XXXXXX")
     local cert_dir="$log_dir/certs"
-    local proxy_network="bridge"
+    # Create a user-defined network for DNS resolution between containers
+    local proxy_network="containai-test-log-net-$RANDOM"
+    docker network create "$proxy_network" >/dev/null 2>&1 || true
 
     generate_log_broker_certs "$cert_dir"
 
     # Mock proxy container that writes logs (simulates squid access log)
     # Create mock proxy with a VOLUME for the log directory (required for --volumes-from)
     docker run -d --name "$proxy_container" --label "containai.test=true" \
+        --network "$proxy_network" \
         -v /var/log/squid \
         "$test_image" sh -c 'mkdir -p /var/log/squid && touch /var/log/squid/access.log && chmod 666 /var/log/squid/access.log && i=0; while true; do echo "log-$i" >> /var/log/squid/access.log; i=$((i+1)); sleep 1; done' >/dev/null
 
@@ -1498,6 +1501,8 @@ DOCKERFILE
         cat "$log_dir/access.log" 2>&1 | head -20 >&2 || echo "(empty or missing)" >&2
         echo "DEBUG: broker.err contents:" >&2
         cat "$log_dir/broker.err" 2>&1 | head -20 >&2 || echo "(empty or missing)" >&2
+        echo "DEBUG: forwarder.err contents (from tmpfs):" >&2
+        docker cp "${proxy_container}-log-forwarder:/tmp/forwarder.err" - 2>/dev/null | tar -xO 2>&1 | head -20 >&2 || echo "(empty or missing)" >&2
         echo "DEBUG: broker container logs:" >&2
         docker logs "${proxy_container}-log-broker" 2>&1 | tail -20 >&2 || echo "(no logs)" >&2
         echo "DEBUG: forwarder container logs:" >&2
@@ -1511,6 +1516,7 @@ DOCKERFILE
 
     stop_proxy_log_pipeline "$proxy_container"
     docker rm -f "$proxy_container" >/dev/null 2>&1 || true
+    docker network rm "$proxy_network" >/dev/null 2>&1 || true
     docker rmi -f "$test_image" >/dev/null 2>&1 || true
     rm -rf "$log_dir"
 }
