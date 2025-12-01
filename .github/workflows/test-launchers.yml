@@ -140,14 +140,15 @@ jobs:
               exit 1
           }
 
-          if ($output -notmatch "Linux containers") {
+          # Match either "Linux containers" error or "WSL" not available error
+          if ($output -notmatch "(Linux containers|WSL)") {
               Write-Error "Launcher script failed for an unexpected reason."
               exit 1
           }
 
           Write-Host "Windows runner correctly reported the unsupported environment."
-            $global:LASTEXITCODE = 0
-            exit 0
+          $global:LASTEXITCODE = 0
+          exit 0
       
       - name: Cleanup test containers
         if: always()
