@@ -96,9 +96,16 @@ else
     echo "         Install from: https://git-scm.com/downloads"
 fi
 
-# Check Git configuration
+# Check Git configuration for the actual user (not root when running via sudo)
+# When invoked via sudo, SUDO_USER contains the original user
+GIT_CMD=(git config --global)
+if [ -n "${SUDO_USER:-}" ] && [ "$(id -u)" -eq 0 ]; then
+    # Running as root via sudo - check the invoking user's config
+    GIT_CMD=(sudo -u "$SUDO_USER" git config --global)
+fi
+
 print_checking "Git user.name configuration"
-if GIT_NAME=$(git config --global user.name 2>/dev/null) && [ -n "$GIT_NAME" ]; then
+if GIT_NAME=$("${GIT_CMD[@]}" user.name 2>/dev/null) && [ -n "$GIT_NAME" ]; then
     print_success "Git user.name configured: $GIT_NAME"
 else
     print_error "Git user.name not configured"
@@ -106,7 +113,7 @@ else
 fi
 
 print_checking "Git user.email configuration"
-if GIT_EMAIL=$(git config --global user.email 2>/dev/null) && [ -n "$GIT_EMAIL" ]; then
+if GIT_EMAIL=$("${GIT_CMD[@]}" user.email 2>/dev/null) && [ -n "$GIT_EMAIL" ]; then
     print_success "Git user.email configured: $GIT_EMAIL"
 else
     print_error "Git user.email not configured"

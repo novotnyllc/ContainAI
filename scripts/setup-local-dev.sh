@@ -37,41 +37,6 @@ fi
 
 echo "Installing launchers to PATH..."
 
-if [[ $CHECK_ONLY -eq 0 ]]; then
-    echo "Running ContainAI prerequisite and health checks..."
-    echo ""
-    if ! "$REPO_ROOT/host/utils/verify-prerequisites.sh"; then
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "❌ Prerequisite verification failed."
-        echo ""
-        echo "Review the errors marked with ✗ above and fix them, then re-run:"
-        echo "    ./scripts/setup-local-dev.sh"
-        echo ""
-        echo "Common fixes:"
-        echo "  • Docker not running    → Start Docker Desktop or: sudo systemctl start docker"
-        echo "  • Git not configured    → git config --global user.name \"Your Name\""
-        echo "                            git config --global user.email \"you@example.com\""
-        echo "  • socat missing         → sudo apt-get install socat  (Debian/Ubuntu)"
-        echo "                            brew install socat          (macOS)"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        exit 1
-    fi
-
-    if ! "$REPO_ROOT/host/utils/check-health.sh"; then
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "❌ Health check failed."
-        echo ""
-        echo "Review the errors above and fix them, then re-run:"
-        echo "    ./scripts/setup-local-dev.sh"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        exit 1
-    fi
-else
-    echo "Checking security assets only (skipping prerequisite and health checks)..."
-fi
-
 file_sha256() {
     local file="$1"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -220,6 +185,40 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
 fi
 
 install_security_assets
+
+# Run prerequisite and health checks AFTER security assets are installed
+# This ensures profiles are in place before checking for them
+echo ""
+echo "Running ContainAI prerequisite and health checks..."
+echo ""
+if ! "$REPO_ROOT/host/utils/verify-prerequisites.sh"; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "❌ Prerequisite verification failed."
+    echo ""
+    echo "Review the errors marked with ✗ above and fix them, then re-run:"
+    echo "    ./scripts/setup-local-dev.sh"
+    echo ""
+    echo "Common fixes:"
+    echo "  • Docker not running    → Start Docker Desktop or: sudo systemctl start docker"
+    echo "  • Git not configured    → git config --global user.name \"Your Name\""
+    echo "                            git config --global user.email \"you@example.com\""
+    echo "  • socat missing         → sudo apt-get install socat  (Debian/Ubuntu)"
+    echo "                            brew install socat          (macOS)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 1
+fi
+
+if ! "$REPO_ROOT/host/utils/check-health.sh"; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "❌ Health check failed."
+    echo ""
+    echo "Review the errors above and fix them, then re-run:"
+    echo "    ./scripts/setup-local-dev.sh"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 1
+fi
 
 # Determine shell rc file
 if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$SHELL" == *"zsh"* ]]; then

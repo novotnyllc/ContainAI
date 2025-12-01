@@ -2224,9 +2224,14 @@ start_proxy_log_pipeline() {
     local forwarder_image="${LOG_FORWARDER_IMAGE:-${CONTAINAI_IMAGE_PREFIX:-containai-dev}-log-forwarder:${CONTAINAI_IMAGE_TAG:-devlocal}}"
     local broker_image="${LOG_BROKER_IMAGE:-$forwarder_image}"
     local forwarder_seccomp="${LOG_FORWARDER_SECCOMP_PROFILE_PATH:-${SECCOMP_PROFILE_PATH:-}}"
-    local forwarder_apparmor="${LOG_FORWARDER_APPARMOR_PROFILE:-containai-log-forwarder}"
+    # Use channel-aware AppArmor profile name
+    local channel
+    channel=$(_resolve_apparmor_channel)
+    local default_log_apparmor
+    default_log_apparmor=$(_format_apparmor_profile_name "containai-log-forwarder" "$channel")
+    local forwarder_apparmor="${LOG_FORWARDER_APPARMOR_PROFILE:-$default_log_apparmor}"
     local broker_seccomp="${LOG_BROKER_SECCOMP_PROFILE_PATH:-${SECCOMP_PROFILE_PATH:-}}"
-    local broker_apparmor="${LOG_BROKER_APPARMOR_PROFILE:-containai-log-forwarder}"
+    local broker_apparmor="${LOG_BROKER_APPARMOR_PROFILE:-$default_log_apparmor}"
     local run_user
     local proxy_image=""
     run_user="$(id -u):$(id -g)"

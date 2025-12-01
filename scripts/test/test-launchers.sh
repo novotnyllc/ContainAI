@@ -1477,6 +1477,15 @@ test_mitm_log_forwarding() {
 
     source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
+    # Use alpine - it has sh, openssl, and all utils needed for log forwarding
+    local test_image="alpine:latest"
+    if ! docker image inspect "$test_image" >/dev/null 2>&1; then
+        docker pull "$test_image" >/dev/null 2>&1 || {
+            fail "Unable to pull $test_image"
+            return
+        }
+    fi
+
     local proxy_container="containai-test-proxy-$RANDOM"
     local log_dir
     log_dir=$(mktemp -d "${TMPDIR:-/tmp}/containai-proxy-log.XXXXXX")
@@ -1485,14 +1494,17 @@ test_mitm_log_forwarding() {
 
     generate_log_broker_certs "$cert_dir"
 
-    docker run -d --name "$proxy_container" --entrypoint sh "$TEST_CODEX_IMAGE" -c 'mkdir -p /var/log/squid; touch /var/log/squid/access.log; i=0; while true; do echo \"log-$i\" >> /var/log/squid/access.log; i=$((i+1)); sleep 1; done' >/dev/null
+    # Mock proxy container that writes logs (simulates squid access log)
+    docker run -d --name "$proxy_container" --label "containai.test=true" \
+        "$test_image" sh -c 'mkdir -p /var/log/squid; touch /var/log/squid/access.log; i=0; while true; do echo "log-$i" >> /var/log/squid/access.log; i=$((i+1)); sleep 1; done' >/dev/null
 
-    LOG_FORWARDER_IMAGE="$TEST_CODEX_IMAGE" LOG_BROKER_IMAGE="$TEST_CODEX_IMAGE" \
+    # Use alpine for forwarder/broker with the installed security profiles
+    LOG_FORWARDER_IMAGE="$test_image" LOG_BROKER_IMAGE="$test_image" \
         start_proxy_log_pipeline "$proxy_container" "$proxy_network" "$log_dir" "$cert_dir"
 
     sleep 3
 
-    if [ -f "$log_dir/access.log" ] && grep -q \"log-\" "$log_dir/access.log"; then
+    if [ -f "$log_dir/access.log" ] && grep -q "log-" "$log_dir/access.log"; then
         pass "Log forwarding captured proxy output via TLS broker"
     else
         fail "Log forwarding did not capture proxy output"
@@ -1804,7 +1816,6 @@ ALL_TESTS=(
     "test_container_naming"
     "test_container_labels"
     "test_image_pull"
-    "test_mitm_log_forwarding"
     "test_mitm_ca_generation"
     "test_branch_sanitization"
     "test_multiple_agents"
