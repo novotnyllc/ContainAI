@@ -756,11 +756,17 @@ jobs:
         run: mkdir -p "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}"
 
       - name: Build payload (no packaging)
+        id: build_payload
         run: |
-          scripts/release/build-payload.sh \
+          output=$(scripts/release/build-payload.sh \
             --version "$VERSION" \
             --out "${{ env.ARTIFACTS_PUBLISH }}" \
-            --profile-env "${{ env.ARTIFACTS_PUBLISH }}/profile.env"
+            --profile-env "${{ env.ARTIFACTS_PUBLISH }}/profile.env")
+          echo "$output"
+          # Extract actual version (includes git sha for dev/nightly) and export to env
+          payload_version=$(echo "$output" | grep '^PAYLOAD_VERSION=' | cut -d= -f2)
+          echo "payload_version=$payload_version" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$payload_version" >> "$GITHUB_ENV"
         env:
           IMAGE_DIGEST: ${{ env.IMAGE_DIGEST }}
           IMAGE_DIGEST_COPILOT: ${{ env.IMAGE_DIGEST_COPILOT }}
@@ -772,15 +778,15 @@ jobs:
       - name: Generate SBOM from payload (GitHub Action)
         uses: anchore/sbom-action@v0
         with:
-          path: ${{ env.ARTIFACTS_PUBLISH }}/${{ env.VERSION }}/payload
-          output-file: ${{ env.ARTIFACTS_PUBLISH }}/${{ env.VERSION }}/payload/payload.sbom.json
+          path: ${{ env.ARTIFACTS_PUBLISH }}/${{ steps.build_payload.outputs.payload_version }}/payload
+          output-file: ${{ env.ARTIFACTS_PUBLISH }}/${{ steps.build_payload.outputs.payload_version }}/payload/payload.sbom.json
 
       - name: Attest payload SBOM (GitHub attestation)
         if: ${{ env.CHANNEL != 'dev' }}
         id: attest_sbom
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: ${{ env.ARTIFACTS_PUBLISH }}/${{ env.VERSION }}/payload/payload.sbom.json
+          subject-path: ${{ env.ARTIFACTS_PUBLISH }}/${{ steps.build_payload.outputs.payload_version }}/payload/payload.sbom.json
 
       - name: Persist SBOM attestation bundle into payload
         if: ${{ env.CHANNEL != 'dev' }}

@@ -195,3 +195,4 @@ mkdir -p "$(dirname "$DEST_PAYLOAD")"
 copy_path "$PAYLOAD_DIR_BUILD/" "$DEST_PAYLOAD/"
 
 echo "✅ Payload ready at $DEST_PAYLOAD"
+echo "PAYLOAD_VERSION=$VERSION"
