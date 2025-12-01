@@ -158,7 +158,12 @@ jobs:
       - name: Scan base image by digest
         if: needs.determine-context.outputs.push == 'true'
         run: |
+          # Skip large browser binaries (Playwright/Chromium) that don't contain secrets
           trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --skip-dirs "/home/agentuser/.cache/ms-playwright" \
+            --skip-dirs "/root/.cache/ms-playwright" \
+            --skip-dirs "/usr/lib/chromium" \
+            --skip-dirs "/usr/lib/firefox" \
             --platform "${{ matrix.arch }}" \
             "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
@@ -354,7 +359,12 @@ jobs:
       - name: Scan image by digest
         if: needs.determine-context.outputs.push == 'true'
         run: |
+          # Skip large browser binaries (Playwright/Chromium) that don't contain secrets
           trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --skip-dirs "/home/agentuser/.cache/ms-playwright" \
+            --skip-dirs "/root/.cache/ms-playwright" \
+            --skip-dirs "/usr/lib/chromium" \
+            --skip-dirs "/usr/lib/firefox" \
             --platform "${{ matrix.arch }}" \
             "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
@@ -547,7 +557,12 @@ jobs:
       - name: Scan image by digest
         if: needs.determine-context.outputs.push == 'true'
         run: |
+          # Skip large browser binaries (Playwright/Chromium) that don't contain secrets
           trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --skip-dirs "/home/agentuser/.cache/ms-playwright" \
+            --skip-dirs "/root/.cache/ms-playwright" \
+            --skip-dirs "/usr/lib/chromium" \
+            --skip-dirs "/usr/lib/firefox" \
             --platform "${{ matrix.arch }}" \
             "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
 

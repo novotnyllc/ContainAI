@@ -24,7 +24,19 @@ FIXTURE_CONFIG_FILE="$TEST_MOCK_SECRETS_DIR/config.toml"
 FIXTURE_GH_TOKEN_FILE="$TEST_MOCK_SECRETS_DIR/gh-token.txt"
 TEST_PROXY_STARTED="false"
 SECRET_SCANNER_BIN="${CONTAINAI_TRIVY_BIN:-}"
-SECRET_SCAN_ARGS=(image --scanners secret --severity HIGH --severity CRITICAL --exit-code 1 --no-progress)
+# Skip large binary directories (Playwright browsers, npm cache) that won't contain secrets
+# and cause Trivy to exhaust /tmp space during extraction
+SECRET_SCAN_ARGS=(
+    image
+    --scanners secret
+    --severity HIGH --severity CRITICAL
+    --exit-code 1
+    --no-progress
+    --skip-dirs "/home/agentuser/.cache/ms-playwright"
+    --skip-dirs "/root/.cache/ms-playwright"
+    --skip-dirs "/usr/lib/chromium"
+    --skip-dirs "/usr/lib/firefox"
+)
 
 ensure_secret_scanner() {
     if [[ -n "$SECRET_SCANNER_BIN" ]]; then
