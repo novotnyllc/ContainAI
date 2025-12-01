@@ -1399,7 +1399,7 @@ test_list_agents() {
     
     create_test_container "codex" "test-containai-repo" "develop" >/dev/null
     
-    local output=$("$PROJECT_ROOT/host/launchers/list-agents")
+    local output=$("$PROJECT_ROOT/host/launchers/entrypoints/list-agents-${CONTAINAI_PROFILE:-dev}")
     
     assert_contains "$output" "copilot-test-containai-repo-main${PROFILE_SUFFIX}" "list-agents shows copilot container"
     assert_contains "$output" "codex-test-containai-repo-develop${PROFILE_SUFFIX}" "list-agents shows codex container"
@@ -1414,7 +1414,7 @@ test_remove_agent() {
     create_test_container "codex" "test-containai-repo" "develop" >/dev/null
     
     # Remove with --no-push flag (since test container doesn't have git)
-    "$PROJECT_ROOT/host/launchers/remove-agent" "$container_name" --no-push
+    "$PROJECT_ROOT/host/launchers/entrypoints/remove-agent-${CONTAINAI_PROFILE:-dev}" "$container_name" --no-push
     
     # Verify container is removed
     if ! docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" | grep -q "^${container_name}$"; then

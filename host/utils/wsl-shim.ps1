@@ -16,11 +16,37 @@ function Get-WslExecutablePath {
     if ($null -ne $candidate) {
         return $candidate.Source
     }
-    throw "WSL is not installed. Please run 'wsl --install' and try again."
+    # Return null instead of throwing - caller will check WslDistributionAvailable
+    return $null
+}
+
+function Test-WslDistributionAvailable {
+    if ($script:RunningOnLinux) { return $true }
+    if ($null -eq $script:WslExePath) { return $false }
+    
+    # Check if any WSL distribution is installed
+    $output = & $script:WslExePath --list --quiet 2>&1
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($output)) {
+        return $false
+    }
+    return $true
 }
 
 $script:WslExePath = Get-WslExecutablePath
+$script:WslDistributionAvailable = Test-WslDistributionAvailable
 $script:RepoRootPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).ProviderPath
+
+function Skip-IfNoWsl {
+    <#
+    .SYNOPSIS
+        Checks if WSL is available and skips the calling test if not.
+    .DESCRIPTION
+        For use in Pester tests to gracefully skip when WSL isn't configured.
+    #>
+    if (-not $script:RunningOnLinux -and -not $script:WslDistributionAvailable) {
+        Set-ItResult -Skipped -Because "No WSL distribution is installed"
+    }
+}
 
 function Convert-ToWslPath {
     param(
@@ -32,6 +58,10 @@ function Convert-ToWslPath {
     
     if ($script:RunningOnLinux) {
         return $resolved
+    }
+
+    if (-not $script:WslDistributionAvailable) {
+        throw "No WSL distribution is installed. Please run 'wsl --install' and try again."
     }
 
     $output = & $script:WslExePath wslpath -u "$resolved" 2>&1
