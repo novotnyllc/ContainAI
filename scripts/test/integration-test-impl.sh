@@ -315,6 +315,8 @@ docker run -d \\
     --label "containai.repo=test-repo" \\
     --label "containai.branch=main" \\
     --network "$TEST_NETWORK" \\
+    --cap-add SYS_ADMIN \\
+    --cap-add NET_ADMIN \\
     -v "$TEST_REPO_DIR:/workspace" \\
     -e "GH_TOKEN=$TEST_GH_TOKEN" \\
     "$TEST_COPILOT_IMAGE" \\
@@ -451,6 +453,51 @@ test_agentcli_uid_split() {
         pass "/run/agent-secrets mount is private"
     else
         fail "/run/agent-secrets propagation mismatch ($propagation)"
+    fi
+}
+
+test_capabilities_dropped() {
+    test_section "Testing capability dropping after privileged setup"
+
+    local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
+
+    # Verify the agent process is running as non-root
+    local agent_uid
+    agent_uid=$(docker exec "$container_name" id -u 2>/dev/null || echo "unknown")
+    if [ "$agent_uid" != "0" ]; then
+        pass "Agent process running as non-root (UID: $agent_uid)"
+    else
+        fail "Agent process unexpectedly running as root"
+        return
+    fi
+
+    # Check that no capabilities are available to the agent process
+    # Using getpcaps to inspect the shell's capabilities
+    local caps
+    caps=$(docker exec "$container_name" bash -c 'getpcaps $$ 2>&1' || true)
+    
+    # getpcaps output for a process with no caps looks like: "PID: ="
+    # If caps are present, it shows: "PID: = cap_sys_admin,cap_net_admin+ep"
+    if echo "$caps" | grep -qE "cap_sys_admin|cap_net_admin"; then
+        fail "Agent process still has SYS_ADMIN or NET_ADMIN capabilities ($caps)"
+    else
+        pass "Agent process has no dangerous capabilities"
+    fi
+
+    # Verify that attempting privileged operations fails
+    # Try to mount a tmpfs (requires CAP_SYS_ADMIN)
+    if docker exec "$container_name" bash -c 'mount -t tmpfs tmpfs /tmp/test-mount 2>/dev/null'; then
+        fail "Agent can still mount filesystems (CAP_SYS_ADMIN not dropped)"
+        docker exec "$container_name" umount /tmp/test-mount 2>/dev/null || true
+    else
+        pass "Agent cannot mount filesystems (CAP_SYS_ADMIN dropped)"
+    fi
+
+    # Try to modify iptables (requires CAP_NET_ADMIN)
+    if docker exec "$container_name" bash -c 'iptables -L 2>/dev/null'; then
+        fail "Agent can still list iptables (CAP_NET_ADMIN not dropped)"
+    else
+        pass "Agent cannot access iptables (CAP_NET_ADMIN dropped)"
     fi
 }
 
@@ -1062,8 +1109,10 @@ PY
     fi
 
     local proxy_log
-    # Wait a moment for logs to flush to disk
-    sleep 2
+    # Wait for logs to flush to disk - Squid's stdio: logging buffers writes
+    # Send SIGUSR1 to rotate logs which forces a flush, then wait a moment
+    docker exec "$proxy_container" kill -USR1 1 2>/dev/null || true
+    sleep 3
     
     # Read the access log file directly from the container
     proxy_log=$(docker exec "$proxy_container" cat /var/log/squid/access.log 2>/dev/null || true)
@@ -1161,12 +1210,44 @@ EOF
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         --cap-add SYS_ADMIN \
+        --cap-add NET_ADMIN \
         -e "PROXY_FIREWALL_APPLIED=1" \
         -v "$helper_server_script:/server.py:ro" \
         "$TEST_CODEX_IMAGE" \
         python3 /server.py
     then
         fail "Failed to start upstream server for helper test"
+        cleanup_helper_resources
+        return
+    fi
+
+    # Wait for upstream server to be ready
+    local upstream_ready=false
+    for _ in {1..15}; do
+        local status
+        status=$(docker inspect -f '{{.State.Status}}' "$allowed_container" 2>/dev/null || echo "unknown")
+        if [ "$status" = "running" ]; then
+            if docker exec "$allowed_container" bash -c "exec 3<>/dev/tcp/localhost/8080" >/dev/null 2>&1; then
+                upstream_ready=true
+                docker exec "$allowed_container" bash -c "exec 3>&-" 2>/dev/null || true
+                break
+            fi
+        elif [ "$status" = "exited" ]; then
+            fail "Upstream server container exited unexpectedly"
+            echo "DEBUG: Upstream server logs:"
+            docker logs "$allowed_container" 2>&1 || true
+            cleanup_helper_resources
+            return
+        fi
+        sleep 1
+    done
+
+    if [ "$upstream_ready" = false ]; then
+        fail "Upstream server did not become ready"
+        echo "DEBUG: Upstream server status:"
+        docker inspect -f '{{.State.Status}}' "$allowed_container" 2>/dev/null || true
+        echo "DEBUG: Upstream server logs:"
+        docker logs "$allowed_container" 2>&1 | tail -50 || true
         cleanup_helper_resources
         return
     fi
@@ -1179,11 +1260,31 @@ EOF
         --ip "$proxy_ip" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --add-host "${allowed_domain}:${allowed_ip}" \
         -e "SQUID_ALLOWED_DOMAINS=${allowed_domain}" \
         -v "$helper_acl_file:/etc/squid/helper-acls.conf:ro" \
         "$proxy_image" >/dev/null
     then
         fail "Failed to start helper squid proxy"
+        cleanup_helper_resources
+        return
+    fi
+
+    # Wait for proxy to be ready
+    local ready=false
+    for _ in {1..10}; do
+        if docker exec "$proxy_container" bash -c "exec 3<>/dev/tcp/localhost/3128" >/dev/null 2>&1; then
+            ready=true
+            docker exec "$proxy_container" bash -c "exec 3>&-" 2>/dev/null || true
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$ready" = false ]; then
+        fail "Helper squid proxy did not become ready"
+        echo "DEBUG: Helper squid proxy logs:"
+        docker logs "$proxy_container" 2>&1 || true
         cleanup_helper_resources
         return
     fi
@@ -1196,6 +1297,7 @@ EOF
         --label "$TEST_LABEL_SESSION" \
         --cap-add NET_ADMIN \
         --cap-add SYS_ADMIN \
+        --add-host "${allowed_domain}:${allowed_ip}" \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
@@ -1215,7 +1317,37 @@ exec python3 /workspace/docker/runtime/mcp-http-helper.py --name helper-test --l
         return
     fi
 
-    sleep 2
+    # Wait for helper container to be running and for the helper script to start
+    local helper_ready=false
+    for _ in {1..15}; do
+        local status
+        status=$(docker inspect -f '{{.State.Status}}' "$helper_container" 2>/dev/null || echo "unknown")
+        if [ "$status" = "running" ]; then
+            # Check if the helper is listening
+            if docker exec "$helper_container" bash -c "exec 3<>/dev/tcp/localhost/18080" >/dev/null 2>&1; then
+                helper_ready=true
+                docker exec "$helper_container" bash -c "exec 3>&-" 2>/dev/null || true
+                break
+            fi
+        elif [ "$status" = "exited" ]; then
+            fail "Helper container exited unexpectedly"
+            echo "DEBUG: Helper container logs:"
+            docker logs "$helper_container" 2>&1 || true
+            cleanup_helper_resources
+            return
+        fi
+        sleep 1
+    done
+
+    if [ "$helper_ready" = false ]; then
+        fail "Helper container did not become ready"
+        echo "DEBUG: Helper container status:"
+        docker inspect -f '{{.State.Status}}' "$helper_container" 2>/dev/null || true
+        echo "DEBUG: Helper container logs:"
+        docker logs "$helper_container" 2>&1 | tail -50 || true
+        cleanup_helper_resources
+        return
+    fi
 
     local health
     health=$(docker exec "$helper_container" curl -s --max-time 3 http://127.0.0.1:18080/health || true)
@@ -1264,6 +1396,8 @@ test_multiple_agents() {
             --label "containai.type=agent" \
             --label "containai.agent=$agent" \
             --network "$TEST_NETWORK" \
+            --cap-add SYS_ADMIN \
+            --cap-add NET_ADMIN \
             -v "$TEST_REPO_DIR:/workspace" \
             "$test_image" \
             sleep $LONG_RUNNING_SLEEP >/dev/null
@@ -1488,6 +1622,7 @@ run_all_tests() {
     if should_run "test_workspace_mounting"; then test_workspace_mounting; fi
     if should_run "test_environment_variables"; then test_environment_variables; fi
     if should_run "test_agentcli_uid_split"; then test_agentcli_uid_split; fi
+    if should_run "test_capabilities_dropped"; then test_capabilities_dropped; fi
     if should_run "test_cli_wrappers"; then test_cli_wrappers; fi
     if should_run "test_agent_task_runner_seccomp"; then test_agent_task_runner_seccomp; fi
     if should_run "test_mcp_configuration_generation"; then test_mcp_configuration_generation; fi

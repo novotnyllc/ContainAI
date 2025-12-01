@@ -675,14 +675,15 @@ if [ "$(id -u)" -eq 0 ]; then
     export CONTAINAI_DISABLE_SENSITIVE_TMPFS="$DISABLE_SENSITIVE_TMPFS"
     export CONTAINAI_RUNNER_POLICY="$RUNNER_POLICY"
 
-    if command -v gosu >/dev/null 2>&1; then
-        exec gosu "$AGENT_USERNAME" /usr/local/bin/entrypoint.sh "$@"
-    elif command -v sudo >/dev/null 2>&1; then
-        exec sudo -E -u "$AGENT_USERNAME" /usr/local/bin/entrypoint.sh "$@"
-    else
-        echo "❌ Unable to drop privileges to $AGENT_USERNAME (gosu/sudo missing)" >&2
+    # Drop all capabilities before re-executing as non-root user.
+    # The privileged setup (tmpfs mounts, ptrace scope, iptables) is complete.
+    # capsh atomically drops caps from the bounding set AND switches user.
+    if ! command -v capsh >/dev/null 2>&1; then
+        echo "❌ FATAL: capsh not found - base image is missing libcap2-bin" >&2
         exit 1
     fi
+    echo "🔒 Dropping capabilities and switching to $AGENT_USERNAME..."
+    exec capsh --drop=all --user="$AGENT_USERNAME" -- -c "exec /usr/local/bin/entrypoint.sh $(printf '%q ' "$@")"
 fi
 
 AGENT_TASK_RUNNER_SOCKET="${AGENT_TASK_RUNNER_SOCKET:-/run/agent-task-runner.sock}"

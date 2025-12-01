@@ -72,6 +72,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libatspi2.0-0 \
     libxshmfence1 \
     libseccomp-dev \
+    # Capability management (for dropping caps after privileged setup)
+    libcap2-bin \
     # .NET runtime dependencies
     libc6 \
     libgcc-s1 \
