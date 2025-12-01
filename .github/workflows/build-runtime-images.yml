@@ -90,6 +90,13 @@ jobs:
     env:
       IMAGE_NAME: containai-base
     steps:
+      - name: Free up disk space
+        run: |
+          # Remove large preinstalled packages we don't need
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af
+          df -h /
+
       - name: Checkout repository
         uses: actions/checkout@v4
 

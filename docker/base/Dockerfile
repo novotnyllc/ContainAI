@@ -130,7 +130,8 @@ ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
 
 # Install .NET workloads 
 RUN dotnet workload install wasm-tools wasm-tools-net9 wasm-tools-net8 || \
-    echo "⚠️  Some workloads may have failed (expected for some platforms)"
+    echo "⚠️  Some workloads may have failed (expected for some platforms)"; \
+    rm -rf /tmp/* /root/.nuget/packages /root/.dotnet/toolResolverCache
 
 # Install PowerShell using the universal package guidance (falls back to tarball on ARM)
 ARG POWERSHELL_VERSION="7.4.13"
@@ -214,7 +215,9 @@ RUN npm install -g \
     @playwright/mcp@latest \
     @modelcontextprotocol/server-sequential-thinking \
     @githubnext/github-copilot-cli && \
-    npx playwright install --with-deps chromium
+    npx playwright install --with-deps chromium && \
+    npm cache clean --force && \
+    rm -rf /tmp/*
 
 # Install agentcli exec helper, task-runner daemon (Rust builds), and wrap vendor CLIs
 COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agentcli-exec /usr/local/bin/agentcli-exec
@@ -251,7 +254,10 @@ RUN set -eux; \
     chown -R agentuser:agentuser /workspace /home/agentuser
 
 # Snapshot mutable root directories so they can be restored into tmpfs overlays at runtime
+# Clean apt cache first to minimize snapshot size (saves ~200-500MB)
 RUN set -eux; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*; \
     snapshot_root="/opt/containai/basefs"; \
     mkdir -p "${snapshot_root}/var/lib/dpkg" \
         "${snapshot_root}/var/lib/apt" \
@@ -265,9 +271,10 @@ RUN set -eux; \
 # Prepare shared tool cache mount point
 RUN mkdir -p /toolcache && chown agentuser:agentuser /toolcache
 
-# Copy Playwright browsers to agentuser's home (installed as root above)
+# Move Playwright browsers to agentuser's home (installed as root above)
+# Use mv instead of cp to avoid duplicating ~500MB of browser binaries
 RUN mkdir -p /home/agentuser/.cache && \
-    cp -r /root/.cache/ms-playwright /home/agentuser/.cache/ && \
+    mv /root/.cache/ms-playwright /home/agentuser/.cache/ && \
     chown -R agentuser:agentuser /home/agentuser/.cache
 
 USER agentuser

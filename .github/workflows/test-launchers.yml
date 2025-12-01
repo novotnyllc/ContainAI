@@ -199,6 +199,13 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
+      - name: Free up disk space
+        run: |
+          # Remove large preinstalled packages we don't need for building containers
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af
+          df -h /
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
