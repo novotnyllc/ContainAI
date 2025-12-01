@@ -2283,7 +2283,7 @@ start_proxy_log_pipeline() {
         -u "$run_user" \
         -v "$cert_dir:/certs:ro" \
         -v "$log_dir:/logs" \
-        --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,mode=755 \
+        --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777 \
         --label "containai.log-of=$proxy_container" \
         --label "containai.log-role=broker" \
         ${agent_id:+--label "containai.agent=${agent_id}"} \
@@ -2307,7 +2307,7 @@ start_proxy_log_pipeline() {
         -u "$run_user" \
         --volumes-from "$proxy_container":ro \
         -v "$cert_dir:/certs:ro" \
-        --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,mode=755 \
+        --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777 \
         --label "containai.log-of=$proxy_container" \
         --label "containai.log-role=forwarder" \
         ${agent_id:+--label "containai.agent=${agent_id}"} \
