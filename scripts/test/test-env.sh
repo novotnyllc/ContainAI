@@ -222,11 +222,18 @@ build_test_images() {
         return 1
     fi
 
-    # Tag for test registry and push
+    # Tag for test registry and push (unless skipped)
     echo "  Tagging as $TEST_BASE_IMAGE..."
     docker tag "$base_tag" "$TEST_BASE_IMAGE" || return 1
-    echo "  Pushing to local registry..."
-    docker push "$TEST_BASE_IMAGE" || return 1
+    if [ "${TEST_SKIP_REGISTRY_PUSH:-false}" != "true" ]; then
+        echo "  Pushing to local registry..."
+        if ! timeout 300 docker push "$TEST_BASE_IMAGE"; then
+            echo "  ❌ Push to local registry failed or timed out"
+            return 1
+        fi
+    else
+        echo "  Skipping registry push (TEST_SKIP_REGISTRY_PUSH=true)"
+    fi
 
     # Build agent images using the base image
     local agents=("copilot" "codex" "claude")
@@ -247,8 +254,13 @@ build_test_images() {
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             . || return 1
 
-        echo "  Pushing to local registry..."
-        docker push "$test_image" || return 1
+        if [ "${TEST_SKIP_REGISTRY_PUSH:-false}" != "true" ]; then
+            echo "  Pushing to local registry..."
+            if ! timeout 300 docker push "$test_image"; then
+                echo "  ❌ Push to local registry failed or timed out"
+                return 1
+            fi
+        fi
     done
 
     echo ""
@@ -311,10 +323,10 @@ pull_and_tag_test_images() {
             return 1
         fi
         
-        if [ "${TEST_USE_REGISTRY_PULLS:-true}" = "true" ]; then
+        if [ "${TEST_USE_REGISTRY_PULLS:-true}" = "true" ] && [ "${TEST_SKIP_REGISTRY_PUSH:-false}" != "true" ]; then
             echo "  Pushing to local test registry..."
-            if ! docker push "$test_image" >/dev/null 2>&1; then
-                echo "  ❌ Error: Could not push to local registry"
+            if ! timeout 300 docker push "$test_image" >/dev/null 2>&1; then
+                echo "  ❌ Error: Could not push to local registry (timed out or failed)"
                 return 1
             fi
         fi

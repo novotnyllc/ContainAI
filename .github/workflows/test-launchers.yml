@@ -135,6 +135,13 @@ jobs:
   integration-test-launchers:
     runs-on: ubuntu-latest
     steps:
+      - name: Free up disk space
+        run: |
+          # Remove large preinstalled packages we don't need for building containers
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af
+          df -h /
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -162,6 +169,8 @@ jobs:
         run: chmod +x scripts/test/integration-test.sh scripts/test/test-env.sh
       
       - name: Run integration tests (launchers mode)
+        env:
+          TEST_SKIP_REGISTRY_PUSH: "true"
         run: ./scripts/test/integration-test.sh --mode launchers
       
       - name: Cleanup test resources

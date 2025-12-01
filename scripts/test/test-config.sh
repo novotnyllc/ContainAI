@@ -54,6 +54,10 @@ export TEST_SOURCE_REGISTRY="${TEST_SOURCE_REGISTRY:-ghcr.io/yourusername}"
 # Whether to use registry pulls (set to false to skip pushes in offline mode)
 export TEST_USE_REGISTRY_PULLS="${TEST_USE_REGISTRY_PULLS:-true}"
 
+# Whether to skip pushing to local registry (images stay local only)
+# Set to true when running tests on same Docker daemon to save disk I/O
+export TEST_SKIP_REGISTRY_PUSH="${TEST_SKIP_REGISTRY_PUSH:-false}"
+
 # Disable launcher update checks during automated tests
 export CONTAINAI_SKIP_UPDATE_CHECK=1
 
