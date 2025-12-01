@@ -2039,6 +2039,7 @@ generate_session_mitm_ca() {
 
 generate_log_broker_certs() {
     local output_dir="$1"
+    local broker_hostname="${2:-localhost}"
 
     if [ -z "$output_dir" ]; then
         echo "❌ Log broker cert output directory not provided" >&2
@@ -2070,7 +2071,7 @@ generate_log_broker_certs() {
         fi
     fi
     if [ ! -f "$server_crt" ] || [ ! -f "$server_key" ]; then
-        if ! openssl req -new -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout "$server_key" -out "$output_dir/server.csr" >/dev/null 2>&1; then
+        if ! openssl req -new -newkey rsa:2048 -nodes -subj "/CN=${broker_hostname}" -keyout "$server_key" -out "$output_dir/server.csr" >/dev/null 2>&1; then
             ok=false
         elif ! openssl x509 -req -in "$output_dir/server.csr" -CA "$ca_crt" -CAkey "$ca_key" -CAcreateserial -out "$server_crt" -days 2 -sha256 >/dev/null 2>&1; then
             ok=false
@@ -2244,7 +2245,8 @@ start_proxy_log_pipeline() {
     mkdir -p "$log_dir" "$cert_dir"
     chmod 750 "$log_dir" 2>/dev/null || true
 
-    if ! generate_log_broker_certs "$cert_dir"; then
+    # Generate certs with the broker hostname for proper TLS verification
+    if ! generate_log_broker_certs "$cert_dir" "$broker_name"; then
         return 1
     fi
     chmod 640 "$cert_dir"/* 2>/dev/null || true
@@ -2313,7 +2315,7 @@ start_proxy_log_pipeline() {
         ${agent_id:+--label "containai.agent=${agent_id}"} \
         ${session_id:+--label "containai.session=${session_id}"} \
         "$forwarder_image" \
-        sh -c "echo 'Forwarder starting' >&2; ls -la /certs/ >&2; ls -la /var/log/squid/ >&2; which socat >&2; tail -F /var/log/squid/access.log 2>/dev/null | socat -d -u - OPENSSL:${broker_name}:${broker_port},cert=/certs/log-client.crt,key=/certs/log-client.key,cafile=/certs/log-ca.crt,verify=1 2>&1 | tee -a /tmp/forwarder.err"
+        sh -c "tail -F /var/log/squid/access.log 2>/dev/null | socat -u - OPENSSL:${broker_name}:${broker_port},cert=/certs/log-client.crt,key=/certs/log-client.key,cafile=/certs/log-ca.crt,verify=1 2>>/tmp/forwarder.err"
     then
         echo "❌ Failed to start log forwarder container $forwarder_name" >&2
         container_cli rm -f "$broker_name" >/dev/null 2>&1 || true
