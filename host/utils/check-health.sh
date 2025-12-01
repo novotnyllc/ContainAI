@@ -302,9 +302,9 @@ if load_common_functions; then
     else
         fail "Host enforcement failed" "Resolve the errors below (see suggested fix)."
         # Channel-aware profile path (dev channel in dev environment)
-        local channel="${CONTAINAI_LAUNCHER_CHANNEL:-${CONTAINAI_PROFILE:-dev}}"
-        local profile_file="/opt/containai/profiles/apparmor-containai-agent-${channel}.profile"
-        local profile_name="containai-agent-${channel}"
+        channel="${CONTAINAI_LAUNCHER_CHANNEL:-${CONTAINAI_PROFILE:-dev}}"
+        profile_file="/opt/containai/profiles/apparmor-containai-agent-${channel}.profile"
+        profile_name="containai-agent-${channel}"
         if printf '%s' "$host_output" | grep -q "AppArmor profile '${profile_name}' is not loaded"; then
             suggest_fix "sudo apparmor_parser -r $profile_file"
         elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then
