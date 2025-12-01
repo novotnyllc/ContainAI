@@ -69,6 +69,9 @@ cleanup() {
 
 trap cleanup EXIT
 
+# Suppress git default branch hints in test output
+git config --global init.defaultBranch main 2>/dev/null || true
+
 print_test_summary() {
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

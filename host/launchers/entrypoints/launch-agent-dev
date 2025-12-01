@@ -5,6 +5,51 @@
 
 set -e
 
+# Handle --help early before any checks (help should always work)
+for arg in "$@"; do
+    if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+        cat <<'HELP'
+Usage: run-agent <agent> [SOURCE] [OPTIONS]
+
+Agent types: copilot, codex, claude
+
+SOURCE can be:
+  • Local path to a git repository (default: current directory)
+  • Git URL (https://...)
+
+Options:
+  -b, --branch BRANCH         Branch name (creates <agent>/<branch>)
+  --name NAME                 Custom container name
+  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)
+  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)
+  --cpu NUM                   CPU limit (default: 4)
+  --memory SIZE               Memory limit (default: 8g)
+  --gpu SPEC                  GPU specification (e.g., 'all' or 'device=0')
+  --prompt TEXT               Initial prompt/task for the agent
+  --no-push                   Disable auto-push on container shutdown
+  --use-current-branch        Use current branch instead of creating agent branch (unsafe)
+  -y, --force                 Automatically replace existing agent branch without prompting
+  -h, --help                  Show this help
+
+Branch Behavior:
+  • Without --branch: creates unique session branch <agent>/session-N
+  • With --branch: creates <agent>/<branch>
+  • Already on agent branch: reuses that branch
+  • Use --use-current-branch to work directly on current branch
+  • Existing agent branches prompt for replacement
+  • Branches with unmerged commits are archived before replacement
+
+Examples:
+  run-agent copilot                              # Copilot in current directory
+  run-agent codex . -b refactor-db               # Codex in current dir, custom branch
+  run-agent copilot https://github.com/user/repo # Copilot from GitHub
+  run-agent claude /path/to/repo --name my-workspace
+  run-agent copilot . -b feature-api -y          # Auto-replace existing agent branch
+HELP
+        exit 0
+    fi
+done
+
 # Source shared functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=host/utils/common-functions.sh
@@ -608,41 +653,8 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: launch-agent <agent> [SOURCE] [OPTIONS]"
-            echo ""
-            echo "Agent types: copilot, codex, claude"
-            echo ""
-            echo "SOURCE can be:"
-            echo "  • Local path to a git repository (default: current directory)"
-            echo "  • Git URL (https://...)"
-            echo ""
-            echo "Options:"
-            echo "  -b, --branch BRANCH         Branch name (creates <agent>/<branch>)"
-            echo "  --name NAME                 Custom container name"
-            echo "  --dotnet-preview CHANNEL    Install .NET preview SDK (e.g., 11.0)"
-            echo "  --network-proxy MODE        Network proxy: allow-all, restricted, squid (default: allow-all)"
-            echo "  --cpu NUM                   CPU limit (default: 4)"
-            echo "  --memory SIZE               Memory limit (default: 8g)"
-            echo "  --gpu SPEC                  GPU specification (e.g., 'all' or 'device=0')"
-            echo "  --no-push                   Disable auto-push on container shutdown"
-            echo "  --use-current-branch        Use current branch instead of creating agent branch (unsafe)"
-            echo "  -y, --force                 Automatically replace existing agent branch without prompting"
-            echo "  -h, --help                  Show this help"
-            echo ""
-            echo "Branch Behavior:"
-            echo "  • Without --branch: creates unique session branch <agent>/session-N"
-            echo "  • With --branch: creates <agent>/<branch>"
-            echo "  • Already on agent branch: reuses that branch"
-            echo "  • Use --use-current-branch to work directly on current branch"
-            echo "  • Existing agent branches prompt for replacement"
-            echo "  • Branches with unmerged commits are archived before replacement"
-            echo ""
-            echo "Examples:"
-            echo "  launch-agent copilot                              # Copilot in current directory"
-            echo "  launch-agent codex . -b refactor-db               # Codex in current dir, custom branch"
-            echo "  launch-agent copilot https://github.com/user/repo # Copilot from GitHub"
-            echo "  launch-agent claude /path/to/repo --name my-workspace"
-            echo "  launch-agent copilot . -b feature-api -y          # Auto-replace existing agent branch"
+            # Early --help handling at top of script should catch this,
+            # but keep fallback for completeness
             exit 0
             ;;
         *)
