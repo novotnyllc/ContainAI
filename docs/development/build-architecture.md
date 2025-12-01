@@ -531,7 +531,8 @@ flowchart TB
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTAINAI_LAUNCHER_CHANNEL` | `dev` | Channel for profile names (dev/nightly/prod) |
-| `CONTAINAI_SYSTEM_PROFILES_DIR` | `/opt/containai/profiles` | System profile installation directory |
+
+**Note:** The system profiles directory (`/opt/containai/profiles`) is hardcoded and not configurable for security reasons.
 
 ### Installer Configuration
 

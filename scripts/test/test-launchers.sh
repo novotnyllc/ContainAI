@@ -297,17 +297,6 @@ test_shared_functions() {
         fail "resolve_seccomp_profile_path() failed - did setup-local-dev.sh run?"
     fi
 
-    # Test that resolution fails when profile doesn't exist anywhere
-    local fake_root
-    fake_root=$(mktemp -d)
-    # Override system profiles dir to a fake location so it won't find the real system profiles
-    if CONTAINAI_SYSTEM_PROFILES_DIR="$fake_root/nonexistent" resolve_seccomp_profile_path "$fake_root" >/dev/null 2>&1; then
-        fail "resolve_seccomp_profile_path() should fail when profile file is absent"
-    else
-        pass "resolve_seccomp_profile_path() reports missing profile correctly"
-    fi
-    rm -rf "$fake_root"
-
     if resolve_apparmor_profile_name "$PROJECT_ROOT" >/dev/null 2>&1; then
         pass "resolve_apparmor_profile_name() locates active AppArmor profile"
     else
@@ -1047,19 +1036,6 @@ test_host_security_preflight() {
         else
             fail "Preflight rejected valid host security configuration"
         fi
-
-    # Test that preflight fails when profile is missing - use fake system dir to isolate
-    local fake_system_dir
-    fake_system_dir=$(mktemp -d)
-    local fake_repo_root
-    fake_repo_root=$(mktemp -d)
-    # Neither location has the profile, so preflight should fail
-    if CONTAINAI_SYSTEM_PROFILES_DIR="$fake_system_dir" verify_host_security_prereqs "$fake_repo_root" >/dev/null 2>&1; then
-        fail "Preflight should fail when seccomp profile is missing from both locations"
-    else
-        pass "Seccomp profile requirement enforced"
-    fi
-    rm -rf "$fake_system_dir" "$fake_repo_root"
 }
 
 test_container_security_preflight() {

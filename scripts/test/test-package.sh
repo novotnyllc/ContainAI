@@ -45,13 +45,19 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common-functions.sh"
 enforce_security_profiles_strict() {
     local install_root="$1"
     local profile_dir="$install_root/host/profiles"
+    # Channel is determined from profile.env; default to dev for testing
+    local channel="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
+    
+    # Seccomp profiles (not channelized)
     local seccomp_agent="$profile_dir/seccomp-containai-agent.json"
     local seccomp_proxy="$profile_dir/seccomp-containai-proxy.json"
     local seccomp_fwd="$profile_dir/seccomp-containai-log-forwarder.json"
     [[ -f "$seccomp_agent" && -f "$seccomp_proxy" && -f "$seccomp_fwd" ]] || die "Seccomp profiles missing in $profile_dir"
-    [[ -f "$profile_dir/apparmor-containai-agent.profile" ]] || die "AppArmor profile missing in $profile_dir"
-    [[ -f "$profile_dir/apparmor-containai-proxy.profile" ]] || die "AppArmor proxy profile missing in $profile_dir"
-    [[ -f "$profile_dir/apparmor-containai-log-forwarder.profile" ]] || die "AppArmor log-forwarder profile missing in $profile_dir"
+    
+    # AppArmor profiles (channelized: apparmor-containai-agent-dev.profile)
+    [[ -f "$profile_dir/apparmor-containai-agent-${channel}.profile" ]] || die "AppArmor agent profile missing (expected apparmor-containai-agent-${channel}.profile)"
+    [[ -f "$profile_dir/apparmor-containai-proxy-${channel}.profile" ]] || die "AppArmor proxy profile missing (expected apparmor-containai-proxy-${channel}.profile)"
+    [[ -f "$profile_dir/apparmor-containai-log-forwarder-${channel}.profile" ]] || die "AppArmor log-forwarder profile missing (expected apparmor-containai-log-forwarder-${channel}.profile)"
     # Skip apparmor_parser invocation in smoke test to avoid sudo/kernel requirements.
 }
 

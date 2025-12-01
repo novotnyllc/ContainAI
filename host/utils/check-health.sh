@@ -301,11 +301,12 @@ if load_common_functions; then
         pass "Host enforcement: seccomp & AppArmor present"
     else
         fail "Host enforcement failed" "Resolve the errors below (see suggested fix)."
-        # Check system location first, then repo location
-        profile_file="${CONTAINAI_SYSTEM_PROFILES_DIR:-/opt/containai/profiles}/apparmor-containai-agent.profile"
-        [ ! -f "$profile_file" ] && profile_file="$SCRIPT_ROOT/host/profiles/apparmor-containai-agent.profile"
-        if printf '%s' "$host_output" | grep -q "AppArmor profile 'containai' is not loaded"; then
-            suggest_fix sudo apparmor_parser -r "$profile_file"
+        # Channel-aware profile path (dev channel in dev environment)
+        local channel="${CONTAINAI_LAUNCHER_CHANNEL:-${CONTAINAI_PROFILE:-dev}}"
+        local profile_file="/opt/containai/profiles/apparmor-containai-agent-${channel}.profile"
+        local profile_name="containai-agent-${channel}"
+        if printf '%s' "$host_output" | grep -q "AppArmor profile '${profile_name}' is not loaded"; then
+            suggest_fix "sudo apparmor_parser -r $profile_file"
         elif printf '%s' "$host_output" | grep -q "AppArmor profile file"; then
             suggest_fix "sudo $SCRIPT_ROOT/scripts/setup-local-dev.sh"
         elif printf '%s' "$host_output" | grep -qi "AppArmor kernel support not detected"; then
