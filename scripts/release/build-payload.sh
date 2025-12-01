@@ -38,6 +38,13 @@ if [[ -z "$VERSION" ]]; then
     exit 1
 fi
 
+for cmd in rsync sha256sum; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "❌ $cmd is required but not found." >&2
+        exit 1
+    fi
+done
+
 # Convert OUT_DIR to absolute path to avoid issues with cd in subshells
 # Create directory if it doesn't exist
 mkdir -p "$OUT_DIR"
@@ -167,7 +174,7 @@ if [[ -d "$PROFILES_DIR" ]]; then
         --channel "$LAUNCHER_CHANNEL" \
         --source "$PROFILES_DIR" \
         --dest "$PROFILES_STAGING" \
-        --manifest "$PROFILES_STAGING/containai-profiles-${CHANNEL}.sha256"; then
+        --manifest "$PROFILES_STAGING/containai-profiles-${LAUNCHER_CHANNEL}.sha256"; then
         rm -rf "$PROFILES_STAGING"
         echo "❌ Failed to generate security profiles for channel $LAUNCHER_CHANNEL" >&2
         exit 1
@@ -184,8 +191,8 @@ CHANNEL=dev
 EOF
 fi
 
-# For dev builds, ensure a placeholder SBOM exists so local installs can proceed without GH-generated SBOMs.
-if [[ "$LAUNCHER_CHANNEL" = "dev" && ! -f "$PAYLOAD_DIR_BUILD/payload.sbom.json" ]]; then
+# For dev builds (or if requested), ensure a placeholder SBOM exists so local installs can proceed without GH-generated SBOMs.
+if [[ ("$LAUNCHER_CHANNEL" = "dev" || "${DUMMY_SBOM:-}" = "true") && ! -f "$PAYLOAD_DIR_BUILD/payload.sbom.json" ]]; then
     echo '{"sbom":"dev placeholder"}' > "$PAYLOAD_DIR_BUILD/payload.sbom.json"
 fi
 

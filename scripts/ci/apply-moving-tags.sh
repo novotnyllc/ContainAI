@@ -28,6 +28,21 @@ done
 
 [[ -n "$DIGESTS_PATH" && -n "$IMMUTABLE_TAG" ]] || { usage >&2; exit 1; }
 
+if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ jq is required but not found." >&2
+    exit 1
+fi
+
+if [[ ! -f "$DIGESTS_PATH" ]]; then
+    echo "❌ Digests file not found: $DIGESTS_PATH" >&2
+    exit 1
+fi
+
+if ! jq -e . "$DIGESTS_PATH" >/dev/null 2>&1; then
+    echo "❌ Invalid JSON in digests file: $DIGESTS_PATH" >&2
+    exit 1
+fi
+
 mapfile -t moving <<< "$(printf '%s\n' "$MOVING_TAGS" | sed '/^$/d')"
 
 while IFS= read -r row; do

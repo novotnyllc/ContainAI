@@ -39,6 +39,11 @@ done
 
 [[ -n "$PREFIX" && -n "$TAG" && -n "$OWNER" && -n "$OUT_PATH" ]] || { usage >&2; exit 1; }
 
+if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ jq is required but not found." >&2
+    exit 1
+fi
+
 declare -A digests
 
 if [[ "$MODE" == "env" ]]; then

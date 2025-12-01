@@ -25,6 +25,7 @@ Options:
   --payload-dir DIR   Payload directory to package (default: <out>/<version>/payload)
   --profile-env PATH  profile.env to read (default: <out>/profile.env, falls back to host/profile.env)
   --launcher-channel  Override launcher channel (defaults to PROFILE in profile.env)
+  --repo              Repository (owner/name) for cosign root URL (default: ContainAI/ContainAI)
 EOF
 }
 
@@ -35,6 +36,7 @@ while [[ $# -gt 0 ]]; do
         --payload-dir) PAYLOAD_DIR="$2"; shift 2 ;;
         --profile-env) PROFILE_ENV_PATH="$2"; shift 2 ;;
         --launcher-channel) LAUNCHER_CHANNEL_OVERRIDE="$2"; shift 2 ;;
+        --repo) REPO_OVERRIDE="$2"; shift 2 ;;
         -h|--help) print_help; exit 0 ;;
         *) echo "Unknown arg: $1" >&2; print_help >&2; exit 1 ;;
     esac
@@ -75,6 +77,13 @@ if [[ -z "$LAUNCHER_CHANNEL" ]]; then
     exit 1
 fi
 
+for cmd in rsync tar sha256sum awk perl; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "❌ $cmd is required for artifact packaging but not found." >&2
+        exit 1
+    fi
+done
+
 redacted_shell_hash() {
     local script="$1"
     sed 's/^INSTALLER_SELF_SHA256=.*/INSTALLER_SELF_SHA256="__REDACTED__"/' "$script" | sha256sum | awk '{print $1}'
@@ -95,12 +104,16 @@ template_installers() {
 
     [[ -f "$cosign_root" ]] || { echo "❌ cosign-root.pem missing in payload" >&2; exit 1; }
     local git_commit
-    git_commit=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || true)
+    git_commit="${GIT_COMMIT:-}"
+    if [[ -z "$git_commit" ]]; then
+        git_commit=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || true)
+    fi
     if [[ -z "$git_commit" ]]; then
         echo "❌ Unable to determine git commit for cosign root URL" >&2
         exit 1
     fi
-    local cosign_url="https://raw.githubusercontent.com/ContainAI/ContainAI/${git_commit}/host/utils/cosign-root.pem"
+    local repo_slug="${REPO_OVERRIDE:-ContainAI/ContainAI}"
+    local cosign_url="https://raw.githubusercontent.com/${repo_slug}/${git_commit}/host/utils/cosign-root.pem"
     local cosign_hash
     cosign_hash=$(sha256sum "$cosign_root" | awk '{print $1}')
     perl -0777 -pi -e "s/__COSIGN_ROOT_SHA256__/$cosign_hash/" "$shell_installer"
@@ -143,6 +156,9 @@ if [[ ! -d "$PAYLOAD_DIR" ]]; then
     echo "❌ Payload directory not found: $PAYLOAD_DIR" >&2
     exit 1
 fi
+
+# Canonicalize PAYLOAD_DIR to absolute path for consistent comparison with PAYLOAD_OUT
+PAYLOAD_DIR="$(cd "$PAYLOAD_DIR" && pwd)"
 
 if [[ ! -f "$PAYLOAD_DIR/SHA256SUMS" ]]; then
     echo "❌ Payload directory is missing SHA256SUMS (run build-payload.sh first)." >&2

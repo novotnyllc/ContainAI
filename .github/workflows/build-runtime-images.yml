@@ -70,6 +70,7 @@ jobs:
           scripts/ci/determine-channel.sh \
             --event-name "$GH_EVENT_NAME" \
             --ref-name "$REF_NAME" \
+            --sha "${{ github.sha }}" \
             --dispatch-channel "$DISPATCH_CHANNEL" \
             --dispatch-version "$DISPATCH_VERSION"
 
@@ -799,7 +800,8 @@ jobs:
             --out "${{ env.ARTIFACTS_PUBLISH }}" \
             --launcher-channel "$CHANNEL" \
             --payload-dir "${{ env.ARTIFACTS_PUBLISH }}/${VERSION}/payload" \
-            --profile-env "${{ env.ARTIFACTS_PUBLISH }}/profile.env"
+            --profile-env "${{ env.ARTIFACTS_PUBLISH }}/profile.env" \
+            --repo "${{ github.repository }}"
         env:
           IMAGE_DIGEST: ${{ env.IMAGE_DIGEST }}
           IMAGE_DIGEST_COPILOT: ${{ env.IMAGE_DIGEST_COPILOT }}

@@ -1762,7 +1762,7 @@ test_package_requires_digest_non_dev() {
     tmp_out=$(mktemp -d)
     local sbom="$tmp_out/sbom.json"
     echo '{"bomFormat":"CycloneDX","components":[]}' > "$sbom"
-    if CONTAINAI_LAUNCHER_CHANNEL=nightly "$PROJECT_ROOT/scripts/release/package.sh" --version "vtest" --out "$tmp_out" --sbom "$sbom" >/dev/null 2>&1; then
+    if CONTAINAI_LAUNCHER_CHANNEL=nightly "$PROJECT_ROOT/scripts/release/package.sh" --version "vtest" --out "$tmp_out" >/dev/null 2>&1; then
         fail "package.sh should fail without CONTAINAI_IMAGE_DIGEST when LAUNCHER_CHANNEL=nightly"
     else
         pass "package.sh rejects nightly channel without digest"

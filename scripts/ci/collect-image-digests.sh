@@ -34,7 +34,16 @@ json_entries=()
 
 for img in "${image_arr[@]}"; do
     full="${PREFIX}/${img}"
-    digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$full" | cut -d@ -f2 || true)"
+    # Find the digest that matches the repository prefix
+    digest="$(docker inspect --format='{{range .RepoDigests}}{{if . | startswith "'"$full"'"}}{{.}}{{end}}{{end}}' "$full" | cut -d@ -f2 || true)"
+    if [[ -z "$digest" ]]; then
+        # Fallback to first digest if specific match fails (e.g. local build)
+        digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$full" | cut -d@ -f2 || true)"
+    fi
+    if [[ -z "$digest" ]]; then
+        # Fallback to image ID for purely local builds (no repo digests)
+        digest="$(docker inspect --format='{{.Id}}' "$full" || true)"
+    fi
     if [[ -z "$digest" ]]; then
         echo "Digest not found for $full" >&2
         exit 1

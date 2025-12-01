@@ -41,7 +41,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -n "$CHANNEL" && -n "$VERSION" && -n "$IMMUTABLE" && -n "$IMAGES_JSON" && -n "$PAYLOAD_REF" && -n "$PAYLOAD_DIGEST" && -n "$OUT_PATH" ]] || { usage >&2; exit 1; }
+[[ -n "$IMAGES_JSON" && -n "$OUT_PATH" ]] || { usage >&2; exit 1; }
+
+if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ jq is required but not found." >&2
+    exit 1
+fi
+
+echo "$IMAGES_JSON" | jq -e . >/dev/null 2>&1 || { echo "❌ Invalid JSON in IMAGES_JSON" >&2; exit 1; }
 
 moving_json=$(printf '%s\n' "$MOVING_TAGS" | jq -R -s 'split("\n")|map(select(length>0))')
 images_compact=$(echo "$IMAGES_JSON" | jq -c '.')

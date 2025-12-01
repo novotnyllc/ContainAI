@@ -8,6 +8,7 @@ Determine channel/version for CI and emit outputs for GitHub Actions.
 Args:
   --event-name NAME        GitHub event name (push, pull_request, schedule, workflow_dispatch)
   --ref-name REF           Ref name (e.g., main, v1.2.3)
+  --sha SHA                Commit SHA (defaults to GITHUB_SHA)
   --dispatch-channel CH    Optional workflow_dispatch channel override
   --dispatch-version VER   Optional workflow_dispatch version override
 
@@ -18,6 +19,7 @@ EOF
 
 EVENT_NAME=""
 REF_NAME=""
+COMMIT_SHA="${GITHUB_SHA:-}"
 DISPATCH_CHANNEL=""
 DISPATCH_VERSION=""
 
@@ -25,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --event-name) EVENT_NAME="$2"; shift 2 ;;
         --ref-name) REF_NAME="$2"; shift 2 ;;
+        --sha) COMMIT_SHA="$2"; shift 2 ;;
         --dispatch-channel) DISPATCH_CHANNEL="$2"; shift 2 ;;
         --dispatch-version) DISPATCH_VERSION="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
@@ -32,7 +35,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -n "$EVENT_NAME" && -n "$REF_NAME" ]] || { usage >&2; exit 1; }
+[[ -n "$EVENT_NAME" && -n "$REF_NAME" && -n "$COMMIT_SHA" ]] || { usage >&2; exit 1; }
 
 channel="${DISPATCH_CHANNEL:-}"
 version="${DISPATCH_VERSION:-}"
@@ -55,7 +58,7 @@ if [[ -z "$version" ]]; then
     fi
 fi
 
-immutable_tag="sha-${GITHUB_SHA}"
+immutable_tag="sha-${COMMIT_SHA}"
 moving_tags="$channel"
 if [[ "$channel" == "prod" && -n "$version" && "$version" != "$channel" ]]; then
     moving_tags="${moving_tags}
