@@ -2289,7 +2289,7 @@ start_proxy_log_pipeline() {
         ${agent_id:+--label "containai.agent=${agent_id}"} \
         ${session_id:+--label "containai.session=${session_id}"} \
         "$broker_image" \
-        sh -c "openssl s_server -quiet -accept ${broker_port} -cert /certs/log-server.crt -key /certs/log-server.key -CAfile /certs/log-ca.crt -Verify 1 >>/logs/access.log 2>>/logs/broker.err"
+        sh -c "while true; do openssl s_server -quiet -accept ${broker_port} -cert /certs/log-server.crt -key /certs/log-server.key -CAfile /certs/log-ca.crt -Verify 1 >>/logs/access.log 2>>/logs/broker.err; done"
     then
         echo "❌ Failed to start log broker container $broker_name" >&2
         return 1
@@ -2313,7 +2313,7 @@ start_proxy_log_pipeline() {
         ${agent_id:+--label "containai.agent=${agent_id}"} \
         ${session_id:+--label "containai.session=${session_id}"} \
         "$forwarder_image" \
-        sh -c "tail -F /var/log/squid/access.log 2>/dev/null | openssl s_client -quiet -connect ${broker_name}:${broker_port} -cert /certs/log-client.crt -key /certs/log-client.key -CAfile /certs/log-ca.crt >/dev/null 2>>/tmp/forwarder.err"
+        sh -c "while true; do tail -F /var/log/squid/access.log 2>/dev/null | openssl s_client -quiet -connect ${broker_name}:${broker_port} -cert /certs/log-client.crt -key /certs/log-client.key -CAfile /certs/log-ca.crt >/dev/null 2>>/tmp/forwarder.err || sleep 1; done"
     then
         echo "❌ Failed to start log forwarder container $forwarder_name" >&2
         container_cli rm -f "$broker_name" >/dev/null 2>&1 || true
