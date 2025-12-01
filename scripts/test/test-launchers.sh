@@ -1454,14 +1454,14 @@ test_mitm_log_forwarding() {
 
     source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
-    # Build a minimal test image with openssl for TLS log forwarding
+    # Build a minimal test image with openssl and socat for TLS log forwarding
     local test_image="containai-test-log-forwarder:latest"
     if ! docker build -q -t "$test_image" - <<'DOCKERFILE' >/dev/null 2>&1
 FROM alpine:latest
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl socat
 DOCKERFILE
     then
-        fail "Unable to build test image with openssl"
+        fail "Unable to build test image with openssl/socat"
         return
     fi
 
