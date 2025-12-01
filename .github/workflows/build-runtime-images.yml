@@ -73,9 +73,35 @@ jobs:
             --dispatch-channel "$DISPATCH_CHANNEL" \
             --dispatch-version "$DISPATCH_VERSION"
 
+  # Scan build context for secrets BEFORE any images are built
+  # This catches secrets at the source and prevents them from being pushed to the registry
+  scan-build-context:
+    name: Scan build context for secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Trivy CLI
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
+
+      - name: Scan build context for secrets
+        run: |
+          echo "🔍 Scanning build context for secrets before image builds..."
+          # Scan directories that get COPYed into images
+          for dir in docker agent-configs host scripts; do
+            if [[ -d "$dir" ]]; then
+              echo "  Scanning $dir..."
+              trivy fs --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress "$dir"
+            fi
+          done
+          echo "✓ Build context secret scan passed"
+
   build-base-arch:
     name: Build base image (${{ matrix.arch_slug }})
-    needs: determine-context
+    needs: [determine-context, scan-build-context]
     if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
@@ -148,24 +174,6 @@ jobs:
           name: base-tar-${{ matrix.arch_slug }}
           path: image-tars/containai-base-${{ matrix.arch_slug }}.tar.gz
           if-no-files-found: error
-
-      - name: Install Trivy CLI
-        if: needs.determine-context.outputs.push == 'true'
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
-
-      - name: Scan base image by digest
-        if: needs.determine-context.outputs.push == 'true'
-        run: |
-          # Skip large browser binaries (Playwright/Chromium) that don't contain secrets
-          trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
-            --skip-dirs "/home/agentuser/.cache/ms-playwright" \
-            --skip-dirs "/root/.cache/ms-playwright" \
-            --skip-dirs "/usr/lib/chromium" \
-            --skip-dirs "/usr/lib/firefox" \
-            --platform "${{ matrix.arch }}" \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
       - name: Generate artifact attestation
         if: needs.determine-context.outputs.push == 'true'
@@ -350,24 +358,6 @@ jobs:
           path: image-tars/containai-${{ matrix.arch_slug }}.tar.gz
           if-no-files-found: error
 
-      - name: Install Trivy CLI
-        if: needs.determine-context.outputs.push == 'true'
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
-
-      - name: Scan image by digest
-        if: needs.determine-context.outputs.push == 'true'
-        run: |
-          # Skip large browser binaries (Playwright/Chromium) that don't contain secrets
-          trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
-            --skip-dirs "/home/agentuser/.cache/ms-playwright" \
-            --skip-dirs "/root/.cache/ms-playwright" \
-            --skip-dirs "/usr/lib/chromium" \
-            --skip-dirs "/usr/lib/firefox" \
-            --platform "${{ matrix.arch }}" \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
-
       - name: Generate artifact attestation
         if: needs.determine-context.outputs.push == 'true'
         uses: actions/attest-build-provenance@v1
@@ -547,24 +537,6 @@ jobs:
           name: variant-tar-${{ matrix.image }}-${{ matrix.arch_slug }}
           path: image-tars/${{ matrix.image }}-${{ matrix.arch_slug }}.tar.gz
           if-no-files-found: error
-
-      - name: Install Trivy CLI
-        if: needs.determine-context.outputs.push == 'true'
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
-
-      - name: Scan image by digest
-        if: needs.determine-context.outputs.push == 'true'
-        run: |
-          # Skip large browser binaries (Playwright/Chromium) that don't contain secrets
-          trivy image --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress \
-            --skip-dirs "/home/agentuser/.cache/ms-playwright" \
-            --skip-dirs "/root/.cache/ms-playwright" \
-            --skip-dirs "/usr/lib/chromium" \
-            --skip-dirs "/usr/lib/firefox" \
-            --platform "${{ matrix.arch }}" \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
 
       - name: Generate artifact attestation
         if: needs.determine-context.outputs.push == 'true'

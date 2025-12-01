@@ -24,19 +24,7 @@ FIXTURE_CONFIG_FILE="$TEST_MOCK_SECRETS_DIR/config.toml"
 FIXTURE_GH_TOKEN_FILE="$TEST_MOCK_SECRETS_DIR/gh-token.txt"
 TEST_PROXY_STARTED="false"
 SECRET_SCANNER_BIN="${CONTAINAI_TRIVY_BIN:-}"
-# Skip large binary directories (Playwright browsers, npm cache) that won't contain secrets
-# and cause Trivy to exhaust /tmp space during extraction
-SECRET_SCAN_ARGS=(
-    image
-    --scanners secret
-    --severity HIGH --severity CRITICAL
-    --exit-code 1
-    --no-progress
-    --skip-dirs "/home/agentuser/.cache/ms-playwright"
-    --skip-dirs "/root/.cache/ms-playwright"
-    --skip-dirs "/usr/lib/chromium"
-    --skip-dirs "/usr/lib/firefox"
-)
+BUILD_CONTEXT_SCANNED="false"
 
 ensure_secret_scanner() {
     if [[ -n "$SECRET_SCANNER_BIN" ]]; then
@@ -56,14 +44,43 @@ ensure_secret_scanner() {
     exit 1
 }
 
-scan_image_for_secrets() {
-    local image="$1"
-    ensure_secret_scanner
-    echo "  🔍 Secret scanning $image for embedded credentials..."
-    if ! "$SECRET_SCANNER_BIN" "${SECRET_SCAN_ARGS[@]}" "$image"; then
-        echo "❌ Secret scan failed for $image" >&2
-        exit 1
+# Scan build context for secrets BEFORE building any images.
+# This is more efficient than scanning each image (no layer extraction needed)
+# and catches secrets at the source before they're baked into images.
+scan_build_context_for_secrets() {
+    # Only scan once per test run
+    if [[ "$BUILD_CONTEXT_SCANNED" == "true" ]]; then
+        return 0
     fi
+    
+    ensure_secret_scanner
+    echo "🔍 Scanning build context for secrets before image builds..."
+    
+    # Scan the directories that get COPYed into images
+    local scan_dirs=(
+        "$PROJECT_ROOT/docker"
+        "$PROJECT_ROOT/agent-configs"
+        "$PROJECT_ROOT/host"
+        "$PROJECT_ROOT/scripts"
+    )
+    
+    for dir in "${scan_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            echo "  Scanning $dir..."
+            if ! "$SECRET_SCANNER_BIN" fs \
+                --scanners secret \
+                --severity HIGH,CRITICAL \
+                --exit-code 1 \
+                --no-progress \
+                "$dir"; then
+                echo "❌ Secret scan failed in $dir" >&2
+                exit 1
+            fi
+        fi
+    done
+    
+    BUILD_CONTEXT_SCANNED="true"
+    echo "✓ Build context secret scan passed"
 }
 
 # ============================================================================
@@ -191,6 +208,10 @@ build_test_images() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     cd "$PROJECT_ROOT"
+    
+    # Scan build context for secrets BEFORE building any images
+    # This catches secrets at the source and uses much less disk than image scanning
+    scan_build_context_for_secrets
 
     # Build base image using centralized utility (handles caching & cleanup)
     echo ""
@@ -200,7 +221,6 @@ build_test_images() {
         echo "❌ Failed to build base image"
         return 1
     fi
-    scan_image_for_secrets "$base_tag"
 
     # Tag for test registry and push
     echo "  Tagging as $TEST_BASE_IMAGE..."
@@ -226,7 +246,6 @@ build_test_images() {
             --build-arg BASE_IMAGE="$base_tag" \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             . || return 1
-        scan_image_for_secrets "$test_image"
 
         echo "  Pushing to local registry..."
         docker push "$test_image" || return 1
