@@ -31,7 +31,11 @@ CONTAINAI_CACHE_DIR="${CONTAINAI_CACHE_DIR:-${CONTAINAI_CONFIG_DIR}/cache}"
 CONTAINAI_PREREQ_CACHE_FILE="${CONTAINAI_PREREQ_CACHE_FILE:-${CONTAINAI_CACHE_DIR}/prereq-check}"
 # Security profiles MUST be root-owned to prevent tampering. System location used by both prod and dev.
 # This path is hardcoded and NOT overridable - security critical.
-readonly CONTAINAI_SYSTEM_PROFILES_DIR="/opt/containai/profiles"
+# Guard against re-sourcing this file (readonly can only be set once)
+if [[ -z "${_CONTAINAI_COMMON_FUNCTIONS_LOADED:-}" ]]; then
+    readonly CONTAINAI_SYSTEM_PROFILES_DIR="/opt/containai/profiles"
+    readonly _CONTAINAI_COMMON_FUNCTIONS_LOADED=1
+fi
 CONTAINAI_BROKER_SCRIPT="${CONTAINAI_BROKER_SCRIPT:-${_CONTAINAI_SCRIPT_ROOT}/host/utils/secret-broker.py}"
 CONTAINAI_AUDIT_LOG="${CONTAINAI_AUDIT_LOG:-${CONTAINAI_CONFIG_DIR}/security-events.log}"
 CONTAINAI_HELPER_NETWORK_POLICY="${CONTAINAI_HELPER_NETWORK_POLICY:-loopback}"

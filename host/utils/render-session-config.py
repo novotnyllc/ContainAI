@@ -23,7 +23,7 @@ AGENT_CONFIG_TARGETS: Dict[str, str] = {
 STUB_COMMAND_TEMPLATE = "/home/agentuser/.local/bin/mcp-stub-{name}"
 HELPER_LISTEN_HOST = "127.0.0.1"
 HELPER_PORT_BASE = 52100
-DEFAULT_CONFIG_ROOT = pathlib.Path(os.environ.get("CONTAINAI_CONFIG_ROOT", Path.home() / ".config" / "containai-dev"))
+DEFAULT_CONFIG_ROOT = pathlib.Path(os.environ.get("CONTAINAI_CONFIG_ROOT", pathlib.Path.home() / ".config" / "containai-dev"))
 DEFAULT_HELPER_ACL_CONFIG = pathlib.Path(
     os.environ.get("CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
 )

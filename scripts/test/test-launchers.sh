@@ -1466,7 +1466,16 @@ test_mitm_log_forwarding() {
     LOG_FORWARDER_IMAGE="$test_image" LOG_BROKER_IMAGE="$test_image" \
         start_proxy_log_pipeline "$proxy_container" "$proxy_network" "$log_dir" "$cert_dir"
 
-    sleep 3
+    # Wait for log pipeline to capture output (CI can be slow)
+    local wait_secs=0
+    local max_wait=10
+    while [ $wait_secs -lt $max_wait ]; do
+        if [ -f "$log_dir/access.log" ] && grep -q "log-" "$log_dir/access.log" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        wait_secs=$((wait_secs + 1))
+    done
 
     if [ -f "$log_dir/access.log" ] && grep -q "log-" "$log_dir/access.log"; then
         pass "Log forwarding captured proxy output via TLS broker"
