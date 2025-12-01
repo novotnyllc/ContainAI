@@ -1445,13 +1445,15 @@ test_mitm_log_forwarding() {
 
     source "$PROJECT_ROOT/host/utils/common-functions.sh"
 
-    # Use alpine - it has sh, openssl, and all utils needed for log forwarding
-    local test_image="alpine:latest"
-    if ! docker image inspect "$test_image" >/dev/null 2>&1; then
-        docker pull "$test_image" >/dev/null 2>&1 || {
-            fail "Unable to pull $test_image"
-            return
-        }
+    # Build a minimal test image with openssl for TLS log forwarding
+    local test_image="containai-test-log-forwarder:latest"
+    if ! docker build -q -t "$test_image" - <<'DOCKERFILE' >/dev/null 2>&1
+FROM alpine:latest
+RUN apk add --no-cache openssl
+DOCKERFILE
+    then
+        fail "Unable to build test image with openssl"
+        return
     fi
 
     local proxy_container="containai-test-proxy-$RANDOM"
@@ -1463,10 +1465,15 @@ test_mitm_log_forwarding() {
     generate_log_broker_certs "$cert_dir"
 
     # Mock proxy container that writes logs (simulates squid access log)
+    # Create mock proxy with a VOLUME for the log directory (required for --volumes-from)
     docker run -d --name "$proxy_container" --label "containai.test=true" \
-        "$test_image" sh -c 'mkdir -p /var/log/squid; touch /var/log/squid/access.log; i=0; while true; do echo "log-$i" >> /var/log/squid/access.log; i=$((i+1)); sleep 1; done' >/dev/null
+        -v /var/log/squid \
+        "$test_image" sh -c 'mkdir -p /var/log/squid && touch /var/log/squid/access.log && chmod 666 /var/log/squid/access.log && i=0; while true; do echo "log-$i" >> /var/log/squid/access.log; i=$((i+1)); sleep 1; done' >/dev/null
 
-    # Use alpine for forwarder/broker with the installed security profiles
+    # Give the proxy container a moment to create the log file
+    sleep 1
+
+    # Use the test image for forwarder/broker (has openssl)
     LOG_FORWARDER_IMAGE="$test_image" LOG_BROKER_IMAGE="$test_image" \
         start_proxy_log_pipeline "$proxy_container" "$proxy_network" "$log_dir" "$cert_dir"
 
@@ -1504,6 +1511,7 @@ test_mitm_log_forwarding() {
 
     stop_proxy_log_pipeline "$proxy_container"
     docker rm -f "$proxy_container" >/dev/null 2>&1 || true
+    docker rmi -f "$test_image" >/dev/null 2>&1 || true
     rm -rf "$log_dir"
 }
 
