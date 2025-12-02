@@ -18,13 +18,12 @@ use nix::unistd::{execvp, initgroups, setresgid, setresuid, User};
 
 fn main() {
     if let Err(err) = real_main() {
-        let _ = writeln!(io::stderr(), "agentcli-exec: {err}");
+        let _ = writeln!(io::stderr(), "agentcli-exec: {:#}", err);
         std::process::exit(1);
     }
 }
 
 fn real_main() -> Result<()> {
-    eprintln!("DEBUG: agentcli-exec starting");
     let mut args = env::args_os();
     let _ = args.next();
     let argv: Vec<OsString> = args.collect();
@@ -70,13 +69,7 @@ fn switch_user() -> Result<()> {
 }
 
 fn setup_runner(socket_path: &str) -> Result<()> {
-    let notify_fd = match install_seccomp_filter() {
-        Ok(fd) => fd,
-        Err(err) => {
-            eprintln!("agentcli-exec: unable to install seccomp filter (continuing without interception): {err}");
-            return Ok(());
-        }
-    };
+    let notify_fd = install_seccomp_filter().context("unable to install seccomp filter")?;
     let agent_name = get_env("CONTAINAI_AGENT_NAME");
     let binary_name = get_env("CONTAINAI_AGENT_BINARY");
     if let Err(err) = register_with_runner(
@@ -92,20 +85,22 @@ fn setup_runner(socket_path: &str) -> Result<()> {
 
 fn install_seccomp_filter() -> Result<OwnedFd> {
     use libseccomp_sys::{
-        scmp_filter_ctx, seccomp_init, seccomp_load, seccomp_notify_fd, seccomp_release,
-        seccomp_rule_add, SCMP_ACT_ALLOW, SCMP_ACT_NOTIFY,
+        scmp_filter_ctx, seccomp_attr_set, seccomp_init, seccomp_load, seccomp_notify_fd,
+        seccomp_release, seccomp_rule_add, SCMP_ACT_ALLOW, SCMP_ACT_NOTIFY,
     };
+    use libseccomp_sys::scmp_filter_attr::{SCMP_FLTATR_CTL_NNP, SCMP_FLTATR_CTL_TSYNC};
 
     unsafe {
         let ctx: scmp_filter_ctx = seccomp_init(SCMP_ACT_ALLOW);
         if ctx.is_null() {
             bail!("seccomp_init returned null");
         }
-        // let rc = seccomp_attr_set(ctx, SCMP_FLTATR_CTL_NNP, 1);
-        // if rc != 0 {
-        //     seccomp_release(ctx);
-        //     bail!("seccomp_attr_set failed: {rc}");
-        // }
+        // Disable TSYNC to avoid ECANCELED (-125) when running in some environments
+        let _ = seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 0);
+        
+        // Try to disable NNP as well, in case it conflicts or we have CAP_SYS_ADMIN
+        let _ = seccomp_attr_set(ctx, SCMP_FLTATR_CTL_NNP, 0);
+
         for syscall in [libc::SYS_execve, libc::SYS_execveat] {
             let rc = seccomp_rule_add(ctx, SCMP_ACT_NOTIFY, syscall as c_int, 0);
             if rc != 0 {
@@ -113,6 +108,7 @@ fn install_seccomp_filter() -> Result<OwnedFd> {
                 bail!("seccomp_rule_add failed for syscall {syscall}: {rc}");
             }
         }
+        
         let rc = seccomp_load(ctx);
         if rc != 0 {
             seccomp_release(ctx);
@@ -142,7 +138,6 @@ fn register_with_runner(
     .map_err(|e| anyhow::anyhow!(e))?;
     let addr = UnixAddr::new(socket_path).context("invalid socket path")?;
     socket::connect(sock.as_raw_fd(), &addr).map_err(|e| anyhow::anyhow!(e))?;
-    eprintln!("DEBUG: agentcli-exec connected to socket");
 
     let header = AgentTaskRunnerMsgHeader::new(
         MSG_REGISTER,
@@ -159,7 +154,6 @@ fn register_with_runner(
     let cmsg = [ControlMessage::ScmRights(&[notify_fd])];
     socket::sendmsg::<UnixAddr>(sock.as_raw_fd(), &iov, &cmsg, MsgFlags::empty(), None)
         .map_err(|e| anyhow::anyhow!(e))?;
-    eprintln!("DEBUG: agentcli-exec sent message");
     Ok(())
 }
 

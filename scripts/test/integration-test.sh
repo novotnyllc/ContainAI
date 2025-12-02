@@ -522,6 +522,23 @@ bootstrap_tools() {
     echo "  ✓ Tooling installed"
 }
 
+inject_common_images() {
+    local images=("python:3-alpine" "alpine:latest" "alpine:3.19")
+    echo "  Injecting common test images into isolation..."
+    
+    for img in "${images[@]}"; do
+        if docker image inspect "$img" >/dev/null 2>&1; then
+            # Check if already present in DinD to save time
+            if ! docker exec "$DIND_CONTAINER" docker image inspect "$img" >/dev/null 2>&1; then
+                echo "    Injecting $img..."
+                docker save "$img" | docker exec -i "$DIND_CONTAINER" docker load >/dev/null
+            fi
+        else
+            echo "    ⚠️  Image $img not found on host, skipping injection"
+        fi
+    done
+}
+
 inject_base_image() {
     # Build base image on host using centralized utility (handles caching & cleanup)
     # Then inject into DinD for test isolation
@@ -699,6 +716,7 @@ else
     wait_for_daemon
     bootstrap_tools
     inject_base_image
+    inject_common_images
     ensure_trivy_inside_isolation
     stage_host_secrets_inside_dind
     run_integration_tests

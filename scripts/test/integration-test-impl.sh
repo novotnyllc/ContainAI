@@ -308,27 +308,31 @@ test_launcher_script_execution() {
 #!/usr/bin/env bash
 source "$SCRIPT_DIR/test-config.sh"
 
-docker run -d \\
-    --name "$container_name" \\
-    --label "$TEST_LABEL_TEST" \\
-    --label "$TEST_LABEL_SESSION" \\
-    --label "containai.type=agent" \\
-    --label "containai.agent=copilot" \\
-    --label "containai.repo=test-repo" \\
-    --label "containai.branch=main" \\
-    --network "$TEST_NETWORK" \\
-    --cap-add SYS_ADMIN \\
-    --cap-add NET_ADMIN \\
-    -v "$TEST_REPO_DIR:/workspace" \\
-    -e "GH_TOKEN=$TEST_GH_TOKEN" \\
-    -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \\
-    -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \\
-    -e "NO_PROXY=localhost,127.0.0.1" \\
-    -v /workspace/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro \\
-    -v /workspace/docker/runtime/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro \\
-    -v /workspace/docker/runtime/agent-task-runner/target/debug/agentcli-exec:/usr/local/bin/agentcli-exec:ro \\
-    "$TEST_COPILOT_IMAGE" \\
-    sleep $LONG_RUNNING_SLEEP
+DOCKER_ARGS=(
+    run -d
+    --name "$container_name"
+    --label "$TEST_LABEL_TEST"
+    --label "$TEST_LABEL_SESSION"
+    --label "containai.type=agent"
+    --label "containai.agent=copilot"
+    --label "containai.repo=test-repo"
+    --label "containai.branch=main"
+    --network "$TEST_NETWORK"
+    --cap-add SYS_ADMIN
+    --cap-add NET_ADMIN
+    -v "$TEST_REPO_DIR:/workspace"
+    -e "GH_TOKEN=$TEST_GH_TOKEN"
+    -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
+    -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
+    -e "NO_PROXY=localhost,127.0.0.1"
+    -v /workspace/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+)
+
+if [ -f /workspace/docker/runtime/agent-task-runner/target/debug/agent-task-runnerd ]; then
+    DOCKER_ARGS+=(-v /workspace/docker/runtime/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro)
+fi
+
+docker "\${DOCKER_ARGS[@]}" "$TEST_COPILOT_IMAGE" sleep $LONG_RUNNING_SLEEP
 EOF
     
     chmod +x "/tmp/test-${launcher_name}"

@@ -40,6 +40,8 @@ compute_base_image_hash() {
         cat "$project_root/docker/base/Dockerfile" 2>/dev/null || true
         # Runtime scripts that get copied into the image
         cat "$project_root/docker/runtime/"*.sh 2>/dev/null || true
+        # Agent task runner source code (Rust)
+        find "$project_root/docker/runtime/agent-task-runner" -type f -exec cat {} \; 2>/dev/null || true
         # Key host utilities that affect image behavior
         find "$project_root/host/utils" -name "*.sh" -type f -exec cat {} \; 2>/dev/null || true
     } | sha256sum | cut -c1-12
