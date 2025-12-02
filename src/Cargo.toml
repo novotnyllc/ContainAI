@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "agent-task-runner",
+    "audit-shim",
+    "audit-protocol",
+]
+resolver = "2"

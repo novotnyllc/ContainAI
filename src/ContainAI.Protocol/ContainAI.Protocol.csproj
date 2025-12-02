@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Library project, no special properties needed beyond Directory.Build.props -->
+  </PropertyGroup>
+</Project>

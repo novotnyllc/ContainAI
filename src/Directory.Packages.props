@@ -1,0 +1,12 @@
+<Project>
+  <ItemGroup>
+    <!-- Runtime Dependencies -->
+    <PackageVersion Include="System.CommandLine" Version="2.0.0" />
+    <PackageVersion Include="System.IO.Pipelines" Version="10.0.0" />
+    
+    <!-- Test Dependencies -->
+    <PackageVersion Include="xunit.v3" Version="3.2.1" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.1.0" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.TrxReport" Version="2.0.2" />
+  </ItemGroup>
+</Project>

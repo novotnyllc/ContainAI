@@ -11,7 +11,7 @@ RUN install -d -o nonroot -g nonroot /agent-task-runner
 USER nonroot
 
 WORKDIR /agent-task-runner
-COPY --chown=nonroot:nonroot docker/runtime/agent-task-runner/ ./
+COPY --chown=nonroot:nonroot src/agent-task-runner/ ./
 RUN cargo build --release --locked
 
 # Base image for containai container

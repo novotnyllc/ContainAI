@@ -16,6 +16,7 @@
 languages:
 - bash
 - cpp
+- csharp
 - python
 - rust
 - markdown

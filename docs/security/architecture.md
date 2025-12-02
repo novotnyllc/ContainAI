@@ -522,7 +522,7 @@ flowchart TB
 ### Agent Task Runner Daemon
 
 - `agentcli-exec` installs a libseccomp filter so that every `execve`/`execveat` inside the `agentcli` namespace is paused and inspected by `agent-task-runnerd` before it runs.
-- Both helpers ship from the Rust crate at `docker/runtime/agent-task-runner`, eliminating the previous C implementations per the secure-language requirement.
+- Both helpers ship from the Rust crate at `src/agent-task-runner`
 - `agent-task-runnerd` (shipped in `/usr/local/bin/agent-task-runnerd`) listens on `/run/agent-task-runner.sock`, receives the seccomp notification FD over SCM_RIGHTS, reconstructs the target command from the paused task’s memory, and appends a JSON log line to `/run/agent-task-runner/events.log`.
 - Operators choose `CONTAINAI_RUNNER_POLICY=observe|enforce` at runtime. Observe mode resumes the syscall after logging; enforce mode denies any exec whose binary lives under `/run/agent-secrets` or `/run/agent-data`, preventing helper processes from inheriting sensitive tmpfs mounts even if wrappers are bypassed.
 - Because the filter is attached inside the container rather than via Docker’s seccomp profile, the interception works for every vendor CLI (Copilot, Codex, Claude) regardless of future runtime changes.

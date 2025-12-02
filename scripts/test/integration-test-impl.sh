@@ -328,8 +328,8 @@ DOCKER_ARGS=(
     -v /workspace/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
 )
 
-if [ -f /workspace/docker/runtime/agent-task-runner/target/debug/agent-task-runnerd ]; then
-    DOCKER_ARGS+=(-v /workspace/docker/runtime/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro)
+if [ -f /workspace/src/agent-task-runner/target/debug/agent-task-runnerd ]; then
+    DOCKER_ARGS+=(-v /workspace/src/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro)
 fi
 
 docker "\${DOCKER_ARGS[@]}" "$TEST_COPILOT_IMAGE" sleep $LONG_RUNNING_SLEEP

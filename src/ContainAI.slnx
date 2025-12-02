@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="ContainAI.LogCollector/ContainAI.LogCollector.csproj" />
+  <Project Path="ContainAI.Host/ContainAI.Host.csproj" />
+  <Project Path="ContainAI.Protocol/ContainAI.Protocol.csproj" />
+  <Project Path="ContainAI.LogCollector.Tests/ContainAI.LogCollector.Tests.csproj" />
+  <Project Path="ContainAI.Host.Tests/ContainAI.Host.Tests.csproj" />
+  <Project Path="ContainAI.Protocol.Tests/ContainAI.Protocol.Tests.csproj" />
+</Solution>
