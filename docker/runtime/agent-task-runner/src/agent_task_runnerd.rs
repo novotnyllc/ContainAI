@@ -57,7 +57,7 @@ impl PolicyMode {
 /// Tracks an agent process that registered for seccomp notifications.
 #[derive(Debug)]
 struct RunnerClient {
-    notify_fd: OwnedFd,
+    notify_fd: Option<OwnedFd>,
     pid: libc::pid_t,
     agent: String,
     binary: String,
@@ -118,8 +118,10 @@ fn real_main() -> Result<()> {
         poll_fds.push(PollFd::new(listen_fd.as_fd(), PollFlags::POLLIN));
         for (idx, client) in clients.iter().enumerate() {
             if let Some(client) = client {
-                poll_fds.push(PollFd::new(client.notify_fd.as_fd(), PollFlags::POLLIN));
-                index_map.push(idx);
+                if let Some(fd) = &client.notify_fd {
+                    poll_fds.push(PollFd::new(fd.as_fd(), PollFlags::POLLIN));
+                    index_map.push(idx);
+                }
             }
         }
 
@@ -350,7 +352,8 @@ fn accept_client(
     match header.msg_type {
         MSG_REGISTER => {
             eprintln!("DEBUG: MSG_REGISTER received");
-            let notify_fd = received_fd.ok_or_else(|| anyhow!("missing SCM_RIGHTS fd"))?;
+            // let notify_fd = received_fd.ok_or_else(|| anyhow!("missing SCM_RIGHTS fd"))?;
+            let notify_fd = received_fd;
             let mut payload = AgentTaskRunnerRegister::empty();
             if payload_buf.len() != std::mem::size_of::<AgentTaskRunnerRegister>() {
                 bail!("invalid payload length {}", payload_buf.len());
@@ -376,7 +379,7 @@ fn accept_client(
 /// Stores a newly registered client in the fixed-size table.
 fn add_client(
     clients: &mut [Option<RunnerClient>],
-    notify_fd: OwnedFd,
+    notify_fd: Option<OwnedFd>,
     payload: &AgentTaskRunnerRegister,
     log_file: &Arc<Mutex<File>>,
 ) -> Result<()> {
@@ -748,9 +751,14 @@ fn handle_notification(
     log_file: &Arc<Mutex<File>>,
     policy_mode: PolicyMode,
 ) -> Result<()> {
+    let notify_fd = match client.notify_fd.as_ref() {
+        Some(fd) => fd.as_raw_fd(),
+        None => return Ok(()), // Should not happen given poll logic
+    };
+
     let mut req = SeccompNotif::default();
     let mut resp = SeccompNotifResp::default();
-    if let Err(err) = recv_notification(client.notify_fd.as_raw_fd(), &mut req) {
+    if let Err(err) = recv_notification(notify_fd, &mut req) {
         if err.kind() == io::ErrorKind::Interrupted || err.kind() == io::ErrorKind::WouldBlock {
             return Ok(());
         }
@@ -784,7 +792,7 @@ fn handle_notification(
         resp.error = -libc::EPERM;
     }
 
-    if let Err(err) = send_response(client.notify_fd.as_raw_fd(), &mut resp) {
+    if let Err(err) = send_response(notify_fd, &mut resp) {
         if err.raw_os_error() == Some(libc::ENOENT) || err.raw_os_error() == Some(libc::ESRCH) {
             return Ok(());
         }

@@ -432,6 +432,7 @@ start_dind() {
         "--name" "$DIND_CONTAINER"
         "--label" "$LABEL_RUN_ID"
         "--label" "$LABEL_CREATED"
+        "--shm-size" "2g"
         "-v" "$PROJECT_ROOT:/workspace:ro"
         "-v" "$DIND_RUN_DIR:/run"
         "-e" "DOCKER_TLS_CERTDIR="
@@ -523,7 +524,7 @@ bootstrap_tools() {
 }
 
 inject_common_images() {
-    local images=("python:3-alpine" "alpine:latest" "alpine:3.19")
+    local images=("python:3-alpine" "alpine:latest" "alpine:3.19" "debian:12-slim")
     echo "  Injecting common test images into isolation..."
     
     for img in "${images[@]}"; do

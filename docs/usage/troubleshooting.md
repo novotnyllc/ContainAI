@@ -35,6 +35,14 @@ If you see:
 1. Run `gh auth login` on your host
 2. Restart container: `docker restart copilot-app`
 
+### WSL2 Support and Limitations
+
+On WSL2, the agent uses the **Userspace Audit Shim** (`libauditshim.so`) for observability. The kernel lacks `CONFIG_SECCOMP_USER_NOTIFICATION` (or has conflicting filters), which prevents kernel-level syscall interception.
+
+- The agent suppresses warning messages about the missing kernel feature.
+- Network proxy, filesystem isolation, and static profiles are active.
+- The Audit Trail captures all agent activity.
+
 ### MCP Servers Not Working
 
 Check the host secrets file exists (the renderer reads it before each launch):

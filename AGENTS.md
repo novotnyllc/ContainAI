@@ -34,7 +34,8 @@ This file contains repository-specific guidance for working with the ContainAI c
 1. **Canonical Bash** - Bash implementations are the source of truth. Windows `.ps1` wrappers simply delegate into WSL and must stay in sync with their bash counterparts.
 2. **Test Coverage** - All functions must have comprehensive unit tests
 3. **Shim Quality** - Windows shims should perform only WSL validation/path translation and must not fork business logic
-4. **Documentation** - Keep CONTRIBUTING.md `docs/` updated with workflow changes
+4. **Fail-Closed Security** - Security controls (user switching, seccomp, capabilities) must never fail open. If a security primitive cannot be established, the process must exit immediately. No silent fallbacks to insecure states.
+5. **Documentation** - Keep CONTRIBUTING.md `docs/` updated with workflow changes
 
 ## Coding Conventions 
 

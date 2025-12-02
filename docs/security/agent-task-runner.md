@@ -16,6 +16,8 @@ This document explains the Rust-based control plane that mediates every process 
 | `agent-task-runnerd` | `docker/runtime/agent-task-runner/src/agent_task_runnerd.rs` | Master daemon. Owns the Unix seqpacket socket, tracks registered vendors, accepts `MSG_RUN_REQUEST` frames, and spawns sandbox helpers. Also handles seccomp user notifications for any `execve`/`execveat` attempted by vendor binaries. | Inputs: socket payloads, seccomp notifications, policy config. Outputs: audit log entries, sandbox processes, JSON responses to clients. |
 | `agent-task-runnerctl` | `docker/runtime/agent-task-runner/src/agent_task_runnerctl.rs` | Lightweight client invoked by wrappers (`install-agent-cli-wrappers.sh`). It builds a JSON payload (argv, env, cwd, session metadata) and relays STDIN/STDOUT/STDERR over the socket. | Inputs: CLI flags, environment variables. Outputs: framed protocol messages, propagated exit code. |
 | `agentcli-exec` | `docker/runtime/agent-task-runner/src/agentcli_exec.rs` | Shim that renames the vendor binary on disk, installs the seccomp filter, and ensures every `execve` traps into `agent-task-runnerd`. | Inputs: original CLI path. Outputs: instrumented vendor CLI process plus seccomp listener FD. |
+| `libauditshim.so` | `docker/base/audit-shim/src/lib.rs` | Userspace audit library injected via `LD_PRELOAD`. Wraps libc functions to log activity when kernel interception is unavailable. | Inputs: libc calls. Outputs: JSON events to `/run/containai/audit.sock`. |
+| `log-collector` | `docker/runtime/log-collector/src/main.rs` | Privileged background process that listens on the audit socket and writes logs to the host mount. | Inputs: JSON events from socket. Outputs: Log files in `/mnt/logs`. |
 | `agent-task-sandbox` | `docker/runtime/agent-task-runner/src/agent_task_sandbox.rs` | Helper executed by the daemon to unshare namespaces, drop privileges to `agentuser`, remount sensitive paths as sealed tmpfs, apply AppArmor + seccomp, and finally `execve` the requested command. | Inputs: daemon-provided argv/env, hide-path list, AppArmor profile. Outputs: isolated workload process tree. |
 | `channel.rs` | `docker/runtime/agent-task-runner/src/channel.rs` | Shared wrapper around Unix seqpacket sockets. Handles framing, size enforcement, and JSON helpers for both the client and daemon. | Inputs: `OwnedFd`. Outputs: strongly-typed header/payload tuples. |
 
@@ -28,7 +30,9 @@ These programs are shipped inside every agent container by the `docker/base/Dock
 3. **Runner request** – `agent-task-runnerctl` connects to the seqpacket socket, sends `MSG_RUN_REQUEST`, and streams STDIN in-band. All options and environment overrides are serialized in the payload so the daemon can validate them before any process spawns.
 4. **Sandbox creation** – The daemon validates policy (hide paths, workspace dir, session scope) and calls into `agent-task-sandbox`. That helper unshares namespaces, masks `/run/agent-*`, drops to `agentuser`, applies the AppArmor enforce profile plus seccomp task filter, and finally `execve`s the requested binary.
 5. **Streaming output & exit status** – `agent-task-runnerd` relays STDOUT/STDERR frames back to the client, logs every run, and responds with `MSG_RUN_EXIT` when the sandboxed process tree terminates. The client converts this payload into a shell exit code (propagating signals as `128+signal`).
-6. **Seccomp backstop** – Independently, `agentcli-exec` ensures the vendor CLI itself cannot `execve` arbitrary binaries without notifying the daemon. Even requests bypassing `agent-task-runnerctl` (e.g., CLI auto-updates) are paused until the daemon decides to allow or deny them.
+6. **Seccomp backstop & Audit Shim** – Independently, `agentcli-exec` ensures the vendor CLI itself cannot `execve` arbitrary binaries without notifying the daemon.
+    *   **Standard Linux**: Uses `seccomp_load` with `SCMP_ACT_NOTIFY`.
+    *   **WSL2/Fallback**: Injects `LD_PRELOAD=/usr/lib/libauditshim.so` to log `execve` calls when kernel notification is unavailable.
 
 ```mermaid
 sequenceDiagram
@@ -39,22 +43,24 @@ sequenceDiagram
     participant S as Sandbox Helper
     participant U as User Command
 
-    W->>C: Launch vendor CLI with seccomp listener
+    W->>C: Launch vendor CLI (Seccomp Listener OR Audit Shim)
     C->>R: Run command via agent-task-runnerctl (MSG_RUN_REQUEST)
     R->>S: Fork sandbox + unshare namespaces
     S->>U: Drop privileges, apply AppArmor/seccomp, execve workload
     U-->>R: STDOUT/STDERR frames (MSG_RUN_STDOUT/ERR)
     R-->>C: `MSG_RUN_EXIT` (code/signal), audit log entry
-    Note over C,R: Any direct execve triggers seccomp notification → R policy
+    Note over C,R: Direct execve triggers Seccomp Notify OR Audit Log
 ```
 
 ## 4. Security Guarantees
 
 | Guarantee | Mechanism | Notes |
 | --- | --- | --- |
+| Fail-Closed Privilege Drop | `agentcli-exec` strictly enforces `switch_user()`. If the user switch fails, the process exits immediately. | No fallback to running as the original user (root/agentcli). |
 | Secrets remain in tmpfs | Entrypoint mounts `/run/agent-secrets` and `/run/agent-data` as `tmpfs` with `mode=000`; sandbox helper remounts them private/unbindable and workloads run as `agentuser`. | Documented in [secret-credential-security-review.md](secret-credential-security-review.md) §4–5. |
 | Every workload is logged | Runner assigns each command the agent/binary/session metadata carried by the wrapper and emits structured JSON events (`/run/agent-task-runner/events.log`). | Log format defined in `agent_task_runnerd.rs` (`Event` struct). |
 | Policy enforcement even when wrappers fail | `agentcli-exec` installs a seccomp user-notification filter on `execve`/`execveat`; daemon can deny or allow after inspecting `/proc/<pid>/exe`. | Violations return `EPERM` and increment anomaly counter. |
+| Audit fallback for restricted kernels | If seccomp notification fails (WSL2), `agentcli-exec` injects `libauditshim.so` to log execution intent via userspace interception. | Ensures visibility when kernel enforcement is unavailable. |
 | Namespace, AppArmor, seccomp applied before user code | `agent-task-sandbox` unshares, remounts hide paths (`--hide`), drops to `agentuser`, calls `prctl(PR_SET_NO_NEW_PRIVS,1)`, then loads the `containai-task` profile before final `execve`. | Prevents privileged syscalls (ptrace, mount, perf, raw sockets, etc.). |
 | STDIO integrity | seqpacket channel ensures message boundaries and backpressure; client handles EINTR and closes STDIN cleanly on EOF, so signal delivery is deterministic. | See `channel.rs` + `FSIZE` guard. |
 | Build reproducibility | `docker/base/Dockerfile` builds all runner binaries in an isolated stage (`cargo build --release --locked`). CI uses the same Dockerfile to produce release artifacts. | `scripts/build/build-dev.sh` rebuilds dev-scoped images; prod builds are pinned and produced in CI. |

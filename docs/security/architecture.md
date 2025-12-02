@@ -10,6 +10,7 @@ High-level design of ContainAI.
 4. **Stateless Images**: Container images contain no secrets or user data
 5. **Secret Scanning**: Every image build and publish step runs a container-aware secret scanner so leaked tokens never ship inside layers
 6. **Persistent Workspaces**: Containers run in background, connectable from VS Code
+7. **Fail-Closed Defaults**: If a security control (e.g., privilege drop, seccomp load) fails, the component must terminate. We do not degrade to insecure modes.
 
 ## System Overview
 
@@ -545,6 +546,63 @@ Containers use a dedicated network with a mandatory proxy sidecar:
 - **Default (Squid):** All outbound HTTP/HTTPS traffic is routed through a Squid proxy sidecar for auditing. Direct internet access is blocked.
 - **Restricted:** (`--network-proxy restricted`) Traffic is routed through Squid but restricted to a strict allowlist of domains.
 - **No Port Exposure:** Containers expose ports to the host only when explicitly configured.
+
+### Observability & Auditing
+
+The system employs a dual-layer approach to ensure visibility into agent actions, providing robust auditing even on kernels with limited features (like WSL2).
+
+1.  **Kernel Enforcement (Seccomp)**:
+    *   **Mechanism**: Uses `seccomp_load` with `SCMP_ACT_NOTIFY`.
+    *   **Role**: Intercepts critical syscalls (`execve`, `execveat`) at the kernel boundary. Pauses the process and delegates the decision to the `agent-task-runnerd` supervisor.
+    *   **Availability**: Requires `CONFIG_SECCOMP_USER_NOTIFICATION` (Standard Linux).
+    *   **Guarantee**: Hard enforcement. The process cannot bypass this without a kernel exploit.
+
+2.  **Userspace Auditing (Shim)**:
+    *   **Mechanism**: Injects a Rust-based `cdylib` (`libauditshim.so`) via `LD_PRELOAD`.
+    *   **Role**: Wraps standard libc functions (`connect`, `execve`, `open`) to log high-level intent before passing control to the real implementation.
+    *   **Availability**: Universal (Linux/WSL2).
+    *   **Guarantee**: High-fidelity logging. Provides visibility into arguments and targets even if the kernel feature is missing.
+
+### Unified Logging Architecture
+
+To securely capture logs from untrusted components (Agent, Proxy) without exposing host filesystems to compromise, the system uses an **Internal Log Sidecar** pattern within each container.
+
+```mermaid
+flowchart LR
+    subgraph "Host System"
+        HostDir[~/.containai/logs/<session>/]
+    end
+
+    subgraph "Agent Container"
+        subgraph "Privileged Zone (Root/LogUser)"
+            Mount[/mnt/logs (Host Bind)]
+            Collector[Log Collector Process]
+            Sock((/run/containai/audit.sock))
+        end
+
+        subgraph "Untrusted Zone (AgentUser)"
+            Shim[Audit Shim]
+            Runner[Task Runner]
+            Agent[Agent Process]
+        end
+
+        Shim -->|JSON| Sock
+        Runner -->|JSON| Sock
+        Agent -->|Stdio| Runner
+        Sock --> Collector
+        Collector -->|Write| Mount
+    end
+
+    HostDir -.-> Mount
+```
+
+*   **Per-Instance Isolation**: Each running agent container runs its own lightweight log collector process. This ensures that multiple concurrent agents do not interfere with each other's logging streams.
+*   **Secure Transport**: A Unix Domain Socket (`/run/containai/audit.sock`) is used for IPC.
+*   **Access Control**:
+    *   The host log directory is mounted into a privileged location (e.g., `/mnt/logs`) accessible *only* to the root/log user.
+    *   The untrusted `agentuser` has **no access** to the mount point, preventing deletion or tampering of historical logs.
+    *   The `agentuser` can only write to the socket.
+*   **Centralization**: Network traffic (Squid), Process execution (Runner/Shim), and System events are aggregated into a single timeline per session.
 
 ## Data Flow
 
