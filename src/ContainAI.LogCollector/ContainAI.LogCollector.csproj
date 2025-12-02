@@ -2,6 +2,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <PublishAot>true</PublishAot>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <TrimMode>full</TrimMode>
     <InvariantGlobalization>true</InvariantGlobalization>
     <StripSymbols>true</StripSymbols>
   </PropertyGroup>
