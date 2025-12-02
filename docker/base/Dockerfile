@@ -1,19 +1,3 @@
-# Build the agent-task-runner binaries (agentcli-exec + agent-task-runnerd) with Rust
-FROM cgr.dev/chainguard/rust:latest-dev AS agent-task-runner-builder
-
-USER root
-RUN apk add --no-cache \
-    libseccomp-dev \
-    pkgconf
-
-RUN install -d -o nonroot -g nonroot /agent-task-runner
-
-USER nonroot
-
-WORKDIR /agent-task-runner
-COPY --chown=nonroot:nonroot src/agent-task-runner/ ./
-RUN cargo build --release --locked
-
 # Base image for containai container
 # This is a DEVELOPMENT container - agents need build tools to compile code!
 FROM ubuntu:24.04
@@ -225,17 +209,19 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     npm cache clean --force && \
     rm -rf /tmp/*
 
-# Install agentcli exec helper, task-runner daemon (Rust builds), and wrap vendor CLIs
-COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agentcli-exec /usr/local/bin/agentcli-exec
-COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-runnerd /usr/local/bin/agent-task-runnerd
-COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-sandbox /usr/local/bin/agent-task-sandbox
-COPY --from=agent-task-runner-builder /agent-task-runner/target/release/agent-task-runnerctl /usr/local/bin/agent-task-runnerctl
+# Install agentcli exec helper, task-runner daemon, and .NET components
+COPY artifacts/agentcli-exec /usr/local/bin/agentcli-exec
+COPY artifacts/agent-task-runnerd /usr/local/bin/agent-task-runnerd
+COPY artifacts/agent-task-sandbox /usr/local/bin/agent-task-sandbox
+COPY artifacts/agent-task-runnerctl /usr/local/bin/agent-task-runnerctl
+COPY artifacts/containai-host /usr/local/bin/containai-host
+COPY artifacts/containai-log-collector /usr/local/bin/containai-log-collector
 
-# Set permissions for Rust binaries, run CLI wrappers, and create users in one layer
+# Set permissions for binaries, run CLI wrappers, and create users in one layer
 RUN set -eux; \
-    chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl; \
+    chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl /usr/local/bin/containai-host /usr/local/bin/containai-log-collector; \
     chmod 4755 /usr/local/bin/agentcli-exec; \
-    chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl; \
+    chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl /usr/local/bin/containai-host /usr/local/bin/containai-log-collector; \
     /usr/local/bin/install-agent-cli-wrappers.sh github-copilot-cli:copilot codex:codex claude:claude; \
     rm /usr/local/bin/install-agent-cli-wrappers.sh; \
     if id -u agentuser >/dev/null 2>&1; then \

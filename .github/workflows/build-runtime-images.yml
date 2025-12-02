@@ -127,6 +127,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+          if [ "${{ matrix.arch_slug }}" = "arm64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu llvm
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: src/global.json
+
+      - name: Compile binaries
+        run: |
+          scripts/build/compile-binaries.sh "${{ matrix.arch_slug }}" "artifacts"
+        shell: bash
+
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v3
