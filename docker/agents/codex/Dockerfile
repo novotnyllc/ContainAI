@@ -26,4 +26,4 @@ WORKDIR /workspace
 
 # Override entrypoint to launch Codex directly
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["bash", "-c", "/usr/local/bin/prepare-codex-secrets.sh && /usr/local/bin/validate-codex-auth.sh && codex"]
+CMD ["bash", "-c", "/usr/local/bin/prepare-codex-secrets.sh && /usr/local/bin/validate-codex-auth.sh && agentcli-exec codex"]

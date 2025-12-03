@@ -262,6 +262,45 @@ git push local HEAD >/dev/null
 EOF
 }
 
+build_artifacts() {
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "⚠️  Cargo not found, checking for pre-built artifacts..."
+        local required_artifacts=(
+            "agentcli-exec"
+            "agent-task-runnerd"
+            "agent-task-sandbox"
+            "agent-task-runnerctl"
+            "libaudit_shim.so"
+            "containai-host"
+            "containai-log-collector"
+        )
+        local missing=0
+        for artifact in "${required_artifacts[@]}"; do
+            if [[ ! -f "$PROJECT_ROOT/artifacts/$artifact" ]]; then
+                echo "❌ Missing artifact: artifacts/$artifact"
+                missing=1
+            fi
+        done
+        
+        if [[ "$missing" -eq 1 ]]; then
+            echo "❌ Cannot proceed without artifacts. Install Rust/Cargo or provide pre-built binaries."
+            return 1
+        fi
+        
+        echo "✓ All required artifacts present."
+        return 0
+    fi
+    echo "Building artifacts using compile-binaries.sh..."
+    local arch
+    case "$(uname -m)" in
+        x86_64) arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        *) echo "Unsupported architecture: $(uname -m)"; return 1 ;;
+    esac
+
+    "$PROJECT_ROOT/scripts/build/compile-binaries.sh" "$arch" "artifacts"
+}
+
 # ============================================================================
 # Integration Tests
 # ============================================================================
@@ -291,6 +330,10 @@ test_launcher_script_execution() {
     
     # Test copilot launcher (channel-aware)
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
+    
+    # DEBUG: Check if entrypoint.sh exists
+    ls -l /workspace/docker/runtime/entrypoint.sh || echo "entrypoint.sh NOT FOUND at /workspace/docker/runtime/entrypoint.sh"
+
     local channel="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
     local launcher_name="run-copilot-dev"
     case "$channel" in
@@ -325,11 +368,11 @@ DOCKER_ARGS=(
     -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
     -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
     -e "NO_PROXY=localhost,127.0.0.1"
-    -v /workspace/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+    -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
 )
 
-if [ -f /workspace/src/agent-task-runner/target/debug/agent-task-runnerd ]; then
-    DOCKER_ARGS+=(-v /workspace/src/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro)
+if [ -f "$PROJECT_ROOT/src/agent-task-runner/target/debug/agent-task-runnerd" ]; then
+    DOCKER_ARGS+=(-v "$PROJECT_ROOT/src/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro")
 fi
 
 docker "\${DOCKER_ARGS[@]}" "$TEST_COPILOT_IMAGE" sleep $LONG_RUNNING_SLEEP
@@ -530,6 +573,11 @@ test_capabilities_dropped() {
 test_agent_task_runner_seccomp() {
     test_section "Testing agent-task-runner seccomp notifications"
 
+    if grep -q "Alpine" /etc/os-release 2>/dev/null; then
+        echo "⚠️  Skipping agent-task-runner seccomp test on Alpine Linux (DinD limitations)"
+        return
+    fi
+
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
 
     # Check if agent-task-runnerd is running
@@ -542,7 +590,7 @@ test_agent_task_runner_seccomp() {
 
     # Run agentcli-exec and capture output
     local exec_out
-    if exec_out=$(docker exec -e AGENT_TASK_RUNNER_SOCKET=/run/agent-task-runner.sock "$container_name" agentcli-exec /bin/bash -c 'true' 2>&1); then
+    if exec_out=$(docker exec -e AGENT_TASK_RUNNER_SOCKET=/run/agent-task-runner.sock "$container_name" agentcli-exec /bin/bash -c 'sleep 1' 2>&1); then
         pass "agentcli-exec executed sample command"
     else
         fail "agentcli-exec failed to run sample command"
@@ -554,7 +602,7 @@ test_agent_task_runner_seccomp() {
         echo "DEBUG: agentcli-exec output: $exec_out"
     fi
 
-    sleep 2
+    sleep 5
 
     local log_output
     log_output=$(docker exec "$container_name" cat /run/agent-task-runner/events.log 2>/dev/null || true)
@@ -1613,6 +1661,82 @@ test_host_prompt_mode() {
     rm -f "$tmp_output"
 }
 
+test_audit_logging() {
+    test_section "Testing audit logging (Host <-> Shim)"
+
+    if grep -q "Alpine" /etc/os-release 2>/dev/null; then
+        echo "⚠️  Skipping audit logging test on Alpine Linux (glibc binary incompatibility)"
+        return
+    fi
+
+    local host_bin="$PROJECT_ROOT/artifacts/containai-log-collector"
+    local shim_lib="$PROJECT_ROOT/artifacts/libaudit_shim.so"
+
+    if [ ! -f "$host_bin" ]; then
+        fail "Host binary not found at $host_bin"
+        return
+    fi
+
+    if [ ! -f "$shim_lib" ]; then
+        fail "Shim library not found at $shim_lib"
+        return
+    fi
+
+    local socket_path="/tmp/audit-test.sock"
+    local log_dir="/tmp/audit-logs"
+    
+    # Ensure log directory exists
+    mkdir -p "$log_dir"
+
+    # Start Host
+    echo "Starting Host..."
+    "$host_bin" --socket-path "$socket_path" --log-dir "$log_dir" > "$log_dir/host.log" 2>&1 &
+    local host_pid=$!
+
+    # Wait for socket
+    local retries=0
+    while [ ! -S "$socket_path" ] && [ $retries -lt 50 ]; do
+        sleep 0.1
+        ((retries++))
+    done
+
+    if [ ! -S "$socket_path" ]; then
+        fail "Host failed to create socket"
+        kill $host_pid || true
+        return
+    fi
+
+    # Run container with shim
+    local container_name="${TEST_CONTAINER_PREFIX}-audit-test"
+    
+    # We use a simple docker run here to ensure we control the environment fully for this specific integration
+    docker run --rm \
+        --name "$container_name" \
+        -v "$socket_path:$socket_path" \
+        -v "$shim_lib:/usr/lib/libaudit_shim.so:ro" \
+        -e "CONTAINAI_SOCKET_PATH=$socket_path" \
+        -e "LD_PRELOAD=/usr/lib/libaudit_shim.so" \
+        "$TEST_COPILOT_IMAGE" \
+        cat /etc/hostname > /dev/null
+
+    # Check logs
+    sleep 2
+    kill $host_pid || true
+
+    local log_file=$(find "$log_dir" -name "session-*.jsonl" | head -n 1)
+    if [ -z "$log_file" ]; then
+        fail "No audit log file created"
+        return
+    fi
+
+    if grep -q "open" "$log_file"; then
+        pass "Audit log contains 'open' event"
+    else
+        fail "Audit log missing 'open' event"
+        cat "$log_file"
+    fi
+}
+
 test_shared_functions() {
     test_section "Testing shared functions with test environment"
     
@@ -1663,6 +1787,12 @@ run_all_tests() {
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
     
+    # Build artifacts first (required for base image and audit tests)
+    build_artifacts || {
+        echo "Failed to build artifacts"
+        exit 1
+    }
+
     # Setup environment
     if [[ "${TEST_FILTER:-}" == "test_squid_proxy_hardening" ]]; then
         echo "Skipping full environment setup for squid proxy test (optimization)"
@@ -1693,6 +1823,7 @@ run_all_tests() {
     if should_run "test_multiple_agents"; then test_multiple_agents; fi
     if should_run "test_container_isolation"; then test_container_isolation; fi
     if should_run "test_cleanup_on_exit"; then test_cleanup_on_exit; fi
+    if should_run "test_audit_logging"; then test_audit_logging; fi
     
     if [ "$TEST_WITH_HOST_SECRETS" = "true" ]; then
         if should_run "test_host_prompt_mode"; then test_host_prompt_mode; fi

@@ -34,9 +34,13 @@ use nix::unistd::{self, Pid};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use signal_hook::flag;
+use audit_protocol::AuditEvent;
+use chrono::Utc;
+use std::os::unix::net::UnixStream;
 
 const MAX_CLIENTS: usize = 64;
 const DEFAULT_LOG_PATH: &str = "/run/agent-task-runner/events.log";
+const AUDIT_SOCKET_PATH: &str = "/run/containai/audit.sock";
 const PATH_MAX: usize = 4096;
 
 #[derive(Clone, Copy)]
@@ -879,7 +883,32 @@ fn log_event(
     serde_json::to_writer(&mut *guard, &event)?;
     guard.write_all(b"\n")?;
     guard.flush()?;
+
+    // Also send to unified audit log
+    send_audit_event(pid, agent, binary, path, action);
+
     Ok(())
+}
+
+fn send_audit_event(pid: i32, agent: &str, binary: &str, path: &str, action: &str) {
+    let event = AuditEvent {
+        timestamp: Utc::now(),
+        source: "agent-task-runner".to_string(),
+        event_type: action.to_string(),
+        payload: serde_json::json!({
+            "pid": pid,
+            "agent": agent,
+            "binary": binary,
+            "path": path
+        }),
+    };
+
+    if let Ok(json) = serde_json::to_string(&event) {
+        if let Ok(mut stream) = UnixStream::connect(AUDIT_SOCKET_PATH) {
+            let _ = stream.write_all(json.as_bytes());
+            let _ = stream.write_all(b"\n");
+        }
+    }
 }
 
 fn timestamp_ms() -> i64 {

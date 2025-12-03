@@ -27,4 +27,4 @@ WORKDIR /workspace
 
 # Override entrypoint to launch Copilot directly with config init
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["bash", "-c", "/usr/local/bin/prepare-copilot-secrets.sh && /usr/local/bin/validate-copilot-auth.sh && github-copilot-cli"]
+CMD ["bash", "-c", "/usr/local/bin/prepare-copilot-secrets.sh && /usr/local/bin/validate-copilot-auth.sh && agentcli-exec github-copilot-cli"]

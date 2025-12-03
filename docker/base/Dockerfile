@@ -170,7 +170,6 @@ COPY --chown=root:root docker/runtime/mcp-http-helper.py /usr/local/bin/mcp-http
 COPY --chown=root:root docker/runtime/capability-unseal.py /usr/local/bin/capability-unseal
 COPY --chown=root:root host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
 COPY --chown=root:root host/utils/package-agent-data.py /usr/local/bin/package-agent-data.py
-COPY --chown=root:root docker/runtime/install-agent-cli-wrappers.sh /usr/local/bin/install-agent-cli-wrappers.sh
 
 # Set permissions for all scripts in one layer
 RUN install -d /usr/local/libexec && \
@@ -188,8 +187,7 @@ RUN install -d /usr/local/libexec && \
     /usr/local/bin/mcp-http-helper.py \
     /usr/local/bin/capability-unseal \
     /usr/local/bin/convert-toml-to-mcp.py \
-    /usr/local/bin/package-agent-data.py \
-    /usr/local/bin/install-agent-cli-wrappers.sh && \
+    /usr/local/bin/package-agent-data.py && \
     ln -sf /usr/local/bin/mcp-stub-runner /usr/local/bin/mcp-stub
 
 # Install GitHub CLI, npm global packages, and Playwright in one layer
@@ -210,20 +208,17 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     rm -rf /tmp/*
 
 # Install agentcli exec helper, task-runner daemon, and .NET components
-COPY artifacts/agentcli-exec /usr/local/bin/agentcli-exec
-COPY artifacts/agent-task-runnerd /usr/local/bin/agent-task-runnerd
-COPY artifacts/agent-task-sandbox /usr/local/bin/agent-task-sandbox
-COPY artifacts/agent-task-runnerctl /usr/local/bin/agent-task-runnerctl
-COPY artifacts/containai-host /usr/local/bin/containai-host
-COPY artifacts/containai-log-collector /usr/local/bin/containai-log-collector
+COPY --chown=root:root artifacts/agentcli-exec /usr/local/bin/agentcli-exec
+COPY --chown=root:root artifacts/agent-task-runnerd /usr/local/bin/agent-task-runnerd
+COPY --chown=root:root artifacts/agent-task-sandbox /usr/local/bin/agent-task-sandbox
+COPY --chown=root:root artifacts/containai-log-collector /usr/local/bin/containai-log-collector
+COPY --chown=root:root artifacts/libaudit_shim.so /usr/lib/containai/libaudit_shim.so
 
 # Set permissions for binaries, run CLI wrappers, and create users in one layer
 RUN set -eux; \
-    chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl /usr/local/bin/containai-host /usr/local/bin/containai-log-collector; \
+    chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/containai-log-collector /usr/lib/containai/libaudit_shim.so; \
     chmod 4755 /usr/local/bin/agentcli-exec; \
-    chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/agent-task-runnerctl /usr/local/bin/containai-host /usr/local/bin/containai-log-collector; \
-    /usr/local/bin/install-agent-cli-wrappers.sh github-copilot-cli:copilot codex:codex claude:claude; \
-    rm /usr/local/bin/install-agent-cli-wrappers.sh; \
+    chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/containai-log-collector /usr/lib/containai/libaudit_shim.so; \
     if id -u agentuser >/dev/null 2>&1; then \
         true; \
     elif id -u ubuntu >/dev/null 2>&1; then \

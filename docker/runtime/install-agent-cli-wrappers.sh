@@ -21,12 +21,15 @@ install_wrapper() {
         exit 1
     fi
 
-    local real_path="${binary_path}.real"
-    if [ ! -x "$real_path" ]; then
-        mv "$binary_path" "$real_path"
-    fi
+    # Create wrapper directory if it doesn't exist
+    local wrapper_dir="/usr/local/share/containai/bin"
+    mkdir -p "$wrapper_dir"
 
-    local wrapper="${binary_path}"
+    # We do NOT rename the original binary. Instead, we place a wrapper in a directory
+    # that is higher in the PATH (configured in Dockerfile).
+    local real_path="${binary_path}"
+    local wrapper="${wrapper_dir}/${binary}"
+
     cat >"$wrapper" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail

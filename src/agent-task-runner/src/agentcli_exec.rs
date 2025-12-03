@@ -31,10 +31,10 @@ fn real_main() -> Result<()> {
         bail!("Usage: agentcli-exec <command> [args...]");
     }
 
-    let mut restricted_mode = false;
-    if let Some(socket_path) = get_env("AGENT_TASK_RUNNER_SOCKET") {
-        restricted_mode = setup_runner(&socket_path)?;
-    }
+    let socket_path = get_env("AGENT_TASK_RUNNER_SOCKET")
+        .unwrap_or_else(|| "/run/agent-task-runner.sock".to_string());
+
+    let restricted_mode = setup_runner(&socket_path)?;
 
     if !restricted_mode {
         // Only attempt to switch user if we are not in a restricted user namespace
@@ -50,6 +50,20 @@ fn real_main() -> Result<()> {
     let (cmd, _) = cstrings
         .split_first()
         .context("missing command after argv parsing")?;
+
+    // Always attempt to load the audit shim if present.
+    // This provides defense-in-depth logging even if seccomp notifications fail or are bypassed.
+    let shim_path = "/usr/lib/containai/libaudit_shim.so";
+    if std::path::Path::new(shim_path).exists() {
+            let current_preload = env::var("LD_PRELOAD").unwrap_or_default();
+            let new_preload = if current_preload.is_empty() {
+                shim_path.to_string()
+            } else {
+                format!("{}:{}", shim_path, current_preload)
+            };
+            env::set_var("LD_PRELOAD", new_preload);
+    }
+
     execvp(cmd, &cstrings)?;
     unreachable!("execvp should not return on success");
 }

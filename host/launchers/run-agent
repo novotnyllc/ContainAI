@@ -695,13 +695,13 @@ run_prompt_session() {
     local exec_cmd status=0
     case "$AGENT" in
         copilot)
-            exec_cmd='github-copilot-cli exec "$PROMPT_INPUT"'
+            exec_cmd='agentcli-exec github-copilot-cli exec "$PROMPT_INPUT"'
             ;;
         codex)
-            exec_cmd='codex exec "$PROMPT_INPUT"'
+            exec_cmd='agentcli-exec codex exec "$PROMPT_INPUT"'
             ;;
         claude)
-            exec_cmd='claude -p "$PROMPT_INPUT"'
+            exec_cmd='agentcli-exec claude -p "$PROMPT_INPUT"'
             ;;
         *)
             echo "❌ Prompt mode is not supported for agent '$AGENT'" >&2

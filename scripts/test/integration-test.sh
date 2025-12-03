@@ -74,8 +74,60 @@ fix_cache_permissions() {
             alpine:3.19 \
             chown -R "$(id -u):$(id -g)" /cache 2>&1; then
             echo "  ⚠️  Permission fix failed (may need manual: sudo chown -R \$(id -u):\$(id -g) $CACHE_DIR)"
+        else
+            # Verify ownership of the directory itself
+            if [[ "$(stat -c '%u' "$CACHE_DIR")" == "0" ]]; then
+                 echo "  ⚠️  Warning: Cache directory is still owned by root. Permission fix might have failed silently."
+            fi
         fi
     fi
+}
+
+prune_large_images() {
+    if [[ "$DIND_STARTED" != "true" ]]; then
+        return
+    fi
+    
+    # Only prune if we are persisting cache (otherwise it's all gone anyway)
+    if [[ "${PERSIST_CACHE:-true}" != "true" ]]; then
+        return
+    fi
+
+    echo "  Pruning images > 500MB from cache to save disk space..."
+    # Execute inside DinD
+    docker exec "$DIND_CONTAINER" sh -c '
+        # List images with size
+        docker images --format "{{.Repository}}:{{.Tag}}|{{.Size}}" | while IFS="|" read -r img size; do
+            # Skip if image name is empty or <none>
+            if [ -z "$img" ] || [ "$img" = "<none>:<none>" ]; then continue; fi
+            
+            # Skip base images to avoid re-injection/re-build
+            if echo "$img" | grep -qE "containai-base|test-containai/base"; then
+                continue
+            fi
+
+            should_remove=false
+            
+            # Check for GB
+            if echo "$size" | grep -q "GB"; then
+                should_remove=true
+            # Check for MB > 500
+            elif echo "$size" | grep -q "MB"; then
+                val=$(echo "$size" | tr -d "MB" | cut -d. -f1)
+                if [ "$val" -gt 500 ]; then
+                    should_remove=true
+                fi
+            fi
+            
+            if [ "$should_remove" = "true" ]; then
+                echo "    Removing large image: $img ($size)"
+                docker rmi "$img" >/dev/null 2>&1 || true
+            fi
+        done
+        
+        # Also prune dangling images
+        docker image prune -f >/dev/null 2>&1 || true
+    ' || echo "  ⚠️  Failed to prune large images"
 }
 
 cleanup() {
@@ -96,14 +148,19 @@ cleanup() {
         fi
     else
         if [[ "$DIND_STARTED" == "true" ]]; then
+            # Prune large images before stopping to keep cache size down
+            prune_large_images
+
             echo ""
             echo "Cleaning up isolated Docker daemon..."
             # Graceful stop to prevent cache corruption
             docker stop -t 10 "$DIND_CONTAINER" >/dev/null 2>&1 || true
             docker rm -fv "$DIND_CONTAINER" >/dev/null 2>&1 || true
-
-            fix_cache_permissions
         fi
+
+        # Always fix permissions if cache exists, even if DinD didn't start properly
+        # This ensures we don't leave root-owned files from a previous failed run
+        fix_cache_permissions
 
         # Clean up any other resources from this run (networks, etc.)
         cleanup_this_run
@@ -713,6 +770,9 @@ run_on_host() {
 if [[ "$ISOLATION_MODE" = "host" ]]; then
     run_on_host
 else
+    # Ensure cache permissions are correct before starting (in case of previous crash)
+    fix_cache_permissions
+    
     start_dind
     wait_for_daemon
     bootstrap_tools

@@ -39,11 +39,14 @@ compute_base_image_hash() {
         # Core Dockerfile
         cat "$project_root/docker/base/Dockerfile" 2>/dev/null || true
         # Runtime scripts that get copied into the image
-        cat "$project_root/docker/runtime/"*.sh 2>/dev/null || true
-        # Agent task runner source code (Rust)
-        find "$project_root/src/agent-task-runner" -type f -exec cat {} \; 2>/dev/null || true
-        # Key host utilities that affect image behavior
-        find "$project_root/host/utils" -name "*.sh" -type f -exec cat {} \; 2>/dev/null || true
+        # We include all files (scripts, python, binaries) and sort for determinism
+        find "$project_root/docker/runtime" -maxdepth 1 -type f -print0 | sort -z | xargs -0 cat 2>/dev/null || true
+        # Compiled artifacts (binaries) that are copied into the image
+        # We hash the artifacts instead of source to ensure image rebuilds when binaries change
+        # and to avoid rebuilds when only build artifacts (target dir) change
+        find "$project_root/artifacts" -maxdepth 1 -type f -print0 | sort -z | xargs -0 cat 2>/dev/null || true
+        # Key host utilities that affect image behavior (scripts and python helpers)
+        find "$project_root/host/utils" -maxdepth 1 -type f \( -name "*.sh" -o -name "*.py" \) -print0 | sort -z | xargs -0 cat 2>/dev/null || true
     } | sha256sum | cut -c1-12
 }
 

@@ -26,4 +26,4 @@ WORKDIR /workspace
 
 # Override entrypoint to launch Claude directly after preparing secrets
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["bash", "-c", "/usr/local/bin/prepare-claude-secrets.sh && /usr/local/bin/validate-claude-auth.sh && claude"]
+CMD ["bash", "-c", "/usr/local/bin/prepare-claude-secrets.sh && /usr/local/bin/validate-claude-auth.sh && agentcli-exec claude"]
