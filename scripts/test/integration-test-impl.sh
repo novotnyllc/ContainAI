@@ -270,7 +270,6 @@ build_artifacts() {
             "agent-task-runnerd"
             "agent-task-sandbox"
             "libaudit_shim.so"
-            "containai-host"
             "containai-log-collector"
         )
         local missing=0
