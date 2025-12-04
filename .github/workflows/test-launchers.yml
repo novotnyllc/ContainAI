@@ -42,7 +42,7 @@ jobs:
           git config --global user.email "actions@github.com"
 
       - name: Install socat
-        run: sudo apt-get update && sudo apt-get install -y socat
+        run: sudo apt-get update && sudo apt-get install -y socat libseccomp-dev libcap-dev zlib1g-dev clang
 
       - name: Install host assets
         run: sudo ./scripts/setup-local-dev.sh
@@ -81,7 +81,7 @@ jobs:
           git config --global user.email "actions@github.com"
 
       - name: Install socat
-        run: sudo apt-get update && sudo apt-get install -y socat
+        run: sudo apt-get update && sudo apt-get install -y socat libseccomp-dev libcap-dev zlib1g-dev clang
 
       - name: Install host assets (sudo)
         run: sudo ./scripts/setup-local-dev.sh
@@ -156,7 +156,7 @@ jobs:
           git config --global user.email "actions@github.com"
 
       - name: Install socat
-        run: sudo apt-get update && sudo apt-get install -y socat
+        run: sudo apt-get update && sudo apt-get install -y socat libseccomp-dev libcap-dev zlib1g-dev clang
 
       - name: Install host assets (sudo)
         run: sudo ./scripts/setup-local-dev.sh
@@ -211,7 +211,7 @@ jobs:
           git config --global user.email "actions@github.com"
 
       - name: Install socat
-        run: sudo apt-get update && sudo apt-get install -y socat
+        run: sudo apt-get update && sudo apt-get install -y socat libseccomp-dev libcap-dev zlib1g-dev clang
 
       - name: Install host assets
         run: sudo ./scripts/setup-local-dev.sh

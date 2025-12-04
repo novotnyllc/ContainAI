@@ -130,9 +130,11 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
+          sudo apt-get install -y clang zlib1g-dev libseccomp-dev libcap-dev
           if [ "${{ matrix.arch_slug }}" = "arm64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu llvm
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update
+            sudo apt-get install -y gcc-aarch64-linux-gnu llvm libseccomp-dev:arm64 libcap-dev:arm64
           fi
 
       - name: Setup .NET
