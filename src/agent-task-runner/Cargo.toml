@@ -30,6 +30,3 @@ path = "src/agent_task_runnerd.rs"
 name = "agent-task-sandbox"
 path = "src/agent_task_sandbox.rs"
 
-[[bin]]
-name = "agent-task-runnerctl"
-path = "src/agent_task_runnerctl.rs"

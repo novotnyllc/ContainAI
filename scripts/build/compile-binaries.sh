@@ -47,7 +47,6 @@ RUST_OUT_DIR="$REPO_ROOT/src/target/$RUST_TARGET/release"
 cp "$RUST_OUT_DIR/agentcli-exec" "$REPO_ROOT/$OUT_DIR/"
 cp "$RUST_OUT_DIR/agent-task-runnerd" "$REPO_ROOT/$OUT_DIR/"
 cp "$RUST_OUT_DIR/agent-task-sandbox" "$REPO_ROOT/$OUT_DIR/"
-cp "$RUST_OUT_DIR/agent-task-runnerctl" "$REPO_ROOT/$OUT_DIR/"
 
 popd >/dev/null
 
