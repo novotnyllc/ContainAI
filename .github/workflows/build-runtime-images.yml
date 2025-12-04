@@ -104,7 +104,7 @@ jobs:
     name: Build base image (${{ matrix.arch_slug }})
     needs: [determine-context, scan-build-context]
     if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -113,14 +113,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"containai-base-amd64"}]' || '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"containai-base-amd64"},{"arch":"linux/arm64","arch_slug":"arm64","cache_scope":"containai-base-arm64"}]') }}
+        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"containai-base-amd64","runner":"ubuntu-latest"}]' || '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"containai-base-amd64","runner":"ubuntu-latest"},{"arch":"linux/arm64","arch_slug":"arm64","cache_scope":"containai-base-arm64","runner":"ubuntu-24.04-arm64"}]') }}
     env:
       IMAGE_NAME: containai-base
     steps:
       - name: Free up disk space
         run: |
           # Remove large preinstalled packages we don't need
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          # Keep /usr/share/dotnet since we need .NET SDK for compilation
+          sudo rm -rf /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo docker image prune -af
           df -h /
 
@@ -131,11 +132,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang zlib1g-dev libseccomp-dev libcap-dev
-          if [ "${{ matrix.arch_slug }}" = "arm64" ]; then
-            sudo dpkg --add-architecture arm64
-            sudo apt-get update
-            sudo apt-get install -y gcc-aarch64-linux-gnu llvm libseccomp-dev:arm64 libcap-dev:arm64
-          fi
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -281,7 +277,7 @@ jobs:
       - determine-context
       - build-base-arch
     if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -290,7 +286,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"runtime-containai-amd64"}]' || '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"runtime-containai-amd64"},{"arch":"linux/arm64","arch_slug":"arm64","cache_scope":"runtime-containai-arm64"}]') }}
+        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"runtime-containai-amd64","runner":"ubuntu-latest"}]' || '[{"arch":"linux/amd64","arch_slug":"amd64","cache_scope":"runtime-containai-amd64","runner":"ubuntu-latest"},{"arch":"linux/arm64","arch_slug":"arm64","cache_scope":"runtime-containai-arm64","runner":"ubuntu-24.04-arm64"}]') }}
     env:
       IMAGE_NAME: containai
     steps:
@@ -464,7 +460,7 @@ jobs:
       - determine-context
       - build-containai-arch
     if: ${{ needs.determine-context.outputs.push == 'true' || github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -473,7 +469,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64"}]' || '[{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/arm64","arch_slug":"arm64"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/arm64","arch_slug":"arm64"}]') }}
+        include: ${{ fromJson(github.event_name == 'pull_request' && '[{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"}]' || '[{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-copilot","dockerfile":"docker/agents/copilot/Dockerfile","cache":"runtime-copilot","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64","runner":"ubuntu-24.04-arm64"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-codex","dockerfile":"docker/agents/codex/Dockerfile","cache":"runtime-codex","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64","runner":"ubuntu-24.04-arm64"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-claude","dockerfile":"docker/agents/claude/Dockerfile","cache":"runtime-claude","base_from_containai":true,"arch":"linux/arm64","arch_slug":"arm64","runner":"ubuntu-24.04-arm64"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-proxy","dockerfile":"docker/proxy/Dockerfile","cache":"runtime-proxy","base_from_containai":false,"arch":"linux/arm64","arch_slug":"arm64","runner":"ubuntu-24.04-arm64"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/amd64","arch_slug":"amd64","runner":"ubuntu-latest"},{"image":"containai-log-forwarder","dockerfile":"docker/log-forwarder/Dockerfile","cache":"runtime-log-forwarder","base_from_containai":false,"arch":"linux/arm64","arch_slug":"arm64","runner":"ubuntu-24.04-arm64"}]') }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

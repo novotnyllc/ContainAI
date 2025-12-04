@@ -76,11 +76,11 @@ fn send_event(event_type: &str, payload: serde_json::Value) {
                 eprintln!("[audit-shim] Failed to write newline: {}", e);
             }
         }
-        Err(e) => {
+        Err(_e) => {
             // Connection failures are expected if the host is not running
             // We log only on debug builds or if specifically requested to avoid spam
             #[cfg(debug_assertions)]
-            eprintln!("[audit-shim] Failed to connect to {}: {}", SOCKET_PATH.as_str(), e);
+            eprintln!("[audit-shim] Failed to connect to {}: {}", SOCKET_PATH.as_str(), _e);
         }
     }
 }

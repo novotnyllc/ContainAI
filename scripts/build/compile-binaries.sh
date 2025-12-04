@@ -16,13 +16,13 @@ mkdir -p "$OUT_DIR"
 if [ "$ARCH" = "amd64" ]; then
     RUST_TARGET="x86_64-unknown-linux-gnu"
     DOTNET_RID="linux-x64"
-    CC_LINKER=""
 elif [ "$ARCH" = "arm64" ]; then
     RUST_TARGET="aarch64-unknown-linux-gnu"
     DOTNET_RID="linux-arm64"
-    # Set linker for Rust cross-compilation
-    export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="aarch64-linux-gnu-gcc"
-    CC_LINKER="clang" # .NET NativeAOT uses clang for cross-compilation usually
+    # Only set cross-linker if we're cross-compiling (not running on arm64 natively)
+    if [ "$(uname -m)" != "aarch64" ]; then
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="aarch64-linux-gnu-gcc"
+    fi
 else
     echo "❌ Unsupported architecture: $ARCH"
     exit 1
