@@ -493,6 +493,9 @@ start_dind() {
         "-v" "$PROJECT_ROOT:/workspace:ro"
         "-v" "$DIND_RUN_DIR:/run"
         "-e" "DOCKER_TLS_CERTDIR="
+        # runc needs writable /tmp for process state files during docker exec
+        "--tmpfs" "/tmp:rw,exec,nosuid,nodev,size=512m,mode=1777"
+        "--tmpfs" "/var/tmp:rw,exec,nosuid,nodev,size=512m,mode=1777"
     )
 
     if [[ "${PERSIST_CACHE:-true}" == "true" ]]; then
