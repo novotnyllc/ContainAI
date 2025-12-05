@@ -807,7 +807,13 @@ test_agent_credential_flow() {
     else
         echo "  ✗ Could not start pre-test container"
     fi
-
+    
+    # Debug: Check /tmp state before credential flow
+    echo "  DEBUG: /tmp state before credential flow loop:"
+    echo "    df -h /tmp:"
+    df -h /tmp 2>&1 || echo "    (failed)"
+    echo "    ls /tmp | wc -l: $(ls /tmp 2>/dev/null | wc -l) files"
+    
     local agents=("claude" "codex")
     
     for agent in "${agents[@]}"; do
@@ -819,13 +825,18 @@ test_agent_credential_flow() {
         local test_image="${!image_var}"
         
         echo "  Testing credential flow for $agent..."
+        echo "    DEBUG: /tmp before setup_mock_agent_credentials:"
+        echo "      Writable test: $(touch /tmp/pre-cred-test-$$ 2>&1 && rm /tmp/pre-cred-test-$$ && echo 'OK' || echo 'FAILED')"
         
         # Setup mock credentials via secret broker on host
         local session_config_root
         if ! session_config_root=$(setup_mock_agent_credentials "$agent" "$session_id"); then
             fail "Failed to setup mock credentials for $agent"
+            echo "    DEBUG: /tmp after failed setup: $(ls /tmp 2>/dev/null | wc -l) files"
             continue
         fi
+        echo "    DEBUG: /tmp after setup_mock_agent_credentials: $(ls /tmp 2>/dev/null | wc -l) files"
+        echo "    DEBUG: session_config_root=$session_config_root"
         
         # Determine prepare script and validation paths
         local prepare_script credential_path
