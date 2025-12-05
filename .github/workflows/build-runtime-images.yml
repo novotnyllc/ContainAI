@@ -850,8 +850,11 @@ jobs:
         id: push
         run: |
           ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-payload:${VERSION}"
+          # --disable-path-validation is needed because bundle-path from attest-build-provenance
+          # returns an absolute path (e.g., /home/runner/work/_temp/.../attestation.jsonl)
           oras push "$ref" \
             --artifact-type application/vnd.containai.payload.v1 \
+            --disable-path-validation \
             "${{ steps.payload_paths.outputs.payload_targz }}:application/vnd.containai.payload.layer.v1+gzip" \
             "${{ steps.payload_paths.outputs.sbom }}:application/vnd.cyclonedx+json" \
             "${{ steps.payload_bundle.outputs.bundle-path }}":application/vnd.in-toto+json
@@ -948,8 +951,11 @@ jobs:
         id: push
         run: |
           ref="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/containai-installer:${VERSION}"
+          # --disable-path-validation is needed because bundle-path from attest-build-provenance
+          # returns an absolute path (e.g., /home/runner/work/_temp/.../attestation.jsonl)
           oras push "$ref" \
             --artifact-type application/vnd.containai.installer.v1 \
+            --disable-path-validation \
             installer.sh.gz:application/vnd.containai.installer.v1+sh \
             "${{ steps.installer_bundle.outputs.bundle-path }}":application/vnd.in-toto+json
           digest=$(oras manifest fetch --descriptor "$ref" | jq -r '.digest // empty')

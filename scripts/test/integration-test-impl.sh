@@ -1667,11 +1667,6 @@ test_host_prompt_mode() {
 test_audit_logging() {
     test_section "Testing audit logging (Host <-> Shim)"
 
-    if grep -q "Alpine" /etc/os-release 2>/dev/null; then
-        echo "⚠️  Skipping audit logging test on Alpine Linux (glibc binary incompatibility)"
-        return
-    fi
-
     local host_bin="$PROJECT_ROOT/artifacts/containai-log-collector"
     local shim_lib="$PROJECT_ROOT/artifacts/libaudit_shim.so"
 
@@ -1687,35 +1682,55 @@ test_audit_logging() {
 
     local socket_path="/tmp/audit-test.sock"
     local log_dir="/tmp/audit-logs"
-    
-    # Ensure log directory exists
+    local collector_container="${TEST_CONTAINER_PREFIX}-audit-collector"
+    local shim_container="${TEST_CONTAINER_PREFIX}-audit-shim"
+
+    # Ensure log directory exists and clean up any stale socket
     mkdir -p "$log_dir"
+    rm -f "$socket_path"
 
-    # Start Host
-    echo "Starting Host..."
-    "$host_bin" --socket-path "$socket_path" --log-dir "$log_dir" > "$log_dir/host.log" 2>&1 &
-    local host_pid=$!
+    # Run the log collector inside a Debian container (glibc-based)
+    # This works even when the test runner is on Alpine (musl) inside DinD
+    echo "Starting log collector in container..."
+    docker run -d --rm \
+        --name "$collector_container" \
+        --network "$TEST_NETWORK" \
+        -v "$host_bin:/usr/local/bin/containai-log-collector:ro" \
+        -v "$socket_path:$socket_path" \
+        -v "$log_dir:/var/log/containai" \
+        debian:12-slim \
+        /usr/local/bin/containai-log-collector \
+            --socket-path "$socket_path" \
+            --log-dir /var/log/containai > /dev/null 2>&1
 
-    # Wait for socket
+    # Wait for socket to be created
     local retries=0
     while [ ! -S "$socket_path" ] && [ $retries -lt 50 ]; do
+        # Check if collector container is still running
+        if ! docker ps -q -f "name=$collector_container" | grep -q .; then
+            echo "Log collector container exited prematurely"
+            docker logs "$collector_container" 2>&1 || true
+            fail "Log collector container failed to start"
+            return
+        fi
         sleep 0.1
         ((retries++))
     done
 
     if [ ! -S "$socket_path" ]; then
-        fail "Host failed to create socket"
-        kill $host_pid || true
+        fail "Log collector failed to create socket after ${retries} retries"
+        docker logs "$collector_container" 2>&1 || true
+        docker rm -f "$collector_container" > /dev/null 2>&1 || true
         return
     fi
 
-    # Run container with shim
-    local container_name="${TEST_CONTAINER_PREFIX}-audit-test"
-    
+    echo "Log collector ready, running shim test..."
+
+    # Run container with shim - uses Debian image for glibc compatibility
     # We use a simple docker run here to ensure we control the environment fully for this specific integration
     # Redirect all output since we only care about the audit log, not container output
     docker run --rm \
-        --name "$container_name" \
+        --name "$shim_container" \
         --network "$TEST_NETWORK" \
         -v "$socket_path:$socket_path" \
         -v "$shim_lib:/usr/lib/libaudit_shim.so:ro" \
@@ -1726,14 +1741,17 @@ test_audit_logging() {
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "PROXY_FIREWALL_APPLIED=1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
-        "$TEST_COPILOT_IMAGE" \
+        debian:12-slim \
         cat /etc/hostname > /dev/null 2>&1
 
-    # Check logs
+    # Give collector time to flush
     sleep 2
-    kill $host_pid || true
+    
+    # Stop the collector gracefully
+    docker stop -t 5 "$collector_container" > /dev/null 2>&1 || true
 
-    local log_file=$(find "$log_dir" -name "session-*.jsonl" | head -n 1)
+    local log_file
+    log_file=$(find "$log_dir" -name "session-*.jsonl" 2>/dev/null | head -n 1)
     if [ -z "$log_file" ]; then
         fail "No audit log file created"
         return
