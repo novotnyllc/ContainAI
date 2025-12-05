@@ -569,6 +569,17 @@ wait_for_daemon() {
         fi
         sleep 1
     done
+    
+    # Verify /tmp is properly mounted and writable in DinD container
+    echo "  Verifying /tmp mount in DinD container..."
+    local tmp_check
+    if ! tmp_check=$(docker exec "$DIND_CONTAINER" sh -c 'mountpoint -q /tmp && touch /tmp/test-$$ && rm /tmp/test-$$' 2>&1); then
+        echo "  ⚠️  WARNING: /tmp may not be properly mounted or writable in DinD"
+        echo "  Mount info: $(docker exec "$DIND_CONTAINER" mount | grep /tmp || echo 'no /tmp mount found')"
+        echo "  This may cause docker exec failures later"
+    else
+        echo "  ✓ /tmp is mounted and writable"
+    fi
 }
 
 bootstrap_tools() {
