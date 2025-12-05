@@ -22,6 +22,7 @@ source "$PROJECT_ROOT/host/utils/common-functions.sh"
 # Test tracking
 FAILED_TESTS=0
 PASSED_TESTS=0
+FAILED_TEST_NAMES=()
 
 # Color output
 RED='\033[0;31m'
@@ -174,6 +175,7 @@ pass() {
 fail() {
     echo -e "${RED}✗${NC} $1"
     ((++FAILED_TESTS))
+    FAILED_TEST_NAMES+=("$1")
 }
 
 test_section() {
@@ -764,7 +766,8 @@ test_mitm_ca_generation() {
             docker rm -f "$container_name" >/dev/null 2>&1 || true
             return
         fi
-        if docker exec "$container_name" sh -c "exec 3<>/dev/tcp/localhost/3128 2>/dev/null && exec 3>&-" 2>/dev/null; then
+        # /dev/tcp requires bash, not sh
+        if docker exec "$container_name" bash -c "exec 3<>/dev/tcp/localhost/3128 2>/dev/null && exec 3>&-" 2>/dev/null; then
             ready=true
             break
         fi
@@ -1879,6 +1882,14 @@ run_all_tests() {
     echo "Test Results:"
     echo "  ✅ Passed: $PASSED_TESTS"
     echo "  ❌ Failed: $FAILED_TESTS"
+    
+    if [ ${#FAILED_TEST_NAMES[@]} -gt 0 ]; then
+        echo ""
+        echo -e "${RED}Failed Tests:${NC}"
+        for test_name in "${FAILED_TEST_NAMES[@]}"; do
+            echo -e "  ${RED}✗${NC} $test_name"
+        done
+    fi
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     return $FAILED_TESTS

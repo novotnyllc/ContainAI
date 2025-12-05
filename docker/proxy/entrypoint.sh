@@ -12,8 +12,6 @@ SQUID_CONF=${SQUID_CONF:-/etc/squid/squid.conf}
 SQUID_CACHE_DIR=${SQUID_CACHE_DIR:-/var/spool/squid}
 SQUID_LOG_DIR=${SQUID_LOG_DIR:-/var/log/squid}
 SQUID_SSL_DB_DIR=${SQUID_SSL_DB_DIR:-/var/spool/squid/ssl_db}
-SQUID_SSL_DB_SIZE_MB=${SQUID_SSL_DB_SIZE_MB:-16}
-SQUID_CRT_TOOL=${SQUID_CRT_TOOL:-/usr/lib/squid/security_file_certgen}
 ALLOWED_DOMAINS_FILE=/etc/squid/allowed-domains.txt
 HELPER_ACLS_FILE=/etc/squid/helper-acls.conf
 AGENT_HEADERS_FILE=/etc/squid/agent-headers.conf
@@ -74,14 +72,16 @@ EOF
 # Initialize ssl_crtd cache
 if [ ! -d "$SQUID_SSL_DB_DIR" ] || [ -z "$(ls -A "$SQUID_SSL_DB_DIR" 2>/dev/null)" ]; then
     echo "🔐 Initializing ssl_crtd cache at $SQUID_SSL_DB_DIR..."
-    # Remove the directory if it exists but is empty - security_file_certgen creates it itself
+    # Remove the directory if it exists but is empty
     rm -rf "$SQUID_SSL_DB_DIR" 2>/dev/null || true
-    # Run as root but fix ownership afterward (more reliable than su in containers)
-    if ! "$SQUID_CRT_TOOL" -c -s "$SQUID_SSL_DB_DIR" -M "${SQUID_SSL_DB_SIZE_MB}MB"; then
-        echo "❌ Failed to initialize ssl_crtd cache" >&2
-        exit 1
-    fi
+    # Create the ssl_db structure manually instead of using security_file_certgen
+    # This avoids potential hangs in container environments (DinD, entropy issues)
+    # The structure is: ssl_db/{certs/, index.txt, size}
+    mkdir -p "$SQUID_SSL_DB_DIR/certs"
+    touch "$SQUID_SSL_DB_DIR/index.txt"
+    echo "0" > "$SQUID_SSL_DB_DIR/size"
     chown -R proxy:proxy "$SQUID_SSL_DB_DIR"
+    echo "✅ ssl_crtd cache initialized"
 fi
 
 # Initialize cache only if cache is enabled in config (not when "cache deny all" is set)
