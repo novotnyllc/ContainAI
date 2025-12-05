@@ -792,6 +792,22 @@ test_execution_prerequisites() {
 test_agent_credential_flow() {
     test_section "Testing agent credential flow via secret broker"
 
+    # Pre-test diagnostic: verify docker exec works before starting credential flow
+    echo "  Pre-test check: verifying docker exec functionality..."
+    local pre_test_container="${TEST_CONTAINER_PREFIX}-pretest-$$"
+    if docker run -d --rm --name "$pre_test_container" alpine:3.19 sleep 30 >/dev/null 2>&1; then
+        if docker exec "$pre_test_container" echo "docker exec works" >/dev/null 2>&1; then
+            echo "  ✓ docker exec works on fresh container"
+        else
+            echo "  ✗ docker exec FAILED on fresh container!"
+            echo "  mount | grep /tmp:"
+            mount | grep /tmp || true
+        fi
+        docker rm -f "$pre_test_container" >/dev/null 2>&1 || true
+    else
+        echo "  ✗ Could not start pre-test container"
+    fi
+
     local agents=("claude" "codex")
     
     for agent in "${agents[@]}"; do
@@ -855,16 +871,37 @@ test_agent_credential_flow() {
             continue
         fi
         
+        # Debug: Check /tmp state on DinD host before docker exec
+        echo "  DEBUG: Checking /tmp state on DinD host..."
+        echo "  mount | grep /tmp:"
+        mount | grep /tmp || echo "    (no /tmp mount found)"
+        echo "  ls -la /tmp (first 10 entries):"
+        ls -la /tmp 2>&1 | head -10 || echo "    (failed to list /tmp)"
+        echo "  touch /tmp/test-write-$$:"
+        if touch "/tmp/test-write-$$" 2>&1; then
+            echo "    /tmp is writable"
+            rm -f "/tmp/test-write-$$"
+        else
+            echo "    /tmp is NOT writable!"
+        fi
+        echo "  DEBUG: End /tmp check"
+        
         # Create required directories as agentuser
         docker exec -u agentuser "$container_name" mkdir -p /home/agentuser/.claude 2>/dev/null || true
         docker exec -u agentuser "$container_name" mkdir -p /run/agent-secrets/codex 2>/dev/null || true
         
         # Run the prepare secrets script
-        if ! docker exec -u agentuser "$container_name" bash -c "$prepare_script" 2>&1; then
+        local exec_output
+        if ! exec_output=$(docker exec -u agentuser "$container_name" bash -c "$prepare_script" 2>&1); then
             fail "Credential preparation failed for $agent"
+            echo "  docker exec output: $exec_output"
+            echo "  DEBUG: Checking /tmp after failure..."
+            mount | grep /tmp || echo "    (no /tmp mount found)"
+            echo "  df /tmp:"
+            df /tmp 2>&1 || echo "    (failed)"
             docker logs "$container_name" 2>&1 | tail -20 || true
             docker rm -f "$container_name" >/dev/null 2>&1 || true
-            rm -rf "$session_config_root"
+            rm -rf "$session_config_root" 2>/dev/null || echo "  (cleanup rm failed)"
             continue
         fi
         pass "Credential preparation succeeded for $agent"
