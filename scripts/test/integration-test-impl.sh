@@ -731,6 +731,9 @@ test_mitm_ca_generation() {
     test_section "Testing MITM CA generation"
 
     local proxy_image="containai-proxy:test-hardened"
+    # Force rebuild to pick up config changes
+    docker rmi "$proxy_image" >/dev/null 2>&1 || true
+    
     if ! docker image inspect "$proxy_image" >/dev/null 2>&1; then
         echo "Building proxy image for MITM test..."
         if ! docker build -f "$PROJECT_ROOT/docker/proxy/Dockerfile" -t "$proxy_image" "$PROJECT_ROOT"; then
@@ -751,10 +754,27 @@ test_mitm_ca_generation() {
         return
     fi
 
-    sleep $CONTAINER_STARTUP_WAIT
+    # Wait for squid to become ready (up to 15 seconds)
+    local ready=false
+    for i in {1..15}; do
+        if ! docker inspect "$container_name" --format '{{.State.Running}}' 2>/dev/null | grep -q 'true'; then
+            echo "DEBUG: Container not running after ${i}s, checking logs..."
+            docker logs "$container_name" 2>&1 || true
+            fail "Proxy container exited unexpectedly during startup"
+            docker rm -f "$container_name" >/dev/null 2>&1 || true
+            return
+        fi
+        if docker exec "$container_name" sh -c "exec 3<>/dev/tcp/localhost/3128 2>/dev/null && exec 3>&-" 2>/dev/null; then
+            ready=true
+            break
+        fi
+        sleep 1
+    done
 
-    if ! assert_container_running "$container_name"; then
-        docker logs "$container_name"
+    if [ "$ready" = false ]; then
+        fail "Squid proxy did not become ready within 15 seconds"
+        echo "DEBUG: Final container logs:"
+        docker logs "$container_name" 2>&1 || true
         docker rm -f "$container_name" >/dev/null 2>&1 || true
         return
     fi

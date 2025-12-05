@@ -84,8 +84,12 @@ if [ ! -d "$SQUID_SSL_DB_DIR" ] || [ -z "$(ls -A "$SQUID_SSL_DB_DIR" 2>/dev/null
     chown -R proxy:proxy "$SQUID_SSL_DB_DIR"
 fi
 
-# Initialize cache if needed
-if [ ! -f "$SQUID_CACHE_DIR/00/00000000" ]; then
+# Initialize cache only if cache is enabled in config (not when "cache deny all" is set)
+# Skip cache initialization for the MITM proxy - we use "cache deny all" anyway
+# This avoids issues with squid -z in container environments
+if grep -q '^cache deny all' "$SQUID_CONF" 2>/dev/null; then
+    echo "ℹ️  Cache disabled in config - skipping cache directory initialization"
+elif [ ! -f "$SQUID_CACHE_DIR/00/00000000" ]; then
     echo "🧱 Initializing Squid cache directories..."
     /usr/sbin/squid -z -f "$SQUID_CONF"
     # squid -z might leave a pid file, remove it to avoid "Squid is already running" error
@@ -97,6 +101,14 @@ fi
 if [ -e /dev/stderr ]; then
     chown proxy:proxy /dev/stderr 2>/dev/null || true
 fi
+
+# Validate config before starting
+echo "🔍 Validating Squid configuration..."
+if ! /usr/sbin/squid -k parse -f "$SQUID_CONF" 2>&1; then
+    echo "❌ Squid configuration validation failed" >&2
+    exit 1
+fi
+echo "✅ Configuration validated"
 
 # Start Squid in foreground so docker can manage lifecycle
 echo "🛡️  Starting Squid proxy (listening on 3128)..."
