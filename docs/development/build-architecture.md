@@ -163,9 +163,10 @@ flowchart TB
         tag["tag v*"]
     end
 
-    subgraph phase1["Phase 1: Context"]
+    subgraph phase1["Phase 1: Context & Security"]
         determine["determine-channel.sh"]
         outputs1["channel, version,<br/>immutable_tag, moving_tags"]
+        secretscan["scan-build-context<br/>(Trivy secret scan)"]
     end
 
     subgraph phase2["Phase 2: Build Images"]
@@ -205,6 +206,7 @@ flowchart TB
         pushmeta["oras push metadata"]
         pushinstaller["oras push installer"]
         attestall["attest all artifacts"]
+        cleanuppartial["cleanup-partial<br/>(on failure)"]
     end
 
     subgraph phase6["Phase 6: Cleanup"]
@@ -213,6 +215,7 @@ flowchart TB
     end
 
     trigger --> phase1
+    determine --> secretscan
     phase1 --> phase2
     
     buildbase_amd --> assemblebase
@@ -261,7 +264,7 @@ flowchart TB
 
 #### Detailed Phase Descriptions
 
-##### Phase 1: Determine Context
+##### Phase 1: Determine Context & Security Scan
 
 `scripts/ci/determine-channel.sh` examines the trigger event and outputs:
 
@@ -272,6 +275,8 @@ flowchart TB
 | `immutable_tag` | Commit-pinned tag | `sha-abc1234` |
 | `moving_tags` | Mutable channel tags | `dev\nnightly` |
 | `push` | Whether to push to registry | `true`, `false` |
+
+**Security Scan:** Before any image builds begin, the `scan-build-context` job uses Trivy to scan all directories that get COPYed into images (`docker/`, `agent-configs/`, `host/`, `scripts/`) for accidentally committed secrets. The scan fails the pipeline if HIGH or CRITICAL severity secrets are detected.
 
 ##### Phase 2: Build Images
 
@@ -379,6 +384,8 @@ All artifacts are pushed to GHCR as OCI artifacts:
 | Installer | `containai-installer:VERSION` | `application/vnd.containai.installer.v1` |
 | Metadata | `containai-metadata:CHANNEL` | `application/vnd.containai.metadata.v1+json` |
 
+**Partial Publish Cleanup:** If any of the publish jobs (`publish-payload`, `publish-metadata`, `publish-installer`) fail, the `cleanup-partial` job runs to delete any partially published artifacts. This prevents incomplete releases from appearing in the registry.
+
 ##### Phase 6: Cleanup
 
 The retention policy:
@@ -453,6 +460,7 @@ flowchart TB
 
 | Script | Purpose | Inputs | Outputs |
 |--------|---------|--------|---------|
+| `scripts/build/compile-binaries.sh` | Compile Rust and .NET native binaries | `ARCH` (amd64/arm64), `OUT_DIR` | Native executables and shared libraries |
 | `scripts/build/build-dev.sh` | Build local dev images | `--agents LIST` | Docker images tagged `:devlocal` |
 | `scripts/setup-local-dev.sh` | Install launchers + profiles | `--check-only` | Profiles in `/opt/containai/profiles/`, PATH updated |
 
@@ -512,6 +520,20 @@ flowchart TB
 | `payload.tar.gz` | `artifacts/publish/<version>/` | `package-artifacts.sh` | ORAS push |
 | `containai-VERSION.tar.gz` | `artifacts/publish/<version>/` | `package-artifacts.sh` | GitHub Release asset |
 | `containai-profiles-CHANNEL.sha256` | `/opt/containai/profiles/` | `prepare-profiles.sh` | `setup-local-dev.sh` (change detection) |
+
+### Native Binary Artifacts
+
+The following platform-specific binaries are compiled from source during CI and embedded in the base image:
+
+| Binary | Source | Target | Purpose |
+|--------|--------|--------|---------|
+| `agentcli-exec` | `src/agent-task-runner` (Rust) | `linux-{arch}-gnu` | Setuid helper that switches to `agentcli` user and installs seccomp filter |
+| `agent-task-runnerd` | `src/agent-task-runner` (Rust) | `linux-{arch}-gnu` | Daemon that receives seccomp notifications and manages sandbox execution |
+| `agent-task-sandbox` | `src/agent-task-runner` (Rust) | `linux-{arch}-gnu` | Sandbox runner that executes commands in isolated namespace |
+| `libaudit_shim.so` | `src/audit-shim` (Rust cdylib) | `linux-{arch}-gnu` | LD_PRELOAD library that intercepts syscalls for audit logging |
+| `containai-log-collector` | `src/ContainAI.LogCollector` (.NET AOT) | `linux-x64` | Receives audit events over Unix socket and writes structured logs |
+
+**Note:** All binaries target glibc (`linux-gnu`) since production containers run Ubuntu 24.04. The `.NET` binary currently only builds for `x64`; ARM64 support requires additional CI configuration.
 
 ---
 
