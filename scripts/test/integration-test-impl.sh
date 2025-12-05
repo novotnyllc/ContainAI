@@ -791,28 +791,6 @@ test_execution_prerequisites() {
 
 test_agent_credential_flow() {
     test_section "Testing agent credential flow via secret broker"
-
-    # Pre-test diagnostic: verify docker exec works before starting credential flow
-    echo "  Pre-test check: verifying docker exec functionality..."
-    local pre_test_container="${TEST_CONTAINER_PREFIX}-pretest-$$"
-    if docker run -d --rm --name "$pre_test_container" alpine:3.19 sleep 30 >/dev/null 2>&1; then
-        if docker exec "$pre_test_container" echo "docker exec works" >/dev/null 2>&1; then
-            echo "  ✓ docker exec works on fresh container"
-        else
-            echo "  ✗ docker exec FAILED on fresh container!"
-            echo "  mount | grep /tmp:"
-            mount | grep /tmp || true
-        fi
-        docker rm -f "$pre_test_container" >/dev/null 2>&1 || true
-    else
-        echo "  ✗ Could not start pre-test container"
-    fi
-    
-    # Debug: Check /tmp state before credential flow
-    echo "  DEBUG: /tmp state before credential flow loop:"
-    echo "    df -h /tmp:"
-    df -h /tmp 2>&1 || echo "    (failed)"
-    echo "    ls /tmp | wc -l: $(ls /tmp 2>/dev/null | wc -l) files"
     
     local agents=("claude" "codex")
     
@@ -825,18 +803,13 @@ test_agent_credential_flow() {
         local test_image="${!image_var}"
         
         echo "  Testing credential flow for $agent..."
-        echo "    DEBUG: /tmp before setup_mock_agent_credentials:"
-        echo "      Writable test: $(touch /tmp/pre-cred-test-$$ 2>&1 && rm /tmp/pre-cred-test-$$ && echo 'OK' || echo 'FAILED')"
         
         # Setup mock credentials via secret broker on host
         local session_config_root
         if ! session_config_root=$(setup_mock_agent_credentials "$agent" "$session_id"); then
             fail "Failed to setup mock credentials for $agent"
-            echo "    DEBUG: /tmp after failed setup: $(ls /tmp 2>/dev/null | wc -l) files"
             continue
         fi
-        echo "    DEBUG: /tmp after setup_mock_agent_credentials: $(ls /tmp 2>/dev/null | wc -l) files"
-        echo "    DEBUG: session_config_root=$session_config_root"
         
         # Determine prepare script and validation paths
         local prepare_script credential_path
@@ -852,8 +825,8 @@ test_agent_credential_flow() {
         esac
         
         # Start container with capability mount
-        # Note: /tmp and /var/tmp tmpfs mounts are required for docker exec to work
-        # in DinD environments (runc needs writable /tmp for process state files)
+        # Mount local entrypoint.sh to ensure consistency with test expectations
+        # HTTP_PROXY/HTTPS_PROXY are required by entrypoint.sh enforce_proxy_firewall()
         docker run -d \
             --name "$container_name" \
             --label "$TEST_LABEL_TEST" \
@@ -862,12 +835,16 @@ test_agent_credential_flow() {
             --cap-add SYS_ADMIN \
             --cap-add NET_ADMIN \
             -v "$TEST_REPO_DIR:/workspace" \
+            -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
             -v "$session_config_root/capabilities:/home/agentuser/.config/containai/capabilities:ro" \
             -v "$PROJECT_ROOT/docker/runtime/capability-unseal.py:/usr/local/bin/capability-unseal:ro" \
             -e "CONTAINAI_AGENT_HOME=/home/agentuser" \
             -e "CONTAINAI_AGENT_SECRET_ROOT=/run/agent-secrets" \
             -e "CONTAINAI_CAPABILITY_UNSEAL=/usr/local/bin/capability-unseal" \
             -e "DISABLE_SENSITIVE_TMPFS=1" \
+            -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+            -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+            -e "NO_PROXY=localhost,127.0.0.1" \
             --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=1m,mode=770,uid=1000,gid=1000" \
@@ -875,27 +852,13 @@ test_agent_credential_flow() {
             $CONTAINER_KEEP_ALIVE_CMD >/dev/null
         
         if ! wait_for_container_ready "$container_name"; then
-            fail "Container $container_name failed to become ready"
-            docker logs "$container_name" 2>&1 | tail -20 || true
+            fail "Container $container_name failed to start"
+            echo "  Container logs:"
+            docker logs "$container_name" 2>&1 | tail -30 || true
             docker rm -f "$container_name" >/dev/null 2>&1 || true
             rm -rf "$session_config_root"
             continue
         fi
-        
-        # Debug: Check /tmp state on DinD host before docker exec
-        echo "  DEBUG: Checking /tmp state on DinD host..."
-        echo "  mount | grep /tmp:"
-        mount | grep /tmp || echo "    (no /tmp mount found)"
-        echo "  ls -la /tmp (first 10 entries):"
-        ls -la /tmp 2>&1 | head -10 || echo "    (failed to list /tmp)"
-        echo "  touch /tmp/test-write-$$:"
-        if touch "/tmp/test-write-$$" 2>&1; then
-            echo "    /tmp is writable"
-            rm -f "/tmp/test-write-$$"
-        else
-            echo "    /tmp is NOT writable!"
-        fi
-        echo "  DEBUG: End /tmp check"
         
         # Create required directories as agentuser
         docker exec -u agentuser "$container_name" mkdir -p /home/agentuser/.claude 2>/dev/null || true
@@ -905,14 +868,11 @@ test_agent_credential_flow() {
         local exec_output
         if ! exec_output=$(docker exec -u agentuser "$container_name" bash -c "$prepare_script" 2>&1); then
             fail "Credential preparation failed for $agent"
-            echo "  docker exec output: $exec_output"
-            echo "  DEBUG: Checking /tmp after failure..."
-            mount | grep /tmp || echo "    (no /tmp mount found)"
-            echo "  df /tmp:"
-            df /tmp 2>&1 || echo "    (failed)"
-            docker logs "$container_name" 2>&1 | tail -20 || true
+            echo "  Error: $exec_output"
+            echo "  Container logs:"
+            docker logs "$container_name" 2>&1 | tail -30 || true
             docker rm -f "$container_name" >/dev/null 2>&1 || true
-            rm -rf "$session_config_root" 2>/dev/null || echo "  (cleanup rm failed)"
+            rm -rf "$session_config_root" 2>/dev/null || true
             continue
         fi
         pass "Credential preparation succeeded for $agent"
@@ -947,16 +907,10 @@ test_agent_credential_flow() {
                 ;;
         esac
         
-        # Cleanup this agent's container - wait for it to fully terminate
+        # Cleanup this agent's container
         docker rm -f "$container_name" >/dev/null 2>&1 || true
-        # Brief wait for bind mount to be released
         sleep 0.5
-        rm -rf "$session_config_root" 2>/dev/null || {
-            # If still fails, try again after forcing container cleanup
-            docker wait "$container_name" >/dev/null 2>&1 || true
-            sleep 0.5
-            rm -rf "$session_config_root" 2>/dev/null || true
-        }
+        rm -rf "$session_config_root" 2>/dev/null || true
     done
     
     # Cleanup broker config
@@ -984,6 +938,7 @@ test_mcp_configuration_generation() {
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
         -v "$TEST_REPO_DIR:/workspace" \
+        -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
@@ -994,7 +949,9 @@ test_mcp_configuration_generation() {
         $CONTAINER_KEEP_ALIVE_CMD >/dev/null
 
     if ! wait_for_container_ready "$container_name"; then
-        fail "Container $container_name failed to become ready"
+        fail "Container $container_name failed to start"
+        echo "  Container logs:"
+        docker logs "$container_name" 2>&1 | tail -30 || true
         return
     fi
 
@@ -1127,6 +1084,7 @@ test_network_proxy_modes() {
         --label "$TEST_LABEL_SESSION" \
         --network none \
         -v "$TEST_REPO_DIR:/workspace" \
+        -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -e "HTTP_PROXY=http://127.0.0.1:3128" \
         -e "HTTPS_PROXY=http://127.0.0.1:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
@@ -1138,6 +1096,8 @@ test_network_proxy_modes() {
 
     if ! wait_for_container_ready "$restricted_container"; then
         fail "Container $restricted_container failed to become ready"
+        echo "  Container logs:"
+        docker logs "$restricted_container" 2>&1 | tail -30 || true
         return
     fi
 
@@ -1182,6 +1142,7 @@ PY
         --cap-add NET_ADMIN \
         --cap-add SYS_ADMIN \
         -v "$TEST_REPO_DIR:/workspace" \
+        -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=localhost,127.0.0.1" \
@@ -1193,6 +1154,8 @@ PY
 
     if ! wait_for_container_ready "$proxy_client"; then
         fail "Container $proxy_client failed to become ready"
+        echo "  Container logs:"
+        docker logs "$proxy_client" 2>&1 | tail -30 || true
         return
     fi
 
@@ -1645,6 +1608,7 @@ EOF
         --label "$TEST_LABEL_SESSION" \
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
+        -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -e "HTTP_PROXY=http://${proxy_ip}:3128" \
         -e "HTTPS_PROXY=http://${proxy_ip}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
@@ -1855,6 +1819,7 @@ test_multiple_agents() {
             --cap-add SYS_ADMIN \
             --cap-add NET_ADMIN \
             -v "$TEST_REPO_DIR:/workspace" \
+            -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
             -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "NO_PROXY=localhost,127.0.0.1" \
@@ -1870,7 +1835,9 @@ test_multiple_agents() {
     # Wait for all containers to be ready
     for container in "${containers[@]}"; do
         if ! wait_for_container_ready "$container"; then
-            fail "Container $container failed to become ready"
+            fail "Container $container failed to start"
+            echo "  Container logs:"
+            docker logs "$container" 2>&1 | tail -30 || true
             return
         fi
         assert_container_running "$container"
@@ -2224,15 +2191,21 @@ run_all_tests() {
     echo "Test Results:"
     echo "  ✅ Passed: $PASSED_TESTS"
     echo "  ❌ Failed: $FAILED_TESTS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     if [ ${#FAILED_TEST_NAMES[@]} -gt 0 ]; then
         echo ""
-        echo -e "${RED}Failed Tests:${NC}"
+        echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║                    FAILED TESTS                           ║${NC}"
+        echo -e "${RED}╠═══════════════════════════════════════════════════════════╣${NC}"
         for test_name in "${FAILED_TEST_NAMES[@]}"; do
-            echo -e "  ${RED}✗${NC} $test_name"
+            # Truncate long names to fit in the box
+            local display_name="${test_name:0:55}"
+            printf "${RED}║${NC} ✗ %-55s ${RED}║${NC}\n" "$display_name"
         done
+        echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
+        echo ""
     fi
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     return $FAILED_TESTS
 }
