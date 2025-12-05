@@ -424,7 +424,11 @@ setup_mock_agent_credentials() {
 # Cleanup mock credential directories
 cleanup_mock_credentials() {
     if [[ -n "${MOCK_BROKER_CONFIG_DIR:-}" && -d "$MOCK_BROKER_CONFIG_DIR" ]]; then
-        rm -rf "$MOCK_BROKER_CONFIG_DIR"
+        rm -rf "$MOCK_BROKER_CONFIG_DIR" 2>/dev/null || {
+            # If normal removal fails, try again after a brief wait
+            sleep 0.5
+            rm -rf "$MOCK_BROKER_CONFIG_DIR" 2>/dev/null || true
+        }
         unset MOCK_BROKER_CONFIG_DIR
     fi
 }
@@ -497,6 +501,8 @@ DOCKER_ARGS=(
     -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
     -e "NO_PROXY=localhost,127.0.0.1"
     -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
+    --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
+    --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
     --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=1m,mode=770"
     --tmpfs "/run/agent-data:rw,nosuid,nodev,size=1m,mode=770"
 )
@@ -819,6 +825,8 @@ test_agent_credential_flow() {
         esac
         
         # Start container with capability mount
+        # Note: /tmp and /var/tmp tmpfs mounts are required for docker exec to work
+        # in DinD environments (runc needs writable /tmp for process state files)
         docker run -d \
             --name "$container_name" \
             --label "$TEST_LABEL_TEST" \
@@ -833,6 +841,8 @@ test_agent_credential_flow() {
             -e "CONTAINAI_AGENT_SECRET_ROOT=/run/agent-secrets" \
             -e "CONTAINAI_CAPABILITY_UNSEAL=/usr/local/bin/capability-unseal" \
             -e "DISABLE_SENSITIVE_TMPFS=1" \
+            --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+            --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=1m,mode=770,uid=1000,gid=1000" \
             "$test_image" \
             $CONTAINER_KEEP_ALIVE_CMD >/dev/null
@@ -889,9 +899,16 @@ test_agent_credential_flow() {
                 ;;
         esac
         
-        # Cleanup this agent's container
+        # Cleanup this agent's container - wait for it to fully terminate
         docker rm -f "$container_name" >/dev/null 2>&1 || true
-        rm -rf "$session_config_root"
+        # Brief wait for bind mount to be released
+        sleep 0.5
+        rm -rf "$session_config_root" 2>/dev/null || {
+            # If still fails, try again after forcing container cleanup
+            docker wait "$container_name" >/dev/null 2>&1 || true
+            sleep 0.5
+            rm -rf "$session_config_root" 2>/dev/null || true
+        }
     done
     
     # Cleanup broker config
@@ -923,6 +940,8 @@ test_mcp_configuration_generation() {
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_COPILOT_IMAGE" \
         $CONTAINER_KEEP_ALIVE_CMD >/dev/null
 
@@ -1064,6 +1083,8 @@ test_network_proxy_modes() {
         -e "HTTPS_PROXY=http://127.0.0.1:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_CLAUDE_IMAGE" \
         $CONTAINER_KEEP_ALIVE_CMD >/dev/null
 
@@ -1117,6 +1138,8 @@ PY
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_CODEX_IMAGE" \
         $CONTAINER_KEEP_ALIVE_CMD >/dev/null
 
@@ -1578,6 +1601,8 @@ EOF
         -e "HTTPS_PROXY=http://${proxy_ip}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         -v "$helper_server_script:/server.py:ro" \
         "$TEST_CODEX_IMAGE" \
         python3 /server.py
@@ -1683,6 +1708,8 @@ EOF
         -e "NO_PROXY=" \
         -e "CONTAINAI_REQUIRE_PROXY=1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         -v "$PROJECT_ROOT:/workspace" \
         "$TEST_CODEX_IMAGE" \
         -c "\
@@ -1784,6 +1811,8 @@ test_multiple_agents() {
             -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "NO_PROXY=localhost,127.0.0.1" \
             -e "DISABLE_SENSITIVE_TMPFS=1" \
+            --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+            --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             "$test_image" \
             $CONTAINER_KEEP_ALIVE_CMD >/dev/null
         

@@ -420,8 +420,24 @@ cleanup_test_repository() {
     fi
     
     echo "Removing test repository: $TEST_REPO_DIR"
-    rm -rf "$TEST_REPO_DIR" || {
-        echo "⚠️  Warning: Could not remove test repository"
+    # First attempt - might fail if bind mounts are still held
+    if rm -rf "$TEST_REPO_DIR" 2>/dev/null; then
+        return 0
+    fi
+    
+    # Wait for any lingering container cleanup to complete
+    sleep 1
+    
+    # Second attempt after waiting
+    if rm -rf "$TEST_REPO_DIR" 2>/dev/null; then
+        return 0
+    fi
+    
+    # If still failing, try to identify what's holding the lock
+    echo "⚠️  Warning: Could not remove test repository on first attempts, retrying..."
+    sleep 2
+    rm -rf "$TEST_REPO_DIR" 2>/dev/null || {
+        echo "⚠️  Warning: Could not remove test repository (may have stale mounts)"
         return 1
     }
 }
