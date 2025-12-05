@@ -585,14 +585,22 @@ inject_common_images() {
     echo "  Injecting common test images into isolation..."
     
     for img in "${images[@]}"; do
+        # Check if already present in DinD
+        if docker exec "$DIND_CONTAINER" docker image inspect "$img" >/dev/null 2>&1; then
+            echo "    ✓ $img already in isolation"
+            continue
+        fi
+
+        # Try to inject from host if available (faster than pulling)
         if docker image inspect "$img" >/dev/null 2>&1; then
-            # Check if already present in DinD to save time
-            if ! docker exec "$DIND_CONTAINER" docker image inspect "$img" >/dev/null 2>&1; then
-                echo "    Injecting $img..."
-                docker save "$img" | docker exec -i "$DIND_CONTAINER" docker load >/dev/null
-            fi
+            echo "    Injecting $img from host..."
+            docker save "$img" | docker exec -i "$DIND_CONTAINER" docker load >/dev/null
         else
-            echo "    ⚠️  Image $img not found on host, skipping injection"
+            # Pull directly inside DinD if not on host
+            echo "    Pulling $img inside isolation..."
+            if ! docker exec "$DIND_CONTAINER" docker pull "$img" >/dev/null 2>&1; then
+                echo "    ⚠️  Failed to pull $img (tests using it may fail)"
+            fi
         fi
     done
 }

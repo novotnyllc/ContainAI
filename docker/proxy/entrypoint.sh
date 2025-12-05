@@ -66,10 +66,14 @@ EOF
 # Initialize ssl_crtd cache
 if [ ! -d "$SQUID_SSL_DB_DIR" ] || [ -z "$(ls -A "$SQUID_SSL_DB_DIR" 2>/dev/null)" ]; then
     echo "🔐 Initializing ssl_crtd cache at $SQUID_SSL_DB_DIR..."
-    if ! su -s /bin/sh proxy -c "$SQUID_CRT_TOOL -c -s $SQUID_SSL_DB_DIR -M ${SQUID_SSL_DB_SIZE_MB}MB"; then
+    # Remove the directory if it exists but is empty - security_file_certgen creates it itself
+    rm -rf "$SQUID_SSL_DB_DIR" 2>/dev/null || true
+    # Run as root but fix ownership afterward (more reliable than su in containers)
+    if ! "$SQUID_CRT_TOOL" -c -s "$SQUID_SSL_DB_DIR" -M "${SQUID_SSL_DB_SIZE_MB}MB"; then
         echo "❌ Failed to initialize ssl_crtd cache" >&2
         exit 1
     fi
+    chown -R proxy:proxy "$SQUID_SSL_DB_DIR"
 fi
 
 # Initialize cache if needed
@@ -81,8 +85,9 @@ if [ ! -f "$SQUID_CACHE_DIR/00/00000000" ]; then
 fi
 
 # Ensure proxy user can write to stderr (for cache.log)
+# Note: This may fail in some container environments (e.g., DinD) - ignore errors
 if [ -e /dev/stderr ]; then
-    chown proxy:proxy /dev/stderr
+    chown proxy:proxy /dev/stderr 2>/dev/null || true
 fi
 
 # Start Squid in foreground so docker can manage lifecycle

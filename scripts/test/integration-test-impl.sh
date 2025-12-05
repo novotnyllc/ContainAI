@@ -367,6 +367,8 @@ DOCKER_ARGS=(
     -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
     -e "NO_PROXY=localhost,127.0.0.1"
     -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
+    --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=1m,mode=770"
+    --tmpfs "/run/agent-data:rw,nosuid,nodev,size=1m,mode=770"
 )
 
 if [ -f "$PROJECT_ROOT/src/agent-task-runner/target/debug/agent-task-runnerd" ]; then
@@ -495,23 +497,18 @@ test_agentcli_uid_split() {
     local secret_opts
     secret_opts=$(docker exec "$container_name" findmnt -no OPTIONS /run/agent-secrets 2>/dev/null || true)
     
-    # Skip mount checks on WSL where tmpfs mounts might fail inside containers
-    if grep -q "WSL" /proc/version 2>/dev/null || grep -q "Microsoft" /proc/version 2>/dev/null; then
-        echo "⚠️  Skipping mount option checks on WSL"
+    if echo "$secret_opts" | grep -q "nosuid" && echo "$secret_opts" | grep -q "nodev" && echo "$secret_opts" | grep -q "noexec"; then
+        pass "/run/agent-secrets mount options enforce nosuid/nodev/noexec"
     else
-        if echo "$secret_opts" | grep -q "nosuid" && echo "$secret_opts" | grep -q "nodev" && echo "$secret_opts" | grep -q "noexec"; then
-            pass "/run/agent-secrets mount options enforce nosuid/nodev/noexec"
-        else
-            fail "Missing required mount options on /run/agent-secrets ($secret_opts)"
-        fi
+        fail "Missing required mount options on /run/agent-secrets ($secret_opts)"
+    fi
 
-        local propagation
-        propagation=$(docker exec "$container_name" findmnt -no PROPAGATION /run/agent-secrets 2>/dev/null || true)
-        if [[ "$propagation" == *"private"* ]]; then
-            pass "/run/agent-secrets mount is private"
-        else
-            fail "/run/agent-secrets propagation mismatch ($propagation)"
-        fi
+    local propagation
+    propagation=$(docker exec "$container_name" findmnt -no PROPAGATION /run/agent-secrets 2>/dev/null || true)
+    if [[ "$propagation" == *"private"* ]]; then
+        pass "/run/agent-secrets mount is private"
+    else
+        fail "/run/agent-secrets propagation mismatch ($propagation)"
     fi
 }
 
@@ -681,6 +678,7 @@ test_mcp_configuration_generation() {
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
         "$TEST_COPILOT_IMAGE" \
         sleep $LONG_RUNNING_SLEEP >/dev/null
 
@@ -797,6 +795,7 @@ test_network_proxy_modes() {
         -e "HTTP_PROXY=http://127.0.0.1:3128" \
         -e "HTTPS_PROXY=http://127.0.0.1:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
         "$TEST_CLAUDE_IMAGE" \
         sleep $LONG_RUNNING_SLEEP >/dev/null
 
@@ -846,6 +845,7 @@ PY
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
         "$TEST_CODEX_IMAGE" \
         sleep $LONG_RUNNING_SLEEP >/dev/null
 
@@ -1303,6 +1303,7 @@ EOF
         -e "HTTP_PROXY=http://${proxy_ip}:3128" \
         -e "HTTPS_PROXY=http://${proxy_ip}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
         -v "$helper_server_script:/server.py:ro" \
         "$TEST_CODEX_IMAGE" \
         python3 /server.py
@@ -1363,17 +1364,30 @@ EOF
 
     # Wait for proxy to be ready
     local ready=false
-    for _ in {1..10}; do
-        if docker exec "$proxy_container" bash -c "exec 3<>/dev/tcp/localhost/3128" >/dev/null 2>&1; then
-            ready=true
-            docker exec "$proxy_container" bash -c "exec 3>&-" 2>/dev/null || true
-            break
+    for _ in {1..15}; do
+        local proxy_status
+        proxy_status=$(docker inspect -f '{{.State.Status}}' "$proxy_container" 2>/dev/null || echo "unknown")
+        if [ "$proxy_status" = "exited" ]; then
+            fail "Helper squid proxy container exited unexpectedly"
+            echo "DEBUG: Exit code: $(docker inspect -f '{{.State.ExitCode}}' "$proxy_container" 2>/dev/null || echo 'unknown')"
+            echo "DEBUG: Helper squid proxy logs:"
+            docker logs "$proxy_container" 2>&1 || true
+            cleanup_helper_resources
+            return
+        fi
+        if [ "$proxy_status" = "running" ]; then
+            if docker exec "$proxy_container" bash -c "exec 3<>/dev/tcp/localhost/3128" >/dev/null 2>&1; then
+                ready=true
+                docker exec "$proxy_container" bash -c "exec 3>&-" 2>/dev/null || true
+                break
+            fi
         fi
         sleep 1
     done
 
     if [ "$ready" = false ]; then
         fail "Helper squid proxy did not become ready"
+        echo "DEBUG: Container status: $(docker inspect -f '{{.State.Status}}' "$proxy_container" 2>/dev/null || echo 'unknown')"
         echo "DEBUG: Helper squid proxy logs:"
         docker logs "$proxy_container" 2>&1 || true
         cleanup_helper_resources
@@ -1394,6 +1408,7 @@ EOF
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
         -e "CONTAINAI_REQUIRE_PROXY=1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
         -v "$PROJECT_ROOT:/workspace" \
         "$TEST_CODEX_IMAGE" \
         -c "\
@@ -1494,6 +1509,7 @@ test_multiple_agents() {
             -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "NO_PROXY=localhost,127.0.0.1" \
+            -e "DISABLE_SENSITIVE_TMPFS=1" \
             "$test_image" \
             /bin/sleep $LONG_RUNNING_SLEEP >/dev/null
         
@@ -1697,6 +1713,7 @@ test_audit_logging() {
     local container_name="${TEST_CONTAINER_PREFIX}-audit-test"
     
     # We use a simple docker run here to ensure we control the environment fully for this specific integration
+    # Redirect all output since we only care about the audit log, not container output
     docker run --rm \
         --name "$container_name" \
         --network "$TEST_NETWORK" \
@@ -1708,8 +1725,9 @@ test_audit_logging() {
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "PROXY_FIREWALL_APPLIED=1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
         "$TEST_COPILOT_IMAGE" \
-        cat /etc/hostname > /dev/null
+        cat /etc/hostname > /dev/null 2>&1
 
     # Check logs
     sleep 2
