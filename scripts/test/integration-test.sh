@@ -44,6 +44,7 @@ if [[ "$DIND_CLIENT_IMAGE_DEFAULT" == "$DIND_IMAGE" ]]; then
 fi
 DIND_CLIENT_IMAGE="${TEST_ISOLATION_CLIENT_IMAGE:-$DIND_CLIENT_IMAGE_DEFAULT}"
 DIND_RUN_DIR=""
+DIND_TMP_DIR=""
 ISOLATION_MODE="${TEST_ISOLATION_MODE:-dind}"
 DIND_STARTED=false
 TEST_ARGS=()
@@ -146,6 +147,9 @@ cleanup() {
         if [[ -n "$DIND_RUN_DIR" ]]; then
             echo "Shared /run directory preserved at: $DIND_RUN_DIR"
         fi
+        if [[ -n "${DIND_TMP_DIR:-}" ]]; then
+            echo "Shared /tmp directory preserved at: $DIND_TMP_DIR"
+        fi
     else
         if [[ "$DIND_STARTED" == "true" ]]; then
             # Prune large images before stopping to keep cache size down
@@ -166,6 +170,11 @@ cleanup() {
         cleanup_this_run
 
         purge_dind_run_dir "$DIND_RUN_DIR"
+        
+        # Clean up DinD tmp directory
+        if [[ -n "${DIND_TMP_DIR:-}" && -d "$DIND_TMP_DIR" ]]; then
+            rm -rf "$DIND_TMP_DIR" 2>/dev/null || true
+        fi
     fi
 
     exit $exit_code
@@ -483,6 +492,13 @@ start_dind() {
     echo "  Mounting: $PROJECT_ROOT -> /workspace (read-only)"
 
     initialize_dind_run_dir
+    
+    # Create a dedicated tmpfs for DinD's /tmp on the host
+    # This ensures runc has a reliable writable /tmp for process state files
+    local dind_tmp_dir
+    dind_tmp_dir=$(mktemp -d -t containai-dind-tmp-XXXXXX)
+    chmod 1777 "$dind_tmp_dir"
+    DIND_TMP_DIR="$dind_tmp_dir"
 
     local -a docker_args=(
         "${DIND_RUN_FLAGS[@]}"
@@ -493,8 +509,9 @@ start_dind() {
         "-v" "$PROJECT_ROOT:/workspace:ro"
         "-v" "$DIND_RUN_DIR:/run"
         "-e" "DOCKER_TLS_CERTDIR="
-        # runc needs writable /tmp for process state files during docker exec
-        "--tmpfs" "/tmp:rw,exec,nosuid,nodev,size=512m,mode=1777"
+        # Use host directory for /tmp to ensure runc has reliable writable space
+        # The dind script's mountpoint check will see this as a mount and skip its own tmpfs
+        "-v" "$dind_tmp_dir:/tmp"
         "--tmpfs" "/var/tmp:rw,exec,nosuid,nodev,size=512m,mode=1777"
     )
 
