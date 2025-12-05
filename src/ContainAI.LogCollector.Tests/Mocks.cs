@@ -1,19 +1,14 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Text;
-using System.Threading;
 using System.Threading.Channels;
-using System.Threading.Tasks;
 using ContainAI.LogCollector.Abstractions;
 
 namespace ContainAI.LogCollector.Tests;
 
 public class MockFileSystem : IFileSystem
 {
-    public List<string> CreatedDirectories { get; } = new();
-    public List<string> DeletedFiles { get; } = new();
-    public Dictionary<string, MemoryStream> Files { get; } = new();
+    public List<string> CreatedDirectories { get; } = [];
+    public List<string> DeletedFiles { get; } = [];
+    public Dictionary<string, MemoryStream> Files { get; } = [];
 
     public void CreateDirectory(string path)
     {
@@ -23,10 +18,7 @@ public class MockFileSystem : IFileSystem
     public void DeleteFile(string path)
     {
         DeletedFiles.Add(path);
-        if (Files.ContainsKey(path))
-        {
-            Files.Remove(path);
-        }
+        Files.Remove(path);
     }
 
     public bool FileExists(string path)

@@ -1,5 +1,3 @@
-using System.IO;
-
 namespace ContainAI.LogCollector.Abstractions;
 
 public interface IFileSystem

@@ -1,7 +1,4 @@
-using System.IO;
 using System.Net.Sockets;
-using System.Threading;
-using System.Threading.Tasks;
 using ContainAI.LogCollector.Abstractions;
 
 namespace ContainAI.LogCollector.Infrastructure;
@@ -25,14 +22,9 @@ public class RealSocketProvider : ISocketProvider
     }
 }
 
-public class RealSocketListener : ISocketListener
+public sealed class RealSocketListener(Socket socket) : ISocketListener
 {
-    private readonly Socket _socket;
-
-    public RealSocketListener(Socket socket)
-    {
-        _socket = socket;
-    }
+    private readonly Socket _socket = socket;
 
     public async Task<Stream> AcceptAsync(CancellationToken token)
     {
