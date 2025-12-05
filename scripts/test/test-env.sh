@@ -17,8 +17,10 @@ source "$SCRIPT_DIR/test-config.sh"
 # Constants for timing and retries
 REGISTRY_STARTUP_TIMEOUT=30
 REGISTRY_POLL_INTERVAL=1
-export CONTAINER_STARTUP_WAIT=2
-export LONG_RUNNING_SLEEP=3600
+# Container management constants - deterministic, not time-based
+export CONTAINER_KEEP_ALIVE_CMD="sleep infinity"
+export CONTAINER_READY_TIMEOUT=30
+export CONTAINER_READY_POLL_INTERVAL=0.5
 
 FIXTURE_CONFIG_FILE="$TEST_MOCK_SECRETS_DIR/config.toml"
 FIXTURE_GH_TOKEN_FILE="$TEST_MOCK_SECRETS_DIR/gh-token.txt"

@@ -11,8 +11,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Constants
-LONG_RUNNING_SLEEP=3600
+# Container management - use deterministic keep-alive, not time-based sleep
+CONTAINER_KEEP_ALIVE_CMD="sleep infinity"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -204,7 +204,7 @@ create_test_container() {
         --label "containai.agent=$agent" \
         --label "containai.repo=$repo" \
         --label "containai.branch=$branch" \
-        alpine:latest sleep $LONG_RUNNING_SLEEP >/dev/null
+        alpine:latest $CONTAINER_KEEP_ALIVE_CMD >/dev/null
     
     echo "$container_name"
 }
@@ -1226,7 +1226,7 @@ test_secure_remote_sync() {
         --label "containai.branch=$agent_branch" \
         --label "containai.repo-path=$TEST_REPO_DIR" \
         --label "containai.local-remote=$bare_repo" \
-        alpine:latest sleep 60 >/dev/null
+        alpine:latest $CONTAINER_KEEP_ALIVE_CMD >/dev/null
 
     if remove_container_with_sidecars "$container_name" "true" "true" >/dev/null 2>&1; then
         pass "remove_container_with_sidecars synchronizes secure remote"

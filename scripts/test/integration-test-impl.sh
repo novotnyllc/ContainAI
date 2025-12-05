@@ -30,9 +30,12 @@ GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Constants for timing
-CONTAINER_STARTUP_WAIT=2
-LONG_RUNNING_SLEEP=3600
+# Constants for container management
+# Use 'infinity' for keep-alive sleeps - deterministic, not time-based
+CONTAINER_KEEP_ALIVE_CMD="sleep infinity"
+# Maximum time to wait for container to reach running state
+CONTAINER_READY_TIMEOUT=30
+CONTAINER_READY_POLL_INTERVAL=0.5
 
 # ============================================================================
 # Usage and Argument Parsing
@@ -224,6 +227,30 @@ assert_container_has_label() {
     fi
 }
 
+# Wait for container to reach running state with deterministic polling
+# Usage: wait_for_container_ready <container_name> [timeout_seconds]
+wait_for_container_ready() {
+    local container_name="$1"
+    local timeout="${2:-$CONTAINER_READY_TIMEOUT}"
+    local elapsed=0
+    
+    while (( $(echo "$elapsed < $timeout" | bc -l) )); do
+        local status
+        status=$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || echo "not_found")
+        if [ "$status" = "running" ]; then
+            return 0
+        elif [ "$status" = "exited" ] || [ "$status" = "dead" ]; then
+            echo "Container $container_name failed to start (status: $status)" >&2
+            return 1
+        fi
+        sleep "$CONTAINER_READY_POLL_INTERVAL"
+        elapsed=$(echo "$elapsed + $CONTAINER_READY_POLL_INTERVAL" | bc -l)
+    done
+    
+    echo "Timeout waiting for container $container_name to be ready" >&2
+    return 1
+}
+
 next_agent_branch_name() {
     local agent="$1"
     local refs count=0
@@ -302,6 +329,107 @@ build_artifacts() {
 }
 
 # ============================================================================
+# Mock Agent Credential Setup
+# ============================================================================
+
+# Setup mock credentials for an agent using the secret broker.
+# This creates a proper capability bundle that can be mounted into containers,
+# allowing tests to run the real entrypoint/credential flow.
+#
+# Usage: setup_mock_agent_credentials <agent> <session_id>
+# Returns: Path to the session config directory in MOCK_SESSION_CONFIG_ROOT
+#
+# The returned directory contains:
+#   - capabilities/<stub>/token.json  - The capability token
+#   - capabilities/<stub>/secrets/*.sealed - Sealed credentials
+#
+# Required env vars set by caller: MOCK_BROKER_CONFIG_DIR (creates if not set)
+setup_mock_agent_credentials() {
+    local agent="$1"
+    local session_id="$2"
+    local broker_script="$PROJECT_ROOT/host/utils/secret-broker.py"
+    
+    # Determine stub name and secret name based on agent
+    local stub_name secret_name mock_credential
+    case "$agent" in
+        claude)
+            stub_name="agent_claude_cli"
+            secret_name="claude_cli_credentials"
+            mock_credential='{"api_key":"test-api-key-for-integration","workspace_id":"test-workspace"}'
+            ;;
+        codex)
+            stub_name="agent_codex_cli"
+            secret_name="codex_cli_auth_json"
+            mock_credential='{"refresh_token":"test-refresh-token","access_token":"test-access-token"}'
+            ;;
+        copilot)
+            stub_name="agent_copilot_cli"
+            secret_name="copilot_cli_credentials"
+            mock_credential='{"oauth_token":"test-oauth-token"}'
+            ;;
+        *)
+            echo "Unknown agent type: $agent" >&2
+            return 1
+            ;;
+    esac
+    
+    # Create broker config directory if needed
+    if [[ -z "${MOCK_BROKER_CONFIG_DIR:-}" ]]; then
+        MOCK_BROKER_CONFIG_DIR=$(mktemp -d)
+        export MOCK_BROKER_CONFIG_DIR
+    fi
+    
+    # Create session-specific directories
+    local session_config_root
+    session_config_root=$(mktemp -d)
+    local cap_dir="$session_config_root/capabilities"
+    local env_dir="$MOCK_BROKER_CONFIG_DIR/config"
+    mkdir -p "$cap_dir" "$env_dir"
+    
+    # Issue capability for the agent stub
+    local issue_mounts=("--mount" "$MOCK_BROKER_CONFIG_DIR" "--mount" "$session_config_root")
+    if ! CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${issue_mounts[@]}" -- \
+            issue --session-id "$session_id" --output "$cap_dir" --stubs "$stub_name" >/dev/null 2>&1; then
+        echo "Failed to issue capability for $agent" >&2
+        return 1
+    fi
+    
+    # Store the mock credential
+    local store_mounts=("--mount" "$MOCK_BROKER_CONFIG_DIR")
+    if ! CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${store_mounts[@]}" -- \
+            store --stub "$stub_name" --name "$secret_name" --value "$mock_credential" >/dev/null 2>&1; then
+        echo "Failed to store mock credential for $agent" >&2
+        return 1
+    fi
+    
+    # Find the capability token and redeem it to seal the secret
+    local token_file
+    token_file=$(find "$cap_dir" -name '*.json' | head -n 1)
+    if [[ -z "$token_file" ]]; then
+        echo "Capability token not found for $agent" >&2
+        return 1
+    fi
+    
+    local redeem_mounts=("--mount" "$MOCK_BROKER_CONFIG_DIR" "--mount" "$session_config_root")
+    if ! CONTAINAI_CONFIG_DIR="$env_dir" run_python_tool "$broker_script" "${redeem_mounts[@]}" -- \
+            redeem --capability "$token_file" --secret "$secret_name" >/dev/null 2>&1; then
+        echo "Failed to redeem capability for $agent" >&2
+        return 1
+    fi
+    
+    # Return the session config root path
+    printf '%s' "$session_config_root"
+}
+
+# Cleanup mock credential directories
+cleanup_mock_credentials() {
+    if [[ -n "${MOCK_BROKER_CONFIG_DIR:-}" && -d "$MOCK_BROKER_CONFIG_DIR" ]]; then
+        rm -rf "$MOCK_BROKER_CONFIG_DIR"
+        unset MOCK_BROKER_CONFIG_DIR
+    fi
+}
+
+# ============================================================================
 # Integration Tests
 # ============================================================================
 
@@ -377,7 +505,7 @@ if [ -f "$PROJECT_ROOT/src/agent-task-runner/target/debug/agent-task-runnerd" ];
     DOCKER_ARGS+=(-v "$PROJECT_ROOT/src/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro")
 fi
 
-docker "\${DOCKER_ARGS[@]}" "$TEST_COPILOT_IMAGE" sleep $LONG_RUNNING_SLEEP
+docker "\${DOCKER_ARGS[@]}" "$TEST_COPILOT_IMAGE" $CONTAINER_KEEP_ALIVE_CMD
 EOF
     
     chmod +x "/tmp/test-${launcher_name}"
@@ -390,8 +518,11 @@ EOF
         return
     fi
     
-    # Verify container is running
-    sleep $CONTAINER_STARTUP_WAIT
+    # Wait for container to be ready (deterministic polling, not arbitrary sleep)
+    if ! wait_for_container_ready "$container_name"; then
+        fail "Container $container_name failed to become ready"
+        return
+    fi
     assert_container_running "$container_name"
 }
 
@@ -652,6 +783,121 @@ test_execution_prerequisites() {
     fi
 }
 
+test_agent_credential_flow() {
+    test_section "Testing agent credential flow via secret broker"
+
+    local agents=("claude" "codex")
+    
+    for agent in "${agents[@]}"; do
+        local container_name="${TEST_CONTAINER_PREFIX}-${agent}-cred"
+        local session_id="test-credential-flow-${agent}"
+        local agent_upper
+        agent_upper=$(printf '%s' "$agent" | tr '[:lower:]' '[:upper:]')
+        local image_var="TEST_${agent_upper}_IMAGE"
+        local test_image="${!image_var}"
+        
+        echo "  Testing credential flow for $agent..."
+        
+        # Setup mock credentials via secret broker on host
+        local session_config_root
+        if ! session_config_root=$(setup_mock_agent_credentials "$agent" "$session_id"); then
+            fail "Failed to setup mock credentials for $agent"
+            continue
+        fi
+        
+        # Determine prepare script and validation paths
+        local prepare_script credential_path
+        case "$agent" in
+            claude)
+                prepare_script="/usr/local/bin/prepare-claude-secrets.sh"
+                credential_path="/home/agentuser/.claude/.credentials.json"
+                ;;
+            codex)
+                prepare_script="/usr/local/bin/prepare-codex-secrets.sh"
+                credential_path="/run/agent-secrets/codex/auth.json"
+                ;;
+        esac
+        
+        # Start container with capability mount
+        docker run -d \
+            --name "$container_name" \
+            --label "$TEST_LABEL_TEST" \
+            --label "$TEST_LABEL_SESSION" \
+            --network "$TEST_NETWORK" \
+            --cap-add SYS_ADMIN \
+            --cap-add NET_ADMIN \
+            -v "$TEST_REPO_DIR:/workspace" \
+            -v "$session_config_root/capabilities:/home/agentuser/.config/containai/capabilities:ro" \
+            -v "$PROJECT_ROOT/docker/runtime/capability-unseal.py:/usr/local/bin/capability-unseal:ro" \
+            -e "CONTAINAI_AGENT_HOME=/home/agentuser" \
+            -e "CONTAINAI_AGENT_SECRET_ROOT=/run/agent-secrets" \
+            -e "CONTAINAI_CAPABILITY_UNSEAL=/usr/local/bin/capability-unseal" \
+            -e "DISABLE_SENSITIVE_TMPFS=1" \
+            --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=1m,mode=770,uid=1000,gid=1000" \
+            "$test_image" \
+            $CONTAINER_KEEP_ALIVE_CMD >/dev/null
+        
+        if ! wait_for_container_ready "$container_name"; then
+            fail "Container $container_name failed to become ready"
+            docker logs "$container_name" 2>&1 | tail -20 || true
+            docker rm -f "$container_name" >/dev/null 2>&1 || true
+            rm -rf "$session_config_root"
+            continue
+        fi
+        
+        # Create required directories as agentuser
+        docker exec -u agentuser "$container_name" mkdir -p /home/agentuser/.claude 2>/dev/null || true
+        docker exec -u agentuser "$container_name" mkdir -p /run/agent-secrets/codex 2>/dev/null || true
+        
+        # Run the prepare secrets script
+        if ! docker exec -u agentuser "$container_name" bash -c "$prepare_script" 2>&1; then
+            fail "Credential preparation failed for $agent"
+            docker logs "$container_name" 2>&1 | tail -20 || true
+            docker rm -f "$container_name" >/dev/null 2>&1 || true
+            rm -rf "$session_config_root"
+            continue
+        fi
+        pass "Credential preparation succeeded for $agent"
+        
+        # Verify credentials were materialized
+        if docker exec -u agentuser "$container_name" test -f "$credential_path"; then
+            pass "Credentials materialized at $credential_path for $agent"
+        else
+            fail "Credentials not found at $credential_path for $agent"
+            docker rm -f "$container_name" >/dev/null 2>&1 || true
+            rm -rf "$session_config_root"
+            continue
+        fi
+        
+        # Verify credential content (check for expected fields)
+        local content
+        content=$(docker exec -u agentuser "$container_name" cat "$credential_path" 2>/dev/null || true)
+        case "$agent" in
+            claude)
+                if echo "$content" | grep -q '"api_key"' && echo "$content" | grep -q 'test-api-key-for-integration'; then
+                    pass "Claude credentials contain expected mock data"
+                else
+                    fail "Claude credentials missing expected content"
+                fi
+                ;;
+            codex)
+                if echo "$content" | grep -q '"refresh_token"' && echo "$content" | grep -q 'test-refresh-token'; then
+                    pass "Codex credentials contain expected mock data"
+                else
+                    fail "Codex credentials missing expected content"
+                fi
+                ;;
+        esac
+        
+        # Cleanup this agent's container
+        docker rm -f "$container_name" >/dev/null 2>&1 || true
+        rm -rf "$session_config_root"
+    done
+    
+    # Cleanup broker config
+    cleanup_mock_credentials
+}
+
 test_mcp_configuration_generation() {
     test_section "Testing MCP configuration generation"
 
@@ -678,9 +924,12 @@ test_mcp_configuration_generation() {
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
         "$TEST_COPILOT_IMAGE" \
-        sleep $LONG_RUNNING_SLEEP >/dev/null
+        $CONTAINER_KEEP_ALIVE_CMD >/dev/null
 
-    sleep $CONTAINER_STARTUP_WAIT
+    if ! wait_for_container_ready "$container_name"; then
+        fail "Container $container_name failed to become ready"
+        return
+    fi
 
     if ! docker exec "$container_name" bash -lc '/usr/local/bin/setup-mcp-configs.sh'; then
         fail "MCP setup script failed"
@@ -816,9 +1065,12 @@ test_network_proxy_modes() {
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
         "$TEST_CLAUDE_IMAGE" \
-        sleep $LONG_RUNNING_SLEEP >/dev/null
+        $CONTAINER_KEEP_ALIVE_CMD >/dev/null
 
-    sleep $CONTAINER_STARTUP_WAIT
+    if ! wait_for_container_ready "$restricted_container"; then
+        fail "Container $restricted_container failed to become ready"
+        return
+    fi
 
     local restricted_networks
     restricted_networks=$(docker inspect -f '{{range $name, $net := .NetworkSettings.Networks}}{{$name}} {{end}}' "$restricted_container")
@@ -866,9 +1118,12 @@ PY
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
         "$TEST_CODEX_IMAGE" \
-        sleep $LONG_RUNNING_SLEEP >/dev/null
+        $CONTAINER_KEEP_ALIVE_CMD >/dev/null
 
-    sleep $CONTAINER_STARTUP_WAIT
+    if ! wait_for_container_ready "$proxy_client"; then
+        fail "Container $proxy_client failed to become ready"
+        return
+    fi
 
     local env_http_proxy
     env_http_proxy=$(docker exec "$proxy_client" printenv HTTP_PROXY 2>/dev/null || true)
@@ -1530,14 +1785,17 @@ test_multiple_agents() {
             -e "NO_PROXY=localhost,127.0.0.1" \
             -e "DISABLE_SENSITIVE_TMPFS=1" \
             "$test_image" \
-            /bin/sleep $LONG_RUNNING_SLEEP >/dev/null
+            $CONTAINER_KEEP_ALIVE_CMD >/dev/null
         
         containers+=("$container_name")
     done
     
-    # Verify all are running
-    sleep $CONTAINER_STARTUP_WAIT
+    # Wait for all containers to be ready
     for container in "${containers[@]}"; do
+        if ! wait_for_container_ready "$container"; then
+            fail "Container $container failed to become ready"
+            return
+        fi
         assert_container_running "$container"
     done
     
@@ -1582,7 +1840,13 @@ test_cleanup_on_exit() {
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         alpine:latest \
-        sleep $LONG_RUNNING_SLEEP >/dev/null
+        $CONTAINER_KEEP_ALIVE_CMD >/dev/null
+    
+    # Wait for container to be ready
+    if ! wait_for_container_ready "$test_container"; then
+        fail "Container $test_container failed to become ready"
+        return
+    fi
     
     # Verify it exists
     if docker ps -a --filter "name=$test_container" --format "{{.Names}}" | grep -q "$test_container"; then
@@ -1861,6 +2125,7 @@ run_all_tests() {
     if should_run "test_agentcli_uid_split"; then test_agentcli_uid_split; fi
     if should_run "test_capabilities_dropped"; then test_capabilities_dropped; fi
     if should_run "test_execution_prerequisites"; then test_execution_prerequisites; fi
+    if should_run "test_agent_credential_flow"; then test_agent_credential_flow; fi
     if should_run "test_agent_task_runner_seccomp"; then test_agent_task_runner_seccomp; fi
     if should_run "test_mcp_configuration_generation"; then test_mcp_configuration_generation; fi
     if should_run "test_mitm_ca_generation"; then test_mitm_ca_generation; fi

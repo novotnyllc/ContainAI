@@ -92,8 +92,20 @@ pwsh scripts/test/test-branch-management.ps1
 - Network connectivity between containers
 - Workspace mounting
 - Environment variable injection
+- **Agent credential flow** (secret broker → capability → unseal → validate)
 - Multi-agent concurrent operation
 - Resource cleanup
+
+### Deterministic Container Management
+
+Integration tests use **deterministic container management** instead of arbitrary sleep timers:
+
+- **Keep-alive**: Containers use `sleep infinity` instead of time-based sleeps
+- **Readiness polling**: `wait_for_container_ready()` polls container state until running
+- **Timeout-based**: Maximum wait of 30 seconds with 0.5s poll interval
+- **Fail-fast**: Tests fail immediately if container enters `exited` or `dead` state
+
+This ensures tests are reproducible and don't depend on timing assumptions.
 
 ## Inner Loop Development
 
@@ -131,6 +143,16 @@ All tests use **mock credentials** and are **completely isolated**:
 - Temporary git repositories
 - Session-labeled containers
 - Auto-cleanup after tests
+
+#### Credential Flow Testing
+Integration tests verify the **full credential pipeline** without real secrets:
+
+1. **Host-side**: Secret broker issues capabilities and stores mock credentials
+2. **Broker seal**: Credentials are cryptographically sealed to capability tokens
+3. **Container-side**: `prepare-*-secrets.sh` runs `capability-unseal` to decrypt
+4. **Validation**: Tests verify credentials are correctly materialized
+
+This tests the entire security flow from host broker to container credential files.
 
 ### Debugging Failed Tests
 

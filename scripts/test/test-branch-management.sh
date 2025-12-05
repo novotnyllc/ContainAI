@@ -11,6 +11,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Container management - use deterministic keep-alive, not time-based sleep
+CONTAINER_KEEP_ALIVE_CMD="sleep infinity"
+
 # Test session ID for complete isolation
 TEST_SESSION_ID="$$"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -355,7 +358,7 @@ test_container_branch_cleanup() {
         --label "containai.type=agent" \
         --label "containai.branch=copilot/cleanup-test" \
         --label "containai.repo-path=$TEST_REPO_DIR" \
-        alpine:latest sleep 60 >/dev/null
+        alpine:latest $CONTAINER_KEEP_ALIVE_CMD >/dev/null
     
     # Simulate removal with branch cleanup
     remove_container_with_sidecars "$container_name" "true" "false"
@@ -386,7 +389,7 @@ test_preserve_branch_with_unmerged_commits() {
         --label "containai.type=agent" \
         --label "containai.branch=copilot/preserve-test" \
         --label "containai.repo-path=$TEST_REPO_DIR" \
-        alpine:latest sleep 60 >/dev/null
+        alpine:latest $CONTAINER_KEEP_ALIVE_CMD >/dev/null
     
     # Remove container (should preserve branch due to unmerged commits)
     remove_container_with_sidecars "$container_name" "true" "false" 2>/dev/null || true
