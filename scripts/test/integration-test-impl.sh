@@ -574,11 +574,7 @@ test_capabilities_dropped() {
 test_agent_task_runner_seccomp() {
     test_section "Testing agent-task-runner seccomp notifications"
 
-    if grep -q "Alpine" /etc/os-release 2>/dev/null; then
-        echo "⚠️  Skipping agent-task-runner seccomp test on Alpine Linux (DinD limitations)"
-        return
-    fi
-
+    # WSL doesn't support seccomp user notifications - skip entirely
     if grep -q "WSL" /proc/version 2>/dev/null || grep -q "Microsoft" /proc/version 2>/dev/null; then
         echo "⚠️  Skipping agent-task-runner seccomp test on WSL (seccomp notifications disabled)"
         return
@@ -607,7 +603,7 @@ test_agent_task_runner_seccomp() {
     if [ -n "$exec_out" ]; then
         echo "DEBUG: agentcli-exec output: $exec_out"
         if echo "$exec_out" | grep -q "WARNING: Seccomp user notification is unavailable"; then
-            echo "⚠️  Seccomp notification unavailable in this environment; skipping log check"
+            fail "Seccomp user notification unavailable - this should only happen on WSL"
             return
         fi
     fi

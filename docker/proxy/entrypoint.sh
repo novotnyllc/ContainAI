@@ -39,7 +39,15 @@ chown -hR proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$SQUID_SSL
 # Generate allowed domains file from environment variable
 if [ -n "${SQUID_ALLOWED_DOMAINS:-}" ]; then
     echo "🌐 Configuring allowed domains for Squid proxy..."
-    echo "$SQUID_ALLOWED_DOMAINS" | tr ',' '\n' | grep -v '^$' > "$ALLOWED_DOMAINS_FILE"
+    # Process domains: split by comma, remove empty lines
+    # Note: grep -v returns exit code 1 if no matches, which would fail in set -e mode
+    # So we use || true to ignore that case (which shouldn't happen with valid input)
+    printf '%s\n' "$SQUID_ALLOWED_DOMAINS" | tr ',' '\n' | grep -v '^[[:space:]]*$' > "$ALLOWED_DOMAINS_FILE" || true
+    # Verify we got at least one domain
+    if [ ! -s "$ALLOWED_DOMAINS_FILE" ]; then
+        echo "⚠️  SQUID_ALLOWED_DOMAINS produced no valid domains, defaulting to allow all" >&2
+        echo "." > "$ALLOWED_DOMAINS_FILE"
+    fi
     echo "✅ Allowed domains configured: $(wc -l < "$ALLOWED_DOMAINS_FILE") domains"
 else
     echo "⚠️  No SQUID_ALLOWED_DOMAINS set - defaulting to allow all"
