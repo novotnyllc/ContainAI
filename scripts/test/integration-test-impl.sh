@@ -2276,14 +2276,17 @@ cleanup() {
     # Only run teardown if not already handled by error_handler
     if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq "$FAILED_TESTS" ]; then
         teardown_test_environment
-        print_final_summary
     fi
+    # ALWAYS print final summary as the absolute last thing - this ensures
+    # failures are visible regardless of what cleanup outputs
+    print_final_summary
     exit "$exit_code"
 }
 
 trap cleanup EXIT INT TERM
 trap 'error_handler $LINENO' ERR
 
-# Run tests
-run_all_tests
-exit $?
+# Run tests - capture result without triggering ERR trap
+run_all_tests || true
+final_exit_code=$FAILED_TESTS
+exit $final_exit_code

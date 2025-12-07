@@ -153,23 +153,21 @@ cleanup() {
     else
         if [[ "$DIND_STARTED" == "true" ]]; then
             # Prune large images before stopping to keep cache size down
-            prune_large_images
+            prune_large_images >/dev/null 2>&1
 
-            echo ""
-            echo "Cleaning up isolated Docker daemon..."
-            # Graceful stop to prevent cache corruption
+            # Graceful stop to prevent cache corruption - suppress output
             docker stop -t 10 "$DIND_CONTAINER" >/dev/null 2>&1 || true
             docker rm -fv "$DIND_CONTAINER" >/dev/null 2>&1 || true
         fi
 
         # Always fix permissions if cache exists, even if DinD didn't start properly
         # This ensures we don't leave root-owned files from a previous failed run
-        fix_cache_permissions
+        fix_cache_permissions >/dev/null 2>&1 || true
 
-        # Clean up any other resources from this run (networks, etc.)
-        cleanup_this_run
+        # Clean up any other resources from this run (networks, etc.) - suppress output
+        cleanup_this_run >/dev/null 2>&1 || true
 
-        purge_dind_run_dir "$DIND_RUN_DIR"
+        purge_dind_run_dir "$DIND_RUN_DIR" >/dev/null 2>&1 || true
         
         # Clean up DinD tmp directory
         if [[ -n "${DIND_TMP_DIR:-}" && -d "$DIND_TMP_DIR" ]]; then
@@ -777,18 +775,12 @@ run_integration_tests() {
     fi
 
     local test_exit_code=0
-    docker exec "${exec_env[@]}" "$DIND_CONTAINER" bash -lc "$command" || test_exit_code=$?
+    # Filter out containerd/shim noise from stderr while preserving real errors
+    # These messages are Docker daemon internals and not actionable test output
+    docker exec "${exec_env[@]}" "$DIND_CONTAINER" bash -lc "$command" 2> >(grep -v -E '^time=.*level=(info|warning).*msg=.*(loading plugin|shim disconnected|cleaning up|ignoring event|stream copy error)' >&2) || test_exit_code=$?
     
-    echo ""
-    echo "═══════════════════════════════════════════════════════════"
-    if [[ $test_exit_code -eq 0 ]]; then
-        echo "Integration tests completed successfully"
-    else
-        echo "Integration tests failed with exit code: $test_exit_code"
-        print_dind_logs
-        echo "Tip: Re-run with TEST_PRESERVE_RESOURCES=true to debug"
-    fi
-    echo "═══════════════════════════════════════════════════════════"
+    # Don't print anything here - let the inner script's print_final_summary be the last output
+    # The inner script already printed a clear summary box showing pass/fail status
     
     return $test_exit_code
 }
