@@ -417,6 +417,9 @@ setup_mock_agent_credentials() {
         return 1
     fi
     
+    # Make capability files readable by agentuser (UID 1000) inside container
+    chmod -R a+rX "$session_config_root/capabilities"
+    
     # Return the session config root path
     printf '%s' "$session_config_root"
 }
@@ -462,9 +465,6 @@ test_launcher_script_execution() {
     
     # Test copilot launcher (channel-aware)
     local container_name="${TEST_CONTAINER_PREFIX}-copilot-test"
-    
-    # DEBUG: Check if entrypoint.sh exists
-    ls -l /workspace/docker/runtime/entrypoint.sh || echo "entrypoint.sh NOT FOUND at /workspace/docker/runtime/entrypoint.sh"
 
     local channel="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
     local launcher_name="run-copilot-dev"
@@ -527,6 +527,8 @@ EOF
     # Wait for container to be ready (deterministic polling, not arbitrary sleep)
     if ! wait_for_container_ready "$container_name"; then
         fail "Container $container_name failed to become ready"
+        echo "  Container logs:"
+        docker logs "$container_name" 2>&1 | tail -30 || true
         return
     fi
     assert_container_running "$container_name"
@@ -955,7 +957,8 @@ test_mcp_configuration_generation() {
         return
     fi
 
-    if ! docker exec "$container_name" bash -lc '/usr/local/bin/setup-mcp-configs.sh'; then
+    # Run as agentuser so configs are written to /home/agentuser/.config/
+    if ! docker exec -u agentuser "$container_name" bash -lc '/usr/local/bin/setup-mcp-configs.sh'; then
         fail "MCP setup script failed"
         success=false
     else
@@ -2193,32 +2196,93 @@ run_all_tests() {
     echo "  ❌ Failed: $FAILED_TESTS"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    if [ ${#FAILED_TEST_NAMES[@]} -gt 0 ]; then
-        echo ""
-        echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${RED}║                    FAILED TESTS                           ║${NC}"
-        echo -e "${RED}╠═══════════════════════════════════════════════════════════╣${NC}"
-        for test_name in "${FAILED_TEST_NAMES[@]}"; do
-            # Truncate long names to fit in the box
-            local display_name="${test_name:0:55}"
-            printf "${RED}║${NC} ✗ %-55s ${RED}║${NC}\n" "$display_name"
-        done
-        echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
-        echo ""
-    fi
+    # Store failed test names for post-cleanup summary
+    # Export to make available after cleanup
+    export FINAL_FAILED_TESTS=$FAILED_TESTS
+    export FINAL_PASSED_TESTS=$PASSED_TESTS
     
     return $FAILED_TESTS
 }
 
-# Cleanup trap
+# Print the final failure summary - called AFTER cleanup so it's the last thing visible
+print_final_summary() {
+    if [ ${#FAILED_TEST_NAMES[@]} -gt 0 ]; then
+        echo ""
+        echo ""
+        echo -e "${RED}╔═══════════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║                                                                               ║${NC}"
+        echo -e "${RED}║                         ❌  TESTS FAILED  ❌                                  ║${NC}"
+        echo -e "${RED}║                                                                               ║${NC}"
+        echo -e "${RED}╠═══════════════════════════════════════════════════════════════════════════════╣${NC}"
+        for test_name in "${FAILED_TEST_NAMES[@]}"; do
+            # Truncate long names to fit in the box
+            local display_name="${test_name:0:73}"
+            printf "${RED}║${NC}  ✗ %-73s ${RED}║${NC}\n" "$display_name"
+        done
+        echo -e "${RED}╠═══════════════════════════════════════════════════════════════════════════════╣${NC}"
+        echo -e "${RED}║                                                                               ║${NC}"
+        printf "${RED}║${NC}  Total: ${GREEN}%d passed${NC}, ${RED}%d failed${NC}                                                  ${RED}║${NC}\n" "$PASSED_TESTS" "$FAILED_TESTS"
+        echo -e "${RED}║                                                                               ║${NC}"
+        echo -e "${RED}╚═══════════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+    else
+        echo ""
+        echo ""
+        echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║                                                                               ║${NC}"
+        echo -e "${GREEN}║                         ✅  ALL TESTS PASSED  ✅                              ║${NC}"
+        echo -e "${GREEN}║                                                                               ║${NC}"
+        printf "${GREEN}║${NC}  Total: ${GREEN}%d passed${NC}, ${RED}%d failed${NC}                                                  ${GREEN}║${NC}\n" "$PASSED_TESTS" "$FAILED_TESTS"
+        echo -e "${GREEN}║                                                                               ║${NC}"
+        echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+    fi
+}
+
+# Error handler - captures the current test when script fails unexpectedly
+# shellcheck disable=SC2329 # invoked via trap
+error_handler() {
+    local exit_code=$?
+    local line_number="$1"
+    echo ""
+    echo -e "${RED}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║              UNEXPECTED ERROR AT LINE $line_number                  ║${NC}"
+    echo -e "${RED}╠═══════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${RED}║ Script exited unexpectedly with code $exit_code                      ║${NC}"
+    echo -e "${RED}║ Check the output above for the actual error.              ║${NC}"
+    echo -e "${RED}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Test Results (partial - interrupted by error):"
+    echo "  ✅ Passed: $PASSED_TESTS"
+    echo "  ❌ Failed: $FAILED_TESTS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ ${#FAILED_TEST_NAMES[@]} -gt 0 ]; then
+        echo ""
+        echo "Failed tests before error:"
+        for test_name in "${FAILED_TEST_NAMES[@]}"; do
+            echo "  ✗ $test_name"
+        done
+    fi
+    teardown_test_environment
+    print_final_summary
+    exit "$exit_code"
+}
+
+# Cleanup trap for normal exit
 # shellcheck disable=SC2329 # invoked via trap
 cleanup() {
     local exit_code=$?
-    teardown_test_environment
+    # Only run teardown if not already handled by error_handler
+    if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq "$FAILED_TESTS" ]; then
+        teardown_test_environment
+        print_final_summary
+    fi
     exit "$exit_code"
 }
 
 trap cleanup EXIT INT TERM
+trap 'error_handler $LINENO' ERR
 
 # Run tests
 run_all_tests
