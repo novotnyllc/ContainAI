@@ -2010,28 +2010,37 @@ test_audit_logging() {
         return
     fi
 
-    local socket_path="/tmp/audit-test.sock"
+    local socket_dir="/tmp/audit-test"
+    local socket_path="$socket_dir/audit.sock"
     local log_dir="/tmp/audit-logs"
     local collector_container="${TEST_CONTAINER_PREFIX}-audit-collector"
     local shim_container="${TEST_CONTAINER_PREFIX}-audit-shim"
 
-    # Ensure log directory exists and clean up any stale socket
-    mkdir -p "$log_dir"
+    # Ensure directories exist and clean up any stale socket
+    mkdir -p "$socket_dir" "$log_dir"
     rm -f "$socket_path"
 
     # Run the log collector inside a Debian container (glibc-based)
     # This works even when the test runner is on Alpine (musl) inside DinD
+    # Note: Don't use --rm so we can get logs on failure
+    # Mount the socket directory (not the socket file) so the collector can create the socket
     echo "Starting log collector in container..."
-    docker run -d --rm \
+    local collector_output
+    if ! collector_output=$(docker run -d \
         --name "$collector_container" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
         --network "$TEST_NETWORK" \
         -v "$host_bin:/usr/local/bin/containai-log-collector:ro" \
-        -v "$socket_path:$socket_path" \
+        -v "$socket_dir:$socket_dir" \
         -v "$log_dir:/var/log/containai" \
         debian:12-slim \
         /usr/local/bin/containai-log-collector \
             --socket-path "$socket_path" \
-            --log-dir /var/log/containai > /dev/null 2>&1
+            --log-dir /var/log/containai 2>&1); then
+        fail "Log collector container failed to start: $collector_output"
+        return
+    fi
 
     # Wait for socket to be created
     local retries=0
@@ -2040,6 +2049,7 @@ test_audit_logging() {
         if ! docker ps -q -f "name=$collector_container" | grep -q .; then
             echo "Log collector container exited prematurely"
             docker logs "$collector_container" 2>&1 || true
+            docker rm -f "$collector_container" > /dev/null 2>&1 || true
             fail "Log collector container failed to start"
             return
         fi
@@ -2062,7 +2072,7 @@ test_audit_logging() {
     docker run --rm \
         --name "$shim_container" \
         --network "$TEST_NETWORK" \
-        -v "$socket_path:$socket_path" \
+        -v "$socket_dir:$socket_dir" \
         -v "$shim_lib:/usr/lib/libaudit_shim.so:ro" \
         -e "CONTAINAI_SOCKET_PATH=$socket_path" \
         -e "LD_PRELOAD=/usr/lib/libaudit_shim.so" \
@@ -2077,8 +2087,9 @@ test_audit_logging() {
     # Give collector time to flush
     sleep 2
     
-    # Stop the collector gracefully
+    # Stop the collector gracefully and clean up
     docker stop -t 5 "$collector_container" > /dev/null 2>&1 || true
+    docker rm -f "$collector_container" > /dev/null 2>&1 || true
 
     local log_file
     log_file=$(find "$log_dir" -name "session-*.jsonl" 2>/dev/null | head -n 1)
