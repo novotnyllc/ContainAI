@@ -37,7 +37,7 @@ flowchart TB
         end
         
         subgraph helper_zone["Helper Proxy Zone"]
-            helper_uid["UID 1000"]
+            helper_uid["UID 40000-60000"]
             helper["mcp-http-helper.py<br/>Listens on 127.0.0.1:52100+"]
         end
         
@@ -69,12 +69,12 @@ flowchart TB
     
     style container fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
     style agent_zone fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style helper_zone fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style helper_zone fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
     style wrapper_zone fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     style proxy_container fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
     style external fill:#fce4ec,stroke:#c2185b,stroke-width:2px
     style agent_uid fill:#bbdefb,stroke:#1565c0,stroke-width:1px
-    style helper_uid fill:#bbdefb,stroke:#1565c0,stroke-width:1px
+    style helper_uid fill:#e1bee7,stroke:#8e24aa,stroke-width:1px
     style wrapper_uid fill:#ffe0b2,stroke:#ef6c00,stroke-width:1px
     style proxy_uid fill:#c8e6c9,stroke:#2e7d32,stroke-width:1px
 ```
@@ -89,7 +89,7 @@ flowchart LR
         direction TB
         agent_uid["**Agent Process**<br/>UID: 1000 (agentuser)<br/>• Runs the AI agent<br/>• Cannot read secrets<br/>• Cannot access /proc of other UIDs"]
         
-        helper_uid["**Helper Proxies**<br/>UID: 1000 (agentuser)<br/>• One per remote server<br/>• Holds bearer tokens in memory<br/>• Forwards via Squid"]
+        helper_uid["**Helper Proxies**<br/>UID: 40000-60000 (per-helper)<br/>• One per remote server<br/>• Holds bearer tokens in memory<br/>• Agent cannot read /proc/helper"]
         
         wrapper_uid["**MCP Wrappers**<br/>UID: 20000-40000 (per-wrapper)<br/>• Deterministic hash of name<br/>• Isolated /run/mcp-wrappers/name/<br/>• Agent cannot read /proc/wrapper"]
         
@@ -102,20 +102,25 @@ flowchart LR
     wrapper_uid --> squid_uid
     
     style agent_uid fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#0d47a1
-    style helper_uid fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#0d47a1
+    style helper_uid fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c
     style wrapper_uid fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100
     style squid_uid fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20
 ```
 
 **Color Legend:**
-- 🔵 **Blue** (UID 1000): Agent user processes - can see each other's memory
-- 🟠 **Orange** (UID 20000-40000): Isolated wrapper processes - agent cannot inspect
+- 🔵 **Blue** (UID 1000): Agent process - cannot access other UIDs' /proc
+- 🟣 **Purple** (UID 40000-60000): Isolated helper proxies - hold bearer tokens securely
+- 🟠 **Orange** (UID 20000-40000): Isolated wrapper processes - inject secrets at exec
 - 🟢 **Green** (separate container): Squid proxy - complete network isolation
 
-**Wrapper UID Calculation:**
+**UID Calculation:**
 ```python
-# From mcp-wrapper-runner.sh
-uid = 20000 + (sha256(wrapper_name).hexdigest() % 20000)
+# Helper proxies (from entrypoint.sh)
+helper_uid = 40000 + (sha256(f"helper-{name}").hexdigest() % 20000)
+# Range: 40000-60000, deterministic per helper name
+
+# Wrappers (from mcp-wrapper-runner.sh)
+wrapper_uid = 20000 + (sha256(wrapper_name).hexdigest() % 20000)
 # Range: 20000-40000, deterministic per wrapper name
 ```
 
@@ -144,7 +149,7 @@ flowchart TB
     squid -->|"✅ Allowlisted URLs"| internet
     
     style agent fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style helper fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style helper fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
     style wrapper fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     style local_mcp fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     style squid fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
@@ -157,10 +162,6 @@ flowchart TB
     linkStyle 4 stroke:#388e3c,stroke-width:2px
     linkStyle 5 stroke:#388e3c,stroke-width:2px
     linkStyle 6 stroke:#388e3c,stroke-width:2px
-```
-    linkStyle 2 stroke:#388e3c,stroke-width:2px
-    linkStyle 3 stroke:#388e3c,stroke-width:2px
-    linkStyle 4 stroke:#388e3c,stroke-width:2px
 ```
 
 **How enforcement works:**
@@ -242,7 +243,7 @@ bearer_token_env_var = "GITHUB_TOKEN"
 ```mermaid
 sequenceDiagram
     participant Agent as Agent (UID 1000)
-    participant Helper as Helper Proxy (UID 1000)
+    participant Helper as Helper Proxy (UID 40000-60000)
     participant Squid as Squid Proxy
     participant External as External API
     
@@ -258,7 +259,7 @@ sequenceDiagram
 
 1. Agent reads config, sees `url: http://127.0.0.1:52100`
 2. Agent makes HTTP request to localhost:52100
-3. `mcp-http-helper.py` receives request
+3. `mcp-http-helper.py` receives request (runs under isolated UID)
 4. Helper injects `Authorization: Bearer <token>` header
 5. Helper forwards to real URL via Squid proxy (HTTP_PROXY env var)
 6. Squid validates URL against allowlist, logs request
@@ -266,6 +267,7 @@ sequenceDiagram
 
 ### Security Properties
 
+- **Agent cannot read helper memory**: Each helper runs under UID 40000-60000, preventing agent from inspecting `/proc/<helper_pid>/` to steal tokens
 - Agent never sees the bearer token (it's in helper's memory only)
 - All traffic goes through Squid (network policy enforced)
 - Helper only forwards to its configured target (no open redirect)
@@ -537,8 +539,8 @@ See [convert-toml-to-mcp.py](../../host/utils/convert-toml-to-mcp.py) for implem
 | `~/.config/containai/wrappers/<name>.json` | Wrapper specs (readable) |
 | `~/.config/containai/capabilities/<name>/` | Capability tokens + sealed secrets |
 | `~/.config/<agent>/mcp/config.json` | Final agent config |
-| `/run/mcp-wrappers/<name>/` | Wrapper runtime state (tmpfs) |
-| `/run/mcp-helpers/` | Helper proxy runtime state (tmpfs) |
+| `/run/mcp-wrappers/<name>/` | Wrapper runtime state (per-wrapper tmpfs, UID 20000-40000) |
+| `/run/mcp-helpers/<name>/` | Helper runtime state (per-helper tmpfs, UID 40000-60000) |
 
 ## Adding New MCP Servers
 

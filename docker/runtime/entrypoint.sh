@@ -380,19 +380,62 @@ start_mcp_helpers() {
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         IFS='|' read -r helper_name helper_listen helper_target helper_bearer <<< "$line"
-        local log_file="/run/mcp-helpers/${helper_name}.log"
+        
+        # Calculate deterministic UID for this helper (range 40000-60000, separate from wrappers)
+        local helper_uid
+        helper_uid=$(python3 -c "import hashlib; print(40000 + (int(hashlib.sha256('helper-${helper_name}'.encode()).hexdigest(), 16) % 20000))")
+        
+        # Create isolated runtime directory for this helper
+        local helper_runtime="/run/mcp-helpers/${helper_name}"
+        mkdir -p "$helper_runtime"
+        chown "$helper_uid:$helper_uid" "$helper_runtime"
+        chmod 700 "$helper_runtime"
+        
+        local log_file="${helper_runtime}/helper.log"
         local helper_ca="${SSL_CERT_FILE:-${HOST_MITM_CA_CERT:-}}"
-        local cmd=(env CONTAINAI_REQUIRE_PROXY=1 CONTAINAI_AGENT_ID="${AGENT_NAME:-}" CONTAINAI_SESSION_ID="${HOST_SESSION_ID:-}" SSL_CERT_FILE="$helper_ca" REQUESTS_CA_BUNDLE="$helper_ca" python3 /usr/local/bin/mcp-http-helper.py --name "$helper_name" --listen "$helper_listen" --target "$helper_target")
+        
+        # Build environment for the helper process
+        local helper_env=(
+            "CONTAINAI_REQUIRE_PROXY=1"
+            "CONTAINAI_AGENT_ID=${AGENT_NAME:-}"
+            "CONTAINAI_SESSION_ID=${HOST_SESSION_ID:-}"
+            "CONTAINAI_HELPER_NAME=${helper_name}"
+            "CONTAINAI_HELPER_UID=${helper_uid}"
+            "SSL_CERT_FILE=${helper_ca}"
+            "REQUESTS_CA_BUNDLE=${helper_ca}"
+            "HOME=${helper_runtime}"
+            "TMPDIR=${helper_runtime}"
+        )
+        
+        # Inherit proxy settings
+        [ -n "${HTTP_PROXY:-}" ] && helper_env+=("HTTP_PROXY=${HTTP_PROXY}")
+        [ -n "${HTTPS_PROXY:-}" ] && helper_env+=("HTTPS_PROXY=${HTTPS_PROXY}")
+        [ -n "${http_proxy:-}" ] && helper_env+=("http_proxy=${http_proxy}")
+        [ -n "${https_proxy:-}" ] && helper_env+=("https_proxy=${https_proxy}")
+        [ -n "${NO_PROXY:-}" ] && helper_env+=("NO_PROXY=${NO_PROXY}")
+        [ -n "${no_proxy:-}" ] && helper_env+=("no_proxy=${no_proxy}")
+        
+        local cmd_args=(
+            --name "$helper_name"
+            --listen "$helper_listen"
+            --target "$helper_target"
+        )
         if [ -n "$helper_bearer" ]; then
-            cmd+=("--bearer-token" "$helper_bearer")
+            cmd_args+=(--bearer-token "$helper_bearer")
         fi
-        "${cmd[@]}" >"$log_file" 2>&1 &
+        
+        # Run the helper under its isolated UID
+        env -i "${helper_env[@]}" setpriv --reuid="$helper_uid" --regid="$helper_uid" --clear-groups \
+            python3 /usr/local/bin/mcp-http-helper.py "${cmd_args[@]}" >"$log_file" 2>&1 &
         local pid=$!
         MCP_HELPER_PIDS+=("$pid")
         MCP_HELPER_NAMES+=("$helper_name")
+        
+        # Health check
         if command -v curl >/dev/null 2>&1; then
+            sleep 0.2  # Brief pause for helper to start
             curl --silent --max-time 2 "http://${helper_listen}/health" >/dev/null 2>&1 || \
-                echo "⚠️  Helper ${helper_name} failed health check on ${helper_listen}" >&2
+                echo "⚠️  Helper ${helper_name} (UID ${helper_uid}) failed health check on ${helper_listen}" >&2
         fi
     done < <(parse_helper_definitions "$helper_file" || true)
 }

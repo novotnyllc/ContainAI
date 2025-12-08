@@ -1928,6 +1928,426 @@ exec python3 /workspace/docker/runtime/mcp-http-helper.py --name helper-test --l
     rm -f "$helper_acl_file"
 }
 
+test_mcp_helper_uid_isolation() {
+    test_section "Testing MCP helper UID isolation (40000-60000 range)"
+
+    local container_name="${TEST_CONTAINER_PREFIX}-helper-uid"
+    local helper_manifest
+    helper_manifest=$(mktemp)
+    
+    # Create a helpers.json manifest with a test helper
+    cat > "$helper_manifest" <<'JSON'
+{
+  "helpers": [
+    {
+      "name": "test-uid-helper",
+      "listen": "127.0.0.1:52199",
+      "target": "http://localhost:9999",
+      "bearerToken": "test-token"
+    }
+  ]
+}
+JSON
+
+    cleanup_helper_uid_resources() {
+        if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+            echo "Preserving helper UID test resources ($container_name)"
+            return
+        fi
+        docker rm -f "$container_name" >/dev/null 2>&1 || true
+        rm -f "$helper_manifest"
+    }
+
+    # Start container with the helper manifest
+    if ! docker run -d \
+        --name "$container_name" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        --network "$TEST_NETWORK" \
+        --cap-add SYS_ADMIN \
+        --cap-add NET_ADMIN \
+        -v "$PROJECT_ROOT:/workspace:ro" \
+        -v "$helper_manifest:/home/agentuser/.config/containai/helpers.json:ro" \
+        -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+        -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+        -e "NO_PROXY=localhost,127.0.0.1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        "$TEST_COPILOT_IMAGE" \
+        $CONTAINER_KEEP_ALIVE_CMD >/dev/null
+    then
+        fail "Failed to start helper UID test container"
+        cleanup_helper_uid_resources
+        return
+    fi
+
+    if ! wait_for_container_ready "$container_name"; then
+        fail "Container $container_name failed to start"
+        docker logs "$container_name" 2>&1 | tail -30 || true
+        cleanup_helper_uid_resources
+        return
+    fi
+
+    # Wait for helper to start (entrypoint calls start_mcp_helpers)
+    sleep 2
+
+    # Find the helper process and check its UID
+    local helper_pid helper_uid
+    helper_pid=$(docker exec "$container_name" pgrep -f "mcp-http-helper.*test-uid-helper" 2>/dev/null | head -1 || true)
+    
+    if [ -z "$helper_pid" ]; then
+        fail "Helper process not found - check if start_mcp_helpers ran"
+        echo "DEBUG: Processes in container:"
+        docker exec "$container_name" ps auxww 2>&1 || true
+        echo "DEBUG: Helper manifest:"
+        docker exec "$container_name" cat /home/agentuser/.config/containai/helpers.json 2>&1 || true
+        echo "DEBUG: Helper log:"
+        docker exec "$container_name" cat /run/mcp-helpers/test-uid-helper/helper.log 2>&1 || true
+        cleanup_helper_uid_resources
+        return
+    fi
+
+    # Get the UID of the helper process
+    # Use root to read /proc since hidepid might be set
+    helper_uid=$(docker exec "$container_name" bash -c "cat /proc/$helper_pid/status 2>/dev/null | grep '^Uid:' | awk '{print \$2}'" || true)
+    
+    if [ -z "$helper_uid" ]; then
+        fail "Could not read helper process UID"
+        cleanup_helper_uid_resources
+        return
+    fi
+
+    # Verify UID is in 40000-60000 range
+    if [ "$helper_uid" -ge 40000 ] && [ "$helper_uid" -lt 60000 ]; then
+        pass "Helper runs under isolated UID $helper_uid (in 40000-60000 range)"
+    else
+        fail "Helper runs under unexpected UID $helper_uid (expected 40000-60000)"
+    fi
+
+    # Verify agent (UID 1000) cannot read /proc/<helper_pid>/environ
+    # This tests that UID isolation prevents token leakage
+    if docker exec --user agentuser "$container_name" cat "/proc/$helper_pid/environ" >/dev/null 2>&1; then
+        fail "Agent (UID 1000) can read helper's /proc/$helper_pid/environ - TOKEN LEAKAGE POSSIBLE"
+    else
+        pass "Agent (UID 1000) cannot read helper's /proc (UID isolation works)"
+    fi
+
+    # Verify agent cannot read /proc/<helper_pid>/fd/ directory
+    if docker exec --user agentuser "$container_name" ls "/proc/$helper_pid/fd/" >/dev/null 2>&1; then
+        fail "Agent can list helper's /proc/$helper_pid/fd/ - potential secret exposure"
+    else
+        pass "Agent cannot list helper's file descriptors"
+    fi
+
+    # Verify the helper runtime directory has correct ownership
+    local runtime_owner
+    runtime_owner=$(docker exec "$container_name" stat -c '%u' /run/mcp-helpers/test-uid-helper 2>/dev/null || true)
+    if [ "$runtime_owner" = "$helper_uid" ]; then
+        pass "Helper runtime directory owned by helper UID ($helper_uid)"
+    else
+        fail "Helper runtime directory has wrong owner ($runtime_owner, expected $helper_uid)"
+    fi
+
+    cleanup_helper_uid_resources
+}
+
+test_mcp_wrapper_uid_isolation() {
+    test_section "Testing MCP wrapper UID isolation (20000-40000 range)"
+
+    local container_name="${TEST_CONTAINER_PREFIX}-wrapper-uid"
+    local wrapper_spec
+    wrapper_spec=$(mktemp)
+    
+    # Create a simple wrapper spec
+    cat > "$wrapper_spec" <<'JSON'
+{
+  "name": "test-uid-wrapper",
+  "command": "/bin/sleep",
+  "args": ["30"],
+  "env": {}
+}
+JSON
+
+    cleanup_wrapper_uid_resources() {
+        if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+            echo "Preserving wrapper UID test resources ($container_name)"
+            return
+        fi
+        docker rm -f "$container_name" >/dev/null 2>&1 || true
+        rm -f "$wrapper_spec"
+    }
+
+    # Start container
+    if ! docker run -d \
+        --name "$container_name" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        --network "$TEST_NETWORK" \
+        --cap-add SYS_ADMIN \
+        --cap-add NET_ADMIN \
+        -v "$PROJECT_ROOT:/workspace:ro" \
+        -v "$wrapper_spec:/home/agentuser/.config/containai/wrappers/test-uid-wrapper.json:ro" \
+        -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+        -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+        -e "NO_PROXY=localhost,127.0.0.1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        "$TEST_COPILOT_IMAGE" \
+        $CONTAINER_KEEP_ALIVE_CMD >/dev/null
+    then
+        fail "Failed to start wrapper UID test container"
+        cleanup_wrapper_uid_resources
+        return
+    fi
+
+    if ! wait_for_container_ready "$container_name"; then
+        fail "Container $container_name failed to start"
+        docker logs "$container_name" 2>&1 | tail -30 || true
+        cleanup_wrapper_uid_resources
+        return
+    fi
+
+    # Create the wrapper symlink and invoke it to spawn a process
+    # The wrapper-runner calculates UID and execs with isolation
+    docker exec "$container_name" bash -c '
+        mkdir -p /usr/local/bin
+        ln -sf /workspace/docker/runtime/mcp-wrapper-runner.sh /usr/local/bin/mcp-wrapper-test-uid-wrapper
+        chmod +x /usr/local/bin/mcp-wrapper-test-uid-wrapper
+    '
+
+    # Copy the wrapper core script
+    docker exec "$container_name" bash -c '
+        mkdir -p /usr/local/libexec
+        cp /workspace/docker/runtime/mcp-wrapper-core.py /usr/local/libexec/
+    '
+
+    # Run the wrapper in background as agentuser
+    # We need to capture its process to check UID
+    docker exec --user agentuser -d "$container_name" bash -c '
+        export CONTAINAI_WRAPPER_SPEC=/home/agentuser/.config/containai/wrappers/test-uid-wrapper.json
+        /usr/local/bin/mcp-wrapper-test-uid-wrapper &
+    '
+
+    sleep 2
+
+    # Find the wrapper/sleep process
+    local wrapper_pid wrapper_uid
+    wrapper_pid=$(docker exec "$container_name" pgrep -f "sleep 30" 2>/dev/null | head -1 || true)
+    
+    if [ -z "$wrapper_pid" ]; then
+        # The wrapper might have failed - check why
+        echo "DEBUG: Processes in container:"
+        docker exec "$container_name" ps auxww 2>&1 || true
+        echo "DEBUG: Wrapper spec:"
+        docker exec "$container_name" cat /home/agentuser/.config/containai/wrappers/test-uid-wrapper.json 2>&1 || true
+        
+        # Try to get wrapper logs
+        echo "DEBUG: Wrapper runtime contents:"
+        docker exec "$container_name" ls -la /run/mcp-wrappers/ 2>&1 || true
+        
+        fail "Wrapper child process (sleep 30) not found"
+        cleanup_wrapper_uid_resources
+        return
+    fi
+
+    # Get the UID of the wrapper's child process
+    wrapper_uid=$(docker exec "$container_name" bash -c "cat /proc/$wrapper_pid/status 2>/dev/null | grep '^Uid:' | awk '{print \$2}'" || true)
+    
+    if [ -z "$wrapper_uid" ]; then
+        fail "Could not read wrapper process UID"
+        cleanup_wrapper_uid_resources
+        return
+    fi
+
+    # Verify UID is in 20000-40000 range
+    if [ "$wrapper_uid" -ge 20000 ] && [ "$wrapper_uid" -lt 40000 ]; then
+        pass "Wrapper child runs under isolated UID $wrapper_uid (in 20000-40000 range)"
+    else
+        fail "Wrapper child runs under unexpected UID $wrapper_uid (expected 20000-40000)"
+    fi
+
+    # Verify agent (UID 1000) cannot read wrapper's /proc/environ
+    if docker exec --user agentuser "$container_name" cat "/proc/$wrapper_pid/environ" >/dev/null 2>&1; then
+        fail "Agent (UID 1000) can read wrapper's /proc/$wrapper_pid/environ - SECRET LEAKAGE POSSIBLE"
+    else
+        pass "Agent (UID 1000) cannot read wrapper's /proc (UID isolation works)"
+    fi
+
+    cleanup_wrapper_uid_resources
+}
+
+test_mcp_wrapper_execution() {
+    test_section "Testing MCP wrapper end-to-end execution with secret injection"
+
+    local container_name="${TEST_CONTAINER_PREFIX}-wrapper-e2e"
+    local test_workspace
+    test_workspace=$(mktemp -d)
+    
+    # Create a mock MCP server that echoes its environment
+    cat > "$test_workspace/mock-mcp.py" <<'PYTHON'
+#!/usr/bin/env python3
+"""Mock MCP server that outputs its environment for testing."""
+import os
+import sys
+import json
+
+# Output environment as JSON for verification
+env_dump = {
+    "TEST_SECRET": os.environ.get("TEST_SECRET", "NOT_SET"),
+    "ANOTHER_VAR": os.environ.get("ANOTHER_VAR", "NOT_SET"),
+    "CONTAINAI_WRAPPER_NAME": os.environ.get("CONTAINAI_WRAPPER_NAME", "NOT_SET"),
+}
+
+print(json.dumps(env_dump))
+sys.stdout.flush()
+PYTHON
+    chmod +x "$test_workspace/mock-mcp.py"
+
+    # Create wrapper spec with environment variables
+    mkdir -p "$test_workspace/wrappers"
+    cat > "$test_workspace/wrappers/mock-mcp.json" <<'JSON'
+{
+  "name": "mock-mcp",
+  "command": "/workspace-test/mock-mcp.py",
+  "args": [],
+  "env": {
+    "TEST_SECRET": "secret-value-12345",
+    "ANOTHER_VAR": "plain-value"
+  }
+}
+JSON
+
+    cleanup_wrapper_e2e_resources() {
+        if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
+            echo "Preserving wrapper e2e test resources ($container_name)"
+            return
+        fi
+        docker rm -f "$container_name" >/dev/null 2>&1 || true
+        rm -rf "$test_workspace"
+    }
+
+    # Start container
+    if ! docker run -d \
+        --name "$container_name" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        --network "$TEST_NETWORK" \
+        --cap-add SYS_ADMIN \
+        --cap-add NET_ADMIN \
+        -v "$PROJECT_ROOT:/workspace:ro" \
+        -v "$test_workspace:/workspace-test:ro" \
+        -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+        -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
+        -e "NO_PROXY=localhost,127.0.0.1" \
+        -e "DISABLE_SENSITIVE_TMPFS=1" \
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
+        --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        "$TEST_COPILOT_IMAGE" \
+        $CONTAINER_KEEP_ALIVE_CMD >/dev/null
+    then
+        fail "Failed to start wrapper e2e test container"
+        cleanup_wrapper_e2e_resources
+        return
+    fi
+
+    if ! wait_for_container_ready "$container_name"; then
+        fail "Container $container_name failed to start"
+        docker logs "$container_name" 2>&1 | tail -30 || true
+        cleanup_wrapper_e2e_resources
+        return
+    fi
+
+    # Setup wrapper infrastructure
+    docker exec "$container_name" bash -c '
+        mkdir -p /usr/local/bin /usr/local/libexec
+        ln -sf /workspace/docker/runtime/mcp-wrapper-runner.sh /usr/local/bin/mcp-wrapper-mock-mcp
+        chmod +x /usr/local/bin/mcp-wrapper-mock-mcp
+        cp /workspace/docker/runtime/mcp-wrapper-core.py /usr/local/libexec/
+    '
+
+    # Run the wrapper and capture output
+    local wrapper_output
+    wrapper_output=$(docker exec --user agentuser "$container_name" bash -c '
+        export CONTAINAI_WRAPPER_SPEC=/workspace-test/wrappers/mock-mcp.json
+        /usr/local/bin/mcp-wrapper-mock-mcp 2>/dev/null
+    ' 2>&1 || true)
+
+    if [ -z "$wrapper_output" ]; then
+        fail "Wrapper produced no output"
+        echo "DEBUG: Checking wrapper error logs..."
+        docker exec "$container_name" ls -la /run/mcp-wrappers/ 2>&1 || true
+        cleanup_wrapper_e2e_resources
+        return
+    fi
+
+    # Verify TEST_SECRET was injected
+    if echo "$wrapper_output" | jq -e '.TEST_SECRET == "secret-value-12345"' >/dev/null 2>&1; then
+        pass "Wrapper injected TEST_SECRET into MCP environment"
+    else
+        fail "TEST_SECRET not properly injected"
+        echo "DEBUG: Wrapper output: $wrapper_output"
+    fi
+
+    # Verify ANOTHER_VAR was passed through
+    if echo "$wrapper_output" | jq -e '.ANOTHER_VAR == "plain-value"' >/dev/null 2>&1; then
+        pass "Wrapper passed ANOTHER_VAR to MCP environment"
+    else
+        fail "ANOTHER_VAR not properly passed"
+    fi
+
+    # Verify wrapper name is set
+    if echo "$wrapper_output" | jq -e '.CONTAINAI_WRAPPER_NAME == "mock-mcp"' >/dev/null 2>&1; then
+        pass "Wrapper set CONTAINAI_WRAPPER_NAME correctly"
+    else
+        fail "CONTAINAI_WRAPPER_NAME not set correctly"
+    fi
+
+    # Test that agent cannot see secrets in wrapper spec file (should be readable but spec review is OK)
+    # The important test is that secrets don't leak via /proc
+    
+    # Run the mock MCP as a background process and verify /proc isolation
+    docker exec --user agentuser -d "$container_name" bash -c '
+        export CONTAINAI_WRAPPER_SPEC=/workspace-test/wrappers/mock-mcp.json
+        # Run a long-lived version that sleeps after output
+        python3 -c "
+import os
+import time
+# Simulate long-running MCP
+time.sleep(30)
+" &
+    '
+    
+    sleep 1
+    
+    # Find the python process and check that agent can't read env from a different wrapper instance
+    # This validates the core security property
+    local wrapper_pid
+    wrapper_pid=$(docker exec "$container_name" pgrep -f "python3.*time.sleep" 2>/dev/null | head -1 || true)
+    
+    if [ -n "$wrapper_pid" ]; then
+        local wrapper_uid
+        wrapper_uid=$(docker exec "$container_name" bash -c "cat /proc/$wrapper_pid/status 2>/dev/null | grep '^Uid:' | awk '{print \$2}'" || true)
+        
+        if [ "$wrapper_uid" -ge 20000 ] && [ "$wrapper_uid" -lt 40000 ]; then
+            pass "Long-running wrapper process runs under isolated UID $wrapper_uid"
+        else
+            # If running as agentuser (1000), UID isolation isn't working for the spawned python
+            if [ "$wrapper_uid" = "1000" ]; then
+                fail "Wrapper python process runs as agentuser - UID isolation not applied"
+            else
+                fail "Wrapper process UID $wrapper_uid not in expected range (20000-40000)"
+            fi
+        fi
+    fi
+
+    cleanup_wrapper_e2e_resources
+}
+
 test_multiple_agents() {
     test_section "Testing multiple agents simultaneously"
     
@@ -2350,6 +2770,9 @@ run_all_tests() {
     if should_run "test_network_proxy_modes"; then test_network_proxy_modes; fi
     if should_run "test_squid_proxy_hardening"; then test_squid_proxy_hardening; fi
     if should_run "test_mcp_helper_proxy_enforced"; then test_mcp_helper_proxy_enforced; fi
+    if should_run "test_mcp_helper_uid_isolation"; then test_mcp_helper_uid_isolation; fi
+    if should_run "test_mcp_wrapper_uid_isolation"; then test_mcp_wrapper_uid_isolation; fi
+    if should_run "test_mcp_wrapper_execution"; then test_mcp_wrapper_execution; fi
     if should_run "test_multiple_agents"; then test_multiple_agents; fi
     if should_run "test_container_isolation"; then test_container_isolation; fi
     if should_run "test_cleanup_on_exit"; then test_cleanup_on_exit; fi
