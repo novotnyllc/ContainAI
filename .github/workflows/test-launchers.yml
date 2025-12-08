@@ -4,17 +4,17 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'host/launchers/**'
-      - 'host/utils/**'
-      - 'scripts/test/**'
+      - 'host/**'
+      - 'scripts/**'
+      - 'src/**'
       - 'docker/**'
       - '.github/workflows/test-launchers.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'host/launchers/**'
-      - 'host/utils/**'
-      - 'scripts/test/**'
+      - 'host/**'
+      - 'scripts/**'
+      - 'src/**'
       - 'docker/**'
       - '.github/workflows/test-launchers.yml'
 
@@ -22,6 +22,108 @@ env:
   TRIVY_VERSION: v0.53.0
 
 jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './host ./scripts'
+          severity: error
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Matches python:3.11-slim used in run_python_tool
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pylint mypy types-requests types-PyYAML
+
+      - name: Run Pylint
+        run: |
+          # Run pylint on host utilities
+          pylint --disable=C0111,C0103,R0903,R0913,R0914 host/utils/*.py
+
+  unit-test-dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: src/global.json
+
+      - name: Restore dependencies
+        run: dotnet restore src/ContainAI.slnx
+
+      - name: Build
+        run: dotnet build --no-restore src/ContainAI.slnx
+
+      - name: Test
+        run: dotnet test --no-build --verbosity normal src/ContainAI.slnx
+
+  unit-test-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run Clippy (Agent Task Runner)
+        run: |
+          cd src/agent-task-runner
+          cargo clippy -- -D warnings
+
+      - name: Run Tests (Agent Task Runner)
+        run: |
+          cd src/agent-task-runner
+          cargo test
+
+      - name: Run Clippy (Audit Shim)
+        run: |
+          cd src/audit-shim
+          cargo clippy -- -D warnings
+
+      - name: Run Tests (Audit Shim)
+        run: |
+          cd src/audit-shim
+          cargo test
+
   # Quick unit tests
   unit-test-bash:
     runs-on: ubuntu-latest

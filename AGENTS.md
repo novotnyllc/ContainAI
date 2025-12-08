@@ -62,3 +62,21 @@ See `CONTRIBUTING.md` for detailed development guidelines including:
 
 - **Build time**: Integration tests run inside an isolated Docker-in-Docker environment to keep the host Docker daemon pristine. A full rebuild (`integration-test.sh --mode full`) takes 15-25 minutes because every agent image is rebuilt inside the isolated sandbox. Launchers mode (`--mode launchers`) uses mock images and completes in 5-10 minutes. Plan your CI and local workflows accordingly.
 - **Host isolation**: All integration tests run via `scripts/test/integration-test.sh`, which automatically creates a disposable Docker-in-Docker container. This ensures no containers, images, or networks leak to the host system.
+
+### CI Verification Standards
+
+All code changes must pass the following automated checks in the CI pipeline:
+
+1.  **Static Analysis**:
+    - **Bash**: `shellcheck` must pass for all `.sh` scripts.
+    - **Python**: `pylint` and `mypy` must pass for all host utility scripts.
+    - **Rust**: `cargo clippy` must pass with no warnings.
+
+2.  **Unit Tests**:
+    - **C#**: All `.Tests` projects must pass (`dotnet test`).
+    - **Rust**: All crates must pass `cargo test`.
+    - **Bash**: Launcher logic must pass `scripts/test/test-launchers.sh`.
+
+3.  **Integration Tests**:
+    - Changes to launchers or core runtime must pass `scripts/test/integration-test.sh`.
+
