@@ -11,7 +11,11 @@
       "listen": "127.0.0.1:52101",
       "name": "github",
       "target": "https://api.github.com/mcp"
+    },
+    {
+      "listen": "127.0.0.1:52102",
+      "name": "existing-server",
+      "target": "http://localhost:8080"
     }
-  ],
-  "source": "scripts/test/fixtures/mcp-config/input/config.toml"
+  ]
 }

@@ -1009,11 +1009,11 @@ test_mcp_configuration_generation() {
             if docker exec "$container_name" cat "$config_path" | jq --sort-keys . > "$output_file" 2>/dev/null; then
                 pass "Extracted $label config to artifacts"
                 
-                # Verify merge behavior: check that existing-server was preserved
-                if jq -e '.mcpServers["existing-server"]' "$output_file" >/dev/null 2>&1; then
-                    pass "Merge verified: existing-server preserved in $label config"
+                # Verify merge behavior: check that existing-server was rewritten to use proxy
+                if jq -e '.mcpServers["existing-server"].url | startswith("http://127.0.0.1:")' "$output_file" >/dev/null 2>&1; then
+                    pass "Existing server rewritten to use helper proxy in $label config"
                 else
-                    fail "Merge failed: existing-server not found in $label config"
+                    fail "Existing server not rewritten to use helper proxy in $label config"
                     success=false
                 fi
                 
@@ -1025,15 +1025,30 @@ test_mcp_configuration_generation() {
                     success=false
                 fi
                 
-                # Compare against expected snapshot
-                if diff -q "$output_file" "$expected_agent_config" >/dev/null 2>&1; then
+                # Verify wrapper config uses new format (CONTAINAI_WRAPPER_* not CONTAINAI_STUB_*)
+                if jq -e '.mcpServers["local-tool"].env.CONTAINAI_WRAPPER_NAME == "local-tool"' "$output_file" >/dev/null 2>&1; then
+                    pass "Local server uses new wrapper format"
+                else
+                    fail "Local server not using new wrapper format (CONTAINAI_WRAPPER_NAME)"
+                    success=false
+                fi
+                
+                # Compare against expected snapshot (normalize WRAPPER_SPEC path which varies by home dir)
+                local normalized_output normalized_expected
+                normalized_output=$(mktemp)
+                normalized_expected=$(mktemp)
+                jq --sort-keys '.mcpServers["local-tool"].env.CONTAINAI_WRAPPER_SPEC = "NORMALIZED"' "$output_file" > "$normalized_output"
+                jq --sort-keys '.mcpServers["local-tool"].env.CONTAINAI_WRAPPER_SPEC = "NORMALIZED"' "$expected_agent_config" > "$normalized_expected"
+                
+                if diff -q "$normalized_output" "$normalized_expected" >/dev/null 2>&1; then
                     pass "Config for $label matches expected snapshot"
                 else
                     fail "Config for $label differs from expected snapshot"
                     echo "  Diff:"
-                    diff -u "$expected_agent_config" "$output_file" | head -30 || true
+                    diff -u "$normalized_expected" "$normalized_output" | head -30 || true
                     success=false
                 fi
+                rm -f "$normalized_output" "$normalized_expected"
             else
                 fail "Failed to extract/normalize MCP config for $label"
                 success=false
@@ -1083,6 +1098,31 @@ test_mcp_configuration_generation() {
         fi
     else
         fail "helpers.json not created"
+        success=false
+    fi
+    
+    # Extract and compare wrapper specs (human-readable JSON, not base64)
+    local wrapper_dir="/home/agentuser/.config/containai/wrappers"
+    local wrapper_output="$artifacts_dir/wrapper-local-tool.json"
+    local expected_wrapper="$fixture_dir/expected/wrapper-local-tool.json"
+    if docker exec "$container_name" test -f "$wrapper_dir/local-tool.json"; then
+        if docker exec "$container_name" cat "$wrapper_dir/local-tool.json" | jq --sort-keys . > "$wrapper_output" 2>/dev/null; then
+            pass "Extracted wrapper spec to artifacts (human-readable JSON)"
+            
+            if diff -q "$wrapper_output" "$expected_wrapper" >/dev/null 2>&1; then
+                pass "Wrapper spec matches expected snapshot"
+            else
+                fail "Wrapper spec differs from expected snapshot"
+                echo "  Diff:"
+                diff -u "$expected_wrapper" "$wrapper_output" | head -30 || true
+                success=false
+            fi
+        else
+            fail "Failed to extract/normalize wrapper spec"
+            success=false
+        fi
+    else
+        fail "Wrapper spec not created at $wrapper_dir/local-tool.json"
         success=false
     fi
 

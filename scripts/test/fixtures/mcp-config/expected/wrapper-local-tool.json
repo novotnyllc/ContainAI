@@ -1,0 +1,17 @@
+{
+  "args": [
+    "--mode",
+    "mcp",
+    "--verbose"
+  ],
+  "command": "/usr/local/bin/my-tool",
+  "cwd": "/workspace",
+  "env": {
+    "API_KEY": "${MY_TOOL_API_KEY}",
+    "TOOL_CONFIG": "/workspace/.tool-config.json"
+  },
+  "name": "local-tool",
+  "secrets": [
+    "MY_TOOL_API_KEY"
+  ]
+}

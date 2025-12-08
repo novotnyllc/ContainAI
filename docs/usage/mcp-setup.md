@@ -72,13 +72,13 @@ ContainAI resolves `config.toml` **before** a container starts. The launcher inv
 - Reads your repo-level `config.toml` plus any `~/.config/containai/config[-<agent>].toml` overrides.
 - Loads secrets from `~/.config/containai/mcp-secrets.env` (or `MCP_SECRETS_FILE`) while on the host.
 - Substitutes `$VAR` / `${VAR}` placeholders everywhere they appear (arguments, env blocks, `bearer_token_env_var`, etc.).
-- Emits fully resolved JSON configs for each agent (`~/.config/<agent>/mcp/config.json` inside the container) and a stub manifest that maps servers → `mcp-stub` command lines.
+- Emits fully resolved JSON configs for each agent (`~/.config/<agent>/mcp/config.json` inside the container) and a stub manifest that maps servers → `mcp-wrapper` command lines.
 
 Because the resolved JSON lives only in the session tmpfs, containers operate without direct access to your plaintext secrets file.
 
-### End-to-end Secret & Stub Flow
+### End-to-end Secret & Wrapper Flow
 
-The diagram below shows the full lifecycle for secrets from the host to the MCP stub inside the container:
+The diagram below shows the full lifecycle for secrets from the host to the MCP wrapper inside the container:
 
 ```mermaid
 sequenceDiagram
@@ -88,29 +88,33 @@ sequenceDiagram
    participant Render as render-session-config.py
    participant Broker as Host Secret Broker
    participant Ctr as Container entrypoint.sh
-   participant Stub as mcp-stub
+   participant Wrapper as mcp-wrapper
    participant MCP as MCP Server
 
    Dev->>Launch: run-copilot-<channel> / run-codex-<channel>
    Launch->>Render: Provide config.toml + secrets file path
-   Render-->>Launch: Session manifest + stub spec (hash recorded)
-   Launch->>Broker: Store secrets + request capabilities per stub
+   Render-->>Launch: Session manifest + wrapper spec (hash recorded)
+   Launch->>Broker: Store secrets + request capabilities per wrapper
    Broker-->>Launch: Sealed capability bundle (scoped to session)
    Launch->>Ctr: docker run + copy manifest/capabilities into /run/containai
-   Ctr->>Stub: entrypoint installs configs, enforces tmpfs ownership
-   note over Stub,Broker: Agent later requests MCP access
-   Stub->>Broker: Redeem capability token for server-specific secret
-   Broker-->>Stub: Stream secret via memfd/tmpfs, token expires after use
-   Stub->>MCP: Launch MCP binary with injected secret, expose STDIO/SSE endpoint
-   MCP-->>Stub: Provide tool responses
-   Stub-->>Dev: Relay MCP responses back to the agent process
+   Ctr->>Wrapper: entrypoint installs configs, enforces tmpfs ownership
+   note over Wrapper,Broker: Agent later requests MCP access
+   Wrapper->>Broker: Redeem capability token for server-specific secret
+   Broker-->>Wrapper: Stream secret via memfd/tmpfs, token expires after use
+   Wrapper->>MCP: Launch MCP binary with injected secret, expose STDIO/SSE endpoint
+   MCP-->>Wrapper: Provide tool responses
+   Wrapper-->>Dev: Relay MCP responses back to the agent process
 ```
 
 Key points:
 
-- Secrets are supplied either by the host-broker rendered configs or by converting `/workspace/config.toml` at container start; nothing secret is baked into the image.
-- The generated JSON lives on the container’s writable layer and disappears when the container exits.
-- MCP stubs run under dedicated UIDs, fetch secrets at launch via the broker, and keep them inside private tmpfs mounts so the agent process never reads raw tokens.
+- All MCP servers go through a proxy mechanism (helper proxy for remote, wrapper for local)
+- Secrets are supplied either by the host-broker rendered configs or by converting `/workspace/config.toml` at container start
+- Pre-existing MCP configs are automatically rewritten to go through the proxy
+- The generated JSON lives on the container's writable layer and disappears when the container exits
+- MCP wrappers run under dedicated UIDs, fetch secrets at launch via the broker, and keep them inside private tmpfs mounts
+
+For detailed architecture information, see [MCP Proxy Architecture](../development/mcp-proxy-architecture.md).
 
 ## Setting Up Secrets
 
@@ -380,7 +384,7 @@ ls -la /tmp/
 
 ### Secrets File Missing During Rendering
 
-**Symptom:** `render-session-config.py` logs `⚠️  Secret 'GITHUB_TOKEN' ... not defined` or MCP stubs fail with "missing capability secret" messages.
+**Symptom:** `render-session-config.py` logs `⚠️  Secret 'GITHUB_TOKEN' ... not defined` or MCP wrappers fail with "missing capability secret" messages.
 
 **Check:**
 ```bash
@@ -619,7 +623,7 @@ echo ".config/containai/mcp-secrets.env" >> .gitignore
 
 ### 5. Container Isolation
 
-Secrets remain outside the container as files. The launcher renders configs on the host, stores sealed capabilities in `/run/containai`, and MCP binaries can only read tokens by calling the trusted `mcp-stub` helper. Verify each run prints `🔐 Session MCP config manifest: <sha>`—that indicates host rendering succeeded and no plaintext secrets were copied into the workspace volume.
+Secrets remain outside the container as files. The launcher renders configs on the host, stores sealed capabilities in `/run/containai`, and MCP binaries can only read tokens by calling the trusted `mcp-wrapper` helper. Verify each run prints `🔐 Session MCP config manifest: <sha>`—that indicates host rendering succeeded and no plaintext secrets were copied into the workspace volume.
 
 ## Advanced Configuration
 

@@ -164,8 +164,8 @@ COPY --chown=root:root host/utils/git-credential-proxy-server.sh /usr/local/bin/
 COPY --chown=root:root docker/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
 COPY --chown=root:root host/utils/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
 COPY --chown=root:root docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
-COPY --chown=root:root docker/runtime/mcp-stub.py /usr/local/libexec/mcp-stub-core.py
-COPY --chown=root:root docker/runtime/mcp-stub-runner.sh /usr/local/bin/mcp-stub-runner
+COPY --chown=root:root docker/runtime/mcp-wrapper.py /usr/local/libexec/mcp-wrapper-core.py
+COPY --chown=root:root docker/runtime/mcp-wrapper-runner.sh /usr/local/bin/mcp-wrapper-runner
 COPY --chown=root:root docker/runtime/mcp-http-helper.py /usr/local/bin/mcp-http-helper.py
 COPY --chown=root:root docker/runtime/capability-unseal.py /usr/local/bin/capability-unseal
 COPY --chown=root:root host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
@@ -183,12 +183,11 @@ RUN install -d /usr/local/libexec && \
     /usr/local/bin/gpg-host-proxy.sh \
     /usr/local/bin/gpg-proxy-server.sh \
     /usr/local/bin/setup-mcp-configs.sh \
-    /usr/local/bin/mcp-stub-runner \
+    /usr/local/bin/mcp-wrapper-runner \
     /usr/local/bin/mcp-http-helper.py \
     /usr/local/bin/capability-unseal \
     /usr/local/bin/convert-toml-to-mcp.py \
-    /usr/local/bin/package-agent-data.py && \
-    ln -sf /usr/local/bin/mcp-stub-runner /usr/local/bin/mcp-stub
+    /usr/local/bin/package-agent-data.py
 
 # Install GitHub CLI, npm global packages, and Playwright in one layer
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \

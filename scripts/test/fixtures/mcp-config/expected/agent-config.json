@@ -6,7 +6,7 @@
     },
     "existing-server": {
       "description": "Pre-existing MCP server that should be preserved",
-      "url": "http://localhost:8080"
+      "url": "http://127.0.0.1:52102"
     },
     "github": {
       "bearerToken": "FAKE_TEST_KEY_github_not_a_real_token_67890",
@@ -14,10 +14,10 @@
     },
     "local-tool": {
       "args": [],
-      "command": "/home/agentuser/.local/bin/mcp-stub-local-tool",
+      "command": "/home/agentuser/.local/bin/mcp-wrapper-local-tool",
       "env": {
-        "CONTAINAI_STUB_NAME": "local-tool",
-        "CONTAINAI_STUB_SPEC": "eyJhcmdzIjogWyItLW1vZGUiLCAibWNwIiwgIi0tdmVyYm9zZSJdLCAiY29tbWFuZCI6ICIvdXNyL2xvY2FsL2Jpbi9teS10b29sIiwgImN3ZCI6ICIvd29ya3NwYWNlIiwgImVudiI6IHsiQVBJX0tFWSI6ICIke01ZX1RPT0xfQVBJX0tFWX0iLCAiVE9PTF9DT05GSUciOiAiL3dvcmtzcGFjZS8udG9vbC1jb25maWcuanNvbiJ9LCAic2VjcmV0cyI6IFsiTVlfVE9PTF9BUElfS0VZIl0sICJzZXJ2ZXIiOiAibG9jYWwtdG9vbCIsICJzdHViIjogImxvY2FsLXRvb2wifQ=="
+        "CONTAINAI_WRAPPER_NAME": "local-tool",
+        "CONTAINAI_WRAPPER_SPEC": "/home/agentuser/.config/containai/wrappers/local-tool.json"
       }
     }
   },

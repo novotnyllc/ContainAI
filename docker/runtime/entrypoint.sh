@@ -293,31 +293,31 @@ install_host_capabilities() {
     return 0
 }
 
-ensure_stub_binaries() {
+ensure_wrapper_binaries() {
     local servers_file="$1"
-    local runner="/usr/local/bin/mcp-stub-runner"
+    local runner="/usr/local/bin/mcp-wrapper-runner"
     [ -x "$runner" ] || return 0
     [ -f "$servers_file" ] || return 0
     mkdir -p "$STUB_SHIM_ROOT"
-    while IFS= read -r stub; do
-        [ -z "$stub" ] && continue
-        local dest="${STUB_SHIM_ROOT}/mcp-stub-${stub}"
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        local dest="${STUB_SHIM_ROOT}/mcp-wrapper-${name}"
         if [ ! -e "$dest" ]; then
             ln -s "$runner" "$dest" 2>/dev/null || true
         fi
     done < "$servers_file"
 }
 
-create_stub_links_from_configs() {
-    local runner="/usr/local/bin/mcp-stub-runner"
+create_wrapper_links_from_configs() {
+    local runner="/usr/local/bin/mcp-wrapper-runner"
     [ -x "$runner" ] || return 0
     if [ "$#" -eq 0 ]; then
         return 0
     fi
     mkdir -p "$STUB_SHIM_ROOT"
-    python3 - "$@" <<'PY' | while IFS= read -r stub; do
+    python3 - "$@" <<'PY' | while IFS= read -r name; do
 import json, sys
-stubs = set()
+names = set()
 for path in sys.argv[1:]:
     try:
         with open(path, "r", encoding="utf-8") as handle:
@@ -331,18 +331,18 @@ for path in sys.argv[1:]:
         if not isinstance(cfg, dict):
             continue
         env = cfg.get("env") or {}
-        stub = env.get("CONTAINAI_STUB_NAME")
-        if not stub:
+        name = env.get("CONTAINAI_WRAPPER_NAME")
+        if not name:
             cmd = cfg.get("command", "")
-            if isinstance(cmd, str) and "mcp-stub-" in cmd:
-                stub = cmd.split("/")[-1].replace("mcp-stub-", "", 1)
-        if stub:
-            stubs.add(stub)
-for stub in sorted(stubs):
-    print(stub)
+            if isinstance(cmd, str) and "mcp-wrapper-" in cmd:
+                name = cmd.split("/")[-1].replace("mcp-wrapper-", "", 1)
+        if name:
+            names.add(name)
+for name in sorted(names):
+    print(name)
 PY
-        [ -z "$stub" ] && continue
-        local dest="${STUB_SHIM_ROOT}/mcp-stub-${stub}"
+        [ -z "$name" ] && continue
+        local dest="${STUB_SHIM_ROOT}/mcp-wrapper-${name}"
         if [ ! -e "$dest" ]; then
             ln -s "$runner" "$dest" 2>/dev/null || true
         fi
@@ -716,7 +716,7 @@ cleanup_on_shutdown() {
             kill "$helper_pid" >/dev/null 2>&1 || true
         done
     fi
-    rm -rf /run/mcp-helpers /run/mcp-stubs
+    rm -rf /run/mcp-helpers /run/mcp-wrappers
 
     # Check if auto-commit/push is enabled (default: true)
     AUTO_COMMIT="${AUTO_COMMIT_ON_SHUTDOWN:-true}"
@@ -976,7 +976,7 @@ fi
 HELPER_MANIFEST_PATH=""
 if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
     servers_file="$HOST_SESSION_CONFIG_ROOT/servers.txt"
-    ensure_stub_binaries "$servers_file"
+    ensure_wrapper_binaries "$servers_file"
     helper_candidate="$HOST_SESSION_CONFIG_ROOT/helpers.json"
     if [ -f "$helper_candidate" ]; then
         HELPER_MANIFEST_PATH="$helper_candidate"
@@ -987,7 +987,7 @@ if [ "$HOST_CONFIG_DEPLOYED" = false ] && [ -f "/workspace/config.toml" ]; then
     /usr/local/bin/setup-mcp-configs.sh 2>&1 | grep -E "^(ERROR|WARN)" || true
 fi
 
-create_stub_links_from_configs \
+create_wrapper_links_from_configs \
     "/home/${AGENT_USERNAME}/.config/github-copilot/mcp/config.json" \
     "/home/${AGENT_USERNAME}/.config/codex/mcp/config.json" \
     "/home/${AGENT_USERNAME}/.config/claude/mcp/config.json"

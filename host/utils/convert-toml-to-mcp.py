@@ -1,10 +1,29 @@
 #!/usr/bin/env python3
 """
 Convert config.toml to agent-specific MCP JSON configurations.
-Reads a single source of truth (config.toml) and generates config files for each agent.
+
+This script transforms ContainAI's unified config.toml into the JSON format
+expected by each AI agent (Copilot, Claude, Codex).
+
+MCP Server Types:
+-----------------
+1. REMOTE servers (have 'url'): 
+   - Accessed via a local helper proxy that forwards requests through Squid
+   - The proxy handles bearer token injection and TLS termination
+   - Config points to http://127.0.0.1:<port> instead of the real URL
+
+2. LOCAL servers (have 'command'):
+   - Run as child processes inside the container
+   - Wrapped by mcp-wrapper to inject secrets from sealed capabilities
+   - Secrets are decrypted at runtime, never stored in plaintext configs
+
+Output Files:
+-------------
+- ~/.config/<agent>/mcp/config.json  - Agent-specific MCP server configs
+- ~/.config/containai/helpers.json   - Helper proxy manifest for remote servers
+- ~/.config/containai/wrappers/      - Wrapper specs for local servers
 """
 
-import base64
 import json
 import os
 import re
@@ -15,14 +34,23 @@ import tomllib
 
 
 ENV_PATTERN = re.compile(r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)")
+
+# Agent config directories (relative to ~)
 DEFAULT_AGENTS = {
     "github-copilot": "~/.config/github-copilot/mcp",
     "codex": "~/.config/codex/mcp",
     "claude": "~/.config/claude/mcp",
 }
-STUB_COMMAND_TEMPLATE = "/home/agentuser/.local/bin/mcp-stub-{name}"
+
+# Where wrapper specs are written
+WRAPPER_SPEC_DIR = "~/.config/containai/wrappers"
+# The wrapper binary that reads specs and injects secrets
+WRAPPER_COMMAND = "/home/agentuser/.local/bin/mcp-wrapper-{name}"
+
+# Helper proxy settings for remote MCP servers  
 HELPER_LISTEN_HOST = "127.0.0.1"
 HELPER_PORT_BASE = 52100
+
 DEFAULT_CONFIG_ROOT = Path(os.environ.get("CONTAINAI_CONFIG_ROOT", Path.home() / ".config" / "containai-dev"))
 DEFAULT_HELPER_ACL_CONFIG = Path(
     os.environ.get("CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
@@ -128,7 +156,27 @@ def collect_placeholders(value):
     return names
 
 
+def _is_already_proxied(server_config):
+    """Check if a server config is already going through our proxy mechanism."""
+    if not isinstance(server_config, dict):
+        return False
+    # Check for wrapper (local server already wrapped)
+    env = server_config.get("env", {})
+    if env.get("CONTAINAI_WRAPPER_SPEC") or env.get("CONTAINAI_WRAPPER_NAME"):
+        return True
+    # Check for helper proxy (remote server already proxied)
+    url = server_config.get("url", "")
+    if isinstance(url, str) and url.startswith(f"http://{HELPER_LISTEN_HOST}:"):
+        return True
+    # Check for wrapper command
+    cmd = server_config.get("command", "")
+    if isinstance(cmd, str) and "mcp-wrapper-" in cmd:
+        return True
+    return False
+
+
 def convert_remote_server(name, settings, secrets, missing_tokens, next_port):
+    """Convert a remote MCP server to use a local helper proxy."""
     converted = {}
     bearer_var = settings.get("bearer_token_env_var")
     bearer_token = None
@@ -156,7 +204,8 @@ def convert_remote_server(name, settings, secrets, missing_tokens, next_port):
     return converted, helper_entry
 
 
-def convert_stub_server(name, settings, secrets, warnings):
+def convert_local_server(name, settings, secrets, warnings):
+    """Convert a local MCP server to use a wrapper for secret injection."""
     config = dict(settings)
     command = str(config.pop("command", "")).strip()
     if not command:
@@ -176,7 +225,7 @@ def convert_stub_server(name, settings, secrets, warnings):
         placeholders.update(collect_placeholders(cwd))
 
     available = {k for k, v in secrets.items() if v} | {k for k, v in os.environ.items() if v}
-    stub_secrets = sorted(name for name in placeholders if name in available)
+    required_secrets = sorted(name for name in placeholders if name in available)
     missing = sorted(name for name in placeholders if name not in available)
     for placeholder in missing:
         warnings.append(
@@ -184,24 +233,32 @@ def convert_stub_server(name, settings, secrets, warnings):
         )
 
     spec = {
-        "stub": name,
-        "server": name,
+        "name": name,
         "command": command,
         "args": args,
         "env": env,
-        "secrets": stub_secrets,
+        "secrets": required_secrets,
     }
     if cwd:
         spec["cwd"] = str(cwd)
 
+    spec_dir = os.path.expanduser(WRAPPER_SPEC_DIR)
+    os.makedirs(spec_dir, exist_ok=True)
+    spec_file = os.path.join(spec_dir, f"{name}.json")
+    try:
+        with open(spec_file, "w", encoding="utf-8") as handle:
+            json.dump(spec, handle, indent=2, sort_keys=True)
+    except OSError as exc:
+        warnings.append(f"⚠️  Could not write wrapper spec for '{name}': {exc}")
+
     rendered_entry = dict(config)
-    rendered_entry["command"] = STUB_COMMAND_TEMPLATE.format(name=name)
+    rendered_entry["command"] = WRAPPER_COMMAND.format(name=name)
     rendered_entry["args"] = []
     rendered_entry["env"] = {
-        "CONTAINAI_STUB_SPEC": base64.b64encode(json.dumps(spec, sort_keys=True).encode("utf-8")).decode("ascii"),
-        "CONTAINAI_STUB_NAME": name,
+        "CONTAINAI_WRAPPER_SPEC": spec_file,
+        "CONTAINAI_WRAPPER_NAME": name,
     }
-    return rendered_entry
+    return rendered_entry, spec
 
 
 def convert_toml_to_mcp(toml_path):
@@ -227,6 +284,7 @@ def convert_toml_to_mcp(toml_path):
     missing_tokens = []
     warnings = []
     helpers = []
+    wrappers = []
     port_state = {"value": HELPER_PORT_BASE}
 
     def next_port():
@@ -238,7 +296,9 @@ def convert_toml_to_mcp(toml_path):
     for name, settings in mcp_servers.items():
         settings = dict(settings or {})
         if "command" in settings:
-            resolved_servers[name] = convert_stub_server(name, settings, secrets, warnings)
+            rendered, spec = convert_local_server(name, settings, secrets, warnings)
+            resolved_servers[name] = rendered
+            wrappers.append(spec)
         else:
             rendered, helper_entry = convert_remote_server(name, settings, secrets, missing_tokens, next_port)
             resolved_servers[name] = rendered
@@ -252,7 +312,6 @@ def convert_toml_to_mcp(toml_path):
 
         config_file = os.path.join(config_dir, "config.json")
         
-        # Load existing config to preserve any pre-existing MCP servers
         existing_config = {}
         existing_servers = {}
         if os.path.exists(config_file):
@@ -263,8 +322,31 @@ def convert_toml_to_mcp(toml_path):
             except (json.JSONDecodeError, OSError) as exc:
                 print(f"⚠️  Could not read existing {agent_name} config, will overwrite: {exc}", file=sys.stderr)
         
-        # Merge: new servers override existing ones with same name
-        merged_servers = {**existing_servers, **resolved_servers}
+        # Rewrite existing servers to go through proxy mechanism
+        rewritten_existing = {}
+        for name, server_config in existing_servers.items():
+            if name in resolved_servers:
+                # Already handled by config.toml, skip
+                continue
+            if _is_already_proxied(server_config):
+                # Already going through our proxy, keep as-is
+                rewritten_existing[name] = server_config
+            elif "command" in server_config:
+                # Local server: wrap it
+                rendered, spec = convert_local_server(name, server_config, secrets, warnings)
+                rewritten_existing[name] = rendered
+                wrappers.append(spec)
+            elif "url" in server_config:
+                # Remote server: route through helper proxy
+                rendered, helper_entry = convert_remote_server(name, server_config, secrets, missing_tokens, next_port)
+                rewritten_existing[name] = rendered
+                helpers.append(helper_entry)
+            else:
+                # Unknown format, preserve but warn
+                warnings.append(f"⚠️  Unknown MCP server format for '{name}', preserving unchanged")
+                rewritten_existing[name] = server_config
+        
+        merged_servers = {**rewritten_existing, **resolved_servers}
         mcp_config = {**existing_config, "mcpServers": merged_servers}
 
         try:
@@ -284,11 +366,14 @@ def convert_toml_to_mcp(toml_path):
         print(f"⚠️  Unable to write helper manifest: {exc}", file=sys.stderr)
 
     print("✅ MCP configurations generated for all agents")
-    print(f"   Servers configured: {', '.join(resolved_servers.keys())}")
     print(f"   Config source: {toml_path}")
+    print(f"   Servers configured: {', '.join(sorted(resolved_servers.keys()))}")
     if helpers:
-        helper_names = ", ".join(helper["name"] for helper in helpers)
-        print(f"   Helper proxies: {helper_names}")
+        helper_names = ", ".join(h["name"] for h in helpers)
+        print(f"   Remote servers (via helper proxy): {helper_names}")
+    if wrappers:
+        wrapper_names = ", ".join(w["name"] for w in wrappers)
+        print(f"   Local servers (via wrapper): {wrapper_names}")
 
     if missing_tokens:
         for server_name, env_var in missing_tokens:
