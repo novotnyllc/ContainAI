@@ -87,8 +87,8 @@ if [ "$SOURCE_TYPE" = "local" ] && [ -f "$SOURCE/config.toml" ]; then
     SESSION_CONFIG_SOURCE="$SOURCE/config.toml"
 fi
 
-if [ -z "$SESSION_CONFIG_SOURCE" ] && [ -f "${HOME}/.config/containai/config.toml" ]; then
-    SESSION_CONFIG_SOURCE="${HOME}/.config/containai/config.toml"
+if [ -z "$SESSION_CONFIG_SOURCE" ] && [ -f "${CONTAINAI_CONFIG_ROOT}/config.toml" ]; then
+    SESSION_CONFIG_SOURCE="${CONTAINAI_CONFIG_ROOT}/config.toml"
 fi
 
 LAUNCHER_HEAD_HASH=$(get_git_head_hash "$REPO_ROOT" 2>/dev/null || echo "")
@@ -108,7 +108,7 @@ fi
 
 SESSION_ARTIFACT_DIR=""
 cleanup_session_artifacts() {
-    local cache_root="${CONTAINAI_SESSION_CACHE:-${HOME:-/tmp}/.containai/session-cache}"
+    local cache_root="${CONTAINAI_SESSION_CACHE:-${CONTAINAI_HOME:-${HOME:-/tmp}/.containai}/session-cache}"
     if [ -n "$CONTAINER_NAME" ] && [ -d "$cache_root/${CONTAINER_NAME}" ]; then
         rm -rf "${cache_root:?}/${CONTAINER_NAME}"
     fi
@@ -125,7 +125,7 @@ SESSION_CONFIG_SHA256=""
 SESSION_CONFIG_SOURCE=""
 SESSION_CONFIG_RENDERED=false
 SESSION_ID_BASE=$(date -u +"%Y%m%dT%H%M%SZ")
-SESSION_CACHE_ROOT="${CONTAINAI_SESSION_CACHE:-${HOME}/.containai/session-cache}"
+SESSION_CACHE_ROOT="${CONTAINAI_SESSION_CACHE:-${CONTAINAI_HOME}/session-cache}"
 
 # Default values
 AGENT=""
@@ -189,7 +189,7 @@ load_mcp_secret_values() {
     if [ -n "${MCP_SECRETS_FILE:-}" ]; then
         candidates+=("${MCP_SECRETS_FILE}")
     fi
-    candidates+=("${HOME}/.config/containai/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
+    candidates+=("${CONTAINAI_CONFIG_ROOT}/mcp-secrets.env" "${HOME}/.mcp-secrets.env")
     local candidate resolved
     for candidate in "${candidates[@]}"; do
         [ -n "$candidate" ] || continue
@@ -584,7 +584,7 @@ PY
         printf '%s\n' "$key_hex" > "$dest_path"
         chmod 600 "$dest_path" 2>/dev/null || true
     fi
-    local host_store="${HOME}/.config/containai/data-hmac/${agent_name}"
+    local host_store="${CONTAINAI_CONFIG_ROOT}/data-hmac/${agent_name}"
     mkdir -p "$host_store"
     cp "$dest_path" "$host_store/${session_id}.key"
     chmod 600 "$host_store/${session_id}.key" 2>/dev/null || true
@@ -719,7 +719,7 @@ else
             REMOTE_HASH=$(printf "%s" "$SOURCE" | sha256sum | awk '{print $1}')
         fi
         REMOTE_HASH=${REMOTE_HASH:0:16}
-        LOCAL_REMOTE_DIR="${CONTAINAI_LOCAL_REMOTES_DIR:-${HOME}/.containai/local-remotes}"
+        LOCAL_REMOTE_DIR="${CONTAINAI_LOCAL_REMOTES_DIR:-${CONTAINAI_HOME}/local-remotes}"
         LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
         mkdir -p "$LOCAL_REMOTE_DIR"
         if [ ! -d "$LOCAL_REMOTE_HOST_PATH" ]; then
@@ -876,7 +876,7 @@ TZ_VALUE="${TZ:-$(cat /etc/timezone 2>/dev/null || echo UTC)}"
 # Squid allowed domains
 SQUID_ALLOWED_DOMAINS="*.github.com,*.githubcopilot.com,*.nuget.org,*.npmjs.org,*.pypi.org,*.python.org,*.microsoft.com,*.docker.io,registry-1.docker.io,api.githubcopilot.com,learn.microsoft.com,platform.uno,*.githubusercontent.com,*.azureedge.net"
 SQUID_HELPER_ACL_FILE="$SESSION_CONFIG_OUTPUT/squid-acls.conf"
-PROXY_LOG_ROOT="${HOME}/.containai/logs/proxy"
+PROXY_LOG_ROOT="${CONTAINAI_HOME}/logs/proxy"
 PROXY_LOG_DIR="${PROXY_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
 PROXY_LOG_CERT_DIR="${SESSION_CONFIG_OUTPUT}/log-broker"
 
@@ -1179,7 +1179,7 @@ fi
 # Add optional agent configs
 [ -d "${HOME}/.config/codex" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/codex:/home/agentuser/.config/codex:ro")
 [ -d "${HOME}/.config/claude" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/claude:/home/agentuser/.config/claude:ro")
-[ -f "${HOME}/.config/containai/mcp-secrets.env" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/containai/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
+[ -f "${CONTAINAI_CONFIG_ROOT}/mcp-secrets.env" ] && DOCKER_ARGS+=("-v" "${CONTAINAI_CONFIG_ROOT}/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
 
 TMPFS_MOUNTS=(
     "/tmp:rw,nosuid,nodev,size=${TMPFS_LARGE_SIZE},mode=1777"
@@ -1200,7 +1200,7 @@ for tmpfs_mount in "${TMPFS_MOUNTS[@]}"; do
 done
 
 # Start git credential proxy server on host if not already running
-CREDENTIAL_SOCKET_PATH="${HOME}/.config/containai/git-credential.sock"
+CREDENTIAL_SOCKET_PATH="${CONTAINAI_CONFIG_ROOT}/git-credential.sock"
 CREDENTIAL_PROXY_SCRIPT="$SCRIPT_DIR/../utils/git-credential-proxy-server.sh"
 
 if [ ! -S "$CREDENTIAL_SOCKET_PATH" ]; then
@@ -1230,7 +1230,7 @@ if [ ! -S "$CREDENTIAL_SOCKET_PATH" ]; then
 fi
 
 # Start GPG proxy server on host if not already running and GPG signing is configured
-GPG_SOCKET_PATH="${HOME}/.config/containai/gpg-proxy.sock"
+GPG_SOCKET_PATH="${CONTAINAI_CONFIG_ROOT}/gpg-proxy.sock"
 GPG_PROXY_SCRIPT="$SCRIPT_DIR/../utils/gpg-proxy-server.sh"
 GPG_SIGNING_ENABLED=false
 
@@ -1366,8 +1366,8 @@ fi
 if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ] && [ "${CONTAINAI_DISABLE_AUTO_SYNC:-0}" != "1" ]; then
     SYNC_SCRIPT="$REPO_ROOT/host/utils/sync-local-remote.sh"
     if [ -x "$SYNC_SCRIPT" ]; then
-        mkdir -p "${HOME}/.containai/logs"
-        LOG_FILE="${HOME}/.containai/logs/${CONTAINER_NAME}-sync.log"
+        mkdir -p "${CONTAINAI_HOME}/logs"
+        LOG_FILE="${CONTAINAI_HOME}/logs/${CONTAINER_NAME}-sync.log"
         "$SYNC_SCRIPT" \
             --bare "$LOCAL_REMOTE_HOST_PATH" \
             --repo "$SOURCE" \

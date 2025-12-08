@@ -217,11 +217,13 @@ if [ "$profile" = "prod" ]; then
     config_root="/etc/containai"
     data_root="/var/lib/containai"
     cache_root="/var/cache/containai"
+    containai_home="${HOME}/.containai"
 else
     root=$(resolve_path "$install_root")
-    config_root="${HOME}/.config/containai-dev"
-    data_root="${HOME}/.local/share/containai-dev"
-    cache_root="${HOME}/.cache/containai-dev"
+    config_root="${HOME}/.config/containai-${profile}"
+    data_root="${HOME}/.local/share/containai-${profile}"
+    cache_root="${HOME}/.cache/containai-${profile}"
+    containai_home="${HOME}/.containai-${profile}"
 fi
 
 sha_file="${CONTAINAI_SHA256_FILE:-${root}/SHA256SUMS}"
@@ -229,6 +231,7 @@ sha_file="${CONTAINAI_SHA256_FILE:-${root}/SHA256SUMS}"
 emit_env() {
     printf 'CONTAINAI_PROFILE=%s\n' "$profile"
     printf 'CONTAINAI_ROOT=%s\n' "$root"
+    printf 'CONTAINAI_HOME=%s\n' "$containai_home"
     printf 'CONTAINAI_CONFIG_ROOT=%s\n' "$config_root"
     printf 'CONTAINAI_DATA_ROOT=%s\n' "$data_root"
     printf 'CONTAINAI_CACHE_ROOT=%s\n' "$cache_root"
@@ -248,6 +251,7 @@ emit_json() {
     printf '{'
     printf '"profile":"%s",' "$profile"
     printf '"root":"%s",' "$root"
+    printf '"home":"%s",' "$containai_home"
     printf '"configRoot":"%s",' "$config_root"
     printf '"dataRoot":"%s",' "$data_root"
     printf '"cacheRoot":"%s",' "$cache_root"

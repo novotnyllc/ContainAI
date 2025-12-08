@@ -8,12 +8,20 @@ _CONTAINAI_SCRIPT_ROOT=$(cd "$COMMON_FUNCTIONS_DIR/../.." && pwd)
 
 CONTAINAI_PROFILE_FILE="${CONTAINAI_PROFILE_FILE:-$_CONTAINAI_SCRIPT_ROOT/profile.env}"
 CONTAINAI_PROFILE="dev"
+# CONTAINAI_HOME: The user-specific state directory (logs, session cache, local remotes)
+if [ "${CONTAINAI_PROFILE}" = "prod" ]; then
+    CONTAINAI_HOME="${HOME}/.containai"
+else
+    CONTAINAI_HOME="${HOME}/.containai-${CONTAINAI_PROFILE}"
+fi
+export CONTAINAI_HOME
+
 # CONTAINAI_ROOT: The ContainAI installation directory (dev clone or prod /opt/containai/current)
 CONTAINAI_ROOT="$_CONTAINAI_SCRIPT_ROOT"
 # Defaults for dev; overridden by env-detect profile file.
-CONTAINAI_CONFIG_DIR="${HOME}/.config/containai-dev"
-CONTAINAI_DATA_ROOT="${HOME}/.local/share/containai-dev"
-CONTAINAI_CACHE_ROOT="${HOME}/.cache/containai-dev"
+CONTAINAI_CONFIG_DIR="${HOME}/.config/containai-${CONTAINAI_PROFILE}"
+CONTAINAI_DATA_ROOT="${HOME}/.local/share/containai-${CONTAINAI_PROFILE}"
+CONTAINAI_CACHE_ROOT="${HOME}/.cache/containai-${CONTAINAI_PROFILE}"
 CONTAINAI_SHA256_FILE="${CONTAINAI_ROOT}/SHA256SUMS"
 CONTAINAI_IMAGE_PREFIX="containai-dev"
 CONTAINAI_IMAGE_TAG="devlocal"
@@ -430,6 +438,7 @@ detect_environment_profile() {
         case "$key" in
             CONTAINAI_PROFILE) CONTAINAI_PROFILE="$value" ;;
             CONTAINAI_ROOT) CONTAINAI_ROOT="$value" ;;
+            CONTAINAI_HOME) CONTAINAI_HOME="$value" ;;
             CONTAINAI_CONFIG_ROOT) CONTAINAI_CONFIG_DIR="$value" ;;
             CONTAINAI_DATA_ROOT) CONTAINAI_DATA_ROOT="$value" ;;
             CONTAINAI_CACHE_ROOT)
@@ -448,7 +457,7 @@ detect_environment_profile() {
             CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER) CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER="$value" ;;
         esac
     done <<< "$output"
-    export CONTAINAI_PROFILE CONTAINAI_ROOT CONTAINAI_CONFIG_DIR CONTAINAI_DATA_ROOT CONTAINAI_CACHE_ROOT CONTAINAI_SHA256_FILE CONTAINAI_IMAGE_PREFIX CONTAINAI_IMAGE_TAG CONTAINAI_REGISTRY CONTAINAI_IMAGE_DIGEST CONTAINAI_IMAGE_DIGEST_COPILOT CONTAINAI_IMAGE_DIGEST_CODEX CONTAINAI_IMAGE_DIGEST_CLAUDE CONTAINAI_IMAGE_DIGEST_PROXY CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER
+    export CONTAINAI_PROFILE CONTAINAI_ROOT CONTAINAI_HOME CONTAINAI_CONFIG_DIR CONTAINAI_DATA_ROOT CONTAINAI_CACHE_ROOT CONTAINAI_SHA256_FILE CONTAINAI_IMAGE_PREFIX CONTAINAI_IMAGE_TAG CONTAINAI_REGISTRY CONTAINAI_IMAGE_DIGEST CONTAINAI_IMAGE_DIGEST_COPILOT CONTAINAI_IMAGE_DIGEST_CODEX CONTAINAI_IMAGE_DIGEST_CLAUDE CONTAINAI_IMAGE_DIGEST_PROXY CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER
     return 0
 }
 
@@ -1751,6 +1760,10 @@ PYINNER
         fi
 
         local output_dir="$home_dir/.containai/${agent_name}/imports/${session_id}"
+        # Use CONTAINAI_HOME if available, otherwise fallback to default
+        if [ -n "${CONTAINAI_HOME:-}" ]; then
+            output_dir="${CONTAINAI_HOME}/${agent_name}/imports/${session_id}"
+        fi
         mkdir -p -- "$output_dir"
 
         if run_python_tool "$packager" --mount "$staged_dir" --mount "$home_dir" -- \
@@ -1922,7 +1935,7 @@ remove_container_with_sidecars() {
     local container_name="$1"
     local skip_push="${2:-false}"
     local keep_branch="${3:-false}"
-    local cache_root="${CONTAINAI_SESSION_CACHE:-${HOME:-/tmp}/.containai/session-cache}"
+    local cache_root="${CONTAINAI_SESSION_CACHE:-${CONTAINAI_HOME:-${HOME:-/tmp}/.containai}/session-cache}"
     
     if ! container_exists "$container_name"; then
         echo "❌ Container '$container_name' does not exist"

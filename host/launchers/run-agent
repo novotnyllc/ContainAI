@@ -130,7 +130,7 @@ LOCAL_REPO_PATH_VALUE=""
 TMPFS_LARGE_SIZE="${CONTAINAI_TMPFS_LARGE:-2g}"
 TMPFS_SMALL_SIZE="${CONTAINAI_TMPFS_SMALL:-512m}"
 TMPFS_SECRET_SIZE="${CONTAINAI_TMPFS_SECRETS:-32m}"
-SESSION_CACHE_ROOT="${CONTAINAI_SESSION_CACHE:-${HOME}/.containai/session-cache}"
+SESSION_CACHE_ROOT="${CONTAINAI_SESSION_CACHE:-${CONTAINAI_HOME}/session-cache}"
 SESSION_ARTIFACT_DIR=""
 SESSION_CONFIG_OUTPUT=""
 SESSION_ID_FILE=""
@@ -223,7 +223,7 @@ cleanup_run_agent_volumes() {
     local container_name="${CONTAINER_NAME:-}"
     local container_running=false
 
-    local cache_root="${CONTAINAI_SESSION_CACHE:-${HOME:-/tmp}/.containai/session-cache}"
+    local cache_root="${CONTAINAI_SESSION_CACHE:-${CONTAINAI_HOME:-${HOME:-/tmp}/.containai}/session-cache}"
     local cache_dir=""
     local proxy_container="${PROXY_CONTAINER_NAME:-}"
     if [ -n "$container_name" ]; then
@@ -886,7 +886,7 @@ else
                 REMOTE_HASH=$(printf "%s" "$SOURCE" | sha256sum | awk '{print $1}')
             fi
             REMOTE_HASH=${REMOTE_HASH:0:16}
-            LOCAL_REMOTE_DIR="${CONTAINAI_LOCAL_REMOTES_DIR:-${HOME}/.containai/local-remotes}"
+            LOCAL_REMOTE_DIR="${CONTAINAI_LOCAL_REMOTES_DIR:-${CONTAINAI_HOME}/local-remotes}"
             LOCAL_REMOTE_HOST_PATH="$LOCAL_REMOTE_DIR/${REMOTE_HASH}.git"
             mkdir -p "$LOCAL_REMOTE_DIR"
             if [ ! -d "$LOCAL_REMOTE_HOST_PATH" ]; then
@@ -1110,11 +1110,11 @@ elif [ "$NETWORK_PROXY" != "restricted" ]; then
     SQUID_ALLOWED_DOMAINS="."
 fi
 SQUID_HELPER_ACL_FILE="$SESSION_CONFIG_OUTPUT/squid-acls.conf"
-PROXY_LOG_ROOT="${HOME}/.containai/logs/proxy"
+PROXY_LOG_ROOT="${CONTAINAI_HOME}/logs/proxy"
 PROXY_LOG_DIR="${PROXY_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
 PROXY_LOG_CERT_DIR="${SESSION_CONFIG_OUTPUT}/log-broker"
 
-AGENT_LOG_ROOT="${HOME}/.containai/logs/agent"
+AGENT_LOG_ROOT="${CONTAINAI_HOME}/logs/agent"
 AGENT_LOG_DIR="${AGENT_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
 mkdir -p "$AGENT_LOG_DIR"
 
@@ -1665,8 +1665,8 @@ fi
 if [ "$SOURCE_TYPE" = "local" ] && [ "$NO_PUSH" != true ] && [ -n "$LOCAL_REMOTE_HOST_PATH" ] && [ "${CONTAINAI_DISABLE_AUTO_SYNC:-0}" != "1" ]; then
     SYNC_SCRIPT="$REPO_ROOT/host/utils/sync-local-remote.sh"
     if [ -x "$SYNC_SCRIPT" ]; then
-        mkdir -p "${HOME}/.containai/logs"
-        LOG_FILE="${HOME}/.containai/logs/${CONTAINER_NAME}-sync.log"
+        mkdir -p "${CONTAINAI_HOME}/logs"
+        LOG_FILE="${CONTAINAI_HOME}/logs/${CONTAINER_NAME}-sync.log"
         "$SYNC_SCRIPT" \
             --bare "$LOCAL_REMOTE_HOST_PATH" \
             --repo "$RESOLVED_PATH" \
