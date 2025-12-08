@@ -537,7 +537,8 @@ jobs:
           tags: ${{ steps.taglist.outputs.tag }}
           build-args: ${{ matrix.base_from_containai && format('BASE_IMAGE={0}', steps.base_image.outputs.tag) || '' }}
           cache-from: type=gha,scope=${{ matrix.cache }}-${{ matrix.arch_slug }}
-          cache-to: type=gha,scope=${{ matrix.cache }}-${{ matrix.arch_slug }},mode=max,compression=zstd
+          # Use mode=min for variants - they derive from base images which have full cache
+          cache-to: type=gha,scope=${{ matrix.cache }}-${{ matrix.arch_slug }},mode=min,compression=zstd
           platforms: ${{ matrix.arch }}
 
       - name: Save variant image tar (PR)
@@ -1094,95 +1095,41 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Ensure packages are public
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify packages exist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
-        run: |
-          packages=(containai-base containai containai-copilot containai-codex containai-claude containai-proxy containai-log-forwarder containai-payload containai-metadata)
-          for pkg in "${packages[@]}"; do
-            if ! gh api --method PATCH "/orgs/${OWNER}/packages/container/${pkg}/settings" -f visibility=public 2>/dev/null; then
-              gh api --method PATCH "/user/packages/container/${pkg}/settings" -f visibility=public 2>/dev/null || true
-            fi
-          done
+        run: scripts/ci/verify-packages-exist.sh
 
       - name: Cleanup container versions with prod retention
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          cutoff_ts=$(date -u -d '180 days ago' +%s)
-          declare -A min_keep=(
-            [containai]=15
-            [containai-base]=10
-            [containai-copilot]=10
-            [containai-codex]=10
-            [containai-claude]=10
-            [containai-proxy]=10
-            [containai-log-forwarder]=10
-            [containai-payload]=10
-            [containai-metadata]=10
-          )
+        run: scripts/ci/cleanup-ghcr-versions.sh
 
-          fetch_versions() {
-            local pkg="$1"
-            local res
-            if res=$(gh api -H "Accept: application/vnd.github+json" \
-              "/orgs/${OWNER}/packages/container/${pkg}/versions?per_page=100" 2>/dev/null); then
-              echo "$res"
-            else
-              gh api -H "Accept: application/vnd.github+json" \
-                "/user/packages/container/${pkg}/versions?per_page=100"
-            fi
-          }
+  # GitHub Actions cache has a 10GB limit per repo. With multi-arch builds and many scopes,
+  # cache can balloon to 20GB+. This job aggressively prunes old cache entries.
+  cleanup-gha-cache:
+    name: Cleanup GitHub Actions cache
+    needs:
+      - determine-context
+      - build-base-arch
+      - build-containai-arch
+      - build-variants-arch
+    # Run cleanup even if builds fail, on main branch pushes or scheduled runs
+    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule') && (github.ref == 'refs/heads/main' || github.event_name == 'schedule') }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-          for pkg in "${!min_keep[@]}"; do
-            echo "Processing $pkg..."
-            json=$(fetch_versions "$pkg") || { echo "Failed to list versions for $pkg" >&2; continue; }
-            count=$(jq 'length' <<<"$json")
-            if [[ "$count" -eq 0 ]]; then
-              echo "No versions for $pkg"; continue
-            fi
-
-            prod_entries=$(jq -r '[.[] | {id:.id, updated:(.updated_at|fromdate), tags:(.metadata.container.tags // [])}]' <<<"$json")
-            latest_prod_id=$(jq -r 'map(select(.tags|index("prod"))) | max_by(.updated) | .id // empty' <<<"$prod_entries")
-            keep_ids=()
-
-            # Keep anything updated within the last 6 months
-            while IFS= read -r id; do keep_ids+=("$id"); done < <(
-              jq -r --argjson cutoff "$cutoff_ts" '.[] | select(.updated >= $cutoff) | .id' <<<"$prod_entries")
-
-            # Keep prod-tagged within 6 months or latest prod regardless of age
-            while IFS= read -r id; do keep_ids+=("$id"); done < <(
-              jq -r --argjson cutoff "$cutoff_ts" --arg latest "$latest_prod_id" '
-                .[] | select((.tags|index("prod")) and ((.updated >= $cutoff) or (.id == ($latest|tonumber)))) | .id'
-              <<<"$prod_entries")
-
-            # Non-prod retention: keep newest N
-            keep_nonprod=$(jq -r --argjson n "${min_keep[$pkg]}" '
-              [.[] | select(.tags|index("prod")|not) | {id, updated}] | sort_by(.updated) | reverse | .[:$n] | .[].id'
-              <<<"$prod_entries")
-            while IFS= read -r id; do [[ -n "$id" ]] && keep_ids+=("$id"); done <<<"$keep_nonprod"
-
-            # Deduplicate keep_ids
-            declare -A keep_map=()
-            for id in "${keep_ids[@]}"; do keep_map[$id]=1; done
-
-            delete_ids=()
-            while IFS= read -r id; do
-              [[ -z "$id" ]] && continue
-              if [[ -z "${keep_map[$id]:-}" ]]; then
-                delete_ids+=("$id")
-              fi
-            done < <(jq -r '.[].id' <<<"$prod_entries")
-
-            for id in "${delete_ids[@]}"; do
-              echo "Deleting $pkg version $id"
-              gh api --method DELETE \
-                "/orgs/${OWNER}/packages/container/${pkg}/versions/${id}" 2>/dev/null \
-                || gh api --method DELETE \
-                  "/user/packages/container/${pkg}/versions/${id}" 2>/dev/null \
-                || echo "⚠️  Failed to delete $pkg version $id" >&2
-            done
-          done
+      - name: Cleanup stale cache entries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: scripts/ci/cleanup-gha-cache.sh
