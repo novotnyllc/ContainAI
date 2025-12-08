@@ -69,8 +69,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20.x (required for MCP servers and building Node projects)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+# Install Node.js 22.x (LTS) (required for MCP servers and building Node projects)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
@@ -120,8 +120,8 @@ RUN dotnet workload install wasm-tools wasm-tools-net9 wasm-tools-net8 || \
     rm -rf /tmp/* /root/.nuget/packages /root/.dotnet/toolResolverCache
 
 # Install PowerShell using the universal package guidance (falls back to tarball on ARM)
-ARG POWERSHELL_VERSION="7.4.13"
-ARG POWERSHELL_RELEASE_TAG="v7.4.13"
+ARG POWERSHELL_VERSION="7.5.4"
+ARG POWERSHELL_RELEASE_TAG="v7.5.4"
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     tmp_dir="$(mktemp -d)"; \

@@ -940,7 +940,8 @@ test_mcp_configuration_generation() {
     local expected_helpers="$fixture_dir/expected/helpers.json"
     
     # Output artifacts directory for CI
-    local artifacts_dir="${TEST_ARTIFACTS_DIR:-$PROJECT_ROOT/test-artifacts}/mcp-config"
+    # Use /tmp inside the container since /workspace is read-only
+    local artifacts_dir="${TEST_ARTIFACTS_DIR:-/tmp/test-artifacts}/mcp-config"
     mkdir -p "$artifacts_dir"
 
     # Create a test workspace with the fixture config
@@ -2116,13 +2117,12 @@ JSON
     docker exec "$container_name" bash -c '
         mkdir -p /usr/local/bin
         ln -sf /workspace/docker/runtime/mcp-wrapper-runner.sh /usr/local/bin/mcp-wrapper-test-uid-wrapper
-        chmod +x /usr/local/bin/mcp-wrapper-test-uid-wrapper
     '
 
     # Copy the wrapper core script
     docker exec "$container_name" bash -c '
         mkdir -p /usr/local/libexec
-        cp /workspace/docker/runtime/mcp-wrapper-core.py /usr/local/libexec/
+        cp /workspace/docker/runtime/mcp-wrapper.py /usr/local/libexec/mcp-wrapper-core.py
     '
 
     # Run the wrapper in background as agentuser
@@ -2266,15 +2266,14 @@ JSON
     docker exec "$container_name" bash -c '
         mkdir -p /usr/local/bin /usr/local/libexec
         ln -sf /workspace/docker/runtime/mcp-wrapper-runner.sh /usr/local/bin/mcp-wrapper-mock-mcp
-        chmod +x /usr/local/bin/mcp-wrapper-mock-mcp
-        cp /workspace/docker/runtime/mcp-wrapper-core.py /usr/local/libexec/
+        cp /workspace/docker/runtime/mcp-wrapper.py /usr/local/libexec/mcp-wrapper-core.py
     '
 
     # Run the wrapper and capture output
     local wrapper_output
     wrapper_output=$(docker exec --user agentuser "$container_name" bash -c '
         export CONTAINAI_WRAPPER_SPEC=/workspace-test/wrappers/mock-mcp.json
-        /usr/local/bin/mcp-wrapper-mock-mcp 2>/dev/null
+        /usr/local/bin/mcp-wrapper-mock-mcp
     ' 2>&1 || true)
 
     if [ -z "$wrapper_output" ]; then
