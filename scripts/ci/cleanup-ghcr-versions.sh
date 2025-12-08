@@ -21,6 +21,7 @@ declare -A min_keep=(
   [containai-proxy]=10
   [containai-log-forwarder]=10
   [containai-payload]=10
+  [containai-installer]=10
   [containai-metadata]=10
 )
 

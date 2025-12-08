@@ -772,6 +772,7 @@ flowchart TB
 ---
 
 **For more details:**
+- [attestations.md](attestations.md) - Supply chain security, SBOMs, and cryptographic attestations
 - [build.md](../development/build.md) - Building and publishing images
 - [../USAGE.md](../../USAGE.md) - Using the agents
 - [network-proxy.md](../usage/network-proxy.md) - Network configuration

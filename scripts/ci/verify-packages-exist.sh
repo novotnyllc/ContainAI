@@ -18,6 +18,7 @@ packages=(
   containai-proxy
   containai-log-forwarder
   containai-payload
+  containai-installer
   containai-metadata
 )
 

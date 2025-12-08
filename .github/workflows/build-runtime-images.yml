@@ -822,13 +822,6 @@ jobs:
           echo "$PAYLOAD_HASH  SHA256SUMS" > payload.sha256
           popd >/dev/null
 
-      - name: Attest payload directory (GitHub attestation)
-        if: ${{ env.CHANNEL != 'dev' }}
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-path: |
-            ${{ env.ARTIFACTS_PUBLISH }}/${{ steps.build_payload.outputs.payload_version }}/payload/**/*
-
       - name: Package payload and transport (final)
         run: |
           scripts/release/package-artifacts.sh \

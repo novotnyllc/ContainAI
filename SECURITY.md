@@ -391,11 +391,24 @@ All data processing happens locally:
 - Code never leaves your environment (except API calls to agent services)
 - Squid logs stored locally in container volumes
 
+### Supply Chain Security
+
+ContainAI uses cryptographic attestations to establish provenance for all artifacts:
+
+- **Container images:** Each image receives a [SLSA Provenance](https://slsa.dev/) attestation via Sigstore, binding the image digest to the GitHub Actions workflow that built it
+- **Release artifacts:** Transport tarballs and SBOMs are attested and verified during installation
+- **Integrity verification:** SHA256SUMS are checked at install time and on every container launch
+
+For complete documentation of all attestations, SBOMs, verification flows, and what each artifact protects, see **[docs/security/attestations.md](docs/security/attestations.md)**.
+
 ## Additional Resources
 
+- [Supply Chain Attestations (ContainAI)](docs/security/attestations.md)
 - [Docker Security Best Practices](https://docs.docker.com/engine/security/)
 - [CIS Docker Benchmark](https://www.cisecurity.org/benchmark/docker)
 - [NIST Container Security Guide](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-190.pdf)
+- [SLSA Framework](https://slsa.dev/)
+- [Sigstore Documentation](https://docs.sigstore.dev/)
 
 ## Questions?
 
