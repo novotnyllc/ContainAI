@@ -21,6 +21,7 @@ CA_AGENT_DATA_STAGED="${CONTAINAI_AGENT_DATA_STAGED:-0}"
 CA_RUNNER_STARTED="${CONTAINAI_RUNNER_STARTED:-0}"
 CA_AGENT_DATA_HOME="${CONTAINAI_AGENT_DATA_HOME:-}"
 CA_AGENT_HOME="${CONTAINAI_AGENT_HOME:-}"
+CA_LOG_DIR="${CONTAINAI_LOG_DIR:-}"
 
 clear_containai_env() {
     for name in $(env | sed -n 's/^\(CONTAINAI_[^=]*\)=.*/\1/p'); do
@@ -50,6 +51,7 @@ AGENT_DATA_STAGED="$CA_AGENT_DATA_STAGED"
 RUNNER_STARTED="$CA_RUNNER_STARTED"
 AGENT_DATA_HOME="$CA_AGENT_DATA_HOME"
 AGENT_HOME="$CA_AGENT_HOME"
+LOG_DIR="$CA_LOG_DIR"
 
 STUB_SHIM_ROOT="/home/${AGENT_USERNAME}/.local/bin"
 declare -a MCP_HELPER_PIDS=()
@@ -577,24 +579,48 @@ ensure_agent_data_fallback() {
 }
 
 start_agent_task_runnerd() {
-    if [ ! -x /usr/local/bin/agent-task-runnerd ]; then
-        return
-    fi
     local socket_path="${AGENT_TASK_RUNNER_SOCKET:-/run/agent-task-runner.sock}"
     local log_dir="/run/agent-task-runner"
     mkdir -p "$log_dir"
     if [ -S "$socket_path" ]; then
         rm -f "$socket_path"
     fi
-    if /usr/local/bin/agent-task-runnerd \
+    
+    # Start LogCollector (Mandatory)
+    local audit_socket="/run/containai/audit.sock"
+    # Logs are written to the workspace by default to ensure they persist to the host
+    # without requiring additional volume mounts.
+    local log_destination="${LOG_DIR:-/workspace/.containai/logs}"
+    
+    mkdir -p "$(dirname "$audit_socket")"
+    mkdir -p "$log_destination"
+    chown "$AGENT_UID:$AGENT_GID" "$log_destination" 2>/dev/null || true
+    
+    /usr/local/bin/containai-log-collector \
+        --socket-path "$audit_socket" \
+        --log-dir "$log_destination" \
+        > "$log_dir/collector.log" 2>&1 &
+        
+    # Wait for socket to appear
+    local retries=50
+    while [ ! -S "$audit_socket" ]; do
+        sleep 0.1
+        retries=$((retries-1))
+        if [ "$retries" -le 0 ]; then
+            echo "❌ FATAL: LogCollector failed to start (socket missing)" >&2
+            exit 1
+        fi
+    done
+    
+    chmod 0666 "$audit_socket"
+    echo "📝 LogCollector started (logs -> $log_destination)"
+
+    # Start Agent Task Runner (Mandatory)
+    /usr/local/bin/agent-task-runnerd \
         --socket "$socket_path" \
         --log "$log_dir/events.log" \
         --policy "$RUNNER_POLICY" \
-        & then
-        :
-    else
-        echo "⚠️  Failed to launch agent-task-runnerd" >&2
-    fi
+        &
 }
 
 export_agent_data_payload() {
