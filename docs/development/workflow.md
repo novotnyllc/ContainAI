@@ -26,6 +26,22 @@ Most users can rely on the published images that the CI system keeps in sync wit
 ./scripts/build/build-dev.sh --agents copilot,codex     # limit to selected agents (proxy always built)
 ```
 
+The script automatically:
+1. Detects your host architecture (amd64 or arm64)
+2. Compiles Rust and .NET native binaries via `compile-binaries.sh`
+3. Builds Docker images using the compiled artifacts
+
+**Cross-compilation:** To build for a different architecture (e.g., ARM64 from x64), first install:
+```bash
+# Ubuntu 24.04 cross-compilation dependencies
+sudo apt-get install -y clang lld llvm gcc-aarch64-linux-gnu
+sudo dpkg --add-architecture arm64
+sudo apt-get update
+sudo apt-get install -y zlib1g-dev:arm64
+```
+
+Then run `scripts/build/compile-binaries.sh arm64 artifacts` directly before using `build-dev.sh`.
+
 Prod images are delivered by CI with signed artifacts; dev tags stay in the `containai-dev-*` namespace to avoid collisions.
 
 ### Build with buildx (bounded cache, no tarballs)

@@ -75,6 +75,20 @@ if ! command -v docker compose >/dev/null 2>&1; then
     exit 1
 fi
 
+# Compile native binaries before building Docker images
+# These are required by the base Dockerfile (COPYs from artifacts/)
+echo "🔧 Compiling native binaries..."
+ARCH="$(uname -m)"
+case "$ARCH" in
+    x86_64)  ARCH="amd64" ;;
+    aarch64) ARCH="arm64" ;;
+    *)
+        echo "❌ Unsupported host architecture: $ARCH" >&2
+        exit 1
+        ;;
+esac
+"$SCRIPT_DIR/compile-binaries.sh" "$ARCH" "artifacts"
+
 select_services() {
     local services=("base" "agents" "proxy")
     for agent in "${SELECTED_AGENTS[@]}"; do

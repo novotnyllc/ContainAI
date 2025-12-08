@@ -41,8 +41,11 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
+      - name: Install build dependencies
+        run: ./scripts/build/install-build-deps.sh --native-only --ci
+
       - name: Install socat
-        run: sudo apt-get update && sudo apt-get install -y socat libseccomp-dev libcap-dev zlib1g-dev clang
+        run: sudo apt-get install -y socat
 
       - name: Install host assets
         run: sudo ./scripts/setup-local-dev.sh
@@ -80,8 +83,11 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
+      - name: Install build dependencies
+        run: ./scripts/build/install-build-deps.sh --native-only --ci
+
       - name: Install socat
-        run: sudo apt-get update && sudo apt-get install -y socat libseccomp-dev libcap-dev zlib1g-dev clang
+        run: sudo apt-get install -y socat
 
       - name: Install host assets (sudo)
         run: sudo ./scripts/setup-local-dev.sh
@@ -156,8 +162,11 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
+      - name: Install build dependencies
+        run: ./scripts/build/install-build-deps.sh --native-only --ci
+
       - name: Install socat
-        run: sudo apt-get update && sudo apt-get install -y socat libseccomp-dev libcap-dev zlib1g-dev clang
+        run: sudo apt-get install -y socat
 
       - name: Install host assets (sudo)
         run: sudo ./scripts/setup-local-dev.sh
@@ -217,8 +226,11 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
+      - name: Install build dependencies
+        run: ./scripts/build/install-build-deps.sh --native-only --ci
+
       - name: Install socat
-        run: sudo apt-get update && sudo apt-get install -y socat libseccomp-dev libcap-dev zlib1g-dev clang
+        run: sudo apt-get install -y socat
 
       - name: Install host assets
         run: sudo ./scripts/setup-local-dev.sh

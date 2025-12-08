@@ -8,6 +8,7 @@ This document provides a comprehensive reference for the ContainAI build system,
 - [Build Pipelines](#build-pipelines)
   - [Local Development Build](#local-development-build)
   - [CI Release Build](#ci-release-build)
+    - [Docker BuildKit Layer Caching](#docker-buildkit-layer-caching)
 - [Artifact Flow Diagrams](#artifact-flow-diagrams)
 - [Script Reference](#script-reference)
 - [Artifact Reference](#artifact-reference)
@@ -171,6 +172,7 @@ flowchart TB
 
     subgraph phase2["Phase 2: Build Images"]
         direction TB
+        ghacache[("GHA Cache<br/>(BuildKit layers)")]
         buildbase_amd["build base (amd64)"]
         buildbase_arm["build base (arm64)"]
         assemblebase["assemble base manifest"]
@@ -181,6 +183,11 @@ flowchart TB
         
         buildvariants["build variants<br/>(copilot, codex, claude,<br/>proxy, log-forwarder)"]
         assemblevariants["assemble variant manifests"]
+        
+        ghacache -.->|"cache-from"| buildbase_amd
+        ghacache -.->|"cache-from"| buildbase_arm
+        buildbase_amd -.->|"cache-to"| ghacache
+        buildbase_arm -.->|"cache-to"| ghacache
     end
 
     subgraph phase3["Phase 3: Tag & Digest"]
@@ -210,8 +217,9 @@ flowchart TB
     end
 
     subgraph phase6["Phase 6: Cleanup"]
-        cleanup["cleanup-ghcr job"]
-        retention["Apply retention policy"]
+        cleanupgha["cleanup-gha-cache job<br/>(BuildKit layers)"]
+        cleanupghcr["cleanup-ghcr job<br/>(Container versions)"]
+        retention["Apply retention policies"]
     end
 
     trigger --> phase1
@@ -250,8 +258,9 @@ flowchart TB
     pushinstaller --> attestall
     
     phase5 --> phase6
-    attestall --> cleanup
-    cleanup --> retention
+    attestall --> cleanupgha
+    cleanupgha --> cleanupghcr
+    cleanupghcr --> retention
 
     style trigger fill:#ffecb3,stroke:#ff8f00
     style phase1 fill:#e8f5e9,stroke:#2e7d32
@@ -280,7 +289,7 @@ flowchart TB
 
 ##### Phase 2: Build Images
 
-Images are built per-architecture, then assembled into multi-arch manifests:
+Images are built per-architecture, then assembled into multi-arch manifests. Each build uses **GitHub Actions cache** (`type=gha`) to store and reuse Docker BuildKit layers—see [Docker BuildKit Layer Caching](#docker-buildkit-layer-caching) for details.
 
 ```mermaid
 flowchart LR
@@ -306,6 +315,134 @@ flowchart LR
 4. Assemble containai manifest
 5. Variants (all agents + proxy + log-forwarder, parallel)
 6. Assemble variant manifests
+
+##### Docker BuildKit Layer Caching
+
+The CI pipeline uses **GitHub Actions cache** (`type=gha`) to store Docker BuildKit layer data between workflow runs. This dramatically reduces build times by reusing unchanged image layers instead of rebuilding them from scratch.
+
+###### How the Cache Works
+
+```mermaid
+sequenceDiagram
+    participant Workflow as GitHub Actions
+    participant BuildKit as Docker BuildKit
+    participant Cache as GHA Cache
+    participant Registry as GHCR
+
+    Note over Workflow: Build job starts
+    Workflow->>Cache: Check for existing cache<br/>(scope: containai-base-amd64)
+    Cache-->>BuildKit: Return cached layers (if any)
+    
+    BuildKit->>BuildKit: Execute Dockerfile<br/>(skip cached layers)
+    
+    alt Layer unchanged
+        BuildKit->>BuildKit: Use cached layer
+    else Layer changed
+        BuildKit->>BuildKit: Rebuild layer + dependents
+    end
+    
+    BuildKit->>Cache: Store new/updated layers<br/>(mode=max or mode=min)
+    BuildKit->>Registry: Push final image
+```
+
+###### Cache Architecture
+
+The pipeline maintains **14 separate cache scopes** (7 images × 2 architectures):
+
+| Image | amd64 Scope | arm64 Scope | Mode |
+|-------|-------------|-------------|------|
+| `containai-base` | `containai-base-amd64` | `containai-base-arm64` | `max` |
+| `containai` | `containai-amd64` | `containai-arm64` | `max` |
+| `containai-copilot` | `containai-copilot-amd64` | `containai-copilot-arm64` | `min` |
+| `containai-codex` | `containai-codex-amd64` | `containai-codex-arm64` | `min` |
+| `containai-claude` | `containai-claude-amd64` | `containai-claude-arm64` | `min` |
+| `containai-proxy` | `containai-proxy-amd64` | `containai-proxy-arm64` | `min` |
+| `containai-log-forwarder` | `containai-log-forwarder-amd64` | `containai-log-forwarder-arm64` | `min` |
+
+###### Cache Modes Explained
+
+- **`mode=max`**: Stores all intermediate layers from every build stage. Use this for images that serve as build bases (like `containai-base`) where intermediate layers are frequently reused.
+
+- **`mode=min`**: Stores only the layers of the final image. Use this for variant images that derive from base images—their intermediate layers are already cached in the base image's scope.
+
+```mermaid
+flowchart TB
+    subgraph maxmode["mode=max (base images)"]
+        direction TB
+        stage1_max["Stage 1 layers"] --> stage2_max["Stage 2 layers"]
+        stage2_max --> stage3_max["Stage 3 layers"]
+        stage3_max --> final_max["Final layers"]
+        
+        cache_max[("Cache stores:<br/>All stages")]
+        stage1_max -.-> cache_max
+        stage2_max -.-> cache_max
+        stage3_max -.-> cache_max
+        final_max -.-> cache_max
+    end
+    
+    subgraph minmode["mode=min (variant images)"]
+        direction TB
+        stage1_min["Stage 1 layers"] --> stage2_min["Stage 2 layers"]
+        stage2_min --> final_min["Final layers"]
+        
+        cache_min[("Cache stores:<br/>Final only")]
+        final_min -.-> cache_min
+    end
+    
+    style maxmode fill:#e3f2fd,stroke:#1565c0
+    style minmode fill:#fff3e0,stroke:#ef6c00
+```
+
+###### Cache Cleanup Job
+
+GitHub Actions has a **10 GB cache limit** per repository. Without cleanup, the 14 cache scopes would quickly exhaust this limit. The `cleanup-gha-cache` job runs after every successful build:
+
+```mermaid
+flowchart TB
+    subgraph cleanup["cleanup-gha-cache Job"]
+        list["List all caches<br/>(gh cache list)"]
+        filter["Filter by age<br/>(>7 days old)"]
+        check["Check total size<br/>(threshold: 8 GB)"]
+        delete["Delete stale caches<br/>(gh cache delete)"]
+    end
+    
+    list --> filter
+    filter --> check
+    check -->|"size > 8GB<br/>or age > 7 days"| delete
+    check -->|"size ≤ 8GB<br/>and age ≤ 7 days"| skip["Skip deletion"]
+    
+    style cleanup fill:#fce4ec,stroke:#c2185b
+```
+
+**Cleanup Thresholds:**
+- **Age**: Caches older than 7 days are deleted (configurable via `MAX_AGE_DAYS`)
+- **Size**: Cleanup is aggressive when total cache exceeds 8 GB (configurable via `SIZE_THRESHOLD_GB`)
+
+The cleanup script lives at `scripts/ci/cleanup-gha-cache.sh` and uses the GitHub CLI to enumerate and delete caches.
+
+###### Cache in Build Flow
+
+```mermaid
+sequenceDiagram
+    participant CI as CI Pipeline
+    participant Base as base build
+    participant Main as containai build
+    participant Variants as variant builds
+    participant Cleanup as cleanup-gha-cache
+
+    CI->>Base: Build containai-base (amd64 + arm64)
+    Note right of Base: cache-from: type=gha,scope=containai-base-{arch}<br/>cache-to: type=gha,scope=containai-base-{arch},mode=max
+    
+    Base->>Main: Build containai (depends on base)
+    Note right of Main: cache-from: type=gha,scope=containai-{arch}<br/>cache-to: type=gha,scope=containai-{arch},mode=max
+    
+    Main->>Variants: Build variants (parallel)
+    Note right of Variants: cache-from: type=gha,scope=containai-{variant}-{arch}<br/>cache-to: type=gha,scope=containai-{variant}-{arch},mode=min
+    
+    Variants->>CI: All builds complete
+    CI->>Cleanup: Run cache cleanup
+    Note right of Cleanup: Delete caches > 7 days old<br/>Enforce 8 GB limit
+```
 
 ##### Phase 3: Tag & Digest Collection
 
@@ -388,11 +525,22 @@ All artifacts are pushed to GHCR as OCI artifacts:
 
 ##### Phase 6: Cleanup
 
-The retention policy:
+The cleanup phase manages two distinct resource pools:
+
+**1. GitHub Actions Cache (BuildKit layers)**
+
+See [Docker BuildKit Layer Caching](#docker-buildkit-layer-caching) for details. The `cleanup-gha-cache` job:
+- Deletes cache entries older than 7 days
+- Enforces an 8 GB size threshold (GitHub limit is 10 GB)
+- Runs after every successful build
+
+**2. Container Registry Versions (GHCR)**
+
+The `cleanup-ghcr` job applies retention rules to container image versions:
 - Keep anything updated within 180 days
 - Keep prod-tagged versions indefinitely (or latest prod if older)
 - Keep newest N non-prod versions per image (varies by image type)
-- Ensure all packages are public
+- Verify all packages are public (visibility inherits from repository)
 
 ---
 
@@ -481,6 +629,9 @@ flowchart TB
 | `scripts/ci/collect-image-digests.sh` | Collect image digests | `--images`, `--repo-prefix`, `--out` | JSON array of digests |
 | `scripts/ci/apply-moving-tags.sh` | Apply channel tags to images | `--digests`, `--immutable-tag`, `--moving-tags` | Registry tags updated |
 | `scripts/ci/write-channels-json.sh` | Generate channel metadata | Many options | `channels.json` |
+| `scripts/ci/verify-packages-exist.sh` | Verify packages exist before cleanup | `OWNER`, `IMAGES` | Exit 0 or error |
+| `scripts/ci/cleanup-ghcr-versions.sh` | Clean old container versions | `OWNER`, env vars | Versions deleted |
+| `scripts/ci/cleanup-gha-cache.sh` | Clean stale GitHub Actions caches | `MAX_AGE_DAYS`, `SIZE_THRESHOLD_GB` | Caches deleted |
 
 ### Utility Scripts
 
@@ -531,9 +682,16 @@ The following platform-specific binaries are compiled from source during CI and 
 | `agent-task-runnerd` | `src/agent-task-runner` (Rust) | `linux-{arch}-gnu` | Daemon that receives seccomp notifications and manages sandbox execution |
 | `agent-task-sandbox` | `src/agent-task-runner` (Rust) | `linux-{arch}-gnu` | Sandbox runner that executes commands in isolated namespace |
 | `libaudit_shim.so` | `src/audit-shim` (Rust cdylib) | `linux-{arch}-gnu` | LD_PRELOAD library that intercepts syscalls for audit logging |
-| `containai-log-collector` | `src/ContainAI.LogCollector` (.NET AOT) | `linux-x64` | Receives audit events over Unix socket and writes structured logs |
+| `containai-log-collector` | `src/ContainAI.LogCollector` (.NET AOT) | `linux-x64`, `linux-arm64` | Receives audit events over Unix socket and writes structured logs |
 
-**Note:** All binaries target glibc (`linux-gnu`) since production containers run Ubuntu 24.04. The `.NET` binary currently only builds for `x64`; ARM64 support requires additional CI configuration.
+**Note:** All binaries target glibc (`linux-gnu`) since production containers run Ubuntu 24.04.
+
+**Cross-compilation:** The `compile-binaries.sh` script supports cross-architecture compilation using clang/lld. Requirements for cross-compiling from x64 to ARM64:
+- `clang`, `lld`, `llvm-objcopy` (LLVM toolchain)
+- `gcc-aarch64-linux-gnu` (cross-compiler for Rust)
+- `zlib1g-dev:arm64` (ARM64 zlib libraries)
+
+CI builds use native runners (`ubuntu-24.04-arm` for ARM64) for maximum reliability.
 
 ---
 
