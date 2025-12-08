@@ -234,7 +234,8 @@ RUN set -eux; \
     fi; \
     usermod -a -G agentcli agentuser >/dev/null 2>&1 || true; \
     mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share; \
-    chown -R agentuser:agentuser /workspace /home/agentuser
+    chown -R agentuser:agentuser /workspace /home/agentuser; \
+    touch /etc/ld.so.preload
 
 # Snapshot mutable root dirs, prepare toolcache, and move Playwright browsers in one layer
 RUN set -eux; \

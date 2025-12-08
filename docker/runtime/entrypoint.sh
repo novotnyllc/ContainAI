@@ -726,6 +726,13 @@ if [ "$(id -u)" -eq 0 ]; then
     export CONTAINAI_DISABLE_SENSITIVE_TMPFS="$DISABLE_SENSITIVE_TMPFS"
     export CONTAINAI_RUNNER_POLICY="$RUNNER_POLICY"
 
+    # Enable global audit shim via ld.so.preload
+    # We use a bind mount because the rootfs is read-only.
+    # The file /etc/ld.so.preload is created empty in the Dockerfile as a mount target.
+    echo "/usr/lib/containai/libaudit_shim.so" > /run/ld.so.preload
+    mount --bind /run/ld.so.preload /etc/ld.so.preload
+    echo "🔒 Audit shim enabled globally via /etc/ld.so.preload"
+
     # Drop all capabilities before re-executing as non-root user.
     # The privileged setup (tmpfs mounts, ptrace scope, iptables) is complete.
     # capsh atomically drops caps from the bounding set AND switches user.

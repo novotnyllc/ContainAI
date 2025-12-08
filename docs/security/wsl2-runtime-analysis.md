@@ -39,23 +39,33 @@ The inability to use `SCMP_ACT_NOTIFY` on WSL2 creates a specific gap in our def
 
 **Conclusion:** While the container remains isolated from the host, we lack the granular observability required to audit agent behavior fully.
 
-## 4. Proposed Mitigation: Userspace Instrumentation
+## 4. Proposed Mitigation: Defense-in-Depth
 
-To bridge this gap before shipping, we are implementing a userspace fallback mechanism.
+To bridge this gap, we employ a multi-layered strategy that combines userspace instrumentation with platform-native controls available on WSL2.
 
-### 4.1 Architecture: The "Audit Shim"
+### 4.1 Userspace Instrumentation (Audit Shim)
 
-Instead of relying on the kernel to notify us of syscalls, we will inject a monitoring library into the agent process.
-
-*   **Mechanism**: `LD_PRELOAD` injection of a Rust-based shared library (`libauditshim.so`).
+*   **Mechanism**: Global injection of a Rust-based shared library (`libauditshim.so`) via `/etc/ld.so.preload`.
 *   **Scope**: Intercepts `execve`, `connect`, `open`, and `openat` in userspace.
-*   **Output**: Streams structured JSON events to the secure audit socket (`/run/containai/audit.sock`).
+*   **Function**: Streams structured JSON events to the secure audit socket (`/run/containai/audit.sock`) and can synchronously block actions based on daemon policy.
+*   **Limitation**: As a userspace control, it can be bypassed by **static binaries** (which do not use the dynamic linker). However, unlike environment-variable based injection, it cannot be bypassed by unsetting `LD_PRELOAD`.
 
-### 4.2 Security Properties
+### 4.2 AppArmor & Mount Restrictions (The Shield)
 
-*   **Visibility**: Restores the "Audit Trail" capability. We can see what the agent is doing.
-*   **Robustness**: While userspace hooks are theoretically bypassable by a hostile binary (unlike kernel hooks), they provide sufficient visibility for the threat model of a "cooperative but untrusted" AI agent.
-*   **Consistency**: This shim will be available on **all** platforms, providing a unified logging format, while Seccomp provides the hard enforcement backstop on supported Linux kernels.
+To mitigate the risk of the agent running malicious code:
+*   **NoExec Mounts**: Writable system directories (`/tmp`, `/dev/shm`) are mounted with the `noexec` flag.
+*   **AppArmor**: We utilize WSL2's support for AppArmor to enforce file access control. This is the primary security boundary on WSL2. It prevents any process (shimmed or custom) from modifying protected system files or reading secrets directly.
+
+### 4.3 Security Properties Summary
+
+| Feature | Linux (Seccomp) | WSL2 (AppArmor Only) |
+| :--- | :--- | :--- |
+| **Interception** | Kernel-level (Unavoidable) | None (Audit-only via `LD_PRELOAD`) |
+| **New Binaries** | Blocked by Seccomp (syscalls) | Allowed in `/workspace` (Gap), Blocked in `/tmp` |
+| **File Protection** | AppArmor + Read-Only Root | AppArmor + Read-Only Root |
+| **Robustness** | High | Medium (Relies entirely on AppArmor containment) |
+
+**Conclusion**: On WSL2, we accept a "Containment" strategy rather than "Interception". We cannot prevent the execution of malicious binaries, but we restrict their access to the system and network.
 
 ## 5. Roadmap
 
