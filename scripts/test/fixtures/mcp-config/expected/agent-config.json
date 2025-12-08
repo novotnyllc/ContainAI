@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "docs": {
+      "bearerToken": "FAKE_TEST_KEY_docs_not_a_real_secret_12345",
+      "url": "http://127.0.0.1:52100"
+    },
+    "existing-server": {
+      "description": "Pre-existing MCP server that should be preserved",
+      "url": "http://localhost:8080"
+    },
+    "github": {
+      "bearerToken": "FAKE_TEST_KEY_github_not_a_real_token_67890",
+      "url": "http://127.0.0.1:52101"
+    },
+    "local-tool": {
+      "args": [],
+      "command": "/home/agentuser/.local/bin/mcp-stub-local-tool",
+      "env": {
+        "CONTAINAI_STUB_NAME": "local-tool",
+        "CONTAINAI_STUB_SPEC": "eyJhcmdzIjogWyItLW1vZGUiLCAibWNwIiwgIi0tdmVyYm9zZSJdLCAiY29tbWFuZCI6ICIvdXNyL2xvY2FsL2Jpbi9teS10b29sIiwgImN3ZCI6ICIvd29ya3NwYWNlIiwgImVudiI6IHsiQVBJX0tFWSI6ICIke01ZX1RPT0xfQVBJX0tFWX0iLCAiVE9PTF9DT05GSUciOiAiL3dvcmtzcGFjZS8udG9vbC1jb25maWcuanNvbiJ9LCAic2VjcmV0cyI6IFsiTVlfVE9PTF9BUElfS0VZIl0sICJzZXJ2ZXIiOiAibG9jYWwtdG9vbCIsICJzdHViIjogImxvY2FsLXRvb2wifQ=="
+      }
+    }
+  },
+  "someOtherKey": "preserved-value"
+}

@@ -250,9 +250,23 @@ def convert_toml_to_mcp(toml_path):
         config_dir = os.path.expanduser(config_path)
         os.makedirs(config_dir, exist_ok=True)
 
-        mcp_config = {"mcpServers": resolved_servers}
-
         config_file = os.path.join(config_dir, "config.json")
+        
+        # Load existing config to preserve any pre-existing MCP servers
+        existing_config = {}
+        existing_servers = {}
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, "r", encoding="utf-8") as handle:
+                    existing_config = json.load(handle)
+                    existing_servers = existing_config.get("mcpServers", {})
+            except (json.JSONDecodeError, OSError) as exc:
+                print(f"⚠️  Could not read existing {agent_name} config, will overwrite: {exc}", file=sys.stderr)
+        
+        # Merge: new servers override existing ones with same name
+        merged_servers = {**existing_servers, **resolved_servers}
+        mcp_config = {**existing_config, "mcpServers": merged_servers}
+
         try:
             with open(config_file, "w", encoding="utf-8") as handle:
                 json.dump(mcp_config, handle, indent=2)

@@ -920,10 +920,9 @@ test_agent_credential_flow() {
 }
 
 test_mcp_configuration_generation() {
-    test_section "Testing MCP configuration generation"
+    test_section "Testing MCP configuration generation with snapshot comparison"
 
     local container_name="${TEST_CONTAINER_PREFIX}-mcp"
-    local expected_keys="docs,github"
     local success=true
     local config_paths=(
         "/home/agentuser/.config/github-copilot/mcp/config.json"
@@ -931,6 +930,24 @@ test_mcp_configuration_generation() {
         "/home/agentuser/.config/claude/mcp/config.json"
     )
     local config_labels=("copilot" "codex" "claude")
+    
+    # Fixture paths
+    local fixture_dir="$PROJECT_ROOT/scripts/test/fixtures/mcp-config"
+    local input_config="$fixture_dir/input/config.toml"
+    local input_secrets="$fixture_dir/input/mcp-secrets.env"
+    local existing_config="$fixture_dir/input/existing-mcp-config.json"
+    local expected_agent_config="$fixture_dir/expected/agent-config.json"
+    local expected_helpers="$fixture_dir/expected/helpers.json"
+    
+    # Output artifacts directory for CI
+    local artifacts_dir="${TEST_ARTIFACTS_DIR:-$PROJECT_ROOT/test-artifacts}/mcp-config"
+    mkdir -p "$artifacts_dir"
+
+    # Create a test workspace with the fixture config
+    local test_workspace
+    test_workspace=$(mktemp -d)
+    cp "$input_config" "$test_workspace/config.toml"
+    cp "$input_secrets" "$test_workspace/.mcp-secrets.env"
 
     docker run -d \
         --name "$container_name" \
@@ -939,12 +956,13 @@ test_mcp_configuration_generation() {
         --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
-        -v "$TEST_REPO_DIR:/workspace" \
+        -v "$test_workspace:/workspace:ro" \
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
+        -e "MCP_SECRETS_FILE=/workspace/.mcp-secrets.env" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_COPILOT_IMAGE" \
@@ -954,8 +972,20 @@ test_mcp_configuration_generation() {
         fail "Container $container_name failed to start"
         echo "  Container logs:"
         docker logs "$container_name" 2>&1 | tail -30 || true
+        rm -rf "$test_workspace"
         return
     fi
+
+    # Pre-populate existing MCP configs to test merge behavior
+    # The converter should preserve existing servers and add new ones
+    for config_path in "${config_paths[@]}"; do
+        local config_dir
+        config_dir=$(dirname "$config_path")
+        docker exec -u agentuser "$container_name" mkdir -p "$config_dir"
+        docker cp "$existing_config" "$container_name:$config_path"
+        docker exec "$container_name" chown agentuser:agentuser "$config_path"
+    done
+    pass "Pre-populated existing MCP configs"
 
     # Run as agentuser so configs are written to /home/agentuser/.config/
     if ! docker exec -u agentuser "$container_name" bash -lc '/usr/local/bin/setup-mcp-configs.sh'; then
@@ -965,31 +995,47 @@ test_mcp_configuration_generation() {
         pass "MCP setup script executed"
     fi
 
+    # Extract and compare configs for each agent
     local idx
     for idx in "${!config_paths[@]}"; do
         local config_path=${config_paths[$idx]}
         local label=${config_labels[$idx]}
+        local output_file="$artifacts_dir/${label}-config.json"
+        
         if docker exec "$container_name" test -f "$config_path"; then
             pass "MCP config file created for $label"
-            local keys
-            if keys=$(docker exec -i "$container_name" env CONFIG_PATH="$config_path" python3 - <<'PY'
-import json
-import os
-
-path = os.environ['CONFIG_PATH']
-with open(path, 'r', encoding='utf-8') as handle:
-    data = json.load(handle)
-print(','.join(sorted(data.get('mcpServers', {}).keys())))
-PY
-); then
-                if [ "$keys" = "$expected_keys" ]; then
-                    pass "MCP config contains expected servers for $label"
+            
+            # Extract config and normalize (sort keys for deterministic comparison)
+            if docker exec "$container_name" cat "$config_path" | jq --sort-keys . > "$output_file" 2>/dev/null; then
+                pass "Extracted $label config to artifacts"
+                
+                # Verify merge behavior: check that existing-server was preserved
+                if jq -e '.mcpServers["existing-server"]' "$output_file" >/dev/null 2>&1; then
+                    pass "Merge verified: existing-server preserved in $label config"
                 else
-                    fail "Unexpected MCP server keys for $label (expected $expected_keys, got $keys)"
+                    fail "Merge failed: existing-server not found in $label config"
+                    success=false
+                fi
+                
+                # Verify merge behavior: check that someOtherKey was preserved
+                if jq -e '.someOtherKey == "preserved-value"' "$output_file" >/dev/null 2>&1; then
+                    pass "Merge verified: non-mcpServers keys preserved in $label config"
+                else
+                    fail "Merge failed: someOtherKey not preserved in $label config"
+                    success=false
+                fi
+                
+                # Compare against expected snapshot
+                if diff -q "$output_file" "$expected_agent_config" >/dev/null 2>&1; then
+                    pass "Config for $label matches expected snapshot"
+                else
+                    fail "Config for $label differs from expected snapshot"
+                    echo "  Diff:"
+                    diff -u "$expected_agent_config" "$output_file" | head -30 || true
                     success=false
                 fi
             else
-                fail "Failed to inspect MCP config contents for $label"
+                fail "Failed to extract/normalize MCP config for $label"
                 success=false
             fi
         else
@@ -997,11 +1043,56 @@ PY
             success=false
         fi
     done
+    
+    # Verify all agent configs are identical
+    if [[ -f "$artifacts_dir/copilot-config.json" && -f "$artifacts_dir/codex-config.json" && -f "$artifacts_dir/claude-config.json" ]]; then
+        if diff -q "$artifacts_dir/copilot-config.json" "$artifacts_dir/codex-config.json" >/dev/null 2>&1 && \
+           diff -q "$artifacts_dir/copilot-config.json" "$artifacts_dir/claude-config.json" >/dev/null 2>&1; then
+            pass "All agent configs are identical"
+        else
+            fail "Agent configs differ from each other (should be identical)"
+            success=false
+        fi
+    fi
+    
+    # Extract and compare helpers.json
+    local helpers_path="/home/agentuser/.config/containai/helpers.json"
+    local helpers_output="$artifacts_dir/helpers.json"
+    if docker exec "$container_name" test -f "$helpers_path"; then
+        # Normalize: remove 'source' field since it contains the test path
+        if docker exec "$container_name" cat "$helpers_path" | jq --sort-keys 'del(.source)' > "$helpers_output" 2>/dev/null; then
+            pass "Extracted helpers.json to artifacts"
+            
+            # Compare against expected (also without source field)
+            local expected_helpers_normalized
+            expected_helpers_normalized=$(mktemp)
+            jq --sort-keys 'del(.source)' "$expected_helpers" > "$expected_helpers_normalized"
+            
+            if diff -q "$helpers_output" "$expected_helpers_normalized" >/dev/null 2>&1; then
+                pass "helpers.json matches expected snapshot"
+            else
+                fail "helpers.json differs from expected snapshot"
+                echo "  Diff:"
+                diff -u "$expected_helpers_normalized" "$helpers_output" | head -30 || true
+                success=false
+            fi
+            rm -f "$expected_helpers_normalized"
+        else
+            fail "Failed to extract/normalize helpers.json"
+            success=false
+        fi
+    else
+        fail "helpers.json not created"
+        success=false
+    fi
 
+    # Cleanup
     docker rm -f "$container_name" >/dev/null 2>&1 || true
+    rm -rf "$test_workspace"
 
     if [ "$success" = true ]; then
-        pass "MCP configuration test completed"
+        pass "MCP configuration snapshot test completed"
+        echo "  Artifacts saved to: $artifacts_dir"
     fi
 }
 

@@ -1,0 +1,17 @@
+{
+  "helpers": [
+    {
+      "bearerToken": "FAKE_TEST_KEY_docs_not_a_real_secret_12345",
+      "listen": "127.0.0.1:52100",
+      "name": "docs",
+      "target": "https://docs.example.com/mcp"
+    },
+    {
+      "bearerToken": "FAKE_TEST_KEY_github_not_a_real_token_67890",
+      "listen": "127.0.0.1:52101",
+      "name": "github",
+      "target": "https://api.github.com/mcp"
+    }
+  ],
+  "source": "scripts/test/fixtures/mcp-config/input/config.toml"
+}

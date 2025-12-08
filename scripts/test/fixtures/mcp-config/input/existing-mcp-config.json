@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "existing-server": {
+      "url": "http://localhost:8080",
+      "description": "Pre-existing MCP server that should be preserved"
+    }
+  },
+  "someOtherKey": "preserved-value"
+}

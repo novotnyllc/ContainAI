@@ -1,0 +1,16 @@
+# Test fixture: Input config.toml for MCP configuration generation tests
+# This file is used by integration tests to verify config generation is deterministic
+
+[mcp_servers.docs]
+url = "https://docs.example.com/mcp"
+bearer_token_env_var = "DOCS_API_KEY"
+
+[mcp_servers.github]
+url = "https://api.github.com/mcp"
+bearer_token_env_var = "GITHUB_TOKEN"
+
+[mcp_servers.local-tool]
+command = "/usr/local/bin/my-tool"
+args = ["--mode", "mcp", "--verbose"]
+env = { TOOL_CONFIG = "/workspace/.tool-config.json", API_KEY = "${MY_TOOL_API_KEY}" }
+cwd = "/workspace"

@@ -192,7 +192,16 @@ jobs:
       - name: Run integration tests (launchers mode)
         env:
           TEST_SKIP_REGISTRY_PUSH: "true"
+          TEST_ARTIFACTS_DIR: ${{ github.workspace }}/test-artifacts
         run: ./scripts/test/integration-test.sh --mode launchers
+      
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-artifacts-launchers
+          path: test-artifacts/
+          if-no-files-found: ignore
       
       - name: Cleanup test resources
         if: always()
@@ -254,7 +263,17 @@ jobs:
         run: chmod +x scripts/test/integration-test.sh scripts/test/test-env.sh
       
       - name: Run integration tests (full mode)
+        env:
+          TEST_ARTIFACTS_DIR: ${{ github.workspace }}/test-artifacts
         run: ./scripts/test/integration-test.sh --mode full
+      
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-artifacts-full
+          path: test-artifacts/
+          if-no-files-found: ignore
       
       - name: Cleanup test resources
         if: always()
