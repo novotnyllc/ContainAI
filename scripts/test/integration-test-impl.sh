@@ -2010,15 +2010,24 @@ test_audit_logging() {
         return
     fi
 
-    local socket_dir="/tmp/audit-test"
+    # Use session-specific paths to avoid collisions
+    local socket_dir="/tmp/audit-test-$$"
     local socket_path="$socket_dir/audit.sock"
-    local log_dir="/tmp/audit-logs"
+    local log_dir="/tmp/audit-logs-$$"
     local collector_container="${TEST_CONTAINER_PREFIX}-audit-collector"
     local shim_container="${TEST_CONTAINER_PREFIX}-audit-shim"
 
-    # Ensure directories exist and clean up any stale socket
+    # Cleanup function for audit test resources
+    cleanup_audit_resources() {
+        docker stop -t 2 "$collector_container" > /dev/null 2>&1 || true
+        docker rm -f "$collector_container" > /dev/null 2>&1 || true
+        docker rm -f "$shim_container" > /dev/null 2>&1 || true
+        rm -rf "$socket_dir" "$log_dir" 2>/dev/null || true
+    }
+
+    # Ensure directories exist and clean up any stale resources
+    cleanup_audit_resources
     mkdir -p "$socket_dir" "$log_dir"
-    rm -f "$socket_path"
 
     # Run the log collector inside a Debian container (glibc-based)
     # This works even when the test runner is on Alpine (musl) inside DinD
@@ -2039,18 +2048,19 @@ test_audit_logging() {
             --socket-path "$socket_path" \
             --log-dir /var/log/containai 2>&1); then
         fail "Log collector container failed to start: $collector_output"
+        cleanup_audit_resources
         return
     fi
 
-    # Wait for socket to be created
+    # Wait for socket to be created (up to 5 seconds)
     local retries=0
     while [ ! -S "$socket_path" ] && [ $retries -lt 50 ]; do
         # Check if collector container is still running
         if ! docker ps -q -f "name=$collector_container" | grep -q .; then
             echo "Log collector container exited prematurely"
             docker logs "$collector_container" 2>&1 || true
-            docker rm -f "$collector_container" > /dev/null 2>&1 || true
             fail "Log collector container failed to start"
+            cleanup_audit_resources
             return
         fi
         sleep 0.1
@@ -2059,8 +2069,11 @@ test_audit_logging() {
 
     if [ ! -S "$socket_path" ]; then
         fail "Log collector failed to create socket after ${retries} retries"
+        echo "DEBUG: Collector container logs:"
         docker logs "$collector_container" 2>&1 || true
-        docker rm -f "$collector_container" > /dev/null 2>&1 || true
+        echo "DEBUG: Socket directory contents:"
+        ls -la "$socket_dir" 2>&1 || true
+        cleanup_audit_resources
         return
     fi
 
@@ -2068,9 +2081,11 @@ test_audit_logging() {
 
     # Run container with shim - uses Debian image for glibc compatibility
     # We use a simple docker run here to ensure we control the environment fully for this specific integration
-    # Redirect all output since we only care about the audit log, not container output
-    docker run --rm \
+    # Use timeout to prevent hanging if shim can't connect
+    if ! timeout 30 docker run --rm \
         --name "$shim_container" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
         --network "$TEST_NETWORK" \
         -v "$socket_dir:$socket_dir" \
         -v "$shim_lib:/usr/lib/libaudit_shim.so:ro" \
@@ -2082,19 +2097,27 @@ test_audit_logging() {
         -e "PROXY_FIREWALL_APPLIED=1" \
         -e "DISABLE_SENSITIVE_TMPFS=1" \
         debian:12-slim \
-        cat /etc/hostname > /dev/null 2>&1
+        cat /etc/hostname > /dev/null 2>&1; then
+        fail "Shim container timed out or failed"
+        cleanup_audit_resources
+        return
+    fi
 
-    # Give collector time to flush
-    sleep 2
+    # Give collector time to flush (increased for slow environments)
+    sleep 3
     
-    # Stop the collector gracefully and clean up
+    # Stop the collector gracefully
     docker stop -t 5 "$collector_container" > /dev/null 2>&1 || true
-    docker rm -f "$collector_container" > /dev/null 2>&1 || true
 
     local log_file
     log_file=$(find "$log_dir" -name "session-*.jsonl" 2>/dev/null | head -n 1)
     if [ -z "$log_file" ]; then
         fail "No audit log file created"
+        echo "DEBUG: Log directory contents:"
+        ls -la "$log_dir" 2>&1 || true
+        echo "DEBUG: Collector container logs:"
+        docker logs "$collector_container" 2>&1 || true
+        cleanup_audit_resources
         return
     fi
 
@@ -2102,8 +2125,14 @@ test_audit_logging() {
         pass "Audit log contains 'open' event"
     else
         fail "Audit log missing 'open' event"
+        echo "DEBUG: Log file contents:"
         cat "$log_file"
+        echo "DEBUG: Collector container logs:"
+        docker logs "$collector_container" 2>&1 || true
     fi
+
+    # Always cleanup
+    cleanup_audit_resources
 }
 
 test_shared_functions() {
