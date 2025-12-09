@@ -70,10 +70,11 @@ fix_cache_permissions() {
         echo "  Fixing cache directory permissions..."
         # Use docker to fix permissions since files inside are root-owned
         # We use alpine because it's small and likely available/cached
+        # First chmod to make directories traversable, then chown
         if ! docker run --rm \
             -v "$CACHE_DIR":/cache \
             alpine:3.19 \
-            chown -R "$(id -u):$(id -g)" /cache 2>&1; then
+            sh -c 'chmod -R u+rwX /cache && chown -R '"$(id -u):$(id -g)"' /cache' 2>&1; then
             echo "  ⚠️  Permission fix failed (may need manual: sudo chown -R \$(id -u):\$(id -g) $CACHE_DIR)"
         else
             # Verify ownership of the directory itself
@@ -131,6 +132,24 @@ prune_large_images() {
     ' || echo "  ⚠️  Failed to prune large images"
 }
 
+fix_permissions_inside_dind() {
+    if [[ "$DIND_STARTED" != "true" ]]; then
+        return
+    fi
+    if [[ "${PERSIST_CACHE:-true}" != "true" ]]; then
+        return
+    fi
+
+    # Use docker exec to fix permissions while container is still running
+    # This is often more reliable than spinning up a new container after the fact
+    local host_uid
+    host_uid=$(id -u)
+    local host_gid
+    host_gid=$(id -g)
+    
+    docker exec "$DIND_CONTAINER" chown -R "$host_uid:$host_gid" /var/lib/docker >/dev/null 2>&1 || true
+}
+
 cleanup() {
     local exit_code=$?
 
@@ -155,6 +174,9 @@ cleanup() {
             # Prune large images before stopping to keep cache size down
             prune_large_images >/dev/null 2>&1
 
+            # Try to fix permissions from inside before stopping
+            fix_permissions_inside_dind
+
             # Graceful stop to prevent cache corruption - suppress output
             docker stop -t 10 "$DIND_CONTAINER" >/dev/null 2>&1 || true
             docker rm -fv "$DIND_CONTAINER" >/dev/null 2>&1 || true
@@ -162,7 +184,7 @@ cleanup() {
 
         # Always fix permissions if cache exists, even if DinD didn't start properly
         # This ensures we don't leave root-owned files from a previous failed run
-        fix_cache_permissions >/dev/null 2>&1 || true
+        fix_cache_permissions
 
         # Clean up any other resources from this run (networks, etc.) - suppress output
         cleanup_this_run >/dev/null 2>&1 || true

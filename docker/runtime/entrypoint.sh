@@ -15,7 +15,6 @@ CA_SECRET_TMPFS_SIZE="${CONTAINAI_SECRET_TMPFS_SIZE:-32m}"
 CA_DISABLE_PTRACE_SCOPE="${CONTAINAI_DISABLE_PTRACE_SCOPE:-0}"
 CA_DISABLE_PROC_HARDENING="${CONTAINAI_DISABLE_PROC_HARDENING:-0}"
 CA_PROC_GROUP="${CONTAINAI_PROC_GROUP:-agentproc}"
-CA_DISABLE_SENSITIVE_TMPFS="${CONTAINAI_DISABLE_SENSITIVE_TMPFS:-0}"
 CA_RUNNER_POLICY="${CONTAINAI_RUNNER_POLICY:-observe}"
 CA_AGENT_DATA_STAGED="${CONTAINAI_AGENT_DATA_STAGED:-0}"
 CA_RUNNER_STARTED="${CONTAINAI_RUNNER_STARTED:-0}"
@@ -45,7 +44,6 @@ SECRETS_TMPFS_SIZE="$CA_SECRET_TMPFS_SIZE"
 DISABLE_PTRACE_SCOPE="$CA_DISABLE_PTRACE_SCOPE"
 DISABLE_PROC_HARDENING="$CA_DISABLE_PROC_HARDENING"
 PROC_GROUP="$CA_PROC_GROUP"
-DISABLE_SENSITIVE_TMPFS="$CA_DISABLE_SENSITIVE_TMPFS"
 RUNNER_POLICY="$CA_RUNNER_POLICY"
 AGENT_DATA_STAGED="$CA_AGENT_DATA_STAGED"
 RUNNER_STARTED="$CA_RUNNER_STARTED"
@@ -114,27 +112,71 @@ harden_proc_visibility() {
     fi
 }
 
+# Check if a mountpoint has secure options (nosuid,nodev,noexec)
+has_secure_mount_options() {
+    local path="$1"
+    local mount_opts
+    mount_opts=$(grep -E "[[:space:]]${path}[[:space:]]" /proc/mounts | awk '{print $4}' || true)
+    if [ -z "$mount_opts" ]; then
+        return 1
+    fi
+    # Check for all three security options
+    if echo "$mount_opts" | grep -q "nosuid" && \
+       echo "$mount_opts" | grep -q "nodev" && \
+       echo "$mount_opts" | grep -q "noexec"; then
+        return 0
+    fi
+    return 1
+}
+
 prepare_sensitive_tmpfs() {
     local path="$1"
     local size="${2:-16m}"
     local owner_uid="${3:-$AGENT_UID}"
     local owner_gid="${4:-$AGENT_GID}"
     local dir_mode="${5:-700}"
-    if [ "$DISABLE_SENSITIVE_TMPFS" = "1" ]; then
-        return
-    fi
+    local critical="${6:-0}"  # If 1, fail on mount error
+    
     mkdir -p "$path"
-    if ! is_mountpoint "$path"; then
-        if ! mount -t tmpfs -o "size=$size,nosuid,nodev,noexec,mode=$dir_mode" tmpfs "$path" >/dev/null 2>&1; then
-            echo "⚠️  Failed to mount tmpfs at $path" >&2
+    
+    if is_mountpoint "$path"; then
+        # Path is already a mountpoint (e.g., Docker --tmpfs or -v mount)
+        # Verify it has secure options, try to add them if not
+        if has_secure_mount_options "$path"; then
+            echo "✓ $path already mounted with secure options (nosuid,nodev,noexec)"
+        else
+            # Try to remount with secure options
+            if mount -o remount,nosuid,nodev,noexec "$path" 2>/dev/null; then
+                echo "🔒 $path remounted with secure options"
+            else
+                if [ "$critical" = "1" ]; then
+                    echo "❌ FATAL: $path is mounted without secure options and remount failed" >&2
+                    echo "   Mount options: $(grep -E "[[:space:]]${path}[[:space:]]" /proc/mounts | awk '{print $4}')" >&2
+                    exit 1
+                else
+                    echo "⚠️  $path mounted without secure options, remount failed" >&2
+                fi
+            fi
         fi
     else
-        mount -o remount,nosuid,nodev,noexec,mode="$dir_mode" "$path" >/dev/null 2>&1 || true
+        # Path is not a mountpoint - we must create the tmpfs
+        if ! mount -t tmpfs -o "size=$size,nosuid,nodev,noexec,mode=$dir_mode" tmpfs "$path"; then
+            if [ "$critical" = "1" ]; then
+                echo "❌ FATAL: Failed to mount tmpfs at $path (critical security path)" >&2
+                echo "   Ensure container has SYS_ADMIN capability and AppArmor allows tmpfs mounts" >&2
+                exit 1
+            else
+                echo "⚠️  Failed to mount tmpfs at $path" >&2
+            fi
+        fi
     fi
+    
     chown "$owner_uid:$owner_gid" "$path" 2>/dev/null || true
     chmod "$dir_mode" "$path" 2>/dev/null || true
-    mount --make-private "$path" >/dev/null 2>&1 || true
-    mount --make-unbindable "$path" >/dev/null 2>&1 || true
+    
+    # Mount isolation - prevent mount escapes (best effort, may fail on some mount types)
+    mount --make-private "$path" 2>/dev/null || true
+    mount --make-unbindable "$path" 2>/dev/null || true
 }
 
 parse_proxy_target() {
@@ -208,6 +250,13 @@ prepare_mcp_helpers_paths() {
     mkdir -p "$helpers_dir"
     chown "$AGENT_UID:$AGENT_GID" "$helpers_dir" 2>/dev/null || true
     chmod 0755 "$helpers_dir" 2>/dev/null || true
+}
+
+prepare_mcp_wrappers_paths() {
+    local wrappers_dir="/run/mcp-wrappers"
+    mkdir -p "$wrappers_dir"
+    chown "$AGENT_UID:$AGENT_GID" "$wrappers_dir" 2>/dev/null || true
+    chmod 0755 "$wrappers_dir" 2>/dev/null || true
 }
 
 ensure_dir_owned() {
@@ -716,13 +765,18 @@ if [ "$(id -u)" -eq 0 ]; then
     prepare_rootfs_mounts
     enforce_ptrace_scope
     harden_proc_visibility
-    prepare_sensitive_tmpfs "/home/${AGENT_USERNAME}/.config/containai/capabilities" "$CAP_TMPFS_SIZE" "$AGENT_UID" "$AGENT_GID" "700"
-    prepare_sensitive_tmpfs "/run/agent-secrets" "$SECRETS_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
-    prepare_sensitive_tmpfs "/run/agent-data" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
-    prepare_sensitive_tmpfs "/run/agent-data-export" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770"
+    # Capabilities tmpfs is critical - stores unsealed secrets
+    prepare_sensitive_tmpfs "/home/${AGENT_USERNAME}/.config/containai/capabilities" "$CAP_TMPFS_SIZE" "$AGENT_UID" "$AGENT_GID" "700" "1"
+    # Agent secrets tmpfs is critical - stores runtime credentials
+    prepare_sensitive_tmpfs "/run/agent-secrets" "$SECRETS_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770" "1"
+    # Agent data tmpfs is critical - stores sensitive ephemeral data
+    prepare_sensitive_tmpfs "/run/agent-data" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770" "1"
+    # Export tmpfs is critical - stores data being exported
+    prepare_sensitive_tmpfs "/run/agent-data-export" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770" "1"
     enforce_proxy_firewall
     prepare_agent_task_runner_paths
     prepare_mcp_helpers_paths
+    prepare_mcp_wrappers_paths
     AGENT_DATA_STAGED=0
     if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
         if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
@@ -749,7 +803,6 @@ if [ "$(id -u)" -eq 0 ]; then
     export CONTAINAI_DISABLE_PTRACE_SCOPE="$DISABLE_PTRACE_SCOPE"
     export CONTAINAI_DISABLE_PROC_HARDENING="$DISABLE_PROC_HARDENING"
     export CONTAINAI_PROC_GROUP="$PROC_GROUP"
-    export CONTAINAI_DISABLE_SENSITIVE_TMPFS="$DISABLE_SENSITIVE_TMPFS"
     export CONTAINAI_RUNNER_POLICY="$RUNNER_POLICY"
 
     # Enable global audit shim via ld.so.preload

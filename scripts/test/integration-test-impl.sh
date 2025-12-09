@@ -843,7 +843,6 @@ test_agent_credential_flow() {
             -e "CONTAINAI_AGENT_HOME=/home/agentuser" \
             -e "CONTAINAI_AGENT_SECRET_ROOT=/run/agent-secrets" \
             -e "CONTAINAI_CAPABILITY_UNSEAL=/usr/local/bin/capability-unseal" \
-            -e "DISABLE_SENSITIVE_TMPFS=1" \
             -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "NO_PROXY=localhost,127.0.0.1" \
@@ -962,7 +961,6 @@ test_mcp_configuration_generation() {
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         -e "MCP_SECRETS_FILE=/workspace/.mcp-secrets.env" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
@@ -1223,7 +1221,6 @@ test_network_proxy_modes() {
         -e "HTTP_PROXY=http://127.0.0.1:3128" \
         -e "HTTPS_PROXY=http://127.0.0.1:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_CLAUDE_IMAGE" \
@@ -1281,7 +1278,6 @@ PY
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=localhost,127.0.0.1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_CODEX_IMAGE" \
@@ -1747,7 +1743,6 @@ EOF
         -e "HTTP_PROXY=http://${proxy_ip}:3128" \
         -e "HTTPS_PROXY=http://${proxy_ip}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         -v "$helper_server_script:/server.py:ro" \
@@ -1854,7 +1849,6 @@ EOF
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
         -e "CONTAINAI_REQUIRE_PROXY=1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         -v "$PROJECT_ROOT:/workspace" \
@@ -1972,7 +1966,6 @@ JSON
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
@@ -2093,7 +2086,6 @@ JSON
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
@@ -2243,7 +2235,6 @@ JSON
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
@@ -2376,7 +2367,6 @@ test_multiple_agents() {
             -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "NO_PROXY=localhost,127.0.0.1" \
-            -e "DISABLE_SENSITIVE_TMPFS=1" \
             --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             "$test_image" \
@@ -2645,7 +2635,6 @@ test_audit_logging() {
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "PROXY_FIREWALL_APPLIED=1" \
-        -e "DISABLE_SENSITIVE_TMPFS=1" \
         debian:12-slim \
         cat /etc/hostname > /dev/null 2>&1; then
         fail "Shim container timed out or failed"

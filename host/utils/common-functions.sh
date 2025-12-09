@@ -1212,10 +1212,6 @@ verify_host_security_prereqs() {
         errors+=("kernel.yama.ptrace_scope is unavailable. Enable the Yama LSM or export CONTAINAI_DISABLE_PTRACE_SCOPE=1 to bypass (not recommended).")
     fi
 
-    if [ "${CONTAINAI_DISABLE_SENSITIVE_TMPFS:-0}" = "1" ]; then
-        warnings+=("Sensitive tmpfs mounting disabled via CONTAINAI_DISABLE_SENSITIVE_TMPFS=1")
-    fi
-
     if [ ${#errors[@]} -gt 0 ]; then
         echo "❌ Host security verification failed:" >&2
         local message

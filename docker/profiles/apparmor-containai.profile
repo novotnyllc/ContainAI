@@ -23,6 +23,38 @@ profile containai flags=(attach_disconnected,mediate_deleted) {
   deny @{PROC}/sysrq-trigger rwklx,
   deny @{PROC}/kcore rwklx,
 
+  # ============================================================================
+  # MOUNT RULES - Order matters! Allow rules must precede the final deny mount.
+  # ============================================================================
+  
+  # CRITICAL: Audit shim bind mount (mandatory for security auditing)
+  mount options=(rw,bind) /run/ld.so.preload -> /etc/ld.so.preload,
+  
+  # /proc hardening - remount with hidepid=2 for process isolation
+  mount options=(rw,remount) -> /proc/,
+  
+  # Sensitive tmpfs mounts for secrets and ephemeral data
+  # These store credentials and sensitive runtime data in memory-only filesystems
+  mount fstype=tmpfs -> /run/agent-secrets/,
+  mount fstype=tmpfs -> /run/agent-data/,
+  mount fstype=tmpfs -> /run/agent-data-export/,
+  mount fstype=tmpfs -> /home/*/,
+  
+  # Remount tmpfs with restrictive options (nosuid,nodev,noexec)
+  mount options=(rw,remount) -> /run/agent-secrets/,
+  mount options=(rw,remount) -> /run/agent-data/,
+  mount options=(rw,remount) -> /run/agent-data-export/,
+  mount options=(rw,remount) -> /home/*/,
+  
+  # Mount propagation isolation - prevent mount escapes
+  mount options=(rw,make-private) -> /run/agent-secrets/,
+  mount options=(rw,make-private) -> /run/agent-data/,
+  mount options=(rw,make-private) -> /run/agent-data-export/,
+  mount options=(rw,make-unbindable) -> /run/agent-secrets/,
+  mount options=(rw,make-unbindable) -> /run/agent-data/,
+  mount options=(rw,make-unbindable) -> /run/agent-data-export/,
+  
+  # Deny all other mount operations
   deny mount,
 
   deny /sys/[^f]*/** wklx,
