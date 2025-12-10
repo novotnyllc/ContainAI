@@ -47,10 +47,10 @@ Full end-to-end system validation with two modes:
 
 ## Feature Coverage Matrix
 
-| Integration tests – host secrets | `./scripts/test/integration-test.sh --mode launchers --with-host-secrets` | Copies your `mcp-secrets.env` into the isolated DinD harness (or uses the host daemon if you pass `--isolation host`) and exercises the `run-<agent> --prompt` path (currently Copilot) to verify live secrets. |
+| Integration tests – host secrets | `./scripts/test/integration-test.sh --mode launchers --with-host-secrets` | Copies your `mcp-secrets.env` into the test run on the host Docker daemon and exercises the `run-<agent> --prompt` path (currently Copilot) to verify live secrets. |
 
 > **Why there isn't a PowerShell integration harness**
-> The PowerShell launchers (`run-*.ps1`) are thin wrappers that forward arguments to the shared bash implementation (`host/launchers/run-agent`). The integration suite manipulates containers, DinD, and git state entirely through bash, so duplicating the 800+ line harness in PowerShell would provide no extra coverage. We rely on the existing PowerShell unit tests (`test-launchers.ps1`, `test-branch-management.ps1`) to guard the PS entrypoints and keep all end-to-end validation centralized in the bash integration runner.
+> The PowerShell launchers (`run-*.ps1`) are thin wrappers that forward arguments to the shared bash implementation (`host/launchers/run-agent`). The integration suite manipulates containers and git state entirely through bash, so duplicating the 800+ line harness in PowerShell would provide no extra coverage. We rely on the existing PowerShell unit tests (`test-launchers.ps1`, `test-branch-management.ps1`) to guard the PS entrypoints and keep all end-to-end validation centralized in the bash integration runner.
 | Feature / Guarantee                          | Automated Coverage                                                                                              | Notes |
 |----------------------------------------------|------------------------------------------------------------------------------------------------------------------|-------|
 | Container launch, labels, workspace mounts   | `integration-test.sh`: launcher execution, label, networking, workspace, env-variable tests                      | Ensures runtime wiring matches docs. |
@@ -110,7 +110,7 @@ Both should pass with identical results. Time: ~1-2 minutes per file.
 
 ### Integration Tests (Before PR)
 
-Integration tests run inside an isolated Docker-in-Docker environment for reproducibility and safety:
+Integration tests run against the host Docker daemon for reproducibility:
 
 ```bash
 # Quick validation with existing/mock images (recommended for development)
@@ -123,16 +123,16 @@ Integration tests run inside an isolated Docker-in-Docker environment for reprod
 ./scripts/test/integration-test.sh --mode launchers --preserve
 ```
 
-**How it works:** Starts a privileged `docker:25.0-dind` container, mounts your repo read-only at `/workspace`, installs required tooling (bash/git/python/jq), then runs the full integration suite against the isolated Docker daemon. All containers, images, registries, and networks are confined to the sandbox and deleted automatically when complete.
+**How it works:** Uses the host daemon with labeled resources for automatic cleanup, builds/pulls mock images, starts a local registry/proxy, and runs the suite. All resources are deleted automatically unless `--preserve` is set.
 
 **Timing:**
-- Launchers mode: ~5-10 minutes (includes DinD startup + mock image builds)
+- Launchers mode: ~5-10 minutes (mock image builds)
 - Full mode: ~15-25 minutes (rebuilds base + all agent images)
 
 **Requirements:**
-- Docker daemon with `--privileged` container support
-- ~2GB disk space for DinD container
-- Port 5555 available inside the isolated environment
+- Docker daemon available
+- ~2GB disk space for mock images (launchers)
+- Port 5555 available for the local registry
 
 **Runtime mocks**: Both modes automatically mount the fixture config/tokens, spin up a disposable proxy container, and create a restricted network to verify `--network-proxy` behavior. No host credentials or proxy daemons are modified.
 
@@ -325,10 +325,10 @@ function Test-NewFeature {
 ## Prerequisites
 
 ### Integration Tests
-- Docker daemon with `--privileged` container support
+- Docker daemon available
 - Git installed and configured
 - Bash 4.0+ (Linux/macOS/WSL)
-- ~5GB disk space for DinD container and builds (full mode)
+- ~5GB disk space for images/builds (full mode)
 - No real GitHub/API tokens required (uses mock credentials)
 
 ### Unit Tests
@@ -347,14 +347,14 @@ function Test-NewFeature {
 - Ensuring no external dependencies
 
 **What it does**:
-1. Starts isolated Docker-in-Docker environment
-2. Creates local registry inside sandbox
+1. Uses host Docker daemon
+2. Creates local registry in the session
 3. Builds base image from `docker/base/Dockerfile`
 4. Builds agent images (copilot, codex, claude)
 5. Runs complete test suite
 6. Cleans up (or preserves with `--preserve`)
 
-**Time**: ~15-25 minutes (includes DinD startup + all builds)
+**Time**: ~15-25 minutes (all builds)
 
 ### Launchers Mode (`--mode launchers`)
 **When to use**:
@@ -363,13 +363,13 @@ function Test-NewFeature {
 - When agent images already exist locally
 
 **What it does**:
-1. Starts isolated Docker-in-Docker environment
-2. Creates local registry inside sandbox
+1. Uses host Docker daemon
+2. Creates local registry in the session
 3. Builds lightweight mock agent images
 4. Runs complete test suite
 5. Cleans up (or preserves with `--preserve`)
 
-**Time**: ~5-10 minutes (includes DinD startup + mock builds)
+**Time**: ~5-10 minutes (mock builds)
 
 ## Security & Isolation
 
@@ -395,7 +395,7 @@ Use `--preserve` flag to keep resources for debugging:
 Then manually inspect:
 ```bash
 # View test containers
-docker ps -a --filter "label=containai.test-session=<PID>"
+docker ps -a --filter "label=containai.test.session=<ID>"
 
 # View test images
 docker images | grep "localhost:5555/test-containai"
@@ -410,7 +410,7 @@ ls -la /tmp/test-containai-repo-<PID>
 Manual cleanup:
 ```bash
 # Remove all test containers from session
-docker ps -aq --filter "label=containai.test-session=<PID>" | xargs docker rm -f
+docker ps -aq --filter "label=containai.test.session=<ID>" | xargs docker rm -f
 
 # Remove test network
 docker network rm test-containai-net-<PID>
@@ -425,7 +425,7 @@ rm -rf /tmp/test-containai-repo-<PID>
 ## Notes
 
 - **Unit tests** use containers labeled `containai.test=true`
-- **Integration tests** use `containai.test-session=<PID>` for isolation
+- **Integration tests** use `containai.test.session=<ID>` for isolation
 - Temporary repositories created with unique PIDs to avoid conflicts
 - All resources cleaned up automatically (unless `--preserve` specified)
 - Tests run independently and can be executed in any order

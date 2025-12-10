@@ -79,6 +79,9 @@ def _make_handler(state: _ProxyState):
                 return
 
             content_length = int(self.headers.get("Content-Length", "0") or 0)
+            if content_length > 10 * 1024 * 1024:  # 10MB limit
+                self.send_error(413, "Request Entity Too Large")
+                return
             body = self.rfile.read(content_length) if content_length > 0 else None
             headers = _filter_headers(self.headers)
             headers["X-CA-Helper"] = state.name

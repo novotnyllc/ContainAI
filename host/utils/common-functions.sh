@@ -2165,16 +2165,18 @@ start_proxy_log_streamer() {
 }
 
 ensure_squid_proxy() {
-    local network_name="$1"
-    local proxy_container="$2"
-    local proxy_image="$3"
-    local agent_container="$4"
-    local squid_allowed_domains="${5:-*.github.com,*.githubcopilot.com,*.nuget.org}"
-    local helper_acl_file="${6:-}"
-    local agent_id="${7:-}"
-    local session_id="${8:-}"
-    local mitm_ca_cert="${9:-${SESSION_MITM_CA_CERT:-}}"
-    local mitm_ca_key="${10:-${SESSION_MITM_CA_KEY:-}}"
+    local internal_network="$1"
+    local egress_network="$2"
+    local proxy_container="$3"
+    local proxy_image="$4"
+    local agent_container="$5"
+    local squid_allowed_domains="${6:-*.github.com,*.githubcopilot.com,*.nuget.org}"
+    local helper_acl_file="${7:-}"
+    local agent_id="${8:-}"
+    local session_id="${9:-}"
+    local mitm_ca_cert="${10:-${SESSION_MITM_CA_CERT:-}}"
+    local mitm_ca_key="${11:-${SESSION_MITM_CA_KEY:-}}"
+    local internal_subnet="${12:-}"
     local proxy_seccomp="${PROXY_SECCOMP_PROFILE_PATH:-${SECCOMP_PROFILE_PATH:-}}"
     local proxy_apparmor="${PROXY_APPARMOR_PROFILE:-containai-proxy}"
     
@@ -2183,9 +2185,16 @@ ensure_squid_proxy() {
         return 1
     fi
     
-    # Create network if needed
-    if ! container_cli network inspect "$network_name" >/dev/null 2>&1; then
-        container_cli network create "$network_name" >/dev/null
+    # Create networks if needed
+    if [ -n "$internal_network" ] && ! container_cli network inspect "$internal_network" >/dev/null 2>&1; then
+        if [ -n "$internal_subnet" ]; then
+            container_cli network create --internal --subnet "$internal_subnet" "$internal_network" >/dev/null
+        else
+            container_cli network create --internal "$internal_network" >/dev/null
+        fi
+    fi
+    if [ -n "$egress_network" ] && ! container_cli network inspect "$egress_network" >/dev/null 2>&1; then
+        container_cli network create "$egress_network" >/dev/null
     fi
     
     # Recreate proxy to ensure per-session CA and ACLs are applied
@@ -2205,7 +2214,7 @@ ensure_squid_proxy() {
         -d
         --name "$proxy_container"
         --hostname "$proxy_container"
-        --network "$network_name"
+        --network "$internal_network"
         --restart no
         --read-only
         --cap-drop=ALL
@@ -2231,6 +2240,11 @@ ensure_squid_proxy() {
     [ -n "$session_id" ] && proxy_args+=("-e" "CA_SESSION_ID=$session_id")
     proxy_args+=("$proxy_image")
     container_cli run "${proxy_args[@]}" >/dev/null
+
+    if [ -n "$egress_network" ]; then
+        # Attach proxy to egress network for outbound traffic
+        container_cli network connect "$egress_network" "$proxy_container" >/dev/null 2>&1 || true
+    fi
 }
 
 # Generate repository setup script for container

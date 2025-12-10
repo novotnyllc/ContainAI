@@ -12,6 +12,22 @@
 
 set -euo pipefail
 
+# Helper to copy files only if content changed (preserves mtime/docker cache)
+install_if_changed() {
+    local src="$1"
+    local dst="$2"
+    if [ ! -f "$src" ]; then
+        echo "❌ Source file not found: $src"
+        exit 1
+    fi
+    if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+        # Files are identical, do nothing to preserve mtime
+        return
+    fi
+    cp "$src" "$dst"
+    echo "  -> Updated $dst"
+}
+
 ARCH="${1:-amd64}"
 OUT_DIR="${2:-artifacts}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,9 +95,9 @@ cargo build --release --target "$RUST_TARGET"
 RUST_OUT_DIR="$REPO_ROOT/src/target/$RUST_TARGET/release"
 
 # Copy binaries
-cp "$RUST_OUT_DIR/agentcli-exec" "$OUT_DIR/"
-cp "$RUST_OUT_DIR/agent-task-runnerd" "$OUT_DIR/"
-cp "$RUST_OUT_DIR/agent-task-sandbox" "$OUT_DIR/"
+install_if_changed "$RUST_OUT_DIR/agentcli-exec" "$OUT_DIR/agentcli-exec"
+install_if_changed "$RUST_OUT_DIR/agent-task-runnerd" "$OUT_DIR/agent-task-runnerd"
+install_if_changed "$RUST_OUT_DIR/agent-task-sandbox" "$OUT_DIR/agent-task-sandbox"
 
 popd >/dev/null
 
@@ -96,7 +112,7 @@ cargo build --release --target "$RUST_TARGET"
 
 # Copy library
 # The library name depends on the OS, but for Linux it's libaudit_shim.so
-cp "$RUST_OUT_DIR/libaudit_shim.so" "$OUT_DIR/"
+install_if_changed "$RUST_OUT_DIR/libaudit_shim.so" "$OUT_DIR/libaudit_shim.so"
 
 popd >/dev/null
 
@@ -128,7 +144,7 @@ dotnet publish "$REPO_ROOT/src/ContainAI.LogCollector/ContainAI.LogCollector.csp
     -o "$OUT_DIR/log-collector"
 
 # Move binaries to flat output structure for Dockerfile simplicity
-mv "$OUT_DIR/log-collector/containai-log-collector" "$OUT_DIR/containai-log-collector"
+install_if_changed "$OUT_DIR/log-collector/containai-log-collector" "$OUT_DIR/containai-log-collector"
 
 # Cleanup intermediate folders
 rm -rf "$OUT_DIR/log-collector"

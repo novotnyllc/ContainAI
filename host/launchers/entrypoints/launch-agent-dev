@@ -856,7 +856,8 @@ else
 fi
 
 PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
-PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
+PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"  # internal network for agent + sidecars
+PROXY_EGRESS_NETWORK_NAME="${CONTAINER_NAME}-egress"  # egress network for proxy only
 PROXY_IMAGE="$(if [ -n "${CONTAINAI_IMAGE_DIGEST_PROXY:-}" ]; then echo "containai-proxy@${CONTAINAI_IMAGE_DIGEST_PROXY}"; else echo "containai-proxy:local"; fi)"
 LOG_FORWARDER_IMAGE="$(if [ -n "${CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER:-}" ]; then echo "containai-log-forwarder@${CONTAINAI_IMAGE_DIGEST_LOG_FORWARDER}"; else echo "containai-log-forwarder:local"; fi)"
 LOG_BROKER_IMAGE="${CONTAINAI_LOG_BROKER_IMAGE:-$LOG_FORWARDER_IMAGE}"
@@ -1071,7 +1072,7 @@ if container_exists "$CONTAINER_NAME"; then
         EXISTING_NETWORK=$(container_cli inspect -f '{{ index .Config.Labels "containai.proxy-network" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_NETWORK_NAME")
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
-        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
+        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_EGRESS_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY" ""
         start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$AGENT" "$SESSION_ID"
     fi
     
@@ -1090,7 +1091,7 @@ fi
 
 # Setup squid proxy if needed
 if [ "$USE_SQUID" = true ]; then
-    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
+    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_EGRESS_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY" ""
     start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$AGENT" "$SESSION_ID"
 fi
 
@@ -1301,6 +1302,8 @@ fi
 DOCKER_ARGS+=(
     "-w" "/workspace"
     "--network" "$NETWORK_MODE"
+    "--cap-add=SYS_ADMIN"
+    "--cap-add=NET_ADMIN"
     "--read-only"
     "--cap-drop=ALL"
     "--security-opt" "no-new-privileges:true"

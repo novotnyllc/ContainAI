@@ -56,193 +56,16 @@ declare -a MCP_HELPER_PIDS=()
 declare -a MCP_HELPER_NAMES=()
 PROXY_FIREWALL_APPLIED="${PROXY_FIREWALL_APPLIED:-0}"
 
-is_mountpoint() {
-    local path="$1"
-    if command -v mountpoint >/dev/null 2>&1; then
-        mountpoint -q "$path"
-        return $?
-    fi
-    grep -qs "[[:space:]]${path}[[:space:]]" /proc/mounts
-}
-
-enforce_ptrace_scope() {
-    local target="$PTRACE_SCOPE_VALUE"
-    if [ "$DISABLE_PTRACE_SCOPE" = "1" ]; then
-        return
-    fi
-    if [ ! -w /proc/sys/kernel/yama/ptrace_scope ]; then
-        echo "⚠️  ptrace_scope not writable; skipping" >&2
-        return
-    fi
-    if command -v sysctl >/dev/null 2>&1; then
-        if sysctl -w kernel.yama.ptrace_scope="$target" >/dev/null 2>&1; then
-            echo "🔒 kernel.yama.ptrace_scope set to $target"
-            return
-        fi
-    fi
-    if echo "$target" >/proc/sys/kernel/yama/ptrace_scope 2>/dev/null; then
-        echo "🔒 kernel.yama.ptrace_scope set to $target"
-    else
-        echo "⚠️  Failed to set kernel.yama.ptrace_scope" >&2
-    fi
-}
-
-harden_proc_visibility() {
-    if [ "$DISABLE_PROC_HARDENING" = "1" ]; then
-        return
-    fi
-    local group="$PROC_GROUP"
-    if ! getent group "$group" >/dev/null 2>&1; then
-        if ! groupadd --system "$group" >/dev/null 2>&1; then
-            echo "⚠️  Unable to create $group group for /proc hardening" >&2
-            return
-        fi
-    fi
-    usermod -a -G "$group" "$AGENT_USERNAME" >/dev/null 2>&1 || true
-    local gid
-    gid=$(getent group "$group" | awk -F: '{print $3}')
-    if [ -z "$gid" ]; then
-        echo "⚠️  Failed to resolve GID for $group" >&2
-        return
-    fi
-    if mount -o remount,hidepid=2,gid="$gid" /proc >/dev/null 2>&1; then
-        echo "🔒 /proc remounted with hidepid=2 (group $group)"
-    else
-        echo "⚠️  Unable to remount /proc with hidepid=2" >&2
-    fi
-}
-
-# Check if a mountpoint has secure options (nosuid,nodev,noexec)
-has_secure_mount_options() {
-    local path="$1"
-    local mount_opts
-    mount_opts=$(grep -E "[[:space:]]${path}[[:space:]]" /proc/mounts | awk '{print $4}' || true)
-    if [ -z "$mount_opts" ]; then
-        return 1
-    fi
-    # Check for all three security options
-    if echo "$mount_opts" | grep -q "nosuid" && \
-       echo "$mount_opts" | grep -q "nodev" && \
-       echo "$mount_opts" | grep -q "noexec"; then
-        return 0
-    fi
-    return 1
-}
-
-prepare_sensitive_tmpfs() {
-    local path="$1"
-    local size="${2:-16m}"
-    local owner_uid="${3:-$AGENT_UID}"
-    local owner_gid="${4:-$AGENT_GID}"
-    local dir_mode="${5:-700}"
-    local critical="${6:-0}"  # If 1, fail on mount error
-    
-    mkdir -p "$path"
-    
-    if is_mountpoint "$path"; then
-        # Path is already a mountpoint (e.g., Docker --tmpfs or -v mount)
-        # Verify it has secure options, try to add them if not
-        if has_secure_mount_options "$path"; then
-            echo "✓ $path already mounted with secure options (nosuid,nodev,noexec)"
-        else
-            # Try to remount with secure options
-            if mount -o remount,nosuid,nodev,noexec "$path" 2>/dev/null; then
-                echo "🔒 $path remounted with secure options"
-            else
-                if [ "$critical" = "1" ]; then
-                    echo "❌ FATAL: $path is mounted without secure options and remount failed" >&2
-                    echo "   Mount options: $(grep -E "[[:space:]]${path}[[:space:]]" /proc/mounts | awk '{print $4}')" >&2
-                    exit 1
-                else
-                    echo "⚠️  $path mounted without secure options, remount failed" >&2
-                fi
-            fi
-        fi
-    else
-        # Path is not a mountpoint - we must create the tmpfs
-        if ! mount -t tmpfs -o "size=$size,nosuid,nodev,noexec,mode=$dir_mode" tmpfs "$path"; then
-            if [ "$critical" = "1" ]; then
-                echo "❌ FATAL: Failed to mount tmpfs at $path (critical security path)" >&2
-                echo "   Ensure container has SYS_ADMIN capability and AppArmor allows tmpfs mounts" >&2
-                exit 1
-            else
-                echo "⚠️  Failed to mount tmpfs at $path" >&2
-            fi
-        fi
-    fi
-    
-    chown "$owner_uid:$owner_gid" "$path" 2>/dev/null || true
-    chmod "$dir_mode" "$path" 2>/dev/null || true
-    
-    # Mount isolation - prevent mount escapes (best effort, may fail on some mount types)
-    mount --make-private "$path" 2>/dev/null || true
-    mount --make-unbindable "$path" 2>/dev/null || true
-}
-
-parse_proxy_target() {
-    local proxy_url="$1"
-    python3 - "$proxy_url" <<'PY'
-import sys, urllib.parse, socket
-url = sys.argv[1]
-parsed = urllib.parse.urlparse(url)
-host = parsed.hostname
-port = parsed.port or (443 if parsed.scheme == "https" else 80)
-if not host:
-    sys.exit(1)
-try:
-    ip = socket.gethostbyname(host)
-except Exception:
-    sys.exit(1)
-print(f"{ip}:{port}")
-PY
-}
-
-enforce_proxy_firewall() {
-    if [ "$PROXY_FIREWALL_APPLIED" = "1" ]; then
-        return
-    fi
-    local proxy_url="${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}"
-    if [ -z "$proxy_url" ]; then
-        echo "❌ Proxy firewall enforcement requires HTTP(S)_PROXY to be set" >&2
-        exit 1
-    fi
-    if ! command -v iptables >/dev/null 2>&1; then
-        echo "❌ iptables not available; cannot enforce proxy-only egress" >&2
-        exit 1
-    fi
-    local proxy_target
-    proxy_target="$(parse_proxy_target "$proxy_url")" || {
-        echo "❌ Unable to resolve proxy target from '$proxy_url'" >&2
-        exit 1
-    }
-    local proxy_ip="${proxy_target%:*}"
-    local proxy_port="${proxy_target##*:}"
-
-    # Flush and enforce OUTPUT policy
-    iptables -F OUTPUT >/dev/null 2>&1 || {
-        echo "❌ iptables flush failed; need NET_ADMIN capability" >&2
-        exit 1
-    }
-    iptables -P OUTPUT DROP
-    iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-    iptables -A OUTPUT -o lo -j ACCEPT
-    # Allow DNS to Docker resolver
-    iptables -A OUTPUT -p udp -d 127.0.0.11 --dport 53 -j ACCEPT
-    iptables -A OUTPUT -p tcp -d 127.0.0.11 --dport 53 -j ACCEPT
-    # Allow proxy traffic only
-    iptables -A OUTPUT -p tcp -d "$proxy_ip" --dport "$proxy_port" -j ACCEPT
-    iptables -A OUTPUT -p tcp -d "$proxy_ip" --dport 80 -j ACCEPT
-    iptables -A OUTPUT -p tcp -d "$proxy_ip" --dport 443 -j ACCEPT
-    PROXY_FIREWALL_APPLIED=1
-    export PROXY_FIREWALL_APPLIED
-    echo "🔒 Egress restricted to proxy ${proxy_ip}:${proxy_port}"
-}
-
 prepare_agent_task_runner_paths() {
     local log_root="/run/agent-task-runner"
     mkdir -p "$log_root"
     chown "$AGENT_UID:$AGENT_GID" "$log_root" 2>/dev/null || true
     chmod 0770 "$log_root" 2>/dev/null || true
+
+    local audit_dir="/run/containai"
+    mkdir -p "$audit_dir"
+    chown "$AGENT_UID:$AGENT_GID" "$audit_dir" 2>/dev/null || true
+    chmod 0755 "$audit_dir" 2>/dev/null || true
 }
 
 prepare_mcp_helpers_paths() {
@@ -256,7 +79,14 @@ prepare_mcp_wrappers_paths() {
     local wrappers_dir="/run/mcp-wrappers"
     mkdir -p "$wrappers_dir"
     chown "$AGENT_UID:$AGENT_GID" "$wrappers_dir" 2>/dev/null || true
-    chmod 0755 "$wrappers_dir" 2>/dev/null || true
+    chmod 1777 "$wrappers_dir" 2>/dev/null || true
+}
+
+prepare_agent_data_export_path() {
+    local export_dir="/run/agent-data-export"
+    mkdir -p "$export_dir"
+    chown "$AGENT_UID:$AGENT_GID" "$export_dir" 2>/dev/null || true
+    chmod 0755 "$export_dir" 2>/dev/null || true
 }
 
 ensure_dir_owned() {
@@ -349,12 +179,13 @@ ensure_wrapper_binaries() {
     local runner="/usr/local/bin/mcp-wrapper-runner"
     [ -x "$runner" ] || return 0
     [ -f "$servers_file" ] || return 0
-    mkdir -p "$STUB_SHIM_ROOT"
+    ensure_dir_owned "$STUB_SHIM_ROOT" 0755
     while IFS= read -r name; do
         [ -z "$name" ] && continue
         local dest="${STUB_SHIM_ROOT}/mcp-wrapper-${name}"
         if [ ! -e "$dest" ]; then
             ln -s "$runner" "$dest" 2>/dev/null || true
+            chown -h "$AGENT_UID:$AGENT_GID" "$dest" 2>/dev/null || true
         fi
     done < "$servers_file"
 }
@@ -365,7 +196,7 @@ create_wrapper_links_from_configs() {
     if [ "$#" -eq 0 ]; then
         return 0
     fi
-    mkdir -p "$STUB_SHIM_ROOT"
+    ensure_dir_owned "$STUB_SHIM_ROOT" 0755
     python3 - "$@" <<'PY' | while IFS= read -r name; do
 import json, sys
 names = set()
@@ -396,6 +227,7 @@ PY
         local dest="${STUB_SHIM_ROOT}/mcp-wrapper-${name}"
         if [ ! -e "$dest" ]; then
             ln -s "$runner" "$dest" 2>/dev/null || true
+            chown -h "$AGENT_UID:$AGENT_GID" "$dest" 2>/dev/null || true
         fi
     done
 }
@@ -456,6 +288,7 @@ start_mcp_helpers() {
             "REQUESTS_CA_BUNDLE=${helper_ca}"
             "HOME=${helper_runtime}"
             "TMPDIR=${helper_runtime}"
+            "LD_PRELOAD=/usr/lib/containai/libaudit_shim.so"
         )
         
         # Inherit proxy settings
@@ -481,6 +314,7 @@ start_mcp_helpers() {
         local pid=$!
         MCP_HELPER_PIDS+=("$pid")
         MCP_HELPER_NAMES+=("$helper_name")
+        echo "$pid" >> "/run/mcp-helpers/pids"
         
         # Health check
         if command -v curl >/dev/null 2>&1; then
@@ -645,10 +479,19 @@ start_agent_task_runnerd() {
     mkdir -p "$log_destination"
     chown "$AGENT_UID:$AGENT_GID" "$log_destination" 2>/dev/null || true
     
-    /usr/local/bin/containai-log-collector \
-        --socket-path "$audit_socket" \
-        --log-dir "$log_destination" \
-        > "$log_dir/collector.log" 2>&1 &
+    # Run log collector as agent user (even if called from root)
+    # Explicitly unset LD_PRELOAD to avoid the collector auditing itself
+    if [ "$(id -u)" -eq 0 ]; then
+        gosu "$AGENT_USERNAME" env -u LD_PRELOAD /usr/local/bin/containai-log-collector \
+            --socket-path "$audit_socket" \
+            --log-dir "$log_destination" \
+            > "$log_dir/collector.log" 2>&1 &
+    else
+        env -u LD_PRELOAD /usr/local/bin/containai-log-collector \
+            --socket-path "$audit_socket" \
+            --log-dir "$log_destination" \
+            > "$log_dir/collector.log" 2>&1 &
+    fi
         
     # Wait for socket to appear
     local retries=50
@@ -665,11 +508,19 @@ start_agent_task_runnerd() {
     echo "📝 LogCollector started (logs -> $log_destination)"
 
     # Start Agent Task Runner (Mandatory)
-    /usr/local/bin/agent-task-runnerd \
-        --socket "$socket_path" \
-        --log "$log_dir/events.log" \
-        --policy "$RUNNER_POLICY" \
-        &
+    if [ "$(id -u)" -eq 0 ]; then
+        gosu "$AGENT_USERNAME" env -u LD_PRELOAD /usr/local/bin/agent-task-runnerd \
+            --socket "$socket_path" \
+            --log "$log_dir/events.log" \
+            --policy "$RUNNER_POLICY" \
+            &
+    else
+        env -u LD_PRELOAD /usr/local/bin/agent-task-runnerd \
+            --socket "$socket_path" \
+            --log "$log_dir/events.log" \
+            --policy "$RUNNER_POLICY" \
+            &
+    fi
 }
 
 export_agent_data_payload() {
@@ -730,28 +581,6 @@ prepare_rootfs_mounts() {
     ensure_dir_owned "/home/${AGENT_USERNAME}" 0755
     ensure_dir_owned "$TOOLCACHE_DIR" 0775
 
-    local cache_paths=(
-        "pip"
-        "pipx"
-        "pipx/bin"
-        "npm"
-        "yarn"
-        "pnpm"
-        "uv"
-        "cargo"
-        "rustup"
-        "ms-playwright"
-        "bun"
-        "nuget"
-        "nuget/http-cache"
-        "nuget/packages"
-        "dotnet"
-    )
-
-    for rel in "${cache_paths[@]}"; do
-        ensure_dir_owned "${TOOLCACHE_DIR}/${rel}" 0775
-    done
-
     seed_tmpfs_from_base "${BASEFS_DIR}/var/lib/dpkg" "/var/lib/dpkg"
     seed_tmpfs_from_base "${BASEFS_DIR}/var/lib/apt" "/var/lib/apt"
     seed_tmpfs_from_base "${BASEFS_DIR}/var/cache/apt" "/var/cache/apt"
@@ -762,21 +591,16 @@ prepare_rootfs_mounts() {
 }
 
 if [ "$(id -u)" -eq 0 ]; then
+    AGENT_UID=$(id -u "$AGENT_USERNAME" 2>/dev/null || echo "$AGENT_UID")
+    AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo "$AGENT_GID")
+    AGENT_CLI_UID=$(id -u "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_CLI_UID")
+    AGENT_CLI_GID=$(id -g "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_CLI_GID")
     prepare_rootfs_mounts
-    enforce_ptrace_scope
-    harden_proc_visibility
-    # Capabilities tmpfs is critical - stores unsealed secrets
-    prepare_sensitive_tmpfs "/home/${AGENT_USERNAME}/.config/containai/capabilities" "$CAP_TMPFS_SIZE" "$AGENT_UID" "$AGENT_GID" "700" "1"
-    # Agent secrets tmpfs is critical - stores runtime credentials
-    prepare_sensitive_tmpfs "/run/agent-secrets" "$SECRETS_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770" "1"
-    # Agent data tmpfs is critical - stores sensitive ephemeral data
-    prepare_sensitive_tmpfs "/run/agent-data" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770" "1"
-    # Export tmpfs is critical - stores data being exported
-    prepare_sensitive_tmpfs "/run/agent-data-export" "$DATA_TMPFS_SIZE" "$AGENT_CLI_UID" "$AGENT_CLI_GID" "770" "1"
-    enforce_proxy_firewall
+    
     prepare_agent_task_runner_paths
     prepare_mcp_helpers_paths
     prepare_mcp_wrappers_paths
+    prepare_agent_data_export_path
     AGENT_DATA_STAGED=0
     if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
         if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
@@ -789,9 +613,13 @@ if [ "$(id -u)" -eq 0 ]; then
         AGENT_DATA_STAGED=1
     fi
     export CONTAINAI_AGENT_DATA_STAGED="$AGENT_DATA_STAGED"
+    
+    # Start task runner (and log collector) BEFORE MCP helpers
+    # This ensures the audit socket is ready for the shim
     start_agent_task_runnerd
     RUNNER_STARTED=1
     export CONTAINAI_RUNNER_STARTED="$RUNNER_STARTED"
+
     export CONTAINAI_USER="$AGENT_USERNAME"
     export CONTAINAI_CLI_USER="$AGENT_CLI_USERNAME"
     export CONTAINAI_BASEFS="$BASEFS_DIR"
@@ -805,30 +633,105 @@ if [ "$(id -u)" -eq 0 ]; then
     export CONTAINAI_PROC_GROUP="$PROC_GROUP"
     export CONTAINAI_RUNNER_POLICY="$RUNNER_POLICY"
 
-    # Enable global audit shim via ld.so.preload
-    # We use a bind mount because the rootfs is read-only.
-    # The file /etc/ld.so.preload is created empty in the Dockerfile as a mount target.
-    echo "/usr/lib/containai/libaudit_shim.so" > /run/ld.so.preload
-    mount --bind /run/ld.so.preload /etc/ld.so.preload
-    echo "🔒 Audit shim enabled globally via /etc/ld.so.preload"
-
-    # Drop all capabilities before re-executing as non-root user.
-    # The privileged setup (tmpfs mounts, ptrace scope, iptables) is complete.
-    # capsh atomically drops caps from the bounding set AND switches user.
-    if ! command -v capsh >/dev/null 2>&1; then
-        echo "❌ FATAL: capsh not found - base image is missing libcap2-bin" >&2
-        exit 1
+    # Host-provided configs and capabilities must be present before dropping caps
+    HOST_CONFIG_DEPLOYED=false
+    if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
+        wait_for_host_payload "$HOST_SESSION_CONFIG_ROOT" 50 0.1 || true
+        if [ ! -f "${HOST_MITM_CA_CERT:-${HOST_SESSION_CONFIG_ROOT}/mitm/proxy-ca.crt}" ]; then
+            echo "❌ MITM CA missing in session artifacts; expected ${HOST_MITM_CA_CERT:-${HOST_SESSION_CONFIG_ROOT}/mitm/proxy-ca.crt}" >&2
+            exit 1
+        fi
+        echo "🔐 Applying host-rendered MCP configs (session ${HOST_SESSION_ID:-unknown})"
+        if install_host_session_configs "$HOST_SESSION_CONFIG_ROOT"; then
+            HOST_CONFIG_DEPLOYED=true
+            echo "   Manifest SHA: ${HOST_SESSION_CONFIG_SHA256:-unknown}"
+        else
+            echo "❌ Host session config directory missing agent payloads" >&2
+            exit 1
+        fi
     fi
-    echo "🔒 Dropping capabilities and switching to $AGENT_USERNAME..."
-    exec capsh --drop=all --user="$AGENT_USERNAME" -- -c "exec /usr/local/bin/entrypoint.sh $(printf '%q ' "$@")"
+
+    if [ -n "${HOST_CAPABILITY_ROOT:-}" ] && [ -d "${HOST_CAPABILITY_ROOT:-}" ]; then
+        wait_for_host_payload "$HOST_CAPABILITY_ROOT" 50 0.1 || true
+        echo "🔑 Installing capability tokens from host"
+        if install_host_capabilities "$HOST_CAPABILITY_ROOT"; then
+            echo "   Capability tokens staged"
+        else
+            echo "❌ Failed to install capability tokens" >&2
+            exit 1
+        fi
+    fi
+
+    HELPER_MANIFEST_PATH=""
+    if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
+        servers_file="$HOST_SESSION_CONFIG_ROOT/servers.txt"
+        ensure_wrapper_binaries "$servers_file"
+        helper_candidate="$HOST_SESSION_CONFIG_ROOT/helpers.json"
+        if [ -f "$helper_candidate" ]; then
+            HELPER_MANIFEST_PATH="$helper_candidate"
+        fi
+    fi
+
+    if [ -z "$HELPER_MANIFEST_PATH" ]; then
+        HELPER_MANIFEST_PATH="/home/${AGENT_USERNAME}/.config/containai/helpers.json"
+    fi
+
+    create_wrapper_links_from_configs \
+        "/home/${AGENT_USERNAME}/.config/github-copilot/mcp/config.json" \
+        "/home/${AGENT_USERNAME}/.config/codex/mcp/config.json" \
+        "/home/${AGENT_USERNAME}/.config/claude/mcp/config.json"
+
+    if [ -f "$HELPER_MANIFEST_PATH" ]; then
+        echo "🔧 Starting MCP helper proxies from ${HELPER_MANIFEST_PATH}"
+        start_mcp_helpers "$HELPER_MANIFEST_PATH"
+    else
+        echo "ℹ️  No MCP helper manifest found; remote helpers not started"
+    fi
+
+    export HELPER_MANIFEST_PATH
+    export HOST_CONFIG_DEPLOYED
+
+
+    # Switch to agent user for the rest of the initialization
+    # We export necessary variables so they persist across the user switch
+    export HOST_CONFIG_DEPLOYED
+    export SSL_CERT_FILE
+    export REQUESTS_CA_BUNDLE
+    export CONTAINAI_AGENT_DATA_STAGED
+    export CONTAINAI_RUNNER_STARTED
+    export CONTAINAI_USER
+    export CONTAINAI_CLI_USER
+    export CONTAINAI_BASEFS
+    export CONTAINAI_TOOLCACHE
+    export CONTAINAI_PTRACE_SCOPE
+    export CONTAINAI_CAP_TMPFS_SIZE
+    export CONTAINAI_DATA_TMPFS_SIZE
+    export CONTAINAI_SECRET_TMPFS_SIZE
+    export CONTAINAI_DISABLE_PTRACE_SCOPE
+    export CONTAINAI_DISABLE_PROC_HARDENING
+    export CONTAINAI_PROC_GROUP
+    export CONTAINAI_RUNNER_POLICY
+    export HELPER_MANIFEST_PATH
+    export AGENT_DATA_HOME
+    export AGENT_HOME
+    export CONTAINAI_AGENT_DATA_HOME
+    export CONTAINAI_AGENT_HOME
+
+    # Enable audit shim via LD_PRELOAD since we cannot write to /etc/ld.so.preload
+    # on a read-only rootfs without SYS_ADMIN capabilities.
+    export LD_PRELOAD="/usr/lib/containai/libaudit_shim.so"
+
+    echo "🔒 Switching to $AGENT_USERNAME..."
+    exec gosu "$AGENT_USERNAME" "$0" "$@"
 fi
 
 AGENT_TASK_RUNNER_SOCKET="${AGENT_TASK_RUNNER_SOCKET:-/run/agent-task-runner.sock}"
 export AGENT_TASK_RUNNER_SOCKET
 if [ "${RUNNER_STARTED:-0}" != "1" ]; then
+    # If we are here, we are running as agentuser but the runner wasn't started by root
+    # (e.g. container started with --user agentuser directly)
     start_agent_task_runnerd
 fi
-enforce_proxy_firewall
 
 echo "🚀 Starting ContainAI Container..."
 
@@ -840,10 +743,10 @@ cleanup_on_shutdown() {
 
     export_agent_data_payload
 
-    if [ ${#MCP_HELPER_PIDS[@]} -gt 0 ]; then
-        for helper_pid in "${MCP_HELPER_PIDS[@]}"; do
+    if [ -f "/run/mcp-helpers/pids" ]; then
+        while read -r helper_pid; do
             kill "$helper_pid" >/dev/null 2>&1 || true
-        done
+        done < "/run/mcp-helpers/pids"
     fi
     rm -rf /run/mcp-helpers /run/mcp-wrappers
 
@@ -996,7 +899,7 @@ trap cleanup_on_shutdown SIGTERM SIGINT EXIT
 cd /workspace || exit 1
 
 # Trust the workspace directory to avoid "dubious ownership" errors
-git config --global --add safe.directory /workspace 2>/dev/null || true
+# (Configured in Dockerfile via --system, but kept here as fallback if needed? No, removing.)
 
 # Display current repository information (concise)
 if [ -d .git ]; then
@@ -1006,18 +909,8 @@ else
     echo "⚠️  Not a git repository - run 'git init' if needed"
 fi
 
-# Configure git to use generic credential helper that delegates to host's auth
-# Works with GitHub, GitLab, Bitbucket, Azure DevOps, self-hosted, etc.
-# The credential helper tries: gh CLI (for github.com) -> git-credential-store
-if git config --global credential.helper "" 2>/dev/null && \
-   git config --global credential.helper '!/usr/local/bin/git-credential-host-helper.sh' 2>/dev/null; then
-    :
-else
-    echo "⚠️  Warning: Failed to configure git credential helper (non-fatal)"
-fi
-
 # Configure git autocrlf for Windows compatibility
-git config --global core.autocrlf true 2>/dev/null || true
+# (Configured in Dockerfile via --system)
 
 # Configure commit signing if host has it configured
 # This allows verified commits while keeping signing keys secure on host
@@ -1066,29 +959,7 @@ if [ -f /home/agentuser/.gitconfig ]; then
     fi
 fi
 
-HOST_CONFIG_DEPLOYED=false
-if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
-    if [ ! -f "${HOST_MITM_CA_CERT:-${HOST_SESSION_CONFIG_ROOT}/mitm/proxy-ca.crt}" ]; then
-        echo "❌ MITM CA missing in session artifacts; expected ${HOST_MITM_CA_CERT:-${HOST_SESSION_CONFIG_ROOT}/mitm/proxy-ca.crt}" >&2
-        exit 1
-    fi
-    echo "🔐 Applying host-rendered MCP configs (session ${HOST_SESSION_ID:-unknown})"
-    if install_host_session_configs "$HOST_SESSION_CONFIG_ROOT"; then
-        HOST_CONFIG_DEPLOYED=true
-        echo "   Manifest SHA: ${HOST_SESSION_CONFIG_SHA256:-unknown}"
-    else
-        echo "⚠️  Host session config directory missing agent payloads; falling back to workspace config.toml"
-    fi
-fi
-
-if [ -n "${HOST_CAPABILITY_ROOT:-}" ] && [ -d "${HOST_CAPABILITY_ROOT:-}" ]; then
-    echo "🔑 Installing capability tokens from host"
-    if install_host_capabilities "$HOST_CAPABILITY_ROOT"; then
-        echo "   Capability tokens staged"
-    else
-        echo "⚠️  Failed to install capability tokens"
-    fi
-fi
+HOST_CONFIG_DEPLOYED=${HOST_CONFIG_DEPLOYED:-false}
 
 if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ "${AGENT_DATA_STAGED:-0}" != "1" ]; then
     if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then
@@ -1102,47 +973,14 @@ if [ -n "${AGENT_NAME:-}" ] && [ -z "${AGENT_DATA_HOME:-${CONTAINAI_AGENT_DATA_H
     ensure_agent_data_fallback "$AGENT_NAME"
 fi
 
-HELPER_MANIFEST_PATH=""
-if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
-    servers_file="$HOST_SESSION_CONFIG_ROOT/servers.txt"
-    ensure_wrapper_binaries "$servers_file"
-    helper_candidate="$HOST_SESSION_CONFIG_ROOT/helpers.json"
-    if [ -f "$helper_candidate" ]; then
-        HELPER_MANIFEST_PATH="$helper_candidate"
-    fi
-fi
-
 if [ "$HOST_CONFIG_DEPLOYED" = false ] && [ -f "/workspace/config.toml" ]; then
     /usr/local/bin/setup-mcp-configs.sh 2>&1 | grep -E "^(ERROR|WARN)" || true
 fi
 
-create_wrapper_links_from_configs \
-    "/home/${AGENT_USERNAME}/.config/github-copilot/mcp/config.json" \
-    "/home/${AGENT_USERNAME}/.config/codex/mcp/config.json" \
-    "/home/${AGENT_USERNAME}/.config/claude/mcp/config.json"
-
-if [ -z "$HELPER_MANIFEST_PATH" ]; then
-    HELPER_MANIFEST_PATH="/home/${AGENT_USERNAME}/.config/containai/helpers.json"
-fi
-
-if [ -n "$HELPER_MANIFEST_PATH" ] && [ ! -f "$HELPER_MANIFEST_PATH" ]; then
-    for _ in {1..5}; do
-        [ -f "$HELPER_MANIFEST_PATH" ] && break
-        sleep 0.2
-    done
-fi
-
-if [ -f "$HELPER_MANIFEST_PATH" ]; then
-    echo "🔧 Starting MCP helper proxies from ${HELPER_MANIFEST_PATH}"
-    start_mcp_helpers "$HELPER_MANIFEST_PATH"
-else
-    echo "ℹ️  No MCP helper manifest found; remote helpers not started"
-fi
-
 # Index project with Serena for faster semantic operations (silent unless error)
 if [ -d "/workspace/.git" ]; then
-    uvx --from "git+https://github.com/oraios/serena" serena project index --project /workspace >/dev/null 2>&1 || \
-        echo "⚠️  Serena indexing failed"
+    timeout 30s serena project index --project /workspace >/dev/null 2>&1 || \
+        echo "⚠️  Serena indexing failed or timed out"
 fi
 
 # Load MCP secrets from host mount if available
@@ -1152,9 +990,6 @@ if [ -f "/home/agentuser/.mcp-secrets.env" ]; then
     source /home/agentuser/.mcp-secrets.env
     set +a
 fi
-
-# Update Serena MCP server to latest version (silent)
-uvx --refresh --from "git+https://github.com/oraios/serena@main" serena --version >/dev/null 2>&1 || true
 
 # Check authentication and configuration (concise summary)
 echo ""
@@ -1223,6 +1058,9 @@ if [ -x "$SESSION_HELPER" ]; then
             ;;
     esac
 fi
+
+# Ensure LD_PRELOAD is set for the final execution (in case we started as agentuser directly)
+export LD_PRELOAD="/usr/lib/containai/libaudit_shim.so"
 
 # Execute the command passed to the container
 exec "$@"

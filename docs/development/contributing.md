@@ -136,6 +136,15 @@ This ensures tests are reproducible and don't depend on timing assumptions.
    ./scripts/test/integration-test.sh --mode launchers
    ```
 
+### Updating Security Profiles
+
+If you modify any files in `host/profiles/` (AppArmor or Seccomp), you must update the system-wide profiles before running tests:
+
+```bash
+# Update profiles in /opt/containai/profiles and reload AppArmor
+sudo ./scripts/setup-local-dev.sh
+```
+
 ### Testing Without Secrets
 All tests use **mock credentials** and are **completely isolated**:
 - No real GitHub tokens required
@@ -336,7 +345,7 @@ containai.proxy-network=<network-name>  # if using squid
 
 ### Test Isolation
 Tests use session IDs (process ID) for complete isolation:
-- Containers: `label=containai.test-session=<PID>`
+- Containers: `label=containai.test.session=<ID>`
 - Networks: `test-containai-net-<PID>`
 - Repositories: `/tmp/test-containai-<PID>`
 

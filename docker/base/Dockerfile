@@ -233,7 +233,11 @@ RUN set -eux; \
         useradd -m -s /usr/sbin/nologin agentcli; \
     fi; \
     usermod -a -G agentcli agentuser >/dev/null 2>&1 || true; \
-    mkdir -p /workspace /home/agentuser/.config /home/agentuser/.local/share; \
+    mkdir -p \
+        /workspace \
+        /home/agentuser/.config \
+        /home/agentuser/.config/containai/capabilities \
+        /home/agentuser/.local/share; \
     chown -R agentuser:agentuser /workspace /home/agentuser; \
     touch /etc/ld.so.preload
 
@@ -266,6 +270,15 @@ RUN pipx --version >/dev/null && \
 ENV PATH="/home/agentuser/.local/bin:${PATH}"
 ENV PATH="/home/agentuser/.cargo/bin:${PATH}"
 ENV PATH="/toolcache/pipx/bin:${PATH}"
+
+# Install serena using uv
+RUN uv tool install serena
+
+# Configure system-wide git settings
+RUN git config --system credential.helper "" && \
+    git config --system credential.helper '!/usr/local/bin/git-credential-host-helper.sh' && \
+    git config --system core.autocrlf true && \
+    git config --system --add safe.directory /workspace
 
 ENV CONTAINAI_BASEFS=/opt/containai/basefs \
     CONTAINAI_TOOLCACHE=/toolcache \

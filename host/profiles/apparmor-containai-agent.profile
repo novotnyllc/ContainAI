@@ -23,6 +23,41 @@ profile containai-agent flags=(attach_disconnected,mediate_deleted) {
   deny @{PROC}/sysrq-trigger rwklx,
   deny @{PROC}/kcore rwklx,
 
+  # =========================================================================
+  # MOUNT RULES - Allow only the mounts required by the entrypoint
+  # =========================================================================
+
+  # Audit shim bind mount
+  mount options=(rw,bind) /run/ld.so.preload -> /etc/ld.so.preload,
+
+  # /proc hardening remount
+  mount options=(rw,remount) -> /proc/,
+
+  # Sensitive tmpfs mounts
+  mount fstype=tmpfs -> /run/agent-secrets/,
+  mount fstype=tmpfs -> /run/agent-data/,
+  mount fstype=tmpfs -> /run/agent-data-export/,
+  mount fstype=tmpfs -> /home/*/,
+  mount fstype=tmpfs -> /home/*/.config/containai/capabilities/,
+
+  # Remount with restrictive flags
+  mount options=(rw,remount) -> /run/agent-secrets/,
+  mount options=(rw,remount) -> /run/agent-data/,
+  mount options=(rw,remount) -> /run/agent-data-export/,
+  mount options=(rw,remount) -> /home/*/,
+  mount options=(rw,remount) -> /home/*/.config/containai/capabilities/,
+
+  # Mount propagation isolation
+  mount options=(rw,make-private) -> /run/agent-secrets/,
+  mount options=(rw,make-private) -> /run/agent-data/,
+  mount options=(rw,make-private) -> /run/agent-data-export/,
+  mount options=(rw,make-private) -> /home/*/.config/containai/capabilities/,
+  mount options=(rw,make-unbindable) -> /run/agent-secrets/,
+  mount options=(rw,make-unbindable) -> /run/agent-data/,
+  mount options=(rw,make-unbindable) -> /run/agent-data-export/,
+  mount options=(rw,make-unbindable) -> /home/*/.config/containai/capabilities/,
+
+  # Deny all other mounts
   deny mount,
 
   deny /sys/[^f]*/** wklx,

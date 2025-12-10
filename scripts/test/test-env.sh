@@ -115,6 +115,7 @@ start_mock_proxy() {
         --network "$TEST_NETWORK" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         alpine:3.19 sh -c "apk add --no-cache busybox-extras >/dev/null && while true; do nc -l -p 3128 >/dev/null; done" >/dev/null
 
     TEST_PROXY_STARTED="true"
@@ -167,6 +168,7 @@ start_local_registry() {
         --name "$TEST_REGISTRY_CONTAINER" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         -p 5555:5000 \
         registry:2 >/dev/null 2>&1; then
         echo "  ✗ Failed to start registry container"
@@ -347,10 +349,11 @@ pull_and_tag_test_images() {
 setup_test_network() {
     echo "Creating test network: $TEST_NETWORK"
     
-    docker network create \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        "$TEST_NETWORK" 2>/dev/null || true
+docker network create \
+    --label "$TEST_LABEL_TEST" \
+    --label "$TEST_LABEL_SESSION" \
+    --label "$TEST_LABEL_CREATED" \
+    "$TEST_NETWORK" 2>/dev/null || true
 }
 
 cleanup_test_network() {
@@ -490,6 +493,11 @@ cleanup_test_containers() {
 cleanup_test_images() {
     if [ "${TEST_PRESERVE_RESOURCES:-false}" = "true" ]; then
         echo "Preserving test images"
+        return 0
+    fi
+
+    if [ "${TEST_KEEP_AGENT_IMAGES:-true}" = "true" ]; then
+        echo "Preserving test images (TEST_KEEP_AGENT_IMAGES=true)"
         return 0
     fi
     

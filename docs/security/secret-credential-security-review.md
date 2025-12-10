@@ -269,7 +269,7 @@ Guarantees:
 
 - **Static enforcement:** PSScriptAnalyzer + shellcheck gating launcher scripts; Rust crate uses clippy + unit tests (`agent_task_sandbox.rs` tests masking/PR_SET_NO_NEW_PRIVS behavior).
 - **Unit/functional tests:** `scripts/test/test-launchers.sh|ps1` cover capability issuance, helper preparation, data packaging; `test-branch-management` ensures git attestation logic holds.
-- **Integration tests:** `scripts/test/integration-test.sh --mode launchers` spins agent containers to validate end-to-end secret flows in disposable Docker-in-Docker environment.
+- **Integration tests:** `scripts/test/integration-test.sh --mode launchers` spins agent containers to validate end-to-end secret flows.
 - **Runtime monitoring:**
   - `security-events.log` records session manifests, capability issuance, override usage.
   - `agent-task-runner/events.log` logs every exec attempt with allow/deny decision.

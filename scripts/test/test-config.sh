@@ -18,17 +18,22 @@ export TEST_COPILOT_IMAGE="${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/copilot:test"
 export TEST_CODEX_IMAGE="${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/codex:test"
 export TEST_CLAUDE_IMAGE="${TEST_REGISTRY}/${TEST_IMAGE_PREFIX}/claude:test"
 
+# Session/label defaults (can be injected by integration-test.sh)
+export TEST_LABEL_PREFIX="${TEST_LABEL_PREFIX:-containai.test}"
+export TEST_SESSION_ID="${TEST_SESSION_ID:-$$}"
+export TEST_CREATED_TS="${TEST_CREATED_TS:-$(date +%s)}"
+
 # Test repository location
-export TEST_REPO_DIR="/tmp/test-containai-repo-$$"
-export TEST_WORKSPACE_DIR="/tmp/test-containai-workspace-$$"
+export TEST_REPO_DIR="/tmp/test-containai-repo-${TEST_SESSION_ID}"
+export TEST_WORKSPACE_DIR="/tmp/test-containai-workspace-${TEST_SESSION_ID}"
 
 # Test Docker network (isolated)
-export TEST_NETWORK="test-containai-net-$$"
-export TEST_PROXY_NETWORK="test-containai-proxy-net-$$"
-export TEST_PROXY_CONTAINER="test-containai-proxy-$$"
+export TEST_NETWORK="test-containai-net-${TEST_SESSION_ID}"
+export TEST_PROXY_NETWORK="test-containai-proxy-net-${TEST_SESSION_ID}"
+export TEST_PROXY_CONTAINER="test-containai-proxy-${TEST_SESSION_ID}"
 
 # Test container prefix
-export TEST_CONTAINER_PREFIX="test-agent-$$"
+export TEST_CONTAINER_PREFIX="test-agent-${TEST_SESSION_ID}"
 
 # Mock credentials (no real secrets)
 export TEST_GH_TOKEN="ghp_test_token_not_real_1234567890abcdef"
@@ -36,8 +41,9 @@ export TEST_GH_USER="test-user"
 export TEST_GH_EMAIL="test@example.com"
 
 # Test labels
-export TEST_LABEL_TEST="containai.test=true"
-export TEST_LABEL_SESSION="containai.test-session=$$"
+export TEST_LABEL_TEST="${TEST_LABEL_TEST:-${TEST_LABEL_PREFIX}.test=true}"
+export TEST_LABEL_SESSION="${TEST_LABEL_SESSION:-${TEST_LABEL_PREFIX}.session=${TEST_SESSION_ID}}"
+export TEST_LABEL_CREATED="${TEST_LABEL_CREATED:-${TEST_LABEL_PREFIX}.created=${TEST_CREATED_TS}}"
 
 # Cleanup preference (override with --preserve flag)
 export TEST_PRESERVE_RESOURCES="${TEST_PRESERVE_RESOURCES:-false}"
@@ -46,7 +52,7 @@ export TEST_PRESERVE_RESOURCES="${TEST_PRESERVE_RESOURCES:-false}"
 export TEST_MODE="${TEST_MODE:-launchers}"
 
 # Local registry container name
-export TEST_REGISTRY_CONTAINER="test-registry-$$"
+export TEST_REGISTRY_CONTAINER="test-registry-${TEST_SESSION_ID}"
 
 # Source registry for pulling images (if available)
 export TEST_SOURCE_REGISTRY="${TEST_SOURCE_REGISTRY:-ghcr.io/yourusername}"
@@ -71,4 +77,4 @@ echo "  Registry: $TEST_REGISTRY"
 echo "  Network: $TEST_NETWORK"
 echo "  Proxy network: $TEST_PROXY_NETWORK"
 echo "  Preserve resources: $TEST_PRESERVE_RESOURCES"
-echo "  Session ID: $$"
+echo "  Session ID: $TEST_SESSION_ID"

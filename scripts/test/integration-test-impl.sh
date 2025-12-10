@@ -37,6 +37,7 @@ CONTAINER_KEEP_ALIVE_CMD="sleep infinity"
 CONTAINER_READY_TIMEOUT=30
 CONTAINER_READY_POLL_INTERVAL=0.5
 
+
 # ============================================================================
 # Usage and Argument Parsing
 # ============================================================================
@@ -481,37 +482,44 @@ test_launcher_script_execution() {
     # Create a mock launcher that uses test images
     cat > "/tmp/test-${launcher_name}" << EOF
 #!/usr/bin/env bash
+set -euo pipefail
 source "$SCRIPT_DIR/test-config.sh"
-
 DOCKER_ARGS=(
     run -d
     --name "$container_name"
-    --label "$TEST_LABEL_TEST"
-    --label "$TEST_LABEL_SESSION"
+    --label "${TEST_LABEL_TEST}"
+    --label "${TEST_LABEL_SESSION}"
+    --label "${TEST_LABEL_CREATED}"
     --label "containai.type=agent"
     --label "containai.agent=copilot"
     --label "containai.repo=test-repo"
     --label "containai.branch=main"
-    --network "$TEST_NETWORK"
+    --network "${TEST_NETWORK}"
     --cap-add SYS_ADMIN
     --cap-add NET_ADMIN
-    -v "$TEST_REPO_DIR:/workspace"
-    -e "GH_TOKEN=$TEST_GH_TOKEN"
+    --read-only
+    --security-opt "apparmor=containai-agent-${channel}"
+)
+
+DOCKER_ARGS+=(
+    --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700"
+    --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700"
+    --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700"
+    --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700"
+    --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755"
+    --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755"
+    --tmpfs "/toolcache:rw,nosuid,nodev,exec,size=256m,mode=775"
+    -v "${TEST_REPO_DIR}:/workspace"
+    -e "GH_TOKEN=${TEST_GH_TOKEN}"
     -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
     -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
     -e "NO_PROXY=localhost,127.0.0.1"
     -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
     --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
     --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
-    --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=1m,mode=770"
-    --tmpfs "/run/agent-data:rw,nosuid,nodev,size=1m,mode=770"
 )
 
-if [ -f "$PROJECT_ROOT/src/agent-task-runner/target/debug/agent-task-runnerd" ]; then
-    DOCKER_ARGS+=(-v "$PROJECT_ROOT/src/agent-task-runner/target/debug/agent-task-runnerd:/usr/local/bin/agent-task-runnerd:ro")
-fi
-
-docker "\${DOCKER_ARGS[@]}" "$TEST_COPILOT_IMAGE" $CONTAINER_KEEP_ALIVE_CMD
+docker "\${DOCKER_ARGS[@]}" "${TEST_COPILOT_IMAGE}" ${CONTAINER_KEEP_ALIVE_CMD}
 EOF
     
     chmod +x "/tmp/test-${launcher_name}"
@@ -833,22 +841,30 @@ test_agent_credential_flow() {
             --name "$container_name" \
             --label "$TEST_LABEL_TEST" \
             --label "$TEST_LABEL_SESSION" \
+            --label "$TEST_LABEL_CREATED" \
             --network "$TEST_NETWORK" \
             --cap-add SYS_ADMIN \
             --cap-add NET_ADMIN \
             -v "$TEST_REPO_DIR:/workspace" \
             -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
-            -v "$session_config_root/capabilities:/home/agentuser/.config/containai/capabilities:ro" \
+            -v "$session_config_root/capabilities:/run/host-capabilities:ro" \
             -v "$PROJECT_ROOT/docker/runtime/capability-unseal.py:/usr/local/bin/capability-unseal:ro" \
             -e "CONTAINAI_AGENT_HOME=/home/agentuser" \
             -e "CONTAINAI_AGENT_SECRET_ROOT=/run/agent-secrets" \
             -e "CONTAINAI_CAPABILITY_UNSEAL=/usr/local/bin/capability-unseal" \
+            -e "HOST_CAPABILITY_ROOT=/run/host-capabilities" \
             -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "NO_PROXY=localhost,127.0.0.1" \
+            --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+            --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+            --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+            --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+            --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+            --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+            --tmpfs "/toolcache:rw,nosuid,nodev,exec,size=256m,mode=775" \
             --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
-            --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=1m,mode=770,uid=1000,gid=1000" \
             "$test_image" \
             $CONTAINER_KEEP_ALIVE_CMD >/dev/null
         
@@ -953,6 +969,7 @@ test_mcp_configuration_generation() {
         --name "$container_name" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
@@ -962,6 +979,12 @@ test_mcp_configuration_generation() {
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "MCP_SECRETS_FILE=/workspace/.mcp-secrets.env" \
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_COPILOT_IMAGE" \
@@ -1157,6 +1180,7 @@ test_mitm_ca_generation() {
         --name "$container_name" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         "$proxy_image"; then
         fail "Failed to start proxy container for MITM test"
         return
@@ -1215,12 +1239,19 @@ test_network_proxy_modes() {
         --name "$restricted_container" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --network none \
         -v "$TEST_REPO_DIR:/workspace" \
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -e "HTTP_PROXY=http://127.0.0.1:3128" \
         -e "HTTPS_PROXY=http://127.0.0.1:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_CLAUDE_IMAGE" \
@@ -1270,6 +1301,7 @@ PY
         --name "$proxy_client" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --network "$TEST_NETWORK" \
         --cap-add NET_ADMIN \
         --cap-add SYS_ADMIN \
@@ -1278,6 +1310,12 @@ PY
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         "$TEST_CODEX_IMAGE" \
@@ -1340,8 +1378,44 @@ test_squid_proxy_hardening() {
     local proxy_network="test-squid-net-${TEST_LABEL_SESSION//[^a-zA-Z0-9_.-]/-}"
     local proxy_container="${TEST_PROXY_CONTAINER}-squid"
     local allowed_container="${TEST_PROXY_CONTAINER}-allowed"
-    local proxy_ip="203.0.113.20"
-    local allowed_ip="203.0.113.10"
+    # Generate a per-session /28 in 100.64.0.0/10; retry with new randoms on collision to avoid runtime errors
+    local subnet_cidr=""
+    local proxy_ip=""
+    local allowed_ip=""
+    local subnet_attempt
+    for subnet_attempt in {1..5}; do
+        subnet_cidr=$(python3 "$SCRIPT_DIR/net_helpers.py" random-subnet \
+            --session "$TEST_LABEL_SESSION" \
+            --test "$TEST_LABEL_TEST" \
+            --base "100.64.0.0/10" \
+            --prefix 28) || subnet_cidr=""
+        [ -n "$subnet_cidr" ] || subnet_cidr="100.115.0.0/28"
+
+        proxy_ip=$(python3 "$SCRIPT_DIR/net_helpers.py" host-ip \
+            --subnet "$subnet_cidr" \
+            --index 3) || proxy_ip=""
+
+        allowed_ip=$(python3 "$SCRIPT_DIR/net_helpers.py" host-ip \
+            --subnet "$subnet_cidr" \
+            --index 2) || allowed_ip=""
+
+        local net_create_err
+        if net_create_err=$(docker network create \
+            --internal \
+            --subnet "$subnet_cidr" \
+            --label "$TEST_LABEL_TEST" \
+            --label "$TEST_LABEL_SESSION" \
+            --label "$TEST_LABEL_CREATED" \
+            "$proxy_network" 2>&1); then
+            break
+        else
+            echo "DEBUG: docker network create error (attempt $subnet_attempt): $net_create_err" >&2
+            docker network rm "$proxy_network" >/dev/null 2>&1 || true
+            subnet_cidr=""
+            proxy_ip=""
+            allowed_ip=""
+        fi
+    done
     local allowed_domain="allowed.test"
     local proxy_url="http://${proxy_ip}:3128"
 
@@ -1396,12 +1470,6 @@ PY
         rm -f "$server_script"
     }
 
-    docker network create \
-        --subnet 203.0.113.0/24 \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        "$proxy_network" 2>/dev/null || true
-
     if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
         fail "Failed to create isolated proxy network"
         cleanup_proxy_resources
@@ -1414,6 +1482,7 @@ PY
         --ip "$allowed_ip" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --cap-add SYS_ADMIN \
         -e "PROXY_FIREWALL_APPLIED=1" \
         -v "$server_script:/server.py:ro" \
@@ -1427,11 +1496,12 @@ PY
 
     if ! docker run -d \
         --name "$proxy_container" \
-        --network "$proxy_network" \
-        --ip "$proxy_ip" \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        --add-host "${allowed_domain}:${allowed_ip}" \
+    --network "$proxy_network" \
+    --ip "$proxy_ip" \
+    --label "$TEST_LABEL_TEST" \
+    --label "$TEST_LABEL_SESSION" \
+    --label "$TEST_LABEL_CREATED" \
+    --add-host "${allowed_domain}:${allowed_ip}" \
         -e "SQUID_ALLOWED_DOMAINS=${allowed_domain}" \
         "$proxy_image"
     then
@@ -1722,6 +1792,7 @@ EOF
         --subnet 203.0.116.0/24 \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         "$proxy_network" 2>/dev/null || true
 
     if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
@@ -1737,12 +1808,19 @@ EOF
         --ip "$allowed_ip" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -e "HTTP_PROXY=http://${proxy_ip}:3128" \
         -e "HTTPS_PROXY=http://${proxy_ip}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         -v "$helper_server_script:/server.py:ro" \
@@ -1793,6 +1871,7 @@ EOF
         --ip "$proxy_ip" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --add-host "${allowed_domain}:${allowed_ip}" \
         -e "SQUID_ALLOWED_DOMAINS=${allowed_domain}" \
         -v "$helper_acl_file:/etc/squid/helper-acls.conf:ro" \
@@ -1839,16 +1918,23 @@ EOF
     if ! docker run -d \
         --name "$helper_container" \
         --network "$proxy_network" \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        --cap-add NET_ADMIN \
-        --cap-add SYS_ADMIN \
+    --label "$TEST_LABEL_TEST" \
+    --label "$TEST_LABEL_SESSION" \
+    --label "$TEST_LABEL_CREATED" \
+    --cap-add NET_ADMIN \
+    --cap-add SYS_ADMIN \
         --add-host "${allowed_domain}:${allowed_ip}" \
         --entrypoint /bin/sh \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
         -e "CONTAINAI_REQUIRE_PROXY=1" \
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         -v "$PROJECT_ROOT:/workspace" \
@@ -1956,9 +2042,10 @@ JSON
     # Start container with the helper manifest
     if ! docker run -d \
         --name "$container_name" \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        --network "$TEST_NETWORK" \
+    --label "$TEST_LABEL_TEST" \
+    --label "$TEST_LABEL_SESSION" \
+    --label "$TEST_LABEL_CREATED" \
+    --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
         -v "$PROJECT_ROOT:/workspace:ro" \
@@ -1966,9 +2053,14 @@ JSON
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
-        --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
         "$TEST_COPILOT_IMAGE" \
         $CONTAINER_KEEP_ALIVE_CMD >/dev/null
     then
@@ -2076,9 +2168,10 @@ JSON
     # Start container
     if ! docker run -d \
         --name "$container_name" \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        --network "$TEST_NETWORK" \
+    --label "$TEST_LABEL_TEST" \
+    --label "$TEST_LABEL_SESSION" \
+    --label "$TEST_LABEL_CREATED" \
+    --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
         -v "$PROJECT_ROOT:/workspace:ro" \
@@ -2086,9 +2179,14 @@ JSON
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
-        --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
         "$TEST_COPILOT_IMAGE" \
         $CONTAINER_KEEP_ALIVE_CMD >/dev/null
     then
@@ -2227,6 +2325,7 @@ JSON
         --name "$container_name" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
         --cap-add NET_ADMIN \
@@ -2235,9 +2334,14 @@ JSON
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
-        --tmpfs "/run:rw,nosuid,nodev,exec,size=64m,mode=755" \
         "$TEST_COPILOT_IMAGE" \
         $CONTAINER_KEEP_ALIVE_CMD >/dev/null
     then
@@ -2357,6 +2461,7 @@ test_multiple_agents() {
             --name "$container_name" \
             --label "$TEST_LABEL_TEST" \
             --label "$TEST_LABEL_SESSION" \
+            --label "$TEST_LABEL_CREATED" \
             --label "containai.type=agent" \
             --label "containai.agent=$agent" \
             --network "$TEST_NETWORK" \
@@ -2367,6 +2472,13 @@ test_multiple_agents() {
             -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
             -e "NO_PROXY=localhost,127.0.0.1" \
+            --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+            --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
+            --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+            --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+            --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
+            --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
+            --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
             --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
             "$test_image" \
@@ -2426,6 +2538,7 @@ test_cleanup_on_exit() {
         --name "$test_container" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         alpine:latest \
         $CONTAINER_KEEP_ALIVE_CMD >/dev/null
     
@@ -2570,7 +2683,7 @@ test_audit_logging() {
     mkdir -p "$socket_dir" "$log_dir"
 
     # Run the log collector inside a Debian container (glibc-based)
-    # This works even when the test runner is on Alpine (musl) inside DinD
+    # This works even when the test runner is on Alpine (musl) environments
     # Note: Don't use --rm so we can get logs on failure
     # Mount the socket directory (not the socket file) so the collector can create the socket
     echo "Starting log collector in container..."
@@ -2579,6 +2692,7 @@ test_audit_logging() {
         --name "$collector_container" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --network "$TEST_NETWORK" \
         -v "$host_bin:/usr/local/bin/containai-log-collector:ro" \
         -v "$socket_dir:$socket_dir" \
@@ -2623,10 +2737,11 @@ test_audit_logging() {
     # We use a simple docker run here to ensure we control the environment fully for this specific integration
     # Use timeout to prevent hanging if shim can't connect
     if ! timeout 30 docker run --rm \
-        --name "$shim_container" \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        --network "$TEST_NETWORK" \
+    --name "$shim_container" \
+    --label "$TEST_LABEL_TEST" \
+    --label "$TEST_LABEL_SESSION" \
+    --label "$TEST_LABEL_CREATED" \
+    --network "$TEST_NETWORK" \
         -v "$socket_dir:$socket_dir" \
         -v "$shim_lib:/usr/lib/libaudit_shim.so:ro" \
         -e "CONTAINAI_SOCKET_PATH=$socket_path" \

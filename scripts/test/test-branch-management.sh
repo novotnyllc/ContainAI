@@ -15,7 +15,10 @@ NC='\033[0m'
 CONTAINER_KEEP_ALIVE_CMD="sleep infinity"
 
 # Test session ID for complete isolation
-TEST_SESSION_ID="$$"
+TEST_SESSION_ID="${TEST_SESSION_ID:-$$}"
+TEST_LABEL_PREFIX="${TEST_LABEL_PREFIX:-containai.test}"
+TEST_LABEL_SESSION="${TEST_LABEL_SESSION:-${TEST_LABEL_PREFIX}.session=${TEST_SESSION_ID}}"
+TEST_LABEL_CREATED="${TEST_LABEL_CREATED:-${TEST_LABEL_PREFIX}.created=$(date +%s)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_REPO_DIR="/tmp/test-branch-mgmt-${TEST_SESSION_ID}"
@@ -64,7 +67,7 @@ cleanup() {
     echo "🧹 Cleaning up test resources..."
     
     # Remove test containers
-    docker ps -aq --filter "label=containai.test-session=${TEST_SESSION_ID}" | xargs -r docker rm -f 2>/dev/null || true
+    docker ps -aq --filter "label=${TEST_LABEL_SESSION}" | xargs -r docker rm -f 2>/dev/null || true
     
     # Remove test networks
     docker network ls --filter "name=test-branch-mgmt-${TEST_SESSION_ID}" --format "{{.Name}}" | xargs -r docker network rm 2>/dev/null || true
@@ -354,7 +357,8 @@ test_container_branch_cleanup() {
     local container_name="copilot-test-cleanup-${TEST_SESSION_ID}"
     docker run -d \
         --name "$container_name" \
-        --label "containai.test-session=${TEST_SESSION_ID}" \
+        --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --label "containai.type=agent" \
         --label "containai.branch=copilot/cleanup-test" \
         --label "containai.repo-path=$TEST_REPO_DIR" \
@@ -385,7 +389,8 @@ test_preserve_branch_with_unmerged_commits() {
     local container_name="copilot-test-preserve-${TEST_SESSION_ID}"
     docker run -d \
         --name "$container_name" \
-        --label "containai.test-session=${TEST_SESSION_ID}" \
+        --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
         --label "containai.type=agent" \
         --label "containai.branch=copilot/preserve-test" \
         --label "containai.repo-path=$TEST_REPO_DIR" \

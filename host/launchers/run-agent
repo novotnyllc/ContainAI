@@ -13,6 +13,13 @@ source "$SCRIPT_DIR/../utils/common-functions.sh"
 detect_environment_profile
 REPO_ROOT="$CONTAINAI_ROOT"
 
+# Channel-aware security profile names/paths
+APPARMOR_PROFILE_NAME="containai-agent-${CONTAINAI_PROFILE}"
+SECCOMP_PROFILE_PATH="/opt/containai/profiles/seccomp-containai-agent-${CONTAINAI_PROFILE}.json"
+if [ ! -f "$SECCOMP_PROFILE_PATH" ]; then
+    SECCOMP_PROFILE_PATH=""
+fi
+
 if ! enforce_prod_install_root; then
     exit 1
 fi
@@ -248,7 +255,6 @@ cleanup_run_agent_volumes() {
     local -a volume_specs=(
         "workspace:${WORKSPACE_VOLUME:-}"
         "home:${HOME_VOLUME:-}"
-        "toolcache:${TOOLCACHE_VOLUME:-}"
     )
 
     for spec in "${volume_specs[@]}"; do
@@ -1052,9 +1058,6 @@ fi
 if [ -z "$HOME_VOLUME" ]; then
     HOME_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "home")
 fi
-if [ -z "$TOOLCACHE_VOLUME" ]; then
-    TOOLCACHE_VOLUME=$(get_container_volume_name "$CONTAINER_NAME" "toolcache")
-fi
 
 # Determine agent branch (handle case where BRANCH is already agent/branch format)
 if [ "$USE_CURRENT_BRANCH" = "true" ]; then
@@ -1095,6 +1098,7 @@ fi
 IMAGE_NAME="$(build_image_ref "$AGENT")"
 PROXY_CONTAINER_NAME="${CONTAINER_NAME}-proxy"
 PROXY_NETWORK_NAME="${CONTAINER_NAME}-net"
+PROXY_EGRESS_NETWORK_NAME="${CONTAINER_NAME}-egress"
 PROXY_IMAGE="$(build_image_ref "proxy")"
 LOG_FORWARDER_IMAGE="${CONTAINAI_LOG_FORWARDER_IMAGE:-$(build_image_ref "log-forwarder")}"
 LOG_BROKER_IMAGE="${CONTAINAI_LOG_BROKER_IMAGE:-$LOG_FORWARDER_IMAGE}"
@@ -1368,7 +1372,7 @@ if container_exists "$CONTAINER_NAME"; then
         EXISTING_NETWORK=$(container_cli inspect -f '{{ index .Config.Labels "containai.proxy-network" }}' "$CONTAINER_NAME" 2>/dev/null || echo "$PROXY_NETWORK_NAME")
         PROXY_CONTAINER_NAME="$EXISTING_PROXY"
         PROXY_NETWORK_NAME="$EXISTING_NETWORK"
-        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
+        ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_EGRESS_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY" ""
         start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$AGENT" "$SESSION_ID"
     fi
     
@@ -1387,7 +1391,7 @@ fi
 
 # Setup squid proxy if needed
 if [ "$USE_SQUID" = true ]; then
-    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY"
+    ensure_squid_proxy "$PROXY_NETWORK_NAME" "$PROXY_EGRESS_NETWORK_NAME" "$PROXY_CONTAINER_NAME" "$PROXY_IMAGE" "$CONTAINER_NAME" "$SQUID_ALLOWED_DOMAINS" "$SQUID_HELPER_ACL_FILE" "$AGENT" "$SESSION_ID" "$PROXY_MITM_CA_CERT" "$PROXY_MITM_CA_KEY" ""
     start_proxy_log_pipeline "$PROXY_CONTAINER_NAME" "$PROXY_NETWORK_NAME" "$PROXY_LOG_DIR" "$PROXY_LOG_CERT_DIR" "$AGENT" "$SESSION_ID"
 fi
 
@@ -1398,8 +1402,6 @@ DOCKER_ARGS+=(
     "run" "-d"
     "--name" "$CONTAINER_NAME"
     "--hostname" "$CONTAINER_NAME"
-    "--security-opt" "apparmor=containai"
-    "--security-opt" "seccomp=$SECCOMP_PROFILE_PATH"
     "-e" "TZ=$TZ_VALUE"
     "-e" "SOURCE_TYPE=$SOURCE_TYPE"
     "-e" "REPO_NAME=$WORKSPACE_NAME"
@@ -1429,7 +1431,6 @@ DOCKER_ARGS+=(
     "--label" "containai.network-policy=$NETWORK_POLICY_ENV"
     "--label" "containai.volume.workspace=$WORKSPACE_VOLUME"
     "--label" "containai.volume.home=$HOME_VOLUME"
-    "--label" "containai.volume.toolcache=$TOOLCACHE_VOLUME"
     "--mount" "type=bind,src=${AGENT_LOG_DIR},dst=/var/log/containai"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
@@ -1439,7 +1440,6 @@ DOCKER_ARGS+=(
 DOCKER_ARGS+=(
     "--mount" "type=volume,src=${WORKSPACE_VOLUME},dst=/workspace"
     "--mount" "type=volume,src=${HOME_VOLUME},dst=/home/agentuser"
-    "--mount" "type=volume,src=${TOOLCACHE_VOLUME},dst=/toolcache"
 )
 
 # Add source-specific vars
@@ -1485,6 +1485,7 @@ fi
 [ -f "${HOME}/.config/containai/mcp-secrets.env" ] && DOCKER_ARGS+=("-v" "${HOME}/.config/containai/mcp-secrets.env:/home/agentuser/.mcp-secrets.env:ro")
 
 TMPFS_MOUNTS=(
+    "/toolcache:rw,nosuid,nodev,size=${TMPFS_LARGE_SIZE},mode=1777"
     "/tmp:rw,nosuid,nodev,size=${TMPFS_LARGE_SIZE},mode=1777"
     "/var/tmp:rw,nosuid,nodev,size=${TMPFS_LARGE_SIZE},mode=1777"
     "/run:rw,nosuid,nodev,size=${TMPFS_SMALL_SIZE},mode=755"
@@ -1602,8 +1603,6 @@ DOCKER_ARGS+=(
     "--network" "$NETWORK_MODE"
     "--read-only"
     "--cap-drop=ALL"
-    "--cap-add=SYS_ADMIN"
-    "--cap-add=NET_ADMIN"
     "--security-opt" "no-new-privileges:true"
     "--pids-limit=4096"
     "--cpus=$CPU"

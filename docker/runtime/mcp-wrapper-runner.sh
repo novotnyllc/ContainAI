@@ -14,6 +14,7 @@ wrapper_name="${wrapper_name:-default}"
 
 runtime_root="/run/mcp-wrappers/${wrapper_name}"
 core_bin="${CONTAINAI_WRAPPER_CORE:-/usr/local/libexec/mcp-wrapper-core.py}"
+cap_root_default="/home/agentuser/.config/containai/capabilities/${wrapper_name}"
 
 validate_spec() {
     # Validate the spec file exists and matches this wrapper
@@ -53,14 +54,6 @@ mkdir -p "$runtime_root" "$runtime_root/tmp"
 # Export runtime-scoped directories to keep wrapper state in tmpfs
 export CONTAINAI_WRAPPER_NAME="$wrapper_name"
 export CONTAINAI_WRAPPER_RUNTIME="$runtime_root"
-export CONTAINAI_WRAPPER_UID="$(python3 - <<'PY'
-import hashlib, os
-name = os.environ.get("CONTAINAI_WRAPPER_NAME", "wrapper")
-# Deterministic 16-bit uid within 20000-40000 range
-uid = 20000 + (int(hashlib.sha256(name.encode()).hexdigest(), 16) % 20000)
-print(uid)
-PY
-)"
 export TMPDIR="$runtime_root/tmp"
 export XDG_RUNTIME_DIR="$runtime_root"
 
@@ -69,6 +62,15 @@ validate_spec
 if [ ! -f "$core_bin" ]; then
     echo "mcp-wrapper-runner: wrapper core missing at $core_bin" >&2
     exit 1
+fi
+
+# Copy capability bundle into runtime so the wrapper can read it
+cap_src="${CONTAINAI_CAP_ROOT:-$cap_root_default}"
+cap_dst="$runtime_root/capabilities"
+if [ -d "$cap_src" ]; then
+    rm -rf "$cap_dst"
+    cp -a "$cap_src" "$cap_dst" 2>/dev/null || true
+    chmod -R go-rwx "$cap_dst" 2>/dev/null || true
 fi
 
 exec python3 "$core_bin"

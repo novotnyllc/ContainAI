@@ -19,4 +19,4 @@ finish() {
 }
 
 trap finish EXIT
-exec "$@"
+"$@"

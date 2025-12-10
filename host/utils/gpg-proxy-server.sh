@@ -48,6 +48,16 @@ DENIED_OPERATIONS=(
     "--import"
     "--edit-key"
     "--passwd"
+    "--output"
+    "-o"
+    "--log-file"
+    "--logger-file"
+    "--homedir"
+    "--options"
+    "--keyring"
+    "--secret-keyring"
+    "--primary-keyring"
+    "--trustdb-name"
 )
 
 # Security: Validate paths
