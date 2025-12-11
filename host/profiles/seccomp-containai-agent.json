@@ -543,45 +543,14 @@
 				"clone"
 			],
 			"action": "SCMP_ACT_ALLOW",
-			"excludes": {
-				"caps": [
-					"CAP_SYS_ADMIN"
-				],
-				"arches": [
-					"s390",
-					"s390x"
-				]
-			}
-		},
-		{
-			"names": [
-				"clone"
-			],
-			"action": "SCMP_ACT_ALLOW",
-			"comment": "s390 parameter ordering for clone is different",
-			"includes": {
-				"arches": [
-					"s390",
-					"s390x"
-				]
-			},
-			"excludes": {
-				"caps": [
-					"CAP_SYS_ADMIN"
-				]
-			}
+			"comment": "clone is used for fork/process creation; namespace flags handled by seccomp notify"
 		},
 		{
 			"names": [
 				"clone3"
 			],
-			"action": "SCMP_ACT_ERRNO",
-			"errnoRet": 38,
-			"excludes": {
-				"caps": [
-					"CAP_SYS_ADMIN"
-				]
-			}
+			"action": "SCMP_ACT_ALLOW",
+			"comment": "clone3 is used by modern glibc for fork/process creation"
 		},
 		{
 			"names": [
@@ -681,7 +650,6 @@
 		{
 			"names": [
 				"bpf",
-				"clone3",
 				"fanotify_init",
 				"fsconfig",
 				"fsmount",

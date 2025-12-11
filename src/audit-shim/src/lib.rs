@@ -16,7 +16,7 @@ lazy_static! {
 }
 
 thread_local! {
-    static RECURSION_GUARD: RefCell<bool> = RefCell::new(false);
+    static RECURSION_GUARD: RefCell<bool> = const { RefCell::new(false) };
 }
 
 fn send_event(event_type: &str, payload: serde_json::Value) {
@@ -86,6 +86,10 @@ fn send_event(event_type: &str, payload: serde_json::Value) {
 }
 
 // Hooking execve
+/// # Safety
+/// This function is an LD_PRELOAD hook for execve. The caller must ensure:
+/// - `path` is a valid null-terminated C string
+/// - `argv` and `envp` are null-terminated arrays of valid C strings (or null)
 #[no_mangle]
 pub unsafe extern "C" fn execve(
     path: *const libc::c_char,
@@ -123,6 +127,9 @@ pub unsafe extern "C" fn execve(
 }
 
 // Hooking open
+/// # Safety
+/// This function is an LD_PRELOAD hook for open. The caller must ensure:
+/// - `path` is a valid null-terminated C string
 #[no_mangle]
 pub unsafe extern "C" fn open(path: *const libc::c_char, flags: libc::c_int, mode: libc::mode_t) -> libc::c_int {
      let path_str = CStr::from_ptr(path).to_string_lossy().to_string();
@@ -142,6 +149,9 @@ pub unsafe extern "C" fn open(path: *const libc::c_char, flags: libc::c_int, mod
 }
 
 // Hooking openat
+/// # Safety
+/// This function is an LD_PRELOAD hook for openat. The caller must ensure:
+/// - `path` is a valid null-terminated C string
 #[no_mangle]
 pub unsafe extern "C" fn openat(dirfd: libc::c_int, path: *const libc::c_char, flags: libc::c_int, mode: libc::mode_t) -> libc::c_int {
      let path_str = CStr::from_ptr(path).to_string_lossy().to_string();
@@ -162,6 +172,9 @@ pub unsafe extern "C" fn openat(dirfd: libc::c_int, path: *const libc::c_char, f
 }
 
 // Hooking connect
+/// # Safety
+/// This function is an LD_PRELOAD hook for connect. The caller must ensure:
+/// - `address` is a valid sockaddr pointer with appropriate length
 #[no_mangle]
 pub unsafe extern "C" fn connect(
     socket: libc::c_int,
