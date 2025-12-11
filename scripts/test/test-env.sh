@@ -433,12 +433,12 @@ cleanup_test_repository() {
         sleep 1
     done
     
-    # Final attempt with verbose error
-    if ! rm -rf "$TEST_REPO_DIR"; then
-        echo "⚠️  Warning: Could not remove test repository with local user permissions."
-        echo "   Attempting removal via Docker (privileged)..."
-        if docker run --rm -v /tmp:/tmp alpine rm -rf "$TEST_REPO_DIR"; then
-            echo "   ✓ Removed via Docker"
+    # Final attempt via Docker if local removal fails
+    if ! rm -rf "$TEST_REPO_DIR" 2>/dev/null; then
+        # echo "⚠️  Warning: Could not remove test repository with local user permissions."
+        # echo "   Attempting removal via Docker (privileged)..."
+        if docker run --rm -v /tmp:/tmp alpine rm -rf "$TEST_REPO_DIR" >/dev/null 2>&1; then
+            # echo "   ✓ Removed via Docker"
             return 0
         else
             echo "   ❌ Failed to remove test repository even via Docker"

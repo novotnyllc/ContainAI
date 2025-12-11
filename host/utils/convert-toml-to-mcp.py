@@ -33,7 +33,9 @@ from pathlib import Path
 import tomllib
 
 
-ENV_PATTERN = re.compile(r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)")
+ENV_PATTERN = re.compile(
+    r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)"
+)
 
 # Agent config directories (relative to ~)
 DEFAULT_AGENTS = {
@@ -47,13 +49,17 @@ WRAPPER_SPEC_DIR = "~/.config/containai/wrappers"
 # The wrapper binary that reads specs and injects secrets
 WRAPPER_COMMAND = "/home/agentuser/.local/bin/mcp-wrapper-{name}"
 
-# Helper proxy settings for remote MCP servers  
+# Helper proxy settings for remote MCP servers
 HELPER_LISTEN_HOST = "127.0.0.1"
 HELPER_PORT_BASE = 52100
 
-DEFAULT_CONFIG_ROOT = Path(os.environ.get("CONTAINAI_CONFIG_ROOT", Path.home() / ".config" / "containai-dev"))
+DEFAULT_CONFIG_ROOT = Path(
+    os.environ.get("CONTAINAI_CONFIG_ROOT", Path.home() / ".config" / "containai-dev")
+)
 DEFAULT_HELPER_ACL_CONFIG = Path(
-    os.environ.get("CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
+    os.environ.get(
+        "CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json"
+    )
 )
 
 
@@ -108,7 +114,9 @@ def collect_secrets():
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
-        secrets.update({k: v for k, v in load_secret_file(candidate).items() if k not in secrets})
+        secrets.update(
+            {k: v for k, v in load_secret_file(candidate).items() if k not in secrets}
+        )
 
     return secrets
 
@@ -224,7 +232,9 @@ def convert_local_server(name, settings, secrets, warnings):
     if cwd:
         placeholders.update(collect_placeholders(cwd))
 
-    available = {k for k, v in secrets.items() if v} | {k for k, v in os.environ.items() if v}
+    available = {k for k, v in secrets.items() if v} | {
+        k for k, v in os.environ.items() if v
+    }
     required_secrets = sorted(name for name in placeholders if name in available)
     missing = sorted(name for name in placeholders if name not in available)
     for placeholder in missing:
@@ -261,15 +271,94 @@ def convert_local_server(name, settings, secrets, warnings):
     return rendered_entry, spec
 
 
-def convert_toml_to_mcp(toml_path):
+def process_servers(mcp_servers, secrets, missing_tokens, warnings, helpers, wrappers, known_helpers):
+    """Process and convert all MCP servers from the config."""
+    resolved_servers = {}
+    port_state = {"value": HELPER_PORT_BASE}
+
+    def next_port():
+        value = port_state["value"]
+        port_state["value"] += 1
+        return value
+
+    for name, settings in mcp_servers.items():
+        settings = dict(settings or {})
+        if "command" in settings:
+            rendered, spec = convert_local_server(name, settings, secrets, warnings)
+            resolved_servers[name] = rendered
+            wrappers.append(spec)
+        else:
+            rendered, helper_entry = convert_remote_server(
+                name, settings, secrets, missing_tokens, next_port
+            )
+            resolved_servers[name] = rendered
+            helpers.append(helper_entry)
+            known_helpers[name] = helper_entry
+    
+    return resolved_servers, next_port
+
+
+def rewrite_existing_servers(
+    existing_servers,
+    resolved_servers,
+    secrets,
+    missing_tokens,
+    warnings,
+    helpers,
+    wrappers,
+    known_helpers,
+    next_port,
+):
+    """Rewrite existing servers to go through proxy mechanism."""
+    rewritten_existing = {}
+    for name, server_config in existing_servers.items():
+        if name in resolved_servers:
+            # Already handled by config.toml, skip
+            continue
+        if _is_already_proxied(server_config):
+            # Already going through our proxy, keep as-is
+            rewritten_existing[name] = server_config
+        elif "command" in server_config:
+            # Local server: wrap it
+            rendered, spec = convert_local_server(name, server_config, secrets, warnings)
+            rewritten_existing[name] = rendered
+            wrappers.append(spec)
+        elif "url" in server_config:
+            # Remote server: route through helper proxy
+            if name in known_helpers:
+                # Reuse existing helper
+                helper = known_helpers[name]
+                rendered = dict(server_config)
+                rendered.pop("bearer_token_env_var", None)
+                for k, v in rendered.items():
+                    rendered[k] = resolve_value(v, secrets)
+                rendered["url"] = f"http://{helper['listen']}"
+                rewritten_existing[name] = rendered
+            else:
+                rendered, helper_entry = convert_remote_server(
+                    name, server_config, secrets, missing_tokens, next_port
+                )
+                rewritten_existing[name] = rendered
+                helpers.append(helper_entry)
+                known_helpers[name] = helper_entry
+        else:
+            # Unknown format, preserve but warn
+            warnings.append(
+                f"⚠️  Unknown MCP server format for '{name}', preserving unchanged"
+            )
+            rewritten_existing[name] = server_config
+    return rewritten_existing
+
+
+def convert_toml_to_mcp(config_path):
     """Convert TOML config to MCP JSON format for all agents."""
 
-    if not os.path.exists(toml_path):
-        print(f"⚠️  No config.toml found at {toml_path}", file=sys.stderr)
+    if not os.path.exists(config_path):
+        print(f"⚠️  No config.toml found at {config_path}", file=sys.stderr)
         return False
 
     try:
-        with open(toml_path, "rb") as handle:
+        with open(config_path, "rb") as handle:
             config = tomllib.load(handle)
     except Exception as exc:  # pylint: disable=broad-except
         print(f"❌ Error parsing TOML: {exc}", file=sys.stderr)
@@ -285,31 +374,16 @@ def convert_toml_to_mcp(toml_path):
     warnings = []
     helpers = []
     wrappers = []
-    port_state = {"value": HELPER_PORT_BASE}
     known_helpers = {}
 
-    def next_port():
-        value = port_state["value"]
-        port_state["value"] += 1
-        return value
-
-    resolved_servers = {}
-    for name, settings in mcp_servers.items():
-        settings = dict(settings or {})
-        if "command" in settings:
-            rendered, spec = convert_local_server(name, settings, secrets, warnings)
-            resolved_servers[name] = rendered
-            wrappers.append(spec)
-        else:
-            rendered, helper_entry = convert_remote_server(name, settings, secrets, missing_tokens, next_port)
-            resolved_servers[name] = rendered
-            helpers.append(helper_entry)
-            known_helpers[name] = helper_entry
+    resolved_servers, next_port = process_servers(
+        mcp_servers, secrets, missing_tokens, warnings, helpers, wrappers, known_helpers
+    )
 
     agents = dict(DEFAULT_AGENTS)
 
-    for agent_name, config_path in agents.items():
-        config_dir = os.path.expanduser(config_path)
+    for agent_name, agent_config_path in agents.items():
+        config_dir = os.path.expanduser(agent_config_path)
         os.makedirs(config_dir, exist_ok=True)
 
         config_file = os.path.join(config_dir, "config.json")
@@ -322,43 +396,24 @@ def convert_toml_to_mcp(toml_path):
                     existing_config = json.load(handle)
                     existing_servers = existing_config.get("mcpServers", {})
             except (json.JSONDecodeError, OSError) as exc:
-                print(f"⚠️  Could not read existing {agent_name} config, will overwrite: {exc}", file=sys.stderr)
-        
+                print(
+                    f"⚠️  Could not read existing {agent_name} config, will overwrite: {exc}",
+                    file=sys.stderr,
+                )
+
         # Rewrite existing servers to go through proxy mechanism
-        rewritten_existing = {}
-        for name, server_config in existing_servers.items():
-            if name in resolved_servers:
-                # Already handled by config.toml, skip
-                continue
-            if _is_already_proxied(server_config):
-                # Already going through our proxy, keep as-is
-                rewritten_existing[name] = server_config
-            elif "command" in server_config:
-                # Local server: wrap it
-                rendered, spec = convert_local_server(name, server_config, secrets, warnings)
-                rewritten_existing[name] = rendered
-                wrappers.append(spec)
-            elif "url" in server_config:
-                # Remote server: route through helper proxy
-                if name in known_helpers:
-                    # Reuse existing helper
-                    helper = known_helpers[name]
-                    rendered = dict(server_config)
-                    rendered.pop("bearer_token_env_var", None)
-                    for k, v in rendered.items():
-                        rendered[k] = resolve_value(v, secrets)
-                    rendered["url"] = f"http://{helper['listen']}"
-                    rewritten_existing[name] = rendered
-                else:
-                    rendered, helper_entry = convert_remote_server(name, server_config, secrets, missing_tokens, next_port)
-                    rewritten_existing[name] = rendered
-                    helpers.append(helper_entry)
-                    known_helpers[name] = helper_entry
-            else:
-                # Unknown format, preserve but warn
-                warnings.append(f"⚠️  Unknown MCP server format for '{name}', preserving unchanged")
-                rewritten_existing[name] = server_config
-        
+        rewritten_existing = rewrite_existing_servers(
+            existing_servers,
+            resolved_servers,
+            secrets,
+            missing_tokens,
+            warnings,
+            helpers,
+            wrappers,
+            known_helpers,
+            next_port,
+        )
+
         merged_servers = {**rewritten_existing, **resolved_servers}
         mcp_config = {**existing_config, "mcpServers": merged_servers}
 
@@ -369,7 +424,7 @@ def convert_toml_to_mcp(toml_path):
             print(f"❌ Error writing {agent_name} config: {exc}", file=sys.stderr)
             return False
 
-    helper_manifest = {"helpers": helpers, "source": str(toml_path)}
+    helper_manifest = {"helpers": helpers, "source": str(config_path)}
     helper_path = os.path.expanduser("~/.config/containai/helpers.json")
     os.makedirs(os.path.dirname(helper_path), exist_ok=True)
     try:

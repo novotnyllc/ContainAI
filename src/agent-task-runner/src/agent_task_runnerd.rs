@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::env;
-use std::ffi::CString;
-use std::fs::{File, OpenOptions};
+use std::fs::{set_permissions, File, OpenOptions, Permissions};
 use std::io::{self, ErrorKind, IoSliceMut, Read, Write};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -30,6 +30,7 @@ use nix::sys::signal::{kill, Signal};
 use nix::sys::socket::{
     self, AddressFamily, Backlog, ControlMessageOwned, MsgFlags, SockFlag, SockType, UnixAddr,
 };
+use nix::sys::uio::{process_vm_readv, RemoteIoVec};
 use nix::unistd::{self, Pid};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -290,7 +291,7 @@ fn create_listener(socket_path: &str) -> Result<OwnedFd> {
     unistd::unlink(Path::new(socket_path)).ok();
     let addr = UnixAddr::new(socket_path)?;
     socket::bind(owned.as_raw_fd(), &addr).map_err(|e| anyhow!(e))?;
-    let _ = unsafe { libc::chmod(CString::new(socket_path)?.as_ptr(), 0o666) };
+    let _ = set_permissions(socket_path, Permissions::from_mode(0o666));
     let backlog = Backlog::new(16).map_err(|e| anyhow!(e))?;
     socket::listen(&owned, backlog).map_err(|e| anyhow!(e))?;
     Ok(owned)
@@ -324,8 +325,8 @@ fn accept_client(
             MsgFlags::empty(),
         )
         .map_err(|e| anyhow!(e))?;
-        let mut cmsgs = msg.cmsgs().map_err(|e| anyhow!(e))?;
-        while let Some(cmsg) = cmsgs.next() {
+        let cmsgs = msg.cmsgs().map_err(|e| anyhow!(e))?;
+        for cmsg in cmsgs {
             if let ControlMessageOwned::ScmRights(fds) = cmsg {
                 if let Some(fd) = fds.first() {
                     received_fd = Some(unsafe { OwnedFd::from_raw_fd(*fd) });
@@ -464,7 +465,7 @@ fn handle_run_session(
         .unwrap_or_else(|| "agent-cli".into());
     let command_label = request
         .argv
-        .get(0)
+        .first()
         .cloned()
         .unwrap_or_else(|| "<unknown>".into());
 
@@ -845,20 +846,14 @@ fn resolve_exec_path(pid: libc::pid_t, addr: u64) -> String {
 /// Wrapper around `process_vm_readv` that copies memory out of the traced
 /// process.
 fn read_remote(pid: libc::pid_t, addr: u64, buf: &mut [u8]) -> io::Result<usize> {
-    let local = libc::iovec {
-        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
-        iov_len: buf.len(),
-    };
-    let remote = libc::iovec {
-        iov_base: addr as *mut libc::c_void,
-        iov_len: buf.len(),
-    };
-    let rc = unsafe { libc::process_vm_readv(pid, &local, 1, &remote, 1, 0) };
-    if rc < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(rc as usize)
-    }
+    let mut local_iov = [IoSliceMut::new(buf)];
+    let remote_iov = [RemoteIoVec {
+        base: addr as usize,
+        len: local_iov[0].len(),
+    }];
+
+    process_vm_readv(Pid::from_raw(pid), &mut local_iov, &remote_iov)
+        .map_err(io::Error::from)
 }
 
 /// Appends a JSON event record to the daemon's log file.

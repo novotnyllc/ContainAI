@@ -23,11 +23,17 @@ AGENT_CONFIG_TARGETS: Dict[str, str] = {
 STUB_COMMAND_TEMPLATE = "/home/agentuser/.local/bin/mcp-stub-{name}"
 HELPER_LISTEN_HOST = "127.0.0.1"
 HELPER_PORT_BASE = 52100
-DEFAULT_CONFIG_ROOT = pathlib.Path(os.environ.get("CONTAINAI_CONFIG_ROOT", pathlib.Path.home() / ".config" / "containai-dev"))
-DEFAULT_HELPER_ACL_CONFIG = pathlib.Path(
-    os.environ.get("CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json")
+DEFAULT_CONFIG_ROOT = pathlib.Path(
+    os.environ.get("CONTAINAI_CONFIG_ROOT", pathlib.Path.home() / ".config" / "containai-dev")
 )
-ENV_PATTERN = re.compile(r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)")
+DEFAULT_HELPER_ACL_CONFIG = pathlib.Path(
+    os.environ.get(
+        "CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json"
+    )
+)
+ENV_PATTERN = re.compile(
+    r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)"
+)
 DEFAULT_SECRET_PATHS = [
     pathlib.Path("~/.config/containai/mcp-secrets.env").expanduser(),
     pathlib.Path("~/.mcp-secrets.env").expanduser(),
@@ -36,26 +42,26 @@ DEFAULT_SECRET_PATHS = [
 
 def _load_secret_file(path: pathlib.Path) -> Dict[str, str]:
     secrets: Dict[str, str] = {}
+    if not path.exists():
+        return secrets
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            for raw_line in handle:
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line.startswith("export "):
-                    line = line[len("export "):]
-                if "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip()
-                if not key:
-                    continue
-                if value and ((value[0] == value[-1]) and value.startswith(("'", '"'))):
-                    value = value[1:-1]
-                secrets.setdefault(key, value)
-    except FileNotFoundError:
-        return {}
+        content = path.read_text(encoding="utf-8")
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            secrets.setdefault(key, value)
     except OSError as exc:
         print(f"⚠️  Unable to read secrets from {path}: {exc}", file=sys.stderr)
     return secrets
@@ -63,21 +69,37 @@ def _load_secret_file(path: pathlib.Path) -> Dict[str, str]:
 
 def _collect_secrets(explicit_files: List[pathlib.Path]) -> Dict[str, str]:
     candidates: List[pathlib.Path] = []
-    seen: Set[str] = set()
-    env_override = os.environ.get("CONTAINAI_MCP_SECRETS_FILE") or os.environ.get("MCP_SECRETS_FILE")
+
+    # Check environment overrides first
+    env_override = os.environ.get("CONTAINAI_MCP_SECRETS_FILE") or os.environ.get(
+        "MCP_SECRETS_FILE"
+    )
     if env_override:
         candidates.append(pathlib.Path(env_override).expanduser())
+
+    # Add explicit files and defaults
     candidates.extend(explicit_files)
     candidates.extend(DEFAULT_SECRET_PATHS)
-    merged: Dict[str, str] = {}
-    for candidate in candidates:
-        resolved = candidate.expanduser()
-        key = str(resolved)
-        if key in seen:
+
+    merged_secrets: Dict[str, str] = {}
+    processed_paths: Set[str] = set()
+
+    for file_path in candidates:
+        resolved_path = file_path.expanduser()
+        path_key = str(resolved_path)
+
+        if path_key in processed_paths:
             continue
-        seen.add(key)
-        merged.update({k: v for k, v in _load_secret_file(resolved).items() if k not in merged})
-    return merged
+
+        processed_paths.add(path_key)
+        file_secrets = _load_secret_file(resolved_path)
+
+        # Only add secrets that haven't been defined yet (first wins)
+        for key, value in file_secrets.items():
+            if key not in merged_secrets:
+                merged_secrets[key] = value
+
+    return merged_secrets
 
 
 def _collect_placeholders(value) -> Set[str]:
@@ -100,7 +122,7 @@ def _load_acl_policies(path: pathlib.Path) -> Dict[str, Dict[str, Dict[str, List
     try:
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return {"helpers": {}, "agents": {}}
     helpers_raw = data.get("helpers", []) if isinstance(data, dict) else data
     agents_raw = data.get("agents", []) if isinstance(data, dict) else []
@@ -121,7 +143,11 @@ def _load_acl_policies(path: pathlib.Path) -> Dict[str, Dict[str, Dict[str, List
     return {"helpers": helpers, "agents": agents}
 
 
-def _write_squid_acls(output_path: pathlib.Path, helpers: List[Dict[str, object]], policies: Dict[str, Dict[str, Dict[str, List[str]]]]) -> None:
+def _write_squid_acls(
+    output_path: pathlib.Path,
+    helpers: List[Dict[str, object]],
+    policies: Dict[str, Dict[str, Dict[str, List[str]]]],
+) -> None:
     lines: List[str] = [
         "# Auto-generated helper ACLs",
         "# Each helper must present X-CA-Helper header; allow lists are per helper",
@@ -193,7 +219,7 @@ def _parse_value(raw: str):
         return False
     try:
         return ast.literal_eval(candidate)
-    except Exception:
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         return candidate.strip('"').strip("'")
 
 

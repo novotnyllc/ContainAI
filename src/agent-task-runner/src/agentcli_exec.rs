@@ -2,8 +2,9 @@ use std::env;
 use std::ffi::{CString, OsString};
 use std::io::{self, IoSlice, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::ffi::OsStringExt;
 use std::os::unix::prelude::RawFd;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 
 use agent_task_runner::protocol::{
     AgentTaskRunnerMsgHeader, AgentTaskRunnerRegister, MSG_REGISTER,
@@ -14,7 +15,8 @@ use libc::c_int;
 use nix::sys::socket::{
     self, AddressFamily, ControlMessage, MsgFlags, SockFlag, SockType, UnixAddr,
 };
-use nix::unistd::{execvp, initgroups, setresgid, setresuid, User};
+use nix::unistd::{getgid, getpid, getuid, initgroups, setresgid, setresuid, User};
+use nix::sched::{unshare, CloneFlags};
 
 fn main() {
     if let Err(err) = real_main() {
@@ -42,30 +44,27 @@ fn real_main() -> Result<()> {
         switch_user().context("failed to switch user")?;
     }
 
-    let cstrings: Vec<CString> = argv
-        .into_iter()
-        .map(|arg| CString::new(arg.into_vec()))
-        .collect::<Result<_, _>>()
-        .context("argument contained NUL byte")?;
-    let (cmd, _) = cstrings
-        .split_first()
-        .context("missing command after argv parsing")?;
+    let target_cmd = &argv[0];
+    let target_args = &argv[1..];
+
+    let mut command = Command::new(target_cmd);
+    command.args(target_args);
 
     // Always attempt to load the audit shim if present.
     // This provides defense-in-depth logging even if seccomp notifications fail or are bypassed.
     let shim_path = "/usr/lib/containai/libaudit_shim.so";
     if std::path::Path::new(shim_path).exists() {
-            let current_preload = env::var("LD_PRELOAD").unwrap_or_default();
-            let new_preload = if current_preload.is_empty() {
-                shim_path.to_string()
-            } else {
-                format!("{}:{}", shim_path, current_preload)
-            };
-            env::set_var("LD_PRELOAD", new_preload);
+        let current_preload = env::var("LD_PRELOAD").unwrap_or_default();
+        let new_preload = if current_preload.is_empty() {
+            shim_path.to_string()
+        } else {
+            format!("{}:{}", shim_path, current_preload)
+        };
+        command.env("LD_PRELOAD", new_preload);
     }
 
-    execvp(cmd, &cstrings)?;
-    unreachable!("execvp should not return on success");
+    let err = command.exec();
+    bail!("exec failed: {}", err);
 }
 
 fn switch_user() -> Result<()> {
@@ -88,27 +87,21 @@ fn setup_runner(socket_path: &str) -> Result<bool> {
     let notify_fd = install_seccomp_filter().context("unable to install seccomp filter")?;
     let agent_name = get_env("CONTAINAI_AGENT_NAME");
     let binary_name = get_env("CONTAINAI_AGENT_BINARY");
-    if let Err(err) = register_with_runner(
+    register_with_runner(
         socket_path,
         notify_fd.as_ref().map(|fd| fd.as_raw_fd()),
         agent_name.as_deref(),
         binary_name.as_deref(),
-    ) {
-        return Err(err);
-    }
+    )?;
     Ok(restricted)
 }
 
 fn unshare_user_namespace() -> Result<bool> {
-    let uid = unsafe { libc::getuid() };
-    let gid = unsafe { libc::getgid() };
+    let uid = getuid();
+    let gid = getgid();
 
-    unsafe {
-        if libc::unshare(libc::CLONE_NEWUSER) != 0 {
-            bail!("unshare(CLONE_NEWUSER) failed: {}", std::io::Error::last_os_error());
-        }
-    }
-    
+    unshare(CloneFlags::CLONE_NEWUSER).context("unshare(CLONE_NEWUSER) failed")?;
+
     // Try mapping root to root (requires CAP_SETUID in parent)
     // If this works, we are not restricted and can switch users.
     let full_map = "0 0 65536";
@@ -125,7 +118,7 @@ fn unshare_user_namespace() -> Result<bool> {
     // This allows us to be root inside (gaining CAP_SYS_ADMIN), but we can't switch to other users.
     let uid_map = format!("0 {} 1", uid);
     std::fs::write("/proc/self/uid_map", uid_map).context("failed to write uid_map")?;
-    
+
     std::fs::write("/proc/self/setgroups", "deny").context("failed to write setgroups")?;
     let gid_map = format!("0 {} 1", gid);
     std::fs::write("/proc/self/gid_map", gid_map).context("failed to write gid_map")?;
@@ -176,7 +169,7 @@ fn install_seccomp_filter() -> Result<Option<OwnedFd>> {
         // File::from_raw_fd takes ownership, so it will close it.
         // But read_fd is an OwnedFd. We should use into_raw_fd() to prevent double close.
         // Or just let File take ownership and forget read_fd.
-        std::mem::forget(read_fd); 
+        std::mem::forget(read_fd);
 
         seccomp_release(ctx);
 
@@ -253,14 +246,14 @@ fn register_with_runner(
         std::mem::size_of::<AgentTaskRunnerRegister>() as u32,
     );
     let mut payload = AgentTaskRunnerRegister::empty();
-    payload.pid = unsafe { libc::getpid() as u32 };
+    payload.pid = getpid().as_raw() as u32;
     write_cstring_buf(&mut payload.agent_name, agent_name, "unknown");
     write_cstring_buf(&mut payload.binary_name, binary_name, "unknown");
 
     let header_bytes = struct_bytes(&header);
     let payload_bytes = struct_bytes(&payload);
     let iov = [IoSlice::new(header_bytes), IoSlice::new(payload_bytes)];
-    
+
     if let Some(fd) = notify_fd {
         let cmsg = [ControlMessage::ScmRights(&[fd])];
         socket::sendmsg::<UnixAddr>(sock.as_raw_fd(), &iov, &cmsg, MsgFlags::empty(), None)
@@ -279,8 +272,5 @@ fn is_wsl() -> bool {
 }
 
 fn get_env(name: &str) -> Option<String> {
-    match env::var(name).ok().filter(|v| !v.is_empty()) {
-        Some(val) => Some(val),
-        None => None,
-    }
+    env::var(name).ok().filter(|v| !v.is_empty())
 }

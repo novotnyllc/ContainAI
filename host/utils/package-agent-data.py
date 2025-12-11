@@ -77,9 +77,59 @@ def write_manifest(manifest_path: Path, agent: str, session_id: str, entries: Li
         pass
 
 
-def _compute_entry_hmac(key: bytes, *, path: str, sha256_value: str, size: int, mtime: int, strategy: str) -> str:
+def _compute_entry_hmac(
+    key: bytes,
+    *,
+    path: str,
+    sha256_value: str,
+    size: int,
+    mtime: int,
+    strategy: str
+) -> str:
     payload = "|".join([path, sha256_value, str(size), str(mtime), strategy])
     return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def process_package_spec(spec, home_path, hmac_key, entries, tar_inputs):
+    raw = os.path.expanduser(spec.path)
+    spec_path = Path(raw)
+    if spec_path.is_absolute():
+        source = spec_path
+        arcname = spec_path.as_posix().lstrip("/")
+        if not arcname:
+            return
+    else:
+        source = (home_path / spec_path).resolve()
+        arcname = spec_path.as_posix()
+    if not source.exists():
+        return
+    if source.is_symlink():
+        return
+    tar_inputs.append((source, arcname))
+    for file_path in iter_spec_files(source):
+        if file_path.is_symlink():
+            continue
+        rel = Path(arcname)
+        if source.is_dir():
+            rel = rel / file_path.relative_to(source)
+        entry_stat = file_path.stat()
+        entry_record = {
+            "path": rel.as_posix(),
+            "sha256": sha256_file(file_path),
+            "size": entry_stat.st_size,
+            "mtime": int(entry_stat.st_mtime),
+            "strategy": spec.strategy,
+        }
+        if hmac_key:
+            entry_record["hmac"] = _compute_entry_hmac(
+                hmac_key,
+                path=entry_record["path"],
+                sha256_value=entry_record["sha256"],
+                size=entry_record["size"],
+                mtime=entry_record["mtime"],
+                strategy=entry_record["strategy"],
+            )
+        entries.append(entry_record)
 
 
 def package_agent_data(
@@ -101,45 +151,7 @@ def package_agent_data(
     tar_inputs: List[tuple[Path, str]] = []
 
     for spec in specs:
-        raw = os.path.expanduser(spec.path)
-        spec_path = Path(raw)
-        if spec_path.is_absolute():
-            source = spec_path
-            arcname = spec_path.as_posix().lstrip("/")
-            if not arcname:
-                continue
-        else:
-            source = (home_path / spec_path).resolve()
-            arcname = spec_path.as_posix()
-        if not source.exists():
-            continue
-        if source.is_symlink():
-            continue
-        tar_inputs.append((source, arcname))
-        for file_path in iter_spec_files(source):
-            if file_path.is_symlink():
-                continue
-            rel = Path(arcname)
-            if source.is_dir():
-                rel = rel / file_path.relative_to(source)
-            entry_stat = file_path.stat()
-            entry_record = {
-                "path": rel.as_posix(),
-                "sha256": sha256_file(file_path),
-                "size": entry_stat.st_size,
-                "mtime": int(entry_stat.st_mtime),
-                "strategy": spec.strategy,
-            }
-            if hmac_key:
-                entry_record["hmac"] = _compute_entry_hmac(
-                    hmac_key,
-                    path=entry_record["path"],
-                    sha256_value=entry_record["sha256"],
-                    size=entry_record["size"],
-                    mtime=entry_record["mtime"],
-                    strategy=entry_record["strategy"],
-                )
-            entries.append(entry_record)
+        process_package_spec(spec, home_path, hmac_key, entries, tar_inputs)
 
     entries.sort(key=lambda item: item["path"])
     write_manifest(manifest_path, agent, session_id, entries)
@@ -173,19 +185,103 @@ def _ensure_relative_path(path_str: str) -> Path:
 
 def _write_temp_copy(fileobj, dest_dir: Path, chunk_size: int = 1024 * 1024) -> tuple[Path, str]:
     dest_dir.mkdir(parents=True, exist_ok=True)
-    tmp_handle = tempfile.NamedTemporaryFile(delete=False, dir=dest_dir)
-    tmp_path = Path(tmp_handle.name)
-    hasher = hashlib.sha256()
-    try:
+    with tempfile.NamedTemporaryFile(delete=False, dir=dest_dir) as tmp_handle:
+        tmp_path = Path(tmp_handle.name)
+        hasher = hashlib.sha256()
         while True:
             chunk = fileobj.read(chunk_size)
             if not chunk:
                 break
             tmp_handle.write(chunk)
             hasher.update(chunk)
-    finally:
-        tmp_handle.close()
     return tmp_path, hasher.hexdigest()
+
+
+def verify_hmac(hmac_key, entry, rel_path, strategy):
+    if not hmac_key:
+        return True
+    entry_hmac = entry.get("hmac")
+    if not entry_hmac:
+        print(f"[data] missing HMAC for '{rel_path}'", file=sys.stderr)
+        return False
+
+    digest_expected = entry.get("sha256")
+    expected_hmac = _compute_entry_hmac(
+        hmac_key,
+        path=rel_path.as_posix(),
+        sha256_value=digest_expected or "",
+        size=int(entry.get("size", 0)),
+        mtime=int(entry.get("mtime", 0)),
+        strategy=strategy,
+    )
+    if not hmac.compare_digest(expected_hmac, entry_hmac):
+        print(f"[data] HMAC mismatch for '{rel_path}'", file=sys.stderr)
+        return False
+    return True
+
+
+def process_archive_entry(
+    archive: tarfile.TarFile,
+    entry: dict,
+    target_home: Path,
+    hmac_key: Optional[bytes],
+) -> bool:
+    """Process a single entry from the archive manifest."""
+    rel_path = _ensure_relative_path(entry["path"])
+    strategy = entry.get("strategy", "replace")
+    digest_expected = entry.get("sha256")
+
+    if not verify_hmac(hmac_key, entry, rel_path, strategy):
+        return False
+
+    try:
+        member = archive.getmember(rel_path.as_posix())
+    except KeyError:
+        print(f"[data] missing member '{rel_path}' in tar", file=sys.stderr)
+        return False
+    if not member.isfile():
+        print(f"[data] member '{rel_path}' is not a regular file", file=sys.stderr)
+        return False
+
+    fileobj = archive.extractfile(member)
+    if fileobj is None:
+        print(f"[data] unable to extract '{rel_path}'", file=sys.stderr)
+        return False
+
+    tmp_root = target_home / ".containai-tmp"
+    tmp_path, digest_actual = _write_temp_copy(fileobj, tmp_root)
+    if digest_expected and digest_actual != digest_expected:
+        tmp_path.unlink(missing_ok=True)
+        print(f"[data] digest mismatch for '{rel_path}'", file=sys.stderr)
+        return False
+
+    target_path = (target_home / rel_path).resolve()
+    if target_home not in target_path.parents and target_path != target_home:
+        tmp_path.unlink(missing_ok=True)
+        print(f"[data] target '{target_path}' escapes home root", file=sys.stderr)
+        return False
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if strategy == "replace":
+        if target_path.exists():
+            if target_path.is_dir():
+                shutil.rmtree(target_path)
+            else:
+                target_path.unlink()
+        shutil.move(str(tmp_path), target_path)
+        target_path.chmod(0o600)
+    elif strategy == "append":
+        with target_path.open("ab") as dest, tmp_path.open("rb") as src:
+            shutil.copyfileobj(src, dest)
+        target_path.chmod(0o600)
+        tmp_path.unlink(missing_ok=True)
+    else:
+        tmp_path.unlink(missing_ok=True)
+        print(f"[data] unknown merge strategy '{strategy}'", file=sys.stderr)
+        return False
+
+    return True
 
 
 def merge_agent_data(
@@ -204,7 +300,10 @@ def merge_agent_data(
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("agent") != agent:
-        print(f"[data] manifest agent mismatch: expected '{agent}' got '{manifest.get('agent')}'", file=sys.stderr)
+        print(
+            f"[data] manifest agent mismatch: expected '{agent}' got '{manifest.get('agent')}'",
+            file=sys.stderr,
+        )
         return False
     if session_id and manifest.get("session") != session_id:
         print(
@@ -221,74 +320,10 @@ def merge_agent_data(
 
     with tarfile.open(tar_path, "r") as archive:
         for entry in manifest.get("entries", []):
-            rel_path = _ensure_relative_path(entry["path"])
-            strategy = entry.get("strategy", "replace")
-            digest_expected = entry.get("sha256")
-            entry_hmac = entry.get("hmac")
-            if hmac_key:
-                if not entry_hmac:
-                    print(f"[data] missing HMAC for '{rel_path}'", file=sys.stderr)
-                    return False
-                expected_hmac = _compute_entry_hmac(
-                    hmac_key,
-                    path=rel_path.as_posix(),
-                    sha256_value=digest_expected or "",
-                    size=int(entry.get("size", 0)),
-                    mtime=int(entry.get("mtime", 0)),
-                    strategy=strategy,
-                )
-                if not hmac.compare_digest(expected_hmac, entry_hmac):
-                    print(f"[data] HMAC mismatch for '{rel_path}'", file=sys.stderr)
-                    return False
-
-            try:
-                member = archive.getmember(rel_path.as_posix())
-            except KeyError:
-                print(f"[data] missing member '{rel_path}' in tar", file=sys.stderr)
-                return False
-            if not member.isfile():
-                print(f"[data] member '{rel_path}' is not a regular file", file=sys.stderr)
-                return False
-
-            fileobj = archive.extractfile(member)
-            if fileobj is None:
-                print(f"[data] unable to extract '{rel_path}'", file=sys.stderr)
-                return False
-
-            tmp_root = target_home / ".containai-tmp"
-            tmp_path, digest_actual = _write_temp_copy(fileobj, tmp_root)
-            if digest_expected and digest_actual != digest_expected:
-                tmp_path.unlink(missing_ok=True)
-                print(f"[data] digest mismatch for '{rel_path}'", file=sys.stderr)
-                return False
-
-            target_path = (target_home / rel_path).resolve()
-            if target_home not in target_path.parents and target_path != target_home:
-                tmp_path.unlink(missing_ok=True)
-                print(f"[data] target '{target_path}' escapes home root", file=sys.stderr)
-                return False
-
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-
-            if strategy == "replace":
-                if target_path.exists():
-                    if target_path.is_dir():
-                        shutil.rmtree(target_path)
-                    else:
-                        target_path.unlink()
-                shutil.move(str(tmp_path), target_path)
-                target_path.chmod(0o600)
-            elif strategy == "append":
-                with target_path.open("ab") as dest, tmp_path.open("rb") as src:
-                    shutil.copyfileobj(src, dest)
-                target_path.chmod(0o600)
-                tmp_path.unlink(missing_ok=True)
+            if process_archive_entry(archive, entry, target_home, hmac_key):
+                processed += 1
             else:
-                tmp_path.unlink(missing_ok=True)
-                print(f"[data] unknown merge strategy '{strategy}'", file=sys.stderr)
                 return False
-
-            processed += 1
 
     tmp_root = target_home / ".containai-tmp"
     if tmp_root.exists():
@@ -306,11 +341,25 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--mode", choices=("package", "merge"), default="package")
     parser.add_argument("--agent", required=True, choices=sorted(AGENT_DATA_SPECS.keys()))
     parser.add_argument("--session-id", help="Session identifier for correlation")
-    parser.add_argument("--tar", required=True, type=Path, help="Tarball path (output for package, input for merge)")
-    parser.add_argument("--manifest", required=True, type=Path, help="Manifest path (output for package, input for merge)")
+    parser.add_argument(
+        "--tar",
+        required=True,
+        type=Path,
+        help="Tarball path (output for package, input for merge)",
+    )
+    parser.add_argument(
+        "--manifest",
+        required=True,
+        type=Path,
+        help="Manifest path (output for package, input for merge)",
+    )
     parser.add_argument("--hmac-key-file", type=Path, help="Path to hex-encoded HMAC key")
-    parser.add_argument("--hmac-key-env", help="Environment variable containing hex-encoded HMAC key")
-    parser.add_argument("--require-hmac", action="store_true", help="Fail if HMAC metadata is missing")
+    parser.add_argument(
+        "--hmac-key-env", help="Environment variable containing hex-encoded HMAC key"
+    )
+    parser.add_argument(
+        "--require-hmac", action="store_true", help="Fail if HMAC metadata is missing"
+    )
     parser.add_argument(
         "--home-path",
         type=Path,
@@ -341,7 +390,7 @@ def _load_hmac_key(args: argparse.Namespace) -> Optional[bytes]:
         try:
             return bytes.fromhex(key_hex)
         except ValueError as exc:
-            raise SystemExit(f"Invalid HMAC key format: {exc}")
+            raise SystemExit(f"Invalid HMAC key format: {exc}") from exc
     if args.require_hmac:
         raise SystemExit("HMAC key required but not provided")
     return None
