@@ -170,12 +170,35 @@ flowchart TB
 2. **Helper proxies** (remote MCP servers): Set `CONTAINAI_REQUIRE_PROXY=1` which makes the helper fail if HTTP_PROXY is not set
 3. **Local MCP servers**: Inherit `HTTP_PROXY`/`HTTPS_PROXY` environment variables from the wrapper
 
-**Environment variables set on MCP processes:**
+**Environment variables set on all processes:**
+
+| Variable | Purpose | Used By |
+|----------|---------|---------|
+| `HTTP_PROXY` | Proxy URL for HTTP requests | All runtimes |
+| `HTTPS_PROXY` | Proxy URL for HTTPS requests | All runtimes |
+| `SSL_CERT_FILE` | Path to CA certificate | Python (requests, urllib) |
+| `REQUESTS_CA_BUNDLE` | Path to CA certificate | Python (requests library) |
+| `NODE_EXTRA_CA_CERTS` | Path to additional CA certificates | Node.js (doesn't use system store) |
+| `SSL_CERT_DIR` | Directory containing CA certificates | .NET HttpClient fallback |
+
+**Runtime-specific proxy behavior:**
+
+| Runtime | Proxy Support | CA Certificate Handling |
+|---------|--------------|------------------------|
+| **Node.js** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses bundled CAs + `NODE_EXTRA_CA_CERTS` |
+| **Python** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` |
+| **.NET** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses system CA store (`update-ca-certificates`) |
+| **curl/wget** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses system CA store |
+| **Go** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses system CA store |
+
 ```bash
+# Example environment in container
 HTTP_PROXY=http://containai-proxy:3128
 HTTPS_PROXY=http://containai-proxy:3128
-SSL_CERT_FILE=/etc/ssl/certs/containai-ca.crt  # For TLS interception
-REQUESTS_CA_BUNDLE=/etc/ssl/certs/containai-ca.crt
+SSL_CERT_FILE=/usr/local/share/ca-certificates/containai-proxy.crt
+REQUESTS_CA_BUNDLE=/usr/local/share/ca-certificates/containai-proxy.crt
+NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/containai-proxy.crt
+SSL_CERT_DIR=/etc/ssl/certs
 ```
 
 ## Remote MCP Servers (Helper Proxy)

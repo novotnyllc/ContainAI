@@ -180,10 +180,18 @@ install_host_session_configs() {
         if command -v update-ca-certificates >/dev/null 2>&1; then
             update-ca-certificates >/dev/null 2>&1 || true
         fi
+        # Python: SSL_CERT_FILE and REQUESTS_CA_BUNDLE
         SSL_CERT_FILE="$trust_bundle_dest"
         REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
         export SSL_CERT_FILE
         export REQUESTS_CA_BUNDLE
+        # Node.js: NODE_EXTRA_CA_CERTS (Node uses bundled CAs, not system store)
+        NODE_EXTRA_CA_CERTS="$trust_bundle_dest"
+        export NODE_EXTRA_CA_CERTS
+        # .NET: Uses system CA store via OpenSSL (update-ca-certificates above)
+        # Explicitly set SSL_CERT_DIR for .NET HttpClient fallback
+        SSL_CERT_DIR="/etc/ssl/certs"
+        export SSL_CERT_DIR
     fi
 
     return $installed
@@ -734,6 +742,8 @@ if [ "$(id -u)" -eq 0 ]; then
     export HOST_CONFIG_DEPLOYED
     export SSL_CERT_FILE
     export REQUESTS_CA_BUNDLE
+    export NODE_EXTRA_CA_CERTS
+    export SSL_CERT_DIR
     export CONTAINAI_AGENT_DATA_STAGED
     export CONTAINAI_RUNNER_STARTED
     export CONTAINAI_USER
