@@ -2,7 +2,7 @@ use std::io;
 use std::os::fd::RawFd;
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct SeccompData {
     pub nr: i32,
     pub arch: u32,
@@ -10,19 +10,8 @@ pub struct SeccompData {
     pub args: [u64; 6],
 }
 
-impl Default for SeccompData {
-    fn default() -> Self {
-        Self {
-            nr: 0,
-            arch: 0,
-            instruction_pointer: 0,
-            args: [0; 6],
-        }
-    }
-}
-
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct SeccompNotif {
     pub id: u64,
     pub pid: u32,
@@ -30,35 +19,13 @@ pub struct SeccompNotif {
     pub data: SeccompData,
 }
 
-impl Default for SeccompNotif {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            pid: 0,
-            flags: 0,
-            data: SeccompData::default(),
-        }
-    }
-}
-
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct SeccompNotifResp {
     pub id: u64,
     pub val: i64,
     pub error: i32,
     pub flags: u32,
-}
-
-impl Default for SeccompNotifResp {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            val: 0,
-            error: 0,
-            flags: 0,
-        }
-    }
 }
 
 const SECCOMP_IOC_MAGIC: u8 = b'!';

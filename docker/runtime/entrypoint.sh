@@ -56,6 +56,28 @@ declare -a MCP_HELPER_PIDS=()
 declare -a MCP_HELPER_NAMES=()
 PROXY_FIREWALL_APPLIED="${PROXY_FIREWALL_APPLIED:-0}"
 
+wait_for_host_payload() {
+    local path="$1"
+    local retries="$2"
+    local interval="$3"
+    local i=0
+    while [ "$i" -lt "$retries" ]; do
+        if [ -n "$(ls -A "$path" 2>/dev/null)" ]; then
+            return 0
+        fi
+        sleep "$interval"
+        i=$((i + 1))
+    done
+    return 1
+}
+
+prepare_agent_secrets_path() {
+    local secrets_dir="/run/agent-secrets"
+    mkdir -p "$secrets_dir"
+    chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$secrets_dir" 2>/dev/null || true
+    chmod 0770 "$secrets_dir" 2>/dev/null || true
+}
+
 prepare_agent_task_runner_paths() {
     local log_root="/run/agent-task-runner"
     mkdir -p "$log_root"
@@ -87,6 +109,13 @@ prepare_agent_data_export_path() {
     mkdir -p "$export_dir"
     chown "$AGENT_UID:$AGENT_GID" "$export_dir" 2>/dev/null || true
     chmod 0755 "$export_dir" 2>/dev/null || true
+}
+
+prepare_agent_data_path() {
+    local data_dir="/run/agent-data"
+    mkdir -p "$data_dir"
+    chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$data_dir" 2>/dev/null || true
+    chmod 0770 "$data_dir" 2>/dev/null || true
 }
 
 ensure_dir_owned() {
@@ -595,12 +624,20 @@ if [ "$(id -u)" -eq 0 ]; then
     AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo "$AGENT_GID")
     AGENT_CLI_UID=$(id -u "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_CLI_UID")
     AGENT_CLI_GID=$(id -g "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_CLI_GID")
+    
+    # Ensure proc group exists
+    if ! getent group "$PROC_GROUP" >/dev/null 2>&1; then
+        groupadd -r "$PROC_GROUP" || true
+    fi
+
     prepare_rootfs_mounts
     
     prepare_agent_task_runner_paths
+    prepare_agent_secrets_path
     prepare_mcp_helpers_paths
     prepare_mcp_wrappers_paths
     prepare_agent_data_export_path
+    prepare_agent_data_path
     AGENT_DATA_STAGED=0
     if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
         if install_host_agent_data "$HOST_SESSION_CONFIG_ROOT"; then

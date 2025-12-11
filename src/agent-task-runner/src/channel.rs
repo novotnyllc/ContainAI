@@ -94,5 +94,5 @@ impl SeqPacketChannel {
 
 /// Converts a `nix` socket error into a stable `io::Error` surface.
 fn nix_to_io(err: nix::Error) -> io::Error {
-    io::Error::new(ErrorKind::Other, err.to_string())
+    io::Error::other(err.to_string())
 }

@@ -286,6 +286,7 @@ def convert_toml_to_mcp(toml_path):
     helpers = []
     wrappers = []
     port_state = {"value": HELPER_PORT_BASE}
+    known_helpers = {}
 
     def next_port():
         value = port_state["value"]
@@ -303,6 +304,7 @@ def convert_toml_to_mcp(toml_path):
             rendered, helper_entry = convert_remote_server(name, settings, secrets, missing_tokens, next_port)
             resolved_servers[name] = rendered
             helpers.append(helper_entry)
+            known_helpers[name] = helper_entry
 
     agents = dict(DEFAULT_AGENTS)
 
@@ -338,9 +340,20 @@ def convert_toml_to_mcp(toml_path):
                 wrappers.append(spec)
             elif "url" in server_config:
                 # Remote server: route through helper proxy
-                rendered, helper_entry = convert_remote_server(name, server_config, secrets, missing_tokens, next_port)
-                rewritten_existing[name] = rendered
-                helpers.append(helper_entry)
+                if name in known_helpers:
+                    # Reuse existing helper
+                    helper = known_helpers[name]
+                    rendered = dict(server_config)
+                    rendered.pop("bearer_token_env_var", None)
+                    for k, v in rendered.items():
+                        rendered[k] = resolve_value(v, secrets)
+                    rendered["url"] = f"http://{helper['listen']}"
+                    rewritten_existing[name] = rendered
+                else:
+                    rendered, helper_entry = convert_remote_server(name, server_config, secrets, missing_tokens, next_port)
+                    rewritten_existing[name] = rendered
+                    helpers.append(helper_entry)
+                    known_helpers[name] = helper_entry
             else:
                 # Unknown format, preserve but warn
                 warnings.append(f"⚠️  Unknown MCP server format for '{name}', preserving unchanged")

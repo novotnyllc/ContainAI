@@ -164,8 +164,7 @@ COPY --chown=root:root host/utils/git-credential-proxy-server.sh /usr/local/bin/
 COPY --chown=root:root docker/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
 COPY --chown=root:root host/utils/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
 COPY --chown=root:root docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
-COPY --chown=root:root docker/runtime/mcp-wrapper.py /usr/local/libexec/mcp-wrapper-core.py
-COPY --chown=root:root docker/runtime/mcp-wrapper-runner.sh /usr/local/bin/mcp-wrapper-runner
+COPY --chown=root:root docker/runtime/mcp-wrapper-core.py /usr/local/libexec/mcp-wrapper-core.py
 COPY --chown=root:root docker/runtime/mcp-http-helper.py /usr/local/bin/mcp-http-helper.py
 COPY --chown=root:root docker/runtime/capability-unseal.py /usr/local/bin/capability-unseal
 COPY --chown=root:root host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
@@ -183,7 +182,6 @@ RUN install -d /usr/local/libexec && \
     /usr/local/bin/gpg-host-proxy.sh \
     /usr/local/bin/gpg-proxy-server.sh \
     /usr/local/bin/setup-mcp-configs.sh \
-    /usr/local/bin/mcp-wrapper-runner \
     /usr/local/bin/mcp-http-helper.py \
     /usr/local/bin/capability-unseal \
     /usr/local/bin/convert-toml-to-mcp.py \
@@ -208,6 +206,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 
 # Install agentcli exec helper, task-runner daemon, and .NET components
 COPY --chown=root:root artifacts/agentcli-exec /usr/local/bin/agentcli-exec
+COPY --chown=root:root artifacts/mcp-wrapper-runner /usr/local/bin/mcp-wrapper-runner
 COPY --chown=root:root artifacts/agent-task-runnerd /usr/local/bin/agent-task-runnerd
 COPY --chown=root:root artifacts/agent-task-sandbox /usr/local/bin/agent-task-sandbox
 COPY --chown=root:root artifacts/containai-log-collector /usr/local/bin/containai-log-collector
@@ -215,9 +214,12 @@ COPY --chown=root:root artifacts/libaudit_shim.so /usr/lib/containai/libaudit_sh
 
 # Set permissions for binaries, run CLI wrappers, and create users in one layer
 RUN set -eux; \
-    chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/containai-log-collector /usr/lib/containai/libaudit_shim.so; \
-    chmod 4755 /usr/local/bin/agentcli-exec; \
+    chown root:root /usr/local/bin/agentcli-exec /usr/local/bin/mcp-wrapper-runner /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/containai-log-collector /usr/lib/containai/libaudit_shim.so; \
+    chmod 4755 /usr/local/bin/agentcli-exec /usr/local/bin/mcp-wrapper-runner; \
     chmod 0755 /usr/local/bin/agent-task-runnerd /usr/local/bin/agent-task-sandbox /usr/local/bin/containai-log-collector /usr/lib/containai/libaudit_shim.so; \
+    if ! getent group agentproc >/dev/null 2>&1; then \
+        groupadd -r agentproc; \
+    fi; \
     if id -u agentuser >/dev/null 2>&1; then \
         true; \
     elif id -u ubuntu >/dev/null 2>&1; then \
@@ -271,8 +273,8 @@ ENV PATH="/home/agentuser/.local/bin:${PATH}"
 ENV PATH="/home/agentuser/.cargo/bin:${PATH}"
 ENV PATH="/toolcache/pipx/bin:${PATH}"
 
-# Install serena using uv
-RUN uv tool install serena
+
+USER root
 
 # Configure system-wide git settings
 RUN git config --system credential.helper "" && \

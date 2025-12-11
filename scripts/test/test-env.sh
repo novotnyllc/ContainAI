@@ -423,26 +423,28 @@ cleanup_test_repository() {
     fi
     
     echo "Removing test repository: $TEST_REPO_DIR"
-    # First attempt - might fail if bind mounts are still held
-    if rm -rf "$TEST_REPO_DIR" 2>/dev/null; then
-        return 0
+    
+    # Retry loop for up to 10 seconds to handle stale Docker bind mounts
+    local end_time=$(( $(date +%s) + 10 ))
+    while [ $(date +%s) -lt $end_time ]; do
+        if rm -rf "$TEST_REPO_DIR" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    
+    # Final attempt with verbose error
+    if ! rm -rf "$TEST_REPO_DIR"; then
+        echo "⚠️  Warning: Could not remove test repository with local user permissions."
+        echo "   Attempting removal via Docker (privileged)..."
+        if docker run --rm -v /tmp:/tmp alpine rm -rf "$TEST_REPO_DIR"; then
+            echo "   ✓ Removed via Docker"
+            return 0
+        else
+            echo "   ❌ Failed to remove test repository even via Docker"
+            return 1
+        fi
     fi
-    
-    # Wait for any lingering container cleanup to complete
-    sleep 1
-    
-    # Second attempt after waiting
-    if rm -rf "$TEST_REPO_DIR" 2>/dev/null; then
-        return 0
-    fi
-    
-    # If still failing, try to identify what's holding the lock
-    echo "⚠️  Warning: Could not remove test repository on first attempts, retrying..."
-    sleep 2
-    rm -rf "$TEST_REPO_DIR" 2>/dev/null || {
-        echo "⚠️  Warning: Could not remove test repository (may have stale mounts)"
-        return 1
-    }
 }
 
 # ============================================================================

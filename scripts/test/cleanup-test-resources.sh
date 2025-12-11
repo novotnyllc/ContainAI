@@ -47,4 +47,19 @@ cleanup_orphans() {
             docker volume rm "$vid" >/dev/null 2>&1 || true
         fi
     done < <(docker volume ls -q --filter "label=${TEST_LABEL_PREFIX}.created" 2>/dev/null || true)
+
+    # Temporary Directories
+    local min_age_mins=$((max_age_hours * 60))
+    
+    # Find directories to remove
+    local dirs_to_remove
+    dirs_to_remove=$(find /tmp -maxdepth 1 -type d \( -name "test-containai-repo-*" -o -name "test-containai-workspace-*" \) -mmin +$min_age_mins 2>/dev/null || true)
+    
+    if [ -n "$dirs_to_remove" ]; then
+        echo "$dirs_to_remove" | while read -r dir; do
+            if ! rm -rf "$dir" 2>/dev/null; then
+                 docker run --rm -v /tmp:/tmp alpine rm -rf "$dir" 2>/dev/null || true
+            fi
+        done
+    fi
 }

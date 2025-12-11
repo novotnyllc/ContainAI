@@ -508,6 +508,8 @@ DOCKER_ARGS+=(
     --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700"
     --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755"
     --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755"
+    --tmpfs "/run/agent-task-runner:rw,nosuid,nodev,exec,size=64m,mode=755"
+    --tmpfs "/run/containai:rw,nosuid,nodev,exec,size=64m,mode=755"
     --tmpfs "/toolcache:rw,nosuid,nodev,exec,size=256m,mode=775"
     -v "${TEST_REPO_DIR}:/workspace"
     -e "GH_TOKEN=${TEST_GH_TOKEN}"
@@ -975,10 +977,12 @@ test_mcp_configuration_generation() {
         --cap-add NET_ADMIN \
         -v "$test_workspace:/workspace:ro" \
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
+        -v "$PROJECT_ROOT/host/utils/convert-toml-to-mcp.py:/usr/local/bin/convert-toml-to-mcp.py:ro" \
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "MCP_SECRETS_FILE=/workspace/.mcp-secrets.env" \
+        -e "CONTAINAI_LOG_DIR=/tmp/logs" \
         --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
         --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
         --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
@@ -2145,6 +2149,7 @@ test_mcp_wrapper_uid_isolation() {
     local container_name="${TEST_CONTAINER_PREFIX}-wrapper-uid"
     local wrapper_spec
     wrapper_spec=$(mktemp)
+    chmod 644 "$wrapper_spec"
     
     # Create a simple wrapper spec
     cat > "$wrapper_spec" <<'JSON'
@@ -2205,21 +2210,29 @@ JSON
     # Create the wrapper symlink and invoke it to spawn a process
     # The wrapper-runner calculates UID and execs with isolation
     docker exec "$container_name" bash -c '
+        chmod 755 /home/agentuser
         mkdir -p /usr/local/bin
-        ln -sf /workspace/docker/runtime/mcp-wrapper-runner.sh /usr/local/bin/mcp-wrapper-test-uid-wrapper
+        ln -sf /usr/local/bin/mcp-wrapper-runner /usr/local/bin/mcp-wrapper-test-uid-wrapper
+        
+        # Create dummy capability for the wrapper
+        mkdir -p /home/agentuser/.config/containai/capabilities/test-uid-wrapper
+        chmod 755 /home/agentuser/.config/containai/capabilities
+        echo "{\"name\": \"test-uid-wrapper\", \"capability_id\": \"dummy\", \"session_key\": \"$(printf "0%.0s" {1..64})\", \"expires_at\": \"2099-01-01T00:00:00Z\"}" > /home/agentuser/.config/containai/capabilities/test-uid-wrapper/token.json
+        
+        chown -R agentuser:agentuser /home/agentuser/.config/containai/capabilities
     '
 
     # Copy the wrapper core script
     docker exec "$container_name" bash -c '
         mkdir -p /usr/local/libexec
-        cp /workspace/docker/runtime/mcp-wrapper.py /usr/local/libexec/mcp-wrapper-core.py
+        cp /workspace/docker/runtime/mcp-wrapper-core.py /usr/local/libexec/mcp-wrapper-core.py
     '
 
     # Run the wrapper in background as agentuser
     # We need to capture its process to check UID
     docker exec --user agentuser -d "$container_name" bash -c '
         export CONTAINAI_WRAPPER_SPEC=/home/agentuser/.config/containai/wrappers/test-uid-wrapper.json
-        /usr/local/bin/mcp-wrapper-test-uid-wrapper &
+        /usr/local/bin/mcp-wrapper-test-uid-wrapper > /tmp/wrapper.log 2>&1 &
     '
 
     sleep 2
@@ -2238,6 +2251,8 @@ JSON
         # Try to get wrapper logs
         echo "DEBUG: Wrapper runtime contents:"
         docker exec "$container_name" ls -la /run/mcp-wrappers/ 2>&1 || true
+        echo "DEBUG: Wrapper logs:"
+        docker exec "$container_name" cat /tmp/wrapper.log 2>&1 || true
         
         fail "Wrapper child process (sleep 30) not found"
         cleanup_wrapper_uid_resources
@@ -2276,6 +2291,7 @@ test_mcp_wrapper_execution() {
     local container_name="${TEST_CONTAINER_PREFIX}-wrapper-e2e"
     local test_workspace
     test_workspace=$(mktemp -d)
+    chmod 755 "$test_workspace"
     
     # Create a mock MCP server that echoes its environment
     cat > "$test_workspace/mock-mcp.py" <<'PYTHON'
@@ -2297,6 +2313,17 @@ sys.stdout.flush()
 PYTHON
     chmod +x "$test_workspace/mock-mcp.py"
 
+    # Create a sleeping mock MCP
+    cat > "$test_workspace/mock-mcp-sleep.py" <<'PYTHON'
+#!/usr/bin/env python3
+import time
+import sys
+print("Sleeping...")
+sys.stdout.flush()
+time.sleep(30)
+PYTHON
+    chmod +x "$test_workspace/mock-mcp-sleep.py"
+
     # Create wrapper spec with environment variables
     mkdir -p "$test_workspace/wrappers"
     cat > "$test_workspace/wrappers/mock-mcp.json" <<'JSON'
@@ -2308,6 +2335,16 @@ PYTHON
     "TEST_SECRET": "secret-value-12345",
     "ANOTHER_VAR": "plain-value"
   }
+}
+JSON
+
+    # Create wrapper spec for sleeping MCP
+    cat > "$test_workspace/wrappers/mock-mcp-sleep.json" <<'JSON'
+{
+  "name": "mock-mcp-sleep",
+  "command": "/workspace-test/mock-mcp-sleep.py",
+  "args": [],
+  "env": {}
 }
 JSON
 
@@ -2359,9 +2396,31 @@ JSON
 
     # Setup wrapper infrastructure
     docker exec "$container_name" bash -c '
+        chmod 755 /home/agentuser
         mkdir -p /usr/local/bin /usr/local/libexec
-        ln -sf /workspace/docker/runtime/mcp-wrapper-runner.sh /usr/local/bin/mcp-wrapper-mock-mcp
-        cp /workspace/docker/runtime/mcp-wrapper.py /usr/local/libexec/mcp-wrapper-core.py
+        ln -sf /usr/local/bin/mcp-wrapper-runner /usr/local/bin/mcp-wrapper-mock-mcp
+        ln -sf /usr/local/bin/mcp-wrapper-runner /usr/local/bin/mcp-wrapper-mock-mcp-sleep
+        cp /workspace/docker/runtime/mcp-wrapper-core.py /usr/local/libexec/mcp-wrapper-core.py
+        
+        # Create dummy capability for the wrapper
+        # Structure: /home/agentuser/.config/containai/capabilities/mock-mcp/token.json
+        mkdir -p /home/agentuser/.config/containai/capabilities/mock-mcp
+        mkdir -p /home/agentuser/.config/containai/capabilities/mock-mcp-sleep
+        chmod 755 /home/agentuser/.config/containai/capabilities
+        echo "{\"name\": \"mock-mcp\", \"capability_id\": \"dummy\", \"session_key\": \"$(printf "0%.0s" {1..64})\", \"expires_at\": \"2099-01-01T00:00:00Z\"}" > /home/agentuser/.config/containai/capabilities/mock-mcp/token.json
+        
+        # For mock-mcp-sleep, we want to test custom CONTAINAI_CAP_ROOT
+        # So we put it in /run/agent-secrets/caps/mock-mcp-sleep/token.json
+        mkdir -p /run/agent-secrets/caps/mock-mcp-sleep
+        cp /home/agentuser/.config/containai/capabilities/mock-mcp/token.json /run/agent-secrets/caps/mock-mcp-sleep/token.json
+        # Fix name in token
+        sed -i "s/mock-mcp/mock-mcp-sleep/" /run/agent-secrets/caps/mock-mcp-sleep/token.json
+        
+        chown -R agentuser:agentuser /home/agentuser/.config/containai/capabilities
+        # /run/agent-secrets is usually read-only or owned by agentcli, but in this test container we can write to it (tmpfs)
+        # We need to make sure agentuser can read it for the test setup, but mcp-wrapper-runner runs as root (setuid) so it can read it.
+        # However, we need to ensure permissions are correct for the test.
+        chmod -R 755 /run/agent-secrets
     '
 
     # Run the wrapper and capture output
@@ -2405,23 +2464,20 @@ JSON
     # The important test is that secrets don't leak via /proc
     
     # Run the mock MCP as a background process and verify /proc isolation
-    docker exec --user agentuser -d "$container_name" bash -c '
-        export CONTAINAI_WRAPPER_SPEC=/workspace-test/wrappers/mock-mcp.json
-        # Run a long-lived version that sleeps after output
-        python3 -c "
-import os
-import time
-# Simulate long-running MCP
-time.sleep(30)
-" &
+    # We use custom CONTAINAI_CAP_ROOT for this test
+    docker exec --user agentuser -d \
+        -e CONTAINAI_CAP_ROOT=/run/agent-secrets/caps \
+        "$container_name" bash -c '
+        export CONTAINAI_WRAPPER_SPEC=/workspace-test/wrappers/mock-mcp-sleep.json
+        /usr/local/bin/mcp-wrapper-mock-mcp-sleep > /tmp/wrapper-sleep.log 2>&1 &
     '
     
-    sleep 1
+    sleep 2
     
     # Find the python process and check that agent can't read env from a different wrapper instance
     # This validates the core security property
     local wrapper_pid
-    wrapper_pid=$(docker exec "$container_name" pgrep -f "python3.*time.sleep" 2>/dev/null | head -1 || true)
+    wrapper_pid=$(docker exec "$container_name" pgrep -f "mock-mcp-sleep.py" 2>/dev/null | head -1 || true)
     
     if [ -n "$wrapper_pid" ]; then
         local wrapper_uid
@@ -2437,6 +2493,12 @@ time.sleep(30)
                 fail "Wrapper process UID $wrapper_uid not in expected range (20000-40000)"
             fi
         fi
+    else
+        fail "Background wrapper process not found"
+        echo "DEBUG: Processes in container:"
+        docker exec "$container_name" ps auxww 2>&1 || true
+        echo "DEBUG: Wrapper logs:"
+        docker exec "$container_name" cat /tmp/wrapper-sleep.log 2>&1 || true
     fi
 
     cleanup_wrapper_e2e_resources

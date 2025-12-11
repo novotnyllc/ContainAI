@@ -18,6 +18,8 @@ thiserror = "2.0"
 audit-protocol = { path = "../audit-protocol" }
 chrono = { version = "0.4", features = ["serde"] }
 
+sha2 = "0.10"
+
 [[bin]]
 name = "agentcli-exec"
 path = "src/agentcli_exec.rs"
@@ -29,4 +31,9 @@ path = "src/agent_task_runnerd.rs"
 [[bin]]
 name = "agent-task-sandbox"
 path = "src/agent_task_sandbox.rs"
+
+[[bin]]
+name = "mcp-wrapper-runner"
+path = "src/mcp_wrapper_runner.rs"
+
 

@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """MCP Wrapper - Secure secret injection for local MCP servers.
 
-This wrapper enables local MCP servers to use secrets that are stored
-encrypted in sealed capabilities. It:
+Reads a wrapper spec from ~/.config/containai/wrappers/<name>.json,
+loads sealed secrets from the capability store, decrypts them using
+the session key, substitutes ${VAR} placeholders, and execs the real
+MCP server command.
 
-1. Reads the wrapper spec from a plain JSON file (no base64 encoding)
-2. Loads sealed secrets from the capability store
-3. Decrypts secrets using the session key
-4. Substitutes ${VAR} placeholders in command/args/env
-5. Execs the real MCP server command
-
-The spec file (~/.config/containai/wrappers/<name>.json) is human-readable:
+Spec format:
 {
     "name": "my-tool",
     "command": "/usr/local/bin/my-tool", 
@@ -19,8 +15,6 @@ The spec file (~/.config/containai/wrappers/<name>.json) is human-readable:
     "cwd": "/workspace",
     "secrets": ["MY_API_KEY"]
 }
-
-This is more transparent than base64-encoding the spec in environment variables.
 """
 
 from __future__ import annotations
@@ -51,11 +45,7 @@ def _die(message: str) -> None:
 
 
 def load_wrapper_spec() -> Dict:
-    """Load the wrapper spec from a JSON file.
-    
-    The spec file path comes from CONTAINAI_WRAPPER_SPEC environment variable.
-    This is a plain JSON file - no base64 encoding - so users can inspect it.
-    """
+    """Load the wrapper spec from CONTAINAI_WRAPPER_SPEC."""
     spec_path = os.environ.get(SPEC_FILE_ENV_VAR)
     if not spec_path:
         raise WrapperError(f"missing {SPEC_FILE_ENV_VAR} environment variable")
@@ -112,9 +102,7 @@ def _select_capability(wrapper_dir: pathlib.Path) -> Tuple[Dict, pathlib.Path]:
     wrapper_name = wrapper_dir.name
     for candidate in candidates:
         token = _load_json(candidate)
-        # Support both old "stub" and new "name"/"wrapper" fields
-        token_name = token.get("name") or token.get("wrapper") or token.get("stub")
-        if token_name != wrapper_name:
+        if token.get("name") != wrapper_name:
             continue
         expires = token.get("expires_at")
         if not expires:
@@ -162,11 +150,8 @@ def _load_sealed_secret(capability: Dict, secret_name: str, secrets_dir: pathlib
     if not sealed_path.is_file():
         raise WrapperError(f"sealed secret '{secret_name}' missing at {sealed_path}")
     record = _load_json(sealed_path)
-    # Support both old "stub" and new "name"/"wrapper" fields
-    record_name = record.get("name") or record.get("wrapper") or record.get("stub")
-    cap_name = capability.get("name") or capability.get("wrapper") or capability.get("stub")
-    if record_name != cap_name:
-        raise WrapperError(f"sealed secret '{secret_name}' does not match wrapper '{cap_name}'")
+    if record.get("name") != capability.get("name"):
+        raise WrapperError(f"sealed secret '{secret_name}' does not match wrapper '{capability.get('name')}'")
     if record.get("capability_id") != capability.get("capability_id"):
         raise WrapperError(f"sealed secret '{secret_name}' not bound to capability {capability.get('capability_id')}")
     ciphertext = record.get("ciphertext")
@@ -185,6 +170,8 @@ def _load_sealed_secret(capability: Dict, secret_name: str, secrets_dir: pathlib
 
 def load_secrets(capability: Dict, wrapper_dir: pathlib.Path, secret_names: Iterable[str]) -> Dict[str, str]:
     """Load and decrypt all required secrets for this wrapper."""
+    if not secret_names:
+        return {}
     secrets_dir = wrapper_dir / "secrets"
     if not secrets_dir.is_dir():
         raise WrapperError(f"sealed secret directory missing at {secrets_dir}")
@@ -245,7 +232,7 @@ def scrub_wrapper_env(env: Dict[str, str]) -> Dict[str, str]:
     """Remove wrapper-specific env vars before exec'ing the real command."""
     env = dict(env)
     env.pop(SPEC_FILE_ENV_VAR, None)
-    env.pop(WRAPPER_NAME_ENV_VAR, None)
+    # CONTAINAI_WRAPPER_NAME is preserved for the child process
     return env
 
 
@@ -255,14 +242,10 @@ def main() -> None:
         wrapper_name = spec.get("name")
         capability_dir = resolve_capability_dir(wrapper_name)
         capability, token_path = _select_capability(capability_dir)
-        
-        # Validate capability matches wrapper
-        cap_name = capability.get("name") or capability.get("wrapper") or capability.get("stub")
-        if cap_name != wrapper_name:
+        if capability.get("name") != wrapper_name:
             raise WrapperError(
-                f"capability token '{token_path}' targets '{cap_name}', expected '{wrapper_name}'"
+                f"capability token '{token_path}' targets '{capability.get('name')}', expected '{wrapper_name}'"
             )
-        
         secret_names = spec.get("secrets", [])
         if not isinstance(secret_names, list):
             raise WrapperError("wrapper spec 'secrets' must be a list")

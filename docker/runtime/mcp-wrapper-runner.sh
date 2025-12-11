@@ -12,6 +12,12 @@ wrapper_name="${CONTAINAI_WRAPPER_NAME:-$script_name}"
 wrapper_name="${wrapper_name#mcp-wrapper-}"
 wrapper_name="${wrapper_name:-default}"
 
+# Sanitize wrapper_name to prevent directory traversal
+if [[ ! "$wrapper_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "mcp-wrapper-runner: invalid wrapper name '$wrapper_name'" >&2
+    exit 1
+fi
+
 runtime_root="/run/mcp-wrappers/${wrapper_name}"
 core_bin="${CONTAINAI_WRAPPER_CORE:-/usr/local/libexec/mcp-wrapper-core.py}"
 cap_root_default="/home/agentuser/.config/containai/capabilities/${wrapper_name}"
@@ -44,12 +50,17 @@ PY
 }
 
 cleanup() {
-    rm -rf -- "$runtime_root"
+    # Cleanup runtime directory (owned by agentuser, so we can delete it)
+    if [[ "$runtime_root" == /run/mcp-wrappers/* ]]; then
+        rm -rf -- "$runtime_root"
+    fi
 }
 trap cleanup EXIT
 
 umask 077
-mkdir -p "$runtime_root" "$runtime_root/tmp"
+
+# Calculate deterministic UID for this wrapper (range 20000-40000)
+# wrapper_uid=$(python3 -c "import hashlib; print(20000 + (int(hashlib.sha256('${wrapper_name}'.encode()).hexdigest(), 16) % 20000))")
 
 # Export runtime-scoped directories to keep wrapper state in tmpfs
 export CONTAINAI_WRAPPER_NAME="$wrapper_name"
@@ -66,11 +77,25 @@ fi
 
 # Copy capability bundle into runtime so the wrapper can read it
 cap_src="${CONTAINAI_CAP_ROOT:-$cap_root_default}"
-cap_dst="$runtime_root/capabilities"
+
+# Setup runtime directory with group permissions for agentcli
+# We use 'agentcli' user for all MCP servers to avoid sudo.
+# 'agentuser' is in 'agentcli' group, so we use group permissions to pass data.
+target_group="agentcli"
+
+mkdir -p "$runtime_root" "$runtime_root/tmp"
+chgrp "$target_group" "$runtime_root" "$runtime_root/tmp"
+chmod 770 "$runtime_root" "$runtime_root/tmp"
+
 if [ -d "$cap_src" ]; then
+    cap_dst="$runtime_root/capabilities"
     rm -rf "$cap_dst"
-    cp -a "$cap_src" "$cap_dst" 2>/dev/null || true
-    chmod -R go-rwx "$cap_dst" 2>/dev/null || true
+    cp -a "$cap_src" "$cap_dst"
+    chgrp -R "$target_group" "$cap_dst"
+    chmod -R g+rX "$cap_dst"
 fi
 
-exec python3 "$core_bin"
+# Execute wrapper core via agentcli-exec
+# This binary is setuid root and switches to the agentcli user
+export CONTAINAI_CLI_USER="agentcli"
+exec /usr/local/bin/agentcli-exec "$core_bin" "$@"

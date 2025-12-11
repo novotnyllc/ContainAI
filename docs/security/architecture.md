@@ -519,6 +519,12 @@ flowchart TB
 - Read-only mounts for authentication
 - No capabilities added
 
+### MCP Server Isolation
+
+MCP servers run under a separate user ID (`agentcli`) to prevent the main agent process (`agentuser`) from accessing their memory or environment variables where secrets are stored. This is achieved using a dedicated setuid helper `agentcli-exec`.
+
+For detailed architecture and diagrams, see [MCP Server Isolation](mcp-isolation.md).
+
 ### Agent Task Runner Daemon
 
 - `agentcli-exec` installs a libseccomp filter so that every `execve`/`execveat` inside the `agentcli` namespace is paused and inspected by `agent-task-runnerd` before it runs.

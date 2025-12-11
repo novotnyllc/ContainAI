@@ -98,6 +98,7 @@ RUST_OUT_DIR="$REPO_ROOT/src/target/$RUST_TARGET/release"
 install_if_changed "$RUST_OUT_DIR/agentcli-exec" "$OUT_DIR/agentcli-exec"
 install_if_changed "$RUST_OUT_DIR/agent-task-runnerd" "$OUT_DIR/agent-task-runnerd"
 install_if_changed "$RUST_OUT_DIR/agent-task-sandbox" "$OUT_DIR/agent-task-sandbox"
+install_if_changed "$RUST_OUT_DIR/mcp-wrapper-runner" "$OUT_DIR/mcp-wrapper-runner"
 
 popd >/dev/null
 
