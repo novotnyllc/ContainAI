@@ -18,7 +18,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
-CONFIG_ROOT = pathlib.Path(os.environ.get("CONTAINAI_CONFIG_DIR", pathlib.Path.home() / ".config" / "containai"))
+CONFIG_ROOT = pathlib.Path(
+    os.environ.get(
+        "CONTAINAI_CONFIG_DIR", pathlib.Path.home() / ".config" / "containai"
+    )
+)
 BROKER_DIR = pathlib.Path(os.environ.get("CONTAINAI_BROKER_DIR", CONFIG_ROOT / "broker.d"))
 KEY_FILE = BROKER_DIR / "keys.json"
 STATE_FILE = BROKER_DIR / "state.json"
@@ -74,12 +78,19 @@ def _maybe_lock_file(path: pathlib.Path) -> None:
     if os.name != "posix":  # chattr only on Linux
         return
     try:
-        subprocess.run(["chattr", "+i", str(path)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            ["chattr", "+i", str(path)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except FileNotFoundError:
         pass
 
 
-def _ensure_broker_files(stubs: List[str] | None = None, *, create_missing_keys: bool = False) -> None:
+def _ensure_broker_files(
+    stubs: List[str] | None = None, *, create_missing_keys: bool = False
+) -> None:
     _ensure_dir(BROKER_DIR)
     desired_stubs = stubs or DEFAULT_STUBS
 
@@ -112,22 +123,30 @@ def _ensure_broker_files(stubs: List[str] | None = None, *, create_missing_keys:
 
 def _load_secrets() -> Dict[str, Dict[str, str]]:
     data = _load_json(SECRETS_FILE)
-    secrets: Dict[str, Dict[str, str]] = {}
+    result: Dict[str, Dict[str, str]] = {}
     if not isinstance(data, dict):
-        return secrets
+        return result
     for stub, value in data.items():
         if isinstance(value, dict):
-            secrets[stub] = {name: str(secret) for name, secret in value.items() if isinstance(name, str)}
-    return secrets
+            result[stub] = {
+                name: str(secret)
+                for name, secret in value.items()
+                if isinstance(name, str)
+            }
+    return result
 
 
 def _write_secrets(data: Dict[str, Dict[str, str]]) -> None:
     _write_json(SECRETS_FILE, data)
 
 
-def _derive_session_key_hex(key_hex: str, nonce: str, session_id: str, stub: str, capability_id: str) -> str:
+def _derive_session_key_hex(
+    key_hex: str, nonce: str, session_id: str, stub: str, capability_id: str
+) -> str:
     seed = f"{nonce}|{session_id}|{stub}|{capability_id}|seal"
-    return hmac.new(bytes.fromhex(key_hex), seed.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.new(
+        bytes.fromhex(key_hex), seed.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
 
 
 def _seal_secret(session_key_hex: str, secret_value: str) -> str:
@@ -153,7 +172,7 @@ def _load_token(path: pathlib.Path) -> Dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"Invalid capability JSON: {exc}")
+        raise SystemExit(f"Invalid capability JSON: {exc}") from exc
     for field in ("stub", "session", "capability_id", "nonce", "expires_at", "hmac"):
         if field not in data:
             raise SystemExit(f"Capability missing field '{field}'")
@@ -170,9 +189,8 @@ def _rate_limit_check(state: Dict) -> None:
     history = state.get("issue_timestamps", [])
     history = [ts for ts in history if now - ts <= ISSUE_WINDOW_SECONDS]
     if len(history) >= ISSUE_WINDOW_LIMIT:
-        raise SystemExit(
-            f"Rate limit exceeded: {len(history)} requests within {ISSUE_WINDOW_SECONDS}s. Wait before retrying."
-        )
+        msg = f"Rate limit exceeded: {len(history)} requests within {ISSUE_WINDOW_SECONDS}s."
+        raise SystemExit(f"{msg} Wait before retrying.")
     history.append(now)
     state["issue_timestamps"] = history
     state["last_issue"] = now
@@ -202,7 +220,7 @@ def _load_keys() -> Dict[str, str]:
         with KEY_FILE.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"Corrupted key store: {exc}")
+        raise SystemExit(f"Corrupted key store: {exc}") from exc
     if not isinstance(data, dict):
         raise SystemExit("Invalid key store format")
     return data
@@ -244,7 +262,9 @@ def cmd_issue(session_id: str, stubs: List[str], output: pathlib.Path, ttl_minut
             "expires_at": expires_at,
             "hmac": digest,
         }
-        token["session_key"] = _derive_session_key_hex(key_hex, nonce, session_id, stub, capability_id)
+        token["session_key"] = _derive_session_key_hex(
+            key_hex, nonce, session_id, stub, capability_id
+        )
         _write_token(output, stub, token)
         summary.append(token)
     _write_json(STATE_FILE, state)
@@ -254,7 +274,9 @@ def cmd_issue(session_id: str, stubs: List[str], output: pathlib.Path, ttl_minut
         raise SystemExit("No capabilities issued (missing stub keys?)")
 
 
-def cmd_store_secret(stub: str, name: str, value: str, from_env: str | None, from_file: pathlib.Path | None) -> None:
+def cmd_store_secret(
+    stub: str, name: str, value: str, from_env: str | None, from_file: pathlib.Path | None
+) -> None:
     _ensure_broker_files([stub])
     secret_value: str | None = value
     if from_env:
@@ -267,9 +289,9 @@ def cmd_store_secret(stub: str, name: str, value: str, from_env: str | None, fro
         secret_value = from_file.read_text(encoding="utf-8").rstrip("\n")
     if not secret_value:
         raise SystemExit("Secret value cannot be empty")
-    secrets = _load_secrets()
-    secrets.setdefault(stub, {})[name] = secret_value
-    _write_secrets(secrets)
+    stored_secrets = _load_secrets()
+    stored_secrets.setdefault(stub, {})[name] = secret_value
+    _write_secrets(stored_secrets)
     _maybe_lock_file(SECRETS_FILE)
     print(f"[broker] secret '{name}' stored for stub '{stub}'")
 
@@ -279,7 +301,9 @@ def cmd_health() -> None:
     if not KEY_FILE.exists():
         raise SystemExit("Broker key file missing")
     if KEY_FILE.stat().st_mode & 0o077:
-        print("[broker] warning: key file is not chmod 600", file=sys.stderr)
+        print(
+            "[broker] warning: key file is not chmod 600", file=sys.stderr
+        )
     state = _load_json(STATE_FILE)
     last_issue = state.get("last_issue")
     if last_issue:
@@ -294,7 +318,12 @@ def cmd_health() -> None:
     print("[broker] health OK")
 
 
-def cmd_redeem(capability_path: pathlib.Path, secret_names: List[str], output_dir: pathlib.Path | None, allow_reuse: bool) -> None:
+def cmd_redeem(
+    capability_path: pathlib.Path,
+    secret_names: List[str],
+    output_dir: pathlib.Path | None,
+    allow_reuse: bool,
+) -> None:
     _ensure_broker_files()
     token = _load_token(capability_path)
     keys = _load_keys()
@@ -305,13 +334,15 @@ def cmd_redeem(capability_path: pathlib.Path, secret_names: List[str], output_di
     expected = _hmac_for(key_hex, payload)
     if not hmac.compare_digest(expected, token["hmac"]):
         raise SystemExit("Capability HMAC mismatch; refusing redemption")
-    expected_session_key = _derive_session_key_hex(key_hex, token["nonce"], token["session"], token["stub"], token["capability_id"])
+    expected_session_key = _derive_session_key_hex(
+        key_hex, token["nonce"], token["session"], token["stub"], token["capability_id"]
+    )
     if token.get("session_key") != expected_session_key:
         raise SystemExit("Capability session key mismatch")
     try:
         expires_at = _parse_iso(token["expires_at"])
     except ValueError as exc:
-        raise SystemExit(f"Invalid expiry timestamp: {exc}")
+        raise SystemExit(f"Invalid expiry timestamp: {exc}") from exc
     if datetime.now(timezone.utc) >= expires_at:
         raise SystemExit("Capability expired")
     state = _load_json(STATE_FILE)
@@ -327,7 +358,8 @@ def cmd_redeem(capability_path: pathlib.Path, secret_names: List[str], output_di
     for secret_name in secret_names:
         secret_value = secrets_for_stub.get(secret_name)
         if secret_value is None:
-            raise SystemExit(f"Secret '{secret_name}' not defined for stub '{token['stub']}'")
+            msg = f"Secret '{secret_name}' not defined for stub '{token['stub']}'"
+            raise SystemExit(msg)
         ciphertext = _seal_secret(token["session_key"], secret_value)
         sealed = {
             "stub": token["stub"],

@@ -15,6 +15,15 @@ import re
 import sys
 from typing import Dict, List, Optional, Set, Tuple
 
+# Allow import of sibling modules
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from _mcp_common import (  # noqa: E402  # pylint: disable=wrong-import-position
+    ENV_PATTERN,
+    collect_placeholders as _collect_placeholders,
+    load_secret_file,
+    resolve_value as _resolve_value,
+)
+
 AGENT_CONFIG_TARGETS: Dict[str, str] = {
     "github-copilot": "/home/agentuser/.config/github-copilot/mcp/config.json",
     "codex": "/home/agentuser/.config/codex/mcp/config.json",
@@ -24,15 +33,14 @@ STUB_COMMAND_TEMPLATE = "/home/agentuser/.local/bin/mcp-stub-{name}"
 HELPER_LISTEN_HOST = "127.0.0.1"
 HELPER_PORT_BASE = 52100
 DEFAULT_CONFIG_ROOT = pathlib.Path(
-    os.environ.get("CONTAINAI_CONFIG_ROOT", pathlib.Path.home() / ".config" / "containai-dev")
+    os.environ.get(
+        "CONTAINAI_CONFIG_ROOT", pathlib.Path.home() / ".config" / "containai-dev"
+    )
 )
 DEFAULT_HELPER_ACL_CONFIG = pathlib.Path(
     os.environ.get(
         "CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json"
     )
-)
-ENV_PATTERN = re.compile(
-    r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?P<bare>[A-Za-z_][A-Za-z0-9_]*)"
 )
 DEFAULT_SECRET_PATHS = [
     pathlib.Path("~/.config/containai/mcp-secrets.env").expanduser(),
@@ -40,34 +48,8 @@ DEFAULT_SECRET_PATHS = [
 ]
 
 
-def _load_secret_file(path: pathlib.Path) -> Dict[str, str]:
-    secrets: Dict[str, str] = {}
-    if not path.exists():
-        return secrets
-    try:
-        content = path.read_text(encoding="utf-8")
-        for raw_line in content.splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[7:]
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip()
-            if not key:
-                continue
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-                value = value[1:-1]
-            secrets.setdefault(key, value)
-    except OSError as exc:
-        print(f"⚠️  Unable to read secrets from {path}: {exc}", file=sys.stderr)
-    return secrets
-
-
 def _collect_secrets(explicit_files: List[pathlib.Path]) -> Dict[str, str]:
+    """Collect secrets from multiple file sources."""
     candidates: List[pathlib.Path] = []
 
     # Check environment overrides first
@@ -92,7 +74,7 @@ def _collect_secrets(explicit_files: List[pathlib.Path]) -> Dict[str, str]:
             continue
 
         processed_paths.add(path_key)
-        file_secrets = _load_secret_file(resolved_path)
+        file_secrets = load_secret_file(resolved_path)
 
         # Only add secrets that haven't been defined yet (first wins)
         for key, value in file_secrets.items():
@@ -100,20 +82,6 @@ def _collect_secrets(explicit_files: List[pathlib.Path]) -> Dict[str, str]:
                 merged_secrets[key] = value
 
     return merged_secrets
-
-
-def _collect_placeholders(value) -> Set[str]:
-    names: Set[str] = set()
-    if isinstance(value, str):
-        for match in ENV_PATTERN.finditer(value):
-            names.add(match.group("braced") or match.group("bare"))
-    elif isinstance(value, list):
-        for item in value:
-            names.update(_collect_placeholders(item))
-    elif isinstance(value, dict):
-        for item in value.values():
-            names.update(_collect_placeholders(item))
-    return names
 
 
 def _load_acl_policies(path: pathlib.Path) -> Dict[str, Dict[str, Dict[str, List[str]]]]:
@@ -249,25 +217,6 @@ def _ensure_directory(path: pathlib.Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _resolve_value(value, secrets: Dict[str, str]):
-    def _replace(match: re.Match[str]) -> str:
-        var = match.group("braced") or match.group("bare")
-        if var in secrets and secrets[var]:
-            return secrets[var]
-        env_val = os.environ.get(var)
-        if env_val:
-            return env_val
-        return match.group(0)
-
-    if isinstance(value, str):
-        return ENV_PATTERN.sub(_replace, value)
-    if isinstance(value, list):
-        return [_resolve_value(item, secrets) for item in value]
-    if isinstance(value, dict):
-        return {key: _resolve_value(val, secrets) for key, val in value.items()}
-    return value
-
-
 def _render_remote_server(
     name: str,
     settings: Dict,
@@ -356,47 +305,29 @@ def _render_stub_server(
     return rendered_entry, stub_secrets
 
 
-def render_configs(
-    *,
-    config_path: Optional[pathlib.Path],
-    output_dir: pathlib.Path,
-    session_id: str,
-    network_policy: str,
-    repo_name: str,
-    agent_name: str,
-    container_name: str,
-    trusted_tree_hashes: List[str],
-    git_head: Optional[str],
+def _process_source_servers(
+    source_servers: Dict,
     secrets: Dict[str, str],
-) -> Dict:
-    config_data: Dict = {}
-    source_exists = config_path is not None and config_path.exists()
-    config_sha = _sha256_file(config_path) if source_exists else None
-    helpers: List[Dict] = []
-    acl_policies = _load_acl_policies(DEFAULT_HELPER_ACL_CONFIG)
-    port_counter = {"value": HELPER_PORT_BASE}
+    warnings: List[str],
+    helpers: List[Dict],
+    port_counter: Dict[str, int],
+) -> Tuple[Dict[str, Dict], Dict[str, List[str]], List[str]]:
+    """Process source servers and return rendered servers, secret map, and stub names."""
+    rendered_servers: Dict[str, Dict] = {}
+    stub_secret_map: Dict[str, List[str]] = {}
+    stubbed_server_names: List[str] = []
 
     def _next_port() -> int:
         port = port_counter["value"]
         port_counter["value"] += 1
         return port
 
-    if source_exists:
-        config_data = _read_toml(config_path)
-    else:
-        config_data = {"mcp_servers": {}}
-
-    source_servers = config_data.get("mcp_servers", {}) or {}
-    generated_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
-    rendered_servers: Dict[str, Dict] = {}
-    stub_secret_map: Dict[str, List[str]] = {}
-    stubbed_server_names: List[str] = []
-    warnings: List[str] = []
-
     for server_name, server_cfg in source_servers.items():
         settings = dict(server_cfg or {})
         if "command" in settings:
-            rendered_entry, stub_secrets = _render_stub_server(server_name, settings, secrets, warnings)
+            rendered_entry, stub_secrets = _render_stub_server(
+                server_name, settings, secrets, warnings
+            )
             rendered_servers[server_name] = rendered_entry
             if stub_secrets:
                 stub_secret_map[server_name] = stub_secrets
@@ -408,9 +339,21 @@ def render_configs(
             rendered_servers[server_name] = rendered_entry
             helpers.append(helper)
 
+    return rendered_servers, stub_secret_map, stubbed_server_names
+
+
+def _write_agent_configs(
+    output_dir: pathlib.Path,
+    session_id: str,
+    agent_name: str,
+    container_name: str,
+    network_policy: str,
+    repo_name: str,
+    generated_at: str,
+    rendered_servers: Dict[str, Dict],
+) -> List[Dict]:
+    """Write agent-specific config files and return file metadata."""
     files: List[Dict] = []
-    all_server_names = sorted(source_servers.keys())
-    stubbed_server_names = sorted(set(stubbed_server_names))
     for agent_key, target_path in AGENT_CONFIG_TARGETS.items():
         payload = {
             "session": {
@@ -429,17 +372,85 @@ def render_configs(
         _ensure_directory(agent_dir)
         dest = agent_dir / "config.json"
         dest.write_bytes(content)
-        files.append(
-            {
-                "agent": agent_key,
-                "path": str(dest),
-                "sha256": _sha256_bytes(content),
-                "target": target_path,
-            }
-        )
+        files.append({
+            "agent": agent_key,
+            "path": str(dest),
+            "sha256": _sha256_bytes(content),
+            "target": target_path,
+        })
+    return files
+
+
+def _write_manifest_files(
+    output_dir: pathlib.Path,
+    stub_secret_map: Dict[str, List[str]],
+    stubbed_server_names: List[str],
+    helpers: List[Dict],
+) -> Tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+    """Write manifest auxiliary files and return their paths."""
+    servers_path = output_dir / "servers.txt"
+    if stubbed_server_names:
+        servers_path.write_text("\n".join(stubbed_server_names) + "\n", encoding="utf-8")
+    else:
+        servers_path.write_text("", encoding="utf-8")
+
+    stub_secret_path = output_dir / "stub-secrets.txt"
+    with stub_secret_path.open("w", encoding="utf-8") as handle:
+        for stub in sorted(stub_secret_map.keys()):
+            names = stub_secret_map[stub]
+            if names:
+                handle.write(f"{stub} {' '.join(names)}\n")
+
+    helpers_path = output_dir / "helpers.json"
+    helpers_content = json.dumps(helpers, indent=2, sort_keys=True)
+    helpers_path.write_text(helpers_content, encoding="utf-8")
+
+    return servers_path, stub_secret_path, helpers_path
+
+
+def render_configs(
+    *,
+    config_path: Optional[pathlib.Path],
+    output_dir: pathlib.Path,
+    session_id: str,
+    network_policy: str,
+    repo_name: str,
+    agent_name: str,
+    container_name: str,
+    trusted_tree_hashes: List[str],
+    git_head: Optional[str],
+    secrets: Dict[str, str],
+) -> Dict:
+    """Render MCP configs for a session."""
+    source_exists = config_path is not None and config_path.exists()
+    config_sha = _sha256_file(config_path) if source_exists else None
+    helpers: List[Dict] = []
+    acl_policies = _load_acl_policies(DEFAULT_HELPER_ACL_CONFIG)
+    port_counter = {"value": HELPER_PORT_BASE}
+    warnings: List[str] = []
+
+    config_data = _read_toml(config_path) if source_exists else {"mcp_servers": {}}
+    source_servers = config_data.get("mcp_servers", {}) or {}
+    generated_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+    rendered_servers, stub_secret_map, stubbed_server_names = _process_source_servers(
+        source_servers, secrets, warnings, helpers, port_counter
+    )
+
+    all_server_names = sorted(source_servers.keys())
+    stubbed_server_names = sorted(set(stubbed_server_names))
+
+    files = _write_agent_configs(
+        output_dir, session_id, agent_name, container_name,
+        network_policy, repo_name, generated_at, rendered_servers
+    )
 
     acl_path = output_dir / "squid-acls.conf"
     _write_squid_acls(acl_path, helpers, acl_policies)
+
+    _, stub_secret_path, helpers_path = _write_manifest_files(
+        output_dir, stub_secret_map, stubbed_server_names, helpers
+    )
 
     manifest = {
         "sessionId": session_id,
@@ -457,35 +468,30 @@ def render_configs(
     }
 
     manifest_path = output_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    servers_path = output_dir / "servers.txt"
-    if stubbed_server_names:
-        servers_path.write_text("\n".join(stubbed_server_names) + "\n", encoding="utf-8")
-    else:
-        servers_path.write_text("", encoding="utf-8")
-    stub_secret_path = output_dir / "stub-secrets.txt"
-    with stub_secret_path.open("w", encoding="utf-8") as handle:
-        for stub in sorted(stub_secret_map.keys()):
-            names = stub_secret_map[stub]
-            if not names:
-                continue
-            handle.write(f"{stub} {' '.join(names)}\n")
+    manifest_content = json.dumps(manifest, indent=2, sort_keys=True)
+    manifest_path.write_text(manifest_content, encoding="utf-8")
+
     manifest["manifestPath"] = str(manifest_path)
     manifest["manifestSha256"] = _sha256_file(manifest_path)
     manifest["stubSecretFile"] = str(stub_secret_path)
-    helpers_path = output_dir / "helpers.json"
-    helpers_path.write_text(json.dumps(helpers, indent=2, sort_keys=True), encoding="utf-8")
     manifest["helpersPath"] = str(helpers_path)
-    if warnings:
-        for warning in warnings:
-            print(warning, file=sys.stderr)
+
+    for warning in warnings:
+        print(warning, file=sys.stderr)
+
     return manifest
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", dest="config", type=pathlib.Path, help="Path to config.toml")
-    parser.add_argument("--output", dest="output", type=pathlib.Path, required=True, help="Output directory")
+    parser.add_argument(
+        "--output",
+        dest="output",
+        type=pathlib.Path,
+        required=True,
+        help="Output directory",
+    )
     parser.add_argument("--session-id", dest="session_id", required=True)
     parser.add_argument("--network-policy", dest="network_policy", required=True)
     parser.add_argument("--repo", dest="repo_name", default="")

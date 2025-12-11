@@ -220,6 +220,76 @@ def verify_hmac(hmac_key, entry, rel_path, strategy):
     return True
 
 
+def _extract_and_validate_member(
+    archive: tarfile.TarFile,
+    rel_path: Path,
+    digest_expected: str | None,
+    target_home: Path,
+) -> tuple[Path, bool] | None:
+    """Extract archive member to temp location and validate.
+
+    Returns (tmp_path, success) tuple or None on failure.
+    """
+    try:
+        member = archive.getmember(rel_path.as_posix())
+    except KeyError:
+        print(f"[data] missing member '{rel_path}' in tar", file=sys.stderr)
+        return None
+    if not member.isfile():
+        print(f"[data] member '{rel_path}' is not a regular file", file=sys.stderr)
+        return None
+
+    fileobj = archive.extractfile(member)
+    if fileobj is None:
+        print(f"[data] unable to extract '{rel_path}'", file=sys.stderr)
+        return None
+
+    tmp_root = target_home / ".containai-tmp"
+    tmp_path, digest_actual = _write_temp_copy(fileobj, tmp_root)
+    if digest_expected and digest_actual != digest_expected:
+        tmp_path.unlink(missing_ok=True)
+        print(f"[data] digest mismatch for '{rel_path}'", file=sys.stderr)
+        return None
+
+    target_path = (target_home / rel_path).resolve()
+    if target_home not in target_path.parents and target_path != target_home:
+        tmp_path.unlink(missing_ok=True)
+        print(f"[data] target '{target_path}' escapes home root", file=sys.stderr)
+        return None
+
+    return tmp_path, True
+
+
+def _apply_merge_strategy(
+    strategy: str,
+    tmp_path: Path,
+    target_path: Path,
+) -> bool:
+    """Apply merge strategy to move temp file to target location."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if strategy == "replace":
+        if target_path.exists():
+            if target_path.is_dir():
+                shutil.rmtree(target_path)
+            else:
+                target_path.unlink()
+        shutil.move(str(tmp_path), target_path)
+        target_path.chmod(0o600)
+        return True
+
+    if strategy == "append":
+        with target_path.open("ab") as dest, tmp_path.open("rb") as src:
+            shutil.copyfileobj(src, dest)
+        target_path.chmod(0o600)
+        tmp_path.unlink(missing_ok=True)
+        return True
+
+    tmp_path.unlink(missing_ok=True)
+    print(f"[data] unknown merge strategy '{strategy}'", file=sys.stderr)
+    return False
+
+
 def process_archive_entry(
     archive: tarfile.TarFile,
     entry: dict,
@@ -234,54 +304,15 @@ def process_archive_entry(
     if not verify_hmac(hmac_key, entry, rel_path, strategy):
         return False
 
-    try:
-        member = archive.getmember(rel_path.as_posix())
-    except KeyError:
-        print(f"[data] missing member '{rel_path}' in tar", file=sys.stderr)
-        return False
-    if not member.isfile():
-        print(f"[data] member '{rel_path}' is not a regular file", file=sys.stderr)
+    result = _extract_and_validate_member(
+        archive, rel_path, digest_expected, target_home
+    )
+    if result is None:
         return False
 
-    fileobj = archive.extractfile(member)
-    if fileobj is None:
-        print(f"[data] unable to extract '{rel_path}'", file=sys.stderr)
-        return False
-
-    tmp_root = target_home / ".containai-tmp"
-    tmp_path, digest_actual = _write_temp_copy(fileobj, tmp_root)
-    if digest_expected and digest_actual != digest_expected:
-        tmp_path.unlink(missing_ok=True)
-        print(f"[data] digest mismatch for '{rel_path}'", file=sys.stderr)
-        return False
-
+    tmp_path, _ = result
     target_path = (target_home / rel_path).resolve()
-    if target_home not in target_path.parents and target_path != target_home:
-        tmp_path.unlink(missing_ok=True)
-        print(f"[data] target '{target_path}' escapes home root", file=sys.stderr)
-        return False
-
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if strategy == "replace":
-        if target_path.exists():
-            if target_path.is_dir():
-                shutil.rmtree(target_path)
-            else:
-                target_path.unlink()
-        shutil.move(str(tmp_path), target_path)
-        target_path.chmod(0o600)
-    elif strategy == "append":
-        with target_path.open("ab") as dest, tmp_path.open("rb") as src:
-            shutil.copyfileobj(src, dest)
-        target_path.chmod(0o600)
-        tmp_path.unlink(missing_ok=True)
-    else:
-        tmp_path.unlink(missing_ok=True)
-        print(f"[data] unknown merge strategy '{strategy}'", file=sys.stderr)
-        return False
-
-    return True
+    return _apply_merge_strategy(strategy, tmp_path, target_path)
 
 
 def merge_agent_data(
@@ -306,8 +337,11 @@ def merge_agent_data(
         )
         return False
     if session_id and manifest.get("session") != session_id:
+        expected_session = session_id
+        actual_session = manifest.get('session')
         print(
-            f"[data] manifest session mismatch: expected '{session_id}' got '{manifest.get('session')}'",
+            f"[data] manifest session mismatch: "
+            f"expected '{expected_session}' got '{actual_session}'",
             file=sys.stderr,
         )
         return False
