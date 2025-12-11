@@ -56,4 +56,7 @@ runs:
     - name: Install Trivy
       shell: bash
       run: |
-        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+        # Download directly from GitHub releases for reliability
+        TRIVY_VERSION="0.68.1"
+        wget -qO- "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | sudo tar -xzf - -C /usr/local/bin trivy
+        trivy --version
