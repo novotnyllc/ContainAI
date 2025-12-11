@@ -499,7 +499,7 @@ test_launcher_script_execution() {
         --label "containai.branch=main"
         --network "${TEST_NETWORK}"
         --cap-add SYS_ADMIN
-        --cap-add NET_ADMIN
+        
         --read-only
         --security-opt "apparmor=containai-agent-${channel}"
         --security-opt "seccomp=${seccomp_profile}"
@@ -690,16 +690,17 @@ test_capabilities_dropped() {
         return
     fi
 
-    # Check that no capabilities are available to the agent process
-    # Using getpcaps to inspect PID 1
+    # Check that no dangerous capabilities are available to the agent process
+    # SYS_ADMIN is granted to the container for sandbox namespace isolation,
+    # but must be dropped before any agent code runs.
     local caps
     # Must use root:agentproc to see PID 1 due to hidepid=2
     caps=$(docker exec --user root:agentproc "$container_name" bash -c 'getpcaps 1 2>&1' || true)
     
-    if echo "$caps" | grep -qE "cap_sys_admin|cap_net_admin"; then
-        fail "Agent process still has SYS_ADMIN or NET_ADMIN capabilities ($caps)"
+    if echo "$caps" | grep -qE "cap_sys_admin"; then
+        fail "Agent process still has SYS_ADMIN capability ($caps)"
     else
-        pass "Agent process has no dangerous capabilities"
+        pass "Agent process has no dangerous capabilities (SYS_ADMIN dropped)"
     fi
 
     # Verify that attempting privileged operations fails
@@ -710,13 +711,6 @@ test_capabilities_dropped() {
         docker exec "$container_name" umount /tmp/test-mount 2>/dev/null || true
     else
         pass "Agent cannot mount filesystems (CAP_SYS_ADMIN dropped)"
-    fi
-
-    # Try to modify iptables (requires CAP_NET_ADMIN)
-    if docker exec --user agentuser "$container_name" bash -c 'iptables -L 2>/dev/null'; then
-        fail "Agent can still list iptables (CAP_NET_ADMIN not dropped)"
-    else
-        pass "Agent cannot access iptables (CAP_NET_ADMIN dropped)"
     fi
 }
 
@@ -844,7 +838,7 @@ test_agent_credential_flow() {
             --label "$TEST_LABEL_CREATED" \
             --network "$TEST_NETWORK" \
             --cap-add SYS_ADMIN \
-            --cap-add NET_ADMIN \
+             \
             -v "$TEST_REPO_DIR:/workspace" \
             -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
             -v "$session_config_root/capabilities:/run/host-capabilities:ro" \
@@ -972,7 +966,7 @@ test_mcp_configuration_generation() {
         --label "$TEST_LABEL_CREATED" \
         --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
-        --cap-add NET_ADMIN \
+         \
         -v "$test_workspace:/workspace:ro" \
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -v "$PROJECT_ROOT/host/utils/convert-toml-to-mcp.py:/usr/local/bin/convert-toml-to-mcp.py:ro" \
@@ -1305,7 +1299,7 @@ PY
         --label "$TEST_LABEL_SESSION" \
         --label "$TEST_LABEL_CREATED" \
         --network "$TEST_NETWORK" \
-        --cap-add NET_ADMIN \
+         \
         --cap-add SYS_ADMIN \
         -v "$TEST_REPO_DIR:/workspace" \
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
@@ -1533,7 +1527,7 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
-        --cap-add NET_ADMIN \
+         \
         --cap-add SYS_ADMIN \
         -e "http_proxy=$proxy_url" \
         python:3-alpine wget -q -O - "http://${allowed_domain}:8080" >/dev/null
@@ -1545,7 +1539,7 @@ PY
 
     if docker run --rm \
         --network "$proxy_network" \
-        --cap-add NET_ADMIN \
+         \
         --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
@@ -1585,7 +1579,7 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
-        --cap-add NET_ADMIN \
+         \
         --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
@@ -1613,7 +1607,7 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
-        --cap-add NET_ADMIN \
+         \
         --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
@@ -1645,7 +1639,7 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
-        --cap-add NET_ADMIN \
+         \
         --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
@@ -1674,7 +1668,7 @@ PY
     if docker run --rm \
         --network "$proxy_network" \
         --add-host "${allowed_domain}:${allowed_ip}" \
-        --cap-add NET_ADMIN \
+         \
         --cap-add SYS_ADMIN \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
@@ -1812,7 +1806,7 @@ EOF
         --label "$TEST_LABEL_SESSION" \
         --label "$TEST_LABEL_CREATED" \
         --cap-add SYS_ADMIN \
-        --cap-add NET_ADMIN \
+         \
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
         -e "HTTP_PROXY=http://${proxy_ip}:3128" \
         -e "HTTPS_PROXY=http://${proxy_ip}:3128" \
@@ -1923,7 +1917,7 @@ EOF
     --label "$TEST_LABEL_TEST" \
     --label "$TEST_LABEL_SESSION" \
     --label "$TEST_LABEL_CREATED" \
-    --cap-add NET_ADMIN \
+     \
     --cap-add SYS_ADMIN \
         --add-host "${allowed_domain}:${allowed_ip}" \
         --entrypoint /bin/sh \
@@ -2049,7 +2043,7 @@ JSON
     --label "$TEST_LABEL_CREATED" \
     --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
-        --cap-add NET_ADMIN \
+         \
         -v "$PROJECT_ROOT:/workspace:ro" \
         -v "$helper_manifest:/home/agentuser/.config/containai/helpers.json:ro" \
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
@@ -2176,7 +2170,7 @@ JSON
     --label "$TEST_LABEL_CREATED" \
     --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
-        --cap-add NET_ADMIN \
+         \
         -v "$PROJECT_ROOT:/workspace:ro" \
         -v "$wrapper_spec:/home/agentuser/.config/containai/wrappers/test-uid-wrapper.json:ro" \
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
@@ -2363,7 +2357,7 @@ JSON
         --label "$TEST_LABEL_CREATED" \
         --network "$TEST_NETWORK" \
         --cap-add SYS_ADMIN \
-        --cap-add NET_ADMIN \
+         \
         -v "$PROJECT_ROOT:/workspace:ro" \
         -v "$test_workspace:/workspace-test:ro" \
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
@@ -2526,7 +2520,7 @@ test_multiple_agents() {
             --label "containai.agent=$agent" \
             --network "$TEST_NETWORK" \
             --cap-add SYS_ADMIN \
-            --cap-add NET_ADMIN \
+             \
             -v "$TEST_REPO_DIR:/workspace" \
             -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
             -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \

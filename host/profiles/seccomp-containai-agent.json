@@ -1,4 +1,5 @@
 {
+	"_comment": "ContainAI Agent Seccomp Profile - Primary syscall enforcement layer. See docs/security/seccomp-profile.md for design rationale. Key points: (1) Default deny with explicit allow list, (2) Hard-deny block at end catches dangerous syscalls even if caps change, (3) clone/clone3 unconditionally allowed for fork/process creation, (4) io_uring allowed (Node.js uses it), (5) unshare allowed for sandbox namespace isolation, (6) WSL2: seccomp notify unavailable, falls back to audit shim.",
 	"defaultAction": "SCMP_ACT_ERRNO",
 	"defaultErrnoRet": 1,
 	"archMap": [

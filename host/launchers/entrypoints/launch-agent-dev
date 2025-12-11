@@ -1303,7 +1303,6 @@ DOCKER_ARGS+=(
     "-w" "/workspace"
     "--network" "$NETWORK_MODE"
     "--cap-add=SYS_ADMIN"
-    "--cap-add=NET_ADMIN"
     "--read-only"
     "--cap-drop=ALL"
     "--security-opt" "no-new-privileges:true"

@@ -1,3 +1,12 @@
+# ContainAI Agent AppArmor Profile
+# See docs/security/profile-architecture.md for design rationale.
+#
+# Security model: Defense-in-depth with seccomp (primary), AppArmor (this),
+# capabilities (CAP_DROP=ALL + SYS_ADMIN for sandbox), namespaces, read-only rootfs.
+#
+# Broad grants (network, capability, file) are intentional - agents need flexibility
+# for dev tasks. Security boundaries enforced via seccomp hard-deny and cap-drop.
+
 #include <tunables/global>
 
 profile containai-agent flags=(attach_disconnected,mediate_deleted) {
@@ -23,9 +32,10 @@ profile containai-agent flags=(attach_disconnected,mediate_deleted) {
   deny @{PROC}/sysrq-trigger rwklx,
   deny @{PROC}/kcore rwklx,
 
-  # =========================================================================
-  # MOUNT RULES - Allow only the mounts required by the entrypoint
-  # =========================================================================
+  # MOUNT RULES - Required for agent-task-sandbox namespace isolation.
+  # These allow `unshare --mount --pid` to create isolated namespaces for each
+  # agent command. Docker's --tmpfs handles tmpfs creation; these rules permit
+  # the propagation changes needed by unshare.
 
   # Audit shim bind mount
   mount options=(rw,bind) /run/ld.so.preload -> /etc/ld.so.preload,
@@ -68,6 +78,7 @@ profile containai-agent flags=(attach_disconnected,mediate_deleted) {
   deny /sys/firmware/** rwklx,
   deny /sys/kernel/security/** rwklx,
 
-  # Suppress ptrace denials when using ps inside the container
-  ptrace (trace,read,tracedby,readby) peer=containai-agent,
+  # ptrace is hard-blocked by seccomp (SCMP_ACT_ERRNO). This deny rule provides
+  # defense-in-depth and prevents audit log noise if seccomp is misconfigured.
+  deny ptrace,
 }
