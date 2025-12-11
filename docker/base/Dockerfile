@@ -166,6 +166,7 @@ COPY --chown=root:root docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-
 COPY --chown=root:root docker/runtime/mcp-wrapper-core.py /usr/local/libexec/mcp-wrapper-core.py
 COPY --chown=root:root docker/runtime/mcp-http-helper.py /usr/local/bin/mcp-http-helper.py
 COPY --chown=root:root docker/runtime/capability-unseal.py /usr/local/bin/capability-unseal
+COPY --chown=root:root host/utils/_mcp_common.py /usr/local/bin/_mcp_common.py
 COPY --chown=root:root host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
 COPY --chown=root:root host/utils/package-agent-data.py /usr/local/bin/package-agent-data.py
 
