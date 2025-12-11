@@ -180,16 +180,30 @@ install_host_session_configs() {
         if command -v update-ca-certificates >/dev/null 2>&1; then
             update-ca-certificates >/dev/null 2>&1 || true
         fi
-        # Python: SSL_CERT_FILE and REQUESTS_CA_BUNDLE
+        
+        # Universal CA certificate environment variables
+        # Different runtimes use different variables - set all common ones
+        
+        # Python: requests, urllib, httpx, aiohttp
         SSL_CERT_FILE="$trust_bundle_dest"
         REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
         export SSL_CERT_FILE
         export REQUESTS_CA_BUNDLE
-        # Node.js: NODE_EXTRA_CA_CERTS (Node uses bundled CAs, not system store)
+        
+        # Node.js: Uses bundled CAs, not system store
         NODE_EXTRA_CA_CERTS="$trust_bundle_dest"
         export NODE_EXTRA_CA_CERTS
+        
+        # curl: CURL_CA_BUNDLE overrides default CA path
+        CURL_CA_BUNDLE="$trust_bundle_dest"
+        export CURL_CA_BUNDLE
+        
+        # Ruby: net/http, open-uri, faraday use SSL_CERT_FILE (already set above)
+        # Rust (reqwest, ureq): Uses SSL_CERT_FILE or system store
+        # Go: Uses system store (update-ca-certificates above)
         # .NET: Uses system CA store via OpenSSL (update-ca-certificates above)
-        # Explicitly set SSL_CERT_DIR for .NET HttpClient fallback
+        
+        # OpenSSL fallback directory (some apps scan this)
         SSL_CERT_DIR="/etc/ssl/certs"
         export SSL_CERT_DIR
     fi
@@ -743,6 +757,7 @@ if [ "$(id -u)" -eq 0 ]; then
     export SSL_CERT_FILE
     export REQUESTS_CA_BUNDLE
     export NODE_EXTRA_CA_CERTS
+    export CURL_CA_BUNDLE
     export SSL_CERT_DIR
     export CONTAINAI_AGENT_DATA_STAGED
     export CONTAINAI_RUNNER_STARTED

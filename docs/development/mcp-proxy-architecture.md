@@ -176,20 +176,27 @@ flowchart TB
 |----------|---------|---------|
 | `HTTP_PROXY` | Proxy URL for HTTP requests | All runtimes |
 | `HTTPS_PROXY` | Proxy URL for HTTPS requests | All runtimes |
-| `SSL_CERT_FILE` | Path to CA certificate | Python (requests, urllib) |
+| `SSL_CERT_FILE` | Path to CA certificate | Python, Ruby, Rust (reqwest) |
 | `REQUESTS_CA_BUNDLE` | Path to CA certificate | Python (requests library) |
-| `NODE_EXTRA_CA_CERTS` | Path to additional CA certificates | Node.js (doesn't use system store) |
-| `SSL_CERT_DIR` | Directory containing CA certificates | .NET HttpClient fallback |
+| `NODE_EXTRA_CA_CERTS` | Path to additional CA certificates | Node.js |
+| `CURL_CA_BUNDLE` | Path to CA certificate | curl |
+| `SSL_CERT_DIR` | Directory containing CA certificates | OpenSSL-based apps |
 
-**Runtime-specific proxy behavior:**
+**Runtime-specific proxy and CA certificate handling:**
 
-| Runtime | Proxy Support | CA Certificate Handling |
-|---------|--------------|------------------------|
-| **Node.js** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses bundled CAs + `NODE_EXTRA_CA_CERTS` |
-| **Python** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` |
-| **.NET** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses system CA store (`update-ca-certificates`) |
-| **curl/wget** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses system CA store |
-| **Go** | Respects `HTTP_PROXY`/`HTTPS_PROXY` | Uses system CA store |
+| Runtime | Proxy Support | CA Certificate Source |
+|---------|--------------|----------------------|
+| **Node.js** | `HTTP_PROXY`/`HTTPS_PROXY` | Bundled CAs + `NODE_EXTRA_CA_CERTS` |
+| **Python** | `HTTP_PROXY`/`HTTPS_PROXY` | `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` |
+| **.NET** | `HTTP_PROXY`/`HTTPS_PROXY` | System CA store (via OpenSSL) |
+| **Go** | `HTTP_PROXY`/`HTTPS_PROXY` | System CA store |
+| **Rust** | `HTTP_PROXY`/`HTTPS_PROXY` | `SSL_CERT_FILE` or system store |
+| **Ruby** | `HTTP_PROXY`/`HTTPS_PROXY` | `SSL_CERT_FILE` |
+| **curl** | `HTTP_PROXY`/`HTTPS_PROXY` | `CURL_CA_BUNDLE` or system store |
+| **wget** | `HTTP_PROXY`/`HTTPS_PROXY` | System CA store |
+| **Java** | `-Dhttp.proxyHost`/`-Dhttps.proxyHost` | Custom truststore (see note) |
+
+> **Note on Java**: Java uses JVM arguments (`-Dhttp.proxyHost`, `-Dhttps.proxyHost`) rather than environment variables. For MITM CA support, you need to import the certificate into a Java truststore using `keytool`. This is not automatically configured.
 
 ```bash
 # Example environment in container
@@ -198,6 +205,7 @@ HTTPS_PROXY=http://containai-proxy:3128
 SSL_CERT_FILE=/usr/local/share/ca-certificates/containai-proxy.crt
 REQUESTS_CA_BUNDLE=/usr/local/share/ca-certificates/containai-proxy.crt
 NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/containai-proxy.crt
+CURL_CA_BUNDLE=/usr/local/share/ca-certificates/containai-proxy.crt
 SSL_CERT_DIR=/etc/ssl/certs
 ```
 
