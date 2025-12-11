@@ -9,8 +9,10 @@ on:
       - 'host/**'
       - 'agent-configs/**'
       - 'scripts/**'
+      - 'src/**'
       - 'config.toml'
       - '.github/workflows/build-runtime-images.yml'
+      - '.github/actions/setup-build-env/**'
   pull_request:
     branches:
       - main
@@ -19,8 +21,10 @@ on:
       - 'host/**'
       - 'agent-configs/**'
       - 'scripts/**'
+      - 'src/**'
       - 'config.toml'
       - '.github/workflows/build-runtime-images.yml'
+      - '.github/actions/setup-build-env/**'
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
@@ -42,7 +46,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAMESPACE: ${{ github.repository_owner }}
-  TRIVY_VERSION: v0.53.0
   ARTIFACTS_ROOT: artifacts
   ARTIFACTS_PUBLISH: artifacts/publish
 
@@ -86,7 +89,7 @@ jobs:
       - name: Install Trivy CLI
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin ${{ env.TRIVY_VERSION }}
+            | sudo sh -s -- -b /usr/local/bin
 
       - name: Scan build context for secrets
         run: |
@@ -128,18 +131,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
-        run: scripts/build/install-build-deps.sh --native-only --ci
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: src/global.json
-
-      - name: Compile binaries
-        run: |
-          scripts/build/compile-binaries.sh "${{ matrix.arch_slug }}" "artifacts"
-        shell: bash
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build-env
 
       - name: Set up Docker Buildx
         id: buildx

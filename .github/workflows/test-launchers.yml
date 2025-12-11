@@ -9,6 +9,7 @@ on:
       - 'src/**'
       - 'docker/**'
       - '.github/workflows/test-launchers.yml'
+      - '.github/actions/setup-build-env/**'
   pull_request:
     branches: [ main, develop ]
     paths:
@@ -17,9 +18,7 @@ on:
       - 'src/**'
       - 'docker/**'
       - '.github/workflows/test-launchers.yml'
-
-env:
-  TRIVY_VERSION: v0.68.1
+      - '.github/actions/setup-build-env/**'
 
 jobs:
   static-analysis:
@@ -75,34 +74,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache Cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-index-
-
-      - name: Cache Cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-build-target-
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build-env
 
       - name: Run Clippy (Agent Task Runner)
         run: |
@@ -143,18 +116,11 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Install build dependencies
-        run: ./scripts/build/install-build-deps.sh --native-only --ci
-
-      - name: Install socat
-        run: sudo apt-get install -y socat
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build-env
 
       - name: Install host assets
         run: sudo ./scripts/setup-local-dev.sh
-
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin ${TRIVY_VERSION}
       
       - name: Make test script executable
         run: chmod +x scripts/test/test-launchers.sh
@@ -185,18 +151,11 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Install build dependencies
-        run: ./scripts/build/install-build-deps.sh --native-only --ci
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build-env
 
-      - name: Install socat
-        run: sudo apt-get install -y socat
-
-      - name: Install host assets (sudo)
+      - name: Install host assets
         run: sudo ./scripts/setup-local-dev.sh
-
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin ${TRIVY_VERSION}
 
       - name: Run launcher tests (PowerShell Linux)
         run: pwsh -NoLogo -File scripts/test/test-launchers.ps1
@@ -264,29 +223,11 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Install build dependencies
-        run: ./scripts/build/install-build-deps.sh --native-only --ci
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build-env
 
-      - name: Install socat
-        run: sudo apt-get install -y socat
-
-      - name: Install host assets (sudo)
+      - name: Install host assets
         run: sudo ./scripts/setup-local-dev.sh
-
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin ${TRIVY_VERSION}
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: src/global.json
-      
-      - name: Build artifacts
-        run: |
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
-          ./scripts/build/compile-binaries.sh "$ARCH" artifacts
 
       - name: Make integration test executable
         run: chmod +x scripts/test/integration-test.sh scripts/test/test-env.sh
@@ -337,29 +278,11 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Install build dependencies
-        run: ./scripts/build/install-build-deps.sh --native-only --ci
-
-      - name: Install socat
-        run: sudo apt-get install -y socat
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build-env
 
       - name: Install host assets
         run: sudo ./scripts/setup-local-dev.sh
-
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin ${TRIVY_VERSION}
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: src/global.json
-      
-      - name: Build artifacts
-        run: |
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
-          ./scripts/build/compile-binaries.sh "$ARCH" artifacts
 
       - name: Make integration test executable
         run: chmod +x scripts/test/integration-test.sh scripts/test/test-env.sh
