@@ -98,7 +98,7 @@ pub unsafe extern "C" fn execve(
 ) -> libc::c_int {
     // Capture details
     let path_str = CStr::from_ptr(path).to_string_lossy().to_string();
-    
+
     // Collect args
     let mut args = Vec::new();
     if !argv.is_null() {
@@ -133,7 +133,7 @@ pub unsafe extern "C" fn execve(
 #[no_mangle]
 pub unsafe extern "C" fn open(path: *const libc::c_char, flags: libc::c_int, mode: libc::mode_t) -> libc::c_int {
      let path_str = CStr::from_ptr(path).to_string_lossy().to_string();
-     
+
      let payload = serde_json::json!({
          "path": path_str,
          "flags": flags,
@@ -142,7 +142,7 @@ pub unsafe extern "C" fn open(path: *const libc::c_char, flags: libc::c_int, mod
 
      send_event("open", payload);
 
-    let original_open: extern "C" fn(*const libc::c_char, libc::c_int, libc::mode_t) -> libc::c_int = 
+    let original_open: extern "C" fn(*const libc::c_char, libc::c_int, libc::mode_t) -> libc::c_int =
         std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, CString::new("open").unwrap().as_ptr()));
 
     original_open(path, flags, mode)
@@ -155,7 +155,7 @@ pub unsafe extern "C" fn open(path: *const libc::c_char, flags: libc::c_int, mod
 #[no_mangle]
 pub unsafe extern "C" fn openat(dirfd: libc::c_int, path: *const libc::c_char, flags: libc::c_int, mode: libc::mode_t) -> libc::c_int {
      let path_str = CStr::from_ptr(path).to_string_lossy().to_string();
-     
+
      let payload = serde_json::json!({
          "dirfd": dirfd,
          "path": path_str,
@@ -165,7 +165,7 @@ pub unsafe extern "C" fn openat(dirfd: libc::c_int, path: *const libc::c_char, f
 
      send_event("openat", payload);
 
-    let original_openat: extern "C" fn(libc::c_int, *const libc::c_char, libc::c_int, libc::mode_t) -> libc::c_int = 
+    let original_openat: extern "C" fn(libc::c_int, *const libc::c_char, libc::c_int, libc::mode_t) -> libc::c_int =
         std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, CString::new("openat").unwrap().as_ptr()));
 
     original_openat(dirfd, path, flags, mode)
@@ -185,7 +185,7 @@ pub unsafe extern "C" fn connect(
     let payload = serde_json::json!({
         "fd": socket,
     });
-    
+
     send_event("connect", payload);
 
     let original_connect: extern "C" fn(libc::c_int, *const libc::sockaddr, libc::socklen_t) -> libc::c_int =
