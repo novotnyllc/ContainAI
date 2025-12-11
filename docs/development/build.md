@@ -207,8 +207,8 @@ COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 |---------|----------------|
 | Non-root user | `agentuser` by default |
 | `no-new-privileges` | Docker security opt |
-| Seccomp profile | Blocks ptrace, clone3, mount, setns |
-| AppArmor profile | Denies /proc and /sys writes |
+| Seccomp profile | Hard-denies ptrace, mount, setns; allows clone/clone3 for process creation |
+| AppArmor profile | Denies /proc and /sys writes; mount rules scoped to sandbox |
 | Read-only auth mounts | Credentials mounted read-only |
 
 See [../security/architecture.md](../security/architecture.md) for the complete security model.

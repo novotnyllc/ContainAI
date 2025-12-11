@@ -75,6 +75,17 @@ The wrapper runs the attested `install.sh` inside WSL and syncs launcher shims i
 
 Re-run the install command with the desired channel or version. The installer swaps `/opt/containai/current` to the new release and preserves the previous version under `/opt/containai/previous`.
 
+## Security
+
+ContainAI isolates AI agents using defense-in-depth:
+
+- **Kernel hardening**: Seccomp syscall filtering + AppArmor MAC profiles
+- **Process isolation**: Non-root user (UID 1000), `no-new-privileges`, namespace sandboxing
+- **Secret protection**: OAuth configs mounted read-only; MCP secrets sealed by host broker
+- **Network governance**: All traffic routed through auditing proxy
+
+The health check verifies these controls are active. For detailed security architecture, see [Security Model](security/model.md) and [Profile Architecture](security/profile-architecture.md).
+
 ## Uninstalling
 
 To uninstall ContainAI, see the [Uninstall Guide](operations.md#uninstalling-containai).

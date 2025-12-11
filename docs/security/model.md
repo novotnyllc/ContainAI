@@ -101,9 +101,9 @@ flowchart TB
 We employ a multi-layered security approach:
 
 ### Layer 1: Kernel Hardening
-- **Seccomp**: We use a custom profile (template: `host/profiles/seccomp-containai-agent.json`, runtime: `seccomp-containai-agent-<channel>.json`) that blocks dangerous syscalls like `ptrace`, `mount`, `keyctl`, and `bpf`.
-- **AppArmor**: A mandatory access control profile (`containai-agent-<channel>`) restricts file access (deny `/proc`, `/sys` writes) and capabilities, even if the process somehow gains root.
-- **Capabilities**: All Linux capabilities are dropped (`--cap-drop=ALL`).
+- **Seccomp**: We use a custom profile (template: `host/profiles/seccomp-containai-agent.json`, runtime: `seccomp-containai-agent-<channel>.json`) that hard-denies dangerous syscalls like `ptrace`, `mount`, `keyctl`, and `bpf`. Process creation (`clone`, `clone3`) is allowed for normal operation.
+- **AppArmor**: A mandatory access control profile (`containai-agent-<channel>`) restricts file access (deny `/proc`, `/sys` writes). Mount rules are scoped only to sandbox namespace operations.
+- **Capabilities**: All Linux capabilities are dropped (`--cap-drop=ALL`), then `CAP_SYS_ADMIN` is added for sandbox namespace isolation (`unshare --mount --pid`). The sandbox explicitly verifies caps are dropped before executing user commands.
 
 ### Layer 2: Process Isolation
 - **User Namespaces**: The agent runs as a non-root user (`UID 1000`).
@@ -118,6 +118,8 @@ We employ a multi-layered security approach:
 - **Sidecar Proxy**: All HTTP/HTTPS traffic is routed through a transparent Squid proxy sidecar.
 - **Egress Filtering**: By default, traffic is allowed but logged. In `restricted` mode, all outbound traffic is blocked.
 - **DNS**: The container uses the host's DNS but cannot access localhost services unless explicitly configured.
+
+For detailed profile design rationale and diagrams, see [Profile Architecture](profile-architecture.md).
 
 ## Audit & Compliance
 
