@@ -27,6 +27,7 @@ Output Files:
 import json
 import os
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -64,6 +65,25 @@ DEFAULT_HELPER_ACL_CONFIG = Path(
         "CONTAINAI_SQUID_HELPERS_CONFIG", DEFAULT_CONFIG_ROOT / "squid-helpers.json"
     )
 )
+
+
+@dataclass
+class ConversionContext:
+    """Shared state for MCP configuration conversion."""
+
+    secrets: Dict[str, str] = field(default_factory=dict)
+    missing_tokens: List[Tuple[str, str]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    helpers: List[Dict] = field(default_factory=list)
+    wrappers: List[Dict] = field(default_factory=list)
+    known_helpers: Dict[str, Dict] = field(default_factory=dict)
+    next_port: int = HELPER_PORT_BASE
+
+    def allocate_port(self) -> int:
+        """Allocate and return the next available helper port."""
+        port = self.next_port
+        self.next_port += 1
+        return port
 
 
 def collect_secrets() -> Dict[str, str]:
@@ -122,11 +142,7 @@ def _is_already_proxied(server_config):
 
 
 def convert_remote_server(
-    name: str,
-    settings: Dict,
-    secrets: Dict[str, str],
-    missing_tokens: List[Tuple[str, str]],
-    port_state: Dict[str, int],
+    name: str, settings: Dict, ctx: ConversionContext
 ) -> Tuple[Dict, Dict]:
     """Convert a remote MCP server to use a local helper proxy."""
     converted: Dict = {}
@@ -136,18 +152,17 @@ def convert_remote_server(
     for key, value in settings.items():
         if key == "bearer_token_env_var":
             continue
-        converted[key] = resolve_value(value, secrets)
+        converted[key] = resolve_value(value, ctx.secrets)
 
     if bearer_var:
-        token = resolve_var(bearer_var, secrets)
+        token = resolve_var(bearer_var, ctx.secrets)
         if token:
             bearer_token = token
             converted["bearerToken"] = token
         else:
-            missing_tokens.append((name, bearer_var))
+            ctx.missing_tokens.append((name, bearer_var))
 
-    listen_port = port_state["value"]
-    port_state["value"] += 1
+    listen_port = ctx.allocate_port()
     listen_addr = f"{HELPER_LISTEN_HOST}:{listen_port}"
     target_url = converted.get("url")
     converted["url"] = f"http://{listen_addr}"
@@ -158,10 +173,7 @@ def convert_remote_server(
 
 
 def convert_local_server(
-    name: str,
-    settings: Dict,
-    secrets: Dict[str, str],
-    warnings: List[str],
+    name: str, settings: Dict, ctx: ConversionContext
 ) -> Tuple[Dict, Dict]:
     """Convert a local MCP server to use a wrapper for secret injection."""
     config = dict(settings)
@@ -182,13 +194,13 @@ def convert_local_server(
     if cwd:
         placeholders.update(collect_placeholders(cwd))
 
-    available = {k for k, v in secrets.items() if v}
+    available = {k for k, v in ctx.secrets.items() if v}
     available |= {k for k, v in os.environ.items() if v}
     required_secrets = sorted(p for p in placeholders if p in available)
     missing = sorted(p for p in placeholders if p not in available)
     for placeholder in missing:
         msg = f"⚠️  Secret '{placeholder}' referenced by MCP server '{name}' is not defined"
-        warnings.append(msg)
+        ctx.warnings.append(msg)
 
     spec = {
         "name": name,
@@ -207,7 +219,7 @@ def convert_local_server(
         with open(spec_file, "w", encoding="utf-8") as handle:
             json.dump(spec, handle, indent=2, sort_keys=True)
     except OSError as exc:
-        warnings.append(f"⚠️  Could not write wrapper spec for '{name}': {exc}")
+        ctx.warnings.append(f"⚠️  Could not write wrapper spec for '{name}': {exc}")
 
     rendered_entry = dict(config)
     rendered_entry["command"] = WRAPPER_COMMAND.format(name=name)
@@ -219,46 +231,27 @@ def convert_local_server(
     return rendered_entry, spec
 
 
-def process_servers(
-    mcp_servers: Dict,
-    secrets: Dict[str, str],
-    missing_tokens: List[Tuple[str, str]],
-    warnings: List[str],
-    helpers: List[Dict],
-    wrappers: List[Dict],
-    known_helpers: Dict[str, Dict],
-) -> Tuple[Dict, Dict[str, int]]:
+def process_servers(mcp_servers: Dict, ctx: ConversionContext) -> Dict:
     """Process and convert all MCP servers from the config."""
     resolved_servers: Dict = {}
-    port_state = {"value": HELPER_PORT_BASE}
 
     for name, settings in mcp_servers.items():
         settings = dict(settings or {})
         if "command" in settings:
-            rendered, spec = convert_local_server(name, settings, secrets, warnings)
+            rendered, spec = convert_local_server(name, settings, ctx)
             resolved_servers[name] = rendered
-            wrappers.append(spec)
+            ctx.wrappers.append(spec)
         else:
-            rendered, helper_entry = convert_remote_server(
-                name, settings, secrets, missing_tokens, port_state
-            )
+            rendered, helper_entry = convert_remote_server(name, settings, ctx)
             resolved_servers[name] = rendered
-            helpers.append(helper_entry)
-            known_helpers[name] = helper_entry
+            ctx.helpers.append(helper_entry)
+            ctx.known_helpers[name] = helper_entry
 
-    return resolved_servers, port_state
+    return resolved_servers
 
 
 def rewrite_existing_servers(
-    existing_servers: Dict,
-    resolved_servers: Dict,
-    secrets: Dict[str, str],
-    missing_tokens: List[Tuple[str, str]],
-    warnings: List[str],
-    helpers: List[Dict],
-    wrappers: List[Dict],
-    known_helpers: Dict[str, Dict],
-    port_state: Dict[str, int],
+    existing_servers: Dict, resolved_servers: Dict, ctx: ConversionContext
 ) -> Dict:
     """Rewrite existing servers to go through proxy mechanism."""
     rewritten_existing: Dict = {}
@@ -271,55 +264,37 @@ def rewrite_existing_servers(
             rewritten_existing[name] = server_config
         elif "command" in server_config:
             # Local server: wrap it
-            rendered, spec = convert_local_server(
-                name, server_config, secrets, warnings
-            )
+            rendered, spec = convert_local_server(name, server_config, ctx)
             rewritten_existing[name] = rendered
-            wrappers.append(spec)
+            ctx.wrappers.append(spec)
         elif "url" in server_config:
             # Remote server: route through helper proxy
-            rewritten_existing[name] = _rewrite_remote_server(
-                name,
-                server_config,
-                secrets,
-                missing_tokens,
-                helpers,
-                known_helpers,
-                port_state,
-            )
+            rewritten_existing[name] = _rewrite_remote_server(name, server_config, ctx)
         else:
             # Unknown format, preserve but warn
             msg = f"⚠️  Unknown MCP server format for '{name}', preserving unchanged"
-            warnings.append(msg)
+            ctx.warnings.append(msg)
             rewritten_existing[name] = server_config
     return rewritten_existing
 
 
 def _rewrite_remote_server(
-    name: str,
-    server_config: Dict,
-    secrets: Dict[str, str],
-    missing_tokens: List[Tuple[str, str]],
-    helpers: List[Dict],
-    known_helpers: Dict[str, Dict],
-    port_state: Dict[str, int],
+    name: str, server_config: Dict, ctx: ConversionContext
 ) -> Dict:
     """Rewrite a remote server to use helper proxy."""
-    if name in known_helpers:
+    if name in ctx.known_helpers:
         # Reuse existing helper
-        helper = known_helpers[name]
+        helper = ctx.known_helpers[name]
         rendered = dict(server_config)
         rendered.pop("bearer_token_env_var", None)
         for k, v in rendered.items():
-            rendered[k] = resolve_value(v, secrets)
+            rendered[k] = resolve_value(v, ctx.secrets)
         rendered["url"] = f"http://{helper['listen']}"
         return rendered
 
-    rendered, helper_entry = convert_remote_server(
-        name, server_config, secrets, missing_tokens, port_state
-    )
-    helpers.append(helper_entry)
-    known_helpers[name] = helper_entry
+    rendered, helper_entry = convert_remote_server(name, server_config, ctx)
+    ctx.helpers.append(helper_entry)
+    ctx.known_helpers[name] = helper_entry
     return rendered
 
 
@@ -340,13 +315,7 @@ def _write_agent_config(
     agent_name: str,
     agent_config_path: str,
     resolved_servers: Dict,
-    secrets: Dict[str, str],
-    missing_tokens: List[Tuple[str, str]],
-    warnings: List[str],
-    helpers: List[Dict],
-    wrappers: List[Dict],
-    known_helpers: Dict[str, Dict],
-    port_state: Dict[str, int],
+    ctx: ConversionContext,
 ) -> bool:
     """Write MCP config for a single agent."""
     config_dir = os.path.expanduser(agent_config_path)
@@ -356,15 +325,7 @@ def _write_agent_config(
     existing_config, existing_servers = _load_existing_config(config_file, agent_name)
 
     rewritten_existing = rewrite_existing_servers(
-        existing_servers,
-        resolved_servers,
-        secrets,
-        missing_tokens,
-        warnings,
-        helpers,
-        wrappers,
-        known_helpers,
-        port_state,
+        existing_servers, resolved_servers, ctx
     )
 
     merged_servers = {**rewritten_existing, **resolved_servers}
@@ -409,29 +370,24 @@ def _write_helper_manifest(config_path: str, helpers: List[Dict]) -> None:
 
 
 def _print_summary(
-    config_path: str,
-    resolved_servers: Dict,
-    helpers: List[Dict],
-    wrappers: List[Dict],
-    missing_tokens: List[Tuple[str, str]],
-    warnings: List[str],
+    config_path: str, resolved_servers: Dict, ctx: ConversionContext
 ) -> None:
     """Print conversion summary and warnings."""
     print("✅ MCP configurations generated for all agents")
     print(f"   Config source: {config_path}")
     server_names = ", ".join(sorted(resolved_servers.keys()))
     print(f"   Servers configured: {server_names}")
-    if helpers:
-        helper_names = ", ".join(h["name"] for h in helpers)
+    if ctx.helpers:
+        helper_names = ", ".join(h["name"] for h in ctx.helpers)
         print(f"   Remote servers (via helper proxy): {helper_names}")
-    if wrappers:
-        wrapper_names = ", ".join(w["name"] for w in wrappers)
+    if ctx.wrappers:
+        wrapper_names = ", ".join(w["name"] for w in ctx.wrappers)
         print(f"   Local servers (via wrapper): {wrapper_names}")
 
-    for server_name, env_var in missing_tokens:
+    for server_name, env_var in ctx.missing_tokens:
         msg = f"⚠️  Missing secret '{env_var}' for MCP server '{server_name}'"
         print(f"{msg} (bearer token not injected)", file=sys.stderr)
-    for warning in warnings:
+    for warning in ctx.warnings:
         print(warning, file=sys.stderr)
 
 
@@ -446,36 +402,17 @@ def convert_toml_to_mcp(config_path: str) -> bool:
         print("⚠️  No mcp_servers found in config.toml", file=sys.stderr)
         return False
 
-    secrets = collect_secrets()
-    missing_tokens: List[Tuple[str, str]] = []
-    warnings: List[str] = []
-    helpers: List[Dict] = []
-    wrappers: List[Dict] = []
-    known_helpers: Dict[str, Dict] = {}
-
-    resolved_servers, port_state = process_servers(
-        mcp_servers, secrets, missing_tokens, warnings, helpers, wrappers, known_helpers
-    )
+    ctx = ConversionContext(secrets=collect_secrets())
+    resolved_servers = process_servers(mcp_servers, ctx)
 
     for agent_name, agent_config_path in DEFAULT_AGENTS.items():
         if not _write_agent_config(
-            agent_name,
-            agent_config_path,
-            resolved_servers,
-            secrets,
-            missing_tokens,
-            warnings,
-            helpers,
-            wrappers,
-            known_helpers,
-            port_state,
+            agent_name, agent_config_path, resolved_servers, ctx
         ):
             return False
 
-    _write_helper_manifest(config_path, helpers)
-    _print_summary(
-        config_path, resolved_servers, helpers, wrappers, missing_tokens, warnings
-    )
+    _write_helper_manifest(config_path, ctx.helpers)
+    _print_summary(config_path, resolved_servers, ctx)
     return True
 
 

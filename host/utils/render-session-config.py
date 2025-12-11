@@ -11,14 +11,13 @@ import hashlib
 import json
 import os
 import pathlib
-import re
 import sys
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 # Allow import of sibling modules
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from _mcp_common import (  # noqa: E402  # pylint: disable=wrong-import-position
-    ENV_PATTERN,
     collect_placeholders as _collect_placeholders,
     load_secret_file,
     resolve_value as _resolve_value,
@@ -46,6 +45,18 @@ DEFAULT_SECRET_PATHS = [
     pathlib.Path("~/.config/containai/mcp-secrets.env").expanduser(),
     pathlib.Path("~/.mcp-secrets.env").expanduser(),
 ]
+
+
+@dataclass
+class SessionMetadata:
+    """Holds session metadata for config generation."""
+
+    session_id: str
+    agent_name: str
+    container_name: str
+    network_policy: str
+    repo_name: str
+    generated_at: str
 
 
 def _collect_secrets(explicit_files: List[pathlib.Path]) -> Dict[str, str]:
@@ -344,12 +355,7 @@ def _process_source_servers(
 
 def _write_agent_configs(
     output_dir: pathlib.Path,
-    session_id: str,
-    agent_name: str,
-    container_name: str,
-    network_policy: str,
-    repo_name: str,
-    generated_at: str,
+    meta: SessionMetadata,
     rendered_servers: Dict[str, Dict],
 ) -> List[Dict]:
     """Write agent-specific config files and return file metadata."""
@@ -357,13 +363,13 @@ def _write_agent_configs(
     for agent_key, target_path in AGENT_CONFIG_TARGETS.items():
         payload = {
             "session": {
-                "id": session_id,
-                "agent": agent_name,
-                "container": container_name,
-                "networkPolicy": network_policy,
-                "generatedAt": generated_at,
+                "id": meta.session_id,
+                "agent": meta.agent_name,
+                "container": meta.container_name,
+                "networkPolicy": meta.network_policy,
+                "generatedAt": meta.generated_at,
                 "target": target_path,
-                "sourceRepo": repo_name,
+                "sourceRepo": meta.repo_name,
             },
             "mcpServers": rendered_servers,
         }
@@ -440,10 +446,15 @@ def render_configs(
     all_server_names = sorted(source_servers.keys())
     stubbed_server_names = sorted(set(stubbed_server_names))
 
-    files = _write_agent_configs(
-        output_dir, session_id, agent_name, container_name,
-        network_policy, repo_name, generated_at, rendered_servers
+    meta = SessionMetadata(
+        session_id=session_id,
+        agent_name=agent_name,
+        container_name=container_name,
+        network_policy=network_policy,
+        repo_name=repo_name,
+        generated_at=generated_at,
     )
+    files = _write_agent_configs(output_dir, meta, rendered_servers)
 
     acl_path = output_dir / "squid-acls.conf"
     _write_squid_acls(acl_path, helpers, acl_policies)
