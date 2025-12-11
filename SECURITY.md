@@ -29,7 +29,7 @@ Each AI agent runs in an isolated Docker container with:
 
 - **Non-root user:** All containers run as `agentuser` (UID 1000)
 - **No privilege escalation:** `--security-opt no-new-privileges:true` is always set
-- **Curated seccomp:** `host/profiles/seccomp-containai.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
+- **Curated seccomp:** `host/profiles/seccomp-containai-agent.json` blocks `ptrace`, `clone3`, `mount`, `setns`, `process_vm_*`, etc.
 - **AppArmor confinement:** `host/profiles/apparmor-containai-agent.profile` is loaded as `containai-agent` to deny `/proc` and `/sys` writes
 - **Capabilities dropped:** `--cap-drop=ALL` removes all Linux capabilities
 - **Process limits:** `--pids-limit=4096` prevents fork bomb attacks

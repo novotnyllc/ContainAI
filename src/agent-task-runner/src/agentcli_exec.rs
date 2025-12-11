@@ -217,11 +217,13 @@ fn install_seccomp_filter() -> Result<Option<OwnedFd>> {
                  // as the system will fall back to the userspace Audit Shim for observability.
                  return Ok(None);
              }
+             // For non-WSL systems, EBUSY is unexpected but we still want to proceed with a warning
+             // rather than crashing, as the audit shim provides fallback coverage.
              eprintln!("WARNING: Seccomp user notification is unavailable (EBUSY). This is unexpected on non-WSL systems. Continuing without syscall interception.");
              return Ok(None);
         }
 
-        bail!("All seccomp load attempts failed. TSYNC: {}, NoTSYNC: {}", errno_tsync, errno_no_tsync);
+        bail!("Seccomp filter load failed (TSYNC: {}, NoTSYNC: {}).", errno_tsync, errno_no_tsync);
     }
 }
 

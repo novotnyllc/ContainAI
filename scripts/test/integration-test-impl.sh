@@ -479,58 +479,56 @@ test_launcher_script_execution() {
             ;;
     esac
     
-    # Create a mock launcher that uses test images
-    cat > "/tmp/test-${launcher_name}" << EOF
-#!/usr/bin/env bash
-set -euo pipefail
-source "$SCRIPT_DIR/test-config.sh"
-DOCKER_ARGS=(
-    run -d
-    --name "$container_name"
-    --label "${TEST_LABEL_TEST}"
-    --label "${TEST_LABEL_SESSION}"
-    --label "${TEST_LABEL_CREATED}"
-    --label "containai.type=agent"
-    --label "containai.agent=copilot"
-    --label "containai.repo=test-repo"
-    --label "containai.branch=main"
-    --network "${TEST_NETWORK}"
-    --cap-add SYS_ADMIN
-    --cap-add NET_ADMIN
-    --read-only
-    --security-opt "apparmor=containai-agent-${channel}"
-)
+    # Resolve security profile using shared logic (requires setup-local-dev.sh to have run)
+    local seccomp_profile
+    if ! seccomp_profile=$(CONTAINAI_LAUNCHER_CHANNEL="$channel" resolve_seccomp_profile_path "$PROJECT_ROOT"); then
+        fail "Failed to resolve seccomp profile for channel '$channel'. Run setup-local-dev.sh?"
+        return
+    fi
 
-DOCKER_ARGS+=(
-    --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700"
-    --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700"
-    --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700"
-    --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700"
-    --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755"
-    --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755"
-    --tmpfs "/run/agent-task-runner:rw,nosuid,nodev,exec,size=64m,mode=755"
-    --tmpfs "/run/containai:rw,nosuid,nodev,exec,size=64m,mode=755"
-    --tmpfs "/toolcache:rw,nosuid,nodev,exec,size=256m,mode=775"
-    -v "${TEST_REPO_DIR}:/workspace"
-    -e "GH_TOKEN=${TEST_GH_TOKEN}"
-    -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
-    -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
-    -e "NO_PROXY=localhost,127.0.0.1"
-    -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
-    --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
-    --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
-)
+    # Execute mock launcher logic directly
+    local -a docker_args=(
+        run -d
+        --name "$container_name"
+        --label "${TEST_LABEL_TEST}"
+        --label "${TEST_LABEL_SESSION}"
+        --label "${TEST_LABEL_CREATED}"
+        --label "containai.type=agent"
+        --label "containai.agent=copilot"
+        --label "containai.repo=test-repo"
+        --label "containai.branch=main"
+        --network "${TEST_NETWORK}"
+        --cap-add SYS_ADMIN
+        --cap-add NET_ADMIN
+        --read-only
+        --security-opt "apparmor=containai-agent-${channel}"
+        --security-opt "seccomp=${seccomp_profile}"
+    )
 
-docker "\${DOCKER_ARGS[@]}" "${TEST_COPILOT_IMAGE}" ${CONTAINER_KEEP_ALIVE_CMD}
-EOF
-    
-    chmod +x "/tmp/test-${launcher_name}"
-    
-    # Execute launcher
-    if "/tmp/test-${launcher_name}"; then
-        pass "Launcher script executed successfully"
+    docker_args+=(
+        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700"
+        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700"
+        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700"
+        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700"
+        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755"
+        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755"
+        --tmpfs "/run/agent-task-runner:rw,nosuid,nodev,exec,size=64m,mode=755"
+        --tmpfs "/run/containai:rw,nosuid,nodev,exec,size=64m,mode=755"
+        --tmpfs "/toolcache:rw,nosuid,nodev,exec,size=256m,mode=775"
+        -v "${TEST_REPO_DIR}:/workspace"
+        -e "GH_TOKEN=${TEST_GH_TOKEN}"
+        -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
+        -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
+        -e "NO_PROXY=localhost,127.0.0.1"
+        -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
+        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
+        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
+    )
+
+    if docker "${docker_args[@]}" "${TEST_COPILOT_IMAGE}" ${CONTAINER_KEEP_ALIVE_CMD}; then
+        pass "Launcher logic executed successfully"
     else
-        fail "Launcher script failed"
+        fail "Launcher logic failed"
         return
     fi
     
