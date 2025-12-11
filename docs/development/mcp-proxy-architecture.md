@@ -140,7 +140,7 @@ flowchart TB
     squid["Squid Proxy<br/>(containai-proxy)"]
     internet["Internet"]
     
-    agent -->|"❌ Direct access blocked<br/>(iptables/firewall)"| internet
+    agent -->|"❌ Direct access blocked<br/>(Docker network isolation)"| internet
     agent -->|"✅ HTTP to localhost"| helper
     agent -->|"✅ spawns"| wrapper
     wrapper -->|"✅ exec()"| local_mcp
@@ -166,9 +166,9 @@ flowchart TB
 
 **How enforcement works:**
 
-1. **Helper proxies** (remote MCP servers): Set `CONTAINAI_REQUIRE_PROXY=1` which makes the helper fail if HTTP_PROXY is not set
-2. **Local MCP servers**: Inherit `HTTP_PROXY`/`HTTPS_PROXY` environment variables from the wrapper
-3. **Firewall rules**: iptables blocks direct outbound connections from the container except to the proxy
+1. **Docker network isolation**: Containers are attached to internal-only networks with no route to the internet; only the proxy has external connectivity
+2. **Helper proxies** (remote MCP servers): Set `CONTAINAI_REQUIRE_PROXY=1` which makes the helper fail if HTTP_PROXY is not set
+3. **Local MCP servers**: Inherit `HTTP_PROXY`/`HTTPS_PROXY` environment variables from the wrapper
 
 **Environment variables set on MCP processes:**
 ```bash

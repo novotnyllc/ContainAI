@@ -24,7 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     unzip \
     socat \
-    iptables \
     tmux \
     gosu \
     # Build tools (REQUIRED for development)

@@ -1910,17 +1910,16 @@ EOF
         return
     fi
 
-    # Helper container with enforced egress to proxy only
+    # Helper container on internal network (Docker network isolation prevents direct
+    # internet access - the helper can only reach the proxy on this network)
     if ! docker run -d \
         --name "$helper_container" \
         --network "$proxy_network" \
-    --label "$TEST_LABEL_TEST" \
-    --label "$TEST_LABEL_SESSION" \
-    --label "$TEST_LABEL_CREATED" \
-     \
-    --cap-add SYS_ADMIN \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
+        --cap-add SYS_ADMIN \
         --add-host "${allowed_domain}:${allowed_ip}" \
-        --entrypoint /bin/sh \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
@@ -1935,13 +1934,10 @@ EOF
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
         -v "$PROJECT_ROOT:/workspace" \
         "$TEST_CODEX_IMAGE" \
-        -c "\
-iptables -F OUTPUT && \
-iptables -P OUTPUT DROP && \
-iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT && \
-iptables -A OUTPUT -o lo -j ACCEPT && \
-iptables -A OUTPUT -p tcp -d ${proxy_ip} --dport 3128 -j ACCEPT && \
-exec python3 /workspace/docker/runtime/mcp-http-helper.py --name helper-test --listen 0.0.0.0:18080 --target http://${allowed_domain}:8080" >/dev/null
+        python3 /workspace/docker/runtime/mcp-http-helper.py \
+            --name helper-test \
+            --listen 0.0.0.0:18080 \
+            --target "http://${allowed_domain}:8080" >/dev/null
     then
         fail "Failed to start helper container with enforced proxy"
         cleanup_helper_resources
