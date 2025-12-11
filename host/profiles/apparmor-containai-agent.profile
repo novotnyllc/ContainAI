@@ -22,7 +22,8 @@ profile containai-agent flags=(attach_disconnected,mediate_deleted) {
 
   # Host processes (dockerd) may send signals for lifecycle operations
   signal (receive) peer=unconfined,
-  # Containers may signal one another when sharing the same profile
+  # Processes within the container run under this profile and must signal each other
+  # (e.g., shell to children, agent-task-sandbox to spawned commands)
   signal (send,receive) peer=containai-agent,
 
   deny @{PROC}/* w,
