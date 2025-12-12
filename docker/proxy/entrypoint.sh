@@ -12,27 +12,43 @@ SQUID_CONF=${SQUID_CONF:-/etc/squid/squid.conf}
 SQUID_CACHE_DIR=${SQUID_CACHE_DIR:-/var/spool/squid}
 SQUID_LOG_DIR=${SQUID_LOG_DIR:-/var/log/squid}
 SQUID_SSL_DB_DIR=${SQUID_SSL_DB_DIR:-/var/spool/squid/ssl_db}
-ALLOWED_DOMAINS_FILE=/etc/squid/allowed-domains.txt
-HELPER_ACLS_FILE=/etc/squid/helper-acls.conf
-AGENT_HEADERS_FILE=/etc/squid/agent-headers.conf
-MITM_CA_CERT=${SQUID_MITM_CA_CERT:-/etc/squid/mitm/ca.crt}
-MITM_CA_KEY=${SQUID_MITM_CA_KEY:-/etc/squid/mitm/ca.key}
+# Runtime config files go in /var/run/squid (tmpfs) for read-only root filesystem support
+SQUID_RUN_DIR=${SQUID_RUN_DIR:-/var/run/squid}
+ALLOWED_DOMAINS_FILE="$SQUID_RUN_DIR/allowed-domains.txt"
+# Helper ACLs may be bind-mounted to /etc/squid/helper-acls.conf, will be copied to runtime dir
+HELPER_ACLS_SOURCE=${SQUID_HELPER_ACLS_FILE:-/etc/squid/helper-acls.conf}
+HELPER_ACLS_FILE="$SQUID_RUN_DIR/helper-acls.conf"
+AGENT_HEADERS_FILE="$SQUID_RUN_DIR/agent-headers.conf"
+# Source CA files - may be bind-mounted with restricted permissions
+MITM_CA_CERT_SOURCE=${SQUID_MITM_CA_CERT:-/etc/squid/mitm/ca.crt}
+MITM_CA_KEY_SOURCE=${SQUID_MITM_CA_KEY:-/etc/squid/mitm/ca.key}
+# Runtime CA files - copied to tmpfs with correct permissions for proxy user
+MITM_CA_CERT="$SQUID_RUN_DIR/mitm-ca.crt"
+MITM_CA_KEY="$SQUID_RUN_DIR/mitm-ca.key"
 
-if [ ! -f "$MITM_CA_CERT" ] || [ ! -f "$MITM_CA_KEY" ]; then
+# Ensure runtime directories exist FIRST before any file operations
+# Note: With --cap-drop=ALL, chown will fail, but tmpfs mounts should be writable
+mkdir -p "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$SQUID_RUN_DIR" "$(dirname "$SQUID_SSL_DB_DIR")"
+chown -hR proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$SQUID_RUN_DIR" 2>/dev/null || true
+
+if [ -f "$MITM_CA_CERT_SOURCE" ] && [ -f "$MITM_CA_KEY_SOURCE" ]; then
+    # Copy bind-mounted CA files to runtime dir with correct permissions
+    cp "$MITM_CA_CERT_SOURCE" "$MITM_CA_CERT"
+    cp "$MITM_CA_KEY_SOURCE" "$MITM_CA_KEY"
+    chown proxy:proxy "$MITM_CA_CERT" "$MITM_CA_KEY" 2>/dev/null || true
+    chmod 644 "$MITM_CA_CERT"
+    chmod 600 "$MITM_CA_KEY"
+    echo "✅ MITM CA copied to runtime directory"
+else
     echo "🔐 Generating new MITM CA certificate..."
-    mkdir -p "$(dirname "$MITM_CA_CERT")"
     openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
         -keyout "$MITM_CA_KEY" -out "$MITM_CA_CERT" \
         -subj "/CN=ContainAI MITM CA/O=ContainAI" 2>/dev/null
-    chown -R proxy:proxy "$(dirname "$MITM_CA_CERT")"
-    chmod 600 "$MITM_CA_KEY"
+    chown proxy:proxy "$MITM_CA_CERT" "$MITM_CA_KEY" 2>/dev/null || true
     chmod 644 "$MITM_CA_CERT"
+    chmod 600 "$MITM_CA_KEY"
     echo "✅ MITM CA generated at $MITM_CA_CERT"
 fi
-
-# Ensure directories exist with correct ownership
-mkdir -p "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$SQUID_SSL_DB_DIR")" "$(dirname "$ALLOWED_DOMAINS_FILE")"
-chown -hR proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$(dirname "$SQUID_SSL_DB_DIR")"
 
 # Generate allowed domains file from environment variable
 if [ -n "${SQUID_ALLOWED_DOMAINS:-}" ]; then
@@ -52,12 +68,15 @@ else
     echo "." > "$ALLOWED_DOMAINS_FILE"
 fi
 
-# Ensure helper ACL file exists (may be bind-mounted)
-if [ ! -f "$HELPER_ACLS_FILE" ]; then
+# Copy or create helper ACL file in runtime directory
+# If a bind-mounted source exists, copy it; otherwise create default
+if [ -f "$HELPER_ACLS_SOURCE" ]; then
+    cp "$HELPER_ACLS_SOURCE" "$HELPER_ACLS_FILE"
+else
     cat > "$HELPER_ACLS_FILE" <<'EOF'
 # default helper ACLs - allow any helper header using allowed-domains list
 acl helper_default req_header X-CA-Helper .
-acl helper_default_domains dstdomain "/etc/squid/allowed-domains.txt"
+acl helper_default_domains dstdomain "/var/run/squid/allowed-domains.txt"
 http_access allow helper_default helper_default_domains
 EOF
 fi
@@ -80,7 +99,7 @@ if [ ! -d "$SQUID_SSL_DB_DIR" ] || [ -z "$(ls -A "$SQUID_SSL_DB_DIR" 2>/dev/null
     mkdir -p "$SQUID_SSL_DB_DIR/certs"
     touch "$SQUID_SSL_DB_DIR/index.txt"
     echo "0" > "$SQUID_SSL_DB_DIR/size"
-    chown -R proxy:proxy "$SQUID_SSL_DB_DIR"
+    chown -R proxy:proxy "$SQUID_SSL_DB_DIR" 2>/dev/null || true
     echo "✅ ssl_crtd cache initialized"
 fi
 

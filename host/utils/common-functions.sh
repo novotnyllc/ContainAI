@@ -2067,7 +2067,10 @@ generate_session_mitm_ca() {
         return 1
     fi
     umask "$original_umask"
-    chmod 600 "$ca_key" "$ca_cert" || true
+    # Key is 600 (proxy-only), cert is 644 (readable for MITM verification)
+    # CAP_CHOWN on proxy container allows chown to work
+    chmod 600 "$ca_key" || true
+    chmod 644 "$ca_cert" || true
     SESSION_MITM_CA_CERT="$ca_cert"
     SESSION_MITM_CA_KEY="$ca_key"
     export SESSION_MITM_CA_CERT SESSION_MITM_CA_KEY
@@ -2218,6 +2221,9 @@ ensure_squid_proxy() {
         --restart no
         --read-only
         --cap-drop=ALL
+        --cap-add=CHOWN
+        --cap-add=SETUID
+        --cap-add=SETGID
         --security-opt "no-new-privileges:true"
         ${proxy_seccomp:+--security-opt "seccomp=${proxy_seccomp}"}
         ${proxy_apparmor:+--security-opt "apparmor=${proxy_apparmor}"}
@@ -2225,9 +2231,9 @@ ensure_squid_proxy() {
         -e "SQUID_ALLOWED_DOMAINS=$squid_allowed_domains"
         -e "SQUID_MITM_CA_CERT=/etc/squid/mitm/ca.crt"
         -e "SQUID_MITM_CA_KEY=/etc/squid/mitm/ca.key"
-        --tmpfs "/var/log/squid:rw,nosuid,nodev,noexec,size=64m,mode=750"
-        --tmpfs "/var/spool/squid:rw,nosuid,nodev,noexec,size=128m,mode=750"
-        --tmpfs "/var/run/squid:rw,nosuid,nodev,noexec,size=16m,mode=750"
+        --tmpfs "/var/log/squid:rw,nosuid,nodev,noexec,size=64m,mode=755"
+        --tmpfs "/var/spool/squid:rw,nosuid,nodev,noexec,size=128m,mode=755"
+        --tmpfs "/var/run/squid:rw,nosuid,nodev,noexec,size=16m,mode=755"
         --label "containai.proxy-of=$agent_container"
         --label "containai.proxy-image=$proxy_image"
         -v "$mitm_ca_cert:/etc/squid/mitm/ca.crt:ro"

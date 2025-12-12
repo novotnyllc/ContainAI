@@ -168,6 +168,94 @@ if [[ "$TEST_WITH_HOST_SECRETS" == "true" ]]; then
 fi
 
 # ============================================================================
+# Security Profile Prerequisites Check
+# ============================================================================
+# Containers REQUIRE security profiles (AppArmor + seccomp) to be installed and
+# loaded. This MUST be done before running integration tests. Fail-fast here
+# with clear instructions rather than cryptic Docker errors later.
+
+verify_security_profiles_ready() {
+    local channel="${CONTAINAI_LAUNCHER_CHANNEL:-dev}"
+    local profiles_dir="${CONTAINAI_SYSTEM_PROFILES_DIR:-/opt/containai/profiles}"
+    local errors=()
+    local can_verify_loaded=0
+
+    echo "Verifying security profiles are installed and loaded..."
+
+    # Check seccomp profiles exist
+    local seccomp_files=(
+        "seccomp-containai-agent-${channel}.json"
+        "seccomp-containai-proxy-${channel}.json"
+        "seccomp-containai-log-forwarder-${channel}.json"
+    )
+    for f in "${seccomp_files[@]}"; do
+        if [[ ! -f "$profiles_dir/$f" ]]; then
+            errors+=("Missing seccomp profile: $profiles_dir/$f")
+        fi
+    done
+
+    # Check AppArmor profiles exist on disk
+    local apparmor_files=(
+        "apparmor-containai-agent-${channel}.profile"
+        "apparmor-containai-proxy-${channel}.profile"
+        "apparmor-containai-log-forwarder-${channel}.profile"
+    )
+    for f in "${apparmor_files[@]}"; do
+        if [[ ! -f "$profiles_dir/$f" ]]; then
+            errors+=("Missing AppArmor profile file: $profiles_dir/$f")
+        fi
+    done
+
+    # Check AppArmor profiles are LOADED in kernel (requires CAP_SYS_ADMIN to read)
+    # Note: /sys/kernel/security/apparmor/profiles shows r--r--r-- but actually
+    # requires root/CAP_SYS_ADMIN to read - test by attempting actual read
+    local apparmor_profiles_file="/sys/kernel/security/apparmor/profiles"
+    local profiles_content
+    if profiles_content=$(cat "$apparmor_profiles_file" 2>/dev/null); then
+        can_verify_loaded=1
+        local profile_names=(
+            "containai-agent-${channel}"
+            "containai-proxy-${channel}"
+            "containai-log-forwarder-${channel}"
+        )
+        for p in "${profile_names[@]}"; do
+            if ! echo "$profiles_content" | grep -q "^${p} "; then
+                errors+=("AppArmor profile not loaded in kernel: $p (run: sudo apparmor_parser -r $profiles_dir/apparmor-${p}.profile)")
+            fi
+        done
+    fi
+
+    if [[ ${#errors[@]} -gt 0 ]]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ Security profile prerequisites NOT met:"
+        echo ""
+        for err in "${errors[@]}"; do
+            echo "  • $err"
+        done
+        echo ""
+        echo "Run the following to install and load security profiles:"
+        echo "  sudo ./scripts/setup-local-dev.sh"
+        echo ""
+        echo "This installs seccomp/AppArmor profiles to $profiles_dir"
+        echo "and loads AppArmor profiles into the kernel."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        exit 1
+    fi
+
+    if [[ "$can_verify_loaded" -eq 0 ]]; then
+        echo "⚠️  Cannot verify AppArmor profiles are loaded (need root to read $apparmor_profiles_file)"
+        echo "   Profile files exist on disk - assuming they are loaded."
+        echo "   If tests fail with 'apparmor failed to apply profile', run:"
+        echo "   sudo ./scripts/setup-local-dev.sh"
+    fi
+
+    echo "✓ Security profiles verified"
+}
+
+verify_security_profiles_ready
+
+# ============================================================================
 # Assertion Helper Functions
 # ============================================================================
 
@@ -1208,8 +1296,9 @@ test_mitm_ca_generation() {
         return
     fi
 
-    # Check if cert exists
-    if docker exec "$container_name" test -f /etc/squid/mitm/ca.crt; then
+    # Check if cert exists in runtime directory (where entrypoint copies/generates it)
+    # The entrypoint now copies bind-mounted certs OR auto-generates them to /var/run/squid/
+    if docker exec "$container_name" test -f /var/run/squid/mitm-ca.crt; then
         pass "MITM CA certificate generated"
     else
         fail "MITM CA certificate not found"
@@ -1217,7 +1306,7 @@ test_mitm_ca_generation() {
 
     # Check subject
     local subject
-    subject=$(docker exec "$container_name" openssl x509 -in /etc/squid/mitm/ca.crt -noout -subject 2>/dev/null || true)
+    subject=$(docker exec "$container_name" openssl x509 -in /var/run/squid/mitm-ca.crt -noout -subject 2>/dev/null || true)
     if echo "$subject" | grep -q "CN = ContainAI MITM CA"; then
         pass "MITM CA has correct subject"
     else
@@ -1728,7 +1817,14 @@ PY
 test_mcp_helper_proxy_enforced() {
     test_section "Testing MCP helper enforced proxy egress"
 
-    local proxy_image="containai-proxy:test-hardened"
+    # Load security profiles using production function - this sets PROXY_APPARMOR_PROFILE, etc.
+    if ! load_security_profiles "$PROJECT_ROOT"; then
+        fail "Failed to load security profiles"
+        return
+    fi
+
+    # Use production proxy image
+    local proxy_image="${PROXY_IMAGE:-containai-proxy:test-hardened}"
     if ! docker image inspect "$proxy_image" >/dev/null 2>&1; then
         echo "Building proxy image for helper proxy test..."
         if ! docker build -f "$PROJECT_ROOT/docker/proxy/Dockerfile" -t "$proxy_image" "$PROJECT_ROOT"; then
@@ -1737,17 +1833,39 @@ test_mcp_helper_proxy_enforced() {
         fi
     fi
 
-    local proxy_network="test-helper-net-${TEST_LABEL_SESSION//[^a-zA-Z0-9_.-]/-}"
-    local proxy_container="${TEST_PROXY_CONTAINER}-helper-proxy"
-    local helper_container="${TEST_PROXY_CONTAINER}-helper"
-    local allowed_container="${TEST_PROXY_CONTAINER}-helper-allowed"
+    # Test resources - use naming consistent with production
+    local internal_network="test-helper-internal-${TEST_SESSION_ID}"
+    local egress_network="test-helper-egress-${TEST_SESSION_ID}"
+    local proxy_container="test-helper-proxy-${TEST_SESSION_ID}"
+    local helper_container="test-helper-agent-${TEST_SESSION_ID}"
+    local allowed_container="test-helper-upstream-${TEST_SESSION_ID}"
+    # Use the container name as the allowed domain - Docker's embedded DNS
+    # resolves container names on the same network, avoiding /etc/hosts issues
+    # with read-only proxy containers
+    local allowed_domain="${allowed_container}"
+    local allowed_ip="203.0.117.10"
+    
+    # Generate session MITM CA using production function
+    local mitm_dir
+    mitm_dir="$(mktemp -d)"
+    if ! generate_session_mitm_ca "$mitm_dir"; then
+        fail "Failed to generate session MITM CA"
+        rm -rf "$mitm_dir"
+        return
+    fi
+
+    # Create helper ACL file (world-readable so container can read without CAP_DAC_READ_SEARCH)
     local helper_acl_file
     helper_acl_file="$(mktemp)"
-    local proxy_ip="203.0.116.20"
-    local allowed_ip="203.0.116.10"
-    local allowed_domain="allowed2.test"
-    local proxy_url="http://${proxy_ip}:3128"
+    chmod 644 "$helper_acl_file"
+    cat > "$helper_acl_file" <<EOF
+# helper-specific ACLs for test
+acl helper_hdr_helper-test req_header X-CA-Helper helper-test
+acl helper_allow_helper-test dstdomain ${allowed_domain}
+http_access allow helper_hdr_helper-test helper_allow_helper-test
+EOF
 
+    # Simple upstream HTTP server
     local helper_server_script
     helper_server_script="$(mktemp)"
     chmod 644 "$helper_server_script"
@@ -1767,215 +1885,173 @@ server = ThreadingHTTPServer(("", 8080), Handler)
 server.serve_forever()
 PY
 
-    cat > "$helper_acl_file" <<EOF
-# helper-specific ACLs for test
-acl helper_hdr_helper-test req_header X-CA-Helper helper-test
-acl helper_allow_helper-test dstdomain ${allowed_domain}
-http_access allow helper_hdr_helper-test helper_allow_helper-test
-EOF
-
     cleanup_helper_resources() {
         if [ "$TEST_PRESERVE_RESOURCES" = "true" ]; then
-            echo "Preserving helper proxy resources ($proxy_container, $helper_container, $allowed_container, $proxy_network)"
+            echo "Preserving helper proxy resources"
             return
         fi
         docker rm -f "$proxy_container" "$helper_container" "$allowed_container" >/dev/null 2>&1 || true
-        docker network rm "$proxy_network" >/dev/null 2>&1 || true
-        rm -f "$helper_server_script"
+        docker network rm "$internal_network" "$egress_network" >/dev/null 2>&1 || true
+        rm -rf "$mitm_dir" "$helper_acl_file" "$helper_server_script"
     }
 
-    docker network create \
-        --subnet 203.0.116.0/24 \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        --label "$TEST_LABEL_CREATED" \
-        "$proxy_network" 2>/dev/null || true
+    # Use production ensure_squid_proxy to set up networks and proxy
+    # This tests the ACTUAL production code path with REAL security profiles
+    ensure_squid_proxy \
+        "$internal_network" \
+        "$egress_network" \
+        "$proxy_container" \
+        "$proxy_image" \
+        "$helper_container" \
+        "$allowed_domain" \
+        "$helper_acl_file" \
+        "test-agent" \
+        "$TEST_SESSION_ID" \
+        "$SESSION_MITM_CA_CERT" \
+        "$SESSION_MITM_CA_KEY" \
+        "203.0.116.0/24"
 
-    if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
-        fail "Failed to create helper proxy network"
+    if ! docker inspect "$proxy_container" >/dev/null 2>&1; then
+        fail "ensure_squid_proxy failed to create proxy container"
         cleanup_helper_resources
         return
     fi
 
-    # Allowed upstream server
-    if ! docker run -d \
-        --name "$allowed_container" \
-        --network "$proxy_network" \
-        --ip "$allowed_ip" \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        --label "$TEST_LABEL_CREATED" \
-        --cap-add SYS_ADMIN \
-         \
-        -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
-        -e "HTTP_PROXY=http://${proxy_ip}:3128" \
-        -e "HTTPS_PROXY=http://${proxy_ip}:3128" \
-        -e "NO_PROXY=localhost,127.0.0.1" \
-        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
-        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
-        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
-        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
-        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
-        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
-        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
-        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
-        -v "$helper_server_script:/server.py:ro" \
-        "$TEST_CODEX_IMAGE" \
-        python3 /server.py
-    then
-        fail "Failed to start upstream server for helper test"
+    # Brief pause to let Docker daemon stabilize network namespaces
+    # This avoids race conditions between network connect and subsequent container starts
+    sleep 1
+
+    # Get proxy IP on internal network
+    local proxy_ip
+    proxy_ip=$(docker inspect -f "{{range .NetworkSettings.Networks}}{{if eq .NetworkID \"$(docker network inspect -f '{{.Id}}' "$internal_network")\"}}" "$proxy_container" 2>/dev/null | head -1)
+    proxy_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$internal_network\").IPAddress}}" "$proxy_container" 2>/dev/null)
+    if [ -z "$proxy_ip" ]; then
+        # Fallback: get any IP from the proxy
+        proxy_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$proxy_container" 2>/dev/null | head -c 15)
+    fi
+    local proxy_url="http://${proxy_ip}:3128"
+
+    # Start upstream server on egress network (only proxy can reach it)
+    # Retry up to 3 times to handle Docker network namespace race conditions
+    local upstream_started=false
+    local upstream_attempt
+    for upstream_attempt in {1..3}; do
+        # Clean up any failed container from previous attempt
+        docker rm -f "$allowed_container" >/dev/null 2>&1 || true
+        
+        if docker run -d \
+            --name "$allowed_container" \
+            --network "$egress_network" \
+            --label "$TEST_LABEL_TEST" \
+            --label "$TEST_LABEL_SESSION" \
+            --label "$TEST_LABEL_CREATED" \
+            -v "$helper_server_script:/server.py:ro" \
+            python:3-alpine python3 /server.py 2>&1
+        then
+            upstream_started=true
+            break
+        else
+            echo "DEBUG: Upstream container start attempt $upstream_attempt failed, retrying after delay..." >&2
+            sleep 2
+        fi
+    done
+    
+    if [ "$upstream_started" = false ]; then
+        fail "Failed to start upstream server for helper test after 3 attempts"
         cleanup_helper_resources
         return
     fi
+    
+    # Note: We use the container name as the allowed_domain, so Docker's
+    # embedded DNS will resolve it. No need for /etc/hosts modification.
 
     # Wait for upstream server to be ready
+    # Note: BusyBox nc -z on Alpine has issues with localhost, so we use Python directly
     local upstream_ready=false
-    for _ in {1..30}; do
-        local status
-        status=$(docker inspect -f '{{.State.Status}}' "$allowed_container" 2>/dev/null || echo "unknown")
-        if [ "$status" = "running" ]; then
-            if docker exec "$allowed_container" bash -c "exec 3<>/dev/tcp/localhost/8080" >/dev/null 2>&1; then
-                upstream_ready=true
-                docker exec "$allowed_container" bash -c "exec 3>&-" 2>/dev/null || true
-                break
-            fi
-        elif [ "$status" = "exited" ]; then
-            fail "Upstream server container exited unexpectedly"
-            echo "DEBUG: Upstream server logs:"
-            docker logs "$allowed_container" 2>&1 || true
-            cleanup_helper_resources
-            return
+    local check_count=0
+    for _ in {1..15}; do
+        check_count=$((check_count + 1))
+        if docker exec "$allowed_container" python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost', 8080)); s.close()" >/dev/null 2>&1; then
+            upstream_ready=true
+            break
         fi
         sleep 1
     done
 
     if [ "$upstream_ready" = false ]; then
+        echo "DEBUG: Final upstream container status after 15 checks:" >&2
+        docker ps -a --filter "name=$allowed_container" --format "{{.Names}} {{.Status}}" >&2 || true
+        docker logs "$allowed_container" 2>&1 >&2 || true
         fail "Upstream server did not become ready"
-        echo "DEBUG: Upstream server status:"
-        docker inspect -f '{{.State.Status}}' "$allowed_container" 2>/dev/null || true
-        echo "DEBUG: Upstream server logs:"
-        docker logs "$allowed_container" 2>&1 | tail -50 || true
-        cleanup_helper_resources
-        return
-    fi
-
-    # Squid proxy
-    if ! docker run -d \
-        --name "$proxy_container" \
-        --hostname "$proxy_container" \
-        --network "$proxy_network" \
-        --ip "$proxy_ip" \
-        --label "$TEST_LABEL_TEST" \
-        --label "$TEST_LABEL_SESSION" \
-        --label "$TEST_LABEL_CREATED" \
-        --add-host "${allowed_domain}:${allowed_ip}" \
-        -e "SQUID_ALLOWED_DOMAINS=${allowed_domain}" \
-        -v "$helper_acl_file:/etc/squid/helper-acls.conf:ro" \
-        "$proxy_image" >/dev/null
-    then
-        fail "Failed to start helper squid proxy"
         cleanup_helper_resources
         return
     fi
 
     # Wait for proxy to be ready
-    local ready=false
+    local proxy_ready=false
     for _ in {1..15}; do
-        local proxy_status
-        proxy_status=$(docker inspect -f '{{.State.Status}}' "$proxy_container" 2>/dev/null || echo "unknown")
-        if [ "$proxy_status" = "exited" ]; then
-            fail "Helper squid proxy container exited unexpectedly"
-            echo "DEBUG: Exit code: $(docker inspect -f '{{.State.ExitCode}}' "$proxy_container" 2>/dev/null || echo 'unknown')"
-            echo "DEBUG: Helper squid proxy logs:"
-            docker logs "$proxy_container" 2>&1 || true
-            cleanup_helper_resources
-            return
-        fi
-        if [ "$proxy_status" = "running" ]; then
-            if docker exec "$proxy_container" bash -c "exec 3<>/dev/tcp/localhost/3128" >/dev/null 2>&1; then
-                ready=true
-                docker exec "$proxy_container" bash -c "exec 3>&-" 2>/dev/null || true
-                break
-            fi
+        if docker exec "$proxy_container" bash -c "exec 3<>/dev/tcp/localhost/3128" >/dev/null 2>&1; then
+            proxy_ready=true
+            docker exec "$proxy_container" bash -c "exec 3>&-" 2>/dev/null || true
+            break
         fi
         sleep 1
     done
 
-    if [ "$ready" = false ]; then
-        fail "Helper squid proxy did not become ready"
-        echo "DEBUG: Container status: $(docker inspect -f '{{.State.Status}}' "$proxy_container" 2>/dev/null || echo 'unknown')"
-        echo "DEBUG: Helper squid proxy logs:"
-        docker logs "$proxy_container" 2>&1 || true
+    if [ "$proxy_ready" = false ]; then
+        fail "Proxy did not become ready"
+        echo "DEBUG: Proxy logs:"
+        docker logs "$proxy_container" 2>&1 | tail -30 || true
         cleanup_helper_resources
         return
     fi
 
-    # Helper container on internal network (Docker network isolation prevents direct
-    # internet access - the helper can only reach the proxy on this network)
+    # Helper container on internal network ONLY - cannot reach egress network directly
+    # This is exactly how the production launcher sets up agent containers
+    # Note: No --add-host needed. The helper talks to the proxy, and the proxy
+    # resolves the upstream container name via Docker's embedded DNS on the egress network.
     if ! docker run -d \
         --name "$helper_container" \
-        --network "$proxy_network" \
+        --network "$internal_network" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         --label "$TEST_LABEL_CREATED" \
-        --cap-add SYS_ADMIN \
-        --add-host "${allowed_domain}:${allowed_ip}" \
         -e "HTTP_PROXY=$proxy_url" \
         -e "HTTPS_PROXY=$proxy_url" \
         -e "NO_PROXY=" \
         -e "CONTAINAI_REQUIRE_PROXY=1" \
-        --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
-        --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
-        --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \
-        --tmpfs "/run/agent-data-export:rw,nosuid,nodev,noexec,size=64m,mode=700" \
-        --tmpfs "/run/mcp-helpers:rw,nosuid,nodev,exec,size=64m,mode=755" \
-        --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755" \
-        --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
-        --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777" \
-        -v "$PROJECT_ROOT:/workspace" \
+        -v "$PROJECT_ROOT:/workspace:ro" \
         "$TEST_CODEX_IMAGE" \
         python3 /workspace/docker/runtime/mcp-http-helper.py \
             --name helper-test \
             --listen 0.0.0.0:18080 \
             --target "http://${allowed_domain}:8080" >/dev/null
     then
-        fail "Failed to start helper container with enforced proxy"
+        fail "Failed to start helper container"
         cleanup_helper_resources
         return
     fi
 
-    # Wait for helper container to be running and for the helper script to start
+    # Wait for helper to be ready
     local helper_ready=false
     for _ in {1..15}; do
-        local status
-        status=$(docker inspect -f '{{.State.Status}}' "$helper_container" 2>/dev/null || echo "unknown")
-        if [ "$status" = "running" ]; then
-            # Check if the helper is listening
-            if docker exec "$helper_container" bash -c "exec 3<>/dev/tcp/localhost/18080" >/dev/null 2>&1; then
-                helper_ready=true
-                docker exec "$helper_container" bash -c "exec 3>&-" 2>/dev/null || true
-                break
-            fi
-        elif [ "$status" = "exited" ]; then
-            fail "Helper container exited unexpectedly"
-            echo "DEBUG: Helper container logs:"
-            docker logs "$helper_container" 2>&1 || true
-            cleanup_helper_resources
-            return
+        if docker exec "$helper_container" bash -c "exec 3<>/dev/tcp/localhost/18080" >/dev/null 2>&1; then
+            helper_ready=true
+            docker exec "$helper_container" bash -c "exec 3>&-" 2>/dev/null || true
+            break
         fi
         sleep 1
     done
 
     if [ "$helper_ready" = false ]; then
         fail "Helper container did not become ready"
-        echo "DEBUG: Helper container status:"
-        docker inspect -f '{{.State.Status}}' "$helper_container" 2>/dev/null || true
-        echo "DEBUG: Helper container logs:"
-        docker logs "$helper_container" 2>&1 | tail -50 || true
+        echo "DEBUG: Helper logs:"
+        docker logs "$helper_container" 2>&1 | tail -30 || true
         cleanup_helper_resources
         return
     fi
 
+    # Test 1: Health endpoint
     local health
     health=$(docker exec "$helper_container" curl -s --max-time 3 http://127.0.0.1:18080/health || true)
     if echo "$health" | grep -q '"status": "ok"'; then
@@ -1984,21 +2060,22 @@ EOF
         fail "Helper health endpoint unavailable"
     fi
 
+    # Test 2: Traffic goes through proxy successfully
     if docker exec "$helper_container" curl -s --max-time 5 http://127.0.0.1:18080/ | grep -q "ok"; then
         pass "Helper successfully proxies through squid with header enforcement"
     else
         fail "Helper failed to proxy through squid"
     fi
 
-    # Direct egress without proxy should fail due to firewall
-    if docker exec "$helper_container" env -u HTTP_PROXY -u HTTPS_PROXY curl --max-time 3 http://${allowed_domain}:8080/ >/dev/null 2>&1; then
-        fail "Helper bypassed proxy despite firewall"
+    # Test 3: Direct egress without proxy should fail due to network isolation
+    # The helper is on internal_network which has --internal flag, blocking external access
+    if docker exec "$helper_container" env -u HTTP_PROXY -u HTTPS_PROXY curl --max-time 3 "http://${allowed_domain}:8080/" >/dev/null 2>&1; then
+        fail "Helper bypassed proxy despite network isolation"
     else
-        pass "Firewall blocks direct egress without proxy"
+        pass "Network isolation blocks direct egress without proxy"
     fi
 
     cleanup_helper_resources
-    rm -f "$helper_acl_file"
 }
 
 test_mcp_helper_uid_isolation() {

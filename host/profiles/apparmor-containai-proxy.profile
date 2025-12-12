@@ -13,8 +13,11 @@ profile containai-proxy flags=(attach_disconnected,mediate_deleted) {
   signal (receive) peer=unconfined,
 
   /etc/squid/** r,
+  /var/log/squid/ rw,
   /var/log/squid/** rw,
+  /var/spool/squid/ rw,
   /var/spool/squid/** rw,
+  /var/run/squid/ rw,
   /var/run/squid/** rw,
   deny /home/** rwklx,
   deny /root/** rwklx,

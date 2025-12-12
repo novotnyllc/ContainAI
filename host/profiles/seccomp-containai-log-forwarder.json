@@ -8,39 +8,46 @@
   "syscalls": [
     {
       "names": [
-        "accept","accept4","access","bind","brk","capget","capset","chdir","chmod","chown","clock_gettime","close",
-        "dup","dup2","dup3","epoll_create","epoll_create1","epoll_ctl","epoll_wait","epoll_pwait","eventfd","eventfd2",
-        "execve","exit","exit_group","faccessat","fadvise64","fallocate","fchmod","fchmodat","fchown","fchownat",
-        "fcntl","fdatasync","fgetxattr","flistxattr","fremovexattr","fsetxattr","fstat","fstatfs","fsync","ftruncate",
-        "futex","getcwd","getdents","getdents64","getegid","geteuid","getgid","getgroups","getpeername","getpid",
-        "getppid","getrandom","getresgid","getresuid","getrlimit","getrusage","getsid","getsockname","getsockopt",
-        "gettid","gettimeofday","getuid","getxattr","inotify_add_watch","inotify_init","inotify_init1","inotify_rm_watch",
-        "ioctl","lchown","link","linkat","listen","lseek","lstat","madvise","memfd_create","mkdir","mkdirat","mknod",
-        "mknodat","mlock","mlockall","mmap","mmap2","mprotect","mremap","msync","munlock","munmap","nanosleep",
-        "newfstatat","open","openat","pipe","pipe2","poll","ppoll","pread64","preadv","preadv2","pselect6","pwrite64",
-        "pwritev","pwritev2","read","readlink","readlinkat","readv","recv","recvfrom","recvmmsg","recvmsg","rename",
-        "renameat","renameat2","rmdir","rt_sigaction","rt_sigpending","rt_sigprocmask","rt_sigqueueinfo","rt_sigreturn",
-        "rt_sigsuspend","rt_sigtimedwait","rt_tgsigqueueinfo","sched_getaffinity","sched_getparam","sched_getscheduler",
-        "sched_rr_get_interval","sched_setaffinity","sched_setparam","sched_setscheduler","sched_yield","seccomp","select",
-        "send","sendto","sendmsg","set_robust_list","set_tid_address","setfsgid","setfsuid","setgid","setgroups",
-        "setitimer","setpgid","setpriority","setregid","setresgid","setresuid","setreuid","setsid","setsockopt","setuid",
-        "shutdown","sigaltstack","signalfd","signalfd4","socket","socketpair","splice","stat","statfs","symlink",
-        "symlinkat","sync","sysinfo","tee","tgkill","timer_delete","timer_gettime","timer_settime","timerfd_create",
-        "timerfd_gettime","timerfd_settime","times","tkill","truncate","umask","uname","unlink","unlinkat","utimensat",
-        "utimes","vmsplice","wait4","waitid","waitpid","write","writev"
+        "accept","accept4","access","arch_prctl","bind","brk","capget","capset","chdir","chmod","chown",
+        "clock_gettime","clone","close","close_range","connect","dup","dup2","dup3","epoll_create",
+        "epoll_create1","epoll_ctl","epoll_wait","epoll_pwait","eventfd","eventfd2","execve","exit",
+        "exit_group","faccessat","faccessat2","fadvise64","fallocate","fchdir","fchmod","fchmodat",
+        "fchown","fchownat","fcntl","fdatasync","fgetxattr","flistxattr","flock","fremovexattr",
+        "fsetxattr","fstat","fstatfs","fsync","ftruncate","futex","getcwd","getdents","getdents64",
+        "getegid","geteuid","getgid","getgroups","getpeername","getpid","getppid","getrandom",
+        "getresgid","getresuid","getrlimit","getrusage","getsid","getsockname","getsockopt","gettid",
+        "gettimeofday","getuid","getxattr","inotify_add_watch","inotify_init","inotify_init1",
+        "inotify_rm_watch","ioctl","lchown","link","linkat","listen","lseek","lstat","madvise",
+        "memfd_create","mkdir","mkdirat","mknod","mknodat","mlock","mlockall","mmap","mmap2",
+        "mprotect","mremap","msync","munlock","munmap","nanosleep","newfstatat","open","openat",
+        "openat2","pipe","pipe2","poll","ppoll","prctl","pread64","preadv","preadv2","pselect6",
+        "pwrite64","pwritev","pwritev2","read","readlink","readlinkat","readv","recv","recvfrom",
+        "recvmmsg","recvmsg","rename","renameat","renameat2","rmdir","rseq","rt_sigaction",
+        "rt_sigpending","rt_sigprocmask","rt_sigqueueinfo","rt_sigreturn","rt_sigsuspend",
+        "rt_sigtimedwait","rt_tgsigqueueinfo","sched_getaffinity","sched_getparam",
+        "sched_getscheduler","sched_rr_get_interval","sched_setaffinity","sched_setparam",
+        "sched_setscheduler","sched_yield","seccomp","select","send","sendto","sendmsg",
+        "set_robust_list","set_tid_address","setfsgid","setfsuid","setgid","setgroups","setitimer",
+        "setpgid","setpriority","setregid","setresgid","setresuid","setreuid","setsid","setsockopt",
+        "setuid","shutdown","sigaltstack","signalfd","signalfd4","socket","socketpair","splice",
+        "stat","statfs","statx","symlink","symlinkat","sync","sysinfo","tee","tgkill","timer_delete",
+        "timer_gettime","timer_settime","timerfd_create","timerfd_gettime","timerfd_settime","times",
+        "tkill","truncate","umask","uname","unlink","unlinkat","utimensat","utimes","vmsplice",
+        "wait4","waitid","waitpid","write","writev"
       ],
       "action": "SCMP_ACT_ALLOW"
     },
     {
       "names": [
-        "bpf","clone3","fanotify_init","fsconfig","fsmount","fsopen","fspick","kcmp","move_mount","mount","open_by_handle_at",
-        "open_tree","pivot_root","process_madvise","process_vm_readv","process_vm_writev","ptrace","quotactl","setdomainname",
-        "sethostname","setns","syslog","umount","umount2","unshare","perf_event_open","keyctl","add_key","request_key",
+        "bpf","fanotify_init","fsconfig","fsmount","fsopen","fspick","kcmp","mount","move_mount",
+        "open_by_handle_at","open_tree","pivot_root","process_madvise","process_vm_readv",
+        "process_vm_writev","ptrace","quotactl","setdomainname","sethostname","setns","syslog",
+        "umount","umount2","unshare","perf_event_open","keyctl","add_key","request_key",
         "timer_create","mq_open"
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 38,
-      "comment": "Forwarder: deny high-risk syscalls"
+      "comment": "Forwarder: deny high-risk syscalls including mount namespace operations"
     }
   ]
 }
