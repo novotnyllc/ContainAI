@@ -25,9 +25,46 @@ This file contains repository-specific guidance for working with the ContainAI c
 
 - `agent-configs/` - Custom instruction files for agents (copied to containers)
 - `docker/` - Container definitions and compose configurations
+- `host/profiles/` - **Security profiles (AppArmor + seccomp)
+- `host/launchers/` - Agent launcher scripts
+- `host/utils/` - Shared bash utilities (common-functions.sh)
 - `scripts/` - Utility scripts (bash plus thin Windows shims)
 - `config.toml` - MCP server configuration template
 - `docs/` - Documentation
+
+## Security Profile Management
+
+### Profile Locations
+- **Source files**: `host/profiles/` (in git, NO channel suffix)
+- **Installed files**: `/opt/containai/profiles/` (with `-dev` or `-prod` suffix)
+
+### Profile Naming Convention
+- Source: `apparmor-containai-proxy.profile`, `seccomp-containai-proxy.json`
+- Installed: `apparmor-containai-proxy-dev.profile`, `seccomp-containai-proxy-dev.json`
+
+### Installation Workflow
+The setup script handles copying, renaming, and loading profiles:
+```bash
+sudo ./scripts/setup-local-dev.sh
+```
+
+This script:
+1. Copies profiles from `host/profiles/` to `/opt/containai/profiles/`
+2. Renames files to add channel suffix (`-dev`)
+3. Updates internal profile names (e.g., `containai-proxy` → `containai-proxy-dev`)
+4. Loads AppArmor profiles into the kernel via `apparmor_parser`
+
+### Common Mistakes to Avoid
+- ❌ NEVER add channel suffix (`-dev`, `-prod`) to source files in `host/profiles/`
+- ❌ NEVER edit installed profiles directly in `/opt/containai/profiles/`
+- ✅ ALWAYS edit source files in `host/profiles/`, then run setup script
+
+### Adding New Syscalls
+When container startup fails with seccomp violations:
+1. Check container logs for blocked syscall names
+2. Add syscalls to the appropriate `host/profiles/seccomp-*.json` allow list
+3. Run `sudo ./scripts/setup-local-dev.sh` to reinstall
+4. Rebuild the affected container image if needed
 
 ## Key Principles
 
