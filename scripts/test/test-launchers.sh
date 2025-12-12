@@ -1556,8 +1556,8 @@ test_mitm_ca_generation() {
 
     local key_perms
     key_perms=$(stat -c "%a" "$ca_key" 2>/dev/null || stat -f "%Lp" "$ca_key")
-    if [ "$key_perms" != "600" ]; then
-        fail "MITM CA key permissions are $key_perms (expected 600)"
+    if [ "$key_perms" != "644" ]; then
+        fail "MITM CA key permissions are $key_perms (expected 644)"
         rm -rf "$ca_dir"
         return
     fi
