@@ -455,7 +455,7 @@ stage_agent_cli_capability_bundles() {
 
 package_agent_data_payload() {
     local agent_name="$1"
-    local packager_script="$REPO_ROOT/host/utils/package-agent-data.py"
+    local packager_script="$REPO_ROOT/host/utils/package_agent_data.py"
     if [ ! -f "$packager_script" ]; then
         return 0
     fi
@@ -890,7 +890,7 @@ if [ "${CONTAINAI_PROFILE:-dev}" = "dev" ]; then
 fi
 
 SESSION_CONFIG_ROOT_IN_CONTAINER="/run/containai"
-RENDERER_SCRIPT="$REPO_ROOT/host/utils/render-session-config.py"
+RENDERER_SCRIPT="$REPO_ROOT/host/utils/render_session_config.py"
 TRUSTED_HASH_ARGS=()
 if [ -n "$TRUSTED_TREE_HASHES_RAW" ]; then
     while IFS= read -r entry; do

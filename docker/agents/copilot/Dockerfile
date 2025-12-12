@@ -20,7 +20,7 @@ RUN mkdir -p /home/agentuser/.config/github-copilot/agents && \
     chown -R agentuser:agentuser /home/agentuser/.config/github-copilot
 COPY --chown=agentuser:agentuser agent-configs/github-copilot/ /home/agentuser/.config/github-copilot/agents/
 COPY docker/agents/copilot/prepare-copilot-secrets.sh /usr/local/bin/prepare-copilot-secrets.sh
-COPY docker/agents/copilot/merge-copilot-tokens.py /usr/local/bin/merge-copilot-tokens.py
+COPY docker/agents/copilot/merge_copilot_tokens.py /usr/local/bin/merge-copilot-tokens.py
 RUN chmod +x /usr/local/bin/prepare-copilot-secrets.sh /usr/local/bin/merge-copilot-tokens.py
 
 WORKDIR /workspace

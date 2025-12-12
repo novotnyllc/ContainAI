@@ -8,12 +8,16 @@ without relying on inline heredocs in shell.
 import argparse
 import hashlib
 import ipaddress
-import os
 import random
 import sys
 
 
 def cmd_random_subnet(args: argparse.Namespace) -> int:
+    """Print a pseudo-random subnet within a base CIDR.
+
+    The subnet is derived from the (session, test) identifiers plus a small
+    random salt to avoid collisions when multiple tests run concurrently.
+    """
     base = ipaddress.ip_network(args.base)
     if args.prefix <= base.prefixlen:
         raise ValueError("prefix must be larger than base prefixlen")
@@ -31,6 +35,11 @@ def cmd_random_subnet(args: argparse.Namespace) -> int:
 
 
 def cmd_host_ip(args: argparse.Namespace) -> int:
+    """Print the Nth host IP for a subnet.
+
+    If the index exceeds the precomputed host list length, fall back to a
+    deterministic arithmetic offset from the network address.
+    """
     net = ipaddress.ip_network(args.subnet)
     hosts = list(net.hosts())
     idx = args.index
@@ -43,6 +52,7 @@ def cmd_host_ip(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(description="Network helpers for tests")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -62,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
+    """CLI entrypoint."""
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

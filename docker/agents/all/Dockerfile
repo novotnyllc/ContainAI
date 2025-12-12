@@ -9,7 +9,7 @@ USER root
 # Copy MCP configuration scripts from build context root
 # Build context is project root, so scripts/ is directly accessible
 COPY --chown=agentuser:agentuser host/utils/_mcp_common.py /usr/local/bin/_mcp_common.py
-COPY --chown=agentuser:agentuser host/utils/convert-toml-to-mcp.py /usr/local/bin/convert-toml-to-mcp.py
+COPY --chown=agentuser:agentuser host/utils/convert_toml_to_mcp.py /usr/local/bin/convert-toml-to-mcp.py
 COPY --chown=agentuser:agentuser docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
 COPY --chown=agentuser:agentuser docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chown=agentuser:agentuser docker/runtime/git-credential-host-helper.sh /usr/local/bin/git-credential-host-helper.sh

@@ -33,11 +33,10 @@ from typing import Dict, List, Tuple
 
 import tomllib
 
-# Allow import of sibling modules
-sys.path.insert(0, str(Path(__file__).parent))
-from _mcp_common import (  # noqa: E402  # pylint: disable=wrong-import-position
+from _mcp_common import (
     collect_placeholders,
     load_secret_file,
+    split_mcp_server_config,
     resolve_value,
 )
 
@@ -145,22 +144,18 @@ def convert_remote_server(
     name: str, settings: Dict, ctx: ConversionContext
 ) -> Tuple[Dict, Dict]:
     """Convert a remote MCP server to use a local helper proxy."""
-    converted: Dict = {}
+    converted: Dict = {
+        key: resolve_value(value, ctx.secrets)
+        for key, value in settings.items()
+        if key != "bearer_token_env_var"
+    }
+
     bearer_var = settings.get("bearer_token_env_var")
-    bearer_token = None
-
-    for key, value in settings.items():
-        if key == "bearer_token_env_var":
-            continue
-        converted[key] = resolve_value(value, ctx.secrets)
-
-    if bearer_var:
-        token = resolve_var(bearer_var, ctx.secrets)
-        if token:
-            bearer_token = token
-            converted["bearerToken"] = token
-        else:
-            ctx.missing_tokens.append((name, bearer_var))
+    bearer_token = resolve_var(bearer_var, ctx.secrets) if bearer_var else None
+    if bearer_var and bearer_token:
+        converted["bearerToken"] = bearer_token
+    elif bearer_var and not bearer_token:
+        ctx.missing_tokens.append((name, bearer_var))
 
     listen_port = ctx.allocate_port()
     listen_addr = f"{HELPER_LISTEN_HOST}:{listen_port}"
@@ -176,31 +171,14 @@ def convert_local_server(
     name: str, settings: Dict, ctx: ConversionContext
 ) -> Tuple[Dict, Dict]:
     """Convert a local MCP server to use a wrapper for secret injection."""
-    config = dict(settings)
-    command = str(config.pop("command", "")).strip()
-    if not command:
-        raise ValueError(f"MCP server '{name}' is missing a command")
-
-    raw_args = config.pop("args", []) or []
-    args = [str(item) for item in raw_args]
-    raw_env = config.pop("env", {}) or {}
-    env = {str(k): str(v) for k, v in raw_env.items()}
-    cwd = config.pop("cwd", None)
-    config.pop("bearer_token_env_var", None)
+    command, args, env, cwd, config = split_mcp_server_config(name, settings)
 
     placeholders = collect_placeholders(command)
     placeholders.update(collect_placeholders(args))
     placeholders.update(collect_placeholders(env))
     if cwd:
         placeholders.update(collect_placeholders(cwd))
-
-    available = {k for k, v in ctx.secrets.items() if v}
-    available |= {k for k, v in os.environ.items() if v}
-    required_secrets = sorted(p for p in placeholders if p in available)
-    missing = sorted(p for p in placeholders if p not in available)
-    for placeholder in missing:
-        msg = f"⚠️  Secret '{placeholder}' referenced by MCP server '{name}' is not defined"
-        ctx.warnings.append(msg)
+    required_secrets = _resolve_required_secrets(name, placeholders, ctx)
 
     spec = {
         "name": name,
@@ -212,14 +190,7 @@ def convert_local_server(
     if cwd:
         spec["cwd"] = str(cwd)
 
-    spec_dir = os.path.expanduser(WRAPPER_SPEC_DIR)
-    os.makedirs(spec_dir, exist_ok=True)
-    spec_file = os.path.join(spec_dir, f"{name}.json")
-    try:
-        with open(spec_file, "w", encoding="utf-8") as handle:
-            json.dump(spec, handle, indent=2, sort_keys=True)
-    except OSError as exc:
-        ctx.warnings.append(f"⚠️  Could not write wrapper spec for '{name}': {exc}")
+    spec_file = _write_wrapper_spec(name, spec, ctx)
 
     rendered_entry = dict(config)
     rendered_entry["command"] = WRAPPER_COMMAND.format(name=name)
@@ -229,6 +200,35 @@ def convert_local_server(
         "CONTAINAI_WRAPPER_NAME": name,
     }
     return rendered_entry, spec
+
+
+def _write_wrapper_spec(name: str, spec: Dict, ctx: ConversionContext) -> str:
+    """Write wrapper spec JSON to disk and return the path."""
+    spec_dir = os.path.expanduser(WRAPPER_SPEC_DIR)
+    os.makedirs(spec_dir, exist_ok=True)
+    spec_file = os.path.join(spec_dir, f"{name}.json")
+    try:
+        with open(spec_file, "w", encoding="utf-8") as handle:
+            json.dump(spec, handle, indent=2, sort_keys=True)
+    except OSError as exc:
+        ctx.warnings.append(f"⚠️  Could not write wrapper spec for '{name}': {exc}")
+    return spec_file
+
+
+def _resolve_required_secrets(
+    name: str,
+    placeholders: set[str],
+    ctx: ConversionContext,
+) -> list[str]:
+    available = {k for k, v in ctx.secrets.items() if v}
+    available |= {k for k, v in os.environ.items() if v}
+    required_secrets = sorted(p for p in placeholders if p in available)
+    missing = sorted(p for p in placeholders if p not in available)
+    for placeholder in missing:
+        ctx.warnings.append(
+            f"⚠️  Secret '{placeholder}' referenced by MCP server '{name}' is not defined"
+        )
+    return required_secrets
 
 
 def process_servers(mcp_servers: Dict, ctx: ConversionContext) -> Dict:
@@ -306,7 +306,7 @@ def _load_toml_config(config_path: str) -> Dict | None:
     try:
         with open(config_path, "rb") as handle:
             return tomllib.load(handle)
-    except Exception as exc:  # pylint: disable=broad-except
+    except (OSError, tomllib.TOMLDecodeError) as exc:
         print(f"❌ Error parsing TOML: {exc}", file=sys.stderr)
         return None
 
@@ -335,7 +335,7 @@ def _write_agent_config(
         with open(config_file, "w", encoding="utf-8") as handle:
             json.dump(mcp_config, handle, indent=2)
         return True
-    except Exception as exc:  # pylint: disable=broad-except
+    except (OSError, TypeError) as exc:
         print(f"❌ Error writing {agent_name} config: {exc}", file=sys.stderr)
         return False
 
@@ -365,7 +365,7 @@ def _write_helper_manifest(config_path: str, helpers: List[Dict]) -> None:
     try:
         with open(helper_path, "w", encoding="utf-8") as handle:
             json.dump(helper_manifest, handle, indent=2, sort_keys=True)
-    except Exception as exc:  # pylint: disable=broad-except
+    except (OSError, TypeError) as exc:
         print(f"⚠️  Unable to write helper manifest: {exc}", file=sys.stderr)
 
 
@@ -416,7 +416,12 @@ def convert_toml_to_mcp(config_path: str) -> bool:
     return True
 
 
+def main(argv: list[str]) -> int:
+    """CLI entrypoint."""
+    toml_file = argv[0] if argv else "/workspace/config.toml"
+    ok = convert_toml_to_mcp(toml_file)
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
-    toml_file = sys.argv[1] if len(sys.argv) > 1 else "/workspace/config.toml"
-    success = convert_toml_to_mcp(toml_file)
-    sys.exit(0 if success else 1)
+    raise SystemExit(main(sys.argv[1:]))

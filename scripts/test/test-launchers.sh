@@ -368,7 +368,7 @@ import secrets
 print(secrets.token_hex(32))
 PY
 
-    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package_agent_data.py" \
         --agent copilot \
         --session-id test-session \
         --home-path "$temp_home" \
@@ -395,7 +395,7 @@ PY
 
     local missing_hmac_target
     missing_hmac_target=$(mktemp -d)
-    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package_agent_data.py" \
         --mode merge \
         --agent copilot \
         --session-id test-session \
@@ -410,7 +410,7 @@ PY
     fi
     rm -rf "$missing_hmac_target"
 
-    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package_agent_data.py" \
         --agent copilot \
         --session-id secure-session \
         --home-path "$temp_home" \
@@ -430,7 +430,7 @@ PY
 
     local secure_target_home
     secure_target_home=$(mktemp -d)
-    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package_agent_data.py" \
         --mode merge \
         --agent copilot \
         --session-id secure-session \
@@ -452,7 +452,7 @@ PY
     rm -rf "$secure_target_home"
 
     rm -rf "$temp_home/.copilot/sessions" "$temp_home/.copilot/logs"
-    if python3 "$PROJECT_ROOT/host/utils/package-agent-data.py" \
+    if python3 "$PROJECT_ROOT/host/utils/package_agent_data.py" \
         --agent copilot \
         --session-id empty-session \
         --home-path "$temp_home" \
@@ -616,7 +616,7 @@ test_session_config_renderer() {
     local output_dir
     output_dir=$(mktemp -d)
     local session_id="test-session-$$"
-    local renderer="$PROJECT_ROOT/host/utils/render-session-config.py"
+    local renderer="$PROJECT_ROOT/host/utils/render_session_config.py"
     local render_args=(
         "--config" "$PROJECT_ROOT/config.toml"
         "--output" "$output_dir"
@@ -706,7 +706,7 @@ PY
 test_secret_broker_cli() {
     test_section "Secret broker CLI"
 
-    local broker_script="$PROJECT_ROOT/host/utils/secret-broker.py"
+    local broker_script="$PROJECT_ROOT/host/utils/secret_broker.py"
     if [ ! -x "$broker_script" ]; then
         fail "secret-broker.py missing or not executable"
         return
@@ -800,7 +800,7 @@ PY
     fi
 
     local unsealed
-    if unsealed=$("$PROJECT_ROOT/docker/runtime/capability-unseal.py" --stub alpha --secret TEST_SECRET --cap-root "$cap_dir" --format raw 2>/dev/null); then
+    if unsealed=$("$PROJECT_ROOT/docker/runtime/capability_unseal.py" --stub alpha --secret TEST_SECRET --cap-root "$cap_dir" --format raw 2>/dev/null); then
         if [ "$unsealed" = "super-secret" ]; then
             pass "capability-unseal retrieves sealed secret"
         else
@@ -836,7 +836,7 @@ test_codex_cli_helper() {
         return
     fi
 
-    local broker_script="$PROJECT_ROOT/host/utils/secret-broker.py"
+    local broker_script="$PROJECT_ROOT/host/utils/secret_broker.py"
     local config_root cap_dir env_dir secret_file
     config_root=$(mktemp -d)
     cap_dir=$(mktemp -d)
@@ -883,7 +883,7 @@ test_codex_cli_helper() {
     if CONTAINAI_AGENT_HOME="$agent_home" \
         CONTAINAI_AGENT_CAP_ROOT="$cap_dir" \
         CONTAINAI_AGENT_SECRET_ROOT="$secret_root" \
-        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
+        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability_unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-codex-secrets decrypts bundle"
     else
@@ -925,7 +925,7 @@ test_claude_cli_helper() {
         return
     fi
 
-    local broker_script="$PROJECT_ROOT/host/utils/secret-broker.py"
+    local broker_script="$PROJECT_ROOT/host/utils/secret_broker.py"
     local config_root env_dir secret_file
     config_root=$(mktemp -d)
     env_dir="$config_root/config"
@@ -974,7 +974,7 @@ test_claude_cli_helper() {
     if CONTAINAI_AGENT_HOME="$agent_home_file" \
         CONTAINAI_AGENT_CAP_ROOT="$file_cap_dir" \
         CONTAINAI_AGENT_SECRET_ROOT="$secret_root_file" \
-        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
+        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability_unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-claude-secrets decrypts file-based bundle"
     else
@@ -1018,7 +1018,7 @@ test_claude_cli_helper() {
     if CONTAINAI_AGENT_HOME="$agent_home_inline" \
         CONTAINAI_AGENT_CAP_ROOT="$inline_cap_dir" \
         CONTAINAI_AGENT_SECRET_ROOT="$secret_root_inline" \
-        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability-unseal.py" \
+        CONTAINAI_CAPABILITY_UNSEAL="$PROJECT_ROOT/docker/runtime/capability_unseal.py" \
         "$helper_script" >/dev/null 2>&1; then
         pass "prepare-claude-secrets decrypts inline bundle"
     else

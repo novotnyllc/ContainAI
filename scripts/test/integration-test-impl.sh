@@ -436,7 +436,7 @@ build_artifacts() {
 setup_mock_agent_credentials() {
     local agent="$1"
     local session_id="$2"
-    local broker_script="$PROJECT_ROOT/host/utils/secret-broker.py"
+    local broker_script="$PROJECT_ROOT/host/utils/secret_broker.py"
     
     # Determine stub name and secret name based on agent
     local stub_name secret_name mock_credential
@@ -930,7 +930,7 @@ test_agent_credential_flow() {
             -v "$TEST_REPO_DIR:/workspace" \
             -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
             -v "$session_config_root/capabilities:/run/host-capabilities:ro" \
-            -v "$PROJECT_ROOT/docker/runtime/capability-unseal.py:/usr/local/bin/capability-unseal:ro" \
+            -v "$PROJECT_ROOT/docker/runtime/capability_unseal.py:/usr/local/bin/capability-unseal:ro" \
             -e "CONTAINAI_AGENT_HOME=/home/agentuser" \
             -e "CONTAINAI_AGENT_SECRET_ROOT=/run/agent-secrets" \
             -e "CONTAINAI_CAPABILITY_UNSEAL=/usr/local/bin/capability-unseal" \
@@ -1057,7 +1057,7 @@ test_mcp_configuration_generation() {
          \
         -v "$test_workspace:/workspace:ro" \
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro" \
-        -v "$PROJECT_ROOT/host/utils/convert-toml-to-mcp.py:/usr/local/bin/convert-toml-to-mcp.py:ro" \
+        -v "$PROJECT_ROOT/host/utils/convert_toml_to_mcp.py:/usr/local/bin/convert-toml-to-mcp.py:ro" \
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
@@ -2077,7 +2077,7 @@ PY
         -e "CONTAINAI_REQUIRE_PROXY=1" \
         -v "$PROJECT_ROOT:/workspace:ro" \
         "$TEST_CODEX_IMAGE" \
-        python3 /workspace/docker/runtime/mcp-http-helper.py \
+        python3 /workspace/docker/runtime/mcp_http_helper.py \
             --name helper-test \
             --listen 0.0.0.0:18080 \
             --target "http://${allowed_domain}:8080" >/dev/null
@@ -2345,7 +2345,7 @@ JSON
     # Copy the wrapper core script
     docker exec "$container_name" bash -c '
         mkdir -p /usr/local/libexec
-        cp /workspace/docker/runtime/mcp-wrapper-core.py /usr/local/libexec/mcp-wrapper-core.py
+        cp /workspace/docker/runtime/mcp_wrapper_core.py /usr/local/libexec/mcp-wrapper-core.py
     '
 
     # Run the wrapper in background as agentuser
@@ -2520,7 +2520,7 @@ JSON
         mkdir -p /usr/local/bin /usr/local/libexec
         ln -sf /usr/local/bin/mcp-wrapper-runner /usr/local/bin/mcp-wrapper-mock-mcp
         ln -sf /usr/local/bin/mcp-wrapper-runner /usr/local/bin/mcp-wrapper-mock-mcp-sleep
-        cp /workspace/docker/runtime/mcp-wrapper-core.py /usr/local/libexec/mcp-wrapper-core.py
+        cp /workspace/docker/runtime/mcp_wrapper_core.py /usr/local/libexec/mcp-wrapper-core.py
         
         # Create dummy capability for the wrapper
         # Structure: /home/agentuser/.config/containai/capabilities/mock-mcp/token.json

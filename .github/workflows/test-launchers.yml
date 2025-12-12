@@ -45,8 +45,9 @@ jobs:
 
       - name: Run Pylint
         run: |
-          # Run pylint on host utilities
-          pylint --disable=C0111,C0103,R0903,R0913,R0914 host/utils/*.py
+          # Run pylint on all Python files (no disables)
+          shopt -s globstar nullglob
+          pylint **/*.py
 
   unit-test-dotnet:
     runs-on: ubuntu-latest

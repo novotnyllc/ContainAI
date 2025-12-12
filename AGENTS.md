@@ -181,8 +181,24 @@ All code changes must pass the following automated checks in the CI pipeline:
 
 1.  **Static Analysis**:
     - **Bash**: `shellcheck` must pass for all `.sh` scripts.
-    - **Python**: `pylint` and `mypy` must pass for all host utility scripts.
+      - **Python**: `pylint` must pass for all Python scripts (no disables).
     - **Rust**: `cargo clippy` must pass with no warnings.
+
+#### Running Pylint Locally
+
+Pylint should run clean (exit code 0) without `# pylint: disable`.
+
+- If you have a working local Python + pip:
+   ```bash
+   python -m pip install -U pylint
+   pylint **/*.py
+   ```
+
+- If your host Python environment does not have `pip`/`ensurepip`, run it via Docker:
+   ```bash
+   docker run --rm -v "$PWD":/work -w /work python:3.13-slim \
+      bash -lc "python -m pip install -q pylint && shopt -s globstar nullglob && pylint **/*.py"
+   ```
 
 2.  **Unit Tests**:
     - **C#**: All `.Tests` projects must pass (`dotnet test`).

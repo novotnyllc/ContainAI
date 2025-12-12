@@ -44,7 +44,7 @@ if [[ -z "${_CONTAINAI_COMMON_FUNCTIONS_LOADED:-}" ]]; then
     readonly CONTAINAI_SYSTEM_PROFILES_DIR="/opt/containai/profiles"
     readonly _CONTAINAI_COMMON_FUNCTIONS_LOADED=1
 fi
-CONTAINAI_BROKER_SCRIPT="${CONTAINAI_BROKER_SCRIPT:-${_CONTAINAI_SCRIPT_ROOT}/host/utils/secret-broker.py}"
+CONTAINAI_BROKER_SCRIPT="${CONTAINAI_BROKER_SCRIPT:-${_CONTAINAI_SCRIPT_ROOT}/host/utils/secret_broker.py}"
 CONTAINAI_AUDIT_LOG="${CONTAINAI_AUDIT_LOG:-${CONTAINAI_CONFIG_DIR}/security-events.log}"
 CONTAINAI_HELPER_NETWORK_POLICY="${CONTAINAI_HELPER_NETWORK_POLICY:-loopback}"
 CONTAINAI_HELPER_PIDS_LIMIT="${CONTAINAI_HELPER_PIDS_LIMIT:-64}"
@@ -699,7 +699,7 @@ get_secret_broker_script() {
         echo "$candidate"
         return 0
     fi
-    candidate="${_CONTAINAI_SCRIPT_ROOT}/host/utils/secret-broker.py"
+    candidate="${_CONTAINAI_SCRIPT_ROOT}/host/utils/secret_broker.py"
     if [ -x "$candidate" ]; then
         echo "$candidate"
         return 0
@@ -1728,7 +1728,7 @@ merge_agent_data_exports() {
     local staged_dir="$2"
     local containai_root="$3"
     local home_dir="$4"
-    local packager="$containai_root/host/utils/package-agent-data.py"
+    local packager="$containai_root/host/utils/package_agent_data.py"
 
     if [ -z "$agent_name" ] || [ ! -d "$staged_dir" ] || [ ! -f "$packager" ]; then
         return 1

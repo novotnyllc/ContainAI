@@ -4,14 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import datetime as dt
-import hashlib
 import json
 import os
 import pathlib
 import sys
-from typing import Dict, List, Tuple
+
+from _token_utils import decrypt_sealed_ciphertext, select_latest_valid_token
 
 DEFAULT_CAP_ROOT = pathlib.Path("~/.config/containai/capabilities").expanduser()
 
@@ -20,7 +18,8 @@ class CapabilityError(RuntimeError):
     """Raised when capability secrets cannot be decoded."""
 
 
-def _load_json(path: pathlib.Path) -> Dict:
+def _load_json(path: pathlib.Path) -> dict:
+    """Load a JSON object from disk."""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
@@ -29,87 +28,80 @@ def _load_json(path: pathlib.Path) -> Dict:
         raise CapabilityError(f"unable to read {path}: {exc}") from exc
 
 
-def _select_capability(stub_dir: pathlib.Path) -> Dict:
-    candidates = sorted(stub_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not candidates:
-        raise CapabilityError(f"no capability tokens found for stub '{stub_dir.name}'")
-    now = dt.datetime.now(dt.timezone.utc)
-    for candidate in candidates:
-        token = _load_json(candidate)
-        if token.get("stub") != stub_dir.name:
-            continue
-        expires_at = token.get("expires_at")
-        if not expires_at:
-            continue
-        try:
-            expiry = dt.datetime.fromisoformat(expires_at)
-        except ValueError:
-            continue
-        if expiry <= now:
-            continue
-        if "session_key" not in token:
-            continue
-        return token
-    raise CapabilityError(f"no valid capabilities available for stub '{stub_dir.name}'")
-
-
-def _xor_stream(key_hex: str, data: bytes) -> bytes:
-    if not key_hex:
-        raise CapabilityError("capability token missing session_key")
+def _select_capability(stub_dir: pathlib.Path) -> dict:
+    """Pick the newest non-expired capability token for a stub."""
     try:
-        key_bytes = bytes.fromhex(key_hex)
-    except ValueError as exc:  # pragma: no cover - defensive
-        raise CapabilityError(f"session_key is not valid hex: {exc}") from exc
-    if not key_bytes:
-        raise CapabilityError("session_key decoded to empty bytes")
-    block = hashlib.sha256(key_bytes).digest()
-    idx = 0
-    output = bytearray()
-    for byte in data:
-        output.append(byte ^ block[idx])
-        idx += 1
-        if idx >= len(block):
-            block = hashlib.sha256(block).digest()
-            idx = 0
-    return bytes(output)
+        token, _path = select_latest_valid_token(
+            stub_dir,
+            expected_field="stub",
+            expected_value=stub_dir.name,
+        )
+        return token
+    except ValueError as exc:
+        raise CapabilityError(str(exc)) from exc
 
 
-def _load_sealed_secret(capability: Dict, stub_dir: pathlib.Path, secret_name: str) -> str:
+def _load_sealed_secret(
+    capability: dict,
+    stub_dir: pathlib.Path,
+    secret_name: str,
+) -> str:
+    """Load and decrypt a sealed secret bound to a capability token."""
     secrets_dir = stub_dir / "secrets"
     record_path = secrets_dir / f"{secret_name}.sealed"
     if not record_path.is_file():
         raise CapabilityError(f"sealed secret '{secret_name}' missing at {record_path}")
     record = _load_json(record_path)
     if record.get("stub") != capability.get("stub"):
-        raise CapabilityError(f"sealed secret '{secret_name}' is not bound to stub '{capability.get('stub')}'")
+        raise CapabilityError(
+            f"sealed secret '{secret_name}' is not bound to stub '{capability.get('stub')}'"
+        )
     if record.get("capability_id") != capability.get("capability_id"):
-        raise CapabilityError(f"sealed secret '{secret_name}' not bound to capability {capability.get('capability_id')}")
+        raise CapabilityError(
+            f"sealed secret '{secret_name}' not bound to capability "
+            f"{capability.get('capability_id')}"
+        )
     ciphertext = record.get("ciphertext")
     if not ciphertext:
         raise CapabilityError(f"sealed secret '{secret_name}' missing ciphertext body")
+    session_key = capability.get("session_key") or ""
+    if not session_key:
+        raise CapabilityError("capability token missing session_key")
     try:
-        cipher_bytes = base64.b64decode(ciphertext)
-    except Exception as exc:  # pragma: no cover - defensive
-        raise CapabilityError(f"sealed secret '{secret_name}' ciphertext invalid: {exc}") from exc
-    plain = _xor_stream(capability.get("session_key", ""), cipher_bytes)
-    try:
-        return plain.decode("utf-8")
-    except UnicodeDecodeError as exc:  # pragma: no cover - defensive
-        raise CapabilityError(f"sealed secret '{secret_name}' is not UTF-8: {exc}") from exc
+        return decrypt_sealed_ciphertext(ciphertext, session_key)
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise CapabilityError(f"sealed secret '{secret_name}' {exc}") from exc
 
 
 def _resolve_stub_dir(cap_root: pathlib.Path, stub: str) -> pathlib.Path:
+    """Resolve the per-stub capability directory under the root."""
     target = cap_root / stub
     if not target.is_dir():
-        raise CapabilityError(f"capability directory missing for stub '{stub}' at {target}")
+        raise CapabilityError(
+            f"capability directory missing for stub '{stub}' at {target}"
+        )
     return target
 
 
-def parse_args(argv: List[str]) -> argparse.Namespace:
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stub", required=True, help="Name of the stub (e.g., agent_copilot_cli)")
-    parser.add_argument("--secret", action="append", required=True, help="Secret name to decode")
-    parser.add_argument("--cap-root", default=str(DEFAULT_CAP_ROOT), help="Capability root directory")
+    parser.add_argument(
+        "--stub",
+        required=True,
+        help="Name of the stub (e.g., agent_copilot_cli)",
+    )
+    parser.add_argument(
+        "--secret",
+        action="append",
+        required=True,
+        help="Secret name to decode",
+    )
+    parser.add_argument(
+        "--cap-root",
+        default=str(DEFAULT_CAP_ROOT),
+        help="Capability root directory",
+    )
     parser.add_argument(
         "--format",
         choices=("json", "raw"),
@@ -127,17 +119,19 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
 
 def _write_secret(path: pathlib.Path, value: str) -> None:
+    """Write a decrypted secret to disk with restrictive permissions."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")
     os.chmod(path, 0o600)
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
+    """Decrypt secrets from a capability token and emit them."""
     args = parse_args(argv)
     cap_root = pathlib.Path(args.cap_root).expanduser()
     stub_dir = _resolve_stub_dir(cap_root, args.stub)
     capability = _select_capability(stub_dir)
-    results: Dict[str, str] = {}
+    results: dict[str, str] = {}
     for secret_name in args.secret:
         results[secret_name] = _load_sealed_secret(capability, stub_dir, secret_name)
 
@@ -165,4 +159,4 @@ if __name__ == "__main__":  # pragma: no cover
         raise SystemExit(main(sys.argv[1:]))
     except CapabilityError as exc:
         print(f"capability-unseal: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

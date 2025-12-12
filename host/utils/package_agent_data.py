@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Package or merge agent data payloads for ContainAI."""
+
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import hmac
 import json
@@ -14,16 +16,55 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Optional
+from collections.abc import Iterable
 
 
 @dataclass(frozen=True)
 class DataSpec:
+    """Describe which on-disk paths should be packaged for an agent."""
+
     path: str
     strategy: str  # merge rule hint (replace, append, etc.)
 
 
-AGENT_DATA_SPECS: dict[str, List[DataSpec]] = {
+@dataclass(frozen=True)
+class ManifestEntry:
+    """A single file entry recorded in a package manifest."""
+
+    path: str
+    sha256: str
+    size: int
+    mtime: int
+    strategy: str
+    hmac: str | None = None
+
+    def to_dict(self) -> dict:
+        """Convert to a JSON-serializable dict."""
+        payload = dataclasses.asdict(self)
+        if payload.get("hmac") is None:
+            payload.pop("hmac", None)
+        return payload
+
+
+@dataclass(frozen=True)
+class PackagePaths:
+    """File paths used when creating an agent data package."""
+
+    tar_path: Path
+    manifest_path: Path
+    home_path: Path
+
+
+@dataclass(frozen=True)
+class MergePaths:
+    """File paths used when merging agent data from a package."""
+
+    tar_path: Path
+    manifest_path: Path
+    target_home: Path
+
+
+AGENT_DATA_SPECS: dict[str, list[DataSpec]] = {
     "copilot": [
         DataSpec(path=".copilot/sessions", strategy="replace"),
         DataSpec(path=".copilot/logs", strategy="append"),
@@ -44,6 +85,7 @@ AGENT_DATA_SPECS: dict[str, List[DataSpec]] = {
 
 
 def sha256_file(path: Path) -> str:
+    """Compute the SHA-256 digest for a file."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -52,6 +94,7 @@ def sha256_file(path: Path) -> str:
 
 
 def iter_spec_files(source: Path) -> Iterable[Path]:
+    """Yield all files under source (or source itself if it's a file)."""
     if source.is_file():
         yield source
         return
@@ -62,7 +105,8 @@ def iter_spec_files(source: Path) -> Iterable[Path]:
             yield child
 
 
-def write_manifest(manifest_path: Path, agent: str, session_id: str, entries: List[dict]) -> None:
+def write_manifest(manifest_path: Path, agent: str, session_id: str, entries: list[dict]) -> None:
+    """Write a manifest JSON file describing a package's contents."""
     payload = {
         "agent": agent,
         "session": session_id,
@@ -79,18 +123,33 @@ def write_manifest(manifest_path: Path, agent: str, session_id: str, entries: Li
 
 def _compute_entry_hmac(
     key: bytes,
-    *,
-    path: str,
-    sha256_value: str,
-    size: int,
-    mtime: int,
-    strategy: str
+    entry: ManifestEntry,
 ) -> str:
-    payload = "|".join([path, sha256_value, str(size), str(mtime), strategy])
+    """Compute an integrity HMAC for a manifest entry."""
+    payload = "|".join(
+        [
+            entry.path,
+            entry.sha256,
+            str(entry.size),
+            str(entry.mtime),
+            entry.strategy,
+        ]
+    )
     return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def process_package_spec(spec, home_path, hmac_key, entries, tar_inputs):
+@dataclass
+class _PackagingContext:
+    """Mutable state used while building a package."""
+
+    home_path: Path
+    hmac_key: bytes | None
+    entries: list[dict]
+    tar_inputs: list[tuple[Path, str]]
+
+
+def process_package_spec(spec: DataSpec, ctx: _PackagingContext) -> None:
+    """Apply a DataSpec to collect tar inputs and manifest entries."""
     raw = os.path.expanduser(spec.path)
     spec_path = Path(raw)
     if spec_path.is_absolute():
@@ -99,13 +158,13 @@ def process_package_spec(spec, home_path, hmac_key, entries, tar_inputs):
         if not arcname:
             return
     else:
-        source = (home_path / spec_path).resolve()
+        source = (ctx.home_path / spec_path).resolve()
         arcname = spec_path.as_posix()
     if not source.exists():
         return
     if source.is_symlink():
         return
-    tar_inputs.append((source, arcname))
+    ctx.tar_inputs.append((source, arcname))
     for file_path in iter_spec_files(source):
         if file_path.is_symlink():
             continue
@@ -113,67 +172,61 @@ def process_package_spec(spec, home_path, hmac_key, entries, tar_inputs):
         if source.is_dir():
             rel = rel / file_path.relative_to(source)
         entry_stat = file_path.stat()
-        entry_record = {
-            "path": rel.as_posix(),
-            "sha256": sha256_file(file_path),
-            "size": entry_stat.st_size,
-            "mtime": int(entry_stat.st_mtime),
-            "strategy": spec.strategy,
-        }
-        if hmac_key:
-            entry_record["hmac"] = _compute_entry_hmac(
-                hmac_key,
-                path=entry_record["path"],
-                sha256_value=entry_record["sha256"],
-                size=entry_record["size"],
-                mtime=entry_record["mtime"],
-                strategy=entry_record["strategy"],
-            )
-        entries.append(entry_record)
+        entry = ManifestEntry(
+            path=rel.as_posix(),
+            sha256=sha256_file(file_path),
+            size=entry_stat.st_size,
+            mtime=int(entry_stat.st_mtime),
+            strategy=spec.strategy,
+        )
+        if ctx.hmac_key:
+            entry = dataclasses.replace(entry, hmac=_compute_entry_hmac(ctx.hmac_key, entry))
+        ctx.entries.append(entry.to_dict())
 
 
 def package_agent_data(
     *,
     agent: str,
     session_id: str,
-    tar_path: Path,
-    manifest_path: Path,
-    home_path: Path,
-    hmac_key: Optional[bytes] = None,
+    paths: PackagePaths,
+    hmac_key: bytes | None = None,
 ) -> bool:
+    """Create an agent data tarball plus a manifest describing its contents."""
     specs = AGENT_DATA_SPECS.get(agent)
     if not specs:
         print(f"[data] no packaging rules for agent '{agent}'", file=sys.stderr)
         return False
 
-    home_path = home_path.expanduser().resolve()
-    entries: List[dict] = []
-    tar_inputs: List[tuple[Path, str]] = []
+    home_path = paths.home_path.expanduser().resolve()
+    ctx = _PackagingContext(home_path=home_path, hmac_key=hmac_key, entries=[], tar_inputs=[])
 
     for spec in specs:
-        process_package_spec(spec, home_path, hmac_key, entries, tar_inputs)
+        process_package_spec(spec, ctx)
 
-    entries.sort(key=lambda item: item["path"])
-    write_manifest(manifest_path, agent, session_id, entries)
+    ctx.entries.sort(key=lambda item: item["path"])
+    write_manifest(paths.manifest_path, agent, session_id, ctx.entries)
 
-    if not tar_inputs:
-        if tar_path.exists():
-            tar_path.unlink()
+    if not ctx.tar_inputs:
+        if paths.tar_path.exists():
+            paths.tar_path.unlink()
         return True
 
-    tar_path.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(tar_path, "w") as archive:
-        for source, arcname in tar_inputs:
+    paths.tar_path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(paths.tar_path, "w") as archive:
+        for source, arcname in ctx.tar_inputs:
             archive.add(source, arcname=arcname)
     try:
-        tar_path.chmod(0o600)
+        paths.tar_path.chmod(0o600)
     except PermissionError:
         pass
-    print(f"[data] packaged {len(entries)} entries for agent '{agent}' -> {tar_path}")
+    print(
+        f"[data] packaged {len(ctx.entries)} entries for agent '{agent}' -> {paths.tar_path}"
+    )
     return True
 
 
 def _ensure_relative_path(path_str: str) -> Path:
+    """Return a sanitized relative path from a manifest entry."""
     candidate = Path(path_str)
     if candidate.is_absolute():
         raise ValueError(f"Entry path '{path_str}' must be relative")
@@ -184,6 +237,7 @@ def _ensure_relative_path(path_str: str) -> Path:
 
 
 def _write_temp_copy(fileobj, dest_dir: Path, chunk_size: int = 1024 * 1024) -> tuple[Path, str]:
+    """Copy a file-like object to a temporary file and return (path, sha256)."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(delete=False, dir=dest_dir) as tmp_handle:
         tmp_path = Path(tmp_handle.name)
@@ -197,7 +251,8 @@ def _write_temp_copy(fileobj, dest_dir: Path, chunk_size: int = 1024 * 1024) -> 
     return tmp_path, hasher.hexdigest()
 
 
-def verify_hmac(hmac_key, entry, rel_path, strategy):
+def verify_hmac(hmac_key: bytes | None, entry: dict, rel_path: Path, strategy: str) -> bool:
+    """Verify an entry's HMAC (if present/required)."""
     if not hmac_key:
         return True
     entry_hmac = entry.get("hmac")
@@ -205,14 +260,16 @@ def verify_hmac(hmac_key, entry, rel_path, strategy):
         print(f"[data] missing HMAC for '{rel_path}'", file=sys.stderr)
         return False
 
-    digest_expected = entry.get("sha256")
+    digest_expected = str(entry.get("sha256", ""))
     expected_hmac = _compute_entry_hmac(
         hmac_key,
-        path=rel_path.as_posix(),
-        sha256_value=digest_expected or "",
-        size=int(entry.get("size", 0)),
-        mtime=int(entry.get("mtime", 0)),
-        strategy=strategy,
+        ManifestEntry(
+            path=rel_path.as_posix(),
+            sha256=digest_expected,
+            size=int(entry.get("size", 0)),
+            mtime=int(entry.get("mtime", 0)),
+            strategy=strategy,
+        ),
     )
     if not hmac.compare_digest(expected_hmac, entry_hmac):
         print(f"[data] HMAC mismatch for '{rel_path}'", file=sys.stderr)
@@ -294,7 +351,7 @@ def process_archive_entry(
     archive: tarfile.TarFile,
     entry: dict,
     target_home: Path,
-    hmac_key: Optional[bytes],
+    hmac_key: bytes | None,
 ) -> bool:
     """Process a single entry from the archive manifest."""
     rel_path = _ensure_relative_path(entry["path"])
@@ -318,18 +375,17 @@ def process_archive_entry(
 def merge_agent_data(
     *,
     agent: str,
-    tar_path: Path,
-    manifest_path: Path,
-    target_home: Path,
+    paths: MergePaths,
     session_id: str | None = None,
-    hmac_key: Optional[bytes] = None,
+    hmac_key: bytes | None = None,
     require_hmac: bool = False,
 ) -> bool:
-    if not tar_path.is_file() or not manifest_path.is_file():
+    """Merge files from a previously created package into a target home directory."""
+    if not paths.tar_path.is_file() or not paths.manifest_path.is_file():
         print(f"[data] export assets missing for agent '{agent}'", file=sys.stderr)
         return False
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = json.loads(paths.manifest_path.read_text(encoding="utf-8"))
     if manifest.get("agent") != agent:
         print(
             f"[data] manifest agent mismatch: expected '{agent}' got '{manifest.get('agent')}'",
@@ -349,10 +405,10 @@ def merge_agent_data(
         print("[data] HMAC key required but not provided", file=sys.stderr)
         return False
 
-    target_home = target_home.expanduser().resolve()
+    target_home = paths.target_home.expanduser().resolve()
     processed = 0
 
-    with tarfile.open(tar_path, "r") as archive:
+    with tarfile.open(paths.tar_path, "r") as archive:
         for entry in manifest.get("entries", []):
             if process_archive_entry(archive, entry, target_home, hmac_key):
                 processed += 1
@@ -370,7 +426,8 @@ def merge_agent_data(
     return True
 
 
-def parse_args(argv: List[str]) -> argparse.Namespace:
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("package", "merge"), default="package")
     parser.add_argument("--agent", required=True, choices=sorted(AGENT_DATA_SPECS.keys()))
@@ -409,8 +466,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _load_hmac_key(args: argparse.Namespace) -> Optional[bytes]:
-    key_hex: Optional[str] = None
+def _load_hmac_key(args: argparse.Namespace) -> bytes | None:
+    """Load the optional HMAC key from file or environment."""
+    key_hex: str | None = None
     if args.hmac_key_file:
         if not args.hmac_key_file.exists():
             raise SystemExit(f"HMAC key file not found: {args.hmac_key_file}")
@@ -430,7 +488,8 @@ def _load_hmac_key(args: argparse.Namespace) -> Optional[bytes]:
     return None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
+    """CLI entrypoint."""
     args = parse_args(argv)
     hmac_key = _load_hmac_key(args)
     if args.mode == "package":
@@ -440,17 +499,21 @@ def main(argv: List[str]) -> int:
         success = package_agent_data(
             agent=args.agent,
             session_id=args.session_id,
-            tar_path=args.tar,
-            manifest_path=args.manifest,
-            home_path=args.home_path,
+            paths=PackagePaths(
+                tar_path=args.tar,
+                manifest_path=args.manifest,
+                home_path=args.home_path,
+            ),
             hmac_key=hmac_key,
         )
     else:
         success = merge_agent_data(
             agent=args.agent,
-            tar_path=args.tar,
-            manifest_path=args.manifest,
-            target_home=args.target_home,
+            paths=MergePaths(
+                tar_path=args.tar,
+                manifest_path=args.manifest,
+                target_home=args.target_home,
+            ),
             session_id=args.session_id,
             hmac_key=hmac_key,
             require_hmac=args.require_hmac,

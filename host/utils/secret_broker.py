@@ -150,6 +150,7 @@ def _derive_session_key_hex(
 
 
 def _seal_secret(session_key_hex: str, secret_value: str) -> str:
+    """Encrypt a secret value using the derived session key."""
     secret_bytes = secret_value.encode("utf-8")
     key_bytes = bytes.fromhex(session_key_hex)
     if not key_bytes:
@@ -167,6 +168,7 @@ def _seal_secret(session_key_hex: str, secret_value: str) -> str:
 
 
 def _load_token(path: pathlib.Path) -> Dict:
+    """Load and validate a capability token JSON file."""
     if not path.exists():
         raise SystemExit(f"Capability file missing: {path}")
     try:
@@ -180,6 +182,7 @@ def _load_token(path: pathlib.Path) -> Dict:
 
 
 def cmd_init(stubs: List[str]) -> None:
+    """Initialize broker storage and (optionally) generate missing stub keys."""
     _ensure_broker_files(stubs, create_missing_keys=True)
     print(f"[broker] key store ready at {KEY_FILE}")
 
@@ -239,6 +242,7 @@ def _write_token(output_dir: pathlib.Path, stub: str, token: Dict) -> None:
 
 
 def cmd_issue(session_id: str, stubs: List[str], output: pathlib.Path, ttl_minutes: int) -> None:
+    """Issue capability tokens for stubs into an output directory."""
     _ensure_broker_files(stubs)
     keys = _load_keys()
     state = _load_json(STATE_FILE)
@@ -277,6 +281,7 @@ def cmd_issue(session_id: str, stubs: List[str], output: pathlib.Path, ttl_minut
 def cmd_store_secret(
     stub: str, name: str, value: str, from_env: str | None, from_file: pathlib.Path | None
 ) -> None:
+    """Store or update a plaintext secret for a stub in the broker store."""
     _ensure_broker_files([stub])
     secret_value: str | None = value
     if from_env:
@@ -297,6 +302,7 @@ def cmd_store_secret(
 
 
 def cmd_health() -> None:
+    """Perform basic broker health checks and print human-readable status."""
     _ensure_broker_files()
     if not KEY_FILE.exists():
         raise SystemExit("Broker key file missing")
@@ -318,15 +324,8 @@ def cmd_health() -> None:
     print("[broker] health OK")
 
 
-def cmd_redeem(
-    capability_path: pathlib.Path,
-    secret_names: List[str],
-    output_dir: pathlib.Path | None,
-    allow_reuse: bool,
-) -> None:
-    _ensure_broker_files()
-    token = _load_token(capability_path)
-    keys = _load_keys()
+def _ensure_token_valid_for_redemption(token: Dict, keys: Dict[str, str]) -> None:
+    """Validate token integrity (HMAC + derived session key)."""
     key_hex = keys.get(token["stub"])
     if not key_hex:
         raise SystemExit(f"No broker key for stub '{token['stub']}'")
@@ -335,26 +334,38 @@ def cmd_redeem(
     if not hmac.compare_digest(expected, token["hmac"]):
         raise SystemExit("Capability HMAC mismatch; refusing redemption")
     expected_session_key = _derive_session_key_hex(
-        key_hex, token["nonce"], token["session"], token["stub"], token["capability_id"]
+        key_hex,
+        token["nonce"],
+        token["session"],
+        token["stub"],
+        token["capability_id"],
     )
     if token.get("session_key") != expected_session_key:
         raise SystemExit("Capability session key mismatch")
-    try:
-        expires_at = _parse_iso(token["expires_at"])
-    except ValueError as exc:
-        raise SystemExit(f"Invalid expiry timestamp: {exc}") from exc
+
+
+def _ensure_token_not_expired(token: Dict) -> None:
+    """Fail if the capability token is expired."""
+    expires_at = _parse_iso(token["expires_at"])
     if datetime.now(timezone.utc) >= expires_at:
         raise SystemExit("Capability expired")
-    state = _load_json(STATE_FILE)
+
+
+def _ensure_token_not_replayed(state: Dict, capability_id: str, allow_reuse: bool) -> None:
+    """Fail if a capability has already been redeemed (unless allow_reuse)."""
     used = state.get("used_capabilities", {})
-    if token["capability_id"] in used and not allow_reuse:
+    if capability_id in used and not allow_reuse:
         raise SystemExit("Capability already redeemed; refuse replay")
-    secrets_store = _load_secrets()
-    secrets_for_stub = secrets_store.get(token["stub"], {})
-    if not secret_names:
-        raise SystemExit("At least one --secret must be provided")
-    destination = output_dir or capability_path.parent / "secrets"
-    destination.mkdir(parents=True, exist_ok=True)
+
+
+def _seal_and_write_secrets(
+    *,
+    token: Dict,
+    secrets_for_stub: Dict[str, str],
+    secret_names: List[str],
+    destination: pathlib.Path,
+) -> None:
+    """Seal requested secrets for a token and write them to disk."""
     for secret_name in secret_names:
         secret_value = secrets_for_stub.get(secret_name)
         if secret_value is None:
@@ -376,10 +387,41 @@ def cmd_redeem(
         except PermissionError:
             pass
         print(f"[broker] sealed secret '{secret_name}' -> {sealed_path}")
+
+
+def cmd_redeem(
+    capability_path: pathlib.Path,
+    secret_names: List[str],
+    output_dir: pathlib.Path | None,
+    allow_reuse: bool,
+) -> None:
+    """Redeem a capability token and write sealed secrets for the agent."""
+    _ensure_broker_files()
+    token = _load_token(capability_path)
+    keys = _load_keys()
+    _ensure_token_valid_for_redemption(token, keys)
+    _ensure_token_not_expired(token)
+
+    state = _load_json(STATE_FILE)
+    _ensure_token_not_replayed(state, token["capability_id"], allow_reuse)
+    secrets_store = _load_secrets()
+    secrets_for_stub = secrets_store.get(token["stub"], {})
+    if not secret_names:
+        raise SystemExit("At least one --secret must be provided")
+    destination = output_dir or capability_path.parent / "secrets"
+    destination.mkdir(parents=True, exist_ok=True)
+
+    _seal_and_write_secrets(
+        token=token,
+        secrets_for_stub=secrets_for_stub,
+        secret_names=secret_names,
+        destination=destination,
+    )
     _mark_capability_used(state, token["capability_id"])
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
+    """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -412,6 +454,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
 
 def main(argv: List[str]) -> int:
+    """CLI entrypoint."""
     args = parse_args(argv)
     if args.command == "init":
         cmd_init(args.stubs)

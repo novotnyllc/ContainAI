@@ -89,7 +89,19 @@ def parse_mcp_server_config(
 
     Returns (command, args, env, cwd).
     """
-    config = dict(settings)
+    command, args, env, cwd, _ = split_mcp_server_config(name, settings)
+    return command, args, env, cwd
+
+
+def split_mcp_server_config(
+    name: str,
+    settings: Dict,
+) -> tuple[str, List[str], Dict[str, str], str | None, Dict]:
+    """Split MCP server config into exec fields and remaining settings.
+
+    Returns (command, args, env, cwd, remaining_settings).
+    """
+    config = dict(settings or {})
     command = str(config.pop("command", "")).strip()
     if not command:
         raise ValueError(f"MCP server '{name}' is missing a command")
@@ -101,4 +113,4 @@ def parse_mcp_server_config(
     cwd = config.pop("cwd", None)
     config.pop("bearer_token_env_var", None)
 
-    return command, args, env, cwd
+    return command, args, env, cwd, config
