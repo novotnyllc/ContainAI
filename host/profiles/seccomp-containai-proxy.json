@@ -10,7 +10,7 @@
     {
       "names": [
         "accept","accept4","access","arch_prctl","bind","brk","capget","capset","chdir","chmod","chown",
-        "clock_getres","clock_gettime","clone","clone3","close","close_range","connect",
+        "clock_getres","clock_gettime","clock_nanosleep","clone","clone3","close","close_range","connect",
         "dup","dup2","dup3","epoll_create","epoll_create1","epoll_ctl","epoll_wait","epoll_pwait",
         "eventfd","eventfd2","execve","execveat","exit","exit_group","faccessat","faccessat2",
         "fallocate","fchdir","fchmod","fchmodat","fchown","fchownat","fcntl","fdatasync","fgetxattr",

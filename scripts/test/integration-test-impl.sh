@@ -1243,7 +1243,7 @@ test_mcp_configuration_generation() {
 }
 
 test_mitm_ca_generation() {
-    test_section "Testing MITM CA generation"
+    test_section "Testing MITM CA requirement and usage"
 
     local proxy_image="containai-proxy:test-hardened"
     # Force rebuild to pick up config changes
@@ -1259,14 +1259,48 @@ test_mitm_ca_generation() {
 
     local container_name="${TEST_CONTAINER_PREFIX}-mitm-gen"
     
-    # Run without mounting certs - should auto-generate
+    # Test 1: Proxy should FAIL without CA files (security requirement)
+    # The launcher must provide CA files - auto-generation would break trust chain
+    local output
+    output=$(docker run --rm \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
+        "$proxy_image" 2>&1) || true
+    
+    if echo "$output" | grep -q "MITM CA files not provided"; then
+        pass "Proxy correctly fails without CA files (security requirement)"
+    else
+        fail "Proxy should fail when CA files are not provided"
+        echo "DEBUG: Output was: $output"
+    fi
+    
+    # Test 2: Generate CA using production function and verify proxy works
+    local test_ca_dir
+    test_ca_dir=$(mktemp -d)
+    # shellcheck source=host/utils/common-functions.sh
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
+    
+    if ! generate_session_mitm_ca "$test_ca_dir"; then
+        fail "Failed to generate test CA"
+        rm -rf "$test_ca_dir"
+        return
+    fi
+    
     if ! docker run -d \
         --name "$container_name" \
         --label "$TEST_LABEL_TEST" \
         --label "$TEST_LABEL_SESSION" \
         --label "$TEST_LABEL_CREATED" \
+        --tmpfs "/var/log/squid:rw,size=64m,mode=755" \
+        --tmpfs "/var/spool/squid:rw,size=128m,mode=755" \
+        --tmpfs "/var/run/squid:rw,size=16m,mode=755" \
+        -v "$test_ca_dir/proxy-ca.crt:/etc/squid/mitm/ca.crt:ro" \
+        -v "$test_ca_dir/proxy-ca.key:/etc/squid/mitm/ca.key:ro" \
+        -e "SQUID_ALLOWED_DOMAINS=." \
         "$proxy_image"; then
-        fail "Failed to start proxy container for MITM test"
+        fail "Failed to start proxy container with CA files"
+        rm -rf "$test_ca_dir"
         return
     fi
 
@@ -1278,6 +1312,7 @@ test_mitm_ca_generation() {
             docker logs "$container_name" 2>&1 || true
             fail "Proxy container exited unexpectedly during startup"
             docker rm -f "$container_name" >/dev/null 2>&1 || true
+            rm -rf "$test_ca_dir"
             return
         fi
         # /dev/tcp requires bash, not sh
@@ -1293,27 +1328,30 @@ test_mitm_ca_generation() {
         echo "DEBUG: Final container logs:"
         docker logs "$container_name" 2>&1 || true
         docker rm -f "$container_name" >/dev/null 2>&1 || true
+        rm -rf "$test_ca_dir"
         return
     fi
+    
+    pass "Proxy starts successfully with provided CA"
 
-    # Check if cert exists in runtime directory (where entrypoint copies/generates it)
-    # The entrypoint now copies bind-mounted certs OR auto-generates them to /var/run/squid/
+    # Verify cert was copied to runtime directory
     if docker exec "$container_name" test -f /var/run/squid/mitm-ca.crt; then
-        pass "MITM CA certificate generated"
+        pass "MITM CA certificate copied to runtime directory"
     else
-        fail "MITM CA certificate not found"
+        fail "MITM CA certificate not found in runtime directory"
     fi
 
-    # Check subject
+    # Check subject matches what we generated
     local subject
     subject=$(docker exec "$container_name" openssl x509 -in /var/run/squid/mitm-ca.crt -noout -subject 2>/dev/null || true)
-    if echo "$subject" | grep -q "CN = ContainAI MITM CA"; then
-        pass "MITM CA has correct subject"
+    if echo "$subject" | grep -q "CN = ContainAI Proxy MITM CA"; then
+        pass "MITM CA has correct subject from launcher"
     else
         fail "MITM CA subject mismatch ($subject)"
     fi
 
     docker rm -f "$container_name" >/dev/null 2>&1 || true
+    rm -rf "$test_ca_dir"
 }
 
 test_network_proxy_modes() {
@@ -1504,6 +1542,17 @@ test_squid_proxy_hardening() {
     local allowed_domain="allowed.test"
     local proxy_url="http://${proxy_ip}:3128"
 
+    # Generate MITM CA for proxy (required, not auto-generated)
+    local proxy_ca_dir
+    proxy_ca_dir="$(mktemp -d)"
+    # shellcheck source=host/utils/common-functions.sh
+    source "$PROJECT_ROOT/host/utils/common-functions.sh"
+    if ! generate_session_mitm_ca "$proxy_ca_dir"; then
+        fail "Failed to generate MITM CA for squid proxy test"
+        rm -rf "$proxy_ca_dir"
+        return
+    fi
+
     local server_script
     server_script="$(mktemp)"
     chmod 644 "$server_script"
@@ -1553,6 +1602,7 @@ PY
         docker rm -f "$proxy_container" "$allowed_container" >/dev/null 2>&1 || true
         docker network rm "$proxy_network" >/dev/null 2>&1 || true
         rm -f "$server_script"
+        rm -rf "$proxy_ca_dir"
     }
 
     if ! docker network inspect "$proxy_network" >/dev/null 2>&1; then
@@ -1581,12 +1631,17 @@ PY
 
     if ! docker run -d \
         --name "$proxy_container" \
-    --network "$proxy_network" \
-    --ip "$proxy_ip" \
-    --label "$TEST_LABEL_TEST" \
-    --label "$TEST_LABEL_SESSION" \
-    --label "$TEST_LABEL_CREATED" \
-    --add-host "${allowed_domain}:${allowed_ip}" \
+        --network "$proxy_network" \
+        --ip "$proxy_ip" \
+        --label "$TEST_LABEL_TEST" \
+        --label "$TEST_LABEL_SESSION" \
+        --label "$TEST_LABEL_CREATED" \
+        --add-host "${allowed_domain}:${allowed_ip}" \
+        --tmpfs "/var/log/squid:rw,size=64m,mode=755" \
+        --tmpfs "/var/spool/squid:rw,size=128m,mode=755" \
+        --tmpfs "/var/run/squid:rw,size=16m,mode=755" \
+        -v "$proxy_ca_dir/proxy-ca.crt:/etc/squid/mitm/ca.crt:ro" \
+        -v "$proxy_ca_dir/proxy-ca.key:/etc/squid/mitm/ca.key:ro" \
         -e "SQUID_ALLOWED_DOMAINS=${allowed_domain}" \
         "$proxy_image"
     then

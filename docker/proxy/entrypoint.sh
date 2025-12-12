@@ -27,28 +27,27 @@ MITM_CA_CERT="$SQUID_RUN_DIR/mitm-ca.crt"
 MITM_CA_KEY="$SQUID_RUN_DIR/mitm-ca.key"
 
 # Ensure runtime directories exist FIRST before any file operations
-# Note: With --cap-drop=ALL, chown will fail, but tmpfs mounts should be writable
+# Note: CAP_DAC_OVERRIDE is dropped, so root cannot write to directories owned by others.
+# We must create/copy files AS ROOT before chowning directories to proxy.
 mkdir -p "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$SQUID_RUN_DIR" "$(dirname "$SQUID_SSL_DB_DIR")"
-chown -hR proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" "$SQUID_RUN_DIR" 2>/dev/null || true
 
-if [ -f "$MITM_CA_CERT_SOURCE" ] && [ -f "$MITM_CA_KEY_SOURCE" ]; then
-    # Copy bind-mounted CA files to runtime dir with correct permissions
-    cp "$MITM_CA_CERT_SOURCE" "$MITM_CA_CERT"
-    cp "$MITM_CA_KEY_SOURCE" "$MITM_CA_KEY"
-    chown proxy:proxy "$MITM_CA_CERT" "$MITM_CA_KEY" 2>/dev/null || true
-    chmod 644 "$MITM_CA_CERT"
-    chmod 600 "$MITM_CA_KEY"
-    echo "✅ MITM CA copied to runtime directory"
-else
-    echo "🔐 Generating new MITM CA certificate..."
-    openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
-        -keyout "$MITM_CA_KEY" -out "$MITM_CA_CERT" \
-        -subj "/CN=ContainAI MITM CA/O=ContainAI" 2>/dev/null
-    chown proxy:proxy "$MITM_CA_CERT" "$MITM_CA_KEY" 2>/dev/null || true
-    chmod 644 "$MITM_CA_CERT"
-    chmod 600 "$MITM_CA_KEY"
-    echo "✅ MITM CA generated at $MITM_CA_CERT"
+# Copy MITM CA files from bind mount to runtime dir
+# The CA MUST be provided by the launcher - generating here would break trust chain
+# (agent wouldn't have the matching cert to trust the proxy's MITM certificates)
+if [ ! -f "$MITM_CA_CERT_SOURCE" ] || [ ! -f "$MITM_CA_KEY_SOURCE" ]; then
+    echo "❌ MITM CA files not provided!" >&2
+    echo "   Expected cert: $MITM_CA_CERT_SOURCE" >&2
+    echo "   Expected key:  $MITM_CA_KEY_SOURCE" >&2
+    echo "   The launcher must generate and bind-mount these files." >&2
+    exit 1
 fi
+cp "$MITM_CA_CERT_SOURCE" "$MITM_CA_CERT"
+cp "$MITM_CA_KEY_SOURCE" "$MITM_CA_KEY"
+chmod 644 "$MITM_CA_CERT"
+# Key is 640, owned by root:proxy - readable by root (for validation) and proxy group (for squid)
+chown root:proxy "$MITM_CA_KEY" 2>/dev/null || true
+chmod 640 "$MITM_CA_KEY"
+echo "✅ MITM CA copied to runtime directory"
 
 # Generate allowed domains file from environment variable
 if [ -n "${SQUID_ALLOWED_DOMAINS:-}" ]; then
@@ -120,6 +119,13 @@ fi
 if [ -e /dev/stderr ]; then
     chown proxy:proxy /dev/stderr 2>/dev/null || true
 fi
+
+# NOW that all files are written, chown runtime directories to proxy user
+# This must be AFTER all file writes since we dropped CAP_DAC_OVERRIDE
+# Note: We don't chown the MITM key - it stays root:proxy with mode 640
+chown -hR proxy:proxy "$SQUID_CACHE_DIR" "$SQUID_LOG_DIR" 2>/dev/null || true
+# For SQUID_RUN_DIR, chown everything EXCEPT the key
+find "$SQUID_RUN_DIR" -mindepth 1 ! -name 'mitm-ca.key' -exec chown proxy:proxy {} \; 2>/dev/null || true
 
 # Validate config before starting
 echo "🔍 Validating Squid configuration..."

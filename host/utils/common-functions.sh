@@ -875,11 +875,6 @@ _resolve_channel_apparmor_profile() {
         return 1
     fi
 
-    if apparmor_profile_loaded "$profile_name"; then
-        echo "$profile_name"
-        return 0
-    fi
-
     # Use resolve_security_asset_path with channel-specific filename
     local profile_file
     profile_file=$(resolve_security_asset_path "$containai_root" "$channel_filename" "$label" 2>/dev/null) || {
@@ -887,6 +882,21 @@ _resolve_channel_apparmor_profile() {
         return 1
     }
 
+    # Check if profile is loaded in kernel
+    if apparmor_profile_loaded "$profile_name"; then
+        echo "$profile_name"
+        return 0
+    fi
+
+    # If we can't verify loaded state (non-root), trust that setup script loaded it
+    # as long as the profile file exists on disk
+    if ! apparmor_profiles_readable; then
+        # Can't verify - trust file existence (setup script handles loading)
+        echo "$profile_name"
+        return 0
+    fi
+
+    # We CAN read the profiles file but profile isn't loaded - need root to load
     if [ "$(id -u 2>/dev/null || echo 1)" != "0" ]; then
         echo "⚠️  ${label} '${profile_name}' not loaded (requires sudo). Run: sudo apparmor_parser -r '$profile_file'" >&2
         return 1
@@ -1051,7 +1061,10 @@ apparmor_profiles_file() {
 apparmor_profiles_readable() {
     local profiles_file
     profiles_file=$(apparmor_profiles_file)
-    [ -r "$profiles_file" ]
+    # Note: /sys/kernel/security/apparmor/profiles shows r--r--r-- but
+    # actually requires CAP_SYS_ADMIN to read. The -r test lies.
+    # We must actually attempt to read it.
+    cat "$profiles_file" >/dev/null 2>&1
 }
 
 apparmor_profile_loaded() {
@@ -2054,22 +2067,40 @@ generate_session_mitm_ca() {
     umask 077
     local ca_key="$output_dir/proxy-ca.key"
     local ca_cert="$output_dir/proxy-ca.crt"
+    # Generate key and cert, then convert key to traditional RSA format
+    # Squid 5.7 has issues with PKCS#8 format keys
     if ! openssl req -x509 -newkey rsa:4096 -sha256 -days 2 -nodes \
         -subj "/CN=ContainAI Proxy MITM CA" \
         -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
         -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
         -addext "subjectKeyIdentifier=hash" \
         -addext "authorityKeyIdentifier=keyid:always,issuer" \
-        -keyout "$ca_key" \
+        -keyout "$ca_key.tmp" \
         -out "$ca_cert" >/dev/null 2>&1; then
         umask "$original_umask"
         echo "❌ Failed to generate MITM CA materials" >&2
         return 1
     fi
+    # Convert PKCS#8 key to traditional RSA PEM format for Squid compatibility
+    if ! openssl rsa -in "$ca_key.tmp" -out "$ca_key" -traditional 2>/dev/null; then
+        # Fallback: use the original key if conversion fails
+        mv "$ca_key.tmp" "$ca_key"
+    else
+        rm -f "$ca_key.tmp"
+    fi
     umask "$original_umask"
-    # Key is 600 (proxy-only), cert is 644 (readable for MITM verification)
-    # CAP_CHOWN on proxy container allows chown to work
-    chmod 600 "$ca_key" || true
+    # Key owned by proxy user (uid 13) so it's readable inside container
+    # when CAP_DAC_READ_SEARCH is dropped. Cert is world-readable for MITM verification.
+    # NOTE: chown to uid 13 requires running as root or having CAP_CHOWN on host
+    if chown 13:13 "$ca_key" 2>/dev/null; then
+        chmod 600 "$ca_key"
+    elif chgrp 13 "$ca_key" 2>/dev/null; then
+        # Can set group to proxy gid, make group-readable
+        chmod 640 "$ca_key"
+    else
+        # Last resort: world-readable key (least secure, but works for non-root testing)
+        chmod 644 "$ca_key" || true
+    fi
     chmod 644 "$ca_cert" || true
     SESSION_MITM_CA_CERT="$ca_cert"
     SESSION_MITM_CA_KEY="$ca_key"
