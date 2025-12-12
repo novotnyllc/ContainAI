@@ -7,9 +7,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LAUNCHERS_PATH="$REPO_ROOT/host/launchers/entrypoints"
-# Security profiles MUST be root-owned to prevent tampering - same location for dev and prod
-# This path is hardcoded and NOT overridable - security critical.
-readonly CONTAINAI_SYSTEM_PROFILES_DIR="/opt/containai/profiles"
 # Source profiles in repo (these get copied to system location)
 SECURITY_PROFILES_DIR="$REPO_ROOT/host/profiles"
 # Channel for profile names (dev, nightly, prod)
