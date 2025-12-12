@@ -881,6 +881,11 @@ PROXY_LOG_ROOT="${CONTAINAI_HOME}/logs/proxy"
 PROXY_LOG_DIR="${PROXY_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
 PROXY_LOG_CERT_DIR="${SESSION_CONFIG_OUTPUT}/log-broker"
 
+# Agent audit log directory (same location as proxy logs for consistency)
+AGENT_LOG_ROOT="${CONTAINAI_HOME}/logs/agent"
+AGENT_LOG_DIR="${AGENT_LOG_ROOT}/${CONTAINER_NAME}/${SESSION_ID}"
+mkdir -p "$AGENT_LOG_DIR"
+
 # Determine network mode
 NETWORK_MODE="$PROXY_NETWORK_NAME"
 NETWORK_POLICY_ENV="squid"
@@ -1114,6 +1119,7 @@ DOCKER_ARGS=(
     "-e" "AGENT_SESSION_MODE=shell"
     "-e" "AGENT_SESSION_SHELL_BIN=/bin/bash"
     "-e" "AGENT_SESSION_SHELL_ARGS=-l"
+    "-e" "AGENT_NAME=$AGENT"
     "-e" "HOST_SESSION_ID=$SESSION_ID"
     "-e" "HOST_SESSION_CONFIG_SHA256=$SESSION_CONFIG_SHA256"
     "-e" "HOST_TRUSTED_TREES=$TRUSTED_TREE_HASHES_ENV"
@@ -1124,6 +1130,7 @@ DOCKER_ARGS=(
     "-e" "CONTAINAI_AGENT_SECRET_ROOT=/run/agent-secrets"
     "-e" "CONTAINAI_AGENT_DATA_ROOT=/run/agent-data"
     "-e" "CONTAINAI_SECRET_TMPFS_SIZE=${TMPFS_SECRET_SIZE}"
+    "-e" "CONTAINAI_LOG_DIR=/var/log/containai"
     "--label" "containai.type=agent"
     "--label" "containai.profile=$CONTAINAI_PROFILE"
     "--label" "containai.agent=$AGENT"
@@ -1133,6 +1140,7 @@ DOCKER_ARGS=(
     "--label" "containai.volume.workspace=$WORKSPACE_VOLUME"
     "--label" "containai.volume.home=$HOME_VOLUME"
     "--label" "containai.volume.toolcache=$TOOLCACHE_VOLUME"
+    "--mount" "type=bind,src=${AGENT_LOG_DIR},dst=/var/log/containai"
     "-v" "${HOME}/.gitconfig:/home/agentuser/.gitconfig:ro"
     "-v" "${HOME}/.config/gh:/home/agentuser/.config/gh:ro"
     "-v" "${HOME}/.config/github-copilot:/home/agentuser/.config/github-copilot:ro"

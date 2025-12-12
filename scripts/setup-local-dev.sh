@@ -37,22 +37,11 @@ if [[ ! -d "$LAUNCHERS_PATH" ]]; then
     exit 1
 fi
 
-echo "Installing launchers to PATH..."
+# Source common functions for DRY
+# shellcheck source=../host/utils/common-functions.sh
+source "$REPO_ROOT/host/utils/common-functions.sh"
 
-file_sha256() {
-    local file="$1"
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file" | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$file" | awk '{print $1}'
-    else
-        python3 - "$file" <<'PY'
-import hashlib, sys, pathlib
-path = pathlib.Path(sys.argv[1])
-print(hashlib.sha256(path.read_bytes()).hexdigest())
-PY
-    fi
-}
+echo "Installing launchers to PATH..."
 
 install_security_assets() {
     local dry_run="${1:-0}"
@@ -71,6 +60,7 @@ install_security_assets() {
         "$SECURITY_PROFILES_DIR/apparmor-containai-proxy.profile"
         "$SECURITY_PROFILES_DIR/seccomp-containai-log-forwarder.json"
         "$SECURITY_PROFILES_DIR/apparmor-containai-log-forwarder.profile"
+        "$SECURITY_PROFILES_DIR/apparmor-containai-logcollector.profile"
     )
     for src in "${required_sources[@]}"; do
         if [[ ! -f "$src" ]]; then
@@ -85,16 +75,9 @@ install_security_assets() {
         exit 1
     fi
 
-    # Require AppArmor tools
-    if ! command -v apparmor_parser >/dev/null 2>&1; then
-        echo "❌ apparmor_parser not found. Install apparmor-utils package." >&2
-        exit 1
-    fi
-    local apparmor_enabled="/sys/module/apparmor/parameters/enabled"
-    if [[ ! -r "$apparmor_enabled" ]] || ! grep -qi '^y' "$apparmor_enabled" 2>/dev/null; then
-        echo "❌ AppArmor is not enabled. Enable AppArmor in your kernel." >&2
-        exit 1
-    fi
+    # Use shared AppArmor prereq checks from common-functions.sh
+    require_apparmor_tools || exit 1
+    require_apparmor_enabled || exit 1
 
     # Check if update is needed by comparing source hashes with existing manifest
     local needs_update=0
@@ -147,38 +130,27 @@ install_security_assets() {
             exit 1
         fi
 
-        # Install generated files with proper ownership
-        for file in "$staging_dir"/*; do
-            [[ -f "$file" ]] || continue
-            local filename
-            filename="$(basename "$file")"
-            "${runner[@]}" install -m 0644 "$file" "$asset_dir/$filename"
-        done
-        rm -rf "$staging_dir"
-
-        echo "✓ Security assets synced to $asset_dir"
-    fi
-
-    # Load channel-aware AppArmor profiles
-    echo "Loading AppArmor profiles (channel: $channel)..."
-    local runner=()
-    if [[ "$(id -u)" -ne 0 ]]; then
-        runner=(sudo)
-    fi
-
-    local profile_agent="apparmor-containai-agent-${channel}.profile"
-    local profile_proxy="apparmor-containai-proxy-${channel}.profile"
-    local profile_fwd="apparmor-containai-log-forwarder-${channel}.profile"
-
-    for profile_file in "$profile_agent" "$profile_proxy" "$profile_fwd"; do
-        local full_path="$asset_dir/$profile_file"
-        if [[ ! -f "$full_path" ]]; then
-            echo "❌ Generated profile not found: $full_path" >&2
-            exit 1
+        # Install generated files using shared function (handles copy, manifest, and loading)
+        # The shared function needs root, so we may need to re-invoke with sudo
+        if [[ "$(id -u)" -ne 0 ]]; then
+            # Re-invoke the shared function with sudo
+            "${runner[@]}" bash -c "
+                source '$REPO_ROOT/host/utils/common-functions.sh'
+                install_security_profiles_to_system '$staging_dir' '$channel' '$SECURITY_MANIFEST_NAME'
+            " || {
+                rm -rf "$staging_dir"
+                echo "❌ Failed to install security profiles" >&2
+                exit 1
+            }
+        else
+            install_security_profiles_to_system "$staging_dir" "$channel" "$SECURITY_MANIFEST_NAME" || {
+                rm -rf "$staging_dir"
+                echo "❌ Failed to install security profiles" >&2
+                exit 1
+            }
         fi
-        "${runner[@]}" apparmor_parser -r "$full_path"
-        echo "  ✓ Loaded $profile_file"
-    done
+        rm -rf "$staging_dir"
+    fi
 }
 
 if [[ $CHECK_ONLY -eq 1 ]]; then

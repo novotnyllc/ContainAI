@@ -1073,6 +1073,187 @@ test_container_security_preflight() {
     fi
 }
 
+test_logcollector_isolation() {
+    test_section "LogCollector user isolation"
+
+    # This test validates the LogCollector security model:
+    # 1. LogCollector runs as dedicated user (logcollector, UID 1001)
+    # 2. agentuser cannot read audit logs
+    # 3. agentuser cannot signal/kill LogCollector
+    # 4. agentuser can write to audit socket (auditwriters group)
+    # 5. AppArmor profile is applied
+
+    # Use channel-aware profile paths (PROFILE_SUFFIX is -dev in test env)
+    local profile="/opt/containai/profiles/seccomp-containai-agent${PROFILE_SUFFIX}.json"
+    local apparmor_profile="containai-logcollector${PROFILE_SUFFIX}"
+    local apparmor_profile_file="/opt/containai/profiles/apparmor-containai-logcollector${PROFILE_SUFFIX}.profile"
+    local image="${TEST_BASE_IMAGE:-containai:local}"
+
+    if [ ! -f "$profile" ]; then
+        fail "Seccomp profile missing - run setup-local-dev.sh first"
+        return
+    fi
+
+    # Check if AppArmor profile is loaded
+    if ! grep -q "$apparmor_profile" /sys/kernel/security/apparmor/profiles 2>/dev/null; then
+        # May not have permission to read - check if profile file exists
+        if [ ! -f "$apparmor_profile_file" ]; then
+            fail "LogCollector AppArmor profile not installed"
+            return
+        fi
+    fi
+
+    local test_log_dir
+    test_log_dir=$(mktemp -d)
+    local container_name="${TEST_CONTAINER_PREFIX:-test}-logcollector-$$"
+
+    # Start test container with LogCollector environment
+    # Note: entrypoint derives AppArmor profile from CONTAINAI_PROFILE
+    if ! docker run -d --rm \
+        --name "$container_name" \
+        --security-opt "seccomp=$profile" \
+        -e "CONTAINAI_LOG_DIR=/var/log/containai" \
+        -e "CONTAINAI_PROFILE=${CONTAINAI_PROFILE:-dev}" \
+        --mount "type=bind,src=${test_log_dir},dst=/var/log/containai" \
+        "$image" \
+        sleep 300 >/dev/null 2>&1; then
+        fail "Failed to start test container"
+        rm -rf "$test_log_dir"
+        return
+    fi
+
+    # Give entrypoint time to start LogCollector
+    sleep 2
+
+    # Test 1: Verify logcollector user exists and is separate from agentuser
+    local logcollector_uid agentuser_uid
+    logcollector_uid=$(docker exec "$container_name" id -u logcollector 2>/dev/null || echo "")
+    agentuser_uid=$(docker exec "$container_name" id -u agentuser 2>/dev/null || echo "")
+
+    if [ -n "$logcollector_uid" ] && [ "$logcollector_uid" = "1001" ]; then
+        pass "logcollector user exists with UID 1001"
+    else
+        fail "logcollector user missing or wrong UID (got: ${logcollector_uid:-none})"
+    fi
+
+    if [ "$logcollector_uid" != "$agentuser_uid" ]; then
+        pass "logcollector and agentuser have different UIDs"
+    else
+        fail "logcollector and agentuser have same UID - no isolation!"
+    fi
+
+    # Test 2: Verify auditwriters group exists and agentuser is member
+    if docker exec "$container_name" getent group auditwriters | grep -q agentuser; then
+        pass "agentuser is member of auditwriters group"
+    else
+        fail "agentuser not in auditwriters group - cannot write to audit socket"
+    fi
+
+    # Test 3: Verify log directory is owned by logcollector
+    local log_owner
+    log_owner=$(docker exec "$container_name" stat -c '%U' /var/log/containai 2>/dev/null || echo "")
+    if [ "$log_owner" = "logcollector" ]; then
+        pass "Log directory owned by logcollector"
+    else
+        fail "Log directory not owned by logcollector (owner: ${log_owner:-unknown})"
+    fi
+
+    # Test 4: Verify agentuser cannot read log directory
+    if docker exec -u agentuser "$container_name" ls /var/log/containai/ >/dev/null 2>&1; then
+        fail "agentuser CAN read log directory - security violation!"
+    else
+        pass "agentuser cannot read log directory"
+    fi
+
+    # Test 5: Verify audit socket exists with correct permissions
+    local socket_perms socket_group
+    socket_perms=$(docker exec "$container_name" stat -c '%a' /run/containai/audit.sock 2>/dev/null || echo "")
+    socket_group=$(docker exec "$container_name" stat -c '%G' /run/containai/audit.sock 2>/dev/null || echo "")
+
+    if [ "$socket_perms" = "620" ]; then
+        pass "Audit socket has correct permissions (620)"
+    else
+        fail "Audit socket has wrong permissions (got: ${socket_perms:-none}, expected: 620)"
+    fi
+
+    if [ "$socket_group" = "auditwriters" ]; then
+        pass "Audit socket group is auditwriters"
+    else
+        fail "Audit socket has wrong group (got: ${socket_group:-none}, expected: auditwriters)"
+    fi
+
+    # Test 6: Verify agentuser can write to audit socket
+    if docker exec -u agentuser "$container_name" sh -c 'echo "{\"test\":true}" | socat - UNIX-CONNECT:/run/containai/audit.sock' >/dev/null 2>&1; then
+        pass "agentuser can write to audit socket"
+    else
+        fail "agentuser cannot write to audit socket"
+    fi
+
+    # Cleanup
+    docker stop "$container_name" >/dev/null 2>&1
+    rm -rf "$test_log_dir"
+}
+
+test_logcollector_apparmor_enforcement() {
+    test_section "LogCollector AppArmor enforcement"
+
+    # This test verifies AppArmor restricts LogCollector's capabilities
+    # Key restrictions:
+    # - No network access
+    # - Cannot read /home, /workspace, /run/agent-secrets
+    # - Can only write to /var/log/containai
+
+    # Use channel-aware profile paths
+    local profile="/opt/containai/profiles/seccomp-containai-agent${PROFILE_SUFFIX}.json"
+    local apparmor_profile="containai-logcollector${PROFILE_SUFFIX}"
+    local image="${TEST_BASE_IMAGE:-containai:local}"
+
+    if [ ! -f "$profile" ]; then
+        fail "Seccomp profile missing"
+        return
+    fi
+
+    local test_log_dir
+    test_log_dir=$(mktemp -d)
+    local container_name="${TEST_CONTAINER_PREFIX:-test}-logcollector-aa-$$"
+
+    # Start container that will test AppArmor enforcement
+    if ! docker run -d --rm \
+        --name "$container_name" \
+        --security-opt "seccomp=$profile" \
+        --security-opt "apparmor=$apparmor_profile" \
+        -e "CONTAINAI_LOG_DIR=/var/log/containai" \
+        -e "CONTAINAI_PROFILE=${CONTAINAI_PROFILE:-dev}" \
+        --mount "type=bind,src=${test_log_dir},dst=/var/log/containai" \
+        "$image" \
+        sleep 300 >/dev/null 2>&1; then
+        fail "Failed to start AppArmor test container"
+        rm -rf "$test_log_dir"
+        return
+    fi
+
+    sleep 2
+
+    # Test: AppArmor denies network access for logcollector profile
+    # Note: This test runs as root initially, but AppArmor profile denies network
+    if docker exec "$container_name" sh -c \
+        'aa-exec -p '"$apparmor_profile"' -- curl -s --max-time 2 http://127.0.0.1/ 2>&1 || true' | grep -qi "denied\|permission\|connect"; then
+        pass "AppArmor blocks network access for logcollector"
+    else
+        # curl might not be installed, try with python
+        if docker exec "$container_name" sh -c \
+            'aa-exec -p '"$apparmor_profile"' -- python3 -c "import socket; s=socket.socket(); s.connect((\"127.0.0.1\", 80))" 2>&1' | grep -qi "denied\|permission"; then
+            pass "AppArmor blocks network access for logcollector"
+        else
+            fail "AppArmor may not be blocking network for logcollector (or test inconclusive)"
+        fi
+    fi
+
+    # Cleanup
+    docker stop "$container_name" >/dev/null 2>&1
+    rm -rf "$test_log_dir"
+}
+
 test_local_remote_push() {
     test_section "Testing secure local remote push"
 
@@ -1824,6 +2005,8 @@ ALL_TESTS=(
     "test_seccomp_ptrace_block"
     "test_host_security_preflight"
     "test_container_security_preflight"
+    "test_logcollector_isolation"
+    "test_logcollector_apparmor_enforcement"
     "test_trusted_path_enforcement"
     "test_session_config_renderer"
     "test_secret_broker_cli"

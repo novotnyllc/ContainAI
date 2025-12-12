@@ -602,12 +602,14 @@ test_launcher_script_execution() {
         --tmpfs "/run/mcp-wrappers:rw,nosuid,nodev,exec,size=64m,mode=755"
         --tmpfs "/run/agent-task-runner:rw,nosuid,nodev,exec,size=64m,mode=755"
         --tmpfs "/run/containai:rw,nosuid,nodev,exec,size=64m,mode=755"
+        --tmpfs "/var/log/containai:rw,nosuid,nodev,noexec,size=64m,mode=755"
         --tmpfs "/toolcache:rw,nosuid,nodev,exec,size=256m,mode=775"
         -v "${TEST_REPO_DIR}:/workspace"
         -e "GH_TOKEN=${TEST_GH_TOKEN}"
         -e "HTTP_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128"
         -e "NO_PROXY=localhost,127.0.0.1"
+        -e "CONTAINAI_LOG_DIR=/var/log/containai"
         -v "$PROJECT_ROOT/docker/runtime/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
         --tmpfs "/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
         --tmpfs "/var/tmp:rw,nosuid,nodev,exec,size=256m,mode=1777"
@@ -1062,7 +1064,8 @@ test_mcp_configuration_generation() {
         -e "HTTPS_PROXY=http://${TEST_PROXY_CONTAINER}:3128" \
         -e "NO_PROXY=localhost,127.0.0.1" \
         -e "MCP_SECRETS_FILE=/workspace/.mcp-secrets.env" \
-        -e "CONTAINAI_LOG_DIR=/tmp/logs" \
+        -e "CONTAINAI_LOG_DIR=/var/log/containai" \
+        --tmpfs "/var/log/containai:rw,nosuid,nodev,noexec,size=64m,mode=755" \
         --tmpfs "/home/agentuser/.config/containai/capabilities:rw,nosuid,nodev,noexec,size=16m,mode=700" \
         --tmpfs "/run/agent-secrets:rw,nosuid,nodev,noexec,size=32m,mode=700" \
         --tmpfs "/run/agent-data:rw,nosuid,nodev,noexec,size=64m,mode=700" \

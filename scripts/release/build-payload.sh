@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=host/utils/common-functions.sh
+source "$PROJECT_ROOT/host/utils/common-functions.sh"
 ARTIFACTS_DIR="$PROJECT_ROOT/artifacts"
 
 VERSION=""
@@ -199,7 +201,7 @@ fi
 # SHA256SUMS inside payload for integrity-check (exclude self)
 pushd "$PAYLOAD_DIR_BUILD" >/dev/null
 find . -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
-PAYLOAD_HASH=$(sha256sum SHA256SUMS | awk '{print $1}')
+PAYLOAD_HASH=$(_sha256_file SHA256SUMS)
 echo "$PAYLOAD_HASH  SHA256SUMS" > payload.sha256
 popd >/dev/null
 

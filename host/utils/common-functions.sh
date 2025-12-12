@@ -1054,6 +1054,138 @@ is_apparmor_supported() {
     return 1
 }
 
+# Require apparmor_parser tool to be available.
+# Args: none
+# Returns: 0 if available, 1 if missing (with error message)
+require_apparmor_tools() {
+    if command -v apparmor_parser >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "❌ apparmor_parser not found. Install apparmor-utils package." >&2
+    return 1
+}
+
+# Require AppArmor to be enabled in kernel.
+# Args: none
+# Returns: 0 if enabled, 1 if disabled (with error message)
+require_apparmor_enabled() {
+    local enabled_flag="/sys/module/apparmor/parameters/enabled"
+    if [[ -r "$enabled_flag" ]] && grep -qi '^y' "$enabled_flag" 2>/dev/null; then
+        return 0
+    fi
+    echo "❌ AppArmor is not enabled. Enable AppArmor in your kernel." >&2
+    return 1
+}
+
+# Load an AppArmor profile file into the kernel.
+# Args:
+#   $1: profile_file - Path to the .profile file
+#   $2: label - Human-readable label for messages (optional)
+# Returns: 0 on success, 1 on failure
+load_apparmor_profile() {
+    local profile_file="$1"
+    local label="${2:-AppArmor profile}"
+
+    if [[ ! -f "$profile_file" ]]; then
+        echo "❌ ${label} file not found: $profile_file" >&2
+        return 1
+    fi
+
+    if ! apparmor_parser -r "$profile_file"; then
+        echo "❌ Failed to load ${label} from $profile_file" >&2
+        return 1
+    fi
+
+    local profile_name
+    profile_name=$(basename "$profile_file" .profile)
+    echo "  ✓ Loaded $profile_name"
+    return 0
+}
+
+# Install security profiles to system location and load into kernel.
+# This is the canonical function for both dev and prod installations.
+# Args:
+#   $1: source_dir - Directory containing channel-specific profiles
+#   $2: channel - Channel name (dev|nightly|prod)
+#   $3: manifest_name - Name for the SHA256 manifest file (optional)
+# Returns: 0 on success, 1 on failure
+install_security_profiles_to_system() {
+    local source_dir="$1"
+    local channel="$2"
+    local manifest_name="${3:-containai-profiles-${channel}.sha256}"
+    local system_dir="$CONTAINAI_SYSTEM_PROFILES_DIR"
+
+    if [[ -z "$source_dir" || -z "$channel" ]]; then
+        echo "❌ Source directory and channel are required" >&2
+        return 1
+    fi
+
+    if [[ ! -d "$source_dir" ]]; then
+        echo "❌ Source profile directory not found: $source_dir" >&2
+        return 1
+    fi
+
+    # Validate channel
+    case "$channel" in
+        dev|nightly|prod) ;;
+        *) echo "❌ Invalid channel: $channel" >&2; return 1 ;;
+    esac
+
+    # Check AppArmor prerequisites
+    require_apparmor_tools || return 1
+    require_apparmor_enabled || return 1
+
+    # Expected profile files (channel-specific)
+    local profile_files=(
+        "apparmor-containai-agent-${channel}.profile"
+        "apparmor-containai-proxy-${channel}.profile"
+        "apparmor-containai-log-forwarder-${channel}.profile"
+        "apparmor-containai-logcollector-${channel}.profile"
+        "seccomp-containai-agent-${channel}.json"
+        "seccomp-containai-proxy-${channel}.json"
+        "seccomp-containai-log-forwarder-${channel}.json"
+    )
+
+    # Verify all required profiles exist in source
+    local missing=()
+    for f in "${profile_files[@]}"; do
+        if [[ ! -f "$source_dir/$f" ]]; then
+            missing+=("$f")
+        fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "❌ Missing profile files in $source_dir:" >&2
+        printf '   - %s\n' "${missing[@]}" >&2
+        return 1
+    fi
+
+    echo "📦 Installing security profiles to $system_dir (channel: $channel)..."
+
+    # Create system directory with proper ownership
+    install -d -m 0755 "$system_dir"
+
+    # Copy all profile files
+    local manifest_entries=()
+    for f in "${profile_files[@]}"; do
+        install -m 0644 "$source_dir/$f" "$system_dir/$f"
+        manifest_entries+=("$f $(_sha256_file "$system_dir/$f")")
+    done
+
+    # Write manifest
+    printf '%s\n' "${manifest_entries[@]}" > "$system_dir/$manifest_name"
+    echo "✓ Security profiles installed to $system_dir"
+
+    # Load AppArmor profiles
+    echo "Loading AppArmor profiles (channel: $channel)..."
+    for f in "${profile_files[@]}"; do
+        if [[ "$f" == *.profile ]]; then
+            load_apparmor_profile "$system_dir/$f" "$f" || return 1
+        fi
+    done
+
+    return 0
+}
+
 apparmor_profiles_file() {
     echo "/sys/kernel/security/apparmor/profiles"
 }

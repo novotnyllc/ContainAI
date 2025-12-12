@@ -11,8 +11,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=host/utils/common-functions.sh
 source "$SCRIPT_DIR/common-functions.sh"
-# shellcheck source=host/utils/security-enforce.sh
-source "$SCRIPT_DIR/security-enforce.sh"
 
 INSTALLER_SELF_SHA256="__INSTALLER_SELF_SHA256__"
 SELF_HASH_REDACTION='INSTALLER_SELF_SHA256="__REDACTED__"'
@@ -75,7 +73,7 @@ fetch_trust_anchor() {
         die "Failed to download cosign root from $COSIGN_ROOT_URL"
     fi
     local cosign_hash
-    cosign_hash=$(sha256sum "$dest" | awk '{print $1}')
+    cosign_hash=$(_sha256_file "$dest")
     if [[ "$cosign_hash" != "$COSIGN_ROOT_EXPECTED_SHA256" ]]; then
         die "cosign-root.pem hash mismatch; expected $COSIGN_ROOT_EXPECTED_SHA256 got $cosign_hash"
     fi
@@ -207,7 +205,7 @@ verify_payload_hash() {
         expected=$(awk '/SHA256SUMS/ {print $1}' "$PAYLOAD_SHA_PATH" || true)
         [[ -n "$expected" ]] || die "Expected hash for SHA256SUMS not found in payload.sha256"
         local actual
-        actual=$(sha256sum "$SHA256SUMS_PATH" | awk '{print $1}')
+        actual=$(_sha256_file "$SHA256SUMS_PATH")
         if [[ "$actual" != "$expected" ]]; then
             die "Payload hash mismatch; expected $expected got $actual"
         fi
@@ -217,7 +215,7 @@ verify_payload_hash() {
     sbom_sum=$(awk '$NF=="./payload.sbom.json" || $NF=="payload.sbom.json" {print $1}' "$SHA256SUMS_PATH" || true)
     if [[ -n "$sbom_sum" ]]; then
         local sbom_actual
-        sbom_actual=$(sha256sum "$SBOM_PATH" | awk '{print $1}')
+        sbom_actual=$(_sha256_file "$SBOM_PATH")
         if [[ "$sbom_actual" != "$sbom_sum" ]]; then
             die "SBOM hash mismatch; expected $sbom_sum got $sbom_actual"
         fi
@@ -325,7 +323,7 @@ fetch_trust_anchor
 RELEASE_ROOT="$INSTALL_ROOT/releases/$VERSION"
 mkdir -p "$INSTALL_ROOT/releases"
 if [[ -n "$TRANSPORT_ASSET_PATH" && -f "$TRANSPORT_ASSET_PATH" ]]; then
-    transport_hash=$(sha256sum "$TRANSPORT_ASSET_PATH" | awk '{print $1}')
+    transport_hash=$(_sha256_file "$TRANSPORT_ASSET_PATH")
     verify_dsse_attestation "$transport_hash" "$TRANSPORT_ATTEST_PATH" "$TRUST_ANCHOR_PATH" "Transport" ""
 else
     if [[ "$CHANNEL" = "dev" ]]; then
@@ -335,7 +333,7 @@ else
     fi
 fi
 verify_payload_hash
-sbom_hash=$(sha256sum "$SBOM_PATH" | awk '{print $1}')
+sbom_hash=$(_sha256_file "$SBOM_PATH")
     verify_dsse_attestation "$sbom_hash" "$SBOM_ATTEST_PATH" "$TRUST_ANCHOR_PATH" "SBOM" "payload.sbom.json"
 
     echo "📦 Installing ContainAI $VERSION to $RELEASE_ROOT"
@@ -343,8 +341,10 @@ rm -rf "$RELEASE_ROOT"
 mkdir -p "$RELEASE_ROOT"
 rsync -a "$PAYLOAD_DIR"/ "$RELEASE_ROOT"/
 
-# Write profile manifest for runtime freshness checks
-enforce_security_profiles_strict "$RELEASE_ROOT" "$CHANNEL"
+# Install security profiles to system location (same as setup-local-dev.sh)
+if ! install_security_profiles_to_system "$RELEASE_ROOT/host/profiles" "$CHANNEL"; then
+    die "Failed to install security profiles"
+fi
 
 if ! "$SCRIPT_DIR/integrity-check.sh" --mode prod --root "$RELEASE_ROOT" --sums "$RELEASE_ROOT/SHA256SUMS"; then
     die "Integrity validation failed after extraction"

@@ -32,14 +32,14 @@ enforce_security_profiles_strict() {
     [[ -f "$seccomp_fwd" ]] || die "Seccomp log-forwarder profile missing at $seccomp_fwd"
     [[ -f "$apparmor_fwd" ]] || die "AppArmor log-forwarder profile missing at $apparmor_fwd"
 
-    # Write manifest for runtime freshness checks
+    # Write manifest for runtime freshness checks (uses _sha256_file from common-functions.sh)
     local seccomp_hash apparmor_hash seccomp_proxy_hash apparmor_proxy_hash seccomp_fwd_hash apparmor_fwd_hash
-    seccomp_hash=$(sha256sum "$seccomp_agent" | awk '{print $1}')
-    apparmor_hash=$(sha256sum "$apparmor_agent" | awk '{print $1}')
-    seccomp_proxy_hash=$(sha256sum "$seccomp_proxy" | awk '{print $1}')
-    apparmor_proxy_hash=$(sha256sum "$apparmor_proxy" | awk '{print $1}')
-    seccomp_fwd_hash=$(sha256sum "$seccomp_fwd" | awk '{print $1}')
-    apparmor_fwd_hash=$(sha256sum "$apparmor_fwd" | awk '{print $1}')
+    seccomp_hash=$(_sha256_file "$seccomp_agent")
+    apparmor_hash=$(_sha256_file "$apparmor_agent")
+    seccomp_proxy_hash=$(_sha256_file "$seccomp_proxy")
+    apparmor_proxy_hash=$(_sha256_file "$apparmor_proxy")
+    seccomp_fwd_hash=$(_sha256_file "$seccomp_fwd")
+    apparmor_fwd_hash=$(_sha256_file "$apparmor_fwd")
     cat > "$profile_dir/containai-profiles-${channel}.sha256" <<EOF
 seccomp-containai-agent-${channel}.json $seccomp_hash
 apparmor-containai-agent-${channel}.profile $apparmor_hash
@@ -49,30 +49,15 @@ seccomp-containai-log-forwarder-${channel}.json $seccomp_fwd_hash
 apparmor-containai-log-forwarder-${channel}.profile $apparmor_fwd_hash
 EOF
 
-    if ! command -v apparmor_parser >/dev/null 2>&1; then
-        die "AppArmor tools missing; install apparmor-utils and retry."
-    fi
-    local enabled_flag="/sys/module/apparmor/parameters/enabled"
-    if [[ ! -r "$enabled_flag" ]] || ! grep -qi '^y' "$enabled_flag" 2>/dev/null; then
-        die "AppArmor is disabled; enable AppArmor to continue."
-    fi
+    # Use shared prereq checks from common-functions.sh
+    require_apparmor_tools || die "AppArmor tools missing; install apparmor-utils and retry."
+    require_apparmor_enabled || die "AppArmor is disabled; enable AppArmor to continue."
     
-    # Load pre-generated profiles directly (no runtime rendering needed)
+    # Load pre-generated profiles using shared loader
     echo "Loading AppArmor profiles (channel: $channel)..."
-    if ! apparmor_parser -r "$apparmor_agent"; then
-        die "Failed to load AppArmor profile from $apparmor_agent"
-    fi
-    echo "  ✓ Loaded containai-agent-${channel}"
-    
-    if ! apparmor_parser -r "$apparmor_proxy"; then
-        die "Failed to load AppArmor profile from $apparmor_proxy"
-    fi
-    echo "  ✓ Loaded containai-proxy-${channel}"
-    
-    if ! apparmor_parser -r "$apparmor_fwd"; then
-        die "Failed to load AppArmor profile from $apparmor_fwd"
-    fi
-    echo "  ✓ Loaded containai-log-forwarder-${channel}"
+    load_apparmor_profile "$apparmor_agent" "Agent AppArmor profile" || die "Failed to load agent profile"
+    load_apparmor_profile "$apparmor_proxy" "Proxy AppArmor profile" || die "Failed to load proxy profile"
+    load_apparmor_profile "$apparmor_fwd" "Log-forwarder AppArmor profile" || die "Failed to load log-forwarder profile"
 }
 
 if [[ "${1:-}" == "--verify" ]]; then

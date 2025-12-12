@@ -35,38 +35,8 @@ IMAGE_DIGEST_PROXY=sha256:dummy
 IMAGE_DIGEST_LOG_FORWARDER=sha256:dummy
 EOF
 
-# Overwrite security-enforce.sh in the copied utils to avoid AppArmor loading (test-only).
-cat > "$UTILS_DIR/security-enforce.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-# shellcheck source=host/utils/common-functions.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common-functions.sh"
-
-enforce_security_profiles_strict() {
-    local install_root="$1"
-    local channel="${2:-}"
-    local profile_dir="$install_root/host/profiles"
-    # Channel is required
-    [[ -n "$channel" ]] || die "Channel is required"
-    
-    # Seccomp profiles (channelized: seccomp-containai-agent-dev.json)
-    local seccomp_agent="$profile_dir/seccomp-containai-agent-${channel}.json"
-    local seccomp_proxy="$profile_dir/seccomp-containai-proxy-${channel}.json"
-    local seccomp_fwd="$profile_dir/seccomp-containai-log-forwarder-${channel}.json"
-    [[ -f "$seccomp_agent" && -f "$seccomp_proxy" && -f "$seccomp_fwd" ]] || die "Seccomp profiles missing in $profile_dir"
-    
-    # AppArmor profiles (channelized: apparmor-containai-agent-dev.profile)
-    [[ -f "$profile_dir/apparmor-containai-agent-${channel}.profile" ]] || die "AppArmor agent profile missing (expected apparmor-containai-agent-${channel}.profile)"
-    [[ -f "$profile_dir/apparmor-containai-proxy-${channel}.profile" ]] || die "AppArmor proxy profile missing (expected apparmor-containai-proxy-${channel}.profile)"
-    [[ -f "$profile_dir/apparmor-containai-log-forwarder-${channel}.profile" ]] || die "AppArmor log-forwarder profile missing (expected apparmor-containai-log-forwarder-${channel}.profile)"
-    # Skip apparmor_parser invocation in smoke test to avoid sudo/kernel requirements.
-}
-
-if [[ "${1:-}" == "--verify" ]]; then
-    enforce_security_profiles_strict "${2:-}" "${3:-}"
-fi
-EOF
-chmod +x "$UTILS_DIR/security-enforce.sh"
+# Tests MUST run with proper security enforcement - no stubbing AppArmor.
+# If this test fails due to AppArmor, run with sudo or fix the test environment.
 
 # Allow non-root installs in tests by removing the root guard in the copied installer.
 perl -0pi -e 's/^if \[\[ \$\(id -u\) -ne 0 \]\]; then\n    die "System installs must run as root"\nfi\n\n//' "$UTILS_DIR/install-release.sh"
@@ -74,7 +44,7 @@ perl -0pi -e 's/^if \[\[ \$\(id -u\) -ne 0 \]\]; then\n    die "System installs 
 perl -0777 -pi -e 's/install_parent="\$\(cd "\$\(dirname "\$INSTALL_ROOT"\)" && pwd\)"\n.*?\nEXTRACT_DIR="\$\(mktemp -d\)"/EXTRACT_DIR="$(mktemp -d)"/s' "$UTILS_DIR/install-release.sh"
 # Point cosign root to the local copy for offline tests and relax installer integrity (tests only).
 COSIGN_LOCAL_URL="file://$UTILS_DIR/cosign-root.pem"
-COSIGN_LOCAL_SHA=$(sha256sum "$UTILS_DIR/cosign-root.pem" | awk '{print $1}')
+COSIGN_LOCAL_SHA=$(_sha256_file "$UTILS_DIR/cosign-root.pem")
 perl -0777 -pi -e "s#^COSIGN_ROOT_URL=.*#COSIGN_ROOT_URL=\"$COSIGN_LOCAL_URL\"#; s/^COSIGN_ROOT_EXPECTED_SHA256=.*/COSIGN_ROOT_EXPECTED_SHA256=\"$COSIGN_LOCAL_SHA\"/; s/^INSTALLER_SELF_SHA256=.*/INSTALLER_SELF_SHA256=\"RELAXED\"/; s/verify_self_integrity\\(\\)\\s*{.*?}\\n/verify_self_integrity(){ :; }\\n/s; s/fetch_trust_anchor\\(\\)\\s*{.*?}\\n/fetch_trust_anchor(){ TRUST_ANCHOR_PATH=\"$UTILS_DIR/cosign-root.pem\"; }\\n/s" "$UTILS_DIR/install-release.sh"
 perl -0777 -pi -e 's/Function\s+Assert-SelfIntegrity\s*{.*?}\s*/Function Assert-SelfIntegrity { return }\n/is; s/\$InstallerSelfSha256\s*=\s*\"[^\"]*\"/\$InstallerSelfSha256 = "RELAXED"/' "$UTILS_DIR/install-release.ps1"
 

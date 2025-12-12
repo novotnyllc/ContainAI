@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=host/utils/common-functions.sh
+source "$PROJECT_ROOT/host/utils/common-functions.sh"
 ARTIFACTS_DIR="$PROJECT_ROOT/artifacts"
 
 VERSION=""
@@ -115,7 +117,7 @@ template_installers() {
     local repo_slug="${REPO_OVERRIDE:-ContainAI/ContainAI}"
     local cosign_url="https://raw.githubusercontent.com/${repo_slug}/${git_commit}/host/utils/cosign-root.pem"
     local cosign_hash
-    cosign_hash=$(sha256sum "$cosign_root" | awk '{print $1}')
+    cosign_hash=$(_sha256_file "$cosign_root")
     perl -0777 -pi -e "s/__COSIGN_ROOT_SHA256__/$cosign_hash/" "$shell_installer"
     # Check that the variable assignment was replaced (not the literal comparison in runtime check)
     if grep -qE '^COSIGN_ROOT_EXPECTED_SHA256="__COSIGN_ROOT_SHA256__"' "$shell_installer"; then

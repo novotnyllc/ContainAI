@@ -66,11 +66,17 @@ fi
 
 mkdir -p "$DEST_DIR"
 
+# Source common functions for DRY
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common-functions.sh
+source "$SCRIPT_DIR/common-functions.sh"
+
 # Profile mappings: base_name -> source_filename
 declare -A APPARMOR_PROFILES=(
     ["containai-agent"]="apparmor-containai-agent.profile"
     ["containai-proxy"]="apparmor-containai-proxy.profile"
     ["containai-log-forwarder"]="apparmor-containai-log-forwarder.profile"
+    ["containai-logcollector"]="apparmor-containai-logcollector.profile"
 )
 
 declare -A SECCOMP_PROFILES=(
@@ -78,18 +84,6 @@ declare -A SECCOMP_PROFILES=(
     ["containai-proxy"]="seccomp-containai-proxy.json"
     ["containai-log-forwarder"]="seccomp-containai-log-forwarder.json"
 )
-
-# SHA256 helper
-file_sha256() {
-    local file="$1"
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file" | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$file" | awk '{print $1}'
-    else
-        python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$file"
-    fi
-}
 
 # Generate AppArmor profile with channel-specific name
 generate_apparmor_profile() {
@@ -148,7 +142,7 @@ for base_name in "${!APPARMOR_PROFILES[@]}"; do
     fi
 
     generate_apparmor_profile "$base_name" "$source_file" "$dest_file"
-    MANIFEST_ENTRIES+=("$dest_filename $(file_sha256 "$dest_file")")
+    MANIFEST_ENTRIES+=("$dest_filename $(_sha256_file "$dest_file")")
 done
 
 # Copy seccomp profiles with channel suffix for consistency
@@ -168,7 +162,7 @@ for base_name in "${!SECCOMP_PROFILES[@]}"; do
 
     cp "$source_file" "$dest_file"
     echo "  ✓ Copied $dest_filename"
-    MANIFEST_ENTRIES+=("$dest_filename $(file_sha256 "$dest_file")")
+    MANIFEST_ENTRIES+=("$dest_filename $(_sha256_file "$dest_file")")
 done
 
 # Write manifest if requested

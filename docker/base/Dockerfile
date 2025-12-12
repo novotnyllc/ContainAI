@@ -57,6 +57,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libseccomp-dev \
     # Capability management (for dropping caps after privileged setup)
     libcap2-bin \
+    # AppArmor tooling (aa-exec used by entrypoint for LogCollector confinement)
+    apparmor-utils \
     # .NET runtime dependencies
     libc6 \
     libgcc-s1 \
@@ -152,42 +154,29 @@ RUN set -eux; \
     rm -rf "$tmp_dir"
 
 # Copy .NET preview installer script
-COPY --chown=root:root docker/runtime/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
+COPY --chown=root:root --chmod=755 docker/runtime/install-dotnet-preview.sh /usr/local/bin/install-dotnet-preview.sh
 
 # Session and runtime helpers - copy all scripts in one layer
-COPY --chown=root:root docker/runtime/agent-session /usr/local/bin/agent-session
-COPY --chown=root:root docker/runtime/agent-session-runner /usr/local/bin/agent-session-runner
-COPY --chown=root:root docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY --chown=root:root docker/runtime/git-credential-host-helper.sh /usr/local/bin/git-credential-host-helper.sh
-COPY --chown=root:root host/utils/git-credential-proxy-server.sh /usr/local/bin/git-credential-proxy-server.sh
-COPY --chown=root:root docker/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
-COPY --chown=root:root host/utils/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
-COPY --chown=root:root docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
+# Executable scripts get --chmod=755, library modules stay 644
+COPY --chown=root:root --chmod=755 docker/runtime/agent-session /usr/local/bin/agent-session
+COPY --chown=root:root --chmod=755 docker/runtime/agent-session-runner /usr/local/bin/agent-session-runner
+COPY --chown=root:root --chmod=755 docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=root:root --chmod=755 docker/runtime/git-credential-host-helper.sh /usr/local/bin/git-credential-host-helper.sh
+COPY --chown=root:root --chmod=755 host/utils/git-credential-proxy-server.sh /usr/local/bin/git-credential-proxy-server.sh
+COPY --chown=root:root --chmod=755 docker/runtime/gpg-host-proxy.sh /usr/local/bin/gpg-host-proxy.sh
+COPY --chown=root:root --chmod=755 host/utils/gpg-proxy-server.sh /usr/local/bin/gpg-proxy-server.sh
+COPY --chown=root:root --chmod=755 docker/runtime/setup-mcp-configs.sh /usr/local/bin/setup-mcp-configs.sh
 COPY --chown=root:root docker/runtime/_token_utils.py /usr/local/bin/_token_utils.py
 COPY --chown=root:root docker/runtime/_token_utils.py /usr/local/libexec/_token_utils.py
 COPY --chown=root:root docker/runtime/mcp_wrapper_core.py /usr/local/libexec/mcp-wrapper-core.py
-COPY --chown=root:root docker/runtime/mcp_http_helper.py /usr/local/bin/mcp-http-helper.py
-COPY --chown=root:root docker/runtime/capability_unseal.py /usr/local/bin/capability-unseal
+COPY --chown=root:root --chmod=755 docker/runtime/mcp_http_helper.py /usr/local/bin/mcp-http-helper.py
+COPY --chown=root:root --chmod=755 docker/runtime/capability_unseal.py /usr/local/bin/capability-unseal
 COPY --chown=root:root host/utils/_mcp_common.py /usr/local/bin/_mcp_common.py
-COPY --chown=root:root host/utils/convert_toml_to_mcp.py /usr/local/bin/convert-toml-to-mcp.py
-COPY --chown=root:root host/utils/package_agent_data.py /usr/local/bin/package-agent-data.py
+COPY --chown=root:root --chmod=755 host/utils/convert_toml_to_mcp.py /usr/local/bin/convert-toml-to-mcp.py
+COPY --chown=root:root --chmod=755 host/utils/package_agent_data.py /usr/local/bin/package-agent-data.py
 
-# Set permissions for all scripts in one layer
-RUN install -d /usr/local/libexec && \
-    chmod +x \
-    /usr/local/bin/install-dotnet-preview.sh \
-    /usr/local/bin/agent-session \
-    /usr/local/bin/agent-session-runner \
-    /usr/local/bin/entrypoint.sh \
-    /usr/local/bin/git-credential-host-helper.sh \
-    /usr/local/bin/git-credential-proxy-server.sh \
-    /usr/local/bin/gpg-host-proxy.sh \
-    /usr/local/bin/gpg-proxy-server.sh \
-    /usr/local/bin/setup-mcp-configs.sh \
-    /usr/local/bin/mcp-http-helper.py \
-    /usr/local/bin/capability-unseal \
-    /usr/local/bin/convert-toml-to-mcp.py \
-    /usr/local/bin/package-agent-data.py
+# Create libexec directory for library modules
+RUN install -d /usr/local/libexec
 
 # Install GitHub CLI, npm global packages, and Playwright in one layer
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -236,7 +225,14 @@ RUN set -eux; \
     if ! id -u agentcli >/dev/null 2>&1; then \
         useradd -m -s /usr/sbin/nologin agentcli; \
     fi; \
+    if ! id -u logcollector >/dev/null 2>&1; then \
+        useradd -r -s /usr/sbin/nologin -u 1001 logcollector; \
+    fi; \
+    if ! getent group auditwriters >/dev/null 2>&1; then \
+        groupadd -r auditwriters; \
+    fi; \
     usermod -a -G agentcli agentuser >/dev/null 2>&1 || true; \
+    usermod -a -G auditwriters agentuser >/dev/null 2>&1 || true; \
     mkdir -p \
         /workspace \
         /home/agentuser/.config \

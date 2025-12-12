@@ -19,8 +19,7 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-codex-auth.sh && \
 RUN mkdir -p /home/agentuser/.config/codex && \
     chown -R agentuser:agentuser /home/agentuser/.config/codex
 COPY --chown=agentuser:agentuser agent-configs/codex/config.toml /home/agentuser/.config/codex/config.toml
-COPY docker/agents/codex/prepare-codex-secrets.sh /usr/local/bin/prepare-codex-secrets.sh
-RUN chmod +x /usr/local/bin/prepare-codex-secrets.sh
+COPY --chown=agentuser:agentuser --chmod=755 docker/agents/codex/prepare-codex-secrets.sh /usr/local/bin/prepare-codex-secrets.sh
 
 WORKDIR /workspace
 

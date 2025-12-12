@@ -19,8 +19,7 @@ RUN echo '#!/usr/bin/env bash' > /usr/local/bin/validate-claude-auth.sh && \
 RUN mkdir -p /home/agentuser/.config/containai/claude && \
 	chown -R agentuser:agentuser /home/agentuser/.config/containai
 COPY --chown=agentuser:agentuser agent-configs/claude/.claude.json /home/agentuser/.config/containai/claude/.claude.json
-COPY docker/agents/claude/prepare-claude-secrets.sh /usr/local/bin/prepare-claude-secrets.sh
-RUN chmod +x /usr/local/bin/prepare-claude-secrets.sh
+COPY --chown=agentuser:agentuser --chmod=755 docker/agents/claude/prepare-claude-secrets.sh /usr/local/bin/prepare-claude-secrets.sh
 
 WORKDIR /workspace
 

@@ -1,55 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Capture caller-provided CONTAINAI_* values, then drop them from the environment
-# to avoid leaking user-supplied values into child processes. We later export
-# sanitized values explicitly when needed.
-CA_USER="${CONTAINAI_USER:-agentuser}"
-CA_CLI_USER="${CONTAINAI_CLI_USER:-agentcli}"
-CA_BASEFS="${CONTAINAI_BASEFS:-/opt/containai/basefs}"
-CA_TOOLCACHE="${CONTAINAI_TOOLCACHE:-/toolcache}"
-CA_PTRACE_SCOPE="${CONTAINAI_PTRACE_SCOPE:-3}"
-CA_CAP_TMPFS_SIZE="${CONTAINAI_CAP_TMPFS_SIZE:-16m}"
-CA_DATA_TMPFS_SIZE="${CONTAINAI_DATA_TMPFS_SIZE:-64m}"
-CA_SECRET_TMPFS_SIZE="${CONTAINAI_SECRET_TMPFS_SIZE:-32m}"
-CA_DISABLE_PTRACE_SCOPE="${CONTAINAI_DISABLE_PTRACE_SCOPE:-0}"
-CA_DISABLE_PROC_HARDENING="${CONTAINAI_DISABLE_PROC_HARDENING:-0}"
-CA_PROC_GROUP="${CONTAINAI_PROC_GROUP:-agentproc}"
-CA_RUNNER_POLICY="${CONTAINAI_RUNNER_POLICY:-observe}"
-CA_AGENT_DATA_STAGED="${CONTAINAI_AGENT_DATA_STAGED:-0}"
-CA_RUNNER_STARTED="${CONTAINAI_RUNNER_STARTED:-0}"
-CA_AGENT_DATA_HOME="${CONTAINAI_AGENT_DATA_HOME:-}"
-CA_AGENT_HOME="${CONTAINAI_AGENT_HOME:-}"
-CA_LOG_DIR="${CONTAINAI_LOG_DIR:-}"
+# Fixed system constants - this is a closed system with predetermined users/paths
+# These are NOT configurable - they match the Dockerfile user creation
+readonly AGENT_USERNAME="agentuser"
+readonly AGENT_CLI_USERNAME="agentcli"
+readonly LOGCOLLECTOR_USERNAME="logcollector"
+readonly LOGCOLLECTOR_UID=1001
+readonly LOGCOLLECTOR_GID=1001
+readonly BASEFS_DIR="/opt/containai/basefs"
+readonly TOOLCACHE_DIR="/toolcache"
+readonly PROC_GROUP="agentproc"
 
-clear_containai_env() {
-    for name in $(env | sed -n 's/^\(CONTAINAI_[^=]*\)=.*/\1/p'); do
-        unset "$name"
-    done
-}
-clear_containai_env
+# Derive IDs from fixed usernames
+AGENT_UID=$(id -u "$AGENT_USERNAME")
+AGENT_GID=$(id -g "$AGENT_USERNAME")
+AGENT_CLI_UID=$(id -u "$AGENT_CLI_USERNAME")
+AGENT_CLI_GID=$(id -g "$AGENT_CLI_USERNAME")
 
-AGENT_USERNAME="$CA_USER"
-AGENT_UID=$(id -u "$AGENT_USERNAME" 2>/dev/null || echo 1000)
-AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo 1000)
-AGENT_CLI_USERNAME="$CA_CLI_USER"
-AGENT_CLI_UID=$(id -u "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_UID")
-AGENT_CLI_GID=$(id -g "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_GID")
-BASEFS_DIR="$CA_BASEFS"
-TOOLCACHE_DIR="$CA_TOOLCACHE"
-PTRACE_SCOPE_VALUE="$CA_PTRACE_SCOPE"
-CAP_TMPFS_SIZE="$CA_CAP_TMPFS_SIZE"
-DATA_TMPFS_SIZE="$CA_DATA_TMPFS_SIZE"
-SECRETS_TMPFS_SIZE="$CA_SECRET_TMPFS_SIZE"
-DISABLE_PTRACE_SCOPE="$CA_DISABLE_PTRACE_SCOPE"
-DISABLE_PROC_HARDENING="$CA_DISABLE_PROC_HARDENING"
-PROC_GROUP="$CA_PROC_GROUP"
-RUNNER_POLICY="$CA_RUNNER_POLICY"
-AGENT_DATA_STAGED="$CA_AGENT_DATA_STAGED"
-RUNNER_STARTED="$CA_RUNNER_STARTED"
-AGENT_DATA_HOME="$CA_AGENT_DATA_HOME"
-AGENT_HOME="$CA_AGENT_HOME"
-LOG_DIR="$CA_LOG_DIR"
+# AppArmor profile derived from channel at runtime
+LOGCOLLECTOR_APPARMOR="containai-logcollector-${CONTAINAI_PROFILE:-dev}"
+
+# Runtime state from environment (these are session-specific, not system config)
+LOG_DIR="${CONTAINAI_LOG_DIR:-}"
+RUNNER_POLICY="${CONTAINAI_RUNNER_POLICY:-observe}"
+AGENT_DATA_STAGED="${CONTAINAI_AGENT_DATA_STAGED:-0}"
+RUNNER_STARTED="${CONTAINAI_RUNNER_STARTED:-0}"
+AGENT_DATA_HOME="${CONTAINAI_AGENT_DATA_HOME:-}"
+AGENT_HOME="${CONTAINAI_AGENT_HOME:-}"
 
 STUB_SHIM_ROOT="/home/${AGENT_USERNAME}/.local/bin"
 declare -a MCP_HELPER_PIDS=()
@@ -74,57 +52,57 @@ wait_for_host_payload() {
 prepare_agent_secrets_path() {
     local secrets_dir="/run/agent-secrets"
     mkdir -p "$secrets_dir"
-    chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$secrets_dir" 2>/dev/null || true
-    chmod 0770 "$secrets_dir" 2>/dev/null || true
+    chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$secrets_dir"
+    chmod 0770 "$secrets_dir"
 }
 
 prepare_agent_task_runner_paths() {
     local log_root="/run/agent-task-runner"
     mkdir -p "$log_root"
-    chown "$AGENT_UID:$AGENT_GID" "$log_root" 2>/dev/null || true
-    chmod 0770 "$log_root" 2>/dev/null || true
+    chown "$AGENT_UID:$AGENT_GID" "$log_root"
+    chmod 0770 "$log_root"
 
     local audit_dir="/run/containai"
     mkdir -p "$audit_dir"
-    chown "$AGENT_UID:$AGENT_GID" "$audit_dir" 2>/dev/null || true
-    chmod 0755 "$audit_dir" 2>/dev/null || true
+    chown "$AGENT_UID:$AGENT_GID" "$audit_dir"
+    chmod 0755 "$audit_dir"
 }
 
 prepare_mcp_helpers_paths() {
     local helpers_dir="/run/mcp-helpers"
     mkdir -p "$helpers_dir"
-    chown "$AGENT_UID:$AGENT_GID" "$helpers_dir" 2>/dev/null || true
-    chmod 0755 "$helpers_dir" 2>/dev/null || true
+    chown "$AGENT_UID:$AGENT_GID" "$helpers_dir"
+    chmod 0755 "$helpers_dir"
 }
 
 prepare_mcp_wrappers_paths() {
     local wrappers_dir="/run/mcp-wrappers"
     mkdir -p "$wrappers_dir"
-    chown "$AGENT_UID:$AGENT_GID" "$wrappers_dir" 2>/dev/null || true
-    chmod 1777 "$wrappers_dir" 2>/dev/null || true
+    chown "$AGENT_UID:$AGENT_GID" "$wrappers_dir"
+    chmod 1777 "$wrappers_dir"
 }
 
 prepare_agent_data_export_path() {
     local export_dir="/run/agent-data-export"
     mkdir -p "$export_dir"
-    chown "$AGENT_UID:$AGENT_GID" "$export_dir" 2>/dev/null || true
-    chmod 0755 "$export_dir" 2>/dev/null || true
+    chown "$AGENT_UID:$AGENT_GID" "$export_dir"
+    chmod 0755 "$export_dir"
 }
 
 prepare_agent_data_path() {
     local data_dir="/run/agent-data"
     mkdir -p "$data_dir"
-    chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$data_dir" 2>/dev/null || true
-    chmod 0770 "$data_dir" 2>/dev/null || true
+    chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$data_dir"
+    chmod 0770 "$data_dir"
 }
 
 ensure_dir_owned() {
     local path="$1"
     local mode="${2:-}"
     mkdir -p "$path"
-    chown "$AGENT_UID:$AGENT_GID" "$path" 2>/dev/null || true
+    chown "$AGENT_UID:$AGENT_GID" "$path"
     if [ -n "$mode" ]; then
-        chmod "$mode" "$path" 2>/dev/null || true
+        chmod "$mode" "$path"
     fi
 }
 
@@ -134,9 +112,9 @@ seed_tmpfs_from_base() {
     local mode="${3:-755}"
     mkdir -p "$target"
     if [ -d "$base" ] && [ -z "$(ls -A "$target" 2>/dev/null)" ]; then
-        cp -a "$base"/. "$target"/ 2>/dev/null || true
+        cp -a "$base"/. "$target"/
     fi
-    chmod "$mode" "$target" 2>/dev/null || true
+    chmod "$mode" "$target"
 }
 
 install_host_session_configs() {
@@ -157,8 +135,8 @@ install_host_session_configs() {
         if [ -f "$src" ]; then
             ensure_dir_owned "$dest_dir" 0700
             cp "$src" "$dest_dir/config.json"
-            chown "$AGENT_UID:$AGENT_GID" "$dest_dir/config.json" 2>/dev/null || true
-            chmod 0600 "$dest_dir/config.json" 2>/dev/null || true
+            chown "$AGENT_UID:$AGENT_GID" "$dest_dir/config.json"
+            chmod 0600 "$dest_dir/config.json"
             installed=0
         fi
     done
@@ -167,18 +145,18 @@ install_host_session_configs() {
         local manifest_dest="/home/${AGENT_USERNAME}/.config/containai/session-manifest.json"
         ensure_dir_owned "$(dirname "$manifest_dest")" 0700
         cp "$manifest" "$manifest_dest"
-        chown "$AGENT_UID:$AGENT_GID" "$manifest_dest" 2>/dev/null || true
-        chmod 0600 "$manifest_dest" 2>/dev/null || true
+        chown "$AGENT_UID:$AGENT_GID" "$manifest_dest"
+        chmod 0600 "$manifest_dest"
     fi
 
     # Install proxy CA if provided
     if [ -f "$trust_bundle_src" ]; then
         echo "🔐 Installing proxy MITM CA into trust store"
         cp "$trust_bundle_src" "$trust_bundle_dest"
-        chown root:root "$trust_bundle_dest" 2>/dev/null || true
-        chmod 644 "$trust_bundle_dest" 2>/dev/null || true
+        chown root:root "$trust_bundle_dest"
+        chmod 644 "$trust_bundle_dest"
         if command -v update-ca-certificates >/dev/null 2>&1; then
-            update-ca-certificates >/dev/null 2>&1 || true
+            update-ca-certificates >/dev/null 2>&1
         fi
         
         # Universal CA certificate environment variables
@@ -218,10 +196,11 @@ install_host_capabilities() {
         return 1
     fi
     ensure_dir_owned "$target" 0700
-    cp -a "$root/." "$target/" 2>/dev/null || true
-    chown -R "$AGENT_UID:$AGENT_GID" "$target" 2>/dev/null || true
-    find "$target" -type d -exec chmod 0700 {} + 2>/dev/null || true
-    find "$target" -type f -exec chmod 0600 {} + 2>/dev/null || true
+    # Copy capabilities from host - fail if source has issues
+    cp -a "$root/." "$target/"
+    chown -R "$AGENT_UID:$AGENT_GID" "$target"
+    find "$target" -type d -exec chmod 0700 {} +
+    find "$target" -type f -exec chmod 0600 {} +
     return 0
 }
 
@@ -235,8 +214,8 @@ ensure_wrapper_binaries() {
         [ -z "$name" ] && continue
         local dest="${STUB_SHIM_ROOT}/mcp-wrapper-${name}"
         if [ ! -e "$dest" ]; then
-            ln -s "$runner" "$dest" 2>/dev/null || true
-            chown -h "$AGENT_UID:$AGENT_GID" "$dest" 2>/dev/null || true
+            ln -s "$runner" "$dest"
+            chown -h "$AGENT_UID:$AGENT_GID" "$dest"
         fi
     done < "$servers_file"
 }
@@ -277,8 +256,8 @@ PY
         [ -z "$name" ] && continue
         local dest="${STUB_SHIM_ROOT}/mcp-wrapper-${name}"
         if [ ! -e "$dest" ]; then
-            ln -s "$runner" "$dest" 2>/dev/null || true
-            chown -h "$AGENT_UID:$AGENT_GID" "$dest" 2>/dev/null || true
+            ln -s "$runner" "$dest"
+            chown -h "$AGENT_UID:$AGENT_GID" "$dest"
         fi
     done
 }
@@ -373,7 +352,7 @@ start_mcp_helpers() {
             curl --silent --max-time 2 "http://${helper_listen}/health" >/dev/null 2>&1 || \
                 echo "⚠️  Helper ${helper_name} (UID ${helper_uid}) failed health check on ${helper_listen}" >&2
         fi
-    done < <(parse_helper_definitions "$helper_file" || true)
+    done < <(parse_helper_definitions "$helper_file")
 }
 
 link_agent_data_target() {
@@ -391,7 +370,7 @@ link_agent_data_target() {
     mkdir -p "$(dirname "$dest_path")"
     rm -rf -- "$dest_path"
     ln -sfn "$source_path" "$dest_path"
-    chown -h "$AGENT_UID:$AGENT_GID" "$dest_path" 2>/dev/null || true
+    chown -h "$AGENT_UID:$AGENT_GID" "$dest_path"
 }
 
 link_agent_data_roots() {
@@ -433,7 +412,7 @@ install_host_agent_data() {
         local data_home="${dest_dir}/home"
 
         mkdir -p -- "$data_home"
-        chmod 0770 "$dest_dir" "$data_home" 2>/dev/null || true
+        chmod 0770 "$dest_dir" "$data_home"
 
         if [ -f "$tar_path" ] && [ -s "$tar_path" ]; then
             if [ ! -f "$manifest_path" ] || [ ! -s "$manifest_path" ]; then
@@ -460,9 +439,9 @@ install_host_agent_data() {
                 --require-hmac \
                 --hmac-key-file "$key_path"; then
                 imported=0
-                chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$data_home" 2>/dev/null || true
-                find "$data_home" -type d -exec chmod 0770 {} + 2>/dev/null || true
-                find "$data_home" -type f -exec chmod 0660 {} + 2>/dev/null || true
+                chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$data_home"
+                find "$data_home" -type d -exec chmod 0770 {} +
+                find "$data_home" -type f -exec chmod 0660 {} +
                 echo "📦 Imported ${agent} data payload"
             else
                 echo "❌ HMAC validation failed for ${agent} data payload" >&2
@@ -473,16 +452,16 @@ install_host_agent_data() {
 
         if [ -f "$manifest_path" ]; then
             cp "$manifest_path" "$dest_dir/import-manifest.json"
-            chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir/import-manifest.json" 2>/dev/null || true
-            chmod 0660 "$dest_dir/import-manifest.json" 2>/dev/null || true
+            chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir/import-manifest.json"
+            chmod 0660 "$dest_dir/import-manifest.json"
         fi
         if [ -f "$key_path" ]; then
             cp "$key_path" "$dest_dir/data-hmac.key"
-            chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir/data-hmac.key" 2>/dev/null || true
-            chmod 0660 "$dest_dir/data-hmac.key" 2>/dev/null || true
+            chown "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir/data-hmac.key"
+            chmod 0660 "$dest_dir/data-hmac.key"
         fi
 
-        chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir" 2>/dev/null || true
+        chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "$dest_dir"
         link_agent_data_roots "$agent" "$data_home"
         if [ "$agent" = "${AGENT_NAME:-}" ]; then
             AGENT_DATA_HOME="$data_home"
@@ -501,7 +480,7 @@ ensure_agent_data_fallback() {
     local fallback_dir="/run/agent-data/${agent}/${session_id}/home"
     mkdir -p "$fallback_dir"
     if [ "$(id -u)" -eq 0 ]; then
-        chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "/run/agent-data/${agent}" 2>/dev/null || true
+        chown -R "$AGENT_CLI_UID:$AGENT_CLI_GID" "/run/agent-data/${agent}"
     fi
     link_agent_data_roots "$agent" "$fallback_dir"
     if [ "$agent" = "${AGENT_NAME:-}" ]; then
@@ -516,33 +495,86 @@ start_agent_task_runnerd() {
     local socket_path="${AGENT_TASK_RUNNER_SOCKET:-/run/agent-task-runner.sock}"
     local log_dir="/run/agent-task-runner"
     mkdir -p "$log_dir"
+    # The task runner runs as the unprivileged agent user.
+    # The log collector runs as a SEPARATE dedicated user in an isolated user namespace.
+    if [ "$(id -u)" -eq 0 ]; then
+        chown "$AGENT_UID:$AGENT_GID" "$log_dir"
+        chmod 0755 "$log_dir"
+    fi
     if [ -S "$socket_path" ]; then
         rm -f "$socket_path"
     fi
     
     # Start LogCollector (Mandatory)
+    # Security model:
+    #   - Runs as dedicated logcollector user (UID 1001), NOT agentuser
+    #   - Isolated in separate user namespace via unshare
+    #   - AppArmor profile restricts file/network access (REQUIRED, no fallback)
+    #   - Container-level seccomp profile applies to all processes including this one
+    #   - Log directory owned by logcollector, inaccessible to agentuser
+    #   - Audit socket: logcollector owns, agentuser can only write (via auditwriters group)
+    #
+    # Fail-closed requirements from launcher:
+    #   1. Log directory mounted from host: CONTAINAI_LOG_DIR
+    #   2. Channel (CONTAINAI_PROFILE) for deriving AppArmor profile name
     local audit_socket="/run/containai/audit.sock"
-    # Logs are written to the workspace by default to ensure they persist to the host
-    # without requiring additional volume mounts.
-    local log_destination="${LOG_DIR:-/workspace/.containai/logs}"
+    local log_destination="${LOG_DIR:-}"
     
+    # Validate log directory - REQUIRED
+    if [ -z "$log_destination" ]; then
+        echo "❌ FATAL: CONTAINAI_LOG_DIR was not provided by the launcher." >&2
+        echo "   Expected: -e CONTAINAI_LOG_DIR=/var/log/containai and a writable mount" >&2
+        exit 1
+    fi
+    case "$log_destination" in
+        /workspace/*)
+            echo "❌ FATAL: CONTAINAI_LOG_DIR points into /workspace ($log_destination)." >&2
+            echo "   Refusing to write audit logs into the workspace." >&2
+            exit 1
+            ;;
+    esac
+
     mkdir -p "$(dirname "$audit_socket")"
     mkdir -p "$log_destination"
-    chown "$AGENT_UID:$AGENT_GID" "$log_destination" 2>/dev/null || true
     
-    # Run log collector as agent user (even if called from root)
-    # Explicitly unset LD_PRELOAD to avoid the collector auditing itself
-    if [ "$(id -u)" -eq 0 ]; then
-        gosu "$AGENT_USERNAME" env -u LD_PRELOAD /usr/local/bin/containai-log-collector \
-            --socket-path "$audit_socket" \
-            --log-dir "$log_destination" \
-            > "$log_dir/collector.log" 2>&1 &
-    else
-        env -u LD_PRELOAD /usr/local/bin/containai-log-collector \
-            --socket-path "$audit_socket" \
-            --log-dir "$log_destination" \
-            > "$log_dir/collector.log" 2>&1 &
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "❌ FATAL: LogCollector must be started as root to apply security profiles" >&2
+        exit 1
     fi
+    
+    # Log directory owned by logcollector, NOT agentuser
+    # This prevents untrusted code from tampering with audit logs
+    chown "$LOGCOLLECTOR_UID:$LOGCOLLECTOR_GID" "$log_destination"
+    chmod 0700 "$log_destination"
+    
+    # Verify logcollector can write
+    gosu "$LOGCOLLECTOR_USERNAME" sh -c "touch '$log_destination/.containai-write-test' && rm -f '$log_destination/.containai-write-test'" \
+        || { echo "❌ FATAL: Log directory not writable by ${LOGCOLLECTOR_USERNAME}: $log_destination" >&2; exit 1; }
+
+    # Audit socket directory - logcollector owns it, agentuser can write via auditwriters group
+    chown "$LOGCOLLECTOR_UID:auditwriters" "$(dirname "$audit_socket")"
+    chmod 0750 "$(dirname "$audit_socket")"
+
+    if ! command -v aa-exec >/dev/null 2>&1; then
+        echo "❌ FATAL: aa-exec is required to apply the LogCollector AppArmor profile, but was not found." >&2
+        echo "   Ensure the image installs apparmor-utils (see docker/base/Dockerfile)." >&2
+        exit 1
+    fi
+
+    # Start LogCollector in isolated user namespace with AppArmor enforcement
+    # - aa-exec: applies AppArmor profile (mandatory)
+    # - unshare --user: creates isolated user namespace (agentuser cannot see/signal this process)
+    # - setpriv --no-new-privs: prevents privilege escalation
+    # - env -u LD_PRELOAD: prevents collector from auditing itself
+    aa-exec -p "$LOGCOLLECTOR_APPARMOR" -- \
+        unshare --user --map-user="$LOGCOLLECTOR_UID" --map-group="$LOGCOLLECTOR_GID" -- \
+        setpriv --no-new-privs --inh-caps=-all \
+        env -u LD_PRELOAD \
+        /usr/local/bin/containai-log-collector \
+            --socket-path "$audit_socket" \
+            --log-dir "$log_destination" \
+        > "$log_dir/collector.log" 2>&1 &
+    LOGCOLLECTOR_PID=$!
         
     # Wait for socket to appear
     local retries=50
@@ -550,28 +582,28 @@ start_agent_task_runnerd() {
         sleep 0.1
         retries=$((retries-1))
         if [ "$retries" -le 0 ]; then
-            echo "❌ FATAL: LogCollector failed to start (socket missing)" >&2
+            echo "❌ FATAL: LogCollector failed to start (socket missing after 5s)" >&2
+            if [ -f "$log_dir/collector.log" ]; then
+                echo "   Collector log:" >&2
+                tail -20 "$log_dir/collector.log" >&2
+            fi
             exit 1
         fi
     done
     
-    chmod 0666 "$audit_socket"
-    echo "📝 LogCollector started (logs -> $log_destination)"
+    # Socket permissions: logcollector owns, auditwriters group can write (agentuser is member)
+    chown "$LOGCOLLECTOR_UID:auditwriters" "$audit_socket"
+    chmod 0620 "$audit_socket"
+    
+    echo "📝 LogCollector started (logs -> $log_destination, PID=$LOGCOLLECTOR_PID)"
+    echo "   Security: AppArmor=$LOGCOLLECTOR_APPARMOR, user namespace isolated"
 
     # Start Agent Task Runner (Mandatory)
-    if [ "$(id -u)" -eq 0 ]; then
-        gosu "$AGENT_USERNAME" env -u LD_PRELOAD /usr/local/bin/agent-task-runnerd \
-            --socket "$socket_path" \
-            --log "$log_dir/events.log" \
-            --policy "$RUNNER_POLICY" \
-            &
-    else
-        env -u LD_PRELOAD /usr/local/bin/agent-task-runnerd \
-            --socket "$socket_path" \
-            --log "$log_dir/events.log" \
-            --policy "$RUNNER_POLICY" \
-            &
-    fi
+    gosu "$AGENT_USERNAME" env -u LD_PRELOAD /usr/local/bin/agent-task-runnerd \
+        --socket "$socket_path" \
+        --log "$log_dir/events.log" \
+        --policy "$RUNNER_POLICY" \
+        &
 }
 
 export_agent_data_payload() {
@@ -617,8 +649,7 @@ export_agent_data_payload() {
         if [ -s "$tar_path" ]; then
             echo "📤 Prepared ${agent} data export payload"
         else
-            rm -f "$tar_path" "$manifest_path"
-            rmdir --ignore-fail-on-non-empty "$agent_export_dir" 2>/dev/null || true
+            rm -rf -- "$tar_path" "$manifest_path" "$agent_export_dir"
         fi
     else
         echo "⚠️  Failed to package ${agent} data export payload" >&2
@@ -637,19 +668,14 @@ prepare_rootfs_mounts() {
     seed_tmpfs_from_base "${BASEFS_DIR}/var/cache/apt" "/var/cache/apt"
     seed_tmpfs_from_base "${BASEFS_DIR}/var/cache/debconf" "/var/cache/debconf"
 
-    chmod 1777 /tmp /var/tmp 2>/dev/null || true
-    chmod 0755 /run /var/log 2>/dev/null || true
+    chmod 1777 /tmp /var/tmp
+    chmod 0755 /run /var/log
 }
 
 if [ "$(id -u)" -eq 0 ]; then
-    AGENT_UID=$(id -u "$AGENT_USERNAME" 2>/dev/null || echo "$AGENT_UID")
-    AGENT_GID=$(id -g "$AGENT_USERNAME" 2>/dev/null || echo "$AGENT_GID")
-    AGENT_CLI_UID=$(id -u "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_CLI_UID")
-    AGENT_CLI_GID=$(id -g "$AGENT_CLI_USERNAME" 2>/dev/null || echo "$AGENT_CLI_GID")
-    
-    # Ensure proc group exists
+    # Ensure proc group exists (idempotent)
     if ! getent group "$PROC_GROUP" >/dev/null 2>&1; then
-        groupadd -r "$PROC_GROUP" || true
+        groupadd -r "$PROC_GROUP"
     fi
 
     prepare_rootfs_mounts
@@ -679,23 +705,18 @@ if [ "$(id -u)" -eq 0 ]; then
     RUNNER_STARTED=1
     export CONTAINAI_RUNNER_STARTED="$RUNNER_STARTED"
 
+    # Export fixed system constants for child processes
     export CONTAINAI_USER="$AGENT_USERNAME"
     export CONTAINAI_CLI_USER="$AGENT_CLI_USERNAME"
     export CONTAINAI_BASEFS="$BASEFS_DIR"
     export CONTAINAI_TOOLCACHE="$TOOLCACHE_DIR"
-    export CONTAINAI_PTRACE_SCOPE="$PTRACE_SCOPE_VALUE"
-    export CONTAINAI_CAP_TMPFS_SIZE="$CAP_TMPFS_SIZE"
-    export CONTAINAI_DATA_TMPFS_SIZE="$DATA_TMPFS_SIZE"
-    export CONTAINAI_SECRET_TMPFS_SIZE="$SECRETS_TMPFS_SIZE"
-    export CONTAINAI_DISABLE_PTRACE_SCOPE="$DISABLE_PTRACE_SCOPE"
-    export CONTAINAI_DISABLE_PROC_HARDENING="$DISABLE_PROC_HARDENING"
     export CONTAINAI_PROC_GROUP="$PROC_GROUP"
     export CONTAINAI_RUNNER_POLICY="$RUNNER_POLICY"
 
     # Host-provided configs and capabilities must be present before dropping caps
     HOST_CONFIG_DEPLOYED=false
     if [ -n "${HOST_SESSION_CONFIG_ROOT:-}" ] && [ -d "${HOST_SESSION_CONFIG_ROOT:-}" ]; then
-        wait_for_host_payload "$HOST_SESSION_CONFIG_ROOT" 50 0.1 || true
+        wait_for_host_payload "$HOST_SESSION_CONFIG_ROOT" 50 0.1
         if [ ! -f "${HOST_MITM_CA_CERT:-${HOST_SESSION_CONFIG_ROOT}/mitm/proxy-ca.crt}" ]; then
             echo "❌ MITM CA missing in session artifacts; expected ${HOST_MITM_CA_CERT:-${HOST_SESSION_CONFIG_ROOT}/mitm/proxy-ca.crt}" >&2
             exit 1
@@ -711,7 +732,7 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
 
     if [ -n "${HOST_CAPABILITY_ROOT:-}" ] && [ -d "${HOST_CAPABILITY_ROOT:-}" ]; then
-        wait_for_host_payload "$HOST_CAPABILITY_ROOT" 50 0.1 || true
+        wait_for_host_payload "$HOST_CAPABILITY_ROOT" 50 0.1
         echo "🔑 Installing capability tokens from host"
         if install_host_capabilities "$HOST_CAPABILITY_ROOT"; then
             echo "   Capability tokens staged"
@@ -752,7 +773,7 @@ if [ "$(id -u)" -eq 0 ]; then
 
 
     # Switch to agent user for the rest of the initialization
-    # We export necessary variables so they persist across the user switch
+    # Export necessary variables for child processes
     export HOST_CONFIG_DEPLOYED
     export SSL_CERT_FILE
     export REQUESTS_CA_BUNDLE
@@ -765,12 +786,6 @@ if [ "$(id -u)" -eq 0 ]; then
     export CONTAINAI_CLI_USER
     export CONTAINAI_BASEFS
     export CONTAINAI_TOOLCACHE
-    export CONTAINAI_PTRACE_SCOPE
-    export CONTAINAI_CAP_TMPFS_SIZE
-    export CONTAINAI_DATA_TMPFS_SIZE
-    export CONTAINAI_SECRET_TMPFS_SIZE
-    export CONTAINAI_DISABLE_PTRACE_SCOPE
-    export CONTAINAI_DISABLE_PROC_HARDENING
     export CONTAINAI_PROC_GROUP
     export CONTAINAI_RUNNER_POLICY
     export HELPER_MANIFEST_PATH

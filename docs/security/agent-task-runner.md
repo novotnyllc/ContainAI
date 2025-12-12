@@ -65,10 +65,27 @@ sequenceDiagram
 
 ## 5. Audit Surfaces & Incident Response Hooks
 
-- `events.log` – Located at `/run/agent-task-runner/events.log`. Every event has: timestamp, PID, agent name, binary name, path or syscall, and action (`register`, `run-exit`, `run-error`, `deny`). The log is append-only and owned by root.
+- **LogCollector audit logs** – The primary audit trail is written to `/var/log/containai/session-<id>.jsonl` by the `containai-log-collector` process. This process runs as a dedicated `logcollector` user (UID 1001) in an isolated user namespace, completely separate from `agentuser`. The log directory is bind-mounted from the host (`~/.containai/logs/agent/<container>/<session>/`), ensuring audit logs persist outside the container and cannot be tampered with by untrusted code.
+
+- **Audit socket** – The audit shim (`libauditshim.so`) and other components write events to `/run/containai/audit.sock`. This socket is owned by `logcollector:auditwriters` with mode `0620` – the `agentuser` is a member of `auditwriters` and can write to the socket, but cannot read from it or access the log files.
+
+- `events.log` – Located at `/run/agent-task-runner/events.log`. Every event has: timestamp, PID, agent name, binary name, path or syscall, and action (`register`, `run-exit`, `run-error`, `deny`). This is a secondary log for the task runner's internal operations.
 - Seccomp anomalies – Denied syscalls are written to stderr and logged, providing early warning when vendor binaries attempt unexpected behavior.
 - Launcher manifests – Host launchers record the exact git commit, hash of wrapper scripts, and session IDs used to create the container. Cross-reference the session ID that appears in runner payloads to trace an entire incident.
 - Capability usage – Helpers (`prepare-*-secrets.sh`) log every capability redemption with session ID; combined with runner logs, auditors can tie secret issuance to individual command executions.
+
+### 5.1 LogCollector Security Model
+
+The LogCollector runs with the following isolation guarantees:
+
+| Control | Implementation | Purpose |
+| --- | --- | --- |
+| Separate user | `logcollector` (UID 1001) | Cannot be signaled/killed by agentuser |
+| User namespace | `unshare --user` | Process invisible to agentuser's namespace |
+| AppArmor profile | `containai-logcollector-{channel}` | Denies network, restricts file access |
+| Log directory permissions | `0700 logcollector:logcollector` | agentuser cannot read audit logs |
+| Socket permissions | `0620 logcollector:auditwriters` | agentuser can only write (append events) |
+| Host bind mount | Logs written to host filesystem | Logs survive container termination |
 
 ## 6. Testing & Verification
 
