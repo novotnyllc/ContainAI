@@ -65,10 +65,17 @@ check_official_template() {
 
     info "Pulling official Docker template from Docker Hub..."
 
-    if ! docker pull docker/sandbox-templates:claude-code 2>&1 | grep -q "Status:"; then
+    local pull_out
+        pull_out="$(docker pull "$SANDBOX_IMAGE" 2>&1)" || {
+        warn "Failed to pull official template from Docker Hub"
+        return 1
+    }
+
+    if ! grep -q "^Status:" <<< "$pull_out"; then
         warn "Failed to pull official template from Docker Hub"
         return 1
     fi
+
 
     local official_version
     official_version=$(get_image_version "$SANDBOX_IMAGE")
