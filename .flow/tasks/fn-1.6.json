@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-13T21:10:26.818277Z",
+  "depends_on": [
+    "fn-1.2"
+  ],
+  "epic": "fn-1",
+  "id": "fn-1.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-1.6.md",
+  "status": "todo",
+  "title": "Add GitHub Copilot and VS Code data volume mounts",
+  "updated_at": "2026-01-13T21:12:26.433409Z"
+}

@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-13T21:10:26.868865Z",
+  "depends_on": [
+    "fn-1.6"
+  ],
+  "epic": "fn-1",
+  "id": "fn-1.7",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-1.7.md",
+  "status": "todo",
+  "title": "Create sync-vscode-data.sh pre-population script",
+  "updated_at": "2026-01-13T21:12:26.530626Z"
+}
