@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Constants
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SANDBOX_IMAGE="docker/sandbox-templates:claude-code"
 readonly CUSTOM_IMAGE="claude-code:latest"
-readonly DOCKERFILE_PATH="$HOME/.claude/templates/sandbox"
+readonly DOCKERFILE_PATH="$SCRIPT_DIR"
 
 # Color output helpers
 info() { echo "ℹ️  $*"; }

@@ -24,6 +24,9 @@ su - agent -c "npm install -g @anthropic-ai/claude-code@latest"
 
 echo "=== New Claude Code version ==="
 su - agent -c "source ~/.bashrc && claude --version"
+
+# Workaround the sandbox not doing this automatically
+su - agent -c "ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json"
 EOF
 
 # Switch back to agent user
