@@ -667,7 +667,7 @@ def run_codex_exec(
 
     if session_id:
         # Try resume first (model already set in original session)
-        cmd = [codex, "exec", "resume", session_id, prompt]
+        cmd = [codex, "exec", "resume", session_id, "--skip-git-repo-check", prompt]
         try:
             result = subprocess.run(
                 cmd,
@@ -691,6 +691,7 @@ def run_codex_exec(
         effective_model,
         "-c",
         'model_reasoning_effort="high"',
+        "--skip-git-repo-check",
         "--sandbox",
         sandbox,
         "--json",
