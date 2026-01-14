@@ -68,6 +68,11 @@ _csd_container_name() {
     # Final cleanup of trailing dashes from truncation
     name="$(printf '%s' "$name" | sed 's/-*$//')"
 
+    # Final fallback if name became empty after all processing
+    if [[ -z "$name" ]]; then
+        name="sandbox-container"
+    fi
+
     printf '%s' "$name"
 }
 
@@ -117,7 +122,6 @@ _csd_check_sandbox() {
 # Ensure required volumes exist with correct permissions
 _csd_ensure_volumes() {
     local volume_name
-    local volumes_to_fix=()
 
     # Check for mount-only volumes (warn if missing, but don't create)
     for vol_spec in "${_CSD_MOUNT_ONLY_VOLUMES[@]}"; do
@@ -135,22 +139,19 @@ _csd_ensure_volumes() {
         if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
             echo "Creating volume: $volume_name"
             docker volume create "$volume_name" >/dev/null
-            volumes_to_fix+=("$volume_name")
         fi
     done
 
-    # Fix permissions on volumes (if image is available)
+    # Fix permissions on all managed volumes (idempotent chown)
     # Skip permission fixing if image not built yet (user builds first)
     if ! docker image inspect "$_CSD_IMAGE" >/dev/null 2>&1; then
-        if [[ ${#volumes_to_fix[@]} -gt 0 ]]; then
-            echo "Note: Skipping permission fix (image not built yet)"
-        fi
+        echo "Note: Skipping permission fix (image not built yet)"
         return 0
     fi
 
-    # Fix permissions on newly created volumes
-    for volume_name in "${volumes_to_fix[@]}"; do
-        echo "Setting permissions on: $volume_name"
+    # Ensure correct ownership on all managed volumes (safe to re-run)
+    for vol_spec in "${_CSD_VOLUMES[@]}"; do
+        volume_name="${vol_spec%%:*}"
         docker run --rm -u root -v "${volume_name}:/data" "$_CSD_IMAGE" chown 1000:1000 /data
     done
 }
@@ -193,23 +194,7 @@ csd() {
         return 1
     fi
 
-    # Check if image exists (let docker errors surface as-is)
-    local inspect_output inspect_rc
-    inspect_output="$(docker image inspect "$_CSD_IMAGE" 2>&1)"
-    inspect_rc=$?
-    if [[ $inspect_rc -ne 0 ]]; then
-        # Check if it's "not found" vs other errors (daemon down, etc.)
-        if printf '%s' "$inspect_output" | grep -qiE "no such image|not found"; then
-            echo "ERROR: Image '$_CSD_IMAGE' not found" >&2
-            echo "Please build the image first: ${_CSD_SCRIPT_DIR}/build.sh" >&2
-        else
-            # Let actual docker error surface
-            echo "$inspect_output" >&2
-        fi
-        return 1
-    fi
-
-    # Get container name
+    # Get container name first (we need it to check container state)
     container_name="$(_csd_container_name)"
     echo "Container: $container_name"
 
@@ -230,9 +215,40 @@ csd() {
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
         echo "Stopping existing container..."
-        docker stop "$container_name" >/dev/null 2>&1 || true
-        docker rm "$container_name" >/dev/null 2>&1 || true
+        # Let errors surface for stop (only ignore "not running")
+        local stop_output
+        stop_output="$(docker stop "$container_name" 2>&1)" || {
+            if ! printf '%s' "$stop_output" | grep -qiE "is not running"; then
+                echo "$stop_output" >&2
+            fi
+        }
+        # Let errors surface for rm (only ignore "not found")
+        local rm_output
+        rm_output="$(docker rm "$container_name" 2>&1)" || {
+            if ! printf '%s' "$rm_output" | grep -qiE "no such container|not found"; then
+                echo "$rm_output" >&2
+                return 1
+            fi
+        }
         container_state="none"
+    fi
+
+    # Check if image exists only when we need to create a new container
+    if [[ "$container_state" == "none" ]]; then
+        local inspect_output inspect_rc
+        inspect_output="$(docker image inspect "$_CSD_IMAGE" 2>&1)"
+        inspect_rc=$?
+        if [[ $inspect_rc -ne 0 ]]; then
+            # Check if it's "not found" vs other errors (daemon down, etc.)
+            if printf '%s' "$inspect_output" | grep -qiE "no such image|not found"; then
+                echo "ERROR: Image '$_CSD_IMAGE' not found" >&2
+                echo "Please build the image first: ${_CSD_SCRIPT_DIR}/build.sh" >&2
+            else
+                # Let actual docker error surface
+                echo "$inspect_output" >&2
+            fi
+            return 1
+        fi
     fi
 
     case "$container_state" in
@@ -284,11 +300,16 @@ csd() {
 
 # Interactive container stop selection
 csd-stop-all() {
-    local containers
+    local containers labeled_containers ancestor_containers
 
-    # Find all dotnet-sandbox related containers (running or stopped)
-    # Use label filter for reliable matching across image rebuilds
-    containers=$(docker ps -a --filter "label=$_CSD_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
+    # Find containers by label (preferred, works across rebuilds)
+    labeled_containers=$(docker ps -a --filter "label=$_CSD_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+
+    # Also find by ancestor image (catches pre-label containers)
+    ancestor_containers=$(docker ps -a --filter "ancestor=$_CSD_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+
+    # Combine and deduplicate (sort -u on first field)
+    containers=$(printf '%s\n%s' "$labeled_containers" "$ancestor_containers" | grep -v '^$' | sort -t$'\t' -k1,1 -u)
 
     if [[ -z "$containers" ]]; then
         echo "No dotnet-sandbox containers found."
