@@ -34,7 +34,18 @@ source ./aliases.sh
 csd
 ```
 
-Most volumes are created automatically on first run. The `docker-claude-sandbox-data` volume is required and must be created beforehand via `../claude/sync-plugins.sh`.
+Most volumes are created automatically on first run. The `docker-claude-sandbox-data` volume is required and must exist before starting:
+
+**Option 1** (new users without Claude on host):
+```bash
+docker volume create docker-claude-sandbox-data
+# Then authenticate inside the container with: claude login
+```
+
+**Option 2** (existing Claude users - syncs credentials and plugins):
+```bash
+../claude/sync-plugins.sh
+```
 
 ## The `csd` Command
 
@@ -53,7 +64,7 @@ csd --help       # Show help
 
 Containers are named automatically based on your git context:
 - In a git repo: `<repo>-<branch>` (e.g., `myproject-main`)
-- Detached HEAD: `<repo>-detached-<sha>` (e.g., `myproject-detached-abc1234`)
+- Detached HEAD: branch component becomes `detached-<sha>`, so full name is `<repo>-detached-<sha>` (e.g., `myproject-detached-abc1234`)
 - Outside git repo: directory name (e.g., `myproject`)
 
 Names are sanitized (lowercase, alphanumeric + dashes, max 63 chars).
@@ -80,12 +91,7 @@ csd-stop-all     # Interactive selection to stop sandbox containers
 | `dotnet-sandbox-nuget` | `/home/agent/.nuget` | NuGet package cache |
 | `dotnet-sandbox-gh` | `/home/agent/.config/gh` | GitHub CLI config |
 
-The `docker-claude-sandbox-data` volume must exist before starting. Create it by running:
-```bash
-../claude/sync-plugins.sh
-```
-
-This volume is managed by Claude/sync-plugins.sh and should not be manually edited. Other volumes are created automatically by `csd`.
+The `docker-claude-sandbox-data` volume must exist before starting (see Quick Start for options). This volume stores Claude credentials and should not be manually edited. Other volumes are created automatically by `csd`.
 
 ## Port Forwarding
 
@@ -169,6 +175,10 @@ For correct nvm-aware access, use a login shell:
 bash -lc "node --version"
 ```
 
+### ECI Detection
+
+Enhanced Container Isolation (ECI) detection is best-effort. The sandbox feature provides ECI automatically when available, but the `csd` wrapper cannot reliably detect ECI status across all Docker versions. The sandbox will still run with standard isolation if ECI is unavailable.
+
 ### VS Code Insiders
 
 VS Code and VS Code Insiders use separate settings directories and host paths. Use the appropriate sync script for your installation (`sync-vscode.sh` vs `sync-vscode-insiders.sh`).
@@ -183,9 +193,18 @@ Ensure you have:
 
 ### "Required volume not found"
 
-Run `../claude/sync-plugins.sh` to create and populate the required Claude credentials volume.
+Create the required credentials volume using one of these options:
 
-Note: Manually running `docker volume create docker-claude-sandbox-data` creates an empty volume but does not populate it with credentials. Always use `sync-plugins.sh` for proper setup.
+**Option 1** (new users - authenticate later):
+```bash
+docker volume create docker-claude-sandbox-data
+# Then run: claude login (inside the container)
+```
+
+**Option 2** (sync existing host credentials):
+```bash
+../claude/sync-plugins.sh
+```
 
 ### "Image not found"
 

@@ -108,7 +108,8 @@ _csd_check_sandbox() {
     # Help output looks like valid sandbox help, so the command exists
     # but ls may have failed for another reason (e.g., no sandboxes yet, daemon issues)
     # Per spec: treat as available if help mentions sandbox-specific commands
-    if printf '%s' "$help_output" | grep -qE "sandbox.*run|Create.*sandbox|list.*sandbox"; then
+    # Use case-insensitive match (-qiE) for robustness across Docker versions
+    if printf '%s' "$help_output" | grep -qiE "sandbox.*run|create.*sandbox|list.*sandbox"; then
         # Help mentions sandbox-specific commands, likely valid
         return 0
     fi
@@ -134,12 +135,13 @@ _csd_ensure_volumes() {
         if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
             echo "ERROR: Required volume '$volume_name' not found" >&2
             echo "" >&2
-            echo "This volume is required for Claude credentials. Create it by running:" >&2
-            echo "  ${_CSD_SCRIPT_DIR}/../claude/sync-plugins.sh" >&2
-            echo "  (or from repo root: ./claude/sync-plugins.sh)" >&2
+            echo "This volume is required for Claude credentials." >&2
             echo "" >&2
-            echo "Or manually create with:" >&2
+            echo "Option 1: Create empty volume (then authenticate inside container):" >&2
             echo "  docker volume create $volume_name" >&2
+            echo "" >&2
+            echo "Option 2: Sync existing host credentials/plugins (if you have Claude on host):" >&2
+            echo "  ${_CSD_SCRIPT_DIR}/../claude/sync-plugins.sh" >&2
             return 1
         fi
     done
@@ -165,9 +167,10 @@ _csd_ensure_volumes() {
     fi
 
     # Ensure correct ownership on all managed volumes (safe to re-run)
+    # Use -R for recursive chown to handle any existing root-owned files
     for vol_spec in "${_CSD_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
-        if ! docker run --rm -u root -v "${volume_name}:/data" "$_CSD_IMAGE" chown 1000:1000 /data; then
+        if ! docker run --rm -u root -v "${volume_name}:/data" "$_CSD_IMAGE" chown -R 1000:1000 /data; then
             echo "ERROR: Failed to fix permissions on volume $volume_name" >&2
             return 1
         fi

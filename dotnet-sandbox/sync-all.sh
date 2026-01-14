@@ -150,7 +150,13 @@ sync_gh_config() {
         return 0
     fi
 
-    # Path exists - check if it's accessible (permission error = actual error)
+    # Path exists - check if it's a directory
+    if [[ ! -d "$GH_CONFIG_DIR" ]]; then
+        error "gh config path exists but is not a directory: $GH_CONFIG_DIR"
+        return 1
+    fi
+
+    # Check if it's accessible (permission error = actual error)
     if [[ ! -r "$GH_CONFIG_DIR" ]]; then
         error "Permission denied reading gh config: $GH_CONFIG_DIR"
         return 1
