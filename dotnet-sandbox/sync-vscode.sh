@@ -152,7 +152,7 @@ sync_settings_files() {
                 docker run --rm \
                     -v "$VOLUME_NAME":/target \
                     -v "$src":/source:ro \
-                    alpine sh -c "
+                    alpine:3.20 sh -c "
                         mkdir -p /target/data/Machine
                         cp /source /target/data/Machine/$file
                         chown -R 1000:1000 /target/data
@@ -209,7 +209,7 @@ sync_extensions_list() {
     # Write extensions list to volume
     printf '%s\n' "$extensions_list" | docker run --rm -i \
         -v "$VOLUME_NAME":/target \
-        alpine sh -c "
+        alpine:3.20 sh -c "
             mkdir -p /target/data
             cat > /target/data/extensions.txt
             chown -R 1000:1000 /target/data

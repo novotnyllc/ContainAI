@@ -52,9 +52,24 @@ fi
 - [ ] Detection is documented in README
 
 ## Done summary
-TBD
+## What changed
+- Added `_csd_check_eci()` function for best-effort ECI detection via `docker info`
+- Added ECI check call in `csd()` function after sandbox availability check
+- Updated README.md with ECI Detection section documenting behavior
 
+## Why
+- Task spec requires ECI detection with warnings for transparency
+- Best-effort detection helps users know if enhanced isolation is active
+- Non-blocking design ensures sandbox usability regardless of ECI status
+
+## Verification
+- `bash -n aliases.sh` - syntax check passed
+- Manual review of detection logic and warning messages
+- README documentation updated to reflect implementation
+
+## Follow-ups
+- Could add verbose mode flag to show detailed detection results
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 25d3373e63a746a4a9c70b20aa6002d23a44a600
+- Tests: bash -n aliases.sh
 - PRs:

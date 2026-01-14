@@ -36,7 +36,7 @@ csd
 
 Most volumes are created automatically on first run. The `docker-claude-sandbox-data` volume is required and must exist before starting:
 
-**Option 1** (new users without Claude on host):
+**Option 1** (new users without Claude on host - creates empty volume):
 ```bash
 docker volume create docker-claude-sandbox-data
 # Then authenticate inside the container with: claude login
@@ -85,7 +85,7 @@ csd-stop-all     # Interactive selection to stop sandbox containers
 
 | Volume Name | Mount Point | Purpose |
 |-------------|-------------|---------|
-| `docker-claude-sandbox-data` | `/mnt/claude-data` | Claude credentials (required, managed by sync-plugins.sh - DO NOT manually edit) |
+| `docker-claude-sandbox-data` | `/mnt/claude-data` | Claude credentials (required - create empty or use sync-plugins.sh, do not manually edit contents) |
 | `docker-claude-plugins` | `/home/agent/.claude/plugins` | Claude Code plugins |
 | `dotnet-sandbox-vscode` | `/home/agent/.vscode-server` | VS Code Server data |
 | `dotnet-sandbox-nuget` | `/home/agent/.nuget` | NuGet package cache |
@@ -137,9 +137,16 @@ The `csd` wrapper detects Docker Sandbox availability before starting a containe
 - **Proceeds** if sandbox is available (even if no containers exist yet)
 - **Shows actual error** for unknown failures to help diagnose issues
 
-ECI (Enhanced Container Isolation) status detection is best-effort. The sandbox provides ECI automatically when available, but `csd` cannot reliably detect ECI status across all Docker versions. If ECI status is unknown, the sandbox proceeds with standard isolation.
+### ECI Detection
 
-To bypass sandbox detection (not recommended), use `csd --force`.
+ECI (Enhanced Container Isolation) detection is best-effort. The `csd` wrapper:
+- Checks `docker info` for ECI indicators (userns, rootless, eci options)
+- **Warns** if ECI is not detected or status is unknown
+- **Proceeds anyway** - ECI detection does not block container start
+
+ECI warnings help you know if enhanced isolation is active, but Docker sandbox provides security isolation regardless of ECI status.
+
+To bypass all detection checks (not recommended), use `csd --force`.
 
 ## Security
 
