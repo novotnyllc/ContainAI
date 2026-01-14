@@ -1,1 +1,5 @@
-{"memory":{"enabled":true}}
+{
+  "memory": {
+    "enabled": true
+  }
+}
