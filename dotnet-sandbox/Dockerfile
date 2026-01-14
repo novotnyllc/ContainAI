@@ -2,4 +2,4 @@
 # Placeholder: Will be implemented in fn-1.2
 # dotnet-sandbox Dockerfile
 FROM scratch
-# Full implementation: fn-1.2
+CMD ["/NOT_IMPLEMENTED_SEE_FN-1.2"]
