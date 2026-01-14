@@ -1,0 +1,85 @@
+{
+  "task_id": "fn-1.5",
+  "title": "Test image build and WASM functionality",
+  "timestamp": "2026-01-14T23:02:00Z",
+  "test_results": {
+    "part_a_dind": {
+      "status": "SKIPPED",
+      "reason": "Docker daemon not available in this environment",
+      "tests": [
+        "A1: Image Build",
+        "A2: .NET SDK Verification",
+        "A3: Node.js Verification",
+        "A4: Blazor WASM Build",
+        "A5: Uno Platform WASM Build",
+        "A6: Claude CLI Verification"
+      ]
+    },
+    "part_b_sandbox": {
+      "status": "SKIPPED",
+      "reason": "Requires Docker Desktop 4.50+ with sandbox feature",
+      "tests": [
+        "B1: Docker Sandbox Launch",
+        "B2: uno-check Verification",
+        "B3: Sandbox Enforcement",
+        "B4: Container Naming",
+        "B5: Port Forwarding"
+      ]
+    },
+    "part_c_compliance": {
+      "status": "PASS",
+      "tests": {
+        "C1_workload_commands": {
+          "status": "PASS",
+          "description": "wasm-tools and wasm-tools-net9 in separate RUN commands",
+          "fix_applied": "Split into two RUN commands with fail-open for wasm-tools-net9"
+        },
+        "C3_label_support": {
+          "status": "PASS",
+          "description": "csd checks for label support before using --label",
+          "fix_applied": "Added probe for --label in sandbox_help"
+        },
+        "C4_volume_permissions": {
+          "status": "PASS",
+          "description": "Chowns ALL volumes including docker-claude-sandbox-data",
+          "fix_applied": "Combined _CSD_VOLUMES and _CSD_MOUNT_ONLY_VOLUMES for chown"
+        },
+        "C5_fallback_image": {
+          "status": "PASS",
+          "description": "Uses base image as fallback for permission fixing",
+          "fix_applied": "Falls back to docker/sandbox-templates:claude-code"
+        },
+        "C6_blocking_errors": {
+          "status": "PASS",
+          "description": "Blocking errors include raw docker output",
+          "fix_applied": "Already implemented"
+        },
+        "C7_collision_details": {
+          "status": "PASS",
+          "description": "Collision errors include expected vs actual identity",
+          "fix_applied": "Added label and image comparison in error messages"
+        },
+        "C8_readme_clarification": {
+          "status": "PASS",
+          "description": "README clarifies sync-plugins does NOT sync credentials",
+          "fix_applied": "Updated README to clarify credential handling"
+        },
+        "C9_fallback_pattern": {
+          "status": "PASS",
+          "description": "Container name fallback uses sandbox-<dirname> pattern",
+          "fix_applied": "Changed fallback to sandbox-$dir_fallback"
+        }
+      }
+    }
+  },
+  "files_modified": [
+    "dotnet-sandbox/Dockerfile",
+    "dotnet-sandbox/aliases.sh",
+    "dotnet-sandbox/README.md"
+  ],
+  "notes": [
+    "Parts A and B require Docker daemon which is not available in this environment",
+    "All Part C compliance tests pass after fixes",
+    "Part C fixes address implementation issues from prerequisite tasks (fn-1.2, fn-1.10, fn-1.11)"
+  ]
+}
