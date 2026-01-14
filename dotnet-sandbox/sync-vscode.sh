@@ -94,12 +94,24 @@ detect_vscode_paths() {
     esac
 }
 
-# Check if VS Code is installed
+# Check if VS Code is installed (distinguishes missing from permission errors)
 check_vscode_installed() {
-    if [[ ! -d "$VSCODE_USER_DIR" ]]; then
+    # First check if path exists at all
+    if [[ ! -e "$VSCODE_USER_DIR" ]]; then
         info "VS Code not installed or no settings found at: $VSCODE_USER_DIR"
         info "Skipping VS Code sync"
         exit 0
+    fi
+
+    # Path exists - check if it's a directory and accessible
+    if [[ ! -d "$VSCODE_USER_DIR" ]]; then
+        error "Path exists but is not a directory: $VSCODE_USER_DIR"
+        exit 1
+    fi
+
+    if [[ ! -r "$VSCODE_USER_DIR" ]]; then
+        error "Permission denied reading VS Code settings: $VSCODE_USER_DIR"
+        exit 1
     fi
 }
 
@@ -170,8 +182,11 @@ sync_extensions_list() {
     step "Syncing extensions list..."
 
     if ! command -v "$CODE_CMD" &>/dev/null; then
-        warn "VS Code CLI ($CODE_CMD) not in PATH, skipping extensions sync"
-        return
+        # VS Code settings dir exists but CLI not in PATH - this is an error
+        error "VS Code CLI ($CODE_CMD) not in PATH"
+        error "Please ensure VS Code is installed and 'code' command is available"
+        error "On macOS: Open VS Code > Cmd+Shift+P > 'Shell Command: Install code command'"
+        exit 1
     fi
 
     if $DRY_RUN; then

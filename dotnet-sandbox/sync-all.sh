@@ -56,6 +56,10 @@ done
 
 # Track failures for aggregate exit code
 HAD_ERROR=false
+# Track which syncs actually ran
+VSCODE_SYNCED=false
+VSCODE_INSIDERS_SYNCED=false
+GH_SYNCED=false
 
 # Check prerequisites
 check_prerequisites() {
@@ -118,10 +122,17 @@ detect_vscode_paths() {
 sync_gh_config() {
     step "Syncing GitHub CLI config..."
 
-    if [[ ! -d "$GH_CONFIG_DIR" ]]; then
+    # First check if path exists at all
+    if [[ ! -e "$GH_CONFIG_DIR" ]]; then
         info "GitHub CLI not configured (no config at: $GH_CONFIG_DIR)"
         info "Skipping gh sync"
         return 0
+    fi
+
+    # Path exists - check if it's accessible (permission error = actual error)
+    if [[ ! -r "$GH_CONFIG_DIR" ]]; then
+        error "Permission denied reading gh config: $GH_CONFIG_DIR"
+        return 1
     fi
 
     # Create volume if it doesn't exist
@@ -134,6 +145,7 @@ sync_gh_config() {
 
     if $DRY_RUN; then
         echo "  [dry-run] Would sync gh config from: $GH_CONFIG_DIR"
+        GH_SYNCED=true
         return 0
     fi
 
@@ -148,15 +160,24 @@ sync_gh_config() {
             chown -R 1000:1000 /target
         "
 
+    GH_SYNCED=true
     success "GitHub CLI config synced"
 }
 
 # Sync VS Code (regular) - only if installed
 sync_vscode() {
-    if [[ ! -d "$VSCODE_USER_DIR" ]]; then
+    # First check if path exists at all
+    if [[ ! -e "$VSCODE_USER_DIR" ]]; then
         info "VS Code not installed (no settings at: $VSCODE_USER_DIR)"
         info "Skipping VS Code sync"
         return 0
+    fi
+
+    # Path exists - check if it's accessible (permission error = actual error)
+    if [[ ! -r "$VSCODE_USER_DIR" ]]; then
+        error "Permission denied reading VS Code settings: $VSCODE_USER_DIR"
+        HAD_ERROR=true
+        return 1
     fi
 
     echo ""
@@ -170,15 +191,24 @@ sync_vscode() {
         HAD_ERROR=true
         return 1
     fi
+    VSCODE_SYNCED=true
     return 0
 }
 
 # Sync VS Code Insiders - only if installed
 sync_vscode_insiders() {
-    if [[ ! -d "$VSCODE_INSIDERS_USER_DIR" ]]; then
+    # First check if path exists at all
+    if [[ ! -e "$VSCODE_INSIDERS_USER_DIR" ]]; then
         info "VS Code Insiders not installed (no settings at: $VSCODE_INSIDERS_USER_DIR)"
         info "Skipping VS Code Insiders sync"
         return 0
+    fi
+
+    # Path exists - check if it's accessible (permission error = actual error)
+    if [[ ! -r "$VSCODE_INSIDERS_USER_DIR" ]]; then
+        error "Permission denied reading VS Code Insiders settings: $VSCODE_INSIDERS_USER_DIR"
+        HAD_ERROR=true
+        return 1
     fi
 
     echo ""
@@ -192,6 +222,7 @@ sync_vscode_insiders() {
         HAD_ERROR=true
         return 1
     fi
+    VSCODE_INSIDERS_SYNCED=true
     return 0
 }
 
@@ -206,9 +237,21 @@ show_summary() {
     fi
     echo "================================================================"
     echo ""
+
+    # Only show volumes that were actually populated
+    local has_volumes=false
     echo "Volumes populated:"
-    echo "  - dotnet-sandbox-vscode (VS Code settings)"
-    echo "  - dotnet-sandbox-gh (GitHub CLI config)"
+    if $VSCODE_SYNCED || $VSCODE_INSIDERS_SYNCED; then
+        echo "  - dotnet-sandbox-vscode (VS Code settings)"
+        has_volumes=true
+    fi
+    if $GH_SYNCED; then
+        echo "  - dotnet-sandbox-gh (GitHub CLI config)"
+        has_volumes=true
+    fi
+    if ! $has_volumes; then
+        echo "  (none - all syncs were skipped)"
+    fi
     echo ""
     echo "Start sandbox with:"
     echo "  source $SCRIPT_DIR/aliases.sh"
