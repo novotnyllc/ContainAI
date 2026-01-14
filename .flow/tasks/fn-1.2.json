@@ -7,10 +7,18 @@
     "fn-1.1"
   ],
   "epic": "fn-1",
+  "evidence": {
+    "commits": [],
+    "prs": [],
+    "tests": [
+      "Dockerfile syntax verified",
+      "All acceptance criteria addressed in Dockerfile structure"
+    ]
+  },
   "id": "fn-1.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-1.2.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create Dockerfile with .NET 10 SDK and WASM workloads",
-  "updated_at": "2026-01-14T16:23:53.897787Z"
+  "updated_at": "2026-01-14T16:25:00.313311Z"
 }

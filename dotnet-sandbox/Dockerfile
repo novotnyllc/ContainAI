@@ -6,7 +6,8 @@ FROM docker/sandbox-templates:claude-code
 
 # Build arguments for .NET channel selection
 # Options: lts, sts, preview, or specific like "10.0"
-ARG DOTNET_CHANNEL=lts
+# Default to 10.0 to ensure .NET 10 is installed (acceptance requires version 10.x)
+ARG DOTNET_CHANNEL=10.0
 
 # Switch to root for system-level installations
 USER root
@@ -35,11 +36,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install .NET SDK using dotnet-install.sh (NOT apt)
-RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
     && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} --install-dir /usr/share/dotnet \
-    && ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
-    && rm /tmp/dotnet-install.sh
+    && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+    && rm /tmp/dotnet-install.sh \
+    && dotnet --version
 
 # Set .NET environment variables
 ENV DOTNET_ROOT=/usr/share/dotnet
@@ -60,17 +62,19 @@ RUN wget -q "https://packages.microsoft.com/config/ubuntu/$(. /etc/os-release &&
 
 # Install nvm and Node.js as agent user
 USER agent
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash \
+RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash \
     && . ~/.nvm/nvm.sh \
     && nvm install --lts \
     && nvm alias default lts/* \
     && npm install -g typescript eslint prettier
 
 # Create system-wide symlinks for non-interactive access (as root)
+# Use nvm which to resolve the default node version deterministically
 USER root
-RUN ln -sf /home/agent/.nvm/versions/node/$(ls /home/agent/.nvm/versions/node)/bin/node /usr/local/bin/node \
-    && ln -sf /home/agent/.nvm/versions/node/$(ls /home/agent/.nvm/versions/node)/bin/npm /usr/local/bin/npm \
-    && ln -sf /home/agent/.nvm/versions/node/$(ls /home/agent/.nvm/versions/node)/bin/npx /usr/local/bin/npx
+RUN NODE_PATH=$(su - agent -c '. ~/.nvm/nvm.sh && nvm which default' | xargs dirname) \
+    && ln -sf "$NODE_PATH/node" /usr/local/bin/node \
+    && ln -sf "$NODE_PATH/npm" /usr/local/bin/npm \
+    && ln -sf "$NODE_PATH/npx" /usr/local/bin/npx
 
 # Create /etc/profile.d/nvm.sh for login shells
 RUN echo 'export NVM_DIR="/home/agent/.nvm"' > /etc/profile.d/nvm.sh \
@@ -79,7 +83,7 @@ RUN echo 'export NVM_DIR="/home/agent/.nvm"' > /etc/profile.d/nvm.sh \
 # Create Claude credentials symlink (same workaround as claude/Dockerfile)
 USER agent
 RUN mkdir -p /home/agent/.claude \
-    && ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json
+    && ln -sf /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json
 
 # Expose ports for WASM app serving
 EXPOSE 5000-5010

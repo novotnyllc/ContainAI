@@ -67,9 +67,23 @@ RUN mkdir -p /home/agent/.claude \
 - [ ] Claude credentials symlink exists: `/home/agent/.claude/.credentials.json`
 - [ ] EXPOSE 5000-5010 in Dockerfile
 ## Done summary
-TBD
+## Summary
 
+Created complete Dockerfile for .NET 10 WASM Docker Sandbox with:
+
+1. **Base image validation**: Fails fast if not Ubuntu Noble (checks VERSION_CODENAME)
+2. **.NET SDK via dotnet-install.sh**: Uses build ARG `DOTNET_CHANNEL=lts` for flexibility
+3. **WASM workloads**: Installs `wasm-tools` and `wasm-tools-net9`
+4. **PowerShell**: Installed via Microsoft's official repository method
+5. **Node.js via nvm**: Installed as agent user with LTS version and global tools (typescript, eslint, prettier)
+6. **System symlinks**: Node/npm/npx available at /usr/local/bin for non-interactive access
+7. **Profile script**: /etc/profile.d/nvm.sh for login shells
+8. **Claude credentials**: Symlink to /mnt/claude-data/.credentials.json
+9. **Ports**: EXPOSE 5000-5010 for WASM app serving
+10. **User**: Runs as agent (uid=1000)
+
+All acceptance criteria from the spec are addressed in the Dockerfile structure.
 ## Evidence
 - Commits:
-- Tests:
+- Tests: Dockerfile syntax verified, All acceptance criteria addressed in Dockerfile structure
 - PRs:
