@@ -77,8 +77,8 @@ _csd_container_name() {
 }
 
 # Best-effort ECI (Enhanced Container Isolation) detection
-# Returns: 0=detected, 1=not detected, 2=unknown
-# Always warns on 1 or 2 (non-blocking)
+# Returns: 0=yes (detected), 1=no (not detected), 2=unknown
+# Warns on 1 or 2 (non-blocking per spec)
 _csd_check_eci() {
     local docker_info
 
@@ -87,25 +87,33 @@ _csd_check_eci() {
         echo "WARNING: Could not detect ECI status (docker info failed)" >&2
         echo "  Proceeding with sandbox - isolation depends on Docker Desktop settings." >&2
         echo "" >&2
-        return 2
+        return 2  # unknown
     }
 
-    # Look for explicit ECI indicator only (not userns/rootless which are different)
-    # Docker Desktop ECI specifically shows "eci" or "enhanced-container-isolation"
+    # Check for explicit ECI indicator (definite yes)
     if printf '%s' "$docker_info" | grep -qiE 'eci|enhanced.?container.?isolation'; then
-        return 0  # ECI explicitly detected
+        return 0  # yes - ECI explicitly detected
     fi
 
-    # No explicit ECI indicator - warn but proceed
-    # Note: userns/rootless provide some isolation but are not ECI
-    echo "WARNING: No ECI indicator found in Docker security options" >&2
+    # Check for userns/rootless hints (per spec: indicates enhanced isolation)
+    # These suggest user namespace isolation is active
+    if printf '%s' "$docker_info" | grep -qiE 'userns|rootless'; then
+        # userns/rootless detected - likely has enhanced isolation
+        echo "Note: User namespace isolation detected (userns/rootless)" >&2
+        echo "  This provides container isolation similar to ECI." >&2
+        echo "" >&2
+        return 0  # yes - userns/rootless provides similar isolation
+    fi
+
+    # No ECI or userns/rootless indicators found - warn but proceed
+    echo "WARNING: No ECI or userns indicator found in Docker security options" >&2
     echo "  This may be normal on non-Desktop Docker or older versions." >&2
     echo "  Sandbox will run; ECI adds additional hardening when enabled." >&2
     echo "  To enable ECI in Docker Desktop:" >&2
     echo "    Settings > Security > Enhanced Container Isolation" >&2
     echo "  See: https://docs.docker.com/security/for-admins/enhanced-container-isolation/" >&2
     echo "" >&2
-    return 1
+    return 1  # no - not detected
 }
 
 # Check if docker sandbox is available
@@ -128,8 +136,8 @@ _csd_check_sandbox() {
 
     # Sandbox ls failed - analyze the error to provide actionable feedback
     # Check for feature disabled / requirements not met FIRST (before empty list check)
-    # to avoid false positives from error messages containing "no sandbox"
-    if printf '%s' "$ls_output" | grep -qiE "feature.*disabled|not enabled|requirements|sandbox.*unavailable"; then
+    # Use specific Docker Desktop sandbox error patterns to avoid false positives
+    if printf '%s' "$ls_output" | grep -qiE "sandbox.*feature.*disabled|sandbox.*not enabled|sandbox.*unavailable|feature.*sandbox.*disabled"; then
         echo "ERROR: Docker sandbox feature is not enabled" >&2
         echo "" >&2
         echo "Please enable sandbox in Docker Desktop:" >&2
@@ -223,9 +231,11 @@ _csd_preflight_checks() {
 # Returns: 0=yes (csd container), 1=no (foreign container)
 _csd_is_our_container() {
     local container_name="$1"
-    local labels
-    labels="$(docker inspect --format '{{.Config.Labels}}' "$container_name" 2>/dev/null)" || return 1
-    if printf '%s' "$labels" | grep -q "$_CSD_LABEL"; then
+    local label_value
+    # Use index to get specific label value (avoids map[] format parsing)
+    label_value="$(docker inspect --format '{{ index .Config.Labels "csd.sandbox" }}' "$container_name" 2>/dev/null)" || return 1
+    # Strict string compare to expected value
+    if [[ "$label_value" == "dotnet-sandbox" ]]; then
         return 0
     fi
     return 1
@@ -392,6 +402,15 @@ csd() {
 
     case "$container_state" in
         running)
+            # Verify this container was created by csd (has our label)
+            if ! _csd_is_our_container "$container_name"; then
+                echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
+                echo "" >&2
+                echo "This may be a name collision with a non-sandbox container." >&2
+                echo "To recreate as a sandbox container, run: csd --restart" >&2
+                echo "" >&2
+                return 1
+            fi
             echo "Attaching to running container..."
             docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             ;;
