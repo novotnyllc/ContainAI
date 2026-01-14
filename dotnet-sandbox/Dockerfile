@@ -56,8 +56,9 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 
 # Install WASM workloads and verify installation
+# Use word boundary to match exact workload name, not just substring
 RUN dotnet workload install wasm-tools wasm-tools-net9 \
-    && dotnet workload list | grep -F wasm-tools
+    && dotnet workload list | grep -E '^\s*wasm-tools\s'
 
 # Install PowerShell via Microsoft's recommended method and verify
 RUN wget -q "https://packages.microsoft.com/config/ubuntu/$(. /etc/os-release && echo $VERSION_ID)/packages-microsoft-prod.deb" -O /tmp/packages-microsoft-prod.deb \
@@ -84,22 +85,31 @@ RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh |
 
 # Create system-wide symlinks for non-interactive access (as root)
 # Use nvm which to resolve the default node version deterministically
-# Force bash shell explicitly to avoid issues if agent's login shell differs
+# Use explicit path instead of ~ to avoid HOME resolution issues under su
 USER root
-RUN NODE_PATH=$(su -s /bin/bash agent -c 'source ~/.nvm/nvm.sh && nvm which default' | xargs dirname) \
+RUN NODE_PATH=$(su -s /bin/bash agent -c 'source /home/agent/.nvm/nvm.sh && nvm which default' | xargs dirname) \
     && ln -sf "$NODE_PATH/node" /usr/local/bin/node \
     && ln -sf "$NODE_PATH/npm" /usr/local/bin/npm \
-    && ln -sf "$NODE_PATH/npx" /usr/local/bin/npx
+    && ln -sf "$NODE_PATH/npx" /usr/local/bin/npx \
+    && ln -sf "$NODE_PATH/tsc" /usr/local/bin/tsc \
+    && ln -sf "$NODE_PATH/eslint" /usr/local/bin/eslint \
+    && ln -sf "$NODE_PATH/prettier" /usr/local/bin/prettier
 
-# Create /etc/profile.d/nvm.sh for login shells
+# Create /etc/profile.d/nvm.sh for login shells with explicit nvm use
 RUN echo 'export NVM_DIR="/home/agent/.nvm"' > /etc/profile.d/nvm.sh \
-    && echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' >> /etc/profile.d/nvm.sh
+    && echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm use default >/dev/null 2>&1' >> /etc/profile.d/nvm.sh
 
-# Verify Node.js installation via symlink and login shell
-RUN /usr/local/bin/node --version \
-    && bash -lc "node --version" \
+# Verify Node.js installation via symlink (as root)
+RUN /usr/local/bin/node --version
+
+# Verify Node.js installation as agent user (login shell environment)
+USER agent
+RUN bash -lc "node --version" \
     && bash -lc "nvm --version" \
     && bash -lc "tsc --version && eslint --version && prettier --version"
+
+# Switch back to root for directory setup
+USER root
 
 # Ensure workspace directory exists with correct ownership
 RUN mkdir -p /home/agent/workspace \

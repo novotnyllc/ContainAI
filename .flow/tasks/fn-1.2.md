@@ -49,23 +49,23 @@ RUN mkdir -p /home/agent/.claude \
 **Ports:**
 - `EXPOSE 5000-5010` for WASM app serving
 
-**Image Naming:**
+**Image Naming:** (implemented in fn-1.4 build.sh)
 - Image: `dotnet-sandbox`
 - Tags: `:latest` AND `:YYYY-MM-DD`
 
 **Build approach:** Use separate RUN commands for maintainability; optimize layers later.
 ## Acceptance
 - [x] Build fails with clear error if base image is not Ubuntu Noble (Dockerfile:15-21)
-- [x] `dotnet --version | grep -E '^10\.'` verifies major version 10 (Dockerfile:45-46)
-- [x] `dotnet workload list` shows `wasm-tools` (Dockerfile:54-56)
-- [x] `pwsh --version` succeeds (Dockerfile:58-65)
-- [x] `bash -lc "node --version"` outputs LTS version (Dockerfile:93-95)
-- [x] `bash -lc "nvm --version"` works (Dockerfile:96)
-- [x] `/usr/local/bin/node --version` works (symlink) (Dockerfile:94)
-- [x] `bash -lc "tsc --version && eslint --version && prettier --version"` work (Dockerfile:97)
-- [x] Container runs as `uid=1000(agent)` (Dockerfile:67-68, 115)
-- [x] Claude credentials symlink exists: `/home/agent/.claude/.credentials.json` (Dockerfile:103-106)
-- [x] EXPOSE 5000-5010 in Dockerfile (Dockerfile:108-109)
+- [x] `dotnet --version | grep -E '^10\.'` verifies major version 10 (Dockerfile:49-50)
+- [x] `dotnet workload list` shows `wasm-tools` (Dockerfile:58-61)
+- [x] `pwsh --version` succeeds (Dockerfile:63-70)
+- [x] `bash -lc "node --version"` outputs LTS version (Dockerfile:107)
+- [x] `bash -lc "nvm --version"` works (Dockerfile:108)
+- [x] `/usr/local/bin/node --version` works (symlink) (Dockerfile:103)
+- [x] `bash -lc "tsc --version && eslint --version && prettier --version"` work (Dockerfile:109)
+- [x] Container runs as `uid=1000(agent)` (Dockerfile:72-73, 130)
+- [x] Claude credentials symlink exists: `/home/agent/.claude/.credentials.json` (Dockerfile:118-121)
+- [x] EXPOSE 5000-5010 in Dockerfile (Dockerfile:123-124)
 ## Done summary
 ## Summary
 
