@@ -148,8 +148,27 @@ curl http://localhost:5000  # Should get response
 - [ ] README documents all test procedures
 
 ## Done summary
-TBD
+Blocked:
+## Blocked: Docker Daemon Not Available
 
+Task fn-1.5 (Test image build and WASM functionality) cannot be completed in this environment.
+
+### Reason
+- Docker CLI is installed (Docker version 29.1.4)
+- Docker daemon is NOT running (no /var/run/docker.sock)
+- All test cases in the spec require Docker daemon access
+
+### What Was Verified
+- All shell scripts pass `bash -n` syntax validation
+- Dockerfile structure reviewed for correctness
+
+### Resolution
+Run the tests manually in an environment with Docker daemon access:
+```bash
+./dotnet-sandbox/build.sh
+docker run --rm -u agent dotnet-sandbox:latest dotnet --version
+# ... etc
+```
 ## Evidence
 - Commits:
 - Tests:
