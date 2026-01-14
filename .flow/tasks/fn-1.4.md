@@ -50,23 +50,45 @@ docker run --rm -u root -v vol:/data dotnet-sandbox:latest chown 1000:1000 /data
 - Let docker errors surface as-is
 - Let docker sandbox handle path mounting
 ## Acceptance
-- [ ] build.sh creates dotnet-sandbox:latest
-- [ ] build.sh creates dotnet-sandbox:YYYY-MM-DD tag
-- [ ] `csd` checks for sandbox availability before starting (blocks if unavailable)
-- [ ] `csd` starts sandbox with all volumes and ports
-- [ ] `csd` auto-attaches via `docker exec -it` if container running
-- [ ] `csd` starts stopped containers via `docker start -ai`
-- [ ] `csd --restart` recreates container even if running
-- [ ] Container name follows `<repo>-<branch>` pattern (sanitized, lowercase, max 63)
-- [ ] Detached HEAD uses `detached-<short-sha>` pattern
-- [ ] Falls back to directory name outside git repo
-- [ ] `csd-stop-all` prompts interactively
-- [ ] Ports 5000-5010 published to host
-- [ ] Volume permission fixing uses dotnet-sandbox, not alpine
+- [x] build.sh creates dotnet-sandbox:latest
+- [x] build.sh creates dotnet-sandbox:YYYY-MM-DD tag
+- [x] `csd` checks for sandbox availability before starting (blocks if unavailable)
+- [x] `csd` starts sandbox with all volumes and ports
+- [x] `csd` auto-attaches via `docker exec -it` if container running
+- [x] `csd` starts stopped containers via `docker start -ai`
+- [x] `csd --restart` recreates container even if running
+- [x] Container name follows `<repo>-<branch>` pattern (sanitized, lowercase, max 63)
+- [x] Detached HEAD uses `detached-<short-sha>` pattern
+- [x] Falls back to directory name outside git repo
+- [x] `csd-stop-all` prompts interactively
+- [x] Ports 5000-5010 published to host
+- [x] Volume permission fixing uses dotnet-sandbox, not alpine
 ## Done summary
-TBD
+Implemented helper scripts for building and running the dotnet-sandbox:
+
+**build.sh:**
+- Builds dotnet-sandbox image from current directory
+- Tags as both `:latest` and `:YYYY-MM-DD` (current date)
+- Passes through any docker build arguments (e.g., `--no-cache`)
+- Displays resulting image info after build
+
+**aliases.sh:**
+- `csd` function (Claude Sandbox Dotnet) with:
+  - Sandbox availability check before starting (blocks with actionable error if unavailable)
+  - Auto-volume creation with uid 1000 permission fixing using dotnet-sandbox image
+  - Auto-attach to running containers via `docker exec -it`
+  - Restart stopped containers via `docker start -ai`
+  - `--restart` flag to force recreate existing containers
+  - Container naming: `<repo>-<branch>` sanitized (lowercase, non-alphanum -> dash, max 63 chars)
+  - Detached HEAD support with `detached-<short-sha>` pattern
+  - Directory name fallback when not in git repo
+  - Port publishing `-p 5000-5010:5000-5010`
+  - All required volumes mounted per spec
+- `csd-stop-all` function with interactive container selection
+
+Both scripts pass bash syntax validation.
 
 ## Evidence
-- Commits:
-- Tests:
+- Commits: TBD (will be set after commit)
+- Tests: bash -n syntax validation passed for both scripts
 - PRs:
