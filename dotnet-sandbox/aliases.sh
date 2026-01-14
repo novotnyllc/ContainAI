@@ -97,9 +97,9 @@ _csd_check_sandbox() {
     if printf '%s' "$help_output" | grep -qiE "not recognized|unknown command|not a docker command"; then
         echo "ERROR: Docker sandbox is not available" >&2
         echo "" >&2
-        echo "Docker sandbox requires Docker Desktop 4.29+ with sandbox feature enabled." >&2
+        echo "Docker sandbox requires Docker Desktop 4.50+ with sandbox feature enabled." >&2
         echo "Please ensure you have:" >&2
-        echo "  1. Docker Desktop 4.29 or later installed" >&2
+        echo "  1. Docker Desktop 4.50 or later installed" >&2
         echo "  2. Docker sandbox feature enabled in Settings > Features in development" >&2
         echo "" >&2
         return 1
@@ -117,7 +117,7 @@ _csd_check_sandbox() {
     echo "ERROR: Unable to verify Docker sandbox availability" >&2
     echo "" >&2
     echo "docker sandbox ls failed and could not confirm sandbox feature is enabled." >&2
-    echo "Please ensure Docker Desktop 4.29+ is installed with sandbox feature enabled." >&2
+    echo "Please ensure Docker Desktop 4.50+ is installed with sandbox feature enabled." >&2
     echo "" >&2
     echo "To bypass this check (not recommended), use: csd --force" >&2
     return 1

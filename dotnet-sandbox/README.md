@@ -2,9 +2,18 @@
 
 Docker sandbox for .NET 10 development with WASM workloads and Claude Code integration.
 
+## Overview
+
+This sandbox provides:
+- .NET 10 SDK (LTS) with `wasm-tools` workload
+- PowerShell
+- Node.js LTS via nvm (with typescript, eslint, prettier)
+- Claude Code CLI with credentials
+- VS Code Server support
+
 ## Prerequisites
 
-- Docker Desktop 4.29+ with Docker sandbox feature enabled
+- Docker Desktop 4.50+ with Docker sandbox feature enabled
 - macOS, Linux, or Windows (WSL2)
 
 To enable Docker sandbox:
@@ -25,15 +34,7 @@ source ./aliases.sh
 csd
 ```
 
-Volumes are created automatically on first run.
-
-## What's Included
-
-- .NET 10 SDK (LTS) with `wasm-tools` workload
-- PowerShell
-- Node.js LTS via nvm (with typescript, eslint, prettier)
-- Claude Code CLI with credentials
-- VS Code Server support
+Most volumes are created automatically on first run. The `docker-claude-sandbox-data` volume is required and must be created beforehand via `../claude/sync-plugins.sh`.
 
 ## The `csd` Command
 
@@ -73,18 +74,18 @@ csd-stop-all     # Interactive selection to stop sandbox containers
 
 | Volume Name | Mount Point | Purpose |
 |-------------|-------------|---------|
-| `docker-claude-sandbox-data` | `/mnt/claude-data` | Claude credentials (required, managed by sync-plugins.sh) |
+| `docker-claude-sandbox-data` | `/mnt/claude-data` | Claude credentials (required, managed by sync-plugins.sh - DO NOT manually edit) |
 | `docker-claude-plugins` | `/home/agent/.claude/plugins` | Claude Code plugins |
 | `dotnet-sandbox-vscode` | `/home/agent/.vscode-server` | VS Code Server data |
 | `dotnet-sandbox-nuget` | `/home/agent/.nuget` | NuGet package cache |
 | `dotnet-sandbox-gh` | `/home/agent/.config/gh` | GitHub CLI config |
 
-The `docker-claude-sandbox-data` volume must exist before starting. If missing, run:
+The `docker-claude-sandbox-data` volume must exist before starting. Create it by running:
 ```bash
 ../claude/sync-plugins.sh
 ```
 
-Other volumes are created automatically by `csd`.
+This volume is managed by Claude/sync-plugins.sh and should not be manually edited. Other volumes are created automatically by `csd`.
 
 ## Port Forwarding
 
@@ -110,10 +111,17 @@ Sync host settings into the sandbox before starting:
 ./sync-all.sh
 ```
 
-These scripts detect your OS and use the appropriate source paths:
+These scripts detect your OS and use the appropriate source paths.
+
+**VS Code paths:**
 - macOS: `~/Library/Application Support/Code/User/`
 - Linux: `~/.config/Code/User/`
 - Windows (WSL): `/mnt/c/Users/<user>/AppData/Roaming/Code/User/`
+
+**VS Code Insiders paths:**
+- macOS: `~/Library/Application Support/Code - Insiders/User/`
+- Linux: `~/.config/Code - Insiders/User/`
+- Windows (WSL): `/mnt/c/Users/<user>/AppData/Roaming/Code - Insiders/User/`
 
 ## Security
 
@@ -123,7 +131,7 @@ Docker sandbox handles all security automatically:
 - Enhanced Container Isolation (ECI)
 - User namespace isolation
 
-**No manual security configuration required.** The `csd` wrapper enforces sandbox usage - it blocks if Docker sandbox is unavailable and warns if ECI status cannot be determined.
+**No manual security configuration required.** The `csd` wrapper enforces sandbox usage and blocks if Docker sandbox is unavailable.
 
 Plain `docker run` is allowed for CI/smoke tests (see Testing below).
 
@@ -161,28 +169,23 @@ For correct nvm-aware access, use a login shell:
 bash -lc "node --version"
 ```
 
-### ECI Detection
-
-Enhanced Container Isolation (ECI) detection is best-effort. The `csd` wrapper warns if ECI status cannot be determined but proceeds anyway.
-
 ### VS Code Insiders
 
-VS Code and VS Code Insiders use separate settings directories. Use the appropriate sync script for your installation.
+VS Code and VS Code Insiders use separate settings directories and host paths. Use the appropriate sync script for your installation (`sync-vscode.sh` vs `sync-vscode-insiders.sh`).
 
 ## Troubleshooting
 
 ### "Docker sandbox is not available"
 
 Ensure you have:
-1. Docker Desktop 4.29 or later
+1. Docker Desktop 4.50 or later
 2. Docker sandbox feature enabled in Settings > Features in development
 
 ### "Required volume not found"
 
-Run `../claude/sync-plugins.sh` to create required volumes, or manually:
-```bash
-docker volume create docker-claude-sandbox-data
-```
+Run `../claude/sync-plugins.sh` to create and populate the required Claude credentials volume.
+
+Note: Manually running `docker volume create docker-claude-sandbox-data` creates an empty volume but does not populate it with credentials. Always use `sync-plugins.sh` for proper setup.
 
 ### "Image not found"
 
