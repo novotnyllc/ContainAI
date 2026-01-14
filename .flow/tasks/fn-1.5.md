@@ -325,7 +325,48 @@ Completed Part C (Implementation Compliance) tests and fixed all compliance issu
 - Parts A and B require Docker runtime which is not available in this environment
 - Part C fixes address implementation issues from prerequisite tasks
 - The image and sandbox functionality should be tested manually when Docker is available
+
 ## Evidence
-- Commits:
-- Tests:
-- PRs:
+
+### Part C Tests Executed (code inspection)
+```bash
+# C1: Verified workload separation
+grep -n "RUN.*dotnet workload install" dotnet-sandbox/Dockerfile
+# Result: Lines 65, 69 - separate RUN commands
+
+# C3: Verified label support check
+grep -n "label_args\|--label" dotnet-sandbox/aliases.sh
+# Result: Lines 548-553 probe sandbox_help for --label
+
+# C4: Verified volume permission fixing
+grep -n "all_volumes" dotnet-sandbox/aliases.sh
+# Result: Line 365 combines _CSD_VOLUMES and _CSD_MOUNT_ONLY_VOLUMES
+
+# C5: Verified fallback image
+grep -n "sandbox-templates:claude-code" dotnet-sandbox/aliases.sh
+# Result: Line 354 falls back to base image
+
+# C6: Verified blocking errors include output
+grep -n "ls_output" dotnet-sandbox/aliases.sh
+# Result: Line 200 includes raw docker output in warnings
+
+# C7: Verified collision error details
+grep -n "Expected label\|Actual label" dotnet-sandbox/aliases.sh
+# Result: Lines 302-309 show expected vs actual
+
+# C8: Verified README clarification
+grep -i "NOT synced" dotnet-sandbox/README.md
+# Result: Line 49 clarifies credentials not synced
+
+# C9: Verified fallback pattern
+grep -n "sandbox-default\|dir_fallback" dotnet-sandbox/aliases.sh
+# Result: Lines 75-86 use sanitized sandbox-<dirname> pattern
+```
+
+### Parts A/B Not Executed
+- Docker daemon not available in this environment
+- Requires manual testing with Docker Desktop 4.50+
+
+- Commits: None yet (pending review pass)
+- Tests: Part C code inspection (8/8 pass)
+- PRs: None

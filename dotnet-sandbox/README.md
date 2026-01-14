@@ -96,12 +96,12 @@ The `docker-claude-sandbox-data` volume must exist before starting (see Quick St
 
 ## Port Forwarding
 
-Ports 5000-5010 are exposed for web development. Access WASM apps at:
+Port 5000 is exposed for web development. Access WASM apps at:
 ```
 http://localhost:5000
 ```
 
-Note: Port publishing requires `docker sandbox run` to support `-p`. If not supported, ports are not published (you'll see a message).
+Note: Port publishing requires `docker sandbox run` to support `-p`. If not supported, ports are not published (you'll see a message). Additional ports can be exposed by rebuilding or using `docker run` directly.
 
 ## Sync Scripts
 

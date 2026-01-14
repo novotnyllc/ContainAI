@@ -32,7 +32,8 @@ fi
 _csd_container_name() {
     local name
 
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # Guard git usage to avoid "command not found" noise in minimal environments
+    if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         local repo_name branch_name
         repo_name="$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)"
 
@@ -70,11 +71,17 @@ _csd_container_name() {
 
     # Final fallback if name became empty after all processing
     # Use sandbox-<dirname> pattern, not generic sandbox-container
+    # Apply same sanitization as main path for consistency
     if [[ -z "$name" ]]; then
         local dir_fallback
         dir_fallback="$(basename "$(pwd)")"
+        # Sanitize: lowercase, replace non-alphanumeric with dash, collapse dashes
+        dir_fallback="$(printf '%s' "$dir_fallback" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-*//;s/-*$//')"
         if [[ -n "$dir_fallback" ]]; then
             name="sandbox-$dir_fallback"
+            # Truncate to 63 characters (Docker limit)
+            name="${name:0:63}"
+            name="$(printf '%s' "$name" | sed 's/-*$//')"
         else
             name="sandbox-default"
         fi
@@ -148,6 +155,9 @@ _csd_check_sandbox() {
        ! printf '%s' "$ls_output" | grep -qiE "no sandboxes"; then
         echo "ERROR: Docker sandbox feature is not enabled" >&2
         echo "" >&2
+        echo "  docker sandbox ls output:" >&2
+        printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
+        echo "" >&2
         echo "Please enable sandbox in Docker Desktop:" >&2
         echo "  Settings > Features in development > Docker sandbox" >&2
         echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
@@ -170,6 +180,9 @@ _csd_check_sandbox() {
     if printf '%s' "$ls_output" | grep -qiE "not recognized|unknown command|not a docker command|command not found"; then
         echo "ERROR: Docker sandbox is not available" >&2
         echo "" >&2
+        echo "  docker sandbox ls output:" >&2
+        printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
+        echo "" >&2
         echo "Docker sandbox requires Docker Desktop 4.50+ with sandbox feature enabled." >&2
         echo "Please ensure you have:" >&2
         echo "  1. Docker Desktop 4.50 or later installed" >&2
@@ -183,6 +196,9 @@ _csd_check_sandbox() {
     if printf '%s' "$ls_output" | grep -qiE "permission denied"; then
         echo "ERROR: Permission denied accessing Docker" >&2
         echo "" >&2
+        echo "  docker sandbox ls output:" >&2
+        printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
+        echo "" >&2
         echo "Please ensure Docker is accessible:" >&2
         echo "  Docker Desktop (macOS/Windows): Ensure Docker Desktop is running and try restarting it" >&2
         echo "  Linux: Add your user to the 'docker' group: sudo usermod -aG docker \$USER" >&2
@@ -194,6 +210,9 @@ _csd_check_sandbox() {
     # Check for daemon not running (tighter match, excludes permission denied)
     if printf '%s' "$ls_output" | grep -qiE "daemon.*not running|connection refused|Is the docker daemon running"; then
         echo "ERROR: Docker daemon is not running" >&2
+        echo "" >&2
+        echo "  docker sandbox ls output:" >&2
+        printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
         echo "" >&2
         echo "Please start Docker Desktop and try again." >&2
         echo "" >&2
@@ -248,7 +267,7 @@ _csd_get_container_image() {
 }
 
 # Verify container was created by csd (has our label or uses our image)
-# Returns: 0=yes (csd container), 1=no (foreign container)
+# Returns: 0=confirmed (label matches), 1=foreign (no match), 2=ambiguous (image matches but no label)
 # Falls back to image name verification if labels not supported
 _csd_is_our_container() {
     local container_name="$1"
@@ -262,15 +281,58 @@ _csd_is_our_container() {
 
     # Fallback: if no label, check if container uses our image
     # This handles cases where docker sandbox run doesn't support --label
+    # Returns 2 to indicate "probable match" requiring user confirmation via --restart
     if [[ -z "$label_value" || "$label_value" == "<no value>" ]]; then
         local image_name
         image_name="$(_csd_get_container_image "$container_name")"
         if [[ "$image_name" == "$_CSD_IMAGE" ]]; then
-            return 0
+            # Image matches but no label - could be ours (pre-label) or foreign
+            return 2  # Ambiguous - caller should warn
         fi
     fi
 
-    return 1
+    return 1  # Definitely foreign
+}
+
+# Check container ownership with appropriate messaging
+# Returns: 0=owned, 1=foreign (with error), 2=ambiguous (with warning)
+_csd_check_container_ownership() {
+    local container_name="$1"
+    local ownership_rc
+
+    _csd_is_our_container "$container_name"
+    ownership_rc=$?
+
+    if [[ $ownership_rc -eq 0 ]]; then
+        return 0  # Confirmed ours
+    elif [[ $ownership_rc -eq 2 ]]; then
+        # Ambiguous - image matches but no label
+        echo "WARNING: Container '$container_name' uses our image but lacks csd label" >&2
+        echo "  This may be a container created before label support or a manual container." >&2
+        echo "  Proceeding, but use 'csd --restart' to take ownership if needed." >&2
+        echo "" >&2
+        return 0  # Proceed with warning
+    else
+        # Foreign container
+        local actual_label actual_image
+        actual_label="$(_csd_get_container_label "$container_name")"
+        actual_image="$(_csd_get_container_image "$container_name")"
+        # Normalize empty or "<no value>" to "<not set>"
+        if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
+            actual_label="<not set>"
+        fi
+        echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
+        echo "" >&2
+        echo "  Expected label 'csd.sandbox': dotnet-sandbox" >&2
+        echo "  Actual label 'csd.sandbox':   ${actual_label:-<not set>}" >&2
+        echo "  Expected image:               $_CSD_IMAGE" >&2
+        echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
+        echo "" >&2
+        echo "This is a name collision with a container not managed by csd." >&2
+        echo "To recreate as a csd-managed sandbox container, run: csd --restart" >&2
+        echo "" >&2
+        return 1
+    fi
 }
 
 # Ensure required volumes exist with correct permissions
@@ -281,16 +343,31 @@ _csd_ensure_volumes() {
     # Check for mount-only volumes (fail if missing - required for operation)
     for vol_spec in "${_CSD_MOUNT_ONLY_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
-        if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
-            echo "ERROR: Required volume '$volume_name' not found" >&2
-            echo "" >&2
-            echo "This volume is required for Claude credentials." >&2
-            echo "" >&2
-            echo "Option 1: Create empty volume (then authenticate inside container):" >&2
-            echo "  docker volume create $volume_name" >&2
-            echo "" >&2
-            echo "Option 2: Sync existing host credentials/plugins (if you have Claude on host):" >&2
-            echo "  ${_CSD_SCRIPT_DIR}/../claude/sync-plugins.sh" >&2
+        local inspect_output inspect_rc
+        inspect_output="$(docker volume inspect "$volume_name" 2>&1)"
+        inspect_rc=$?
+        if [[ $inspect_rc -ne 0 ]]; then
+            # Distinguish "not found" from docker errors
+            if printf '%s' "$inspect_output" | grep -qiE "no such volume|not found"; then
+                echo "ERROR: Required volume '$volume_name' not found" >&2
+                echo "" >&2
+                echo "This volume is required for Claude credentials." >&2
+                echo "" >&2
+                echo "Option 1: Create empty volume (then authenticate inside container):" >&2
+                echo "  docker volume create \"$volume_name\"" >&2
+                echo "" >&2
+                echo "Option 2: Sync plugins/settings (does NOT sync credentials), then claude login:" >&2
+                echo "  ${_CSD_SCRIPT_DIR}/../claude/sync-plugins.sh" >&2
+                echo "  # Then inside container: claude login" >&2
+            else
+                # Docker failure (daemon down, permission denied, etc.)
+                echo "ERROR: Failed to check volume '$volume_name'" >&2
+                echo "" >&2
+                echo "  docker volume inspect output:" >&2
+                printf '%s\n' "$inspect_output" | sed 's/^/    /' >&2
+                echo "" >&2
+                echo "Please ensure Docker is running and accessible." >&2
+            fi
             return 1
         fi
     done
@@ -402,6 +479,36 @@ csd() {
 
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
+        # Check ownership before removing - prevent accidentally deleting foreign containers
+        _csd_is_our_container "$container_name"
+        local ownership_rc=$?
+        if [[ $ownership_rc -eq 1 ]]; then
+            # Definitely foreign - block unless user explicitly confirms
+            local actual_label actual_image
+            actual_label="$(_csd_get_container_label "$container_name")"
+            actual_image="$(_csd_get_container_image "$container_name")"
+            if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
+                actual_label="<not set>"
+            fi
+            echo "ERROR: Cannot restart - container '$container_name' was not created by csd" >&2
+            echo "" >&2
+            echo "  Expected label 'csd.sandbox': dotnet-sandbox" >&2
+            echo "  Actual label 'csd.sandbox':   $actual_label" >&2
+            echo "  Expected image:               $_CSD_IMAGE" >&2
+            echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
+            echo "" >&2
+            echo "To avoid data loss, csd will not delete containers it didn't create." >&2
+            echo "Remove the conflicting container manually if needed:" >&2
+            echo "  docker rm -f '$container_name'" >&2
+            echo "" >&2
+            return 1
+        elif [[ $ownership_rc -eq 2 ]]; then
+            # Ambiguous - warn but proceed since --restart is explicit
+            echo "WARNING: Container '$container_name' uses our image but lacks csd label" >&2
+            echo "  Proceeding with --restart as requested." >&2
+            echo "" >&2
+        fi
+
         echo "Stopping existing container..."
         # Let errors surface for stop (only ignore "not running")
         local stop_output
@@ -442,41 +549,26 @@ csd() {
     case "$container_state" in
         running)
             # Verify this container was created by csd (has our label or image)
-            if ! _csd_is_our_container "$container_name"; then
-                local actual_label actual_image
-                actual_label="$(_csd_get_container_label "$container_name")"
-                actual_image="$(_csd_get_container_image "$container_name")"
-                echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
-                echo "" >&2
-                echo "  Expected label 'csd.sandbox': dotnet-sandbox" >&2
-                echo "  Actual label 'csd.sandbox':   ${actual_label:-<not set>}" >&2
-                echo "  Expected image:               $_CSD_IMAGE" >&2
-                echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
-                echo "" >&2
-                echo "This is a name collision with a container not managed by csd." >&2
-                echo "To recreate as a csd-managed sandbox container, run: csd --restart" >&2
-                echo "" >&2
+            if ! _csd_check_container_ownership "$container_name"; then
                 return 1
             fi
+            # Warn if sandbox unavailable (non-blocking for running containers)
+            if ! _csd_check_sandbox; then
+                if [[ "$force_flag" != "true" ]]; then
+                    echo "WARNING: Sandbox unavailable but attaching to existing container" >&2
+                    echo "  Use --force to suppress this warning, or --restart to recreate as sandbox" >&2
+                    echo "" >&2
+                fi
+            fi
             echo "Attaching to running container..."
+            # NOTE: Using docker exec (not docker sandbox exec) is intentional.
+            # Docker Desktop sandboxes are regular containers accessible via standard docker commands.
+            # The sandbox provides isolation at creation time; exec/start work normally.
             docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             ;;
         exited|created)
             # Verify this container was created by csd (has our label or image)
-            if ! _csd_is_our_container "$container_name"; then
-                local actual_label actual_image
-                actual_label="$(_csd_get_container_label "$container_name")"
-                actual_image="$(_csd_get_container_image "$container_name")"
-                echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
-                echo "" >&2
-                echo "  Expected label 'csd.sandbox': dotnet-sandbox" >&2
-                echo "  Actual label 'csd.sandbox':   ${actual_label:-<not set>}" >&2
-                echo "  Expected image:               $_CSD_IMAGE" >&2
-                echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
-                echo "" >&2
-                echo "This is a name collision with a container not managed by csd." >&2
-                echo "To recreate as a csd-managed sandbox container, run: csd --restart" >&2
-                echo "" >&2
+            if ! _csd_check_container_ownership "$container_name"; then
                 return 1
             fi
             # Check sandbox availability before starting
@@ -508,15 +600,28 @@ csd() {
             done
 
             # Get sandbox run help to check supported flags
-            local sandbox_help
+            local sandbox_help sandbox_help_rc
             sandbox_help="$(docker sandbox run --help 2>&1)"
+            sandbox_help_rc=$?
+
+            # Check if sandbox run help failed (indicates sandbox unavailable)
+            if [[ $sandbox_help_rc -ne 0 ]]; then
+                echo "ERROR: docker sandbox run is not available" >&2
+                echo "" >&2
+                echo "  docker sandbox run --help output:" >&2
+                printf '%s\n' "$sandbox_help" | sed 's/^/    /' >&2
+                echo "" >&2
+                echo "Please ensure Docker Desktop 4.50+ with sandbox feature is enabled." >&2
+                return 1
+            fi
 
             # Check if sandbox supports port publishing and which flag to use
+            # Use single port 5000 for compatibility (ranges may not be supported)
             local port_args=()
             if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])-p([[:space:]]|,|$)'; then
-                port_args=("-p" "5000-5010:5000-5010")
+                port_args=("-p" "5000:5000")
             elif printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--publish([[:space:]]|,|$)'; then
-                port_args=("--publish" "5000-5010:5000-5010")
+                port_args=("--publish" "5000:5000")
             else
                 echo "Note: docker sandbox run does not support port publishing; ports not forwarded"
             fi

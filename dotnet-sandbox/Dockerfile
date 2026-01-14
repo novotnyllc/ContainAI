@@ -5,10 +5,9 @@
 FROM docker/sandbox-templates:claude-code
 
 # Build arguments for .NET channel selection
-# Supported values: lts, 10.0 (or any channel resolving to .NET 10.x)
-# NOTE: sts/preview channels may resolve to non-10 versions and will fail the version check
-# Default to lts per spec; version 10 verification ensures correct major version
-ARG DOTNET_CHANNEL=lts
+# Default to 10.0 to ensure consistent builds regardless of LTS status
+# Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
+ARG DOTNET_CHANNEL=10.0
 
 # Switch to root for system-level installations
 USER root
@@ -41,6 +40,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install .NET SDK using dotnet-install.sh (NOT apt)
+# NOTE: Supply chain risk - downloads script from Microsoft. For production use,
+# consider vendoring the script or verifying a known checksum.
+# See: https://dot.net/v1/dotnet-install.sh (official Microsoft script)
 # Verify .NET 10 is installed per acceptance criteria
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
@@ -48,13 +50,18 @@ RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
     && rm /tmp/dotnet-install.sh \
     && dotnet --version \
-    && dotnet --version | grep -E '^10\.' || (echo "ERROR: Expected .NET 10.x" >&2 && exit 1)
+    && if ! dotnet --version | grep -qE '^10\.'; then \
+         echo "ERROR: Expected .NET 10.x, got $(dotnet --version)" >&2; \
+         exit 1; \
+       fi
 
 # Set .NET environment variables
 ENV DOTNET_ROOT=/usr/share/dotnet
 ENV PATH="${PATH}:/usr/share/dotnet"
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+ENV NUGET_XMLDOC_MODE=skip
 
 # Install WASM workloads
 # wasm-tools is required (hard fail)
@@ -82,12 +89,17 @@ RUN id -u agent | grep -x 1000 || (echo "ERROR: agent user must have UID 1000" >
 SHELL ["/bin/bash", "-c"]
 
 # Install nvm and Node.js as agent user
+# NOTE: Supply chain risk - downloads script from GitHub. Version v0.40.1 is pinned.
+# For production use, consider verifying the script checksum or vendoring it.
+# See: https://github.com/nvm-sh/nvm/releases
 USER agent
-RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash \
+RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh -o /tmp/nvm-install.sh \
+    && bash /tmp/nvm-install.sh \
+    && rm /tmp/nvm-install.sh \
     && source ~/.nvm/nvm.sh \
     && nvm install --lts \
     && nvm alias default lts/* \
-    && npm install -g typescript eslint prettier
+    && npm install -g typescript@5 eslint@8 prettier@3
 
 # Create system-wide symlinks for non-interactive access (as root)
 # Use nvm which to resolve the default node version deterministically
@@ -147,8 +159,8 @@ RUN mkdir -p /home/agent/.vscode-server \
 USER agent
 RUN ln -sf /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json
 
-# Expose ports for WASM app serving
-EXPOSE 5000-5010
+# Expose primary port for WASM app serving (additional ports available on demand)
+EXPOSE 5000
 
 # Set working directory
 WORKDIR /home/agent/workspace
