@@ -1,38 +1,41 @@
 # fn-1.9 Apply security hardening (capabilities, seccomp)
 
 ## Description
-**NOT NEEDED** - Docker sandbox handles all security automatically.
+**SKIPPED** - Docker sandbox handles all security automatically.
 
-### Why This Task is Obsolete
+### Why This Task is Not Needed
 
 When using `docker sandbox run`, Docker handles:
 - Capability dropping/adding
-- seccomp profiles  
+- seccomp profiles
 - ECI (Enhanced Container Isolation)
 - User namespace isolation
 
 We do NOT manually configure security flags.
 
-### What Was Removed
+### What Was Not Implemented (by design)
 
-Originally this task planned to add:
+This task originally planned to add:
 - `--cap-drop=ALL` / `--cap-add=...`
 - `--security-opt=seccomp=unconfined`
 - Manual runArgs in devcontainer.json
 
-All of this is now handled by `docker sandbox run` automatically.
+All of this is handled by `docker sandbox run` automatically.
 
-### Action
+### Verification
 
-Mark this task as **SKIPPED** or close immediately - no implementation needed.
+- No devcontainer.json in this project (not using dev containers)
+- Helper scripts use `csd` wrapper which uses `docker sandbox run`
+- No manual security flags added anywhere
+
 ## Acceptance
 - [x] Task marked as not needed (docker sandbox handles security)
-- [ ] Verify no manual security flags in devcontainer.json
-- [ ] Verify no manual security flags in helper scripts
+- [x] No devcontainer.json exists (N/A - not using dev containers)
+- [x] Helper scripts use docker sandbox (enforced by csd wrapper)
 ## Done summary
-TBD
+SKIPPED - Docker sandbox handles all security automatically. No manual security configuration needed.
 
 ## Evidence
-- Commits:
-- Tests:
-- PRs:
+- Commits: N/A (no implementation needed)
+- Tests: N/A
+- PRs: N/A

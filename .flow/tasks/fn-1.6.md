@@ -1,42 +1,41 @@
-# fn-1.6 Add GitHub Copilot and VS Code data volume mounts
+# fn-1.6 Add volume mount points in Dockerfile
 
 ## Description
-Add volume mount for GitHub Copilot CLI authentication to persist across container rebuilds.
+Create mount point directories in Dockerfile for volumes (per spec Volume Strategy).
 
-### Volume Mount to Add
+### Mount Points to Create
 
 | Volume | Container Path | Purpose |
 |--------|----------------|---------|
-| `docker-github-copilot` | `/home/agent/.config/github-copilot` | Copilot CLI auth (`hosts.json`) |
+| `dotnet-sandbox-vscode` | `/home/agent/.vscode-server` | VS Code server data + Copilot extension auth |
+| `dotnet-sandbox-nuget` | `/home/agent/.nuget` | NuGet package cache |
+| `dotnet-sandbox-gh` | `/home/agent/.config/gh` | GitHub CLI config |
+| `docker-claude-plugins` | `/home/agent/.claude/plugins` | Claude plugins (reused from existing) |
 
-**Note**: The `docker-vscode-data` volume was DROPPED. VS Code Remote Containers stores all data (globalStorage, workspaceStorage, extensions, settings) under `~/.vscode-server`, which is covered by `docker-vscode-server`. The `~/.config/Code` path is for local VS Code, not Remote Containers.
-
-### GitHub Copilot Auth Locations
-
-Per research, Copilot stores auth in two places:
-- **CLI**: `~/.config/github-copilot/hosts.json` (OAuth tokens) - requires separate volume for credential isolation
-- **VS Code Extension**: `~/.vscode-server/data/User/globalStorage/github.copilot/` - covered by vscode-server volume
+**Note**: `docker-claude-sandbox-data` is managed by docker sandbox / sync-plugins.sh - we do NOT create this mount point (symlink handles credentials).
 
 ### Implementation
 
-1. Update Dockerfile to create mount point directory:
+1. Update Dockerfile to create mount point directories:
    ```dockerfile
-   RUN mkdir -p /home/agent/.config/github-copilot \
-       && chown -R agent:agent /home/agent/.config
+   RUN mkdir -p /home/agent/.vscode-server \
+               /home/agent/.nuget \
+               /home/agent/.config/gh \
+               /home/agent/.claude/plugins \
+       && chown -R agent:agent /home/agent/.vscode-server \
+                               /home/agent/.nuget \
+                               /home/agent/.config \
+                               /home/agent/.claude
    ```
 
-2. Ensure proper permissions (agent user owns directory)
-
-### Reference
-
-- Existing volume pattern: `claude/sync-plugins.sh:21-23`
-- GitHub Copilot CLI auth: `~/.config/github-copilot/hosts.json`
-- VS Code Copilot extension: `~/.vscode-server/data/User/globalStorage/github.copilot/`
+2. Ensure proper permissions (agent user owns directories)
 ## Acceptance
-- [ ] Dockerfile creates `/home/agent/.config/github-copilot` directory
-- [ ] Directory owned by agent user (UID 1000): `docker run --rm ... stat -c '%U' /home/agent/.config/github-copilot` outputs `agent`
-- [ ] After Copilot CLI auth: `~/.config/github-copilot/hosts.json` contains token
-- [ ] After container rebuild: `hosts.json` persists (volume not destroyed)
+- [ ] Dockerfile creates `/home/agent/.vscode-server` directory
+- [ ] Dockerfile creates `/home/agent/.nuget` directory
+- [ ] Dockerfile creates `/home/agent/.config/gh` directory
+- [ ] Dockerfile creates `/home/agent/.claude/plugins` directory
+- [ ] All directories owned by agent user (UID 1000)
+- [ ] Directories have correct permissions
 ## Done summary
 TBD
 
