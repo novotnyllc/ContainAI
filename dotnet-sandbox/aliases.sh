@@ -10,16 +10,23 @@
 # ==============================================================================
 # Note: No strict mode - this file is sourced into interactive shells
 
-# Constants
-readonly _CSD_IMAGE="dotnet-sandbox:latest"
-readonly _CSD_LABEL="csd.sandbox=dotnet-sandbox"
-readonly _CSD_VOLUMES=(
-    "docker-claude-sandbox-data:/mnt/claude-data"
-    "dotnet-sandbox-vscode:/home/agent/.vscode-server"
-    "dotnet-sandbox-nuget:/home/agent/.nuget"
-    "dotnet-sandbox-gh:/home/agent/.config/gh"
-    "docker-claude-plugins:/home/agent/.claude/plugins"
-)
+# Constants (guarded for safe re-sourcing)
+if [[ -z "${_CSD_IMAGE-}" ]]; then
+    _CSD_IMAGE="dotnet-sandbox:latest"
+    _CSD_LABEL="csd.sandbox=dotnet-sandbox"
+    _CSD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # Volumes that csd creates/ensures (per spec)
+    _CSD_VOLUMES=(
+        "dotnet-sandbox-vscode:/home/agent/.vscode-server"
+        "dotnet-sandbox-nuget:/home/agent/.nuget"
+        "dotnet-sandbox-gh:/home/agent/.config/gh"
+        "docker-claude-plugins:/home/agent/.claude/plugins"
+    )
+    # Additional volumes to mount (managed elsewhere, not created by csd)
+    _CSD_MOUNT_ONLY_VOLUMES=(
+        "docker-claude-sandbox-data:/mnt/claude-data"
+    )
+fi
 
 # Generate sanitized container name from git repo/branch or directory
 _csd_container_name() {
@@ -80,8 +87,8 @@ _csd_check_sandbox() {
     local help_output
     help_output="$(docker sandbox --help 2>&1)" || true
 
-    # Match various error patterns for missing subcommand
-    if printf '%s' "$help_output" | grep -qiE "not recognized|unknown command|not a docker command|invalid|Usage:.*docker"; then
+    # Match known error patterns for missing subcommand
+    if printf '%s' "$help_output" | grep -qiE "not recognized|unknown command|not a docker command"; then
         echo "ERROR: Docker sandbox is not available" >&2
         echo "" >&2
         echo "Docker sandbox requires Docker Desktop 4.29+ with sandbox feature enabled." >&2
@@ -94,17 +101,16 @@ _csd_check_sandbox() {
 
     # Help output looks like valid sandbox help, so the command exists
     # but ls may have failed for another reason (e.g., no sandboxes yet, daemon issues)
-    # Be conservative: if we can't positively confirm sandbox works, fail
+    # Per spec: treat as available if help mentions sandbox-specific commands
     if printf '%s' "$help_output" | grep -qE "sandbox.*run|Create.*sandbox|list.*sandbox"; then
         # Help mentions sandbox-specific commands, likely valid
         return 0
     fi
 
-    # Can't confirm sandbox is available - fail safe
-    echo "ERROR: Unable to verify Docker sandbox availability" >&2
-    echo "docker sandbox ls failed and help output was unexpected." >&2
-    echo "" >&2
-    return 1
+    # Can't confirm sandbox is available - warn but proceed (fail-open per fn-1.11 intent)
+    echo "WARNING: Unable to verify Docker sandbox availability" >&2
+    echo "docker sandbox ls failed; proceeding anyway." >&2
+    return 0
 }
 
 # Ensure required volumes exist with correct permissions
@@ -179,7 +185,7 @@ csd() {
     # Check if image exists
     if ! docker image inspect "$_CSD_IMAGE" >/dev/null 2>&1; then
         echo "ERROR: Image '$_CSD_IMAGE' not found" >&2
-        echo "Please build the image first: ./dotnet-sandbox/build.sh" >&2
+        echo "Please build the image first: ${_CSD_SCRIPT_DIR}/build.sh" >&2
         return 1
     fi
 
@@ -209,18 +215,21 @@ csd() {
             docker start -ai "$container_name"
             ;;
         none)
-            # Ensure volumes exist
+            # Ensure volumes exist (only csd-managed volumes)
             _csd_ensure_volumes
 
-            # Build volume arguments
+            # Build volume arguments (both csd-managed and mount-only volumes)
             local vol_args=()
             for vol_spec in "${_CSD_VOLUMES[@]}"; do
+                vol_args+=("-v" "$vol_spec")
+            done
+            for vol_spec in "${_CSD_MOUNT_ONLY_VOLUMES[@]}"; do
                 vol_args+=("-v" "$vol_spec")
             done
 
             # Check if sandbox supports port publishing
             local port_args=()
-            if docker sandbox run --help 2>&1 | grep -qE '\-p,?\s|--publish'; then
+            if docker sandbox run --help 2>&1 | grep -qE '(^|[[:space:]])(-p|--publish)([[:space:]]|,|$)'; then
                 port_args=("-p" "5000-5010:5000-5010")
             else
                 echo "Note: docker sandbox run does not support -p; ports not published"
