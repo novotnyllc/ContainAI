@@ -2,4 +2,4 @@
 # Placeholder: Will be implemented in fn-1.2
 # dotnet-sandbox Dockerfile
 FROM scratch
-# TODO: Full implementation in fn-1.2
+# Full implementation: fn-1.2
