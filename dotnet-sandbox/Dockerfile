@@ -36,12 +36,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install .NET SDK using dotnet-install.sh (NOT apt)
+# Verify .NET 10 is installed per acceptance criteria
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
     && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} --install-dir /usr/share/dotnet \
     && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
     && rm /tmp/dotnet-install.sh \
-    && dotnet --version
+    && dotnet --version \
+    && dotnet --version | grep -E '^10\.' || (echo "ERROR: Expected .NET 10.x" >&2 && exit 1)
 
 # Set .NET environment variables
 ENV DOTNET_ROOT=/usr/share/dotnet
@@ -49,21 +51,29 @@ ENV PATH="${PATH}:/usr/share/dotnet"
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 
-# Install WASM workloads
-RUN dotnet workload install wasm-tools wasm-tools-net9
+# Install WASM workloads and verify installation
+RUN dotnet workload install wasm-tools wasm-tools-net9 \
+    && dotnet workload list | grep -F wasm-tools
 
-# Install PowerShell via Microsoft's recommended method
+# Install PowerShell via Microsoft's recommended method and verify
 RUN wget -q "https://packages.microsoft.com/config/ubuntu/$(. /etc/os-release && echo $VERSION_ID)/packages-microsoft-prod.deb" -O /tmp/packages-microsoft-prod.deb \
     && dpkg -i /tmp/packages-microsoft-prod.deb \
     && rm /tmp/packages-microsoft-prod.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends powershell \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pwsh --version
+
+# Verify agent user has expected UID (inherited from base image)
+RUN id -u agent | grep -x 1000 || (echo "ERROR: agent user must have UID 1000" >&2 && exit 1)
+
+# Use bash for nvm-related commands (nvm.sh requires bash, not dash)
+SHELL ["/bin/bash", "-c"]
 
 # Install nvm and Node.js as agent user
 USER agent
 RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash \
-    && . ~/.nvm/nvm.sh \
+    && source ~/.nvm/nvm.sh \
     && nvm install --lts \
     && nvm alias default lts/* \
     && npm install -g typescript eslint prettier
@@ -71,7 +81,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh |
 # Create system-wide symlinks for non-interactive access (as root)
 # Use nvm which to resolve the default node version deterministically
 USER root
-RUN NODE_PATH=$(su - agent -c '. ~/.nvm/nvm.sh && nvm which default' | xargs dirname) \
+RUN NODE_PATH=$(su - agent -c 'source ~/.nvm/nvm.sh && nvm which default' | xargs dirname) \
     && ln -sf "$NODE_PATH/node" /usr/local/bin/node \
     && ln -sf "$NODE_PATH/npm" /usr/local/bin/npm \
     && ln -sf "$NODE_PATH/npx" /usr/local/bin/npx
@@ -79,6 +89,16 @@ RUN NODE_PATH=$(su - agent -c '. ~/.nvm/nvm.sh && nvm which default' | xargs dir
 # Create /etc/profile.d/nvm.sh for login shells
 RUN echo 'export NVM_DIR="/home/agent/.nvm"' > /etc/profile.d/nvm.sh \
     && echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' >> /etc/profile.d/nvm.sh
+
+# Verify Node.js installation via symlink and login shell
+RUN /usr/local/bin/node --version \
+    && bash -lc "node --version" \
+    && bash -lc "nvm --version" \
+    && bash -lc "tsc --version && eslint --version && prettier --version"
+
+# Ensure workspace directory exists with correct ownership
+RUN mkdir -p /home/agent/workspace \
+    && chown -R agent:agent /home/agent/workspace
 
 # Create Claude credentials symlink (same workaround as claude/Dockerfile)
 USER agent
