@@ -37,9 +37,19 @@ Create mount point directories in Dockerfile for volumes (per spec Volume Strate
 - [ ] All directories owned by agent user (UID 1000)
 - [ ] Directories have correct permissions
 ## Done summary
-TBD
+- Added mount point directories in Dockerfile for volume mounts
+- Created /home/agent/.vscode-server, .nuget, .config/gh, .claude/plugins
+- Set correct ownership (agent:agent) for all directories
 
+Why:
+- Volumes require pre-existing mount points with correct permissions
+- Per Volume Strategy in epic spec
+
+Verification:
+- Dockerfile syntax verified by code review
+- Docker build cannot be tested (daemon not available in CI)
+- All acceptance criteria addressed in implementation
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 4bd004b6afbe5b1de32340943d227201066441ce
+- Tests: Dockerfile syntax review
 - PRs:

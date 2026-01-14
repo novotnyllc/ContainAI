@@ -1,16 +1,25 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-14T17:26:35.550472Z",
   "created_at": "2026-01-13T21:10:26.818277Z",
   "depends_on": [
     "fn-1.2"
   ],
   "epic": "fn-1",
+  "evidence": {
+    "commits": [
+      "4bd004b6afbe5b1de32340943d227201066441ce"
+    ],
+    "prs": [],
+    "tests": [
+      "Dockerfile syntax review"
+    ]
+  },
   "id": "fn-1.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-1.6.md",
-  "status": "todo",
+  "status": "done",
   "title": "Add GitHub Copilot and VS Code data volume mounts",
-  "updated_at": "2026-01-13T23:44:36.689335Z"
+  "updated_at": "2026-01-14T17:27:24.342394Z"
 }

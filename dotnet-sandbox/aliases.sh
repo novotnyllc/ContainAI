@@ -120,15 +120,17 @@ _csd_check_sandbox() {
 }
 
 # Ensure required volumes exist with correct permissions
+# Returns non-zero on failure
 _csd_ensure_volumes() {
-    local volume_name
+    local volume_name vol_spec
 
     # Check for mount-only volumes (warn if missing, but don't create)
     for vol_spec in "${_CSD_MOUNT_ONLY_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
         if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
             echo "WARNING: Volume '$volume_name' not found" >&2
-            echo "  Credentials/settings may not work. Run: claude/sync-plugins.sh" >&2
+            echo "  Create it with: docker volume create $volume_name" >&2
+            echo "  Or run: claude/sync-plugins.sh (for full setup)" >&2
         fi
     done
 
@@ -138,7 +140,10 @@ _csd_ensure_volumes() {
 
         if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
             echo "Creating volume: $volume_name"
-            docker volume create "$volume_name" >/dev/null
+            if ! docker volume create "$volume_name" >/dev/null; then
+                echo "ERROR: Failed to create volume $volume_name" >&2
+                return 1
+            fi
         fi
     done
 
@@ -152,7 +157,10 @@ _csd_ensure_volumes() {
     # Ensure correct ownership on all managed volumes (safe to re-run)
     for vol_spec in "${_CSD_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
-        docker run --rm -u root -v "${volume_name}:/data" "$_CSD_IMAGE" chown 1000:1000 /data
+        if ! docker run --rm -u root -v "${volume_name}:/data" "$_CSD_IMAGE" chown 1000:1000 /data; then
+            echo "ERROR: Failed to fix permissions on volume $volume_name" >&2
+            return 1
+        fi
     done
 }
 

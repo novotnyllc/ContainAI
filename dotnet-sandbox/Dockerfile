@@ -125,6 +125,18 @@ USER agent
 RUN mkdir -p /home/agent/.claude \
     && ln -sf /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json
 
+# Create mount point directories for volumes (per spec Volume Strategy)
+# These directories will be mount targets for named volumes managed by csd wrapper
+USER root
+RUN mkdir -p /home/agent/.vscode-server \
+             /home/agent/.nuget \
+             /home/agent/.config/gh \
+             /home/agent/.claude/plugins \
+    && chown -R agent:agent /home/agent/.vscode-server \
+                            /home/agent/.nuget \
+                            /home/agent/.config \
+                            /home/agent/.claude
+
 # Expose ports for WASM app serving
 EXPOSE 5000-5010
 
