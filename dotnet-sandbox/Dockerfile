@@ -120,22 +120,22 @@ USER root
 RUN mkdir -p /home/agent/workspace \
     && chown -R agent:agent /home/agent/workspace
 
-# Create Claude credentials symlink (same workaround as claude/Dockerfile)
-USER agent
-RUN mkdir -p /home/agent/.claude \
-    && ln -sf /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json
-
 # Create mount point directories for volumes (per spec Volume Strategy)
 # These directories will be mount targets for named volumes managed by csd wrapper
-USER root
+# NOTE: Must be created BEFORE the credentials symlink to avoid chown dereferencing issues
 RUN mkdir -p /home/agent/.vscode-server \
              /home/agent/.nuget \
              /home/agent/.config/gh \
              /home/agent/.claude/plugins \
     && chown -R agent:agent /home/agent/.vscode-server \
                             /home/agent/.nuget \
-                            /home/agent/.config \
+                            /home/agent/.config/gh \
                             /home/agent/.claude
+
+# Create Claude credentials symlink (same workaround as claude/Dockerfile)
+# Done AFTER mount point creation to avoid symlink target being affected by chown
+USER agent
+RUN ln -sf /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json
 
 # Expose ports for WASM app serving
 EXPOSE 5000-5010
