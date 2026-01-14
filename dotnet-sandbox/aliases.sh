@@ -51,14 +51,15 @@ _csd_container_name() {
     fi
 
     # Sanitize: lowercase, replace non-alphanumeric with dash, collapse repeated dashes
-    name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g')"
+    # Use sed 's/--*/-/g' for POSIX portability (BSD/macOS compatible)
+    name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g')"
 
     # Strip leading/trailing dashes
     name="$(printf '%s' "$name" | sed 's/^-*//;s/-*$//')"
 
     # Handle empty or dash-only names
     if [[ -z "$name" || "$name" =~ ^-+$ ]]; then
-        name="sandbox-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-*//;s/-*$//')"
+        name="sandbox-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-*//;s/-*$//')"
     fi
 
     # Truncate to 63 characters (Docker limit)
@@ -118,6 +119,16 @@ _csd_ensure_volumes() {
     local volume_name
     local volumes_to_fix=()
 
+    # Check for mount-only volumes (warn if missing, but don't create)
+    for vol_spec in "${_CSD_MOUNT_ONLY_VOLUMES[@]}"; do
+        volume_name="${vol_spec%%:*}"
+        if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
+            echo "WARNING: Volume '$volume_name' not found" >&2
+            echo "  Credentials/settings may not work. Run: claude/sync-plugins.sh" >&2
+        fi
+    done
+
+    # Create csd-managed volumes if missing
     for vol_spec in "${_CSD_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
 
@@ -182,10 +193,19 @@ csd() {
         return 1
     fi
 
-    # Check if image exists
-    if ! docker image inspect "$_CSD_IMAGE" >/dev/null 2>&1; then
-        echo "ERROR: Image '$_CSD_IMAGE' not found" >&2
-        echo "Please build the image first: ${_CSD_SCRIPT_DIR}/build.sh" >&2
+    # Check if image exists (let docker errors surface as-is)
+    local inspect_output inspect_rc
+    inspect_output="$(docker image inspect "$_CSD_IMAGE" 2>&1)"
+    inspect_rc=$?
+    if [[ $inspect_rc -ne 0 ]]; then
+        # Check if it's "not found" vs other errors (daemon down, etc.)
+        if printf '%s' "$inspect_output" | grep -qiE "no such image|not found"; then
+            echo "ERROR: Image '$_CSD_IMAGE' not found" >&2
+            echo "Please build the image first: ${_CSD_SCRIPT_DIR}/build.sh" >&2
+        else
+            # Let actual docker error surface
+            echo "$inspect_output" >&2
+        fi
         return 1
     fi
 
@@ -193,9 +213,19 @@ csd() {
     container_name="$(_csd_container_name)"
     echo "Container: $container_name"
 
-    # Check container state
-    local container_state
-    container_state="$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null || echo "none")"
+    # Check container state (distinguish not-found from actual errors)
+    local container_state container_inspect_output container_inspect_rc
+    container_inspect_output="$(docker inspect --format '{{.State.Status}}' "$container_name" 2>&1)"
+    container_inspect_rc=$?
+    if [[ $container_inspect_rc -eq 0 ]]; then
+        container_state="$container_inspect_output"
+    elif printf '%s' "$container_inspect_output" | grep -qiE "no such object|not found|error.*no such"; then
+        container_state="none"
+    else
+        # Actual error (daemon down, etc.) - surface it
+        echo "$container_inspect_output" >&2
+        return 1
+    fi
 
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
