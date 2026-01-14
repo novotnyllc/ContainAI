@@ -124,11 +124,6 @@ check_prerequisites() {
         exit 1
     fi
 
-    if ! command -v jq &>/dev/null; then
-        error "jq is not installed (required for JSON processing)"
-        exit 1
-    fi
-
     # Create volume if it doesn't exist
     if ! docker volume inspect "$VOLUME_NAME" &>/dev/null; then
         warn "Volume does not exist, creating: $VOLUME_NAME"

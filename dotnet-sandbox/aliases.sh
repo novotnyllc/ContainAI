@@ -84,17 +84,23 @@ _csd_check_sandbox() {
     fi
 
     # Check if sandbox command is available by trying to run it
-    # docker sandbox ls succeeds (exit 0) if sandbox feature is available
-    if docker sandbox ls >/dev/null 2>&1; then
+    # Capture both stdout and stderr for proper error analysis
+    local ls_output ls_rc
+    ls_output="$(docker sandbox ls 2>&1)"
+    ls_rc=$?
+
+    if [[ $ls_rc -eq 0 ]]; then
         return 0
     fi
 
-    # Sandbox ls failed - check if it's because the command doesn't exist
-    local help_output
-    help_output="$(docker sandbox --help 2>&1)" || true
+    # Sandbox ls failed - analyze the error to provide actionable feedback
+    # Check for "no sandboxes exist" case (command works, just empty list)
+    if printf '%s' "$ls_output" | grep -qiE "no sandbox|empty|0 sandboxes"; then
+        return 0
+    fi
 
-    # Match known error patterns for missing subcommand
-    if printf '%s' "$help_output" | grep -qiE "not recognized|unknown command|not a docker command"; then
+    # Check for command not found / not available errors
+    if printf '%s' "$ls_output" | grep -qiE "not recognized|unknown command|not a docker command|command not found"; then
         echo "ERROR: Docker sandbox is not available" >&2
         echo "" >&2
         echo "Docker sandbox requires Docker Desktop 4.50+ with sandbox feature enabled." >&2
@@ -105,21 +111,31 @@ _csd_check_sandbox() {
         return 1
     fi
 
-    # Help output looks like valid sandbox help, so the command exists
-    # but ls may have failed for another reason (e.g., no sandboxes yet, daemon issues)
-    # Per spec: treat as available if help mentions sandbox-specific commands
-    # Use case-insensitive match (-qiE) for robustness across Docker versions
-    if printf '%s' "$help_output" | grep -qiE "sandbox.*run|create.*sandbox|list.*sandbox"; then
-        # Help mentions sandbox-specific commands, likely valid
-        return 0
+    # Check for daemon not running
+    if printf '%s' "$ls_output" | grep -qiE "cannot connect|daemon.*not running|connection refused"; then
+        echo "ERROR: Docker daemon is not running" >&2
+        echo "" >&2
+        echo "Please start Docker Desktop and try again." >&2
+        echo "" >&2
+        return 1
     fi
 
-    # Can't confirm sandbox is available - fail closed for safety
-    echo "ERROR: Unable to verify Docker sandbox availability" >&2
+    # Check for feature disabled / requirements not met
+    if printf '%s' "$ls_output" | grep -qiE "feature.*disabled|not enabled|requirements|sandbox.*unavailable"; then
+        echo "ERROR: Docker sandbox feature is not enabled" >&2
+        echo "" >&2
+        echo "Please enable sandbox in Docker Desktop:" >&2
+        echo "  Settings > Features in development > Docker sandbox" >&2
+        echo "" >&2
+        return 1
+    fi
+
+    # Unknown error - fail closed with the actual error message
+    echo "ERROR: Docker sandbox check failed" >&2
     echo "" >&2
-    echo "docker sandbox ls failed and could not confirm sandbox feature is enabled." >&2
+    echo "docker sandbox ls returned: $ls_output" >&2
+    echo "" >&2
     echo "Please ensure Docker Desktop 4.50+ is installed with sandbox feature enabled." >&2
-    echo "" >&2
     echo "To bypass this check (not recommended), use: csd --force" >&2
     return 1
 }

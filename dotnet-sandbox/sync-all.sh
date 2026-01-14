@@ -70,11 +70,6 @@ check_prerequisites() {
         exit 1
     fi
 
-    if ! command -v jq &>/dev/null; then
-        error "jq is not installed (required for JSON processing)"
-        exit 1
-    fi
-
     success "Prerequisites OK"
 }
 

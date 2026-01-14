@@ -129,6 +129,18 @@ These scripts detect your OS and use the appropriate source paths.
 - Linux: `~/.config/Code - Insiders/User/`
 - Windows (WSL): `/mnt/c/Users/<user>/AppData/Roaming/Code - Insiders/User/`
 
+## Sandbox Detection
+
+The `csd` wrapper detects Docker Sandbox availability before starting a container:
+
+- **Blocks with actionable error** if sandbox is unavailable (command not found, feature disabled, daemon not running)
+- **Proceeds** if sandbox is available (even if no containers exist yet)
+- **Shows actual error** for unknown failures to help diagnose issues
+
+ECI (Enhanced Container Isolation) status detection is best-effort. The sandbox provides ECI automatically when available, but `csd` cannot reliably detect ECI status across all Docker versions. If ECI status is unknown, the sandbox proceeds with standard isolation.
+
+To bypass sandbox detection (not recommended), use `csd --force`.
+
 ## Security
 
 Docker sandbox handles all security automatically:
@@ -174,10 +186,6 @@ For correct nvm-aware access, use a login shell:
 ```bash
 bash -lc "node --version"
 ```
-
-### ECI Detection
-
-Enhanced Container Isolation (ECI) detection is best-effort. The sandbox feature provides ECI automatically when available, but the `csd` wrapper cannot reliably detect ECI status across all Docker versions. The sandbox will still run with standard isolation if ECI is unavailable.
 
 ### VS Code Insiders
 
