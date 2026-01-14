@@ -34,7 +34,6 @@ This project uses Flow-Next for task tracking. Use `.flow/bin/flowctl` instead o
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -46,4 +45,4 @@ This project uses Flow-Next for task tracking. Use `.flow/bin/flowctl` instead o
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+- If push fails, resolve and retry until it succeeds, if there is a remote

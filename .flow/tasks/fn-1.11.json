@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-14T04:22:31.406055Z",
+  "depends_on": [
+    "fn-1.1"
+  ],
+  "epic": "fn-1",
+  "id": "fn-1.11",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-1.11.md",
+  "status": "todo",
+  "title": "Create check-sandbox.sh for Docker Sandbox and ECI detection",
+  "updated_at": "2026-01-14T04:22:31.406072Z"
+}

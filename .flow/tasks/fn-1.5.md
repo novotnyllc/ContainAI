@@ -1,7 +1,12 @@
 # fn-1.5 Test image build and WASM functionality
 
 ## Description
-Comprehensive testing of the complete setup: image build, WASM functionality, VS Code integration, security hardening, and container-internal testing.
+Comprehensive testing using both docker sandbox (for interactive) and docker run (for CI/smoke tests).
+
+### Test Strategy
+
+**Interactive/Development Testing**: Use `docker sandbox run` with all 5 volumes
+**CI/Smoke Testing**: Use `docker run --rm` (acceptable for non-interactive verification)
 
 ### Test Cases
 
@@ -10,112 +15,110 @@ Comprehensive testing of the complete setup: image build, WASM functionality, VS
 ./dotnet-wasm/build.sh
 ```
 
-#### 2. .NET SDK Verification
+#### 2. Volume Initialization
 ```bash
-docker run --rm docker-sandbox-dotnet-wasm:latest dotnet --info
-docker run --rm docker-sandbox-dotnet-wasm:latest dotnet --list-sdks
+# First time only
+./dotnet-wasm/init-volumes.sh
 ```
 
-#### 3. WASM Workload Verification
+#### 3. .NET SDK Verification (CI/Smoke)
 ```bash
-docker run --rm docker-sandbox-dotnet-wasm:latest dotnet workload list
+# docker run is acceptable for non-interactive smoke tests
+docker run --rm -u agent dotnet-wasm:latest dotnet --info
+docker run --rm -u agent dotnet-wasm:latest dotnet --list-sdks
+docker run --rm -u agent dotnet-wasm:latest dotnet workload list
 ```
 
-#### 4. Blazor WASM Build Test
+#### 4. Docker Sandbox Launch Test (Interactive) - ALL 5 VOLUMES
+```bash
+# Source aliases
+source ./dotnet-wasm/aliases.sh
+
+# Start sandbox (uses docker sandbox run with all 5 volumes)
+# Container will be named <repo>-<branch> by default
+claude-sandbox-dotnet
+
+# Or manually with ALL 5 volumes and custom name:
+docker sandbox run \
+  --name my-custom-sandbox \
+  -v docker-vscode-server:/home/agent/.vscode-server \
+  -v docker-github-copilot:/home/agent/.config/github-copilot \
+  -v docker-dotnet-packages:/home/agent/.nuget/packages \
+  -v docker-claude-plugins:/home/agent/.claude/plugins \
+  -v docker-claude-sandbox-data:/mnt/claude-data \
+  dotnet-wasm
+```
+
+#### 5. Blazor WASM Build Test (CI/Smoke)
 ```bash
 mkdir -p /tmp/wasm-test && cd /tmp/wasm-test
-docker run --rm -v $(pwd):/workspace -w /workspace \
-    docker-sandbox-dotnet-wasm:latest \
-    sh -c "dotnet new blazorwasm -n TestApp && cd TestApp && dotnet build"
+docker run --rm -u agent -v $(pwd):/workspace -w /workspace \
+    dotnet-wasm:latest \
+    sh -c "dotnet new blazorwasm -n BlazorTestApp && cd BlazorTestApp && dotnet build"
 ```
 
-#### 5. User/Permission Verification
+#### 6. Uno Platform WASM Build Test (CI/Smoke)
 ```bash
-docker run --rm docker-sandbox-dotnet-wasm:latest id
-# Expected: uid=1000(agent) gid=1000(agent)
+mkdir -p /tmp/uno-test && cd /tmp/uno-test
+docker run --rm -u agent -v $(pwd):/workspace -w /workspace \
+    dotnet-wasm:latest \
+    sh -c "dotnet new install Uno.Templates && \
+           dotnet new unoapp -n UnoTestApp --preset=blank --platforms wasm && \
+           cd UnoTestApp && \
+           dotnet build UnoTestApp.Wasm/UnoTestApp.Wasm.csproj"
 ```
 
-#### 6. Volume Persistence Test
+#### 7. Claude CLI Verification (CI/Smoke)
 ```bash
-# First run - install a package
-docker run --rm \
-    -v docker-dotnet-packages:/home/agent/.nuget/packages \
-    docker-sandbox-dotnet-wasm:latest \
-    dotnet add package Newtonsoft.Json --version 13.0.3
-
-# Second run - verify package cached
-docker run --rm \
-    -v docker-dotnet-packages:/home/agent/.nuget/packages \
-    docker-sandbox-dotnet-wasm:latest \
-    ls /home/agent/.nuget/packages/newtonsoft.json
+docker run --rm -u agent dotnet-wasm:latest sh -c "command -v claude && claude --version"
 ```
 
-#### 7. Claude CLI Verification
+#### 8. Sandbox/ECI Detection Test
 ```bash
-docker run --rm docker-sandbox-dotnet-wasm:latest which claude
-docker run --rm docker-sandbox-dotnet-wasm:latest claude --version
+# Verify the check-sandbox.sh script runs on container startup
+docker sandbox run dotnet-wasm check-sandbox.sh
+# Should output sandbox detection info and ECI status
 ```
 
-#### 8. Podman Rootless Test
+#### 9. Container Naming Test
 ```bash
-docker run --rm -it docker-sandbox-dotnet-wasm:latest podman run --rm hello-world
-docker run --rm docker-sandbox-dotnet-wasm:latest podman info | grep rootless
-```
+# Source aliases in a git repo
+cd /path/to/some-repo
+source /path/to/dotnet-wasm/aliases.sh
 
-#### 9. Security Hardening Test
-```bash
-# Run with security flags
-./dotnet-wasm/run.sh
+# Start sandbox - should be named "some-repo-main" (or current branch)
+claude-sandbox-dotnet
 
-# Inside container, verify restrictions
-cat /proc/self/status | grep Cap
-# Should show dropped capabilities
-```
+# Verify with docker sandbox ls
+docker sandbox ls
+# Should show container named after repo-branch
 
-#### 10. VS Code DevContainer Test (Manual)
-```bash
-# Test with VS Code Stable
-code ./dotnet-wasm
-# Select "Reopen in Container"
-
-# Test with VS Code Insiders
-code-insiders ./dotnet-wasm
-# Select "Reopen in Container"
-```
-
-#### 11. GitHub Copilot Volume Test
-```bash
-# Sync from host
-./dotnet-wasm/sync-vscode-data.sh
-
-# Verify data synced
-docker run --rm \
-    -v docker-github-copilot:/home/agent/.config/github-copilot:ro \
-    alpine ls /home/agent/.config/github-copilot/
+# Test custom name override
+claude-sandbox-dotnet my-custom-name
+docker sandbox ls | grep my-custom-name
 ```
 
 ### Notes
 
-- Clean up test artifacts after testing
-- Document any issues found in epic notes
-- Some tests require manual VS Code interaction
-- Podman test may require additional kernel features
+- **Interactive/dev sessions**: Use `docker sandbox run` with **all 5 volumes** for full security isolation
+- **CI/smoke tests**: `docker run --rm` is acceptable for automated verification (no volumes needed)
+- **Manual sandbox commands** must include all 5 volumes (match the function)
+- **Container naming**: Defaults to `<repo>-<branch>`, can be overridden with first argument
+
 ## Acceptance
 - [ ] Image builds without errors
 - [ ] `dotnet --version` returns 10.x
-- [ ] `dotnet workload list` shows `wasm-tools` installed
-- [ ] Blazor WASM project creates and builds successfully
-- [ ] Container runs as `agent` user (UID 1000)
-- [ ] NuGet package cache persists across container restarts
-- [ ] `claude --version` works inside container
-- [ ] `podman run --rm hello-world` succeeds inside container
-- [ ] `podman info` shows rootless mode enabled
-- [ ] Container starts with security restrictions (cap-drop, no-new-privileges)
-- [ ] VS Code Stable can open devcontainer
-- [ ] VS Code Insiders can open devcontainer
-- [ ] GitHub Copilot auth persists after container rebuild
-- [ ] sync-vscode-data.sh successfully syncs host data
-- [ ] All test cases documented pass
+- [ ] `dotnet workload list` shows `wasm-tools`
+- [ ] Blazor WASM project creates and builds
+- [ ] Uno Platform WASM project creates and builds
+- [ ] `command -v claude && claude --version` succeeds
+- [ ] `docker sandbox run ... dotnet-wasm` starts successfully
+- [ ] `claude-sandbox-dotnet` function works
+- [ ] Container name defaults to `<repo>-<branch>`
+- [ ] Container name can be overridden with argument
+- [ ] Sandbox/ECI detection script outputs correct environment info
+- [ ] README documents all test procedures
+
 ## Done summary
 TBD
 

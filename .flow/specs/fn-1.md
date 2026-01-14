@@ -1,163 +1,146 @@
-# .NET 10 WASM Docker Sandbox with DevContainer Support
+# .NET 10 WASM Docker Sandbox
 
 ## Overview
 
-Create a Docker image template for a development sandbox that includes .NET SDK 10 with WASM workloads, building on the existing `claude/Dockerfile` patterns. The template supports VS Code (Stable + Insiders) devcontainers with shared volume caching for VS Code Server, Claude extension, GitHub Copilot auth, and C# Dev Kit data. Security hardening and container-internal testing capabilities are core requirements.
+A Docker image template for a development sandbox with .NET SDK 10 and WASM workloads.
+
+**Primary workflow**: `docker sandbox run` with full security isolation
+
+**Build Strategy**: Single-stage Dockerfile based on `docker/sandbox-templates:claude-code` with .NET SDK 10 installed directly. The full SDK is required in the final image for development, so multi-stage provides no benefit.
 
 ## Scope
 
 **In Scope:**
-- New `dotnet-wasm/` directory with Dockerfile extending existing patterns
-- .NET SDK 10 (floating version) with `wasm-tools` workload pre-installed
-- `.devcontainer/devcontainer.json` supporting both VS Code Stable and Insiders
-- Named volumes for all persistent data:
-  - VS Code Server cache (`~/.vscode-server`)
-  - GitHub Copilot auth (`~/.config/github-copilot`, globalStorage)
-  - C# Dev Kit data (OmniSharp, extension storage)
-  - NuGet package cache
+- New `dotnet-wasm/` directory with Dockerfile
+- .NET SDK 10 with `wasm-tools` workload pre-installed
+- Early container startup check for Docker Sandbox detection and ECI status
+- Volume initialization script (for ownership fix)
+- Named volumes for persistent data (5 total)
 - Claude extension configured to use local `claude` CLI
-- Helper scripts following existing `sync-plugins.sh` patterns
-- VS Code data pre-population script (like sync-plugins.sh)
-- Security hardening for untrusted code execution
-- Container-internal testing strategy (Sysbox/Podman-in-container)
-- Documentation for usage
+- Helper aliases (`claude-sandbox-dotnet`) with automatic container naming
+- VS Code settings pre-population script (best-effort)
+- Documentation (README.md)
 
-**Out of Scope (Phase 2):**
-- OpenAI Codex CLI integration (future)
-- Gemini CLI integration (future)
-- Network firewall scripts (can be added later)
+**Out of Scope:**
+- Manual seccomp/capabilities configuration (docker sandbox handles this)
+- OpenAI Codex CLI integration (Phase 2)
+- Gemini CLI integration (Phase 2)
+- Depending on docker-claude-* images (use only docker/sandbox-templates:claude-code)
 
 ## Approach
 
 ### Architecture Decisions
 
-1. **Base Image Strategy**: Layer on top of `docker/sandbox-templates:claude-code` to inherit existing Claude setup, then add .NET SDK 10 from Microsoft's Ubuntu packages (Debian images discontinued for .NET 10).
+1. **Docker Sandbox Workflow**:
+   - Uses `docker sandbox run` with full security isolation
+   - All security handled automatically (ECI, capabilities, seccomp)
+   - Alias: `claude-sandbox-dotnet`
+   - **Container naming**: Defaults to `<repo-name>-<branch>` for easy identification
 
-2. **User Convention**: Maintain `agent` user with UID 1000 for volume compatibility with existing `docker-claude-*` volumes.
+2. **Single-Stage Build**:
+   - Base: `docker/sandbox-templates:claude-code`
+   - **Fail fast** if base is not Ubuntu Noble (deps are distro-specific)
+   - Install .NET SDK 10 from Microsoft apt repo
+   - Install wasm-tools workload
+   - Verify with `dotnet --info` (fails if deps missing)
 
-3. **Version Strategy**: Use floating versions (e.g., `10.0` not `10.0.100`) for .NET SDK to automatically get updates.
+   Single-stage is simpler and the full SDK must be in the final image anyway for development work.
 
-4. **VS Code Support**: Support both VS Code Stable and Insiders via devcontainer.json.
+3. **Container Startup Environment Detection**:
 
-5. **Volume Strategy**:
+   On container startup, detect and report:
+   - Whether running in Docker Sandbox (vs plain Docker)
+   - ECI (Enhanced Container Isolation) status
+   - Recommend enabling ECI if not detected
+
+   This provides early feedback to users about their security posture.
+
+4. **Volume Initialization Required**:
+
+   Docker volume ownership is tricky - Dockerfile `chown` only helps new volumes. Users MUST run `init-volumes.sh` once before first use to fix ownership on all 5 volumes.
+
+5. **Base Image Requirement**:
+
+   `docker/sandbox-templates:claude-code` MUST be Ubuntu Noble (24.04). The Dockerfile fails fast if not. Before building, verify:
+   ```bash
+   docker run --rm docker/sandbox-templates:claude-code cat /etc/os-release | grep VERSION_CODENAME
+   ```
+
+6. **Volume Strategy** (5 volumes total):
+
    | Volume | Mount Point | Purpose |
    |--------|-------------|---------|
-   | `docker-vscode-server` | `/home/agent/.vscode-server` | VS Code Server cache |
-   | `docker-vscode-data` | `/home/agent/.config/Code` | VS Code user data (globalStorage, workspaceStorage) |
+   | `docker-vscode-server` | `/home/agent/.vscode-server` | VS Code Server |
    | `docker-github-copilot` | `/home/agent/.config/github-copilot` | Copilot CLI auth |
    | `docker-dotnet-packages` | `/home/agent/.nuget/packages` | NuGet package cache |
-   | `docker-omnisharp` | `/home/agent/.omnisharp` | OmniSharp/C# Dev Kit |
-   | `docker-claude-plugins` | `/home/agent/.claude/plugins` | (existing) Claude plugins |
-   | `docker-claude-sandbox-data` | `/mnt/claude-data` | (existing) Claude credentials |
+   | `docker-claude-plugins` | `/home/agent/.claude/plugins` | Claude plugins |
+   | `docker-claude-sandbox-data` | `/mnt/claude-data` | **REQUIRED** - Claude credentials |
 
-6. **devcontainer.json Strategy**: Include in image AND provide as copyable template. Image includes default config; users can override by copying to their project.
-
-7. **Container-Internal Testing**: Use Podman (rootless) for testing within container. Sysbox requires host runtime installation; Podman can run nested containers without host changes.
-
-8. **Security Hardening**:
-   - Run as non-root user (agent, UID 1000)
-   - Drop all capabilities except required ones
-   - Read-only root filesystem with tmpfs for writes
-   - seccomp profile (Docker default + custom restrictions)
-   - No access to host Docker socket
-   - ECI already enabled on host (user confirmed)
-
-### Key Patterns from Existing Code
-
-- `claude/Dockerfile:18-20`: npm-global path pattern at `~/.npm-global`
-- `claude/Dockerfile:29`: Credential symlink from `/mnt/claude-data/`
-- `sync-plugins.sh:21-23`: Volume naming convention
-- `sync-plugins.sh:108-114`: Volume mount pattern using alpine for file operations
-- `update-claude-sandbox.sh:44-59`: Build and tag pattern
-
-### Dependencies
-
-- Microsoft .NET 10 SDK packages (Ubuntu Noble)
-- Python 3 (required for WASM workloads on Linux)
-- Podman (for container-internal testing)
-- VS Code Stable or Insiders on host machine
-- Existing `docker-claude-*` volumes
+7. **Helper Scripts**:
+   - `build.sh` - Build and tag image
+   - `init-volumes.sh` - Initialize all 5 volumes with correct ownership
+   - `aliases.sh` - Shell aliases for sandbox commands (with auto container naming)
+   - `sync-vscode-data.sh` - Pre-populate VS Code settings (best-effort)
+   - `check-sandbox.sh` - Detect Docker Sandbox and ECI status
 
 ## Quick Commands
 
 ```bash
 # Build the image
-docker build -t docker-sandbox-dotnet-wasm:latest ./dotnet-wasm/
+./dotnet-wasm/build.sh
 
-# Run with devcontainer (VS Code Stable)
-code --folder-uri vscode-remote://dev-container+$(pwd | xxd -p)/home/agent/workspace
+# Initialize volumes (first time only)
+./dotnet-wasm/init-volumes.sh
 
-# Run with devcontainer (VS Code Insiders)
-code-insiders --folder-uri vscode-remote://dev-container+$(pwd | xxd -p)/home/agent/workspace
+# Source aliases
+source ./dotnet-wasm/aliases.sh
 
-# Smoke test - verify .NET and WASM
-docker run --rm docker-sandbox-dotnet-wasm:latest dotnet --list-sdks
-docker run --rm docker-sandbox-dotnet-wasm:latest dotnet workload list
+# Start sandbox (all 5 volumes, named after repo-branch)
+claude-sandbox-dotnet
 
-# Test container-internal Docker (Podman)
-docker run --rm -it docker-sandbox-dotnet-wasm:latest podman run --rm hello-world
+# Smoke tests (CI/verification)
+docker run --rm -u agent dotnet-wasm:latest dotnet --list-sdks
+docker run --rm -u agent dotnet-wasm:latest dotnet workload list
 
-# Sync VS Code data from host
-./dotnet-wasm/sync-vscode-data.sh
-
-# Test WASM build capability
-docker run --rm -v $(pwd):/workspace docker-sandbox-dotnet-wasm:latest \
-  sh -c "cd /workspace && dotnet new blazorwasm -n TestWasm && cd TestWasm && dotnet build"
+# Stop ALL sandboxes
+claude-sandbox-stop-all
 ```
 
 ## Acceptance Criteria
 
-- [ ] `docker build` succeeds for `dotnet-wasm/Dockerfile`
-- [ ] Container has .NET SDK 10.x installed (`dotnet --version`)
-- [ ] WASM workload is installed (`dotnet workload list` shows `wasm-tools`)
-- [ ] VS Code Stable can open project in devcontainer
-- [ ] VS Code Insiders can open project in devcontainer
-- [ ] VS Code Server is cached in named volume (persists across container rebuilds)
-- [ ] GitHub Copilot auth persists across container rebuilds
-- [ ] C# Dev Kit functions with persisted OmniSharp data
-- [ ] Claude extension works in VS Code and uses local `claude` CLI
-- [ ] Agent user has UID 1000 (compatible with existing volumes)
-- [ ] Can create and build a Blazor WASM project
-- [ ] Container can build Docker images internally (Podman)
-- [ ] Container runs with security hardening (no --privileged, capabilities dropped)
-- [ ] sync-vscode-data.sh pre-populates VS Code volumes from host
-
-## Risks & Mitigations
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| .NET 10 not GA yet | Build may use preview SDK | Use floating version; auto-updates when GA |
-| Ubuntu vs Debian base conflict | Package manager issues | Use multi-stage or apt sources carefully |
-| Podman rootless complexity | Testing may fail | Test thoroughly; document workarounds |
-| GitHub Copilot token expiry | Auth breaks | Document re-auth process |
-| Security restrictions break functionality | Extensions/tools fail | Test each capability; allow specific exceptions |
+- [ ] `docker build` succeeds with Dockerfile
+- [ ] Build fails with clear error if base image is not Ubuntu Noble
+- [ ] `dotnet --version` (as agent) outputs 10.x
+- [ ] `dotnet workload list` (as agent) shows `wasm-tools`
+- [ ] `command -v claude && claude --version` (as agent) succeeds
+- [ ] Container runs as `uid=1000(agent)`
+- [ ] `docker sandbox run ... dotnet-wasm` starts successfully
+- [ ] Container name defaults to `<repo-name>-<branch>`
+- [ ] Container startup detects Docker Sandbox vs plain Docker
+- [ ] Container startup reports ECI status with recommendation if disabled
+- [ ] `init-volumes.sh` creates and fixes ownership for all 5 volumes
+- [ ] `claude-sandbox-dotnet` alias includes all 5 volumes
+- [ ] Blazor WASM project creates and builds successfully
+- [ ] Uno Platform WASM project creates and builds successfully
+- [ ] README documents: run init-volumes.sh before first use
+- [ ] Image does NOT depend on any docker-claude-* images
 
 ## Security Considerations
 
-1. **Container Isolation**: ECI enabled on host, no docker socket access
-2. **User Namespaces**: Run as UID 1000 (agent), not root
-3. **Capability Dropping**: Drop all caps, add only required ones
-4. **Read-only Root**: Use tmpfs for `/tmp`, named volumes for data
-5. **Network**: Container can access network (required for NuGet, VS Code)
-6. **Testing**: Podman rootless for internal builds (no host Docker access)
+**Docker sandbox handles all security automatically:**
+- Capabilities dropping
+- seccomp profiles
+- ECI (Enhanced Container Isolation)
+- User namespace isolation
+
+**We do NOT configure:**
+- `--cap-drop`, `--cap-add`
+- `--security-opt=seccomp=...`
+- Manual security flags in runArgs
 
 ## References
 
-- Existing Dockerfile: `claude/Dockerfile`
+- Existing scripts: `claude/update-claude-sandbox.sh`, `claude/sync-plugins.sh`
+- Docker sandbox commands: `docker sandbox run`, `docker sandbox ls`, `docker sandbox rm`
 - Volume patterns: `claude/sync-plugins.sh:21-23`
-- Reference devcontainer: https://github.com/centminmod/claude-code-devcontainers/
-- .NET 10 Docker images: https://mcr.microsoft.com/en-us/product/dotnet/sdk/about
-- WASM workloads: https://learn.microsoft.com/en-us/aspnet/core/blazor/webassembly-build-tools-and-aot
-- VS Code Dev Containers: https://containers.dev/implementors/json_reference/
-- Claude Code extension: https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code
-- GitHub Copilot storage: `~/.config/github-copilot/hosts.json`
-- VS Code globalStorage: `~/.config/Code/User/globalStorage/`
-- Sysbox: https://github.com/nestybox/sysbox
-- Podman rootless: https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md
-- Docker ECI: https://docs.docker.com/enterprise/security/hardened-desktop/enhanced-container-isolation/
-
-## Resolved Questions
-
-1. **Version pinning**: Use floating versions (10.0) for auto-updates
-2. **devcontainer.json**: Include in image AND provide as copyable template
-3. **VS Code versions**: Support both Stable and Insiders
+- Uno Platform: https://platform.uno/
