@@ -123,6 +123,7 @@ RUN mkdir -p /home/agent/workspace \
 # Create mount point directories for volumes (per spec Volume Strategy)
 # These directories will be mount targets for named volumes managed by csd wrapper
 # NOTE: Must be created BEFORE the credentials symlink to avoid chown dereferencing issues
+# Use restrictive permissions (0700) for dirs that may hold credentials/tokens
 RUN mkdir -p /home/agent/.vscode-server \
              /home/agent/.nuget \
              /home/agent/.config/gh \
@@ -130,7 +131,11 @@ RUN mkdir -p /home/agent/.vscode-server \
     && chown -R agent:agent /home/agent/.vscode-server \
                             /home/agent/.nuget \
                             /home/agent/.config \
-                            /home/agent/.claude
+                            /home/agent/.claude \
+    && chmod 700 /home/agent/.vscode-server \
+                 /home/agent/.nuget \
+                 /home/agent/.config/gh \
+                 /home/agent/.claude
 
 # Create Claude credentials symlink (same workaround as claude/Dockerfile)
 # Done AFTER mount point creation to avoid symlink target being affected by chown

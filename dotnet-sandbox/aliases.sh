@@ -113,10 +113,14 @@ _csd_check_sandbox() {
         return 0
     fi
 
-    # Can't confirm sandbox is available - warn but proceed (fail-open per fn-1.11 intent)
-    echo "WARNING: Unable to verify Docker sandbox availability" >&2
-    echo "docker sandbox ls failed; proceeding anyway." >&2
-    return 0
+    # Can't confirm sandbox is available - fail closed for safety
+    echo "ERROR: Unable to verify Docker sandbox availability" >&2
+    echo "" >&2
+    echo "docker sandbox ls failed and could not confirm sandbox feature is enabled." >&2
+    echo "Please ensure Docker Desktop 4.29+ is installed with sandbox feature enabled." >&2
+    echo "" >&2
+    echo "To bypass this check (not recommended), use: csd --force" >&2
+    return 1
 }
 
 # Ensure required volumes exist with correct permissions
@@ -131,7 +135,8 @@ _csd_ensure_volumes() {
             echo "ERROR: Required volume '$volume_name' not found" >&2
             echo "" >&2
             echo "This volume is required for Claude credentials. Create it by running:" >&2
-            echo "  claude/sync-plugins.sh" >&2
+            echo "  ${_CSD_SCRIPT_DIR}/../claude/sync-plugins.sh" >&2
+            echo "  (or from repo root: ./claude/sync-plugins.sh)" >&2
             echo "" >&2
             echo "Or manually create with:" >&2
             echo "  docker volume create $volume_name" >&2
@@ -172,6 +177,7 @@ _csd_ensure_volumes() {
 # Claude Sandbox Dotnet - main function
 csd() {
     local restart_flag=false
+    local force_flag=false
     local container_name
 
     # Parse arguments
@@ -181,13 +187,18 @@ csd() {
                 restart_flag=true
                 shift
                 ;;
+            --force)
+                force_flag=true
+                shift
+                ;;
             --help|-h)
-                echo "Usage: csd [--restart]"
+                echo "Usage: csd [--restart] [--force]"
                 echo ""
                 echo "Start or attach to a dotnet-sandbox container."
                 echo ""
                 echo "Options:"
                 echo "  --restart  Force recreate container even if running"
+                echo "  --force    Skip sandbox availability check (not recommended)"
                 echo "  --help     Show this help"
                 echo ""
                 echo "Container naming: <repo>-<branch> (sanitized, max 63 chars)"
@@ -202,9 +213,13 @@ csd() {
         esac
     done
 
-    # Check sandbox availability
-    if ! _csd_check_sandbox; then
-        return 1
+    # Check sandbox availability (unless --force)
+    if [[ "$force_flag" != "true" ]]; then
+        if ! _csd_check_sandbox; then
+            return 1
+        fi
+    else
+        echo "WARNING: Skipping sandbox availability check (--force)" >&2
     fi
 
     # Get container name first (we need it to check container state)
