@@ -19,7 +19,6 @@ set -euo pipefail
 
 # Constants
 readonly VOLUME_NAME="dotnet-sandbox-vscode"
-readonly CONTAINER_VSCODE_PATH="/home/agent/.vscode-server"
 
 # Color output helpers (consistent with sync-plugins.sh)
 info() { echo "INFO: $*"; }
@@ -113,6 +112,11 @@ check_prerequisites() {
         exit 1
     fi
 
+    if ! command -v jq &>/dev/null; then
+        error "jq is not installed (required for JSON processing)"
+        exit 1
+    fi
+
     # Create volume if it doesn't exist
     if ! docker volume inspect "$VOLUME_NAME" &>/dev/null; then
         warn "Volume does not exist, creating: $VOLUME_NAME"
@@ -177,17 +181,23 @@ sync_extensions_list() {
         return
     fi
 
-    # Get extensions list and save to volume
+    # Get extensions list - capture exit code and stderr for proper error handling
     local extensions_list
-    extensions_list=$("$CODE_CMD" --list-extensions 2>/dev/null || true)
+    local exit_code=0
+    extensions_list=$("$CODE_CMD" --list-extensions 2>&1) || exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        error "Failed to list extensions (exit code $exit_code): $extensions_list"
+        exit 1
+    fi
 
     if [[ -z "$extensions_list" ]]; then
-        warn "No extensions found or failed to list extensions"
+        info "No extensions installed"
         return
     fi
 
     # Write extensions list to volume
-    echo "$extensions_list" | docker run --rm -i \
+    printf '%s\n' "$extensions_list" | docker run --rm -i \
         -v "$VOLUME_NAME":/target \
         alpine sh -c "
             mkdir -p /target/data
@@ -196,7 +206,7 @@ sync_extensions_list() {
         "
 
     local count
-    count=$(echo "$extensions_list" | wc -l)
+    count=$(printf '%s\n' "$extensions_list" | wc -l)
     success "Synced extensions list ($count extensions)"
 }
 
