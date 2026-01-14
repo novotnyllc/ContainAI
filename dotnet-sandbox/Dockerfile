@@ -5,7 +5,8 @@
 FROM docker/sandbox-templates:claude-code
 
 # Build arguments for .NET channel selection
-# Options: lts, sts, preview, or specific like "10.0"
+# Supported values: lts, 10.0 (or any channel resolving to .NET 10.x)
+# NOTE: sts/preview channels may resolve to non-10 versions and will fail the version check
 # Default to lts per spec; version 10 verification ensures correct major version
 ARG DOTNET_CHANNEL=lts
 
@@ -56,9 +57,9 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 
 # Install WASM workloads and verify installation
-# Use word boundary to match exact workload name, not just substring
+# Use POSIX character class for whitespace matching (ERE \s is not portable)
 RUN dotnet workload install wasm-tools wasm-tools-net9 \
-    && dotnet workload list | grep -E '^\s*wasm-tools\s'
+    && dotnet workload list | grep -E '^[[:space:]]*wasm-tools([[:space:]]|$)'
 
 # Install PowerShell via Microsoft's recommended method and verify
 RUN wget -q "https://packages.microsoft.com/config/ubuntu/$(. /etc/os-release && echo $VERSION_ID)/packages-microsoft-prod.deb" -O /tmp/packages-microsoft-prod.deb \
@@ -87,7 +88,11 @@ RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh |
 # Use nvm which to resolve the default node version deterministically
 # Use explicit path instead of ~ to avoid HOME resolution issues under su
 USER root
-RUN NODE_PATH=$(su -s /bin/bash agent -c 'source /home/agent/.nvm/nvm.sh && nvm which default' | xargs dirname) \
+RUN NODE_BIN=$(su -s /bin/bash agent -c 'source /home/agent/.nvm/nvm.sh && nvm which default') \
+    && if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then \
+         echo "ERROR: Failed to resolve nvm default node path" >&2; exit 1; \
+       fi \
+    && NODE_PATH=$(dirname "$NODE_BIN") \
     && ln -sf "$NODE_PATH/node" /usr/local/bin/node \
     && ln -sf "$NODE_PATH/npm" /usr/local/bin/npm \
     && ln -sf "$NODE_PATH/npx" /usr/local/bin/npx \
