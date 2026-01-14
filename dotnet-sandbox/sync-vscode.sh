@@ -153,13 +153,13 @@ sync_settings_files() {
             if $DRY_RUN; then
                 echo "  [dry-run] Would sync: $file"
             else
-                # Create Data/User directory structure in volume (matches VS Code Server layout)
+                # Create data/Machine directory structure (VS Code Server reads from here)
                 docker run --rm \
                     -v "$VOLUME_NAME":/target \
                     -v "$src":/source:ro \
                     alpine sh -c "
-                        mkdir -p /target/data/User
-                        cp /source /target/data/User/$file
+                        mkdir -p /target/data/Machine
+                        cp /source /target/data/Machine/$file
                         chown -R 1000:1000 /target/data
                     "
                 info "Synced: $file"
@@ -182,11 +182,11 @@ sync_extensions_list() {
     step "Syncing extensions list..."
 
     if ! command -v "$CODE_CMD" &>/dev/null; then
-        # VS Code settings dir exists but CLI not in PATH - this is an error
-        error "VS Code CLI ($CODE_CMD) not in PATH"
-        error "Please ensure VS Code is installed and 'code' command is available"
-        error "On macOS: Open VS Code > Cmd+Shift+P > 'Shell Command: Install code command'"
-        exit 1
+        # VS Code settings dir exists but CLI not in PATH - treat as "not fully installed"
+        # Per spec: "exit 0 with message if VS Code not installed"
+        warn "VS Code CLI ($CODE_CMD) not in PATH, skipping extensions sync"
+        warn "To enable: Open VS Code > Cmd+Shift+P > 'Shell Command: Install code command'"
+        return
     fi
 
     if $DRY_RUN; then
@@ -235,7 +235,7 @@ show_summary() {
     echo "  Volume: $VOLUME_NAME"
     echo "  Source: $VSCODE_USER_DIR"
     echo ""
-    echo "Files synced to volume at data/User/:"
+    echo "Files synced to volume at data/Machine/:"
     echo "  - settings.json"
     echo "  - keybindings.json"
     echo "  - extensions.txt (list only)"

@@ -100,9 +100,30 @@ detect_vscode_paths() {
                     VSCODE_USER_DIR="/mnt/c/Users/$win_user/AppData/Roaming/Code/User"
                     VSCODE_INSIDERS_USER_DIR="/mnt/c/Users/$win_user/AppData/Roaming/Code - Insiders/User"
                 else
-                    # Fallback to Linux paths
-                    VSCODE_USER_DIR="$HOME/.config/Code/User"
-                    VSCODE_INSIDERS_USER_DIR="$HOME/.config/Code - Insiders/User"
+                    # Fallback: try common Windows paths first (matching sync-vscode.sh logic)
+                    VSCODE_USER_DIR=""
+                    for user_dir in /mnt/c/Users/*/AppData/Roaming/Code/User; do
+                        if [[ -d "$user_dir" ]]; then
+                            VSCODE_USER_DIR="$user_dir"
+                            break
+                        fi
+                    done
+                    # If no Windows VS Code found, try Linux path
+                    if [[ -z "$VSCODE_USER_DIR" ]]; then
+                        VSCODE_USER_DIR="$HOME/.config/Code/User"
+                    fi
+
+                    VSCODE_INSIDERS_USER_DIR=""
+                    for user_dir in "/mnt/c/Users/"*"/AppData/Roaming/Code - Insiders/User"; do
+                        if [[ -d "$user_dir" ]]; then
+                            VSCODE_INSIDERS_USER_DIR="$user_dir"
+                            break
+                        fi
+                    done
+                    # If no Windows VS Code Insiders found, try Linux path
+                    if [[ -z "$VSCODE_INSIDERS_USER_DIR" ]]; then
+                        VSCODE_INSIDERS_USER_DIR="$HOME/.config/Code - Insiders/User"
+                    fi
                 fi
             else
                 # Native Linux
@@ -150,12 +171,12 @@ sync_gh_config() {
     fi
 
     # Sync entire gh config directory (including dotfiles)
-    # Use find to remove all files including hidden ones, then copy fresh
+    # Use rm with explicit glob to ensure all files are removed including hidden ones
     docker run --rm \
         -v "$GH_VOLUME_NAME":/target \
         -v "$GH_CONFIG_DIR":/source:ro \
         alpine sh -c "
-            find /target -mindepth 1 -delete 2>/dev/null || true
+            rm -rf /target/* /target/.[!.]* /target/..?* 2>/dev/null || true
             cp -a /source/. /target/
             chown -R 1000:1000 /target
         "
