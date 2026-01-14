@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Placeholder: Will be implemented in fn-1.4
 # Shell aliases for dotnet-sandbox (csd, csd-stop-all)
-echo "TODO: Implement aliases"
+echo "ERROR: aliases.sh not yet implemented (see fn-1.4)" >&2
+exit 1

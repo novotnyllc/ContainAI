@@ -480,4 +480,6 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
+# Flow-Next
 !.flow/bin/*
+.flow/tmp/

@@ -2,4 +2,4 @@
 
 Docker sandbox with .NET SDK, Node.js, and WASM workloads.
 
-TODO: Documentation will be added after implementation is complete.
+Documentation will be added in fn-1.10 after implementation is complete.

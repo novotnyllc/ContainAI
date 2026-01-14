@@ -13,9 +13,9 @@ Create the `dotnet-sandbox/` directory structure with placeholder files:
 
 Note: Directory is `dotnet-sandbox/` to match the image name per naming standards in spec.
 ## Acceptance
-- [ ] `dotnet-sandbox/` directory exists
-- [ ] Directory has correct permissions (755)
-- [ ] `ls -la dotnet-sandbox/` shows expected structure
+- [x] `dotnet-sandbox/` directory exists
+- [x] Directory has correct permissions (755)
+- [x] `ls -la dotnet-sandbox/` shows expected structure
 ## Done summary
 Created `dotnet-sandbox/` directory structure with all placeholder files:
 - `Dockerfile` - placeholder for container definition
