@@ -1,16 +1,30 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-14T17:47:50.249990Z",
   "created_at": "2026-01-13T21:10:26.868865Z",
   "depends_on": [
     "fn-1.6"
   ],
   "epic": "fn-1",
+  "evidence": {
+    "commits": [
+      "a187e4b0126bcde47f4b4e830ddbe9b1832b85b2"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n sync-vscode.sh",
+      "bash -n sync-vscode-insiders.sh",
+      "bash -n sync-all.sh",
+      "./sync-vscode.sh --dry-run",
+      "./sync-vscode-insiders.sh --dry-run",
+      "./sync-all.sh --dry-run"
+    ]
+  },
   "id": "fn-1.7",
   "priority": null,
   "spec_path": ".flow/tasks/fn-1.7.md",
-  "status": "todo",
+  "status": "done",
   "title": "Create sync-vscode-data.sh pre-population script",
-  "updated_at": "2026-01-14T07:07:24.280950Z"
+  "updated_at": "2026-01-14T17:50:41.529598Z"
 }

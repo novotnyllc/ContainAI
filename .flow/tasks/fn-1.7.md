@@ -42,9 +42,16 @@ Create VS Code sync scripts (split into multiple scripts):
 - [ ] sync-all.sh syncs gh CLI config
 - [ ] All scripts require jq
 ## Done summary
-TBD
+- Implemented sync-vscode.sh with OS detection (macOS/Linux/WSL)
+- Implemented sync-vscode-insiders.sh with separate data-insiders/ directory
+- Implemented sync-all.sh to orchestrate VS Code + gh CLI syncs
+- All scripts support --dry-run mode and graceful handling when apps not installed
 
+Verification:
+- bash -n syntax check passed for all scripts
+- --dry-run mode tested successfully
+- --help output verified for all scripts
 ## Evidence
-- Commits:
-- Tests:
+- Commits: a187e4b0126bcde47f4b4e830ddbe9b1832b85b2
+- Tests: bash -n sync-vscode.sh, bash -n sync-vscode-insiders.sh, bash -n sync-all.sh, ./sync-vscode.sh --dry-run, ./sync-vscode-insiders.sh --dry-run, ./sync-all.sh --dry-run
 - PRs:
