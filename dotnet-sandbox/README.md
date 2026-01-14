@@ -150,11 +150,13 @@ To bypass all detection checks (not recommended), use `csd --force`.
 
 ## Security
 
-Docker sandbox handles all security automatically:
+Docker sandbox provides security isolation through:
 - Capabilities dropping
 - seccomp profiles
-- Enhanced Container Isolation (ECI)
 - User namespace isolation
+- Enhanced Container Isolation (ECI) - when enabled in Docker Desktop settings
+
+**Note:** ECI is optional and depends on your Docker Desktop configuration. The sandbox provides isolation regardless, but ECI adds additional security boundaries. See [Docker ECI documentation](https://docs.docker.com/security/for-admins/enhanced-container-isolation/) for details.
 
 **No manual security configuration required.** The `csd` wrapper enforces sandbox usage and blocks if Docker sandbox is unavailable.
 

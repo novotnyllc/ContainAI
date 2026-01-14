@@ -77,39 +77,38 @@ _csd_container_name() {
 }
 
 # Best-effort ECI (Enhanced Container Isolation) detection
-# Returns: 0=available, 1=not available, 2=unknown
-# Outputs warning to stderr if ECI not detected
+# Returns: 0=detected, 1=not detected, 2=unknown
+# Always warns on 1 or 2 (non-blocking)
 _csd_check_eci() {
-    local docker_info security_opts
+    local docker_info
 
     # Get docker info security options
     docker_info="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" || {
         echo "WARNING: Could not detect ECI status (docker info failed)" >&2
+        echo "  Proceeding with sandbox - isolation depends on Docker Desktop settings." >&2
+        echo "" >&2
         return 2
     }
 
-    # Look for ECI indicators in security options
-    # Docker Desktop with ECI shows userns, rootless, or eci-related options
+    # Look for explicit ECI indicators in security options
+    # Docker Desktop with ECI enabled shows userns, rootless, or eci-related options
     if printf '%s' "$docker_info" | grep -qiE 'eci|enhanced.?container.?isolation|userns|rootless'; then
-        return 0  # ECI detected
+        return 0  # ECI explicitly detected
     fi
 
-    # Check if running on Docker Desktop (which implies sandbox security)
-    if docker info --format '{{.Name}}' 2>/dev/null | grep -qiE 'docker-desktop|desktop'; then
-        # Docker Desktop detected - sandbox provides isolation even if ECI not explicitly listed
-        return 0
-    fi
-
-    # ECI not detected - warn but don't block
-    echo "WARNING: ECI (Enhanced Container Isolation) not detected" >&2
+    # ECI not explicitly detected - warn but proceed
+    # Note: Docker Desktop may still provide sandbox isolation even without ECI
+    echo "WARNING: ECI (Enhanced Container Isolation) not detected in Docker info" >&2
     echo "  Sandbox will run with standard Docker isolation." >&2
     echo "  For enhanced security, enable ECI in Docker Desktop:" >&2
     echo "    Settings > Security > Enhanced Container Isolation" >&2
+    echo "  See: https://docs.docker.com/security/for-admins/enhanced-container-isolation/" >&2
     echo "" >&2
     return 1
 }
 
 # Check if docker sandbox is available
+# Returns: 0=yes, 1=no (definite), 2=unknown (fail-open with warning)
 _csd_check_sandbox() {
     if ! command -v docker >/dev/null 2>&1; then
         echo "ERROR: Docker is not installed or not in PATH" >&2
@@ -134,6 +133,7 @@ _csd_check_sandbox() {
         echo "" >&2
         echo "Please enable sandbox in Docker Desktop:" >&2
         echo "  Settings > Features in development > Docker sandbox" >&2
+        echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
         echo "" >&2
         return 1
     fi
@@ -144,7 +144,7 @@ _csd_check_sandbox() {
         return 0
     fi
 
-    # Check for command not found / not available errors
+    # Check for command not found / not available errors (definite "no")
     if printf '%s' "$ls_output" | grep -qiE "not recognized|unknown command|not a docker command|command not found"; then
         echo "ERROR: Docker sandbox is not available" >&2
         echo "" >&2
@@ -152,12 +152,25 @@ _csd_check_sandbox() {
         echo "Please ensure you have:" >&2
         echo "  1. Docker Desktop 4.50 or later installed" >&2
         echo "  2. Docker sandbox feature enabled in Settings > Features in development" >&2
+        echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
         echo "" >&2
         return 1
     fi
 
-    # Check for daemon not running
-    if printf '%s' "$ls_output" | grep -qiE "cannot connect|daemon.*not running|connection refused"; then
+    # Check for permission denied (separate from daemon not running)
+    if printf '%s' "$ls_output" | grep -qiE "permission denied"; then
+        echo "ERROR: Permission denied accessing Docker" >&2
+        echo "" >&2
+        echo "Please ensure your user has Docker access:" >&2
+        echo "  - Add your user to the 'docker' group: sudo usermod -aG docker \$USER" >&2
+        echo "  - Or check Docker Desktop socket permissions" >&2
+        echo "  - Then log out and back in, or run: newgrp docker" >&2
+        echo "" >&2
+        return 1
+    fi
+
+    # Check for daemon not running (tighter match, excludes permission denied)
+    if printf '%s' "$ls_output" | grep -qiE "daemon.*not running|connection refused|Is the docker daemon running"; then
         echo "ERROR: Docker daemon is not running" >&2
         echo "" >&2
         echo "Please start Docker Desktop and try again." >&2
@@ -165,14 +178,16 @@ _csd_check_sandbox() {
         return 1
     fi
 
-    # Unknown error - fail closed with the actual error message
-    echo "ERROR: Docker sandbox check failed" >&2
+    # Unknown error - fail OPEN with warning (per spec: don't block on unknown)
+    echo "WARNING: Could not verify Docker sandbox availability" >&2
     echo "" >&2
-    echo "docker sandbox ls returned: $ls_output" >&2
+    printf '  docker sandbox ls returned: %s\n' "$ls_output" >&2
     echo "" >&2
-    echo "Please ensure Docker Desktop 4.50+ is installed with sandbox feature enabled." >&2
-    echo "To bypass this check (not recommended), use: csd --force" >&2
-    return 1
+    echo "  Attempting to proceed - sandbox run may fail if not available." >&2
+    echo "  Ensure Docker Desktop 4.50+ is installed with sandbox feature enabled." >&2
+    echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
+    echo "" >&2
+    return 2  # Unknown - proceed with warning
 }
 
 # Ensure required volumes exist with correct permissions
@@ -267,17 +282,6 @@ csd() {
         esac
     done
 
-    # Check sandbox availability (unless --force)
-    if [[ "$force_flag" != "true" ]]; then
-        if ! _csd_check_sandbox; then
-            return 1
-        fi
-        # Best-effort ECI detection (warns but doesn't block)
-        _csd_check_eci || true
-    else
-        echo "WARNING: Skipping sandbox availability check (--force)" >&2
-    fi
-
     # Get container name first (we need it to check container state)
     container_name="$(_csd_container_name)"
     echo "Container: $container_name"
@@ -341,10 +345,39 @@ csd() {
             docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             ;;
         exited|created)
+            # Check sandbox availability before starting (unless --force)
+            if [[ "$force_flag" != "true" ]]; then
+                local sandbox_rc
+                _csd_check_sandbox
+                sandbox_rc=$?
+                if [[ $sandbox_rc -eq 1 ]]; then
+                    return 1  # Definite "no" - block
+                fi
+                # rc=0 (yes) or rc=2 (unknown) - proceed
+                # Best-effort ECI detection (warns but doesn't block)
+                _csd_check_eci || true
+            else
+                echo "WARNING: Skipping sandbox availability check (--force)" >&2
+            fi
             echo "Starting stopped container..."
             docker start -ai "$container_name"
             ;;
         none)
+            # Check sandbox availability before creating new container (unless --force)
+            if [[ "$force_flag" != "true" ]]; then
+                local sandbox_rc
+                _csd_check_sandbox
+                sandbox_rc=$?
+                if [[ $sandbox_rc -eq 1 ]]; then
+                    return 1  # Definite "no" - block
+                fi
+                # rc=0 (yes) or rc=2 (unknown) - proceed
+                # Best-effort ECI detection (warns but doesn't block)
+                _csd_check_eci || true
+            else
+                echo "WARNING: Skipping sandbox availability check (--force)" >&2
+            fi
+
             # Ensure volumes exist (both required and csd-managed)
             if ! _csd_ensure_volumes; then
                 echo "ERROR: Volume setup failed. Cannot start container." >&2
