@@ -7,10 +7,19 @@
     "fn-1.2"
   ],
   "epic": "fn-1",
+  "evidence": {
+    "commits": [
+      "9c4ed4e"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n syntax validation"
+    ]
+  },
   "id": "fn-1.4",
   "priority": null,
   "spec_path": ".flow/tasks/fn-1.4.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create helper scripts (build and run)",
-  "updated_at": "2026-01-14T16:54:58.759539Z"
+  "updated_at": "2026-01-14T16:56:38.268755Z"
 }

@@ -12,7 +12,9 @@
 
 # Constants
 readonly _CSD_IMAGE="dotnet-sandbox:latest"
+readonly _CSD_LABEL="csd.sandbox=dotnet-sandbox"
 readonly _CSD_VOLUMES=(
+    "docker-claude-sandbox-data:/mnt/claude-data"
     "dotnet-sandbox-vscode:/home/agent/.vscode-server"
     "dotnet-sandbox-nuget:/home/agent/.nuget"
     "dotnet-sandbox-gh:/home/agent/.config/gh"
@@ -41,24 +43,24 @@ _csd_container_name() {
         name="$(basename "$(pwd)")"
     fi
 
-    # Sanitize: lowercase, replace non-alphanumeric with dash
-    name="$(echo "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')"
+    # Sanitize: lowercase, replace non-alphanumeric with dash, collapse repeated dashes
+    name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g')"
 
     # Strip leading/trailing dashes
-    name="$(echo "$name" | sed 's/^-*//;s/-*$//')"
+    name="$(printf '%s' "$name" | sed 's/^-*//;s/-*$//')"
 
     # Handle empty or dash-only names
     if [[ -z "$name" || "$name" =~ ^-+$ ]]; then
-        name="sandbox-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/^-*//;s/-*$//')"
+        name="sandbox-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-*//;s/-*$//')"
     fi
 
     # Truncate to 63 characters (Docker limit)
     name="${name:0:63}"
 
     # Final cleanup of trailing dashes from truncation
-    name="$(echo "$name" | sed 's/-*$//')"
+    name="$(printf '%s' "$name" | sed 's/-*$//')"
 
-    echo "$name"
+    printf '%s' "$name"
 }
 
 # Check if docker sandbox is available
@@ -68,10 +70,18 @@ _csd_check_sandbox() {
         return 1
     fi
 
-    # Check if sandbox command is available
+    # Check if sandbox command is available by trying to run it
+    # docker sandbox ls succeeds (exit 0) if sandbox feature is available
     if docker sandbox ls >/dev/null 2>&1; then
         return 0
-    elif docker sandbox --help 2>&1 | grep -q "not recognized\|unknown command\|Unknown command"; then
+    fi
+
+    # Sandbox ls failed - check if it's because the command doesn't exist
+    local help_output
+    help_output="$(docker sandbox --help 2>&1)" || true
+
+    # Match various error patterns for missing subcommand
+    if printf '%s' "$help_output" | grep -qiE "not recognized|unknown command|not a docker command|invalid|Usage:.*docker"; then
         echo "ERROR: Docker sandbox is not available" >&2
         echo "" >&2
         echo "Docker sandbox requires Docker Desktop 4.29+ with sandbox feature enabled." >&2
@@ -80,16 +90,27 @@ _csd_check_sandbox() {
         echo "  2. Docker sandbox feature enabled in Settings > Features in development" >&2
         echo "" >&2
         return 1
-    else
-        # sandbox command exists but failed for another reason (maybe no sandboxes yet)
+    fi
+
+    # Help output looks like valid sandbox help, so the command exists
+    # but ls may have failed for another reason (e.g., no sandboxes yet, daemon issues)
+    # Be conservative: if we can't positively confirm sandbox works, fail
+    if printf '%s' "$help_output" | grep -qE "sandbox.*run|Create.*sandbox|list.*sandbox"; then
+        # Help mentions sandbox-specific commands, likely valid
         return 0
     fi
+
+    # Can't confirm sandbox is available - fail safe
+    echo "ERROR: Unable to verify Docker sandbox availability" >&2
+    echo "docker sandbox ls failed and help output was unexpected." >&2
+    echo "" >&2
+    return 1
 }
 
 # Ensure required volumes exist with correct permissions
 _csd_ensure_volumes() {
-    local volume_name mount_point
-    local volumes_created=()
+    local volume_name
+    local volumes_to_fix=()
 
     for vol_spec in "${_CSD_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
@@ -97,17 +118,24 @@ _csd_ensure_volumes() {
         if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
             echo "Creating volume: $volume_name"
             docker volume create "$volume_name" >/dev/null
-            volumes_created+=("$volume_name")
+            volumes_to_fix+=("$volume_name")
         fi
     done
 
-    # Fix permissions on newly created volumes (if image is available)
-    if [[ ${#volumes_created[@]} -gt 0 ]] && docker image inspect "$_CSD_IMAGE" >/dev/null 2>&1; then
-        for volume_name in "${volumes_created[@]}"; do
-            echo "Setting permissions on: $volume_name"
-            docker run --rm -u root -v "${volume_name}:/data" "$_CSD_IMAGE" chown 1000:1000 /data 2>/dev/null || true
-        done
+    # Fix permissions on volumes (if image is available)
+    # Skip permission fixing if image not built yet (user builds first)
+    if ! docker image inspect "$_CSD_IMAGE" >/dev/null 2>&1; then
+        if [[ ${#volumes_to_fix[@]} -gt 0 ]]; then
+            echo "Note: Skipping permission fix (image not built yet)"
+        fi
+        return 0
     fi
+
+    # Fix permissions on newly created volumes
+    for volume_name in "${volumes_to_fix[@]}"; do
+        echo "Setting permissions on: $volume_name"
+        docker run --rm -u root -v "${volume_name}:/data" "$_CSD_IMAGE" chown 1000:1000 /data
+    done
 }
 
 # Claude Sandbox Dotnet - main function
@@ -190,11 +218,20 @@ csd() {
                 vol_args+=("-v" "$vol_spec")
             done
 
+            # Check if sandbox supports port publishing
+            local port_args=()
+            if docker sandbox run --help 2>&1 | grep -qE '\-p,?\s|--publish'; then
+                port_args=("-p" "5000-5010:5000-5010")
+            else
+                echo "Note: docker sandbox run does not support -p; ports not published"
+            fi
+
             echo "Starting new sandbox container..."
             docker sandbox run \
                 --name "$container_name" \
+                --label "$_CSD_LABEL" \
                 -it \
-                -p 5000-5010:5000-5010 \
+                "${port_args[@]}" \
                 "${vol_args[@]}" \
                 "$_CSD_IMAGE" \
                 bash
@@ -211,7 +248,8 @@ csd-stop-all() {
     local containers
 
     # Find all dotnet-sandbox related containers (running or stopped)
-    containers=$(docker ps -a --filter "ancestor=$_CSD_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
+    # Use label filter for reliable matching across image rebuilds
+    containers=$(docker ps -a --filter "label=$_CSD_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
 
     if [[ -z "$containers" ]]; then
         echo "No dotnet-sandbox containers found."

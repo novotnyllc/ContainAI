@@ -87,8 +87,7 @@ Implemented helper scripts for building and running the dotnet-sandbox:
 - `csd-stop-all` function with interactive container selection
 
 Both scripts pass bash syntax validation.
-
 ## Evidence
-- Commits: TBD (will be set after commit)
-- Tests: bash -n syntax validation passed for both scripts
+- Commits: 9c4ed4e
+- Tests: bash -n syntax validation
 - PRs:
