@@ -1,32 +1,18 @@
 # fn-1.1 Create dotnet-wasm directory structure
 
 ## Description
-Create the `dotnet-wasm/` directory structure following existing repo patterns from `claude/`.
+Create the `dotnet-sandbox/` directory structure with placeholder files:
 
-### Files to Create
+- `dotnet-sandbox/Dockerfile`
+- `dotnet-sandbox/build.sh`
+- `dotnet-sandbox/aliases.sh`
+- `dotnet-sandbox/check-sandbox.sh`
+- `dotnet-sandbox/sync-vscode.sh`
+- `dotnet-sandbox/sync-vscode-insiders.sh`
+- `dotnet-sandbox/sync-all.sh`
+- `dotnet-sandbox/README.md`
 
-```
-dotnet-wasm/
-├── Dockerfile           # Main container definition (created in fn-1.2)
-├── build.sh             # Build helper (created in fn-1.4)
-├── aliases.sh           # Shell aliases to source (created in fn-1.4)
-├── init-volumes.sh      # Volume initialization (created in fn-1.4)
-├── check-sandbox.sh     # Sandbox/ECI detection (created in fn-1.11)
-├── sync-vscode-data.sh  # VS Code data sync script (created in fn-1.7)
-└── README.md            # Documentation (created in fn-1.10)
-```
-
-### Reference Pattern
-
-Follow the existing structure at `claude/`:
-- `claude/Dockerfile:1-34` - Dockerfile pattern
-- `claude/sync-plugins.sh` - Script style with `set -euo pipefail`
-
-### Implementation Notes
-
-- Create directory only; actual file content comes in subsequent tasks
-- Ensure proper permissions (755 for directory)
-
+Note: Directory is `dotnet-sandbox/` (not `dotnet-wasm/`) to match the image name.
 ## Acceptance
 - [ ] `dotnet-wasm/` directory exists
 - [ ] Directory has correct permissions (755)
