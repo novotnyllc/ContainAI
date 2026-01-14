@@ -30,12 +30,12 @@ Create mount point directories in Dockerfile for volumes (per spec Volume Strate
 
 2. Ensure proper permissions (agent user owns directories)
 ## Acceptance
-- [ ] Dockerfile creates `/home/agent/.vscode-server` directory
-- [ ] Dockerfile creates `/home/agent/.nuget` directory
-- [ ] Dockerfile creates `/home/agent/.config/gh` directory
-- [ ] Dockerfile creates `/home/agent/.claude/plugins` directory
-- [ ] All directories owned by agent user (UID 1000)
-- [ ] Directories have correct permissions
+- [x] Dockerfile creates `/home/agent/.vscode-server` directory
+- [x] Dockerfile creates `/home/agent/.nuget` directory
+- [x] Dockerfile creates `/home/agent/.config/gh` directory
+- [x] Dockerfile creates `/home/agent/.claude/plugins` directory
+- [x] All directories owned by agent user (UID 1000)
+- [x] Directories have correct permissions
 ## Done summary
 - Added mount point directories in Dockerfile for volume mounts
 - Created /home/agent/.vscode-server, .nuget, .config/gh, .claude/plugins

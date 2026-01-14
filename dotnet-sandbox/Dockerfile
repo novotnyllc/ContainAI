@@ -129,7 +129,7 @@ RUN mkdir -p /home/agent/.vscode-server \
              /home/agent/.claude/plugins \
     && chown -R agent:agent /home/agent/.vscode-server \
                             /home/agent/.nuget \
-                            /home/agent/.config/gh \
+                            /home/agent/.config \
                             /home/agent/.claude
 
 # Create Claude credentials symlink (same workaround as claude/Dockerfile)

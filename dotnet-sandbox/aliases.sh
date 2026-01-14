@@ -124,13 +124,18 @@ _csd_check_sandbox() {
 _csd_ensure_volumes() {
     local volume_name vol_spec
 
-    # Check for mount-only volumes (warn if missing, but don't create)
+    # Check for mount-only volumes (fail if missing - required for operation)
     for vol_spec in "${_CSD_MOUNT_ONLY_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
         if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
-            echo "WARNING: Volume '$volume_name' not found" >&2
-            echo "  Create it with: docker volume create $volume_name" >&2
-            echo "  Or run: claude/sync-plugins.sh (for full setup)" >&2
+            echo "ERROR: Required volume '$volume_name' not found" >&2
+            echo "" >&2
+            echo "This volume is required for Claude credentials. Create it by running:" >&2
+            echo "  claude/sync-plugins.sh" >&2
+            echo "" >&2
+            echo "Or manually create with:" >&2
+            echo "  docker volume create $volume_name" >&2
+            return 1
         fi
     done
 
@@ -269,8 +274,11 @@ csd() {
             docker start -ai "$container_name"
             ;;
         none)
-            # Ensure volumes exist (only csd-managed volumes)
-            _csd_ensure_volumes
+            # Ensure volumes exist (both required and csd-managed)
+            if ! _csd_ensure_volumes; then
+                echo "ERROR: Volume setup failed. Cannot start container." >&2
+                return 1
+            fi
 
             # Build volume arguments (both csd-managed and mount-only volumes)
             local vol_args=()
