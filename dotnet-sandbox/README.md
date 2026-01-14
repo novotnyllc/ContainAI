@@ -42,10 +42,11 @@ docker volume create docker-claude-sandbox-data
 # Then authenticate inside the container with: claude login
 ```
 
-**Option 2** (existing Claude users - syncs credentials and plugins):
+**Option 2** (existing Claude users - syncs plugins and settings):
 ```bash
 ../claude/sync-plugins.sh
 ```
+Note: sync-plugins.sh syncs plugins and settings only. Credentials are NOT synced - you'll need to run `claude login` inside the container to authenticate.
 
 ## The `csd` Command
 
@@ -218,9 +219,10 @@ docker volume create docker-claude-sandbox-data
 # Then run: claude login (inside the container)
 ```
 
-**Option 2** (sync existing host credentials):
+**Option 2** (sync plugins from host, then authenticate):
 ```bash
-../claude/sync-plugins.sh
+../claude/sync-plugins.sh  # Syncs plugins and settings, NOT credentials
+# Then inside container: claude login
 ```
 
 ### "Image not found"

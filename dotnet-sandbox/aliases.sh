@@ -69,8 +69,15 @@ _csd_container_name() {
     name="$(printf '%s' "$name" | sed 's/-*$//')"
 
     # Final fallback if name became empty after all processing
+    # Use sandbox-<dirname> pattern, not generic sandbox-container
     if [[ -z "$name" ]]; then
-        name="sandbox-container"
+        local dir_fallback
+        dir_fallback="$(basename "$(pwd)")"
+        if [[ -n "$dir_fallback" ]]; then
+            name="sandbox-$dir_fallback"
+        else
+            name="sandbox-default"
+        fi
     fi
 
     printf '%s' "$name"
@@ -228,17 +235,41 @@ _csd_preflight_checks() {
     return 0
 }
 
-# Verify container was created by csd (has our label)
+# Get the csd.sandbox label value from a container (empty if not found)
+_csd_get_container_label() {
+    local container_name="$1"
+    docker inspect --format '{{ index .Config.Labels "csd.sandbox" }}' "$container_name" 2>/dev/null || echo ""
+}
+
+# Get the image name of a container
+_csd_get_container_image() {
+    local container_name="$1"
+    docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || echo ""
+}
+
+# Verify container was created by csd (has our label or uses our image)
 # Returns: 0=yes (csd container), 1=no (foreign container)
+# Falls back to image name verification if labels not supported
 _csd_is_our_container() {
     local container_name="$1"
     local label_value
-    # Use index to get specific label value (avoids map[] format parsing)
-    label_value="$(docker inspect --format '{{ index .Config.Labels "csd.sandbox" }}' "$container_name" 2>/dev/null)" || return 1
-    # Strict string compare to expected value
+    label_value="$(_csd_get_container_label "$container_name")"
+
+    # Primary check: label match
     if [[ "$label_value" == "dotnet-sandbox" ]]; then
         return 0
     fi
+
+    # Fallback: if no label, check if container uses our image
+    # This handles cases where docker sandbox run doesn't support --label
+    if [[ -z "$label_value" || "$label_value" == "<no value>" ]]; then
+        local image_name
+        image_name="$(_csd_get_container_image "$container_name")"
+        if [[ "$image_name" == "$_CSD_IMAGE" ]]; then
+            return 0
+        fi
+    fi
+
     return 1
 }
 
@@ -277,18 +308,25 @@ _csd_ensure_volumes() {
         fi
     done
 
-    # Fix permissions on all managed volumes (idempotent chown)
-    # Skip permission fixing if image not built yet (user builds first)
-    if ! docker image inspect "$_CSD_IMAGE" >/dev/null 2>&1; then
-        echo "Note: Skipping permission fix (image not built yet)"
+    # Fix permissions on all volumes (idempotent chown)
+    # Use dotnet-sandbox:latest if built, otherwise fall back to base image
+    local chown_image
+    if docker image inspect "$_CSD_IMAGE" >/dev/null 2>&1; then
+        chown_image="$_CSD_IMAGE"
+    elif docker image inspect "docker/sandbox-templates:claude-code" >/dev/null 2>&1; then
+        echo "Note: Using base image for permission fix (dotnet-sandbox not built yet)"
+        chown_image="docker/sandbox-templates:claude-code"
+    else
+        echo "Note: Skipping permission fix (no suitable image available)"
         return 0
     fi
 
-    # Ensure correct ownership on all managed volumes (safe to re-run)
+    # Ensure correct ownership on ALL volumes (both managed and mount-only)
     # Use -R for recursive chown to handle any existing root-owned files
-    for vol_spec in "${_CSD_VOLUMES[@]}"; do
+    local all_volumes=("${_CSD_VOLUMES[@]}" "${_CSD_MOUNT_ONLY_VOLUMES[@]}")
+    for vol_spec in "${all_volumes[@]}"; do
         volume_name="${vol_spec%%:*}"
-        if ! docker run --rm -u root -v "${volume_name}:/data" "$_CSD_IMAGE" chown -R 1000:1000 /data; then
+        if ! docker run --rm -u root -v "${volume_name}:/data" "$chown_image" chown -R 1000:1000 /data; then
             echo "ERROR: Failed to fix permissions on volume $volume_name" >&2
             return 1
         fi
@@ -403,12 +441,20 @@ csd() {
 
     case "$container_state" in
         running)
-            # Verify this container was created by csd (has our label)
+            # Verify this container was created by csd (has our label or image)
             if ! _csd_is_our_container "$container_name"; then
+                local actual_label actual_image
+                actual_label="$(_csd_get_container_label "$container_name")"
+                actual_image="$(_csd_get_container_image "$container_name")"
                 echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
                 echo "" >&2
-                echo "This may be a name collision with a non-sandbox container." >&2
-                echo "To recreate as a sandbox container, run: csd --restart" >&2
+                echo "  Expected label 'csd.sandbox': dotnet-sandbox" >&2
+                echo "  Actual label 'csd.sandbox':   ${actual_label:-<not set>}" >&2
+                echo "  Expected image:               $_CSD_IMAGE" >&2
+                echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
+                echo "" >&2
+                echo "This is a name collision with a container not managed by csd." >&2
+                echo "To recreate as a csd-managed sandbox container, run: csd --restart" >&2
                 echo "" >&2
                 return 1
             fi
@@ -416,12 +462,20 @@ csd() {
             docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             ;;
         exited|created)
-            # Verify this container was created by csd (has our label)
+            # Verify this container was created by csd (has our label or image)
             if ! _csd_is_our_container "$container_name"; then
+                local actual_label actual_image
+                actual_label="$(_csd_get_container_label "$container_name")"
+                actual_image="$(_csd_get_container_image "$container_name")"
                 echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
                 echo "" >&2
-                echo "This may be a name collision with a non-sandbox container." >&2
-                echo "To recreate as a sandbox container, run: csd --restart" >&2
+                echo "  Expected label 'csd.sandbox': dotnet-sandbox" >&2
+                echo "  Actual label 'csd.sandbox':   ${actual_label:-<not set>}" >&2
+                echo "  Expected image:               $_CSD_IMAGE" >&2
+                echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
+                echo "" >&2
+                echo "This is a name collision with a container not managed by csd." >&2
+                echo "To recreate as a csd-managed sandbox container, run: csd --restart" >&2
                 echo "" >&2
                 return 1
             fi
@@ -453,9 +507,12 @@ csd() {
                 vol_args+=("-v" "$vol_spec")
             done
 
-            # Check if sandbox supports port publishing and which flag to use
-            local port_args=() sandbox_help
+            # Get sandbox run help to check supported flags
+            local sandbox_help
             sandbox_help="$(docker sandbox run --help 2>&1)"
+
+            # Check if sandbox supports port publishing and which flag to use
+            local port_args=()
             if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])-p([[:space:]]|,|$)'; then
                 port_args=("-p" "5000-5010:5000-5010")
             elif printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--publish([[:space:]]|,|$)'; then
@@ -464,10 +521,18 @@ csd() {
                 echo "Note: docker sandbox run does not support port publishing; ports not forwarded"
             fi
 
+            # Check if sandbox supports --label flag
+            local label_args=()
+            if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--label([[:space:]]|,|=|$)'; then
+                label_args=("--label" "$_CSD_LABEL")
+            else
+                echo "Note: docker sandbox run does not support --label; container identity via image name"
+            fi
+
             echo "Starting new sandbox container..."
             docker sandbox run \
                 --name "$container_name" \
-                --label "$_CSD_LABEL" \
+                "${label_args[@]}" \
                 -it \
                 "${port_args[@]}" \
                 "${vol_args[@]}" \

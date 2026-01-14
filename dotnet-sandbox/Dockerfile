@@ -56,10 +56,15 @@ ENV PATH="${PATH}:/usr/share/dotnet"
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 
-# Install WASM workloads and verify installation
-# Use POSIX character class for whitespace matching (ERE \s is not portable)
-RUN dotnet workload install wasm-tools wasm-tools-net9 \
+# Install WASM workloads
+# wasm-tools is required (hard fail)
+# wasm-tools-net9 is optional (fail-open for forward compatibility)
+RUN dotnet workload install wasm-tools \
     && dotnet workload list | grep -E '^[[:space:]]*wasm-tools([[:space:]]|$)'
+
+# Install wasm-tools-net9 (optional, fail-open)
+RUN dotnet workload install wasm-tools-net9 \
+    || echo "Note: wasm-tools-net9 not available (may not be needed for .NET 10+)"
 
 # Install PowerShell via Microsoft's recommended method and verify
 RUN wget -q "https://packages.microsoft.com/config/ubuntu/$(. /etc/os-release && echo $VERSION_ID)/packages-microsoft-prod.deb" -O /tmp/packages-microsoft-prod.deb \
