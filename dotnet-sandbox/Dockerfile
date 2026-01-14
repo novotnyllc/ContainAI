@@ -6,8 +6,8 @@ FROM docker/sandbox-templates:claude-code
 
 # Build arguments for .NET channel selection
 # Options: lts, sts, preview, or specific like "10.0"
-# Default to 10.0 to ensure .NET 10 is installed (acceptance requires version 10.x)
-ARG DOTNET_CHANNEL=10.0
+# Default to lts per spec; version 10 verification ensures correct major version
+ARG DOTNET_CHANNEL=lts
 
 # Switch to root for system-level installations
 USER root
@@ -20,8 +20,12 @@ RUN . /etc/os-release && \
         exit 1; \
     fi
 
-# Install prerequisites for .NET and PowerShell
+# Install prerequisites for .NET, PowerShell, and dotnet-install.sh
+# bash and tar are required by dotnet-install.sh for extraction
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    tar \
+    gzip \
     curl \
     wget \
     ca-certificates \
@@ -80,8 +84,9 @@ RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh |
 
 # Create system-wide symlinks for non-interactive access (as root)
 # Use nvm which to resolve the default node version deterministically
+# Force bash shell explicitly to avoid issues if agent's login shell differs
 USER root
-RUN NODE_PATH=$(su - agent -c 'source ~/.nvm/nvm.sh && nvm which default' | xargs dirname) \
+RUN NODE_PATH=$(su -s /bin/bash agent -c 'source ~/.nvm/nvm.sh && nvm which default' | xargs dirname) \
     && ln -sf "$NODE_PATH/node" /usr/local/bin/node \
     && ln -sf "$NODE_PATH/npm" /usr/local/bin/npm \
     && ln -sf "$NODE_PATH/npx" /usr/local/bin/npx

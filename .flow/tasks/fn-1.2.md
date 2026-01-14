@@ -72,7 +72,7 @@ RUN mkdir -p /home/agent/.claude \
 Created complete Dockerfile for .NET 10 WASM Docker Sandbox with:
 
 1. **Base image validation**: Fails fast if not Ubuntu Noble (checks VERSION_CODENAME)
-2. **.NET SDK via dotnet-install.sh**: Uses build ARG `DOTNET_CHANNEL=10.0` (default) for .NET 10
+2. **.NET SDK via dotnet-install.sh**: Uses build ARG `DOTNET_CHANNEL=lts` (default) with version 10 verification
 3. **WASM workloads**: Installs `wasm-tools` and `wasm-tools-net9`
 4. **PowerShell**: Installed via Microsoft's official repository method
 5. **Node.js via nvm**: Installed as agent user with LTS version and global tools (typescript, eslint, prettier)
