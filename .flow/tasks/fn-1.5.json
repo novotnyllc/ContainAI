@@ -15,7 +15,7 @@
   "id": "fn-1.5",
   "priority": null,
   "spec_path": ".flow/tasks/fn-1.5.md",
-  "status": "blocked",
+  "status": "todo",
   "title": "Test image build and WASM functionality",
-  "updated_at": "2026-01-14T19:23:11.362723Z"
+  "updated_at": "2026-01-14T21:18:07.574319Z"
 }
