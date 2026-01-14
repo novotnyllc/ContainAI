@@ -42,14 +42,14 @@ fi
 - Clear messaging for all states
 
 ## Acceptance
-- [ ] `csd` checks for docker sandbox availability before starting
-- [ ] BLOCKS with actionable error if `sandbox=no` (includes version requirements)
-- [ ] Does NOT block on "unknown" states (fail-open)
-- [ ] WARNS if ECI detection returns no/unknown
-- [ ] Clear messaging explains each state and next steps
-- [ ] Detection code is in `csd` wrapper (aliases.sh)
-- [ ] Plain `docker run` works without blocking (no entrypoint check)
-- [ ] Detection is documented in README
+- [x] `csd` checks for docker sandbox availability before starting
+- [x] BLOCKS with actionable error if `sandbox=no` (includes version requirements)
+- [x] Does NOT block on "unknown" states (fail-open)
+- [x] WARNS if ECI detection returns no/unknown
+- [x] Clear messaging explains each state and next steps
+- [x] Detection code is in `csd` wrapper (aliases.sh)
+- [x] Plain `docker run` works without blocking (no entrypoint check)
+- [x] Detection is documented in README
 
 ## Done summary
 ## What changed

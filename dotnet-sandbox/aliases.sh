@@ -90,17 +90,18 @@ _csd_check_eci() {
         return 2
     }
 
-    # Look for explicit ECI indicators in security options
-    # Docker Desktop with ECI enabled shows userns, rootless, or eci-related options
-    if printf '%s' "$docker_info" | grep -qiE 'eci|enhanced.?container.?isolation|userns|rootless'; then
+    # Look for explicit ECI indicator only (not userns/rootless which are different)
+    # Docker Desktop ECI specifically shows "eci" or "enhanced-container-isolation"
+    if printf '%s' "$docker_info" | grep -qiE 'eci|enhanced.?container.?isolation'; then
         return 0  # ECI explicitly detected
     fi
 
-    # ECI not explicitly detected - warn but proceed
-    # Note: Docker Desktop may still provide sandbox isolation even without ECI
-    echo "WARNING: ECI (Enhanced Container Isolation) not detected in Docker info" >&2
-    echo "  Sandbox will run with standard Docker isolation." >&2
-    echo "  For enhanced security, enable ECI in Docker Desktop:" >&2
+    # No explicit ECI indicator - warn but proceed
+    # Note: userns/rootless provide some isolation but are not ECI
+    echo "WARNING: No ECI indicator found in Docker security options" >&2
+    echo "  This may be normal on non-Desktop Docker or older versions." >&2
+    echo "  Sandbox will run; ECI adds additional hardening when enabled." >&2
+    echo "  To enable ECI in Docker Desktop:" >&2
     echo "    Settings > Security > Enhanced Container Isolation" >&2
     echo "  See: https://docs.docker.com/security/for-admins/enhanced-container-isolation/" >&2
     echo "" >&2
@@ -138,10 +139,15 @@ _csd_check_sandbox() {
         return 1
     fi
 
-    # Check for "no sandboxes exist" case (command works, just empty list)
-    # Use specific known patterns to avoid false positives
+    # Check for "no sandboxes exist" case - only treat as success if exit code was 0
+    # (handled above) or if message clearly indicates functional sandbox support
+    # With non-zero exit, treat as unknown to be safe
     if printf '%s' "$ls_output" | grep -qiE "no sandboxes found|0 sandboxes|sandbox list is empty"; then
-        return 0
+        # Non-zero exit with empty list message - treat as unknown, not success
+        echo "WARNING: docker sandbox ls returned empty list with error code" >&2
+        echo "  Attempting to proceed - sandbox may be functional." >&2
+        echo "" >&2
+        return 2
     fi
 
     # Check for command not found / not available errors (definite "no")
@@ -181,13 +187,48 @@ _csd_check_sandbox() {
     # Unknown error - fail OPEN with warning (per spec: don't block on unknown)
     echo "WARNING: Could not verify Docker sandbox availability" >&2
     echo "" >&2
-    printf '  docker sandbox ls returned: %s\n' "$ls_output" >&2
+    echo "  docker sandbox ls output:" >&2
+    printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
     echo "" >&2
     echo "  Attempting to proceed - sandbox run may fail if not available." >&2
     echo "  Ensure Docker Desktop 4.50+ is installed with sandbox feature enabled." >&2
     echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
     echo "" >&2
     return 2  # Unknown - proceed with warning
+}
+
+# Preflight checks for sandbox/ECI before container start
+# Returns: 0=proceed, 1=block
+_csd_preflight_checks() {
+    local force_flag="$1"
+
+    if [[ "$force_flag" == "true" ]]; then
+        echo "WARNING: Skipping sandbox availability check (--force)" >&2
+        return 0
+    fi
+
+    local sandbox_rc
+    _csd_check_sandbox
+    sandbox_rc=$?
+    if [[ $sandbox_rc -eq 1 ]]; then
+        return 1  # Definite "no" - block
+    fi
+    # rc=0 (yes) or rc=2 (unknown) - proceed
+    # Best-effort ECI detection (warns but doesn't block)
+    _csd_check_eci || true
+    return 0
+}
+
+# Verify container was created by csd (has our label)
+# Returns: 0=yes (csd container), 1=no (foreign container)
+_csd_is_our_container() {
+    local container_name="$1"
+    local labels
+    labels="$(docker inspect --format '{{.Config.Labels}}' "$container_name" 2>/dev/null)" || return 1
+    if printf '%s' "$labels" | grep -q "$_CSD_LABEL"; then
+        return 0
+    fi
+    return 1
 }
 
 # Ensure required volumes exist with correct permissions
@@ -282,6 +323,13 @@ csd() {
         esac
     done
 
+    # Early prereq check: is docker available?
+    # This ensures docker errors get routed through our messaging
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "ERROR: Docker is not installed or not in PATH" >&2
+        return 1
+    fi
+
     # Get container name first (we need it to check container state)
     container_name="$(_csd_container_name)"
     echo "Container: $container_name"
@@ -295,7 +343,10 @@ csd() {
     elif printf '%s' "$container_inspect_output" | grep -qiE "no such object|not found|error.*no such"; then
         container_state="none"
     else
-        # Actual error (daemon down, etc.) - surface it
+        # Docker error - route through sandbox check for actionable messaging
+        # This handles daemon down, permission denied, etc.
+        _csd_check_sandbox || return 1
+        # If sandbox check passed but inspect still failed, surface the error
         echo "$container_inspect_output" >&2
         return 1
     fi
@@ -345,37 +396,26 @@ csd() {
             docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             ;;
         exited|created)
-            # Check sandbox availability before starting (unless --force)
-            if [[ "$force_flag" != "true" ]]; then
-                local sandbox_rc
-                _csd_check_sandbox
-                sandbox_rc=$?
-                if [[ $sandbox_rc -eq 1 ]]; then
-                    return 1  # Definite "no" - block
-                fi
-                # rc=0 (yes) or rc=2 (unknown) - proceed
-                # Best-effort ECI detection (warns but doesn't block)
-                _csd_check_eci || true
-            else
-                echo "WARNING: Skipping sandbox availability check (--force)" >&2
+            # Verify this container was created by csd (has our label)
+            if ! _csd_is_our_container "$container_name"; then
+                echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
+                echo "" >&2
+                echo "This may be a name collision with a non-sandbox container." >&2
+                echo "To recreate as a sandbox container, run: csd --restart" >&2
+                echo "" >&2
+                return 1
+            fi
+            # Check sandbox availability before starting
+            if ! _csd_preflight_checks "$force_flag"; then
+                return 1
             fi
             echo "Starting stopped container..."
             docker start -ai "$container_name"
             ;;
         none)
-            # Check sandbox availability before creating new container (unless --force)
-            if [[ "$force_flag" != "true" ]]; then
-                local sandbox_rc
-                _csd_check_sandbox
-                sandbox_rc=$?
-                if [[ $sandbox_rc -eq 1 ]]; then
-                    return 1  # Definite "no" - block
-                fi
-                # rc=0 (yes) or rc=2 (unknown) - proceed
-                # Best-effort ECI detection (warns but doesn't block)
-                _csd_check_eci || true
-            else
-                echo "WARNING: Skipping sandbox availability check (--force)" >&2
+            # Check sandbox availability before creating new container
+            if ! _csd_preflight_checks "$force_flag"; then
+                return 1
             fi
 
             # Ensure volumes exist (both required and csd-managed)

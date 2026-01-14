@@ -144,9 +144,9 @@ ECI (Enhanced Container Isolation) detection is best-effort. The `csd` wrapper:
 - **Warns** if ECI is not detected or status is unknown
 - **Proceeds anyway** - ECI detection does not block container start
 
-ECI warnings help you know if enhanced isolation is active, but Docker sandbox provides security isolation regardless of ECI status.
+ECI warnings help you know if enhanced isolation is active. Sandbox works without ECI; ECI adds additional hardening when enabled.
 
-To bypass all detection checks (not recommended), use `csd --force`.
+To bypass preflight detection (not recommended), use `csd --force`. Note: this only skips the check; `docker sandbox run` must still be functional.
 
 ## Security
 
