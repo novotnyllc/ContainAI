@@ -86,9 +86,20 @@ Create `dotnet-sandbox/README.md` with comprehensive usage documentation.
 - [ ] Documents container naming convention including detached HEAD
 
 ## Done summary
-TBD
+- Added comprehensive README.md documentation for dotnet-sandbox
+- Covers all required sections: prerequisites, quick start, csd command, volumes, security, sync scripts, testing, limitations, troubleshooting
+- Documents that docker sandbox handles all security automatically (no --cap-drop, --security-opt)
+- Includes nvm symlink limitation documentation
 
+Why:
+- Per task spec fn-1.10 acceptance criteria
+- Users need documentation to use the sandbox effectively
+
+Verification:
+- README.md exists with all required sections
+- Security section states "No manual security configuration required"
+- Does not mention runArgs, --cap-drop, --security-opt
 ## Evidence
-- Commits:
-- Tests:
+- Commits: af7f6b3f239ca6f43dbcf908fe039babc036f075
+- Tests: manual README review
 - PRs:
