@@ -158,7 +158,7 @@ Docker sandbox provides security isolation through:
 
 **Note:** ECI is optional and depends on your Docker Desktop configuration. The sandbox provides isolation regardless, but ECI adds additional security boundaries. See [Docker ECI documentation](https://docs.docker.com/security/for-admins/enhanced-container-isolation/) for details.
 
-**No manual security configuration required.** The `csd` wrapper enforces sandbox usage and blocks if Docker sandbox is unavailable.
+**No manual security configuration required.** The `csd` wrapper enforces sandbox usage: blocks when sandbox is definitely unavailable, and warns but attempts to proceed when status is unknown.
 
 Plain `docker run` is allowed for CI/smoke tests (see Testing below).
 

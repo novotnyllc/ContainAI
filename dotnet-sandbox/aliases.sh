@@ -95,14 +95,14 @@ _csd_check_eci() {
         return 0  # yes - ECI explicitly detected
     fi
 
-    # Check for userns/rootless hints (per spec: indicates enhanced isolation)
-    # These suggest user namespace isolation is active
+    # Check for userns/rootless hints (per spec: indicates some isolation)
+    # These suggest user namespace isolation is active, but it's not ECI
     if printf '%s' "$docker_info" | grep -qiE 'userns|rootless'; then
-        # userns/rootless detected - likely has enhanced isolation
+        # userns/rootless detected - isolation present but not ECI specifically
         echo "Note: User namespace isolation detected (userns/rootless)" >&2
-        echo "  This provides container isolation similar to ECI." >&2
+        echo "  ECI not detected, but userns/rootless provides container isolation." >&2
         echo "" >&2
-        return 0  # yes - userns/rootless provides similar isolation
+        return 2  # unknown - has isolation but not ECI specifically
     fi
 
     # No ECI or userns/rootless indicators found - warn but proceed
@@ -136,8 +136,9 @@ _csd_check_sandbox() {
 
     # Sandbox ls failed - analyze the error to provide actionable feedback
     # Check for feature disabled / requirements not met FIRST (before empty list check)
-    # Use specific Docker Desktop sandbox error patterns to avoid false positives
-    if printf '%s' "$ls_output" | grep -qiE "sandbox.*feature.*disabled|sandbox.*not enabled|sandbox.*unavailable|feature.*sandbox.*disabled"; then
+    # Match broad patterns per spec, but exclude "no sandbox" empty list messages
+    if printf '%s' "$ls_output" | grep -qiE "feature.*disabled|not enabled|requirements.*not met|sandbox.*unavailable" && \
+       ! printf '%s' "$ls_output" | grep -qiE "no sandboxes"; then
         echo "ERROR: Docker sandbox feature is not enabled" >&2
         echo "" >&2
         echo "Please enable sandbox in Docker Desktop:" >&2
@@ -175,10 +176,10 @@ _csd_check_sandbox() {
     if printf '%s' "$ls_output" | grep -qiE "permission denied"; then
         echo "ERROR: Permission denied accessing Docker" >&2
         echo "" >&2
-        echo "Please ensure your user has Docker access:" >&2
-        echo "  - Add your user to the 'docker' group: sudo usermod -aG docker \$USER" >&2
-        echo "  - Or check Docker Desktop socket permissions" >&2
-        echo "  - Then log out and back in, or run: newgrp docker" >&2
+        echo "Please ensure Docker is accessible:" >&2
+        echo "  Docker Desktop (macOS/Windows): Ensure Docker Desktop is running and try restarting it" >&2
+        echo "  Linux: Add your user to the 'docker' group: sudo usermod -aG docker \$USER" >&2
+        echo "         Then log out and back in, or run: newgrp docker" >&2
         echo "" >&2
         return 1
     fi
@@ -452,12 +453,15 @@ csd() {
                 vol_args+=("-v" "$vol_spec")
             done
 
-            # Check if sandbox supports port publishing
-            local port_args=()
-            if docker sandbox run --help 2>&1 | grep -qE '(^|[[:space:]])(-p|--publish)([[:space:]]|,|$)'; then
+            # Check if sandbox supports port publishing and which flag to use
+            local port_args=() sandbox_help
+            sandbox_help="$(docker sandbox run --help 2>&1)"
+            if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])-p([[:space:]]|,|$)'; then
                 port_args=("-p" "5000-5010:5000-5010")
+            elif printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--publish([[:space:]]|,|$)'; then
+                port_args=("--publish" "5000-5010:5000-5010")
             else
-                echo "Note: docker sandbox run does not support -p; ports not published"
+                echo "Note: docker sandbox run does not support port publishing; ports not forwarded"
             fi
 
             echo "Starting new sandbox container..."
