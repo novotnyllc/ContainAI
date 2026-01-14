@@ -28,6 +28,6 @@ Created `dotnet-sandbox/` directory structure with all placeholder files:
 
 Directory has 755 permissions. All shell scripts are executable.
 ## Evidence
-- Commits:
+- Commits: 4a72197, 903739e
 - Tests: ls -la dotnet-sandbox/, stat -c '%a' dotnet-sandbox
 - PRs:
