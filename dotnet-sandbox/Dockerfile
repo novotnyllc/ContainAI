@@ -27,6 +27,7 @@ RUN apt-get update \
     software-properties-common \    
     jq \
     unzip \
+    nano \
     socat \
     tmux \
     shellcheck \
@@ -153,19 +154,16 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | b
       # Point non-interactive bash at a dedicated env file
 ENV BASH_ENV=/home/agent/.bash_env    
 
-RUN cat > /home/agent/.bunfig.toml <<'EOF'
-[install]
-globalDir = "/home/agent/.bun/install/global"
-globalBinDir = "/home/agent/.bun/bin"
-EOF
+
+#ENV BUN_INSTALL=/usr/share/bun
+#ENV UV_INSTALL_DIR=/usr/share/uv
+RUN curl -fsSL https://bun.com/install | bash \ 
+    && curl -LsSf https://astral.sh/uv/install.sh | bash \
+    && curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+#ENV PATH="/home/agent/.bun/bin:${BUN_INSTALL}/bin:${PATH}"
+#ENV PATH="${UV_INSTALL_DIR}/bin:${PATH}"
 
 USER root
-ENV BUN_INSTALL=/usr/share/bun
-ENV UV_INSTALL_DIR=/usr/share/uv
-RUN curl -fsSL https://bun.com/install | bash \ 
-    && curl -LsSf https://astral.sh/uv/install.sh | bash 
-ENV PATH="/home/agent/.bun/bin:${BUN_INSTALL}/bin:${PATH}"
-ENV PATH="${UV_INSTALL_DIR}/bin:${PATH}"
 
 # Install GitHub CLI, ai code agents as npm global packages in one layer
 RUN <<EOF
@@ -207,4 +205,3 @@ RUN chmod 0755 /usr/local/bin/entrypoint.sh
 USER agent
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-WORKDIR /home/agent/workspace
