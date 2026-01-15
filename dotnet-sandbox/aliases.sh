@@ -562,7 +562,7 @@ csd() {
         
             echo "Starting new sandbox container..."
             docker sandbox run \
-                -d --name "$container_name" \
+                --name "$container_name" \
                 "${vol_args[@]}" \
                 --template "$_CSD_IMAGE" \
                 claude

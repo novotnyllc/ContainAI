@@ -70,7 +70,10 @@ main() {
   rm -rf "$TARGET_LINK"
   ln -s "$MIRRORED" "$TARGET_LINK"
 
-  log "Workspace linked: $TARGET_LINK -> $MIRRORED"
+  #log "Workspace linked: $TARGET_LINK -> $MIRRORED"
+  
+  // Set working directory back to workspace after changing symlink
+  cd /home/agent/workspace
 
   # Continue with the container's original command
   exec "$@"
