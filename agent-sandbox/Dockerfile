@@ -130,30 +130,27 @@ RUN curl -fsSL https://bun.com/install | bash \
     && curl -LsSf https://astral.sh/uv/install.sh | bash \
     && curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
 
-# Create mount point directories for volumes (per spec Volume Strategy)
-# These directories will be mount targets for named volumes managed by csd wrapper
-RUN  mkdir -p /home/agent/.vscode-server/extensions \
-              /home/agent/.vscode-server/data/Machine \
+# Create mount point directories so we can symlink to them
+RUN  mkdir -p /home/agent/.vscode-server/data/Machine \
               /home/agent/.vscode-server/data/User \
-              /home/agent/.vscode-server-insiders/extensions \
               /home/agent/.vscode-server-insiders/data/Machine \
               /home/agent/.vscode-server-insiders/data/User  \
-              /home/agent/.config/gh \
-              /home/agent/.claude/plugins 
-
-# Workaround for Claude credentials symlink
-RUN  ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json \
-        # VS Code Insiders
-        && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /home/agent/.vscode-server-insiders/data/Machine/settings.json \
-        && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json /home/agent/.vscode-server-insiders/data/User/mcp.json \
-        && ln -s /mnt/agent-data/vscode-server-insiders/data/User/prompts /home/agent/.vscode-server-insiders/data/User/prompts \
-        && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp /home/agent/.vscode-server-insiders/data/User/mcp \
-        && ln -s /mnt/agent-data/vscode-server-insiders/extensions /home/agent/.vscode-server-insiders/extensions \
-        # VS Code
-        && ln -s /mnt/agent-data/vscode-server/data/Machine/settings.json /home/agent/.vscode-server/data/Machine/settings.json \
-        && ln -s /mnt/agent-data/vscode-server/extensions /home/agent/.vscode-server/extensions \
-        && ln -s /mnt/agent-data/vscode-server/data/User/mcp.json /home/agent/.vscode-server/data/User/mcp.json \
-        && ln -s /mnt/agent-data/vscode-server/data/User/prompts /home/agent/.vscode-server/data/User/prompts \
-        && ln -s /mnt/agent-data/vscode-server/data/User/mcp /home/agent/.vscode-server/data/User/mcp
+    # Workaround for Claude credentials symlink
+    && ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json \
+    # Claude
+    && rm -rf /home/agent/.claude/plugins \
+    && ln -s /mnt/claude-data/claude/plugins /home/agent/.claude/plugins \
+    # VS Code Insiders
+    && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /home/agent/.vscode-server-insiders/data/Machine/settings.json \
+    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json /home/agent/.vscode-server-insiders/data/User/mcp.json \
+    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/prompts /home/agent/.vscode-server-insiders/data/User/prompts \
+    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp /home/agent/.vscode-server-insiders/data/User/mcp \
+    && ln -s /mnt/agent-data/vscode-server-insiders/extensions /home/agent/.vscode-server-insiders/extensions \
+    # VS Code
+    && ln -s /mnt/agent-data/vscode-server/data/Machine/settings.json /home/agent/.vscode-server/data/Machine/settings.json \
+    && ln -s /mnt/agent-data/vscode-server/extensions /home/agent/.vscode-server/extensions \
+    && ln -s /mnt/agent-data/vscode-server/data/User/mcp.json /home/agent/.vscode-server/data/User/mcp.json \
+    && ln -s /mnt/agent-data/vscode-server/data/User/prompts /home/agent/.vscode-server/data/User/prompts \
+    && ln -s /mnt/agent-data/vscode-server/data/User/mcp /home/agent/.vscode-server/data/User/mcp
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

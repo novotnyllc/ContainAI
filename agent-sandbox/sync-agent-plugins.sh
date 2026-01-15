@@ -109,11 +109,13 @@ copy_plugin_files() {
         -v "$PLUGINS_VOLUME":/target \
         -v "$HOST_PLUGINS_DIR":/source:ro \
         alpine sh -c "
-            rm -rf /target/claude/cache /target/claude/marketplaces 2>/dev/null || true
-            mkdir -p /target/claude || true
+            rm -rf /target/claude /target/vscode-server /target/vscode-server-insiders 
+            mkdir -p /target/claude/plugins 
             mkdir -p /target/vscode-server/extensions /target/vscode-server/data/Machine /target/vscode-server/data/User /target/vscode-server/data/User/mcp /target/vscode-server/data/User/prompts || true
             mkdir -p /target/vscode-server-insiders/extensions /target/vscode-server-insiders/data/Machine /target/vscode-server-insiders/data/User /target/vscode-server-insiders/data/User/mcp /target/vscode-server-insiders/data/User/prompts || true
-            cp -a /source/cache /source/marketplaces /target/claude/ 2>/dev/null || true
+            touch /target/vscode-server/data/Machine/settings.json /target/vscode-server/data/User/mcp.json
+            touch /target/vscode-server-insiders/data/Machine/settings.json /target/vscode-server-insiders/data/User/mcp.json
+            cp -a /source/cache /source/marketplaces /target/claude/plugins 
         "
 
     success "Plugin files copied"
@@ -142,7 +144,7 @@ transform_installed_plugins() {
                 } | del(.projectPath)
             ))
         }) | from_entries)
-    " | docker run --rm -i -v "$PLUGINS_VOLUME":/target alpine sh -c "cat > /target/claude/installed_plugins.json"
+    " | docker run --rm -i -v "$PLUGINS_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/installed_plugins.json"
 
     success "installed_plugins.json transformed"
 }
@@ -161,7 +163,7 @@ transform_marketplaces() {
         with_entries(
             .value.installLocation = (.value.installLocation | gsub(\"$HOST_PATH_PREFIX\"; \"$CONTAINER_PATH_PREFIX\"))
         )
-    " | docker run --rm -i -v "$PLUGINS_VOLUME":/target alpine sh -c "cat > /target/claude/known_marketplaces.json"
+    " | docker run --rm -i -v "$PLUGINS_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/known_marketplaces.json"
 
     success "known_marketplaces.json transformed"
 }
@@ -205,14 +207,14 @@ remove_orphan_markers() {
 
     if $DRY_RUN; then
         local count
-        count=$(docker run --rm -v "$PLUGINS_VOLUME":/plugins alpine find /plugins/claude/cache -name ".orphaned_at" 2>/dev/null | wc -l)
+        count=$(docker run --rm -v "$PLUGINS_VOLUME":/plugins alpine find /plugins/claude/plugins/cache -name ".orphaned_at" 2>/dev/null | wc -l)
         echo "  [dry-run] Would remove $count orphan markers"
         return
     fi
 
     local removed
     removed=$(docker run --rm -v "$PLUGINS_VOLUME":/plugins alpine sh -c '
-        find /plugins/claude/cache -name ".orphaned_at" -delete -print 2>/dev/null | wc -l
+        find /plugins/claude/plugins/cache -name ".orphaned_at" -delete -print 2>/dev/null | wc -l
     ')
 
     success "Removed $removed orphan markers"
