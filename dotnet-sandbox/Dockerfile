@@ -1,59 +1,71 @@
 # syntax=docker/dockerfile:1
-# .NET 10 WASM Docker Sandbox
+# Docker Sandbox for AI Agents with .NET
 # Provides .NET SDK with WASM workloads for Blazor/Uno development
 
 FROM docker/sandbox-templates:claude-code
+
+# Switch to root to perform installations
+USER root
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Install system dependencies and build tools in one layer
+# Build tools (build-essential, etc.) are REQUIRED - agents compile code!
+RUN apt-get update && && apt-get upgrade -y && \
+    apt-get autoremove -y && apt-get install -y --no-install-recommends \
+    # Core utilities
+    curl \
+    wget \
+    git \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    software-properties-common \    
+    jq \
+    unzip \
+    socat \
+    tmux \
+    # Build tools 
+    build-essential \
+    # Python with dev headers (for building native extensions)
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    python3-tomli \
+    pipx \
+    # .NET runtime dependencies
+    libc6 \
+    libgcc-s1 \
+    libgssapi-krb5-2 \
+    libicu74 \
+    libssl3t64 \
+    libstdc++6 \
+    libunwind8 \
+    zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 24.x (LTS)
+#RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+#    apt-get install -y nodejs && \
+#    rm -rf /var/lib/apt/lists/*
 
 # Build arguments for .NET channel selection
 # Default to 10.0 to ensure consistent builds regardless of LTS status
 # Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
 ARG DOTNET_CHANNEL=10.0
 
-# Switch to root for system-level installations
-USER root
-
-# Fail fast if base image is not Ubuntu Noble
-RUN . /etc/os-release && \
-    if [ "$VERSION_CODENAME" != "noble" ]; then \
-        echo "ERROR: Base image must be Ubuntu Noble (24.04)" >&2; \
-        echo "Found: $VERSION_CODENAME" >&2; \
-        exit 1; \
-    fi
-
-# Install prerequisites for .NET, PowerShell, and dotnet-install.sh
-# bash and tar are required by dotnet-install.sh for extraction
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    tar \
-    gzip \
-    curl \
-    wget \
-    ca-certificates \
-    apt-transport-https \
-    software-properties-common \
-    libc6 \
-    libgcc-s1 \
-    libicu74 \
-    libssl3 \
-    libstdc++6 \
-    zlib1g \
-    && rm -rf /var/lib/apt/lists/*
 
 # Install .NET SDK using dotnet-install.sh (NOT apt)
-# NOTE: Supply chain risk - downloads script from Microsoft. For production use,
-# consider vendoring the script or verifying a known checksum.
+
 # See: https://dot.net/v1/dotnet-install.sh (official Microsoft script)
-# Verify .NET 10 is installed per acceptance criteria
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
     && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} --install-dir /usr/share/dotnet \
     && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
-    && rm /tmp/dotnet-install.sh \
-    && dotnet --version \
-    && if ! dotnet --version | grep -qE '^10\.'; then \
-         echo "ERROR: Expected .NET 10.x, got $(dotnet --version)" >&2; \
-         exit 1; \
-       fi
+    && rm /tmp/dotnet-install.sh 
 
 # Set .NET environment variables
 ENV DOTNET_ROOT=/usr/share/dotnet
@@ -61,39 +73,50 @@ ENV PATH="${PATH}:/usr/share/dotnet"
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
-ENV NUGET_XMLDOC_MODE=skip
 
-# Install WASM workloads
-# wasm-tools is required (hard fail)
-# wasm-tools-net9 is optional (fail-open for forward compatibility)
-RUN dotnet workload install wasm-tools \
-    && dotnet workload list | grep -E '^[[:space:]]*wasm-tools([[:space:]]|$)'
+# Install .NET workloads 
+RUN dotnet workload install wasm-tools wasm-tools-net9 \
+    rm -rf /tmp/* /root/.nuget/packages /root/.dotnet/toolResolverCache
 
-# Install wasm-tools-net9 (optional, fail-open)
-RUN dotnet workload install wasm-tools-net9 \
-    || echo "Note: wasm-tools-net9 not available (may not be needed for .NET 10+)"
-
-# Install PowerShell via Microsoft's recommended method and verify
-RUN wget -q "https://packages.microsoft.com/config/ubuntu/$(. /etc/os-release && echo $VERSION_ID)/packages-microsoft-prod.deb" -O /tmp/packages-microsoft-prod.deb \
-    && dpkg -i /tmp/packages-microsoft-prod.deb \
-    && rm /tmp/packages-microsoft-prod.deb \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends powershell \
-    && rm -rf /var/lib/apt/lists/* \
-    && pwsh --version
-
-# Verify agent user has expected UID (inherited from base image)
-RUN id -u agent | grep -x 1000 || (echo "ERROR: agent user must have UID 1000" >&2 && exit 1)
+ARG POWERSHELL_VERSION="7.5.4"
+ARG POWERSHELL_RELEASE_TAG="v7.5.4"
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    tmp_dir="$(mktemp -d)"; \
+    base_url="https://github.com/PowerShell/PowerShell/releases/download/${POWERSHELL_RELEASE_TAG}"; \
+    case "$arch" in \
+        amd64) \
+            pkg="powershell_${POWERSHELL_VERSION}-1.deb_amd64.deb"; \
+            curl -fsSL "$base_url/$pkg" -o "$tmp_dir/$pkg"; \
+            if ! dpkg -i "$tmp_dir/$pkg"; then \
+                apt-get update; \
+                apt-get install -y -f; \
+                rm -rf /var/lib/apt/lists/*; \
+                dpkg -i "$tmp_dir/$pkg"; \
+            fi; \
+            ;; \
+        arm64) \
+            tarball="powershell-${POWERSHELL_VERSION}-linux-arm64.tar.gz"; \
+            curl -fsSL "$base_url/$tarball" -o "$tmp_dir/$tarball"; \
+            install_root="/opt/microsoft/powershell/7"; \
+            rm -rf "$install_root" && mkdir -p "$install_root"; \
+            tar -xzf "$tmp_dir/$tarball" -C "$install_root"; \
+            ln -sf "$install_root/pwsh" /usr/bin/pwsh; \
+            ;; \
+        *) \
+            echo "Unsupported architecture for PowerShell install: $arch" >&2; \
+            exit 1; \
+            ;; \
+    esac && \
+    rm -rf "$tmp_dir"
 
 # Use bash for nvm-related commands (nvm.sh requires bash, not dash)
 SHELL ["/bin/bash", "-c"]
 
 # Install nvm and Node.js as agent user
-# NOTE: Supply chain risk - downloads script from GitHub. Version v0.40.1 is pinned.
-# For production use, consider verifying the script checksum or vendoring it.
 # See: https://github.com/nvm-sh/nvm/releases
 USER agent
-RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh -o /tmp/nvm-install.sh \
+RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh -o /tmp/nvm-install.sh \
     && bash /tmp/nvm-install.sh \
     && rm /tmp/nvm-install.sh \
     && source ~/.nvm/nvm.sh \
@@ -133,24 +156,33 @@ RUN bash -lc "node --version" \
 # Switch back to root for directory setup
 USER root
 
-# Ensure workspace directory exists with correct ownership
-RUN mkdir -p /home/agent/workspace \
-    && chown -R agent:agent /home/agent/workspace
+# Install GitHub CLI, ai code agents as npm global packages in one layer
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y gh && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g \
+        @githubnext/github-copilot-cli \
+        @anthropic-ai/claude-code@latest \
+        @openai/codex && \ 
+        @google/gemini-cli && \
+        opencode-ai && \
+    npm cache clean --force && \
+    rm -rf /tmp/*
 
 # Create mount point directories for volumes (per spec Volume Strategy)
 # These directories will be mount targets for named volumes managed by csd wrapper
 # NOTE: Must be created BEFORE the credentials symlink to avoid chown dereferencing issues
 # Use restrictive permissions (0700) for dirs that may hold credentials/tokens
 RUN mkdir -p /home/agent/.vscode-server \
-             /home/agent/.nuget \
              /home/agent/.config/gh \
              /home/agent/.claude/plugins \
-    && chown -R agent:agent /home/agent/.vscode-server \
-                            /home/agent/.nuget \
+    && chown -R agent:agent /home/agent/.vscode-server \                            
                             /home/agent/.config \
                             /home/agent/.claude \
     && chmod 700 /home/agent/.vscode-server \
-                 /home/agent/.nuget \
                  /home/agent/.config/gh \
                  /home/agent/.claude
 
@@ -159,11 +191,7 @@ RUN mkdir -p /home/agent/.vscode-server \
 USER agent
 RUN ln -sf /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json
 
-# Expose primary port for WASM app serving (additional ports available on demand)
-EXPOSE 5000
-
-# Set working directory
-WORKDIR /home/agent/workspace
-
 # Final user should be agent
 USER agent
+# Set working directory
+WORKDIR /home/agent/workspace
