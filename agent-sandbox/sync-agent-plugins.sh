@@ -230,7 +230,7 @@ fix_ownership() {
     fi
 
     docker run --rm -v "$PLUGINS_VOLUME":/plugins alpine chown -R 1000:1000 /plugins
-    docker run --rm -v "$DATA_VOLUME":/data alpine chown 1000:1000 /data/settings.json 2>/dev/null || true
+    docker run --rm -v "$DATA_VOLUME":/data alpine chown 1000:1000 -R /data 
 
     success "Ownership fixed"
 }

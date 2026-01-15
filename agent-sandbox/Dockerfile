@@ -106,7 +106,10 @@ ENV NVM_DIR=/home/agent/.nvm
 RUN printf '%s\n' \
   '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh"' \
   > /home/agent/.bash_env
-RUN echo "alias claude='claude --dangerously-skip-permissions'" >> /home/agent/.bash_aliases
+RUN echo "alias claude='claude --dangerously-skip-permissions'" >> /home/agent/.bash_aliases \
+    && touch /home/agent/.docker/sandbox/locks/detached.lock \
+    && rm -rf /home/agent/.local/share/claude \ 
+    && rm /home/agent/.local/bin/claude
 
 ENV BASH_ENV=/home/agent/.bashrc
 
