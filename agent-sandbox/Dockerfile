@@ -68,6 +68,9 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
 
 USER agent
+# Use bash for the shell
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Build arguments for .NET channel selection
 # Default to 10.0 to ensure consistent builds regardless of LTS status
 # Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
@@ -97,22 +100,18 @@ RUN dotnet workload install wasm-tools wasm-tools-net9 \
 
 # clear out npm config prefix to use default
 ENV NPM_CONFIG_PREFIX=
-
-# Use bash for the shell
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Create a script file sourced by both interactive and non-interactive bash shells
 ENV NVM_DIR=/home/agent/.nvm
 # Create minimal bash_env: only source nvm (no PATH, no output)
 RUN printf '%s\n' \
   '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh"' \
-  > /home/agent/.bash_env
-RUN echo "alias claude='claude --dangerously-skip-permissions'" >> /home/agent/.bash_aliases \
-    && touch /home/agent/.docker/sandbox/locks/detached.lock \
-    && rm -rf /home/agent/.local/share/claude \ 
-    && rm /home/agent/.local/bin/claude
-
-ENV BASH_ENV=/home/agent/.bashrc
-
+  > /home/agent/.bash_env \
+    && echo "alias claude='claude --dangerously-skip-permissions'" >> /home/agent/.bash_aliases \
+    && echo "alias codex='codex --dangerously-bypass-approvals-and-sandbox'" >> /home/agent/.bash_aliases \
+    && echo "alias copilot='copilot --yolo'" >> /home/agent/.bash_aliases \
+    && echo "alias gemini='gemini --yolo'" >> /home/agent/.bash_aliases \
+    && touch /home/agent/.docker/sandbox/locks/detached.lock 
+ENV BASH_ENV=/home/agent/.bash_env
 
 # Download and install nvm
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
@@ -121,20 +120,19 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | b
     && nvm alias default 'lts/*' \
     && echo node > /home/agent/.nvmrc \
     && npm install -g \
-      @anthropic-ai/claude-code@latest \
-      @github/copilot \
-      @openai/codex \
-      @google/gemini-cli \
-      opencode-ai \
       typescript \
       eslint \
       prettier 
 
-      # Point non-interactive bash at a dedicated env file
-ENV BASH_ENV=/home/agent/.bash_env    
-
 RUN curl -fsSL https://bun.com/install | bash \ 
-    && curl -LsSf https://astral.sh/uv/install.sh | bash \
+    && curl -LsSf https://astral.sh/uv/install.sh | bash
+ENV PATH="/home/agent/.bun/bin:${PATH}"
+
+# Download and install the latest agents & related tools
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && bun install -g @openai/codex @google/gemini-cli \    
+    && curl -fsSL https://gh.io/copilot-install | bash \
+    && curl -fsSL https://opencode.ai/install | bash \
     && curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
 
 # Create mount point directories so we can symlink to them
