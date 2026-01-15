@@ -11,20 +11,20 @@
 # ==============================================================================
 # Note: No strict mode - this file is sourced into interactive shells
 
-# Constants (guarded for safe re-sourcing)
-if [[ -z "${_CSD_IMAGE-}" ]]; then
-    _CSD_IMAGE="agent-sandbox:latest"
-    _CSD_LABEL="csd.sandbox=agent-sandbox"
-    _CSD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    # Volumes that csd creates/ensures (per spec)
-    _CSD_VOLUMES=(
-        "sandbox-agent-data:/mnt/agent-data"
-    )
-    # Additional volumes to mount (managed elsewhere, not created by csd)
-    _CSD_MOUNT_ONLY_VOLUMES=(
+# Constants 
 
-    )
-fi
+_CSD_IMAGE="agent-sandbox:latest"
+_CSD_LABEL="asb.sandbox=agent-sandbox"
+_CSD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Volumes that asb creates/ensures (per spec)
+_CSD_VOLUMES=(
+        "sandbox-agent-data:/mnt/agent-data"
+)
+# Additional volumes to mount (managed elsewhere, not created by csd)
+_CSD_MOUNT_ONLY_VOLUMES=(
+)
+
 
 # Generate sanitized container name from git repo/branch or directory
 _csd_container_name() {
@@ -247,10 +247,10 @@ _csd_preflight_checks() {
     return 0
 }
 
-# Get the csd.sandbox label value from a container (empty if not found)
+# Get the asb.sandbox label value from a container (empty if not found)
 _csd_get_container_label() {
     local container_name="$1"
-    docker inspect --format '{{ index .Config.Labels "csd.sandbox" }}' "$container_name" 2>/dev/null || echo ""
+    docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null || echo ""
 }
 
 # Get the image name of a container
@@ -259,7 +259,7 @@ _csd_get_container_image() {
     docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || echo ""
 }
 
-# Verify container was created by csd (has our label or uses our image)
+# Verify container was created by asb (has our label or uses our image)
 # Returns: 0=confirmed (label matches), 1=foreign (no match), 2=ambiguous (image matches but no label)
 # Falls back to image name verification if labels not supported
 _csd_is_our_container() {
@@ -300,9 +300,9 @@ _csd_check_container_ownership() {
         return 0  # Confirmed ours
     elif [[ $ownership_rc -eq 2 ]]; then
         # Ambiguous - image matches but no label
-        echo "WARNING: Container '$container_name' uses our image but lacks csd label" >&2
+        echo "WARNING: Container '$container_name' uses our image but lacks asb label" >&2
         echo "  This may be a container created before label support or a manual container." >&2
-        echo "  Proceeding, but use 'csd --restart' to take ownership if needed." >&2
+        echo "  Proceeding, but use 'asb --restart' to take ownership if needed." >&2
         echo "" >&2
         return 0  # Proceed with warning
     else
@@ -314,15 +314,15 @@ _csd_check_container_ownership() {
         if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
             actual_label="<not set>"
         fi
-        echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
+        echo "ERROR: Container '$container_name' exists but was not created by asb" >&2
         echo "" >&2
-        echo "  Expected label 'csd.sandbox': agent-sandbox" >&2
-        echo "  Actual label 'csd.sandbox':   ${actual_label:-<not set>}" >&2
+        echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
+        echo "  Actual label 'asb.sandbox':   ${actual_label:-<not set>}" >&2
         echo "  Expected image:               $_CSD_IMAGE" >&2
         echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
         echo "" >&2
-        echo "This is a name collision with a container not managed by csd." >&2
-        echo "To recreate as a csd-managed sandbox container, run: csd --restart" >&2
+        echo "This is a name collision with a container not managed by asb." >&2
+        echo "To recreate as a asb-managed sandbox container, run: asb --restart" >&2
         echo "" >&2
         return 1
     fi
@@ -335,7 +335,7 @@ _csd_ensure_volumes() {
 
 
 
-    # Create csd-managed volumes if missing
+    # Create asb-managed volumes if missing
     for vol_spec in "${_CSD_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
 
@@ -374,7 +374,7 @@ asb() {
                 shift
                 ;;                
             --help|-h)
-                echo "Usage: csd [--restart] [--force] [--detached]"
+                echo "Usage: asb [--restart] [--force] [--detached]"
                 echo ""
                 echo "Start or attach to a agent-sandbox container."
                 echo ""
@@ -437,14 +437,14 @@ asb() {
             if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
                 actual_label="<not set>"
             fi
-            echo "ERROR: Cannot restart - container '$container_name' was not created by csd" >&2
+            echo "ERROR: Cannot restart - container '$container_name' was not created by asb" >&2
             echo "" >&2
-            echo "  Expected label 'csd.sandbox': agent-sandbox" >&2
-            echo "  Actual label 'csd.sandbox':   $actual_label" >&2
+            echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
+            echo "  Actual label 'asb.sandbox':   $actual_label" >&2
             echo "  Expected image:               $_CSD_IMAGE" >&2
             echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
             echo "" >&2
-            echo "To avoid data loss, csd will not delete containers it didn't create." >&2
+            echo "To avoid data loss, asb will not delete containers it didn't create." >&2
             echo "Remove the conflicting container manually if needed:" >&2
             echo "  docker rm -f '$container_name'" >&2
             echo "" >&2
@@ -537,7 +537,7 @@ asb() {
                 return 1
             fi
 
-            # Build volume arguments (both csd-managed and mount-only volumes)
+            # Build volume arguments (both asb-managed and mount-only volumes)
             local vol_args=()
             for vol_spec in "${_CSD_VOLUMES[@]}"; do
                 vol_args+=("-v" "$vol_spec")
@@ -559,18 +559,25 @@ asb() {
                 return 1
             fi
 
-            local detached_args=""
+            local detached_args=()
             if [[ "$detached_flag" == "true" ]]; then
-                detached_args="--detached"
+                detached_args=(--detached)
             fi
         
             echo "Starting new sandbox container..."
-            docker sandbox run \
-                --name "$container_name" \
-                "${vol_args[@]}" \
-                "$detached_args" \
-                --template "$_CSD_IMAGE" \
-                claude            
+            args=(
+                --name "$container_name"
+                "${vol_args[@]}"
+                "${detached_args[@]}"
+                --template "$_CSD_IMAGE"
+                claude
+            )
+
+            #printf 'Running command: docker sandbox run'
+            #printf ' %q' "${args[@]}"
+            #sprintf '\n'
+
+            docker sandbox run "${args[@]}"
 
             ;;
         *)
