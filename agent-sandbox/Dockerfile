@@ -139,7 +139,7 @@ RUN  mkdir -p /home/agent/.vscode-server/data/Machine \
     && ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json \
     # Claude
     && rm -rf /home/agent/.claude/plugins \
-    && ln -s /mnt/claude-data/claude/plugins /home/agent/.claude/plugins \
+    && ln -s /mnt/agent-data/claude/plugins /home/agent/.claude/plugins \
     # VS Code Insiders
     && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /home/agent/.vscode-server-insiders/data/Machine/settings.json \
     && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json /home/agent/.vscode-server-insiders/data/User/mcp.json \
