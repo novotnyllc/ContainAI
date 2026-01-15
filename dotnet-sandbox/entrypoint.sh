@@ -33,7 +33,7 @@ discover_mirrored_workspace() {
 # Conservative safety check: refuse to replace if TARGET_LINK is a mountpoint.
 is_mountpoint() {
   if command -v mountpoint >/dev/null 2>&1; then
-    mountpoint -q "$1"
+    mountpoint -q --nofollow "$1"
     return $?
   fi
 
@@ -67,13 +67,12 @@ main() {
   fi
 
   # Replace /home/agent/workspace with a symlink to the mirrored workspace.
-  rm -rf "$TARGET_LINK"
+  rm -d "$TARGET_LINK"
   ln -s "$MIRRORED" "$TARGET_LINK"
 
   #log "Workspace linked: $TARGET_LINK -> $MIRRORED"
   
-  // Set working directory back to workspace after changing symlink
-  cd /home/agent/workspace
+
 
   # Continue with the container's original command
   exec "$@"

@@ -50,10 +50,12 @@ RUN apt-get update \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 24.x (LTS)
-#RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-#    apt-get install -y nodejs && \
-#    rm -rf /var/lib/apt/lists/*
+# Configure bash for color prompt for both root and agent users
+RUN sed -i 's/^#\s*force_color_prompt=yes/force_color_prompt=yes/' /root/.bashrc \
+    && cp /root/.bashrc /home/agent/.bashrc \
+    && cp /root/.profile /home/agent/.profile \
+    && chown agent:agent /home/agent/.bashrc \
+    && chown agent:agent /home/agent/.profile 
 
 # Build arguments for .NET channel selection
 # Default to 10.0 to ensure consistent builds regardless of LTS status
@@ -82,7 +84,8 @@ ENV NUGET_XMLDOC_MODE=skip
 
 # Install .NET workloads 
 RUN dotnet workload install wasm-tools wasm-tools-net9 \
-    && rm -rf /tmp/* /root/.nuget/packages /root/.dotnet/toolResolverCache
+    && rm -rf /tmp/* /root/.nuget/packages /root/.dotnet/toolResolverCache \
+    && dotnet workload list
 
 ARG POWERSHELL_VERSION="7.6.0-preview.6"
 ARG POWERSHELL_RELEASE_TAG="v7.6.0-preview.6"
@@ -118,25 +121,25 @@ RUN set -eux; \
 
 # clear out npm config prefix to use default
 ENV NPM_CONFIG_PREFIX=
+
+
+USER agent
+# Use bash for the shell
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# Create a script file sourced by both interactive and non-interactive bash shells
+ENV NVM_DIR=/home/agent/.nvm
 # Create minimal bash_env: only source nvm (no PATH, no output)
 RUN printf '%s\n' \
   '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh"' \
   > /home/agent/.bash_env
-  
-USER agent
-# Use bash for the shell
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Create a script file sourced by both interactive and non-interactive bash shells
 ENV BASH_ENV=/home/agent/.bashrc
-ENV NVM_DIR=/home/agent/.nvm
 
 # Download and install nvm
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
     && source /home/agent/.nvm/nvm.sh \
     && nvm install --lts \
     && nvm alias default 'lts/*' \
-    && echo node > .nvmrc \
+    && echo node > /home/agent/.nvmrc \
     && npm install -g \
       @anthropic-ai/claude-code@latest \
       @github/copilot \
@@ -150,12 +153,18 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | b
       # Point non-interactive bash at a dedicated env file
 ENV BASH_ENV=/home/agent/.bash_env    
 
+RUN cat > /home/agent/.bunfig.toml <<'EOF'
+[install]
+globalDir = "/home/agent/.bun/install/global"
+globalBinDir = "/home/agent/.bun/bin"
+EOF
+
 USER root
 ENV BUN_INSTALL=/usr/share/bun
 ENV UV_INSTALL_DIR=/usr/share/uv
 RUN curl -fsSL https://bun.com/install | bash \ 
     && curl -LsSf https://astral.sh/uv/install.sh | bash 
-ENV PATH="${BUN_INSTALL}/bin:${PATH}"
+ENV PATH="/home/agent/.bun/bin:${BUN_INSTALL}/bin:${PATH}"
 ENV PATH="${UV_INSTALL_DIR}/bin:${PATH}"
 
 # Install GitHub CLI, ai code agents as npm global packages in one layer
@@ -169,6 +178,9 @@ apt-get install -y gh
 rm -rf /var/lib/apt/lists/* 
    
 rm -rf /tmp/*
+
+#trigger the workload integrity check
+su - agent -c "dotnet workload list"
 
 # Workaround the sandbox not doing this automatically
 su - agent -c "ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json"
@@ -188,13 +200,6 @@ RUN mkdir -p /home/agent/.vscode-server \
                  /home/agent/.config/gh \
                  /home/agent/.claude
 
-RUN cp /root/.bashrc /home/agent/.bashrc \
-    && cp /root/.profile /home/agent/.profile \
-    && cp /root/.zshrc /home/agent/.zshrc \
-    && chown agent:agent /home/agent/.bashrc \
-    && chown agent:agent /home/agent/.profile \
-    && chown agent:agent /home/agent/.zshrc
-
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
 
@@ -202,3 +207,4 @@ RUN chmod 0755 /usr/local/bin/entrypoint.sh
 USER agent
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+WORKDIR /home/agent/workspace
