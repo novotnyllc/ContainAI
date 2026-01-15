@@ -40,10 +40,10 @@ RUN apt-get update && apt-get upgrade -y && \
     libc6 \
     libgcc-s1 \
     libgssapi-krb5-2 \
-    libicu74 \
+    libicu76 \
     libssl3t64 \
     libstdc++6 \
-    libunwind8 \
+    tzdata \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
