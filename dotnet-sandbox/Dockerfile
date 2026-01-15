@@ -13,7 +13,7 @@ ENV TZ=UTC
 
 # Install system dependencies and build tools in one layer
 # Build tools (build-essential, etc.) are REQUIRED - agents compile code!
-RUN apt-get update && && apt-get upgrade -y && \
+RUN apt-get update && apt-get upgrade -y && \
     apt-get autoremove -y && apt-get install -y --no-install-recommends \
     # Core utilities
     curl \
