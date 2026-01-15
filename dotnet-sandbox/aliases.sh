@@ -18,13 +18,12 @@ if [[ -z "${_CSD_IMAGE-}" ]]; then
     # Volumes that csd creates/ensures (per spec)
     _CSD_VOLUMES=(
         "dotnet-sandbox-vscode:/home/agent/.vscode-server"
-        "dotnet-sandbox-nuget:/home/agent/.nuget"
         "dotnet-sandbox-gh:/home/agent/.config/gh"
         "docker-claude-plugins:/home/agent/.claude/plugins"
     )
     # Additional volumes to mount (managed elsewhere, not created by csd)
     _CSD_MOUNT_ONLY_VOLUMES=(
-        "docker-claude-sandbox-data:/mnt/claude-data"
+
     )
 fi
 
@@ -340,37 +339,7 @@ _csd_check_container_ownership() {
 _csd_ensure_volumes() {
     local volume_name vol_spec
 
-    # Check for mount-only volumes (fail if missing - required for operation)
-    for vol_spec in "${_CSD_MOUNT_ONLY_VOLUMES[@]}"; do
-        volume_name="${vol_spec%%:*}"
-        local inspect_output inspect_rc
-        inspect_output="$(docker volume inspect "$volume_name" 2>&1)"
-        inspect_rc=$?
-        if [[ $inspect_rc -ne 0 ]]; then
-            # Distinguish "not found" from docker errors
-            if printf '%s' "$inspect_output" | grep -qiE "no such volume|not found"; then
-                echo "ERROR: Required volume '$volume_name' not found" >&2
-                echo "" >&2
-                echo "This volume is required for Claude credentials." >&2
-                echo "" >&2
-                echo "Option 1: Create empty volume (then authenticate inside container):" >&2
-                echo "  docker volume create \"$volume_name\"" >&2
-                echo "" >&2
-                echo "Option 2: Sync plugins/settings (does NOT sync credentials), then claude login:" >&2
-                echo "  ${_CSD_SCRIPT_DIR}/../claude/sync-plugins.sh" >&2
-                echo "  # Then inside container: claude login" >&2
-            else
-                # Docker failure (daemon down, permission denied, etc.)
-                echo "ERROR: Failed to check volume '$volume_name'" >&2
-                echo "" >&2
-                echo "  docker volume inspect output:" >&2
-                printf '%s\n' "$inspect_output" | sed 's/^/    /' >&2
-                echo "" >&2
-                echo "Please ensure Docker is running and accessible." >&2
-            fi
-            return 1
-        fi
-    done
+
 
     # Create csd-managed volumes if missing
     for vol_spec in "${_CSD_VOLUMES[@]}"; do
@@ -385,29 +354,7 @@ _csd_ensure_volumes() {
         fi
     done
 
-    # Fix permissions on all volumes (idempotent chown)
-    # Use dotnet-sandbox:latest if built, otherwise fall back to base image
-    local chown_image
-    if docker image inspect "$_CSD_IMAGE" >/dev/null 2>&1; then
-        chown_image="$_CSD_IMAGE"
-    elif docker image inspect "docker/sandbox-templates:claude-code" >/dev/null 2>&1; then
-        echo "Note: Using base image for permission fix (dotnet-sandbox not built yet)"
-        chown_image="docker/sandbox-templates:claude-code"
-    else
-        echo "Note: Skipping permission fix (no suitable image available)"
-        return 0
-    fi
-
-    # Ensure correct ownership on ALL volumes (both managed and mount-only)
-    # Use -R for recursive chown to handle any existing root-owned files
-    local all_volumes=("${_CSD_VOLUMES[@]}" "${_CSD_MOUNT_ONLY_VOLUMES[@]}")
-    for vol_spec in "${all_volumes[@]}"; do
-        volume_name="${vol_spec%%:*}"
-        if ! docker run --rm -u root -v "${volume_name}:/data" "$chown_image" chown -R 1000:1000 /data; then
-            echo "ERROR: Failed to fix permissions on volume $volume_name" >&2
-            return 1
-        fi
-    done
+  
 }
 
 # Claude Sandbox Dotnet - main function
@@ -595,9 +542,6 @@ csd() {
             for vol_spec in "${_CSD_VOLUMES[@]}"; do
                 vol_args+=("-v" "$vol_spec")
             done
-            for vol_spec in "${_CSD_MOUNT_ONLY_VOLUMES[@]}"; do
-                vol_args+=("-v" "$vol_spec")
-            done
 
             # Get sandbox run help to check supported flags
             local sandbox_help sandbox_help_rc
@@ -615,34 +559,13 @@ csd() {
                 return 1
             fi
 
-            # Check if sandbox supports port publishing and which flag to use
-            # Use single port 5000 for compatibility (ranges may not be supported)
-            local port_args=()
-            if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])-p([[:space:]]|,|$)'; then
-                port_args=("-p" "5000:5000")
-            elif printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--publish([[:space:]]|,|$)'; then
-                port_args=("--publish" "5000:5000")
-            else
-                echo "Note: docker sandbox run does not support port publishing; ports not forwarded"
-            fi
-
-            # Check if sandbox supports --label flag
-            local label_args=()
-            if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--label([[:space:]]|,|=|$)'; then
-                label_args=("--label" "$_CSD_LABEL")
-            else
-                echo "Note: docker sandbox run does not support --label; container identity via image name"
-            fi
-
+        
             echo "Starting new sandbox container..."
             docker sandbox run \
-                --name "$container_name" \
-                "${label_args[@]}" \
-                -it \
-                "${port_args[@]}" \
+                -d --name "$container_name" \
                 "${vol_args[@]}" \
-                "$_CSD_IMAGE" \
-                bash
+                --template "$_CSD_IMAGE" \
+                claude
             ;;
         *)
             echo "Unexpected container state: $container_state" >&2

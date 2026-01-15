@@ -60,7 +60,6 @@ RUN apt-get update \
 # Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
 ARG DOTNET_CHANNEL=10.0
 
-
 # Install .NET SDK using dotnet-install.sh (NOT apt)
 
 # See: https://dot.net/v1/dotnet-install.sh (official Microsoft script)
@@ -76,6 +75,10 @@ ENV PATH="${PATH}:/usr/share/dotnet"
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+ENV DOTNET_ROLL_FORWARD=Major
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+ENV NUGET_XMLDOC_MODE=skip
 
 # Install .NET workloads 
 RUN dotnet workload install wasm-tools wasm-tools-net9 \
@@ -113,17 +116,61 @@ RUN set -eux; \
     esac && \
     rm -rf "$tmp_dir"
 
-
-
-
-
-
+# clear out npm config prefix to use default
+ENV NPM_CONFIG_PREFIX=
 
 USER agent
-SHELL ["/bin/bash", "-c"]
-RUN curl -fsSL https://bun.com/install | bash 
+# Use bash for the shell
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Create a script file sourced by both interactive and non-interactive bash shells
+ENV BASH_ENV=/home/agent/.bashrc
+RUN touch "${BASH_ENV}"
+RUN echo '. "${BASH_ENV}"' >> ~/.bashrc
+
+# Download and install nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | PROFILE="${BASH_ENV}" bash \
+    && source ~/.nvm/nvm.sh \
+    && nvm install --lts \
+    && nvm alias default 'lts/*' \
+    && echo node > .nvmrc \
+    && npm install -g \
+      @anthropic-ai/claude-code@latest \
+      @github/copilot \
+      @openai/codex \
+      @google/gemini-cli \
+      opencode-ai \
+      typescript \
+      eslint \
+      prettier 
+    
+
+ENV BUN_INSTALL=/usr/share/bun
+RUN curl -fsSL https://bun.com/install | bash \ 
+    && curl -LsSf https://astral.sh/uv/install.sh | bash 
+ENV PATH="${PATH}:${BUN_INSTALL}/bin"
+ENV PATH="/home/agent/.local/bin:${PATH}"
+
+# Create system-wide symlinks for non-interactive access (as root)
+# Use nvm which to resolve the default node version deterministically
+# Use explicit path instead of ~ to avoid HOME resolution issues under su
 USER root
+RUN NODE_BIN=$(su -s /bin/bash agent -c 'source /home/agent/.nvm/nvm.sh && nvm which default') \
+    && if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then \
+         echo "ERROR: Failed to resolve nvm default node path" >&2; exit 1; \
+       fi \
+    && NODE_PATH=$(dirname "$NODE_BIN") \
+    && ln -sf "$NODE_PATH/node" /usr/local/bin/node \
+    && ln -sf "$NODE_PATH/npm" /usr/local/bin/npm \
+    && ln -sf "$NODE_PATH/npx" /usr/local/bin/npx \
+    && ln -sf "$NODE_PATH/tsc" /usr/local/bin/tsc \
+    && ln -sf "$NODE_PATH/eslint" /usr/local/bin/eslint \
+    && ln -sf "$NODE_PATH/prettier" /usr/local/bin/prettier \
+    && ln -sf "$NODE_PATH/claude" /usr/local/bin/claude \
+    && ln -sf "$NODE_PATH/codex" /usr/local/bin/codex \
+    && ln -sf "$NODE_PATH/gemini" /usr/local/bin/gemini \
+    && ln -sf "$NODE_PATH/copilot" /usr/local/bin/copilot 
+
 
 # Install GitHub CLI, ai code agents as npm global packages in one layer
 RUN <<EOF
@@ -137,21 +184,21 @@ rm -rf /var/lib/apt/lists/*
    
 # Configure npm to use user-level global installation
 # This installs to ~/.npm-global instead of /usr/local/lib/node_modules
-su - agent -c "mkdir -p ~/.npm-global"
-su - agent -c "npm config set prefix '~/.npm-global'"
-su - agent -c "echo 'export PATH=~/.npm-global/bin:\$PATH' >> ~/.bashrc"
+#su - agent -c "mkdir -p ~/.npm-global"
+#su - agent -c "npm config set prefix '~/.npm-global'"
+#su - agent -c "echo 'export PATH=~/.npm-global/bin:\$PATH' >> ~/.bashrc"
 
 # Install latest Claude Code using npm (goes to user directory)
-su - agent -c "npm install -g @anthropic-ai/claude-code@latest"
-su - agent -c "npm install -g @githubnext/github-copilot-cli"
-su - agent -c "npm install -g @openai/codex"
-su - agent -c "npm install -g @google/gemini-cli"
-su - agent -c "npm install -g opencode-ai"
-su - agent -c "npm install -g typescript"
-su - agent -c "npm install -g eslint"
-su - agent -c "npm install -g prettier"
+#su - agent -c "npm install -g @anthropic-ai/claude-code@latest"
+#su - agent -c "npm install -g @githubnext/github-copilot-cli"
+#su - agent -c "npm install -g @openai/codex"
+#su - agent -c "npm install -g @google/gemini-cli"
+#su - agent -c "npm install -g opencode-ai"
+#su - agent -c "npm install -g typescript"
+#su - agent -c "npm install -g eslint"
+#su - agent -c "npm install -g prettier"
 
-su - agent -c "npm cache clean --force"
+#su - agent -c "npm cache clean --force"
 rm -rf /tmp/*
 
 # Workaround the sandbox not doing this automatically
@@ -172,7 +219,11 @@ RUN mkdir -p /home/agent/.vscode-server \
                  /home/agent/.config/gh \
                  /home/agent/.claude
 
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 0755 /usr/local/bin/entrypoint.sh
+
 # Final user should be agent
 USER agent
 # Set working directory
 WORKDIR /home/agent/workspace
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
