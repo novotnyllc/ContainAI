@@ -20,7 +20,7 @@ Create Dockerfile for .NET development sandbox with:
 ```dockerfile
 # Install nvm and node AS AGENT USER
 USER agent
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash \
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
     && . ~/.nvm/nvm.sh \
     && nvm install --lts \
     && nvm alias default lts/* \

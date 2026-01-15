@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1
-# Docker Sandbox for AI Agents with .NET
-# Provides .NET SDK with WASM workloads for Blazor/Uno development
+# Docker Sandbox for AI Agents
 
 FROM docker/sandbox-templates:claude-code
 
@@ -11,9 +10,13 @@ USER root
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
+
 # Install system dependencies and build tools in one layer
 # Build tools (build-essential, etc.) are REQUIRED - agents compile code!
-RUN apt-get update \
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
     && apt-get upgrade -y \
     && apt-get autoremove -y \
     && apt-get install -y --no-install-recommends \
@@ -27,6 +30,7 @@ RUN apt-get update \
     software-properties-common \    
     jq \
     unzip \
+    openssh-client \
     nano \
     socat \
     tmux \
@@ -40,6 +44,7 @@ RUN apt-get update \
     python3-dev \
     python3-tomli \
     pipx \
+    gh \
     # .NET runtime dependencies
     libc6 \
     libgcc-s1 \
@@ -58,6 +63,10 @@ RUN sed -i 's/^#\s*force_color_prompt=yes/force_color_prompt=yes/' /root/.bashrc
     && chown agent:agent /home/agent/.bashrc \
     && chown agent:agent /home/agent/.profile 
 
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 0755 /usr/local/bin/entrypoint.sh
+
+USER agent
 # Build arguments for .NET channel selection
 # Default to 10.0 to ensure consistent builds regardless of LTS status
 # Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
@@ -68,13 +77,13 @@ ARG DOTNET_CHANNEL=10.0
 # See: https://dot.net/v1/dotnet-install.sh (official Microsoft script)
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} --install-dir /usr/share/dotnet \
+    && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} --install-dir /home/agent/.dotnet \
     && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
     && rm /tmp/dotnet-install.sh 
 
 # Set .NET environment variables
-ENV DOTNET_ROOT=/usr/share/dotnet
-ENV PATH="${PATH}:/usr/share/dotnet"
+ENV DOTNET_ROOT=/home/agent/.dotnet
+ENV PATH="${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}"
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV DOTNET_NOLOGO=1
 ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
@@ -123,8 +132,6 @@ RUN set -eux; \
 # clear out npm config prefix to use default
 ENV NPM_CONFIG_PREFIX=
 
-
-USER agent
 # Use bash for the shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Create a script file sourced by both interactive and non-interactive bash shells
@@ -154,54 +161,34 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | b
       # Point non-interactive bash at a dedicated env file
 ENV BASH_ENV=/home/agent/.bash_env    
 
-
-#ENV BUN_INSTALL=/usr/share/bun
-#ENV UV_INSTALL_DIR=/usr/share/uv
 RUN curl -fsSL https://bun.com/install | bash \ 
     && curl -LsSf https://astral.sh/uv/install.sh | bash \
     && curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
-#ENV PATH="/home/agent/.bun/bin:${BUN_INSTALL}/bin:${PATH}"
-#ENV PATH="${UV_INSTALL_DIR}/bin:${PATH}"
-
-USER root
-
-# Install GitHub CLI, ai code agents as npm global packages in one layer
-RUN <<EOF
-
-curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 
-chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg 
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null 
-apt-get update 
-apt-get install -y gh 
-rm -rf /var/lib/apt/lists/* 
-   
-rm -rf /tmp/*
-
-#trigger the workload integrity check
-su - agent -c "dotnet workload list"
-
-# Workaround the sandbox not doing this automatically
-su - agent -c "ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json"
-EOF
 
 # Create mount point directories for volumes (per spec Volume Strategy)
 # These directories will be mount targets for named volumes managed by csd wrapper
-# NOTE: Must be created BEFORE the credentials symlink to avoid chown dereferencing issues
-# Use restrictive permissions (0700) for dirs that may hold credentials/tokens
-RUN mkdir -p /home/agent/.vscode-server \
-             /home/agent/.config/gh \
-             /home/agent/.claude/plugins \
-    && chown -R agent:agent /home/agent/.vscode-server \                            
-                            /home/agent/.config \
-                            /home/agent/.claude \
-    && chmod 700 /home/agent/.vscode-server \
-                 /home/agent/.config/gh \
-                 /home/agent/.claude
+RUN  mkdir -p /home/agent/.vscode-server/extensions \
+              /home/agent/.vscode-server/data/Machine \
+              /home/agent/.vscode-server/data/User \
+              /home/agent/.vscode-server-insiders/extensions \
+              /home/agent/.vscode-server-insiders/data/Machine \
+              /home/agent/.vscode-server-insiders/data/User  \
+              /home/agent/.config/gh \
+              /home/agent/.claude/plugins 
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 0755 /usr/local/bin/entrypoint.sh
-
-# Final user should be agent
-USER agent
+# Workaround for Claude credentials symlink
+RUN  ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json \
+        # VS Code Insiders
+        && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /home/agent/.vscode-server-insiders/data/Machine/settings.json \
+        && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json /home/agent/.vscode-server-insiders/data/User/mcp.json \
+        && ln -s /mnt/agent-data/vscode-server-insiders/data/User/prompts /home/agent/.vscode-server-insiders/data/User/prompts \
+        && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp /home/agent/.vscode-server-insiders/data/User/mcp \
+        && ln -s /mnt/agent-data/vscode-server-insiders/extensions /home/agent/.vscode-server-insiders/extensions \
+        # VS Code
+        && ln -s /mnt/agent-data/vscode-server/data/Machine/settings.json /home/agent/.vscode-server/data/Machine/settings.json \
+        && ln -s /mnt/agent-data/vscode-server/extensions /home/agent/.vscode-server/extensions \
+        && ln -s /mnt/agent-data/vscode-server/data/User/mcp.json /home/agent/.vscode-server/data/User/mcp.json \
+        && ln -s /mnt/agent-data/vscode-server/data/User/prompts /home/agent/.vscode-server/data/User/prompts \
+        && ln -s /mnt/agent-data/vscode-server/data/User/mcp /home/agent/.vscode-server/data/User/mcp
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

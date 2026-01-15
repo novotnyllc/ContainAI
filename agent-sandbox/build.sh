@@ -2,18 +2,18 @@
 set -euo pipefail
 
 # ==============================================================================
-# Build dotnet-sandbox Docker image
+# Build agent-sandbox Docker image
 # ==============================================================================
 # Builds and tags the dotnet-sandbox image:
-#   - dotnet-sandbox:latest
-#   - dotnet-sandbox:YYYY-MM-DD
+#   - agent-sandbox:latest
+#   - agent-sandbox:YYYY-MM-DD
 #
 # Usage: ./build.sh [docker build options]
 #   Example: ./build.sh --no-cache
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_NAME="dotnet-sandbox"
+IMAGE_NAME="agent-sandbox"
 DATE_TAG="$(date +%Y-%m-%d)"
 
 echo "Building $IMAGE_NAME..."

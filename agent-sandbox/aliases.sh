@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Shell aliases for dotnet-sandbox
+# Shell aliases for agent-sandbox
 # ==============================================================================
 # Provides:
-#   csd           - Claude Sandbox Dotnet: start/attach to sandbox container
-#   csd-stop-all  - Interactive selection to stop sandbox containers
+#   asb           - Agent Sandbox: start/attach to sandbox container
+#   asbd          - Agent Sandbox: start detached sandbox container
+#   asb-stop-all  - Interactive selection to stop sandbox containers
 #
 # Usage: source aliases.sh
 # ==============================================================================
@@ -12,14 +13,12 @@
 
 # Constants (guarded for safe re-sourcing)
 if [[ -z "${_CSD_IMAGE-}" ]]; then
-    _CSD_IMAGE="dotnet-sandbox:latest"
-    _CSD_LABEL="csd.sandbox=dotnet-sandbox"
+    _CSD_IMAGE="agent-sandbox:latest"
+    _CSD_LABEL="csd.sandbox=agent-sandbox"
     _CSD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     # Volumes that csd creates/ensures (per spec)
     _CSD_VOLUMES=(
-        "dotnet-sandbox-vscode:/home/agent/.vscode-server"
-        "dotnet-sandbox-gh:/home/agent/.config/gh"
-        "docker-claude-plugins:/home/agent/.claude/plugins"
+        "sandbox-agent-data:/mnt/agent-data"
     )
     # Additional volumes to mount (managed elsewhere, not created by csd)
     _CSD_MOUNT_ONLY_VOLUMES=(
@@ -93,38 +92,33 @@ _csd_container_name() {
 # Returns: 0=yes (detected), 1=no (not detected), 2=unknown
 # Warns on 1 or 2 (non-blocking per spec)
 _csd_check_eci() {
-    local docker_info
+    local docker_info_def_runtime docker_info_security_opts
 
-    # Get docker info security options
-    docker_info="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" || {
-        echo "WARNING: Could not detect ECI status (docker info failed)" >&2
-        echo "  Proceeding with sandbox - isolation depends on Docker Desktop settings." >&2
-        echo "" >&2
-        return 2  # unknown
-    }
+
+    # Get docker info default runtime
+    docker_info_def_runtime="$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null)"
+    docker_info_security_opts="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)"
 
     # Check for explicit ECI indicator (definite yes)
-    if printf '%s' "$docker_info" | grep -qiE 'eci|enhanced.?container.?isolation'; then
+    if printf '%s' "$docker_info_def_runtime" | grep -qiE 'sysbox-runc'; then
         return 0  # yes - ECI explicitly detected
     fi
 
     # Check for userns/rootless hints (per spec: indicates some isolation)
     # These suggest user namespace isolation is active, but it's not ECI
-    if printf '%s' "$docker_info" | grep -qiE 'userns|rootless'; then
+    if printf '%s' "$docker_info_security_opts" | grep -qiE 'userns|rootless'; then
         # userns/rootless detected - isolation present but not ECI specifically
         echo "Note: User namespace isolation detected (userns/rootless)" >&2
-        echo "  ECI not detected, but userns/rootless provides container isolation." >&2
+        echo "  ECI not detected, but userns/rootless provides some container isolation." >&2
         echo "" >&2
         return 2  # unknown - has isolation but not ECI specifically
     fi
 
     # No ECI or userns/rootless indicators found - warn but proceed
     echo "WARNING: No ECI or userns indicator found in Docker security options" >&2
-    echo "  This may be normal on non-Desktop Docker or older versions." >&2
     echo "  Sandbox will run; ECI adds additional hardening when enabled." >&2
     echo "  To enable ECI in Docker Desktop:" >&2
     echo "    Settings > Security > Enhanced Container Isolation" >&2
-    echo "  See: https://docs.docker.com/security/for-admins/enhanced-container-isolation/" >&2
     echo "" >&2
     return 1  # no - not detected
 }
@@ -274,7 +268,7 @@ _csd_is_our_container() {
     label_value="$(_csd_get_container_label "$container_name")"
 
     # Primary check: label match
-    if [[ "$label_value" == "dotnet-sandbox" ]]; then
+    if [[ "$label_value" == "agent-sandbox" ]]; then
         return 0
     fi
 
@@ -322,7 +316,7 @@ _csd_check_container_ownership() {
         fi
         echo "ERROR: Container '$container_name' exists but was not created by csd" >&2
         echo "" >&2
-        echo "  Expected label 'csd.sandbox': dotnet-sandbox" >&2
+        echo "  Expected label 'csd.sandbox': agent-sandbox" >&2
         echo "  Actual label 'csd.sandbox':   ${actual_label:-<not set>}" >&2
         echo "  Expected image:               $_CSD_IMAGE" >&2
         echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
@@ -357,11 +351,12 @@ _csd_ensure_volumes() {
   
 }
 
-# Claude Sandbox Dotnet - main function
-csd() {
+# Agent Sandbox - main function
+asb() {
     local restart_flag=false
     local force_flag=false
     local container_name
+    local detached_flag=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -374,12 +369,17 @@ csd() {
                 force_flag=true
                 shift
                 ;;
+            --detached|-d)
+                detached_flag=true
+                shift
+                ;;                
             --help|-h)
-                echo "Usage: csd [--restart] [--force]"
+                echo "Usage: csd [--restart] [--force] [--detached]"
                 echo ""
-                echo "Start or attach to a dotnet-sandbox container."
+                echo "Start or attach to a agent-sandbox container."
                 echo ""
                 echo "Options:"
+                echo "  --detached Start as detached container"
                 echo "  --restart  Force recreate container even if running"
                 echo "  --force    Skip sandbox availability check (not recommended)"
                 echo "  --help     Show this help"
@@ -390,7 +390,7 @@ csd() {
                 ;;
             *)
                 echo "Unknown option: $1" >&2
-                echo "Use 'csd --help' for usage" >&2
+                echo "Use 'asb --help' for usage" >&2
                 return 1
                 ;;
         esac
@@ -439,7 +439,7 @@ csd() {
             fi
             echo "ERROR: Cannot restart - container '$container_name' was not created by csd" >&2
             echo "" >&2
-            echo "  Expected label 'csd.sandbox': dotnet-sandbox" >&2
+            echo "  Expected label 'csd.sandbox': agent-sandbox" >&2
             echo "  Actual label 'csd.sandbox':   $actual_label" >&2
             echo "  Expected image:               $_CSD_IMAGE" >&2
             echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
@@ -451,7 +451,7 @@ csd() {
             return 1
         elif [[ $ownership_rc -eq 2 ]]; then
             # Ambiguous - warn but proceed since --restart is explicit
-            echo "WARNING: Container '$container_name' uses our image but lacks csd label" >&2
+            echo "WARNING: Container '$container_name' uses our image but lacks our label" >&2
             echo "  Proceeding with --restart as requested." >&2
             echo "" >&2
         fi
@@ -559,13 +559,19 @@ csd() {
                 return 1
             fi
 
+            local detached_args=""
+            if [[ "$detached_flag" == "true" ]]; then
+                detached_args="--detached"
+            fi
         
             echo "Starting new sandbox container..."
             docker sandbox run \
                 --name "$container_name" \
-                -d "${vol_args[@]}" \
+                "${vol_args[@]}" \
+                "$detached_args" \
                 --template "$_CSD_IMAGE" \
-                claude
+                claude            
+
             ;;
         *)
             echo "Unexpected container state: $container_state" >&2
@@ -575,7 +581,7 @@ csd() {
 }
 
 # Interactive container stop selection
-csd-stop-all() {
+asb-stop-all() {
     local containers labeled_containers ancestor_containers
 
     # Find containers by label (preferred, works across rebuilds)
@@ -588,7 +594,7 @@ csd-stop-all() {
     containers=$(printf '%s\n%s' "$labeled_containers" "$ancestor_containers" | grep -v '^$' | sort -t$'\t' -k1,1 -u)
 
     if [[ -z "$containers" ]]; then
-        echo "No dotnet-sandbox containers found."
+        echo "No agent-sandbox containers found."
         return 0
     fi
 
@@ -639,6 +645,8 @@ csd-stop-all() {
 
     echo "Done."
 }
+
+alias asbd='asb --detached'
 
 # Return 0 when sourced, exit 1 when executed directly
 return 0 2>/dev/null || { echo "This script should be sourced, not executed: source aliases.sh" >&2; exit 1; }

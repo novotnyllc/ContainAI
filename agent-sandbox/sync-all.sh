@@ -6,8 +6,7 @@ set -euo pipefail
 # ==============================================================================
 #
 # Orchestrates syncing of:
-#   - VS Code settings and extensions
-#   - VS Code Insiders settings and extensions (if installed)
+
 #   - GitHub CLI configuration
 #
 # Usage: sync-all.sh [options]

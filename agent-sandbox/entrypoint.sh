@@ -6,19 +6,11 @@ TARGET_LINK="/home/agent/workspace"
 
 log() { printf '%s\n' "$*" >&2; }
 
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    log "ERROR: required command not found: $1"
-    exit 1
-  }
-}
-
 # Discover the mirrored workspace mount.
 # In Docker Sandbox, the workspace shows up in `findmnt --real` as:
 #   TARGET=/some/abs/path
 #   SOURCE=/dev/sdX[/some/abs/path]
 discover_mirrored_workspace() {
-  require_cmd findmnt
   findmnt --real -n -o TARGET,SOURCE \
   | awk '
       {
@@ -69,10 +61,6 @@ main() {
   # Replace /home/agent/workspace with a symlink to the mirrored workspace.
   rm -d "$TARGET_LINK"
   ln -s "$MIRRORED" "$TARGET_LINK"
-
-  #log "Workspace linked: $TARGET_LINK -> $MIRRORED"
-  
-
 
   # Continue with the container's original command
   exec "$@"
