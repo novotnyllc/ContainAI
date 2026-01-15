@@ -35,6 +35,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     socat \
     tmux \
     shellcheck \
+    locales-all \
     # Build tools 
     build-essential \
     # Python with dev headers (for building native extensions)
@@ -105,7 +106,10 @@ ENV NVM_DIR=/home/agent/.nvm
 RUN printf '%s\n' \
   '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh"' \
   > /home/agent/.bash_env
+RUN echo "alias claude='claude --dangerously-skip-permissions'" >> /home/agent/.bash_aliases
+
 ENV BASH_ENV=/home/agent/.bashrc
+
 
 # Download and install nvm
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
