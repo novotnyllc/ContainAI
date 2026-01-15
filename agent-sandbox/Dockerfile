@@ -72,13 +72,10 @@ USER agent
 # Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
 ARG DOTNET_CHANNEL=10.0
 
-# Install .NET SDK using dotnet-install.sh (NOT apt)
-
 # See: https://dot.net/v1/dotnet-install.sh (official Microsoft script)
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} --install-dir /home/agent/.dotnet \
-    && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+    && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} \
     && rm /tmp/dotnet-install.sh 
 
 # Set .NET environment variables
@@ -94,40 +91,8 @@ ENV NUGET_XMLDOC_MODE=skip
 
 # Install .NET workloads 
 RUN dotnet workload install wasm-tools wasm-tools-net9 \
-    && rm -rf /tmp/* /root/.nuget/packages /root/.dotnet/toolResolverCache \
-    && dotnet workload list
-
-ARG POWERSHELL_VERSION="7.6.0-preview.6"
-ARG POWERSHELL_RELEASE_TAG="v7.6.0-preview.6"
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    tmp_dir="$(mktemp -d)"; \
-    base_url="https://github.com/PowerShell/PowerShell/releases/download/${POWERSHELL_RELEASE_TAG}"; \
-    case "$arch" in \
-        amd64) \
-            pkg="powershell_${POWERSHELL_VERSION}-1.deb_amd64.deb"; \
-            curl -fsSL "$base_url/$pkg" -o "$tmp_dir/$pkg"; \
-            if ! dpkg -i "$tmp_dir/$pkg"; then \
-                apt-get update; \
-                apt-get install -y -f; \
-                rm -rf /var/lib/apt/lists/*; \
-                dpkg -i "$tmp_dir/$pkg"; \
-            fi; \
-            ;; \
-        arm64) \
-            tarball="powershell-${POWERSHELL_VERSION}-linux-arm64.tar.gz"; \
-            curl -fsSL "$base_url/$tarball" -o "$tmp_dir/$tarball"; \
-            install_root="/opt/microsoft/powershell/7"; \
-            rm -rf "$install_root" && mkdir -p "$install_root"; \
-            tar -xzf "$tmp_dir/$tarball" -C "$install_root"; \
-            ln -sf "$install_root/pwsh" /usr/bin/pwsh; \
-            ;; \
-        *) \
-            echo "Unsupported architecture for PowerShell install: $arch" >&2; \
-            exit 1; \
-            ;; \
-    esac && \
-    rm -rf "$tmp_dir"
+    && dotnet tool install -g PowerShell \
+    && rm -rf /tmp/* 
 
 # clear out npm config prefix to use default
 ENV NPM_CONFIG_PREFIX=
