@@ -250,13 +250,10 @@ show_summary() {
     echo ""
     echo "To use the sandbox with plugins:"
     echo ""
-    echo "  docker sandbox rm \$(docker sandbox ls -q)   # Remove existing sandbox"
-    echo "  claude-sandbox                               # Start with plugins"
+    echo "  csd                                   # Start with plugins"
     echo ""
-    echo "Or manually:"
-    echo ""
-    echo "  docker sandbox run -v $PLUGINS_VOLUME:$CONTAINER_PLUGINS_PATH claude"
-    echo ""
+
+
 }
 
 # Main
