@@ -13,8 +13,10 @@ ENV TZ=UTC
 
 # Install system dependencies and build tools in one layer
 # Build tools (build-essential, etc.) are REQUIRED - agents compile code!
-RUN apt-get update && apt-get upgrade -y && \
-    apt-get autoremove -y && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get autoremove -y \
+    && apt-get install -y --no-install-recommends \
     # Core utilities
     curl \
     wget \
@@ -27,6 +29,7 @@ RUN apt-get update && apt-get upgrade -y && \
     unzip \
     socat \
     tmux \
+    shellcheck \
     # Build tools 
     build-essential \
     # Python with dev headers (for building native extensions)
@@ -76,10 +79,10 @@ ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 
 # Install .NET workloads 
 RUN dotnet workload install wasm-tools wasm-tools-net9 \
-    rm -rf /tmp/* /root/.nuget/packages /root/.dotnet/toolResolverCache
+    && rm -rf /tmp/* /root/.nuget/packages /root/.dotnet/toolResolverCache
 
-ARG POWERSHELL_VERSION="7.5.4"
-ARG POWERSHELL_RELEASE_TAG="v7.5.4"
+ARG POWERSHELL_VERSION="7.6.0-preview.6"
+ARG POWERSHELL_RELEASE_TAG="v7.6.0-preview.6"
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     tmp_dir="$(mktemp -d)"; \
@@ -110,67 +113,50 @@ RUN set -eux; \
     esac && \
     rm -rf "$tmp_dir"
 
-# Use bash for nvm-related commands (nvm.sh requires bash, not dash)
+
+
+
+
+
+
+USER agent
 SHELL ["/bin/bash", "-c"]
+RUN curl -fsSL https://bun.com/install | bash 
 
-# Install nvm and Node.js as agent user
-# See: https://github.com/nvm-sh/nvm/releases
-USER agent
-RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh -o /tmp/nvm-install.sh \
-    && bash /tmp/nvm-install.sh \
-    && rm /tmp/nvm-install.sh \
-    && source ~/.nvm/nvm.sh \
-    && nvm install --lts \
-    && nvm alias default lts/* \
-    && npm install -g typescript@5 eslint@8 prettier@3
-
-# Create system-wide symlinks for non-interactive access (as root)
-# Use nvm which to resolve the default node version deterministically
-# Use explicit path instead of ~ to avoid HOME resolution issues under su
-USER root
-RUN NODE_BIN=$(su -s /bin/bash agent -c 'source /home/agent/.nvm/nvm.sh && nvm which default') \
-    && if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then \
-         echo "ERROR: Failed to resolve nvm default node path" >&2; exit 1; \
-       fi \
-    && NODE_PATH=$(dirname "$NODE_BIN") \
-    && ln -sf "$NODE_PATH/node" /usr/local/bin/node \
-    && ln -sf "$NODE_PATH/npm" /usr/local/bin/npm \
-    && ln -sf "$NODE_PATH/npx" /usr/local/bin/npx \
-    && ln -sf "$NODE_PATH/tsc" /usr/local/bin/tsc \
-    && ln -sf "$NODE_PATH/eslint" /usr/local/bin/eslint \
-    && ln -sf "$NODE_PATH/prettier" /usr/local/bin/prettier
-
-# Create /etc/profile.d/nvm.sh for login shells with explicit nvm use
-RUN echo 'export NVM_DIR="/home/agent/.nvm"' > /etc/profile.d/nvm.sh \
-    && echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm use default >/dev/null 2>&1' >> /etc/profile.d/nvm.sh
-
-# Verify Node.js installation via symlink (as root)
-RUN /usr/local/bin/node --version
-
-# Verify Node.js installation as agent user (login shell environment)
-USER agent
-RUN bash -lc "node --version" \
-    && bash -lc "nvm --version" \
-    && bash -lc "tsc --version && eslint --version && prettier --version"
-
-# Switch back to root for directory setup
 USER root
 
 # Install GitHub CLI, ai code agents as npm global packages in one layer
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-    apt-get update && \
-    apt-get install -y gh && \
-    rm -rf /var/lib/apt/lists/* && \
-    npm install -g \
-        @githubnext/github-copilot-cli \
-        @anthropic-ai/claude-code@latest \
-        @openai/codex && \ 
-        @google/gemini-cli && \
-        opencode-ai && \
-    npm cache clean --force && \
-    rm -rf /tmp/*
+RUN <<EOF
+
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 
+chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg 
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null 
+apt-get update 
+apt-get install -y gh 
+rm -rf /var/lib/apt/lists/* 
+   
+# Configure npm to use user-level global installation
+# This installs to ~/.npm-global instead of /usr/local/lib/node_modules
+su - agent -c "mkdir -p ~/.npm-global"
+su - agent -c "npm config set prefix '~/.npm-global'"
+su - agent -c "echo 'export PATH=~/.npm-global/bin:\$PATH' >> ~/.bashrc"
+
+# Install latest Claude Code using npm (goes to user directory)
+su - agent -c "npm install -g @anthropic-ai/claude-code@latest"
+su - agent -c "npm install -g @githubnext/github-copilot-cli"
+su - agent -c "npm install -g @openai/codex"
+su - agent -c "npm install -g @google/gemini-cli"
+su - agent -c "npm install -g opencode-ai"
+su - agent -c "npm install -g typescript"
+su - agent -c "npm install -g eslint"
+su - agent -c "npm install -g prettier"
+
+su - agent -c "npm cache clean --force"
+rm -rf /tmp/*
+
+# Workaround the sandbox not doing this automatically
+su - agent -c "ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json"
+EOF
 
 # Create mount point directories for volumes (per spec Volume Strategy)
 # These directories will be mount targets for named volumes managed by csd wrapper
@@ -185,11 +171,6 @@ RUN mkdir -p /home/agent/.vscode-server \
     && chmod 700 /home/agent/.vscode-server \
                  /home/agent/.config/gh \
                  /home/agent/.claude
-
-# Create Claude credentials symlink (same workaround as claude/Dockerfile)
-# Done AFTER mount point creation to avoid symlink target being affected by chown
-USER agent
-RUN ln -sf /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json
 
 # Final user should be agent
 USER agent
