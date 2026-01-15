@@ -253,7 +253,8 @@ show_summary() {
     echo ""
     echo "To use the sandbox with plugins:"
     echo ""
-    echo "  csd                                   # Start with plugins"
+    echo "  asb                                   # Start with plugins"
+    echo "  asbd                                   # Start detached with plugins"
     echo ""
 
 
