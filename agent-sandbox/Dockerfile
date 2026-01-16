@@ -214,9 +214,7 @@ ENV \
     # Do not generate certificate
     DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
     # Do not show first run text
-    DOTNET_NOLOGO=true \
-    # SDK version
-    DOTNET_SDK_VERSION=10.0.102 \
+    DOTNET_NOLOGO=true \    
     # Enable correct mode for dotnet watch (only mode supported in a container)
     DOTNET_USE_POLLING_FILE_WATCHER=true \
     # Skip extraction of XML docs - generally not useful within an image/container - helps performance
