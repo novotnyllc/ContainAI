@@ -392,12 +392,12 @@ asb() {
                 shift
                 ;;
             --help|-h)
-                echo "Usage: asb [--restart] [--force] [--detached]"
+                echo "Usage: asb [--restart] [--force] [--detached|-d]"
                 echo ""
-                echo "Start or attach to a agent-sandbox container."
+                echo "Start or attach to an agent-sandbox container."
                 echo ""
                 echo "Options:"
-                echo "  --detached Start as detached container"
+                echo "  -d, --detached  Start as detached container"
                 echo "  --restart  Force recreate container even if running"
                 echo "  --force    Skip sandbox availability check (not recommended)"
                 echo "  --help     Show this help"
@@ -436,8 +436,13 @@ asb() {
     else
         # Docker error - route through sandbox check for actionable messaging
         # This handles daemon down, permission denied, etc.
-        _asb_check_sandbox || return 1
-        # If sandbox check passed but inspect still failed, surface the error
+        local sandbox_check_rc
+        _asb_check_sandbox
+        sandbox_check_rc=$?
+        if [[ $sandbox_check_rc -eq 1 ]]; then
+            return 1  # Definite failure - sandbox check already printed error
+        fi
+        # rc=0 (ok) or rc=2 (unknown) - sandbox might work, surface the original error
         echo "$container_inspect_output" >&2
         return 1
     fi
@@ -518,13 +523,16 @@ asb() {
                 return 1
             fi
             # Warn if sandbox unavailable (non-blocking for running containers)
-            if ! _asb_check_sandbox; then
-                if [[ "$force_flag" != "true" ]]; then
-                    echo "WARNING: Sandbox unavailable but attaching to existing container" >&2
-                    echo "  Use --force to suppress this warning, or --restart to recreate as sandbox" >&2
-                    echo "" >&2
-                fi
+            local sandbox_rc
+            _asb_check_sandbox
+            sandbox_rc=$?
+            if [[ $sandbox_rc -eq 1 ]] && [[ "$force_flag" != "true" ]]; then
+                # Definite unavailability - warn but proceed since container exists
+                echo "WARNING: Sandbox unavailable but attaching to existing container" >&2
+                echo "  Use --force to suppress this warning, or --restart to recreate as sandbox" >&2
+                echo "" >&2
             fi
+            # rc=0 or rc=2: no warning needed (sandbox available or status unknown)
             echo "Attaching to running container..."
             # NOTE: Using docker exec (not docker sandbox exec) is intentional.
             # Docker Desktop sandboxes are regular containers accessible via standard docker commands.
@@ -604,10 +612,6 @@ asb() {
                     claude
                 )
             fi
-
-            #printf 'Running command: docker sandbox run'
-            #printf ' %q' "${args[@]}"
-            #sprintf '\n'
 
             docker sandbox run "${args[@]}"
 
