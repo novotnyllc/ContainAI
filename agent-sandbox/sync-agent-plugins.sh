@@ -116,7 +116,10 @@ copy_plugin_files() {
             mkdir -p /target/copilot /target/gemini /target/opencode /target/codex/skills
             touch /target/vscode-server/data/Machine/settings.json /target/vscode-server/data/User/mcp.json
             touch /target/vscode-server-insiders/data/Machine/settings.json /target/vscode-server-insiders/data/User/mcp.json
+            touch /target/gemini/google_accounts.json /target/gemini/oauth_creds.json /target/gemini/settings.json
+            touch /target/codex/auth.json /target/codex/config.toml
             cp -a /source/cache /source/marketplaces /target/claude/plugins 
+            
         "
 
     success "Plugin files copied"

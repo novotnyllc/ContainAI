@@ -84,7 +84,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
     && apt-get update \
-    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
     # Core utilities
     curl \
@@ -195,11 +194,16 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     # Copilot
     && ln -s /mnt/agent-data/copilot/config.json ${HOME}/.copilot/config.json \
     # Gemini    
+    && touch /mnt/agent-data/gemini/google_accounts.json \
     && ln -s /mnt/agent-data/gemini/google_accounts.json ${HOME}/.gemini/google_accounts.json \
+    && touch /mnt/agent-data/gemini/oauth_creds.json \
     && ln -s /mnt/agent-data/gemini/oauth_creds.json ${HOME}/.gemini/oauth_creds.json \
+    && touch /mnt/agent-data/gemini/settings.json \
     && ln -s /mnt/agent-data/gemini/settings.json ${HOME}/.gemini/settings.json \
     # Codex
+    && touch /mnt/agent-data/codex/auth.json \
     && ln -s /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \
+    && touch /mnt/agent-data/codex/config.toml \
     && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
     && rm -rf ${HOME}/.codex/skills \
     && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills
