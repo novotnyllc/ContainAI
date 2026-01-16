@@ -6,10 +6,20 @@
     "fn-2-kcs.1"
   ],
   "epic": "fn-2-kcs",
+  "evidence": {
+    "commits": [
+      "06a70195874573c497545738179f34a727ee2aeb"
+    ],
+    "prs": [],
+    "tests": [
+      "grep -i '\\bcsd\\b' agent-sandbox/README.md (no matches)",
+      "grep 'dotnet-sandbox' agent-sandbox/README.md (no matches)"
+    ]
+  },
   "id": "fn-2-kcs.3",
   "priority": null,
   "spec_path": ".flow/tasks/fn-2-kcs.3.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "PR3: README.md documentation update",
-  "updated_at": "2026-01-16T09:25:57.829995Z"
+  "updated_at": "2026-01-16T09:40:15.019855Z"
 }
