@@ -252,11 +252,11 @@ _asb_preflight_checks() {
                 # Isolated - proceed normally
                 ;;
             1)
-                echo "ERROR: Container isolation required but not detected. Use --force to bypass." >&2
+                echo "[ERROR] Container isolation required but not detected. Use --force to bypass." >&2
                 return 1
                 ;;
             2)
-                echo "ERROR: Cannot verify isolation status. Use --force to bypass." >&2
+                echo "[ERROR] Cannot verify isolation status. Use --force to bypass." >&2
                 return 1
                 ;;
         esac
@@ -340,7 +340,7 @@ _asb_check_container_ownership() {
         echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
         echo "" >&2
         echo "This is a name collision with a container not managed by asb." >&2
-        echo "To recreate as a asb-managed sandbox container, run: asb --restart" >&2
+        echo "To recreate as an asb-managed sandbox container, run: asb --restart" >&2
         echo "" >&2
         return 1
     fi
