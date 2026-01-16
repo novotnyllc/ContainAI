@@ -4,10 +4,21 @@
   "created_at": "2026-01-16T01:00:27.323687Z",
   "depends_on": [],
   "epic": "fn-2-kcs",
+  "evidence": {
+    "commits": [
+      "e9b457c"
+    ],
+    "review": "codex impl-review returned SHIP",
+    "tests": [
+      "build.sh --help works",
+      "build.sh --dotnet-channel validation works",
+      "no trailing whitespace in Dockerfile"
+    ]
+  },
   "id": "fn-2-kcs.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-2-kcs.2.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "PR2: Dockerfile & build.sh (image size + CLI options + OCI labels)",
-  "updated_at": "2026-01-16T09:14:00.078456Z"
+  "updated_at": "2026-01-16T09:24:43.481843Z"
 }
