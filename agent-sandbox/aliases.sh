@@ -11,23 +11,20 @@
 # ==============================================================================
 # Note: No strict mode - this file is sourced into interactive shells
 
-# Constants 
+# Constants
 
-_CSD_IMAGE="agent-sandbox:latest"
-_CSD_LABEL="asb.sandbox=agent-sandbox"
-_CSD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_ASB_IMAGE="agent-sandbox:latest"
+_ASB_LABEL="asb.sandbox=agent-sandbox"
+_ASB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Volumes that asb creates/ensures (per spec)
-_CSD_VOLUMES=(
+_ASB_VOLUMES=(
         "sandbox-agent-data:/mnt/agent-data"
-)
-# Additional volumes to mount (managed elsewhere, not created by csd)
-_CSD_MOUNT_ONLY_VOLUMES=(
 )
 
 
 # Generate sanitized container name from git repo/branch or directory
-_csd_container_name() {
+_asb_container_name() {
     local name
 
     # Guard git usage to avoid "command not found" noise in minimal environments
@@ -88,44 +85,40 @@ _csd_container_name() {
     printf '%s' "$name"
 }
 
-# Best-effort ECI (Enhanced Container Isolation) detection
-# Returns: 0=yes (detected), 1=no (not detected), 2=unknown
-# Warns on 1 or 2 (non-blocking per spec)
-_csd_check_eci() {
-    local docker_info_def_runtime docker_info_security_opts
+# Container isolation detection (conservative - prefer return 2 over false positive/negative)
+# Returns: 0=isolated (detected), 1=not isolated (definite), 2=unknown (ambiguous)
+_asb_check_isolation() {
+    local runtime rootless info_output
 
-
-    # Get docker info default runtime
-    docker_info_def_runtime="$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null)"
-    docker_info_security_opts="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)"
-
-    # Check for explicit ECI indicator (definite yes)
-    if printf '%s' "$docker_info_def_runtime" | grep -qiE 'sysbox-runc'; then
-        return 0  # yes - ECI explicitly detected
+    info_output=$(docker info --format '{{.DefaultRuntime}}\t{{.Rootless}}' 2>/dev/null)
+    if [[ $? -ne 0 ]] || [[ -z "$info_output" ]]; then
+        echo "[WARN] Unable to determine isolation status" >&2
+        return 2
     fi
 
-    # Check for userns/rootless hints (per spec: indicates some isolation)
-    # These suggest user namespace isolation is active, but it's not ECI
-    if printf '%s' "$docker_info_security_opts" | grep -qiE 'userns|rootless'; then
-        # userns/rootless detected - isolation present but not ECI specifically
-        echo "Note: User namespace isolation detected (userns/rootless)" >&2
-        echo "  ECI not detected, but userns/rootless provides some container isolation." >&2
-        echo "" >&2
-        return 2  # unknown - has isolation but not ECI specifically
+    IFS=$'\t' read -r runtime rootless <<< "$info_output"
+
+    if [[ "$runtime" == "sysbox-runc" ]]; then
+        echo "[OK] Isolation: sysbox-runc" >&2
+        return 0
+    fi
+    if [[ "$rootless" == "true" ]]; then
+        echo "[OK] Isolation: rootless mode" >&2
+        return 0
     fi
 
-    # No ECI or userns/rootless indicators found - warn but proceed
-    echo "WARNING: No ECI or userns indicator found in Docker security options" >&2
-    echo "  Sandbox will run; ECI adds additional hardening when enabled." >&2
-    echo "  To enable ECI in Docker Desktop:" >&2
-    echo "    Settings > Security > Enhanced Container Isolation" >&2
-    echo "" >&2
-    return 1  # no - not detected
+    if [[ "$runtime" == "runc" ]] && [[ "$rootless" == "false" ]]; then
+        echo "[WARN] No isolation detected (default runtime)" >&2
+        return 1
+    fi
+
+    echo "[WARN] Unable to determine isolation status" >&2
+    return 2
 }
 
 # Check if docker sandbox is available
 # Returns: 0=yes, 1=no (definite), 2=unknown (fail-open with warning)
-_csd_check_sandbox() {
+_asb_check_sandbox() {
     if ! command -v docker >/dev/null 2>&1; then
         echo "ERROR: Docker is not installed or not in PATH" >&2
         return 1
@@ -225,36 +218,61 @@ _csd_check_sandbox() {
     return 2  # Unknown - proceed with warning
 }
 
-# Preflight checks for sandbox/ECI before container start
+# Preflight checks for sandbox/isolation before container start
 # Returns: 0=proceed, 1=block
-_csd_preflight_checks() {
+_asb_preflight_checks() {
     local force_flag="$1"
+    local sandbox_rc isolation_rc
 
     if [[ "$force_flag" == "true" ]]; then
         echo "WARNING: Skipping sandbox availability check (--force)" >&2
+        # Handle ASB_REQUIRE_ISOLATION with --force bypass
+        if [[ "${ASB_REQUIRE_ISOLATION:-0}" == "1" ]]; then
+            echo "*** WARNING: Bypassing isolation requirement with --force" >&2
+            echo "*** Running without verified isolation may expose host system" >&2
+        fi
         return 0
     fi
 
-    local sandbox_rc
-    _csd_check_sandbox
+    _asb_check_sandbox
     sandbox_rc=$?
     if [[ $sandbox_rc -eq 1 ]]; then
         return 1  # Definite "no" - block
     fi
     # rc=0 (yes) or rc=2 (unknown) - proceed
-    # Best-effort ECI detection (warns but doesn't block)
-    _csd_check_eci || true
+
+    # Best-effort isolation detection
+    _asb_check_isolation
+    isolation_rc=$?
+
+    # Handle ASB_REQUIRE_ISOLATION environment variable
+    if [[ "${ASB_REQUIRE_ISOLATION:-0}" == "1" ]]; then
+        case $isolation_rc in
+            0)
+                # Isolated - proceed normally
+                ;;
+            1)
+                echo "[ERROR] Container isolation required but not detected. Use --force to bypass." >&2
+                return 1
+                ;;
+            2)
+                echo "[ERROR] Cannot verify isolation status. Use --force to bypass." >&2
+                return 1
+                ;;
+        esac
+    fi
+
     return 0
 }
 
 # Get the asb.sandbox label value from a container (empty if not found)
-_csd_get_container_label() {
+_asb_get_container_label() {
     local container_name="$1"
     docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null || echo ""
 }
 
 # Get the image name of a container
-_csd_get_container_image() {
+_asb_get_container_image() {
     local container_name="$1"
     docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || echo ""
 }
@@ -262,10 +280,10 @@ _csd_get_container_image() {
 # Verify container was created by asb (has our label or uses our image)
 # Returns: 0=confirmed (label matches), 1=foreign (no match), 2=ambiguous (image matches but no label)
 # Falls back to image name verification if labels not supported
-_csd_is_our_container() {
+_asb_is_our_container() {
     local container_name="$1"
     local label_value
-    label_value="$(_csd_get_container_label "$container_name")"
+    label_value="$(_asb_get_container_label "$container_name")"
 
     # Primary check: label match
     if [[ "$label_value" == "agent-sandbox" ]]; then
@@ -277,8 +295,8 @@ _csd_is_our_container() {
     # Returns 2 to indicate "probable match" requiring user confirmation via --restart
     if [[ -z "$label_value" || "$label_value" == "<no value>" ]]; then
         local image_name
-        image_name="$(_csd_get_container_image "$container_name")"
-        if [[ "$image_name" == "$_CSD_IMAGE" ]]; then
+        image_name="$(_asb_get_container_image "$container_name")"
+        if [[ "$image_name" == "$_ASB_IMAGE" ]]; then
             # Image matches but no label - could be ours (pre-label) or foreign
             return 2  # Ambiguous - caller should warn
         fi
@@ -289,11 +307,11 @@ _csd_is_our_container() {
 
 # Check container ownership with appropriate messaging
 # Returns: 0=owned, 1=foreign (with error), 2=ambiguous (with warning)
-_csd_check_container_ownership() {
+_asb_check_container_ownership() {
     local container_name="$1"
     local ownership_rc
 
-    _csd_is_our_container "$container_name"
+    _asb_is_our_container "$container_name"
     ownership_rc=$?
 
     if [[ $ownership_rc -eq 0 ]]; then
@@ -308,8 +326,8 @@ _csd_check_container_ownership() {
     else
         # Foreign container
         local actual_label actual_image
-        actual_label="$(_csd_get_container_label "$container_name")"
-        actual_image="$(_csd_get_container_image "$container_name")"
+        actual_label="$(_asb_get_container_label "$container_name")"
+        actual_image="$(_asb_get_container_image "$container_name")"
         # Normalize empty or "<no value>" to "<not set>"
         if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
             actual_label="<not set>"
@@ -318,7 +336,7 @@ _csd_check_container_ownership() {
         echo "" >&2
         echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
         echo "  Actual label 'asb.sandbox':   ${actual_label:-<not set>}" >&2
-        echo "  Expected image:               $_CSD_IMAGE" >&2
+        echo "  Expected image:               $_ASB_IMAGE" >&2
         echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
         echo "" >&2
         echo "This is a name collision with a container not managed by asb." >&2
@@ -330,13 +348,13 @@ _csd_check_container_ownership() {
 
 # Ensure required volumes exist with correct permissions
 # Returns non-zero on failure
-_csd_ensure_volumes() {
+_asb_ensure_volumes() {
     local volume_name vol_spec
 
 
 
     # Create asb-managed volumes if missing
-    for vol_spec in "${_CSD_VOLUMES[@]}"; do
+    for vol_spec in "${_ASB_VOLUMES[@]}"; do
         volume_name="${vol_spec%%:*}"
 
         if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
@@ -348,7 +366,7 @@ _csd_ensure_volumes() {
         fi
     done
 
-  
+
 }
 
 # Agent Sandbox - main function
@@ -372,7 +390,7 @@ asb() {
             --detached|-d)
                 detached_flag=true
                 shift
-                ;;                
+                ;;
             --help|-h)
                 echo "Usage: asb [--restart] [--force] [--detached]"
                 echo ""
@@ -404,7 +422,7 @@ asb() {
     fi
 
     # Get container name first (we need it to check container state)
-    container_name="$(_csd_container_name)"
+    container_name="$(_asb_container_name)"
     echo "Container: $container_name"
 
     # Check container state (distinguish not-found from actual errors)
@@ -418,7 +436,7 @@ asb() {
     else
         # Docker error - route through sandbox check for actionable messaging
         # This handles daemon down, permission denied, etc.
-        _csd_check_sandbox || return 1
+        _asb_check_sandbox || return 1
         # If sandbox check passed but inspect still failed, surface the error
         echo "$container_inspect_output" >&2
         return 1
@@ -427,13 +445,13 @@ asb() {
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
         # Check ownership before removing - prevent accidentally deleting foreign containers
-        _csd_is_our_container "$container_name"
+        _asb_is_our_container "$container_name"
         local ownership_rc=$?
         if [[ $ownership_rc -eq 1 ]]; then
             # Definitely foreign - block unless user explicitly confirms
             local actual_label actual_image
-            actual_label="$(_csd_get_container_label "$container_name")"
-            actual_image="$(_csd_get_container_image "$container_name")"
+            actual_label="$(_asb_get_container_label "$container_name")"
+            actual_image="$(_asb_get_container_image "$container_name")"
             if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
                 actual_label="<not set>"
             fi
@@ -441,7 +459,7 @@ asb() {
             echo "" >&2
             echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
             echo "  Actual label 'asb.sandbox':   $actual_label" >&2
-            echo "  Expected image:               $_CSD_IMAGE" >&2
+            echo "  Expected image:               $_ASB_IMAGE" >&2
             echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
             echo "" >&2
             echo "To avoid data loss, asb will not delete containers it didn't create." >&2
@@ -478,13 +496,13 @@ asb() {
     # Check if image exists only when we need to create a new container
     if [[ "$container_state" == "none" ]]; then
         local inspect_output inspect_rc
-        inspect_output="$(docker image inspect "$_CSD_IMAGE" 2>&1)"
+        inspect_output="$(docker image inspect "$_ASB_IMAGE" 2>&1)"
         inspect_rc=$?
         if [[ $inspect_rc -ne 0 ]]; then
             # Check if it's "not found" vs other errors (daemon down, etc.)
             if printf '%s' "$inspect_output" | grep -qiE "no such image|not found"; then
-                echo "ERROR: Image '$_CSD_IMAGE' not found" >&2
-                echo "Please build the image first: ${_CSD_SCRIPT_DIR}/build.sh" >&2
+                echo "ERROR: Image '$_ASB_IMAGE' not found" >&2
+                echo "Please build the image first: ${_ASB_SCRIPT_DIR}/build.sh" >&2
             else
                 # Let actual docker error surface
                 echo "$inspect_output" >&2
@@ -495,12 +513,12 @@ asb() {
 
     case "$container_state" in
         running)
-            # Verify this container was created by csd (has our label or image)
-            if ! _csd_check_container_ownership "$container_name"; then
+            # Verify this container was created by asb (has our label or image)
+            if ! _asb_check_container_ownership "$container_name"; then
                 return 1
             fi
             # Warn if sandbox unavailable (non-blocking for running containers)
-            if ! _csd_check_sandbox; then
+            if ! _asb_check_sandbox; then
                 if [[ "$force_flag" != "true" ]]; then
                     echo "WARNING: Sandbox unavailable but attaching to existing container" >&2
                     echo "  Use --force to suppress this warning, or --restart to recreate as sandbox" >&2
@@ -514,12 +532,12 @@ asb() {
             docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             ;;
         exited|created)
-            # Verify this container was created by csd (has our label or image)
-            if ! _csd_check_container_ownership "$container_name"; then
+            # Verify this container was created by asb (has our label or image)
+            if ! _asb_check_container_ownership "$container_name"; then
                 return 1
             fi
             # Check sandbox availability before starting
-            if ! _csd_preflight_checks "$force_flag"; then
+            if ! _asb_preflight_checks "$force_flag"; then
                 return 1
             fi
             echo "Starting stopped container..."
@@ -527,19 +545,19 @@ asb() {
             ;;
         none)
             # Check sandbox availability before creating new container
-            if ! _csd_preflight_checks "$force_flag"; then
+            if ! _asb_preflight_checks "$force_flag"; then
                 return 1
             fi
 
-            # Ensure volumes exist (both required and csd-managed)
-            if ! _csd_ensure_volumes; then
+            # Ensure volumes exist (asb-managed)
+            if ! _asb_ensure_volumes; then
                 echo "ERROR: Volume setup failed. Cannot start container." >&2
                 return 1
             fi
 
-            # Build volume arguments (both asb-managed and mount-only volumes)
+            # Build volume arguments (asb-managed volumes)
             local vol_args=()
-            for vol_spec in "${_CSD_VOLUMES[@]}"; do
+            for vol_spec in "${_ASB_VOLUMES[@]}"; do
                 vol_args+=("-v" "$vol_spec")
             done
 
@@ -563,15 +581,29 @@ asb() {
             if [[ "$detached_flag" == "true" ]]; then
                 detached_args=(--detached)
             fi
-        
+
             echo "Starting new sandbox container..."
-            args=(
-                --name "$container_name"
-                "${vol_args[@]}"
-                "${detached_args[@]}"
-                --template "$_CSD_IMAGE"
-                claude
-            )
+
+            # Check if docker sandbox supports --label
+            local args=()
+            if docker sandbox run --help 2>&1 | grep -q '\-\-label'; then
+                args=(
+                    --name "$container_name"
+                    --label "$_ASB_LABEL"
+                    "${vol_args[@]}"
+                    "${detached_args[@]}"
+                    --template "$_ASB_IMAGE"
+                    claude
+                )
+            else
+                args=(
+                    --name "$container_name"
+                    "${vol_args[@]}"
+                    "${detached_args[@]}"
+                    --template "$_ASB_IMAGE"
+                    claude
+                )
+            fi
 
             #printf 'Running command: docker sandbox run'
             #printf ' %q' "${args[@]}"
@@ -592,10 +624,10 @@ asb-stop-all() {
     local containers labeled_containers ancestor_containers
 
     # Find containers by label (preferred, works across rebuilds)
-    labeled_containers=$(docker ps -a --filter "label=$_CSD_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+    labeled_containers=$(docker ps -a --filter "label=$_ASB_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
 
     # Also find by ancestor image (catches pre-label containers)
-    ancestor_containers=$(docker ps -a --filter "ancestor=$_CSD_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+    ancestor_containers=$(docker ps -a --filter "ancestor=$_ASB_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
 
     # Combine and deduplicate (sort -u on first field)
     containers=$(printf '%s\n%s' "$labeled_containers" "$ancestor_containers" | grep -v '^$' | sort -t$'\t' -k1,1 -u)
@@ -605,7 +637,7 @@ asb-stop-all() {
         return 0
     fi
 
-    echo "Dotnet sandbox containers:"
+    echo "Agent Sandbox containers:"
     echo ""
 
     local i=0
