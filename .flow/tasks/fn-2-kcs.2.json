@@ -9,6 +9,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-2-kcs.2.md",
   "status": "todo",
-  "title": "PR2: Docker image size reduction to under 3GB",
-  "updated_at": "2026-01-16T01:01:04.822505Z"
+  "title": "PR2: Dockerfile & build.sh (image size + CLI options + OCI labels)",
+  "updated_at": "2026-01-16T05:00:00.000000Z"
 }

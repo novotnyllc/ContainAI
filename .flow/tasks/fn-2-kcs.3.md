@@ -1,64 +1,73 @@
-# fn-2-kcs.3 PR3: Build script enhancements with BuildKit
+# fn-2-kcs.3: PR3 - README.md documentation update
 
 ## Description
-Enhance build.sh with configurable build args and add OCI standard labels to Dockerfile.
 
-## Build Script Changes
+Update README.md to reflect the renamed `asb` command and remove all stale `csd` references.
 
-### DOTNET_CHANNEL Option
-Add `--dotnet-channel` option to build.sh:
+**Dependency**: This task should be done AFTER fn-2-kcs.1 (aliases.sh rename) is complete.
+
+## File to Modify
+
+- `agent-sandbox/README.md`
+
+## Changes Required
+
+### Stale References to Update
+
+| Pattern | Change to |
+|---------|-----------|
+| `csd` command references | `asb` |
+| `csd-stop-all` | `asb-stop-all` |
+| "Claude Sandbox Dotnet" | "Agent Sandbox" |
+| "Dotnet sandbox" | "Agent Sandbox" |
+| "dotnet-sandbox" (project name) | "agent-sandbox" |
+
+### Volume Names (Breaking Change)
+
+Rename volume names from `dotnet-sandbox-*` to `agent-sandbox-*`:
+- Update `_ASB_VOLUMES` array values in aliases.sh
+- Update any `docker volume` commands in documentation
+- Update variable definitions containing volume names
+
+**Note**: This orphans existing Docker volumes. Users must manually migrate data if needed. No automatic migration - backward compatibility explicitly not required.
+
+### Additional Updates
+
+- Clarify that `_ASB_LABEL` identifies containers as "managed by asb" (not per-user ownership)
+
+### Search Commands
+
 ```bash
-./build.sh --dotnet-channel lts      # Use latest LTS
-./build.sh --dotnet-channel 10.0     # Use specific version
+# Find all csd references
+rg "\bcsd\b" agent-sandbox/README.md
+
+# Find dotnet-sandbox references (all should be renamed)
+rg "dotnet-sandbox" agent-sandbox/README.md
 ```
 
-Default should remain `10.0` for consistency.
+## Testing
 
-### Base Image Configuration
-Add build arg for base image:
 ```bash
-./build.sh --base-image docker/sandbox-templates:claude-code
+# Verify no stale references remain (word boundary search)
+grep -i "\\bcsd\\b" agent-sandbox/README.md  # Should return nothing
+
+# Verify no dotnet-sandbox references remain
+grep "dotnet-sandbox" agent-sandbox/README.md  # Should return nothing
 ```
 
-### BuildKit Enablement
-Set `DOCKER_BUILDKIT=1` by default in build.sh.
-
-## Dockerfile Changes
-
-### OCI Standard Labels
-Add to Dockerfile:
-```dockerfile
-LABEL org.opencontainers.image.source="https://github.com/<repo>"
-LABEL org.opencontainers.image.description="Agent Sandbox for AI coding assistants"
-LABEL org.opencontainers.image.licenses="MIT"
-```
-
-Build args for dynamic labels:
-```dockerfile
-ARG BUILD_DATE
-ARG VCS_REF
-LABEL org.opencontainers.image.created="${BUILD_DATE}"
-LABEL org.opencontainers.image.revision="${VCS_REF}"
-```
-
-Update build.sh to pass these:
-```bash
---build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
---build-arg VCS_REF="$(git rev-parse HEAD)"
-```
-
-## Files to Modify
-- `agent-sandbox/build.sh`
-- `agent-sandbox/Dockerfile`
 ## Acceptance
-- [ ] `--dotnet-channel` option added to build.sh
-- [ ] Base image configurable via `--base-image` option
-- [ ] `DOCKER_BUILDKIT=1` set by default in build.sh
-- [ ] OCI standard labels added to Dockerfile
-- [ ] Dynamic labels (BUILD_DATE, VCS_REF) passed at build time
-- [ ] `./build.sh --help` shows all options
-- [ ] `./build.sh` works with defaults
-- [ ] `./build.sh --dotnet-channel lts` works
+
+- [ ] All `csd` command references changed to `asb`
+- [ ] `csd-stop-all` changed to `asb-stop-all`
+- [ ] "Claude Sandbox Dotnet" changed to "Agent Sandbox"
+- [ ] "Dotnet sandbox" (title case) changed to "Agent Sandbox"
+- [ ] "dotnet-sandbox" project references changed to "agent-sandbox"
+- [ ] Volume names `dotnet-sandbox-*` renamed to `agent-sandbox-*`
+- [ ] Title updated to reference "agent-sandbox"
+- [ ] All command examples updated
+- [ ] `grep -i "\\bcsd\\b" agent-sandbox/README.md` returns no matches
+- [ ] Documentation accurately describes the renamed commands
+
 ## Done summary
 TBD
 
