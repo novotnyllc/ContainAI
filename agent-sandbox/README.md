@@ -1,4 +1,4 @@
-# dotnet-sandbox
+# agent-sandbox
 
 Docker sandbox for .NET 10 development with WASM workloads and Claude Code integration.
 
@@ -27,14 +27,14 @@ To enable Docker sandbox:
 # Build the image
 ./build.sh
 
-# Source aliases (adds csd command)
+# Source aliases (adds asb command)
 source ./aliases.sh
 
 # Start sandbox
-csd
+asb
 ```
 
-Most volumes are created automatically on first run. The `docker-claude-sandbox-data` volume is required and must exist before starting:
+Most volumes are created automatically on first run. The `docker-claude-sandbox-data` volume is required and must exist before starting (run `asb` to see the error message with instructions):
 
 **Option 1** (new users without Claude on host - creates empty volume):
 ```bash
@@ -48,17 +48,17 @@ docker volume create docker-claude-sandbox-data
 ```
 Note: sync-plugins.sh syncs plugins and settings only. Credentials are NOT synced - you'll need to run `claude login` inside the container to authenticate.
 
-## The `csd` Command
+## The `asb` Command
 
-`csd` (Claude Sandbox Dotnet) is the main command for working with the sandbox.
+`asb` (Agent Sandbox) is the main command for working with the sandbox.
 
 ### Basic Usage
 
 ```bash
-csd              # Start or attach to sandbox
-csd --restart    # Force recreate container
-csd --force      # Skip sandbox availability check (not recommended)
-csd --help       # Show help
+asb              # Start or attach to sandbox
+asb --restart    # Force recreate container
+asb --force      # Skip sandbox availability check (not recommended)
+asb --help       # Show help
 ```
 
 ### Container Naming
@@ -72,14 +72,14 @@ Names are sanitized (lowercase, alphanumeric + dashes, max 63 chars).
 
 ### Auto-Attach Behavior
 
-- If a container with the same name is running, `csd` attaches to it
-- If the container exists but is stopped, `csd` starts it
-- Use `csd --restart` to force a fresh container
+- If a container with the same name is running, `asb` attaches to it
+- If the container exists but is stopped, `asb` starts it
+- Use `asb --restart` to force a fresh container
 
 ### Stopping Containers
 
 ```bash
-csd-stop-all     # Interactive selection to stop sandbox containers
+asb-stop-all     # Interactive selection to stop sandbox containers
 ```
 
 ## Volumes
@@ -88,11 +88,11 @@ csd-stop-all     # Interactive selection to stop sandbox containers
 |-------------|-------------|---------|
 | `docker-claude-sandbox-data` | `/mnt/claude-data` | Claude credentials (required - create empty or use sync-plugins.sh, do not manually edit contents) |
 | `docker-claude-plugins` | `/home/agent/.claude/plugins` | Claude Code plugins |
-| `dotnet-sandbox-vscode` | `/home/agent/.vscode-server` | VS Code Server data |
-| `dotnet-sandbox-nuget` | `/home/agent/.nuget` | NuGet package cache |
-| `dotnet-sandbox-gh` | `/home/agent/.config/gh` | GitHub CLI config |
+| `agent-sandbox-vscode` | `/home/agent/.vscode-server` | VS Code Server data |
+| `agent-sandbox-nuget` | `/home/agent/.nuget` | NuGet package cache |
+| `agent-sandbox-gh` | `/home/agent/.config/gh` | GitHub CLI config |
 
-The `docker-claude-sandbox-data` volume must exist before starting (see Quick Start for options). This volume stores Claude credentials and should not be manually edited. Other volumes are created automatically by `csd`.
+The `docker-claude-sandbox-data` volume must exist before starting (see Quick Start for options). This volume stores Claude credentials and should not be manually edited. Other volumes are created automatically by `asb`.
 
 ## Port Forwarding
 
@@ -132,22 +132,22 @@ These scripts detect your OS and use the appropriate source paths.
 
 ## Sandbox Detection
 
-The `csd` wrapper detects Docker Sandbox availability before starting a container:
+The `asb` wrapper detects Docker Sandbox availability before starting a container:
 
 - **Blocks with actionable error** if sandbox is unavailable (command not found, feature disabled, daemon not running)
 - **Proceeds** if sandbox is available (even if no containers exist yet)
 - **Shows actual error** for unknown failures to help diagnose issues
 
-### ECI Detection
+### Isolation Detection
 
-ECI (Enhanced Container Isolation) detection is best-effort. The `csd` wrapper:
-- Checks `docker info` for ECI indicators (userns, rootless, eci options)
-- **Warns** if ECI is not detected or status is unknown
-- **Proceeds anyway** - ECI detection does not block container start
+Isolation detection is best-effort. The `asb` wrapper:
+- Checks `docker info` for isolation indicators (sysbox-runc, rootless mode)
+- **Warns** if isolation is not detected or status is unknown
+- **Proceeds anyway** - isolation detection does not block container start
 
-ECI warnings help you know if enhanced isolation is active. Sandbox works without ECI; ECI adds additional hardening when enabled.
+Isolation warnings help you know if enhanced isolation is active. Sandbox works without additional isolation; sysbox-runc or rootless mode adds additional hardening when enabled.
 
-To bypass preflight detection (not recommended), use `csd --force`. Note: this only skips the check; `docker sandbox run` must still be functional.
+To bypass preflight detection (not recommended), use `asb --force`. Note: this only skips the check; `docker sandbox run` must still be functional.
 
 ## Security
 
@@ -159,31 +159,40 @@ Docker sandbox provides security isolation through:
 
 **Note:** ECI is optional and depends on your Docker Desktop configuration. The sandbox provides isolation regardless, but ECI adds additional security boundaries. See [Docker ECI documentation](https://docs.docker.com/security/for-admins/enhanced-container-isolation/) for details.
 
-**No manual security configuration required.** The `csd` wrapper enforces sandbox usage: blocks when sandbox is definitely unavailable, and warns but attempts to proceed when status is unknown.
+**No manual security configuration required.** The `asb` wrapper enforces sandbox usage: blocks when sandbox is definitely unavailable, and warns but attempts to proceed when status is unknown.
 
 Plain `docker run` is allowed for CI/smoke tests (see Testing below).
+
+## Container Management
+
+The `asb` command labels containers it creates with `asb.sandbox=agent-sandbox`. This label identifies containers as "managed by asb" and enables:
+
+- **Ownership verification**: `asb` checks this label before attaching to or restarting containers to prevent accidentally affecting containers with the same name created by other tools
+- **Container discovery**: `asb-stop-all` uses this label to find asb-managed containers across all branches/directories
+
+If `docker sandbox run` does not support the `--label` flag, `asb` falls back to image-based detection with a warning. Use `asb --restart` to recreate the container with proper labeling when label support becomes available.
 
 ## Testing the Image
 
 ### Interactive (via sandbox)
 
 ```bash
-csd
+asb
 ```
 
 ### CI/Smoke Tests (plain docker run)
 
 ```bash
 # .NET SDK
-docker run --rm -u agent dotnet-sandbox:latest dotnet --list-sdks
-docker run --rm -u agent dotnet-sandbox:latest dotnet workload list
+docker run --rm -u agent agent-sandbox:latest dotnet --list-sdks
+docker run --rm -u agent agent-sandbox:latest dotnet workload list
 
 # PowerShell
-docker run --rm -u agent dotnet-sandbox:latest pwsh --version
+docker run --rm -u agent agent-sandbox:latest pwsh --version
 
 # Node.js (requires login shell for nvm)
-docker run --rm -u agent dotnet-sandbox:latest bash -lc "node --version"
-docker run --rm -u agent dotnet-sandbox:latest bash -lc "nvm --version"
+docker run --rm -u agent agent-sandbox:latest bash -lc "node --version"
+docker run --rm -u agent agent-sandbox:latest bash -lc "nvm --version"
 ```
 
 ## Known Limitations

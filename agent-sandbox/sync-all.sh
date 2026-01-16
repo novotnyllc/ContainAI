@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Constants
-readonly GH_VOLUME_NAME="dotnet-sandbox-gh"
+readonly GH_VOLUME_NAME="agent-sandbox-gh"
 
 # Color output helpers (consistent with sync-plugins.sh)
 info() { echo "INFO: $*"; }
@@ -263,11 +263,11 @@ show_summary() {
     local has_volumes=false
     echo "Volumes populated:"
     if $VSCODE_SYNCED || $VSCODE_INSIDERS_SYNCED; then
-        echo "  - dotnet-sandbox-vscode (VS Code settings)"
+        echo "  - agent-sandbox-vscode (VS Code settings)"
         has_volumes=true
     fi
     if $GH_SYNCED; then
-        echo "  - dotnet-sandbox-gh (GitHub CLI config)"
+        echo "  - agent-sandbox-gh (GitHub CLI config)"
         has_volumes=true
     fi
     if ! $has_volumes; then
@@ -276,7 +276,7 @@ show_summary() {
     echo ""
     echo "Start sandbox with:"
     echo "  source $SCRIPT_DIR/aliases.sh"
-    echo "  csd"
+    echo "  asb"
     echo ""
 }
 
