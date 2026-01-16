@@ -39,11 +39,11 @@ Note: With cache mounts, no need to delete lists - they're not baked into layer.
 
 **.NET SDK** (lines 80-83):
 ```dockerfile
-RUN --mount=type=cache,target=/home/agent/.dotnet/sdk-manifests \
-    --mount=type=cache,target=/tmp/dotnet-install,uid=1000,gid=1000 \
-    curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL}
+# NOTE: sdk-manifests must NOT be cache-mounted - it's needed at runtime for workloads
+RUN --mount=type=cache,target=/tmp/dotnet-install,uid=1000,gid=1000 \
+    curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install/dotnet-install.sh \
+    && chmod +x /tmp/dotnet-install/dotnet-install.sh \
+    && TMPDIR=/tmp/dotnet-install /tmp/dotnet-install/dotnet-install.sh --channel ${DOTNET_CHANNEL}
 ```
 
 **.NET workloads** (lines 96-99):
@@ -226,7 +226,7 @@ docker run --rm agent-sandbox:latest python3 --version
 - [ ] `ARG BASE_IMAGE` added before FROM
 - [ ] FROM uses `${BASE_IMAGE}`
 - [ ] BuildKit cache mount added for apt (`/var/cache/apt`, `/var/lib/apt`)
-- [ ] BuildKit cache mount added for .NET (`sdk-manifests`, `nuget/packages`, `toolResolverCache`)
+- [ ] BuildKit cache mount added for .NET (`/tmp/dotnet-install`, `nuget/packages`, `toolResolverCache`) - NOTE: sdk-manifests must NOT be cached (needed at runtime)
 - [ ] BuildKit cache mount added for npm (`/home/agent/.npm/_cacache`)
 - [ ] BuildKit cache mount added for pip/uv (`/home/agent/.cache/pip`, `/home/agent/.cache/uv`)
 - [ ] OCI labels added (title, description, source, licenses, created, revision)
@@ -242,9 +242,8 @@ docker run --rm agent-sandbox:latest python3 --version
 - [ ] `docker inspect` shows correct OCI labels
 
 ## Done summary
-TBD
-
+Added BuildKit cache mounts for apt, dotnet, npm, pip/uv to reduce image size and rebuild time. Implemented CLI options (--dotnet-channel, --base-image, --help) and OCI labels in build.sh. Note: sdk-manifests intentionally NOT cache-mounted as it's required at runtime for dotnet workloads.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 44d20b6bcf6055455c3b298700065239dcb52309
+- Tests: ./build.sh --help
 - PRs:
