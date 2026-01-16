@@ -169,6 +169,6 @@ ASB_REQUIRE_ISOLATION=1 _asb_check_isolation
 ## Done summary
 Cleaned up aliases.sh: renamed _CSD_* to _ASB_*, _csd_* to _asb_*, added --label flag with capability detection, rewrote isolation detection, added local variable hygiene.
 ## Evidence
-- Commits: dd5cff0193f2cf2bc0bd747a098d4f7022f16831, c0c59729751b63c6983c0d876a58d17d4a4ea7d5
-- Tests: bash -n agent-sandbox/aliases.sh, grep -E '_CSD_|_csd_' agent-sandbox/aliases.sh (returns nothing), source agent-sandbox/aliases.sh && asb --help
+- Commits:
+- Tests:
 - PRs:

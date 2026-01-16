@@ -1,26 +1,11 @@
 {
-  "assignee": "claire@novotny.org",
-  "claim_note": "",
-  "claimed_at": "2026-01-16T04:40:38.786520Z",
   "created_at": "2026-01-16T01:00:26.111910Z",
   "depends_on": [],
   "epic": "fn-2-kcs",
-  "evidence": {
-    "commits": [
-      "dd5cff0193f2cf2bc0bd747a098d4f7022f16831",
-      "c0c59729751b63c6983c0d876a58d17d4a4ea7d5"
-    ],
-    "prs": [],
-    "tests": [
-      "bash -n agent-sandbox/aliases.sh",
-      "grep -E '_CSD_|_csd_' agent-sandbox/aliases.sh (returns nothing)",
-      "source agent-sandbox/aliases.sh && asb --help"
-    ]
-  },
   "id": "fn-2-kcs.1",
   "priority": null,
   "spec_path": ".flow/tasks/fn-2-kcs.1.md",
-  "status": "done",
+  "status": "todo",
   "title": "PR1: Aliases.sh cleanup and label fix",
-  "updated_at": "2026-01-16T04:55:42.424258Z"
+  "updated_at": "2026-01-16T08:48:53.266965Z"
 }

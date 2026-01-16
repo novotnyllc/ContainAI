@@ -244,6 +244,6 @@ docker run --rm agent-sandbox:latest python3 --version
 ## Done summary
 Added BuildKit cache mounts for apt, dotnet, npm, pip/uv to reduce image size and rebuild time. Implemented CLI options (--dotnet-channel, --base-image, --help) and OCI labels in build.sh. Note: sdk-manifests intentionally NOT cache-mounted as it's required at runtime for dotnet workloads.
 ## Evidence
-- Commits: 44d20b6bcf6055455c3b298700065239dcb52309
-- Tests: ./build.sh --help
+- Commits:
+- Tests:
 - PRs:

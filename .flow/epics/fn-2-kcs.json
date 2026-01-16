@@ -3,7 +3,7 @@
   "created_at": "2026-01-16T00:59:27.882793Z",
   "depends_on_epics": [],
   "id": "fn-2-kcs",
-  "next_task": 4,
+  "next_task": 1,
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-16T02:24:22.236223Z",
   "spec_path": ".flow/specs/fn-2-kcs.md",

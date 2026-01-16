@@ -71,6 +71,6 @@ grep "dotnet-sandbox" agent-sandbox/README.md  # Should return nothing
 ## Done summary
 Updated README.md and sync-all.sh to replace all csd/dotnet-sandbox references with asb/agent-sandbox. Added Container Management section clarifying that _ASB_LABEL identifies containers as "managed by asb". Fixed grammar issues (a->an) and stale comments in aliases.sh and build.sh.
 ## Evidence
-- Commits: 0dd3c2b9c39735127ae6d92c6f54181b6b2da4a9, f39139a, a2de8a9
-- Tests: grep -i '\bcsd\b' agent-sandbox/README.md (no matches), grep 'dotnet-sandbox' agent-sandbox/README.md (no matches)
+- Commits:
+- Tests:
 - PRs:

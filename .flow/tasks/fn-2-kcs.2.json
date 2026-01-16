@@ -1,23 +1,11 @@
 {
-  "assignee": "claire@novotny.org",
-  "claim_note": "",
-  "claimed_at": "2026-01-16T04:50:36.167636Z",
   "created_at": "2026-01-16T01:00:27.323687Z",
   "depends_on": [],
   "epic": "fn-2-kcs",
-  "evidence": {
-    "commits": [
-      "44d20b6bcf6055455c3b298700065239dcb52309"
-    ],
-    "prs": [],
-    "tests": [
-      "./build.sh --help"
-    ]
-  },
   "id": "fn-2-kcs.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-2-kcs.2.md",
-  "status": "done",
+  "status": "todo",
   "title": "PR2: Dockerfile & build.sh (image size + CLI options + OCI labels)",
-  "updated_at": "2026-01-16T05:52:54.801763Z"
+  "updated_at": "2026-01-16T08:48:57.165594Z"
 }
