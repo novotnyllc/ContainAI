@@ -1,7 +1,17 @@
 # syntax=docker/dockerfile:1
 # Docker Sandbox for AI Agents
 
-FROM docker/sandbox-templates:claude-code
+ARG BASE_IMAGE=docker/sandbox-templates:claude-code
+FROM ${BASE_IMAGE}
+
+ARG BUILD_DATE=unknown
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="Agent Sandbox" \
+      org.opencontainers.image.description="Docker sandbox for AI coding agents" \
+      org.opencontainers.image.source="https://github.com/clairernovotny/agent-sandbox" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}"
 
 # Switch to root to perform installations
 USER root
@@ -13,7 +23,9 @@ ENV TZ=UTC
 
 # Install system dependencies and build tools in one layer
 # Build tools (build-essential, etc.) are REQUIRED - agents compile code!
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
     && apt-get update \
@@ -27,7 +39,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     ca-certificates \
     gnupg \
     lsb-release \
-    software-properties-common \    
+    software-properties-common \
     jq \
     unzip \
     openssh-client \
@@ -36,7 +48,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     tmux \
     shellcheck \
     locales-all \
-    # Build tools 
+    # Build tools
     build-essential \
     # Python with dev headers (for building native extensions)
     python3 \
@@ -54,15 +66,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     libssl3t64 \
     libstdc++6 \
     tzdata \
-    zlib1g \
-    && rm -rf /var/lib/apt/lists/*
+    zlib1g
 
 # Configure bash for color prompt for both root and agent users
 RUN sed -i 's/^#\s*force_color_prompt=yes/force_color_prompt=yes/' /root/.bashrc \
     && cp /root/.bashrc /home/agent/.bashrc \
     && cp /root/.profile /home/agent/.profile \
     && chown agent:agent /home/agent/.bashrc \
-    && chown agent:agent /home/agent/.profile 
+    && chown agent:agent /home/agent/.profile
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
@@ -77,10 +88,11 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG DOTNET_CHANNEL=10.0
 
 # See: https://dot.net/v1/dotnet-install.sh (official Microsoft script)
-RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} \
-    && rm /tmp/dotnet-install.sh 
+# NOTE: sdk-manifests must NOT be cache-mounted - it's needed at runtime for workloads
+RUN --mount=type=cache,target=/tmp/dotnet-install,uid=1000,gid=1000 \
+    curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install/dotnet-install.sh \
+    && chmod +x /tmp/dotnet-install/dotnet-install.sh \
+    && TMPDIR=/tmp/dotnet-install /tmp/dotnet-install/dotnet-install.sh --channel ${DOTNET_CHANNEL}
 
 # Set .NET environment variables
 ENV DOTNET_ROOT=/home/agent/.dotnet
@@ -93,10 +105,11 @@ ENV DOTNET_USE_POLLING_FILE_WATCHER=true
 ENV DOTNET_RUNNING_IN_CONTAINER=true
 ENV NUGET_XMLDOC_MODE=skip
 
-# Install .NET workloads 
-RUN dotnet workload install wasm-tools wasm-tools-net9 \
-    && dotnet tool install -g PowerShell \
-    && rm -rf /tmp/* 
+# Install .NET workloads
+RUN --mount=type=cache,target=/home/agent/.nuget/packages,uid=1000,gid=1000 \
+    --mount=type=cache,target=/home/agent/.dotnet/toolResolverCache,uid=1000,gid=1000 \
+    dotnet workload install wasm-tools wasm-tools-net9 \
+    && dotnet tool install -g PowerShell
 
 # clear out npm config prefix to use default
 ENV NPM_CONFIG_PREFIX=
@@ -110,30 +123,31 @@ RUN printf '%s\n' \
     && echo "alias codex='codex --dangerously-bypass-approvals-and-sandbox'" >> /home/agent/.bash_aliases \
     && echo "alias copilot='copilot --yolo'" >> /home/agent/.bash_aliases \
     && echo "alias gemini='gemini --yolo'" >> /home/agent/.bash_aliases \
-    && touch /home/agent/.docker/sandbox/locks/detached.lock 
+    && touch /home/agent/.docker/sandbox/locks/detached.lock
 ENV BASH_ENV=/home/agent/.bash_env
 
 # Download and install nvm
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
+RUN --mount=type=cache,target=/home/agent/.npm/_cacache,uid=1000,gid=1000 \
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
     && source /home/agent/.nvm/nvm.sh \
     && nvm install --lts \
     && nvm alias default 'lts/*' \
     && echo node > /home/agent/.nvmrc \
-    && npm install -g \
-      typescript \
-      eslint \
-      prettier 
+    && npm install -g typescript eslint prettier
 
-RUN curl -fsSL https://bun.com/install | bash \ 
+RUN --mount=type=cache,target=/home/agent/.cache/pip,uid=1000,gid=1000 \
+    --mount=type=cache,target=/home/agent/.cache/uv,uid=1000,gid=1000 \
+    curl -fsSL https://bun.com/install | bash \
     && curl -LsSf https://astral.sh/uv/install.sh | bash
 ENV PATH="/home/agent/.bun/bin:${PATH}"
 
 # Download and install the latest agents & related tools
 RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && bun install -g @openai/codex @google/gemini-cli \    
+    && bun install -g @openai/codex @google/gemini-cli \
     && curl -fsSL https://gh.io/copilot-install | bash \
     && curl -fsSL https://opencode.ai/install | bash \
-    && curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+    && curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash \
+    && rm -rf /tmp/* /home/agent/.bun/install-cache
 
 # Create mount point directories so we can symlink to them
 RUN  mkdir -p /home/agent/.vscode-server/data/Machine \
