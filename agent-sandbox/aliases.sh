@@ -120,7 +120,7 @@ _asb_check_isolation() {
 # Returns: 0=yes, 1=no (definite), 2=unknown (fail-open with warning)
 _asb_check_sandbox() {
     if ! command -v docker >/dev/null 2>&1; then
-        echo "ERROR: Docker is not installed or not in PATH" >&2
+        echo "[ERROR] Docker is not installed or not in PATH" >&2
         return 1
     fi
 
@@ -139,7 +139,7 @@ _asb_check_sandbox() {
     # Match broad patterns per spec, but exclude "no sandbox" empty list messages
     if printf '%s' "$ls_output" | grep -qiE "feature.*disabled|not enabled|requirements.*not met|sandbox.*unavailable" && \
        ! printf '%s' "$ls_output" | grep -qiE "no sandboxes"; then
-        echo "ERROR: Docker sandbox feature is not enabled" >&2
+        echo "[ERROR] Docker sandbox feature is not enabled" >&2
         echo "" >&2
         echo "  docker sandbox ls output:" >&2
         printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
@@ -156,7 +156,7 @@ _asb_check_sandbox() {
     # With non-zero exit, treat as unknown to be safe
     if printf '%s' "$ls_output" | grep -qiE "no sandboxes found|0 sandboxes|sandbox list is empty"; then
         # Non-zero exit with empty list message - treat as unknown, not success
-        echo "WARNING: docker sandbox ls returned empty list with error code" >&2
+        echo "[WARN] docker sandbox ls returned empty list with error code" >&2
         echo "  Attempting to proceed - sandbox may be functional." >&2
         echo "" >&2
         return 2
@@ -164,7 +164,7 @@ _asb_check_sandbox() {
 
     # Check for command not found / not available errors (definite "no")
     if printf '%s' "$ls_output" | grep -qiE "not recognized|unknown command|not a docker command|command not found"; then
-        echo "ERROR: Docker sandbox is not available" >&2
+        echo "[ERROR] Docker sandbox is not available" >&2
         echo "" >&2
         echo "  docker sandbox ls output:" >&2
         printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
@@ -180,7 +180,7 @@ _asb_check_sandbox() {
 
     # Check for permission denied (separate from daemon not running)
     if printf '%s' "$ls_output" | grep -qiE "permission denied"; then
-        echo "ERROR: Permission denied accessing Docker" >&2
+        echo "[ERROR] Permission denied accessing Docker" >&2
         echo "" >&2
         echo "  docker sandbox ls output:" >&2
         printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
@@ -195,7 +195,7 @@ _asb_check_sandbox() {
 
     # Check for daemon not running (tighter match, excludes permission denied)
     if printf '%s' "$ls_output" | grep -qiE "daemon.*not running|connection refused|Is the docker daemon running"; then
-        echo "ERROR: Docker daemon is not running" >&2
+        echo "[ERROR] Docker daemon is not running" >&2
         echo "" >&2
         echo "  docker sandbox ls output:" >&2
         printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
@@ -206,7 +206,7 @@ _asb_check_sandbox() {
     fi
 
     # Unknown error - fail OPEN with warning (per spec: don't block on unknown)
-    echo "WARNING: Could not verify Docker sandbox availability" >&2
+    echo "[WARN] Could not verify Docker sandbox availability" >&2
     echo "" >&2
     echo "  docker sandbox ls output:" >&2
     printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
@@ -225,7 +225,7 @@ _asb_preflight_checks() {
     local sandbox_rc isolation_rc
 
     if [[ "$force_flag" == "true" ]]; then
-        echo "WARNING: Skipping sandbox availability check (--force)" >&2
+        echo "[WARN] Skipping sandbox availability check (--force)" >&2
         # Handle ASB_REQUIRE_ISOLATION with --force bypass
         if [[ "${ASB_REQUIRE_ISOLATION:-0}" == "1" ]]; then
             echo "*** WARNING: Bypassing isolation requirement with --force" >&2
@@ -318,7 +318,7 @@ _asb_check_container_ownership() {
         return 0  # Confirmed ours
     elif [[ $ownership_rc -eq 2 ]]; then
         # Ambiguous - image matches but no label
-        echo "WARNING: Container '$container_name' uses our image but lacks asb label" >&2
+        echo "[WARN] Container '$container_name' uses our image but lacks asb label" >&2
         echo "  This may be a container created before label support or a manual container." >&2
         echo "  Proceeding, but use 'asb --restart' to take ownership if needed." >&2
         echo "" >&2
@@ -332,7 +332,7 @@ _asb_check_container_ownership() {
         if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
             actual_label="<not set>"
         fi
-        echo "ERROR: Container '$container_name' exists but was not created by asb" >&2
+        echo "[ERROR] Container '$container_name' exists but was not created by asb" >&2
         echo "" >&2
         echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
         echo "  Actual label 'asb.sandbox':   ${actual_label:-<not set>}" >&2
@@ -360,7 +360,7 @@ _asb_ensure_volumes() {
         if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
             echo "Creating volume: $volume_name"
             if ! docker volume create "$volume_name" >/dev/null; then
-                echo "ERROR: Failed to create volume $volume_name" >&2
+                echo "[ERROR] Failed to create volume $volume_name" >&2
                 return 1
             fi
         fi
@@ -417,7 +417,7 @@ asb() {
     # Early prereq check: is docker available?
     # This ensures docker errors get routed through our messaging
     if ! command -v docker >/dev/null 2>&1; then
-        echo "ERROR: Docker is not installed or not in PATH" >&2
+        echo "[ERROR] Docker is not installed or not in PATH" >&2
         return 1
     fi
 
@@ -460,7 +460,7 @@ asb() {
             if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
                 actual_label="<not set>"
             fi
-            echo "ERROR: Cannot restart - container '$container_name' was not created by asb" >&2
+            echo "[ERROR] Cannot restart - container '$container_name' was not created by asb" >&2
             echo "" >&2
             echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
             echo "  Actual label 'asb.sandbox':   $actual_label" >&2
@@ -474,7 +474,7 @@ asb() {
             return 1
         elif [[ $ownership_rc -eq 2 ]]; then
             # Ambiguous - warn but proceed since --restart is explicit
-            echo "WARNING: Container '$container_name' uses our image but lacks our label" >&2
+            echo "[WARN] Container '$container_name' uses our image but lacks our label" >&2
             echo "  Proceeding with --restart as requested." >&2
             echo "" >&2
         fi
@@ -506,7 +506,7 @@ asb() {
         if [[ $inspect_rc -ne 0 ]]; then
             # Check if it's "not found" vs other errors (daemon down, etc.)
             if printf '%s' "$inspect_output" | grep -qiE "no such image|not found"; then
-                echo "ERROR: Image '$_ASB_IMAGE' not found" >&2
+                echo "[ERROR] Image '$_ASB_IMAGE' not found" >&2
                 echo "Please build the image first: ${_ASB_SCRIPT_DIR}/build.sh" >&2
             else
                 # Let actual docker error surface
@@ -528,7 +528,7 @@ asb() {
             sandbox_rc=$?
             if [[ $sandbox_rc -eq 1 ]] && [[ "$force_flag" != "true" ]]; then
                 # Definite unavailability - warn but proceed since container exists
-                echo "WARNING: Sandbox unavailable but attaching to existing container" >&2
+                echo "[WARN] Sandbox unavailable but attaching to existing container" >&2
                 echo "  Use --force to suppress this warning, or --restart to recreate as sandbox" >&2
                 echo "" >&2
             fi
@@ -559,7 +559,7 @@ asb() {
 
             # Ensure volumes exist (asb-managed)
             if ! _asb_ensure_volumes; then
-                echo "ERROR: Volume setup failed. Cannot start container." >&2
+                echo "[ERROR] Volume setup failed. Cannot start container." >&2
                 return 1
             fi
 
@@ -576,7 +576,7 @@ asb() {
 
             # Check if sandbox run help failed (indicates sandbox unavailable)
             if [[ $sandbox_help_rc -ne 0 ]]; then
-                echo "ERROR: docker sandbox run is not available" >&2
+                echo "[ERROR] docker sandbox run is not available" >&2
                 echo "" >&2
                 echo "  docker sandbox run --help output:" >&2
                 printf '%s\n' "$sandbox_help" | sed 's/^/    /' >&2
