@@ -167,8 +167,22 @@ ASB_REQUIRE_ISOLATION=1 _asb_check_isolation
 - [ ] `source aliases.sh && asb --help` works correctly
 
 ## Done summary
+## Summary
+
 Cleaned up aliases.sh: renamed _CSD_* to _ASB_*, _csd_* to _asb_*, added --label flag with capability detection, rewrote isolation detection, added local variable hygiene.
+
+## Changes Made
+
+1. **Variable Renames**: _CSD_IMAGE → _ASB_IMAGE, _CSD_LABEL → _ASB_LABEL, _CSD_SCRIPT_DIR → _ASB_SCRIPT_DIR, _CSD_VOLUMES → _ASB_VOLUMES
+2. **Function Renames**: All 9 _csd_* functions renamed to _asb_* including _csd_check_eci → _asb_check_isolation
+3. **Dead Code Removed**: _CSD_MOUNT_ONLY_VOLUMES (unused empty array)
+4. **Comment Updates**: 4 "csd" references updated to "asb"
+5. **Branding Fix**: "Dotnet sandbox containers:" → "Agent Sandbox containers:"
+6. **--label Flag**: Added capability detection via help output with proper regex pattern
+7. **Isolation Detection**: Conservative detection with return codes 0/1/2, ASCII markers
+8. **ASB_REQUIRE_ISOLATION**: Environment variable support with --force bypass warning
+9. **Variable Hygiene**: All temporary variables declared with local keyword
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c0c5972
+- Tests: source agent-sandbox/aliases.sh && asb --help, grep -E '_CSD_|_csd_' agent-sandbox/aliases.sh # returns nothing
 - PRs:
