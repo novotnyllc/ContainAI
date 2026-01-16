@@ -407,7 +407,7 @@ asb() {
                 return 0
                 ;;
             *)
-                echo "Unknown option: $1" >&2
+                echo "[ERROR] Unknown option: $1" >&2
                 echo "Use 'asb --help' for usage" >&2
                 return 1
                 ;;
@@ -617,7 +617,7 @@ asb() {
 
             ;;
         *)
-            echo "Unexpected container state: $container_state" >&2
+            echo "[ERROR] Unexpected container state: $container_state" >&2
             return 1
             ;;
     esac
@@ -673,7 +673,7 @@ asb-stop-all() {
             if [[ "$num" =~ ^[0-9]+$ ]] && [[ "$num" -ge 1 ]] && [[ "$num" -le "${#names[@]}" ]]; then
                 to_stop+=("${names[$((num - 1))]}")
             else
-                echo "Invalid selection: $num" >&2
+                echo "[WARN] Invalid selection: $num" >&2
             fi
         done
     fi
