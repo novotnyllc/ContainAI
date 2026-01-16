@@ -1,8 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure that files are were they are expected to be and folders created.
+
+mkdir -p /mnt/agent-data/claude/plugins 
+mkdir -p /mnt/agent-data/vscode-server/extensions /mnt/agent-data/vscode-server/data/Machine /mnt/agent-data/vscode-server/data/User /mnt/agent-data/vscode-server/data/User/mcp /mnt/agent-data/vscode-server/data/User/prompts 
+mkdir -p /mnt/agent-data/vscode-server-insiders/extensions /mnt/agent-data/vscode-server-insiders/data/Machine /mnt/agent-data/vscode-server-insiders/data/User /mnt/agent-data/vscode-server-insiders/data/User/mcp /mnt/agent-data/vscode-server-insiders/data/User/prompts 
+mkdir -p /mnt/agent-data/copilot 
+mkdir -p /mnt/agent-data/codex/skills
+mkdir -p /mnt/agent-data/gemini
+mkdir -p /mnt/agent-data/opencode
+
+touch /mnt/agent-data/vscode-server/data/Machine/settings.json /mnt/agent-data/vscode-server/data/User/mcp.json
+touch /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /mnt/agent-data/vscode-server-insiders/data/User/mcp.json
+
+touch /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json /mnt/agent-data/gemini/settings.json
+
+touch /mnt/agent-data/codex/auth.json /mnt/agent-data/codex/config.toml
+
+
 # Canonical location your tooling expects
-TARGET_LINK="/home/agent/workspace"
+TARGET_LINK="${HOME}/workspace"
 
 log() { printf '%s\n' "$*" >&2; }
 

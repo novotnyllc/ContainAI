@@ -176,9 +176,14 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
               ${HOME}/.codex  \
     # Workaround for Claude credentials symlink
     && ln -s /mnt/claude-data/.credentials.json ${HOME}/.claude/.credentials.json \
-    # Claude
+    # folders that need to be removed before we can symlink to them
+    # Remove the plugins folder on create as we'll be symlinking it to the mount point
+    # We do this here instead of in the entryoint as this is part of our build
+    # The entrypoint will touch the files to ensure they exist at runtime on the volume
     && rm -rf ${HOME}/.claude/plugins \
     && ln -s /mnt/agent-data/claude/plugins ${HOME}/.claude/plugins \
+    && rm -rf ${HOME}/.codex/skills \
+    && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
     # VS Code Insiders
     && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json ${HOME}/.vscode-server-insiders/data/Machine/settings.json \
     && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json ${HOME}/.vscode-server-insiders/data/User/mcp.json \
@@ -193,21 +198,13 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && ln -s /mnt/agent-data/vscode-server/data/User/mcp ${HOME}/.vscode-server/data/User/mcp \
     # Copilot
     && ln -s /mnt/agent-data/copilot/config.json ${HOME}/.copilot/config.json \
-    # Gemini    
-    && touch /mnt/agent-data/gemini/google_accounts.json \
-    && ln -s /mnt/agent-data/gemini/google_accounts.json ${HOME}/.gemini/google_accounts.json \
-    && touch /mnt/agent-data/gemini/oauth_creds.json \
-    && ln -s /mnt/agent-data/gemini/oauth_creds.json ${HOME}/.gemini/oauth_creds.json \
-    && touch /mnt/agent-data/gemini/settings.json \
+    # Gemini        
+    && ln -s /mnt/agent-data/gemini/google_accounts.json ${HOME}/.gemini/google_accounts.json \    
+    && ln -s /mnt/agent-data/gemini/oauth_creds.json ${HOME}/.gemini/oauth_creds.json \    
     && ln -s /mnt/agent-data/gemini/settings.json ${HOME}/.gemini/settings.json \
-    # Codex
-    && touch /mnt/agent-data/codex/auth.json \
-    && ln -s /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \
-    && touch /mnt/agent-data/codex/config.toml \
-    && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
-    && rm -rf ${HOME}/.codex/skills \
-    && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills
-
+    # Codex    
+    && ln -s /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \    
+    && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml 
 
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
