@@ -113,6 +113,7 @@ copy_plugin_files() {
             mkdir -p /target/claude/plugins 
             mkdir -p /target/vscode-server/extensions /target/vscode-server/data/Machine /target/vscode-server/data/User /target/vscode-server/data/User/mcp /target/vscode-server/data/User/prompts || true
             mkdir -p /target/vscode-server-insiders/extensions /target/vscode-server-insiders/data/Machine /target/vscode-server-insiders/data/User /target/vscode-server-insiders/data/User/mcp /target/vscode-server-insiders/data/User/prompts || true
+            mkdir -p /target/copilot /target/gemini /target/opencode /target/codex/skills
             touch /target/vscode-server/data/Machine/settings.json /target/vscode-server/data/User/mcp.json
             touch /target/vscode-server-insiders/data/Machine/settings.json /target/vscode-server-insiders/data/User/mcp.json
             cp -a /source/cache /source/marketplaces /target/claude/plugins 

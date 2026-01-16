@@ -1,7 +1,51 @@
 # syntax=docker/dockerfile:1
 # Docker Sandbox for AI Agents
-
 ARG BASE_IMAGE=docker/sandbox-templates:claude-code
+FROM amd64/buildpack-deps:questing-curl AS installer
+# Use bash for the shell
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Build arguments for .NET channel selection
+# Default to 10.0 to ensure consistent builds regardless of LTS status
+# Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
+ARG DOTNET_CHANNEL=10.0
+
+ENV DOTNET_ROOT=/usr/share/dotnet 
+ENV PATH=${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \ 
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \        
+        libatomic1 \
+        libc6 \
+        libgcc-s1 \
+        libgssapi-krb5-2 \
+        libicu76 \
+        libssl3t64 \
+        libstdc++6 \
+        zlib1g \
+    && curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel ${DOTNET_CHANNEL} --install-dir ${DOTNET_ROOT} 
+    
+
+# Install PowerShell global tool
+RUN mkdir -p ${DOTNET_ROOT}/tools \
+    && dotnet tool install PowerShell --tool-path ${DOTNET_ROOT}/tools \
+    && dotnet nuget locals all --clear \
+    # To reduce image size, remove the copy nupkg that nuget keeps.
+    && find ${DOTNET_ROOT}/tools -print | grep -i '.*[.]nupkg$' | xargs rm    
+
+ARG INCLUDE_DOTNET_WASM=false
+
+RUN if [ "$INCLUDE_DOTNET_WASM" = "true" ]; then \
+      dotnet workload install wasm-tools wasm-tools-net9; \
+    fi \
+    && dotnet --info # just to make sure things are setup
+    # TODO: see if we can nuke the extras there  && find ${DOTNET_ROOT}/packs -print | grep -i '.*[.]nupkg$' | xargs rm    
+
+
 FROM ${BASE_IMAGE}
 
 ARG BUILD_DATE=unknown
@@ -13,6 +57,7 @@ LABEL org.opencontainers.image.title="Agent Sandbox" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}"
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]      
 # Switch to root to perform installations
 USER root
 
@@ -20,6 +65,16 @@ USER root
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
+# Remove ubuntu user from base image
+# Configure bash for color prompt for both root and agent users 
+RUN rm -rf /home/ubuntu \ 
+    && sed -i 's/^#\s*force_color_prompt=yes/force_color_prompt=yes/' /root/.bashrc \
+    && cp /root/.bashrc /home/agent/.bashrc \
+    && cp /root/.profile /home/agent/.profile \
+    && chown agent:agent /home/agent/.bashrc \
+    && chown agent:agent /home/agent/.profile \
+    \
+    && rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 
 # Install system dependencies and build tools in one layer
 # Build tools (build-essential, etc.) are REQUIRED - agents compile code!
@@ -30,7 +85,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
     && apt-get update \
     && apt-get upgrade -y \
-    && apt-get autoremove -y \
     && apt-get install -y --no-install-recommends \
     # Core utilities
     curl \
@@ -59,6 +113,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     pipx \
     gh \
     # .NET runtime dependencies
+    libatomic1 \    
     libc6 \
     libgcc-s1 \
     libgssapi-krb5-2 \
@@ -68,108 +123,109 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     tzdata \
     zlib1g
 
-# Configure bash for color prompt for both root and agent users
-RUN sed -i 's/^#\s*force_color_prompt=yes/force_color_prompt=yes/' /root/.bashrc \
-    && cp /root/.bashrc /home/agent/.bashrc \
-    && cp /root/.profile /home/agent/.profile \
-    && chown agent:agent /home/agent/.bashrc \
-    && chown agent:agent /home/agent/.profile
-
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 0755 /usr/local/bin/entrypoint.sh
 
 USER agent
-# Use bash for the shell
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Build arguments for .NET channel selection
-# Default to 10.0 to ensure consistent builds regardless of LTS status
-# Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
-ARG DOTNET_CHANNEL=10.0
-
-# See: https://dot.net/v1/dotnet-install.sh (official Microsoft script)
-# NOTE: sdk-manifests must NOT be cache-mounted - it's needed at runtime for workloads
-RUN --mount=type=cache,target=/tmp/dotnet-install,uid=1000,gid=1000 \
-    curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install/dotnet-install.sh \
-    && TMPDIR=/tmp/dotnet-install /tmp/dotnet-install/dotnet-install.sh --channel ${DOTNET_CHANNEL}
-
-# Set .NET environment variables
-ENV DOTNET_ROOT=/home/agent/.dotnet
-ENV PATH="${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}"
-ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
-ENV DOTNET_NOLOGO=1
-ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
-ENV DOTNET_ROLL_FORWARD=Major
-ENV DOTNET_USE_POLLING_FILE_WATCHER=true
-ENV DOTNET_RUNNING_IN_CONTAINER=true
-ENV NUGET_XMLDOC_MODE=skip
-
-# Install .NET workloads
-RUN --mount=type=cache,target=/home/agent/.nuget/packages,uid=1000,gid=1000 \
-    --mount=type=cache,target=/home/agent/.dotnet/toolResolverCache,uid=1000,gid=1000 \
-    dotnet workload install wasm-tools wasm-tools-net9 \
-    && dotnet tool install -g PowerShell
-
+CMD [ "/bin/bash" ]
+WORKDIR /home/agent
 # clear out npm config prefix to use default
 ENV NPM_CONFIG_PREFIX=
+ENV HOME=/home/agent
 # Create a script file sourced by both interactive and non-interactive bash shells
-ENV NVM_DIR=/home/agent/.nvm
+ENV NVM_DIR=${HOME}/.nvm
 # Create minimal bash_env: only source nvm (no PATH, no output)
 RUN printf '%s\n' \
   '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh"' \
-  > /home/agent/.bash_env \
-    && echo "alias claude='claude --dangerously-skip-permissions'" >> /home/agent/.bash_aliases \
-    && echo "alias codex='codex --dangerously-bypass-approvals-and-sandbox'" >> /home/agent/.bash_aliases \
-    && echo "alias copilot='copilot --yolo'" >> /home/agent/.bash_aliases \
-    && echo "alias gemini='gemini --yolo'" >> /home/agent/.bash_aliases \
-    && touch /home/agent/.docker/sandbox/locks/detached.lock
-ENV BASH_ENV=/home/agent/.bash_env
+  > ${HOME}/.bash_env \
+    && echo "alias claude='claude --dangerously-skip-permissions'" >> ${HOME}/.bash_aliases \
+    && echo "alias codex='codex --dangerously-bypass-approvals-and-sandbox'" >> ${HOME}/.bash_aliases \
+    && echo "alias copilot='copilot --yolo'" >> ${HOME}/.bash_aliases \
+    && echo "alias gemini='gemini --yolo'" >> ${HOME}/.bash_aliases \
+    && touch ${HOME}/.docker/sandbox/locks/detached.lock
+ENV BASH_ENV=${HOME}/.bash_env
+
+RUN curl -fsSL https://bun.com/install | bash \
+    && curl -LsSf https://astral.sh/uv/install.sh | bash
 
 # Download and install nvm
-RUN --mount=type=cache,target=/home/agent/.npm/_cacache,uid=1000,gid=1000 \
+RUN --mount=type=cache,target=${HOME}/.npm/_cacache,uid=1000,gid=1000 \
     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
-    && source /home/agent/.nvm/nvm.sh \
+    && source ${HOME}/.nvm/nvm.sh \
     && nvm install --lts \
     && nvm alias default 'lts/*' \
-    && echo node > /home/agent/.nvmrc \
+    && echo node > ${HOME}/.nvmrc \
     && npm install -g typescript eslint prettier
 
-RUN --mount=type=cache,target=/home/agent/.cache/pip,uid=1000,gid=1000 \
-    --mount=type=cache,target=/home/agent/.cache/uv,uid=1000,gid=1000 \
-    curl -fsSL https://bun.com/install | bash \
-    && curl -LsSf https://astral.sh/uv/install.sh | bash
-ENV PATH="/home/agent/.bun/bin:${PATH}"
 
-# Download and install the latest agents & related tools
+ENV PATH="${HOME}/.bun/bin:${PATH}"
+
+# Download and install the latest agents
 RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && bun install -g @openai/codex @google/gemini-cli \
+    && bun install -g --trust @openai/codex @google/gemini-cli agent-browser  \
     && curl -fsSL https://gh.io/copilot-install | bash \
     && curl -fsSL https://opencode.ai/install | bash \
-    && curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash \
-    && rm -rf /tmp/* /home/agent/.bun/install-cache
+    && rm -rf /tmp/*
 
 # Create mount point directories so we can symlink to them
-RUN  mkdir -p /home/agent/.vscode-server/data/Machine \
-              /home/agent/.vscode-server/data/User \
-              /home/agent/.vscode-server-insiders/data/Machine \
-              /home/agent/.vscode-server-insiders/data/User  \
+RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
+              ${HOME}/.vscode-server/data/User \
+              ${HOME}/.vscode-server-insiders/data/Machine \
+              ${HOME}/.vscode-server-insiders/data/User  \
+              ${HOME}/.copilot  \
+              ${HOME}/.gemini \
+              ${HOME}/.opencode  \
+              ${HOME}/.codex  \
     # Workaround for Claude credentials symlink
-    && ln -s /mnt/claude-data/.credentials.json /home/agent/.claude/.credentials.json \
+    && ln -s /mnt/claude-data/.credentials.json ${HOME}/.claude/.credentials.json \
     # Claude
-    && rm -rf /home/agent/.claude/plugins \
-    && ln -s /mnt/agent-data/claude/plugins /home/agent/.claude/plugins \
+    && rm -rf ${HOME}/.claude/plugins \
+    && ln -s /mnt/agent-data/claude/plugins ${HOME}/.claude/plugins \
     # VS Code Insiders
-    && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /home/agent/.vscode-server-insiders/data/Machine/settings.json \
-    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json /home/agent/.vscode-server-insiders/data/User/mcp.json \
-    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/prompts /home/agent/.vscode-server-insiders/data/User/prompts \
-    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp /home/agent/.vscode-server-insiders/data/User/mcp \
-    && ln -s /mnt/agent-data/vscode-server-insiders/extensions /home/agent/.vscode-server-insiders/extensions \
+    && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json ${HOME}/.vscode-server-insiders/data/Machine/settings.json \
+    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json ${HOME}/.vscode-server-insiders/data/User/mcp.json \
+    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/prompts ${HOME}/.vscode-server-insiders/data/User/prompts \
+    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp ${HOME}/.vscode-server-insiders/data/User/mcp \
+    && ln -s /mnt/agent-data/vscode-server-insiders/extensions ${HOME}/.vscode-server-insiders/extensions \
     # VS Code
-    && ln -s /mnt/agent-data/vscode-server/data/Machine/settings.json /home/agent/.vscode-server/data/Machine/settings.json \
-    && ln -s /mnt/agent-data/vscode-server/extensions /home/agent/.vscode-server/extensions \
-    && ln -s /mnt/agent-data/vscode-server/data/User/mcp.json /home/agent/.vscode-server/data/User/mcp.json \
-    && ln -s /mnt/agent-data/vscode-server/data/User/prompts /home/agent/.vscode-server/data/User/prompts \
-    && ln -s /mnt/agent-data/vscode-server/data/User/mcp /home/agent/.vscode-server/data/User/mcp
+    && ln -s /mnt/agent-data/vscode-server/data/Machine/settings.json ${HOME}/.vscode-server/data/Machine/settings.json \
+    && ln -s /mnt/agent-data/vscode-server/extensions ${HOME}/.vscode-server/extensions \
+    && ln -s /mnt/agent-data/vscode-server/data/User/mcp.json ${HOME}/.vscode-server/data/User/mcp.json \
+    && ln -s /mnt/agent-data/vscode-server/data/User/prompts ${HOME}/.vscode-server/data/User/prompts \
+    && ln -s /mnt/agent-data/vscode-server/data/User/mcp ${HOME}/.vscode-server/data/User/mcp \
+    # Copilot
+    && ln -s /mnt/agent-data/copilot/config.json ${HOME}/.copilot/config.json \
+    # Gemini    
+    && ln -s /mnt/agent-data/gemini/google_accounts.json ${HOME}/.gemini/google_accounts.json \
+    && ln -s /mnt/agent-data/gemini/oauth_creds.json ${HOME}/.gemini/oauth_creds.json \
+    && ln -s /mnt/agent-data/gemini/settings.json ${HOME}/.gemini/settings.json \
+    # Codex
+    && ln -s /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \
+    && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
+    && rm -rf ${HOME}/.codex/skills \
+    && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills
+
+
+
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
+
+WORKDIR /home/agent/workspace
+ENV \
+    # Do not generate certificate
+    DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
+    # Do not show first run text
+    DOTNET_NOLOGO=true \
+    # SDK version
+    DOTNET_SDK_VERSION=10.0.102 \
+    # Enable correct mode for dotnet watch (only mode supported in a container)
+    DOTNET_USE_POLLING_FILE_WATCHER=true \
+    # Skip extraction of XML docs - generally not useful within an image/container - helps performance
+    NUGET_XMLDOC_MODE=skip \
+    # Workaround for https://github.com/PowerShell/PowerShell/issues/20685
+    DOTNET_ROLL_FORWARD=Major \
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_ROOT=${HOME}/.dotnet 
+ENV PATH=${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}
+COPY --from=installer --chown=agent /usr/share/dotnet ${HOME}/.dotnet
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
