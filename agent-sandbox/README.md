@@ -84,15 +84,21 @@ asb-stop-all     # Interactive selection to stop sandbox containers
 
 ## Volumes
 
+### Mounted by `asb`
+
 | Volume Name | Mount Point | Purpose |
 |-------------|-------------|---------|
-| `docker-claude-sandbox-data` | `/mnt/claude-data` | Claude credentials (required - create empty or use sync-plugins.sh, do not manually edit contents) |
-| `docker-claude-plugins` | `/home/agent/.claude/plugins` | Claude Code plugins |
-| `agent-sandbox-vscode` | `/home/agent/.vscode-server` | VS Code Server data |
-| `agent-sandbox-nuget` | `/home/agent/.nuget` | NuGet package cache |
-| `agent-sandbox-gh` | `/home/agent/.config/gh` | GitHub CLI config |
+| `sandbox-agent-data` | `/mnt/agent-data` | Plugins and agent data (created automatically by `asb`) |
 
-The `docker-claude-sandbox-data` volume must exist before starting (see Quick Start for options). This volume stores Claude credentials and should not be manually edited. Other volumes are created automatically by `asb`.
+### Used by sync scripts (not mounted by `asb`)
+
+| Volume Name | Used By | Purpose |
+|-------------|---------|---------|
+| `docker-claude-sandbox-data` | `sync-agent-plugins.sh` | Claude credentials (required - see Quick Start) |
+| `agent-sandbox-vscode` | `sync-all.sh` | VS Code Server settings |
+| `agent-sandbox-gh` | `sync-all.sh` | GitHub CLI config |
+
+Note: The sync script volumes are populated by the sync scripts but are not currently mounted by `asb`. To use synced VS Code or gh settings inside the container, you would need to manually mount these volumes or modify the container setup.
 
 ## Port Forwarding
 
