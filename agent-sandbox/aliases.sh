@@ -252,11 +252,11 @@ _asb_preflight_checks() {
                 # Isolated - proceed normally
                 ;;
             1)
-                echo "[ERROR] Container isolation required but not detected. Use --force to bypass." >&2
+                echo "ERROR: Container isolation required but not detected. Use --force to bypass." >&2
                 return 1
                 ;;
             2)
-                echo "[ERROR] Cannot verify isolation status. Use --force to bypass." >&2
+                echo "ERROR: Cannot verify isolation status. Use --force to bypass." >&2
                 return 1
                 ;;
         esac
@@ -556,7 +556,7 @@ asb() {
             fi
 
             # Build volume arguments (asb-managed volumes)
-            local vol_args=()
+            local vol_args=() vol_spec
             for vol_spec in "${_ASB_VOLUMES[@]}"; do
                 vol_args+=("-v" "$vol_spec")
             done
@@ -584,9 +584,9 @@ asb() {
 
             echo "Starting new sandbox container..."
 
-            # Check if docker sandbox supports --label
+            # Check if docker sandbox supports --label (reuse captured help output)
             local args=()
-            if docker sandbox run --help 2>&1 | grep -q '\-\-label'; then
+            if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--label([[:space:]=]|$)'; then
                 args=(
                     --name "$container_name"
                     --label "$_ASB_LABEL"
@@ -642,6 +642,7 @@ asb-stop-all() {
 
     local i=0
     local names=()
+    local name status
     while IFS=$'\t' read -r name status; do
         i=$((i + 1))
         names+=("$name")
@@ -650,6 +651,7 @@ asb-stop-all() {
 
     echo ""
     echo "Enter numbers to stop (space-separated), 'all', or 'q' to quit:"
+    local selection
     read -r selection
 
     if [[ "$selection" == "q" || "$selection" == "Q" ]]; then
@@ -662,6 +664,7 @@ asb-stop-all() {
     if [[ "$selection" == "all" || "$selection" == "ALL" ]]; then
         to_stop=("${names[@]}")
     else
+        local num
         for num in $selection; do
             if [[ "$num" =~ ^[0-9]+$ ]] && [[ "$num" -ge 1 ]] && [[ "$num" -le "${#names[@]}" ]]; then
                 to_stop+=("${names[$((num - 1))]}")
@@ -677,9 +680,10 @@ asb-stop-all() {
     fi
 
     echo ""
-    for name in "${to_stop[@]}"; do
-        echo "Stopping: $name"
-        docker stop "$name" >/dev/null 2>&1 || true
+    local container_to_stop
+    for container_to_stop in "${to_stop[@]}"; do
+        echo "Stopping: $container_to_stop"
+        docker stop "$container_to_stop" >/dev/null 2>&1 || true
     done
 
     echo "Done."
