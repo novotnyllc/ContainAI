@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Docker Sandbox for AI Agents
 ARG BASE_IMAGE=docker/sandbox-templates:claude-code
-FROM amd64/buildpack-deps:questing-curl AS installer
+FROM buildpack-deps:questing-curl AS installer
 # Use bash for the shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

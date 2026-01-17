@@ -86,7 +86,6 @@ docker build \
     --build-arg BASE_IMAGE="$BASE_IMAGE" \
     --build-arg BUILD_DATE="$BUILD_DATE" \
     --build-arg VCS_REF="$VCS_REF" \
-    "${DOCKER_ARGS[@]}" \
     "$SCRIPT_DIR"
 
 # Capture result
@@ -101,7 +100,3 @@ echo "Build complete!"
 echo "=== Result: $RESULT_SIZE ==="
 docker images "${IMAGE_NAME}" --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}"
 
-if [[ "$HAVE_BASELINE" == "1" ]]; then
-    echo ""
-    echo "=== Compare baseline ($BASELINE_SIZE) vs result ($RESULT_SIZE) for >=10% reduction ==="
-fi
