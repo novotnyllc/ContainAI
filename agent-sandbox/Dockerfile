@@ -184,7 +184,7 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     # Claude
     && mkdir -p /mnt/agent-data/claude/skills \
     && mkdir -p /mnt/agent-data/claude/plugins \
-    && rm ${HOME}/.claude.json \
+    && mv ${HOME}/.claude.json /mnt/agent-data/claude/claude.json \
     && ln -s /mnt/agent-data/claude/credentials.json ${HOME}/.claude/.credentials.json \
     && ln -s /mnt/agent-data/claude/claude.json ${HOME}/.claude.json \
     && ln -s /mnt/agent-data/claude/settings.json ${HOME}/.claude/settings.json \

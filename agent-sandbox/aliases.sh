@@ -287,7 +287,7 @@ _asb_get_container_image() {
 }
 
 # Verify container was created by asb (has our label or uses our image)
-# Returns: 0=confirmed (label matches), 1=foreign (no match), 2=ambiguous (image matches but no label)
+# Returns: 0=ours (label or image matches), 1=foreign (no match)
 # Falls back to image name verification if labels not supported
 _asb_is_our_container() {
     local container_name="$1"
@@ -301,13 +301,13 @@ _asb_is_our_container() {
 
     # Fallback: if no label, check if container uses our image
     # This handles cases where docker sandbox run doesn't support --label
-    # Returns 2 to indicate "probable match" requiring user confirmation via --restart
+    # or containers created before label support was added
     if [[ -z "$label_value" || "$label_value" == "<no value>" ]]; then
         local image_name
         image_name="$(_asb_get_container_image "$container_name")"
         if [[ "$image_name" == "$_ASB_IMAGE" ]]; then
-            # Image matches but no label - could be ours (pre-label) or foreign
-            return 2  # Ambiguous - caller should warn
+            # Image matches - trust it as ours
+            return 0
         fi
     fi
 
@@ -315,44 +315,33 @@ _asb_is_our_container() {
 }
 
 # Check container ownership with appropriate messaging
-# Returns: 0=owned, 1=foreign (with error), 2=ambiguous (with warning)
+# Returns: 0=owned, 1=foreign (with error)
 _asb_check_container_ownership() {
     local container_name="$1"
-    local ownership_rc
 
-    _asb_is_our_container "$container_name"
-    ownership_rc=$?
-
-    if [[ $ownership_rc -eq 0 ]]; then
-        return 0  # Confirmed ours
-    elif [[ $ownership_rc -eq 2 ]]; then
-        # Ambiguous - image matches but no label
-        echo "[WARN] Container '$container_name' uses our image but lacks asb label" >&2
-        echo "  This may be a container created before label support or a manual container." >&2
-        echo "  Proceeding, but use 'asb --restart' to take ownership if needed." >&2
-        echo "" >&2
-        return 0  # Proceed with warning
-    else
-        # Foreign container
-        local actual_label actual_image
-        actual_label="$(_asb_get_container_label "$container_name")"
-        actual_image="$(_asb_get_container_image "$container_name")"
-        # Normalize empty or "<no value>" to "<not set>"
-        if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
-            actual_label="<not set>"
-        fi
-        echo "[ERROR] Container '$container_name' exists but was not created by asb" >&2
-        echo "" >&2
-        echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
-        echo "  Actual label 'asb.sandbox':   ${actual_label:-<not set>}" >&2
-        echo "  Expected image:               $_ASB_IMAGE" >&2
-        echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
-        echo "" >&2
-        echo "This is a name collision with a container not managed by asb." >&2
-        echo "To recreate as an asb-managed sandbox container, run: asb --restart" >&2
-        echo "" >&2
-        return 1
+    if _asb_is_our_container "$container_name"; then
+        return 0
     fi
+
+    # Foreign container
+    local actual_label actual_image
+    actual_label="$(_asb_get_container_label "$container_name")"
+    actual_image="$(_asb_get_container_image "$container_name")"
+    # Normalize empty or "<no value>" to "<not set>"
+    if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
+        actual_label="<not set>"
+    fi
+    echo "[ERROR] Container '$container_name' exists but was not created by asb" >&2
+    echo "" >&2
+    echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
+    echo "  Actual label 'asb.sandbox':   ${actual_label:-<not set>}" >&2
+    echo "  Expected image:               $_ASB_IMAGE" >&2
+    echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
+    echo "" >&2
+    echo "This is a name collision with a container not managed by asb." >&2
+    echo "To recreate as an asb-managed sandbox container, run: asb --restart" >&2
+    echo "" >&2
+    return 1
 }
 
 # Ensure required volumes exist with correct permissions
@@ -606,10 +595,8 @@ asb() {
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
         # Check ownership before removing - prevent accidentally deleting foreign containers
-        _asb_is_our_container "$container_name"
-        local ownership_rc=$?
-        if [[ $ownership_rc -eq 1 ]]; then
-            # Definitely foreign - block unless user explicitly confirms
+        if ! _asb_is_our_container "$container_name"; then
+            # Foreign container - block
             local actual_label actual_image
             actual_label="$(_asb_get_container_label "$container_name")"
             actual_image="$(_asb_get_container_image "$container_name")"
@@ -628,11 +615,6 @@ asb() {
             echo "  docker rm -f '$container_name'" >&2
             echo "" >&2
             return 1
-        elif [[ $ownership_rc -eq 2 ]]; then
-            # Ambiguous - warn but proceed since --restart is explicit
-            echo "[WARN] Container '$container_name' uses our image but lacks our label" >&2
-            echo "  Proceeding with --restart as requested." >&2
-            echo "" >&2
         fi
 
         if [[ "$quiet_flag" != "true" ]]; then
@@ -773,7 +755,7 @@ asb() {
             args+=(--name "$container_name")
 
             # Add label if supported
-            if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--label([[:space:]=]|$)'; then
+            if printf '%s' "$sandbox_help" | grep -q -- '--label'; then
                 args+=(--label "$_ASB_LABEL")
             fi
 
