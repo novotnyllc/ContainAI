@@ -816,7 +816,7 @@ asb() {
             fi
 
             args+=(--template "$_ASB_IMAGE")
-            args+=(--credential none)
+            args+=(--credentials none)
             args+=(claude)
 
             # Add agent arguments if any

@@ -183,9 +183,10 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     \
     # Claude
     && mkdir -p /mnt/agent-data/claude/skills \
-    && mv ${HOME}/.claude/plugins /mnt/agent-data/claude/ \
+    && mkdir -p /mnt/agent-data/claude/plugins \
+    && rm ${HOME}/.claude.json \
     && ln -s /mnt/agent-data/claude/credentials.json ${HOME}/.claude/.credentials.json \
-    && ln -s /mnt/agent-data/claude/claude.json {HOME}/.claude.json \
+    && ln -s /mnt/agent-data/claude/claude.json ${HOME}/.claude.json \
     && ln -s /mnt/agent-data/claude/settings.json ${HOME}/.claude/settings.json \
     && ln -s /mnt/agent-data/claude/plugins ${HOME}/.claude/plugins \
     && ln -s /mnt/agent-data/claude/skills ${HOME}/.claude/skills \
@@ -216,7 +217,6 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && ln -s /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \    
     && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
     && mkdir -p /mnt/agent-data/codex \
-    && mv ${HOME}/.codex/skills /mnt/agent-data/codex/ \
     && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
     \
     # Config
