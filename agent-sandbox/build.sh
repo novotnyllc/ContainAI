@@ -73,7 +73,7 @@ docker build \
     --build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL" \
     --build-arg BUILD_DATE="$BUILD_DATE" \
     --build-arg VCS_REF="$VCS_REF" \
-    "${DOCKER_ARGS[@]}" \
+    ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
     "$SCRIPT_DIR"
 
 # Capture result
