@@ -100,11 +100,12 @@ main() {
   esac
 
   # Replace /home/agent/workspace with a symlink to the mirrored workspace.
+  # First cd away from the directory we're about to delete (WORKDIR sets cwd to workspace)
+  cd /tmp
   rm -d "$AGENT_WORKSPACE"
   ln -s "$MIRRORED" "$AGENT_WORKSPACE"
-
+  cd "$AGENT_WORKSPACE"
   
-
   # Continue with the container's original command
   exec "$@"
 }

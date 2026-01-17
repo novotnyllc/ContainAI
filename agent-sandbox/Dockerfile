@@ -178,6 +178,9 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     # We do this here instead of in the entryoint as this is part of our build
     # The entrypoint will touch the files to ensure they exist at runtime on the volume
     \
+    && sudo mkdir -p /mnt/agent-data \
+    && sudo chown -R agent:agent /mnt/agent-data \
+    \
     # Claude
     && mkdir -p /mnt/agent-data/claude/skills \
     && mv ${HOME}/.claude/plugins /mnt/agent-data/claude/ \
@@ -214,12 +217,16 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
     && mkdir -p /mnt/agent-data/codex \
     && mv ${HOME}/.codex/skills /mnt/agent-data/codex/ \
-    && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills 
+    && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
+    \
+    # Config
+    && mv ${HOME}/.config /mnt/agent-data/ \
+    && ln -s /mnt/agent-data/config ${HOME}/.config
 
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
-WORKDIR /home/agent/workspace
+WORKDIR /home/agent
 ENV \
     # Do not generate certificate
     DOTNET_GENERATE_ASPNET_CERTIFICATE=false \

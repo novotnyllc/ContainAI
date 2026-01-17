@@ -395,7 +395,7 @@ _asb_print_help() {
         echo "  -d, --detached              Create sandbox without running agent interactively"
     fi
     echo "  -e, --env strings           Set environment variables (format: KEY=VALUE)"
-    echo "      --mount-docker-socket   Mount the host's Docker socket into the sandbox"
+    echo "      --mount-docker-socket   Mount the host's Docker socket into the sandbox (DANGEROUS)"
     echo "      --name string           Name for the sandbox (default: <repo>-<branch>)"
     echo "  -q, --quiet                 Suppress verbose output"
     echo "      --restart               Force recreate container even if running"
@@ -415,6 +415,7 @@ asb() {
     local debug_flag=false
     local quiet_flag=false
     local mount_docker_socket=false
+    local please_root_my_host=false
     local workspace=""
     local -a env_vars=()
     local -a extra_volumes=()
@@ -450,6 +451,10 @@ asb() {
                 ;;
             --mount-docker-socket)
                 mount_docker_socket=true
+                shift
+                ;;
+            --please-root-my-host)
+                please_root_my_host=true
                 shift
                 ;;
             --name)
@@ -523,6 +528,33 @@ asb() {
                 ;;
         esac
     done
+
+    # Safety check for --mount-docker-socket
+    if [[ "$mount_docker_socket" == "true" && "$please_root_my_host" != "true" ]]; then
+        echo "" >&2
+        echo "╔══════════════════════════════════════════════════════════════════════════════╗" >&2
+        echo "║                      🚨 ⚠️  DANGER: HOST ROOT ACCESS  ⚠️ 🚨                   ║" >&2
+        echo "╠══════════════════════════════════════════════════════════════════════════════╣" >&2
+        echo "║                                                                              ║" >&2
+        echo "║  Mounting the Docker socket grants FULL ROOT ACCESS to your host system.     ║" >&2
+        echo "║                                                                              ║" >&2
+        echo "║  Any process in the container can:                                           ║" >&2
+        echo "║    • Create privileged containers that escape all isolation                  ║" >&2
+        echo "║    • Mount and modify ANY file on the host (including /etc/shadow)           ║" >&2
+        echo "║    • Access all other containers, images, volumes, and networks              ║" >&2
+        echo "║    • Install rootkits or persistent backdoors on the host                    ║" >&2
+        echo "║    • Exfiltrate sensitive data from the host filesystem                      ║" >&2
+        echo "║                                                                              ║" >&2
+        echo "║  This COMPLETELY DEFEATS the purpose of running in a sandbox.                ║" >&2
+        echo "║                                                                              ║" >&2
+        echo "║  If you understand and accept these risks, add:                              ║" >&2
+        echo "║                                                                              ║" >&2
+        echo "║      --please-root-my-host                                                   ║" >&2
+        echo "║                                                                              ║" >&2
+        echo "╚══════════════════════════════════════════════════════════════════════════════╝" >&2
+        echo "" >&2
+        return 1
+    fi
 
     # Early prereq check: is docker available?
     # This ensures docker errors get routed through our messaging
