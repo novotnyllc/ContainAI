@@ -5,6 +5,7 @@
 # Provides:
 #   asb           - Agent Sandbox: start/attach to sandbox container
 #   asbd          - Agent Sandbox: start detached sandbox container
+#   asbs          - Agent Sandbox: start sandbox with shell (alias: asb-shell)
 #   asb-stop-all  - Interactive selection to stop sandbox containers
 #
 # Usage: source aliases.sh
@@ -380,6 +381,7 @@ _asb_ensure_volumes() {
 # Print help for asb/asbd
 _asb_print_help() {
     local show_detached="$1"
+    local show_shell="$2"
     echo "Usage: asb [options] -- [agent-options]"
     echo ""
     echo "Run an AI agent inside a sandbox with access to a host workspace."
@@ -399,6 +401,9 @@ _asb_print_help() {
     echo "      --name string           Name for the sandbox (default: <repo>-<branch>)"
     echo "  -q, --quiet                 Suppress verbose output"
     echo "      --restart               Force recreate container even if running"
+    if [[ "$show_shell" == "true" ]]; then
+        echo "      --shell                 Start with interactive shell instead of agent"
+    fi
     echo "      --force                 Skip sandbox availability check (not recommended)"
     echo "  -v, --volume strings        Bind mount a volume or host file or directory into the sandbox"
     echo "                              (format: hostpath:sandboxpath[:readonly|:ro])"
@@ -412,6 +417,7 @@ asb() {
     local force_flag=false
     local container_name=""
     local detached_flag=false
+    local shell_flag=false
     local debug_flag=false
     local quiet_flag=false
     local mount_docker_socket=false
@@ -439,6 +445,10 @@ asb() {
                 ;;
             --detached|-d)
                 detached_flag=true
+                shift
+                ;;
+            --shell)
+                shell_flag=true
                 shift
                 ;;
             --debug|-D)
@@ -518,7 +528,7 @@ asb() {
                 shift
                 ;;
             --help|-h)
-                _asb_print_help true
+                _asb_print_help true true
                 return 0
                 ;;
             *)
@@ -646,6 +656,22 @@ asb() {
         container_state="none"
     fi
 
+    # Handle stopped container + shell mode: must recreate to use sandbox run
+    # (docker start doesn't provide sandbox isolation)
+    if [[ "$shell_flag" == "true" ]] && [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
+        if ! _asb_check_container_ownership "$container_name"; then
+            return 1
+        fi
+        if ! _asb_preflight_checks "$force_flag"; then
+            return 1
+        fi
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "Recreating container for shell access..."
+        fi
+        docker rm "$container_name" >/dev/null 2>&1
+        container_state="none"
+    fi
+
     # Check if image exists only when we need to create a new container
     if [[ "$container_state" == "none" ]]; then
         local inspect_output inspect_rc
@@ -690,6 +716,7 @@ asb() {
             docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             ;;
         exited|created)
+            # Note: shell mode with stopped containers is handled before this case statement
             # Verify this container was created by asb (has our label or image)
             if ! _asb_check_container_ownership "$container_name"; then
                 return 1
@@ -766,14 +793,20 @@ asb() {
             done
 
             # Add optional flags
-            if [[ "$detached_flag" == "true" ]]; then
+            if [[ "$shell_flag" == "true" ]]; then
+                # Shell mode: always run detached and quiet
                 args+=(--detached)
+                args+=(--quiet)
+            else
+                if [[ "$detached_flag" == "true" ]]; then
+                    args+=(--detached)
+                fi
+                if [[ "$quiet_flag" == "true" ]]; then
+                    args+=(--quiet)
+                fi
             fi
             if [[ "$debug_flag" == "true" ]]; then
                 args+=(--debug)
-            fi
-            if [[ "$quiet_flag" == "true" ]]; then
-                args+=(--quiet)
             fi
             if [[ "$mount_docker_socket" == "true" ]]; then
                 args+=(--mount-docker-socket)
@@ -791,7 +824,14 @@ asb() {
                 args+=("${agent_args[@]}")
             fi
 
-            docker sandbox run "${args[@]}"
+            if [[ "$shell_flag" == "true" ]]; then
+                # Shell mode: run detached, capture container ID, then exec bash
+                local container_id
+                container_id=$(docker sandbox run "${args[@]}")
+                docker exec -it --user agent -w /home/agent/workspace "$container_id" bash
+            else
+                docker sandbox run "${args[@]}"
+            fi
 
             ;;
         *)
@@ -877,12 +917,55 @@ asbd() {
     local arg
     for arg in "$@"; do
         if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
-            _asb_print_help false
+            _asb_print_help false true
             return 0
         fi
     done
     # Pass all args to asb with --detached
     asb --detached "$@"
+}
+
+# Print help for asb-shell/asbs
+_asb_shell_print_help() {
+    echo "Usage: asb-shell [options]"
+    echo ""
+    echo "Start a sandbox container and open an interactive shell."
+    echo ""
+    echo "This starts the agent in the background and provides a bash shell."
+    echo "If no workspace is specified via the \"--workspace\" option, the current working directory is used."
+    echo "The workspace is exposed inside the sandbox at the same path as on the host."
+    echo ""
+    echo "Options:"
+    echo "  -D, --debug                 Enable debug logging"
+    echo "  -e, --env strings           Set environment variables (format: KEY=VALUE)"
+    echo "      --mount-docker-socket   Mount the host's Docker socket into the sandbox (DANGEROUS)"
+    echo "      --name string           Name for the sandbox (default: <repo>-<branch>)"
+    echo "  -q, --quiet                 Suppress verbose output"
+    echo "      --restart               Force recreate container even if running"
+    echo "      --force                 Skip sandbox availability check (not recommended)"
+    echo "  -v, --volume strings        Bind mount a volume or host file or directory into the sandbox"
+    echo "                              (format: hostpath:sandboxpath[:readonly|:ro])"
+    echo "  -w, --workspace string      Workspace path (default \".\")"
+    echo "  -h, --help                  Show this help"
+}
+
+# Agent Sandbox Shell - start sandbox with interactive shell
+asb-shell() {
+    # Check for help flag first
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+            _asb_shell_print_help
+            return 0
+        fi
+    done
+    # Pass all args to asb with --shell
+    asb --shell "$@"
+}
+
+# Alias: asbs = asb-shell
+asbs() {
+    asb-shell "$@"
 }
 
 # Return 0 when sourced, exit 1 when executed directly
