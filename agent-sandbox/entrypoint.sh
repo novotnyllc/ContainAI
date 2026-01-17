@@ -1,26 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure that files are were they are expected to be and folders created.
 
+# Canonical location
+AGENT_WORKSPACE="${HOME}/workspace"
+
+# Ensure that files are were they are expected to be and folders created.
+sudo chown -R agent:agent /mnt/agent-data
 mkdir -p /mnt/agent-data/claude/plugins 
 mkdir -p /mnt/agent-data/vscode-server/extensions /mnt/agent-data/vscode-server/data/Machine /mnt/agent-data/vscode-server/data/User /mnt/agent-data/vscode-server/data/User/mcp /mnt/agent-data/vscode-server/data/User/prompts 
 mkdir -p /mnt/agent-data/vscode-server-insiders/extensions /mnt/agent-data/vscode-server-insiders/data/Machine /mnt/agent-data/vscode-server-insiders/data/User /mnt/agent-data/vscode-server-insiders/data/User/mcp /mnt/agent-data/vscode-server-insiders/data/User/prompts 
-mkdir -p /mnt/agent-data/copilot 
+mkdir -p /mnt/agent-data/copilot
 mkdir -p /mnt/agent-data/codex/skills
 mkdir -p /mnt/agent-data/gemini
 mkdir -p /mnt/agent-data/opencode
 
 touch /mnt/agent-data/vscode-server/data/Machine/settings.json /mnt/agent-data/vscode-server/data/User/mcp.json
 touch /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /mnt/agent-data/vscode-server-insiders/data/User/mcp.json
-
+touch /mnt/agent-data/claude/claude.json /mnt/agent-data/claude/.credentials.json /mnt/agent-data/claude/settings.json
 touch /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json /mnt/agent-data/gemini/settings.json
-
 touch /mnt/agent-data/codex/auth.json /mnt/agent-data/codex/config.toml
 
+# Check if .claude.json exists, is 0 bytes, and is not a symlink
+# Docker Sandbox creates the file when creating the container replacing a link
+  CLAUDE_JSON="${AGENT_WORKSPACE}/.claude.json"
+  if [[ -f "$CLAUDE_JSON" && ! -L "$CLAUDE_JSON" && ! -s "$CLAUDE_JSON" ]]; then
+    log "WARNING: ${CLAUDE_JSON} exists but is empty (0 bytes)"
+  fi
 
-# Canonical location your tooling expects
-TARGET_LINK="${HOME}/workspace"
+
 
 log() { printf '%s\n' "$*" >&2; }
 
@@ -29,15 +37,33 @@ log() { printf '%s\n' "$*" >&2; }
 #   TARGET=/some/abs/path
 #   SOURCE=/dev/sdX[/some/abs/path]
 discover_mirrored_workspace() {
-  findmnt --real -n -o TARGET,SOURCE \
-  | awk '
-      {
-        tgt=$1; src=$2
-        # Match SOURCE ending with "[<TARGET>]"
-        if (src ~ "\\[" tgt "\\]$") print tgt
-      }
-    ' \
-  | head -n 1
+  findmnt --real --json \
+  | jq -r '
+      # Flatten the tree: any object with target+source is a mount entry.
+      def mounts:
+        .. | objects | select(has("target") and has("source"))
+        | {target: .target, source: .source};
+
+      # Matching rule:
+      # 1) source ends with [target]
+      # 2) macOS Docker Desktop: source ends with [target without leading /Volumes]
+      def is_match($t; $s):
+        ($s | endswith("[" + $t + "]"))
+        or (
+          ($t | startswith("/Volumes"))
+          and ($s | endswith("[" + ($t | sub("^/Volumes"; "")) + "]"))
+        );
+
+      # Choose the deepest target (longest string) among matches, skip "/".
+      [ mounts
+        | select(.target != "/")
+        | select(is_match(.target; .source))
+      ]
+      | sort_by(.target | length)
+      | last
+      | .target
+      // empty
+    '
 }
 
 # Conservative safety check: refuse to replace if TARGET_LINK is a mountpoint.
@@ -57,28 +83,27 @@ is_mountpoint() {
 main() {
   MIRRORED="$(discover_mirrored_workspace || true)"
 
-  if [[ -z "${MIRRORED:-}" ]]; then
+  diag="$(findmnt --real --json 2>&1)" 
+
+  if [[ -z "${MIRRORED:-}" || ! -d "$MIRRORED" ]]; then
     log "ERROR: Could not discover mirrored workspace mount via findmnt."
     log "Diagnostics:"
-    (findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS || true) >&2
+    log "$diag"
     exit 1
   fi
 
-  if [[ ! -d "$MIRRORED" ]]; then
-    log "ERROR: Discovered mirrored workspace is not a directory: $MIRRORED"
-    exit 1
-  fi
-
-  # If /home/agent/workspace is itself a mountpoint, do not rm -rf it.
-  if is_mountpoint "$TARGET_LINK"; then
-    log "ERROR: $TARGET_LINK is a mountpoint; refusing to replace it with a symlink."
-    log "       Use the mirrored workspace directly: $MIRRORED"
-    exit 1
-  fi
+  case "$MIRRORED" in
+    /|/etc/*|/proc/*|/sys/*|/run/*|/dev/*)
+      log "ERROR: Refusing suspicious workspace candidate: $MIRRORED"
+      exit 1
+      ;;
+  esac
 
   # Replace /home/agent/workspace with a symlink to the mirrored workspace.
-  rm -d "$TARGET_LINK"
-  ln -s "$MIRRORED" "$TARGET_LINK"
+  rm -d "$AGENT_WORKSPACE"
+  ln -s "$MIRRORED" "$AGENT_WORKSPACE"
+
+  
 
   # Continue with the container's original command
   exec "$@"

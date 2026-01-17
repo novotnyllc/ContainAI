@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Docker Sandbox for AI Agents
-ARG BASE_IMAGE=docker/sandbox-templates:claude-code
+
 FROM buildpack-deps:questing-curl AS installer
 # Use bash for the shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -45,8 +45,7 @@ RUN if [ "$INCLUDE_DOTNET_WASM" = "true" ]; then \
     && dotnet --info # just to make sure things are setup
     # TODO: see if we can nuke the extras there  && find ${DOTNET_ROOT}/packs -print | grep -i '.*[.]nupkg$' | xargs rm    
 
-
-FROM ${BASE_IMAGE}
+FROM docker/sandbox-templates:claude-code
 
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
@@ -122,7 +121,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     tzdata \
     zlib1g
 
-
 USER agent
 
 CMD [ "/bin/bash" ]
@@ -174,37 +172,49 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
               ${HOME}/.gemini \
               ${HOME}/.opencode  \
               ${HOME}/.codex  \
-    # Workaround for Claude credentials symlink
-    && ln -s /mnt/claude-data/.credentials.json ${HOME}/.claude/.credentials.json \
+    \
     # folders that need to be removed before we can symlink to them
     # Remove the plugins folder on create as we'll be symlinking it to the mount point
     # We do this here instead of in the entryoint as this is part of our build
     # The entrypoint will touch the files to ensure they exist at runtime on the volume
-    && rm -rf ${HOME}/.claude/plugins \
+    \
+    # Claude
+    && mkdir -p /mnt/agent-data/claude/skills \
+    && mv ${HOME}/.claude/plugins /mnt/agent-data/claude/ \
+    && ln -s /mnt/agent-data/claude/credentials.json ${HOME}/.claude/.credentials.json \
+    && ln -s /mnt/agent-data/claude/claude.json {HOME}/.claude.json \
+    && ln -s /mnt/agent-data/claude/settings.json ${HOME}/.claude/settings.json \
     && ln -s /mnt/agent-data/claude/plugins ${HOME}/.claude/plugins \
-    && rm -rf ${HOME}/.codex/skills \
-    && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
+    && ln -s /mnt/agent-data/claude/skills ${HOME}/.claude/skills \
+    \
     # VS Code Insiders
     && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json ${HOME}/.vscode-server-insiders/data/Machine/settings.json \
     && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json ${HOME}/.vscode-server-insiders/data/User/mcp.json \
     && ln -s /mnt/agent-data/vscode-server-insiders/data/User/prompts ${HOME}/.vscode-server-insiders/data/User/prompts \
     && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp ${HOME}/.vscode-server-insiders/data/User/mcp \
     && ln -s /mnt/agent-data/vscode-server-insiders/extensions ${HOME}/.vscode-server-insiders/extensions \
+    \
     # VS Code
     && ln -s /mnt/agent-data/vscode-server/data/Machine/settings.json ${HOME}/.vscode-server/data/Machine/settings.json \
     && ln -s /mnt/agent-data/vscode-server/extensions ${HOME}/.vscode-server/extensions \
     && ln -s /mnt/agent-data/vscode-server/data/User/mcp.json ${HOME}/.vscode-server/data/User/mcp.json \
     && ln -s /mnt/agent-data/vscode-server/data/User/prompts ${HOME}/.vscode-server/data/User/prompts \
     && ln -s /mnt/agent-data/vscode-server/data/User/mcp ${HOME}/.vscode-server/data/User/mcp \
+    \
     # Copilot
     && ln -s /mnt/agent-data/copilot/config.json ${HOME}/.copilot/config.json \
+    \
     # Gemini        
     && ln -s /mnt/agent-data/gemini/google_accounts.json ${HOME}/.gemini/google_accounts.json \    
     && ln -s /mnt/agent-data/gemini/oauth_creds.json ${HOME}/.gemini/oauth_creds.json \    
     && ln -s /mnt/agent-data/gemini/settings.json ${HOME}/.gemini/settings.json \
+    \
     # Codex    
     && ln -s /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \    
-    && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml 
+    && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
+    && mkdir -p /mnt/agent-data/codex \
+    && mv ${HOME}/.codex/skills /mnt/agent-data/codex/ \
+    && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills 
 
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh

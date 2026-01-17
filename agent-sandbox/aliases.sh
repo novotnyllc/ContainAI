@@ -88,27 +88,35 @@ _asb_container_name() {
 # Container isolation detection (conservative - prefer return 2 over false positive/negative)
 # Returns: 0=isolated (detected), 1=not isolated (definite), 2=unknown (ambiguous)
 _asb_check_isolation() {
-    local runtime rootless info_output
+    local runtime rootless userns
 
-    info_output=$(docker info --format '{{.DefaultRuntime}}\t{{.Rootless}}' 2>/dev/null)
-    if [[ $? -ne 0 ]] || [[ -z "$info_output" ]]; then
+    runtime=$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null)
+    if [[ $? -ne 0 ]] || [[ -z "$runtime" ]]; then
         echo "[WARN] Unable to determine isolation status" >&2
         return 2
     fi
 
-    IFS=$'\t' read -r runtime rootless <<< "$info_output"
+    rootless=$(docker info --format '{{.Rootless}}' 2>/dev/null)
+    userns=$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)
 
+    # ECI enabled - sysbox-runc runtime
     if [[ "$runtime" == "sysbox-runc" ]]; then
-        echo "[OK] Isolation: sysbox-runc" >&2
-        return 0
-    fi
-    if [[ "$rootless" == "true" ]]; then
-        echo "[OK] Isolation: rootless mode" >&2
         return 0
     fi
 
-    if [[ "$runtime" == "runc" ]] && [[ "$rootless" == "false" ]]; then
-        echo "[WARN] No isolation detected (default runtime)" >&2
+    # Rootless mode
+    if [[ "$rootless" == "true" ]]; then
+        return 0
+    fi
+
+    # User namespace remapping enabled
+    if echo "$userns" | grep -q "userns"; then
+        return 0
+    fi
+
+    # Standard runc without isolation features
+    if [[ "$runtime" == "runc" ]]; then
+        echo "[WARN] No additional isolation detected (standard runtime)" >&2
         return 1
     fi
 
@@ -369,16 +377,57 @@ _asb_ensure_volumes() {
 
 }
 
+# Print help for asb/asbd
+_asb_print_help() {
+    local show_detached="$1"
+    echo "Usage: asb [options] -- [agent-options]"
+    echo ""
+    echo "Run an AI agent inside a sandbox with access to a host workspace."
+    echo ""
+    echo "The agent argument must be one of: claude, gemini."
+    echo "Agent-specific options can be passed after the agent name."
+    echo "If no workspace is specified via the \"--workspace\" option, the current working directory is used."
+    echo "The workspace is exposed inside the sandbox at the same path as on the host."
+    echo ""
+    echo "Options:"
+    echo "  -D, --debug                 Enable debug logging"
+    if [[ "$show_detached" == "true" ]]; then
+        echo "  -d, --detached              Create sandbox without running agent interactively"
+    fi
+    echo "  -e, --env strings           Set environment variables (format: KEY=VALUE)"
+    echo "      --mount-docker-socket   Mount the host's Docker socket into the sandbox"
+    echo "      --name string           Name for the sandbox (default: <repo>-<branch>)"
+    echo "  -q, --quiet                 Suppress verbose output"
+    echo "      --restart               Force recreate container even if running"
+    echo "      --force                 Skip sandbox availability check (not recommended)"
+    echo "  -v, --volume strings        Bind mount a volume or host file or directory into the sandbox"
+    echo "                              (format: hostpath:sandboxpath[:readonly|:ro])"
+    echo "  -w, --workspace string      Workspace path (default \".\")"
+    echo "  -h, --help                  Show this help"
+}
+
 # Agent Sandbox - main function
 asb() {
     local restart_flag=false
     local force_flag=false
-    local container_name
+    local container_name=""
     local detached_flag=false
+    local debug_flag=false
+    local quiet_flag=false
+    local mount_docker_socket=false
+    local workspace=""
+    local -a env_vars=()
+    local -a extra_volumes=()
+    local -a agent_args=()
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --)
+                shift
+                agent_args=("$@")
+                break
+                ;;
             --restart)
                 restart_flag=true
                 shift
@@ -391,19 +440,80 @@ asb() {
                 detached_flag=true
                 shift
                 ;;
+            --debug|-D)
+                debug_flag=true
+                shift
+                ;;
+            --quiet|-q)
+                quiet_flag=true
+                shift
+                ;;
+            --mount-docker-socket)
+                mount_docker_socket=true
+                shift
+                ;;
+            --name)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --name requires a value" >&2
+                    return 1
+                fi
+                container_name="$2"
+                shift 2
+                ;;
+            --name=*)
+                container_name="${1#--name=}"
+                shift
+                ;;
+            --workspace|-w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="$2"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                shift
+                ;;
+            -w*)
+                workspace="${1#-w}"
+                shift
+                ;;
+            --env|-e)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --env requires a value" >&2
+                    return 1
+                fi
+                env_vars+=("$2")
+                shift 2
+                ;;
+            --env=*)
+                env_vars+=("${1#--env=}")
+                shift
+                ;;
+            -e*)
+                env_vars+=("${1#-e}")
+                shift
+                ;;
+            --volume|-v)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --volume requires a value" >&2
+                    return 1
+                fi
+                extra_volumes+=("$2")
+                shift 2
+                ;;
+            --volume=*)
+                extra_volumes+=("${1#--volume=}")
+                shift
+                ;;
+            -v*)
+                extra_volumes+=("${1#-v}")
+                shift
+                ;;
             --help|-h)
-                echo "Usage: asb [--restart] [--force] [--detached|-d]"
-                echo ""
-                echo "Start or attach to an agent-sandbox container."
-                echo ""
-                echo "Options:"
-                echo "  -d, --detached  Start as detached container"
-                echo "  --restart  Force recreate container even if running"
-                echo "  --force    Skip sandbox availability check (not recommended)"
-                echo "  --help     Show this help"
-                echo ""
-                echo "Container naming: <repo>-<branch> (sanitized, max 63 chars)"
-                echo "Falls back to directory name if not in a git repo."
+                _asb_print_help true
                 return 0
                 ;;
             *)
@@ -421,9 +531,13 @@ asb() {
         return 1
     fi
 
-    # Get container name first (we need it to check container state)
-    container_name="$(_asb_container_name)"
-    echo "Container: $container_name"
+    # Get container name (use provided or generate default)
+    if [[ -z "$container_name" ]]; then
+        container_name="$(_asb_container_name)"
+    fi
+    if [[ "$quiet_flag" != "true" ]]; then
+        echo "Container: $container_name"
+    fi
 
     # Check container state (distinguish not-found from actual errors)
     local container_state container_inspect_output container_inspect_rc
@@ -479,7 +593,9 @@ asb() {
             echo "" >&2
         fi
 
-        echo "Stopping existing container..."
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "Stopping existing container..."
+        fi
         # Let errors surface for stop (only ignore "not running")
         local stop_output
         stop_output="$(docker stop "$container_name" 2>&1)" || {
@@ -533,7 +649,9 @@ asb() {
                 echo "" >&2
             fi
             # rc=0 or rc=2: no warning needed (sandbox available or status unknown)
-            echo "Attaching to running container..."
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "Attaching to running container..."
+            fi
             # NOTE: Using docker exec (not docker sandbox exec) is intentional.
             # Docker Desktop sandboxes are regular containers accessible via standard docker commands.
             # The sandbox provides isolation at creation time; exec/start work normally.
@@ -548,7 +666,9 @@ asb() {
             if ! _asb_preflight_checks "$force_flag"; then
                 return 1
             fi
-            echo "Starting stopped container..."
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "Starting stopped container..."
+            fi
             docker start -ai "$container_name"
             ;;
         none)
@@ -585,32 +705,58 @@ asb() {
                 return 1
             fi
 
-            local detached_args=()
-            if [[ "$detached_flag" == "true" ]]; then
-                detached_args=(--detached)
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "Starting new sandbox container..."
             fi
 
-            echo "Starting new sandbox container..."
-
-            # Check if docker sandbox supports --label (reuse captured help output)
+            # Build docker sandbox run arguments
             local args=()
+            args+=(--name "$container_name")
+
+            # Add label if supported
             if printf '%s' "$sandbox_help" | grep -qE '(^|[[:space:]])--label([[:space:]=]|$)'; then
-                args=(
-                    --name "$container_name"
-                    --label "$_ASB_LABEL"
-                    "${vol_args[@]}"
-                    "${detached_args[@]}"
-                    --template "$_ASB_IMAGE"
-                    claude
-                )
-            else
-                args=(
-                    --name "$container_name"
-                    "${vol_args[@]}"
-                    "${detached_args[@]}"
-                    --template "$_ASB_IMAGE"
-                    claude
-                )
+                args+=(--label "$_ASB_LABEL")
+            fi
+
+            # Add volumes
+            args+=("${vol_args[@]}")
+
+            # Add extra user volumes
+            local vol
+            for vol in "${extra_volumes[@]}"; do
+                args+=(-v "$vol")
+            done
+
+            # Add environment variables
+            local env_var
+            for env_var in "${env_vars[@]}"; do
+                args+=(-e "$env_var")
+            done
+
+            # Add optional flags
+            if [[ "$detached_flag" == "true" ]]; then
+                args+=(--detached)
+            fi
+            if [[ "$debug_flag" == "true" ]]; then
+                args+=(--debug)
+            fi
+            if [[ "$quiet_flag" == "true" ]]; then
+                args+=(--quiet)
+            fi
+            if [[ "$mount_docker_socket" == "true" ]]; then
+                args+=(--mount-docker-socket)
+            fi
+            if [[ -n "$workspace" ]]; then
+                args+=(--workspace "$workspace")
+            fi
+
+            args+=(--template "$_ASB_IMAGE")
+            args+=(--credential none)
+            args+=(claude)
+
+            # Add agent arguments if any
+            if [[ ${#agent_args[@]} -gt 0 ]]; then
+                args+=("${agent_args[@]}")
             fi
 
             docker sandbox run "${args[@]}"
@@ -693,7 +839,19 @@ asb-stop-all() {
     echo "Done."
 }
 
-alias asbd='asb --detached'
+# Agent Sandbox Detached - wrapper that always runs detached
+asbd() {
+    # Check for help flag first
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+            _asb_print_help false
+            return 0
+        fi
+    done
+    # Pass all args to asb with --detached
+    asb --detached "$@"
+}
 
 # Return 0 when sourced, exit 1 when executed directly
 return 0 2>/dev/null || { echo "This script should be sourced, not executed: source aliases.sh" >&2; exit 1; }
