@@ -9,10 +9,20 @@
     "fn-3-8m1.5"
   ],
   "epic": "fn-3-8m1",
+  "evidence": {
+    "commits": [
+      "6c1e5048e83685e64d8c9d04f2f217f96ce8e3dc",
+      "b263b0d55e852b45995a3534b647769040db5d34"
+    ],
+    "prs": [],
+    "tests": [
+      "bash agent-sandbox/test-sync-integration.sh"
+    ]
+  },
   "id": "fn-3-8m1.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-3-8m1.6.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Integration test and verify sync workflow",
-  "updated_at": "2026-01-18T11:28:09.394343Z"
+  "updated_at": "2026-01-18T12:02:46.238064Z"
 }
