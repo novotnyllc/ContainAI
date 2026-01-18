@@ -30,26 +30,12 @@ verify_path_under_data_dir() {
   local path="$1"
   local resolved
 
-  # If path doesn't exist yet, check parent
-  if [[ -e "$path" ]]; then
-    resolved="$(realpath "$path" 2>/dev/null)" || {
-      log "ERROR: Cannot resolve path: $path"
-      return 1
-    }
-  else
-    # For non-existent paths, check that parent resolves correctly
-    local parent
-    parent="$(dirname "$path")"
-    if [[ -e "$parent" ]]; then
-      resolved="$(realpath "$parent" 2>/dev/null)/$(basename "$path")" || {
-        log "ERROR: Cannot resolve parent path: $parent"
-        return 1
-      }
-    else
-      # Parent doesn't exist either - will be created, assume safe if not symlink
-      return 0
-    fi
-  fi
+  # Use realpath -m to resolve the path even if it doesn't exist yet
+  # This handles symlinks in any path component, not just the final one
+  resolved="$(realpath -m "$path" 2>/dev/null)" || {
+    log "ERROR: Cannot resolve path: $path"
+    return 1
+  }
 
   # Verify resolved path is exactly DATA_DIR or starts with DATA_DIR/
   # This prevents /mnt/agent-datax from passing the check
@@ -140,9 +126,11 @@ ensure_volume_structure() {
   run_as_root chown -R --no-dereference 1000:1000 "${DATA_DIR}"
 
   # Claude Code (SYNC_MAP flags: fjs for claude.json, fs for credentials, fj for settings)
+  # Note: credentials.json gets JSON init even though SYNC_MAP has 'fs' not 'fjs'
+  # because Claude CLI requires valid JSON (empty file causes parse errors)
   ensure_dir "${DATA_DIR}/claude"
   ensure_file "${DATA_DIR}/claude/claude.json" true
-  ensure_file "${DATA_DIR}/claude/credentials.json"
+  ensure_file "${DATA_DIR}/claude/credentials.json" true
   ensure_file "${DATA_DIR}/claude/settings.json" true
   ensure_file "${DATA_DIR}/claude/settings.local.json"
   ensure_dir "${DATA_DIR}/claude/plugins"
