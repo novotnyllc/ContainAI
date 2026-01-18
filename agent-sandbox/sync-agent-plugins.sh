@@ -213,9 +213,9 @@ sync_configs() {
 # Functions for rsync-based sync (runs inside eeacms/rsync container)
 # ==============================================================================
 
-# ensure_path: Create target path with correct ownership
-# Only called after source type is verified
-ensure_path() {
+# ensure: Create target path and optionally init JSON if flagged
+# Named to match spec; handles both path creation and JSON init
+ensure() {
     local path="$1" flags="$2"
 
     # In dry-run mode, only print what would happen
@@ -223,6 +223,9 @@ ensure_path() {
         case "$flags" in
             *d*) echo "[DRY-RUN] Would create directory: $path" ;;
             *f*) echo "[DRY-RUN] Would create parent dir and touch: $path" ;;
+        esac
+        case "$flags" in
+            *j*) echo "[DRY-RUN] Would initialize JSON if empty: $path" ;;
         esac
         return 0
     fi
@@ -241,24 +244,23 @@ ensure_path() {
             chown 1000:1000 "$path"
             ;;
     esac
-}
 
-# init_json: Initialize JSON file with {} if empty (called AFTER rsync)
-init_json() {
-    local path="$1"
-    if [ "${DRY_RUN:-}" = "1" ]; then
-        echo "[DRY-RUN] Would initialize JSON if empty: $path"
-        return 0
-    fi
-    if [ ! -s "$path" ]; then
-        echo "{}" > "$path"
-        chown 1000:1000 "$path"
-    fi
+    # Initialize JSON with {} if empty and flagged
+    case "$flags" in
+        *j*)
+            if [ ! -s "$path" ]; then
+                echo "{}" > "$path"
+                chown 1000:1000 "$path"
+            fi
+            ;;
+    esac
 }
 
 # copy: Rsync source to target with appropriate flags
 copy() {
     local src="$1" dst="$2" flags="$3"
+
+    # Build rsync options as space-separated string (safe for current literals)
     local opts="-a --chown=1000:1000"
 
     # Add mirror flag if specified (removes files not in source)
@@ -282,7 +284,7 @@ copy() {
             *d*)
                 # Directory: verify source is actually a directory
                 if [ -d "$src" ]; then
-                    ensure_path "$dst" "$flags"
+                    ensure "$dst" "$flags"
                     rsync $opts "$src/" "$dst/"
                     # Enforce restrictive permissions recursively for secret dirs
                     if [ "${DRY_RUN:-}" != "1" ]; then
@@ -293,16 +295,23 @@ copy() {
                                 ;;
                         esac
                     fi
+                else
+                    echo "[WARN] Expected directory but found file: $src" >&2
                 fi
                 ;;
             *f*)
                 # File: verify source is actually a file
                 if [ -f "$src" ]; then
-                    ensure_path "$dst" "$flags"
+                    ensure "$dst" "$flags"
                     rsync $opts "$src" "$dst"
-                    # Initialize JSON AFTER rsync (so empty source doesnt overwrite {})
+                    # Re-apply JSON init AFTER rsync (in case source was empty)
                     case "$flags" in
-                        *j*) init_json "$dst" ;;
+                        *j*)
+                            if [ ! -s "$dst" ]; then
+                                echo "{}" > "$dst"
+                                chown 1000:1000 "$dst"
+                            fi
+                            ;;
                     esac
                     # Enforce restrictive permissions for secret files
                     if [ "${DRY_RUN:-}" != "1" ]; then
@@ -316,12 +325,22 @@ copy() {
                                 ;;
                         esac
                     fi
+                else
+                    echo "[WARN] Expected file but found directory: $src" >&2
                 fi
                 ;;
         esac
     else
-        # Warn about missing sources (especially important for secrets/auth files)
-        echo "[WARN] Source not found, skipping: $src" >&2
+        # Source missing: still ensure target exists if j flag (init empty JSON)
+        case "$flags" in
+            *j*)
+                echo "[INFO] Source missing, initializing target JSON: $dst"
+                ensure "$dst" "$flags"
+                ;;
+            *)
+                echo "[WARN] Source not found, skipping: $src" >&2
+                ;;
+        esac
     fi
 }
 
@@ -337,10 +356,12 @@ done <<'"'"'MAP_DATA'"'"'
     for entry in "${SYNC_MAP[@]}"; do
         script_with_data+="$entry"$'\n'
     done
-    script_with_data+='MAP_DATA'
+    # Add trailing newline after MAP_DATA terminator for proper heredoc
+    script_with_data+=$'MAP_DATA\n'
 
     # Run container with map data embedded in script via heredoc
-    docker run --rm \
+    # Note: --network=none for security (rsync doesn't need network)
+    docker run --rm --network=none \
         --mount type=bind,src="$HOME",dst=/source,readonly \
         --mount type=volume,src="$DATA_VOLUME",dst=/target \
         "${env_args[@]}" \
