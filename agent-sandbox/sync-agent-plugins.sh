@@ -2,17 +2,17 @@
 set -euo pipefail
 
 # ==============================================================================
-# Sync Claude Code plugins from host to Docker sandbox
+# Sync agent configs from host to Docker sandbox using rsync
 # ==============================================================================
-# From: https://github.com/kaldown/dotfiles/blob/macos/.claude/scripts/sandbox/sync-plugins.sh
+# Syncs plugins, settings, credentials, and other agent configs via eeacms/rsync
+# container. Uses declarative SYNC_MAP to define sources, targets, and flags.
 #
-# Syncs plugins, settings, and removes orphan markers so plugins work correctly
-# in the Docker sandbox environment.
-#
-# Usage: sync-plugins.sh [options]
-#   --dry-run    Show what would be done without making changes
+# Usage: sync-agent-plugins.sh [options]
+#   --dry-run    Show what would be done without making changes (uses rsync --dry-run)
 #   --force      Skip confirmation prompts
 #   --help       Show this help message
+#
+# Platform: Linux only (blocks on macOS with error)
 # ==============================================================================
 
 # Constants
@@ -186,40 +186,133 @@ check_prerequisites() {
     success "Prerequisites OK"
 }
 
-# Copy plugin cache and marketplaces
-copy_plugin_files() {
-    step "Copying plugin cache and marketplaces..."
+# ==============================================================================
+# sync_configs: Rsync-based config sync using eeacms/rsync container
+# ==============================================================================
+# Processes SYNC_MAP entries via docker container with rsync.
+# Pass map data via environment variable to avoid shell quoting issues.
+# ==============================================================================
+sync_configs() {
+    step "Syncing configs via rsync..."
 
+    # Build map data as newline-separated entries
+    local map_data=""
+    local entry
+    for entry in "${SYNC_MAP[@]}"; do
+        map_data+="$entry"$'\n'
+    done
+
+    # Build environment args
+    local -a env_args=()
+    env_args+=(--env "SYNC_MAP_DATA=$map_data")
     if $DRY_RUN; then
-        echo "  [dry-run] "
-        return
+        env_args+=(--env "DRY_RUN=1")
     fi
 
+    # Run container with map data passed via environment
     docker run --rm \
-        -v "$DATA_VOLUME":/target \
-        -v "$HOME":/source:ro \
-        alpine sh -c "
-            rm -rf /target/*
-            mkdir -p /mnt/agent-data/claude/plugins /mnt/agent-data/claude/skills
-            mkdir -p /mnt/agent-data/vscode-server/extensions /mnt/agent-data/vscode-server/data/Machine /mnt/agent-data/vscode-server/data/User /mnt/agent-data/vscode-server/data/User/mcp /mnt/agent-data/vscode-server/data/User/prompts 
-            mkdir -p /mnt/agent-data/vscode-server-insiders/extensions /mnt/agent-data/vscode-server-insiders/data/Machine /mnt/agent-data/vscode-server-insiders/data/User /mnt/agent-data/vscode-server-insiders/data/User/mcp /mnt/agent-data/vscode-server-insiders/data/User/prompts 
-            mkdir -p /mnt/agent-data/copilot
-            mkdir -p /mnt/agent-data/codex/skills
-            mkdir -p /mnt/agent-data/gemini
-            mkdir -p /mnt/agent-data/opencode
+        --mount type=bind,src="$HOME",dst=/source,readonly \
+        --mount type=volume,src="$DATA_VOLUME",dst=/target \
+        "${env_args[@]}" \
+        eeacms/rsync sh -e <<'SYNC_SCRIPT'
+# ==============================================================================
+# Functions for rsync-based sync (runs inside eeacms/rsync container)
+# ==============================================================================
 
-            touch /mnt/agent-data/vscode-server/data/Machine/settings.json /mnt/agent-data/vscode-server/data/User/mcp.json
-            touch /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /mnt/agent-data/vscode-server-insiders/data/User/mcp.json
-            touch /mnt/agent-data/claude/claude.json /mnt/agent-data/claude/.credentials.json /mnt/agent-data/claude/settings.json
-            touch /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json /mnt/agent-data/gemini/settings.json
-            touch /mnt/agent-data/codex/auth.json /mnt/agent-data/codex/config.toml
+# ensure: Create target path and initialize JSON if flagged
+ensure() {
+    local path="$1" flags="$2"
 
-            cp -a /source/.claude/plugins/cache /source/.claude/plugins/marketplaces /target/claude/plugins 
-            cp -a /source/.claude/skills /target/claude/skills 
-            
-        "
+    # In dry-run mode, only print what would happen
+    if [ "${DRY_RUN:-}" = "1" ]; then
+        case "$flags" in
+            *d*) echo "[DRY-RUN] Would create directory: $path" ;;
+            *f*) echo "[DRY-RUN] Would create parent dir and touch: $path" ;;
+        esac
+        case "$flags" in
+            *j*) echo "[DRY-RUN] Would initialize JSON if empty: $path" ;;
+        esac
+        return 0
+    fi
 
-    success "Plugin files copied"
+    # Create directory or file with parent
+    case "$flags" in
+        *d*) mkdir -p "$path" ;;
+        *f*) mkdir -p "$(dirname "$path")"; touch "$path" ;;
+    esac
+
+    # Initialize JSON with {} if empty and flagged
+    case "$flags" in
+        *j*) [ -s "$path" ] || echo "{}" > "$path" ;;
+    esac
+}
+
+# copy: Rsync source to target with appropriate flags
+copy() {
+    local src="$1" dst="$2" flags="$3"
+    local opts="-a --chown=1000:1000"
+
+    # Add mirror flag if specified (removes files not in source)
+    case "$flags" in
+        *m*) opts="$opts --delete" ;;
+    esac
+
+    # Add exclude for .system/ subdirectory if flagged
+    case "$flags" in
+        *x*) opts="$opts --exclude=.system/" ;;
+    esac
+
+    # In dry-run mode, use rsync --dry-run with itemize-changes
+    if [ "${DRY_RUN:-}" = "1" ]; then
+        opts="$opts --dry-run --itemize-changes"
+    fi
+
+    # Always ensure target exists first (respects dry-run internally)
+    ensure "$dst" "$flags"
+
+    # Copy if source exists, branching by type
+    if [ -e "$src" ]; then
+        case "$flags" in
+            *d*)
+                # Directory: use trailing slashes for content sync (not rename)
+                if [ -d "$src" ]; then
+                    rsync $opts "$src/" "$dst/"
+                fi
+                ;;
+            *f*)
+                # File: rsync directly to target path (handles renames)
+                if [ -f "$src" ]; then
+                    rsync $opts "$src" "$dst"
+                fi
+                ;;
+        esac
+    fi
+
+    # Enforce restrictive permissions for secrets (skip in dry-run)
+    if [ "${DRY_RUN:-}" != "1" ]; then
+        case "$flags" in
+            *s*)
+                case "$flags" in
+                    *d*) chmod 700 "$dst" 2>/dev/null || true ;;
+                    *f*) chmod 600 "$dst" 2>/dev/null || true ;;
+                esac
+                ;;
+        esac
+    fi
+}
+
+# Process map entries from environment variable
+echo "$SYNC_MAP_DATA" | while IFS=: read -r src dst flags; do
+    [ -z "$src" ] && continue
+    copy "$src" "$dst" "$flags"
+done
+SYNC_SCRIPT
+
+    if $DRY_RUN; then
+        success "[dry-run] Rsync sync simulation complete"
+    else
+        success "Configs synced via rsync"
+    fi
 }
 
 # Transform installed_plugins.json (fix paths + scope)
@@ -321,21 +414,6 @@ remove_orphan_markers() {
     success "Removed $removed orphan markers"
 }
 
-# Fix ownership
-fix_ownership() {
-    step "Fixing ownership (UID 1000 for agent user)..."
-
-    if $DRY_RUN; then
-        echo "  [dry-run] Would chown 1000:1000 on volumes"
-        return
-    fi
-
-    docker run --rm -v "$DATA_VOLUME":/plugins alpine chown -R 1000:1000 /plugins
-    docker run --rm -v "$DATA_VOLUME":/data alpine chown 1000:1000 -R /data 
-
-    success "Ownership fixed"
-}
-
 # Show summary
 show_summary() {
     echo ""
@@ -384,12 +462,11 @@ main() {
     check_prerequisites
     echo ""
 
-    copy_plugin_files
+    sync_configs
     transform_installed_plugins
     transform_marketplaces
     merge_enabled_plugins
     remove_orphan_markers
-    fix_ownership
 
     if ! $DRY_RUN; then
         show_summary

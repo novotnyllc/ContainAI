@@ -5,10 +5,20 @@
   "created_at": "2026-01-18T08:39:16.317425Z",
   "depends_on": [],
   "epic": "fn-3-8m1",
+  "evidence": {
+    "commits": [
+      "76b9fdf"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n sync-agent-plugins.sh",
+      "path overlap verification"
+    ]
+  },
   "id": "fn-3-8m1.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-3-8m1.2.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Implement SYNC_MAP declarative config array",
-  "updated_at": "2026-01-18T08:50:53.121441Z"
+  "updated_at": "2026-01-18T09:03:58.371467Z"
 }
