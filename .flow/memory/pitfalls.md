@@ -21,3 +21,6 @@ Dynamic ARGs/LABELs (BUILD_DATE, VCS_REF) invalidate layer cache - place them at
 
 ## 2026-01-16 manual [pitfall]
 Shell precedence: 'cmd1 && cmd2 || true' masks cmd1 failures; use 'cmd1 && (cmd2 || true)' to only mask cmd2
+
+## 2026-01-18 manual [pitfall]
+ln -sfn to directory paths needs rm -rf first if destination may exist as real directory (ln -sfn creates link INSIDE existing dir)

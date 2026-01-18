@@ -5,26 +5,81 @@ set -euo pipefail
 # Canonical location
 AGENT_WORKSPACE="${HOME}/workspace"
 
-# Ensure that files are were they are expected to be and folders created.
-sudo chown -R agent:agent /mnt/agent-data
-mkdir -p /mnt/agent-data/claude/plugins /mnt/agent-data/claude/skills
-mkdir -p /mnt/agent-data/vscode-server/extensions /mnt/agent-data/vscode-server/data/Machine /mnt/agent-data/vscode-server/data/User /mnt/agent-data/vscode-server/data/User/mcp /mnt/agent-data/vscode-server/data/User/prompts 
-mkdir -p /mnt/agent-data/vscode-server-insiders/extensions /mnt/agent-data/vscode-server-insiders/data/Machine /mnt/agent-data/vscode-server-insiders/data/User /mnt/agent-data/vscode-server-insiders/data/User/mcp /mnt/agent-data/vscode-server-insiders/data/User/prompts 
-mkdir -p /mnt/agent-data/copilot
-mkdir -p /mnt/agent-data/codex/skills
-mkdir -p /mnt/agent-data/gemini
-mkdir -p /mnt/agent-data/opencode
+# Ensure all volume structure exists for symlinks to work.
+# Derived from SYNC_MAP targets in sync-agent-plugins.sh
+ensure_volume_structure() {
+  local data_dir="/mnt/agent-data"
 
-touch /mnt/agent-data/vscode-server/data/Machine/settings.json /mnt/agent-data/vscode-server/data/User/mcp.json
-touch /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /mnt/agent-data/vscode-server-insiders/data/User/mcp.json
-touch /mnt/agent-data/claude/claude.json /mnt/agent-data/claude/credentials.json /mnt/agent-data/claude/settings.json
-touch /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json /mnt/agent-data/gemini/settings.json
-touch /mnt/agent-data/codex/auth.json /mnt/agent-data/codex/config.toml
+  # Claude Code
+  mkdir -p "${data_dir}/claude"
+  [ -s "${data_dir}/claude/claude.json" ] || echo '{}' > "${data_dir}/claude/claude.json"
+  touch "${data_dir}/claude/credentials.json"
+  [ -s "${data_dir}/claude/settings.json" ] || echo '{}' > "${data_dir}/claude/settings.json"
+  touch "${data_dir}/claude/settings.local.json"
+  mkdir -p "${data_dir}/claude/plugins"
+  mkdir -p "${data_dir}/claude/skills"
+  chmod 600 "${data_dir}/claude/credentials.json"
 
-# Set restrictive permissions on secret files (credentials, auth tokens)
-chmod 600 /mnt/agent-data/claude/credentials.json
-chmod 600 /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json
-chmod 600 /mnt/agent-data/codex/auth.json
+  # GitHub CLI
+  mkdir -p "${data_dir}/config/gh"
+  chmod 700 "${data_dir}/config/gh"
+
+  # OpenCode (config via ~/.config symlink)
+  mkdir -p "${data_dir}/config/opencode"
+
+  # tmux
+  mkdir -p "${data_dir}/tmux"
+  touch "${data_dir}/tmux/.tmux.conf"
+  mkdir -p "${data_dir}/tmux/.tmux"
+  mkdir -p "${data_dir}/config/tmux"
+
+  # Shell
+  mkdir -p "${data_dir}/shell"
+  touch "${data_dir}/shell/.bash_aliases"
+  mkdir -p "${data_dir}/shell/.bashrc.d"
+
+  # VS Code Server
+  mkdir -p "${data_dir}/vscode-server/extensions"
+  mkdir -p "${data_dir}/vscode-server/data/Machine"
+  mkdir -p "${data_dir}/vscode-server/data/User/mcp"
+  mkdir -p "${data_dir}/vscode-server/data/User/prompts"
+
+  # VS Code Insiders
+  mkdir -p "${data_dir}/vscode-server-insiders/extensions"
+  mkdir -p "${data_dir}/vscode-server-insiders/data/Machine"
+  mkdir -p "${data_dir}/vscode-server-insiders/data/User/mcp"
+  mkdir -p "${data_dir}/vscode-server-insiders/data/User/prompts"
+
+  # Copilot
+  mkdir -p "${data_dir}/copilot/skills"
+  touch "${data_dir}/copilot/config.json"
+  touch "${data_dir}/copilot/mcp-config.json"
+
+  # Gemini
+  mkdir -p "${data_dir}/gemini"
+  touch "${data_dir}/gemini/google_accounts.json"
+  touch "${data_dir}/gemini/oauth_creds.json"
+  touch "${data_dir}/gemini/GEMINI.md"
+  chmod 600 "${data_dir}/gemini/google_accounts.json"
+  chmod 600 "${data_dir}/gemini/oauth_creds.json"
+
+  # Codex
+  mkdir -p "${data_dir}/codex/skills"
+  touch "${data_dir}/codex/config.toml"
+  touch "${data_dir}/codex/auth.json"
+  chmod 600 "${data_dir}/codex/auth.json"
+
+  # OpenCode (auth from data dir)
+  mkdir -p "${data_dir}/local/share/opencode"
+  touch "${data_dir}/local/share/opencode/auth.json"
+  chmod 600 "${data_dir}/local/share/opencode/auth.json"
+
+  # Fix ownership
+  chown -R 1000:1000 "${data_dir}"
+}
+
+# Ensure volume structure exists
+ensure_volume_structure
 
 # Check if .claude.json exists and is 0 bytes
 # Docker Sandbox creates the file when creating the container replacing a link
