@@ -262,7 +262,7 @@ ensure() {
 }
 
 # copy: Rsync source to target with appropriate flags
-# In dry-run mode, uses rsync --dry-run --itemize-changes when dest parent exists
+# In dry-run mode, always uses rsync --dry-run --itemize-changes
 copy() {
     src="$1"
     dst="$2"
@@ -299,12 +299,9 @@ copy() {
                     if [ "${DRY_RUN:-}" != "1" ]; then
                         ensure "$dst" "$flags"
                     fi
-                    # In dry-run, check if dest parent exists for rsync to work
-                    if [ "${DRY_RUN:-}" = "1" ] && [ ! -d "$dst" ]; then
-                        echo "[DRY-RUN] Would sync directory: $src -> $dst (dest does not exist yet)"
-                        case "$flags" in *s*) echo "[DRY-RUN]   with secret permissions (700 dirs, 600 files)" ;; esac
-                        case "$flags" in *m*) echo "[DRY-RUN]   with mirror mode (--delete)" ;; esac
-                        case "$flags" in *x*) echo "[DRY-RUN]   excluding .system/" ;; esac
+                    # Run rsync (in dry-run, ignore exit 3 for missing dest dirs)
+                    if [ "${DRY_RUN:-}" = "1" ]; then
+                        rsync "$@" "$src/" "$dst/" 2>/dev/null || true
                     else
                         rsync "$@" "$src/" "$dst/"
                     fi
@@ -328,11 +325,9 @@ copy() {
                     if [ "${DRY_RUN:-}" != "1" ]; then
                         ensure "$dst" "$flags"
                     fi
-                    # In dry-run, check if dest parent exists for rsync to work
-                    if [ "${DRY_RUN:-}" = "1" ] && [ ! -d "${dst%/*}" ]; then
-                        echo "[DRY-RUN] Would sync file: $src -> $dst (dest parent does not exist yet)"
-                        case "$flags" in *j*) echo "[DRY-RUN]   with JSON init if empty" ;; esac
-                        case "$flags" in *s*) echo "[DRY-RUN]   with secret permissions (600)" ;; esac
+                    # Run rsync (in dry-run, ignore exit 3 for missing dest dirs)
+                    if [ "${DRY_RUN:-}" = "1" ]; then
+                        rsync "$@" "$src" "$dst" 2>/dev/null || true
                     else
                         rsync "$@" "$src" "$dst"
                     fi
