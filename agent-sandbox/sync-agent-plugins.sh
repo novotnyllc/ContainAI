@@ -299,9 +299,11 @@ copy() {
                     if [ "${DRY_RUN:-}" != "1" ]; then
                         ensure "$dst" "$flags"
                     fi
-                    # Run rsync (in dry-run, ignore exit 3 for missing dest dirs)
+                    # Run rsync (in dry-run, warn on exit 3 for missing dest dirs)
                     if [ "${DRY_RUN:-}" = "1" ]; then
-                        rsync "$@" "$src/" "$dst/" 2>/dev/null || true
+                        if ! rsync "$@" "$src/" "$dst/" 2>&1; then
+                            echo "[DRY-RUN] Note: $dst does not exist yet (will be created on actual sync)"
+                        fi
                     else
                         rsync "$@" "$src/" "$dst/"
                     fi
@@ -325,9 +327,11 @@ copy() {
                     if [ "${DRY_RUN:-}" != "1" ]; then
                         ensure "$dst" "$flags"
                     fi
-                    # Run rsync (in dry-run, ignore exit 3 for missing dest dirs)
+                    # Run rsync (in dry-run, warn on exit 3 for missing dest dirs)
                     if [ "${DRY_RUN:-}" = "1" ]; then
-                        rsync "$@" "$src" "$dst" 2>/dev/null || true
+                        if ! rsync "$@" "$src" "$dst" 2>&1; then
+                            echo "[DRY-RUN] Note: ${dst%/*} does not exist yet (will be created on actual sync)"
+                        fi
                     else
                         rsync "$@" "$src" "$dst"
                     fi
