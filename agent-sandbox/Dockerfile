@@ -238,6 +238,7 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     \
     # Shell configs
     && mkdir -p /mnt/agent-data/shell/.bashrc.d \
+    && rm -rf ${HOME}/.bash_aliases_imported \
     && ln -sfn /mnt/agent-data/shell/.bash_aliases ${HOME}/.bash_aliases_imported \
     && rm -rf ${HOME}/.bashrc.d \
     && ln -sfn /mnt/agent-data/shell/.bashrc.d ${HOME}/.bashrc.d \
