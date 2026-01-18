@@ -98,7 +98,7 @@ asb-stop-all     # Interactive selection to stop sandbox containers
 | `agent-sandbox-vscode` | `sync-all.sh` | VS Code Server settings |
 | `agent-sandbox-gh` | `sync-all.sh` | GitHub CLI config |
 
-Note: The sync script volumes are populated by the sync scripts but are not currently mounted by `asb`. To use synced VS Code or gh settings inside the container, you would need to manually mount these volumes or modify the container setup.
+Note: The `agent-sandbox-vscode` and `agent-sandbox-gh` volumes listed above are populated by `sync-all.sh` but are not currently mounted by `asb`. To use these synced settings inside the container, you would need to manually mount these volumes or modify the container setup. The `sandbox-agent-data` volume is already mounted by `asb`.
 
 ## Port Forwarding
 

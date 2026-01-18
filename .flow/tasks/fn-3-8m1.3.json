@@ -8,10 +8,24 @@
     "fn-3-8m1.2"
   ],
   "epic": "fn-3-8m1",
+  "evidence": {
+    "commits": [
+      "a137bf6",
+      "0879739",
+      "8169ac4",
+      "54fbf0c",
+      "688422a"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n agent-sandbox/sync-agent-plugins.sh",
+      "shellcheck agent-sandbox/sync-agent-plugins.sh"
+    ]
+  },
   "id": "fn-3-8m1.3",
   "priority": null,
   "spec_path": ".flow/tasks/fn-3-8m1.3.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Implement rsync-based sync_configs function",
-  "updated_at": "2026-01-18T09:05:14.549604Z"
+  "updated_at": "2026-01-18T09:36:42.032492Z"
 }

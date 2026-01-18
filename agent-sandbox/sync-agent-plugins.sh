@@ -206,17 +206,18 @@ sync_configs() {
     fi
 
     # Build map data and pass via heredoc inside the script
-    # shellcheck disable=SC2016
     local script_with_data
+    # shellcheck disable=SC2016
     script_with_data='
 # ==============================================================================
 # Functions for rsync-based sync (runs inside eeacms/rsync container)
 # ==============================================================================
 
 # ensure: Create target path and optionally init JSON if flagged
-# Named to match spec; handles both path creation and JSON init
+# Named to match spec; handles both path creation, JSON init, and secret perms
 ensure() {
-    local path="$1" flags="$2"
+    path="$1"
+    flags="$2"
 
     # In dry-run mode, only print what would happen
     if [ "${DRY_RUN:-}" = "1" ]; then
@@ -226,6 +227,9 @@ ensure() {
         esac
         case "$flags" in
             *j*) echo "[DRY-RUN] Would initialize JSON if empty: $path" ;;
+        esac
+        case "$flags" in
+            *s*) echo "[DRY-RUN] Would apply secret permissions to: $path" ;;
         esac
         return 0
     fi
@@ -254,28 +258,40 @@ ensure() {
             fi
             ;;
     esac
+
+    # Apply secret permissions if flagged (Critical: must apply even when source missing)
+    case "$flags" in
+        *s*)
+            case "$flags" in
+                *d*) chmod 700 "$path" ;;
+                *f*) chmod 600 "$path" ;;
+            esac
+            ;;
+    esac
 }
 
 # copy: Rsync source to target with appropriate flags
 copy() {
-    local src="$1" dst="$2" flags="$3"
+    src="$1"
+    dst="$2"
+    flags="$3"
 
-    # Build rsync options as space-separated string (safe for current literals)
-    local opts="-a --chown=1000:1000"
+    # Build rsync options using positional parameters (POSIX-safe)
+    set -- -a --chown=1000:1000
 
     # Add mirror flag if specified (removes files not in source)
     case "$flags" in
-        *m*) opts="$opts --delete" ;;
+        *m*) set -- "$@" --delete ;;
     esac
 
     # Add exclude for .system/ subdirectory if flagged
     case "$flags" in
-        *x*) opts="$opts --exclude=.system/" ;;
+        *x*) set -- "$@" "--exclude=.system/" ;;
     esac
 
     # In dry-run mode, use rsync --dry-run with itemize-changes
     if [ "${DRY_RUN:-}" = "1" ]; then
-        opts="$opts --dry-run --itemize-changes"
+        set -- "$@" --dry-run --itemize-changes
     fi
 
     # Only sync if source exists AND matches expected type
@@ -285,7 +301,7 @@ copy() {
                 # Directory: verify source is actually a directory
                 if [ -d "$src" ]; then
                     ensure "$dst" "$flags"
-                    rsync $opts "$src/" "$dst/"
+                    rsync "$@" "$src/" "$dst/"
                     # Enforce restrictive permissions recursively for secret dirs
                     if [ "${DRY_RUN:-}" != "1" ]; then
                         case "$flags" in
@@ -303,7 +319,7 @@ copy() {
                 # File: verify source is actually a file
                 if [ -f "$src" ]; then
                     ensure "$dst" "$flags"
-                    rsync $opts "$src" "$dst"
+                    rsync "$@" "$src" "$dst"
                     # Re-apply JSON init AFTER rsync (in case source was empty)
                     case "$flags" in
                         *j*)
@@ -331,10 +347,10 @@ copy() {
                 ;;
         esac
     else
-        # Source missing: still ensure target exists if j flag (init empty JSON)
+        # Source missing: still ensure target exists if j or s flag
         case "$flags" in
-            *j*)
-                echo "[INFO] Source missing, initializing target JSON: $dst"
+            *j*|*s*)
+                echo "[INFO] Source missing, ensuring target: $dst"
                 ensure "$dst" "$flags"
                 ;;
             *)
@@ -361,7 +377,8 @@ done <<'"'"'MAP_DATA'"'"'
 
     # Run container with map data embedded in script via heredoc
     # Note: --network=none for security (rsync doesn't need network)
-    docker run --rm --network=none \
+    # Note: --user 0:0 required for chown/rsync --chown to work
+    docker run --rm --network=none --user 0:0 \
         --mount type=bind,src="$HOME",dst=/source,readonly \
         --mount type=volume,src="$DATA_VOLUME",dst=/target \
         "${env_args[@]}" \
@@ -484,14 +501,17 @@ remove_orphan_markers() {
 
     if $DRY_RUN; then
         local count
-        count=$(docker run --rm -v "$DATA_VOLUME":/plugins alpine find /plugins/claude/plugins/cache -name ".orphaned_at" 2>/dev/null | wc -l)
+        # Run entire pipeline in container to avoid pipefail issues when cache dir missing
+        count=$(docker run --rm -v "$DATA_VOLUME":/plugins alpine sh -c '
+            find /plugins/claude/plugins/cache -name ".orphaned_at" 2>/dev/null | wc -l || echo 0
+        ')
         echo "  [dry-run] Would remove $count orphan markers"
         return
     fi
 
     local removed
     removed=$(docker run --rm -v "$DATA_VOLUME":/plugins alpine sh -c '
-        find /plugins/claude/plugins/cache -name ".orphaned_at" -delete -print 2>/dev/null | wc -l
+        find /plugins/claude/plugins/cache -name ".orphaned_at" -delete -print 2>/dev/null | wc -l || echo 0
     ')
 
     success "Removed $removed orphan markers"
