@@ -4,10 +4,10 @@
   "depends_on_epics": [],
   "id": "fn-3-8m1",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "needs_work",
+  "plan_reviewed_at": "2026-01-18T06:31:42.127820Z",
   "spec_path": ".flow/specs/fn-3-8m1.md",
   "status": "open",
   "title": "Sync-Agent-Plugins Rsync Refactor",
-  "updated_at": "2026-01-18T06:25:34.754628Z"
+  "updated_at": "2026-01-18T06:31:42.127833Z"
 }
