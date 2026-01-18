@@ -211,6 +211,7 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && ln -sfn /mnt/agent-data/vscode-server/data/User/mcp ${HOME}/.vscode-server/data/User/mcp \
     \
     # Copilot
+    && mkdir -p /mnt/agent-data/copilot/skills \
     && ln -sfn /mnt/agent-data/copilot/config.json ${HOME}/.copilot/config.json \
     && ln -sfn /mnt/agent-data/copilot/mcp-config.json ${HOME}/.copilot/mcp-config.json \
     && rm -rf ${HOME}/.copilot/skills \
@@ -223,20 +224,20 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && ln -sfn /mnt/agent-data/gemini/GEMINI.md ${HOME}/.gemini/GEMINI.md \
     \
     # Codex
-    && mkdir -p /mnt/agent-data/codex \
+    && mkdir -p /mnt/agent-data/codex/skills \
     && ln -sfn /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \
     && ln -sfn /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
     && rm -rf ${HOME}/.codex/skills \
     && ln -sfn /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
     \
     # tmux (legacy location)
-    && mkdir -p /mnt/agent-data/tmux \
+    && mkdir -p /mnt/agent-data/tmux/.tmux \
     && ln -sfn /mnt/agent-data/tmux/.tmux.conf ${HOME}/.tmux.conf \
     && rm -rf ${HOME}/.tmux \
     && ln -sfn /mnt/agent-data/tmux/.tmux ${HOME}/.tmux \
     \
     # Shell configs
-    && mkdir -p /mnt/agent-data/shell \
+    && mkdir -p /mnt/agent-data/shell/.bashrc.d \
     && ln -sfn /mnt/agent-data/shell/.bash_aliases ${HOME}/.bash_aliases_imported \
     && rm -rf ${HOME}/.bashrc.d \
     && ln -sfn /mnt/agent-data/shell/.bashrc.d ${HOME}/.bashrc.d \
