@@ -51,8 +51,9 @@ verify_path_under_data_dir() {
     fi
   fi
 
-  # Verify resolved path starts with DATA_DIR
-  if [[ "$resolved" != "${DATA_DIR}"* ]]; then
+  # Verify resolved path is exactly DATA_DIR or starts with DATA_DIR/
+  # This prevents /mnt/agent-datax from passing the check
+  if [[ "$resolved" != "${DATA_DIR}" && "$resolved" != "${DATA_DIR}/"* ]]; then
     log "ERROR: Path escapes data directory: $path -> $resolved"
     return 1
   fi
@@ -141,7 +142,7 @@ ensure_volume_structure() {
   # Claude Code (SYNC_MAP flags: fjs for claude.json, fs for credentials, fj for settings)
   ensure_dir "${DATA_DIR}/claude"
   ensure_file "${DATA_DIR}/claude/claude.json" true
-  ensure_file "${DATA_DIR}/claude/credentials.json" true
+  ensure_file "${DATA_DIR}/claude/credentials.json"
   ensure_file "${DATA_DIR}/claude/settings.json" true
   ensure_file "${DATA_DIR}/claude/settings.local.json"
   ensure_dir "${DATA_DIR}/claude/plugins"
@@ -187,19 +188,19 @@ ensure_volume_structure() {
 
   # Gemini (SYNC_MAP flags: fs for oauth files, f for GEMINI.md, Dockerfile symlink for settings)
   ensure_dir "${DATA_DIR}/gemini"
-  ensure_file "${DATA_DIR}/gemini/google_accounts.json" true
-  ensure_file "${DATA_DIR}/gemini/oauth_creds.json" true
+  ensure_file "${DATA_DIR}/gemini/google_accounts.json"
+  ensure_file "${DATA_DIR}/gemini/oauth_creds.json"
   ensure_file "${DATA_DIR}/gemini/GEMINI.md"
   ensure_file "${DATA_DIR}/gemini/settings.json" true
 
   # Codex (SYNC_MAP flags: f for config.toml, fs for auth.json, dx for skills)
   ensure_dir "${DATA_DIR}/codex/skills"
   ensure_file "${DATA_DIR}/codex/config.toml"
-  ensure_file "${DATA_DIR}/codex/auth.json" true
+  ensure_file "${DATA_DIR}/codex/auth.json"
 
   # OpenCode auth (SYNC_MAP flags: fs - secret file)
   ensure_dir "${DATA_DIR}/local/share/opencode"
-  ensure_file "${DATA_DIR}/local/share/opencode/auth.json" true
+  ensure_file "${DATA_DIR}/local/share/opencode/auth.json"
 
   # Apply secret permissions (after all files created, before final ownership fix)
   # Secret files: chmod 600 (SYNC_MAP 's' flag on files)
