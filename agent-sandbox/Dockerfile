@@ -138,7 +138,12 @@ RUN printf '%s\n' \
     && echo "alias codex='codex --dangerously-bypass-approvals-and-sandbox'" >> ${HOME}/.bash_aliases \
     && echo "alias copilot='copilot --yolo'" >> ${HOME}/.bash_aliases \
     && echo "alias gemini='gemini --yolo'" >> ${HOME}/.bash_aliases \
-    && touch ${HOME}/.docker/sandbox/locks/detached.lock
+    && touch ${HOME}/.docker/sandbox/locks/detached.lock \
+    # Add sourcing hooks to .bashrc for imported aliases and .bashrc.d scripts
+    && echo '# Source imported bash_aliases if exists' >> ${HOME}/.bashrc \
+    && echo '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' >> ${HOME}/.bashrc \
+    && echo '# Source all scripts in .bashrc.d if directory exists' >> ${HOME}/.bashrc \
+    && echo 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' >> ${HOME}/.bashrc
 ENV BASH_ENV=${HOME}/.bash_env
 
 RUN curl -fsSL https://bun.com/install | bash \
@@ -185,43 +190,60 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && mkdir -p /mnt/agent-data/claude/skills \
     && mkdir -p /mnt/agent-data/claude/plugins \
     && mv ${HOME}/.claude.json /mnt/agent-data/claude/claude.json \
-    && ln -s /mnt/agent-data/claude/credentials.json ${HOME}/.claude/.credentials.json \
-    && ln -s /mnt/agent-data/claude/claude.json ${HOME}/.claude.json \
-    && ln -s /mnt/agent-data/claude/settings.json ${HOME}/.claude/settings.json \
-    && ln -s /mnt/agent-data/claude/plugins ${HOME}/.claude/plugins \
-    && ln -s /mnt/agent-data/claude/skills ${HOME}/.claude/skills \
+    && ln -sfn /mnt/agent-data/claude/credentials.json ${HOME}/.claude/.credentials.json \
+    && ln -sfn /mnt/agent-data/claude/claude.json ${HOME}/.claude.json \
+    && ln -sfn /mnt/agent-data/claude/settings.json ${HOME}/.claude/settings.json \
+    && ln -sfn /mnt/agent-data/claude/plugins ${HOME}/.claude/plugins \
+    && ln -sfn /mnt/agent-data/claude/skills ${HOME}/.claude/skills \
     \
     # VS Code Insiders
-    && ln -s /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json ${HOME}/.vscode-server-insiders/data/Machine/settings.json \
-    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp.json ${HOME}/.vscode-server-insiders/data/User/mcp.json \
-    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/prompts ${HOME}/.vscode-server-insiders/data/User/prompts \
-    && ln -s /mnt/agent-data/vscode-server-insiders/data/User/mcp ${HOME}/.vscode-server-insiders/data/User/mcp \
-    && ln -s /mnt/agent-data/vscode-server-insiders/extensions ${HOME}/.vscode-server-insiders/extensions \
+    && ln -sfn /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json ${HOME}/.vscode-server-insiders/data/Machine/settings.json \
+    && ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/mcp.json ${HOME}/.vscode-server-insiders/data/User/mcp.json \
+    && ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/prompts ${HOME}/.vscode-server-insiders/data/User/prompts \
+    && ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/mcp ${HOME}/.vscode-server-insiders/data/User/mcp \
+    && ln -sfn /mnt/agent-data/vscode-server-insiders/extensions ${HOME}/.vscode-server-insiders/extensions \
     \
     # VS Code
-    && ln -s /mnt/agent-data/vscode-server/data/Machine/settings.json ${HOME}/.vscode-server/data/Machine/settings.json \
-    && ln -s /mnt/agent-data/vscode-server/extensions ${HOME}/.vscode-server/extensions \
-    && ln -s /mnt/agent-data/vscode-server/data/User/mcp.json ${HOME}/.vscode-server/data/User/mcp.json \
-    && ln -s /mnt/agent-data/vscode-server/data/User/prompts ${HOME}/.vscode-server/data/User/prompts \
-    && ln -s /mnt/agent-data/vscode-server/data/User/mcp ${HOME}/.vscode-server/data/User/mcp \
+    && ln -sfn /mnt/agent-data/vscode-server/data/Machine/settings.json ${HOME}/.vscode-server/data/Machine/settings.json \
+    && ln -sfn /mnt/agent-data/vscode-server/extensions ${HOME}/.vscode-server/extensions \
+    && ln -sfn /mnt/agent-data/vscode-server/data/User/mcp.json ${HOME}/.vscode-server/data/User/mcp.json \
+    && ln -sfn /mnt/agent-data/vscode-server/data/User/prompts ${HOME}/.vscode-server/data/User/prompts \
+    && ln -sfn /mnt/agent-data/vscode-server/data/User/mcp ${HOME}/.vscode-server/data/User/mcp \
     \
     # Copilot
-    && ln -s /mnt/agent-data/copilot/config.json ${HOME}/.copilot/config.json \
+    && ln -sfn /mnt/agent-data/copilot/config.json ${HOME}/.copilot/config.json \
+    && ln -sfn /mnt/agent-data/copilot/mcp-config.json ${HOME}/.copilot/mcp-config.json \
+    && ln -sfn /mnt/agent-data/copilot/skills ${HOME}/.copilot/skills \
     \
-    # Gemini        
-    && ln -s /mnt/agent-data/gemini/google_accounts.json ${HOME}/.gemini/google_accounts.json \    
-    && ln -s /mnt/agent-data/gemini/oauth_creds.json ${HOME}/.gemini/oauth_creds.json \    
-    && ln -s /mnt/agent-data/gemini/settings.json ${HOME}/.gemini/settings.json \
+    # Gemini
+    && ln -sfn /mnt/agent-data/gemini/google_accounts.json ${HOME}/.gemini/google_accounts.json \
+    && ln -sfn /mnt/agent-data/gemini/oauth_creds.json ${HOME}/.gemini/oauth_creds.json \
+    && ln -sfn /mnt/agent-data/gemini/settings.json ${HOME}/.gemini/settings.json \
+    && ln -sfn /mnt/agent-data/gemini/GEMINI.md ${HOME}/.gemini/GEMINI.md \
     \
-    # Codex    
-    && ln -s /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \    
-    && ln -s /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
+    # Codex
+    && ln -sfn /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \
+    && ln -sfn /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
     && mkdir -p /mnt/agent-data/codex \
-    && ln -s /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
+    && ln -sfn /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
+    \
+    # tmux (legacy location)
+    && mkdir -p /mnt/agent-data/tmux \
+    && ln -sfn /mnt/agent-data/tmux/.tmux.conf ${HOME}/.tmux.conf \
+    && ln -sfn /mnt/agent-data/tmux/.tmux ${HOME}/.tmux \
+    \
+    # Shell configs
+    && mkdir -p /mnt/agent-data/shell \
+    && ln -sfn /mnt/agent-data/shell/.bash_aliases ${HOME}/.bash_aliases_imported \
+    && ln -sfn /mnt/agent-data/shell/.bashrc.d ${HOME}/.bashrc.d \
+    \
+    # OpenCode data (XDG_DATA_HOME for auth.json)
+    && mkdir -p ${HOME}/.local/share/opencode \
+    && ln -sfn /mnt/agent-data/local/share/opencode/auth.json ${HOME}/.local/share/opencode/auth.json \
     \
     # Config
     && mv ${HOME}/.config /mnt/agent-data/ \
-    && ln -s /mnt/agent-data/config ${HOME}/.config
+    && ln -sfn /mnt/agent-data/config ${HOME}/.config
 
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
