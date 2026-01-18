@@ -139,11 +139,11 @@ RUN printf '%s\n' \
     && echo "alias copilot='copilot --yolo'" >> ${HOME}/.bash_aliases \
     && echo "alias gemini='gemini --yolo'" >> ${HOME}/.bash_aliases \
     && touch ${HOME}/.docker/sandbox/locks/detached.lock \
-    # Add sourcing hooks to .bashrc for imported aliases and .bashrc.d scripts
-    && echo '# Source imported bash_aliases if exists' >> ${HOME}/.bashrc \
-    && echo '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' >> ${HOME}/.bashrc \
-    && echo '# Source all scripts in .bashrc.d if directory exists' >> ${HOME}/.bashrc \
-    && echo 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' >> ${HOME}/.bashrc
+    # Add sourcing hooks to .bashrc for imported aliases and .bashrc.d scripts (idempotent)
+    && grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' ${HOME}/.bashrc \
+       || { echo '# Source imported bash_aliases if exists'; echo '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported'; } >> ${HOME}/.bashrc \
+    && grep -qxF 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' ${HOME}/.bashrc \
+       || { echo '# Source all scripts in .bashrc.d if directory exists'; echo 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> ${HOME}/.bashrc
 ENV BASH_ENV=${HOME}/.bash_env
 
 RUN curl -fsSL https://bun.com/install | bash \
@@ -239,10 +239,11 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     \
     # OpenCode data (XDG_DATA_HOME for auth.json)
     && mkdir -p ${HOME}/.local/share/opencode \
+    && mkdir -p /mnt/agent-data/local/share/opencode \
     && ln -sfn /mnt/agent-data/local/share/opencode/auth.json ${HOME}/.local/share/opencode/auth.json \
     \
-    # Config
-    && mv ${HOME}/.config /mnt/agent-data/ \
+    # Config (rename to 'config' on move to match symlink target)
+    && mv ${HOME}/.config /mnt/agent-data/config \
     && ln -sfn /mnt/agent-data/config ${HOME}/.config
 
 
