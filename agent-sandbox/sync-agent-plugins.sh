@@ -215,43 +215,25 @@ sync_configs() {
 
 # ensure: Create target path and optionally init JSON if flagged
 # Named to match spec; handles both path creation, JSON init, and secret perms
-# Note: Directories are always created (even in dry-run) so rsync --dry-run can succeed
+# Note: In dry-run mode, this is a no-op (no mutations allowed)
 ensure() {
     path="$1"
     flags="$2"
 
-    # Always create directories (mkdir -p is idempotent/non-destructive)
-    # This ensures rsync --dry-run can succeed even on empty volumes
-    case "$flags" in
-        *d*)
-            mkdir -p "$path"
-            ;;
-        *f*)
-            mkdir -p "${path%/*}"
-            ;;
-    esac
-
-    # In dry-run mode, report what would happen but skip file mutations
+    # In dry-run mode, do nothing (mutations not allowed)
+    # Dry-run reporting is handled by copy() which skips rsync entirely
     if [ "${DRY_RUN:-}" = "1" ]; then
-        case "$flags" in
-            *d*) echo "[DRY-RUN] Directory exists: $path" ;;
-            *f*) echo "[DRY-RUN] Would touch file: $path" ;;
-        esac
-        case "$flags" in
-            *j*) echo "[DRY-RUN] Would initialize JSON if empty: $path" ;;
-        esac
-        case "$flags" in
-            *s*) echo "[DRY-RUN] Would apply secret permissions to: $path" ;;
-        esac
         return 0
     fi
 
-    # Create file and set ownership (non-dry-run only)
+    # Create directory or file with parent
     case "$flags" in
         *d*)
+            mkdir -p "$path"
             chown 1000:1000 "$path"
             ;;
         *f*)
+            mkdir -p "${path%/*}"
             chown 1000:1000 "${path%/*}"
             touch "$path"
             chown 1000:1000 "$path"
@@ -280,10 +262,50 @@ ensure() {
 }
 
 # copy: Rsync source to target with appropriate flags
+# In dry-run mode, reports what would happen without running rsync (no mutations)
 copy() {
     src="$1"
     dst="$2"
     flags="$3"
+
+    # In dry-run mode, just report what would happen (no mutations allowed)
+    if [ "${DRY_RUN:-}" = "1" ]; then
+        if [ -e "$src" ]; then
+            case "$flags" in
+                *d*)
+                    if [ -d "$src" ]; then
+                        echo "[DRY-RUN] Would sync directory: $src -> $dst"
+                        case "$flags" in *s*) echo "[DRY-RUN]   with secret permissions (700 dirs, 600 files)" ;; esac
+                        case "$flags" in *m*) echo "[DRY-RUN]   with mirror mode (--delete)" ;; esac
+                        case "$flags" in *x*) echo "[DRY-RUN]   excluding .system/" ;; esac
+                    else
+                        echo "[DRY-RUN] [WARN] Expected directory but found file: $src"
+                    fi
+                    ;;
+                *f*)
+                    if [ -f "$src" ]; then
+                        echo "[DRY-RUN] Would sync file: $src -> $dst"
+                        case "$flags" in *j*) echo "[DRY-RUN]   with JSON init if empty" ;; esac
+                        case "$flags" in *s*) echo "[DRY-RUN]   with secret permissions (600)" ;; esac
+                    else
+                        echo "[DRY-RUN] [WARN] Expected file but found directory: $src"
+                    fi
+                    ;;
+            esac
+        else
+            case "$flags" in
+                *j*|*s*)
+                    echo "[DRY-RUN] Source missing, would ensure target: $dst"
+                    case "$flags" in *j*) echo "[DRY-RUN]   with JSON init" ;; esac
+                    case "$flags" in *s*) echo "[DRY-RUN]   with secret permissions" ;; esac
+                    ;;
+                *)
+                    echo "[DRY-RUN] [WARN] Source not found, would skip: $src"
+                    ;;
+            esac
+        fi
+        return 0
+    fi
 
     # Build rsync options using positional parameters (POSIX-safe)
     set -- -a --chown=1000:1000
@@ -298,11 +320,6 @@ copy() {
         *x*) set -- "$@" "--exclude=.system/" ;;
     esac
 
-    # In dry-run mode, use rsync --dry-run with itemize-changes
-    if [ "${DRY_RUN:-}" = "1" ]; then
-        set -- "$@" --dry-run --itemize-changes
-    fi
-
     # Only sync if source exists AND matches expected type
     if [ -e "$src" ]; then
         case "$flags" in
@@ -312,14 +329,12 @@ copy() {
                     ensure "$dst" "$flags"
                     rsync "$@" "$src/" "$dst/"
                     # Enforce restrictive permissions recursively for secret dirs
-                    if [ "${DRY_RUN:-}" != "1" ]; then
-                        case "$flags" in
-                            *s*)
-                                find "$dst" -type d -exec chmod 700 {} +
-                                find "$dst" -type f -exec chmod 600 {} +
-                                ;;
-                        esac
-                    fi
+                    case "$flags" in
+                        *s*)
+                            find "$dst" -type d -exec chmod 700 {} +
+                            find "$dst" -type f -exec chmod 600 {} +
+                            ;;
+                    esac
                 else
                     echo "[WARN] Expected directory but found file: $src" >&2
                 fi
@@ -339,17 +354,15 @@ copy() {
                             ;;
                     esac
                     # Enforce restrictive permissions for secret files
-                    if [ "${DRY_RUN:-}" != "1" ]; then
-                        case "$flags" in
-                            *s*)
-                                if [ -e "$dst" ]; then
-                                    chmod 600 "$dst"
-                                else
-                                    echo "[WARN] Secret target missing: $dst" >&2
-                                fi
-                                ;;
-                        esac
-                    fi
+                    case "$flags" in
+                        *s*)
+                            if [ -e "$dst" ]; then
+                                chmod 600 "$dst"
+                            else
+                                echo "[WARN] Secret target missing: $dst" >&2
+                            fi
+                            ;;
+                    esac
                 else
                     echo "[WARN] Expected file but found directory: $src" >&2
                 fi
