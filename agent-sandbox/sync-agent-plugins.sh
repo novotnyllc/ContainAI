@@ -25,6 +25,80 @@ readonly DATA_VOLUME="sandbox-agent-data"
 readonly HOST_PATH_PREFIX="$HOME/.claude/plugins/"
 readonly CONTAINER_PATH_PREFIX="/home/agent/.claude/plugins/"
 
+# ==============================================================================
+# SYNC_MAP: Declarative configuration array for syncing host configs to volume
+# ==============================================================================
+# Format: "source:target:flags"
+# Flags:
+#   d = directory
+#   f = file
+#   j = initialize JSON with {} if empty
+#   m = mirror mode (--delete to remove files not in source)
+#   s = secret (600 for files, 700 for dirs)
+#   x = exclude .system/ subdirectory
+# ==============================================================================
+
+SYNC_MAP=(
+  # ─── Claude Code ───
+  # Note: target files are NOT dot-prefixed for visibility in volume
+  "/source/.claude.json:/target/claude/claude.json:fjs"
+  "/source/.claude/.credentials.json:/target/claude/credentials.json:fs"
+  "/source/.claude/settings.json:/target/claude/settings.json:fj"
+  "/source/.claude/settings.local.json:/target/claude/settings.local.json:f"
+  "/source/.claude/plugins:/target/claude/plugins:d"
+  "/source/.claude/skills:/target/claude/skills:d"
+
+  # ─── GitHub CLI ───
+  "/source/.config/gh:/target/config/gh:ds"
+
+  # ─── OpenCode (config) ───
+  "/source/.config/opencode:/target/config/opencode:d"
+
+  # ─── tmux ───
+  "/source/.tmux.conf:/target/tmux/.tmux.conf:f"
+  "/source/.tmux:/target/tmux/.tmux:d"
+  "/source/.config/tmux:/target/config/tmux:d"
+
+  # ─── Shell ───
+  "/source/.bash_aliases:/target/shell/.bash_aliases:f"
+  "/source/.bashrc.d:/target/shell/.bashrc.d:d"
+
+  # ─── VS Code Server ───
+  # Sync entire data subtrees (no overlapping entries)
+  "/source/.vscode-server/extensions:/target/vscode-server/extensions:d"
+  "/source/.vscode-server/data/Machine:/target/vscode-server/data/Machine:d"
+  "/source/.vscode-server/data/User/mcp:/target/vscode-server/data/User/mcp:d"
+  "/source/.vscode-server/data/User/prompts:/target/vscode-server/data/User/prompts:d"
+
+  # ─── VS Code Insiders ───
+  "/source/.vscode-server-insiders/extensions:/target/vscode-server-insiders/extensions:d"
+  "/source/.vscode-server-insiders/data/Machine:/target/vscode-server-insiders/data/Machine:d"
+  "/source/.vscode-server-insiders/data/User/mcp:/target/vscode-server-insiders/data/User/mcp:d"
+  "/source/.vscode-server-insiders/data/User/prompts:/target/vscode-server-insiders/data/User/prompts:d"
+
+  # ─── Copilot ───
+  # Selective sync: config, mcp-config, skills (exclude logs/, command-history-state.json)
+  "/source/.copilot/config.json:/target/copilot/config.json:f"
+  "/source/.copilot/mcp-config.json:/target/copilot/mcp-config.json:f"
+  "/source/.copilot/skills:/target/copilot/skills:d"
+
+  # ─── Gemini ───
+  # Selective sync: credentials + user instructions (exclude tmp/, antigravity/)
+  "/source/.gemini/google_accounts.json:/target/gemini/google_accounts.json:fs"
+  "/source/.gemini/oauth_creds.json:/target/gemini/oauth_creds.json:fs"
+  "/source/.gemini/GEMINI.md:/target/gemini/GEMINI.md:f"
+
+  # ─── Codex ───
+  # Selective sync: config, auth, skills (exclude history.jsonl, log/, sessions/, shell_snapshots/, tmp/)
+  "/source/.codex/config.toml:/target/codex/config.toml:f"
+  "/source/.codex/auth.json:/target/codex/auth.json:fs"
+  "/source/.codex/skills:/target/codex/skills:dx"
+
+  # ─── OpenCode (data) ───
+  # Config is covered by ~/.config symlink; only need auth from data dir
+  "/source/.local/share/opencode/auth.json:/target/local/share/opencode/auth.json:fs"
+)
+
 # Color output helpers
 info() { echo "ℹ️  $*"; }
 success() { echo "✅ $*"; }
