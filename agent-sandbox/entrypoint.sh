@@ -18,6 +18,7 @@ ensure_volume_structure() {
   touch "${data_dir}/claude/settings.local.json"
   mkdir -p "${data_dir}/claude/plugins"
   mkdir -p "${data_dir}/claude/skills"
+  chmod 600 "${data_dir}/claude/claude.json"
   chmod 600 "${data_dir}/claude/credentials.json"
 
   # GitHub CLI
@@ -43,12 +44,16 @@ ensure_volume_structure() {
   mkdir -p "${data_dir}/vscode-server/data/Machine"
   mkdir -p "${data_dir}/vscode-server/data/User/mcp"
   mkdir -p "${data_dir}/vscode-server/data/User/prompts"
+  touch "${data_dir}/vscode-server/data/Machine/settings.json"
+  touch "${data_dir}/vscode-server/data/User/mcp.json"
 
   # VS Code Insiders
   mkdir -p "${data_dir}/vscode-server-insiders/extensions"
   mkdir -p "${data_dir}/vscode-server-insiders/data/Machine"
   mkdir -p "${data_dir}/vscode-server-insiders/data/User/mcp"
   mkdir -p "${data_dir}/vscode-server-insiders/data/User/prompts"
+  touch "${data_dir}/vscode-server-insiders/data/Machine/settings.json"
+  touch "${data_dir}/vscode-server-insiders/data/User/mcp.json"
 
   # Copilot
   mkdir -p "${data_dir}/copilot/skills"
@@ -60,6 +65,7 @@ ensure_volume_structure() {
   touch "${data_dir}/gemini/google_accounts.json"
   touch "${data_dir}/gemini/oauth_creds.json"
   touch "${data_dir}/gemini/GEMINI.md"
+  touch "${data_dir}/gemini/settings.json"
   chmod 600 "${data_dir}/gemini/google_accounts.json"
   chmod 600 "${data_dir}/gemini/oauth_creds.json"
 
@@ -74,8 +80,8 @@ ensure_volume_structure() {
   touch "${data_dir}/local/share/opencode/auth.json"
   chmod 600 "${data_dir}/local/share/opencode/auth.json"
 
-  # Fix ownership
-  chown -R 1000:1000 "${data_dir}"
+  # Fix ownership (use sudo since entrypoint runs as non-root USER agent)
+  sudo chown -R 1000:1000 "${data_dir}"
 }
 
 # Ensure volume structure exists
