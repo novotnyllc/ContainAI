@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-18T20:16:06.334406Z",
+  "depends_on": [
+    "fn-4-vet.2"
+  ],
+  "epic": "fn-4-vet",
+  "id": "fn-4-vet.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-4-vet.4.md",
+  "status": "todo",
+  "title": "Update asb* functions to use configurable volume",
+  "updated_at": "2026-01-18T21:21:17.631668Z"
+}

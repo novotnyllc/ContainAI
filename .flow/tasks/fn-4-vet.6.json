@@ -1,0 +1,17 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-18T20:16:12.769310Z",
+  "depends_on": [
+    "fn-4-vet.3",
+    "fn-4-vet.4"
+  ],
+  "epic": "fn-4-vet",
+  "id": "fn-4-vet.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-4-vet.6.md",
+  "status": "todo",
+  "title": "Update integration tests for configurable volumes",
+  "updated_at": "2026-01-18T21:20:45.178168Z"
+}

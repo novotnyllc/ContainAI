@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-18T22:18:05.265708Z",
+  "depends_on": [
+    "fn-4-vet.12"
+  ],
+  "epic": "fn-4-vet",
+  "id": "fn-4-vet.13",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-4-vet.13.md",
+  "status": "todo",
+  "title": "Delete aliases.sh and update tests",
+  "updated_at": "2026-01-18T22:19:56.215545Z"
+}

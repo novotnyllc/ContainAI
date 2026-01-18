@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-18T22:18:04.962623Z",
+  "depends_on": [
+    "fn-4-vet.8"
+  ],
+  "epic": "fn-4-vet",
+  "id": "fn-4-vet.11",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-4-vet.11.md",
+  "status": "todo",
+  "title": "Create lib/export.sh - cai export subcommand",
+  "updated_at": "2026-01-18T22:19:31.539321Z"
+}

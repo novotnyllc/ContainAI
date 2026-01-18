@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-18T22:18:04.807146Z",
+  "depends_on": [
+    "fn-4-vet.8"
+  ],
+  "epic": "fn-4-vet",
+  "id": "fn-4-vet.10",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-4-vet.10.md",
+  "status": "todo",
+  "title": "Create lib/import.sh - cai import subcommand",
+  "updated_at": "2026-01-18T22:19:22.841409Z"
+}

@@ -1,0 +1,18 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-18T22:18:05.114181Z",
+  "depends_on": [
+    "fn-4-vet.9",
+    "fn-4-vet.10",
+    "fn-4-vet.11"
+  ],
+  "epic": "fn-4-vet",
+  "id": "fn-4-vet.12",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-4-vet.12.md",
+  "status": "todo",
+  "title": "Create containai.sh - main CLI entry point",
+  "updated_at": "2026-01-18T22:19:44.563070Z"
+}

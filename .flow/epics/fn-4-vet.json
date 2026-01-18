@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-4-vet",
+  "created_at": "2026-01-18T20:15:15.808072Z",
+  "depends_on_epics": [],
+  "id": "fn-4-vet",
+  "next_task": 1,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-18T22:52:02.727316Z",
+  "spec_path": ".flow/specs/fn-4-vet.md",
+  "status": "open",
+  "title": "Configurable Volume Names & ContainAI Rename",
+  "updated_at": "2026-01-18T22:52:02.727335Z"
+}
