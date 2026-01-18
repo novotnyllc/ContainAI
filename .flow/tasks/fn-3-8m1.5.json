@@ -5,10 +5,26 @@
   "created_at": "2026-01-18T08:39:16.485545Z",
   "depends_on": [],
   "epic": "fn-3-8m1",
+  "evidence": {
+    "commits": [
+      "a5a3a3c",
+      "a9170cc",
+      "4c5396c",
+      "8d23235",
+      "e6a6935",
+      "20b49d2",
+      "ca86a8f",
+      "155d6e5"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n agent-sandbox/entrypoint.sh"
+    ]
+  },
   "id": "fn-3-8m1.5",
   "priority": null,
   "spec_path": ".flow/tasks/fn-3-8m1.5.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Update entrypoint.sh with ensure_volume_structure",
-  "updated_at": "2026-01-18T10:35:55.818559Z"
+  "updated_at": "2026-01-18T11:27:04.929950Z"
 }

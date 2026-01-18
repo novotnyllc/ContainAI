@@ -1,7 +1,7 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-18T11:28:09.394331Z",
   "created_at": "2026-01-18T08:39:16.542202Z",
   "depends_on": [
     "fn-3-8m1.3",
@@ -12,7 +12,7 @@
   "id": "fn-3-8m1.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-3-8m1.6.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Integration test and verify sync workflow",
-  "updated_at": "2026-01-18T08:40:22.965139Z"
+  "updated_at": "2026-01-18T11:28:09.394343Z"
 }
