@@ -140,10 +140,10 @@ RUN printf '%s\n' \
     && echo "alias gemini='gemini --yolo'" >> ${HOME}/.bash_aliases \
     && touch ${HOME}/.docker/sandbox/locks/detached.lock \
     # Add sourcing hooks to .bashrc for imported aliases and .bashrc.d scripts (idempotent)
-    && grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' ${HOME}/.bashrc \
-       || { echo '# Source imported bash_aliases if exists'; echo '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported'; } >> ${HOME}/.bashrc \
-    && grep -qxF 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' ${HOME}/.bashrc \
-       || { echo '# Source all scripts in .bashrc.d if directory exists'; echo 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> ${HOME}/.bashrc
+    && { grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' ${HOME}/.bashrc \
+       || { echo '# Source imported bash_aliases if exists'; echo '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported'; } >> ${HOME}/.bashrc; } \
+    && { grep -qxF 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' ${HOME}/.bashrc \
+       || { echo '# Source all scripts in .bashrc.d if directory exists'; echo 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> ${HOME}/.bashrc; }
 ENV BASH_ENV=${HOME}/.bash_env
 
 RUN curl -fsSL https://bun.com/install | bash \
@@ -213,6 +213,7 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     # Copilot
     && ln -sfn /mnt/agent-data/copilot/config.json ${HOME}/.copilot/config.json \
     && ln -sfn /mnt/agent-data/copilot/mcp-config.json ${HOME}/.copilot/mcp-config.json \
+    && rm -rf ${HOME}/.copilot/skills \
     && ln -sfn /mnt/agent-data/copilot/skills ${HOME}/.copilot/skills \
     \
     # Gemini
@@ -222,19 +223,22 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && ln -sfn /mnt/agent-data/gemini/GEMINI.md ${HOME}/.gemini/GEMINI.md \
     \
     # Codex
+    && mkdir -p /mnt/agent-data/codex \
     && ln -sfn /mnt/agent-data/codex/auth.json ${HOME}/.codex/auth.json \
     && ln -sfn /mnt/agent-data/codex/config.toml ${HOME}/.codex/config.toml \
-    && mkdir -p /mnt/agent-data/codex \
+    && rm -rf ${HOME}/.codex/skills \
     && ln -sfn /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
     \
     # tmux (legacy location)
     && mkdir -p /mnt/agent-data/tmux \
     && ln -sfn /mnt/agent-data/tmux/.tmux.conf ${HOME}/.tmux.conf \
+    && rm -rf ${HOME}/.tmux \
     && ln -sfn /mnt/agent-data/tmux/.tmux ${HOME}/.tmux \
     \
     # Shell configs
     && mkdir -p /mnt/agent-data/shell \
     && ln -sfn /mnt/agent-data/shell/.bash_aliases ${HOME}/.bash_aliases_imported \
+    && rm -rf ${HOME}/.bashrc.d \
     && ln -sfn /mnt/agent-data/shell/.bashrc.d ${HOME}/.bashrc.d \
     \
     # OpenCode data (XDG_DATA_HOME for auth.json)
