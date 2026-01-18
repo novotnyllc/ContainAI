@@ -17,7 +17,7 @@ mkdir -p /mnt/agent-data/opencode
 
 touch /mnt/agent-data/vscode-server/data/Machine/settings.json /mnt/agent-data/vscode-server/data/User/mcp.json
 touch /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /mnt/agent-data/vscode-server-insiders/data/User/mcp.json
-touch /mnt/agent-data/claude/claude.json /mnt/agent-data/claude/.credentials.json /mnt/agent-data/claude/settings.json
+touch /mnt/agent-data/claude/claude.json /mnt/agent-data/claude/credentials.json /mnt/agent-data/claude/settings.json
 touch /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json /mnt/agent-data/gemini/settings.json
 touch /mnt/agent-data/codex/auth.json /mnt/agent-data/codex/config.toml
 

@@ -9,7 +9,6 @@ set -euo pipefail
 #
 # Usage: sync-agent-plugins.sh [options]
 #   --dry-run    Show what would be done without making changes (uses rsync --dry-run)
-#   --force      Skip confirmation prompts
 #   --help       Show this help message
 #
 # Platform: Linux only (blocks on macOS with error)
@@ -133,10 +132,6 @@ parse_args() {
                 DRY_RUN=true
                 shift
                 ;;
-            --force|-f)
-                FORCE=true
-                shift
-                ;;
             --help|-h)
                 head -20 "$0" | tail -15
                 exit 0
@@ -151,7 +146,6 @@ parse_args() {
 
 # Global flags (set by parse_args)
 DRY_RUN=false
-FORCE=false
 
 # Check prerequisites
 check_prerequisites() {
@@ -195,8 +189,13 @@ check_prerequisites() {
 sync_configs() {
     step "Syncing configs via rsync..."
 
-    # Ensure volume exists even in dry-run mode (required for mount)
+    # In dry-run mode, require volume to exist (no mutations allowed)
     if ! docker volume inspect "$DATA_VOLUME" &>/dev/null; then
+        if $DRY_RUN; then
+            error "Dry-run requires volume to exist: $DATA_VOLUME"
+            error "Create it first with: docker volume create $DATA_VOLUME"
+            return 1
+        fi
         info "Creating data volume: $DATA_VOLUME"
         docker volume create "$DATA_VOLUME" >/dev/null
     fi
@@ -215,9 +214,9 @@ sync_configs() {
 # Functions for rsync-based sync (runs inside eeacms/rsync container)
 # ==============================================================================
 
-# ensure: Create target path and initialize JSON if flagged
-# Only called when source exists (to avoid creating empty placeholders)
-ensure() {
+# ensure_path: Create target path with correct ownership
+# Only called after source type is verified
+ensure_path() {
     local path="$1" flags="$2"
 
     # In dry-run mode, only print what would happen
@@ -232,10 +231,19 @@ ensure() {
         return 0
     fi
 
-    # Create directory or file with parent
+    # Create directory or file with parent, chown entire tree
     case "$flags" in
-        *d*) mkdir -p "$path" && chown 1000:1000 "$path" ;;
-        *f*) mkdir -p "${path%/*}" && touch "$path" && chown 1000:1000 "$path" ;;
+        *d*)
+            mkdir -p "$path"
+            chown -R 1000:1000 "$path"
+            ;;
+        *f*)
+            mkdir -p "${path%/*}"
+            touch "$path"
+            # chown parent tree and file
+            chown -R 1000:1000 "${path%/*}"
+            chown 1000:1000 "$path"
+            ;;
     esac
 
     # Initialize JSON with {} if empty and flagged
@@ -269,39 +277,45 @@ copy() {
         opts="$opts --dry-run --itemize-changes"
     fi
 
-    # Only ensure target and sync if source exists (avoid empty placeholders)
+    # Only sync if source exists AND matches expected type
     if [ -e "$src" ]; then
-        ensure "$dst" "$flags"
         case "$flags" in
             *d*)
-                # Directory: use trailing slashes for content sync (not rename)
+                # Directory: verify source is actually a directory
                 if [ -d "$src" ]; then
+                    ensure_path "$dst" "$flags"
                     rsync $opts "$src/" "$dst/"
+                    # Enforce restrictive permissions recursively for secret dirs
+                    if [ "${DRY_RUN:-}" != "1" ]; then
+                        case "$flags" in
+                            *s*)
+                                find "$dst" -type d -exec chmod 700 {} +
+                                find "$dst" -type f -exec chmod 600 {} +
+                                ;;
+                        esac
+                    fi
                 fi
                 ;;
             *f*)
-                # File: rsync directly to target path (handles renames)
+                # File: verify source is actually a file
                 if [ -f "$src" ]; then
+                    ensure_path "$dst" "$flags"
                     rsync $opts "$src" "$dst"
+                    # Enforce restrictive permissions for secret files
+                    if [ "${DRY_RUN:-}" != "1" ]; then
+                        case "$flags" in
+                            *s*)
+                                if [ -e "$dst" ]; then
+                                    chmod 600 "$dst"
+                                else
+                                    echo "[WARN] Secret target missing: $dst" >&2
+                                fi
+                                ;;
+                        esac
+                    fi
                 fi
                 ;;
         esac
-
-        # Enforce restrictive permissions for secrets (skip in dry-run)
-        if [ "${DRY_RUN:-}" != "1" ]; then
-            case "$flags" in
-                *s*)
-                    if [ -e "$dst" ]; then
-                        case "$flags" in
-                            *d*) chmod 700 "$dst" ;;
-                            *f*) chmod 600 "$dst" ;;
-                        esac
-                    else
-                        echo "[WARN] Secret target missing, cannot set permissions: $dst" >&2
-                    fi
-                    ;;
-            esac
-        fi
     fi
 }
 
@@ -392,8 +406,9 @@ merge_enabled_plugins() {
     host_plugins=$(jq '.enabledPlugins' "$HOST_CLAUDE_SETTINGS")
 
     # Get existing sandbox settings or create minimal structure
+    # Note: path is /target/claude/settings.json to match SYNC_MAP target paths
     local existing_settings
-    existing_settings=$(docker run --rm -v "$DATA_VOLUME":/data alpine cat /data/settings.json 2>/dev/null || echo '{}')
+    existing_settings=$(docker run --rm -v "$DATA_VOLUME":/target alpine cat /target/claude/settings.json 2>/dev/null || echo '{}')
 
     # If empty or invalid, create minimal structure
     if [[ -z "$existing_settings" ]] || ! echo "$existing_settings" | jq -e '.' &>/dev/null; then
@@ -404,8 +419,8 @@ merge_enabled_plugins() {
     local merged
     merged=$(echo "$existing_settings" | jq --argjson hp "$host_plugins" '.enabledPlugins = ((.enabledPlugins // {}) + $hp)')
 
-    # Write to volume
-    echo "$merged" | docker run --rm -i -v "$DATA_VOLUME":/data alpine sh -c "cat > /data/settings.json && chown 1000:1000 /data/settings.json"
+    # Write to volume (path matches SYNC_MAP target)
+    echo "$merged" | docker run --rm -i -v "$DATA_VOLUME":/target alpine sh -c "cat > /target/claude/settings.json && chown 1000:1000 /target/claude/settings.json"
 
     success "enabledPlugins merged"
 }
