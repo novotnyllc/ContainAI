@@ -75,18 +75,31 @@ def ensure_flow_exists() -> bool:
 
 def get_default_config() -> dict:
     """Return default config structure."""
-    return {"memory": {"enabled": False}}
+    return {"memory": {"enabled": False}, "planSync": {"enabled": False}, "review": {"backend": None}}
+
+
+def deep_merge(base: dict, override: dict) -> dict:
+    """Deep merge override into base. Override values win for conflicts."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def load_flow_config() -> dict:
-    """Load .flow/config.json, returning defaults if missing."""
+    """Load .flow/config.json, merging with defaults for missing keys."""
     config_path = get_flow_dir() / CONFIG_FILE
     defaults = get_default_config()
     if not config_path.exists():
         return defaults
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else defaults
+        if isinstance(data, dict):
+            return deep_merge(defaults, data)
+        return defaults
     except (json.JSONDecodeError, Exception):
         return defaults
 
@@ -1292,33 +1305,54 @@ def find_active_run(
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    """Initialize .flow/ directory structure."""
+    """Initialize or upgrade .flow/ directory structure (idempotent)."""
     flow_dir = get_flow_dir()
+    actions = []
 
-    if flow_dir.exists():
-        if args.json:
-            json_output({"message": ".flow/ already exists", "path": str(flow_dir)})
-        else:
-            print(f".flow/ already exists at {flow_dir}")
-        return
+    # Create directories if missing (idempotent, never destroys existing)
+    for subdir in [EPICS_DIR, SPECS_DIR, TASKS_DIR, MEMORY_DIR]:
+        dir_path = flow_dir / subdir
+        if not dir_path.exists():
+            dir_path.mkdir(parents=True)
+            actions.append(f"created {subdir}/")
 
-    # Create directory structure
-    (flow_dir / EPICS_DIR).mkdir(parents=True)
-    (flow_dir / SPECS_DIR).mkdir(parents=True)
-    (flow_dir / TASKS_DIR).mkdir(parents=True)
-    (flow_dir / MEMORY_DIR).mkdir(parents=True)
+    # Create meta.json if missing (never overwrite existing)
+    meta_path = flow_dir / META_FILE
+    if not meta_path.exists():
+        meta = {"schema_version": SCHEMA_VERSION, "next_epic": 1}
+        atomic_write_json(meta_path, meta)
+        actions.append("created meta.json")
 
-    # Create meta.json
-    meta = {"schema_version": SCHEMA_VERSION, "next_epic": 1}
-    atomic_write_json(flow_dir / META_FILE, meta)
+    # Config: create or upgrade (merge missing defaults)
+    config_path = flow_dir / CONFIG_FILE
+    if not config_path.exists():
+        atomic_write_json(config_path, get_default_config())
+        actions.append("created config.json")
+    else:
+        # Load raw config, compare with merged (which includes new defaults)
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raw = {}
+        except (json.JSONDecodeError, Exception):
+            raw = {}
+        merged = deep_merge(get_default_config(), raw)
+        if merged != raw:
+            atomic_write_json(config_path, merged)
+            actions.append("upgraded config.json (added missing keys)")
 
-    # Create config.json with defaults
-    atomic_write_json(flow_dir / CONFIG_FILE, get_default_config())
+    # Output
+    if actions:
+        message = f".flow/ updated: {', '.join(actions)}"
+    else:
+        message = ".flow/ already up to date"
 
     if args.json:
-        json_output({"message": ".flow/ initialized", "path": str(flow_dir)})
+        json_output(
+            {"success": True, "message": message, "path": str(flow_dir), "actions": actions}
+        )
     else:
-        print(f".flow/ initialized at {flow_dir}")
+        print(message)
 
 
 def cmd_detect(args: argparse.Namespace) -> None:
@@ -1579,6 +1613,31 @@ def cmd_config_set(args: argparse.Namespace) -> None:
         json_output({"key": args.key, "value": new_value, "message": f"{args.key} set"})
     else:
         print(f"{args.key} set to {new_value}")
+
+
+def cmd_review_backend(args: argparse.Namespace) -> None:
+    """Get review backend for skill conditionals. Returns ASK if not configured."""
+    # Priority: FLOW_REVIEW_BACKEND env > config > ASK
+    env_val = os.environ.get("FLOW_REVIEW_BACKEND", "").strip()
+    if env_val and env_val in ("rp", "codex", "none"):
+        backend = env_val
+        source = "env"
+    elif ensure_flow_exists():
+        cfg_val = get_config("review.backend")
+        if cfg_val and cfg_val in ("rp", "codex", "none"):
+            backend = cfg_val
+            source = "config"
+        else:
+            backend = "ASK"
+            source = "none"
+    else:
+        backend = "ASK"
+        source = "none"
+
+    if args.json:
+        json_output({"backend": backend, "source": source})
+    else:
+        print(backend)
 
 
 MEMORY_TEMPLATES = {
@@ -2242,7 +2301,7 @@ def cmd_tasks(args: argparse.Namespace) -> None:
             tasks.append(
                 {
                     "id": task_data["id"],
-                    "epic": task_data["epic_id"],
+                    "epic": task_data["epic"],
                     "title": task_data["title"],
                     "status": task_data["status"],
                     "priority": task_data.get("priority"),
@@ -2317,16 +2376,16 @@ def cmd_list(args: argparse.Namespace) -> None:
             task_data = normalize_task(
                 load_json_or_exit(task_file, f"Task {stem}", use_json=args.json)
             )
-            if "id" not in task_data or "epic_id" not in task_data:
+            if "id" not in task_data or "epic" not in task_data:
                 continue  # Skip artifact files (GH-21)
-            epic_id = task_data["epic_id"]
+            epic_id = task_data["epic"]
             if epic_id not in tasks_by_epic:
                 tasks_by_epic[epic_id] = []
             tasks_by_epic[epic_id].append(task_data)
             all_tasks.append(
                 {
                     "id": task_data["id"],
-                    "epic": task_data["epic_id"],
+                    "epic": task_data["epic"],
                     "title": task_data["title"],
                     "status": task_data["status"],
                     "priority": task_data.get("priority"),
@@ -3933,7 +3992,24 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
                 break
 
     if win_id is None:
-        error_exit("No RepoPrompt window matches repo root", use_json=False, code=2)
+        if getattr(args, "create", False):
+            # Auto-create window via workspace create --new-window (RP 1.5.68+)
+            ws_name = os.path.basename(repo_root)
+            create_cmd = f"workspace create {shlex.quote(ws_name)} --new-window --folder-path {shlex.quote(repo_root)}"
+            create_res = run_rp_cli(["--raw-json", "-e", create_cmd])
+            try:
+                data = json.loads(create_res.stdout or "{}")
+                win_id = data.get("window_id")
+            except json.JSONDecodeError:
+                pass
+            if not win_id:
+                error_exit(
+                    f"Failed to create RP window: {create_res.stderr or create_res.stdout}",
+                    use_json=False,
+                    code=2,
+                )
+        else:
+            error_exit("No RepoPrompt window matches repo root", use_json=False, code=2)
 
     # Write state file for ralph-guard verification
     repo_hash = hashlib.sha256(repo_root.encode()).hexdigest()[:16]
@@ -4584,6 +4660,13 @@ def main() -> None:
     p_config_set.add_argument("--json", action="store_true", help="JSON output")
     p_config_set.set_defaults(func=cmd_config_set)
 
+    # review-backend (helper for skills)
+    p_review_backend = subparsers.add_parser(
+        "review-backend", help="Get review backend (ASK if not configured)"
+    )
+    p_review_backend.add_argument("--json", action="store_true", help="JSON output")
+    p_review_backend.set_defaults(func=cmd_review_backend)
+
     # memory
     p_memory = subparsers.add_parser("memory", help="Memory commands")
     memory_sub = p_memory.add_subparsers(dest="memory_cmd", required=True)
@@ -4961,6 +5044,11 @@ def main() -> None:
     )
     p_rp_setup.add_argument("--repo-root", required=True, help="Repo root path")
     p_rp_setup.add_argument("--summary", required=True, help="Builder summary")
+    p_rp_setup.add_argument(
+        "--create",
+        action="store_true",
+        help="Create new RP window if none matches (requires RP 1.5.68+)",
+    )
     p_rp_setup.add_argument("--json", action="store_true", help="JSON output")
     p_rp_setup.set_defaults(func=cmd_rp_setup_review)
 

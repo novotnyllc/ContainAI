@@ -4,5 +4,8 @@
   },
   "planSync": {
     "enabled": true
+  },
+  "review": {
+    "backend": "codex"
   }
 }
