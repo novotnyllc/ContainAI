@@ -22,24 +22,63 @@ run_as_root() {
   fi
 }
 
-# Helper: reject symlinks in top-level tool directories to prevent traversal attacks
-# Only checks immediate children of data_dir (e.g., claude, config, gemini)
-reject_symlink_traversal() {
-  local data_dir="$1"
-  local subdir="$2"
-  local target="${data_dir}/${subdir}"
+# Data directory constant for path validation
+readonly DATA_DIR="/mnt/agent-data"
 
-  # If target exists and is a symlink, refuse to proceed
-  if [[ -L "$target" ]]; then
-    log "ERROR: Symlink traversal detected: $target is a symlink. Refusing to proceed."
+# Helper: verify path resolves under DATA_DIR (prevents symlink traversal)
+verify_path_under_data_dir() {
+  local path="$1"
+  local resolved
+
+  # If path doesn't exist yet, check parent
+  if [[ -e "$path" ]]; then
+    resolved="$(realpath "$path" 2>/dev/null)" || {
+      log "ERROR: Cannot resolve path: $path"
+      return 1
+    }
+  else
+    # For non-existent paths, check that parent resolves correctly
+    local parent
+    parent="$(dirname "$path")"
+    if [[ -e "$parent" ]]; then
+      resolved="$(realpath "$parent" 2>/dev/null)/$(basename "$path")" || {
+        log "ERROR: Cannot resolve parent path: $parent"
+        return 1
+      }
+    else
+      # Parent doesn't exist either - will be created, assume safe if not symlink
+      return 0
+    fi
+  fi
+
+  # Verify resolved path starts with DATA_DIR
+  if [[ "$resolved" != "${DATA_DIR}"* ]]; then
+    log "ERROR: Path escapes data directory: $path -> $resolved"
     return 1
   fi
   return 0
 }
 
-# Helper: ensure a directory exists with type validation
+# Helper: reject symlinks at any path (for security-sensitive operations)
+reject_symlink() {
+  local path="$1"
+  if [[ -L "$path" ]]; then
+    log "ERROR: Symlink detected where regular file/dir expected: $path"
+    return 1
+  fi
+  return 0
+}
+
+# Helper: ensure a directory exists with type and symlink validation
 ensure_dir() {
   local path="$1"
+
+  # Reject symlinks
+  reject_symlink "$path" || return 1
+
+  # Verify path stays under data directory
+  verify_path_under_data_dir "$path" || return 1
+
   if [[ -e "$path" && ! -d "$path" ]]; then
     log "ERROR: Expected directory but found file: $path"
     return 1
@@ -47,10 +86,16 @@ ensure_dir() {
   mkdir -p "$path"
 }
 
-# Helper: ensure a file exists with type validation, optionally init JSON
+# Helper: ensure a file exists with type and symlink validation, optionally init JSON
 ensure_file() {
   local path="$1"
   local init_json="${2:-false}"
+
+  # Reject symlinks
+  reject_symlink "$path" || return 1
+
+  # Verify path stays under data directory
+  verify_path_under_data_dir "$path" || return 1
 
   # Ensure parent directory exists
   local parent
@@ -70,114 +115,107 @@ ensure_file() {
   fi
 }
 
+# Helper: apply chmod with symlink and path validation
+safe_chmod() {
+  local mode="$1"
+  local path="$2"
+
+  # Reject symlinks before chmod
+  reject_symlink "$path" || return 1
+
+  # Verify path stays under data directory
+  verify_path_under_data_dir "$path" || return 1
+
+  chmod "$mode" "$path"
+}
+
 # Ensure all volume structure exists for symlinks to work.
 # Derived from SYNC_MAP targets in sync-agent-plugins.sh plus additional
 # Dockerfile symlink targets (e.g., vscode-server settings.json, mcp.json)
 ensure_volume_structure() {
-  local data_dir="/mnt/agent-data"
-
   # Bootstrap: ensure volume root is writable by agent user (1000:1000)
   # On a fresh Docker volume, /mnt/agent-data is root:root, so we need sudo first
-  run_as_root mkdir -p "${data_dir}"
-  run_as_root chown -R --no-dereference 1000:1000 "${data_dir}"
+  run_as_root mkdir -p "${DATA_DIR}"
+  run_as_root chown -R --no-dereference 1000:1000 "${DATA_DIR}"
 
-  # Define top-level tool directories that we'll create
-  # Reject any that are symlinks to prevent traversal attacks
-  local tool_dirs=(
-    "claude"
-    "config"
-    "copilot"
-    "gemini"
-    "codex"
-    "local"
-    "shell"
-    "tmux"
-    "vscode-server"
-    "vscode-server-insiders"
-  )
+  # Claude Code (SYNC_MAP flags: fjs for claude.json, fs for credentials, fj for settings)
+  ensure_dir "${DATA_DIR}/claude"
+  ensure_file "${DATA_DIR}/claude/claude.json" true
+  ensure_file "${DATA_DIR}/claude/credentials.json" true
+  ensure_file "${DATA_DIR}/claude/settings.json" true
+  ensure_file "${DATA_DIR}/claude/settings.local.json"
+  ensure_dir "${DATA_DIR}/claude/plugins"
+  ensure_dir "${DATA_DIR}/claude/skills"
 
-  for subdir in "${tool_dirs[@]}"; do
-    reject_symlink_traversal "${data_dir}" "$subdir" || return 1
-  done
+  # GitHub CLI (SYNC_MAP flags: ds - secret directory)
+  ensure_dir "${DATA_DIR}/config/gh"
 
-  # Claude Code
-  ensure_dir "${data_dir}/claude"
-  ensure_file "${data_dir}/claude/claude.json" true
-  ensure_file "${data_dir}/claude/credentials.json" true
-  ensure_file "${data_dir}/claude/settings.json" true
-  ensure_file "${data_dir}/claude/settings.local.json"
-  ensure_dir "${data_dir}/claude/plugins"
-  ensure_dir "${data_dir}/claude/skills"
+  # OpenCode config (SYNC_MAP flags: d)
+  ensure_dir "${DATA_DIR}/config/opencode"
 
-  # GitHub CLI
-  ensure_dir "${data_dir}/config/gh"
+  # tmux (SYNC_MAP flags: f for .tmux.conf, d for .tmux and config/tmux)
+  ensure_dir "${DATA_DIR}/tmux"
+  ensure_file "${DATA_DIR}/tmux/.tmux.conf"
+  ensure_dir "${DATA_DIR}/tmux/.tmux"
+  ensure_dir "${DATA_DIR}/config/tmux"
 
-  # OpenCode (config via ~/.config symlink)
-  ensure_dir "${data_dir}/config/opencode"
+  # Shell (SYNC_MAP flags: f for .bash_aliases, d for .bashrc.d)
+  ensure_dir "${DATA_DIR}/shell"
+  ensure_file "${DATA_DIR}/shell/.bash_aliases"
+  ensure_dir "${DATA_DIR}/shell/.bashrc.d"
 
-  # tmux
-  ensure_dir "${data_dir}/tmux"
-  ensure_file "${data_dir}/tmux/.tmux.conf"
-  ensure_dir "${data_dir}/tmux/.tmux"
-  ensure_dir "${data_dir}/config/tmux"
+  # VS Code Server (SYNC_MAP flags: d for dirs, Dockerfile symlinks need JSON init)
+  ensure_dir "${DATA_DIR}/vscode-server/extensions"
+  ensure_dir "${DATA_DIR}/vscode-server/data/Machine"
+  ensure_dir "${DATA_DIR}/vscode-server/data/User/mcp"
+  ensure_dir "${DATA_DIR}/vscode-server/data/User/prompts"
+  ensure_file "${DATA_DIR}/vscode-server/data/Machine/settings.json" true
+  ensure_file "${DATA_DIR}/vscode-server/data/User/mcp.json" true
 
-  # Shell
-  ensure_dir "${data_dir}/shell"
-  ensure_file "${data_dir}/shell/.bash_aliases"
-  ensure_dir "${data_dir}/shell/.bashrc.d"
+  # VS Code Insiders (same structure as VS Code Server)
+  ensure_dir "${DATA_DIR}/vscode-server-insiders/extensions"
+  ensure_dir "${DATA_DIR}/vscode-server-insiders/data/Machine"
+  ensure_dir "${DATA_DIR}/vscode-server-insiders/data/User/mcp"
+  ensure_dir "${DATA_DIR}/vscode-server-insiders/data/User/prompts"
+  ensure_file "${DATA_DIR}/vscode-server-insiders/data/Machine/settings.json" true
+  ensure_file "${DATA_DIR}/vscode-server-insiders/data/User/mcp.json" true
 
-  # VS Code Server
-  ensure_dir "${data_dir}/vscode-server/extensions"
-  ensure_dir "${data_dir}/vscode-server/data/Machine"
-  ensure_dir "${data_dir}/vscode-server/data/User/mcp"
-  ensure_dir "${data_dir}/vscode-server/data/User/prompts"
-  ensure_file "${data_dir}/vscode-server/data/Machine/settings.json" true
-  ensure_file "${data_dir}/vscode-server/data/User/mcp.json" true
+  # Copilot (SYNC_MAP flags: f for config.json/mcp-config.json, d for skills - NO json init)
+  ensure_dir "${DATA_DIR}/copilot/skills"
+  ensure_file "${DATA_DIR}/copilot/config.json"
+  ensure_file "${DATA_DIR}/copilot/mcp-config.json"
 
-  # VS Code Insiders
-  ensure_dir "${data_dir}/vscode-server-insiders/extensions"
-  ensure_dir "${data_dir}/vscode-server-insiders/data/Machine"
-  ensure_dir "${data_dir}/vscode-server-insiders/data/User/mcp"
-  ensure_dir "${data_dir}/vscode-server-insiders/data/User/prompts"
-  ensure_file "${data_dir}/vscode-server-insiders/data/Machine/settings.json" true
-  ensure_file "${data_dir}/vscode-server-insiders/data/User/mcp.json" true
+  # Gemini (SYNC_MAP flags: fs for oauth files, f for GEMINI.md, Dockerfile symlink for settings)
+  ensure_dir "${DATA_DIR}/gemini"
+  ensure_file "${DATA_DIR}/gemini/google_accounts.json" true
+  ensure_file "${DATA_DIR}/gemini/oauth_creds.json" true
+  ensure_file "${DATA_DIR}/gemini/GEMINI.md"
+  ensure_file "${DATA_DIR}/gemini/settings.json" true
 
-  # Copilot
-  ensure_dir "${data_dir}/copilot/skills"
-  ensure_file "${data_dir}/copilot/config.json" true
-  ensure_file "${data_dir}/copilot/mcp-config.json" true
+  # Codex (SYNC_MAP flags: f for config.toml, fs for auth.json, dx for skills)
+  ensure_dir "${DATA_DIR}/codex/skills"
+  ensure_file "${DATA_DIR}/codex/config.toml"
+  ensure_file "${DATA_DIR}/codex/auth.json" true
 
-  # Gemini
-  ensure_dir "${data_dir}/gemini"
-  ensure_file "${data_dir}/gemini/google_accounts.json" true
-  ensure_file "${data_dir}/gemini/oauth_creds.json" true
-  ensure_file "${data_dir}/gemini/GEMINI.md"
-  ensure_file "${data_dir}/gemini/settings.json" true
-
-  # Codex
-  ensure_dir "${data_dir}/codex/skills"
-  ensure_file "${data_dir}/codex/config.toml"
-  ensure_file "${data_dir}/codex/auth.json" true
-
-  # OpenCode (auth from data dir)
-  ensure_dir "${data_dir}/local/share/opencode"
-  ensure_file "${data_dir}/local/share/opencode/auth.json" true
+  # OpenCode auth (SYNC_MAP flags: fs - secret file)
+  ensure_dir "${DATA_DIR}/local/share/opencode"
+  ensure_file "${DATA_DIR}/local/share/opencode/auth.json" true
 
   # Apply secret permissions (after all files created, before final ownership fix)
-  # Secret files: chmod 600
-  chmod 600 "${data_dir}/claude/claude.json"
-  chmod 600 "${data_dir}/claude/credentials.json"
-  chmod 600 "${data_dir}/gemini/google_accounts.json"
-  chmod 600 "${data_dir}/gemini/oauth_creds.json"
-  chmod 600 "${data_dir}/codex/auth.json"
-  chmod 600 "${data_dir}/local/share/opencode/auth.json"
+  # Secret files: chmod 600 (SYNC_MAP 's' flag on files)
+  safe_chmod 600 "${DATA_DIR}/claude/claude.json"
+  safe_chmod 600 "${DATA_DIR}/claude/credentials.json"
+  safe_chmod 600 "${DATA_DIR}/gemini/google_accounts.json"
+  safe_chmod 600 "${DATA_DIR}/gemini/oauth_creds.json"
+  safe_chmod 600 "${DATA_DIR}/codex/auth.json"
+  safe_chmod 600 "${DATA_DIR}/local/share/opencode/auth.json"
 
-  # Secret dirs: chmod 700
-  chmod 700 "${data_dir}/config/gh"
+  # Secret dirs: chmod 700 (SYNC_MAP 's' flag on directories)
+  safe_chmod 700 "${DATA_DIR}/config/gh"
 
   # Final ownership fix (use sudo since entrypoint runs as non-root USER agent)
   # Use --no-dereference to prevent symlink traversal attacks
-  run_as_root chown -R --no-dereference 1000:1000 "${data_dir}"
+  run_as_root chown -R --no-dereference 1000:1000 "${DATA_DIR}"
 }
 
 # Ensure volume structure exists
