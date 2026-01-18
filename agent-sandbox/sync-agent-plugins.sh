@@ -16,11 +16,10 @@ set -euo pipefail
 # ==============================================================================
 
 # Constants
-readonly HOST_PLUGINS_DIR="$HOME/.claude/plugins"
-readonly HOST_SETTINGS="$HOME/.claude/settings.json"
-readonly PLUGINS_VOLUME="sandbox-agent-data"
-readonly DATA_VOLUME="docker-claude-sandbox-data"
-readonly CONTAINER_PLUGINS_PATH="/home/agent/.claude/plugins"
+readonly HOST_CLAUDE_PLUGINS_DIR="$HOME/.claude/plugins"
+readonly HOST_CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
+readonly HOST_CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+readonly DATA_VOLUME="sandbox-agent-data"
 
 # User-specific path (auto-detected)
 readonly HOST_PATH_PREFIX="$HOME/.claude/plugins/"
@@ -62,13 +61,13 @@ done
 check_prerequisites() {
     info "Checking prerequisites..."
 
-    if [[ ! -d "$HOST_PLUGINS_DIR" ]]; then
-        error "Host plugins directory not found: $HOST_PLUGINS_DIR"
+    if [[ ! -d "$HOST_CLAUDE_PLUGINS_DIR" ]]; then
+        error "Host plugins directory not found: $HOST_CLAUDE_PLUGINS_DIR"
         exit 1
     fi
 
-    if [[ ! -f "$HOST_SETTINGS" ]]; then
-        error "Host settings file not found: $HOST_SETTINGS"
+    if [[ ! -f "$HOST_CLAUDE_SETTINGS" ]]; then
+        error "Host settings file not found: $HOST_CLAUDE_SETTINGS"
         exit 1
     fi
 
@@ -82,12 +81,7 @@ check_prerequisites() {
         exit 1
     fi
 
-    # Check if volumes exist, create if not
-    if ! docker volume inspect "$PLUGINS_VOLUME" &>/dev/null; then
-        warn "Plugins volume does not exist, creating..."
-        $DRY_RUN || docker volume create "$PLUGINS_VOLUME"
-    fi
-
+    # Check if volume exists, create if not
     if ! docker volume inspect "$DATA_VOLUME" &>/dev/null; then
         warn "Data volume does not exist, creating..."
         $DRY_RUN || docker volume create "$DATA_VOLUME"
@@ -101,24 +95,31 @@ copy_plugin_files() {
     step "Copying plugin cache and marketplaces..."
 
     if $DRY_RUN; then
-        echo "  [dry-run] Would copy: cache/, marketplaces/"
+        echo "  [dry-run] "
         return
     fi
 
     docker run --rm \
-        -v "$PLUGINS_VOLUME":/target \
-        -v "$HOST_PLUGINS_DIR":/source:ro \
+        -v "$DATA_VOLUME":/target \
+        -v "$HOME":/source:ro \
         alpine sh -c "
-            rm -rf /target/claude /target/vscode-server /target/vscode-server-insiders 
-            mkdir -p /target/claude/plugins 
-            mkdir -p /target/vscode-server/extensions /target/vscode-server/data/Machine /target/vscode-server/data/User /target/vscode-server/data/User/mcp /target/vscode-server/data/User/prompts || true
-            mkdir -p /target/vscode-server-insiders/extensions /target/vscode-server-insiders/data/Machine /target/vscode-server-insiders/data/User /target/vscode-server-insiders/data/User/mcp /target/vscode-server-insiders/data/User/prompts || true
-            mkdir -p /target/copilot /target/gemini /target/opencode /target/codex/skills
-            touch /target/vscode-server/data/Machine/settings.json /target/vscode-server/data/User/mcp.json
-            touch /target/vscode-server-insiders/data/Machine/settings.json /target/vscode-server-insiders/data/User/mcp.json
-            touch /target/gemini/google_accounts.json /target/gemini/oauth_creds.json /target/gemini/settings.json
-            touch /target/codex/auth.json /target/codex/config.toml
-            cp -a /source/cache /source/marketplaces /target/claude/plugins 
+            rm -rf /target/*
+            mkdir -p /mnt/agent-data/claude/plugins /mnt/agent-data/claude/skills
+            mkdir -p /mnt/agent-data/vscode-server/extensions /mnt/agent-data/vscode-server/data/Machine /mnt/agent-data/vscode-server/data/User /mnt/agent-data/vscode-server/data/User/mcp /mnt/agent-data/vscode-server/data/User/prompts 
+            mkdir -p /mnt/agent-data/vscode-server-insiders/extensions /mnt/agent-data/vscode-server-insiders/data/Machine /mnt/agent-data/vscode-server-insiders/data/User /mnt/agent-data/vscode-server-insiders/data/User/mcp /mnt/agent-data/vscode-server-insiders/data/User/prompts 
+            mkdir -p /mnt/agent-data/copilot
+            mkdir -p /mnt/agent-data/codex/skills
+            mkdir -p /mnt/agent-data/gemini
+            mkdir -p /mnt/agent-data/opencode
+
+            touch /mnt/agent-data/vscode-server/data/Machine/settings.json /mnt/agent-data/vscode-server/data/User/mcp.json
+            touch /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /mnt/agent-data/vscode-server-insiders/data/User/mcp.json
+            touch /mnt/agent-data/claude/claude.json /mnt/agent-data/claude/.credentials.json /mnt/agent-data/claude/settings.json
+            touch /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json /mnt/agent-data/gemini/settings.json
+            touch /mnt/agent-data/codex/auth.json /mnt/agent-data/codex/config.toml
+
+            cp -a /source/.claude/plugins/cache /source/.claude/plugins/marketplaces /target/claude/plugins 
+            cp -a /source/.claude/skills /target/claude/skills 
             
         "
 
@@ -138,7 +139,7 @@ transform_installed_plugins() {
         return
     fi
 
-    cat "$HOST_PLUGINS_DIR/installed_plugins.json" | jq "
+    cat "$HOST_CLAUDE_PLUGINS_DIR/installed_plugins.json" | jq "
         .plugins = (.plugins | to_entries | map({
             key: .key,
             value: (.value | map(
@@ -148,7 +149,7 @@ transform_installed_plugins() {
                 } | del(.projectPath)
             ))
         }) | from_entries)
-    " | docker run --rm -i -v "$PLUGINS_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/installed_plugins.json"
+    " | docker run --rm -i -v "$DATA_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/installed_plugins.json"
 
     success "installed_plugins.json transformed"
 }
@@ -163,11 +164,11 @@ transform_marketplaces() {
     fi
 
     # Use with_entries to preserve object structure (not map which converts to array)
-    cat "$HOST_PLUGINS_DIR/known_marketplaces.json" | jq "
+    cat "$HOST_CLAUDE_PLUGINS_DIR/known_marketplaces.json" | jq "
         with_entries(
             .value.installLocation = (.value.installLocation | gsub(\"$HOST_PATH_PREFIX\"; \"$CONTAINER_PATH_PREFIX\"))
         )
-    " | docker run --rm -i -v "$PLUGINS_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/known_marketplaces.json"
+    " | docker run --rm -i -v "$DATA_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/known_marketplaces.json"
 
     success "known_marketplaces.json transformed"
 }
@@ -178,13 +179,13 @@ merge_enabled_plugins() {
 
     if $DRY_RUN; then
         local count
-        count=$(jq '.enabledPlugins | length' "$HOST_SETTINGS")
+        count=$(jq '.enabledPlugins | length' "$HOST_CLAUDE_SETTINGS")
         echo "  [dry-run] Would merge $count enabled plugins"
         return
     fi
 
     local host_plugins
-    host_plugins=$(jq '.enabledPlugins' "$HOST_SETTINGS")
+    host_plugins=$(jq '.enabledPlugins' "$HOST_CLAUDE_SETTINGS")
 
     # Get existing sandbox settings or create minimal structure
     local existing_settings
@@ -211,13 +212,13 @@ remove_orphan_markers() {
 
     if $DRY_RUN; then
         local count
-        count=$(docker run --rm -v "$PLUGINS_VOLUME":/plugins alpine find /plugins/claude/plugins/cache -name ".orphaned_at" 2>/dev/null | wc -l)
+        count=$(docker run --rm -v "$DATA_VOLUME":/plugins alpine find /plugins/claude/plugins/cache -name ".orphaned_at" 2>/dev/null | wc -l)
         echo "  [dry-run] Would remove $count orphan markers"
         return
     fi
 
     local removed
-    removed=$(docker run --rm -v "$PLUGINS_VOLUME":/plugins alpine sh -c '
+    removed=$(docker run --rm -v "$DATA_VOLUME":/plugins alpine sh -c '
         find /plugins/claude/plugins/cache -name ".orphaned_at" -delete -print 2>/dev/null | wc -l
     ')
 
@@ -233,7 +234,7 @@ fix_ownership() {
         return
     fi
 
-    docker run --rm -v "$PLUGINS_VOLUME":/plugins alpine chown -R 1000:1000 /plugins
+    docker run --rm -v "$DATA_VOLUME":/plugins alpine chown -R 1000:1000 /plugins
     docker run --rm -v "$DATA_VOLUME":/data alpine chown 1000:1000 -R /data 
 
     success "Ownership fixed"
@@ -249,10 +250,10 @@ show_summary() {
 
     # Count plugins
     local plugin_count
-    plugin_count=$(jq '.plugins | length' "$HOST_PLUGINS_DIR/installed_plugins.json" 2>/dev/null || echo "?")
+    plugin_count=$(jq '.plugins | length' "$HOST_CLAUDE_PLUGINS_DIR/installed_plugins.json" 2>/dev/null || echo "?")
 
     local enabled_count
-    enabled_count=$(jq '[.enabledPlugins | to_entries[] | select(.value == true)] | length' "$HOST_SETTINGS" 2>/dev/null || echo "?")
+    enabled_count=$(jq '[.enabledPlugins | to_entries[] | select(.value == true)] | length' "$HOST_CLAUDE_SETTINGS" 2>/dev/null || echo "?")
 
     echo "  📦 Plugins synced: $plugin_count"
     echo "  ✓ Enabled: $enabled_count"

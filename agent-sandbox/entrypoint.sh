@@ -7,7 +7,7 @@ AGENT_WORKSPACE="${HOME}/workspace"
 
 # Ensure that files are were they are expected to be and folders created.
 sudo chown -R agent:agent /mnt/agent-data
-mkdir -p /mnt/agent-data/claude/plugins 
+mkdir -p /mnt/agent-data/claude/plugins /mnt/agent-data/claude/skills
 mkdir -p /mnt/agent-data/vscode-server/extensions /mnt/agent-data/vscode-server/data/Machine /mnt/agent-data/vscode-server/data/User /mnt/agent-data/vscode-server/data/User/mcp /mnt/agent-data/vscode-server/data/User/prompts 
 mkdir -p /mnt/agent-data/vscode-server-insiders/extensions /mnt/agent-data/vscode-server-insiders/data/Machine /mnt/agent-data/vscode-server-insiders/data/User /mnt/agent-data/vscode-server-insiders/data/User/mcp /mnt/agent-data/vscode-server-insiders/data/User/prompts 
 mkdir -p /mnt/agent-data/copilot
@@ -21,14 +21,12 @@ touch /mnt/agent-data/claude/claude.json /mnt/agent-data/claude/.credentials.jso
 touch /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json /mnt/agent-data/gemini/settings.json
 touch /mnt/agent-data/codex/auth.json /mnt/agent-data/codex/config.toml
 
-# Check if .claude.json exists, is 0 bytes, and is not a symlink
+# Check if .claude.json exists and is 0 bytes
 # Docker Sandbox creates the file when creating the container replacing a link
-  CLAUDE_JSON="${AGENT_WORKSPACE}/.claude.json"
-  if [[ -f "$CLAUDE_JSON" && ! -L "$CLAUDE_JSON" && ! -s "$CLAUDE_JSON" ]]; then
-    log "WARNING: ${CLAUDE_JSON} exists but is empty (0 bytes)"
-  fi
-
-
+CLAUDE_JSON="${AGENT_WORKSPACE}/.claude.json"
+if [[ -f "$CLAUDE_JSON" && ! -s "$CLAUDE_JSON" ]]; then
+  echo "{}"> "$CLAUDE_JSON" # Claude complains if there's an empty file and if it creates it it breaks the symlink
+fi
 
 log() { printf '%s\n' "$*" >&2; }
 
