@@ -34,45 +34,50 @@ step() { echo "→ $*"; }
 
 # Platform guard - blocks on macOS, allows Linux/WSL only
 check_platform() {
-  case "$(uname -s)" in
-    Linux)
-      return 0  # Includes WSL
-      ;;
-    Darwin)
-      echo "ERROR: macOS is not supported by sync-agent-plugins.sh yet" >&2
-      return 1
-      ;;
-    *)
-      echo "ERROR: Unsupported platform: $(uname -s)" >&2
-      return 1
-      ;;
-  esac
-}
-
-# Parse arguments
-DRY_RUN=false
-FORCE=false
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --dry-run)
-            DRY_RUN=true
-            shift
+    local platform
+    platform="$(uname -s)"
+    case "$platform" in
+        Linux)
+            return 0  # Includes WSL
             ;;
-        --force|-f)
-            FORCE=true
-            shift
-            ;;
-        --help|-h)
-            head -20 "$0" | tail -15
-            exit 0
+        Darwin)
+            echo "ERROR: macOS is not supported by sync-agent-plugins.sh yet" >&2
+            return 1
             ;;
         *)
-            error "Unknown option: $1"
-            exit 1
+            echo "ERROR: Unsupported platform: $platform" >&2
+            return 1
             ;;
     esac
-done
+}
+
+# Parse arguments - called from main() after platform check
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            --force|-f)
+                FORCE=true
+                shift
+                ;;
+            --help|-h)
+                head -20 "$0" | tail -15
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Global flags (set by parse_args)
+DRY_RUN=false
+FORCE=false
 
 # Check prerequisites
 check_prerequisites() {
@@ -286,8 +291,11 @@ show_summary() {
 
 # Main
 main() {
-    # Platform guard - must run before any operations
+    # Platform guard - must run before any operations (including argument parsing)
     check_platform || exit 1
+
+    # Parse arguments after platform check
+    parse_args "$@"
 
     echo "═══════════════════════════════════════════════════════════════════"
     info "Syncing Claude Code plugins from host to Docker sandbox"
