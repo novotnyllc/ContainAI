@@ -215,15 +215,27 @@ sync_configs() {
 
 # ensure: Create target path and optionally init JSON if flagged
 # Named to match spec; handles both path creation, JSON init, and secret perms
+# Note: Directories are always created (even in dry-run) so rsync --dry-run can succeed
 ensure() {
     path="$1"
     flags="$2"
 
-    # In dry-run mode, only print what would happen
+    # Always create directories (mkdir -p is idempotent/non-destructive)
+    # This ensures rsync --dry-run can succeed even on empty volumes
+    case "$flags" in
+        *d*)
+            mkdir -p "$path"
+            ;;
+        *f*)
+            mkdir -p "${path%/*}"
+            ;;
+    esac
+
+    # In dry-run mode, report what would happen but skip file mutations
     if [ "${DRY_RUN:-}" = "1" ]; then
         case "$flags" in
-            *d*) echo "[DRY-RUN] Would create directory: $path" ;;
-            *f*) echo "[DRY-RUN] Would create parent dir and touch: $path" ;;
+            *d*) echo "[DRY-RUN] Directory exists: $path" ;;
+            *f*) echo "[DRY-RUN] Would touch file: $path" ;;
         esac
         case "$flags" in
             *j*) echo "[DRY-RUN] Would initialize JSON if empty: $path" ;;
@@ -234,15 +246,12 @@ ensure() {
         return 0
     fi
 
-    # Create directory or file with parent
-    # Only chown the new path, not recursively (rsync --chown handles transferred files)
+    # Create file and set ownership (non-dry-run only)
     case "$flags" in
         *d*)
-            mkdir -p "$path"
             chown 1000:1000 "$path"
             ;;
         *f*)
-            mkdir -p "${path%/*}"
             chown 1000:1000 "${path%/*}"
             touch "$path"
             chown 1000:1000 "$path"
