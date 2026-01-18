@@ -190,36 +190,33 @@ check_prerequisites() {
 # sync_configs: Rsync-based config sync using eeacms/rsync container
 # ==============================================================================
 # Processes SYNC_MAP entries via docker container with rsync.
-# Pass map data via environment variable to avoid shell quoting issues.
+# Pass map data via heredoc to avoid shell quoting issues.
 # ==============================================================================
 sync_configs() {
     step "Syncing configs via rsync..."
 
-    # Build map data as newline-separated entries
-    local map_data=""
-    local entry
-    for entry in "${SYNC_MAP[@]}"; do
-        map_data+="$entry"$'\n'
-    done
+    # Ensure volume exists even in dry-run mode (required for mount)
+    if ! docker volume inspect "$DATA_VOLUME" &>/dev/null; then
+        info "Creating data volume: $DATA_VOLUME"
+        docker volume create "$DATA_VOLUME" >/dev/null
+    fi
 
-    # Build environment args
+    # Build environment args for dry-run mode only
     local -a env_args=()
-    env_args+=(--env "SYNC_MAP_DATA=$map_data")
     if $DRY_RUN; then
         env_args+=(--env "DRY_RUN=1")
     fi
 
-    # Run container with map data passed via environment
-    docker run --rm \
-        --mount type=bind,src="$HOME",dst=/source,readonly \
-        --mount type=volume,src="$DATA_VOLUME",dst=/target \
-        "${env_args[@]}" \
-        eeacms/rsync sh -e <<'SYNC_SCRIPT'
+    # Build map data and pass via heredoc inside the script
+    # shellcheck disable=SC2016
+    local script_with_data
+    script_with_data='
 # ==============================================================================
 # Functions for rsync-based sync (runs inside eeacms/rsync container)
 # ==============================================================================
 
 # ensure: Create target path and initialize JSON if flagged
+# Only called when source exists (to avoid creating empty placeholders)
 ensure() {
     local path="$1" flags="$2"
 
@@ -237,13 +234,18 @@ ensure() {
 
     # Create directory or file with parent
     case "$flags" in
-        *d*) mkdir -p "$path" ;;
-        *f*) mkdir -p "$(dirname "$path")"; touch "$path" ;;
+        *d*) mkdir -p "$path" && chown 1000:1000 "$path" ;;
+        *f*) mkdir -p "${path%/*}" && touch "$path" && chown 1000:1000 "$path" ;;
     esac
 
     # Initialize JSON with {} if empty and flagged
     case "$flags" in
-        *j*) [ -s "$path" ] || echo "{}" > "$path" ;;
+        *j*)
+            if [ ! -s "$path" ]; then
+                echo "{}" > "$path"
+                chown 1000:1000 "$path"
+            fi
+            ;;
     esac
 }
 
@@ -267,11 +269,9 @@ copy() {
         opts="$opts --dry-run --itemize-changes"
     fi
 
-    # Always ensure target exists first (respects dry-run internally)
-    ensure "$dst" "$flags"
-
-    # Copy if source exists, branching by type
+    # Only ensure target and sync if source exists (avoid empty placeholders)
     if [ -e "$src" ]; then
+        ensure "$dst" "$flags"
         case "$flags" in
             *d*)
                 # Directory: use trailing slashes for content sync (not rename)
@@ -286,27 +286,45 @@ copy() {
                 fi
                 ;;
         esac
-    fi
 
-    # Enforce restrictive permissions for secrets (skip in dry-run)
-    if [ "${DRY_RUN:-}" != "1" ]; then
-        case "$flags" in
-            *s*)
-                case "$flags" in
-                    *d*) chmod 700 "$dst" 2>/dev/null || true ;;
-                    *f*) chmod 600 "$dst" 2>/dev/null || true ;;
-                esac
-                ;;
-        esac
+        # Enforce restrictive permissions for secrets (skip in dry-run)
+        if [ "${DRY_RUN:-}" != "1" ]; then
+            case "$flags" in
+                *s*)
+                    if [ -e "$dst" ]; then
+                        case "$flags" in
+                            *d*) chmod 700 "$dst" ;;
+                            *f*) chmod 600 "$dst" ;;
+                        esac
+                    else
+                        echo "[WARN] Secret target missing, cannot set permissions: $dst" >&2
+                    fi
+                    ;;
+            esac
+        fi
     fi
 }
 
-# Process map entries from environment variable
-echo "$SYNC_MAP_DATA" | while IFS=: read -r src dst flags; do
+# Process map entries from heredoc
+while IFS=: read -r src dst flags; do
     [ -z "$src" ] && continue
     copy "$src" "$dst" "$flags"
-done
-SYNC_SCRIPT
+done <<'"'"'MAP_DATA'"'"'
+'
+
+    # Append SYNC_MAP entries as heredoc data
+    local entry
+    for entry in "${SYNC_MAP[@]}"; do
+        script_with_data+="$entry"$'\n'
+    done
+    script_with_data+='MAP_DATA'
+
+    # Run container with map data embedded in script via heredoc
+    docker run --rm \
+        --mount type=bind,src="$HOME",dst=/source,readonly \
+        --mount type=volume,src="$DATA_VOLUME",dst=/target \
+        "${env_args[@]}" \
+        eeacms/rsync sh -e -c "$script_with_data"
 
     if $DRY_RUN; then
         success "[dry-run] Rsync sync simulation complete"
@@ -318,9 +336,6 @@ SYNC_SCRIPT
 # Transform installed_plugins.json (fix paths + scope)
 transform_installed_plugins() {
     step "Transforming installed_plugins.json (fixing paths and scope)..."
-
-    local host_prefix="${HOST_PATH_PREFIX//\//\\/}"
-    local container_prefix="${CONTAINER_PATH_PREFIX//\//\\/}"
 
     if $DRY_RUN; then
         echo "  [dry-run] Would transform paths: $HOST_PATH_PREFIX → $CONTAINER_PATH_PREFIX"

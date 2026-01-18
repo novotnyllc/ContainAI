@@ -34,19 +34,19 @@ source ./aliases.sh
 asb
 ```
 
-Most volumes are created automatically on first run. The `docker-claude-sandbox-data` volume is required and must exist before starting (run `asb` to see the error message with instructions):
+Most volumes are created automatically on first run. The `sandbox-agent-data` volume is required and must exist before starting (run `asb` to see the error message with instructions):
 
 **Option 1** (new users without Claude on host - creates empty volume):
 ```bash
-docker volume create docker-claude-sandbox-data
+docker volume create sandbox-agent-data
 # Then authenticate inside the container with: claude login
 ```
 
 **Option 2** (existing Claude users - syncs plugins and settings):
 ```bash
-../claude/sync-plugins.sh
+./sync-agent-plugins.sh
 ```
-Note: sync-plugins.sh syncs plugins and settings only. Credentials are NOT synced - you'll need to run `claude login` inside the container to authenticate.
+Note: sync-agent-plugins.sh syncs plugins, settings, and credentials from host to volume.
 
 ## The `asb` Command
 
@@ -90,11 +90,11 @@ asb-stop-all     # Interactive selection to stop sandbox containers
 |-------------|-------------|---------|
 | `sandbox-agent-data` | `/mnt/agent-data` | Plugins and agent data (created automatically by `asb`) |
 
-### Used by sync scripts (not mounted by `asb`)
+### Used by sync scripts
 
 | Volume Name | Used By | Purpose |
 |-------------|---------|---------|
-| `docker-claude-sandbox-data` | `sync-agent-plugins.sh` | Claude credentials (required - see Quick Start) |
+| `sandbox-agent-data` | `sync-agent-plugins.sh` | Agent configs synced from host (same as above) |
 | `agent-sandbox-vscode` | `sync-all.sh` | VS Code Server settings |
 | `agent-sandbox-gh` | `sync-all.sh` | GitHub CLI config |
 
@@ -226,18 +226,17 @@ Ensure you have:
 
 ### "Required volume not found"
 
-Create the required credentials volume using one of these options:
+Create the required data volume using one of these options:
 
 **Option 1** (new users - authenticate later):
 ```bash
-docker volume create docker-claude-sandbox-data
+docker volume create sandbox-agent-data
 # Then run: claude login (inside the container)
 ```
 
-**Option 2** (sync plugins from host, then authenticate):
+**Option 2** (sync configs from host):
 ```bash
-../claude/sync-plugins.sh  # Syncs plugins and settings, NOT credentials
-# Then inside container: claude login
+./sync-agent-plugins.sh  # Syncs plugins, settings, and credentials
 ```
 
 ### "Image not found"
