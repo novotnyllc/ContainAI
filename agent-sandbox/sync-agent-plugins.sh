@@ -32,6 +32,23 @@ error() { echo "❌ $*" >&2; }
 warn() { echo "⚠️  $*"; }
 step() { echo "→ $*"; }
 
+# Platform guard - blocks on macOS, allows Linux/WSL only
+check_platform() {
+  case "$(uname -s)" in
+    Linux)
+      return 0  # Includes WSL
+      ;;
+    Darwin)
+      echo "ERROR: macOS is not supported by sync-agent-plugins.sh yet" >&2
+      return 1
+      ;;
+    *)
+      echo "ERROR: Unsupported platform: $(uname -s)" >&2
+      return 1
+      ;;
+  esac
+}
+
 # Parse arguments
 DRY_RUN=false
 FORCE=false
@@ -269,6 +286,9 @@ show_summary() {
 
 # Main
 main() {
+    # Platform guard - must run before any operations
+    check_platform || exit 1
+
     echo "═══════════════════════════════════════════════════════════════════"
     info "Syncing Claude Code plugins from host to Docker sandbox"
     echo "═══════════════════════════════════════════════════════════════════"
