@@ -10,6 +10,11 @@ AGENT_WORKSPACE="${HOME}/workspace"
 ensure_volume_structure() {
   local data_dir="/mnt/agent-data"
 
+  # Bootstrap: ensure volume root is writable by agent user (1000:1000)
+  # On a fresh Docker volume, /mnt/agent-data is root:root, so we need sudo first
+  sudo mkdir -p "${data_dir}"
+  sudo chown 1000:1000 "${data_dir}"
+
   # Claude Code
   mkdir -p "${data_dir}/claude"
   [ -s "${data_dir}/claude/claude.json" ] || echo '{}' > "${data_dir}/claude/claude.json"
@@ -44,40 +49,40 @@ ensure_volume_structure() {
   mkdir -p "${data_dir}/vscode-server/data/Machine"
   mkdir -p "${data_dir}/vscode-server/data/User/mcp"
   mkdir -p "${data_dir}/vscode-server/data/User/prompts"
-  touch "${data_dir}/vscode-server/data/Machine/settings.json"
-  touch "${data_dir}/vscode-server/data/User/mcp.json"
+  [ -s "${data_dir}/vscode-server/data/Machine/settings.json" ] || echo '{}' > "${data_dir}/vscode-server/data/Machine/settings.json"
+  [ -s "${data_dir}/vscode-server/data/User/mcp.json" ] || echo '{}' > "${data_dir}/vscode-server/data/User/mcp.json"
 
   # VS Code Insiders
   mkdir -p "${data_dir}/vscode-server-insiders/extensions"
   mkdir -p "${data_dir}/vscode-server-insiders/data/Machine"
   mkdir -p "${data_dir}/vscode-server-insiders/data/User/mcp"
   mkdir -p "${data_dir}/vscode-server-insiders/data/User/prompts"
-  touch "${data_dir}/vscode-server-insiders/data/Machine/settings.json"
-  touch "${data_dir}/vscode-server-insiders/data/User/mcp.json"
+  [ -s "${data_dir}/vscode-server-insiders/data/Machine/settings.json" ] || echo '{}' > "${data_dir}/vscode-server-insiders/data/Machine/settings.json"
+  [ -s "${data_dir}/vscode-server-insiders/data/User/mcp.json" ] || echo '{}' > "${data_dir}/vscode-server-insiders/data/User/mcp.json"
 
   # Copilot
   mkdir -p "${data_dir}/copilot/skills"
-  touch "${data_dir}/copilot/config.json"
-  touch "${data_dir}/copilot/mcp-config.json"
+  [ -s "${data_dir}/copilot/config.json" ] || echo '{}' > "${data_dir}/copilot/config.json"
+  [ -s "${data_dir}/copilot/mcp-config.json" ] || echo '{}' > "${data_dir}/copilot/mcp-config.json"
 
   # Gemini
   mkdir -p "${data_dir}/gemini"
-  touch "${data_dir}/gemini/google_accounts.json"
-  touch "${data_dir}/gemini/oauth_creds.json"
+  [ -s "${data_dir}/gemini/google_accounts.json" ] || echo '{}' > "${data_dir}/gemini/google_accounts.json"
+  [ -s "${data_dir}/gemini/oauth_creds.json" ] || echo '{}' > "${data_dir}/gemini/oauth_creds.json"
   touch "${data_dir}/gemini/GEMINI.md"
-  touch "${data_dir}/gemini/settings.json"
+  [ -s "${data_dir}/gemini/settings.json" ] || echo '{}' > "${data_dir}/gemini/settings.json"
   chmod 600 "${data_dir}/gemini/google_accounts.json"
   chmod 600 "${data_dir}/gemini/oauth_creds.json"
 
   # Codex
   mkdir -p "${data_dir}/codex/skills"
   touch "${data_dir}/codex/config.toml"
-  touch "${data_dir}/codex/auth.json"
+  [ -s "${data_dir}/codex/auth.json" ] || echo '{}' > "${data_dir}/codex/auth.json"
   chmod 600 "${data_dir}/codex/auth.json"
 
   # OpenCode (auth from data dir)
   mkdir -p "${data_dir}/local/share/opencode"
-  touch "${data_dir}/local/share/opencode/auth.json"
+  [ -s "${data_dir}/local/share/opencode/auth.json" ] || echo '{}' > "${data_dir}/local/share/opencode/auth.json"
   chmod 600 "${data_dir}/local/share/opencode/auth.json"
 
   # Fix ownership (use sudo since entrypoint runs as non-root USER agent)
