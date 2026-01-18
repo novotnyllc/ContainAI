@@ -6,7 +6,8 @@ set -euo pipefail
 AGENT_WORKSPACE="${HOME}/workspace"
 
 # Ensure all volume structure exists for symlinks to work.
-# Derived from SYNC_MAP targets in sync-agent-plugins.sh
+# Derived from SYNC_MAP targets in sync-agent-plugins.sh plus additional
+# Dockerfile symlink targets (e.g., vscode-server settings.json, mcp.json)
 ensure_volume_structure() {
   local data_dir="/mnt/agent-data"
 
@@ -18,7 +19,7 @@ ensure_volume_structure() {
   # Claude Code
   mkdir -p "${data_dir}/claude"
   [ -s "${data_dir}/claude/claude.json" ] || echo '{}' > "${data_dir}/claude/claude.json"
-  touch "${data_dir}/claude/credentials.json"
+  [ -s "${data_dir}/claude/credentials.json" ] || echo '{}' > "${data_dir}/claude/credentials.json"
   [ -s "${data_dir}/claude/settings.json" ] || echo '{}' > "${data_dir}/claude/settings.json"
   touch "${data_dir}/claude/settings.local.json"
   mkdir -p "${data_dir}/claude/plugins"
@@ -86,7 +87,8 @@ ensure_volume_structure() {
   chmod 600 "${data_dir}/local/share/opencode/auth.json"
 
   # Fix ownership (use sudo since entrypoint runs as non-root USER agent)
-  sudo chown -R 1000:1000 "${data_dir}"
+  # Use --no-dereference to prevent symlink traversal attacks
+  sudo chown -R --no-dereference 1000:1000 "${data_dir}"
 }
 
 # Ensure volume structure exists
