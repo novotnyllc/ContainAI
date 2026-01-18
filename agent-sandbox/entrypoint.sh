@@ -21,6 +21,11 @@ touch /mnt/agent-data/claude/claude.json /mnt/agent-data/claude/credentials.json
 touch /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json /mnt/agent-data/gemini/settings.json
 touch /mnt/agent-data/codex/auth.json /mnt/agent-data/codex/config.toml
 
+# Set restrictive permissions on secret files (credentials, auth tokens)
+chmod 600 /mnt/agent-data/claude/credentials.json
+chmod 600 /mnt/agent-data/gemini/google_accounts.json /mnt/agent-data/gemini/oauth_creds.json
+chmod 600 /mnt/agent-data/codex/auth.json
+
 # Check if .claude.json exists and is 0 bytes
 # Docker Sandbox creates the file when creating the container replacing a link
 CLAUDE_JSON="${AGENT_WORKSPACE}/.claude.json"

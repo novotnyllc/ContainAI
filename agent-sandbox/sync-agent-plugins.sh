@@ -16,7 +16,6 @@ set -euo pipefail
 
 # Constants
 readonly HOST_CLAUDE_PLUGINS_DIR="$HOME/.claude/plugins"
-readonly HOST_CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 readonly HOST_CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 readonly DATA_VOLUME="sandbox-agent-data"
 
@@ -225,36 +224,36 @@ ensure_path() {
             *d*) echo "[DRY-RUN] Would create directory: $path" ;;
             *f*) echo "[DRY-RUN] Would create parent dir and touch: $path" ;;
         esac
-        case "$flags" in
-            *j*) echo "[DRY-RUN] Would initialize JSON if empty: $path" ;;
-        esac
         return 0
     fi
 
-    # Create directory or file with parent, chown entire tree
+    # Create directory or file with parent
+    # Only chown the new path, not recursively (rsync --chown handles transferred files)
     case "$flags" in
         *d*)
             mkdir -p "$path"
-            chown -R 1000:1000 "$path"
+            chown 1000:1000 "$path"
             ;;
         *f*)
             mkdir -p "${path%/*}"
+            chown 1000:1000 "${path%/*}"
             touch "$path"
-            # chown parent tree and file
-            chown -R 1000:1000 "${path%/*}"
             chown 1000:1000 "$path"
             ;;
     esac
+}
 
-    # Initialize JSON with {} if empty and flagged
-    case "$flags" in
-        *j*)
-            if [ ! -s "$path" ]; then
-                echo "{}" > "$path"
-                chown 1000:1000 "$path"
-            fi
-            ;;
-    esac
+# init_json: Initialize JSON file with {} if empty (called AFTER rsync)
+init_json() {
+    local path="$1"
+    if [ "${DRY_RUN:-}" = "1" ]; then
+        echo "[DRY-RUN] Would initialize JSON if empty: $path"
+        return 0
+    fi
+    if [ ! -s "$path" ]; then
+        echo "{}" > "$path"
+        chown 1000:1000 "$path"
+    fi
 }
 
 # copy: Rsync source to target with appropriate flags
@@ -301,6 +300,10 @@ copy() {
                 if [ -f "$src" ]; then
                     ensure_path "$dst" "$flags"
                     rsync $opts "$src" "$dst"
+                    # Initialize JSON AFTER rsync (so empty source doesnt overwrite {})
+                    case "$flags" in
+                        *j*) init_json "$dst" ;;
+                    esac
                     # Enforce restrictive permissions for secret files
                     if [ "${DRY_RUN:-}" != "1" ]; then
                         case "$flags" in
@@ -316,6 +319,9 @@ copy() {
                 fi
                 ;;
         esac
+    else
+        # Warn about missing sources (especially important for secrets/auth files)
+        echo "[WARN] Source not found, skipping: $src" >&2
     fi
 }
 
@@ -351,13 +357,26 @@ done <<'"'"'MAP_DATA'"'"'
 transform_installed_plugins() {
     step "Transforming installed_plugins.json (fixing paths and scope)..."
 
+    local src_file="$HOST_CLAUDE_PLUGINS_DIR/installed_plugins.json"
+
     if $DRY_RUN; then
         echo "  [dry-run] Would transform paths: $HOST_PATH_PREFIX → $CONTAINER_PATH_PREFIX"
         echo "  [dry-run] Would change scope: local → user"
         return
     fi
 
-    cat "$HOST_CLAUDE_PLUGINS_DIR/installed_plugins.json" | jq "
+    # Guard: skip if source file doesn't exist or is invalid
+    if [[ ! -f "$src_file" ]]; then
+        warn "installed_plugins.json not found, skipping transform"
+        return
+    fi
+
+    if ! jq -e '.' "$src_file" &>/dev/null; then
+        warn "installed_plugins.json is invalid JSON, skipping transform"
+        return
+    fi
+
+    jq "
         .plugins = (.plugins | to_entries | map({
             key: .key,
             value: (.value | map(
@@ -367,7 +386,7 @@ transform_installed_plugins() {
                 } | del(.projectPath)
             ))
         }) | from_entries)
-    " | docker run --rm -i -v "$DATA_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/installed_plugins.json"
+    " "$src_file" | docker run --rm -i --user 1000:1000 -v "$DATA_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/installed_plugins.json"
 
     success "installed_plugins.json transformed"
 }
@@ -376,17 +395,30 @@ transform_installed_plugins() {
 transform_marketplaces() {
     step "Transforming known_marketplaces.json..."
 
+    local src_file="$HOST_CLAUDE_PLUGINS_DIR/known_marketplaces.json"
+
     if $DRY_RUN; then
         echo "  [dry-run] Would transform marketplace paths"
         return
     fi
 
+    # Guard: skip if source file doesn't exist or is invalid
+    if [[ ! -f "$src_file" ]]; then
+        warn "known_marketplaces.json not found, skipping transform"
+        return
+    fi
+
+    if ! jq -e '.' "$src_file" &>/dev/null; then
+        warn "known_marketplaces.json is invalid JSON, skipping transform"
+        return
+    fi
+
     # Use with_entries to preserve object structure (not map which converts to array)
-    cat "$HOST_CLAUDE_PLUGINS_DIR/known_marketplaces.json" | jq "
+    jq "
         with_entries(
             .value.installLocation = (.value.installLocation | gsub(\"$HOST_PATH_PREFIX\"; \"$CONTAINER_PATH_PREFIX\"))
         )
-    " | docker run --rm -i -v "$DATA_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/known_marketplaces.json"
+    " "$src_file" | docker run --rm -i --user 1000:1000 -v "$DATA_VOLUME":/target alpine sh -c "cat > /target/claude/plugins/known_marketplaces.json"
 
     success "known_marketplaces.json transformed"
 }

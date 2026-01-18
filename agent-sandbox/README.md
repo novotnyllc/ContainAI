@@ -42,11 +42,11 @@ docker volume create sandbox-agent-data
 # Then authenticate inside the container with: claude login
 ```
 
-**Option 2** (existing Claude users - syncs plugins and settings):
+**Option 2** (existing Claude users on Linux/WSL - syncs plugins and settings):
 ```bash
 ./sync-agent-plugins.sh
 ```
-Note: sync-agent-plugins.sh syncs plugins, settings, and credentials from host to volume.
+Note: sync-agent-plugins.sh syncs plugins, settings, and credentials from host to volume. **Linux/WSL only** - macOS is not yet supported by this script.
 
 ## The `asb` Command
 
