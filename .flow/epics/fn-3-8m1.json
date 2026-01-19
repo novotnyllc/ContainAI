@@ -7,7 +7,7 @@
   "plan_review_status": "needs_work",
   "plan_reviewed_at": "2026-01-18T06:31:42.127820Z",
   "spec_path": ".flow/specs/fn-3-8m1.md",
-  "status": "open",
+  "status": "done",
   "title": "Sync-Agent-Plugins Rsync Refactor",
-  "updated_at": "2026-01-18T06:31:42.127833Z"
+  "updated_at": "2026-01-19T07:46:35.170510Z"
 }
