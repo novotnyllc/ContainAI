@@ -9,28 +9,36 @@
 #   _containai_check_isolation    - Detect container isolation status
 #   _containai_check_sandbox      - Check if docker sandbox is available
 #   _containai_preflight_checks   - Run preflight checks before container ops
-#   _containai_ensure_volume      - Ensure a volume exists
-#   _containai_start_container    - Start or attach to container (future)
+#   _containai_ensure_volumes     - Ensure a volume exists (takes volume name param)
 #   _containai_stop_all           - Stop all ContainAI containers
+#
+# Container inspection helpers:
+#   _containai_get_container_label      - Get containai.sandbox label value
+#   _containai_get_container_image      - Get container image name
+#   _containai_get_container_data_volume - Get mounted data volume name
+#   _containai_is_our_container         - Check if container belongs to ContainAI
+#   _containai_check_container_ownership - Check ownership with error messaging
+#   _containai_check_volume_match       - Check if volume matches desired
 #
 # Constants:
 #   _CONTAINAI_IMAGE              - Default image name
 #   _CONTAINAI_LABEL              - Container label for ContainAI ownership
+#   _CONTAINAI_LEGACY_LABEL       - Legacy label for transition period
 #
 # Usage: source lib/container.sh
 # ==============================================================================
+
+# Require bash first (before using BASH_SOURCE)
+if [[ -z "${BASH_VERSION:-}" ]]; then
+    echo "[ERROR] lib/container.sh requires bash" >&2
+    return 1 2>/dev/null || exit 1
+fi
 
 # Detect direct execution (must be sourced, not executed)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "[ERROR] lib/container.sh must be sourced, not executed directly" >&2
     echo "Usage: source lib/container.sh" >&2
     exit 1
-fi
-
-# Require bash
-if [[ -z "${BASH_VERSION:-}" ]]; then
-    echo "[ERROR] lib/container.sh requires bash" >&2
-    return 1
 fi
 
 # ==============================================================================
@@ -40,13 +48,15 @@ fi
 # Guard against re-sourcing
 : "${_CONTAINAI_IMAGE:=agent-sandbox:latest}"
 : "${_CONTAINAI_LABEL:=containai.sandbox=containai}"
+# Legacy label for transition period (discover containers created with old label)
+: "${_CONTAINAI_LEGACY_LABEL:=asb.sandbox=agent-sandbox}"
 
 # ==============================================================================
 # Container naming
 # ==============================================================================
 
 # Generate sanitized container name from git repo/branch or directory
-# Format: cai-<repo>-<branch> (sanitized)
+# Format: <repo>-<branch> (sanitized, no prefix per original _asb_container_name)
 # Returns: container name via stdout
 _containai_container_name() {
     local name repo_name branch_name
@@ -63,10 +73,10 @@ _containai_container_name() {
             branch_name="detached-$(git rev-parse --short HEAD 2>/dev/null)"
         fi
 
-        name="cai-${repo_name}-${branch_name}"
+        name="${repo_name}-${branch_name}"
     else
         # Fall back to current directory name
-        name="cai-$(basename "$(pwd)")"
+        name="$(basename "$(pwd)")"
     fi
 
     # Sanitize: lowercase, replace non-alphanumeric with dash, collapse repeated dashes
@@ -78,7 +88,7 @@ _containai_container_name() {
 
     # Handle empty or dash-only names
     if [[ -z "$name" || "$name" =~ ^-+$ ]]; then
-        name="cai-sandbox-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-*//;s/-*$//')"
+        name="sandbox-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-*//;s/-*$//')"
     fi
 
     # Truncate to 63 characters (Docker limit)
@@ -88,7 +98,7 @@ _containai_container_name() {
     name="$(printf '%s' "$name" | sed 's/-*$//')"
 
     # Final fallback if name became empty after all processing
-    # Use cai-sandbox-<dirname> pattern, not generic cai-sandbox-container
+    # Use sandbox-<dirname> pattern, not generic sandbox-container
     # Apply same sanitization as main path for consistency
     if [[ -z "$name" ]]; then
         local dir_fallback
@@ -96,12 +106,12 @@ _containai_container_name() {
         # Sanitize: lowercase, replace non-alphanumeric with dash, collapse dashes
         dir_fallback="$(printf '%s' "$dir_fallback" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-*//;s/-*$//')"
         if [[ -n "$dir_fallback" ]]; then
-            name="cai-sandbox-$dir_fallback"
+            name="sandbox-$dir_fallback"
             # Truncate to 63 characters (Docker limit)
             name="${name:0:63}"
             name="$(printf '%s' "$name" | sed 's/-*$//')"
         else
-            name="cai-sandbox-default"
+            name="sandbox-default"
         fi
     fi
 
@@ -115,22 +125,17 @@ _containai_container_name() {
 # Container isolation detection (conservative - prefer return 2 over false positive/negative)
 # Returns: 0=isolated (detected), 1=not isolated (definite), 2=unknown (ambiguous)
 _containai_check_isolation() {
-    local runtime rootless userns docker_info_output
+    local runtime rootless userns
 
-    # Capture docker info output once
-    if ! docker_info_output=$(docker info 2>/dev/null); then
+    # Use docker info --format for reliable structured output (proven approach from aliases.sh)
+    runtime=$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null)
+    if [[ $? -ne 0 ]] || [[ -z "$runtime" ]]; then
         echo "[WARN] Unable to determine isolation status" >&2
         return 2
     fi
 
-    runtime=$(printf '%s' "$docker_info_output" | grep -E "^\s*Default Runtime:" | sed 's/.*Default Runtime:[[:space:]]*//' | head -1)
-    if [[ -z "$runtime" ]]; then
-        echo "[WARN] Unable to determine isolation status" >&2
-        return 2
-    fi
-
-    rootless=$(printf '%s' "$docker_info_output" | grep -E "^\s*Rootless:" | sed 's/.*Rootless:[[:space:]]*//' | head -1)
-    userns=$(printf '%s' "$docker_info_output" | grep -E "^\s*Security Options:" | head -1)
+    rootless=$(docker info --format '{{.Rootless}}' 2>/dev/null)
+    userns=$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)
 
     # ECI enabled - sysbox-runc runtime
     if [[ "$runtime" == "sysbox-runc" ]]; then
@@ -320,7 +325,7 @@ _containai_preflight_checks() {
 # Ensure a volume exists, creating it if necessary
 # Arguments: $1 = volume name, $2 = quiet flag (optional, default false)
 # Returns: 0 on success, 1 on failure
-_containai_ensure_volume() {
+_containai_ensure_volumes() {
     local volume_name="$1"
     local quiet="${2:-false}"
 
@@ -345,24 +350,76 @@ _containai_ensure_volume() {
 # Container inspection helpers
 # ==============================================================================
 
-# Get the containai.sandbox label value from a container (empty if not found)
-_containai_get_container_label() {
+# Check if container exists
+# Arguments: $1 = container name
+# Returns: 0=exists, 1=does not exist or error
+_containai_container_exists() {
     local container_name="$1"
-    docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null || echo ""
+    local inspect_output
+
+    inspect_output=$(docker inspect "$container_name" 2>&1)
+    if [[ $? -eq 0 ]]; then
+        return 0
+    fi
+
+    # Check if it's "no such" vs other errors
+    if printf '%s' "$inspect_output" | grep -qiE "no such object|not found|error.*no such"; then
+        return 1  # Container doesn't exist
+    fi
+
+    # Docker error (daemon down, permission, etc.) - treat as "doesn't exist" for safety
+    return 1
 }
 
-# Get the image name of a container
+# Get the containai.sandbox label value from a container (empty if not found or error)
+# Also checks legacy asb.sandbox label for transition period
+_containai_get_container_label() {
+    local container_name="$1"
+    local label_value
+
+    # First try new label
+    label_value=$(docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null)
+    if [[ $? -eq 0 ]] && [[ -n "$label_value" ]] && [[ "$label_value" != "<no value>" ]]; then
+        printf '%s' "$label_value"
+        return 0
+    fi
+
+    # Fall back to legacy label for transition period
+    label_value=$(docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null)
+    if [[ $? -eq 0 ]] && [[ -n "$label_value" ]] && [[ "$label_value" != "<no value>" ]]; then
+        printf '%s' "$label_value"
+        return 0
+    fi
+
+    echo ""
+}
+
+# Get the image name of a container (empty if not found or error)
 _containai_get_container_image() {
     local container_name="$1"
-    docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || echo ""
+    local image_name
+
+    image_name=$(docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null)
+    if [[ $? -eq 0 ]]; then
+        printf '%s' "$image_name"
+    else
+        echo ""
+    fi
 }
 
 # Get the data volume mounted at /mnt/agent-data from a container
 # Returns: volume name or empty if not found
 _containai_get_container_data_volume() {
     local container_name="$1"
+    local volume_name
+
     # Query mount source for /mnt/agent-data destination
-    docker inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null || echo ""
+    volume_name=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null)
+    if [[ $? -eq 0 ]]; then
+        printf '%s' "$volume_name"
+    else
+        echo ""
+    fi
 }
 
 # Verify container was created by ContainAI (has our label or uses our image)
@@ -371,10 +428,21 @@ _containai_get_container_data_volume() {
 _containai_is_our_container() {
     local container_name="$1"
     local label_value
+
+    # First check if container exists
+    if ! _containai_container_exists "$container_name"; then
+        return 1
+    fi
+
     label_value="$(_containai_get_container_label "$container_name")"
 
-    # Primary check: label match
+    # Primary check: new label match
     if [[ "$label_value" == "containai" ]]; then
+        return 0
+    fi
+
+    # Check legacy label value for transition period
+    if [[ "$label_value" == "agent-sandbox" ]]; then
         return 0
     fi
 
@@ -394,9 +462,14 @@ _containai_is_our_container() {
 }
 
 # Check container ownership with appropriate messaging
-# Returns: 0=owned, 1=foreign (with error)
+# Returns: 0=owned, 1=foreign (with error), 2=does not exist
 _containai_check_container_ownership() {
     local container_name="$1"
+
+    # First check if container exists
+    if ! _containai_container_exists "$container_name"; then
+        return 2  # Container doesn't exist - not an ownership error
+    fi
 
     if _containai_is_our_container "$container_name"; then
         return 0
@@ -413,7 +486,7 @@ _containai_check_container_ownership() {
     echo "[ERROR] Container '$container_name' exists but was not created by ContainAI" >&2
     echo "" >&2
     echo "  Expected label 'containai.sandbox': containai" >&2
-    echo "  Actual label 'containai.sandbox':   ${actual_label:-<not set>}" >&2
+    echo "  Actual label 'containai.sandbox':   ${actual_label}" >&2
     echo "  Expected image:                     $_CONTAINAI_IMAGE" >&2
     echo "  Actual image:                       ${actual_image:-<unknown>}" >&2
     echo "" >&2
@@ -466,18 +539,34 @@ _containai_check_volume_match() {
 
 # Interactive container stop selection
 # Finds all ContainAI containers (by label or ancestor image) and prompts user
+# Arguments: --all to stop all without prompting (non-interactive mode)
 # Returns: 0 always
 _containai_stop_all() {
-    local containers labeled_containers ancestor_containers
+    local stop_all_flag=false
+    local arg
 
-    # Find containers by label (preferred, works across rebuilds)
+    # Parse arguments
+    for arg in "$@"; do
+        case "$arg" in
+            --all)
+                stop_all_flag=true
+                ;;
+        esac
+    done
+
+    local containers labeled_containers legacy_labeled_containers ancestor_containers
+
+    # Find containers by new label (preferred)
     labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+
+    # Find containers by legacy label (transition period)
+    legacy_labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LEGACY_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
 
     # Also find by ancestor image (catches pre-label containers)
     ancestor_containers=$(docker ps -a --filter "ancestor=$_CONTAINAI_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
 
     # Combine and deduplicate (sort -u on first field)
-    containers=$(printf '%s\n%s' "$labeled_containers" "$ancestor_containers" | grep -v '^$' | sort -t$'\t' -k1,1 -u)
+    containers=$(printf '%s\n%s\n%s' "$labeled_containers" "$legacy_labeled_containers" "$ancestor_containers" | grep -v '^$' | sort -t$'\t' -k1,1 -u)
 
     if [[ -z "$containers" ]]; then
         echo "No ContainAI containers found."
@@ -495,6 +584,28 @@ _containai_stop_all() {
         names+=("$name")
         printf "  %d) %s (%s)\n" "$i" "$name" "$status"
     done <<< "$containers"
+
+    # Handle non-interactive mode
+    if [[ "$stop_all_flag" == "true" ]]; then
+        echo ""
+        echo "Stopping all containers (--all flag)..."
+        local container_to_stop
+        for container_to_stop in "${names[@]}"; do
+            echo "Stopping: $container_to_stop"
+            docker stop "$container_to_stop" >/dev/null 2>&1 || true
+        done
+        echo "Done."
+        return 0
+    fi
+
+    # Check for interactive terminal
+    if [[ ! -t 0 ]]; then
+        echo "" >&2
+        echo "[ERROR] Non-interactive terminal detected." >&2
+        echo "Use --all flag to stop all containers without prompting:" >&2
+        echo "  cai-stop-all --all" >&2
+        return 1
+    fi
 
     echo ""
     echo "Enter numbers to stop (space-separated), 'all', or 'q' to quit:"
