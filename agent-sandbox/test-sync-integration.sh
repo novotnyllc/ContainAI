@@ -17,8 +17,27 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_VOLUME="sandbox-agent-data"
+
+# Use isolated test volumes by default to prevent clobbering user data
+# Each test run gets a unique volume name
+TEST_RUN_ID="test-$(date +%s)-$$"
+DATA_VOLUME="containai-test-${TEST_RUN_ID}"
+
 IMAGE_NAME="agent-sandbox-test:latest"
+
+# Cleanup test volumes on exit
+cleanup_test_volumes() {
+    # Remove the main test volume
+    docker volume rm "$DATA_VOLUME" 2>/dev/null || true
+    # Also clean any stale test volumes from previous interrupted runs
+    # Using a subshell to capture the list safely
+    local stale_volumes
+    stale_volumes=$(docker volume ls --filter "name=containai-test-" -q 2>/dev/null || true)
+    if [[ -n "$stale_volumes" ]]; then
+        echo "$stale_volumes" | xargs -r docker volume rm 2>/dev/null || true
+    fi
+}
+trap cleanup_test_volumes EXIT
 
 # Color output helpers
 pass() { echo "[PASS] $*"; }
@@ -567,6 +586,144 @@ test_opencode_cli() {
 }
 
 # ==============================================================================
+# Test 11: Workspace path matching in config
+# ==============================================================================
+test_workspace_path_matching() {
+    section "Test 11: Workspace path-based config matching"
+
+    local test_dir test_vol
+    test_dir="/tmp/test-workspace-match-$$"
+    test_vol="test-ws-vol-$$"
+
+    mkdir -p "$test_dir/subproject/.containai"
+    cat > "$test_dir/subproject/.containai/config.toml" << EOF
+[agent]
+data_volume = "default-vol"
+
+[workspace."$test_dir/subproject"]
+data_volume = "$test_vol"
+EOF
+
+    # Test that workspace path matching works
+    # Must clear env vars to ensure config discovery is tested
+    local resolved
+    if resolved=$(cd "$test_dir/subproject" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir/subproject'" 2>&1); then
+        if [[ "$resolved" == "$test_vol" ]]; then
+            pass "Workspace path matching works"
+        else
+            fail "Workspace path matching returned wrong volume: $resolved (expected: $test_vol)"
+        fi
+    else
+        fail "Workspace path matching failed: $resolved"
+    fi
+
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
+# Test 12: Fallback to [agent] when no workspace match
+# ==============================================================================
+test_workspace_fallback_to_agent() {
+    section "Test 12: Fallback to [agent] when no workspace match"
+
+    local test_dir default_vol
+    test_dir="/tmp/test-fallback-$$"
+    default_vol="fallback-vol-$$"
+
+    mkdir -p "$test_dir/.containai"
+    cat > "$test_dir/.containai/config.toml" << EOF
+[agent]
+data_volume = "$default_vol"
+
+[workspace."/some/other/path"]
+data_volume = "other-vol"
+EOF
+
+    # Test that fallback to [agent] works when no workspace matches
+    # Must clear env vars to ensure config discovery is tested
+    local resolved
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir'" 2>&1); then
+        if [[ "$resolved" == "$default_vol" ]]; then
+            pass "Falls back to [agent] when no workspace match"
+        else
+            fail "Fallback returned wrong volume: $resolved (expected: $default_vol)"
+        fi
+    else
+        fail "Fallback to [agent] failed: $resolved"
+    fi
+
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
+# Test 13: Longest workspace path match wins
+# ==============================================================================
+test_longest_match_wins() {
+    section "Test 13: Longest workspace path match wins"
+
+    local test_dir
+    test_dir="/tmp/test-longest-$$"
+
+    mkdir -p "$test_dir/project/subdir/.containai"
+    cat > "$test_dir/project/subdir/.containai/config.toml" << EOF
+[agent]
+data_volume = "default"
+
+[workspace."$test_dir/project"]
+data_volume = "project-vol"
+
+[workspace."$test_dir/project/subdir"]
+data_volume = "subdir-vol"
+EOF
+
+    # Test that longest workspace path match wins
+    # Must clear env vars to ensure config discovery is tested
+    local resolved
+    if resolved=$(cd "$test_dir/project/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir/project/subdir'" 2>&1); then
+        if [[ "$resolved" == "subdir-vol" ]]; then
+            pass "Longest workspace path match wins"
+        else
+            fail "Longest match returned wrong volume: $resolved (expected: subdir-vol)"
+        fi
+    else
+        fail "Longest match test failed: $resolved"
+    fi
+
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
+# Test 14: --data-volume overrides workspace config
+# ==============================================================================
+test_data_volume_overrides_config() {
+    section "Test 14: --data-volume overrides workspace config"
+
+    local test_dir
+    test_dir="/tmp/test-override-$$"
+
+    mkdir -p "$test_dir/.containai"
+    cat > "$test_dir/.containai/config.toml" << 'EOF'
+[agent]
+data_volume = "config-vol"
+EOF
+
+    # Test that CLI volume overrides config
+    # Must clear env vars to ensure CLI precedence is tested
+    local resolved
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume 'cli-vol'" 2>&1); then
+        if [[ "$resolved" == "cli-vol" ]]; then
+            pass "--data-volume overrides workspace config"
+        else
+            fail "CLI override returned wrong volume: $resolved (expected: cli-vol)"
+        fi
+    else
+        fail "CLI override test failed: $resolved"
+    fi
+
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
@@ -600,6 +757,10 @@ main() {
     test_tmux_config
     test_gh_cli
     test_opencode_cli
+    test_workspace_path_matching
+    test_workspace_fallback_to_agent
+    test_longest_match_wins
+    test_data_volume_overrides_config
 
     # Summary
     echo ""
