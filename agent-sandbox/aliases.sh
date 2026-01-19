@@ -56,10 +56,11 @@ _containai_validate_volume_name() {
 # Outputs: config file path (or empty if not found)
 _containai_find_config() {
     local workspace="${1:-$PWD}"
-    local dir config_file
+    local dir config_file git_root_found
 
     # Resolve workspace to absolute path
     dir=$(cd "$workspace" 2>/dev/null && pwd) || dir="$PWD"
+    git_root_found=false
 
     # Walk up directory tree looking for .containai/config.toml
     while [[ "$dir" != "/" ]]; do
@@ -70,15 +71,17 @@ _containai_find_config() {
         fi
 
         # Check for git root (stop walking up after git root)
-        if [[ -d "$dir/.git" ]]; then
+        # Use -e to handle both .git directory and .git file (worktrees/submodules)
+        if [[ -e "$dir/.git" ]]; then
+            git_root_found=true
             break
         fi
 
         dir=$(dirname "$dir")
     done
 
-    # Check root directory
-    if [[ -f "/.containai/config.toml" ]]; then
+    # Only check root directory if we actually walked to / (no git root found)
+    if [[ "$git_root_found" == "false" && -f "/.containai/config.toml" ]]; then
         printf '%s' "/.containai/config.toml"
         return 0
     fi
@@ -99,11 +102,12 @@ _containai_find_config() {
 # Calls parse-toml.py with workspace matching mode
 # Arguments: $1 = config file, $2 = workspace path, $3 = config dir
 # Outputs: data_volume value (or empty if not found)
+# Returns: 0 on success, 1 on parse error
 _containai_parse_config_for_workspace() {
     local config_file="$1"
     local workspace="$2"
     local config_dir="$3"
-    local script_dir result
+    local script_dir result parse_stderr parse_rc
 
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
@@ -114,8 +118,21 @@ _containai_parse_config_for_workspace() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     # Call parse-toml.py in workspace matching mode
-    result=$(python3 "$script_dir/parse-toml.py" "$config_file" --workspace "$workspace" --config-dir "$config_dir" 2>/dev/null)
+    # Capture both stdout and stderr, check exit code
+    parse_stderr=$(mktemp)
+    result=$(python3 "$script_dir/parse-toml.py" "$config_file" --workspace "$workspace" --config-dir "$config_dir" 2>"$parse_stderr")
+    parse_rc=$?
 
+    if [[ $parse_rc -ne 0 ]]; then
+        echo "[WARN] Failed to parse config file: $config_file" >&2
+        if [[ -s "$parse_stderr" ]]; then
+            cat "$parse_stderr" >&2
+        fi
+        rm -f "$parse_stderr"
+        return 0  # Fall back to default, don't fail hard
+    fi
+
+    rm -f "$parse_stderr"
     printf '%s' "$result"
 }
 

@@ -77,12 +77,14 @@ def resolve_section_path(section_path, config_dir):
     Returns:
         Normalized absolute path
     """
-    if section_path.startswith("./") or section_path.startswith("../"):
-        # Relative path - resolve against config_dir
-        resolved = os.path.join(config_dir, section_path)
+    # Expand ~ to home directory
+    expanded = os.path.expanduser(section_path)
+
+    # If not absolute, resolve against config_dir
+    if not os.path.isabs(expanded):
+        resolved = os.path.join(config_dir, expanded)
     else:
-        # Absolute path
-        resolved = section_path
+        resolved = expanded
 
     return normalize_path(resolved)
 
@@ -94,6 +96,7 @@ def path_segment_matches(section_path, workspace_path):
     A section path P matches workspace W if:
     - W equals P exactly, OR
     - W starts with P AND the character after P in W is "/"
+    - Special case: "/" matches any absolute path
 
     Args:
         section_path: Normalized section path (candidate match)
@@ -106,9 +109,14 @@ def path_segment_matches(section_path, workspace_path):
         /a/b matches /a/b      (exact)
         /a/b matches /a/b/c    (prefix with / boundary)
         /a/b does NOT match /a/bc (no segment boundary)
+        / matches /anything    (root as catch-all)
     """
     if workspace_path == section_path:
         # Exact match
+        return True
+
+    # Special case: "/" matches any absolute path
+    if section_path == "/" and workspace_path.startswith("/"):
         return True
 
     # Check prefix with segment boundary
