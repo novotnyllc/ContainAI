@@ -52,8 +52,71 @@ fi
 # ==============================================================================
 
 # Guard against re-sourcing
-: "${_CONTAINAI_IMAGE:=agent-sandbox:latest}"
 : "${_CONTAINAI_LABEL:=containai.sandbox=containai}"
+: "${_CONTAINAI_DEFAULT_REPO:=docker/sandbox-templates}"
+: "${_CONTAINAI_DEFAULT_AGENT:=claude}"
+: "${_CONTAINAI_DEFAULT_CREDENTIALS:=none}"
+
+# Map agent name to default image tag
+# Format: agent -> tag
+declare -A _CONTAINAI_AGENT_TAGS 2>/dev/null || true
+_CONTAINAI_AGENT_TAGS=(
+    [claude]="claude-code"
+    [gemini]="gemini-cli"
+)
+
+# ==============================================================================
+# Image resolution
+# ==============================================================================
+
+# Resolve the image to use based on agent and optional tag override
+# Arguments: $1 = agent name (claude, gemini), $2 = optional image tag override
+# Outputs: Full image name (repo:tag)
+# Returns: 0 on success, 1 on invalid agent
+_containai_resolve_image() {
+    local agent="${1:-$_CONTAINAI_DEFAULT_AGENT}"
+    local explicit_tag="${2:-}"
+    local repo="$_CONTAINAI_DEFAULT_REPO"
+    local tag
+
+    # Validate agent and get default tag
+    if [[ -z "${_CONTAINAI_AGENT_TAGS[$agent]:-}" ]]; then
+        _cai_error "Unknown agent: $agent"
+        _cai_error "  Supported agents: claude, gemini"
+        return 1
+    fi
+
+    # Tag precedence: --image-tag > CONTAINAI_AGENT_TAG > agent default
+    if [[ -n "$explicit_tag" ]]; then
+        tag="$explicit_tag"
+    elif [[ -n "${CONTAINAI_AGENT_TAG:-}" ]]; then
+        tag="$CONTAINAI_AGENT_TAG"
+    else
+        tag="${_CONTAINAI_AGENT_TAGS[$agent]}"
+    fi
+
+    printf '%s:%s' "$repo" "$tag"
+    return 0
+}
+
+# Check if image exists locally
+# Arguments: $1 = image name
+# Returns: 0 if exists, 1 if not found
+_containai_check_image() {
+    local image="$1"
+    local inspect_output
+
+    if ! inspect_output=$(docker image inspect "$image" 2>&1); then
+        if printf '%s' "$inspect_output" | grep -qiE "no such image|not found"; then
+            _cai_error "Image not found: $image"
+            _cai_info "Pull the image with: docker pull $image"
+        else
+            printf '%s\n' "$inspect_output" >&2
+        fi
+        return 1
+    fi
+    return 0
+}
 
 # ==============================================================================
 # Volume name validation (local copy for independence from config.sh)
@@ -567,6 +630,10 @@ _containai_check_volume_match() {
 #   --name <name>        Container name (default: auto-generated)
 #   --workspace <path>   Workspace path (default: $PWD)
 #   --data-volume <vol>  Data volume name (required)
+#   --agent <name>       Agent to run (claude, gemini; default: claude or from config)
+#   --image-tag <tag>    Override image tag (default: agent-specific)
+#   --credentials <mode> Credential mode (none, host; default: none)
+#   --acknowledge-credential-risk  Required when using --credentials=host
 #   --volume-mismatch-warn  Warn on volume mismatch instead of blocking (for implicit volumes)
 #   --restart            Force recreate container
 #   --force              Skip preflight checks
@@ -584,6 +651,10 @@ _containai_start_container() {
     local container_name=""
     local workspace=""
     local data_volume=""
+    local agent=""
+    local image_tag=""
+    local credentials="$_CONTAINAI_DEFAULT_CREDENTIALS"
+    local acknowledge_credential_risk=false
     local volume_mismatch_warn=false
     local restart_flag=false
     local force_flag=false
@@ -647,6 +718,58 @@ _containai_start_container() {
                 ;;
             --data-volume=*)
                 data_volume="${1#--data-volume=}"
+                shift
+                ;;
+            --agent)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --agent requires a value" >&2
+                    return 1
+                fi
+                agent="$2"
+                shift 2
+                ;;
+            --agent=*)
+                agent="${1#--agent=}"
+                if [[ -z "$agent" ]]; then
+                    echo "[ERROR] --agent requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --image-tag)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                image_tag="$2"
+                shift 2
+                ;;
+            --image-tag=*)
+                image_tag="${1#--image-tag=}"
+                if [[ -z "$image_tag" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --credentials)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --credentials requires a value" >&2
+                    return 1
+                fi
+                credentials="$2"
+                shift 2
+                ;;
+            --credentials=*)
+                credentials="${1#--credentials=}"
+                if [[ -z "$credentials" ]]; then
+                    echo "[ERROR] --credentials requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --acknowledge-credential-risk)
+                acknowledge_credential_risk=true
                 shift
                 ;;
             --volume-mismatch-warn)
@@ -730,6 +853,37 @@ _containai_start_container() {
         return 1
     fi
 
+    # Set agent default if not specified
+    if [[ -z "$agent" ]]; then
+        agent="$_CONTAINAI_DEFAULT_AGENT"
+    fi
+
+    # Validate credentials mode (FR-4: safe defaults)
+    case "$credentials" in
+        none)
+            # Safe default - no acknowledgement required
+            ;;
+        host)
+            # Risky - requires explicit acknowledgement
+            if [[ "$acknowledge_credential_risk" != "true" ]]; then
+                echo "" >&2
+                echo "[ERROR] --credentials=host requires --acknowledge-credential-risk" >&2
+                echo "" >&2
+                echo "Using --credentials=host forwards your host credentials to the sandbox." >&2
+                echo "This grants the AI agent access to your credentials (API keys, tokens, etc.)." >&2
+                echo "" >&2
+                echo "To proceed, add: --acknowledge-credential-risk" >&2
+                echo "" >&2
+                return 1
+            fi
+            ;;
+        *)
+            echo "[ERROR] Invalid credentials mode: $credentials" >&2
+            echo "  Valid modes: none, host" >&2
+            return 1
+            ;;
+    esac
+
     # Safety check for --mount-docker-socket
     if [[ "$mount_docker_socket" == "true" && "$please_root_my_host" != "true" ]]; then
         echo "" >&2
@@ -738,6 +892,12 @@ _containai_start_container() {
         echo "Mounting the Docker socket grants FULL ROOT ACCESS to your host system." >&2
         echo "This COMPLETELY DEFEATS the purpose of running in a sandbox." >&2
         echo "" >&2
+        return 1
+    fi
+
+    # Resolve image based on agent and optional tag override
+    local resolved_image
+    if ! resolved_image=$(_containai_resolve_image "$agent" "$image_tag"); then
         return 1
     fi
 
@@ -843,15 +1003,7 @@ _containai_start_container() {
 
     # Check image exists when creating new container
     if [[ "$container_state" == "none" ]]; then
-        local image_inspect
-        # Use if ! pattern for set -e safety
-        if ! image_inspect=$(docker image inspect "$_CONTAINAI_IMAGE" 2>&1); then
-            if printf '%s' "$image_inspect" | grep -qiE "no such image|not found"; then
-                echo "[ERROR] Image '$_CONTAINAI_IMAGE' not found" >&2
-                echo "Please build the image first: agent-sandbox/build.sh" >&2
-            else
-                echo "$image_inspect" >&2
-            fi
+        if ! _containai_check_image "$resolved_image"; then
             return 1
         fi
     fi
@@ -953,9 +1105,9 @@ _containai_start_container() {
             fi
 
             args+=(--workspace "$workspace_resolved")
-            args+=(--template "$_CONTAINAI_IMAGE")
-            args+=(--credentials none)
-            args+=(claude)
+            args+=(--template "$resolved_image")
+            args+=(--credentials "$credentials")
+            args+=("$agent")
 
             if [[ ${#agent_args[@]} -gt 0 ]]; then
                 args+=("${agent_args[@]}")

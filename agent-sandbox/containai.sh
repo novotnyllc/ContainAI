@@ -122,7 +122,7 @@ _CONTAINAI_LIB_LOADED="1"
 
 _containai_help() {
     cat <<'EOF'
-ContainAI - Run Claude Code in a secure Docker sandbox
+ContainAI - Run AI coding agents in a secure Docker sandbox
 
 Usage: containai [subcommand] [options]
        cai [subcommand] [options]
@@ -136,26 +136,42 @@ Subcommands:
   stop          Stop ContainAI containers
   help          Show this help message
 
-Global Options:
+Run Options:
+  --agent <name>        Agent to run (claude, gemini; default: claude)
+  --credentials <mode>  Credential mode (none, host; default: none)
+  --image-tag <tag>     Override image tag (default: agent-specific)
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
+  --name <name>         Container name (default: auto-generated)
+  --restart             Force recreate container
+  --force               Skip sandbox availability check
+  --detached, -d        Run in background
+  --quiet, -q           Suppress verbose output
+  -e, --env <VAR=val>   Set environment variable (repeatable)
+  -v, --volume <spec>   Extra volume mount (repeatable)
+  -- <args>             Pass arguments to agent
+
+Security Options:
+  --acknowledge-credential-risk   Required when using --credentials=host
+  --mount-docker-socket           Mount Docker socket (DANGEROUS)
+  --please-root-my-host           Acknowledge Docker socket danger
+
+Global Options:
   -h, --help            Show help (use with subcommand for subcommand help)
 
 Examples:
-  cai                           Start sandbox in current directory
-  cai shell                     Open shell in running sandbox
-  cai doctor                    Check system capabilities
-  cai doctor --json             Output diagnostics as JSON
-  cai import                    Sync configs to data volume
-  cai import --dry-run          Preview import without changes
-  cai export                    Export data volume to archive
-  cai export -o ~/backup.tgz    Export to specific path
-  cai stop                      Stop sandbox containers
-  cai stop --all                Stop all containers without prompting
+  cai                               Start Claude sandbox (default)
+  cai --agent gemini                Start Gemini sandbox
+  cai -- --print                    Pass --print to Claude
+  cai doctor                        Check system capabilities
+  cai shell                         Open shell in running sandbox
+  cai stop --all                    Stop all containers
 
-For subcommand-specific help:
-  cai <subcommand> --help
+Safe Defaults (FR-4):
+  - Credentials mode defaults to 'none' (never 'host' by default)
+  - No Docker socket mounted by default
+  - No additional volume mounts beyond workspace
 
 Volume Selection:
   Volume is automatically selected based on workspace path from config.
@@ -808,6 +824,10 @@ _containai_run_cmd() {
     local workspace=""
     local explicit_config=""
     local container_name=""
+    local agent=""
+    local image_tag=""
+    local credentials=""
+    local acknowledge_credential_risk=""
     local restart_flag=""
     local force_flag=""
     local detached_flag=""
@@ -826,6 +846,58 @@ _containai_run_cmd() {
                 shift
                 agent_args=("$@")
                 break
+                ;;
+            --agent)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --agent requires a value" >&2
+                    return 1
+                fi
+                agent="$2"
+                shift 2
+                ;;
+            --agent=*)
+                agent="${1#--agent=}"
+                if [[ -z "$agent" ]]; then
+                    echo "[ERROR] --agent requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --image-tag)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                image_tag="$2"
+                shift 2
+                ;;
+            --image-tag=*)
+                image_tag="${1#--image-tag=}"
+                if [[ -z "$image_tag" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --credentials)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --credentials requires a value" >&2
+                    return 1
+                fi
+                credentials="$2"
+                shift 2
+                ;;
+            --credentials=*)
+                credentials="${1#--credentials=}"
+                if [[ -z "$credentials" ]]; then
+                    echo "[ERROR] --credentials requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --acknowledge-credential-risk)
+                acknowledge_credential_risk="--acknowledge-credential-risk"
+                shift
                 ;;
             --data-volume)
                 if [[ -z "${2-}" ]]; then
@@ -998,6 +1070,18 @@ _containai_run_cmd() {
 
     if [[ -n "$container_name" ]]; then
         start_args+=(--name "$container_name")
+    fi
+    if [[ -n "$agent" ]]; then
+        start_args+=(--agent "$agent")
+    fi
+    if [[ -n "$image_tag" ]]; then
+        start_args+=(--image-tag "$image_tag")
+    fi
+    if [[ -n "$credentials" ]]; then
+        start_args+=(--credentials "$credentials")
+    fi
+    if [[ -n "$acknowledge_credential_risk" ]]; then
+        start_args+=("$acknowledge_credential_risk")
     fi
     if [[ -n "$restart_flag" ]]; then
         start_args+=("$restart_flag")

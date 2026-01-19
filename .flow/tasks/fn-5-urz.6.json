@@ -8,10 +8,23 @@
     "fn-5-urz.5"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "77dc9d85a3c8a4f1f0d0a7e4e7f9d8c7b6a5e4d3",
+      "47fe3749f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3",
+      "cf31c0d6b6f2fbc2e7925147a55acb7e76a36d5e"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n agent-sandbox/lib/doctor.sh",
+      "source containai.sh && cai doctor --help",
+      "source containai.sh && cai doctor --json"
+    ]
+  },
   "id": "fn-5-urz.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.6.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Decision engine + formatted doctor output",
-  "updated_at": "2026-01-19T20:36:13.603671Z"
+  "updated_at": "2026-01-19T20:56:11.410451Z"
 }

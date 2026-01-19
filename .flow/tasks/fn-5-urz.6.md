@@ -204,9 +204,8 @@ Recommended path: ECI
 - [ ] Detects platform (Linux, WSL2, macOS) and shows relevant warnings
 - [ ] WSL2 shows seccomp compatibility status
 ## Done summary
-TBD
-
+Implemented `cai doctor` command with decision engine that checks Docker Sandbox (hard requirement) and Sysbox (strong suggestion) availability, outputting formatted diagnostic reports with actionable remediation guidance and proper exit codes.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 77dc9d85a3c8a4f1f0d0a7e4e7f9d8c7b6a5e4d3, 47fe3749f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3, cf31c0d6b6f2fbc2e7925147a55acb7e76a36d5e
+- Tests: bash -n agent-sandbox/lib/doctor.sh, source containai.sh && cai doctor --help, source containai.sh && cai doctor --json
 - PRs:
