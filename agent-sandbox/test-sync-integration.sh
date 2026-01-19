@@ -125,7 +125,7 @@ test_dry_run() {
     # Run dry-run - should succeed when prerequisites are met
     local dry_run_exit=0
     local dry_run_output
-    dry_run_output=$("$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || dry_run_exit=$?
+    dry_run_output=$("$SCRIPT_DIR/sync-agent-plugins.sh" --volume "$DATA_VOLUME" --dry-run 2>&1) || dry_run_exit=$?
 
     if [[ $dry_run_exit -ne 0 ]]; then
         fail "Dry-run failed with exit code $dry_run_exit"
@@ -155,7 +155,7 @@ test_full_sync() {
 
     # Run full sync and require success
     local sync_exit=0
-    if ! "$SCRIPT_DIR/sync-agent-plugins.sh" >/dev/null 2>&1; then
+    if ! "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "$DATA_VOLUME" >/dev/null 2>&1; then
         sync_exit=$?
         fail "Full sync failed with exit code $sync_exit"
         return

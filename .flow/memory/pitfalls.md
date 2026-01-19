@@ -27,3 +27,6 @@ ln -sfn to directory paths needs rm -rf first if destination may exist as real d
 
 ## 2026-01-19 manual [pitfall]
 Git worktrees and submodules use .git file (not directory); use -e test instead of -d for git root detection
+
+## 2026-01-19 manual [pitfall]
+With set -e, capturing exit code via var=$(cmd); rc=$? is dead code - use if ! var=$(cmd); then for error handling

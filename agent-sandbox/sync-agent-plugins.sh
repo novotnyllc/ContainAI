@@ -213,16 +213,17 @@ _sync_resolve_config_volume() {
     # Use if-construct to avoid set -e terminating on non-zero exit
     local result parse_stderr
     parse_stderr=$(mktemp)
+    # Ensure temp file cleanup on function exit (handles interrupts/errors)
+    trap 'rm -f "$parse_stderr"' RETURN
+
     if ! result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" --workspace "$PWD" --config-dir "$config_dir" 2>"$parse_stderr"); then
         echo "[WARN] Failed to parse config file: $config_file" >&2
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
         fi
-        rm -f "$parse_stderr"
         return 0  # Fall back to default, don't fail hard
     fi
 
-    rm -f "$parse_stderr"
     printf '%s' "$result"
 }
 
@@ -299,13 +300,13 @@ parse_args() {
 
 # Print help message
 print_help() {
-    cat <<'EOF'
+    cat <<EOF
 Usage: sync-agent-plugins.sh [OPTIONS]
 
 Syncs agent plugins, configs, and credentials from host to Docker sandbox volume.
 
 Options:
-  --volume <name>    Docker volume name for agent data (default: sandbox-agent-data)
+  --volume <name>    Docker volume name for agent data (default: $_SYNC_DEFAULT_VOLUME)
   --config <path>    Explicit config file path (disables discovery)
   --dry-run          Show what would be synced without executing
   --help             Show this help message
@@ -314,7 +315,7 @@ Environment:
   CONTAINAI_DATA_VOLUME    Volume name (overridden by --volume)
   CONTAINAI_CONFIG         Config file path (overridden by --config)
 
-Note: Config discovery uses current directory ($PWD) as root.
+Note: Config discovery uses current directory (\$PWD) as root.
 EOF
 }
 
@@ -363,9 +364,8 @@ resolve_data_volume() {
     fi
 
     # 3. Try config discovery from $PWD
-    volume=$(_sync_resolve_config_volume "$EXPLICIT_CONFIG")
-    local resolve_rc=$?
-    if [[ $resolve_rc -ne 0 ]]; then
+    # Use if-construct to avoid set -e terminating on non-zero exit
+    if ! volume=$(_sync_resolve_config_volume "$EXPLICIT_CONFIG"); then
         # Explicit config was specified but not found - exit with error
         exit 1
     fi
