@@ -788,87 +788,43 @@ EOF
 }
 
 # ==============================================================================
-# Test 15: Relative workspace path "./" resolution
+# Test 15: Relative workspace paths are skipped (absolute paths only)
 # ==============================================================================
-test_relative_workspace_path() {
-    section "Test 15: Relative workspace path './' resolution"
+test_relative_paths_skipped() {
+    section "Test 15: Relative workspace paths are skipped"
 
-    local test_dir rel_vol
+    local test_dir
     test_dir=$(mktemp -d)
-    rel_vol="relative-vol-$$"
 
-    # Config uses "./" which should resolve to the PROJECT ROOT (parent of .containai),
-    # NOT the .containai directory itself. This is the most common user pattern.
+    # Config uses relative paths which should be SKIPPED per spec
+    # "Absolute paths only in workspace sections (skip relative)"
     mkdir -p "$test_dir/.containai"
     cat > "$test_dir/.containai/config.toml" << EOF
 [agent]
-data_volume = "default-vol"
+data_volume = "agent-default-vol"
 
 [workspace."./"]
-data_volume = "$rel_vol"
+data_volume = "relative-vol-should-be-skipped"
 EOF
 
-    # Test that relative workspace path "./" resolves to project root
+    # Test that relative workspace path "./" is skipped, falls back to [agent]
     # Must clear env vars to ensure config discovery is tested
-    # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
     if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
-        if [[ "$resolved" == "$rel_vol" ]]; then
-            pass "Relative workspace path './' resolves to project root"
+        if [[ "$resolved" == "agent-default-vol" ]]; then
+            pass "Relative workspace paths are skipped (falls back to agent default)"
         else
-            fail "Relative workspace path returned wrong volume: $resolved (expected: $rel_vol)"
+            fail "Relative path was NOT skipped: got $resolved (expected: agent-default-vol)"
             [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
         fi
     else
-        fail "Relative workspace path test failed: $resolved"
+        fail "Relative path skip test failed: $resolved"
         [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
     fi
     rm -f "$stderr_file"
 
     rm -rf "$test_dir"
-}
-
-# ==============================================================================
-# Test 16: Relative path "./subdir" in workspace section
-# ==============================================================================
-test_relative_subdir_path() {
-    section "Test 16: Relative path './subdir' in workspace section"
-
-    # Create a structure where config is at project root
-    # and we want to match a subdirectory
-    local project_dir subdir_vol
-    project_dir=$(mktemp -d)
-    subdir_vol="subdir-vol-$$"
-
-    mkdir -p "$project_dir/.containai"
-    mkdir -p "$project_dir/subdir"
-    cat > "$project_dir/.containai/config.toml" << EOF
-[agent]
-data_volume = "default-vol"
-
-[workspace."./subdir"]
-data_volume = "$subdir_vol"
-EOF
-
-    # Test from subdir - should match [workspace."./subdir"]
-    # which resolves to $project_dir/subdir (relative to project root)
-    local resolved stderr_file
-    stderr_file=$(mktemp)
-    if resolved=$(cd "$project_dir/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$project_dir/subdir'" 2>"$stderr_file"); then
-        if [[ "$resolved" == "$subdir_vol" ]]; then
-            pass "Relative workspace path './subdir' resolves correctly"
-        else
-            fail "Relative subdir path returned wrong volume: $resolved (expected: $subdir_vol)"
-            [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
-        fi
-    else
-        fail "Relative subdir path test failed: $resolved"
-        [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
-    fi
-    rm -f "$stderr_file"
-
-    rm -rf "$project_dir"
 }
 
 # ==============================================================================
@@ -909,8 +865,7 @@ main() {
     test_workspace_fallback_to_agent
     test_longest_match_wins
     test_data_volume_overrides_config
-    test_relative_workspace_path
-    test_relative_subdir_path
+    test_relative_paths_skipped
 
     # Summary
     echo ""
