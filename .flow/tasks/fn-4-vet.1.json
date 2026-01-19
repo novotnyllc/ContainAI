@@ -5,10 +5,24 @@
   "created_at": "2026-01-18T20:16:02.042611Z",
   "depends_on": [],
   "epic": "fn-4-vet",
+  "evidence": {
+    "commits": [
+      "7d212d34cbfe762e6b98f8dbe0377cd797cacf6f"
+    ],
+    "prs": [],
+    "tests": [
+      "python3 parse-toml.py simple key lookup",
+      "python3 parse-toml.py workspace matching",
+      "python3 parse-toml.py segment boundary",
+      "python3 parse-toml.py longest match wins",
+      "python3 parse-toml.py relative paths",
+      "error handling tests"
+    ]
+  },
   "id": "fn-4-vet.1",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.1.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Add TOML config parser helper script",
-  "updated_at": "2026-01-19T07:51:33.941599Z"
+  "updated_at": "2026-01-19T07:59:35.377008Z"
 }

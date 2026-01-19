@@ -288,9 +288,8 @@ python3 agent-sandbox/parse-toml.py nonexistent.toml agent.volume
 - [ ] Errors on invalid file/TOML (exit 1)
 - [ ] Has shebang `#!/usr/bin/env python3`
 ## Done summary
-TBD
-
+Created TOML config parser helper script (parse-toml.py) with two modes: simple key lookup using dot notation and workspace path matching with path-segment boundary algorithm. Implements longest-match-wins and fallback to [agent].data_volume. Handles Python 3.11+ tomllib with tomli fallback.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 7d212d34cbfe762e6b98f8dbe0377cd797cacf6f
+- Tests: python3 parse-toml.py simple key lookup, python3 parse-toml.py workspace matching, python3 parse-toml.py segment boundary, python3 parse-toml.py longest match wins, python3 parse-toml.py relative paths, error handling tests
 - PRs:
