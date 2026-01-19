@@ -128,7 +128,7 @@ Usage: containai [subcommand] [options]
        cai [subcommand] [options]
 
 Subcommands:
-  (default)     Start/attach to sandbox container
+  run           Start/attach to sandbox container (default if omitted)
   shell         Open interactive shell in running container
   doctor        Check system capabilities and show diagnostics
   import        Sync host configs to data volume
@@ -1136,6 +1136,10 @@ containai() {
 
     # Route to subcommands
     case "$subcommand" in
+        run)
+            shift
+            _containai_run_cmd "$@"
+            ;;
         shell)
             shift
             _containai_shell_cmd "$@"

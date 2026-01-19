@@ -497,6 +497,15 @@ _containai_get_container_data_volume() {
     fi
 }
 
+# Check if an image name belongs to ContainAI (from our repo)
+# Arguments: $1 = image name
+# Returns: 0=ours, 1=not ours
+_containai_is_our_image() {
+    local image_name="$1"
+    # Check if image starts with our repo prefix
+    [[ "$image_name" == "${_CONTAINAI_DEFAULT_REPO}:"* ]]
+}
+
 # Verify container was created by ContainAI (has our label or uses our image)
 # Returns: 0=ours (label or image matches), 1=foreign (no match), 2=docker error
 _containai_is_our_container() {
@@ -528,7 +537,7 @@ _containai_is_our_container() {
     # Fallback: check image (for containers without label)
     if [[ -z "$label_value" ]]; then
         image_name="$(_containai_get_container_image "$container_name")"
-        if [[ "$image_name" == "$_CONTAINAI_IMAGE" ]]; then
+        if _containai_is_our_image "$image_name"; then
             return 0
         fi
     fi
@@ -576,7 +585,7 @@ _containai_check_container_ownership() {
     echo "" >&2
     echo "  Expected label 'containai.sandbox': containai" >&2
     echo "  Actual label 'containai.sandbox':   ${label_value:-<not set>}" >&2
-    echo "  Expected image:                     $_CONTAINAI_IMAGE" >&2
+    echo "  Expected image prefix:              ${_CONTAINAI_DEFAULT_REPO}:" >&2
     echo "  Actual image:                       ${actual_image:-<unknown>}" >&2
     echo "" >&2
     echo "This is a name collision with a container not managed by ContainAI." >&2
@@ -630,7 +639,7 @@ _containai_check_volume_match() {
 #   --name <name>        Container name (default: auto-generated)
 #   --workspace <path>   Workspace path (default: $PWD)
 #   --data-volume <vol>  Data volume name (required)
-#   --agent <name>       Agent to run (claude, gemini; default: claude or from config)
+#   --agent <name>       Agent to run (claude, gemini; default: claude)
 #   --image-tag <tag>    Override image tag (default: agent-specific)
 #   --credentials <mode> Credential mode (none, host; default: none)
 #   --acknowledge-credential-risk  Required when using --credentials=host
@@ -1024,7 +1033,17 @@ _containai_start_container() {
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Attaching to running container..."
             fi
-            docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
+            # Execute agent command (with args if provided) or shell if in shell mode
+            if [[ "$shell_flag" == "true" ]]; then
+                docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
+            else
+                # Run agent with any provided arguments
+                local -a exec_cmd=("$agent")
+                if [[ ${#agent_args[@]} -gt 0 ]]; then
+                    exec_cmd+=("${agent_args[@]}")
+                fi
+                docker exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
+            fi
             ;;
         exited|created)
             if ! _containai_check_container_ownership "$container_name"; then
@@ -1152,14 +1171,16 @@ _containai_stop_all() {
         return 1
     fi
 
-    local containers labeled_containers ancestor_containers
+    local containers labeled_containers ancestor_containers_claude ancestor_containers_gemini
 
     # Use || true for set -e safety - empty result is valid
     labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || labeled_containers=""
-    ancestor_containers=$(docker ps -a --filter "ancestor=$_CONTAINAI_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_containers=""
+    # Check all known agent images from our repo
+    ancestor_containers_claude=$(docker ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:claude-code" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_containers_claude=""
+    ancestor_containers_gemini=$(docker ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:gemini-cli" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_containers_gemini=""
 
     # Use sed instead of grep -v for set -e safety (grep returns 1 on no match)
-    containers=$(printf '%s\n%s' "$labeled_containers" "$ancestor_containers" | sed -e '/^$/d' | sort -t$'\t' -k1,1 -u)
+    containers=$(printf '%s\n%s\n%s' "$labeled_containers" "$ancestor_containers_claude" "$ancestor_containers_gemini" | sed -e '/^$/d' | sort -t$'\t' -k1,1 -u)
 
     if [[ -z "$containers" ]]; then
         echo "No ContainAI containers found."
