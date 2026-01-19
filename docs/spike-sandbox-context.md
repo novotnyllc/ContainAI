@@ -2,7 +2,7 @@
 
 **Task:** fn-5-urz.1
 **Date:** 2026-01-19
-**Status:** Complete
+**Status:** Blocked - Requires Docker Desktop 4.50+ with Sandboxes
 
 ## Overview
 
@@ -171,9 +171,9 @@ Our tests confirm that Docker CLI respects context selection:
 
 3. **Default context:** Worked immediately, proving the test context was actually routing elsewhere
 
-### Finding 3: Context Architecture Implications
+### Finding 3: Context Architecture Implications (Unverified Hypothesis)
 
-Based on Docker's architecture and documentation:
+Based on Docker's architecture and documentation, we hypothesize:
 
 1. **Docker context determines the daemon endpoint.** The `--context` flag or `DOCKER_CONTEXT` env var sets which Docker daemon receives commands.
 
@@ -181,39 +181,42 @@ Based on Docker's architecture and documentation:
 
 3. **Sandboxes are Docker Desktop-specific.** They use Docker Desktop's Enhanced Container Isolation (ECI) feature, which is not available in Docker Engine.
 
-### Finding 3: Architecture Validation
+### Finding 4: Architecture Validation (Hypothesis - Pending Docker Desktop Tests)
 
-The PRD architecture is **correct**:
+The PRD architecture assumes:
 
 | Mode | Context | Implementation | Notes |
 |------|---------|----------------|-------|
 | Sandbox | `default` | `docker sandbox run` | Docker Desktop only |
 | Sysbox | `containai-secure` | `docker run --runtime=sysbox-runc` | Uses regular docker run |
 
-**Key insight:** The context question is moot for the Sandbox mode because:
+**Hypothesis:** The context question may be moot for Sandbox mode because:
 - Sandboxes only work with Docker Desktop
 - Docker Desktop is always on the `default` context (or `desktop-linux` on some systems)
 - You cannot run sandboxes against a different daemon
 
-For Sysbox mode, context **is** respected because it uses regular `docker run`, not `docker sandbox`:
+**HOWEVER**, this is unverified. The spike's core question is exactly whether `docker --context X sandbox ...` routes to context X or ignores it. This MUST be tested on Docker Desktop.
+
+For Sysbox mode, context IS respected (confirmed by our tests) because it uses regular `docker run`, not `docker sandbox`:
 - `docker --context containai-secure run --runtime=sysbox-runc` routes to the containai-secure daemon
 - This is standard Docker context behavior
 
 ## Conclusion
 
-**Context is NOT a concern for the architecture because:**
+**BLOCKED: This spike cannot be completed without Docker Desktop 4.50+.**
 
-1. **Sandbox mode:** Only works with Docker Desktop, which is always the default context. There's no scenario where you'd want to run `docker sandbox` against a different daemon.
+The core question remains unanswered:
+- Does `docker --context test-unreachable sandbox ls` fail (context respected)?
+- Or does it succeed against the default daemon (context ignored)?
 
-2. **Sysbox mode:** Uses regular `docker run` (not `docker sandbox`), which fully respects Docker context as expected.
+**What we know:**
+1. **Sysbox mode context IS respected** - Confirmed via unreachable endpoint test
+2. **docker sandbox is Docker Desktop only** - Confirmed (not available in Docker Engine)
+3. **Sandbox mode context behavior** - UNKNOWN - requires Docker Desktop testing
 
-**Recommendation:** Proceed with the Secure Engine tasks (fn-5-urz.10, fn-5-urz.11). The architecture is sound:
-- Sandbox mode: Use `docker --context default sandbox run` (or just `docker sandbox run`)
-- Sysbox mode: Use `docker --context containai-secure run --runtime=sysbox-runc`
+## Required Next Steps
 
-## Additional Notes for Full Validation
-
-For environments with Docker Desktop 4.50+, the following tests should confirm context behavior:
+To complete this spike, run these tests on **Docker Desktop 4.50+ with Sandboxes enabled**:
 
 ```bash
 # 1. Verify sandbox works on default
@@ -223,15 +226,25 @@ docker --context default sandbox ls
 # 2. Create unreachable context and test
 docker context create test-unreachable --docker "host=tcp://192.0.2.1:2375"
 docker --context test-unreachable sandbox ls
-# Expected: Connection error to 192.0.2.1 (context respected)
-# OR: "sandbox command not available" (context respected, but sandbox is DD-only)
+# Expected outcomes:
+#   A) Connection error to 192.0.2.1 → Context IS respected
+#   B) Returns results from default daemon → Context IGNORED (architecture problem)
 
-# 3. Cleanup
+# 3. Test with env var
+DOCKER_CONTEXT=test-unreachable docker sandbox ls
+
+# 4. Cleanup
 docker context rm test-unreachable
 ```
 
-## Impact on Epic
+## Impact on Epic (Pending Validation)
 
-- **fn-5-urz.10 (WSL Secure Engine):** Can proceed - uses docker run, not sandbox
-- **fn-5-urz.11 (macOS Lima VM):** Can proceed - uses docker run, not sandbox
-- **PRD updates:** None required - architecture is valid
+**DO NOT proceed with dependent tasks until this spike is completed:**
+
+- **fn-5-urz.10 (WSL Secure Engine):** BLOCKED - depends on this spike
+- **fn-5-urz.11 (macOS Lima VM):** BLOCKED - depends on this spike
+- **fn-5-urz.15 (Linux Sysbox):** CAN PROCEED - uses docker run, context verified
+- **fn-5-urz.16 (Dockerfile updates):** CAN PROCEED - uses docker run, context verified
+
+**If Docker Desktop testing shows context IS respected (outcome A):** Proceed with all tasks.
+**If context is IGNORED (outcome B):** Update PRD with ECI-only fallback recommendation.
