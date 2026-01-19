@@ -48,6 +48,19 @@ docker volume create sandbox-agent-data
 ```
 Note: sync-agent-plugins.sh syncs plugins, settings, and credentials from host to volume. **Linux/WSL only** - macOS is not yet supported by this script.
 
+**Using a custom volume name:**
+```bash
+# Via CLI flag (highest precedence)
+./sync-agent-plugins.sh --volume my-custom-volume
+
+# Via environment variable
+CONTAINAI_DATA_VOLUME=my-custom-volume ./sync-agent-plugins.sh
+
+# Via config file (~/.config/containai/config.toml or .containai/config.toml)
+# [agent]
+# data_volume = "my-custom-volume"
+```
+
 ## The `asb` Command
 
 `asb` (Agent Sandbox) is the main command for working with the sandbox.

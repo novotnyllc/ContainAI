@@ -134,6 +134,32 @@ test_dry_run() {
     fi
     pass "Dry-run command succeeded"
 
+    # Verify required output includes resolved volume name
+    if echo "$dry_run_output" | grep -q "Using data volume: $DATA_VOLUME"; then
+        pass "Dry-run output includes 'Using data volume: $DATA_VOLUME'"
+    else
+        fail "Dry-run output missing 'Using data volume: $DATA_VOLUME'"
+        info "Output: $(echo "$dry_run_output" | head -20)"
+    fi
+
+    # Test CONTAINAI_DATA_VOLUME env var precedence
+    local env_test_output
+    env_test_output=$(CONTAINAI_DATA_VOLUME="env-test-vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || true
+    if echo "$env_test_output" | grep -q "Using data volume: env-test-vol"; then
+        pass "CONTAINAI_DATA_VOLUME env var respected"
+    else
+        fail "CONTAINAI_DATA_VOLUME env var not respected"
+    fi
+
+    # Test --volume flag takes precedence over env var
+    local cli_test_output
+    cli_test_output=$(CONTAINAI_DATA_VOLUME="env-test-vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "cli-test-vol" --dry-run 2>&1) || true
+    if echo "$cli_test_output" | grep -q "Using data volume: cli-test-vol"; then
+        pass "--volume flag takes precedence over env var"
+    else
+        fail "--volume flag does not take precedence over env var"
+    fi
+
     # Capture volume snapshot after dry-run
     local after_snapshot
     after_snapshot=$(run_in_rsync 'find /data -exec stat -c "%a %s %n" {} \; 2>/dev/null | sort')

@@ -213,7 +213,7 @@ _sync_resolve_config_volume() {
     # Use if-construct to avoid set -e terminating on non-zero exit
     local result parse_stderr
     parse_stderr=$(mktemp)
-    # Ensure temp file cleanup on function exit (handles interrupts/errors)
+    # Cleanup temp file on function return (normal exit paths only)
     trap 'rm -f "$parse_stderr"' RETURN
 
     if ! result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" --workspace "$PWD" --config-dir "$config_dir" 2>"$parse_stderr"); then
@@ -414,8 +414,13 @@ check_prerequisites() {
 
     # Check if volume exists, create if not
     if ! docker volume inspect "$DATA_VOLUME" &>/dev/null; then
+        if $DRY_RUN; then
+            error "Data volume does not exist: $DATA_VOLUME"
+            error "Create it first with: docker volume create $DATA_VOLUME"
+            exit 1
+        fi
         warn "Data volume does not exist, creating..."
-        $DRY_RUN || docker volume create "$DATA_VOLUME"
+        docker volume create "$DATA_VOLUME"
     fi
 
     success "Prerequisites OK"
@@ -816,10 +821,19 @@ show_summary() {
 
 # Main
 main() {
-    # Platform guard - must run before any operations (including argument parsing)
+    # Handle --help before platform check so users can see help on any platform
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+            print_help
+            exit 0
+        fi
+    done
+
+    # Platform guard - must run before any operations
     check_platform || exit 1
 
-    # Parse arguments after platform check
+    # Parse remaining arguments after platform check
     parse_args "$@"
 
     # Initialize EXPLICIT_CONFIG from CONTAINAI_CONFIG env var if not set via --config
