@@ -40,9 +40,8 @@ Parse config, return excludes array (cumulative default + workspace).
 - [ ] Graceful fallback when Python unavailable
 - [ ] Error exit when explicit `--config` file missing
 ## Done summary
-TBD
-
+Fixed RETURN trap causing unbound variable error in _containai_parse_config. Added strict mode for explicit configs (parse failures return error instead of fallback). Improved robustness with proper JSON extraction error handling and stderr warning display.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 56b840f, 9ed8bcd, d8e86b0
+- Tests: manual function tests for all acceptance criteria
 - PRs:

@@ -7,10 +7,21 @@
     "fn-4-vet.7"
   ],
   "epic": "fn-4-vet",
+  "evidence": {
+    "commits": [
+      "56b840f",
+      "9ed8bcd",
+      "d8e86b0"
+    ],
+    "prs": [],
+    "tests": [
+      "manual function tests for all acceptance criteria"
+    ]
+  },
   "id": "fn-4-vet.8",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.8.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create lib/config.sh - config loading & volume resolution",
-  "updated_at": "2026-01-19T11:50:31.071374Z"
+  "updated_at": "2026-01-19T12:42:28.570727Z"
 }
