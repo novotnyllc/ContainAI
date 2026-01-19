@@ -9,7 +9,7 @@
 #
 # Usage:
 #   source lib/export.sh
-#   _containai_export "volume-name" "" "false" "pattern1" "pattern2"
+#   _containai_export "volume-name" "/path/to/output.tgz" "false" "pattern1" "pattern2"
 #
 # Note: config.sh is NOT required for basic export. It's only needed if the
 # caller wants to resolve excludes from config (done by containai.sh wrapper).
@@ -18,7 +18,12 @@
 #   $1 = volume name (required)
 #   $2 = output path (optional, default: ./containai-export-YYYYMMDD-HHMMSS.tgz)
 #   $3 = no_excludes flag ("true" or "false", default: "false")
-#   $@ = exclude patterns (remaining arguments, applied unless no_excludes)
+#   $@ = exclude patterns (remaining arguments after $3, applied unless no_excludes)
+#
+# Note on signature: The spec defines `_containai_export(volume, output_path,
+# excludes_array, no_excludes)` but bash cannot pass arrays in the middle.
+# This implementation uses: volume, output_path, no_excludes, ...excludes
+# The wrapper in containai.sh should call accordingly.
 #
 # Dependencies:
 #   - docker (for tar container)
@@ -124,6 +129,13 @@ _containai_export() {
         output_path="./containai-export-$(date +%Y%m%d-%H%M%S).tgz"
     fi
 
+    # Expand leading tilde safely (without eval)
+    if [[ "$output_path" == "~/"* ]]; then
+        output_path="${HOME}${output_path:1}"
+    elif [[ "$output_path" == "~" ]]; then
+        output_path="$HOME"
+    fi
+
     # Resolve output path to absolute
     local output_dir output_basename output_abs_path
     output_dir=$(dirname "$output_path")
@@ -132,6 +144,12 @@ _containai_export() {
     # Validate output directory exists
     if [[ ! -d "$output_dir" ]]; then
         _export_error "Output directory doesn't exist: $output_dir"
+        return 1
+    fi
+
+    # Check output directory is writable
+    if [[ ! -w "$output_dir" ]]; then
+        _export_error "Output directory is not writable: $output_dir"
         return 1
     fi
 
@@ -146,11 +164,17 @@ _containai_export() {
 
     # Build tar exclude flags (unless --no-excludes)
     # Note: Use separate --exclude and pattern args for BusyBox tar compatibility
+    # Patterns are relative to the archive root (tar -C /data .)
+    # Normalize patterns: strip leading ./ if present, patterns match without ./
     local -a tar_excludes=()
     if [[ "$no_excludes" != "true" ]] && [[ ${#excludes[@]} -gt 0 ]]; then
-        local pattern
+        local pattern normalized
         for pattern in "${excludes[@]}"; do
-            tar_excludes+=(--exclude "$pattern")
+            # Strip leading ./ if present
+            normalized="${pattern#./}"
+            # Skip empty patterns
+            [[ -z "$normalized" ]] && continue
+            tar_excludes+=(--exclude "$normalized")
         done
     fi
 
@@ -161,14 +185,27 @@ _containai_export() {
     fi
     tar_cmd+=(-C /data .)
 
+    # Get current user's uid:gid for proper file ownership
+    local user_id group_id
+    user_id=$(id -u)
+    group_id=$(id -g)
+
     # Run tar via docker container mounting the volume read-only
     # Output directory is mounted for writing the archive
+    # Use --user to ensure output file is owned by invoking user
     if ! docker run --rm --network=none \
+        --user "${user_id}:${group_id}" \
         -v "${volume}:/data:ro" \
         -v "${output_dir}:/out" \
-        alpine:latest \
+        alpine \
         "${tar_cmd[@]}"; then
         _export_error "Failed to create archive"
+        return 1
+    fi
+
+    # Verify archive was created
+    if [[ ! -f "$output_abs_path" ]]; then
+        _export_error "Archive was not created: $output_abs_path"
         return 1
     fi
 
