@@ -48,3 +48,6 @@ base64 -w0 is not portable (BSD/macOS lacks -w flag); use 'base64 | tr -d \n' fo
 
 ## 2026-01-19 manual [pitfall]
 BASH_SOURCE check must come AFTER BASH_VERSION check - BASH_SOURCE is bash-only and fails in sh/dash
+
+## 2026-01-19 manual [pitfall]
+Use 'cd -- "$path"' not 'cd "$path"' - paths starting with - can be misinterpreted as cd options

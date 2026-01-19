@@ -1,168 +1,187 @@
 #!/usr/bin/env python3
-"""Parse ContainAI TOML config. Requires Python 3.11+ (tomllib)."""
+"""
+parse-toml.py - Minimal TOML config parser for shell script consumption.
+
+Provides a CLI interface for reading TOML configuration values, suitable
+for calling from shell scripts that need to access config settings.
+
+Usage:
+    python3 parse-toml.py --file config.toml --key agent.data_volume
+    python3 parse-toml.py --file config.toml --json
+    python3 parse-toml.py --file config.toml --exists agent.data_volume
+"""
 import argparse
 import json
 import sys
 from pathlib import Path
 
+# Python 3.11+ has tomllib in stdlib, fallback to toml package for older versions
 try:
     import tomllib
+
+    def load_toml(path: Path) -> dict:
+        """Load TOML file using tomllib (Python 3.11+)."""
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+
 except ImportError:
-    print("Error: Python 3.11+ required (tomllib not available)", file=sys.stderr)
-    sys.exit(1)
+    try:
+        import toml
+
+        def load_toml(path: Path) -> dict:
+            """Load TOML file using toml package (Python < 3.11)."""
+            return toml.load(path)
+
+    except ImportError:
+        print(
+            "Error: No TOML parser available. Install 'toml' package for Python < 3.11",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
-def find_workspace(config: dict, workspace: str) -> dict | None:
+def get_nested_value(data: dict, key: str):
     """
-    Find workspace with longest matching path (segment boundary).
-
-    Only absolute paths in workspace sections are matched; relative paths are skipped.
+    Get a nested value from a dict using dot notation.
 
     Args:
-        config: Parsed TOML config dict
-        workspace: Workspace path to match
+        data: The dict to search
+        key: Dot-separated key path (e.g., "agent.data_volume")
 
     Returns:
-        Matched workspace section or None
+        The value if found, or None if not found
     """
-    workspace_path = Path(workspace).resolve()
-    workspaces = config.get("workspace", {})
-
-    if not isinstance(workspaces, dict):
-        return None
-
-    best_match = None
-    best_segments = 0
-
-    for path_str, section in workspaces.items():
-        if not isinstance(section, dict):
-            continue
-
-        cfg_path = Path(path_str)
-
-        # Skip relative paths (spec: "Absolute paths only")
-        if not cfg_path.is_absolute():
-            continue
-
-        cfg_path = cfg_path.resolve()
-
-        # Check if workspace is under cfg_path (segment boundary match)
-        try:
-            workspace_path.relative_to(cfg_path)
-            # Use segment count for longest match (more specific = more segments)
-            num_segments = len(cfg_path.parts)
-            if num_segments > best_segments:
-                best_match, best_segments = section, num_segments
-        except ValueError:
-            pass
-
-    return best_match
+    parts = key.split(".")
+    current = data
+    for part in parts:
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
 
 
-def validate_single_line(value: str, field_name: str) -> str:
+def key_exists(data: dict, key: str) -> bool:
     """
-    Validate that a string value is single-line (no embedded newlines).
+    Check if a nested key exists in a dict.
 
     Args:
-        value: String value to validate
-        field_name: Field name for error message
+        data: The dict to search
+        key: Dot-separated key path
 
     Returns:
-        The value if valid
-
-    Raises:
-        ValueError: If value contains newlines
+        True if key exists, False otherwise
     """
-    if "\n" in value or "\r" in value:
-        raise ValueError(f"{field_name} must be single-line (no embedded newlines)")
-    return value
+    parts = key.split(".")
+    current = data
+    for part in parts:
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    return True
+
+
+def format_value(value) -> str:
+    """
+    Format a value for shell-friendly output.
+
+    - Strings are output as-is
+    - Booleans are output as lowercase "true"/"false"
+    - Numbers are output as strings
+    - Complex types (lists, dicts) are output as JSON
+
+    Args:
+        value: The value to format
+
+    Returns:
+        String representation suitable for shell consumption
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    # For complex types (list, dict), output as JSON
+    return json.dumps(value, separators=(",", ":"))
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Parse ContainAI TOML config file"
+        description="Parse ContainAI TOML config file for shell consumption"
     )
     parser.add_argument(
-        "config",
-        help="Path to config.toml file"
+        "--file",
+        "-f",
+        required=True,
+        help="Path to TOML config file",
     )
     parser.add_argument(
-        "workspace",
-        help="Workspace path for matching"
+        "--key",
+        "-k",
+        help="Dot-separated key path to retrieve (e.g., agent.data_volume)",
     )
+    parser.add_argument(
+        "--json",
+        "-j",
+        action="store_true",
+        dest="output_json",
+        help="Output entire config as JSON",
+    )
+    parser.add_argument(
+        "--exists",
+        "-e",
+        help="Check if key exists (exit 0 if exists, 1 if not)",
+    )
+
     args = parser.parse_args()
 
-    config_path = args.config
-    workspace = args.workspace
-
-    try:
-        with open(config_path, "rb") as f:
-            config = tomllib.load(f)
-    except FileNotFoundError:
-        print(f"Error: Config file not found: {config_path}", file=sys.stderr)
+    # Validate mutually exclusive options
+    mode_count = sum([bool(args.key), args.output_json, bool(args.exists)])
+    if mode_count == 0:
+        print("Error: Must specify one of --key, --json, or --exists", file=sys.stderr)
         sys.exit(1)
-    except tomllib.TOMLDecodeError as e:
+    if mode_count > 1:
+        print(
+            "Error: Options --key, --json, and --exists are mutually exclusive",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Load the TOML file
+    config_path = Path(args.file)
+    try:
+        config = load_toml(config_path)
+    except FileNotFoundError:
+        print(f"Error: File not found: {args.file}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        # Handle TOML parse errors from either library
         print(f"Error: Invalid TOML: {e}", file=sys.stderr)
         sys.exit(1)
 
-    ws = find_workspace(config, workspace)
-    agent = config.get("agent", {})
-    default_excludes = config.get("default_excludes", [])
+    # Handle --exists mode
+    if args.exists:
+        if key_exists(config, args.exists):
+            sys.exit(0)
+        else:
+            sys.exit(1)
 
-    # Validate types
-    if not isinstance(default_excludes, list):
-        default_excludes = []
-    if not isinstance(agent, dict):
-        agent = {}
+    # Handle --json mode
+    if args.output_json:
+        print(json.dumps(config, indent=2))
+        sys.exit(0)
 
-    # Get workspace excludes if ws exists
-    ws_excludes = []
-    if ws:
-        ws_excludes = ws.get("excludes", [])
-        if not isinstance(ws_excludes, list):
-            ws_excludes = []
-
-    # Fallback chain for data_volume:
-    # 1. workspace.data_volume (if ws exists and has it)
-    # 2. agent.data_volume
-    # 3. default
-    data_volume = None
-    if ws:
-        data_volume = ws.get("data_volume")
-    if not data_volume:
-        data_volume = agent.get("data_volume", "sandbox-agent-data")
-
-    # Validate data_volume is a string
-    if not isinstance(data_volume, str):
-        print(f"Error: data_volume must be a string, got {type(data_volume).__name__}", file=sys.stderr)
-        sys.exit(1)
-
-    # Validate data_volume is single-line (required for safe parsing)
-    try:
-        validate_single_line(data_volume, "data_volume")
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # Stable de-dupe preserving order (dict.fromkeys preserves insertion order)
-    combined_excludes = default_excludes + ws_excludes
-    # Filter to only single-line strings and dedupe
-    seen = {}
-    for item in combined_excludes:
-        if isinstance(item, str) and item not in seen:
-            try:
-                validate_single_line(item, "exclude pattern")
-                seen[item] = True
-            except ValueError:
-                # Skip excludes with embedded newlines
-                print(f"Warning: Skipping exclude with embedded newline: {repr(item)}", file=sys.stderr)
-    excludes = list(seen.keys())
-
-    # Output compact JSON (no spaces) for reliable bash parsing
-    print(json.dumps({
-        "data_volume": data_volume,
-        "excludes": excludes
-    }, separators=(",", ":")))
+    # Handle --key mode
+    if args.key:
+        value = get_nested_value(config, args.key)
+        # Missing key outputs empty string and exits 0 (per spec)
+        if value is None:
+            print("")
+        else:
+            print(format_value(value))
+        sys.exit(0)
 
 
 if __name__ == "__main__":
