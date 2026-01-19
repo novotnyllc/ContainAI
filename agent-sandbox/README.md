@@ -28,6 +28,7 @@ To enable Docker sandbox:
 ./build.sh
 
 # Source aliases (adds cai/containai commands)
+# Note: requires bash (not zsh or other shells)
 source ./aliases.sh
 
 # Start sandbox

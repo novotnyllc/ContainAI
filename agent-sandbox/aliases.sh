@@ -20,9 +20,15 @@
 #
 # Suppress deprecation warning: export CONTAINAI_NO_DEPRECATION_WARNING=1
 #
-# Usage: source aliases.sh
+# Usage: source aliases.sh  (requires bash)
 # ==============================================================================
 # Note: No strict mode - this file is sourced into interactive shells
+
+# Require bash - this script uses bash-specific features (arrays, BASH_SOURCE, etc.)
+if [[ -z "${BASH_VERSION:-}" ]]; then
+    echo "[ERROR] ContainAI aliases require bash. Please run: bash -c 'source aliases.sh'" >&2
+    return 1 2>/dev/null || exit 1
+fi
 
 # Constants
 
@@ -508,7 +514,7 @@ _asb_get_container_data_volume() {
     docker inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null || echo ""
 }
 
-# Verify container was created by asb (has our label or uses our image)
+# Verify container was created by ContainAI (has our label or uses our image)
 # Returns: 0=ours (label or image matches), 1=foreign (no match)
 # Falls back to image name verification if labels not supported
 _asb_is_our_container() {
@@ -553,15 +559,15 @@ _asb_check_container_ownership() {
     if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
         actual_label="<not set>"
     fi
-    echo "[ERROR] Container '$container_name' exists but was not created by asb" >&2
+    echo "[ERROR] Container '$container_name' exists but was not created by ContainAI" >&2
     echo "" >&2
     echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
     echo "  Actual label 'asb.sandbox':   ${actual_label:-<not set>}" >&2
     echo "  Expected image:               $_ASB_IMAGE" >&2
     echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
     echo "" >&2
-    echo "This is a name collision with a container not managed by asb." >&2
-    echo "To recreate as an asb-managed sandbox container, run: asb --restart" >&2
+    echo "This is a name collision with a container not managed by ContainAI." >&2
+    echo "To recreate as a ContainAI-managed sandbox container, run: cai --restart" >&2
     echo "" >&2
     return 1
 }
@@ -611,9 +617,9 @@ _asb_check_volume_match() {
             echo "" >&2
             echo "The container was created with a different workspace/config." >&2
             echo "To use the correct volume, recreate the container:" >&2
-            echo "  asb --restart" >&2
+            echo "  cai --restart" >&2
             echo "Or specify a different container name:" >&2
-            echo "  asb --name <unique-name>" >&2
+            echo "  cai --name <unique-name>" >&2
             echo "" >&2
         fi
         return 1
@@ -916,14 +922,14 @@ _asb_impl() {
             if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
                 actual_label="<not set>"
             fi
-            echo "[ERROR] Cannot restart - container '$container_name' was not created by asb" >&2
+            echo "[ERROR] Cannot restart - container '$container_name' was not created by ContainAI" >&2
             echo "" >&2
             echo "  Expected label 'asb.sandbox': agent-sandbox" >&2
             echo "  Actual label 'asb.sandbox':   $actual_label" >&2
             echo "  Expected image:               $_ASB_IMAGE" >&2
             echo "  Actual image:                 ${actual_image:-<unknown>}" >&2
             echo "" >&2
-            echo "To avoid data loss, asb will not delete containers it didn't create." >&2
+            echo "To avoid data loss, ContainAI will not delete containers it didn't create." >&2
             echo "Remove the conflicting container manually if needed:" >&2
             echo "  docker rm -f '$container_name'" >&2
             echo "" >&2
@@ -1002,7 +1008,7 @@ _asb_impl() {
 
     case "$container_state" in
         running)
-            # Verify this container was created by asb (has our label or image)
+            # Verify this container was created by ContainAI (has our label or image)
             if ! _asb_check_container_ownership "$container_name"; then
                 return 1
             fi
@@ -1038,7 +1044,7 @@ _asb_impl() {
             ;;
         exited|created)
             # Note: shell mode with stopped containers is handled before this case statement
-            # Verify this container was created by asb (has our label or image)
+            # Verify this container was created by ContainAI (has our label or image)
             if ! _asb_check_container_ownership "$container_name"; then
                 return 1
             fi
@@ -1196,9 +1202,10 @@ cai-stop-all() {
 
 # containai-shell - open shell in sandbox
 containai-shell() {
-    # Check for help flag first
+    # Check for help flag before -- delimiter
     local arg
     for arg in "$@"; do
+        [[ "$arg" == "--" ]] && break
         if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
             _asb_shell_print_help
             return 0
@@ -1209,9 +1216,10 @@ containai-shell() {
 
 # cai-shell - open shell in sandbox
 cai-shell() {
-    # Check for help flag first
+    # Check for help flag before -- delimiter
     local arg
     for arg in "$@"; do
+        [[ "$arg" == "--" ]] && break
         if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
             _asb_shell_print_help
             return 0
@@ -1222,9 +1230,10 @@ cai-shell() {
 
 # containaid - run in detached mode
 containaid() {
-    # Check for help flag first
+    # Check for help flag before -- delimiter
     local arg
     for arg in "$@"; do
+        [[ "$arg" == "--" ]] && break
         if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
             _asb_print_help false true
             return 0
@@ -1235,9 +1244,10 @@ containaid() {
 
 # caid - run in detached mode
 caid() {
-    # Check for help flag first
+    # Check for help flag before -- delimiter
     local arg
     for arg in "$@"; do
+        [[ "$arg" == "--" ]] && break
         if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
             _asb_print_help false true
             return 0
@@ -1336,9 +1346,10 @@ asb-stop-all() {
 # Agent Sandbox Detached - deprecated, shows warning then runs detached
 asbd() {
     _containai_deprecation_check
-    # Check for help flag first
+    # Check for help flag before -- delimiter
     local arg
     for arg in "$@"; do
+        [[ "$arg" == "--" ]] && break
         if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
             _asb_print_help false true
             return 0
@@ -1379,9 +1390,10 @@ _asb_shell_print_help() {
 # Agent Sandbox Shell - deprecated, shows warning then starts with shell
 asb-shell() {
     _containai_deprecation_check
-    # Check for help flag first
+    # Check for help flag before -- delimiter
     local arg
     for arg in "$@"; do
+        [[ "$arg" == "--" ]] && break
         if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
             _asb_shell_print_help
             return 0
