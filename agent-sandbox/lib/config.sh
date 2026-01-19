@@ -4,11 +4,13 @@
 # ==============================================================================
 # This file must be sourced, not executed directly.
 #
-# NOTE: This library provides the SAME functions as aliases.sh config section.
-# It is intended to be the canonical implementation that aliases.sh and
-# sync-agent-plugins.sh will eventually source (replacing their inline copies).
-# Do NOT source both this file and aliases.sh in the same shell - they define
-# the same function names intentionally.
+# NOTE: This library is the canonical implementation of config loading.
+# It will eventually replace the inline config functions in aliases.sh and
+# sync-agent-plugins.sh. Current API differences:
+# - aliases.sh uses _containai_parse_config_for_workspace (different signature)
+# - lib/config.sh adds _containai_resolve_excludes (not in aliases.sh)
+# Do NOT source both this file and aliases.sh in the same shell until
+# aliases.sh is migrated to source this library.
 #
 # Provides:
 #   _containai_find_config        - Find config file by walking up from workspace
@@ -238,17 +240,42 @@ _containai_parse_config() {
         fi
         return 0  # Graceful fallback in non-strict mode
     fi
+
+    # Show any warnings from parse-toml.py (e.g., "skipping exclude with newline")
+    if [[ -s "$parse_stderr" ]]; then
+        cat "$parse_stderr" >&2
+    fi
     rm -f "$parse_stderr"
 
-    # Extract volume from JSON
-    _CAI_VOLUME=$(_containai_extract_volume "$json_result")
+    # Extract volume from JSON - guard against Python failures
+    local extract_vol extract_exc
+    if ! extract_vol=$(_containai_extract_volume "$json_result"); then
+        if [[ "$strict" == "strict" ]]; then
+            echo "[ERROR] Failed to extract volume from config JSON" >&2
+            return 1
+        fi
+        echo "[WARN] Failed to extract volume from config JSON" >&2
+        return 0
+    fi
+    _CAI_VOLUME="$extract_vol"
 
-    # Extract excludes from JSON into array
+    # Extract excludes from JSON into array - guard against Python failures
+    if ! extract_exc=$(_containai_extract_excludes "$json_result"); then
+        if [[ "$strict" == "strict" ]]; then
+            echo "[ERROR] Failed to extract excludes from config JSON" >&2
+            return 1
+        fi
+        echo "[WARN] Failed to extract excludes from config JSON" >&2
+        return 0
+    fi
+
+    # Parse excludes into array (empty lines are valid empty-string excludes per parse-toml.py,
+    # but we skip them as they have no meaning for rsync --exclude)
     while IFS= read -r line; do
         if [[ -n "$line" ]]; then
             _CAI_EXCLUDES+=("$line")
         fi
-    done < <(_containai_extract_excludes "$json_result")
+    done <<< "$extract_exc"
 
     return 0
 }
