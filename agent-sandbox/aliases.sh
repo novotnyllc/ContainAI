@@ -569,6 +569,7 @@ _asb_print_help() {
     echo "The workspace is exposed inside the sandbox at the same path as on the host."
     echo ""
     echo "Options:"
+    echo "      --data-volume string    Data volume name (default: from config or sandbox-agent-data)"
     echo "  -D, --debug                 Enable debug logging"
     if [[ "$show_detached" == "true" ]]; then
         echo "  -d, --detached              Create sandbox without running agent interactively"
@@ -600,6 +601,7 @@ asb() {
     local mount_docker_socket=false
     local please_root_my_host=false
     local workspace=""
+    local data_volume=""
     local -a env_vars=()
     local -a extra_volumes=()
     local -a agent_args=()
@@ -670,6 +672,18 @@ asb() {
                 ;;
             -w*)
                 workspace="${1#-w}"
+                shift
+                ;;
+            --data-volume)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
+                data_volume="$2"
+                shift 2
+                ;;
+            --data-volume=*)
+                data_volume="${1#--data-volume=}"
                 shift
                 ;;
             --env|-e)
@@ -906,17 +920,29 @@ asb() {
                 return 1
             fi
 
-            # Ensure volumes exist (asb-managed)
-            if ! _asb_ensure_volumes; then
-                echo "[ERROR] Volume setup failed. Cannot start container." >&2
+            # Resolve data volume (uses CLI flag, env var, config, or default)
+            local resolved_volume workspace_for_resolve
+            workspace_for_resolve="${workspace:-$PWD}"
+            resolved_volume=$(_containai_resolve_volume "$data_volume" "$workspace_for_resolve")
+            if [[ $? -ne 0 ]]; then
+                echo "[ERROR] Failed to resolve data volume" >&2
                 return 1
             fi
 
-            # Build volume arguments (asb-managed volumes)
-            local vol_args=() vol_spec
-            for vol_spec in "${_ASB_VOLUMES[@]}"; do
-                vol_args+=("-v" "$vol_spec")
-            done
+            # Ensure resolved volume exists
+            if ! docker volume inspect "$resolved_volume" >/dev/null 2>&1; then
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "Creating volume: $resolved_volume"
+                fi
+                if ! docker volume create "$resolved_volume" >/dev/null; then
+                    echo "[ERROR] Failed to create volume $resolved_volume" >&2
+                    return 1
+                fi
+            fi
+
+            # Build volume arguments with resolved volume
+            local vol_args=()
+            vol_args+=("-v" "$resolved_volume:/mnt/agent-data")
 
             # Get sandbox run help to check supported flags
             local sandbox_help sandbox_help_rc
