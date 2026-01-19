@@ -284,9 +284,14 @@ _cai_docker_desktop_version() {
         return 1
     fi
 
-    # Validate semver format (at least major.minor)
-    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+ ]]; then
+    # Validate and normalize semver format (major.minor.patch)
+    # Accept X.Y or X.Y.Z, normalize to X.Y.Z
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
         return 1
+    fi
+    # Normalize X.Y to X.Y.0 for consistent semver output
+    if [[ ! "$version" =~ \.[0-9]+\.[0-9]+$ ]]; then
+        version="${version}.0"
     fi
 
     printf '%s' "$version"
@@ -333,7 +338,9 @@ _cai_sandbox_available() {
         return 0
     fi
 
-    # Daemon not running - can't determine availability
+    # Daemon not running - plugin may exist but we can't verify
+    # Return 1 here; _cai_sandbox_feature_enabled handles daemon checks separately
+    # and provides actionable error messages
     if printf '%s' "$version_output" | grep -qiE "daemon.*not running|connection refused|Is the docker daemon running|Cannot connect"; then
         return 1
     fi
@@ -371,8 +378,8 @@ _cai_sandbox_feature_enabled() {
                 _cai_error "  Check DOCKER_CONTEXT / DOCKER_HOST settings"
                 ;;
             *)
-                _cai_error "Docker Desktop is not running"
-                _cai_error "  Start Docker Desktop and try again"
+                _cai_error "Docker daemon is not accessible"
+                _cai_error "  Run 'docker info' to diagnose the issue"
                 ;;
         esac
         return 1
@@ -455,9 +462,14 @@ _cai_sandbox_feature_enabled() {
     fi
 
     # Analyze error message for specific failure modes
+    # These patterns are based on documented Docker Desktop error messages:
+    # - "This feature has been locked by your administrator"
+    # - "Beta features are disabled by your administrator"
+    # - Settings Management policy blocks
 
     # Admin policy blocks beta features
-    if printf '%s' "$ls_output" | grep -qiE "beta.*disabled|disabled.*admin|administrator.*policy|settings.*management|locked.*admin|admin.*locked"; then
+    # Pattern matches: "locked by.*admin", "disabled by.*admin", "administrator policy"
+    if printf '%s' "$ls_output" | grep -qiE "locked by[^.]*admin|disabled by[^.]*admin|administrator[[:space:]]+policy|settings[[:space:]]+management.*lock"; then
         _cai_error "Sandboxes disabled by administrator policy"
         _cai_error "  Ask your administrator to allow beta features"
         _cai_error "  See: https://docs.docker.com/desktop/settings-and-maintenance/settings/"
@@ -480,10 +492,8 @@ _cai_sandbox_feature_enabled() {
         return 1
     fi
 
-    # Empty list messages still indicate success
-    if printf '%s' "$ls_output" | grep -qiE "no sandboxes|0 sandboxes|empty"; then
-        return 0
-    fi
+    # Note: We do NOT try to infer success from output strings on non-zero exit.
+    # Exit code is authoritative - if docker sandbox ls fails, we fail.
 
     # Unknown error - report it with proper formatting
     _cai_error "Docker Sandboxes check failed"

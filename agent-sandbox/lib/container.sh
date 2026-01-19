@@ -80,18 +80,13 @@ _containai__validate_volume_name() {
 
 # Check if Docker is available and responsive
 # Returns: 0=available, 1=not available (with error message)
+# Note: Uses _cai_docker_available for timeout-protected daemon check
 _containai_check_docker() {
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "[ERROR] Docker is not installed or not in PATH" >&2
+    # Delegate to lib/docker.sh which has timeout protection
+    # The 'verbose' flag enables actionable error messages
+    if ! _cai_docker_available verbose; then
         return 1
     fi
-
-    # Quick liveness check
-    if ! docker info >/dev/null 2>&1; then
-        echo "[ERROR] Docker daemon is not accessible" >&2
-        return 1
-    fi
-
     return 0
 }
 
@@ -174,9 +169,9 @@ _containai_check_isolation() {
         return 2
     fi
 
-    # Use docker info --format for reliable structured output
+    # Use docker info --format for reliable structured output with timeout
     # Use if ! pattern for set -e safety
-    if ! runtime=$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then
+    if ! runtime=$(_cai_timeout 5 docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then
         echo "[WARN] Unable to determine isolation status" >&2
         return 2
     fi
@@ -186,8 +181,9 @@ _containai_check_isolation() {
     fi
 
     # These can fail without blocking (we only use them if available)
-    rootless=$(docker info --format '{{.Rootless}}' 2>/dev/null) || rootless=""
-    userns=$(docker info --format '{{.SecurityOptions}}' 2>/dev/null) || userns=""
+    # Use timeout to avoid hanging on slow/unhealthy daemons
+    rootless=$(_cai_timeout 5 docker info --format '{{.Rootless}}' 2>/dev/null) || rootless=""
+    userns=$(_cai_timeout 5 docker info --format '{{.SecurityOptions}}' 2>/dev/null) || userns=""
 
     # ECI enabled - sysbox-runc runtime
     if [[ "$runtime" == "sysbox-runc" ]]; then
@@ -880,8 +876,9 @@ _containai_start_container() {
             vol_args+=("-v" "$data_volume:/mnt/agent-data")
 
             # Check sandbox run help for supported flags - use if ! pattern for set -e safety
+            # Use timeout to avoid hanging if CLI/daemon wedges
             local sandbox_help
-            if ! sandbox_help=$(docker sandbox run --help 2>&1); then
+            if ! sandbox_help=$(_cai_timeout 10 docker sandbox run --help 2>&1); then
                 echo "[ERROR] docker sandbox run is not available" >&2
                 return 1
             fi
