@@ -718,6 +718,10 @@ _containai_start_container() {
     local image_tag=""
     local credentials="$_CONTAINAI_DEFAULT_CREDENTIALS"
     local acknowledge_credential_risk=false
+    local allow_host_credentials=false
+    local ack_host_credentials=false
+    local allow_host_docker_socket=false
+    local ack_host_docker_socket=false
     local volume_mismatch_warn=false
     local restart_flag=false
     local force_flag=false
@@ -887,6 +891,22 @@ _containai_start_container() {
                 please_root_my_host=true
                 shift
                 ;;
+            --allow-host-credentials)
+                allow_host_credentials=true
+                shift
+                ;;
+            --i-understand-this-exposes-host-credentials)
+                ack_host_credentials=true
+                shift
+                ;;
+            --allow-host-docker-socket)
+                allow_host_docker_socket=true
+                shift
+                ;;
+            --i-understand-this-grants-root-access)
+                ack_host_docker_socket=true
+                shift
+                ;;
             --env|-e)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --env requires a value" >&2
@@ -937,24 +957,75 @@ _containai_start_container() {
         agent="$_CONTAINAI_DEFAULT_AGENT"
     fi
 
+    # FR-5: Unsafe opt-ins with acknowledgements
+    # New flags: --allow-host-credentials + --i-understand-this-exposes-host-credentials
+    # Legacy flags: --credentials=host + --acknowledge-credential-risk (kept for compatibility)
+    # Config [danger].allow_host_credentials can pre-enable but CLI ack is still required
+
+    # Resolve allow_host_credentials from config if not already set via CLI
+    if [[ "$allow_host_credentials" != "true" ]]; then
+        local config_allow_creds
+        config_allow_creds=$(_containai_resolve_danger_allow_host_credentials "${workspace:-$PWD}" "$explicit_config")
+        if [[ "$config_allow_creds" == "true" ]]; then
+            allow_host_credentials=true
+        fi
+    fi
+
+    # Validate --allow-host-credentials requires acknowledgement
+    if [[ "$allow_host_credentials" == "true" ]]; then
+        if [[ "$ack_host_credentials" != "true" ]]; then
+            echo "" >&2
+            echo "[ERROR] --allow-host-credentials requires --i-understand-this-exposes-host-credentials" >&2
+            echo "" >&2
+            echo "This will share your host credentials with the sandbox:" >&2
+            echo "  - ~/.ssh (SSH keys, config)" >&2
+            echo "  - ~/.gitconfig (git identity, credentials)" >&2
+            echo "  - API tokens and credentials stored in your home directory" >&2
+            echo "" >&2
+            echo "The AI agent will have access to these sensitive files." >&2
+            echo "" >&2
+            echo "To proceed, add: --i-understand-this-exposes-host-credentials" >&2
+            echo "" >&2
+            return 1
+        fi
+        # Override credentials to host when using the new flag
+        credentials="host"
+        # Print warning even with acknowledgement
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "[WARN] Running with host credentials - ~/.ssh, ~/.gitconfig, and other credentials are accessible" >&2
+        fi
+    fi
+
+    # Legacy path: --credentials=host with --acknowledge-credential-risk
+    # Keep backward compatibility
+    if [[ "$credentials" == "host" && "$allow_host_credentials" != "true" ]]; then
+        if [[ "$acknowledge_credential_risk" != "true" ]]; then
+            echo "" >&2
+            echo "[ERROR] --credentials=host requires --acknowledge-credential-risk" >&2
+            echo "" >&2
+            echo "Using --credentials=host forwards your host credentials to the sandbox." >&2
+            echo "This grants the AI agent access to your credentials (API keys, tokens, etc.)." >&2
+            echo "" >&2
+            echo "To proceed, add: --acknowledge-credential-risk" >&2
+            echo "" >&2
+            echo "Alternatively, use the new explicit flags:" >&2
+            echo "  --allow-host-credentials --i-understand-this-exposes-host-credentials" >&2
+            echo "" >&2
+            return 1
+        fi
+        # Print warning even with acknowledgement
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "[WARN] Running with host credentials - ~/.ssh, ~/.gitconfig, and other credentials are accessible" >&2
+        fi
+    fi
+
     # Validate credentials mode (FR-4: safe defaults)
     case "$credentials" in
         none)
             # Safe default - no acknowledgement required
             ;;
         host)
-            # Risky - requires explicit acknowledgement
-            if [[ "$acknowledge_credential_risk" != "true" ]]; then
-                echo "" >&2
-                echo "[ERROR] --credentials=host requires --acknowledge-credential-risk" >&2
-                echo "" >&2
-                echo "Using --credentials=host forwards your host credentials to the sandbox." >&2
-                echo "This grants the AI agent access to your credentials (API keys, tokens, etc.)." >&2
-                echo "" >&2
-                echo "To proceed, add: --acknowledge-credential-risk" >&2
-                echo "" >&2
-                return 1
-            fi
+            # Already validated above (via allow_host_credentials or legacy path)
             ;;
         *)
             echo "[ERROR] Invalid credentials mode: $credentials" >&2
@@ -963,15 +1034,67 @@ _containai_start_container() {
             ;;
     esac
 
-    # Safety check for --mount-docker-socket
-    if [[ "$mount_docker_socket" == "true" && "$please_root_my_host" != "true" ]]; then
-        echo "" >&2
-        echo "[ERROR] --mount-docker-socket requires --please-root-my-host acknowledgement" >&2
-        echo "" >&2
-        echo "Mounting the Docker socket grants FULL ROOT ACCESS to your host system." >&2
-        echo "This COMPLETELY DEFEATS the purpose of running in a sandbox." >&2
-        echo "" >&2
-        return 1
+    # FR-5: Unsafe opt-ins for Docker socket
+    # New flags: --allow-host-docker-socket + --i-understand-this-grants-root-access
+    # Legacy flags: --mount-docker-socket + --please-root-my-host (kept for compatibility)
+    # Config [danger].allow_host_docker_socket can pre-enable but CLI ack is still required
+
+    # Resolve allow_host_docker_socket from config if not already set via CLI
+    if [[ "$allow_host_docker_socket" != "true" ]]; then
+        local config_allow_socket
+        config_allow_socket=$(_containai_resolve_danger_allow_host_docker_socket "${workspace:-$PWD}" "$explicit_config")
+        if [[ "$config_allow_socket" == "true" ]]; then
+            allow_host_docker_socket=true
+        fi
+    fi
+
+    # Validate --allow-host-docker-socket requires acknowledgement
+    if [[ "$allow_host_docker_socket" == "true" ]]; then
+        if [[ "$ack_host_docker_socket" != "true" ]]; then
+            echo "" >&2
+            echo "[ERROR] --allow-host-docker-socket requires --i-understand-this-grants-root-access" >&2
+            echo "" >&2
+            echo "Mounting the Docker socket grants FULL ROOT ACCESS to your host system." >&2
+            echo "" >&2
+            echo "Risks:" >&2
+            echo "  - Complete sandbox escape possible" >&2
+            echo "  - AI agent can run arbitrary containers with host access" >&2
+            echo "  - Host filesystem can be mounted and modified" >&2
+            echo "  - Privilege escalation to root on host is trivial" >&2
+            echo "" >&2
+            echo "This COMPLETELY DEFEATS the purpose of running in a sandbox." >&2
+            echo "" >&2
+            echo "To proceed, add: --i-understand-this-grants-root-access" >&2
+            echo "" >&2
+            return 1
+        fi
+        # Enable the underlying flag
+        mount_docker_socket=true
+        # Print warning even with acknowledgement
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "[WARN] Docker socket mounted - sandbox isolation is BYPASSED, root access to host is possible" >&2
+        fi
+    fi
+
+    # Legacy path: --mount-docker-socket with --please-root-my-host
+    # Keep backward compatibility
+    if [[ "$mount_docker_socket" == "true" && "$allow_host_docker_socket" != "true" ]]; then
+        if [[ "$please_root_my_host" != "true" ]]; then
+            echo "" >&2
+            echo "[ERROR] --mount-docker-socket requires --please-root-my-host acknowledgement" >&2
+            echo "" >&2
+            echo "Mounting the Docker socket grants FULL ROOT ACCESS to your host system." >&2
+            echo "This COMPLETELY DEFEATS the purpose of running in a sandbox." >&2
+            echo "" >&2
+            echo "Alternatively, use the new explicit flags:" >&2
+            echo "  --allow-host-docker-socket --i-understand-this-grants-root-access" >&2
+            echo "" >&2
+            return 1
+        fi
+        # Print warning even with acknowledgement
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "[WARN] Docker socket mounted - sandbox isolation is BYPASSED, root access to host is possible" >&2
+        fi
     fi
 
     # Resolve image based on agent and optional tag override

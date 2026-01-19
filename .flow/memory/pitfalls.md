@@ -54,3 +54,6 @@ Use 'cd -- "$path"' not 'cd "$path"' - paths starting with - can be misinterpret
 
 ## 2026-01-19 manual [pitfall]
 Bash heredocs (<<EOF) override stdin for the command - cannot pipe data into python3 - with heredoc script
+
+## 2026-01-19 manual [pitfall]
+When capturing function output to a variable, use stdout-only capture; mixing stderr with 2>&1 can pollute the value with warning messages

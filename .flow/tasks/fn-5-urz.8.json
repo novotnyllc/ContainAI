@@ -8,10 +8,32 @@
     "fn-5-urz.7"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "fc80595",
+      "1e50eb7",
+      "ce70ad8",
+      "c1df007",
+      "af3046e",
+      "d96eea3"
+    ],
+    "prs": [],
+    "reviews": [
+      "codex-round1-NEEDS_WORK",
+      "codex-round2-NEEDS_WORK",
+      "codex-round3-NEEDS_WORK-addressed"
+    ],
+    "tests": [
+      "bash -n containai.sh",
+      "bash -n lib/container.sh",
+      "bash -n lib/doctor.sh",
+      "bash -n lib/config.sh"
+    ]
+  },
   "id": "fn-5-urz.8",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.8.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Context auto-selection (ECI vs Secure Engine)",
-  "updated_at": "2026-01-19T21:57:40.626863Z"
+  "updated_at": "2026-01-19T22:59:13.026879Z"
 }

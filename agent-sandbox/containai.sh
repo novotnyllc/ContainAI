@@ -151,7 +151,16 @@ Run Options:
   -e, --env <VAR=val>   Set environment variable (repeatable)
   -- <args>             Pass arguments to agent
 
-Security Options:
+Security Options (FR-5 Unsafe Opt-ins):
+  --allow-host-credentials        Enable host credential sharing (requires ack)
+  --i-understand-this-exposes-host-credentials
+                                  Required acknowledgement for --allow-host-credentials
+  --allow-host-docker-socket      Mount Docker socket (requires ack)
+  --i-understand-this-grants-root-access
+                                  Required acknowledgement for --allow-host-docker-socket
+
+  Legacy security options (deprecated, use above instead):
+  --credentials <mode>            Credential mode (none, host; default: none)
   --acknowledge-credential-risk   Required when using --credentials=host
   --mount-docker-socket           Mount Docker socket (DANGEROUS)
   --please-root-my-host           Acknowledge Docker socket danger
@@ -271,6 +280,14 @@ Options:
   -e, --env <VAR=val>   Set environment variable (repeatable)
   -v, --volume <spec>   Extra volume mount (repeatable)
   -h, --help            Show this help message
+
+Security Options (FR-5 Unsafe Opt-ins):
+  --allow-host-credentials        Enable host credential sharing (requires ack)
+  --i-understand-this-exposes-host-credentials
+                                  Required acknowledgement for --allow-host-credentials
+  --allow-host-docker-socket      Mount Docker socket (requires ack)
+  --i-understand-this-grants-root-access
+                                  Required acknowledgement for --allow-host-docker-socket
 
 Examples:
   cai shell                    Open shell in default sandbox
@@ -621,6 +638,10 @@ _containai_shell_cmd() {
     local debug_flag=""
     local mount_docker_socket=""
     local please_root_my_host=""
+    local allow_host_credentials=""
+    local ack_host_credentials=""
+    local allow_host_docker_socket=""
+    local ack_host_docker_socket=""
     local -a env_vars=()
     local -a extra_volumes=()
 
@@ -724,6 +745,22 @@ _containai_shell_cmd() {
                 please_root_my_host="--please-root-my-host"
                 shift
                 ;;
+            --allow-host-credentials)
+                allow_host_credentials="--allow-host-credentials"
+                shift
+                ;;
+            --i-understand-this-exposes-host-credentials)
+                ack_host_credentials="--i-understand-this-exposes-host-credentials"
+                shift
+                ;;
+            --allow-host-docker-socket)
+                allow_host_docker_socket="--allow-host-docker-socket"
+                shift
+                ;;
+            --i-understand-this-grants-root-access)
+                ack_host_docker_socket="--i-understand-this-grants-root-access"
+                shift
+                ;;
             --env|-e)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --env requires a value" >&2
@@ -817,6 +854,18 @@ _containai_shell_cmd() {
     if [[ -n "$please_root_my_host" ]]; then
         start_args+=("$please_root_my_host")
     fi
+    if [[ -n "$allow_host_credentials" ]]; then
+        start_args+=("$allow_host_credentials")
+    fi
+    if [[ -n "$ack_host_credentials" ]]; then
+        start_args+=("$ack_host_credentials")
+    fi
+    if [[ -n "$allow_host_docker_socket" ]]; then
+        start_args+=("$allow_host_docker_socket")
+    fi
+    if [[ -n "$ack_host_docker_socket" ]]; then
+        start_args+=("$ack_host_docker_socket")
+    fi
     local env_var vol
     for env_var in "${env_vars[@]}"; do
         start_args+=(--env "$env_var")
@@ -838,6 +887,10 @@ _containai_run_cmd() {
     local image_tag=""
     local credentials=""
     local acknowledge_credential_risk=""
+    local allow_host_credentials=""
+    local ack_host_credentials=""
+    local allow_host_docker_socket=""
+    local ack_host_docker_socket=""
     local restart_flag=""
     local force_flag=""
     local detached_flag=""
@@ -1009,6 +1062,22 @@ _containai_run_cmd() {
                 please_root_my_host="--please-root-my-host"
                 shift
                 ;;
+            --allow-host-credentials)
+                allow_host_credentials="--allow-host-credentials"
+                shift
+                ;;
+            --i-understand-this-exposes-host-credentials)
+                ack_host_credentials="--i-understand-this-exposes-host-credentials"
+                shift
+                ;;
+            --allow-host-docker-socket)
+                allow_host_docker_socket="--allow-host-docker-socket"
+                shift
+                ;;
+            --i-understand-this-grants-root-access)
+                ack_host_docker_socket="--i-understand-this-grants-root-access"
+                shift
+                ;;
             --env|-e)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --env requires a value" >&2
@@ -1122,6 +1191,18 @@ _containai_run_cmd() {
     fi
     if [[ -n "$please_root_my_host" ]]; then
         start_args+=("$please_root_my_host")
+    fi
+    if [[ -n "$allow_host_credentials" ]]; then
+        start_args+=("$allow_host_credentials")
+    fi
+    if [[ -n "$ack_host_credentials" ]]; then
+        start_args+=("$ack_host_credentials")
+    fi
+    if [[ -n "$allow_host_docker_socket" ]]; then
+        start_args+=("$allow_host_docker_socket")
+    fi
+    if [[ -n "$ack_host_docker_socket" ]]; then
+        start_args+=("$ack_host_docker_socket")
     fi
     local env_var
     for env_var in "${env_vars[@]}"; do

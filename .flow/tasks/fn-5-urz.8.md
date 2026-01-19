@@ -76,9 +76,8 @@ context_name = "containai-secure"  # or custom name
 - [ ] Debug output shows which context was selected
 - [ ] Works correctly per spike (fn-5-urz.1): Sysbox context confirmed, sandbox context pending Docker Desktop testing
 ## Done summary
-TBD
-
+Implemented Docker context auto-selection based on isolation availability. The system now automatically selects ECI path (default context with Docker Desktop) when ECI is enabled AND sandbox feature is available, or falls back to Sysbox path (configured or default containai-secure context) when Sysbox is available. Addresses all acceptance criteria including config override support, debug output, and actionable error messages.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: fc80595, 1e50eb7, ce70ad8, c1df007, af3046e, d96eea3
+- Tests: bash -n containai.sh, bash -n lib/container.sh, bash -n lib/doctor.sh, bash -n lib/config.sh
 - PRs:
