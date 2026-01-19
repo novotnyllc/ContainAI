@@ -17,7 +17,12 @@ set -euo pipefail
 # Constants
 readonly HOST_CLAUDE_PLUGINS_DIR="$HOME/.claude/plugins"
 readonly HOST_CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-readonly DATA_VOLUME="sandbox-agent-data"
+
+# Default volume name (can be overridden via CLI, env, or config)
+readonly _SYNC_DEFAULT_VOLUME="sandbox-agent-data"
+
+# Script directory for locating parse-toml.py
+_SYNC_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # User-specific path (auto-detected)
 readonly HOST_PATH_PREFIX="$HOME/.claude/plugins/"
@@ -104,6 +109,125 @@ error() { echo "❌ $*" >&2; }
 warn() { echo "⚠️  $*"; }
 step() { echo "→ $*"; }
 
+# ==============================================================================
+# Volume name resolution functions
+# ==============================================================================
+
+# Validate Docker volume name pattern
+# Pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
+# Length: 1-255 characters
+# Returns: 0=valid, 1=invalid
+_sync_validate_volume_name() {
+    local name="$1"
+
+    # Check length
+    if [[ -z "$name" ]] || [[ ${#name} -gt 255 ]]; then
+        return 1
+    fi
+
+    # Check pattern: must start with alphanumeric, followed by alphanumeric, underscore, dot, or dash
+    if [[ ! "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Find config file by walking up from $PWD
+# Checks: .containai/config.toml then falls back to XDG_CONFIG_HOME
+# Outputs: config file path (or empty if not found)
+_sync_find_config() {
+    local dir config_file git_root_found
+
+    dir="$PWD"
+    git_root_found=false
+
+    # Walk up directory tree looking for .containai/config.toml
+    while [[ "$dir" != "/" ]]; do
+        config_file="$dir/.containai/config.toml"
+        if [[ -f "$config_file" ]]; then
+            printf '%s' "$config_file"
+            return 0
+        fi
+
+        # Check for git root (stop walking up after git root)
+        # Use -e to handle both .git directory and .git file (worktrees/submodules)
+        if [[ -e "$dir/.git" ]]; then
+            git_root_found=true
+            break
+        fi
+
+        dir=$(dirname "$dir")
+    done
+
+    # Only check root directory if we actually walked to / (no git root found)
+    if [[ "$git_root_found" == "false" && -f "/.containai/config.toml" ]]; then
+        printf '%s' "/.containai/config.toml"
+        return 0
+    fi
+
+    # Fall back to XDG_CONFIG_HOME
+    local xdg_config="${XDG_CONFIG_HOME:-$HOME/.config}"
+    config_file="$xdg_config/containai/config.toml"
+    if [[ -f "$config_file" ]]; then
+        printf '%s' "$config_file"
+        return 0
+    fi
+
+    # Not found
+    return 0
+}
+
+# Resolve volume from config file
+# Arguments: $1 = explicit config path (optional)
+# Outputs: data_volume value (or empty if not found/no config)
+_sync_resolve_config_volume() {
+    local explicit_config="${1:-}"
+    local config_file config_dir
+
+    # Find config file
+    if [[ -n "$explicit_config" ]]; then
+        if [[ ! -f "$explicit_config" ]]; then
+            echo "[ERROR] Config file not found: $explicit_config" >&2
+            return 1
+        fi
+        config_file="$explicit_config"
+    else
+        config_file=$(_sync_find_config)
+    fi
+
+    # No config file found - return empty (caller uses default)
+    if [[ -z "$config_file" ]]; then
+        return 0
+    fi
+
+    config_dir=$(dirname "$config_file")
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "[WARN] Python not found, cannot parse config. Using default." >&2
+        return 0
+    fi
+
+    # Call parse-toml.py in workspace matching mode (workspace = $PWD)
+    local result parse_stderr parse_rc
+    parse_stderr=$(mktemp)
+    result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" --workspace "$PWD" --config-dir "$config_dir" 2>"$parse_stderr")
+    parse_rc=$?
+
+    if [[ $parse_rc -ne 0 ]]; then
+        echo "[WARN] Failed to parse config file: $config_file" >&2
+        if [[ -s "$parse_stderr" ]]; then
+            cat "$parse_stderr" >&2
+        fi
+        rm -f "$parse_stderr"
+        return 0  # Fall back to default, don't fail hard
+    fi
+
+    rm -f "$parse_stderr"
+    printf '%s' "$result"
+}
+
 # Platform guard - blocks on macOS, allows Linux/WSL only
 check_platform() {
     local platform
@@ -131,8 +255,32 @@ parse_args() {
                 DRY_RUN=true
                 shift
                 ;;
+            --volume)
+                if [[ -z "${2:-}" ]]; then
+                    error "--volume requires a value"
+                    exit 1
+                fi
+                CLI_VOLUME="$2"
+                shift 2
+                ;;
+            --volume=*)
+                CLI_VOLUME="${1#--volume=}"
+                shift
+                ;;
+            --config)
+                if [[ -z "${2:-}" ]]; then
+                    error "--config requires a value"
+                    exit 1
+                fi
+                EXPLICIT_CONFIG="$2"
+                shift 2
+                ;;
+            --config=*)
+                EXPLICIT_CONFIG="${1#--config=}"
+                shift
+                ;;
             --help|-h)
-                head -20 "$0" | tail -15
+                print_help
                 exit 0
                 ;;
             *)
@@ -143,8 +291,83 @@ parse_args() {
     done
 }
 
+# Print help message
+print_help() {
+    cat <<'EOF'
+Usage: sync-agent-plugins.sh [OPTIONS]
+
+Syncs agent plugins, configs, and credentials from host to Docker sandbox volume.
+
+Options:
+  --volume <name>    Docker volume name for agent data (default: sandbox-agent-data)
+  --config <path>    Explicit config file path (disables discovery)
+  --dry-run          Show what would be synced without executing
+  --help             Show this help message
+
+Environment:
+  CONTAINAI_DATA_VOLUME    Volume name (overridden by --volume)
+  CONTAINAI_CONFIG         Config file path (overridden by --config)
+
+Note: Config discovery uses current directory ($PWD) as root.
+EOF
+}
+
 # Global flags (set by parse_args)
 DRY_RUN=false
+CLI_VOLUME=""
+EXPLICIT_CONFIG=""
+
+# DATA_VOLUME is set after resolve_data_volume() is called
+DATA_VOLUME=""
+
+# Resolve data volume with precedence:
+# 1. --volume CLI flag (skips config parsing)
+# 2. CONTAINAI_DATA_VOLUME env var (skips config parsing)
+# 3. Config file value (from $PWD discovery)
+# 4. Default: sandbox-agent-data
+resolve_data_volume() {
+    local volume=""
+
+    # 1. CLI flag always wins - SKIP all config parsing
+    if [[ -n "$CLI_VOLUME" ]]; then
+        if ! _sync_validate_volume_name "$CLI_VOLUME"; then
+            error "Invalid volume name: $CLI_VOLUME"
+            exit 1
+        fi
+        DATA_VOLUME="$CLI_VOLUME"
+        return 0
+    fi
+
+    # 2. Environment variable - SKIP all config parsing
+    if [[ -n "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+        if ! _sync_validate_volume_name "$CONTAINAI_DATA_VOLUME"; then
+            error "Invalid volume name in CONTAINAI_DATA_VOLUME: $CONTAINAI_DATA_VOLUME"
+            exit 1
+        fi
+        DATA_VOLUME="$CONTAINAI_DATA_VOLUME"
+        return 0
+    fi
+
+    # 3. Try config discovery from $PWD
+    volume=$(_sync_resolve_config_volume "$EXPLICIT_CONFIG")
+    local resolve_rc=$?
+    if [[ $resolve_rc -ne 0 ]]; then
+        # Explicit config was specified but not found - exit with error
+        exit 1
+    fi
+
+    if [[ -n "$volume" ]]; then
+        if ! _sync_validate_volume_name "$volume"; then
+            error "Invalid volume name in config: $volume"
+            exit 1
+        fi
+        DATA_VOLUME="$volume"
+        return 0
+    fi
+
+    # 4. Default
+    DATA_VOLUME="$_SYNC_DEFAULT_VOLUME"
+}
 
 # Check prerequisites
 check_prerequisites() {
@@ -580,9 +803,16 @@ main() {
     # Parse arguments after platform check
     parse_args "$@"
 
+    # Resolve data volume (must be after parse_args sets CLI_VOLUME and EXPLICIT_CONFIG)
+    resolve_data_volume
+
     echo "═══════════════════════════════════════════════════════════════════"
     info "Syncing Claude Code plugins from host to Docker sandbox"
     echo "═══════════════════════════════════════════════════════════════════"
+    echo ""
+
+    # Print resolved volume for verification (required by acceptance criteria)
+    info "Using data volume: $DATA_VOLUME"
     echo ""
 
     if $DRY_RUN; then

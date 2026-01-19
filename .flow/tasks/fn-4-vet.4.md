@@ -93,14 +93,15 @@ _containai_main() {
 - Modify: `agent-sandbox/aliases.sh:22-24` (remove _ASB_VOLUMES)
 - Modify: `agent-sandbox/aliases.sh:349-368` (_asb_ensure_volumes → singular)
 - Modify: `agent-sandbox/aliases.sh:404+` (main function with flag parsing)
+<!-- Updated by plan-sync: fn-4-vet.2 used workspace path-based selection, not --profile -->
 ## Overview
-Update all `asb*` / `cai*` functions in `aliases.sh` to use per-invocation volume resolution via `_containai_resolve_volume()`. Add `--data-volume` and `--profile` flag parsing.
+Update all `asb*` / `cai*` functions in `aliases.sh` to use per-invocation volume resolution via `_containai_resolve_volume()`. Add `--data-volume` and `--config` flag parsing.
 
 ## Implementation
 
 ### New CLI Flags (avoid conflicts)
 - `--data-volume <name>` - specify agent data volume (distinct from existing `--volume/-v` for bind mounts)
-- `--profile <name>` - select TOML profile section (distinct from existing `--workspace` for host path)
+- `--config <path>` - explicit config file path (workspace path matching determines volume automatically)
 
 ### Current Code (lines 22-24)
 ```bash
@@ -114,11 +115,13 @@ Remove hardcoded array; resolve volume per-invocation:
 
 ```bash
 # In asb/cai main function, parse new flags first
+# Note: fn-4-vet.2 already implemented this in asb() with workspace-based resolution
 _containai_main() {
     local data_volume_flag=""
-    local profile_flag=""
+    local config_flag=""
+    local workspace_flag=""
     local args=()
-    
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --data-volume)
@@ -129,12 +132,20 @@ _containai_main() {
                 data_volume_flag="${1#*=}"
                 shift
                 ;;
-            --profile)
-                profile_flag="$2"
+            --config)
+                config_flag="$2"
                 shift 2
                 ;;
-            --profile=*)
-                profile_flag="${1#*=}"
+            --config=*)
+                config_flag="${1#*=}"
+                shift
+                ;;
+            --workspace)
+                workspace_flag="$2"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace_flag="${1#*=}"
                 shift
                 ;;
             *)
@@ -143,10 +154,14 @@ _containai_main() {
                 ;;
         esac
     done
-    
+
+    # Resolve workspace (for both mounting AND config matching)
+    local workspace="${workspace_flag:-$PWD}"
+
     # Resolve volume for this invocation
+    # Signature: _containai_resolve_volume(cli_volume, workspace, explicit_config)
     local volume
-    volume=$(_containai_resolve_volume "$data_volume_flag" "$profile_flag")
+    volume=$(_containai_resolve_volume "$data_volume_flag" "$workspace" "$config_flag")
     
     # Validate
     if ! _containai_validate_volume_name "$volume"; then
