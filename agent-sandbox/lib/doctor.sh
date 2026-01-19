@@ -1,0 +1,525 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# ContainAI Doctor Command - System Health Check and Diagnostics
+# ==============================================================================
+# This file must be sourced, not executed directly.
+#
+# Provides:
+#   _cai_doctor()              - Run all checks and output formatted report
+#   _cai_doctor_json()         - Run all checks and output JSON report
+#   _cai_check_wsl_seccomp()   - Check WSL2 seccomp compatibility status
+#
+# Requirements Hierarchy:
+#   Docker Sandbox: Hard requirement - blocks usage if not available
+#   Sysbox:         Strong suggestion - warns but allows usage if not available
+#
+# Dependencies:
+#   - Requires lib/core.sh to be sourced first for logging functions
+#   - Requires lib/platform.sh to be sourced first for platform detection
+#   - Requires lib/docker.sh to be sourced first for Docker availability checks
+#   - Requires lib/eci.sh to be sourced first for ECI detection
+#
+# Usage: source lib/doctor.sh
+# ==============================================================================
+
+# Require bash first (before using BASH_SOURCE)
+if [[ -z "${BASH_VERSION:-}" ]]; then
+    echo "[ERROR] lib/doctor.sh requires bash" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+# Detect direct execution (must be sourced, not executed)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    echo "[ERROR] lib/doctor.sh must be sourced, not executed directly" >&2
+    echo "Usage: source lib/doctor.sh" >&2
+    exit 1
+fi
+
+# Guard against re-sourcing side effects
+if [[ -n "${_CAI_DOCTOR_LOADED:-}" ]]; then
+    return 0
+fi
+_CAI_DOCTOR_LOADED=1
+
+# ==============================================================================
+# WSL2 Seccomp Compatibility Check
+# ==============================================================================
+
+# Check WSL2 seccomp compatibility status for Sysbox
+# Outputs: "ok", "filter_warning", "unavailable", or "unknown"
+# Sets: _CAI_SECCOMP_MODE with numeric mode (0=disabled, 1=strict, 2=filter)
+# Note: WSL2's filter mode (Seccomp: 2) can conflict with Sysbox's seccomp policies
+_cai_check_wsl_seccomp() {
+    _CAI_SECCOMP_MODE=""
+
+    # Check /proc/1/status for Seccomp field
+    if [[ -f /proc/1/status ]]; then
+        local seccomp_line
+        # Guard grep with || true per pitfall memory
+        seccomp_line=$(grep "^Seccomp:" /proc/1/status 2>/dev/null || true)
+        if [[ -n "$seccomp_line" ]]; then
+            # Extract mode number
+            _CAI_SECCOMP_MODE="${seccomp_line##*:}"
+            _CAI_SECCOMP_MODE="${_CAI_SECCOMP_MODE// /}"
+
+            case "$_CAI_SECCOMP_MODE" in
+                0)
+                    printf '%s' "unavailable"
+                    return 0
+                    ;;
+                1)
+                    # Strict mode - Sysbox works
+                    printf '%s' "ok"
+                    return 0
+                    ;;
+                2)
+                    # Filter mode - may conflict with Sysbox
+                    printf '%s' "filter_warning"
+                    return 0
+                    ;;
+            esac
+        fi
+    fi
+
+    # Fallback: Try unshare test
+    if command -v unshare >/dev/null 2>&1; then
+        if unshare --map-root-user true 2>/dev/null; then
+            printf '%s' "ok"
+            return 0
+        else
+            printf '%s' "unavailable"
+            return 0
+        fi
+    fi
+
+    printf '%s' "unknown"
+    return 0
+}
+
+# ==============================================================================
+# Sysbox Detection
+# ==============================================================================
+
+# Check if Sysbox is available on the containai-secure context
+# Returns: 0=available, 1=not available
+# Outputs: Sets _CAI_SYSBOX_ERROR with reason on failure
+#          Sets _CAI_SYSBOX_CONTEXT_EXISTS with true/false
+_cai_sysbox_available() {
+    _CAI_SYSBOX_ERROR=""
+    _CAI_SYSBOX_CONTEXT_EXISTS="false"
+
+    local socket="/var/run/containai-docker.sock"
+
+    # Check if socket exists
+    if [[ ! -S "$socket" ]]; then
+        _CAI_SYSBOX_ERROR="socket_not_found"
+        return 1
+    fi
+
+    # Check if context exists
+    if docker context inspect containai-secure >/dev/null 2>&1; then
+        _CAI_SYSBOX_CONTEXT_EXISTS="true"
+    else
+        _CAI_SYSBOX_ERROR="context_not_found"
+        return 1
+    fi
+
+    # Check if we can connect to the daemon
+    local info_output rc
+    info_output=$(_cai_timeout 10 docker --context containai-secure info 2>&1) && rc=0 || rc=$?
+
+    if [[ $rc -eq 124 ]]; then
+        _CAI_SYSBOX_ERROR="timeout"
+        return 1
+    fi
+
+    if [[ $rc -ne 0 ]]; then
+        _CAI_SYSBOX_ERROR="daemon_unavailable"
+        return 1
+    fi
+
+    # Check for sysbox-runc runtime
+    if ! printf '%s' "$info_output" | grep -q "sysbox-runc"; then
+        _CAI_SYSBOX_ERROR="runtime_not_found"
+        return 1
+    fi
+
+    return 0
+}
+
+# ==============================================================================
+# Doctor Text Output
+# ==============================================================================
+
+# Print right-aligned status marker at column 60
+# Arguments: $1 = status text (e.g., "[OK]", "[WARN]", "[ERROR]")
+#            $2 = optional note (e.g., "REQUIRED", "STRONGLY RECOMMENDED")
+_cai_doctor_status() {
+    local status="$1"
+    local note="${2:-}"
+
+    if [[ -n "$note" ]]; then
+        printf '%s    <- %s\n' "$status" "$note"
+    else
+        printf '%s\n' "$status"
+    fi
+}
+
+# Run doctor command with text output
+# Returns: 0 if Docker Sandbox available (minimum requirement met)
+#          1 if Docker Sandbox NOT available (cannot proceed)
+_cai_doctor() {
+    local sandbox_ok="false"
+    local sysbox_ok="false"
+    local dd_version=""
+    local sandbox_version=""
+    local platform
+    local seccomp_status=""
+
+    platform=$(_cai_detect_platform)
+
+    printf '%s\n' "ContainAI Doctor"
+    printf '%s\n' "================"
+    printf '\n'
+
+    # === Docker Desktop Section ===
+    printf '%s\n' "Docker Desktop"
+
+    # Check Docker CLI
+    if ! _cai_docker_cli_available; then
+        printf '  %-44s %s\n' "Docker CLI:" "$(_cai_doctor_status "[ERROR] Not installed")"
+        printf '\n'
+        printf '%s\n' "Summary"
+        printf '  %-44s %s\n' "Docker Sandbox:" "[ERROR] Docker not installed"
+        printf '  %-44s %s\n' "Recommended:" "Install Docker Desktop from https://www.docker.com/products/docker-desktop/"
+        return 1
+    fi
+
+    # Check Docker daemon
+    if ! _cai_docker_daemon_available; then
+        printf '  %-44s %s\n' "Docker daemon:" "[ERROR] Not accessible"
+        case "${_CAI_DAEMON_ERROR:-unknown}" in
+            not_running)
+                printf '  %-44s %s\n' "" "(Start Docker Desktop to continue)"
+                ;;
+            permission)
+                printf '  %-44s %s\n' "" "(Check Docker Desktop is running)"
+                ;;
+            timeout)
+                printf '  %-44s %s\n' "" "(Docker command timed out)"
+                ;;
+        esac
+        printf '\n'
+        printf '%s\n' "Summary"
+        printf '  %-44s %s\n' "Docker Sandbox:" "[ERROR] Docker not running"
+        printf '  %-44s %s\n' "Recommended:" "Start Docker Desktop and try again"
+        return 1
+    fi
+
+    # Get Docker Desktop version
+    if _cai_docker_desktop_version >/dev/null 2>&1; then
+        dd_version=$(_cai_docker_desktop_version)
+        printf '  %-44s %s\n' "Version: $dd_version" "[OK]"
+    else
+        # Not Docker Desktop - check error
+        case "${_CAI_DD_VERSION_ERROR:-}" in
+            not_docker_desktop)
+                printf '  %-44s %s\n' "Docker Engine (not Docker Desktop):" "[ERROR]"
+                printf '  %-44s %s\n' "" "(Docker Sandbox requires Docker Desktop 4.50+)"
+                ;;
+            *)
+                printf '  %-44s %s\n' "Version:" "[ERROR] Could not detect"
+                ;;
+        esac
+        printf '\n'
+        printf '%s\n' "Summary"
+        printf '  %-44s %s\n' "Docker Sandbox:" "[ERROR] Docker Desktop required"
+        printf '  %-44s %s\n' "Recommended:" "Install Docker Desktop 4.50+ from https://www.docker.com/products/docker-desktop/"
+        return 1
+    fi
+
+    # Check if Docker Desktop version is sufficient (4.50+)
+    local dd_major dd_minor dd_rest
+    dd_major="${dd_version%%.*}"
+    dd_rest="${dd_version#*.}"
+    dd_minor="${dd_rest%%.*}"
+
+    if [[ "$dd_major" -lt 4 ]] || { [[ "$dd_major" -eq 4 ]] && [[ "$dd_minor" -lt 50 ]]; }; then
+        printf '  %-44s %s\n' "Sandboxes feature:" "[ERROR] Version $dd_version < 4.50"
+        printf '  %-44s %s\n' "" "(Upgrade Docker Desktop to 4.50+)"
+        printf '\n'
+        printf '%s\n' "Summary"
+        printf '  %-44s %s\n' "Docker Sandbox:" "[ERROR] Docker Desktop 4.50+ required"
+        printf '  %-44s %s\n' "Recommended:" "Update via Settings > Software Updates"
+        return 1
+    fi
+
+    # Check sandbox feature enabled
+    if _cai_sandbox_feature_enabled 2>/dev/null; then
+        sandbox_ok="true"
+        if _cai_sandbox_version >/dev/null 2>&1; then
+            sandbox_version=$(_cai_sandbox_version)
+        fi
+        printf '  %-44s %s\n' "Sandboxes feature: enabled" "[OK]    <- REQUIRED"
+    else
+        printf '  %-44s %s\n' "Sandboxes feature: not enabled" "[ERROR] <- REQUIRED"
+        printf '  %-44s %s\n' "" "(Enable experimental features in Docker Desktop Settings)"
+        printf '\n'
+        printf '%s\n' "Summary"
+        printf '  %-44s %s\n' "Docker Sandbox:" "[ERROR] Feature not enabled"
+        printf '  %-44s %s\n' "Recommended:" "Enable beta features in Docker Desktop Settings > Features in development"
+        return 1
+    fi
+
+    printf '\n'
+
+    # === Container Isolation Section ===
+    printf '%s\n' "Container Isolation"
+
+    # Check Sysbox availability
+    if _cai_sysbox_available; then
+        sysbox_ok="true"
+        printf '  %-44s %s\n' "Sysbox available: yes" "[OK]    <- STRONGLY RECOMMENDED"
+        printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK]"
+        printf '  %-44s %s\n' "Context 'containai-secure': configured" "[OK]"
+    else
+        printf '  %-44s %s\n' "Sysbox available: no" "[WARN]  <- STRONGLY RECOMMENDED"
+        case "${_CAI_SYSBOX_ERROR:-}" in
+            socket_not_found)
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox for enhanced isolation)"
+                ;;
+            context_not_found)
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to configure containai-secure context)"
+                ;;
+            daemon_unavailable)
+                printf '  %-44s %s\n' "" "(ContainAI Docker daemon not running)"
+                ;;
+            runtime_not_found)
+                printf '  %-44s %s\n' "" "(Sysbox runtime not found - run 'cai setup')"
+                ;;
+            timeout)
+                printf '  %-44s %s\n' "" "(ContainAI Docker daemon timed out)"
+                ;;
+        esac
+    fi
+
+    printf '\n'
+
+    # === Platform-specific Section ===
+    if [[ "$platform" == "wsl" ]]; then
+        printf '%s\n' "Platform: WSL2"
+
+        seccomp_status=$(_cai_check_wsl_seccomp)
+        case "$seccomp_status" in
+            ok)
+                printf '  %-44s %s\n' "Seccomp compatibility: ok" "[OK]"
+                ;;
+            filter_warning)
+                printf '  %-44s %s\n' "Seccomp compatibility: warning" "[WARN]"
+                printf '  %-44s %s\n' "" "(WSL 1.1.0+ may have seccomp conflicts with Sysbox)"
+                ;;
+            unavailable)
+                printf '  %-44s %s\n' "Seccomp compatibility: not available" "[WARN]"
+                printf '  %-44s %s\n' "" "(Sysbox requires seccomp support)"
+                ;;
+            unknown)
+                printf '  %-44s %s\n' "Seccomp compatibility: unknown" "[WARN]"
+                ;;
+        esac
+
+        printf '\n'
+    elif [[ "$platform" == "macos" ]]; then
+        printf '%s\n' "Platform: macOS"
+
+        # Check ECI status on macOS
+        local eci_status
+        eci_status=$(_cai_eci_status)
+        case "$eci_status" in
+            enabled)
+                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): enabled" "[OK]"
+                ;;
+            available_not_enabled)
+                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): available" "[INFO]"
+                printf '  %-44s %s\n' "" "(Enable in Settings > Security for additional isolation)"
+                ;;
+            *)
+                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): not available" "[INFO]"
+                ;;
+        esac
+
+        printf '\n'
+    elif [[ "$platform" == "linux" ]]; then
+        printf '%s\n' "Platform: Linux"
+        printf '\n'
+    fi
+
+    # === Summary Section ===
+    printf '%s\n' "Summary"
+
+    if [[ "$sandbox_ok" == "true" ]]; then
+        printf '  %-44s %s\n' "Docker Sandbox:" "[OK] Available (required)"
+    else
+        printf '  %-44s %s\n' "Docker Sandbox:" "[ERROR] Not available (required)"
+    fi
+
+    if [[ "$sysbox_ok" == "true" ]]; then
+        printf '  %-44s %s\n' "Sysbox:" "[OK] Available (strongly recommended)"
+        printf '  %-44s %s\n' "Recommended:" "Use 'cai run' with full isolation"
+    else
+        printf '  %-44s %s\n' "Sysbox:" "[WARN] Not available (strongly recommended)"
+        printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' for best security"
+    fi
+
+    # Exit code: 0 if sandbox available, 1 if not
+    if [[ "$sandbox_ok" == "true" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ==============================================================================
+# Doctor JSON Output
+# ==============================================================================
+
+# Escape string for JSON output
+# Arguments: $1 = string to escape
+# Outputs: JSON-safe escaped string
+_cai_json_escape() {
+    local str="$1"
+    # Escape backslashes first, then quotes, then control chars
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    str="${str//$'\n'/\\n}"
+    str="${str//$'\r'/\\r}"
+    str="${str//$'\t'/\\t}"
+    printf '%s' "$str"
+}
+
+# Run doctor command with JSON output
+# Returns: 0 if Docker Sandbox available (minimum requirement met)
+#          1 if Docker Sandbox NOT available (cannot proceed)
+_cai_doctor_json() {
+    local sandbox_ok="false"
+    local sysbox_ok="false"
+    local dd_version=""
+    local sandbox_enabled="false"
+    local platform
+    local seccomp_status=""
+    local seccomp_compatible="true"
+    local seccomp_warning=""
+    local eci_status="not_available"
+    local sysbox_runtime=""
+    local sysbox_context_exists="false"
+    local recommended_action="setup_required"
+
+    platform=$(_cai_detect_platform)
+
+    # Check Docker availability
+    if _cai_docker_cli_available && _cai_docker_daemon_available; then
+        if _cai_docker_desktop_version >/dev/null 2>&1; then
+            dd_version=$(_cai_docker_desktop_version)
+
+            # Check version requirement
+            local dd_major dd_minor dd_rest
+            dd_major="${dd_version%%.*}"
+            dd_rest="${dd_version#*.}"
+            dd_minor="${dd_rest%%.*}"
+
+            if [[ "$dd_major" -gt 4 ]] || { [[ "$dd_major" -eq 4 ]] && [[ "$dd_minor" -ge 50 ]]; }; then
+                # Check sandbox feature
+                if _cai_sandbox_feature_enabled 2>/dev/null; then
+                    sandbox_ok="true"
+                    sandbox_enabled="true"
+                fi
+            fi
+        fi
+    fi
+
+    # Check Sysbox
+    if _cai_sysbox_available; then
+        sysbox_ok="true"
+        sysbox_runtime="sysbox-runc"
+        sysbox_context_exists="true"
+    else
+        sysbox_context_exists="${_CAI_SYSBOX_CONTEXT_EXISTS:-false}"
+    fi
+
+    # Platform-specific checks
+    if [[ "$platform" == "wsl" ]]; then
+        seccomp_status=$(_cai_check_wsl_seccomp)
+        case "$seccomp_status" in
+            ok)
+                seccomp_compatible="true"
+                ;;
+            filter_warning)
+                seccomp_compatible="false"
+                seccomp_warning="WSL 1.1.0+ may have seccomp conflicts"
+                ;;
+            unavailable|unknown)
+                seccomp_compatible="false"
+                ;;
+        esac
+    elif [[ "$platform" == "macos" ]]; then
+        eci_status=$(_cai_eci_status)
+    fi
+
+    # Determine recommended action
+    if [[ "$sandbox_ok" == "true" ]] && [[ "$sysbox_ok" == "true" ]]; then
+        recommended_action="ready"
+    elif [[ "$sandbox_ok" == "true" ]]; then
+        recommended_action="setup_sysbox"
+    else
+        recommended_action="setup_required"
+    fi
+
+    # Output JSON
+    printf '{\n'
+    printf '  "docker_desktop": {\n'
+    printf '    "version": "%s",\n' "$(_cai_json_escape "$dd_version")"
+    printf '    "sandboxes_available": %s,\n' "$sandbox_ok"
+    printf '    "sandboxes_enabled": %s,\n' "$sandbox_enabled"
+    printf '    "requirement_level": "hard"\n'
+    printf '  },\n'
+    printf '  "sysbox": {\n'
+    printf '    "available": %s,\n' "$sysbox_ok"
+    if [[ -n "$sysbox_runtime" ]]; then
+        printf '    "runtime": "%s",\n' "$sysbox_runtime"
+    else
+        printf '    "runtime": null,\n'
+    fi
+    printf '    "context_exists": %s,\n' "$sysbox_context_exists"
+    printf '    "context_name": "containai-secure",\n'
+    printf '    "requirement_level": "strong_suggestion"\n'
+    printf '  },\n'
+    printf '  "platform": {\n'
+    printf '    "type": "%s",\n' "$platform"
+    if [[ "$platform" == "wsl" ]]; then
+        printf '    "seccomp_compatible": %s,\n' "$seccomp_compatible"
+        if [[ -n "$seccomp_warning" ]]; then
+            printf '    "warning": "%s"\n' "$(_cai_json_escape "$seccomp_warning")"
+        else
+            printf '    "warning": null\n'
+        fi
+    elif [[ "$platform" == "macos" ]]; then
+        printf '    "eci_status": "%s"\n' "$eci_status"
+    else
+        printf '    "warning": null\n'
+    fi
+    printf '  },\n'
+    printf '  "summary": {\n'
+    printf '    "sandbox_ok": %s,\n' "$sandbox_ok"
+    printf '    "sysbox_ok": %s,\n' "$sysbox_ok"
+    printf '    "recommended_action": "%s"\n' "$recommended_action"
+    printf '  }\n'
+    printf '}\n'
+
+    # Exit code: 0 if sandbox available, 1 if not
+    if [[ "$sandbox_ok" == "true" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+return 0

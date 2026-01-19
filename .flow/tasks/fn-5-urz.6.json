@@ -1,7 +1,7 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-19T20:36:13.603651Z",
   "created_at": "2026-01-18T23:55:51.745828Z",
   "depends_on": [
     "fn-5-urz.4",
@@ -11,7 +11,7 @@
   "id": "fn-5-urz.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.6.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Decision engine + formatted doctor output",
-  "updated_at": "2026-01-19T04:54:10.589542Z"
+  "updated_at": "2026-01-19T20:36:13.603671Z"
 }

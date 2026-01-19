@@ -49,6 +49,7 @@ _containai_libs_exist() {
     [[ -f "$_CAI_SCRIPT_DIR/lib/platform.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/docker.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/eci.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/doctor.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/config.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/container.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] && \
@@ -84,6 +85,11 @@ fi
 
 if ! source "$_CAI_SCRIPT_DIR/lib/eci.sh"; then
     echo "[ERROR] Failed to source lib/eci.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/doctor.sh"; then
+    echo "[ERROR] Failed to source lib/doctor.sh" >&2
     return 1
 fi
 
@@ -124,6 +130,7 @@ Usage: containai [subcommand] [options]
 Subcommands:
   (default)     Start/attach to sandbox container
   shell         Open interactive shell in running container
+  doctor        Check system capabilities and show diagnostics
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
@@ -138,6 +145,8 @@ Global Options:
 Examples:
   cai                           Start sandbox in current directory
   cai shell                     Open shell in running sandbox
+  cai doctor                    Check system capabilities
+  cai doctor --json             Output diagnostics as JSON
   cai import                    Sync configs to data volume
   cai import --dry-run          Preview import without changes
   cai export                    Export data volume to archive
@@ -244,6 +253,35 @@ Examples:
   cai shell                    Open shell in default sandbox
   cai shell --restart          Recreate container and open shell
   cai shell -e DEBUG=1         Open shell with environment variable
+EOF
+}
+
+_containai_doctor_help() {
+    cat <<'EOF'
+ContainAI Doctor - Check system capabilities and diagnostics
+
+Usage: cai doctor [options]
+
+Checks Docker Desktop, Sandbox feature, and Sysbox availability.
+Reports requirement levels and actionable remediation guidance.
+
+Requirements:
+  Docker Sandbox: REQUIRED - cai run will not work without this
+  Sysbox:         STRONGLY RECOMMENDED - enhanced isolation
+
+Options:
+  --json          Output machine-parseable JSON
+  -h, --help      Show this help message
+
+Exit Codes:
+  0    Docker Sandbox available (minimum requirement met)
+  1    Docker Sandbox NOT available (cannot proceed)
+
+Note: Missing Sysbox produces a warning (exit 0), not an error.
+
+Examples:
+  cai doctor                    Run all checks, show formatted report
+  cai doctor --json             Output JSON for scripts/automation
 EOF
 }
 
@@ -515,6 +553,37 @@ _containai_stop_cmd() {
     done
 
     _containai_stop_all "$@"
+}
+
+# Doctor subcommand handler
+_containai_doctor_cmd() {
+    local json_output="false"
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json)
+                json_output="true"
+                shift
+                ;;
+            --help|-h)
+                _containai_doctor_help
+                return 0
+                ;;
+            *)
+                echo "[ERROR] Unknown option: $1" >&2
+                echo "Use 'cai doctor --help' for usage" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    # Run doctor checks
+    if [[ "$json_output" == "true" ]]; then
+        _cai_doctor_json
+    else
+        _cai_doctor
+    fi
 }
 
 # Shell subcommand handler - delegates to _containai_start_container with --shell
@@ -986,6 +1055,10 @@ containai() {
         shell)
             shift
             _containai_shell_cmd "$@"
+            ;;
+        doctor)
+            shift
+            _containai_doctor_cmd "$@"
             ;;
         import)
             shift
