@@ -188,9 +188,10 @@ _sync_find_config() {
 # Resolve volume from config file
 # Arguments: $1 = explicit config path (optional)
 # Outputs: data_volume value (or empty if not found/no config)
+# Returns: 1 on hard failure (explicit config with parse error), 0 otherwise
 _sync_resolve_config_volume() {
     local explicit_config="${1:-}"
-    local config_file config_dir
+    local config_file config_dir strict_mode="false"
 
     # Find config file
     if [[ -n "$explicit_config" ]]; then
@@ -199,6 +200,7 @@ _sync_resolve_config_volume() {
             return 1
         fi
         config_file="$explicit_config"
+        strict_mode="true"  # Explicit config: fail hard on parse errors
     else
         config_file=$(_sync_find_config)
     fi
@@ -212,6 +214,10 @@ _sync_resolve_config_volume() {
 
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
+        if [[ "$strict_mode" == "true" ]]; then
+            echo "[ERROR] Python not found, cannot parse config: $config_file" >&2
+            return 1
+        fi
         echo "[WARN] Python not found, cannot parse config. Using default." >&2
         return 0
     fi
@@ -223,6 +229,14 @@ _sync_resolve_config_volume() {
     parse_stderr=$(mktemp)
 
     if ! result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" --workspace "$PWD" --config-dir "$config_dir" 2>"$parse_stderr"); then
+        if [[ "$strict_mode" == "true" ]]; then
+            echo "[ERROR] Failed to parse config file: $config_file" >&2
+            if [[ -s "$parse_stderr" ]]; then
+                cat "$parse_stderr" >&2
+            fi
+            rm -f "$parse_stderr"
+            return 1
+        fi
         echo "[WARN] Failed to parse config file: $config_file" >&2
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2

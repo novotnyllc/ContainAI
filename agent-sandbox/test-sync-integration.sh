@@ -36,16 +36,18 @@ register_test_volume() {
 
 # Cleanup test volumes created by THIS run
 # First pass: registered volumes (explicit tracking)
-# Second pass: any volumes matching this run's ID prefix (catches unregistered volumes)
+# Second pass: any volumes containing this run's ID (catches unregistered volumes)
 cleanup_test_volumes() {
     local vol
     # First pass: explicitly registered volumes
     for vol in "${TEST_VOLUMES_CREATED[@]}"; do
         docker volume rm "$vol" 2>/dev/null || true
     done
-    # Second pass: catch any volumes with this run's ID that weren't registered
+    # Second pass: catch any volumes containing this run's ID that weren't registered
+    # Note: containai-test-env-${TEST_RUN_ID}, containai-test-cli-${TEST_RUN_ID}, etc.
+    # all contain $TEST_RUN_ID as a substring, so filter by run ID directly
     local run_volumes
-    run_volumes=$(docker volume ls --filter "name=containai-test-${TEST_RUN_ID}" -q 2>/dev/null || true)
+    run_volumes=$(docker volume ls --filter "name=${TEST_RUN_ID}" -q 2>/dev/null || true)
     if [[ -n "$run_volumes" ]]; then
         echo "$run_volumes" | xargs -r docker volume rm 2>/dev/null || true
     fi
@@ -786,35 +788,34 @@ EOF
 }
 
 # ==============================================================================
-# Test 15: Relative workspace path resolution
+# Test 15: Relative workspace path "./" resolution
 # ==============================================================================
 test_relative_workspace_path() {
-    section "Test 15: Relative workspace path resolution"
+    section "Test 15: Relative workspace path './' resolution"
 
     local test_dir rel_vol
-    test_dir="/tmp/test-relative-$$"
+    test_dir=$(mktemp -d)
     rel_vol="relative-vol-$$"
 
-    # Config uses ".." which resolves to the parent of .containai (the project root)
-    # This tests that relative paths in [workspace."<path>"] are resolved
-    # against the config file's directory
+    # Config uses "./" which should resolve to the PROJECT ROOT (parent of .containai),
+    # NOT the .containai directory itself. This is the most common user pattern.
     mkdir -p "$test_dir/.containai"
     cat > "$test_dir/.containai/config.toml" << EOF
 [agent]
 data_volume = "default-vol"
 
-[workspace.".."]
+[workspace."./"]
 data_volume = "$rel_vol"
 EOF
 
-    # Test that relative workspace path ".." resolves to project root
+    # Test that relative workspace path "./" resolves to project root
     # Must clear env vars to ensure config discovery is tested
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
     if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "$rel_vol" ]]; then
-            pass "Relative workspace path '..' resolves to project root"
+            pass "Relative workspace path './' resolves to project root"
         else
             fail "Relative workspace path returned wrong volume: $resolved (expected: $rel_vol)"
             [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
@@ -826,6 +827,48 @@ EOF
     rm -f "$stderr_file"
 
     rm -rf "$test_dir"
+}
+
+# ==============================================================================
+# Test 16: Relative path "./subdir" in workspace section
+# ==============================================================================
+test_relative_subdir_path() {
+    section "Test 16: Relative path './subdir' in workspace section"
+
+    # Create a structure where config is at project root
+    # and we want to match a subdirectory
+    local project_dir subdir_vol
+    project_dir=$(mktemp -d)
+    subdir_vol="subdir-vol-$$"
+
+    mkdir -p "$project_dir/.containai"
+    mkdir -p "$project_dir/subdir"
+    cat > "$project_dir/.containai/config.toml" << EOF
+[agent]
+data_volume = "default-vol"
+
+[workspace."./subdir"]
+data_volume = "$subdir_vol"
+EOF
+
+    # Test from subdir - should match [workspace."./subdir"]
+    # which resolves to $project_dir/subdir (relative to project root)
+    local resolved stderr_file
+    stderr_file=$(mktemp)
+    if resolved=$(cd "$project_dir/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$project_dir/subdir'" 2>"$stderr_file"); then
+        if [[ "$resolved" == "$subdir_vol" ]]; then
+            pass "Relative workspace path './subdir' resolves correctly"
+        else
+            fail "Relative subdir path returned wrong volume: $resolved (expected: $subdir_vol)"
+            [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
+        fi
+    else
+        fail "Relative subdir path test failed: $resolved"
+        [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
+    fi
+    rm -f "$stderr_file"
+
+    rm -rf "$project_dir"
 }
 
 # ==============================================================================
@@ -867,6 +910,7 @@ main() {
     test_longest_match_wins
     test_data_volume_overrides_config
     test_relative_workspace_path
+    test_relative_subdir_path
 
     # Summary
     echo ""

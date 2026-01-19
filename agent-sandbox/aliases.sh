@@ -137,17 +137,23 @@ _containai_find_config() {
 
 # Parse config file for workspace matching
 # Calls parse-toml.py with workspace matching mode
-# Arguments: $1 = config file, $2 = workspace path, $3 = config dir
+# Arguments: $1 = config file, $2 = workspace path, $3 = config dir, $4 = strict mode (optional)
 # Outputs: data_volume value (or empty if not found)
-# Returns: 0 on success, 1 on parse error
+# Returns: 0 on success, 1 on parse error (in strict mode)
+# When strict=true, errors cause hard failure. When false (or omitted), errors warn and return empty.
 _containai_parse_config_for_workspace() {
     local config_file="$1"
     local workspace="$2"
     local config_dir="$3"
+    local strict="${4:-false}"
     local script_dir result parse_stderr
 
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
+        if [[ "$strict" == "true" ]]; then
+            echo "[ERROR] Python not found, cannot parse config: $config_file" >&2
+            return 1
+        fi
         echo "[WARN] Python not found, cannot parse config. Using default." >&2
         return 0
     fi
@@ -158,6 +164,14 @@ _containai_parse_config_for_workspace() {
     # Use if ! pattern to handle set -e safely
     parse_stderr=$(mktemp)
     if ! result=$(python3 "$script_dir/parse-toml.py" "$config_file" --workspace "$workspace" --config-dir "$config_dir" 2>"$parse_stderr"); then
+        if [[ "$strict" == "true" ]]; then
+            echo "[ERROR] Failed to parse config file: $config_file" >&2
+            if [[ -s "$parse_stderr" ]]; then
+                cat "$parse_stderr" >&2
+            fi
+            rm -f "$parse_stderr"
+            return 1
+        fi
         echo "[WARN] Failed to parse config file: $config_file" >&2
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
@@ -213,6 +227,8 @@ _containai_resolve_volume() {
     workspace=$(cd "$workspace" 2>/dev/null && pwd) || workspace="$PWD"
 
     # 4. Find config file
+    # Track if config was explicit for strict mode
+    local strict_mode="false"
     if [[ -n "$explicit_config" ]]; then
         if [[ ! -f "$explicit_config" ]]; then
             echo "[ERROR] Config file not found: $explicit_config" >&2
@@ -220,6 +236,7 @@ _containai_resolve_volume() {
         fi
         config_file="$explicit_config"
         config_dir=$(dirname "$config_file")
+        strict_mode="true"  # Explicit config: fail hard on parse errors
     else
         config_file=$(_containai_find_config "$workspace")
         if [[ -n "$config_file" ]]; then
@@ -228,8 +245,12 @@ _containai_resolve_volume() {
     fi
 
     # 5. Parse config with workspace matching
+    # Use strict mode for explicit config (fail hard on parse errors)
     if [[ -n "$config_file" ]]; then
-        volume=$(_containai_parse_config_for_workspace "$config_file" "$workspace" "$config_dir")
+        if ! volume=$(_containai_parse_config_for_workspace "$config_file" "$workspace" "$config_dir" "$strict_mode"); then
+            # Strict mode already printed error
+            return 1
+        fi
         if [[ -n "$volume" ]]; then
             # Validate volume name from config
             if ! _containai_validate_volume_name "$volume"; then

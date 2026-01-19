@@ -33,3 +33,6 @@ With set -e, capturing exit code via var=$(cmd); rc=$? is dead code - use if ! v
 
 ## 2026-01-19 manual [pitfall]
 Tests checking env var/config precedence must clear external env vars (env -u) to be hermetic
+
+## 2026-01-19 manual [pitfall]
+grep -v with empty input fails under set -euo pipefail; use sed -e '/pattern/d' instead for filter pipelines

@@ -70,9 +70,18 @@ def resolve_section_path(section_path, config_dir):
     """
     Resolve a workspace section path to an absolute path.
 
+    For local project configs (e.g., .containai/config.toml), relative paths
+    like "./" or "../subdir" are resolved against the PROJECT ROOT (parent of
+    .containai/), not against the config file directory. This matches user
+    expectation that [workspace."./"] refers to the project root.
+
+    For user-level configs (e.g., ~/.config/containai/config.toml), relative
+    paths are resolved against the config directory since there's no project
+    context.
+
     Args:
         section_path: The path from [workspace."<path>"]
-        config_dir: Directory containing the config file (for relative paths)
+        config_dir: Directory containing the config file
 
     Returns:
         Normalized absolute path
@@ -80,12 +89,21 @@ def resolve_section_path(section_path, config_dir):
     # Expand ~ to home directory
     expanded = os.path.expanduser(section_path)
 
-    # If not absolute, resolve against config_dir
-    if not os.path.isabs(expanded):
-        resolved = os.path.join(config_dir, expanded)
-    else:
-        resolved = expanded
+    # If already absolute, just normalize
+    if os.path.isabs(expanded):
+        return normalize_path(expanded)
 
+    # For relative paths, determine the appropriate base directory
+    # If config is in .containai/, resolve relative to project root (parent)
+    config_dir_name = os.path.basename(config_dir)
+    if config_dir_name == ".containai":
+        # Project-local config: resolve relative to project root
+        base_dir = os.path.dirname(config_dir)
+    else:
+        # User-level config or other: resolve relative to config dir
+        base_dir = config_dir
+
+    resolved = os.path.join(base_dir, expanded)
     return normalize_path(resolved)
 
 

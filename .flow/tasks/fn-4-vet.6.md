@@ -341,9 +341,37 @@ Add cleanup function to remove test volumes after test run.
 - [ ] No test volumes left behind after run
 - [ ] `./test-sync-integration.sh` completes successfully
 ## Done summary
-TBD
+## Summary
 
+Updated `test-sync-integration.sh` with isolated test volumes and workspace path matching tests.
+
+### Implementation
+
+1. **Isolated Test Volumes** (lines 21-56):
+   - Unique `TEST_RUN_ID` per run using timestamp + PID
+   - Volume names prefixed with `containai-test-${TEST_RUN_ID}`
+   - `TEST_VOLUMES_CREATED` array tracks all test volumes
+   - `register_test_volume()` function for explicit tracking
+   - `cleanup_test_volumes()` with EXIT trap removes all test volumes
+
+2. **New Test Functions** (lines 629-829):
+   - `test_workspace_path_matching()` - verifies workspace path-based config matching
+   - `test_workspace_fallback_to_agent()` - verifies fallback to [agent] section
+   - `test_longest_match_wins()` - verifies longest path match takes precedence
+   - `test_data_volume_overrides_config()` - verifies CLI --data-volume overrides config
+   - `test_relative_workspace_path()` - verifies relative path resolution (bonus)
+
+3. **Volume Precedence Tests** (in test_dry_run, lines 182-258):
+   - `CONTAINAI_DATA_VOLUME` env var precedence
+   - `--volume` flag overrides env var
+   - `--volume` skips config parsing
+
+### Key Changes
+
+- Tests no longer use `sandbox-agent-data` by default
+- Each test run creates unique volumes that are cleaned up on exit
+- Parallel test runs are isolated from each other
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 6648b11 feat(tests): add isolated test volumes and workspace path matching tests, be55b48 fix(tests): address impl-review feedback for isolated test volumes, 5eca178 fix(tests): address second round of impl-review feedback
+- Tests: test_workspace_path_matching, test_workspace_fallback_to_agent, test_longest_match_wins, test_data_volume_overrides_config
 - PRs:

@@ -8,10 +8,31 @@
     "fn-4-vet.4"
   ],
   "epic": "fn-4-vet",
+  "evidence": {
+    "acceptance_criteria": {
+      "cleanup_trap": true,
+      "isolated_volumes": true,
+      "workspace_tests": true
+    },
+    "commits": [
+      "6648b11 feat(tests): add isolated test volumes and workspace path matching tests",
+      "be55b48 fix(tests): address impl-review feedback for isolated test volumes",
+      "5eca178 fix(tests): address second round of impl-review feedback"
+    ],
+    "files_changed": [
+      "agent-sandbox/test-sync-integration.sh"
+    ],
+    "tests": {
+      "test_data_volume_overrides_config": "PASS",
+      "test_longest_match_wins": "PASS",
+      "test_workspace_fallback_to_agent": "PASS",
+      "test_workspace_path_matching": "PASS"
+    }
+  },
   "id": "fn-4-vet.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.6.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Update integration tests for configurable volumes",
-  "updated_at": "2026-01-19T10:29:27.286465Z"
+  "updated_at": "2026-01-19T11:01:41.650036Z"
 }
