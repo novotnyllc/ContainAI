@@ -216,18 +216,21 @@ _containai_parse_config() {
 
     # Call parse-toml.py - outputs JSON: {"data_volume": "...", "excludes": [...]}
     # Capture stderr separately to avoid corrupting JSON output
-    local parse_stderr
+    local parse_stderr parse_rc
     parse_stderr=$(mktemp)
-    # Ensure cleanup on any exit path
-    trap 'rm -f "$parse_stderr"' RETURN
 
-    if ! json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>"$parse_stderr"); then
+    # Run parser, capture exit code
+    json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>"$parse_stderr") && parse_rc=0 || parse_rc=$?
+
+    if [[ $parse_rc -ne 0 ]]; then
         echo "[WARN] Failed to parse config file: $config_file" >&2
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
         fi
+        rm -f "$parse_stderr"
         return 0  # Graceful fallback
     fi
+    rm -f "$parse_stderr"
 
     # Extract volume from JSON
     _CAI_VOLUME=$(_containai_extract_volume "$json_result")
