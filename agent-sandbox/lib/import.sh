@@ -208,7 +208,9 @@ _containai_import() {
     # Print resolved volume for verification (required by acceptance criteria)
     _import_info "Using data volume: $volume"
 
-    # Ensure volume exists (unless dry-run)
+    # Ensure volume exists
+    # Note: dry-run requires volume to exist because rsync container mounts it
+    # This is intentional - dry-run previews changes to an existing volume
     if [[ "$dry_run" != "true" ]]; then
         if ! docker volume inspect "$volume" >/dev/null 2>&1; then
             _import_warn "Data volume does not exist, creating..."

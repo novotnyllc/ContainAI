@@ -206,7 +206,7 @@ The `cai` command labels containers it creates with `containai.sandbox=containai
 - **Ownership verification**: `cai` checks this label before attaching to or restarting containers to prevent accidentally affecting containers with the same name created by other tools
 - **Container discovery**: `cai-stop-all` uses this label to find ContainAI-managed containers across all branches/directories
 
-**Legacy compatibility**: Containers created with the previous `asb.sandbox=agent-sandbox` label are still discovered and managed, but new containers use the `containai.sandbox=containai` label.
+**Container migration**: Containers created before the rename (with `asb.sandbox=agent-sandbox` label) are still discovered and can be managed. New containers use the `containai.sandbox=containai` label. Use `cai --restart` to recreate old containers with the new label.
 
 If `docker sandbox run` does not support the `--label` flag, `cai` falls back to image-based detection with a warning. Use `cai --restart` to recreate the container with proper labeling when label support becomes available.
 
