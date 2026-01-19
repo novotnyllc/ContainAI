@@ -176,6 +176,13 @@ Safe Defaults (FR-4):
 Volume Selection:
   Volume is automatically selected based on workspace path from config.
   Use --data-volume to override automatic selection.
+
+Context Selection:
+  Context is automatically selected based on isolation availability:
+  - If ECI (Enhanced Container Isolation) is enabled: uses default Docker Desktop context
+  - Otherwise if containai-secure context exists: uses Sysbox isolation
+  - Otherwise: fails with actionable error message
+  Override with [secure_engine].context_name in config.
 EOF
 }
 

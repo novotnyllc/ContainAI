@@ -1,7 +1,7 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-19T21:57:40.626841Z",
   "created_at": "2026-01-18T23:55:53.752305Z",
   "depends_on": [
     "fn-5-urz.6",
@@ -11,7 +11,7 @@
   "id": "fn-5-urz.8",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.8.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Context auto-selection (ECI vs Secure Engine)",
-  "updated_at": "2026-01-18T23:58:28.621280Z"
+  "updated_at": "2026-01-19T21:57:40.626863Z"
 }

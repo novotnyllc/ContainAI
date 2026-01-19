@@ -8,6 +8,7 @@
 #   _cai_doctor()              - Run all checks and output formatted report
 #   _cai_doctor_json()         - Run all checks and output JSON report
 #   _cai_check_wsl_seccomp()   - Check WSL2 seccomp compatibility status
+#   _cai_select_context()      - Auto-select Docker context based on isolation availability
 #
 # Requirements Hierarchy:
 #   Docker Sandbox: Hard requirement - blocks usage if not available
@@ -86,6 +87,55 @@ _cai_check_wsl_seccomp() {
     # No seccomp status found - cannot determine
     printf '%s' "unknown"
     return 0
+}
+
+# ==============================================================================
+# Context Auto-Selection
+# ==============================================================================
+
+# Auto-select Docker context based on isolation availability
+# Returns context name via stdout:
+#   - "" (empty) for default context (Docker Desktop with ECI)
+#   - "containai-secure" for Sysbox context (or config override)
+#   - Nothing (return 1) if no isolation available
+# Arguments: $1 = config override for context name (optional)
+#            $2 = debug flag ("debug" to enable debug output)
+# Returns: 0=context selected, 1=no isolation available
+# Outputs: Debug messages to stderr if debug flag is set
+_cai_select_context() {
+    local config_context_name="${1:-}"
+    local debug_flag="${2:-}"
+    local eci_status context_to_use
+
+    # Check ECI status first
+    eci_status=$(_cai_eci_status)
+
+    if [[ "$eci_status" == "enabled" ]]; then
+        # ECI enabled - use default context (Docker Desktop)
+        if [[ "$debug_flag" == "debug" ]]; then
+            printf '%s\n' "[DEBUG] Context selection: ECI enabled, using default context" >&2
+        fi
+        printf '%s' ""
+        return 0
+    fi
+
+    # ECI not enabled - check for Secure Engine context
+    # Use config override if provided, otherwise default to containai-secure
+    local context_name="${config_context_name:-containai-secure}"
+
+    if docker context inspect "$context_name" >/dev/null 2>&1; then
+        if [[ "$debug_flag" == "debug" ]]; then
+            printf '%s\n' "[DEBUG] Context selection: ECI not available, using context '$context_name'" >&2
+        fi
+        printf '%s' "$context_name"
+        return 0
+    fi
+
+    # No isolation available
+    if [[ "$debug_flag" == "debug" ]]; then
+        printf '%s\n' "[DEBUG] Context selection: No isolation available (ECI=$eci_status, context '$context_name' not found)" >&2
+    fi
+    return 1
 }
 
 # ==============================================================================

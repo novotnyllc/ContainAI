@@ -1148,73 +1148,175 @@ _containai_start_container() {
                 return 1
             fi
 
-            local -a vol_args=()
-            vol_args+=("-v" "$data_volume:/mnt/agent-data")
+            # Resolve secure engine context from config (for context override)
+            local config_context_override=""
+            config_context_override=$(_containai_resolve_secure_engine_context "$workspace_resolved" "" 2>/dev/null) || config_context_override=""
 
-            # Check sandbox run help for supported flags - use if ! pattern for set -e safety
-            # Use timeout to avoid hanging if CLI/daemon wedges
-            local sandbox_help
-            if ! sandbox_help=$(_cai_timeout 10 docker sandbox run --help 2>&1); then
-                echo "[ERROR] docker sandbox run is not available" >&2
+            # Auto-select Docker context based on isolation availability
+            local selected_context debug_mode=""
+            if [[ "$debug_flag" == "true" ]]; then
+                debug_mode="debug"
+            fi
+            if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
+                _cai_error "No isolation available. Run 'containai doctor' for setup instructions."
                 return 1
             fi
 
-            if [[ "$quiet_flag" != "true" ]]; then
-                echo "Starting new sandbox container..."
-            fi
+            local -a vol_args=()
+            vol_args+=("-v" "$data_volume:/mnt/agent-data")
 
-            local -a args=()
-            args+=(--name "$container_name")
-
-            # Add label if supported - ALWAYS use new label for creation
-            if printf '%s' "$sandbox_help" | grep -q -- '--label'; then
-                args+=(--label "$_CONTAINAI_LABEL")
-            fi
-
-            args+=("${vol_args[@]}")
-
-            local vol env_var
-            for vol in "${extra_volumes[@]}"; do
-                args+=(-v "$vol")
-            done
-            for env_var in "${env_vars[@]}"; do
-                args+=(-e "$env_var")
-            done
-
-            if [[ "$shell_flag" == "true" ]]; then
-                args+=(--detached --quiet)
-            else
-                if [[ "$detached_flag" == "true" ]]; then
-                    args+=(--detached)
-                fi
-                if [[ "$quiet_flag" == "true" ]]; then
-                    args+=(--quiet)
-                fi
-            fi
-            if [[ "$debug_flag" == "true" ]]; then
-                args+=(--debug)
-            fi
-            if [[ "$mount_docker_socket" == "true" ]]; then
-                args+=(--mount-docker-socket)
-            fi
-
-            args+=(--workspace "$workspace_resolved")
-            args+=(--template "$resolved_image")
-            args+=(--credentials "$credentials")
-            args+=("$agent")
-
-            if [[ ${#agent_args[@]} -gt 0 ]]; then
-                args+=("${agent_args[@]}")
-            fi
-
-            if [[ "$shell_flag" == "true" ]]; then
-                if ! docker sandbox run "${args[@]}" >/dev/null; then
-                    echo "[ERROR] Failed to create sandbox container" >&2
+            # Branch based on context selection:
+            # - Empty context = default (Docker Desktop) -> use docker sandbox run
+            # - Non-empty context = Sysbox -> use docker --context X run --runtime=sysbox-runc
+            if [[ -z "$selected_context" ]]; then
+                # Sandbox mode (Docker Desktop with ECI)
+                # Check sandbox run help for supported flags - use if ! pattern for set -e safety
+                # Use timeout to avoid hanging if CLI/daemon wedges
+                local sandbox_help
+                if ! sandbox_help=$(_cai_timeout 10 docker sandbox run --help 2>&1); then
+                    echo "[ERROR] docker sandbox run is not available" >&2
                     return 1
                 fi
-                docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
+
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "Starting new sandbox container (ECI mode)..."
+                fi
+
+                local -a args=()
+                args+=(--name "$container_name")
+
+                # Add label if supported - ALWAYS use new label for creation
+                if printf '%s' "$sandbox_help" | grep -q -- '--label'; then
+                    args+=(--label "$_CONTAINAI_LABEL")
+                fi
+
+                args+=("${vol_args[@]}")
+
+                local vol env_var
+                for vol in "${extra_volumes[@]}"; do
+                    args+=(-v "$vol")
+                done
+                for env_var in "${env_vars[@]}"; do
+                    args+=(-e "$env_var")
+                done
+
+                if [[ "$shell_flag" == "true" ]]; then
+                    args+=(--detached --quiet)
+                else
+                    if [[ "$detached_flag" == "true" ]]; then
+                        args+=(--detached)
+                    fi
+                    if [[ "$quiet_flag" == "true" ]]; then
+                        args+=(--quiet)
+                    fi
+                fi
+                if [[ "$debug_flag" == "true" ]]; then
+                    args+=(--debug)
+                fi
+                if [[ "$mount_docker_socket" == "true" ]]; then
+                    args+=(--mount-docker-socket)
+                fi
+
+                args+=(--workspace "$workspace_resolved")
+                args+=(--template "$resolved_image")
+                args+=(--credentials "$credentials")
+                args+=("$agent")
+
+                if [[ ${#agent_args[@]} -gt 0 ]]; then
+                    args+=("${agent_args[@]}")
+                fi
+
+                if [[ "$shell_flag" == "true" ]]; then
+                    if ! docker sandbox run "${args[@]}" >/dev/null; then
+                        echo "[ERROR] Failed to create sandbox container" >&2
+                        return 1
+                    fi
+                    docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
+                else
+                    docker sandbox run "${args[@]}"
+                fi
             else
-                docker sandbox run "${args[@]}"
+                # Sysbox mode (containai-secure context)
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "Starting new sandbox container (Sysbox mode, context: $selected_context)..."
+                fi
+
+                local -a args=()
+                args+=(--context "$selected_context")
+                args+=(run)
+                args+=(--runtime=sysbox-runc)
+                args+=(--name "$container_name")
+                args+=(--label "$_CONTAINAI_LABEL")
+
+                # Interactive/TTY flags
+                if [[ "$shell_flag" == "true" ]]; then
+                    args+=(-d)
+                elif [[ "$detached_flag" == "true" ]]; then
+                    args+=(-d)
+                else
+                    args+=(-it)
+                fi
+
+                # Remove container on exit (only if not detached)
+                if [[ "$detached_flag" != "true" && "$shell_flag" != "true" ]]; then
+                    args+=(--rm)
+                fi
+
+                # Volume mounts
+                args+=("${vol_args[@]}")
+                args+=(-v "$workspace_resolved:/home/agent/workspace")
+
+                local vol env_var
+                for vol in "${extra_volumes[@]}"; do
+                    args+=(-v "$vol")
+                done
+
+                # Environment variables
+                for env_var in "${env_vars[@]}"; do
+                    args+=(-e "$env_var")
+                done
+
+                # Working directory
+                args+=(-w /home/agent/workspace)
+
+                # Image
+                args+=("$resolved_image")
+
+                # Command: agent with any args
+                args+=("$agent")
+                if [[ ${#agent_args[@]} -gt 0 ]]; then
+                    args+=("${agent_args[@]}")
+                fi
+
+                if [[ "$shell_flag" == "true" ]]; then
+                    # For shell mode, start container with sleep infinity to keep it running
+                    # Build args without the agent command
+                    local -a shell_args=()
+                    shell_args+=(--context "$selected_context")
+                    shell_args+=(run)
+                    shell_args+=(--runtime=sysbox-runc)
+                    shell_args+=(--name "$container_name")
+                    shell_args+=(--label "$_CONTAINAI_LABEL")
+                    shell_args+=(-d)
+                    shell_args+=("${vol_args[@]}")
+                    shell_args+=(-v "$workspace_resolved:/home/agent/workspace")
+                    for vol in "${extra_volumes[@]}"; do
+                        shell_args+=(-v "$vol")
+                    done
+                    for env_var in "${env_vars[@]}"; do
+                        shell_args+=(-e "$env_var")
+                    done
+                    shell_args+=(-w /home/agent/workspace)
+                    shell_args+=("$resolved_image")
+                    shell_args+=(sleep infinity)
+                    if ! docker "${shell_args[@]}" >/dev/null; then
+                        echo "[ERROR] Failed to create Sysbox container" >&2
+                        return 1
+                    fi
+                    docker --context "$selected_context" exec -it -w /home/agent/workspace "$container_name" bash
+                else
+                    docker "${args[@]}"
+                fi
             fi
             ;;
         *)

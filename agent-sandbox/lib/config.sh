@@ -47,6 +47,7 @@ _CAI_CONFIG_LOADED=1
 # Only initialize once (guarded above)
 _CAI_VOLUME=""
 _CAI_EXCLUDES=()
+_CAI_SECURE_ENGINE_CONTEXT=""
 
 # ==============================================================================
 # Volume name validation
@@ -211,6 +212,7 @@ _containai_parse_config() {
     _CAI_EXCLUDES=()
     _CAI_AGENT=""
     _CAI_CREDENTIALS=""
+    _CAI_SECURE_ENGINE_CONTEXT=""
 
     # Check if config file exists
     if [[ ! -f "$config_file" ]]; then
@@ -324,6 +326,17 @@ if isinstance(creds, dict):
     print(creds.get('mode', ''))
 ")
     _CAI_CREDENTIALS="$creds_mode"
+
+    # Extract secure_engine.context_name from config
+    local secure_engine_context=""
+    secure_engine_context=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+se = config.get('secure_engine', {})
+if isinstance(se, dict):
+    print(se.get('context_name', ''))
+")
+    _CAI_SECURE_ENGINE_CONTEXT="$secure_engine_context"
 
     # Extract excludes with cumulative merge (pass JSON via stdin):
     # default_excludes + workspace.<key>.excludes (deduped)
@@ -650,6 +663,62 @@ _containai_resolve_credentials() {
 
     # 5. Default
     printf '%s' "none"
+}
+
+# ==============================================================================
+# Secure Engine context resolution
+# ==============================================================================
+
+# Resolve secure engine context name from config
+# Arguments: $1 = workspace path (default: $PWD)
+#            $2 = explicit config path (optional)
+# Outputs: context name (empty if not configured)
+# Precedence:
+#   1. CONTAINAI_SECURE_ENGINE_CONTEXT env var
+#   2. Config file [secure_engine].context_name
+#   3. Default: "" (empty, let caller decide)
+_containai_resolve_secure_engine_context() {
+    local workspace="${1:-$PWD}"
+    local explicit_config="${2:-}"
+    local config_file
+
+    # 1. Environment variable
+    if [[ -n "${CONTAINAI_SECURE_ENGINE_CONTEXT:-}" ]]; then
+        printf '%s' "$CONTAINAI_SECURE_ENGINE_CONTEXT"
+        return 0
+    fi
+
+    # 2. Resolve workspace to absolute path
+    if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
+        workspace="$PWD"
+    fi
+
+    # 3. Find and parse config file
+    if [[ -n "$explicit_config" ]]; then
+        if [[ ! -f "$explicit_config" ]]; then
+            # Config not found, return empty
+            return 0
+        fi
+        config_file="$explicit_config"
+    else
+        config_file=$(_containai_find_config "$workspace")
+    fi
+
+    if [[ -n "$config_file" ]]; then
+        local strict_mode=""
+        if [[ -n "$explicit_config" ]]; then
+            strict_mode="strict"
+        fi
+        if _containai_parse_config "$config_file" "$workspace" "$strict_mode"; then
+            if [[ -n "$_CAI_SECURE_ENGINE_CONTEXT" ]]; then
+                printf '%s' "$_CAI_SECURE_ENGINE_CONTEXT"
+                return 0
+            fi
+        fi
+    fi
+
+    # 4. Default: empty (let caller decide)
+    return 0
 }
 
 return 0
