@@ -7,9 +7,15 @@ set -euo pipefail
 # Syncs plugins, settings, credentials, and other agent configs via eeacms/rsync
 # container. Uses declarative SYNC_MAP to define sources, targets, and flags.
 #
-# Usage: sync-agent-plugins.sh [options]
-#   --dry-run    Show what would be done without making changes (uses rsync --dry-run)
-#   --help       Show this help message
+# Usage: sync-agent-plugins.sh [OPTIONS]
+#   --volume <name>    Docker volume name (default: sandbox-agent-data)
+#   --config <path>    Explicit config file path (disables discovery)
+#   --dry-run          Show what would be done without making changes
+#   --help             Show this help message
+#
+# Environment:
+#   CONTAINAI_DATA_VOLUME    Volume name (overridden by --volume)
+#   CONTAINAI_CONFIG         Config file path (overridden by --config)
 #
 # Platform: Linux only (blocks on macOS with error)
 # ==============================================================================
@@ -211,19 +217,20 @@ _sync_resolve_config_volume() {
 
     # Call parse-toml.py in workspace matching mode (workspace = $PWD)
     # Use if-construct to avoid set -e terminating on non-zero exit
+    # Explicit cleanup on both paths (mirrors aliases.sh pattern)
     local result parse_stderr
     parse_stderr=$(mktemp)
-    # Cleanup temp file on function return (normal exit paths only)
-    trap 'rm -f "$parse_stderr"' RETURN
 
     if ! result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" --workspace "$PWD" --config-dir "$config_dir" 2>"$parse_stderr"); then
         echo "[WARN] Failed to parse config file: $config_file" >&2
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
         fi
+        rm -f "$parse_stderr"
         return 0  # Fall back to default, don't fail hard
     fi
 
+    rm -f "$parse_stderr"
     printf '%s' "$result"
 }
 

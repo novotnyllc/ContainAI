@@ -142,23 +142,69 @@ test_dry_run() {
         info "Output: $(echo "$dry_run_output" | head -20)"
     fi
 
+    # Create test volumes for precedence tests
+    docker volume create env-test-vol >/dev/null 2>&1 || true
+    docker volume create cli-test-vol >/dev/null 2>&1 || true
+
     # Test CONTAINAI_DATA_VOLUME env var precedence
-    local env_test_output
-    env_test_output=$(CONTAINAI_DATA_VOLUME="env-test-vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || true
+    local env_test_output env_test_exit=0
+    env_test_output=$(CONTAINAI_DATA_VOLUME="env-test-vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || env_test_exit=$?
     if echo "$env_test_output" | grep -q "Using data volume: env-test-vol"; then
         pass "CONTAINAI_DATA_VOLUME env var respected"
     else
-        fail "CONTAINAI_DATA_VOLUME env var not respected"
+        fail "CONTAINAI_DATA_VOLUME env var not respected (exit: $env_test_exit)"
+        info "Output: $(echo "$env_test_output" | head -10)"
     fi
 
     # Test --volume flag takes precedence over env var
-    local cli_test_output
-    cli_test_output=$(CONTAINAI_DATA_VOLUME="env-test-vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "cli-test-vol" --dry-run 2>&1) || true
+    local cli_test_output cli_test_exit=0
+    cli_test_output=$(CONTAINAI_DATA_VOLUME="env-test-vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "cli-test-vol" --dry-run 2>&1) || cli_test_exit=$?
     if echo "$cli_test_output" | grep -q "Using data volume: cli-test-vol"; then
         pass "--volume flag takes precedence over env var"
     else
-        fail "--volume flag does not take precedence over env var"
+        fail "--volume flag does not take precedence over env var (exit: $cli_test_exit)"
+        info "Output: $(echo "$cli_test_output" | head -10)"
     fi
+
+    # Test --volume skips config parsing even when CONTAINAI_CONFIG points to invalid file
+    local skip_config_output skip_config_exit=0
+    skip_config_output=$(CONTAINAI_CONFIG="/nonexistent/config.toml" "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "$DATA_VOLUME" --dry-run 2>&1) || skip_config_exit=$?
+    if echo "$skip_config_output" | grep -q "Using data volume: $DATA_VOLUME"; then
+        pass "--volume skips config parsing (ignores invalid CONTAINAI_CONFIG)"
+    else
+        fail "--volume should skip config parsing but didn't (exit: $skip_config_exit)"
+        info "Output: $(echo "$skip_config_output" | head -10)"
+    fi
+
+    # Test explicit --config with missing file fails
+    local missing_config_output missing_config_exit=0
+    missing_config_output=$("$SCRIPT_DIR/sync-agent-plugins.sh" --config "/nonexistent/config.toml" --dry-run 2>&1) || missing_config_exit=$?
+    if [[ $missing_config_exit -ne 0 ]] && echo "$missing_config_output" | grep -q "Config file not found"; then
+        pass "Explicit --config with missing file fails with error"
+    else
+        fail "Explicit --config with missing file should fail (exit: $missing_config_exit)"
+        info "Output: $(echo "$missing_config_output" | head -10)"
+    fi
+
+    # Test config discovery from $PWD
+    local config_test_dir config_test_output config_test_exit=0
+    config_test_dir=$(mktemp -d)
+    mkdir -p "$config_test_dir/.containai"
+    echo '[agent]' > "$config_test_dir/.containai/config.toml"
+    echo 'data_volume = "config-discovered-vol"' >> "$config_test_dir/.containai/config.toml"
+    docker volume create config-discovered-vol >/dev/null 2>&1 || true
+    config_test_output=$(cd "$config_test_dir" && "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || config_test_exit=$?
+    if echo "$config_test_output" | grep -q "Using data volume: config-discovered-vol"; then
+        pass "Config discovery from \$PWD works"
+    else
+        fail "Config discovery from \$PWD not working (exit: $config_test_exit)"
+        info "Output: $(echo "$config_test_output" | head -10)"
+    fi
+    rm -rf "$config_test_dir"
+    docker volume rm config-discovered-vol >/dev/null 2>&1 || true
+
+    # Cleanup test volumes
+    docker volume rm env-test-vol cli-test-vol >/dev/null 2>&1 || true
 
     # Capture volume snapshot after dry-run
     local after_snapshot
