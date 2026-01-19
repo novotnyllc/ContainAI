@@ -176,7 +176,14 @@ _containai_check_isolation() {
         return 0
     fi
 
-    # ECI not enabled - fall back to docker info checks for other isolation methods
+    # ECI detection failed - check if it was operational failure vs definitive "not enabled"
+    # _CAI_ECI_DETECTION_UNCERTAIN=1 means we couldn't determine status (timeout, image not found, etc.)
+    if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
+        echo "[WARN] ECI detection uncertain (${_CAI_ECI_ENABLED_ERROR:-unknown})" >&2
+        # Continue to docker info checks as fallback, but remember uncertainty
+    fi
+
+    # ECI not enabled or uncertain - fall back to docker info checks for other isolation methods
     # Use docker info --format for reliable structured output with timeout
     # Use if ! pattern for set -e safety
     if ! runtime=$(_cai_timeout 5 docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then
@@ -210,6 +217,11 @@ _containai_check_isolation() {
 
     # Standard runc without isolation features
     if [[ "$runtime" == "runc" ]]; then
+        # If ECI detection was uncertain, return unknown instead of definite "not isolated"
+        if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
+            echo "[WARN] Unable to definitively determine isolation status" >&2
+            return 2
+        fi
         echo "[WARN] No additional isolation detected (standard runtime)" >&2
         return 1
     fi
