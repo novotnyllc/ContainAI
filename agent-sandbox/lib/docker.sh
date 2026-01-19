@@ -155,14 +155,27 @@ _cai_sandbox_available() {
 
 # Get docker sandbox version if available
 # Outputs: Version string (e.g., "0.1.0")
-# Returns: 0=success, 1=sandbox unavailable
+# Returns: 0=success, 1=sandbox unavailable, 2=unknown (sandbox availability uncertain)
 _cai_sandbox_version() {
-    if ! _cai_sandbox_available; then
+    local avail_rc
+    # Preserve exit code from availability check (0/1/2)
+    if _cai_sandbox_available; then
+        avail_rc=0
+    else
+        avail_rc=$?
+    fi
+
+    # For unknown (2), still attempt to get version - might work
+    if [[ $avail_rc -eq 1 ]]; then
         return 1
     fi
 
     local version_output
     if ! version_output=$(docker sandbox version 2>/dev/null); then
+        # If availability was unknown and version fails, propagate unknown
+        if [[ $avail_rc -eq 2 ]]; then
+            return 2
+        fi
         return 1
     fi
 

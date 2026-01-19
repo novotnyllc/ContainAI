@@ -45,3 +45,6 @@ Bash read command returns non-zero on EOF; guard with 'if ! read -r var; then' f
 
 ## 2026-01-19 manual [pitfall]
 base64 -w0 is not portable (BSD/macOS lacks -w flag); use 'base64 | tr -d \n' for cross-platform encoding
+
+## 2026-01-19 manual [pitfall]
+BASH_SOURCE check must come AFTER BASH_VERSION check - BASH_SOURCE is bash-only and fails in sh/dash

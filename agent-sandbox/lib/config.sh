@@ -115,11 +115,8 @@ _containai_find_config() {
         dir=$(dirname "$dir")
     done
 
-    # Only check root directory if we actually walked to / (no git root found)
-    if [[ "$git_root_found" == "false" && -f "/.containai/config.toml" ]]; then
-        printf '%s' "/.containai/config.toml"
-        return 0
-    fi
+    # Note: Do NOT check root filesystem (/.containai/config.toml) - security concern
+    # Only repo-local and user-local configs are valid discovery targets
 
     # Fall back to XDG_CONFIG_HOME
     local xdg_config="${XDG_CONFIG_HOME:-$HOME/.config}"

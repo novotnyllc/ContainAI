@@ -60,6 +60,9 @@ if ! _containai_libs_exist; then
     return 1
 fi
 
+# Clean up one-shot helper function to reduce namespace pollution
+unset -f _containai_libs_exist
+
 # Source library files with error checking
 # Order matters: core.sh first (logging), then platform/docker, then config, then others
 # Note: config.sh must come before import.sh (depends on _containai_resolve_excludes)
