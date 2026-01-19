@@ -18,10 +18,181 @@ _ASB_IMAGE="agent-sandbox:latest"
 _ASB_LABEL="asb.sandbox=agent-sandbox"
 _ASB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Default volume name (can be overridden via config)
+_CONTAINAI_DEFAULT_VOLUME="sandbox-agent-data"
+
 # Volumes that asb creates/ensures (per spec)
 _ASB_VOLUMES=(
         "sandbox-agent-data:/mnt/agent-data"
 )
+
+# ==============================================================================
+# Config loading functions for ContainAI
+# ==============================================================================
+
+# Validate Docker volume name pattern
+# Pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
+# Length: 1-255 characters
+# Returns: 0=valid, 1=invalid
+_containai_validate_volume_name() {
+    local name="$1"
+
+    # Check length
+    if [[ -z "$name" ]] || [[ ${#name} -gt 255 ]]; then
+        return 1
+    fi
+
+    # Check pattern: must start with alphanumeric, followed by alphanumeric, underscore, dot, or dash
+    if [[ ! "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Find config file by walking up from workspace path
+# Checks: .containai/config.toml then falls back to XDG_CONFIG_HOME
+# Arguments: $1 = workspace path (default: $PWD)
+# Outputs: config file path (or empty if not found)
+_containai_find_config() {
+    local workspace="${1:-$PWD}"
+    local dir config_file
+
+    # Resolve workspace to absolute path
+    dir=$(cd "$workspace" 2>/dev/null && pwd) || dir="$PWD"
+
+    # Walk up directory tree looking for .containai/config.toml
+    while [[ "$dir" != "/" ]]; do
+        config_file="$dir/.containai/config.toml"
+        if [[ -f "$config_file" ]]; then
+            printf '%s' "$config_file"
+            return 0
+        fi
+
+        # Check for git root (stop walking up after git root)
+        if [[ -d "$dir/.git" ]]; then
+            break
+        fi
+
+        dir=$(dirname "$dir")
+    done
+
+    # Check root directory
+    if [[ -f "/.containai/config.toml" ]]; then
+        printf '%s' "/.containai/config.toml"
+        return 0
+    fi
+
+    # Fall back to XDG_CONFIG_HOME
+    local xdg_config="${XDG_CONFIG_HOME:-$HOME/.config}"
+    config_file="$xdg_config/containai/config.toml"
+    if [[ -f "$config_file" ]]; then
+        printf '%s' "$config_file"
+        return 0
+    fi
+
+    # Not found
+    return 0
+}
+
+# Parse config file for workspace matching
+# Calls parse-toml.py with workspace matching mode
+# Arguments: $1 = config file, $2 = workspace path, $3 = config dir
+# Outputs: data_volume value (or empty if not found)
+_containai_parse_config_for_workspace() {
+    local config_file="$1"
+    local workspace="$2"
+    local config_dir="$3"
+    local script_dir result
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "[WARN] Python not found, cannot parse config. Using default." >&2
+        return 0
+    fi
+
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    # Call parse-toml.py in workspace matching mode
+    result=$(python3 "$script_dir/parse-toml.py" "$config_file" --workspace "$workspace" --config-dir "$config_dir" 2>/dev/null)
+
+    printf '%s' "$result"
+}
+
+# Main volume resolver - determines the data volume to use
+# Arguments: $1 = CLI --data-volume value (optional)
+#            $2 = workspace path (default: $PWD)
+#            $3 = explicit config path (optional)
+# Outputs: volume name
+# Precedence:
+#   1. --data-volume CLI flag (skips config parsing entirely)
+#   2. CONTAINAI_DATA_VOLUME env var (skips config parsing entirely)
+#   3. Config file [workspace.<path>] section matching workspace
+#   4. Config file [agent].data_volume
+#   5. Default: sandbox-agent-data
+_containai_resolve_volume() {
+    local cli_volume="${1:-}"
+    local workspace="${2:-$PWD}"
+    local explicit_config="${3:-}"
+    local config_file config_dir volume
+
+    # 1. CLI flag always wins - SKIP all config parsing
+    if [[ -n "$cli_volume" ]]; then
+        # Validate volume name
+        if ! _containai_validate_volume_name "$cli_volume"; then
+            echo "[ERROR] Invalid volume name: $cli_volume" >&2
+            return 1
+        fi
+        printf '%s' "$cli_volume"
+        return 0
+    fi
+
+    # 2. Environment variable always wins - SKIP all config parsing
+    if [[ -n "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+        # Validate volume name
+        if ! _containai_validate_volume_name "$CONTAINAI_DATA_VOLUME"; then
+            echo "[ERROR] Invalid volume name in CONTAINAI_DATA_VOLUME: $CONTAINAI_DATA_VOLUME" >&2
+            return 1
+        fi
+        printf '%s' "$CONTAINAI_DATA_VOLUME"
+        return 0
+    fi
+
+    # 3. Resolve workspace to absolute path
+    workspace=$(cd "$workspace" 2>/dev/null && pwd) || workspace="$PWD"
+
+    # 4. Find config file
+    if [[ -n "$explicit_config" ]]; then
+        if [[ ! -f "$explicit_config" ]]; then
+            echo "[ERROR] Config file not found: $explicit_config" >&2
+            return 1
+        fi
+        config_file="$explicit_config"
+        config_dir=$(dirname "$config_file")
+    else
+        config_file=$(_containai_find_config "$workspace")
+        if [[ -n "$config_file" ]]; then
+            config_dir=$(dirname "$config_file")
+        fi
+    fi
+
+    # 5. Parse config with workspace matching
+    if [[ -n "$config_file" ]]; then
+        volume=$(_containai_parse_config_for_workspace "$config_file" "$workspace" "$config_dir")
+        if [[ -n "$volume" ]]; then
+            # Validate volume name from config
+            if ! _containai_validate_volume_name "$volume"; then
+                echo "[ERROR] Invalid volume name in config: $volume" >&2
+                return 1
+            fi
+            printf '%s' "$volume"
+            return 0
+        fi
+    fi
+
+    # 6. Default
+    printf '%s' "$_CONTAINAI_DEFAULT_VOLUME"
+}
 
 
 # Generate sanitized container name from git repo/branch or directory
