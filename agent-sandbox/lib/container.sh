@@ -10,10 +10,12 @@
 #   _containai_check_sandbox      - Check if docker sandbox is available
 #   _containai_preflight_checks   - Run preflight checks before container ops
 #   _containai_ensure_volumes     - Ensure a volume exists (takes volume name param)
+#   _containai_start_container    - Start or attach to container
 #   _containai_stop_all           - Stop all ContainAI containers
 #
 # Container inspection helpers:
-#   _containai_get_container_label      - Get containai.sandbox label value
+#   _containai_container_exists         - Check if container exists
+#   _containai_get_container_labels     - Get both new and legacy label values
 #   _containai_get_container_image      - Get container image name
 #   _containai_get_container_data_volume - Get mounted data volume name
 #   _containai_is_our_container         - Check if container belongs to ContainAI
@@ -23,7 +25,12 @@
 # Constants:
 #   _CONTAINAI_IMAGE              - Default image name
 #   _CONTAINAI_LABEL              - Container label for ContainAI ownership
-#   _CONTAINAI_LEGACY_LABEL       - Legacy label for transition period
+#   _CONTAINAI_LEGACY_LABEL       - Legacy label for transition period (read-only)
+#
+# Note on legacy label support:
+#   This library discovers containers with the legacy asb.sandbox=agent-sandbox
+#   label but only CREATES containers with containai.sandbox=containai.
+#   This provides backward compatibility during the transition period.
 #
 # Usage: source lib/container.sh
 # ==============================================================================
@@ -48,8 +55,53 @@ fi
 # Guard against re-sourcing
 : "${_CONTAINAI_IMAGE:=agent-sandbox:latest}"
 : "${_CONTAINAI_LABEL:=containai.sandbox=containai}"
-# Legacy label for transition period (discover containers created with old label)
+# Legacy label for transition period - READ-ONLY (discover old containers, never create with this)
 : "${_CONTAINAI_LEGACY_LABEL:=asb.sandbox=agent-sandbox}"
+
+# ==============================================================================
+# Volume name validation (local copy for independence from config.sh)
+# ==============================================================================
+
+# Validate Docker volume name pattern
+# Pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
+# Length: 1-255 characters
+# Returns: 0=valid, 1=invalid
+_containai_validate_volume_name() {
+    local name="$1"
+
+    # Check length
+    if [[ -z "$name" ]] || [[ ${#name} -gt 255 ]]; then
+        return 1
+    fi
+
+    # Check pattern: must start with alphanumeric, followed by alphanumeric, underscore, dot, or dash
+    if [[ ! "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# ==============================================================================
+# Docker availability check
+# ==============================================================================
+
+# Check if Docker is available and responsive
+# Returns: 0=available, 1=not available (with error message)
+_containai_check_docker() {
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "[ERROR] Docker is not installed or not in PATH" >&2
+        return 1
+    fi
+
+    # Quick liveness check
+    if ! docker info >/dev/null 2>&1; then
+        echo "[ERROR] Docker daemon is not accessible" >&2
+        return 1
+    fi
+
+    return 0
+}
 
 # ==============================================================================
 # Container naming
@@ -98,16 +150,12 @@ _containai_container_name() {
     name="$(printf '%s' "$name" | sed 's/-*$//')"
 
     # Final fallback if name became empty after all processing
-    # Use sandbox-<dirname> pattern, not generic sandbox-container
-    # Apply same sanitization as main path for consistency
     if [[ -z "$name" ]]; then
         local dir_fallback
         dir_fallback="$(basename "$(pwd)")"
-        # Sanitize: lowercase, replace non-alphanumeric with dash, collapse dashes
         dir_fallback="$(printf '%s' "$dir_fallback" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-*//;s/-*$//')"
         if [[ -n "$dir_fallback" ]]; then
             name="sandbox-$dir_fallback"
-            # Truncate to 63 characters (Docker limit)
             name="${name:0:63}"
             name="$(printf '%s' "$name" | sed 's/-*$//')"
         else
@@ -123,9 +171,16 @@ _containai_container_name() {
 # ==============================================================================
 
 # Container isolation detection (conservative - prefer return 2 over false positive/negative)
+# Requires: Docker must be available (call _containai_check_docker first or _containai_check_sandbox)
 # Returns: 0=isolated (detected), 1=not isolated (definite), 2=unknown (ambiguous)
 _containai_check_isolation() {
     local runtime rootless userns
+
+    # Guard: check docker availability
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "[WARN] Unable to determine isolation status (docker not found)" >&2
+        return 2
+    fi
 
     # Use docker info --format for reliable structured output (proven approach from aliases.sh)
     runtime=$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null)
@@ -175,16 +230,12 @@ _containai_check_sandbox() {
     fi
 
     # Check if sandbox command is available by trying to run it
-    # Capture both stdout and stderr for proper error analysis
-    # Use if ! pattern to handle set -e safely
     local ls_output
     if ls_output="$(docker sandbox ls 2>&1)"; then
         return 0
     fi
 
     # Sandbox ls failed - analyze the error to provide actionable feedback
-    # Check for feature disabled / requirements not met FIRST (before empty list check)
-    # Match broad patterns per spec, but exclude "no sandbox" empty list messages
     if printf '%s' "$ls_output" | grep -qiE "feature.*disabled|not enabled|requirements.*not met|sandbox.*unavailable" && \
        ! printf '%s' "$ls_output" | grep -qiE "no sandboxes"; then
         echo "[ERROR] Docker sandbox feature is not enabled" >&2
@@ -199,18 +250,13 @@ _containai_check_sandbox() {
         return 1
     fi
 
-    # Check for "no sandboxes exist" case - only treat as success if exit code was 0
-    # (handled above) or if message clearly indicates functional sandbox support
-    # With non-zero exit, treat as unknown to be safe
     if printf '%s' "$ls_output" | grep -qiE "no sandboxes found|0 sandboxes|sandbox list is empty"; then
-        # Non-zero exit with empty list message - treat as unknown, not success
         echo "[WARN] docker sandbox ls returned empty list with error code" >&2
         echo "  Attempting to proceed - sandbox may be functional." >&2
         echo "" >&2
         return 2
     fi
 
-    # Check for command not found / not available errors (definite "no")
     if printf '%s' "$ls_output" | grep -qiE "not recognized|unknown command|not a docker command|command not found"; then
         echo "[ERROR] Docker sandbox is not available" >&2
         echo "" >&2
@@ -226,7 +272,6 @@ _containai_check_sandbox() {
         return 1
     fi
 
-    # Check for permission denied (separate from daemon not running)
     if printf '%s' "$ls_output" | grep -qiE "permission denied"; then
         echo "[ERROR] Permission denied accessing Docker" >&2
         echo "" >&2
@@ -241,7 +286,6 @@ _containai_check_sandbox() {
         return 1
     fi
 
-    # Check for daemon not running (tighter match, excludes permission denied)
     if printf '%s' "$ls_output" | grep -qiE "daemon.*not running|connection refused|Is the docker daemon running"; then
         echo "[ERROR] Docker daemon is not running" >&2
         echo "" >&2
@@ -253,7 +297,7 @@ _containai_check_sandbox() {
         return 1
     fi
 
-    # Unknown error - fail OPEN with warning (per spec: don't block on unknown)
+    # Unknown error - fail OPEN with warning
     echo "[WARN] Could not verify Docker sandbox availability" >&2
     echo "" >&2
     echo "  docker sandbox ls output:" >&2
@@ -263,7 +307,7 @@ _containai_check_sandbox() {
     echo "  Ensure Docker Desktop 4.50+ is installed with sandbox feature enabled." >&2
     echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
     echo "" >&2
-    return 2  # Unknown - proceed with warning
+    return 2
 }
 
 # ==============================================================================
@@ -279,7 +323,6 @@ _containai_preflight_checks() {
 
     if [[ "$force_flag" == "true" ]]; then
         echo "[WARN] Skipping sandbox availability check (--force)" >&2
-        # Handle CONTAINAI_REQUIRE_ISOLATION with --force bypass
         if [[ "${CONTAINAI_REQUIRE_ISOLATION:-0}" == "1" ]]; then
             echo "*** WARNING: Bypassing isolation requirement with --force" >&2
             echo "*** Running without verified isolation may expose host system" >&2
@@ -290,20 +333,15 @@ _containai_preflight_checks() {
     _containai_check_sandbox
     sandbox_rc=$?
     if [[ $sandbox_rc -eq 1 ]]; then
-        return 1  # Definite "no" - block
+        return 1
     fi
-    # rc=0 (yes) or rc=2 (unknown) - proceed
 
-    # Best-effort isolation detection
     _containai_check_isolation
     isolation_rc=$?
 
-    # Handle CONTAINAI_REQUIRE_ISOLATION environment variable
     if [[ "${CONTAINAI_REQUIRE_ISOLATION:-0}" == "1" ]]; then
         case $isolation_rc in
-            0)
-                # Isolated - proceed normally
-                ;;
+            0) ;;
             1)
                 echo "[ERROR] Container isolation required but not detected. Use --force to bypass." >&2
                 return 1
@@ -334,6 +372,13 @@ _containai_ensure_volumes() {
         return 1
     fi
 
+    # Validate volume name
+    if ! _containai_validate_volume_name "$volume_name"; then
+        echo "[ERROR] Invalid volume name: $volume_name" >&2
+        echo "  Volume names must start with alphanumeric and contain only [a-zA-Z0-9_.-]" >&2
+        return 1
+    fi
+
     if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
         if [[ "$quiet" != "true" ]]; then
             echo "Creating volume: $volume_name"
@@ -352,14 +397,16 @@ _containai_ensure_volumes() {
 
 # Check if container exists
 # Arguments: $1 = container name
-# Returns: 0=exists, 1=does not exist or error
+# Returns: 0=exists, 1=does not exist, 2=docker error (daemon down, etc.)
 _containai_container_exists() {
     local container_name="$1"
-    local inspect_output
+    local inspect_output inspect_rc
 
-    inspect_output=$(docker inspect "$container_name" 2>&1)
-    if [[ $? -eq 0 ]]; then
-        return 0
+    inspect_output=$(docker inspect --type container --format '{{.Id}}' "$container_name" 2>&1)
+    inspect_rc=$?
+
+    if [[ $inspect_rc -eq 0 ]]; then
+        return 0  # Container exists
     fi
 
     # Check if it's "no such" vs other errors
@@ -367,31 +414,34 @@ _containai_container_exists() {
         return 1  # Container doesn't exist
     fi
 
-    # Docker error (daemon down, permission, etc.) - treat as "doesn't exist" for safety
-    return 1
+    # Docker error (daemon down, permission, etc.)
+    return 2
 }
 
-# Get the containai.sandbox label value from a container (empty if not found or error)
-# Also checks legacy asb.sandbox label for transition period
-_containai_get_container_label() {
+# Get label values for both new and legacy labels from a container
+# Arguments: $1 = container name
+# Outputs to stdout: Two lines: "new_label_value" then "legacy_label_value" (may be empty)
+# Returns: 0 on success, 1 on docker error
+_containai_get_container_labels() {
     local container_name="$1"
-    local label_value
+    local new_label legacy_label
 
-    # First try new label
-    label_value=$(docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null)
-    if [[ $? -eq 0 ]] && [[ -n "$label_value" ]] && [[ "$label_value" != "<no value>" ]]; then
-        printf '%s' "$label_value"
-        return 0
+    new_label=$(docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+    # Normalize "<no value>" to empty
+    if [[ "$new_label" == "<no value>" ]]; then
+        new_label=""
     fi
 
-    # Fall back to legacy label for transition period
-    label_value=$(docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null)
-    if [[ $? -eq 0 ]] && [[ -n "$label_value" ]] && [[ "$label_value" != "<no value>" ]]; then
-        printf '%s' "$label_value"
-        return 0
+    legacy_label=$(docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null)
+    if [[ "$legacy_label" == "<no value>" ]]; then
+        legacy_label=""
     fi
 
-    echo ""
+    printf '%s\n%s\n' "$new_label" "$legacy_label"
+    return 0
 }
 
 # Get the image name of a container (empty if not found or error)
@@ -413,7 +463,6 @@ _containai_get_container_data_volume() {
     local container_name="$1"
     local volume_name
 
-    # Query mount source for /mnt/agent-data destination
     volume_name=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null)
     if [[ $? -eq 0 ]]; then
         printf '%s' "$volume_name"
@@ -423,70 +472,83 @@ _containai_get_container_data_volume() {
 }
 
 # Verify container was created by ContainAI (has our label or uses our image)
-# Returns: 0=ours (label or image matches), 1=foreign (no match)
-# Falls back to image name verification if labels not supported
+# Returns: 0=ours (label or image matches), 1=foreign (no match), 2=docker error
 _containai_is_our_container() {
     local container_name="$1"
-    local label_value
+    local exists_rc labels new_label legacy_label image_name
 
-    # First check if container exists
-    if ! _containai_container_exists "$container_name"; then
-        return 1
+    _containai_container_exists "$container_name"
+    exists_rc=$?
+    if [[ $exists_rc -eq 1 ]]; then
+        return 1  # Doesn't exist = not ours
+    elif [[ $exists_rc -eq 2 ]]; then
+        return 2  # Docker error
     fi
 
-    label_value="$(_containai_get_container_label "$container_name")"
+    # Get both label values
+    labels=$(_containai_get_container_labels "$container_name")
+    if [[ $? -ne 0 ]]; then
+        return 2  # Docker error
+    fi
+    new_label=$(printf '%s' "$labels" | head -1)
+    legacy_label=$(printf '%s' "$labels" | tail -1)
 
-    # Primary check: new label match
-    if [[ "$label_value" == "containai" ]]; then
+    # Check new label
+    if [[ "$new_label" == "containai" ]]; then
         return 0
     fi
 
-    # Check legacy label value for transition period
-    if [[ "$label_value" == "agent-sandbox" ]]; then
+    # Check legacy label value
+    if [[ "$legacy_label" == "agent-sandbox" ]]; then
         return 0
     fi
 
-    # Fallback: if no label, check if container uses our image
-    # This handles cases where docker sandbox run doesn't support --label
-    # or containers created before label support was added
-    if [[ -z "$label_value" || "$label_value" == "<no value>" ]]; then
-        local image_name
+    # Fallback: check image
+    if [[ -z "$new_label" ]] && [[ -z "$legacy_label" ]]; then
         image_name="$(_containai_get_container_image "$container_name")"
         if [[ "$image_name" == "$_CONTAINAI_IMAGE" ]]; then
-            # Image matches - trust it as ours
             return 0
         fi
     fi
 
-    return 1  # Definitely foreign
+    return 1
 }
 
 # Check container ownership with appropriate messaging
-# Returns: 0=owned, 1=foreign (with error), 2=does not exist
+# Returns: 0=owned, 1=foreign (with error), 2=does not exist, 3=docker error
 _containai_check_container_ownership() {
     local container_name="$1"
+    local exists_rc is_ours_rc labels new_label legacy_label actual_image
 
-    # First check if container exists
-    if ! _containai_container_exists "$container_name"; then
-        return 2  # Container doesn't exist - not an ownership error
+    _containai_container_exists "$container_name"
+    exists_rc=$?
+    if [[ $exists_rc -eq 1 ]]; then
+        return 2  # Container doesn't exist
+    elif [[ $exists_rc -eq 2 ]]; then
+        echo "[ERROR] Cannot check container ownership - Docker error" >&2
+        return 3
     fi
 
-    if _containai_is_our_container "$container_name"; then
+    _containai_is_our_container "$container_name"
+    is_ours_rc=$?
+    if [[ $is_ours_rc -eq 0 ]]; then
         return 0
+    elif [[ $is_ours_rc -eq 2 ]]; then
+        echo "[ERROR] Cannot check container ownership - Docker error" >&2
+        return 3
     fi
 
-    # Foreign container
-    local actual_label actual_image
-    actual_label="$(_containai_get_container_label "$container_name")"
+    # Foreign container - show detailed info
+    labels=$(_containai_get_container_labels "$container_name")
+    new_label=$(printf '%s' "$labels" | head -1)
+    legacy_label=$(printf '%s' "$labels" | tail -1)
     actual_image="$(_containai_get_container_image "$container_name")"
-    # Normalize empty or "<no value>" to "<not set>"
-    if [[ -z "$actual_label" || "$actual_label" == "<no value>" ]]; then
-        actual_label="<not set>"
-    fi
+
     echo "[ERROR] Container '$container_name' exists but was not created by ContainAI" >&2
     echo "" >&2
     echo "  Expected label 'containai.sandbox': containai" >&2
-    echo "  Actual label 'containai.sandbox':   ${actual_label}" >&2
+    echo "  Actual label 'containai.sandbox':   ${new_label:-<not set>}" >&2
+    echo "  Actual label 'asb.sandbox':         ${legacy_label:-<not set>}" >&2
     echo "  Expected image:                     $_CONTAINAI_IMAGE" >&2
     echo "  Actual image:                       ${actual_image:-<unknown>}" >&2
     echo "" >&2
@@ -507,12 +569,10 @@ _containai_check_volume_match() {
 
     mounted_volume=$(_containai_get_container_data_volume "$container_name")
 
-    # If no volume mount found, don't block (might be legacy container)
     if [[ -z "$mounted_volume" ]]; then
         return 0
     fi
 
-    # Check for mismatch
     if [[ "$mounted_volume" != "$desired_volume" ]]; then
         if [[ "$quiet_flag" != "true" ]]; then
             echo "[WARN] Volume mismatch for container '$container_name'" >&2
@@ -534,18 +594,372 @@ _containai_check_volume_match() {
 }
 
 # ==============================================================================
+# Start container
+# ==============================================================================
+
+# Start or attach to a ContainAI sandbox container
+# This is the core container operation function extracted from _asb_impl
+# Arguments:
+#   --name <name>        Container name (default: auto-generated)
+#   --workspace <path>   Workspace path (default: $PWD)
+#   --data-volume <vol>  Data volume name (required)
+#   --restart            Force recreate container
+#   --force              Skip preflight checks
+#   --detached           Run detached
+#   --shell              Start with shell instead of agent
+#   --quiet              Suppress verbose output
+#   --debug              Enable debug logging
+#   --mount-docker-socket Mount docker socket (dangerous)
+#   --please-root-my-host Acknowledge docker socket danger
+#   -e, --env <VAR=val>  Environment variable (repeatable)
+#   -v, --volume <spec>  Extra volume mount (repeatable)
+#   -- <agent_args>      Arguments to pass to agent
+# Returns: 0 on success, 1 on failure
+_containai_start_container() {
+    local container_name=""
+    local workspace=""
+    local data_volume=""
+    local restart_flag=false
+    local force_flag=false
+    local detached_flag=false
+    local shell_flag=false
+    local quiet_flag=false
+    local debug_flag=false
+    local mount_docker_socket=false
+    local please_root_my_host=false
+    local -a env_vars=()
+    local -a extra_volumes=()
+    local -a agent_args=()
+    local arg
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --)
+                shift
+                agent_args=("$@")
+                break
+                ;;
+            --name)
+                container_name="$2"
+                shift 2
+                ;;
+            --name=*)
+                container_name="${1#--name=}"
+                shift
+                ;;
+            --workspace|-w)
+                workspace="$2"
+                workspace="${workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            -w*)
+                workspace="${1#-w}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            --data-volume)
+                data_volume="$2"
+                shift 2
+                ;;
+            --data-volume=*)
+                data_volume="${1#--data-volume=}"
+                shift
+                ;;
+            --restart)
+                restart_flag=true
+                shift
+                ;;
+            --force)
+                force_flag=true
+                shift
+                ;;
+            --detached|-d)
+                detached_flag=true
+                shift
+                ;;
+            --shell)
+                shell_flag=true
+                shift
+                ;;
+            --quiet|-q)
+                quiet_flag=true
+                shift
+                ;;
+            --debug|-D)
+                debug_flag=true
+                shift
+                ;;
+            --mount-docker-socket)
+                mount_docker_socket=true
+                shift
+                ;;
+            --please-root-my-host)
+                please_root_my_host=true
+                shift
+                ;;
+            --env|-e)
+                env_vars+=("$2")
+                shift 2
+                ;;
+            --env=*)
+                env_vars+=("${1#--env=}")
+                shift
+                ;;
+            -e*)
+                env_vars+=("${1#-e}")
+                shift
+                ;;
+            --volume|-v)
+                extra_volumes+=("$2")
+                shift 2
+                ;;
+            --volume=*)
+                extra_volumes+=("${1#--volume=}")
+                shift
+                ;;
+            -v*)
+                extra_volumes+=("${1#-v}")
+                shift
+                ;;
+            *)
+                echo "[ERROR] Unknown option: $1" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    # Validate required arguments
+    if [[ -z "$data_volume" ]]; then
+        echo "[ERROR] --data-volume is required" >&2
+        return 1
+    fi
+
+    # Safety check for --mount-docker-socket
+    if [[ "$mount_docker_socket" == "true" && "$please_root_my_host" != "true" ]]; then
+        echo "" >&2
+        echo "[ERROR] --mount-docker-socket requires --please-root-my-host acknowledgement" >&2
+        echo "" >&2
+        echo "Mounting the Docker socket grants FULL ROOT ACCESS to your host system." >&2
+        echo "This COMPLETELY DEFEATS the purpose of running in a sandbox." >&2
+        echo "" >&2
+        return 1
+    fi
+
+    # Early docker check
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "[ERROR] Docker is not installed or not in PATH" >&2
+        return 1
+    fi
+
+    # Resolve workspace
+    local workspace_resolved
+    workspace_resolved="${workspace:-$PWD}"
+    if ! workspace_resolved=$(cd "$workspace_resolved" 2>/dev/null && pwd); then
+        echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
+        return 1
+    fi
+
+    # Get container name
+    if [[ -z "$container_name" ]]; then
+        container_name="$(_containai_container_name)"
+    fi
+    if [[ "$quiet_flag" != "true" ]]; then
+        echo "Container: $container_name"
+    fi
+
+    # Check container state
+    local container_state exists_rc inspect_output
+    _containai_container_exists "$container_name"
+    exists_rc=$?
+
+    if [[ $exists_rc -eq 0 ]]; then
+        container_state=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null)
+    elif [[ $exists_rc -eq 1 ]]; then
+        container_state="none"
+    else
+        # Docker error - run sandbox check for actionable messaging
+        _containai_check_sandbox
+        if [[ $? -eq 1 ]]; then
+            return 1
+        fi
+        echo "[ERROR] Docker error checking container state" >&2
+        return 1
+    fi
+
+    # Handle --restart flag
+    if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
+        local is_ours_rc
+        _containai_is_our_container "$container_name"
+        is_ours_rc=$?
+        if [[ $is_ours_rc -ne 0 ]]; then
+            echo "[ERROR] Cannot restart - container '$container_name' was not created by ContainAI" >&2
+            echo "Remove the conflicting container manually if needed: docker rm -f '$container_name'" >&2
+            return 1
+        fi
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "Stopping existing container..."
+        fi
+        docker stop "$container_name" >/dev/null 2>&1 || true
+        docker rm "$container_name" >/dev/null 2>&1 || true
+        container_state="none"
+    fi
+
+    # Handle shell mode with stopped container
+    if [[ "$shell_flag" == "true" ]] && [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
+        _containai_check_container_ownership "$container_name"
+        if [[ $? -eq 1 ]]; then
+            return 1
+        fi
+        if ! _containai_preflight_checks "$force_flag"; then
+            return 1
+        fi
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "Recreating container for shell access..."
+        fi
+        docker rm "$container_name" >/dev/null 2>&1
+        container_state="none"
+    fi
+
+    # Check image exists when creating new container
+    if [[ "$container_state" == "none" ]]; then
+        local image_inspect
+        image_inspect=$(docker image inspect "$_CONTAINAI_IMAGE" 2>&1)
+        if [[ $? -ne 0 ]]; then
+            if printf '%s' "$image_inspect" | grep -qiE "no such image|not found"; then
+                echo "[ERROR] Image '$_CONTAINAI_IMAGE' not found" >&2
+                echo "Please build the image first" >&2
+            else
+                echo "$image_inspect" >&2
+            fi
+            return 1
+        fi
+    fi
+
+    case "$container_state" in
+        running)
+            _containai_check_container_ownership "$container_name"
+            if [[ $? -eq 1 ]]; then
+                return 1
+            fi
+            _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "Attaching to running container..."
+            fi
+            docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
+            ;;
+        exited|created)
+            _containai_check_container_ownership "$container_name"
+            if [[ $? -eq 1 ]]; then
+                return 1
+            fi
+            _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"
+            if ! _containai_preflight_checks "$force_flag"; then
+                return 1
+            fi
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "Starting stopped container..."
+            fi
+            docker start -ai "$container_name"
+            ;;
+        none)
+            if ! _containai_preflight_checks "$force_flag"; then
+                return 1
+            fi
+            if ! _containai_ensure_volumes "$data_volume" "$quiet_flag"; then
+                return 1
+            fi
+
+            local -a vol_args=()
+            vol_args+=("-v" "$data_volume:/mnt/agent-data")
+
+            # Check sandbox run help for supported flags
+            local sandbox_help
+            sandbox_help=$(docker sandbox run --help 2>&1)
+            if [[ $? -ne 0 ]]; then
+                echo "[ERROR] docker sandbox run is not available" >&2
+                return 1
+            fi
+
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "Starting new sandbox container..."
+            fi
+
+            local -a args=()
+            args+=(--name "$container_name")
+
+            # Add label if supported - ALWAYS use new label for creation
+            if printf '%s' "$sandbox_help" | grep -q -- '--label'; then
+                args+=(--label "$_CONTAINAI_LABEL")
+            fi
+
+            args+=("${vol_args[@]}")
+
+            local vol env_var
+            for vol in "${extra_volumes[@]}"; do
+                args+=(-v "$vol")
+            done
+            for env_var in "${env_vars[@]}"; do
+                args+=(-e "$env_var")
+            done
+
+            if [[ "$shell_flag" == "true" ]]; then
+                args+=(--detached --quiet)
+            else
+                if [[ "$detached_flag" == "true" ]]; then
+                    args+=(--detached)
+                fi
+                if [[ "$quiet_flag" == "true" ]]; then
+                    args+=(--quiet)
+                fi
+            fi
+            if [[ "$debug_flag" == "true" ]]; then
+                args+=(--debug)
+            fi
+            if [[ "$mount_docker_socket" == "true" ]]; then
+                args+=(--mount-docker-socket)
+            fi
+
+            args+=(--workspace "$workspace_resolved")
+            args+=(--template "$_CONTAINAI_IMAGE")
+            args+=(--credentials none)
+            args+=(claude)
+
+            if [[ ${#agent_args[@]} -gt 0 ]]; then
+                args+=("${agent_args[@]}")
+            fi
+
+            if [[ "$shell_flag" == "true" ]]; then
+                docker sandbox run "${args[@]}" >/dev/null
+                docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
+            else
+                docker sandbox run "${args[@]}"
+            fi
+            ;;
+        *)
+            echo "[ERROR] Unexpected container state: $container_state" >&2
+            return 1
+            ;;
+    esac
+}
+
+# ==============================================================================
 # Stop all containers
 # ==============================================================================
 
 # Interactive container stop selection
 # Finds all ContainAI containers (by label or ancestor image) and prompts user
 # Arguments: --all to stop all without prompting (non-interactive mode)
-# Returns: 0 always
+# Returns: 0 on success, 1 on error (non-interactive without --all, or docker unavailable)
 _containai_stop_all() {
     local stop_all_flag=false
     local arg
 
-    # Parse arguments
     for arg in "$@"; do
         case "$arg" in
             --all)
@@ -554,18 +968,17 @@ _containai_stop_all() {
         esac
     done
 
+    # Check docker availability first
+    if ! _containai_check_docker; then
+        return 1
+    fi
+
     local containers labeled_containers legacy_labeled_containers ancestor_containers
 
-    # Find containers by new label (preferred)
-    labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+    labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
+    legacy_labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LEGACY_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
+    ancestor_containers=$(docker ps -a --filter "ancestor=$_CONTAINAI_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
 
-    # Find containers by legacy label (transition period)
-    legacy_labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LEGACY_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
-
-    # Also find by ancestor image (catches pre-label containers)
-    ancestor_containers=$(docker ps -a --filter "ancestor=$_CONTAINAI_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null || true)
-
-    # Combine and deduplicate (sort -u on first field)
     containers=$(printf '%s\n%s\n%s' "$labeled_containers" "$legacy_labeled_containers" "$ancestor_containers" | grep -v '^$' | sort -t$'\t' -k1,1 -u)
 
     if [[ -z "$containers" ]]; then
@@ -585,7 +998,6 @@ _containai_stop_all() {
         printf "  %d) %s (%s)\n" "$i" "$name" "$status"
     done <<< "$containers"
 
-    # Handle non-interactive mode
     if [[ "$stop_all_flag" == "true" ]]; then
         echo ""
         echo "Stopping all containers (--all flag)..."
@@ -598,7 +1010,6 @@ _containai_stop_all() {
         return 0
     fi
 
-    # Check for interactive terminal
     if [[ ! -t 0 ]]; then
         echo "" >&2
         echo "[ERROR] Non-interactive terminal detected." >&2
