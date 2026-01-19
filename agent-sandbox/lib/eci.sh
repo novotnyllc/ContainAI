@@ -9,6 +9,8 @@
 #   _cai_eci_enabled()       - Check if ECI is actually enabled (uid_map + runtime check)
 #   _cai_eci_status()        - Get ECI status: "enabled", "available_not_enabled", "not_available"
 #
+# Note: _cai_eci_status_message() provides detailed diagnostics including detection failures.
+#
 # Detection methods per Docker documentation:
 #   1. uid_map check: docker run --rm --pull=never alpine:3.20 cat /proc/self/uid_map
 #      - ECI active: "0 100000 65536" (root mapped to unprivileged)
@@ -97,35 +99,46 @@ _cai_eci_check_uid_map() {
         return 1
     fi
 
+    # Use high-entropy container name to avoid collisions and enable cleanup
+    # Include PID, timestamp with nanoseconds, and RANDOM for uniqueness
+    local container_name
+    container_name="cai-eci-uid-$$-$(date +%s%N 2>/dev/null || date +%s)-${RANDOM:-0}"
+
     # Run ephemeral container to check uid_map
     # ECI maps root (uid 0) to unprivileged user (typically 100000+)
     # Without ECI: "0 0 4294967295" (root is root)
     # With ECI: "0 100000 65536" (root mapped to 100000)
     # Use --pull=never to avoid network dependency in airgapped environments
+    # Use --name for reliable cleanup on timeout/partial-create
     # Note: Capture stdout only to avoid mixing with pull progress/warnings
     local uid_map_output rc tmpfile stderr_snippet
     tmpfile=$(mktemp)
     # Clear the flag before calling _cai_timeout so we can detect if it was set
     _CAI_TIMEOUT_UNAVAILABLE=0
-    uid_map_output=$(_cai_timeout 30 docker run --rm --pull=never "$_CAI_ECI_ALPINE_IMAGE" cat /proc/self/uid_map 2>"$tmpfile") && rc=0 || rc=$?
+    uid_map_output=$(_cai_timeout 30 docker run --rm --name "$container_name" --pull=never "$_CAI_ECI_ALPINE_IMAGE" cat /proc/self/uid_map 2>"$tmpfile") && rc=0 || rc=$?
     stderr_snippet=$(head -c 200 "$tmpfile" 2>/dev/null || true)
     rm -f "$tmpfile"
 
     # No timeout mechanism available - check flag set by _cai_timeout
     if [[ "${_CAI_TIMEOUT_UNAVAILABLE:-0}" == "1" ]]; then
+        # Cleanup any partial container
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
         _CAI_ECI_UID_MAP_ERROR="no_timeout"
         _CAI_ECI_UID_MAP_DETAIL="Install coreutils (timeout/gtimeout) or perl"
         return 1
     fi
 
-    # Timeout
+    # Timeout - cleanup container that may have been created
     if [[ $rc -eq 124 ]]; then
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
         _CAI_ECI_UID_MAP_ERROR="timeout"
         return 1
     fi
 
     # Command failed - check for image not found
     if [[ $rc -ne 0 ]]; then
+        # Cleanup any partial container
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
         if printf '%s' "$stderr_snippet" | grep -qiE "no such image|image.*not found|pull access denied|manifest unknown"; then
             _CAI_ECI_UID_MAP_ERROR="image_not_found"
             _CAI_ECI_UID_MAP_DETAIL="Pull $_CAI_ECI_ALPINE_IMAGE: docker pull $_CAI_ECI_ALPINE_IMAGE"
@@ -136,13 +149,18 @@ _cai_eci_check_uid_map() {
         return 1
     fi
 
+    # Container ran successfully with --rm, should be auto-cleaned
+    # But ensure cleanup in case of race condition
+    _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
+
     # Parse uid_map output
     # Format: "inside_uid outside_uid count"
     # ECI active: first field is 0, second field is high (100000+)
     # ECI inactive: first field is 0, second field is 0
     # Filter for lines matching the expected uid_map format to handle any extra output
+    # Guard with || true to prevent set -e/pipefail from exiting on no match
     local inside_uid outside_uid _count line
-    line=$(printf '%s' "$uid_map_output" | grep -E '^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+' | head -1)
+    line=$(printf '%s' "$uid_map_output" | { grep -E '^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+' || true; } | head -1)
     if [[ -z "$line" ]]; then
         _CAI_ECI_UID_MAP_ERROR="parse_failed"
         return 1
@@ -190,7 +208,7 @@ _cai_eci_check_runtime() {
     # Use high-entropy container name to avoid collisions
     # Include PID, timestamp with nanoseconds, and RANDOM for uniqueness
     local container_name cid_for_cleanup
-    container_name="cai-eci-check-$$-$(date +%s%N 2>/dev/null || date +%s)-${RANDOM:-0}"
+    container_name="cai-eci-rt-$$-$(date +%s%N 2>/dev/null || date +%s)-${RANDOM:-0}"
     cid_for_cleanup=""
 
     # Start ephemeral container (detached, short-lived) with known name
@@ -204,18 +222,10 @@ _cai_eci_check_runtime() {
     stderr_snippet=$(head -c 200 "$tmpfile" 2>/dev/null || true)
     rm -f "$tmpfile"
 
-    # Helper to cleanup by CID (more reliable than name)
-    _eci_cleanup() {
-        if [[ -n "$cid_for_cleanup" ]]; then
-            _cai_timeout 10 docker rm -f "$cid_for_cleanup" >/dev/null 2>&1 || true
-        elif [[ -n "$container_name" ]]; then
-            _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
-        fi
-    }
-
     # No timeout mechanism available - check flag set by _cai_timeout
     if [[ "${_CAI_TIMEOUT_UNAVAILABLE:-0}" == "1" ]]; then
-        _eci_cleanup
+        # Cleanup by name (CID not yet known)
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
         _CAI_ECI_RUNTIME_ERROR="no_timeout"
         _CAI_ECI_RUNTIME_DETAIL="Install coreutils (timeout/gtimeout) or perl"
         return 1
@@ -223,14 +233,14 @@ _cai_eci_check_runtime() {
 
     # Timeout starting container
     if [[ $rc -eq 124 ]]; then
-        _eci_cleanup
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
         _CAI_ECI_RUNTIME_ERROR="timeout_start"
         return 1
     fi
 
     # Failed to start container - check for image not found
     if [[ $rc -ne 0 ]]; then
-        _eci_cleanup
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
         if printf '%s' "$stderr_snippet" | grep -qiE "no such image|image.*not found|pull access denied|manifest unknown"; then
             _CAI_ECI_RUNTIME_ERROR="image_not_found"
             _CAI_ECI_RUNTIME_DETAIL="Pull $_CAI_ECI_ALPINE_IMAGE: docker pull $_CAI_ECI_ALPINE_IMAGE"
@@ -242,11 +252,12 @@ _cai_eci_check_runtime() {
     fi
 
     # Extract CID from output (take last line matching hex pattern in case of extra output)
-    cid=$(printf '%s' "$cid" | grep -E '^[a-f0-9]{12,64}$' | tail -1)
+    # Guard with || true to prevent set -e/pipefail from exiting on no match
+    cid=$(printf '%s' "$cid" | { grep -E '^[a-f0-9]{12,64}$' || true; } | tail -1)
 
     # Validate we got a container ID and save it for cleanup
     if [[ -z "$cid" ]] || [[ ! "$cid" =~ ^[a-f0-9]+$ ]]; then
-        _eci_cleanup
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
         _CAI_ECI_RUNTIME_ERROR="invalid_cid"
         return 1
     fi
@@ -260,8 +271,12 @@ _cai_eci_check_runtime() {
     stderr_snippet=$(head -c 200 "$tmpfile" 2>/dev/null || true)
     rm -f "$tmpfile"
 
-    # Always cleanup container
-    _eci_cleanup
+    # Always cleanup container - prefer CID over name for reliability
+    if [[ -n "$cid_for_cleanup" ]]; then
+        _cai_timeout 10 docker rm -f "$cid_for_cleanup" >/dev/null 2>&1 || true
+    else
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
+    fi
 
     # Timeout inspecting
     if [[ $rc -eq 124 ]]; then
@@ -344,10 +359,11 @@ _cai_eci_enabled() {
 # ==============================================================================
 
 # Get comprehensive ECI status
-# Outputs: One of: "enabled", "available_not_enabled", "detection_failed", "not_available"
+# Outputs: One of: "enabled", "available_not_enabled", "not_available"
 # Returns: Always 0 (status is in output)
 # Note: "available_not_enabled" means Docker Desktop 4.29+ and ECI definitively not enabled
-#       "detection_failed" means Docker Desktop 4.29+ but detection had operational failure
+#       Operational failures (image missing, timeout, etc.) are treated as "not_available"
+#       Use _cai_eci_status_message() for detailed diagnostics including detection failures
 _cai_eci_status() {
     # Check if ECI is actually enabled
     if _cai_eci_enabled; then
@@ -358,9 +374,10 @@ _cai_eci_status() {
     # Check if ECI could be available (Docker Desktop 4.29+)
     # This only checks version - subscription tier and admin settings cannot be detected
     if _cai_eci_available; then
-        # If detection was uncertain, report that instead of claiming "not enabled"
+        # If detection was uncertain (operational failure), treat as not_available
+        # Callers can use _cai_eci_status_message() for detailed diagnostics
         if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
-            printf '%s' "detection_failed"
+            printf '%s' "not_available"
         else
             printf '%s' "available_not_enabled"
         fi
@@ -378,6 +395,8 @@ _cai_eci_status() {
 # Print human-readable ECI status message
 # Arguments: none (uses _cai_eci_status internally)
 # Outputs: Status message to stdout
+# Note: Provides detailed diagnostics including operational failures that _cai_eci_status
+#       collapses to "not_available" for simplified API contract
 _cai_eci_status_message() {
     local status
     status=$(_cai_eci_status)
@@ -393,91 +412,94 @@ _cai_eci_status_message() {
             printf '%s\n' "  - ECI must be enabled by admin in Docker Desktop Settings"
             printf '%s\n' "  Enable: Settings > Security > Enhanced Container Isolation"
             ;;
-        detection_failed)
-            printf '%s\n' "ECI detection failed"
-            printf '%s\n' "  Docker Desktop version supports ECI, but detection could not complete"
-            case "${_CAI_ECI_ENABLED_ERROR:-}" in
-                image_not_found|uid_map_image_not_found|runtime_image_not_found)
-                    printf '%s\n' "  Missing image: $_CAI_ECI_ALPINE_IMAGE"
-                    printf '%s\n' "  Run: docker pull $_CAI_ECI_ALPINE_IMAGE"
-                    ;;
-                no_timeout|uid_map_no_timeout|runtime_no_timeout)
-                    printf '%s\n' "  No timeout command available"
-                    printf '%s\n' "  Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)"
-                    ;;
-                timeout*|uid_map_timeout*|runtime_timeout*)
-                    printf '%s\n' "  Docker command timed out"
-                    printf '%s\n' "  Check Docker Desktop is responsive"
-                    ;;
-                daemon_unavailable|uid_map_daemon_unavailable|runtime_daemon_unavailable)
-                    printf '%s\n' "  Docker daemon not accessible"
-                    printf '%s\n' "  Ensure Docker Desktop is running"
-                    ;;
-                *)
-                    printf '%s\n' "  Error: ${_CAI_ECI_ENABLED_ERROR:-unknown}"
-                    if [[ -n "${_CAI_ECI_UID_MAP_DETAIL:-}" ]]; then
-                        printf '%s\n' "  Detail: ${_CAI_ECI_UID_MAP_DETAIL}"
-                    fi
-                    ;;
-            esac
-            ;;
         not_available)
-            printf '%s\n' "ECI not available"
-            # Branch on specific error conditions for accurate messaging
-            case "${_CAI_DD_VERSION_ERROR:-}" in
-                timeout)
-                    printf '%s\n' "  Docker command timed out"
-                    printf '%s\n' "  Check Docker Desktop is responsive"
-                    ;;
-                permission)
-                    printf '%s\n' "  Permission denied accessing Docker"
-                    printf '%s\n' "  Ensure Docker Desktop is running and accessible"
-                    ;;
-                not_running)
-                    printf '%s\n' "  Docker Desktop is not running"
-                    printf '%s\n' "  Start Docker Desktop and try again"
-                    ;;
-                not_docker_desktop)
-                    printf '%s\n' "  ECI requires Docker Desktop 4.29+"
-                    printf '%s\n' "  Current Docker is not Docker Desktop (colima, docker-ce, etc.)"
-                    ;;
-                *)
-                    # Check for no_timeout error
-                    if [[ "${_CAI_ECI_UID_MAP_ERROR:-}" == "no_timeout" || "${_CAI_ECI_RUNTIME_ERROR:-}" == "no_timeout" ]]; then
-                        printf '%s\n' "  No timeout command available (timeout, gtimeout, or perl required)"
+            # Check if this is actually a detection failure on Docker Desktop 4.29+
+            # (operational failure, not definitive "not available")
+            if _cai_eci_available && [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
+                printf '%s\n' "ECI not available (detection failed)"
+                printf '%s\n' "  Docker Desktop version supports ECI, but detection could not complete"
+                case "${_CAI_ECI_ENABLED_ERROR:-}" in
+                    image_not_found|uid_map_image_not_found|runtime_image_not_found)
+                        printf '%s\n' "  Missing image: $_CAI_ECI_ALPINE_IMAGE"
+                        printf '%s\n' "  Run: docker pull $_CAI_ECI_ALPINE_IMAGE"
+                        ;;
+                    no_timeout|uid_map_no_timeout|runtime_no_timeout)
+                        printf '%s\n' "  No timeout command available"
                         printf '%s\n' "  Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)"
-                    # Check if we can get version info
-                    elif _cai_docker_desktop_version >/dev/null 2>&1; then
-                        local dd_version
-                        dd_version=$(_cai_docker_desktop_version)
+                        ;;
+                    timeout*|uid_map_timeout*|runtime_timeout*)
+                        printf '%s\n' "  Docker command timed out"
+                        printf '%s\n' "  Check Docker Desktop is responsive"
+                        ;;
+                    daemon_unavailable|uid_map_daemon_unavailable|runtime_daemon_unavailable)
+                        printf '%s\n' "  Docker daemon not accessible"
+                        printf '%s\n' "  Ensure Docker Desktop is running"
+                        ;;
+                    *)
+                        printf '%s\n' "  Error: ${_CAI_ECI_ENABLED_ERROR:-unknown}"
+                        if [[ -n "${_CAI_ECI_UID_MAP_DETAIL:-}" ]]; then
+                            printf '%s\n' "  Detail: ${_CAI_ECI_UID_MAP_DETAIL}"
+                        fi
+                        ;;
+                esac
+            else
+                printf '%s\n' "ECI not available"
+                # Branch on specific error conditions for accurate messaging
+                case "${_CAI_DD_VERSION_ERROR:-}" in
+                    timeout)
+                        printf '%s\n' "  Docker command timed out"
+                        printf '%s\n' "  Check Docker Desktop is responsive"
+                        ;;
+                    permission)
+                        printf '%s\n' "  Permission denied accessing Docker"
+                        printf '%s\n' "  Ensure Docker Desktop is running and accessible"
+                        ;;
+                    not_running)
+                        printf '%s\n' "  Docker Desktop is not running"
+                        printf '%s\n' "  Start Docker Desktop and try again"
+                        ;;
+                    not_docker_desktop)
                         printf '%s\n' "  ECI requires Docker Desktop 4.29+"
-                        printf '%s\n' "  Current version: $dd_version (too old)"
-                    elif ! _cai_docker_daemon_available; then
-                        # Daemon not available - check daemon error
-                        case "${_CAI_DAEMON_ERROR:-}" in
-                            timeout)
-                                printf '%s\n' "  Docker command timed out"
-                                ;;
-                            permission)
-                                printf '%s\n' "  Permission denied accessing Docker"
-                                ;;
-                            not_running)
-                                printf '%s\n' "  Docker is not running"
-                                ;;
-                            no_timeout)
-                                printf '%s\n' "  No timeout command available"
-                                printf '%s\n' "  Install coreutils: brew install coreutils (macOS)"
-                                ;;
-                            *)
-                                printf '%s\n' "  Docker daemon not accessible"
-                                ;;
-                        esac
-                    else
-                        printf '%s\n' "  ECI requires Docker Desktop 4.29+"
-                        printf '%s\n' "  Current Docker is not Docker Desktop"
-                    fi
-                    ;;
-            esac
+                        printf '%s\n' "  Current Docker is not Docker Desktop (colima, docker-ce, etc.)"
+                        ;;
+                    *)
+                        # Check for no_timeout error
+                        if [[ "${_CAI_ECI_UID_MAP_ERROR:-}" == "no_timeout" || "${_CAI_ECI_RUNTIME_ERROR:-}" == "no_timeout" ]]; then
+                            printf '%s\n' "  No timeout command available (timeout, gtimeout, or perl required)"
+                            printf '%s\n' "  Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)"
+                        # Check if we can get version info
+                        elif _cai_docker_desktop_version >/dev/null 2>&1; then
+                            local dd_version
+                            dd_version=$(_cai_docker_desktop_version)
+                            printf '%s\n' "  ECI requires Docker Desktop 4.29+"
+                            printf '%s\n' "  Current version: $dd_version (too old)"
+                        elif ! _cai_docker_daemon_available; then
+                            # Daemon not available - check daemon error
+                            case "${_CAI_DAEMON_ERROR:-}" in
+                                timeout)
+                                    printf '%s\n' "  Docker command timed out"
+                                    ;;
+                                permission)
+                                    printf '%s\n' "  Permission denied accessing Docker"
+                                    ;;
+                                not_running)
+                                    printf '%s\n' "  Docker is not running"
+                                    ;;
+                                no_timeout)
+                                    printf '%s\n' "  No timeout command available"
+                                    printf '%s\n' "  Install coreutils: brew install coreutils (macOS)"
+                                    ;;
+                                *)
+                                    printf '%s\n' "  Docker daemon not accessible"
+                                    ;;
+                            esac
+                        else
+                            printf '%s\n' "  ECI requires Docker Desktop 4.29+"
+                            printf '%s\n' "  Current Docker is not Docker Desktop"
+                        fi
+                        ;;
+                esac
+            fi
             ;;
     esac
 }

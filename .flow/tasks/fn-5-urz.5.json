@@ -7,10 +7,22 @@
     "fn-5-urz.2"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "7274575",
+      "f84ddf9",
+      "a0a9914",
+      "42601ae"
+    ],
+    "prs": [],
+    "tests": [
+      "Manual testing via docker run commands"
+    ]
+  },
   "id": "fn-5-urz.5",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.5.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "ECI detection (uid_map + runtime check)",
-  "updated_at": "2026-01-19T18:00:56.859937Z"
+  "updated_at": "2026-01-19T20:08:53.201780Z"
 }

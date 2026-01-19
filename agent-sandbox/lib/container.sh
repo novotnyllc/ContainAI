@@ -170,20 +170,25 @@ _containai_check_isolation() {
         return 2
     fi
 
-    # First check ECI using both methods (uid_map + runtime) for high confidence
-    # _cai_eci_enabled requires both checks to pass, so this is the most reliable
-    if _cai_eci_enabled; then
-        return 0
+    # Gate ECI detection behind availability check to avoid unnecessary container spawning
+    # _cai_eci_available is cheap (version check only), while _cai_eci_enabled spawns containers
+    # This avoids "pull alpine" requirement in airgapped non-Docker-Desktop environments
+    if _cai_eci_available; then
+        # Docker Desktop 4.29+ - check if ECI is actually enabled
+        # _cai_eci_enabled requires both uid_map + runtime checks to pass
+        if _cai_eci_enabled; then
+            return 0
+        fi
+
+        # ECI detection failed - check if it was operational failure vs definitive "not enabled"
+        # _CAI_ECI_DETECTION_UNCERTAIN=1 means we couldn't determine status (timeout, image not found, etc.)
+        if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
+            echo "[WARN] ECI detection uncertain (${_CAI_ECI_ENABLED_ERROR:-unknown})" >&2
+            # Continue to docker info checks as fallback, but remember uncertainty
+        fi
     fi
 
-    # ECI detection failed - check if it was operational failure vs definitive "not enabled"
-    # _CAI_ECI_DETECTION_UNCERTAIN=1 means we couldn't determine status (timeout, image not found, etc.)
-    if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
-        echo "[WARN] ECI detection uncertain (${_CAI_ECI_ENABLED_ERROR:-unknown})" >&2
-        # Continue to docker info checks as fallback, but remember uncertainty
-    fi
-
-    # ECI not enabled or uncertain - fall back to docker info checks for other isolation methods
+    # ECI not available/enabled or uncertain - fall back to docker info checks for other isolation methods
     # Use docker info --format for reliable structured output with timeout
     # Use if ! pattern for set -e safety
     if ! runtime=$(_cai_timeout 5 docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then

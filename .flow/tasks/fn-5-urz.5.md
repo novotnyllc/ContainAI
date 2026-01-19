@@ -62,9 +62,8 @@ docker stop "$CID"
 - [ ] Timeout handling if Docker hangs
 - [ ] Clear status messages: "ECI enabled", "ECI available but not enabled", "ECI not available"
 ## Done summary
-TBD
-
+Implemented ECI (Enhanced Container Isolation) detection with dual validation methods (uid_map check and runtime check) that must agree for enabled status. Includes comprehensive error handling, timeout protection, and actionable status messages.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 7274575, f84ddf9, a0a9914, 42601ae
+- Tests: Manual testing via docker run commands
 - PRs:

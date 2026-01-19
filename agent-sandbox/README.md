@@ -179,9 +179,12 @@ Use `cai --force` to bypass sandbox detection if needed (not recommended).
 ### Isolation Detection
 
 Isolation detection is best-effort. The `cai` command:
-- Checks `docker info` for isolation indicators (sysbox-runc, rootless mode)
+- For ECI: runs ephemeral containers to check uid_map (user namespace) and runtime (sysbox-runc)
+- For Sysbox: checks `docker info` for sysbox-runc runtime availability
 - **Warns** if isolation is not detected or status is unknown
 - **Proceeds anyway** - isolation detection does not block container start
+
+Note: ECI detection requires the `alpine:3.20` image to be available locally (use `--pull=never` to avoid network dependency). If the image is missing, ECI detection fails gracefully with an actionable error message.
 
 Isolation warnings help you know if enhanced isolation is active. Sandbox works without additional isolation; sysbox-runc or rootless mode adds additional hardening when enabled.
 
