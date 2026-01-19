@@ -1,5 +1,9 @@
 # fn-4-vet.10 Create lib/import.sh - cai import subcommand
 
+<!-- Updated by plan-sync: fn-4-vet.4 architecture note -->
+<!-- lib/config.sh doesn't exist yet - config functions are in aliases.sh -->
+<!-- Depends on lib extraction from fn-4-vet.8 OR can source aliases.sh directly -->
+
 ## Description
 Create `agent-sandbox/lib/import.sh` - the `cai import` subcommand.
 

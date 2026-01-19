@@ -1,5 +1,10 @@
 # fn-4-vet.13 Delete aliases.sh and update tests
 
+<!-- Updated by plan-sync: fn-4-vet.4 architecture note -->
+<!-- WARNING: aliases.sh contains ALL implementation - config, container, main functions -->
+<!-- Cannot delete until lib extraction (fn-4-vet.8/9) AND containai.sh (fn-4-vet.12) are complete -->
+<!-- Ensure containai.sh properly replaces all aliases.sh functionality before deletion -->
+
 ## Description
 Delete `aliases.sh` and update integration tests.
 

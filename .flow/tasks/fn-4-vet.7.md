@@ -1,5 +1,8 @@
 # fn-4-vet.7 Create Python TOML parser (parse-toml.py)
 
+<!-- Updated by plan-sync: fn-4-vet.4 already created parse-toml.py in agent-sandbox/ -->
+<!-- This task may already be complete - verify existing implementation -->
+
 ## Description
 Create `agent-sandbox/parse-toml.py` - a Python 3.11+ TOML config parser.
 

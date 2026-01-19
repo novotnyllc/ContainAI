@@ -1,5 +1,9 @@
 # fn-4-vet.8 Create lib/config.sh - config loading & volume resolution
 
+<!-- Updated by plan-sync: fn-4-vet.4 implemented config functions directly in aliases.sh -->
+<!-- Functions already exist: _containai_find_config, _containai_parse_config_for_workspace, _containai_resolve_volume -->
+<!-- This task may involve extracting to lib/ OR verifying existing implementation is complete -->
+
 ## Description
 Create `agent-sandbox/lib/config.sh` - config loading and volume resolution for bash.
 

@@ -7,10 +7,11 @@ Add `containai` and `cai` as primary CLI aliases for all commands, keeping `asb*
 ## Implementation
 
 ### New Primary Aliases
+<!-- Updated by plan-sync: fn-4-vet.4 kept logic in asb(), no _containai_main() exists -->
 ```bash
 # Primary commands - no deprecation warning
-containai() { _containai_main "$@"; }
-cai() { _containai_main "$@"; }
+containai() { asb "$@"; }
+cai() { asb "$@"; }
 
 containai-stop-all() { asb-stop-all "$@"; }
 cai-stop-all() { asb-stop-all "$@"; }
@@ -37,11 +38,17 @@ _containai_deprecation_warn_asb() {
     _containai_deprecation_warned=1
 }
 
+# Approach: rename current asb() to _asb_impl(), then wrap with deprecation
+_asb_impl() {
+    # ... current asb() implementation moves here ...
+}
+
 asb() {
     _containai_deprecation_warn_asb
-    _containai_main "$@"
+    _asb_impl "$@"
 }
 ```
+<!-- Updated by plan-sync: fn-4-vet.4 kept logic in asb(), rename to _asb_impl() and wrap -->
 
 ### Help Text
 ```
@@ -66,10 +73,11 @@ Add `containai` and `cai` as primary CLI aliases for all commands, keeping `asb*
 ## Implementation
 
 ### New Primary Aliases (all mapping to asb equivalents)
+<!-- Updated by plan-sync: fn-4-vet.4 kept logic in asb(), call _asb_impl() directly -->
 ```bash
-# Primary commands
-containai() { _containai_deprecation_warn_asb; _containai_main "$@"; }
-cai() { _containai_main "$@"; }
+# Primary commands - call _asb_impl() directly (no deprecation warning)
+containai() { _asb_impl "$@"; }
+cai() { _asb_impl "$@"; }
 
 # Stop all
 containai-stop-all() { asb-stop-all "$@"; }
@@ -100,9 +108,10 @@ _containai_deprecation_warn_asb() {
 }
 
 # Deprecated commands show warning
+# Rename current asb() to _asb_impl(), wrap with deprecation
 asb() {
     _containai_deprecation_warn_asb
-    _containai_main "$@"
+    _asb_impl "$@"  # Updated by plan-sync: fn-4-vet.4 used asb(), not _containai_main()
 }
 ```
 
@@ -114,7 +123,8 @@ Usage: containai [OPTIONS] [-- AGENT_ARGS...]
 
 Options:
   --data-volume <name>   Use specified Docker volume for agent data
-  --profile <name>       Use named profile from config file
+  --config <path>        Use explicit config file (disables discovery)
+  <!-- Updated by plan-sync: fn-4-vet.4 uses workspace path matching, no --profile -->
   --config <path>        Use explicit config file (disables discovery)
   --volume, -v <mount>   Add additional bind mount (unchanged)
   --workspace <path>     Use specified host workspace (unchanged)
@@ -135,10 +145,11 @@ Add `containai` and `cai` as primary CLI aliases, keeping `asb*` functions as de
 ## Implementation
 
 ### New Primary Aliases
+<!-- Updated by plan-sync: fn-4-vet.4 kept logic in asb(), use _asb_impl() -->
 ```bash
 # Primary aliases - these are the recommended commands
-containai() { _containai_main "$@"; }
-cai() { _containai_main "$@"; }
+containai() { _asb_impl "$@"; }
+cai() { _asb_impl "$@"; }
 
 containai-stop-all() { asb-stop-all "$@"; }
 cai-stop-all() { asb-stop-all "$@"; }
@@ -169,7 +180,7 @@ _containai_deprecation_check() {
 
 asb() {
     _containai_deprecation_check
-    _containai_main "$@"
+    _asb_impl "$@"  # Updated by plan-sync: fn-4-vet.4 used asb(), not _containai_main()
 }
 ```
 
@@ -182,7 +193,8 @@ Usage: containai [OPTIONS] COMMAND [ARGS...]
 
 Options:
   --data-volume <name>   Use specified Docker volume for agent data
-  --profile <name>       Use named profile from config file
+  --config <path>        Use explicit config file (disables discovery)
+  <!-- Updated by plan-sync: fn-4-vet.4 uses workspace path matching, no --profile -->
   --volume, -v <mount>   Add additional bind mount (unchanged)
   --workspace <path>     Use specified host workspace (unchanged)
   ...
@@ -222,12 +234,13 @@ Add a one-time deprecation notice when `asb` is used directly:
 ```bash
 _asb_deprecation_warned=false
 
+# Rename current asb() to _asb_impl(), wrap with deprecation
 asb() {
     if [[ "$_asb_deprecation_warned" != "true" ]]; then
         echo "[WARN] 'asb' is deprecated, use 'containai' or 'cai' instead" >&2
         _asb_deprecation_warned=true
     fi
-    _containai_main "$@"
+    _asb_impl "$@"  # Updated by plan-sync: fn-4-vet.4 used asb(), not _containai_main()
 }
 ```
 

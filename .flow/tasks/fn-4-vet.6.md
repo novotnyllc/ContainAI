@@ -181,20 +181,9 @@ data_volume = \"$test_vol\"" > "$test_dir/.containai/config.toml"
     rm -rf "$test_dir"
 }
 
-test_profile_selection() {
-    step "Testing --profile flag"
-    local test_dir="/tmp/test-profile-$$"
-    mkdir -p "$test_dir/.containai"
-    echo "[agent]
-data_volume = \"default-vol\"
-[profile.testing]
-data_volume = \"test-profile-vol\"" > "$test_dir/.containai/config.toml"
-    
-    (cd "$test_dir" && source "$ORIG_DIR/aliases.sh" && \
-     [[ "$(_containai_resolve_volume "" "testing")" == "test-profile-vol" ]])
-    pass "Profile selection works"
-    rm -rf "$test_dir"
-}
+# Updated by plan-sync: fn-4-vet.4 uses workspace path matching, not --profile
+# test_profile_selection() removed - profiles not implemented
+# Use test_workspace_path_matching() and test_longest_match_wins() instead
 
 test_data_volume_overrides_config() {
     step "Testing --data-volume overrides config file"
@@ -279,21 +268,8 @@ data_volume = \"$test_vol\"" > "$test_dir/.containai/config.toml"
     rm -rf "$test_dir"
 }
 
-test_profile_selection() {
-    step "Testing --profile flag"
-    local test_dir="/tmp/test-profile-$$"
-    mkdir -p "$test_dir/.containai"
-    echo "[agent]
-data_volume = \"default-vol\"
-[profile.testing]
-data_volume = \"test-profile-vol\"" > "$test_dir/.containai/config.toml"
-    
-    (cd "$test_dir" && source "$ORIG_DIR/aliases.sh" && \
-     [[ "$(_containai_resolve_volume "" "testing")" == "test-profile-vol" ]])
-    pass "Profile selection works"
-    
-    rm -rf "$test_dir"
-}
+# Updated by plan-sync: fn-4-vet.4 uses workspace path matching, not --profile
+# test_profile_selection() removed - profiles not implemented
 
 test_python_optional() {
     step "Testing graceful fallback without Python"

@@ -1,5 +1,10 @@
 # fn-4-vet.12 Create containai.sh - main CLI entry point
 
+<!-- Updated by plan-sync: fn-4-vet.4 architecture note -->
+<!-- No _containai_main() exists - main logic is in asb() in aliases.sh -->
+<!-- lib/*.sh files don't exist yet - all functions in aliases.sh -->
+<!-- May need to create containai.sh that sources aliases.sh + adds subcommands -->
+
 ## Description
 Create `agent-sandbox/containai.sh` - a sourced shell script (not executable wrapper).
 
@@ -9,27 +14,33 @@ Create `agent-sandbox/containai.sh` - a sourced shell script (not executable wra
 
 ## Structure
 
+<!-- Updated by plan-sync: fn-4-vet.4 architecture - source aliases.sh for now -->
+<!-- lib/*.sh files are planned for future extraction -->
 ```bash
 #!/usr/bin/env bash
 # ContainAI CLI
 
 _CAI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$_CAI_SCRIPT_DIR/lib/config.sh"
-source "$_CAI_SCRIPT_DIR/lib/container.sh"
-source "$_CAI_SCRIPT_DIR/lib/import.sh"
-source "$_CAI_SCRIPT_DIR/lib/export.sh"
+# Option A: Source libs if they exist (post fn-4-vet.8/9/10/11)
+# source "$_CAI_SCRIPT_DIR/lib/config.sh"
+# source "$_CAI_SCRIPT_DIR/lib/container.sh"
+# source "$_CAI_SCRIPT_DIR/lib/import.sh"
+# source "$_CAI_SCRIPT_DIR/lib/export.sh"
+
+# Option B: Source aliases.sh which contains all functions (current state)
+source "$_CAI_SCRIPT_DIR/aliases.sh"
 
 containai() {
     local subcommand="${1:-}"
     shift 2>/dev/null || true
-    
+
     case "$subcommand" in
-        shell)   _containai_shell "$@" ;;
-        import)  _containai_import_cmd "$@" ;;
-        export)  _containai_export_cmd "$@" ;;
-        stop)    _containai_stop_all "$@" ;;
+        shell)   asb-shell "$@" ;;  # Use existing asb-shell
+        import)  _containai_import_cmd "$@" ;;  # New subcommand
+        export)  _containai_export_cmd "$@" ;;  # New subcommand
+        stop)    asb-stop-all "$@" ;;  # Use existing asb-stop-all
         help|-h|--help) _containai_help ;;
-        *)       _containai_run "$subcommand" "$@" ;;  # Default: start container
+        *)       asb "$subcommand" "$@" ;;  # Default: delegate to asb()
     esac
 }
 
@@ -39,9 +50,9 @@ cai() { containai "$@"; }
 
 ## Subcommand Handlers
 
-### `_containai_run(args...)`
-Parse common flags (`--data-volume`, `--config`, `--workspace`), resolve volume,
-start/attach to container. Core logic from aliases.sh `asb()`.
+<!-- Updated by plan-sync: fn-4-vet.4 note - asb() already handles flags, delegate to it -->
+### Default case (no subcommand)
+Delegate to `asb()` which already handles `--data-volume`, `--config`, `--workspace` flags.
 
 ### `_containai_shell(args...)`
 Open shell in running container. Logic from `asb-shell()`.

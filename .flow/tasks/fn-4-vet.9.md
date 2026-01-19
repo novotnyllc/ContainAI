@@ -1,5 +1,9 @@
 # fn-4-vet.9 Create lib/container.sh - container operations
 
+<!-- Updated by plan-sync: fn-4-vet.4 kept container functions in aliases.sh with _asb_* prefix -->
+<!-- Functions exist: _asb_container_name, _asb_check_isolation, _asb_check_sandbox, etc. -->
+<!-- This task involves extracting to lib/ AND potentially renaming _asb_* to _containai_* -->
+
 ## Description
 Create `agent-sandbox/lib/container.sh` - container operations extracted from aliases.sh.
 
