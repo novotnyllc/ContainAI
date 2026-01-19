@@ -70,9 +70,8 @@ Config can pre-allow but CLI still requires acknowledgement flag for audit trail
 - [ ] Config [danger] section doesn't bypass ack requirement
 - [ ] Help text documents the risks of each flag
 ## Done summary
-TBD
-
+Made config [danger] section optional for FR-5 unsafe opt-ins. CLI flags --allow-host-credentials and --allow-host-docker-socket now work with just their acknowledgement flags, without requiring config permission first. Config remains available for audit trail purposes.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 913333e13f681178fb4e8455c08b78f98b383616
+- Tests: codex impl-review SHIP verdict
 - PRs:

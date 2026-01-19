@@ -7,10 +7,19 @@
     "fn-5-urz.7"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "913333e13f681178fb4e8455c08b78f98b383616"
+    ],
+    "prs": [],
+    "tests": [
+      "codex impl-review SHIP verdict"
+    ]
+  },
   "id": "fn-5-urz.9",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.9.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Unsafe opt-ins with acknowledgements",
-  "updated_at": "2026-01-19T23:00:34.495629Z"
+  "updated_at": "2026-01-19T23:40:29.549861Z"
 }
