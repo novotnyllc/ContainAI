@@ -21,11 +21,6 @@ _ASB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Default volume name (can be overridden via config)
 _CONTAINAI_DEFAULT_VOLUME="sandbox-agent-data"
 
-# Volumes that asb creates/ensures (per spec)
-_ASB_VOLUMES=(
-        "sandbox-agent-data:/mnt/agent-data"
-)
-
 # ==============================================================================
 # Config loading functions for ContainAI
 # ==============================================================================
@@ -532,29 +527,6 @@ _asb_check_container_ownership() {
     return 1
 }
 
-# Ensure required volumes exist with correct permissions
-# Returns non-zero on failure
-_asb_ensure_volumes() {
-    local volume_name vol_spec
-
-
-
-    # Create asb-managed volumes if missing
-    for vol_spec in "${_ASB_VOLUMES[@]}"; do
-        volume_name="${vol_spec%%:*}"
-
-        if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
-            echo "Creating volume: $volume_name"
-            if ! docker volume create "$volume_name" >/dev/null; then
-                echo "[ERROR] Failed to create volume $volume_name" >&2
-                return 1
-            fi
-        fi
-    done
-
-
-}
-
 # Print help for asb/asbd
 _asb_print_help() {
     local show_detached="$1"
@@ -569,6 +541,7 @@ _asb_print_help() {
     echo "The workspace is exposed inside the sandbox at the same path as on the host."
     echo ""
     echo "Options:"
+    echo "      --config path           Config file path (default: auto-discovered)"
     echo "      --data-volume string    Data volume name (default: from config or sandbox-agent-data)"
     echo "  -D, --debug                 Enable debug logging"
     if [[ "$show_detached" == "true" ]]; then
@@ -602,6 +575,7 @@ asb() {
     local please_root_my_host=false
     local workspace=""
     local data_volume=""
+    local config_file=""
     local -a env_vars=()
     local -a extra_volumes=()
     local -a agent_args=()
@@ -672,6 +646,18 @@ asb() {
                 ;;
             -w*)
                 workspace="${1#-w}"
+                shift
+                ;;
+            --config)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                config_file="$2"
+                shift 2
+                ;;
+            --config=*)
+                config_file="${1#--config=}"
                 shift
                 ;;
             --data-volume)
@@ -923,7 +909,7 @@ asb() {
             # Resolve data volume (uses CLI flag, env var, config, or default)
             local resolved_volume workspace_for_resolve
             workspace_for_resolve="${workspace:-$PWD}"
-            resolved_volume=$(_containai_resolve_volume "$data_volume" "$workspace_for_resolve")
+            resolved_volume=$(_containai_resolve_volume "$data_volume" "$workspace_for_resolve" "$config_file")
             if [[ $? -ne 0 ]]; then
                 echo "[ERROR] Failed to resolve data volume" >&2
                 return 1
@@ -1132,6 +1118,8 @@ _asb_shell_print_help() {
     echo "The workspace is exposed inside the sandbox at the same path as on the host."
     echo ""
     echo "Options:"
+    echo "      --config path           Config file path (default: auto-discovered)"
+    echo "      --data-volume string    Data volume name (default: from config or sandbox-agent-data)"
     echo "  -D, --debug                 Enable debug logging"
     echo "  -e, --env strings           Set environment variables (format: KEY=VALUE)"
     echo "      --mount-docker-socket   Mount the host's Docker socket into the sandbox (DANGEROUS)"
