@@ -14,8 +14,9 @@ containai run [--agent claude|gemini] [--workspace <path>] [-- <agent args>]
 ## Safe Defaults (FR-4)
 
 - `--credentials=none` (never `host` by default)
+- Config `credentials.mode=host` is NEVER honored (explicit CLI flag required)
 - No `--mount-docker-socket`
-- No additional volume mounts beyond workspace
+- No arbitrary host path mounts (only workspace + named data volume for persistence)
 - Workspace is current directory if not specified
 
 ## Implementation

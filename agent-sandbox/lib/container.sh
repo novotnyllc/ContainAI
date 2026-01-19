@@ -1113,8 +1113,22 @@ _containai_start_container() {
                     echo "Starting stopped container with arguments..."
                 fi
                 docker start "$container_name" >/dev/null
-                # Wait briefly for container to be ready
-                sleep 1
+                # Wait for container to be running (poll with bounded timeout)
+                local wait_count=0
+                local max_wait=30
+                while [[ $wait_count -lt $max_wait ]]; do
+                    local state
+                    state=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || state=""
+                    if [[ "$state" == "running" ]]; then
+                        break
+                    fi
+                    sleep 0.5
+                    ((wait_count++))
+                done
+                if [[ $wait_count -ge $max_wait ]]; then
+                    echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
+                    return 1
+                fi
                 # Run agent with arguments
                 local -a exec_cmd=("$agent")
                 exec_cmd+=("${agent_args[@]}")
