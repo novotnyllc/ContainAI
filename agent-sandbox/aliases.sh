@@ -720,6 +720,10 @@ asb() {
                 ;;
             --config=*)
                 config_file="${1#--config=}"
+                if [[ -z "$config_file" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --data-volume)
@@ -732,6 +736,10 @@ asb() {
                 ;;
             --data-volume=*)
                 data_volume="${1#--data-volume=}"
+                if [[ -z "$data_volume" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --env|-e)
@@ -1058,9 +1066,8 @@ asb() {
             if [[ "$mount_docker_socket" == "true" ]]; then
                 args+=(--mount-docker-socket)
             fi
-            if [[ -n "$workspace" ]]; then
-                args+=(--workspace "$workspace")
-            fi
+            # Always pass workspace (use workspace_for_resolve which was already normalized)
+            args+=(--workspace "$workspace_for_resolve")
 
             args+=(--template "$_ASB_IMAGE")
             args+=(--credentials none)
