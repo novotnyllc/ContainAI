@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-5-urz",
+  "created_at": "2026-01-18T23:55:01.553051Z",
+  "depends_on_epics": [],
+  "id": "fn-5-urz",
+  "next_task": 1,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-19T00:04:20.135532Z",
+  "spec_path": ".flow/specs/fn-5-urz.md",
+  "status": "open",
+  "title": "ContainAI Secure Sandboxed Agent Runtime",
+  "updated_at": "2026-01-19T00:04:20.135550Z"
+}
