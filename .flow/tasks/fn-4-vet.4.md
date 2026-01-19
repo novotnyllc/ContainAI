@@ -238,7 +238,7 @@ When user changes `CONTAINAI_VOLUME` and re-sources aliases.sh, the new value sh
 - [ ] Volume resolved per-invocation via `_containai_resolve_volume()`
 - [ ] `_ASB_VOLUMES` array removed, replaced with dynamic resolution
 - [ ] `_asb_ensure_volume()` creates volume by name
-- [ ] `cai --data-volume custom` uses custom volume
+- [ ] `asb --data-volume custom` uses custom volume (cai alias is fn-4-vet.5)
 - [ ] Changing directory uses correct workspace for config matching
 - [ ] Existing `--volume/-v` and `--workspace` flags unchanged
 - [ ] Mount point remains `/mnt/agent-data`

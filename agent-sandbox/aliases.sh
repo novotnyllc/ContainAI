@@ -960,9 +960,10 @@ asb() {
             fi
             # Check for volume mismatch
             if ! _asb_check_volume_match "$container_name" "$resolved_volume" "$quiet_flag"; then
-                # If user explicitly provided --data-volume, mismatch is a hard error
-                if [[ -n "$data_volume" ]]; then
-                    echo "[ERROR] Volume mismatch with explicit --data-volume flag" >&2
+                # If user explicitly provided --data-volume or --config, mismatch is a hard error
+                # (explicit config implies explicit volume intent)
+                if [[ -n "$data_volume" || -n "$config_file" ]]; then
+                    echo "[ERROR] Volume mismatch with explicit volume/config flag" >&2
                     echo "  Use --restart to recreate container with the requested volume" >&2
                     return 1
                 fi
@@ -995,9 +996,10 @@ asb() {
             fi
             # Check for volume mismatch
             if ! _asb_check_volume_match "$container_name" "$resolved_volume" "$quiet_flag"; then
-                # If user explicitly provided --data-volume, mismatch is a hard error
-                if [[ -n "$data_volume" ]]; then
-                    echo "[ERROR] Volume mismatch with explicit --data-volume flag" >&2
+                # If user explicitly provided --data-volume or --config, mismatch is a hard error
+                # (explicit config implies explicit volume intent)
+                if [[ -n "$data_volume" || -n "$config_file" ]]; then
+                    echo "[ERROR] Volume mismatch with explicit volume/config flag" >&2
                     echo "  Use --restart to recreate container with the requested volume" >&2
                     return 1
                 fi
