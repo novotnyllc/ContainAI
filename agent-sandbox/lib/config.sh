@@ -31,8 +31,8 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
     return 1
 fi
 
-# Default volume name (read-only constant)
-readonly _CONTAINAI_DEFAULT_VOLUME="sandbox-agent-data"
+# Default volume name (guard against re-sourcing and conflict with aliases.sh)
+: "${_CONTAINAI_DEFAULT_VOLUME:=sandbox-agent-data}"
 
 # Global variables for parsed config (set by _containai_parse_config)
 _CAI_VOLUME=""
@@ -145,35 +145,28 @@ elif sys.argv[2] == 'excludes':
 " "$json" "$field"
 }
 
-# Parse JSON to extract data_volume
+# Parse JSON to extract data_volume using parameter expansion
+# Avoids jq dependency and is safe with set -e
 # Arguments: $1 = JSON string
 # Outputs: data_volume value
 _containai_extract_volume() {
     local json="$1"
+    local data_volume
 
-    # Try jq first (faster, more robust)
-    if command -v jq >/dev/null 2>&1; then
-        printf '%s' "$json" | jq -r '.data_volume // empty'
-        return
-    fi
+    # Use parameter expansion (same pattern as aliases.sh)
+    data_volume="${json#*\"data_volume\":\"}"
+    data_volume="${data_volume%%\"*}"
 
-    # Fall back to Python (already required for parse-toml.py)
-    _containai_parse_json_python "$json" "volume"
+    printf '%s' "$data_volume"
 }
 
-# Parse JSON to extract excludes array
+# Parse JSON to extract excludes array using Python
 # Arguments: $1 = JSON string
 # Outputs: excludes (newline-separated)
 _containai_extract_excludes() {
     local json="$1"
 
-    # Try jq first (faster, more robust)
-    if command -v jq >/dev/null 2>&1; then
-        printf '%s' "$json" | jq -r '.excludes[]? // empty'
-        return
-    fi
-
-    # Fall back to Python (already required for parse-toml.py)
+    # Use Python for reliable JSON array parsing (already required for parse-toml.py)
     _containai_parse_json_python "$json" "excludes"
 }
 
@@ -216,11 +209,20 @@ _containai_parse_config() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
     # Call parse-toml.py - outputs JSON: {"data_volume": "...", "excludes": [...]}
-    if ! json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>&1); then
+    # Capture stderr separately to avoid corrupting JSON output
+    local parse_stderr
+    parse_stderr=$(mktemp)
+
+    if ! json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>"$parse_stderr"); then
         echo "[WARN] Failed to parse config file: $config_file" >&2
-        echo "$json_result" >&2
+        if [[ -s "$parse_stderr" ]]; then
+            cat "$parse_stderr" >&2
+        fi
+        rm -f "$parse_stderr"
         return 0  # Graceful fallback
     fi
+
+    rm -f "$parse_stderr"
 
     # Extract volume from JSON
     _CAI_VOLUME=$(_containai_extract_volume "$json_result")

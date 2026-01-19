@@ -132,7 +132,12 @@ def main():
     if not data_volume:
         data_volume = agent.get("data_volume", "sandbox-agent-data")
 
-    # Validate data_volume is single-line (required for line-based parsing)
+    # Validate data_volume is a string
+    if not isinstance(data_volume, str):
+        print(f"Error: data_volume must be a string, got {type(data_volume).__name__}", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate data_volume is single-line (required for safe parsing)
     try:
         validate_single_line(data_volume, "data_volume")
     except ValueError as e:
