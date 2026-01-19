@@ -68,9 +68,8 @@ if __name__ == "__main__":
 - [ ] Longest match wins when multiple workspaces match
 - [ ] Excludes are cumulative (default_excludes + workspace excludes)
 ## Done summary
-TBD
-
+Rewrote parse-toml.py to output compact JSON with data_volume and excludes. Uses path segment count for longest match, stable exclude deduplication, and proper fallback chain. Updated bash callers and tests.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: cadc454, 19a3979, de92ab9, cf17bb3
+- Tests: python3 -m py_compile parse-toml.py, bash -n aliases.sh, bash -n sync-agent-plugins.sh, manual JSON extraction tests, manual workspace matching tests
 - PRs:
