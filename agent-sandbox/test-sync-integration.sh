@@ -12,7 +12,7 @@
 # 7. Shell sources .bashrc.d scripts
 # 8. tmux loads config
 # 9. gh CLI available in container
-# 10. opencode CLI available in container
+# 10. opencode CLI check (optional - depends on image build)
 # 11-15. Workspace volume resolution tests
 # ==============================================================================
 
@@ -587,14 +587,14 @@ test_gh_cli() {
 }
 
 # ==============================================================================
-# Test 10: opencode CLI available in container
+# Test 10: opencode CLI check (optional - depends on image build)
 # ==============================================================================
 test_opencode_cli() {
-    section "Test 10: opencode CLI available in container"
+    section "Test 10: opencode CLI check (optional)"
 
     # Check opencode version
     # Note: opencode is installed in Dockerfile but CI may use cached images
-    # This test verifies the CLI is accessible when present
+    # This test verifies the CLI is accessible when present, skips otherwise
     local opencode_version
     opencode_version=$(run_in_image_no_entrypoint 'which opencode >/dev/null 2>&1 && opencode --version 2>&1 | head -1 || echo "not_installed"')
 

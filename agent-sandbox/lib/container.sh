@@ -15,7 +15,7 @@
 #
 # Container inspection helpers:
 #   _containai_container_exists         - Check if container exists
-#   _containai_get_container_labels     - Get both new and legacy label values
+#   _containai_get_container_label      - Get ContainAI label value
 #   _containai_get_container_image      - Get container image name
 #   _containai_get_container_data_volume - Get mounted data volume name
 #   _containai_is_our_container         - Check if container belongs to ContainAI
