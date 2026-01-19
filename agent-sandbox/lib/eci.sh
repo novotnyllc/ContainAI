@@ -5,12 +5,12 @@
 # This file must be sourced, not executed directly.
 #
 # Provides:
-#   _cai_eci_available()     - Check if ECI might be available (Docker Desktop 4.50+)
+#   _cai_eci_available()     - Check if ECI might be available (Docker Desktop 4.29+)
 #   _cai_eci_enabled()       - Check if ECI is actually enabled (uid_map + runtime check)
-#   _cai_eci_status()        - Get ECI status: "enabled", "available_not_enabled", "not_available"
+#   _cai_eci_status()        - Get ECI status: "enabled", "maybe_available", "not_available"
 #
 # Detection methods per Docker documentation:
-#   1. uid_map check: docker run --rm alpine cat /proc/self/uid_map
+#   1. uid_map check: docker run --rm alpine:3.20 cat /proc/self/uid_map
 #      - ECI active: "0 100000 65536" (root mapped to unprivileged)
 #      - ECI inactive: "0 0 4294967295" (root is root)
 #   2. runtime check: docker inspect --format '{{.HostConfig.Runtime}}' <cid>
@@ -43,14 +43,17 @@ if [[ -n "${_CAI_ECI_LOADED:-}" ]]; then
 fi
 _CAI_ECI_LOADED=1
 
+# Pin alpine version for reproducible uid_map output parsing
+_CAI_ECI_ALPINE_IMAGE="alpine:3.20"
+
 # ==============================================================================
 # ECI availability check
 # ==============================================================================
 
-# Check if ECI might be available (Docker Desktop 4.50+ with business subscription)
-# This checks prerequisites but cannot definitively detect subscription tier.
-# Returns: 0=potentially available (Docker Desktop 4.50+), 1=not available
-# Note: Even if this returns 0, ECI may not be enabled - use _cai_eci_enabled() to verify
+# Check if ECI might be available (Docker Desktop 4.29+ with Business subscription)
+# This checks prerequisites but cannot definitively detect subscription tier or admin settings.
+# Returns: 0=potentially available (Docker Desktop 4.29+), 1=not available
+# Note: Even if this returns 0, ECI may not be enabled due to subscription/admin - use _cai_eci_enabled() to verify
 _cai_eci_available() {
     # ECI requires Docker Desktop
     local dd_version dd_rc
@@ -76,7 +79,7 @@ _cai_eci_available() {
     fi
 
     # Docker Desktop version is sufficient for ECI to potentially be available
-    # Actual subscription tier (Business) cannot be detected programmatically
+    # Actual subscription tier (Business) and admin settings cannot be detected programmatically
     return 0
 }
 
@@ -99,8 +102,11 @@ _cai_eci_check_uid_map() {
     # ECI maps root (uid 0) to unprivileged user (typically 100000+)
     # Without ECI: "0 0 4294967295" (root is root)
     # With ECI: "0 100000 65536" (root mapped to 100000)
-    local uid_map_output rc
-    uid_map_output=$(_cai_timeout 30 docker run --rm alpine cat /proc/self/uid_map 2>&1) && rc=0 || rc=$?
+    # Note: Capture stdout only to avoid mixing with pull progress/warnings
+    local uid_map_output rc tmpfile
+    tmpfile=$(mktemp)
+    uid_map_output=$(_cai_timeout 30 docker run --rm "$_CAI_ECI_ALPINE_IMAGE" cat /proc/self/uid_map 2>"$tmpfile") && rc=0 || rc=$?
+    rm -f "$tmpfile"
 
     # Timeout
     if [[ $rc -eq 124 ]]; then
@@ -118,9 +124,13 @@ _cai_eci_check_uid_map() {
     # Format: "inside_uid outside_uid count"
     # ECI active: first field is 0, second field is high (100000+)
     # ECI inactive: first field is 0, second field is 0
+    # Filter for lines matching the expected uid_map format to handle any extra output
     local inside_uid outside_uid _count line
-    # Read first line (may have leading whitespace)
-    line=$(printf '%s' "$uid_map_output" | head -1)
+    line=$(printf '%s' "$uid_map_output" | grep -E '^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+' | head -1)
+    if [[ -z "$line" ]]; then
+        _CAI_ECI_UID_MAP_ERROR="parse_failed"
+        return 1
+    fi
     # _count captures the third field but is unused (only need inside_uid and outside_uid)
     if ! read -r inside_uid outside_uid _count <<< "$line"; then
         _CAI_ECI_UID_MAP_ERROR="parse_failed"
@@ -159,34 +169,54 @@ _cai_eci_check_runtime() {
         return 1
     fi
 
-    # Start ephemeral container (detached, short-lived)
-    local cid rc
-    cid=$(_cai_timeout 30 docker run -d --rm alpine sleep 10 2>&1) && rc=0 || rc=$?
+    # Use deterministic container name for cleanup on all exit paths
+    local container_name
+    container_name="cai-eci-check-$$-$(date +%s)"
 
-    # Timeout starting container
+    # Cleanup function - always try to remove by name
+    _cai_eci_cleanup_runtime_container() {
+        _cai_timeout 10 docker rm -f "$container_name" >/dev/null 2>&1 || true
+    }
+
+    # Start ephemeral container (detached, short-lived) with known name
+    # Capture stdout only for CID, stderr to temp file
+    local cid rc tmpfile
+    tmpfile=$(mktemp)
+    cid=$(_cai_timeout 30 docker run -d --name "$container_name" --rm "$_CAI_ECI_ALPINE_IMAGE" sleep 10 2>"$tmpfile") && rc=0 || rc=$?
+    rm -f "$tmpfile"
+
+    # Timeout starting container - cleanup by name
     if [[ $rc -eq 124 ]]; then
+        _cai_eci_cleanup_runtime_container
         _CAI_ECI_RUNTIME_ERROR="timeout_start"
         return 1
     fi
 
-    # Failed to start container
+    # Failed to start container - cleanup by name in case partial creation
     if [[ $rc -ne 0 ]]; then
+        _cai_eci_cleanup_runtime_container
         _CAI_ECI_RUNTIME_ERROR="container_failed"
         return 1
     fi
 
-    # Validate we got a container ID (64 hex chars or short form 12 hex chars)
-    if [[ ! "$cid" =~ ^[a-f0-9]+$ ]]; then
+    # Extract CID from output (take last line matching hex pattern in case of extra output)
+    cid=$(printf '%s' "$cid" | grep -E '^[a-f0-9]{12,64}$' | tail -1)
+
+    # Validate we got a container ID
+    if [[ -z "$cid" ]] || [[ ! "$cid" =~ ^[a-f0-9]+$ ]]; then
+        _cai_eci_cleanup_runtime_container
         _CAI_ECI_RUNTIME_ERROR="invalid_cid"
         return 1
     fi
 
-    # Inspect runtime
+    # Inspect runtime (capture stdout only)
     local runtime
-    runtime=$(_cai_timeout 10 docker inspect --format '{{.HostConfig.Runtime}}' "$cid" 2>&1) && rc=0 || rc=$?
+    tmpfile=$(mktemp)
+    runtime=$(_cai_timeout 10 docker inspect --format '{{.HostConfig.Runtime}}' "$cid" 2>"$tmpfile") && rc=0 || rc=$?
+    rm -f "$tmpfile"
 
-    # Always cleanup container (use timeout to avoid hanging)
-    _cai_timeout 10 docker stop "$cid" >/dev/null 2>&1 || true
+    # Always cleanup container by name
+    _cai_eci_cleanup_runtime_container
 
     # Timeout inspecting
     if [[ $rc -eq 124 ]]; then
@@ -253,8 +283,9 @@ _cai_eci_enabled() {
 # ==============================================================================
 
 # Get comprehensive ECI status
-# Outputs: One of: "enabled", "available_not_enabled", "not_available"
+# Outputs: One of: "enabled", "maybe_available", "not_available"
 # Returns: Always 0 (status is in output)
+# Note: "maybe_available" means Docker Desktop 4.29+ but subscription/admin status unknown
 _cai_eci_status() {
     # Check if ECI is actually enabled
     if _cai_eci_enabled; then
@@ -263,8 +294,9 @@ _cai_eci_status() {
     fi
 
     # Check if ECI could be available (Docker Desktop 4.29+)
+    # This only checks version - subscription tier and admin settings cannot be detected
     if _cai_eci_available; then
-        printf '%s' "available_not_enabled"
+        printf '%s' "maybe_available"
         return 0
     fi
 
@@ -287,22 +319,63 @@ _cai_eci_status_message() {
         enabled)
             printf '%s\n' "ECI enabled"
             ;;
-        available_not_enabled)
-            printf '%s\n' "ECI available but not enabled"
-            printf '%s\n' "  Enable ECI in Docker Desktop Settings > Security > Enhanced Container Isolation"
-            printf '%s\n' "  Requires Docker Business subscription"
+        maybe_available)
+            printf '%s\n' "ECI may be available but is not enabled"
+            printf '%s\n' "  Docker Desktop version supports ECI, but:"
+            printf '%s\n' "  - ECI requires Docker Business subscription"
+            printf '%s\n' "  - ECI must be enabled by admin in Docker Desktop Settings"
+            printf '%s\n' "  Enable: Settings > Security > Enhanced Container Isolation"
             ;;
         not_available)
             printf '%s\n' "ECI not available"
-            if ! _cai_docker_desktop_version >/dev/null 2>&1; then
-                printf '%s\n' "  ECI requires Docker Desktop 4.29+"
-                printf '%s\n' "  Current Docker is not Docker Desktop"
-            else
-                local dd_version
-                dd_version=$(_cai_docker_desktop_version)
-                printf '%s\n' "  ECI requires Docker Desktop 4.29+ with Business subscription"
-                printf '%s\n' "  Current version: $dd_version"
-            fi
+            # Branch on specific error conditions for accurate messaging
+            # First check daemon errors from the last availability check
+            case "${_CAI_DD_VERSION_ERROR:-}" in
+                timeout)
+                    printf '%s\n' "  Docker command timed out"
+                    printf '%s\n' "  Check Docker Desktop is responsive"
+                    ;;
+                permission)
+                    printf '%s\n' "  Permission denied accessing Docker"
+                    printf '%s\n' "  Ensure Docker Desktop is running and accessible"
+                    ;;
+                not_running)
+                    printf '%s\n' "  Docker Desktop is not running"
+                    printf '%s\n' "  Start Docker Desktop and try again"
+                    ;;
+                not_docker_desktop)
+                    printf '%s\n' "  ECI requires Docker Desktop 4.29+"
+                    printf '%s\n' "  Current Docker is not Docker Desktop (colima, docker-ce, etc.)"
+                    ;;
+                *)
+                    # Check if we can get version info
+                    if _cai_docker_desktop_version >/dev/null 2>&1; then
+                        local dd_version
+                        dd_version=$(_cai_docker_desktop_version)
+                        printf '%s\n' "  ECI requires Docker Desktop 4.29+"
+                        printf '%s\n' "  Current version: $dd_version (too old)"
+                    elif ! _cai_docker_daemon_available; then
+                        # Daemon not available - check daemon error
+                        case "${_CAI_DAEMON_ERROR:-}" in
+                            timeout)
+                                printf '%s\n' "  Docker command timed out"
+                                ;;
+                            permission)
+                                printf '%s\n' "  Permission denied accessing Docker"
+                                ;;
+                            not_running)
+                                printf '%s\n' "  Docker is not running"
+                                ;;
+                            *)
+                                printf '%s\n' "  Docker daemon not accessible"
+                                ;;
+                        esac
+                    else
+                        printf '%s\n' "  ECI requires Docker Desktop 4.29+"
+                        printf '%s\n' "  Current Docker is not Docker Desktop"
+                    fi
+                    ;;
+            esac
             ;;
     esac
 }

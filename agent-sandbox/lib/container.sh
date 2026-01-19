@@ -158,6 +158,7 @@ _containai_container_name() {
 # ==============================================================================
 
 # Container isolation detection (conservative - prefer return 2 over false positive/negative)
+# Uses both docker info checks AND the ECI detection functions for high confidence.
 # Requires: Docker must be available (call _containai_check_docker first or _containai_check_sandbox)
 # Returns: 0=isolated (detected), 1=not isolated (definite), 2=unknown (ambiguous)
 _containai_check_isolation() {
@@ -169,6 +170,13 @@ _containai_check_isolation() {
         return 2
     fi
 
+    # First check ECI using both methods (uid_map + runtime) for high confidence
+    # _cai_eci_enabled requires both checks to pass, so this is the most reliable
+    if _cai_eci_enabled; then
+        return 0
+    fi
+
+    # ECI not enabled - fall back to docker info checks for other isolation methods
     # Use docker info --format for reliable structured output with timeout
     # Use if ! pattern for set -e safety
     if ! runtime=$(_cai_timeout 5 docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then
@@ -185,7 +193,7 @@ _containai_check_isolation() {
     rootless=$(_cai_timeout 5 docker info --format '{{.Rootless}}' 2>/dev/null) || rootless=""
     userns=$(_cai_timeout 5 docker info --format '{{.SecurityOptions}}' 2>/dev/null) || userns=""
 
-    # ECI enabled - sysbox-runc runtime
+    # ECI enabled via default runtime - sysbox-runc (fallback check via docker info)
     if [[ "$runtime" == "sysbox-runc" ]]; then
         return 0
     fi
