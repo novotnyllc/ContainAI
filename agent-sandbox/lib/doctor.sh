@@ -52,11 +52,11 @@ _CAI_DOCTOR_LOADED=1
 _cai_check_wsl_seccomp() {
     _CAI_SECCOMP_MODE=""
 
-    # Check /proc/1/status for Seccomp field
-    if [[ -f /proc/1/status ]]; then
+    # Check /proc/self/status for Seccomp field (current process's seccomp mode)
+    if [[ -f /proc/self/status ]]; then
         local seccomp_line
         # Guard grep with || true per pitfall memory
-        seccomp_line=$(grep "^Seccomp:" /proc/1/status 2>/dev/null || true)
+        seccomp_line=$(grep "^Seccomp:" /proc/self/status 2>/dev/null || true)
         if [[ -n "$seccomp_line" ]]; then
             # Extract mode number
             _CAI_SECCOMP_MODE="${seccomp_line##*:}"
@@ -64,7 +64,9 @@ _cai_check_wsl_seccomp() {
 
             case "$_CAI_SECCOMP_MODE" in
                 0)
-                    printf '%s' "unavailable"
+                    # Mode 0 means seccomp is not active for this process
+                    # but the kernel may still support it - report as ok
+                    printf '%s' "ok"
                     return 0
                     ;;
                 1)
@@ -81,17 +83,7 @@ _cai_check_wsl_seccomp() {
         fi
     fi
 
-    # Fallback: Try unshare test
-    if command -v unshare >/dev/null 2>&1; then
-        if unshare --map-root-user true 2>/dev/null; then
-            printf '%s' "ok"
-            return 0
-        else
-            printf '%s' "unavailable"
-            return 0
-        fi
-    fi
-
+    # No seccomp status found - cannot determine
     printf '%s' "unknown"
     return 0
 }
@@ -172,7 +164,6 @@ _cai_doctor() {
     local sandbox_ok="false"
     local sysbox_ok="false"
     local dd_version=""
-    local sandbox_version=""
     local platform
     local seccomp_status=""
 
@@ -257,9 +248,6 @@ _cai_doctor() {
     # Check sandbox feature enabled
     if _cai_sandbox_feature_enabled 2>/dev/null; then
         sandbox_ok="true"
-        if _cai_sandbox_version >/dev/null 2>&1; then
-            sandbox_version=$(_cai_sandbox_version)
-        fi
         printf '  %-44s %s\n' "Sandboxes feature: enabled" "[OK]    <- REQUIRED"
     else
         printf '  %-44s %s\n' "Sandboxes feature: not enabled" "[ERROR] <- REQUIRED"
@@ -286,19 +274,22 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Sysbox available: no" "[WARN]  <- STRONGLY RECOMMENDED"
         case "${_CAI_SYSBOX_ERROR:-}" in
             socket_not_found)
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox for enhanced isolation)"
+                printf '  %-44s %s\n' "" "(Sysbox not configured - see ContainAI setup documentation)"
                 ;;
             context_not_found)
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to configure containai-secure context)"
+                printf '  %-44s %s\n' "" "(containai-secure context not configured)"
                 ;;
             daemon_unavailable)
                 printf '  %-44s %s\n' "" "(ContainAI Docker daemon not running)"
                 ;;
             runtime_not_found)
-                printf '  %-44s %s\n' "" "(Sysbox runtime not found - run 'cai setup')"
+                printf '  %-44s %s\n' "" "(Sysbox runtime not found in ContainAI daemon)"
                 ;;
             timeout)
                 printf '  %-44s %s\n' "" "(ContainAI Docker daemon timed out)"
+                ;;
+            *)
+                printf '  %-44s %s\n' "" "(Sysbox check failed - run 'cai doctor --json' for details)"
                 ;;
         esac
     fi
@@ -339,11 +330,11 @@ _cai_doctor() {
                 printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): enabled" "[OK]"
                 ;;
             available_not_enabled)
-                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): available" "[INFO]"
+                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): available" "[WARN]"
                 printf '  %-44s %s\n' "" "(Enable in Settings > Security for additional isolation)"
                 ;;
             *)
-                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): not available" "[INFO]"
+                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): not available" "[WARN]"
                 ;;
         esac
 
@@ -364,10 +355,10 @@ _cai_doctor() {
 
     if [[ "$sysbox_ok" == "true" ]]; then
         printf '  %-44s %s\n' "Sysbox:" "[OK] Available (strongly recommended)"
-        printf '  %-44s %s\n' "Recommended:" "Use 'cai run' with full isolation"
+        printf '  %-44s %s\n' "Recommended:" "Use ContainAI with full isolation"
     else
         printf '  %-44s %s\n' "Sysbox:" "[WARN] Not available (strongly recommended)"
-        printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' for best security"
+        printf '  %-44s %s\n' "Recommended:" "Configure Sysbox for enhanced security"
     fi
 
     # Exit code: 0 if sandbox available, 1 if not
@@ -401,10 +392,12 @@ _cai_json_escape() {
 #          1 if Docker Sandbox NOT available (cannot proceed)
 _cai_doctor_json() {
     local sandbox_ok="false"
+    local sandboxes_available="false"
+    local sandbox_enabled="false"
     local sysbox_ok="false"
     local dd_version=""
-    local sandbox_enabled="false"
     local platform
+    local platform_json
     local seccomp_status=""
     local seccomp_compatible="true"
     local seccomp_warning=""
@@ -414,6 +407,12 @@ _cai_doctor_json() {
     local recommended_action="setup_required"
 
     platform=$(_cai_detect_platform)
+    # Normalize platform type for JSON (wsl -> wsl2 per spec)
+    if [[ "$platform" == "wsl" ]]; then
+        platform_json="wsl2"
+    else
+        platform_json="$platform"
+    fi
 
     # Check Docker availability
     if _cai_docker_cli_available && _cai_docker_daemon_available; then
@@ -427,7 +426,11 @@ _cai_doctor_json() {
             dd_minor="${dd_rest%%.*}"
 
             if [[ "$dd_major" -gt 4 ]] || { [[ "$dd_major" -eq 4 ]] && [[ "$dd_minor" -ge 50 ]]; }; then
-                # Check sandbox feature
+                # Version sufficient - check if sandbox plugin is available
+                if _cai_sandbox_available; then
+                    sandboxes_available="true"
+                fi
+                # Check if sandbox feature is actually enabled
                 if _cai_sandbox_feature_enabled 2>/dev/null; then
                     sandbox_ok="true"
                     sandbox_enabled="true"
@@ -477,7 +480,7 @@ _cai_doctor_json() {
     printf '{\n'
     printf '  "docker_desktop": {\n'
     printf '    "version": "%s",\n' "$(_cai_json_escape "$dd_version")"
-    printf '    "sandboxes_available": %s,\n' "$sandbox_ok"
+    printf '    "sandboxes_available": %s,\n' "$sandboxes_available"
     printf '    "sandboxes_enabled": %s,\n' "$sandbox_enabled"
     printf '    "requirement_level": "hard"\n'
     printf '  },\n'
@@ -493,7 +496,7 @@ _cai_doctor_json() {
     printf '    "requirement_level": "strong_suggestion"\n'
     printf '  },\n'
     printf '  "platform": {\n'
-    printf '    "type": "%s",\n' "$platform"
+    printf '    "type": "%s",\n' "$platform_json"
     if [[ "$platform" == "wsl" ]]; then
         printf '    "seccomp_compatible": %s,\n' "$seccomp_compatible"
         if [[ -n "$seccomp_warning" ]]; then
