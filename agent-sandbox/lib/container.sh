@@ -1025,7 +1025,7 @@ _containai_start_container() {
             echo "[WARN] No isolation available but --force specified. Proceeding without isolation checks." >&2
             selected_context=""
         else
-            _cai_error "No isolation available. Run 'containai doctor' for setup instructions."
+            _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
             _cai_error "Use --force to bypass (for testing only - not recommended)"
             return 1
         fi
@@ -1411,7 +1411,7 @@ _containai_start_container() {
                         echo "[ERROR] Failed to create Sysbox container" >&2
                         return 1
                     fi
-                    docker --context "$selected_context" exec -it -w /home/agent/workspace "$container_name" bash
+                    docker --context "$selected_context" exec -it --user agent -w /home/agent/workspace "$container_name" bash
                 else
                     docker "${args[@]}"
                 fi
@@ -1480,11 +1480,27 @@ _containai_stop_all() {
     local default_containers secure_containers all_containers
     default_containers=$(_containai_list_containers_for_context "")
 
-    # Also check secure engine context if it exists
-    if docker context inspect containai-secure >/dev/null 2>&1; then
-        secure_containers=$(_containai_list_containers_for_context "containai-secure")
-    else
-        secure_containers=""
+    # Determine which secure engine contexts to check
+    # Check both configured context (if different) and default containai-secure
+    local configured_context default_secure_context="containai-secure"
+    configured_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || configured_context=""
+
+    secure_containers=""
+
+    # Check default containai-secure context
+    if docker context inspect "$default_secure_context" >/dev/null 2>&1; then
+        secure_containers=$(_containai_list_containers_for_context "$default_secure_context")
+    fi
+
+    # Also check configured context if different from default
+    if [[ -n "$configured_context" ]] && [[ "$configured_context" != "$default_secure_context" ]]; then
+        if docker context inspect "$configured_context" >/dev/null 2>&1; then
+            local config_containers
+            config_containers=$(_containai_list_containers_for_context "$configured_context")
+            if [[ -n "$config_containers" ]]; then
+                secure_containers=$(printf '%s\n%s' "$secure_containers" "$config_containers")
+            fi
+        fi
     fi
 
     # Merge results (containers may exist in both contexts with same name - keep both)

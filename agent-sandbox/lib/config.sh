@@ -334,13 +334,25 @@ if isinstance(creds, dict):
     _CAI_CREDENTIALS="$creds_mode"
 
     # Extract secure_engine.context_name from config
+    # Validate: must be single-line string with safe characters for Docker context name
     local secure_engine_context=""
     secure_engine_context=$(printf '%s' "$config_json" | python3 -c "
-import json, sys
+import json, sys, re
 config = json.load(sys.stdin)
 se = config.get('secure_engine', {})
 if isinstance(se, dict):
-    print(se.get('context_name', ''))
+    ctx = se.get('context_name', '')
+    if isinstance(ctx, str):
+        # Reject multi-line or control characters
+        if '\n' in ctx or '\r' in ctx or '\t' in ctx:
+            print('[WARN] secure_engine.context_name contains control characters, ignoring', file=sys.stderr)
+        # Docker context names: alphanumeric, underscore, dash (conservative set)
+        elif not re.match(r'^[a-zA-Z0-9_-]*$', ctx):
+            print('[WARN] secure_engine.context_name contains invalid characters, ignoring', file=sys.stderr)
+        elif len(ctx) > 64:
+            print('[WARN] secure_engine.context_name too long (>64 chars), ignoring', file=sys.stderr)
+        else:
+            print(ctx)
 ")
     _CAI_SECURE_ENGINE_CONTEXT="$secure_engine_context"
 
