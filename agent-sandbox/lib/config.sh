@@ -91,7 +91,7 @@ _containai_find_config() {
     fi
 
     # Resolve workspace to absolute path - warn if invalid
-    if ! dir=$(cd "$workspace" 2>/dev/null && pwd); then
+    if ! dir=$(cd -- "$workspace" 2>/dev/null && pwd); then
         echo "[WARN] Invalid workspace path, using \$PWD: $workspace" >&2
         dir="$PWD"
     fi
@@ -218,7 +218,7 @@ _containai_parse_config() {
     fi
 
     # Determine script directory (where parse-toml.py lives)
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
     # Call parse-toml.py - outputs JSON: {"data_volume": "...", "excludes": [...]}
     # Capture stderr separately to avoid corrupting JSON output
@@ -323,7 +323,7 @@ _containai_resolve_volume() {
     fi
 
     # 3. Resolve workspace to absolute path
-    if ! workspace=$(cd "$workspace" 2>/dev/null && pwd); then
+    if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
         echo "[WARN] Invalid workspace path, using \$PWD: $workspace" >&2
         workspace="$PWD"
     fi
@@ -383,7 +383,7 @@ _containai_resolve_excludes() {
     local config_file
 
     # Resolve workspace to absolute path
-    if ! workspace=$(cd "$workspace" 2>/dev/null && pwd); then
+    if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
         echo "[WARN] Invalid workspace path, using \$PWD: $workspace" >&2
         workspace="$PWD"
     fi

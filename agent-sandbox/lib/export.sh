@@ -182,7 +182,7 @@ _containai_export() {
     fi
 
     # Resolve to absolute path
-    if ! output_dir=$(cd "$output_dir" 2>/dev/null && pwd); then
+    if ! output_dir=$(cd -- "$output_dir" 2>/dev/null && pwd); then
         _export_error "Cannot access output directory: $(dirname "$output_path")"
         return 1
     fi

@@ -784,7 +784,7 @@ _containai_start_container() {
     # Resolve workspace
     local workspace_resolved
     workspace_resolved="${workspace:-$PWD}"
-    if ! workspace_resolved=$(cd "$workspace_resolved" 2>/dev/null && pwd); then
+    if ! workspace_resolved=$(cd -- "$workspace_resolved" 2>/dev/null && pwd); then
         echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
         return 1
     fi
