@@ -15,11 +15,11 @@ Replace hardcoded `sandbox-agent-data` with configurable volumes. Rename to Cont
 
 ```toml
 [agent]
-data_volume = "sandbox-agent-data"
+data_volume = "containai-data"
 import_excludes = [".vscode-server/data/User/settings.json"]
 
 [workspace."/home/user/project"]
-data_volume = "project-data"
+data_volume = "containai-project-data"
 import_excludes = [".custom/path"]
 ```
 

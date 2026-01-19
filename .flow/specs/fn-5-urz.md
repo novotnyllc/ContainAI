@@ -37,22 +37,6 @@ ContainAI supports two mutually exclusive execution modes:
 - `--context containai-secure` → Sysbox mode (requires `cai setup`)
 - `--context default` or unset → Sandbox mode (Docker Desktop)
 
-## Agent Image Mapping
-
-| Agent | Repo |
-|-------|------|
-| claude | `docker/sandbox-templates` |
-| gemini | `docker/sandbox-templates` |
-
-| Agent | Default Tag |
-|-------|-------------|
-| claude | `claude-code` |
-| gemini | `gemini-cli` |
-
-**Tag precedence:** `--image-tag` > `CONTAINAI_AGENT_TAG` > agent default tag
-
-**Image construction:** `${REPO}:${TAG}` (never string surgery on existing tag)
-
 ## Config Discovery
 
 **Exit codes:**

@@ -177,6 +177,8 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
               ${HOME}/.gemini \
               ${HOME}/.opencode  \
               ${HOME}/.codex  \
+              ${HOME}/.local/share \
+              ${HOME}/.config \
     \
     # folders that need to be removed before we can symlink to them
     # Remove the plugins folder on create as we'll be symlinking it to the mount point
@@ -230,11 +232,11 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && rm -rf ${HOME}/.codex/skills \
     && ln -sfn /mnt/agent-data/codex/skills ${HOME}/.codex/skills \
     \
-    # tmux (legacy location)
-    && mkdir -p /mnt/agent-data/tmux/.tmux \
-    && ln -sfn /mnt/agent-data/tmux/.tmux.conf ${HOME}/.tmux.conf \
-    && rm -rf ${HOME}/.tmux \
-    && ln -sfn /mnt/agent-data/tmux/.tmux ${HOME}/.tmux \
+    # tmux
+    && mkdir -p /mnt/agent-data/config/tmux \
+    && mkdir -p /mnt/agent-data/local/share/tmux \
+    && ln -sfn /mnt/agent-data/config/tmux ${HOME}/.config/tmux \
+    && ln -sfn /mnt/agent-data/local/share/tmux ${HOME}/.local/share/tmux \
     \
     # Shell configs
     && mkdir -p /mnt/agent-data/shell/.bashrc.d \
@@ -246,11 +248,7 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     # OpenCode data (XDG_DATA_HOME for auth.json)
     && mkdir -p ${HOME}/.local/share/opencode \
     && mkdir -p /mnt/agent-data/local/share/opencode \
-    && ln -sfn /mnt/agent-data/local/share/opencode/auth.json ${HOME}/.local/share/opencode/auth.json \
-    \
-    # Config (rename to 'config' on move to match symlink target)
-    && mv ${HOME}/.config /mnt/agent-data/config \
-    && ln -sfn /mnt/agent-data/config ${HOME}/.config
+    && ln -sfn /mnt/agent-data/local/share/opencode/auth.json ${HOME}/.local/share/opencode/auth.json     
 
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh

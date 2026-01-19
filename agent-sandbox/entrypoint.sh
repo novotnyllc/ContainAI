@@ -144,7 +144,7 @@ ensure_volume_structure() {
 
   # tmux (SYNC_MAP flags: f for .tmux.conf, d for .tmux and config/tmux)
   ensure_dir "${DATA_DIR}/tmux"
-  ensure_file "${DATA_DIR}/tmux/.tmux.conf"
+  #ensure_file "${DATA_DIR}/tmux/.tmux.conf"
   ensure_dir "${DATA_DIR}/tmux/.tmux"
   ensure_dir "${DATA_DIR}/config/tmux"
 

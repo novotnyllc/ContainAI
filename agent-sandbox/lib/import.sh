@@ -102,9 +102,8 @@ _IMPORT_SYNC_MAP=(
   "/source/.config/opencode:/target/config/opencode:d"
 
   # --- tmux ---
-  "/source/.tmux.conf:/target/tmux/.tmux.conf:f"
-  "/source/.tmux:/target/tmux/.tmux:d"
   "/source/.config/tmux:/target/config/tmux:d"
+  "/source/.local/share/tmux:/target/local/share/tmux:d"
 
   # --- Shell ---
   "/source/.bash_aliases:/target/shell/.bash_aliases:f"
@@ -142,7 +141,7 @@ _IMPORT_SYNC_MAP=(
   "/source/.codex/skills:/target/codex/skills:dx"
 
   # --- OpenCode (data) ---
-  # Config is covered by ~/.config symlink; only need auth from data dir
+  # Only need auth from data dir
   "/source/.local/share/opencode/auth.json:/target/local/share/opencode/auth.json:fs"
 )
 fi
