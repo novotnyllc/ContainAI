@@ -24,3 +24,6 @@ Shell precedence: 'cmd1 && cmd2 || true' masks cmd1 failures; use 'cmd1 && (cmd2
 
 ## 2026-01-18 manual [pitfall]
 ln -sfn to directory paths needs rm -rf first if destination may exist as real directory (ln -sfn creates link INSIDE existing dir)
+
+## 2026-01-19 manual [pitfall]
+Git worktrees and submodules use .git file (not directory); use -e test instead of -d for git root detection

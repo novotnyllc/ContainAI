@@ -463,9 +463,8 @@ Max length: 255 characters
 - [ ] All variables declared `local` to prevent shell pollution
 - [ ] `cai --workspace /path` uses /path for both workspace AND config matching
 ## Done summary
-TBD
-
+Added config loading functions to aliases.sh with full integration: _containai_validate_volume_name, _containai_find_config, _containai_parse_config_for_workspace, and _containai_resolve_volume. Wired into asb with --data-volume flag support.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 33085e1, 6c89b6e, 8e1a22d
+- Tests: bash -n aliases.sh, python3 -m py_compile parse-toml.py, manual function tests
 - PRs:

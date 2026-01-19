@@ -7,10 +7,23 @@
     "fn-4-vet.1"
   ],
   "epic": "fn-4-vet",
+  "evidence": {
+    "commits": [
+      "33085e1",
+      "6c89b6e",
+      "8e1a22d"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n aliases.sh",
+      "python3 -m py_compile parse-toml.py",
+      "manual function tests"
+    ]
+  },
   "id": "fn-4-vet.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.2.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Add config loading function to aliases.sh",
-  "updated_at": "2026-01-19T08:02:31.594629Z"
+  "updated_at": "2026-01-19T08:19:13.156223Z"
 }
