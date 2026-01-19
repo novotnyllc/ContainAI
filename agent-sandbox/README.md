@@ -170,9 +170,11 @@ These scripts detect your OS and use the appropriate source paths.
 
 The `cai` command detects Docker Sandbox availability before starting a container:
 
-- **Blocks with actionable error** if sandbox is unavailable (command not found, feature disabled, daemon not running)
+- **Blocks with actionable error** if sandbox is unavailable (command not found, feature disabled, daemon not running, not Docker Desktop)
 - **Proceeds** if sandbox is available (even if no containers exist yet)
-- **Shows actual error** for unknown failures to help diagnose issues
+- **Blocks for unknown failures** with error details (fail-closed for security)
+
+Use `cai --force` to bypass sandbox detection if needed (not recommended).
 
 ### Isolation Detection
 
@@ -195,7 +197,7 @@ Docker sandbox provides security isolation through:
 
 **Note:** ECI is optional and depends on your Docker Desktop configuration. The sandbox provides isolation regardless, but ECI adds additional security boundaries. See [Docker ECI documentation](https://docs.docker.com/security/for-admins/enhanced-container-isolation/) for details.
 
-**No manual security configuration required.** The `cai` command enforces sandbox usage: blocks when sandbox is definitely unavailable, and warns but attempts to proceed when status is unknown.
+**No manual security configuration required.** The `cai` command enforces sandbox usage with fail-closed behavior: blocks when sandbox is unavailable or status cannot be verified.
 
 Plain `docker run` is allowed for CI/smoke tests (see Testing below).
 

@@ -219,7 +219,15 @@ _containai_check_isolation() {
 # ==============================================================================
 
 # Check if docker sandbox is available
-# Returns: 0=yes, 1=no (definite), 2=unknown (fail-open with warning)
+# Returns: 0=yes (sandbox confirmed working), 1=no (fail-closed)
+#
+# Design decision: This function is now fail-closed for security. Previously it
+# returned 2 for "unknown" cases and proceeded anyway (fail-open). Now any
+# unclassified error blocks sandbox usage. This is safer because:
+# - Sandboxes provide security isolation; better to block than run unsecured
+# - All known error cases have actionable remediation messages
+# - Users can use --force to bypass if they know what they're doing
+#
 # Note: Delegates to _cai_sandbox_feature_enabled() for actual detection logic
 _containai_check_sandbox() {
     # Delegate to the comprehensive detection in lib/docker.sh
@@ -235,7 +243,7 @@ _containai_check_sandbox() {
     fi
 
     # _cai_sandbox_feature_enabled already printed detailed error messages
-    # Return 1 for definite failure (the new function doesn't have "unknown" state)
+    # Return 1 for definite failure (fail-closed for security)
     return 1
 }
 

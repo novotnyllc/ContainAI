@@ -88,16 +88,11 @@ _cai_timeout() {
         return $?
     fi
 
-    # No timeout mechanism available - fail fast with actionable error
-    # Running without timeout would violate the "doesn't hang" requirement
-    if declare -f _cai_error >/dev/null 2>&1; then
-        _cai_error "No timeout command available (timeout, gtimeout, or perl required)"
-        _cai_error "  Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)"
-    else
-        echo "[ERROR] No timeout command available (timeout, gtimeout, or perl required)" >&2
-        echo "[ERROR]   Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)" >&2
-    fi
-    return 1
+    # No timeout mechanism available - set flag and return special exit code 125
+    # Exit code 125 signals "no timeout available" so callers can provide remediation
+    # We don't print here because stderr is often captured/redirected
+    _CAI_TIMEOUT_UNAVAILABLE=1
+    return 125
 }
 
 # ==============================================================================
@@ -112,10 +107,16 @@ _cai_docker_cli_available() {
 
 # Check if Docker daemon is accessible (with timeout to avoid hanging)
 # Returns: 0=accessible, 1=not accessible
-# Outputs: On verbose mode, sets _CAI_DAEMON_ERROR with error details
+# Outputs: Sets _CAI_DAEMON_ERROR with error details
 _cai_docker_daemon_available() {
     local output rc
     output=$(_cai_timeout 5 docker info 2>&1) && rc=0 || rc=$?
+
+    # No timeout mechanism available (exit code 125)
+    if [[ $rc -eq 125 ]]; then
+        _CAI_DAEMON_ERROR="no_timeout"
+        return 1
+    fi
 
     # Timeout (exit code 124)
     if [[ $rc -eq 124 ]]; then
@@ -158,6 +159,10 @@ _cai_docker_available() {
     if ! _cai_docker_daemon_available; then
         if [[ "$verbose" == "verbose" ]] && declare -f _cai_error >/dev/null 2>&1; then
             case "${_CAI_DAEMON_ERROR:-unknown}" in
+                no_timeout)
+                    _cai_error "No timeout command available (timeout, gtimeout, or perl required)"
+                    _cai_error "  Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)"
+                    ;;
                 timeout)
                     _cai_error "Docker command timed out"
                     _cai_error "  Check DOCKER_CONTEXT / daemon reachability"
@@ -227,9 +232,14 @@ _cai_docker_desktop_version() {
 
     # Get Platform.Name which contains "Docker Desktop X.Y.Z" on Docker Desktop
     # On non-Docker Desktop (colima, docker-ce, etc) this returns different values
-    local platform_name rc stderr_output
-    stderr_output=$(_cai_timeout 5 docker version --format '{{.Server.Platform.Name}}' 2>&1 1>/dev/null) || true
-    platform_name=$(_cai_timeout 5 docker version --format '{{.Server.Platform.Name}}' 2>/dev/null) && rc=0 || rc=$?
+    # Use single docker call with temp file to capture both stdout and stderr
+    local platform_name rc tmpfile
+    tmpfile=$(mktemp)
+    # Capture stderr to temp file, stdout to variable
+    platform_name=$(_cai_timeout 5 docker version --format '{{.Server.Platform.Name}}' 2>"$tmpfile") && rc=0 || rc=$?
+    local stderr_output
+    stderr_output=$(cat "$tmpfile" 2>/dev/null)
+    rm -f "$tmpfile"
 
     # Timeout
     if [[ $rc -eq 124 ]]; then
@@ -339,6 +349,10 @@ _cai_sandbox_feature_enabled() {
     # First check if Docker daemon is accessible (with detailed error)
     if ! _cai_docker_daemon_available; then
         case "${_CAI_DAEMON_ERROR:-unknown}" in
+            no_timeout)
+                _cai_error "No timeout command available (timeout, gtimeout, or perl required)"
+                _cai_error "  Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)"
+                ;;
             timeout)
                 _cai_error "Docker command timed out"
                 _cai_error "  Check DOCKER_CONTEXT / daemon reachability"
