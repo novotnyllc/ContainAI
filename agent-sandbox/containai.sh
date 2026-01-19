@@ -48,6 +48,7 @@ _containai_libs_exist() {
     [[ -f "$_CAI_SCRIPT_DIR/lib/core.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/platform.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/docker.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/eci.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/config.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/container.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] && \
@@ -78,6 +79,11 @@ fi
 
 if ! source "$_CAI_SCRIPT_DIR/lib/docker.sh"; then
     echo "[ERROR] Failed to source lib/docker.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/eci.sh"; then
+    echo "[ERROR] Failed to source lib/eci.sh" >&2
     return 1
 fi
 
