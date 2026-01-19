@@ -9,10 +9,25 @@
     "fn-4-vet.11"
   ],
   "epic": "fn-4-vet",
+  "evidence": {
+    "commits": [
+      "a75ab80",
+      "cf7d0a6",
+      "0062fe0"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -c 'source agent-sandbox/containai.sh && type containai'",
+      "bash -c 'cai help'",
+      "bash -c 'cai import --help'",
+      "bash -c 'cai export --help'",
+      "bash -c 'cai import --data-volume='"
+    ]
+  },
   "id": "fn-4-vet.12",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.12.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create containai.sh - main CLI entry point",
-  "updated_at": "2026-01-19T14:54:47.448498Z"
+  "updated_at": "2026-01-19T15:17:39.094549Z"
 }

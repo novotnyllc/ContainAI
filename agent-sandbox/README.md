@@ -35,9 +35,8 @@ source ./containai.sh
 cai
 ```
 
-> **Note:** `containai.sh` is the recommended entry point. It sources the modular
-> libraries (`lib/*.sh`) when available, falling back to `aliases.sh` for
-> backward compatibility. The older `source ./aliases.sh` still works but is deprecated.
+> **Note:** `containai.sh` sources the modular libraries (`lib/*.sh`) to provide
+> all ContainAI functionality.
 
 The data volume (`sandbox-agent-data` by default) is created automatically on first run.
 
@@ -49,15 +48,16 @@ cai
 
 **Existing Claude users on Linux/WSL** (sync plugins and settings from host):
 ```bash
-./sync-agent-plugins.sh
+source ./containai.sh
+cai import
 ```
-Note: sync-agent-plugins.sh syncs plugins, settings, and credentials from host to volume. **Linux/WSL only** - macOS is not yet supported by this script.
+Note: `cai import` syncs plugins, settings, and credentials from host to volume. **Linux/WSL only** - macOS is not yet supported.
 
 **Using a custom volume name:**
 ```bash
 # Via CLI flag (highest precedence)
 cai --data-volume my-custom-volume
-./sync-agent-plugins.sh --volume my-custom-volume
+cai import --data-volume my-custom-volume
 
 # Via environment variable
 CONTAINAI_DATA_VOLUME=my-custom-volume cai
@@ -71,9 +71,6 @@ cai --config ~/.config/containai/config.toml
 ## Commands
 
 ContainAI provides `cai` (short) and `containai` (full) as primary commands.
-
-> **Note:** The older `asb*` commands still work but show a one-time deprecation warning per shell session.
-> Suppress with: `export CONTAINAI_NO_DEPRECATION_WARNING=1`
 
 ### Basic Usage
 
@@ -127,7 +124,7 @@ The volume name can be configured via:
 
 | Volume Name | Used By | Purpose |
 |-------------|---------|---------|
-| `sandbox-agent-data` | `sync-agent-plugins.sh` | Agent configs synced from host (same as above) |
+| `sandbox-agent-data` | `cai import` | Agent configs synced from host (same as above) |
 | `agent-sandbox-vscode` | `sync-all.sh` | VS Code Server settings |
 | `agent-sandbox-gh` | `sync-all.sh` | GitHub CLI config |
 

@@ -117,7 +117,7 @@ safe_chmod() {
 }
 
 # Ensure all volume structure exists for symlinks to work.
-# Derived from SYNC_MAP targets in sync-agent-plugins.sh plus additional
+# Derived from _IMPORT_SYNC_MAP targets in lib/import.sh plus additional
 # Dockerfile symlink targets (e.g., vscode-server settings.json, mcp.json)
 ensure_volume_structure() {
   # Bootstrap: ensure volume root is writable by agent user (1000:1000)

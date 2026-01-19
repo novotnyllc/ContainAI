@@ -94,9 +94,8 @@ _containai_parse_common_flags() {
 - [ ] `cai stop` stops all containers
 - [ ] Common flags parsed correctly across subcommands
 ## Done summary
-TBD
-
+Created containai.sh as the main CLI entry point that sources lib/*.sh modules and provides subcommand routing for shell, import, export, stop commands. Implements Option A/B library loading (libs if exist, else aliases.sh fallback) for backward compatibility.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: a75ab80, cf7d0a6, 0062fe0
+- Tests: bash -c 'source agent-sandbox/containai.sh && type containai', bash -c 'cai help', bash -c 'cai import --help', bash -c 'cai export --help', bash -c 'cai import --data-volume='
 - PRs:

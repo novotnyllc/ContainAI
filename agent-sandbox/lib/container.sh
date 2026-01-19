@@ -108,7 +108,7 @@ _containai_check_docker() {
 # ==============================================================================
 
 # Generate sanitized container name from git repo/branch or directory
-# Format: <repo>-<branch> (sanitized, no prefix per original _asb_container_name)
+# Format: <repo>-<branch> (sanitized)
 # Returns: container name via stdout
 _containai_container_name() {
     local name repo_name branch_name
@@ -182,7 +182,7 @@ _containai_check_isolation() {
         return 2
     fi
 
-    # Use docker info --format for reliable structured output (proven approach from aliases.sh)
+    # Use docker info --format for reliable structured output
     # Use if ! pattern for set -e safety
     if ! runtime=$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then
         echo "[WARN] Unable to determine isolation status" >&2
@@ -621,7 +621,7 @@ _containai_check_volume_match() {
 # ==============================================================================
 
 # Start or attach to a ContainAI sandbox container
-# This is the core container operation function extracted from _asb_impl
+# This is the core container operation function
 # Arguments:
 #   --name <name>        Container name (default: auto-generated)
 #   --workspace <path>   Workspace path (default: $PWD)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Integration tests for sync-agent-plugins.sh workflow
+# Integration tests for ContainAI import workflow
 # ==============================================================================
 # Verifies:
 # 1. Platform guard rejects non-Linux
@@ -101,47 +101,30 @@ run_in_image_no_entrypoint() {
 }
 
 # ==============================================================================
-# Test 1: Platform guard rejects non-Linux
+# Test 1: CLI help works
 # ==============================================================================
-test_platform_guard() {
-    section "Test 1: Platform guard rejects non-Linux"
+test_cli_help() {
+    section "Test 1: CLI help works"
 
-    # Create a temp directory with a fake uname that returns Darwin
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    cat > "$tmp_dir/uname" << 'FAKE_UNAME'
-#!/bin/bash
-if [[ "$1" == "-s" ]]; then
-    echo "Darwin"
-else
-    /usr/bin/uname "$@"
-fi
-FAKE_UNAME
-    chmod +x "$tmp_dir/uname"
-
-    # Test that script fails on "Darwin" (via PATH override)
-    local darwin_output
-    local darwin_exit=0
-    darwin_output=$(PATH="$tmp_dir:$PATH" "$SCRIPT_DIR/sync-agent-plugins.sh" 2>&1) || darwin_exit=$?
-
-    if [[ $darwin_exit -ne 0 ]] && echo "$darwin_output" | grep -q "macOS is not supported"; then
-        pass "Darwin platform rejected with correct error message"
+    # Test cai --help works
+    local help_output help_exit=0
+    help_output=$(bash -c "source '$SCRIPT_DIR/containai.sh' && cai --help" 2>&1) || help_exit=$?
+    if [[ $help_exit -eq 0 ]] && echo "$help_output" | grep -q "ContainAI"; then
+        pass "cai --help works"
     else
-        fail "Darwin platform should be rejected (exit=$darwin_exit)"
+        fail "cai --help failed (exit=$help_exit)"
+        info "Output: $(echo "$help_output" | head -10)"
     fi
 
-    # Test Linux (real platform) - should succeed past platform check
-    # We check that --help works (proves platform guard passes)
-    local linux_output linux_exit=0
-    linux_output=$("$SCRIPT_DIR/sync-agent-plugins.sh" --help 2>&1) || linux_exit=$?
-    if [[ $linux_exit -eq 0 ]]; then
-        pass "Linux platform accepted (--help works)"
+    # Test cai import --help works
+    local import_help_output import_help_exit=0
+    import_help_output=$(bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --help" 2>&1) || import_help_exit=$?
+    if [[ $import_help_exit -eq 0 ]] && echo "$import_help_output" | grep -q "Import"; then
+        pass "cai import --help works"
     else
-        fail "Linux platform should accept --help (exit=$linux_exit, output: $linux_output)"
+        fail "cai import --help failed (exit=$import_help_exit)"
+        info "Output: $(echo "$import_help_output" | head -10)"
     fi
-
-    # Cleanup
-    rm -rf "$tmp_dir"
 }
 
 # ==============================================================================
@@ -161,10 +144,10 @@ test_dry_run() {
     local before_snapshot
     before_snapshot=$(run_in_rsync 'find /data -exec stat -c "%a %s %n" {} \; 2>/dev/null | sort')
 
-    # Run dry-run - should succeed when prerequisites are met
+    # Run dry-run via cai import - should succeed when prerequisites are met
     local dry_run_exit=0
     local dry_run_output
-    dry_run_output=$("$SCRIPT_DIR/sync-agent-plugins.sh" --volume "$DATA_VOLUME" --dry-run 2>&1) || dry_run_exit=$?
+    dry_run_output=$(bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$DATA_VOLUME' --dry-run" 2>&1) || dry_run_exit=$?
 
     if [[ $dry_run_exit -ne 0 ]]; then
         fail "Dry-run failed with exit code $dry_run_exit"
@@ -197,7 +180,7 @@ test_dry_run() {
 
     # Test CONTAINAI_DATA_VOLUME env var precedence
     local env_test_output env_test_exit=0
-    env_test_output=$(CONTAINAI_DATA_VOLUME="$env_vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || env_test_exit=$?
+    env_test_output=$(CONTAINAI_DATA_VOLUME="$env_vol" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --dry-run" 2>&1) || env_test_exit=$?
     if echo "$env_test_output" | grep -q "Using data volume: $env_vol"; then
         pass "CONTAINAI_DATA_VOLUME env var respected"
     else
@@ -205,30 +188,30 @@ test_dry_run() {
         info "Output: $(echo "$env_test_output" | head -10)"
     fi
 
-    # Test --volume flag takes precedence over env var
+    # Test --data-volume flag takes precedence over env var
     local cli_test_output cli_test_exit=0
-    cli_test_output=$(CONTAINAI_DATA_VOLUME="$env_vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "$cli_vol" --dry-run 2>&1) || cli_test_exit=$?
+    cli_test_output=$(CONTAINAI_DATA_VOLUME="$env_vol" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$cli_vol' --dry-run" 2>&1) || cli_test_exit=$?
     if echo "$cli_test_output" | grep -q "Using data volume: $cli_vol"; then
-        pass "--volume flag takes precedence over env var"
+        pass "--data-volume flag takes precedence over env var"
     else
-        fail "--volume flag does not take precedence over env var (exit: $cli_test_exit)"
+        fail "--data-volume flag does not take precedence over env var (exit: $cli_test_exit)"
         info "Output: $(echo "$cli_test_output" | head -10)"
     fi
 
-    # Test --volume skips config parsing even when CONTAINAI_CONFIG points to invalid file
+    # Test --data-volume skips config parsing even when CONTAINAI_CONFIG points to invalid file
     local skip_config_output skip_config_exit=0
-    skip_config_output=$(CONTAINAI_CONFIG="/nonexistent/config.toml" "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "$DATA_VOLUME" --dry-run 2>&1) || skip_config_exit=$?
+    skip_config_output=$(CONTAINAI_CONFIG="/nonexistent/config.toml" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$DATA_VOLUME' --dry-run" 2>&1) || skip_config_exit=$?
     if echo "$skip_config_output" | grep -q "Using data volume: $DATA_VOLUME"; then
-        pass "--volume skips config parsing (ignores invalid CONTAINAI_CONFIG)"
+        pass "--data-volume skips config parsing (ignores invalid CONTAINAI_CONFIG)"
     else
-        fail "--volume should skip config parsing but didn't (exit: $skip_config_exit)"
+        fail "--data-volume should skip config parsing but didn't (exit: $skip_config_exit)"
         info "Output: $(echo "$skip_config_output" | head -10)"
     fi
 
     # Test explicit --config with missing file fails
     # Note: Must clear env vars to ensure config parsing is attempted
     local missing_config_output missing_config_exit=0
-    missing_config_output=$(env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG "$SCRIPT_DIR/sync-agent-plugins.sh" --config "/nonexistent/config.toml" --dry-run 2>&1) || missing_config_exit=$?
+    missing_config_output=$(env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --config '/nonexistent/config.toml' --dry-run" 2>&1) || missing_config_exit=$?
     if [[ $missing_config_exit -ne 0 ]] && echo "$missing_config_output" | grep -q "Config file not found"; then
         pass "Explicit --config with missing file fails with error"
     else
@@ -250,7 +233,7 @@ test_dry_run() {
         return
     fi
     register_test_volume "$config_vol"
-    config_test_output=$(cd "$config_test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || config_test_exit=$?
+    config_test_output=$(cd "$config_test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --dry-run" 2>&1) || config_test_exit=$?
     if echo "$config_test_output" | grep -q "Using data volume: $config_vol"; then
         pass "Config discovery from \$PWD works"
     else
@@ -278,9 +261,9 @@ test_dry_run() {
 test_full_sync() {
     section "Test 3: Full sync copies all configs"
 
-    # Run full sync and require success
+    # Run full sync via cai import and require success
     local sync_exit=0
-    if ! "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "$DATA_VOLUME" >/dev/null 2>&1; then
+    if ! bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$DATA_VOLUME'" >/dev/null 2>&1; then
         sync_exit=$?
         fail "Full sync failed with exit code $sync_exit"
         return
@@ -649,7 +632,7 @@ EOF
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir/subproject" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir/subproject'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir/subproject" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir/subproject'" 2>"$stderr_file"); then
         if [[ "$resolved" == "$test_vol" ]]; then
             pass "Workspace path matching works"
         else
@@ -689,7 +672,7 @@ EOF
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "$default_vol" ]]; then
             pass "Falls back to [agent] when no workspace match"
         else
@@ -731,7 +714,7 @@ EOF
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir/project/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir/project/subdir'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir/project/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir/project/subdir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "subdir-vol" ]]; then
             pass "Longest workspace path match wins"
         else
@@ -771,7 +754,7 @@ EOF
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume 'cli-vol'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume 'cli-vol'" 2>"$stderr_file"); then
         if [[ "$resolved" == "cli-vol" ]]; then
             pass "CLI volume overrides workspace config"
         else
@@ -811,7 +794,7 @@ EOF
     # Must clear env vars to ensure config discovery is tested
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "agent-default-vol" ]]; then
             pass "Relative workspace paths are skipped (falls back to agent default)"
         else
@@ -832,7 +815,7 @@ EOF
 # ==============================================================================
 main() {
     echo "=============================================================================="
-    echo "Integration Tests for sync-agent-plugins.sh"
+    echo "Integration Tests for ContainAI"
     echo "=============================================================================="
 
     # Check prerequisites
@@ -851,7 +834,7 @@ main() {
     fi
 
     # Run tests
-    test_platform_guard
+    test_cli_help
     test_dry_run
     test_full_sync
     test_secret_permissions

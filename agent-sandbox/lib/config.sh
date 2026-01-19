@@ -4,13 +4,8 @@
 # ==============================================================================
 # This file must be sourced, not executed directly.
 #
-# NOTE: This library is the canonical implementation of config loading.
-# It will eventually replace the inline config functions in aliases.sh and
-# sync-agent-plugins.sh. Current API differences:
-# - aliases.sh uses _containai_parse_config_for_workspace (different signature)
-# - lib/config.sh adds _containai_resolve_excludes (not in aliases.sh)
-# Do NOT source both this file and aliases.sh in the same shell until
-# aliases.sh is migrated to source this library.
+# Provides configuration resolution for ContainAI with workspace overrides
+# and exclude pattern support.
 #
 # Provides:
 #   _containai_find_config        - Find config file by walking up from workspace
@@ -39,7 +34,7 @@ if [[ -z "${BASH_VERSION:-}" ]]; then
     return 1
 fi
 
-# Default volume name (guard against re-sourcing and conflict with aliases.sh)
+# Default volume name (guard against re-sourcing)
 : "${_CONTAINAI_DEFAULT_VOLUME:=sandbox-agent-data}"
 
 # Global variables for parsed config (set by _containai_parse_config)

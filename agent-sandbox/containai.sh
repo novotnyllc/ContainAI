@@ -34,15 +34,11 @@ fi
 _CAI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ==============================================================================
-# Library loading - Option A/B selection per spec
+# Library loading
 # ==============================================================================
-# Option A: Source lib/*.sh if they all exist (preferred, post fn-4-vet.8-11)
-# Option B: Fall back to aliases.sh for backward compatibility
-#
-# This provides a smooth transition path during the migration period.
+# Source modular libraries from lib/*.sh
 
 _CONTAINAI_LIB_LOADED=""
-_CONTAINAI_USING_ALIASES=""
 
 # Check if all lib files exist
 _containai_libs_exist() {
@@ -52,54 +48,36 @@ _containai_libs_exist() {
     [[ -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]]
 }
 
-if _containai_libs_exist; then
-    # Option A: Source modular libraries
-    # Detect if aliases.sh is already sourced (prevent function/variable collisions)
-    if declare -f _asb_impl >/dev/null 2>&1 && [[ -z "${_CONTAINAI_LIB_LOADED:-}" ]]; then
-        echo "[WARN] aliases.sh is already sourced in this shell" >&2
-        echo "  containai.sh will delegate to aliases.sh functions for compatibility." >&2
-        echo "  For full containai.sh functionality, start a new shell and source containai.sh only." >&2
-        _CONTAINAI_USING_ALIASES="1"
-    else
-        # Source library files with error checking
-        # Note: config.sh must be sourced first as import.sh depends on _containai_resolve_excludes
-        if ! source "$_CAI_SCRIPT_DIR/lib/config.sh"; then
-            echo "[ERROR] Failed to source lib/config.sh" >&2
-            return 1
-        fi
-
-        if ! source "$_CAI_SCRIPT_DIR/lib/container.sh"; then
-            echo "[ERROR] Failed to source lib/container.sh" >&2
-            return 1
-        fi
-
-        if ! source "$_CAI_SCRIPT_DIR/lib/import.sh"; then
-            echo "[ERROR] Failed to source lib/import.sh" >&2
-            return 1
-        fi
-
-        if ! source "$_CAI_SCRIPT_DIR/lib/export.sh"; then
-            echo "[ERROR] Failed to source lib/export.sh" >&2
-            return 1
-        fi
-
-        # Mark libraries as loaded
-        _CONTAINAI_LIB_LOADED="1"
-    fi
-else
-    # Option B: Fall back to aliases.sh
-    if [[ -f "$_CAI_SCRIPT_DIR/aliases.sh" ]]; then
-        if ! source "$_CAI_SCRIPT_DIR/aliases.sh"; then
-            echo "[ERROR] Failed to source aliases.sh" >&2
-            return 1
-        fi
-        _CONTAINAI_USING_ALIASES="1"
-    else
-        echo "[ERROR] Neither lib/*.sh nor aliases.sh found" >&2
-        echo "  Expected at: $_CAI_SCRIPT_DIR/lib/*.sh or $_CAI_SCRIPT_DIR/aliases.sh" >&2
-        return 1
-    fi
+if ! _containai_libs_exist; then
+    echo "[ERROR] Required lib/*.sh files not found" >&2
+    echo "  Expected at: $_CAI_SCRIPT_DIR/lib/*.sh" >&2
+    return 1
 fi
+
+# Source library files with error checking
+# Note: config.sh must be sourced first as import.sh depends on _containai_resolve_excludes
+if ! source "$_CAI_SCRIPT_DIR/lib/config.sh"; then
+    echo "[ERROR] Failed to source lib/config.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/container.sh"; then
+    echo "[ERROR] Failed to source lib/container.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/import.sh"; then
+    echo "[ERROR] Failed to source lib/import.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/export.sh"; then
+    echo "[ERROR] Failed to source lib/export.sh" >&2
+    return 1
+fi
+
+# Mark libraries as loaded
+_CONTAINAI_LIB_LOADED="1"
 
 # ==============================================================================
 # Help functions
@@ -966,35 +944,6 @@ _containai_run_cmd() {
 containai() {
     local subcommand="${1:-}"
 
-    # When using aliases.sh fallback, delegate to asb* functions
-    if [[ -n "$_CONTAINAI_USING_ALIASES" ]]; then
-        case "$subcommand" in
-            shell)
-                shift
-                asb-shell "$@"
-                ;;
-            stop)
-                shift
-                asb-stop-all "$@"
-                ;;
-            import|export)
-                echo "[ERROR] '$subcommand' subcommand requires lib/*.sh (not available)" >&2
-                echo "  This installation is using aliases.sh fallback mode." >&2
-                echo "  import/export subcommands need the modular libraries." >&2
-                return 1
-                ;;
-            help|-h|--help)
-                _containai_help
-                ;;
-            *)
-                # Default: delegate to asb() which handles all container operations
-                asb "$@"
-                ;;
-        esac
-        return $?
-    fi
-
-    # Full modular mode - route to lib-based handlers
     # Handle empty or help first
     if [[ -z "$subcommand" ]]; then
         _containai_run_cmd
@@ -1038,7 +987,7 @@ containai() {
 cai() { containai "$@"; }
 
 # ==============================================================================
-# Convenience aliases (matching aliases.sh patterns)
+# Convenience aliases
 # ==============================================================================
 
 # cai-shell - open shell in sandbox (convenience wrapper)
