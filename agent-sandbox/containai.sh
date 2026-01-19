@@ -808,6 +808,9 @@ _containai_shell_cmd() {
     if [[ -n "$debug_flag" ]]; then
         start_args+=("$debug_flag")
     fi
+    if [[ -n "$explicit_config" ]]; then
+        start_args+=(--config "$explicit_config")
+    fi
     if [[ -n "$mount_docker_socket" ]]; then
         start_args+=("$mount_docker_socket")
     fi

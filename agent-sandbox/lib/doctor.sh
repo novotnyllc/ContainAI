@@ -122,20 +122,37 @@ _cai_select_context() {
     # ECI not enabled - check for Secure Engine context
     # Use config override if provided, otherwise default to containai-secure
     local context_name="${config_context_name:-containai-secure}"
+    local default_context="containai-secure"
 
     # Verify context exists AND has sysbox-runc runtime (not just context inspect)
     # This catches cases where context exists but daemon is down or sysbox not installed
     if _cai_sysbox_available_for_context "$context_name"; then
         if [[ "$debug_flag" == "debug" ]]; then
-            printf '%s\n' "[DEBUG] Context selection: ECI not available, using context '$context_name' with Sysbox" >&2
+            printf '%s\n' "[DEBUG] Context selection: ECI not enabled, using context '$context_name' with Sysbox" >&2
         fi
         printf '%s' "$context_name"
         return 0
     fi
 
+    # Config-specified context failed - try default containai-secure as fallback
+    # (unless config already specified containai-secure, which we just tried)
+    if [[ -n "$config_context_name" ]] && [[ "$config_context_name" != "$default_context" ]]; then
+        if [[ "$debug_flag" == "debug" ]]; then
+            printf '%s\n' "[DEBUG] Context selection: Config context '$config_context_name' not available, trying default '$default_context'" >&2
+        fi
+        if _cai_sysbox_available_for_context "$default_context"; then
+            if [[ "$debug_flag" == "debug" ]]; then
+                printf '%s\n' "[DEBUG] Context selection: Using fallback context '$default_context' with Sysbox" >&2
+            fi
+            echo "[WARN] Config context '$config_context_name' not available, using default '$default_context'" >&2
+            printf '%s' "$default_context"
+            return 0
+        fi
+    fi
+
     # No isolation available
     if [[ "$debug_flag" == "debug" ]]; then
-        printf '%s\n' "[DEBUG] Context selection: No isolation available (ECI=$eci_status, context '$context_name' not ready)" >&2
+        printf '%s\n' "[DEBUG] Context selection: No isolation available (ECI status=$eci_status, context '$context_name' not ready)" >&2
     fi
     return 1
 }
@@ -247,8 +264,8 @@ _cai_doctor_status() {
 }
 
 # Run doctor command with text output
-# Returns: 0 if Docker Sandbox available (minimum requirement met)
-#          1 if Docker Sandbox NOT available (cannot proceed)
+# Returns: 0 if any isolation available (Sandbox OR Sysbox)
+#          1 if no isolation available (cannot proceed)
 _cai_doctor() {
     local sandbox_ok="false"
     local sysbox_ok="false"
@@ -437,22 +454,41 @@ _cai_doctor() {
     # === Summary Section ===
     printf '%s\n' "Summary"
 
+    # Either Sandbox OR Sysbox is sufficient for cai run to work
+    local isolation_available="false"
+    if [[ "$sandbox_ok" == "true" ]] || [[ "$sysbox_ok" == "true" ]]; then
+        isolation_available="true"
+    fi
+
     if [[ "$sandbox_ok" == "true" ]]; then
-        printf '  %-44s %s\n' "Docker Sandbox:" "[OK] Available (required)"
+        printf '  %-44s %s\n' "Docker Sandbox:" "[OK] Available"
     else
-        printf '  %-44s %s\n' "Docker Sandbox:" "[ERROR] Not available (required)"
+        if [[ "$sysbox_ok" == "true" ]]; then
+            printf '  %-44s %s\n' "Docker Sandbox:" "[WARN] Not available (Sysbox provides isolation)"
+        else
+            printf '  %-44s %s\n' "Docker Sandbox:" "[ERROR] Not available"
+        fi
     fi
 
     if [[ "$sysbox_ok" == "true" ]]; then
-        printf '  %-44s %s\n' "Sysbox:" "[OK] Available (strongly recommended)"
-        printf '  %-44s %s\n' "Recommended:" "Use 'cai run' with full isolation"
+        printf '  %-44s %s\n' "Sysbox:" "[OK] Available"
     else
-        printf '  %-44s %s\n' "Sysbox:" "[WARN] Not available (strongly recommended)"
-        printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' for best security"
+        if [[ "$sandbox_ok" == "true" ]]; then
+            printf '  %-44s %s\n' "Sysbox:" "[INFO] Not configured (Sandbox provides isolation)"
+        else
+            printf '  %-44s %s\n' "Sysbox:" "[WARN] Not available"
+        fi
     fi
 
-    # Exit code: 0 if sandbox available, 1 if not
-    if [[ "$sandbox_ok" == "true" ]]; then
+    if [[ "$isolation_available" == "true" ]]; then
+        printf '  %-44s %s\n' "Status:" "[OK] Ready to use 'cai run'"
+    else
+        printf '  %-44s %s\n' "Status:" "[ERROR] No isolation available"
+        printf '  %-44s %s\n' "Recommended:" "Install Docker Desktop 4.50+ or run 'cai setup'"
+    fi
+
+    # Exit code: 0 if any isolation available, 1 if not
+    if [[ "$isolation_available" == "true" ]]; then
         return 0
     else
         return 1
@@ -478,8 +514,8 @@ _cai_json_escape() {
 }
 
 # Run doctor command with JSON output
-# Returns: 0 if Docker Sandbox available (minimum requirement met)
-#          1 if Docker Sandbox NOT available (cannot proceed)
+# Returns: 0 if any isolation available (Sandbox OR Sysbox)
+#          1 if no isolation available (cannot proceed)
 _cai_doctor_json() {
     local sandbox_ok="false"
     local sandboxes_available="false"
@@ -557,11 +593,17 @@ _cai_doctor_json() {
         eci_status=$(_cai_eci_status)
     fi
 
+    # Either Sandbox OR Sysbox is sufficient for cai run to work
+    local isolation_available="false"
+    if [[ "$sandbox_ok" == "true" ]] || [[ "$sysbox_ok" == "true" ]]; then
+        isolation_available="true"
+    fi
+
     # Determine recommended action
     if [[ "$sandbox_ok" == "true" ]] && [[ "$sysbox_ok" == "true" ]]; then
         recommended_action="ready"
-    elif [[ "$sandbox_ok" == "true" ]]; then
-        recommended_action="setup_sysbox"
+    elif [[ "$sandbox_ok" == "true" ]] || [[ "$sysbox_ok" == "true" ]]; then
+        recommended_action="ready"  # Either one is sufficient
     else
         recommended_action="setup_required"
     fi
@@ -571,8 +613,7 @@ _cai_doctor_json() {
     printf '  "docker_desktop": {\n'
     printf '    "version": "%s",\n' "$(_cai_json_escape "$dd_version")"
     printf '    "sandboxes_available": %s,\n' "$sandboxes_available"
-    printf '    "sandboxes_enabled": %s,\n' "$sandbox_enabled"
-    printf '    "requirement_level": "hard"\n'
+    printf '    "sandboxes_enabled": %s\n' "$sandbox_enabled"
     printf '  },\n'
     printf '  "sysbox": {\n'
     printf '    "available": %s,\n' "$sysbox_ok"
@@ -582,8 +623,7 @@ _cai_doctor_json() {
         printf '    "runtime": null,\n'
     fi
     printf '    "context_exists": %s,\n' "$sysbox_context_exists"
-    printf '    "context_name": "containai-secure",\n'
-    printf '    "requirement_level": "strong_suggestion"\n'
+    printf '    "context_name": "containai-secure"\n'
     printf '  },\n'
     printf '  "platform": {\n'
     printf '    "type": "%s",\n' "$platform_json"
@@ -603,12 +643,13 @@ _cai_doctor_json() {
     printf '  "summary": {\n'
     printf '    "sandbox_ok": %s,\n' "$sandbox_ok"
     printf '    "sysbox_ok": %s,\n' "$sysbox_ok"
+    printf '    "isolation_available": %s,\n' "$isolation_available"
     printf '    "recommended_action": "%s"\n' "$recommended_action"
     printf '  }\n'
     printf '}\n'
 
-    # Exit code: 0 if sandbox available, 1 if not
-    if [[ "$sandbox_ok" == "true" ]]; then
+    # Exit code: 0 if any isolation available, 1 if not
+    if [[ "$isolation_available" == "true" ]]; then
         return 0
     else
         return 1

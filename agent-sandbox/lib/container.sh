@@ -30,6 +30,7 @@
 #   - lib/core.sh (logging functions)
 #   - lib/docker.sh (Docker availability checks)
 #   - lib/eci.sh (ECI detection functions)
+#   - lib/doctor.sh (context selection: _cai_select_context, _cai_sysbox_available_for_context)
 #
 # Usage: source lib/container.sh
 # ==============================================================================
@@ -403,11 +404,12 @@ _containai_preflight_checks() {
 # ==============================================================================
 
 # Ensure a volume exists, creating it if necessary
-# Arguments: $1 = volume name, $2 = quiet flag (optional, default false)
+# Arguments: $1 = volume name, $2 = quiet flag (optional, default false), $3 = context (optional)
 # Returns: 0 on success, 1 on failure
 _containai_ensure_volumes() {
     local volume_name="$1"
     local quiet="${2:-false}"
+    local context="${3:-}"
 
     if [[ -z "$volume_name" ]]; then
         echo "[ERROR] Volume name is required" >&2
@@ -421,11 +423,17 @@ _containai_ensure_volumes() {
         return 1
     fi
 
-    if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
+    # Build context-aware docker command
+    local -a docker_cmd=(docker)
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    if ! "${docker_cmd[@]}" volume inspect "$volume_name" >/dev/null 2>&1; then
         if [[ "$quiet" != "true" ]]; then
             echo "Creating volume: $volume_name"
         fi
-        if ! docker volume create "$volume_name" >/dev/null; then
+        if ! "${docker_cmd[@]}" volume create "$volume_name" >/dev/null; then
             echo "[ERROR] Failed to create volume $volume_name" >&2
             return 1
         fi
@@ -989,7 +997,23 @@ _containai_start_container() {
     # === CONTEXT SELECTION (must happen before container state checks) ===
     # Resolve secure engine context from config (for context override)
     local config_context_override=""
-    config_context_override=$(_containai_resolve_secure_engine_context "$workspace_resolved" "${explicit_config:-}" 2>/dev/null) || config_context_override=""
+    local context_resolve_output
+    if [[ -n "$explicit_config" ]]; then
+        # Explicit config: don't suppress errors (strict mode)
+        if ! context_resolve_output=$(_containai_resolve_secure_engine_context "$workspace_resolved" "$explicit_config" 2>&1); then
+            # Parse failure with explicit config is a warning, not fatal
+            echo "[WARN] Could not parse secure_engine.context_name from config: $explicit_config" >&2
+            if [[ -n "$context_resolve_output" ]]; then
+                echo "  $context_resolve_output" >&2
+            fi
+            config_context_override=""
+        else
+            config_context_override="$context_resolve_output"
+        fi
+    else
+        # Discovered config: suppress errors gracefully
+        config_context_override=$(_containai_resolve_secure_engine_context "$workspace_resolved" "" 2>/dev/null) || config_context_override=""
+    fi
 
     # Auto-select Docker context based on isolation availability
     local selected_context debug_mode=""
@@ -1230,7 +1254,7 @@ _containai_start_container() {
             ;;
         none)
             # Skip preflight checks - context selection already validated isolation
-            if ! _containai_ensure_volumes "$data_volume" "$quiet_flag"; then
+            if ! _containai_ensure_volumes "$data_volume" "$quiet_flag" "$selected_context"; then
                 return 1
             fi
 
@@ -1404,8 +1428,35 @@ _containai_start_container() {
 # Stop all containers
 # ==============================================================================
 
+# Helper to list containers from a specific context
+# Arguments: $1 = context name (empty for default)
+# Outputs: containers in format "name\tstatus\tcontext" (one per line)
+_containai_list_containers_for_context() {
+    local context="${1:-}"
+    local -a docker_cmd=(docker)
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    local labeled ancestor_claude ancestor_gemini line
+    # Use || true for set -e safety - empty result is valid
+    labeled=$("${docker_cmd[@]}" ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || labeled=""
+    ancestor_claude=$("${docker_cmd[@]}" ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:claude-code" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_claude=""
+    ancestor_gemini=$("${docker_cmd[@]}" ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:gemini-cli" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_gemini=""
+
+    # Combine and dedupe, adding context as third column
+    local combined
+    combined=$(printf '%s\n%s\n%s' "$labeled" "$ancestor_claude" "$ancestor_gemini" | sed -e '/^$/d' | sort -t$'\t' -k1,1 -u)
+    while IFS=$'\t' read -r name status; do
+        if [[ -n "$name" ]]; then
+            printf '%s\t%s\t%s\n' "$name" "$status" "$context"
+        fi
+    done <<< "$combined"
+}
+
 # Interactive container stop selection
 # Finds all ContainAI containers (by label or ancestor image) and prompts user
+# Checks both default context and secure engine context (containai-secure)
 # Arguments: --all to stop all without prompting (non-interactive mode)
 # Returns: 0 on success, 1 on error (non-interactive without --all, or docker unavailable)
 _containai_stop_all() {
@@ -1425,18 +1476,21 @@ _containai_stop_all() {
         return 1
     fi
 
-    local containers labeled_containers ancestor_containers_claude ancestor_containers_gemini
+    # Collect containers from default context
+    local default_containers secure_containers all_containers
+    default_containers=$(_containai_list_containers_for_context "")
 
-    # Use || true for set -e safety - empty result is valid
-    labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || labeled_containers=""
-    # Check all known agent images from our repo
-    ancestor_containers_claude=$(docker ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:claude-code" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_containers_claude=""
-    ancestor_containers_gemini=$(docker ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:gemini-cli" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_containers_gemini=""
+    # Also check secure engine context if it exists
+    if docker context inspect containai-secure >/dev/null 2>&1; then
+        secure_containers=$(_containai_list_containers_for_context "containai-secure")
+    else
+        secure_containers=""
+    fi
 
-    # Use sed instead of grep -v for set -e safety (grep returns 1 on no match)
-    containers=$(printf '%s\n%s\n%s' "$labeled_containers" "$ancestor_containers_claude" "$ancestor_containers_gemini" | sed -e '/^$/d' | sort -t$'\t' -k1,1 -u)
+    # Merge results (containers may exist in both contexts with same name - keep both)
+    all_containers=$(printf '%s\n%s' "$default_containers" "$secure_containers" | sed -e '/^$/d')
 
-    if [[ -z "$containers" ]]; then
+    if [[ -z "$all_containers" ]]; then
         echo "No ContainAI containers found."
         return 0
     fi
@@ -1446,20 +1500,33 @@ _containai_stop_all() {
 
     local i=0
     local names=()
-    local name status
-    while IFS=$'\t' read -r name status; do
+    local contexts=()
+    local name status ctx display_ctx
+    while IFS=$'\t' read -r name status ctx; do
         i=$((i + 1))
         names+=("$name")
-        printf "  %d) %s (%s)\n" "$i" "$name" "$status"
-    done <<< "$containers"
+        contexts+=("$ctx")
+        if [[ -n "$ctx" ]]; then
+            display_ctx=" [context: $ctx]"
+        else
+            display_ctx=""
+        fi
+        printf "  %d) %s (%s)%s\n" "$i" "$name" "$status" "$display_ctx"
+    done <<< "$all_containers"
 
     if [[ "$stop_all_flag" == "true" ]]; then
         echo ""
         echo "Stopping all containers (--all flag)..."
-        local container_to_stop
-        for container_to_stop in "${names[@]}"; do
-            echo "Stopping: $container_to_stop"
-            docker stop "$container_to_stop" >/dev/null 2>&1 || true
+        local idx container_to_stop ctx_to_use
+        for idx in "${!names[@]}"; do
+            container_to_stop="${names[$idx]}"
+            ctx_to_use="${contexts[$idx]}"
+            echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+            if [[ -n "$ctx_to_use" ]]; then
+                docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1 || true
+            else
+                docker stop "$container_to_stop" >/dev/null 2>&1 || true
+            fi
         done
         echo "Done."
         return 0
@@ -1487,31 +1554,40 @@ _containai_stop_all() {
         return 0
     fi
 
-    local to_stop=()
+    local -a to_stop_idx=()
 
     if [[ "$selection" == "all" || "$selection" == "ALL" ]]; then
-        to_stop=("${names[@]}")
+        local idx
+        for idx in "${!names[@]}"; do
+            to_stop_idx+=("$idx")
+        done
     else
         local num
         for num in $selection; do
             if [[ "$num" =~ ^[0-9]+$ ]] && [[ "$num" -ge 1 ]] && [[ "$num" -le "${#names[@]}" ]]; then
-                to_stop+=("${names[$((num - 1))]}")
+                to_stop_idx+=("$((num - 1))")
             else
                 echo "[WARN] Invalid selection: $num" >&2
             fi
         done
     fi
 
-    if [[ ${#to_stop[@]} -eq 0 ]]; then
+    if [[ ${#to_stop_idx[@]} -eq 0 ]]; then
         echo "No containers selected."
         return 0
     fi
 
     echo ""
-    local container_to_stop
-    for container_to_stop in "${to_stop[@]}"; do
-        echo "Stopping: $container_to_stop"
-        docker stop "$container_to_stop" >/dev/null 2>&1 || true
+    local idx container_to_stop ctx_to_use
+    for idx in "${to_stop_idx[@]}"; do
+        container_to_stop="${names[$idx]}"
+        ctx_to_use="${contexts[$idx]}"
+        echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+        if [[ -n "$ctx_to_use" ]]; then
+            docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1 || true
+        else
+            docker stop "$container_to_stop" >/dev/null 2>&1 || true
+        fi
     done
 
     echo "Done."

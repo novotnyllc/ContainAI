@@ -12,11 +12,17 @@
 #   _containai_parse_config       - Parse config file via parse-toml.py
 #   _containai_resolve_volume     - Resolve data volume with precedence
 #   _containai_resolve_excludes   - Resolve cumulative excludes from config
+#   _containai_resolve_agent      - Resolve agent from config
+#   _containai_resolve_credentials - Resolve credentials mode from config
+#   _containai_resolve_secure_engine_context - Resolve secure engine context from config
 #   _containai_validate_volume_name - Validate Docker volume name
 #
 # Global variables set by _containai_parse_config:
-#   _CAI_VOLUME  - Resolved data volume name
+#   _CAI_VOLUME   - Resolved data volume name
 #   _CAI_EXCLUDES - Bash array of exclude patterns
+#   _CAI_AGENT    - Default agent name
+#   _CAI_CREDENTIALS - Credentials mode
+#   _CAI_SECURE_ENGINE_CONTEXT - Secure engine context name override
 #
 # Usage: source lib/config.sh
 # ==============================================================================
