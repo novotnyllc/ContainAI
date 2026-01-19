@@ -962,14 +962,26 @@ _containai_start_container() {
     # Legacy flags: --credentials=host + --acknowledge-credential-risk (kept for compatibility)
     # Config [danger].allow_host_credentials acts as PERMISSION (gate) not auto-enable
 
-    # Validate --allow-host-credentials requires acknowledgement
-    # Config [danger] section only PERMITS the flag - doesn't auto-enable it
+    # Validate --allow-host-credentials requires acknowledgement AND config permission
+    # Config [danger] section acts as a PERMISSION GATE - must be true to allow the flag
     if [[ "$allow_host_credentials" == "true" ]]; then
-        # Check if config permits this (only consulted when CLI flag is used)
+        # Check if config permits this (required for CLI flag to work)
         local config_allow_creds
         config_allow_creds=$(_containai_resolve_danger_allow_host_credentials "${workspace:-$PWD}" "$explicit_config")
-        # Config can deny even if CLI flag is passed (but we don't implement deny-only yet)
-        # For now, config is purely informational for audit trail
+
+        # Config must permit this flag
+        if [[ "$config_allow_creds" != "true" ]]; then
+            echo "" >&2
+            echo "[ERROR] --allow-host-credentials requires config permission" >&2
+            echo "" >&2
+            echo "Add to your .containai/config.toml:" >&2
+            echo "  [danger]" >&2
+            echo "  allow_host_credentials = true" >&2
+            echo "" >&2
+            echo "This ensures unsafe opt-ins are explicitly permitted in project config." >&2
+            echo "" >&2
+            return 1
+        fi
 
         if [[ "$ack_host_credentials" != "true" ]]; then
             echo "" >&2
@@ -1031,14 +1043,26 @@ _containai_start_container() {
     # Legacy flags: --mount-docker-socket + --please-root-my-host (kept for compatibility)
     # Config [danger].allow_host_docker_socket acts as PERMISSION (gate) not auto-enable
 
-    # Validate --allow-host-docker-socket requires acknowledgement
-    # Config [danger] section only PERMITS the flag - doesn't auto-enable it
+    # Validate --allow-host-docker-socket requires acknowledgement AND config permission
+    # Config [danger] section acts as a PERMISSION GATE - must be true to allow the flag
     if [[ "$allow_host_docker_socket" == "true" ]]; then
-        # Check if config permits this (only consulted when CLI flag is used)
+        # Check if config permits this (required for CLI flag to work)
         local config_allow_socket
         config_allow_socket=$(_containai_resolve_danger_allow_host_docker_socket "${workspace:-$PWD}" "$explicit_config")
-        # Config can deny even if CLI flag is passed (but we don't implement deny-only yet)
-        # For now, config is purely informational for audit trail
+
+        # Config must permit this flag
+        if [[ "$config_allow_socket" != "true" ]]; then
+            echo "" >&2
+            echo "[ERROR] --allow-host-docker-socket requires config permission" >&2
+            echo "" >&2
+            echo "Add to your .containai/config.toml:" >&2
+            echo "  [danger]" >&2
+            echo "  allow_host_docker_socket = true" >&2
+            echo "" >&2
+            echo "This ensures unsafe opt-ins are explicitly permitted in project config." >&2
+            echo "" >&2
+            return 1
+        fi
 
         if [[ "$ack_host_docker_socket" != "true" ]]; then
             echo "" >&2
@@ -1192,6 +1216,29 @@ _containai_start_container() {
         container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_state=""
     else
         container_state="none"
+    fi
+
+    # FR-5: Unsafe opts require --restart when container already exists
+    # Without restart, we'd attach to existing container which may not have these opts
+    if [[ "$container_state" != "none" && "$restart_flag" != "true" ]]; then
+        if [[ "$credentials" == "host" ]]; then
+            echo "" >&2
+            echo "[ERROR] --allow-host-credentials / --credentials=host requires --restart when container exists" >&2
+            echo "" >&2
+            echo "Container '$container_name' already exists and may not have host credentials enabled." >&2
+            echo "Add --restart to recreate the container with the new configuration." >&2
+            echo "" >&2
+            return 1
+        fi
+        if [[ "$mount_docker_socket" == "true" ]]; then
+            echo "" >&2
+            echo "[ERROR] --allow-host-docker-socket / --mount-docker-socket requires --restart when container exists" >&2
+            echo "" >&2
+            echo "Container '$container_name' already exists and may not have Docker socket mounted." >&2
+            echo "Add --restart to recreate the container with the new configuration." >&2
+            echo "" >&2
+            return 1
+        fi
     fi
 
     # Handle --restart flag

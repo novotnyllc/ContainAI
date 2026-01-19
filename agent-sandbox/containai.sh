@@ -160,9 +160,9 @@ Security Options (FR-5 Unsafe Opt-ins):
       RISKS: Full root access, sandbox escape, host compromise
       Requires: --i-understand-this-grants-root-access
 
-  Legacy (deprecated):
-  --credentials host              Use --allow-host-credentials instead
-  --mount-docker-socket           Use --allow-host-docker-socket instead
+  Legacy (deprecated, still functional):
+  --credentials host + --acknowledge-credential-risk
+  --mount-docker-socket + --please-root-my-host
 
 Global Options:
   -h, --help            Show help (use with subcommand for subcommand help)
@@ -177,7 +177,8 @@ Examples:
 
 Safe Defaults (FR-4):
   - Credentials mode defaults to 'none' (never 'host' by default)
-  - Config credentials.mode=host is NEVER honored (CLI --credentials=host required)
+  - Config credentials.mode=host is NEVER honored
+  - Host credentials require: --allow-host-credentials (or legacy --credentials=host)
   - No Docker socket mounted by default
   - No arbitrary volume mounts (only workspace + data volume for persistence)
 
