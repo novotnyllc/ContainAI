@@ -26,19 +26,69 @@ fi
 # Detect direct execution (must be sourced, not executed)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "[ERROR] containai.sh must be sourced, not executed directly" >&2
-    echo "Usage: source containai.sh" >&2
+    echo "Usage: source agent-sandbox/containai.sh" >&2
     exit 1
 fi
 
 # Determine script directory
 _CAI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source library files
+# Detect if aliases.sh is already sourced (prevent function/variable collisions)
+# aliases.sh defines _asb_impl and _ASB_IMAGE; lib/container.sh defines _containai_start_container
+if declare -f _asb_impl >/dev/null 2>&1 && [[ -z "${_CONTAINAI_LIB_LOADED:-}" ]]; then
+    echo "[ERROR] aliases.sh is already sourced in this shell" >&2
+    echo "" >&2
+    echo "containai.sh and aliases.sh provide overlapping functionality and" >&2
+    echo "cannot be sourced together. Please use one or the other:" >&2
+    echo "  - containai.sh: New modular CLI (recommended)" >&2
+    echo "  - aliases.sh:   Legacy CLI (deprecated)" >&2
+    echo "" >&2
+    echo "Start a new shell or run: exec bash" >&2
+    return 1
+fi
+
+# Source library files with error checking
 # Note: config.sh must be sourced first as import.sh depends on _containai_resolve_excludes
-source "$_CAI_SCRIPT_DIR/lib/config.sh"
-source "$_CAI_SCRIPT_DIR/lib/container.sh"
-source "$_CAI_SCRIPT_DIR/lib/import.sh"
-source "$_CAI_SCRIPT_DIR/lib/export.sh"
+_CONTAINAI_LIB_LOADED=""
+
+if [[ ! -f "$_CAI_SCRIPT_DIR/lib/config.sh" ]]; then
+    echo "[ERROR] Required library not found: $_CAI_SCRIPT_DIR/lib/config.sh" >&2
+    return 1
+fi
+if ! source "$_CAI_SCRIPT_DIR/lib/config.sh"; then
+    echo "[ERROR] Failed to source lib/config.sh" >&2
+    return 1
+fi
+
+if [[ ! -f "$_CAI_SCRIPT_DIR/lib/container.sh" ]]; then
+    echo "[ERROR] Required library not found: $_CAI_SCRIPT_DIR/lib/container.sh" >&2
+    return 1
+fi
+if ! source "$_CAI_SCRIPT_DIR/lib/container.sh"; then
+    echo "[ERROR] Failed to source lib/container.sh" >&2
+    return 1
+fi
+
+if [[ ! -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]]; then
+    echo "[ERROR] Required library not found: $_CAI_SCRIPT_DIR/lib/import.sh" >&2
+    return 1
+fi
+if ! source "$_CAI_SCRIPT_DIR/lib/import.sh"; then
+    echo "[ERROR] Failed to source lib/import.sh" >&2
+    return 1
+fi
+
+if [[ ! -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]]; then
+    echo "[ERROR] Required library not found: $_CAI_SCRIPT_DIR/lib/export.sh" >&2
+    return 1
+fi
+if ! source "$_CAI_SCRIPT_DIR/lib/export.sh"; then
+    echo "[ERROR] Failed to source lib/export.sh" >&2
+    return 1
+fi
+
+# Mark libraries as loaded (used for collision detection)
+_CONTAINAI_LIB_LOADED="1"
 
 # ==============================================================================
 # Help functions
@@ -210,6 +260,10 @@ _containai_import_cmd() {
                 ;;
             --data-volume=*)
                 cli_volume="${1#--data-volume=}"
+                if [[ -z "$cli_volume" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --config)
@@ -223,6 +277,10 @@ _containai_import_cmd() {
                 ;;
             --config=*)
                 explicit_config="${1#--config=}"
+                if [[ -z "$explicit_config" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
                 explicit_config="${explicit_config/#\~/$HOME}"
                 shift
                 ;;
@@ -237,6 +295,10 @@ _containai_import_cmd() {
                 ;;
             --workspace=*)
                 workspace="${1#--workspace=}"
+                if [[ -z "$workspace" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
@@ -297,6 +359,10 @@ _containai_export_cmd() {
                 ;;
             --output=*)
                 output_path="${1#--output=}"
+                if [[ -z "$output_path" ]]; then
+                    echo "[ERROR] --output requires a value" >&2
+                    return 1
+                fi
                 output_path="${output_path/#\~/$HOME}"
                 shift
                 ;;
@@ -319,6 +385,10 @@ _containai_export_cmd() {
                 ;;
             --data-volume=*)
                 cli_volume="${1#--data-volume=}"
+                if [[ -z "$cli_volume" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --config)
@@ -332,6 +402,10 @@ _containai_export_cmd() {
                 ;;
             --config=*)
                 explicit_config="${1#--config=}"
+                if [[ -z "$explicit_config" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
                 explicit_config="${explicit_config/#\~/$HOME}"
                 shift
                 ;;
@@ -346,6 +420,10 @@ _containai_export_cmd() {
                 ;;
             --workspace=*)
                 workspace="${1#--workspace=}"
+                if [[ -z "$workspace" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
@@ -447,6 +525,10 @@ _containai_shell_cmd() {
                 ;;
             --data-volume=*)
                 cli_volume="${1#--data-volume=}"
+                if [[ -z "$cli_volume" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --config)
@@ -460,6 +542,10 @@ _containai_shell_cmd() {
                 ;;
             --config=*)
                 explicit_config="${1#--config=}"
+                if [[ -z "$explicit_config" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
                 explicit_config="${explicit_config/#\~/$HOME}"
                 shift
                 ;;
@@ -474,6 +560,10 @@ _containai_shell_cmd() {
                 ;;
             --workspace=*)
                 workspace="${1#--workspace=}"
+                if [[ -z "$workspace" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
@@ -492,6 +582,10 @@ _containai_shell_cmd() {
                 ;;
             --name=*)
                 container_name="${1#--name=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --name requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --restart)
@@ -654,6 +748,10 @@ _containai_run_cmd() {
                 ;;
             --data-volume=*)
                 cli_volume="${1#--data-volume=}"
+                if [[ -z "$cli_volume" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --config)
@@ -667,6 +765,10 @@ _containai_run_cmd() {
                 ;;
             --config=*)
                 explicit_config="${1#--config=}"
+                if [[ -z "$explicit_config" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
                 explicit_config="${explicit_config/#\~/$HOME}"
                 shift
                 ;;
@@ -681,6 +783,10 @@ _containai_run_cmd() {
                 ;;
             --workspace=*)
                 workspace="${1#--workspace=}"
+                if [[ -z "$workspace" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
@@ -699,6 +805,10 @@ _containai_run_cmd() {
                 ;;
             --name=*)
                 container_name="${1#--name=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --name requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --restart)
@@ -877,12 +987,9 @@ containai() {
             _containai_run_cmd "$@"
             ;;
         *)
-            # Unknown subcommand - could be a typo or intentional
-            echo "[ERROR] Unknown subcommand: $subcommand" >&2
-            echo "" >&2
-            echo "Available subcommands: shell, import, export, stop, help" >&2
-            echo "Use 'cai --help' for usage" >&2
-            return 1
+            # Unknown token - delegate to default run which will handle unknown flags
+            # This preserves backward compatibility and allows passing through args
+            _containai_run_cmd "$@"
             ;;
     esac
 }
