@@ -102,7 +102,7 @@ _containai_parse_config_for_workspace() {
     local config_file="$1"
     local workspace="$2"
     local config_dir="$3"
-    local script_dir result parse_stderr parse_rc
+    local script_dir result parse_stderr
 
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
@@ -113,12 +113,9 @@ _containai_parse_config_for_workspace() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     # Call parse-toml.py in workspace matching mode
-    # Capture both stdout and stderr, check exit code
+    # Use if ! pattern to handle set -e safely
     parse_stderr=$(mktemp)
-    result=$(python3 "$script_dir/parse-toml.py" "$config_file" --workspace "$workspace" --config-dir "$config_dir" 2>"$parse_stderr")
-    parse_rc=$?
-
-    if [[ $parse_rc -ne 0 ]]; then
+    if ! result=$(python3 "$script_dir/parse-toml.py" "$config_file" --workspace "$workspace" --config-dir "$config_dir" 2>"$parse_stderr"); then
         echo "[WARN] Failed to parse config file: $config_file" >&2
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
@@ -318,11 +315,9 @@ _asb_check_sandbox() {
 
     # Check if sandbox command is available by trying to run it
     # Capture both stdout and stderr for proper error analysis
-    local ls_output ls_rc
-    ls_output="$(docker sandbox ls 2>&1)"
-    ls_rc=$?
-
-    if [[ $ls_rc -eq 0 ]]; then
+    # Use if ! pattern to handle set -e safely
+    local ls_output
+    if ls_output="$(docker sandbox ls 2>&1)"; then
         return 0
     fi
 
@@ -572,17 +567,19 @@ _asb_check_volume_match() {
 
     # Check for mismatch
     if [[ "$mounted_volume" != "$desired_volume" ]]; then
-        echo "[WARN] Volume mismatch for container '$container_name'" >&2
-        echo "" >&2
-        echo "  Container uses volume: $mounted_volume" >&2
-        echo "  Workspace expects:     $desired_volume" >&2
-        echo "" >&2
-        echo "The container was created with a different workspace/config." >&2
-        echo "To use the correct volume, recreate the container:" >&2
-        echo "  asb --restart" >&2
-        echo "Or specify a different container name:" >&2
-        echo "  asb --name <unique-name>" >&2
-        echo "" >&2
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "[WARN] Volume mismatch for container '$container_name'" >&2
+            echo "" >&2
+            echo "  Container uses volume: $mounted_volume" >&2
+            echo "  Workspace expects:     $desired_volume" >&2
+            echo "" >&2
+            echo "The container was created with a different workspace/config." >&2
+            echo "To use the correct volume, recreate the container:" >&2
+            echo "  asb --restart" >&2
+            echo "Or specify a different container name:" >&2
+            echo "  asb --name <unique-name>" >&2
+            echo "" >&2
+        fi
         return 1
     fi
 
@@ -704,10 +701,14 @@ asb() {
                 ;;
             --workspace=*)
                 workspace="${1#--workspace=}"
+                # Expand leading tilde
+                workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
             -w*)
                 workspace="${1#-w}"
+                # Expand leading tilde
+                workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
             --config)
@@ -724,6 +725,8 @@ asb() {
                     echo "[ERROR] --config requires a value" >&2
                     return 1
                 fi
+                # Expand leading tilde
+                config_file="${config_file/#\~/$HOME}"
                 shift
                 ;;
             --data-volume)
@@ -930,9 +933,16 @@ asb() {
         fi
     fi
 
-    # Resolve data volume early (needed for both new containers and mismatch detection)
+    # Normalize workspace to absolute path (needed for volume resolution and docker sandbox run)
     local resolved_volume workspace_for_resolve
     workspace_for_resolve="${workspace:-$PWD}"
+    # Resolve to absolute path, fall back to PWD if directory doesn't exist
+    if ! workspace_for_resolve=$(cd "$workspace_for_resolve" 2>/dev/null && pwd); then
+        echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
+        return 1
+    fi
+
+    # Resolve data volume (needed for both new containers and mismatch detection)
     if ! resolved_volume=$(_containai_resolve_volume "$data_volume" "$workspace_for_resolve" "$config_file"); then
         echo "[ERROR] Failed to resolve data volume" >&2
         return 1
@@ -1079,10 +1089,10 @@ asb() {
             fi
 
             if [[ "$shell_flag" == "true" ]]; then
-                # Shell mode: run detached, capture container ID, then exec bash
-                local container_id
-                container_id=$(docker sandbox run "${args[@]}")
-                docker exec -it --user agent -w /home/agent/workspace "$container_id" bash
+                # Shell mode: run detached, then exec bash using container name
+                # (avoid capturing container_id since --quiet may suppress output)
+                docker sandbox run "${args[@]}" >/dev/null
+                docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             else
                 docker sandbox run "${args[@]}"
             fi
