@@ -131,45 +131,57 @@ _containai_find_config() {
 }
 
 # ==============================================================================
-# JSON parsing helpers
+# Workspace matching
 # ==============================================================================
 
-# Parse JSON using Python
-# Arguments: $1 = JSON string, $2 = field to extract ("volume" or "excludes")
-# Outputs: extracted value(s)
-_containai_parse_json_python() {
-    local json="$1"
-    local field="$2"
+# Find the best matching workspace section from config JSON
+# Arguments: $1 = full config JSON, $2 = workspace path (absolute)
+# Outputs: workspace key that matches (empty if none)
+# Matches workspace paths using longest path prefix (segment boundary)
+_containai_find_matching_workspace() {
+    local config_json="$1"
+    local workspace="$2"
 
     python3 -c "
-import json, sys
-data = json.loads(sys.argv[1])
-if sys.argv[2] == 'volume':
-    print(data.get('data_volume', ''))
-elif sys.argv[2] == 'excludes':
-    for exc in data.get('excludes', []):
-        print(exc)
-" "$json" "$field"
-}
+import json
+import sys
+from pathlib import Path
 
-# Parse JSON to extract data_volume using Python
-# Arguments: $1 = JSON string
-# Outputs: data_volume value
-_containai_extract_volume() {
-    local json="$1"
+config = json.loads(sys.argv[1])
+workspace = Path(sys.argv[2]).resolve()
 
-    # Use Python for reliable JSON parsing (already required for parse-toml.py)
-    _containai_parse_json_python "$json" "volume"
-}
+workspaces = config.get('workspace', {})
+if not isinstance(workspaces, dict):
+    sys.exit(0)
 
-# Parse JSON to extract excludes array using Python
-# Arguments: $1 = JSON string
-# Outputs: excludes (newline-separated)
-_containai_extract_excludes() {
-    local json="$1"
+best_match = None
+best_segments = 0
 
-    # Use Python for reliable JSON array parsing (already required for parse-toml.py)
-    _containai_parse_json_python "$json" "excludes"
+for path_str, section in workspaces.items():
+    if not isinstance(section, dict):
+        continue
+
+    cfg_path = Path(path_str)
+
+    # Skip relative paths (absolute only)
+    if not cfg_path.is_absolute():
+        continue
+
+    cfg_path = cfg_path.resolve()
+
+    # Check if workspace is under cfg_path
+    try:
+        workspace.relative_to(cfg_path)
+        num_segments = len(cfg_path.parts)
+        if num_segments > best_segments:
+            best_match = path_str
+            best_segments = num_segments
+    except ValueError:
+        pass
+
+if best_match:
+    print(best_match)
+" "$config_json" "$workspace"
 }
 
 # ==============================================================================
@@ -177,7 +189,7 @@ _containai_extract_excludes() {
 # ==============================================================================
 
 # Parse config file for workspace matching
-# Calls parse-toml.py and captures JSON output
+# Calls parse-toml.py and handles workspace section matching
 # Arguments: $1 = config file, $2 = workspace path, $3 = strict mode (optional, "strict")
 # Sets globals: _CAI_VOLUME, _CAI_EXCLUDES
 # Returns: 0 on success, 1 on failure
@@ -195,7 +207,7 @@ _containai_parse_config() {
     local config_file="$1"
     local workspace="$2"
     local strict="${3:-}"
-    local script_dir json_result line parse_stderr
+    local script_dir config_json parse_stderr ws_key line
 
     # Reset globals
     _CAI_VOLUME=""
@@ -220,11 +232,11 @@ _containai_parse_config() {
     # Determine script directory (where parse-toml.py lives)
     script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-    # Call parse-toml.py - outputs JSON: {"data_volume": "...", "excludes": [...]}
+    # Call parse-toml.py --json to get full config
     # Capture stderr separately to avoid corrupting JSON output
     parse_stderr=$(mktemp)
 
-    if ! json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>"$parse_stderr"); then
+    if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>"$parse_stderr"); then
         if [[ "$strict" == "strict" ]]; then
             echo "[ERROR] Failed to parse config file: $config_file" >&2
         else
@@ -240,41 +252,72 @@ _containai_parse_config() {
         return 0  # Graceful fallback in non-strict mode
     fi
 
-    # Show any warnings from parse-toml.py (e.g., "skipping exclude with newline")
+    # Show any warnings from parse-toml.py
     if [[ -s "$parse_stderr" ]]; then
         cat "$parse_stderr" >&2
     fi
     rm -f "$parse_stderr"
 
-    # Extract volume from JSON - guard against Python failures
-    local extract_vol extract_exc
-    if ! extract_vol=$(_containai_extract_volume "$json_result"); then
-        if [[ "$strict" == "strict" ]]; then
-            echo "[ERROR] Failed to extract volume from config JSON" >&2
-            return 1
-        fi
-        echo "[WARN] Failed to extract volume from config JSON" >&2
-        return 0
-    fi
-    _CAI_VOLUME="$extract_vol"
+    # Find matching workspace section
+    ws_key=$(_containai_find_matching_workspace "$config_json" "$workspace")
 
-    # Extract excludes from JSON into array - guard against Python failures
-    if ! extract_exc=$(_containai_extract_excludes "$json_result"); then
-        if [[ "$strict" == "strict" ]]; then
-            echo "[ERROR] Failed to extract excludes from config JSON" >&2
-            return 1
-        fi
-        echo "[WARN] Failed to extract excludes from config JSON" >&2
-        return 0
+    # Extract data_volume with fallback chain:
+    # 1. workspace.<key>.data_volume (if workspace matches)
+    # 2. agent.data_volume
+    # 3. (leave empty, caller uses default)
+    local vol=""
+    if [[ -n "$ws_key" ]]; then
+        vol=$(python3 -c "
+import json, sys
+config = json.loads(sys.argv[1])
+ws = config.get('workspace', {}).get(sys.argv[2], {})
+print(ws.get('data_volume', ''))
+" "$config_json" "$ws_key")
     fi
+    if [[ -z "$vol" ]]; then
+        vol=$(python3 -c "
+import json, sys
+config = json.loads(sys.argv[1])
+print(config.get('agent', {}).get('data_volume', ''))
+" "$config_json")
+    fi
+    _CAI_VOLUME="$vol"
 
-    # Parse excludes into array (empty lines are valid empty-string excludes per parse-toml.py,
-    # but we skip them as they have no meaning for rsync --exclude)
+    # Extract excludes with cumulative merge:
+    # default_excludes + workspace.<key>.excludes (deduped)
+    local excludes_output
+    excludes_output=$(python3 -c "
+import json, sys
+config = json.loads(sys.argv[1])
+ws_key = sys.argv[2] if len(sys.argv) > 2 else ''
+
+default_excludes = config.get('default_excludes', [])
+if not isinstance(default_excludes, list):
+    default_excludes = []
+
+ws_excludes = []
+if ws_key:
+    ws = config.get('workspace', {}).get(ws_key, {})
+    ws_excludes = ws.get('excludes', [])
+    if not isinstance(ws_excludes, list):
+        ws_excludes = []
+
+# Dedupe preserving order
+seen = {}
+for item in default_excludes + ws_excludes:
+    if isinstance(item, str) and item not in seen:
+        # Skip multi-line values (security/safety)
+        if '\n' not in item and '\r' not in item:
+            seen[item] = True
+            print(item)
+" "$config_json" "$ws_key")
+
+    # Parse excludes into array
     while IFS= read -r line; do
         if [[ -n "$line" ]]; then
             _CAI_EXCLUDES+=("$line")
         fi
-    done <<< "$extract_exc"
+    done <<< "$excludes_output"
 
     return 0
 }

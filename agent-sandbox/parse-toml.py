@@ -15,9 +15,14 @@ import json
 import sys
 from pathlib import Path
 
+# Sentinel for "key not found" (distinct from None which is a valid TOML value)
+_NOT_FOUND = object()
+
 # Python 3.11+ has tomllib in stdlib, fallback to toml package for older versions
 try:
     import tomllib
+
+    _TOML_DECODE_ERROR = tomllib.TOMLDecodeError
 
     def load_toml(path: Path) -> dict:
         """Load TOML file using tomllib (Python 3.11+)."""
@@ -27,6 +32,8 @@ try:
 except ImportError:
     try:
         import toml
+
+        _TOML_DECODE_ERROR = toml.TomlDecodeError
 
         def load_toml(path: Path) -> dict:
             """Load TOML file using toml package (Python < 3.11)."""
@@ -49,35 +56,15 @@ def get_nested_value(data: dict, key: str):
         key: Dot-separated key path (e.g., "agent.data_volume")
 
     Returns:
-        The value if found, or None if not found
+        The value if found, or _NOT_FOUND sentinel if not found
     """
     parts = key.split(".")
     current = data
     for part in parts:
         if not isinstance(current, dict) or part not in current:
-            return None
+            return _NOT_FOUND
         current = current[part]
     return current
-
-
-def key_exists(data: dict, key: str) -> bool:
-    """
-    Check if a nested key exists in a dict.
-
-    Args:
-        data: The dict to search
-        key: Dot-separated key path
-
-    Returns:
-        True if key exists, False otherwise
-    """
-    parts = key.split(".")
-    current = data
-    for part in parts:
-        if not isinstance(current, dict) or part not in current:
-            return False
-        current = current[part]
-    return True
 
 
 def format_value(value) -> str:
@@ -103,12 +90,27 @@ def format_value(value) -> str:
         return str(value)
     if isinstance(value, str):
         return value
-    # For complex types (list, dict), output as JSON
-    return json.dumps(value, separators=(",", ":"))
+    # For complex types (list, dict, datetime), output as JSON
+    # Use default=str to handle TOML datetime types
+    try:
+        return json.dumps(value, separators=(",", ":"), default=str)
+    except TypeError as e:
+        print(f"Error: Cannot serialize value: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+class ErrorExitParser(argparse.ArgumentParser):
+    """ArgumentParser that exits with code 1 on errors (not 2)."""
+
+    def error(self, message: str) -> None:
+        """Print error message and exit with code 1."""
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        sys.exit(1)
 
 
 def main():
-    parser = argparse.ArgumentParser(
+    parser = ErrorExitParser(
         description="Parse ContainAI TOML config file for shell consumption"
     )
     parser.add_argument(
@@ -138,9 +140,14 @@ def main():
     args = parser.parse_args()
 
     # Validate mutually exclusive options
-    mode_count = sum([bool(args.key), args.output_json, bool(args.exists)])
+    # Use 'is not None' to correctly handle empty string keys
+    mode_count = sum(
+        [args.key is not None, args.output_json, args.exists is not None]
+    )
     if mode_count == 0:
-        print("Error: Must specify one of --key, --json, or --exists", file=sys.stderr)
+        print(
+            "Error: Must specify one of --key, --json, or --exists", file=sys.stderr
+        )
         sys.exit(1)
     if mode_count > 1:
         print(
@@ -156,28 +163,41 @@ def main():
     except FileNotFoundError:
         print(f"Error: File not found: {args.file}", file=sys.stderr)
         sys.exit(1)
-    except Exception as e:
-        # Handle TOML parse errors from either library
+    except PermissionError:
+        print(f"Error: Permission denied: {args.file}", file=sys.stderr)
+        sys.exit(1)
+    except IsADirectoryError:
+        print(f"Error: Path is a directory: {args.file}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as e:
+        print(f"Error: Cannot read file: {e}", file=sys.stderr)
+        sys.exit(1)
+    except _TOML_DECODE_ERROR as e:
         print(f"Error: Invalid TOML: {e}", file=sys.stderr)
         sys.exit(1)
 
     # Handle --exists mode
-    if args.exists:
-        if key_exists(config, args.exists):
+    if args.exists is not None:
+        value = get_nested_value(config, args.exists)
+        if value is not _NOT_FOUND:
             sys.exit(0)
         else:
             sys.exit(1)
 
     # Handle --json mode
     if args.output_json:
-        print(json.dumps(config, indent=2))
+        try:
+            print(json.dumps(config, indent=2, default=str))
+        except TypeError as e:
+            print(f"Error: Cannot serialize config: {e}", file=sys.stderr)
+            sys.exit(1)
         sys.exit(0)
 
     # Handle --key mode
-    if args.key:
+    if args.key is not None:
         value = get_nested_value(config, args.key)
         # Missing key outputs empty string and exits 0 (per spec)
-        if value is None:
+        if value is _NOT_FOUND:
             print("")
         else:
             print(format_value(value))
