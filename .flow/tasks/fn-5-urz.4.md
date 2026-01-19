@@ -53,9 +53,8 @@ docker sandbox ls >/dev/null 2>&1
 - [ ] Error messages are actionable with remediation steps
 - [ ] Works when Docker is not running (doesn't hang)
 ## Done summary
-TBD
-
+Implemented Docker Desktop and Sandboxes availability detection with timeout-protected checks, actionable error messages, and admin policy block detection. Functions: _cai_docker_desktop_version (returns semver), _cai_sandbox_available (checks plugin), _cai_sandbox_feature_enabled (comprehensive check with error messaging).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3c96078, 52e9132, 161b9a8, 10605b8, ccfc0cf
+- Tests: bash -c 'source agent-sandbox/containai.sh && _cai_docker_desktop_version', bash -c 'source agent-sandbox/containai.sh && _cai_sandbox_available', bash -c 'source agent-sandbox/containai.sh && _containai_check_docker', bash -c 'source agent-sandbox/containai.sh && _containai_check_isolation'
 - PRs:

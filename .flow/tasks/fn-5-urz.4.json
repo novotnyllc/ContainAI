@@ -7,10 +7,26 @@
     "fn-5-urz.2"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "3c96078",
+      "52e9132",
+      "161b9a8",
+      "10605b8",
+      "ccfc0cf"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -c 'source agent-sandbox/containai.sh && _cai_docker_desktop_version'",
+      "bash -c 'source agent-sandbox/containai.sh && _cai_sandbox_available'",
+      "bash -c 'source agent-sandbox/containai.sh && _containai_check_docker'",
+      "bash -c 'source agent-sandbox/containai.sh && _containai_check_isolation'"
+    ]
+  },
   "id": "fn-5-urz.4",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.4.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Docker Desktop + Sandboxes availability detection",
-  "updated_at": "2026-01-19T17:08:01.536466Z"
+  "updated_at": "2026-01-19T17:59:52.820932Z"
 }
