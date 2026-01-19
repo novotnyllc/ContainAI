@@ -65,9 +65,8 @@ agent-sandbox/
 - [ ] Platform detection returns correct value for current environment
 - [ ] No global variable pollution when sourced
 ## Done summary
-TBD
-
+Added modular shell library structure with lib/core.sh (logging with ASCII markers), lib/platform.sh (WSL/macOS/Linux detection), and lib/docker.sh (Docker availability helpers). Updated containai.sh to source new libs and import.sh to use core.sh logging functions.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 6c1516c69caa7fd1aeba5da89f56466e96645639
+- Tests: bash -c 'source containai.sh && _cai_detect_platform', bash -c 'source containai.sh && _cai_info test && _cai_warn test && _cai_error test'
 - PRs:
