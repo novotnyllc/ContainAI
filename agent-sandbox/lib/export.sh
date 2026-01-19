@@ -9,8 +9,8 @@
 #
 # Usage:
 #   source lib/export.sh
-#   excludes=("pattern1" "pattern2")
-#   _containai_export "volume-name" "/path/to/output.tgz" excludes "false"
+#   my_excludes=("pattern1" "pattern2")
+#   _containai_export "volume-name" "/path/to/output.tgz" my_excludes "false"
 #
 # Note: config.sh is NOT required for basic export. It's only needed if the
 # caller wants to resolve excludes from config (done by containai.sh wrapper).
@@ -19,12 +19,17 @@
 #   $1 = volume name (required)
 #   $2 = output path (optional, default: ./containai-export-YYYYMMDD-HHMMSS.tgz)
 #        If a directory, the default filename is appended.
-#   $3 = excludes array name (passed by reference, bash 3.2+ compatible)
+#        Output directory must exist (not created automatically for safety).
+#   $3 = excludes_array_name - NAME of a bash array variable containing exclude
+#        patterns (not the array itself). Pass empty string "" for no excludes.
 #   $4 = no_excludes flag ("true" or "false", default: "false")
 #
-# Output: Prints absolute path to archive on stdout (logs go to stderr)
+# Exclude pattern normalization:
+#   - Leading "./" and "/" are stripped from patterns
+#   - Both "./pattern" and "pattern" forms are passed to tar for compatibility
+#   - Example: "/foo/bar" -> excludes "./foo/bar" and "foo/bar"
 #
-# Requires: bash 4.0+ (for associative array support in indirect expansion)
+# Output: Prints absolute path to created archive on stdout (logs go to stderr)
 #
 # Dependencies:
 #   - docker (for tar container)
@@ -84,28 +89,29 @@ _export_warn() { echo "[WARN] $*" >&2; }
 #   $1 = volume name (required)
 #   $2 = output path (optional, default: ./containai-export-YYYYMMDD-HHMMSS.tgz)
 #        If a directory or ends with /, the default filename is appended.
-#   $3 = excludes array name (passed by reference, optional)
+#   $3 = excludes_array_name - NAME of bash array variable (not the array itself)
 #   $4 = no_excludes flag ("true" or "false", default: "false")
 # Returns: 0 on success, 1 on failure
 # Outputs: Absolute archive path to stdout on success
 _containai_export() {
     local volume="${1:-}"
     local output_path="${2:-}"
-    local excludes_name="${3:-}"
+    local excludes_array_name="${3:-}"
     local no_excludes="${4:-false}"
 
-    # Access excludes array by name using indirect expansion (bash 3.2+ compatible)
-    # Validate the variable name contains only safe characters
+    # Access excludes array by name using indirect expansion
+    # Validate the variable name contains only safe characters to prevent injection
     local -a excludes=()
-    if [[ -n "$excludes_name" ]]; then
-        if [[ ! "$excludes_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-            _export_error "Invalid excludes array name: $excludes_name"
+    if [[ -n "$excludes_array_name" ]]; then
+        if [[ ! "$excludes_array_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            _export_error "Invalid excludes array name: $excludes_array_name"
+            _export_error "Pass the NAME of the array variable, not the array itself"
             return 1
         fi
         # Use indirect expansion to copy array elements
-        local _arr_ref="${excludes_name}[@]"
+        local _arr_ref="${excludes_array_name}[@]"
         # Check if the array is set before expanding
-        if eval "[[ -n \"\${$excludes_name+x}\" ]]"; then
+        if eval "[[ -n \"\${$excludes_array_name+x}\" ]]"; then
             excludes=("${!_arr_ref}")
         fi
     fi
@@ -129,13 +135,7 @@ _containai_export() {
         return 1
     fi
 
-    # Check Docker daemon is reachable
-    if ! docker info >/dev/null 2>&1; then
-        _export_error "Cannot connect to Docker daemon"
-        return 1
-    fi
-
-    # Check that volume exists
+    # Check that volume exists (also verifies Docker daemon connectivity)
     if ! docker volume inspect "$volume" >/dev/null 2>&1; then
         _export_error "Volume does not exist: $volume"
         return 1
@@ -221,7 +221,7 @@ _containai_export() {
 
     # Run tar via docker container mounting the volume read-only
     # Run as root to ensure all files can be read (volume may have 600/700 permissions)
-    # Then chown the output file to the invoking user
+    # Attempt to chown output file to invoking user (best-effort, may fail on Docker Desktop)
     if ! docker run --rm --network=none \
         -e "HOST_UID=${user_id}" \
         -e "HOST_GID=${group_id}" \
@@ -229,7 +229,7 @@ _containai_export() {
         -v "${volume}:/data:ro" \
         -v "${output_dir}:/out" \
         alpine:latest \
-        sh -c '"${@}" && chown "${HOST_UID}:${HOST_GID}" "${OUTPUT_FILE}"' -- "${tar_cmd[@]}"; then
+        sh -c '"${@}" && chown "${HOST_UID}:${HOST_GID}" "${OUTPUT_FILE}" 2>/dev/null || true' -- "${tar_cmd[@]}"; then
         _export_error "Failed to create archive"
         return 1
     fi
