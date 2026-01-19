@@ -7,10 +7,27 @@
     "fn-4-vet.8"
   ],
   "epic": "fn-4-vet",
+  "evidence": {
+    "commits": [
+      "5d7c311",
+      "14cb05a",
+      "8b65e8d",
+      "44b03e5",
+      "36bfce4",
+      "1932efb",
+      "edd4e0d"
+    ],
+    "impl_review": {
+      "receipt": "scripts/ralph/runs/20260119T075055Z-containai-main-claire@novotny.org-16841-9669/receipts/impl-fn-4-vet.11.json",
+      "verdict": "SHIP"
+    },
+    "prs": [],
+    "tests": []
+  },
   "id": "fn-4-vet.11",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.11.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create lib/export.sh - cai export subcommand",
-  "updated_at": "2026-01-19T14:14:05.220206Z"
+  "updated_at": "2026-01-19T14:53:46.168018Z"
 }

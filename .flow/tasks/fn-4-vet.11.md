@@ -52,9 +52,20 @@ done
 - [ ] Volume mounted read-only
 - [ ] Outputs archive path on success
 ## Done summary
-TBD
+## Summary
+Implemented `lib/export.sh` providing the `_containai_export` function for the `cai export` subcommand.
 
+## Changes
+- Creates `_containai_export(volume, output_path, excludes_array, no_excludes)` function
+- Exports Docker volume contents to a `.tgz` archive via Alpine container
+- Volume mounted read-only for safety
+- Supports exclude patterns with both `./path` and `path` forms for tar compatibility
+- `--no-excludes` flag includes all files
+- Outputs absolute archive path on success (logs to stderr)
+- Validates archive integrity after creation
+- Safe cleanup: never deletes pre-existing user files on failure
+- Pinned Alpine 3.20 for reproducible builds
 ## Evidence
-- Commits:
+- Commits: 5d7c311, 14cb05a, 8b65e8d, 44b03e5, 36bfce4, 1932efb, edd4e0d
 - Tests:
 - PRs:
