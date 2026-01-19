@@ -34,12 +34,21 @@ register_test_volume() {
     TEST_VOLUMES_CREATED+=("$1")
 }
 
-# Cleanup only test volumes created by THIS run
+# Cleanup test volumes created by THIS run
+# First pass: registered volumes (explicit tracking)
+# Second pass: any volumes matching this run's ID prefix (catches unregistered volumes)
 cleanup_test_volumes() {
     local vol
+    # First pass: explicitly registered volumes
     for vol in "${TEST_VOLUMES_CREATED[@]}"; do
         docker volume rm "$vol" 2>/dev/null || true
     done
+    # Second pass: catch any volumes with this run's ID that weren't registered
+    local run_volumes
+    run_volumes=$(docker volume ls --filter "name=containai-test-${TEST_RUN_ID}" -q 2>/dev/null || true)
+    if [[ -n "$run_volumes" ]]; then
+        echo "$run_volumes" | xargs -r docker volume rm 2>/dev/null || true
+    fi
 }
 trap cleanup_test_volumes EXIT
 
@@ -57,6 +66,7 @@ FAILED=0
 # Helper to run commands in rsync container and extract clean output
 # Filters out SSH key generation noise from eeacms/rsync
 # Captures docker exit code to avoid false positives
+# Uses sed instead of grep -v to avoid failure on empty output (pipefail-safe)
 run_in_rsync() {
     local output exit_code
     output=$(docker run --rm -v "$DATA_VOLUME":/data eeacms/rsync sh -c "$1" 2>&1) || exit_code=$?
@@ -64,12 +74,13 @@ run_in_rsync() {
         echo "docker_run_failed:$exit_code"
         return 1
     fi
-    echo "$output" | \
-        grep -v "^Generating SSH" | \
-        grep -v "^ssh-keygen:" | \
-        grep -v "^Please add this" | \
-        grep -v "^====" | \
-        grep -v "^ssh-rsa "
+    # Use sed to filter noise (doesn't fail on empty input unlike grep -v)
+    printf '%s\n' "$output" | sed \
+        -e '/^Generating SSH/d' \
+        -e '/^ssh-keygen:/d' \
+        -e '/^Please add this/d' \
+        -e '/^====/d' \
+        -e '/^ssh-rsa /d'
 }
 
 # Helper to get a single numeric value from rsync container (handles wc -l whitespace)
@@ -171,8 +182,14 @@ test_dry_run() {
     # Create test volumes for precedence tests (use unique run-scoped names)
     local env_vol="containai-test-env-${TEST_RUN_ID}"
     local cli_vol="containai-test-cli-${TEST_RUN_ID}"
-    docker volume create "$env_vol" >/dev/null 2>&1 || true
-    docker volume create "$cli_vol" >/dev/null 2>&1 || true
+    if ! docker volume create "$env_vol" >/dev/null; then
+        fail "Failed to create test volume: $env_vol"
+        return
+    fi
+    if ! docker volume create "$cli_vol" >/dev/null; then
+        fail "Failed to create test volume: $cli_vol"
+        return
+    fi
     register_test_volume "$env_vol"
     register_test_volume "$cli_vol"
 
@@ -225,7 +242,11 @@ test_dry_run() {
     mkdir -p "$config_test_dir/.containai"
     echo '[agent]' > "$config_test_dir/.containai/config.toml"
     echo "data_volume = \"$config_vol\"" >> "$config_test_dir/.containai/config.toml"
-    docker volume create "$config_vol" >/dev/null 2>&1 || true
+    if ! docker volume create "$config_vol" >/dev/null; then
+        fail "Failed to create test volume: $config_vol"
+        rm -rf "$config_test_dir"
+        return
+    fi
     register_test_volume "$config_vol"
     config_test_output=$(cd "$config_test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || config_test_exit=$?
     if echo "$config_test_output" | grep -q "Using data volume: $config_vol"; then
@@ -305,9 +326,13 @@ test_full_sync() {
 
     # Log volume structure for evidence (spec requirement: ls -laR)
     info "Volume structure (ls -laR /data | head -50):"
-    run_in_rsync 'ls -laR /data 2>/dev/null | head -50' | while IFS= read -r line; do
-        echo "    $line"
-    done
+    local ls_output
+    ls_output=$(run_in_rsync 'ls -laR /data 2>/dev/null | head -50') || true
+    if [[ -n "$ls_output" ]]; then
+        printf '%s\n' "$ls_output" | while IFS= read -r line; do
+            echo "    $line"
+        done
+    fi
 }
 
 # ==============================================================================
@@ -356,9 +381,13 @@ test_secret_permissions() {
 
     # Log stat output for evidence (spec requirement - all secret files)
     info "Secret permissions verification (stat -c '%a %n'):"
-    run_in_rsync "stat -c '%a %n' /data/claude/credentials.json /data/config/gh /data/gemini/oauth_creds.json /data/gemini/google_accounts.json /data/codex/auth.json /data/local/share/opencode/auth.json 2>/dev/null || true" | while IFS= read -r line; do
-        echo "    $line"
-    done
+    local evidence_output
+    evidence_output=$(run_in_rsync "stat -c '%a %n' /data/claude/credentials.json /data/config/gh /data/gemini/oauth_creds.json /data/gemini/google_accounts.json /data/codex/auth.json /data/local/share/opencode/auth.json 2>/dev/null || true") || true
+    if [[ -n "$evidence_output" ]]; then
+        printf '%s\n' "$evidence_output" | while IFS= read -r line; do
+            echo "    $line"
+        done
+    fi
 }
 
 # ==============================================================================
@@ -717,10 +746,10 @@ EOF
 }
 
 # ==============================================================================
-# Test 14: --data-volume overrides workspace config
+# Test 14: CLI volume overrides workspace config
 # ==============================================================================
 test_data_volume_overrides_config() {
-    section "Test 14: --data-volume overrides workspace config"
+    section "Test 14: CLI volume overrides workspace config"
 
     local test_dir
     test_dir="/tmp/test-override-$$"
@@ -742,7 +771,7 @@ EOF
     stderr_file=$(mktemp)
     if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume 'cli-vol'" 2>"$stderr_file"); then
         if [[ "$resolved" == "cli-vol" ]]; then
-            pass "--data-volume overrides workspace config"
+            pass "CLI volume overrides workspace config"
         else
             fail "CLI override returned wrong volume: $resolved (expected: cli-vol)"
             [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
