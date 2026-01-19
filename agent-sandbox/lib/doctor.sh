@@ -105,7 +105,7 @@ _cai_check_wsl_seccomp() {
 _cai_select_context() {
     local config_context_name="${1:-}"
     local debug_flag="${2:-}"
-    local eci_status context_to_use
+    local eci_status
 
     # Check ECI status first
     eci_status=$(_cai_eci_status)
@@ -123,9 +123,11 @@ _cai_select_context() {
     # Use config override if provided, otherwise default to containai-secure
     local context_name="${config_context_name:-containai-secure}"
 
-    if docker context inspect "$context_name" >/dev/null 2>&1; then
+    # Verify context exists AND has sysbox-runc runtime (not just context inspect)
+    # This catches cases where context exists but daemon is down or sysbox not installed
+    if _cai_sysbox_available_for_context "$context_name"; then
         if [[ "$debug_flag" == "debug" ]]; then
-            printf '%s\n' "[DEBUG] Context selection: ECI not available, using context '$context_name'" >&2
+            printf '%s\n' "[DEBUG] Context selection: ECI not available, using context '$context_name' with Sysbox" >&2
         fi
         printf '%s' "$context_name"
         return 0
@@ -133,9 +135,46 @@ _cai_select_context() {
 
     # No isolation available
     if [[ "$debug_flag" == "debug" ]]; then
-        printf '%s\n' "[DEBUG] Context selection: No isolation available (ECI=$eci_status, context '$context_name' not found)" >&2
+        printf '%s\n' "[DEBUG] Context selection: No isolation available (ECI=$eci_status, context '$context_name' not ready)" >&2
     fi
     return 1
+}
+
+# Check if Sysbox is available for a specific context
+# Arguments: $1 = context name
+# Returns: 0=available, 1=not available
+# Outputs: Sets _CAI_SYSBOX_CONTEXT_ERROR with reason on failure
+_cai_sysbox_available_for_context() {
+    local context_name="${1:-containai-secure}"
+    _CAI_SYSBOX_CONTEXT_ERROR=""
+
+    # Check if context exists
+    if ! docker context inspect "$context_name" >/dev/null 2>&1; then
+        _CAI_SYSBOX_CONTEXT_ERROR="context_not_found"
+        return 1
+    fi
+
+    # Check if we can connect to the daemon on this context
+    local info_output rc
+    info_output=$(_cai_timeout 10 docker --context "$context_name" info 2>&1) && rc=0 || rc=$?
+
+    if [[ $rc -eq 124 ]]; then
+        _CAI_SYSBOX_CONTEXT_ERROR="timeout"
+        return 1
+    fi
+
+    if [[ $rc -ne 0 ]]; then
+        _CAI_SYSBOX_CONTEXT_ERROR="daemon_unavailable"
+        return 1
+    fi
+
+    # Check for sysbox-runc runtime
+    if ! printf '%s' "$info_output" | grep -q "sysbox-runc"; then
+        _CAI_SYSBOX_CONTEXT_ERROR="runtime_not_found"
+        return 1
+    fi
+
+    return 0
 }
 
 # ==============================================================================

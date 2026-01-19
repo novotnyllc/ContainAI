@@ -696,6 +696,7 @@ _containai_start_container() {
     local container_name=""
     local workspace=""
     local data_volume=""
+    local explicit_config=""
     local agent=""
     local image_tag=""
     local credentials="$_CONTAINAI_DEFAULT_CREDENTIALS"
@@ -763,6 +764,22 @@ _containai_start_container() {
                 ;;
             --data-volume=*)
                 data_volume="${1#--data-volume=}"
+                shift
+                ;;
+            --config)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                explicit_config="$2"
+                shift 2
+                ;;
+            --config=*)
+                explicit_config="${1#--config=}"
+                if [[ -z "$explicit_config" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --agent)
@@ -960,6 +977,28 @@ _containai_start_container() {
         return 1
     fi
 
+    # === CONTEXT SELECTION (must happen before container state checks) ===
+    # Resolve secure engine context from config (for context override)
+    local config_context_override=""
+    config_context_override=$(_containai_resolve_secure_engine_context "$workspace_resolved" "${explicit_config:-}" 2>/dev/null) || config_context_override=""
+
+    # Auto-select Docker context based on isolation availability
+    local selected_context debug_mode=""
+    if [[ "$debug_flag" == "true" ]]; then
+        debug_mode="debug"
+    fi
+    if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
+        _cai_error "No isolation available. Run 'containai doctor' for setup instructions."
+        return 1
+    fi
+
+    # Build docker command prefix based on context
+    # Empty context = default (ECI mode), non-empty = Sysbox mode
+    local -a docker_cmd=(docker)
+    if [[ -n "$selected_context" ]]; then
+        docker_cmd=(docker --context "$selected_context")
+    fi
+
     # Get container name
     if [[ -z "$container_name" ]]; then
         container_name="$(_containai_container_name)"
@@ -969,43 +1008,27 @@ _containai_start_container() {
     fi
 
     # Check container state - guard for set -e safety (non-zero is valid control flow)
-    local container_state exists_rc sandbox_rc
-    if _containai_container_exists "$container_name"; then
+    # Use context-aware docker command for container inspection
+    local container_state exists_rc
+    if "${docker_cmd[@]}" inspect "$container_name" >/dev/null 2>&1; then
         exists_rc=0
     else
-        exists_rc=$?
+        exists_rc=1
     fi
 
     if [[ $exists_rc -eq 0 ]]; then
         # Use || true for set -e safety (success already confirmed by exists check)
-        container_state=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_state=""
-    elif [[ $exists_rc -eq 1 ]]; then
-        container_state="none"
+        container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_state=""
     else
-        # Docker error - run sandbox check for actionable messaging
-        # Guard for set -e safety (non-zero is valid control flow)
-        if _containai_check_sandbox; then
-            sandbox_rc=0
-        else
-            sandbox_rc=$?
-        fi
-        if [[ $sandbox_rc -eq 1 ]]; then
-            return 1
-        fi
-        echo "[ERROR] Docker error checking container state" >&2
-        return 1
+        container_state="none"
     fi
 
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
-        local is_ours_rc
-        # Guard for set -e safety (non-zero is valid control flow)
-        if _containai_is_our_container "$container_name"; then
-            is_ours_rc=0
-        else
-            is_ours_rc=$?
-        fi
-        if [[ $is_ours_rc -ne 0 ]]; then
+        # Check if container belongs to ContainAI using context-aware inspection
+        local label_val
+        label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || label_val=""
+        if [[ "$label_val" != "containai" ]]; then
             echo "[ERROR] Cannot restart - container '$container_name' was not created by ContainAI" >&2
             echo "Remove the conflicting container manually if needed: docker rm -f '$container_name'" >&2
             return 1
@@ -1015,14 +1038,14 @@ _containai_start_container() {
         fi
         # Stop container, ignoring "not running" errors but surfacing others
         local stop_output
-        stop_output="$(docker stop "$container_name" 2>&1)" || {
+        stop_output="$("${docker_cmd[@]}" stop "$container_name" 2>&1)" || {
             if ! printf '%s' "$stop_output" | grep -qiE "is not running"; then
                 echo "$stop_output" >&2
             fi
         }
         # Remove container, ignoring "not found" errors but surfacing others
         local rm_output
-        rm_output="$(docker rm "$container_name" 2>&1)" || {
+        rm_output="$("${docker_cmd[@]}" rm "$container_name" 2>&1)" || {
             if ! printf '%s' "$rm_output" | grep -qiE "no such container|not found"; then
                 echo "$rm_output" >&2
                 return 1
@@ -1033,16 +1056,18 @@ _containai_start_container() {
 
     # Handle shell mode with stopped container
     if [[ "$shell_flag" == "true" ]] && [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
-        if ! _containai_check_container_ownership "$container_name"; then
+        # Check ownership using context-aware docker command
+        local shell_label_val
+        shell_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || shell_label_val=""
+        if [[ "$shell_label_val" != "containai" ]]; then
+            echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
             return 1
         fi
-        if ! _containai_preflight_checks "$force_flag"; then
-            return 1
-        fi
+        # Skip preflight checks - context selection already validated isolation
         if [[ "$quiet_flag" != "true" ]]; then
             echo "Recreating container for shell access..."
         fi
-        docker rm "$container_name" >/dev/null 2>&1
+        "${docker_cmd[@]}" rm "$container_name" >/dev/null 2>&1
         container_state="none"
     fi
 
@@ -1055,70 +1080,102 @@ _containai_start_container() {
 
     case "$container_state" in
         running)
-            if ! _containai_check_container_ownership "$container_name"; then
+            # Check ownership using context-aware docker command
+            local running_label_val
+            running_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || running_label_val=""
+            if [[ "$running_label_val" != "containai" ]]; then
+                echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
                 return 1
             fi
-            if ! _containai_check_image_match "$container_name" "$resolved_image" "$quiet_flag"; then
-                # Image mismatch: always block - user must use --restart or --name
+            # Check image match using context-aware docker command
+            local running_image
+            running_image=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || running_image=""
+            if [[ "$running_image" != "$resolved_image" ]]; then
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "[WARN] Container image mismatch:" >&2
+                    echo "  Running:   $running_image" >&2
+                    echo "  Requested: $resolved_image" >&2
+                fi
                 echo "[ERROR] Image mismatch prevents attachment. Use --restart to recreate with requested agent." >&2
                 return 1
             fi
-            if ! _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"; then
-                # Volume mismatch: block unless caller opted for warn-only
+            # Check volume match using context-aware docker command
+            local running_volume
+            running_volume=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null) || running_volume=""
+            if [[ "$running_volume" != "$data_volume" ]]; then
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "[WARN] Data volume mismatch:" >&2
+                    echo "  Running:   ${running_volume:-<none>}" >&2
+                    echo "  Requested: $data_volume" >&2
+                fi
                 if [[ "$volume_mismatch_warn" != "true" ]]; then
                     echo "[ERROR] Volume mismatch prevents attachment. Use --restart to recreate." >&2
                     return 1
                 fi
-                # Warn mode: message already printed by check, proceed
             fi
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Attaching to running container..."
             fi
             # Execute agent command (with args if provided) or shell if in shell mode
             if [[ "$shell_flag" == "true" ]]; then
-                docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
+                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" bash
             else
                 # Run agent with any provided arguments
                 local -a exec_cmd=("$agent")
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     exec_cmd+=("${agent_args[@]}")
                 fi
-                docker exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
+                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
             fi
             ;;
         exited|created)
-            if ! _containai_check_container_ownership "$container_name"; then
+            # Check ownership using context-aware docker command
+            local exited_label_val
+            exited_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || exited_label_val=""
+            if [[ "$exited_label_val" != "containai" ]]; then
+                echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
                 return 1
             fi
-            if ! _containai_check_image_match "$container_name" "$resolved_image" "$quiet_flag"; then
-                # Image mismatch: always block - user must use --restart or --name
+            # Check image match using context-aware docker command
+            local exited_image
+            exited_image=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || exited_image=""
+            if [[ "$exited_image" != "$resolved_image" ]]; then
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "[WARN] Container image mismatch:" >&2
+                    echo "  Running:   $exited_image" >&2
+                    echo "  Requested: $resolved_image" >&2
+                fi
                 echo "[ERROR] Image mismatch prevents start. Use --restart to recreate with requested agent." >&2
                 return 1
             fi
-            if ! _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"; then
-                # Volume mismatch: block unless caller opted for warn-only
+            # Check volume match using context-aware docker command
+            local exited_volume
+            exited_volume=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null) || exited_volume=""
+            if [[ "$exited_volume" != "$data_volume" ]]; then
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "[WARN] Data volume mismatch:" >&2
+                    echo "  Running:   ${exited_volume:-<none>}" >&2
+                    echo "  Requested: $data_volume" >&2
+                fi
                 if [[ "$volume_mismatch_warn" != "true" ]]; then
                     echo "[ERROR] Volume mismatch prevents start. Use --restart to recreate." >&2
                     return 1
                 fi
-                # Warn mode: message already printed by check, proceed
             fi
-            if ! _containai_preflight_checks "$force_flag"; then
-                return 1
-            fi
+            # Skip preflight checks - context selection already validated isolation
             # If agent_args provided, start container detached then exec with args
             # docker start -ai doesn't support passing args to the entrypoint
             if [[ ${#agent_args[@]} -gt 0 ]]; then
                 if [[ "$quiet_flag" != "true" ]]; then
                     echo "Starting stopped container with arguments..."
                 fi
-                docker start "$container_name" >/dev/null
+                "${docker_cmd[@]}" start "$container_name" >/dev/null
                 # Wait for container to be running (poll with bounded timeout)
                 local wait_count=0
                 local max_wait=30
                 while [[ $wait_count -lt $max_wait ]]; do
                     local state
-                    state=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || state=""
+                    state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || state=""
                     if [[ "$state" == "running" ]]; then
                         break
                     fi
@@ -1132,35 +1189,21 @@ _containai_start_container() {
                 # Run agent with arguments
                 local -a exec_cmd=("$agent")
                 exec_cmd+=("${agent_args[@]}")
-                docker exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
+                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
             else
                 if [[ "$quiet_flag" != "true" ]]; then
                     echo "Starting stopped container..."
                 fi
-                docker start -ai "$container_name"
+                "${docker_cmd[@]}" start -ai "$container_name"
             fi
             ;;
         none)
-            if ! _containai_preflight_checks "$force_flag"; then
-                return 1
-            fi
+            # Skip preflight checks - context selection already validated isolation
             if ! _containai_ensure_volumes "$data_volume" "$quiet_flag"; then
                 return 1
             fi
 
-            # Resolve secure engine context from config (for context override)
-            local config_context_override=""
-            config_context_override=$(_containai_resolve_secure_engine_context "$workspace_resolved" "" 2>/dev/null) || config_context_override=""
-
-            # Auto-select Docker context based on isolation availability
-            local selected_context debug_mode=""
-            if [[ "$debug_flag" == "true" ]]; then
-                debug_mode="debug"
-            fi
-            if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
-                _cai_error "No isolation available. Run 'containai doctor' for setup instructions."
-                return 1
-            fi
+            # Context already selected earlier in the function (stored in docker_cmd and selected_context)
 
             local -a vol_args=()
             vol_args+=("-v" "$data_volume:/mnt/agent-data")
