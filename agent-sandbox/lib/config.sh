@@ -4,6 +4,12 @@
 # ==============================================================================
 # This file must be sourced, not executed directly.
 #
+# NOTE: This library provides the SAME functions as aliases.sh config section.
+# It is intended to be the canonical implementation that aliases.sh and
+# sync-agent-plugins.sh will eventually source (replacing their inline copies).
+# Do NOT source both this file and aliases.sh in the same shell - they define
+# the same function names intentionally.
+#
 # Provides:
 #   _containai_find_config        - Find config file by walking up from workspace
 #   _containai_parse_config       - Parse config file via parse-toml.py
@@ -127,7 +133,7 @@ _containai_find_config() {
 # JSON parsing helpers
 # ==============================================================================
 
-# Parse JSON using Python (fallback when jq not available)
+# Parse JSON using Python
 # Arguments: $1 = JSON string, $2 = field to extract ("volume" or "excludes")
 # Outputs: extracted value(s)
 _containai_parse_json_python() {
@@ -212,17 +218,16 @@ _containai_parse_config() {
     # Capture stderr separately to avoid corrupting JSON output
     local parse_stderr
     parse_stderr=$(mktemp)
+    # Ensure cleanup on any exit path
+    trap 'rm -f "$parse_stderr"' RETURN
 
     if ! json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>"$parse_stderr"); then
         echo "[WARN] Failed to parse config file: $config_file" >&2
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
         fi
-        rm -f "$parse_stderr"
         return 0  # Graceful fallback
     fi
-
-    rm -f "$parse_stderr"
 
     # Extract volume from JSON
     _CAI_VOLUME=$(_containai_extract_volume "$json_result")
