@@ -436,6 +436,9 @@ _containai_get_container_labels() {
     fi
 
     legacy_label=$(docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
     if [[ "$legacy_label" == "<no value>" ]]; then
         legacy_label=""
     fi
@@ -641,6 +644,10 @@ _containai_start_container() {
                 break
                 ;;
             --name)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --name requires a value" >&2
+                    return 1
+                fi
                 container_name="$2"
                 shift 2
                 ;;
@@ -649,6 +656,10 @@ _containai_start_container() {
                 shift
                 ;;
             --workspace|-w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
                 workspace="$2"
                 workspace="${workspace/#\~/$HOME}"
                 shift 2
@@ -664,6 +675,10 @@ _containai_start_container() {
                 shift
                 ;;
             --data-volume)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
                 data_volume="$2"
                 shift 2
                 ;;
@@ -704,6 +719,10 @@ _containai_start_container() {
                 shift
                 ;;
             --env|-e)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --env requires a value" >&2
+                    return 1
+                fi
                 env_vars+=("$2")
                 shift 2
                 ;;
@@ -716,6 +735,10 @@ _containai_start_container() {
                 shift
                 ;;
             --volume|-v)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --volume requires a value" >&2
+                    return 1
+                fi
                 extra_volumes+=("$2")
                 shift 2
                 ;;
@@ -805,15 +828,27 @@ _containai_start_container() {
         if [[ "$quiet_flag" != "true" ]]; then
             echo "Stopping existing container..."
         fi
-        docker stop "$container_name" >/dev/null 2>&1 || true
-        docker rm "$container_name" >/dev/null 2>&1 || true
+        # Stop container, ignoring "not running" errors but surfacing others
+        local stop_output
+        stop_output="$(docker stop "$container_name" 2>&1)" || {
+            if ! printf '%s' "$stop_output" | grep -qiE "is not running"; then
+                echo "$stop_output" >&2
+            fi
+        }
+        # Remove container, ignoring "not found" errors but surfacing others
+        local rm_output
+        rm_output="$(docker rm "$container_name" 2>&1)" || {
+            if ! printf '%s' "$rm_output" | grep -qiE "no such container|not found"; then
+                echo "$rm_output" >&2
+                return 1
+            fi
+        }
         container_state="none"
     fi
 
     # Handle shell mode with stopped container
     if [[ "$shell_flag" == "true" ]] && [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
-        _containai_check_container_ownership "$container_name"
-        if [[ $? -eq 1 ]]; then
+        if ! _containai_check_container_ownership "$container_name"; then
             return 1
         fi
         if ! _containai_preflight_checks "$force_flag"; then
@@ -843,22 +878,26 @@ _containai_start_container() {
 
     case "$container_state" in
         running)
-            _containai_check_container_ownership "$container_name"
-            if [[ $? -eq 1 ]]; then
+            if ! _containai_check_container_ownership "$container_name"; then
                 return 1
             fi
-            _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"
+            if ! _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"; then
+                echo "[ERROR] Volume mismatch prevents attachment. Use --restart to recreate." >&2
+                return 1
+            fi
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Attaching to running container..."
             fi
             docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             ;;
         exited|created)
-            _containai_check_container_ownership "$container_name"
-            if [[ $? -eq 1 ]]; then
+            if ! _containai_check_container_ownership "$container_name"; then
                 return 1
             fi
-            _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"
+            if ! _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"; then
+                echo "[ERROR] Volume mismatch prevents start. Use --restart to recreate." >&2
+                return 1
+            fi
             if ! _containai_preflight_checks "$force_flag"; then
                 return 1
             fi
