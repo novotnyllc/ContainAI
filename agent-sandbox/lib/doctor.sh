@@ -107,19 +107,28 @@ _cai_select_context() {
     local debug_flag="${2:-}"
     local eci_status
 
-    # Check ECI status first
-    eci_status=$(_cai_eci_status)
+    # Check ECI status first (ensure we use default context for this check)
+    # Unset DOCKER_CONTEXT to ensure we check Docker Desktop, not a custom context
+    eci_status=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_eci_status)
 
+    # ECI path requires BOTH ECI enabled AND sandbox feature available
     if [[ "$eci_status" == "enabled" ]]; then
-        # ECI enabled - use default context (Docker Desktop)
-        if [[ "$debug_flag" == "debug" ]]; then
-            printf '%s\n' "[DEBUG] Context selection: ECI enabled, using default context" >&2
+        # Also verify sandbox feature is enabled (docker sandbox command works)
+        if _cai_sandbox_feature_enabled 2>/dev/null; then
+            # ECI enabled with sandboxes - use default context (Docker Desktop)
+            if [[ "$debug_flag" == "debug" ]]; then
+                printf '%s\n' "[DEBUG] Context selection: ECI enabled + sandboxes available, using default context" >&2
+            fi
+            printf '%s' ""
+            return 0
+        else
+            if [[ "$debug_flag" == "debug" ]]; then
+                printf '%s\n' "[DEBUG] Context selection: ECI enabled but sandboxes not available, checking Sysbox" >&2
+            fi
         fi
-        printf '%s' ""
-        return 0
     fi
 
-    # ECI not enabled - check for Secure Engine context
+    # ECI path not usable - check for Secure Engine context
     # Use config override if provided, otherwise default to containai-secure
     local context_name="${config_context_name:-containai-secure}"
     local default_context="containai-secure"
@@ -128,7 +137,7 @@ _cai_select_context() {
     # This catches cases where context exists but daemon is down or sysbox not installed
     if _cai_sysbox_available_for_context "$context_name"; then
         if [[ "$debug_flag" == "debug" ]]; then
-            printf '%s\n' "[DEBUG] Context selection: ECI not enabled, using context '$context_name' with Sysbox" >&2
+            printf '%s\n' "[DEBUG] Context selection: Using context '$context_name' with Sysbox" >&2
         fi
         printf '%s' "$context_name"
         return 0
@@ -374,29 +383,37 @@ _cai_doctor() {
     # === Sysbox / Secure Engine Section ===
     printf '%s\n' "Secure Engine (Sysbox Path)"
 
-    # Check Sysbox availability
-    if _cai_sysbox_available; then
+    # Resolve configured context name (env/config), default to containai-secure
+    local sysbox_context_name="containai-secure"
+    local config_context
+    config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
+    if [[ -n "$config_context" ]]; then
+        sysbox_context_name="$config_context"
+    fi
+
+    # Check Sysbox availability with resolved context name
+    if _cai_sysbox_available_for_context "$sysbox_context_name"; then
         sysbox_ok="true"
         printf '  %-44s %s\n' "Sysbox available:" "[OK]"
         printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK]"
-        printf '  %-44s %s\n' "Context 'containai-secure':" "[OK] Configured"
+        printf '  %-44s %s\n' "Context '$sysbox_context_name':" "[OK] Configured"
     else
         printf '  %-44s %s\n' "Sysbox available:" "[INFO] Not configured"
-        case "${_CAI_SYSBOX_ERROR:-}" in
+        case "${_CAI_SYSBOX_CONTEXT_ERROR:-${_CAI_SYSBOX_ERROR:-}}" in
             socket_not_found)
                 printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox)"
                 ;;
             context_not_found)
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to configure containai-secure context)"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to configure '$sysbox_context_name' context)"
                 ;;
             daemon_unavailable)
-                printf '  %-44s %s\n' "" "(ContainAI Docker daemon not running)"
+                printf '  %-44s %s\n' "" "(Docker daemon for '$sysbox_context_name' not running)"
                 ;;
             runtime_not_found)
                 printf '  %-44s %s\n' "" "(Sysbox runtime not found - run 'cai setup')"
                 ;;
             timeout)
-                printf '  %-44s %s\n' "" "(ContainAI Docker daemon timed out)"
+                printf '  %-44s %s\n' "" "(Docker daemon for '$sysbox_context_name' timed out)"
                 ;;
             *)
                 printf '  %-44s %s\n' "" "(Run 'cai setup' for Sysbox isolation)"

@@ -687,10 +687,44 @@ _containai_resolve_credentials() {
 # Secure Engine context resolution
 # ==============================================================================
 
+# Validate secure engine context name
+# Arguments: $1 = context name
+# Returns: 0=valid, 1=invalid
+# Outputs: warning to stderr if invalid
+_containai_validate_context_name() {
+    local ctx="$1"
+
+    # Empty is valid (means use default)
+    if [[ -z "$ctx" ]]; then
+        return 0
+    fi
+
+    # Check for control characters
+    if [[ "$ctx" == *$'\n'* ]] || [[ "$ctx" == *$'\r'* ]] || [[ "$ctx" == *$'\t'* ]]; then
+        echo "[WARN] Context name contains control characters" >&2
+        return 1
+    fi
+
+    # Docker context names: alphanumeric, underscore, dash
+    if [[ ! "$ctx" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "[WARN] Context name contains invalid characters" >&2
+        return 1
+    fi
+
+    # Length check
+    if [[ ${#ctx} -gt 64 ]]; then
+        echo "[WARN] Context name too long (>64 chars)" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 # Resolve secure engine context name from config
 # Arguments: $1 = workspace path (default: $PWD)
 #            $2 = explicit config path (optional)
 # Outputs: context name (empty if not configured)
+# Returns: 0 on success, 1 on failure (strict mode parse error)
 # Precedence:
 #   1. CONTAINAI_SECURE_ENGINE_CONTEXT env var
 #   2. Config file [secure_engine].context_name
@@ -700,10 +734,15 @@ _containai_resolve_secure_engine_context() {
     local explicit_config="${2:-}"
     local config_file
 
-    # 1. Environment variable
+    # 1. Environment variable (with validation)
     if [[ -n "${CONTAINAI_SECURE_ENGINE_CONTEXT:-}" ]]; then
-        printf '%s' "$CONTAINAI_SECURE_ENGINE_CONTEXT"
-        return 0
+        if _containai_validate_context_name "$CONTAINAI_SECURE_ENGINE_CONTEXT"; then
+            printf '%s' "$CONTAINAI_SECURE_ENGINE_CONTEXT"
+            return 0
+        else
+            echo "[WARN] Ignoring invalid CONTAINAI_SECURE_ENGINE_CONTEXT" >&2
+            # Fall through to config/default
+        fi
     fi
 
     # 2. Resolve workspace to absolute path
@@ -714,8 +753,8 @@ _containai_resolve_secure_engine_context() {
     # 3. Find and parse config file
     if [[ -n "$explicit_config" ]]; then
         if [[ ! -f "$explicit_config" ]]; then
-            # Config not found, return empty
-            return 0
+            echo "[ERROR] Config file not found: $explicit_config" >&2
+            return 1
         fi
         config_file="$explicit_config"
     else
@@ -727,11 +766,15 @@ _containai_resolve_secure_engine_context() {
         if [[ -n "$explicit_config" ]]; then
             strict_mode="strict"
         fi
-        if _containai_parse_config "$config_file" "$workspace" "$strict_mode"; then
-            if [[ -n "$_CAI_SECURE_ENGINE_CONTEXT" ]]; then
-                printf '%s' "$_CAI_SECURE_ENGINE_CONTEXT"
-                return 0
+        if ! _containai_parse_config "$config_file" "$workspace" "$strict_mode"; then
+            # Parse failed - in strict mode this is fatal
+            if [[ "$strict_mode" == "strict" ]]; then
+                return 1
             fi
+            # Non-strict: fall through to default
+        elif [[ -n "$_CAI_SECURE_ENGINE_CONTEXT" ]]; then
+            printf '%s' "$_CAI_SECURE_ENGINE_CONTEXT"
+            return 0
         fi
     fi
 

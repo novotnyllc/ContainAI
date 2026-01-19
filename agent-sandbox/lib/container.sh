@@ -996,19 +996,13 @@ _containai_start_container() {
 
     # === CONTEXT SELECTION (must happen before container state checks) ===
     # Resolve secure engine context from config (for context override)
+    # Note: capture stdout only for context value; let stderr flow to parent stderr
     local config_context_override=""
-    local context_resolve_output
     if [[ -n "$explicit_config" ]]; then
-        # Explicit config: don't suppress errors (strict mode)
-        if ! context_resolve_output=$(_containai_resolve_secure_engine_context "$workspace_resolved" "$explicit_config" 2>&1); then
-            # Parse failure with explicit config is a warning, not fatal
-            echo "[WARN] Could not parse secure_engine.context_name from config: $explicit_config" >&2
-            if [[ -n "$context_resolve_output" ]]; then
-                echo "  $context_resolve_output" >&2
-            fi
-            config_context_override=""
-        else
-            config_context_override="$context_resolve_output"
+        # Explicit config: strict mode - fail on parse errors
+        if ! config_context_override=$(_containai_resolve_secure_engine_context "$workspace_resolved" "$explicit_config"); then
+            echo "[ERROR] Failed to parse config: $explicit_config" >&2
+            return 1
         fi
     else
         # Discovered config: suppress errors gracefully
