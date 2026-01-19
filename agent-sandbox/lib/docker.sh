@@ -88,12 +88,16 @@ _cai_timeout() {
         return $?
     fi
 
-    # No timeout mechanism available - run without timeout and warn
-    if declare -f _cai_warn >/dev/null 2>&1; then
-        _cai_warn "No timeout command available; command may hang if daemon is unresponsive"
+    # No timeout mechanism available - fail fast with actionable error
+    # Running without timeout would violate the "doesn't hang" requirement
+    if declare -f _cai_error >/dev/null 2>&1; then
+        _cai_error "No timeout command available (timeout, gtimeout, or perl required)"
+        _cai_error "  Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)"
+    else
+        echo "[ERROR] No timeout command available (timeout, gtimeout, or perl required)" >&2
+        echo "[ERROR]   Install coreutils: brew install coreutils (macOS) or apt install coreutils (Linux)" >&2
     fi
-    "$@"
-    return $?
+    return 1
 }
 
 # ==============================================================================
@@ -163,7 +167,7 @@ _cai_docker_available() {
                     _cai_error "  Ensure Docker Desktop is running, or add user to docker group"
                     ;;
                 not_running)
-                    _cai_error "Docker daemon is not running"
+                    _cai_error "Docker Desktop is not running"
                     _cai_error "  Start Docker Desktop and try again"
                     ;;
                 context)
@@ -212,18 +216,36 @@ _cai_docker_version() {
 # Outputs: Version string (e.g., "4.50.1") or empty if not Docker Desktop
 # Returns: 0=Docker Desktop detected (version output), 1=not Docker Desktop or error
 # Note: Uses timeout to avoid hanging when Docker is not running
+# Sets _CAI_DD_VERSION_ERROR for callers who need to distinguish failure modes
 _cai_docker_desktop_version() {
+    _CAI_DD_VERSION_ERROR=""
+
     if ! _cai_docker_cli_available; then
+        _CAI_DD_VERSION_ERROR="no_cli"
         return 1
     fi
 
     # Get Platform.Name which contains "Docker Desktop X.Y.Z" on Docker Desktop
     # On non-Docker Desktop (colima, docker-ce, etc) this returns different values
-    local platform_name rc
+    local platform_name rc stderr_output
+    stderr_output=$(_cai_timeout 5 docker version --format '{{.Server.Platform.Name}}' 2>&1 1>/dev/null) || true
     platform_name=$(_cai_timeout 5 docker version --format '{{.Server.Platform.Name}}' 2>/dev/null) && rc=0 || rc=$?
 
-    # Timeout or error
+    # Timeout
+    if [[ $rc -eq 124 ]]; then
+        _CAI_DD_VERSION_ERROR="timeout"
+        return 1
+    fi
+
+    # Other error - check if it's permission/daemon issue vs not Docker Desktop
     if [[ $rc -ne 0 ]]; then
+        if printf '%s' "$stderr_output" | grep -qiE "permission denied"; then
+            _CAI_DD_VERSION_ERROR="permission"
+        elif printf '%s' "$stderr_output" | grep -qiE "daemon.*not running|connection refused|Cannot connect"; then
+            _CAI_DD_VERSION_ERROR="not_running"
+        else
+            _CAI_DD_VERSION_ERROR="error"
+        fi
         return 1
     fi
 
@@ -231,6 +253,7 @@ _cai_docker_desktop_version() {
     # Examples: "Docker Desktop 4.50.0", "Docker Desktop 4.50.1 (abcdef)"
     if [[ "$platform_name" != *"Docker Desktop"* ]]; then
         # Not Docker Desktop (could be: "Docker Engine - Community", "colima", etc.)
+        _CAI_DD_VERSION_ERROR="not_docker_desktop"
         return 1
     fi
 
@@ -326,7 +349,7 @@ _cai_sandbox_feature_enabled() {
                 _cai_error "  Linux: Add user to docker group: sudo usermod -aG docker \$USER"
                 ;;
             not_running)
-                _cai_error "Docker daemon is not running"
+                _cai_error "Docker Desktop is not running"
                 _cai_error "  Start Docker Desktop and try again"
                 ;;
             context)
@@ -334,7 +357,7 @@ _cai_sandbox_feature_enabled() {
                 _cai_error "  Check DOCKER_CONTEXT / DOCKER_HOST settings"
                 ;;
             *)
-                _cai_error "Docker daemon is not accessible"
+                _cai_error "Docker Desktop is not running"
                 _cai_error "  Start Docker Desktop and try again"
                 ;;
         esac
@@ -343,13 +366,41 @@ _cai_sandbox_feature_enabled() {
 
     # Check Docker Desktop version requirement (4.50+)
     # Sandboxes are a Docker Desktop feature - require Docker Desktop
-    local dd_version
-    if ! dd_version=$(_cai_docker_desktop_version); then
-        _cai_error "Docker Sandboxes require Docker Desktop 4.50+"
-        _cai_error "  Current Docker is not Docker Desktop (colima, docker-ce, etc.)"
-        _cai_error "  Install Docker Desktop: https://www.docker.com/products/docker-desktop/"
+    # Note: Call function first to set _CAI_DD_VERSION_ERROR, then capture output
+    # (subshell capture loses the variable, so we call twice)
+    local dd_version dd_rc
+    _cai_docker_desktop_version >/dev/null 2>&1 && dd_rc=0 || dd_rc=$?
+    if [[ $dd_rc -ne 0 ]]; then
+        # Provide specific error based on what went wrong
+        case "${_CAI_DD_VERSION_ERROR:-unknown}" in
+            timeout)
+                _cai_error "Docker command timed out while checking version"
+                _cai_error "  Check Docker Desktop is responsive"
+                ;;
+            permission)
+                _cai_error "Permission denied checking Docker version"
+                _cai_error "  Ensure Docker Desktop is running and accessible"
+                ;;
+            not_running)
+                _cai_error "Docker Desktop is not running"
+                _cai_error "  Start Docker Desktop and try again"
+                ;;
+            not_docker_desktop)
+                _cai_error "Docker Sandboxes require Docker Desktop 4.50+"
+                _cai_error "  Current Docker is not Docker Desktop (colima, docker-ce, etc.)"
+                _cai_error "  Install Docker Desktop: https://www.docker.com/products/docker-desktop/"
+                ;;
+            *)
+                _cai_error "Docker Sandboxes require Docker Desktop 4.50+"
+                _cai_error "  Could not determine Docker Desktop version"
+                _cai_error "  Install Docker Desktop: https://www.docker.com/products/docker-desktop/"
+                ;;
+        esac
         return 1
     fi
+
+    # Capture the version (function succeeded, so this is safe)
+    dd_version=$(_cai_docker_desktop_version)
 
     # Parse major.minor for comparison
     local major minor

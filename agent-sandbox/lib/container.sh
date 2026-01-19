@@ -220,91 +220,23 @@ _containai_check_isolation() {
 
 # Check if docker sandbox is available
 # Returns: 0=yes, 1=no (definite), 2=unknown (fail-open with warning)
+# Note: Delegates to _cai_sandbox_feature_enabled() for actual detection logic
 _containai_check_sandbox() {
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "[ERROR] Docker is not installed or not in PATH" >&2
-        return 1
-    fi
-
-    # Check if sandbox command is available by trying to run it
-    local ls_output
-    if ls_output="$(docker sandbox ls 2>&1)"; then
+    # Delegate to the comprehensive detection in lib/docker.sh
+    # _cai_sandbox_feature_enabled handles:
+    # - Docker CLI availability
+    # - Docker daemon accessibility (with timeout)
+    # - Docker Desktop version check (4.50+)
+    # - Sandbox plugin availability
+    # - Admin policy blocks
+    # - Actionable error messages
+    if _cai_sandbox_feature_enabled; then
         return 0
     fi
 
-    # Sandbox ls failed - analyze the error to provide actionable feedback
-    if printf '%s' "$ls_output" | grep -qiE "feature.*disabled|not enabled|requirements.*not met|sandbox.*unavailable" && \
-       ! printf '%s' "$ls_output" | grep -qiE "no sandboxes"; then
-        echo "[ERROR] Docker sandbox feature is not enabled" >&2
-        echo "" >&2
-        echo "  docker sandbox ls output:" >&2
-        printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
-        echo "" >&2
-        echo "Please enable sandbox in Docker Desktop:" >&2
-        echo "  Settings > Features in development > Docker sandbox" >&2
-        echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
-        echo "" >&2
-        return 1
-    fi
-
-    if printf '%s' "$ls_output" | grep -qiE "no sandboxes found|0 sandboxes|sandbox list is empty"; then
-        echo "[WARN] docker sandbox ls returned empty list with error code" >&2
-        echo "  Attempting to proceed - sandbox may be functional." >&2
-        echo "" >&2
-        return 2
-    fi
-
-    if printf '%s' "$ls_output" | grep -qiE "not recognized|unknown command|not a docker command|command not found"; then
-        echo "[ERROR] Docker sandbox is not available" >&2
-        echo "" >&2
-        echo "  docker sandbox ls output:" >&2
-        printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
-        echo "" >&2
-        echo "Docker sandbox requires Docker Desktop 4.50+ with sandbox feature enabled." >&2
-        echo "Please ensure you have:" >&2
-        echo "  1. Docker Desktop 4.50 or later installed" >&2
-        echo "  2. Docker sandbox feature enabled in Settings > Features in development" >&2
-        echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
-        echo "" >&2
-        return 1
-    fi
-
-    if printf '%s' "$ls_output" | grep -qiE "permission denied"; then
-        echo "[ERROR] Permission denied accessing Docker" >&2
-        echo "" >&2
-        echo "  docker sandbox ls output:" >&2
-        printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
-        echo "" >&2
-        echo "Please ensure Docker is accessible:" >&2
-        echo "  Docker Desktop (macOS/Windows): Ensure Docker Desktop is running and try restarting it" >&2
-        echo "  Linux: Add your user to the 'docker' group: sudo usermod -aG docker \$USER" >&2
-        echo "         Then log out and back in, or run: newgrp docker" >&2
-        echo "" >&2
-        return 1
-    fi
-
-    if printf '%s' "$ls_output" | grep -qiE "daemon.*not running|connection refused|Is the docker daemon running"; then
-        echo "[ERROR] Docker daemon is not running" >&2
-        echo "" >&2
-        echo "  docker sandbox ls output:" >&2
-        printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
-        echo "" >&2
-        echo "Please start Docker Desktop and try again." >&2
-        echo "" >&2
-        return 1
-    fi
-
-    # Unknown error - fail OPEN with warning
-    echo "[WARN] Could not verify Docker sandbox availability" >&2
-    echo "" >&2
-    echo "  docker sandbox ls output:" >&2
-    printf '%s\n' "$ls_output" | sed 's/^/    /' >&2
-    echo "" >&2
-    echo "  Attempting to proceed - sandbox run may fail if not available." >&2
-    echo "  Ensure Docker Desktop 4.50+ is installed with sandbox feature enabled." >&2
-    echo "  See: https://docs.docker.com/desktop/features/sandbox/" >&2
-    echo "" >&2
-    return 2
+    # _cai_sandbox_feature_enabled already printed detailed error messages
+    # Return 1 for definite failure (the new function doesn't have "unknown" state)
+    return 1
 }
 
 # ==============================================================================
