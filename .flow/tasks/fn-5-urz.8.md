@@ -63,15 +63,18 @@ context_name = "containai-secure"  # or custom name
 
 ## Depends On
 
-- Task 1 spike must confirm `docker sandbox` respects `--context`
-- If spike shows context is ignored, this task needs revision
+<!-- Updated by plan-sync: fn-5-urz.1 confirmed Sysbox context works, but sandbox context is UNKNOWN -->
+- Task 1 spike (fn-5-urz.1) findings:
+  - **Sysbox context: CONFIRMED** - `docker --context X run --runtime=sysbox-runc` routes correctly
+  - **Sandbox context: UNKNOWN** - Spike blocked pending Docker Desktop 4.50+ testing
+- If Docker Desktop testing shows sandbox context is ignored, this task needs revision
 ## Acceptance
 - [ ] Auto-selects ECI path when enabled (no context flag)
 - [ ] Auto-selects Secure Engine context when ECI not available
 - [ ] Warns with actionable message when no isolation available
 - [ ] Respects config override for context name
 - [ ] Debug output shows which context was selected
-- [ ] Works correctly when spike (fn-5-urz.1) confirms context support
+- [ ] Works correctly per spike (fn-5-urz.1): Sysbox context confirmed, sandbox context pending Docker Desktop testing
 ## Done summary
 TBD
 

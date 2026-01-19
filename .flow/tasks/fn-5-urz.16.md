@@ -102,6 +102,14 @@ docker run --privileged -it containai-test
 
 The main `agent-sandbox/Dockerfile` remains unchanged for production use. This is a separate `Dockerfile.test` for testing purposes only.
 
+## Depends On
+
+<!-- Updated by plan-sync: fn-5-urz.1 Sysbox context confirmed, sandbox context UNKNOWN (blocked) -->
+- Task 1 spike (fn-5-urz.1) findings:
+  - **Sysbox context: CONFIRMED** - Sysbox in Dockerfile.test can proceed
+  - **Sandbox context: UNKNOWN** - Blocked pending Docker Desktop 4.50+ testing
+- NOTE: Spike document recommends NOT proceeding until Docker Desktop testing completes
+
 ## References
 
 - Sysbox DinD: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/dind.md

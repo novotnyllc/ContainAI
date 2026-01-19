@@ -82,6 +82,14 @@ if pgrep -x "docker-desktop" >/dev/null || docker context ls | grep -q "desktop-
 fi
 ```
 
+## Depends On
+
+<!-- Updated by plan-sync: fn-5-urz.1 Sysbox context confirmed, sandbox context UNKNOWN (blocked) -->
+- Task 1 spike (fn-5-urz.1) findings:
+  - **Sysbox context: CONFIRMED** - Native Linux Sysbox installation can proceed
+  - **Sandbox context: UNKNOWN** - Blocked pending Docker Desktop 4.50+ testing
+- NOTE: Spike document recommends NOT proceeding until Docker Desktop testing completes
+
 ## References
 
 - Sysbox install: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md

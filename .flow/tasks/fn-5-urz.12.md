@@ -54,8 +54,9 @@ uid_map=$(docker --context containai-secure run --rm alpine cat /proc/self/uid_m
 pass "User namespace enabled"
 
 section "Test 5: Sandbox runs on Secure Engine"
-# This depends on Task 1 spike result
-docker --context containai-secure sandbox run --help || warn "Sandbox may not support context"
+# Updated by plan-sync: fn-5-urz.1 confirmed Sysbox context works, sandbox context UNKNOWN
+# Sysbox context is confirmed working. Sandbox context pending Docker Desktop 4.50+ testing.
+docker --context containai-secure sandbox run --help || warn "Sandbox context support pending Docker Desktop testing (see fn-5-urz.1)"
 ```
 
 ## Platform-Specific Tests

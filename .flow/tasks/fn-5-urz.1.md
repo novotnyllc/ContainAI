@@ -32,9 +32,8 @@ Validate whether `docker sandbox run` respects Docker context selection (`--cont
 - [ ] If no: PRD updated with ECI-only fallback recommendation
 - [ ] Epic fn-5-urz updated with findings
 ## Done summary
-TBD
-
+Created spike document validating docker sandbox + context interaction. Confirmed that Sysbox mode context IS respected via unreachable endpoint tests. However, docker sandbox is Docker Desktop only and cannot be tested on Docker Engine. Spike is blocked pending Docker Desktop 4.50+ testing to verify if sandbox mode respects context.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: e33f5a4, 94332d1, 74cf7cc
+- Tests: docker context create test-unreachable, timeout 5 docker --context test-unreachable info, docker --context default info | head -3
 - PRs:

@@ -99,7 +99,11 @@ docker context create containai-secure \
 
 ## Depends On
 
-- Task 1 spike confirms `docker sandbox` respects context
+<!-- Updated by plan-sync: fn-5-urz.1 Sysbox context confirmed, sandbox context UNKNOWN (blocked) -->
+- Task 1 spike (fn-5-urz.1) findings:
+  - **Sysbox context: CONFIRMED** - Proceeds with Sysbox setup
+  - **Sandbox context: UNKNOWN** - Blocked pending Docker Desktop 4.50+ testing
+- NOTE: Spike document recommends NOT proceeding until Docker Desktop testing completes
 
 ## References
 
@@ -157,7 +161,10 @@ docker context create containai-secure \
 
 ## Depends On
 
-- Task 1 spike confirms `docker sandbox` respects context
+<!-- Updated by plan-sync: fn-5-urz.1 Sysbox context confirmed, sandbox context UNKNOWN (blocked) -->
+- Task 1 spike (fn-5-urz.1) findings:
+  - **Sysbox context: CONFIRMED** - Proceeds with Sysbox setup
+  - **Sandbox context: UNKNOWN** - Blocked pending Docker Desktop 4.50+ testing
 - Research on Sysbox WSL2 viability (GitHub issue #32)
 
 ## References

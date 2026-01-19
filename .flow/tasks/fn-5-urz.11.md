@@ -124,6 +124,14 @@ docker --context containai-secure info | grep -i sysbox
 docker context ls  # default or desktop-linux should be active
 ```
 
+## Depends On
+
+<!-- Updated by plan-sync: fn-5-urz.1 Sysbox context confirmed, sandbox context UNKNOWN (blocked) -->
+- Task 1 spike (fn-5-urz.1) findings:
+  - **Sysbox context: CONFIRMED** - Proceeds with Sysbox setup in Lima VM
+  - **Sandbox context: UNKNOWN** - Blocked pending Docker Desktop 4.50+ testing
+- NOTE: Spike document recommends NOT proceeding until Docker Desktop testing completes
+
 ## References
 
 - Lima: https://github.com/lima-vm/lima
