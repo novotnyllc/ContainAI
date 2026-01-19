@@ -8,9 +8,11 @@
 #   _containai_export  - Export data volume to .tgz archive
 #
 # Usage:
-#   source lib/config.sh
 #   source lib/export.sh
 #   _containai_export "volume-name" "" "false" "pattern1" "pattern2"
+#
+# Note: config.sh is NOT required for basic export. It's only needed if the
+# caller wants to resolve excludes from config (done by containai.sh wrapper).
 #
 # Arguments:
 #   $1 = volume name (required)
@@ -60,12 +62,12 @@ _export_validate_volume_name() {
 }
 
 # ==============================================================================
-# Color output helpers
+# Output helpers - all logs go to stderr, only archive path to stdout
 # ==============================================================================
-_export_info() { echo "[INFO] $*"; }
-_export_success() { echo "[OK] $*"; }
+_export_info() { echo "[INFO] $*" >&2; }
+_export_success() { echo "[OK] $*" >&2; }
 _export_error() { echo "[ERROR] $*" >&2; }
-_export_warn() { echo "[WARN] $*"; }
+_export_warn() { echo "[WARN] $*" >&2; }
 
 # ==============================================================================
 # Main export function
@@ -105,6 +107,12 @@ _containai_export() {
         return 1
     fi
 
+    # Check Docker daemon is reachable
+    if ! docker info >/dev/null 2>&1; then
+        _export_error "Cannot connect to Docker daemon"
+        return 1
+    fi
+
     # Check that volume exists
     if ! docker volume inspect "$volume" >/dev/null 2>&1; then
         _export_error "Volume does not exist: $volume"
@@ -137,11 +145,12 @@ _containai_export() {
     _export_info "Exporting volume '$volume' to: $output_abs_path"
 
     # Build tar exclude flags (unless --no-excludes)
+    # Note: Use separate --exclude and pattern args for BusyBox tar compatibility
     local -a tar_excludes=()
     if [[ "$no_excludes" != "true" ]] && [[ ${#excludes[@]} -gt 0 ]]; then
         local pattern
         for pattern in "${excludes[@]}"; do
-            tar_excludes+=("--exclude=$pattern")
+            tar_excludes+=(--exclude "$pattern")
         done
     fi
 
