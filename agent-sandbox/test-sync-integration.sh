@@ -25,19 +25,26 @@ DATA_VOLUME="containai-test-${TEST_RUN_ID}"
 
 IMAGE_NAME="agent-sandbox-test:latest"
 
-# Cleanup test volumes on exit
+# Track all test volumes created by THIS run for safe cleanup
+# (avoids deleting volumes from parallel test runs)
+declare -a TEST_VOLUMES_CREATED=()
+
+# Register a test volume for cleanup (call after creating any test volume)
+register_test_volume() {
+    TEST_VOLUMES_CREATED+=("$1")
+}
+
+# Cleanup only test volumes created by THIS run
 cleanup_test_volumes() {
-    # Remove the main test volume
-    docker volume rm "$DATA_VOLUME" 2>/dev/null || true
-    # Also clean any stale test volumes from previous interrupted runs
-    # Using a subshell to capture the list safely
-    local stale_volumes
-    stale_volumes=$(docker volume ls --filter "name=containai-test-" -q 2>/dev/null || true)
-    if [[ -n "$stale_volumes" ]]; then
-        echo "$stale_volumes" | xargs -r docker volume rm 2>/dev/null || true
-    fi
+    local vol
+    for vol in "${TEST_VOLUMES_CREATED[@]}"; do
+        docker volume rm "$vol" 2>/dev/null || true
+    done
 }
 trap cleanup_test_volumes EXIT
+
+# Register the main test volume
+register_test_volume "$DATA_VOLUME"
 
 # Color output helpers
 pass() { echo "[PASS] $*"; }
@@ -161,14 +168,18 @@ test_dry_run() {
         info "Output: $(echo "$dry_run_output" | head -20)"
     fi
 
-    # Create test volumes for precedence tests
-    docker volume create env-test-vol >/dev/null 2>&1 || true
-    docker volume create cli-test-vol >/dev/null 2>&1 || true
+    # Create test volumes for precedence tests (use unique run-scoped names)
+    local env_vol="containai-test-env-${TEST_RUN_ID}"
+    local cli_vol="containai-test-cli-${TEST_RUN_ID}"
+    docker volume create "$env_vol" >/dev/null 2>&1 || true
+    docker volume create "$cli_vol" >/dev/null 2>&1 || true
+    register_test_volume "$env_vol"
+    register_test_volume "$cli_vol"
 
     # Test CONTAINAI_DATA_VOLUME env var precedence
     local env_test_output env_test_exit=0
-    env_test_output=$(CONTAINAI_DATA_VOLUME="env-test-vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || env_test_exit=$?
-    if echo "$env_test_output" | grep -q "Using data volume: env-test-vol"; then
+    env_test_output=$(CONTAINAI_DATA_VOLUME="$env_vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || env_test_exit=$?
+    if echo "$env_test_output" | grep -q "Using data volume: $env_vol"; then
         pass "CONTAINAI_DATA_VOLUME env var respected"
     else
         fail "CONTAINAI_DATA_VOLUME env var not respected (exit: $env_test_exit)"
@@ -177,8 +188,8 @@ test_dry_run() {
 
     # Test --volume flag takes precedence over env var
     local cli_test_output cli_test_exit=0
-    cli_test_output=$(CONTAINAI_DATA_VOLUME="env-test-vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "cli-test-vol" --dry-run 2>&1) || cli_test_exit=$?
-    if echo "$cli_test_output" | grep -q "Using data volume: cli-test-vol"; then
+    cli_test_output=$(CONTAINAI_DATA_VOLUME="$env_vol" "$SCRIPT_DIR/sync-agent-plugins.sh" --volume "$cli_vol" --dry-run 2>&1) || cli_test_exit=$?
+    if echo "$cli_test_output" | grep -q "Using data volume: $cli_vol"; then
         pass "--volume flag takes precedence over env var"
     else
         fail "--volume flag does not take precedence over env var (exit: $cli_test_exit)"
@@ -206,26 +217,24 @@ test_dry_run() {
         info "Output: $(echo "$missing_config_output" | head -10)"
     fi
 
-    # Test config discovery from $PWD
+    # Test config discovery from $PWD (use unique run-scoped volume name)
     # Note: Must clear env vars to ensure config discovery is tested, not env precedence
     local config_test_dir config_test_output config_test_exit=0
+    local config_vol="containai-test-config-${TEST_RUN_ID}"
     config_test_dir=$(mktemp -d)
     mkdir -p "$config_test_dir/.containai"
     echo '[agent]' > "$config_test_dir/.containai/config.toml"
-    echo 'data_volume = "config-discovered-vol"' >> "$config_test_dir/.containai/config.toml"
-    docker volume create config-discovered-vol >/dev/null 2>&1 || true
+    echo "data_volume = \"$config_vol\"" >> "$config_test_dir/.containai/config.toml"
+    docker volume create "$config_vol" >/dev/null 2>&1 || true
+    register_test_volume "$config_vol"
     config_test_output=$(cd "$config_test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || config_test_exit=$?
-    if echo "$config_test_output" | grep -q "Using data volume: config-discovered-vol"; then
+    if echo "$config_test_output" | grep -q "Using data volume: $config_vol"; then
         pass "Config discovery from \$PWD works"
     else
         fail "Config discovery from \$PWD not working (exit: $config_test_exit)"
         info "Output: $(echo "$config_test_output" | head -10)"
     fi
     rm -rf "$config_test_dir"
-    docker volume rm config-discovered-vol >/dev/null 2>&1 || true
-
-    # Cleanup test volumes
-    docker volume rm env-test-vol cli-test-vol >/dev/null 2>&1 || true
 
     # Capture volume snapshot after dry-run
     local after_snapshot
@@ -606,16 +615,21 @@ EOF
 
     # Test that workspace path matching works
     # Must clear env vars to ensure config discovery is tested
-    local resolved
-    if resolved=$(cd "$test_dir/subproject" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir/subproject'" 2>&1); then
+    # Capture stdout only (stderr may contain warnings)
+    local resolved stderr_file
+    stderr_file=$(mktemp)
+    if resolved=$(cd "$test_dir/subproject" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir/subproject'" 2>"$stderr_file"); then
         if [[ "$resolved" == "$test_vol" ]]; then
             pass "Workspace path matching works"
         else
             fail "Workspace path matching returned wrong volume: $resolved (expected: $test_vol)"
+            [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
         fi
     else
         fail "Workspace path matching failed: $resolved"
+        [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
     fi
+    rm -f "$stderr_file"
 
     rm -rf "$test_dir"
 }
@@ -641,16 +655,21 @@ EOF
 
     # Test that fallback to [agent] works when no workspace matches
     # Must clear env vars to ensure config discovery is tested
-    local resolved
-    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir'" 2>&1); then
+    # Capture stdout only (stderr may contain warnings)
+    local resolved stderr_file
+    stderr_file=$(mktemp)
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "$default_vol" ]]; then
             pass "Falls back to [agent] when no workspace match"
         else
             fail "Fallback returned wrong volume: $resolved (expected: $default_vol)"
+            [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
         fi
     else
         fail "Fallback to [agent] failed: $resolved"
+        [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
     fi
+    rm -f "$stderr_file"
 
     rm -rf "$test_dir"
 }
@@ -678,16 +697,21 @@ EOF
 
     # Test that longest workspace path match wins
     # Must clear env vars to ensure config discovery is tested
-    local resolved
-    if resolved=$(cd "$test_dir/project/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir/project/subdir'" 2>&1); then
+    # Capture stdout only (stderr may contain warnings)
+    local resolved stderr_file
+    stderr_file=$(mktemp)
+    if resolved=$(cd "$test_dir/project/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir/project/subdir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "subdir-vol" ]]; then
             pass "Longest workspace path match wins"
         else
             fail "Longest match returned wrong volume: $resolved (expected: subdir-vol)"
+            [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
         fi
     else
         fail "Longest match test failed: $resolved"
+        [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
     fi
+    rm -f "$stderr_file"
 
     rm -rf "$test_dir"
 }
@@ -702,23 +726,75 @@ test_data_volume_overrides_config() {
     test_dir="/tmp/test-override-$$"
 
     mkdir -p "$test_dir/.containai"
-    cat > "$test_dir/.containai/config.toml" << 'EOF'
+    # Include BOTH [agent] AND [workspace] sections to prove CLI overrides workspace config
+    cat > "$test_dir/.containai/config.toml" << EOF
 [agent]
-data_volume = "config-vol"
+data_volume = "agent-vol"
+
+[workspace."$test_dir"]
+data_volume = "workspace-vol"
 EOF
 
-    # Test that CLI volume overrides config
+    # Test that CLI volume overrides workspace config (not just [agent])
     # Must clear env vars to ensure CLI precedence is tested
-    local resolved
-    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume 'cli-vol'" 2>&1); then
+    # Capture stdout only (stderr may contain warnings)
+    local resolved stderr_file
+    stderr_file=$(mktemp)
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume 'cli-vol'" 2>"$stderr_file"); then
         if [[ "$resolved" == "cli-vol" ]]; then
             pass "--data-volume overrides workspace config"
         else
             fail "CLI override returned wrong volume: $resolved (expected: cli-vol)"
+            [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
         fi
     else
         fail "CLI override test failed: $resolved"
+        [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
     fi
+    rm -f "$stderr_file"
+
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
+# Test 15: Relative workspace path resolution
+# ==============================================================================
+test_relative_workspace_path() {
+    section "Test 15: Relative workspace path resolution"
+
+    local test_dir rel_vol
+    test_dir="/tmp/test-relative-$$"
+    rel_vol="relative-vol-$$"
+
+    # Config uses ".." which resolves to the parent of .containai (the project root)
+    # This tests that relative paths in [workspace."<path>"] are resolved
+    # against the config file's directory
+    mkdir -p "$test_dir/.containai"
+    cat > "$test_dir/.containai/config.toml" << EOF
+[agent]
+data_volume = "default-vol"
+
+[workspace.".."]
+data_volume = "$rel_vol"
+EOF
+
+    # Test that relative workspace path ".." resolves to project root
+    # Must clear env vars to ensure config discovery is tested
+    # Capture stdout only (stderr may contain warnings)
+    local resolved stderr_file
+    stderr_file=$(mktemp)
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/aliases.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
+        if [[ "$resolved" == "$rel_vol" ]]; then
+            pass "Relative workspace path '..' resolves to project root"
+        else
+            fail "Relative workspace path returned wrong volume: $resolved (expected: $rel_vol)"
+            [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
+        fi
+    else
+        fail "Relative workspace path test failed: $resolved"
+        [[ -s "$stderr_file" ]] && info "stderr: $(cat "$stderr_file")"
+    fi
+    rm -f "$stderr_file"
 
     rm -rf "$test_dir"
 }
@@ -761,6 +837,7 @@ main() {
     test_workspace_fallback_to_agent
     test_longest_match_wins
     test_data_volume_overrides_config
+    test_relative_workspace_path
 
     # Summary
     echo ""
