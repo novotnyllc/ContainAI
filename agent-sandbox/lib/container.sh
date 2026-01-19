@@ -960,29 +960,10 @@ _containai_start_container() {
     # FR-5: Unsafe opt-ins with acknowledgements
     # New flags: --allow-host-credentials + --i-understand-this-exposes-host-credentials
     # Legacy flags: --credentials=host + --acknowledge-credential-risk (kept for compatibility)
-    # Config [danger].allow_host_credentials acts as PERMISSION (gate) not auto-enable
+    # Config [danger].allow_host_credentials is optional (for audit trail, not a gate)
 
-    # Validate --allow-host-credentials requires acknowledgement AND config permission
-    # Config [danger] section acts as a PERMISSION GATE - must be true to allow the flag
+    # Validate --allow-host-credentials requires acknowledgement
     if [[ "$allow_host_credentials" == "true" ]]; then
-        # Check if config permits this (required for CLI flag to work)
-        local config_allow_creds
-        config_allow_creds=$(_containai_resolve_danger_allow_host_credentials "${workspace:-$PWD}" "$explicit_config")
-
-        # Config must permit this flag
-        if [[ "$config_allow_creds" != "true" ]]; then
-            echo "" >&2
-            echo "[ERROR] --allow-host-credentials requires config permission" >&2
-            echo "" >&2
-            echo "Add to your .containai/config.toml:" >&2
-            echo "  [danger]" >&2
-            echo "  allow_host_credentials = true" >&2
-            echo "" >&2
-            echo "This ensures unsafe opt-ins are explicitly permitted in project config." >&2
-            echo "" >&2
-            return 1
-        fi
-
         if [[ "$ack_host_credentials" != "true" ]]; then
             echo "" >&2
             echo "[ERROR] --allow-host-credentials requires --i-understand-this-exposes-host-credentials" >&2
@@ -1041,29 +1022,10 @@ _containai_start_container() {
     # FR-5: Unsafe opt-ins for Docker socket
     # New flags: --allow-host-docker-socket + --i-understand-this-grants-root-access
     # Legacy flags: --mount-docker-socket + --please-root-my-host (kept for compatibility)
-    # Config [danger].allow_host_docker_socket acts as PERMISSION (gate) not auto-enable
+    # Config [danger].allow_host_docker_socket is optional (for audit trail, not a gate)
 
-    # Validate --allow-host-docker-socket requires acknowledgement AND config permission
-    # Config [danger] section acts as a PERMISSION GATE - must be true to allow the flag
+    # Validate --allow-host-docker-socket requires acknowledgement
     if [[ "$allow_host_docker_socket" == "true" ]]; then
-        # Check if config permits this (required for CLI flag to work)
-        local config_allow_socket
-        config_allow_socket=$(_containai_resolve_danger_allow_host_docker_socket "${workspace:-$PWD}" "$explicit_config")
-
-        # Config must permit this flag
-        if [[ "$config_allow_socket" != "true" ]]; then
-            echo "" >&2
-            echo "[ERROR] --allow-host-docker-socket requires config permission" >&2
-            echo "" >&2
-            echo "Add to your .containai/config.toml:" >&2
-            echo "  [danger]" >&2
-            echo "  allow_host_docker_socket = true" >&2
-            echo "" >&2
-            echo "This ensures unsafe opt-ins are explicitly permitted in project config." >&2
-            echo "" >&2
-            return 1
-        fi
-
         if [[ "$ack_host_docker_socket" != "true" ]]; then
             echo "" >&2
             echo "[ERROR] --allow-host-docker-socket requires --i-understand-this-grants-root-access" >&2
