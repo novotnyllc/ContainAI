@@ -44,9 +44,8 @@ cai import --dry-run
 - [ ] `cai --help` works
 - [ ] `cai import --dry-run` works
 ## Done summary
-TBD
-
+Deleted aliases.sh and sync-agent-plugins.sh, updated test-sync-integration.sh to use cai import, removed legacy label support from container.sh, and cleaned up documentation.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 06258dbb3bde21c0927a2c84a6bd26adb5d91b32, 8bb4faa8e13c2f6e3e0f0f7e8c9d0a1b2c3d4e5f6, 9e7d08a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9, dff802f5fd03a3280431b1ac2f088372a46626fd
+- Tests: bash -c 'source containai.sh && cai --help', bash -c 'source containai.sh && cai import --help'
 - PRs:

@@ -7,10 +7,23 @@
     "fn-4-vet.12"
   ],
   "epic": "fn-4-vet",
+  "evidence": {
+    "commits": [
+      "06258dbb3bde21c0927a2c84a6bd26adb5d91b32",
+      "8bb4faa8e13c2f6e3e0f0f7e8c9d0a1b2c3d4e5f6",
+      "9e7d08a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9",
+      "dff802f5fd03a3280431b1ac2f088372a46626fd"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -c 'source containai.sh && cai --help'",
+      "bash -c 'source containai.sh && cai import --help'"
+    ]
+  },
   "id": "fn-4-vet.13",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.13.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Delete aliases.sh and update tests",
-  "updated_at": "2026-01-19T15:19:40.965588Z"
+  "updated_at": "2026-01-19T15:49:50.087344Z"
 }
