@@ -311,9 +311,17 @@ _cai_eci_check_runtime() {
 # Returns: 0=ECI enabled, 1=ECI not enabled
 # Outputs: Sets _CAI_ECI_ENABLED_ERROR with detailed reason on failure
 #          Sets _CAI_ECI_DETECTION_UNCERTAIN=1 if failure was operational (not definitive)
+# Note: Requires Docker Desktop 4.29+ - returns error if not available
 _cai_eci_enabled() {
     _CAI_ECI_ENABLED_ERROR=""
     _CAI_ECI_DETECTION_UNCERTAIN=0
+
+    # Guard: ECI is only meaningful on Docker Desktop 4.29+
+    # This prevents false positives on non-DD hosts that happen to have sysbox + userns
+    if ! _cai_eci_available; then
+        _CAI_ECI_ENABLED_ERROR="not_available"
+        return 1
+    fi
 
     local uid_map_rc runtime_rc
 
@@ -365,26 +373,27 @@ _cai_eci_enabled() {
 #       Operational failures (image missing, timeout, etc.) are treated as "not_available"
 #       Use _cai_eci_status_message() for detailed diagnostics including detection failures
 _cai_eci_status() {
-    # Check if ECI is actually enabled
+    # Check availability first to avoid unnecessary container spawning on non-DD hosts
+    # _cai_eci_available is cheap (version check only), while _cai_eci_enabled spawns containers
+    if ! _cai_eci_available; then
+        printf '%s' "not_available"
+        return 0
+    fi
+
+    # Docker Desktop 4.29+ - check if ECI is actually enabled
     if _cai_eci_enabled; then
         printf '%s' "enabled"
         return 0
     fi
 
-    # Check if ECI could be available (Docker Desktop 4.29+)
-    # This only checks version - subscription tier and admin settings cannot be detected
-    if _cai_eci_available; then
-        # If detection was uncertain (operational failure), treat as not_available
-        # Callers can use _cai_eci_status_message() for detailed diagnostics
-        if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
-            printf '%s' "not_available"
-        else
-            printf '%s' "available_not_enabled"
-        fi
-        return 0
+    # ECI available but not enabled (or detection failed)
+    # If detection was uncertain (operational failure), treat as not_available
+    # Callers can use _cai_eci_status_message() for detailed diagnostics
+    if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
+        printf '%s' "not_available"
+    else
+        printf '%s' "available_not_enabled"
     fi
-
-    printf '%s' "not_available"
     return 0
 }
 
@@ -437,8 +446,14 @@ _cai_eci_status_message() {
                         ;;
                     *)
                         printf '%s\n' "  Error: ${_CAI_ECI_ENABLED_ERROR:-unknown}"
-                        if [[ -n "${_CAI_ECI_UID_MAP_DETAIL:-}" ]]; then
+                        # Print the appropriate detail based on which check failed
+                        # Prefer runtime detail for runtime_* errors, uid_map detail otherwise
+                        if [[ "${_CAI_ECI_ENABLED_ERROR:-}" == runtime_* ]] && [[ -n "${_CAI_ECI_RUNTIME_DETAIL:-}" ]]; then
+                            printf '%s\n' "  Detail: ${_CAI_ECI_RUNTIME_DETAIL}"
+                        elif [[ -n "${_CAI_ECI_UID_MAP_DETAIL:-}" ]]; then
                             printf '%s\n' "  Detail: ${_CAI_ECI_UID_MAP_DETAIL}"
+                        elif [[ -n "${_CAI_ECI_RUNTIME_DETAIL:-}" ]]; then
+                            printf '%s\n' "  Detail: ${_CAI_ECI_RUNTIME_DETAIL}"
                         fi
                         ;;
                 esac

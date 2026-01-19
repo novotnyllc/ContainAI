@@ -26,6 +26,11 @@
 #   _CONTAINAI_IMAGE              - Default image name
 #   _CONTAINAI_LABEL              - Container label for ContainAI ownership
 #
+# Dependencies:
+#   - lib/core.sh (logging functions)
+#   - lib/docker.sh (Docker availability checks)
+#   - lib/eci.sh (ECI detection functions)
+#
 # Usage: source lib/container.sh
 # ==============================================================================
 
