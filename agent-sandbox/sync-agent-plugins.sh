@@ -210,7 +210,7 @@ _sync_resolve_config_volume() {
         return 0
     fi
 
-    config_dir=$(dirname "$config_file")
+    # config_dir no longer needed for parse-toml.py
 
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
@@ -222,13 +222,13 @@ _sync_resolve_config_volume() {
         return 0
     fi
 
-    # Call parse-toml.py in workspace matching mode (workspace = $PWD)
+    # Call parse-toml.py - outputs JSON: {"data_volume": "...", "excludes": [...]}
     # Use if-construct to avoid set -e terminating on non-zero exit
     # Explicit cleanup on both paths (mirrors aliases.sh pattern)
-    local result parse_stderr
+    local json_result parse_stderr data_volume
     parse_stderr=$(mktemp)
 
-    if ! result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" --workspace "$PWD" --config-dir "$config_dir" 2>"$parse_stderr"); then
+    if ! json_result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" "$PWD" 2>"$parse_stderr"); then
         if [[ "$strict_mode" == "true" ]]; then
             echo "[ERROR] Failed to parse config file: $config_file" >&2
             if [[ -s "$parse_stderr" ]]; then
@@ -246,7 +246,12 @@ _sync_resolve_config_volume() {
     fi
 
     rm -f "$parse_stderr"
-    printf '%s' "$result"
+
+    # Extract data_volume from JSON using parameter expansion
+    data_volume="${json_result#*\"data_volume\":\"}"
+    data_volume="${data_volume%%\"*}"
+
+    printf '%s' "$data_volume"
 }
 
 # Platform guard - blocks on macOS, allows Linux/WSL only

@@ -136,17 +136,17 @@ _containai_find_config() {
 }
 
 # Parse config file for workspace matching
-# Calls parse-toml.py with workspace matching mode
-# Arguments: $1 = config file, $2 = workspace path, $3 = config dir, $4 = strict mode (optional)
+# Calls parse-toml.py with config and workspace path
+# Arguments: $1 = config file, $2 = workspace path, $3 = config dir (unused), $4 = strict mode (optional)
 # Outputs: data_volume value (or empty if not found)
 # Returns: 0 on success, 1 on parse error (in strict mode)
 # When strict=true, errors cause hard failure. When false (or omitted), errors warn and return empty.
 _containai_parse_config_for_workspace() {
     local config_file="$1"
     local workspace="$2"
-    local config_dir="$3"
+    # config_dir ($3) is no longer needed - kept for API compat
     local strict="${4:-false}"
-    local script_dir result parse_stderr
+    local script_dir result parse_stderr json_result data_volume
 
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
@@ -160,10 +160,10 @@ _containai_parse_config_for_workspace() {
 
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-    # Call parse-toml.py in workspace matching mode
+    # Call parse-toml.py - outputs JSON: {"data_volume": "...", "excludes": [...]}
     # Use if ! pattern to handle set -e safely
     parse_stderr=$(mktemp)
-    if ! result=$(python3 "$script_dir/parse-toml.py" "$config_file" --workspace "$workspace" --config-dir "$config_dir" 2>"$parse_stderr"); then
+    if ! json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>"$parse_stderr"); then
         if [[ "$strict" == "true" ]]; then
             echo "[ERROR] Failed to parse config file: $config_file" >&2
             if [[ -s "$parse_stderr" ]]; then
@@ -181,7 +181,13 @@ _containai_parse_config_for_workspace() {
     fi
 
     rm -f "$parse_stderr"
-    printf '%s' "$result"
+
+    # Extract data_volume from JSON using Python (jq may not be available)
+    # Use parameter expansion to extract value between quotes after "data_volume":
+    data_volume="${json_result#*\"data_volume\":\"}"
+    data_volume="${data_volume%%\"*}"
+
+    printf '%s' "$data_volume"
 }
 
 # Main volume resolver - determines the data volume to use
