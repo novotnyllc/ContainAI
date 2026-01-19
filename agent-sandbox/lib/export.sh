@@ -9,21 +9,20 @@
 #
 # Usage:
 #   source lib/export.sh
-#   _containai_export "volume-name" "/path/to/output.tgz" "false" "pattern1" "pattern2"
+#   excludes=("pattern1" "pattern2")
+#   _containai_export "volume-name" "/path/to/output.tgz" excludes "false"
 #
 # Note: config.sh is NOT required for basic export. It's only needed if the
 # caller wants to resolve excludes from config (done by containai.sh wrapper).
 #
-# Arguments:
+# Arguments (matching spec signature):
 #   $1 = volume name (required)
 #   $2 = output path (optional, default: ./containai-export-YYYYMMDD-HHMMSS.tgz)
-#   $3 = no_excludes flag ("true" or "false", default: "false")
-#   $@ = exclude patterns (remaining arguments after $3, applied unless no_excludes)
+#        If a directory, the default filename is appended.
+#   $3 = excludes array name (passed by reference via nameref)
+#   $4 = no_excludes flag ("true" or "false", default: "false")
 #
-# Note on signature: The spec defines `_containai_export(volume, output_path,
-# excludes_array, no_excludes)` but bash cannot pass arrays in the middle.
-# This implementation uses: volume, output_path, no_excludes, ...excludes
-# The wrapper in containai.sh should call accordingly.
+# Output: Prints absolute path to archive on stdout (logs go to stderr)
 #
 # Dependencies:
 #   - docker (for tar container)
@@ -82,16 +81,25 @@ _export_warn() { echo "[WARN] $*" >&2; }
 # Arguments:
 #   $1 = volume name (required)
 #   $2 = output path (optional, default: ./containai-export-YYYYMMDD-HHMMSS.tgz)
-#   $3 = no_excludes flag ("true" or "false", default: "false")
-#   $@ = remaining args are exclude patterns
+#        If a directory or ends with /, the default filename is appended.
+#   $3 = excludes array name (passed by reference via nameref, optional)
+#   $4 = no_excludes flag ("true" or "false", default: "false")
 # Returns: 0 on success, 1 on failure
-# Outputs: Archive path on success
+# Outputs: Absolute archive path to stdout on success
 _containai_export() {
     local volume="${1:-}"
     local output_path="${2:-}"
-    local no_excludes="${3:-false}"
-    shift 3 2>/dev/null || shift $#
-    local -a excludes=("$@")
+    local excludes_name="${3:-}"
+    local no_excludes="${4:-false}"
+
+    # Use nameref to access excludes array by name (bash 4.3+)
+    local -a excludes=()
+    if [[ -n "$excludes_name" ]]; then
+        local -n _excludes_ref="$excludes_name" 2>/dev/null || true
+        if [[ -n "${_excludes_ref+x}" ]]; then
+            excludes=("${_excludes_ref[@]}")
+        fi
+    fi
 
     # Validate required arguments
     if [[ -z "$volume" ]]; then
@@ -124,16 +132,26 @@ _containai_export() {
         return 1
     fi
 
-    # Determine output path
-    if [[ -z "$output_path" ]]; then
-        output_path="./containai-export-$(date +%Y%m%d-%H%M%S).tgz"
-    fi
+    # Default filename for auto-generated archives
+    local default_filename="containai-export-$(date +%Y%m%d-%H%M%S).tgz"
 
     # Expand leading tilde safely (without eval)
     if [[ "$output_path" == "~/"* ]]; then
         output_path="${HOME}${output_path:1}"
     elif [[ "$output_path" == "~" ]]; then
         output_path="$HOME"
+    fi
+
+    # Determine output path - handle directory vs file
+    if [[ -z "$output_path" ]]; then
+        # No path specified - use default in current directory
+        output_path="./$default_filename"
+    elif [[ -d "$output_path" ]]; then
+        # Path is an existing directory - append default filename
+        output_path="${output_path%/}/$default_filename"
+    elif [[ "$output_path" == */ ]]; then
+        # Path ends with / - treat as directory, append default filename
+        output_path="${output_path}$default_filename"
     fi
 
     # Resolve output path to absolute
@@ -164,17 +182,18 @@ _containai_export() {
 
     # Build tar exclude flags (unless --no-excludes)
     # Note: Use separate --exclude and pattern args for BusyBox tar compatibility
-    # Patterns are relative to the archive root (tar -C /data .)
-    # Normalize patterns: strip leading ./ if present, patterns match without ./
+    # With `tar -C /data .`, archived paths have leading ./ (e.g., ./claude/settings.json)
+    # Pass both forms (with and without ./) for maximum compatibility across tar versions
     local -a tar_excludes=()
     if [[ "$no_excludes" != "true" ]] && [[ ${#excludes[@]} -gt 0 ]]; then
         local pattern normalized
         for pattern in "${excludes[@]}"; do
-            # Strip leading ./ if present
+            # Strip leading ./ if present to get normalized form
             normalized="${pattern#./}"
             # Skip empty patterns
             [[ -z "$normalized" ]] && continue
-            tar_excludes+=(--exclude "$normalized")
+            # Add both forms: ./path and path for tar compatibility
+            tar_excludes+=(--exclude "./$normalized" --exclude "$normalized")
         done
     fi
 
