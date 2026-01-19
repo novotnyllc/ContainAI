@@ -19,10 +19,12 @@
 #   $1 = volume name (required)
 #   $2 = output path (optional, default: ./containai-export-YYYYMMDD-HHMMSS.tgz)
 #        If a directory, the default filename is appended.
-#   $3 = excludes array name (passed by reference via nameref)
+#   $3 = excludes array name (passed by reference, bash 3.2+ compatible)
 #   $4 = no_excludes flag ("true" or "false", default: "false")
 #
 # Output: Prints absolute path to archive on stdout (logs go to stderr)
+#
+# Requires: bash 4.0+ (for associative array support in indirect expansion)
 #
 # Dependencies:
 #   - docker (for tar container)
@@ -82,7 +84,7 @@ _export_warn() { echo "[WARN] $*" >&2; }
 #   $1 = volume name (required)
 #   $2 = output path (optional, default: ./containai-export-YYYYMMDD-HHMMSS.tgz)
 #        If a directory or ends with /, the default filename is appended.
-#   $3 = excludes array name (passed by reference via nameref, optional)
+#   $3 = excludes array name (passed by reference, optional)
 #   $4 = no_excludes flag ("true" or "false", default: "false")
 # Returns: 0 on success, 1 on failure
 # Outputs: Absolute archive path to stdout on success
@@ -92,12 +94,19 @@ _containai_export() {
     local excludes_name="${3:-}"
     local no_excludes="${4:-false}"
 
-    # Use nameref to access excludes array by name (bash 4.3+)
+    # Access excludes array by name using indirect expansion (bash 3.2+ compatible)
+    # Validate the variable name contains only safe characters
     local -a excludes=()
     if [[ -n "$excludes_name" ]]; then
-        local -n _excludes_ref="$excludes_name" 2>/dev/null || true
-        if [[ -n "${_excludes_ref+x}" ]]; then
-            excludes=("${_excludes_ref[@]}")
+        if [[ ! "$excludes_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            _export_error "Invalid excludes array name: $excludes_name"
+            return 1
+        fi
+        # Use indirect expansion to copy array elements
+        local _arr_ref="${excludes_name}[@]"
+        # Check if the array is set before expanding
+        if eval "[[ -n \"\${$excludes_name+x}\" ]]"; then
+            excludes=("${!_arr_ref}")
         fi
     fi
 
@@ -188,8 +197,9 @@ _containai_export() {
     if [[ "$no_excludes" != "true" ]] && [[ ${#excludes[@]} -gt 0 ]]; then
         local pattern normalized
         for pattern in "${excludes[@]}"; do
-            # Strip leading ./ if present to get normalized form
+            # Normalize: strip leading ./ and / to get clean relative path
             normalized="${pattern#./}"
+            normalized="${normalized#/}"
             # Skip empty patterns
             [[ -z "$normalized" ]] && continue
             # Add both forms: ./path and path for tar compatibility
@@ -204,20 +214,22 @@ _containai_export() {
     fi
     tar_cmd+=(-C /data .)
 
-    # Get current user's uid:gid for proper file ownership
+    # Get current user's uid:gid for proper file ownership after archive creation
     local user_id group_id
     user_id=$(id -u)
     group_id=$(id -g)
 
     # Run tar via docker container mounting the volume read-only
-    # Output directory is mounted for writing the archive
-    # Use --user to ensure output file is owned by invoking user
+    # Run as root to ensure all files can be read (volume may have 600/700 permissions)
+    # Then chown the output file to the invoking user
     if ! docker run --rm --network=none \
-        --user "${user_id}:${group_id}" \
+        -e "HOST_UID=${user_id}" \
+        -e "HOST_GID=${group_id}" \
+        -e "OUTPUT_FILE=/out/${output_basename}" \
         -v "${volume}:/data:ro" \
         -v "${output_dir}:/out" \
-        alpine \
-        "${tar_cmd[@]}"; then
+        alpine:latest \
+        sh -c '"${@}" && chown "${HOST_UID}:${HOST_GID}" "${OUTPUT_FILE}"' -- "${tar_cmd[@]}"; then
         _export_error "Failed to create archive"
         return 1
     fi
@@ -225,6 +237,16 @@ _containai_export() {
     # Verify archive was created
     if [[ ! -f "$output_abs_path" ]]; then
         _export_error "Archive was not created: $output_abs_path"
+        return 1
+    fi
+
+    # Validate archive integrity by listing contents
+    if ! docker run --rm --network=none \
+        -v "${output_dir}:/out:ro" \
+        alpine:latest \
+        tar -tzf "/out/${output_basename}" >/dev/null 2>&1; then
+        _export_error "Archive validation failed - archive may be corrupt: $output_abs_path"
+        rm -f "$output_abs_path"
         return 1
     fi
 
