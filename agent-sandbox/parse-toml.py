@@ -60,21 +60,28 @@ def find_workspace(config: dict, workspace: str) -> dict | None:
 
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: parse-toml.py <config> <workspace>", file=sys.stderr)
+    # Check for --format=lines option
+    format_lines = "--format=lines" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("--format=")]
+
+    if len(args) < 2:
+        print("Usage: parse-toml.py [--format=lines] <config> <workspace>", file=sys.stderr)
         sys.exit(1)
 
+    config_path = args[0]
+    workspace = args[1]
+
     try:
-        with open(sys.argv[1], "rb") as f:
+        with open(config_path, "rb") as f:
             config = tomllib.load(f)
     except FileNotFoundError:
-        print(f"Error: Config file not found: {sys.argv[1]}", file=sys.stderr)
+        print(f"Error: Config file not found: {config_path}", file=sys.stderr)
         sys.exit(1)
     except tomllib.TOMLDecodeError as e:
         print(f"Error: Invalid TOML: {e}", file=sys.stderr)
         sys.exit(1)
 
-    ws = find_workspace(config, sys.argv[2])
+    ws = find_workspace(config, workspace)
     agent = config.get("agent", {})
     default_excludes = config.get("default_excludes", [])
 
@@ -110,11 +117,18 @@ def main():
             seen[item] = True
     excludes = list(seen.keys())
 
-    # Output compact JSON (no spaces) for reliable bash parsing
-    print(json.dumps({
-        "data_volume": data_volume,
-        "excludes": excludes
-    }, separators=(",", ":")))
+    # Output format
+    if format_lines:
+        # Line-based format for bash: VOLUME=<vol> then one exclude per line
+        print(f"VOLUME={data_volume}")
+        for exc in excludes:
+            print(exc)
+    else:
+        # Compact JSON (no spaces) for reliable bash parsing
+        print(json.dumps({
+            "data_volume": data_volume,
+            "excludes": excludes
+        }, separators=(",", ":")))
 
 
 if __name__ == "__main__":
