@@ -145,7 +145,7 @@ Run Options:
   --workspace <path>    Workspace path (default: current directory)
   --name <name>         Container name (default: auto-generated)
   --restart             Force recreate container
-  --force               Skip sandbox availability check
+  --force               Skip isolation checks (for testing only)
   --detached, -d        Run in background
   --quiet, -q           Suppress verbose output
   -e, --env <VAR=val>   Set environment variable (repeatable)
@@ -266,7 +266,7 @@ Options:
   --workspace <path>    Workspace path (default: current directory)
   --name <name>         Container name (default: auto-generated)
   --restart             Force recreate container
-  --force               Skip sandbox availability check
+  --force               Skip isolation checks (for testing only)
   -q, --quiet           Suppress verbose output
   -e, --env <VAR=val>   Set environment variable (repeatable)
   -v, --volume <spec>   Extra volume mount (repeatable)
@@ -1075,6 +1075,11 @@ _containai_run_cmd() {
     local -a start_args=()
     start_args+=(--data-volume "$resolved_volume")
     start_args+=(--workspace "$resolved_workspace")
+
+    # Pass explicit config if provided (for context resolution)
+    if [[ -n "$explicit_config" ]]; then
+        start_args+=(--config "$explicit_config")
+    fi
 
     # Add volume mismatch warn for implicit volume selection
     if [[ -z "$cli_volume" ]] && [[ -z "$explicit_config" ]]; then

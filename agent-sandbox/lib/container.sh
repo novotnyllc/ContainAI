@@ -100,16 +100,25 @@ _containai_resolve_image() {
 }
 
 # Check if image exists locally
-# Arguments: $1 = image name
+# Arguments: $1 = image name, $2 = context name (optional)
 # Returns: 0 if exists, 1 if not found
 _containai_check_image() {
     local image="$1"
+    local context="${2:-}"
     local inspect_output
+    local -a docker_cmd=(docker)
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
 
-    if ! inspect_output=$(docker image inspect "$image" 2>&1); then
+    if ! inspect_output=$("${docker_cmd[@]}" image inspect "$image" 2>&1); then
         if printf '%s' "$inspect_output" | grep -qiE "no such image|not found"; then
             _cai_error "Image not found: $image"
-            _cai_info "Pull the image with: docker pull $image"
+            if [[ -n "$context" ]]; then
+                _cai_info "Pull the image with: docker --context $context pull $image"
+            else
+                _cai_info "Pull the image with: docker pull $image"
+            fi
         else
             printf '%s\n' "$inspect_output" >&2
         fi
@@ -988,8 +997,14 @@ _containai_start_container() {
         debug_mode="debug"
     fi
     if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
-        _cai_error "No isolation available. Run 'containai doctor' for setup instructions."
-        return 1
+        if [[ "$force_flag" == "true" ]]; then
+            echo "[WARN] No isolation available but --force specified. Proceeding without isolation checks." >&2
+            selected_context=""
+        else
+            _cai_error "No isolation available. Run 'containai doctor' for setup instructions."
+            _cai_error "Use --force to bypass (for testing only - not recommended)"
+            return 1
+        fi
     fi
 
     # Build docker command prefix based on context
@@ -1025,13 +1040,17 @@ _containai_start_container() {
 
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
-        # Check if container belongs to ContainAI using context-aware inspection
-        local label_val
+        # Check if container belongs to ContainAI using context-aware inspection (label or image fallback)
+        local label_val restart_image_fallback
         label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || label_val=""
         if [[ "$label_val" != "containai" ]]; then
-            echo "[ERROR] Cannot restart - container '$container_name' was not created by ContainAI" >&2
-            echo "Remove the conflicting container manually if needed: docker rm -f '$container_name'" >&2
-            return 1
+            # Fallback: check if image is from our repo (for legacy containers without label)
+            restart_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || restart_image_fallback=""
+            if [[ "$restart_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                echo "[ERROR] Cannot restart - container '$container_name' was not created by ContainAI" >&2
+                echo "Remove the conflicting container manually if needed: docker rm -f '$container_name'" >&2
+                return 1
+            fi
         fi
         if [[ "$quiet_flag" != "true" ]]; then
             echo "Stopping existing container..."
@@ -1056,12 +1075,16 @@ _containai_start_container() {
 
     # Handle shell mode with stopped container
     if [[ "$shell_flag" == "true" ]] && [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
-        # Check ownership using context-aware docker command
-        local shell_label_val
+        # Check ownership using context-aware docker command (label or image fallback)
+        local shell_label_val shell_image_fallback
         shell_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || shell_label_val=""
         if [[ "$shell_label_val" != "containai" ]]; then
-            echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
-            return 1
+            # Fallback: check if image is from our repo (for legacy containers without label)
+            shell_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || shell_image_fallback=""
+            if [[ "$shell_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
+                return 1
+            fi
         fi
         # Skip preflight checks - context selection already validated isolation
         if [[ "$quiet_flag" != "true" ]]; then
@@ -1071,21 +1094,25 @@ _containai_start_container() {
         container_state="none"
     fi
 
-    # Check image exists when creating new container
+    # Check image exists when creating new container (use selected context)
     if [[ "$container_state" == "none" ]]; then
-        if ! _containai_check_image "$resolved_image"; then
+        if ! _containai_check_image "$resolved_image" "$selected_context"; then
             return 1
         fi
     fi
 
     case "$container_state" in
         running)
-            # Check ownership using context-aware docker command
-            local running_label_val
+            # Check ownership using context-aware docker command (label or image fallback)
+            local running_label_val running_image_val
             running_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || running_label_val=""
             if [[ "$running_label_val" != "containai" ]]; then
-                echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
-                return 1
+                # Fallback: check if image is from our repo (for legacy containers without label)
+                running_image_val=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || running_image_val=""
+                if [[ "$running_image_val" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                    echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
+                    return 1
+                fi
             fi
             # Check image match using context-aware docker command
             local running_image
@@ -1129,12 +1156,16 @@ _containai_start_container() {
             fi
             ;;
         exited|created)
-            # Check ownership using context-aware docker command
-            local exited_label_val
+            # Check ownership using context-aware docker command (label or image fallback)
+            local exited_label_val exited_image_fallback
             exited_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || exited_label_val=""
             if [[ "$exited_label_val" != "containai" ]]; then
-                echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
-                return 1
+                # Fallback: check if image is from our repo (for legacy containers without label)
+                exited_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || exited_image_fallback=""
+                if [[ "$exited_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                    echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
+                    return 1
+                fi
             fi
             # Check image match using context-aware docker command
             local exited_image
