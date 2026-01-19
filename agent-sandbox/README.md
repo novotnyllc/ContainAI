@@ -34,15 +34,15 @@ source ./aliases.sh
 asb
 ```
 
-Most volumes are created automatically on first run. The `sandbox-agent-data` volume is required and must exist before starting (run `asb` to see the error message with instructions):
+The data volume (`sandbox-agent-data` by default) is created automatically on first run.
 
-**Option 1** (new users without Claude on host - creates empty volume):
+**New users** (authenticate later inside container):
 ```bash
-docker volume create sandbox-agent-data
-# Then authenticate inside the container with: claude login
+asb
+# Then run: claude login (inside the container)
 ```
 
-**Option 2** (existing Claude users on Linux/WSL - syncs plugins and settings):
+**Existing Claude users on Linux/WSL** (sync plugins and settings from host):
 ```bash
 ./sync-agent-plugins.sh
 ```
@@ -51,14 +51,16 @@ Note: sync-agent-plugins.sh syncs plugins, settings, and credentials from host t
 **Using a custom volume name:**
 ```bash
 # Via CLI flag (highest precedence)
+asb --data-volume my-custom-volume
 ./sync-agent-plugins.sh --volume my-custom-volume
 
 # Via environment variable
-CONTAINAI_DATA_VOLUME=my-custom-volume ./sync-agent-plugins.sh
+CONTAINAI_DATA_VOLUME=my-custom-volume asb
 
 # Via config file (~/.config/containai/config.toml or .containai/config.toml)
 # [agent]
 # data_volume = "my-custom-volume"
+asb --config ~/.config/containai/config.toml
 ```
 
 ## The `asb` Command
@@ -68,10 +70,12 @@ CONTAINAI_DATA_VOLUME=my-custom-volume ./sync-agent-plugins.sh
 ### Basic Usage
 
 ```bash
-asb              # Start or attach to sandbox
-asb --restart    # Force recreate container
-asb --force      # Skip sandbox availability check (not recommended)
-asb --help       # Show help
+asb                               # Start or attach to sandbox
+asb --restart                     # Force recreate container
+asb --data-volume custom-vol      # Use a specific data volume
+asb --config /path/to/config.toml # Use a specific config file
+asb --force                       # Skip sandbox availability check (not recommended)
+asb --help                        # Show help
 ```
 
 ### Container Naming
@@ -101,7 +105,13 @@ asb-stop-all     # Interactive selection to stop sandbox containers
 
 | Volume Name | Mount Point | Purpose |
 |-------------|-------------|---------|
-| `sandbox-agent-data` | `/mnt/agent-data` | Plugins and agent data (created automatically by `asb`) |
+| configurable (default: `sandbox-agent-data`) | `/mnt/agent-data` | Plugins and agent data (created automatically by `asb`) |
+
+The volume name can be configured via:
+1. `--data-volume` flag (highest precedence)
+2. `CONTAINAI_DATA_VOLUME` environment variable
+3. Config file (`[agent].data_volume` or `[workspace."<path>"].data_volume`)
+4. Default: `sandbox-agent-data`
 
 ### Used by sync scripts
 
@@ -236,21 +246,6 @@ VS Code and VS Code Insiders use separate settings directories and host paths. U
 Ensure you have:
 1. Docker Desktop 4.50 or later
 2. Docker sandbox feature enabled in Settings > Features in development
-
-### "Required volume not found"
-
-Create the required data volume using one of these options:
-
-**Option 1** (new users - authenticate later):
-```bash
-docker volume create sandbox-agent-data
-# Then run: claude login (inside the container)
-```
-
-**Option 2** (sync configs from host):
-```bash
-./sync-agent-plugins.sh  # Syncs plugins, settings, and credentials
-```
 
 ### "Image not found"
 

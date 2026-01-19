@@ -469,6 +469,14 @@ _asb_get_container_image() {
     docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || echo ""
 }
 
+# Get the data volume mounted at /mnt/agent-data from a container
+# Returns: volume name or empty if not found
+_asb_get_container_data_volume() {
+    local container_name="$1"
+    # Query mount source for /mnt/agent-data destination
+    docker inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null || echo ""
+}
+
 # Verify container was created by asb (has our label or uses our image)
 # Returns: 0=ours (label or image matches), 1=foreign (no match)
 # Falls back to image name verification if labels not supported
@@ -525,6 +533,60 @@ _asb_check_container_ownership() {
     echo "To recreate as an asb-managed sandbox container, run: asb --restart" >&2
     echo "" >&2
     return 1
+}
+
+# Ensure a volume exists, creating it if necessary
+# Arguments: $1 = volume name, $2 = quiet flag (optional, default false)
+# Returns: 0 on success, 1 on failure
+_asb_ensure_volume() {
+    local volume_name="$1"
+    local quiet="${2:-false}"
+
+    if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
+        if [[ "$quiet" != "true" ]]; then
+            echo "Creating volume: $volume_name"
+        fi
+        if ! docker volume create "$volume_name" >/dev/null; then
+            echo "[ERROR] Failed to create volume $volume_name" >&2
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Check if container's mounted volume matches the desired volume
+# Arguments: $1 = container name, $2 = desired volume name, $3 = quiet flag
+# Returns: 0 if match or no mount found, 1 if mismatch (with warning)
+_asb_check_volume_match() {
+    local container_name="$1"
+    local desired_volume="$2"
+    local quiet_flag="$3"
+    local mounted_volume
+
+    mounted_volume=$(_asb_get_container_data_volume "$container_name")
+
+    # If no volume mount found, don't block (might be legacy container)
+    if [[ -z "$mounted_volume" ]]; then
+        return 0
+    fi
+
+    # Check for mismatch
+    if [[ "$mounted_volume" != "$desired_volume" ]]; then
+        echo "[WARN] Volume mismatch for container '$container_name'" >&2
+        echo "" >&2
+        echo "  Container uses volume: $mounted_volume" >&2
+        echo "  Workspace expects:     $desired_volume" >&2
+        echo "" >&2
+        echo "The container was created with a different workspace/config." >&2
+        echo "To use the correct volume, recreate the container:" >&2
+        echo "  asb --restart" >&2
+        echo "Or specify a different container name:" >&2
+        echo "  asb --name <unique-name>" >&2
+        echo "" >&2
+        return 1
+    fi
+
+    return 0
 }
 
 # Print help for asb/asbd
@@ -860,11 +922,24 @@ asb() {
         fi
     fi
 
+    # Resolve data volume early (needed for both new containers and mismatch detection)
+    local resolved_volume workspace_for_resolve
+    workspace_for_resolve="${workspace:-$PWD}"
+    if ! resolved_volume=$(_containai_resolve_volume "$data_volume" "$workspace_for_resolve" "$config_file"); then
+        echo "[ERROR] Failed to resolve data volume" >&2
+        return 1
+    fi
+
     case "$container_state" in
         running)
             # Verify this container was created by asb (has our label or image)
             if ! _asb_check_container_ownership "$container_name"; then
                 return 1
+            fi
+            # Check for volume mismatch (warns but doesn't block)
+            if ! _asb_check_volume_match "$container_name" "$resolved_volume" "$quiet_flag"; then
+                # User was warned, but we proceed with existing container
+                :
             fi
             # Warn if sandbox unavailable (non-blocking for running containers)
             local sandbox_rc
@@ -891,6 +966,11 @@ asb() {
             if ! _asb_check_container_ownership "$container_name"; then
                 return 1
             fi
+            # Check for volume mismatch (warns but doesn't block)
+            if ! _asb_check_volume_match "$container_name" "$resolved_volume" "$quiet_flag"; then
+                # User was warned, but we proceed with existing container
+                :
+            fi
             # Check sandbox availability before starting
             if ! _asb_preflight_checks "$force_flag"; then
                 return 1
@@ -906,24 +986,9 @@ asb() {
                 return 1
             fi
 
-            # Resolve data volume (uses CLI flag, env var, config, or default)
-            local resolved_volume workspace_for_resolve
-            workspace_for_resolve="${workspace:-$PWD}"
-            resolved_volume=$(_containai_resolve_volume "$data_volume" "$workspace_for_resolve" "$config_file")
-            if [[ $? -ne 0 ]]; then
-                echo "[ERROR] Failed to resolve data volume" >&2
+            # Ensure resolved volume exists (resolved_volume set before case statement)
+            if ! _asb_ensure_volume "$resolved_volume" "$quiet_flag"; then
                 return 1
-            fi
-
-            # Ensure resolved volume exists
-            if ! docker volume inspect "$resolved_volume" >/dev/null 2>&1; then
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "Creating volume: $resolved_volume"
-                fi
-                if ! docker volume create "$resolved_volume" >/dev/null; then
-                    echo "[ERROR] Failed to create volume $resolved_volume" >&2
-                    return 1
-                fi
             fi
 
             # Build volume arguments with resolved volume
