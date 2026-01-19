@@ -152,18 +152,17 @@ Run Options:
   -- <args>             Pass arguments to agent
 
 Security Options (FR-5 Unsafe Opt-ins):
-  --allow-host-credentials        Enable host credential sharing (requires ack)
-  --i-understand-this-exposes-host-credentials
-                                  Required acknowledgement for --allow-host-credentials
-  --allow-host-docker-socket      Mount Docker socket (requires ack)
-  --i-understand-this-grants-root-access
-                                  Required acknowledgement for --allow-host-docker-socket
+  --allow-host-credentials        Enable host credential sharing (ECI mode only)
+      RISKS: Exposes ~/.ssh, ~/.gitconfig, API tokens to sandbox
+      Requires: --i-understand-this-exposes-host-credentials
 
-  Legacy security options (deprecated, use above instead):
-  --credentials <mode>            Credential mode (none, host; default: none)
-  --acknowledge-credential-risk   Required when using --credentials=host
-  --mount-docker-socket           Mount Docker socket (DANGEROUS)
-  --please-root-my-host           Acknowledge Docker socket danger
+  --allow-host-docker-socket      Mount Docker socket (ECI mode only)
+      RISKS: Full root access, sandbox escape, host compromise
+      Requires: --i-understand-this-grants-root-access
+
+  Legacy (deprecated):
+  --credentials host              Use --allow-host-credentials instead
+  --mount-docker-socket           Use --allow-host-docker-socket instead
 
 Global Options:
   -h, --help            Show help (use with subcommand for subcommand help)
@@ -282,12 +281,13 @@ Options:
   -h, --help            Show this help message
 
 Security Options (FR-5 Unsafe Opt-ins):
-  --allow-host-credentials        Enable host credential sharing (requires ack)
-  --i-understand-this-exposes-host-credentials
-                                  Required acknowledgement for --allow-host-credentials
-  --allow-host-docker-socket      Mount Docker socket (requires ack)
-  --i-understand-this-grants-root-access
-                                  Required acknowledgement for --allow-host-docker-socket
+  --allow-host-credentials        Enable host credential sharing (ECI mode only)
+      RISKS: Exposes ~/.ssh, ~/.gitconfig, API tokens to sandbox
+      Requires: --i-understand-this-exposes-host-credentials
+
+  --allow-host-docker-socket      Mount Docker socket (ECI mode only)
+      RISKS: Full root access, sandbox escape, host compromise
+      Requires: --i-understand-this-grants-root-access
 
 Examples:
   cai shell                    Open shell in default sandbox
@@ -1132,16 +1132,11 @@ _containai_run_cmd() {
     local resolved_agent
     resolved_agent=$(_containai_resolve_agent "$agent" "$resolved_workspace" "$explicit_config")
 
-    # Determine if credential risk is acknowledged (for config resolution)
-    local ack_risk_flag=""
-    if [[ -n "$acknowledge_credential_risk" ]]; then
-        ack_risk_flag="true"
-    fi
-
     # Resolve credentials (CLI > env > config > default)
-    # Note: config credentials.mode=host requires --acknowledge-credential-risk on CLI
+    # Note: config credentials.mode=host is NEVER honored - CLI --credentials=host required
+    # The 4th parameter is unused but kept for API compatibility
     local resolved_credentials
-    resolved_credentials=$(_containai_resolve_credentials "$credentials" "$resolved_workspace" "$explicit_config" "$ack_risk_flag")
+    resolved_credentials=$(_containai_resolve_credentials "$credentials" "$resolved_workspace" "$explicit_config" "")
 
     # Build args for _containai_start_container
     local -a start_args=()

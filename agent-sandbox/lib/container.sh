@@ -960,19 +960,17 @@ _containai_start_container() {
     # FR-5: Unsafe opt-ins with acknowledgements
     # New flags: --allow-host-credentials + --i-understand-this-exposes-host-credentials
     # Legacy flags: --credentials=host + --acknowledge-credential-risk (kept for compatibility)
-    # Config [danger].allow_host_credentials can pre-enable but CLI ack is still required
-
-    # Resolve allow_host_credentials from config if not already set via CLI
-    if [[ "$allow_host_credentials" != "true" ]]; then
-        local config_allow_creds
-        config_allow_creds=$(_containai_resolve_danger_allow_host_credentials "${workspace:-$PWD}" "$explicit_config")
-        if [[ "$config_allow_creds" == "true" ]]; then
-            allow_host_credentials=true
-        fi
-    fi
+    # Config [danger].allow_host_credentials acts as PERMISSION (gate) not auto-enable
 
     # Validate --allow-host-credentials requires acknowledgement
+    # Config [danger] section only PERMITS the flag - doesn't auto-enable it
     if [[ "$allow_host_credentials" == "true" ]]; then
+        # Check if config permits this (only consulted when CLI flag is used)
+        local config_allow_creds
+        config_allow_creds=$(_containai_resolve_danger_allow_host_credentials "${workspace:-$PWD}" "$explicit_config")
+        # Config can deny even if CLI flag is passed (but we don't implement deny-only yet)
+        # For now, config is purely informational for audit trail
+
         if [[ "$ack_host_credentials" != "true" ]]; then
             echo "" >&2
             echo "[ERROR] --allow-host-credentials requires --i-understand-this-exposes-host-credentials" >&2
@@ -990,14 +988,11 @@ _containai_start_container() {
         fi
         # Override credentials to host when using the new flag
         credentials="host"
-        # Print warning even with acknowledgement
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "[WARN] Running with host credentials - ~/.ssh, ~/.gitconfig, and other credentials are accessible" >&2
-        fi
+        # Warning will be printed after context selection (ECI-only check)
     fi
 
     # Legacy path: --credentials=host with --acknowledge-credential-risk
-    # Keep backward compatibility
+    # Keep backward compatibility - independent of [danger] config section
     if [[ "$credentials" == "host" && "$allow_host_credentials" != "true" ]]; then
         if [[ "$acknowledge_credential_risk" != "true" ]]; then
             echo "" >&2
@@ -1013,10 +1008,7 @@ _containai_start_container() {
             echo "" >&2
             return 1
         fi
-        # Print warning even with acknowledgement
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "[WARN] Running with host credentials - ~/.ssh, ~/.gitconfig, and other credentials are accessible" >&2
-        fi
+        # Warning will be printed after context selection (ECI-only check)
     fi
 
     # Validate credentials mode (FR-4: safe defaults)
@@ -1037,19 +1029,17 @@ _containai_start_container() {
     # FR-5: Unsafe opt-ins for Docker socket
     # New flags: --allow-host-docker-socket + --i-understand-this-grants-root-access
     # Legacy flags: --mount-docker-socket + --please-root-my-host (kept for compatibility)
-    # Config [danger].allow_host_docker_socket can pre-enable but CLI ack is still required
-
-    # Resolve allow_host_docker_socket from config if not already set via CLI
-    if [[ "$allow_host_docker_socket" != "true" ]]; then
-        local config_allow_socket
-        config_allow_socket=$(_containai_resolve_danger_allow_host_docker_socket "${workspace:-$PWD}" "$explicit_config")
-        if [[ "$config_allow_socket" == "true" ]]; then
-            allow_host_docker_socket=true
-        fi
-    fi
+    # Config [danger].allow_host_docker_socket acts as PERMISSION (gate) not auto-enable
 
     # Validate --allow-host-docker-socket requires acknowledgement
+    # Config [danger] section only PERMITS the flag - doesn't auto-enable it
     if [[ "$allow_host_docker_socket" == "true" ]]; then
+        # Check if config permits this (only consulted when CLI flag is used)
+        local config_allow_socket
+        config_allow_socket=$(_containai_resolve_danger_allow_host_docker_socket "${workspace:-$PWD}" "$explicit_config")
+        # Config can deny even if CLI flag is passed (but we don't implement deny-only yet)
+        # For now, config is purely informational for audit trail
+
         if [[ "$ack_host_docker_socket" != "true" ]]; then
             echo "" >&2
             echo "[ERROR] --allow-host-docker-socket requires --i-understand-this-grants-root-access" >&2
@@ -1070,14 +1060,11 @@ _containai_start_container() {
         fi
         # Enable the underlying flag
         mount_docker_socket=true
-        # Print warning even with acknowledgement
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "[WARN] Docker socket mounted - sandbox isolation is BYPASSED, root access to host is possible" >&2
-        fi
+        # Warning will be printed after context selection (ECI-only check)
     fi
 
     # Legacy path: --mount-docker-socket with --please-root-my-host
-    # Keep backward compatibility
+    # Keep backward compatibility - independent of [danger] config section
     if [[ "$mount_docker_socket" == "true" && "$allow_host_docker_socket" != "true" ]]; then
         if [[ "$please_root_my_host" != "true" ]]; then
             echo "" >&2
@@ -1091,10 +1078,7 @@ _containai_start_container() {
             echo "" >&2
             return 1
         fi
-        # Print warning even with acknowledgement
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "[WARN] Docker socket mounted - sandbox isolation is BYPASSED, root access to host is possible" >&2
-        fi
+        # Warning will be printed after context selection (ECI-only check)
     fi
 
     # Resolve image based on agent and optional tag override
@@ -1153,6 +1137,37 @@ _containai_start_container() {
     local -a docker_cmd=(docker)
     if [[ -n "$selected_context" ]]; then
         docker_cmd=(docker --context "$selected_context")
+    fi
+
+    # FR-5: Unsafe opts are ECI-only - error if used with Sysbox mode
+    # --credentials=host and --mount-docker-socket are docker sandbox features
+    if [[ -n "$selected_context" ]]; then
+        if [[ "$credentials" == "host" ]]; then
+            echo "" >&2
+            echo "[ERROR] --credentials=host / --allow-host-credentials is only supported in ECI mode (Docker Desktop)" >&2
+            echo "" >&2
+            echo "Current mode: Sysbox (context: $selected_context)" >&2
+            echo "Host credential sharing requires 'docker sandbox run' which is an ECI feature." >&2
+            echo "" >&2
+            return 1
+        fi
+        if [[ "$mount_docker_socket" == "true" ]]; then
+            echo "" >&2
+            echo "[ERROR] --mount-docker-socket / --allow-host-docker-socket is only supported in ECI mode (Docker Desktop)" >&2
+            echo "" >&2
+            echo "Current mode: Sysbox (context: $selected_context)" >&2
+            echo "Docker socket mounting requires 'docker sandbox run' which is an ECI feature." >&2
+            echo "" >&2
+            return 1
+        fi
+    else
+        # ECI mode - print warnings for unsafe opts (after mode validation)
+        if [[ "$credentials" == "host" ]]; then
+            echo "[WARN] Running with host credentials - ~/.ssh, ~/.gitconfig, and other credentials are accessible" >&2
+        fi
+        if [[ "$mount_docker_socket" == "true" ]]; then
+            echo "[WARN] Docker socket mounted - sandbox isolation is BYPASSED, root access to host is possible" >&2
+        fi
     fi
 
     # Get container name
