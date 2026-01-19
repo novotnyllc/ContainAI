@@ -39,3 +39,9 @@ grep -v with empty input fails under set -euo pipefail; use sed -e '/pattern/d' 
 
 ## 2026-01-19 manual [pitfall]
 Functions returning non-zero for valid control flow (not just errors) need if/else guards for set -e: if func; then rc=0; else rc=$?; fi
+
+## 2026-01-19 manual [pitfall]
+Bash read command returns non-zero on EOF; guard with 'if ! read -r var; then' for set -e safety
+
+## 2026-01-19 manual [pitfall]
+base64 -w0 is not portable (BSD/macOS lacks -w flag); use 'base64 | tr -d \n' for cross-platform encoding
