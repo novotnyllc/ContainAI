@@ -13,7 +13,7 @@
 #   _containai_export "volume-name" "/path/to/output.tgz" my_excludes "false"
 #
 # Note: config.sh is NOT required for basic export. It's only needed if the
-# caller wants to resolve excludes from config (done by containai.sh wrapper).
+# caller wants to resolve excludes from config (done by the CLI wrapper).
 #
 # Arguments (matching spec signature):
 #   $1 = volume name (required)
@@ -110,8 +110,9 @@ _containai_export() {
         fi
         # Use indirect expansion to copy array elements
         local _arr_ref="${excludes_array_name}[@]"
-        # Check if the array is set before expanding
-        if eval "[[ -n \"\${$excludes_array_name+x}\" ]]"; then
+        # Check if the variable is set before expanding (avoids unbound variable error)
+        # Use declare -p to test existence without eval
+        if declare -p "$excludes_array_name" >/dev/null 2>&1; then
             excludes=("${!_arr_ref}")
         fi
     fi
@@ -187,6 +188,12 @@ _containai_export() {
     fi
     output_abs_path="$output_dir/$output_basename"
 
+    # Track whether the output file existed before (for safe cleanup on failure)
+    local output_existed_before=false
+    if [[ -e "$output_abs_path" ]]; then
+        output_existed_before=true
+    fi
+
     _export_info "Exporting volume '$volume' to: $output_abs_path"
 
     # Build tar exclude flags (unless --no-excludes)
@@ -222,14 +229,15 @@ _containai_export() {
     # Run tar via docker container mounting the volume read-only
     # Run as root to ensure all files can be read (volume may have 600/700 permissions)
     # Attempt to chown output file to invoking user (best-effort, may fail on Docker Desktop)
+    # Note: Use subshell grouping so only chown is best-effort, tar errors propagate
     if ! docker run --rm --network=none \
         -e "HOST_UID=${user_id}" \
         -e "HOST_GID=${group_id}" \
         -e "OUTPUT_FILE=/out/${output_basename}" \
         -v "${volume}:/data:ro" \
         -v "${output_dir}:/out" \
-        alpine:latest \
-        sh -c '"${@}" && chown "${HOST_UID}:${HOST_GID}" "${OUTPUT_FILE}" 2>/dev/null || true' -- "${tar_cmd[@]}"; then
+        alpine:3.20 \
+        sh -c '"${@}" && (chown "${HOST_UID}:${HOST_GID}" "${OUTPUT_FILE}" 2>/dev/null || true)' -- "${tar_cmd[@]}"; then
         _export_error "Failed to create archive"
         return 1
     fi
@@ -243,10 +251,14 @@ _containai_export() {
     # Validate archive integrity by listing contents
     if ! docker run --rm --network=none \
         -v "${output_dir}:/out:ro" \
-        alpine:latest \
+        alpine:3.20 \
         tar -tzf "/out/${output_basename}" >/dev/null 2>&1; then
         _export_error "Archive validation failed - archive may be corrupt: $output_abs_path"
-        rm -f "$output_abs_path"
+        # Only remove the file if WE created it (it didn't exist before)
+        # Never delete pre-existing user files
+        if [[ "$output_existed_before" != "true" ]]; then
+            rm -f "$output_abs_path"
+        fi
         return 1
     fi
 
