@@ -27,13 +27,17 @@ To enable Docker sandbox:
 # Build the image
 ./build.sh
 
-# Source aliases (adds cai/containai commands)
+# Source ContainAI CLI (adds cai/containai commands)
 # Note: requires bash (not zsh or other shells)
-source ./aliases.sh
+source ./containai.sh
 
 # Start sandbox
 cai
 ```
+
+> **Note:** `containai.sh` is the recommended entry point. It sources the modular
+> libraries (`lib/*.sh`) when available, falling back to `aliases.sh` for
+> backward compatibility. The older `source ./aliases.sh` still works but is deprecated.
 
 The data volume (`sandbox-agent-data` by default) is created automatically on first run.
 
