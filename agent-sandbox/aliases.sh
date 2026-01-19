@@ -37,7 +37,8 @@ _CONTAINAI_DEFAULT_VOLUME="sandbox-agent-data"
 # Deprecation warning for asb* commands
 # ==============================================================================
 # Track if deprecation warning has been shown this session
-_containai_deprecation_warned=""
+# Only initialize if unset so re-sourcing doesn't reset state
+: "${_containai_deprecation_warned:=}"
 
 # Show deprecation warning for asb commands (one-time per session)
 # Can be suppressed by setting CONTAINAI_NO_DEPRECATION_WARNING=1
@@ -657,6 +658,10 @@ _asb_print_help() {
     echo "  -w, --workspace string      Workspace path (default \".\")"
     echo "  -h, --help                  Show this help"
     echo ""
+    echo "Volume Selection:"
+    echo "  Volume is automatically selected based on workspace path from config."
+    echo "  Use --data-volume to override automatic selection."
+    echo ""
     echo "Related Commands:"
     echo "  cai-stop-all                Stop all sandbox containers"
     echo "  cai-shell                   Open shell in running sandbox"
@@ -830,7 +835,7 @@ _asb_impl() {
                 ;;
             *)
                 echo "[ERROR] Unknown option: $1" >&2
-                echo "Use 'asb --help' for usage" >&2
+                echo "Use 'containai --help' for usage" >&2
                 return 1
                 ;;
         esac
@@ -1181,32 +1186,64 @@ cai() {
 
 # containai-stop-all - stop sandbox containers
 containai-stop-all() {
-    asb-stop-all "$@"
+    _asb_stop_all_impl "$@"
 }
 
 # cai-stop-all - stop sandbox containers
 cai-stop-all() {
-    asb-stop-all "$@"
+    _asb_stop_all_impl "$@"
 }
 
 # containai-shell - open shell in sandbox
 containai-shell() {
-    asb-shell "$@"
+    # Check for help flag first
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+            _asb_shell_print_help
+            return 0
+        fi
+    done
+    _asb_impl --shell "$@"
 }
 
 # cai-shell - open shell in sandbox
 cai-shell() {
-    asb-shell "$@"
+    # Check for help flag first
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+            _asb_shell_print_help
+            return 0
+        fi
+    done
+    _asb_impl --shell "$@"
 }
 
 # containaid - run in detached mode
 containaid() {
-    asbd "$@"
+    # Check for help flag first
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+            _asb_print_help false true
+            return 0
+        fi
+    done
+    _asb_impl --detached "$@"
 }
 
 # caid - run in detached mode
 caid() {
-    asbd "$@"
+    # Check for help flag first
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+            _asb_print_help false true
+            return 0
+        fi
+    done
+    _asb_impl --detached "$@"
 }
 
 # ==============================================================================
@@ -1220,8 +1257,8 @@ asb() {
     _asb_impl "$@"
 }
 
-# Interactive container stop selection
-asb-stop-all() {
+# Interactive container stop selection - implementation
+_asb_stop_all_impl() {
     local containers labeled_containers ancestor_containers
 
     # Find containers by label (preferred, works across rebuilds)
@@ -1290,8 +1327,15 @@ asb-stop-all() {
     echo "Done."
 }
 
-# Agent Sandbox Detached - wrapper that always runs detached
+# asb-stop-all - deprecated, shows warning then calls implementation
+asb-stop-all() {
+    _containai_deprecation_check
+    _asb_stop_all_impl "$@"
+}
+
+# Agent Sandbox Detached - deprecated, shows warning then runs detached
 asbd() {
+    _containai_deprecation_check
     # Check for help flag first
     local arg
     for arg in "$@"; do
@@ -1300,8 +1344,8 @@ asbd() {
             return 0
         fi
     done
-    # Pass all args to asb with --detached
-    asb --detached "$@"
+    # Pass all args to implementation with --detached
+    _asb_impl --detached "$@"
 }
 
 # Print help for cai-shell/containai-shell/asb-shell/asbs
@@ -1332,8 +1376,9 @@ _asb_shell_print_help() {
     echo "  -h, --help                  Show this help"
 }
 
-# Agent Sandbox Shell - start sandbox with interactive shell
+# Agent Sandbox Shell - deprecated, shows warning then starts with shell
 asb-shell() {
+    _containai_deprecation_check
     # Check for help flag first
     local arg
     for arg in "$@"; do
@@ -1342,8 +1387,8 @@ asb-shell() {
             return 0
         fi
     done
-    # Pass all args to asb with --shell
-    asb --shell "$@"
+    # Pass all args to implementation with --shell
+    _asb_impl --shell "$@"
 }
 
 # Alias: asbs = asb-shell

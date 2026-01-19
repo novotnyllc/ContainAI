@@ -262,9 +262,8 @@ Optionally rename internal `_asb_*` functions to `_containai_*` for consistency.
 - [ ] `cai` does NOT show deprecation warning
 - [ ] Help text shows volume selection is automatic by workspace
 ## Done summary
-TBD
-
+Added containai and cai as primary CLI aliases for all agent-sandbox commands. The asb* commands remain functional but now show a one-time deprecation warning per shell session that can be suppressed via CONTAINAI_NO_DEPRECATION_WARNING=1. Updated help text to document all aliases with appropriate deprecation markers.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 46722d773e65c2f19c049b2538ea774df44cda88
+- Tests: bash -n aliases.sh (syntax check), source aliases.sh && type containai (function defined), cai --help (no deprecation warning), asb --help (shows warning once), CONTAINAI_NO_DEPRECATION_WARNING=1 asb --help (suppresses warning)
 - PRs:

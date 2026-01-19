@@ -820,8 +820,8 @@ show_summary() {
     echo ""
     echo "To use the sandbox with plugins:"
     echo ""
-    echo "  asb                                   # Start with plugins"
-    echo "  asbd                                   # Start detached with plugins"
+    echo "  cai                                   # Start with plugins"
+    echo "  caid                                  # Start detached with plugins"
     echo ""
 
 

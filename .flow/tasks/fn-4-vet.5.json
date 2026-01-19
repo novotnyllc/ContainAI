@@ -7,10 +7,23 @@
     "fn-4-vet.4"
   ],
   "epic": "fn-4-vet",
+  "evidence": {
+    "commits": [
+      "46722d773e65c2f19c049b2538ea774df44cda88"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n aliases.sh (syntax check)",
+      "source aliases.sh && type containai (function defined)",
+      "cai --help (no deprecation warning)",
+      "asb --help (shows warning once)",
+      "CONTAINAI_NO_DEPRECATION_WARNING=1 asb --help (suppresses warning)"
+    ]
+  },
   "id": "fn-4-vet.5",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.5.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Add containai and cai CLI aliases",
-  "updated_at": "2026-01-19T09:59:14.683428Z"
+  "updated_at": "2026-01-19T10:02:51.817288Z"
 }
