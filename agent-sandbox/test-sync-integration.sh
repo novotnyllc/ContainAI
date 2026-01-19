@@ -177,8 +177,9 @@ test_dry_run() {
     fi
 
     # Test explicit --config with missing file fails
+    # Note: Must clear env vars to ensure config parsing is attempted
     local missing_config_output missing_config_exit=0
-    missing_config_output=$("$SCRIPT_DIR/sync-agent-plugins.sh" --config "/nonexistent/config.toml" --dry-run 2>&1) || missing_config_exit=$?
+    missing_config_output=$(env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG "$SCRIPT_DIR/sync-agent-plugins.sh" --config "/nonexistent/config.toml" --dry-run 2>&1) || missing_config_exit=$?
     if [[ $missing_config_exit -ne 0 ]] && echo "$missing_config_output" | grep -q "Config file not found"; then
         pass "Explicit --config with missing file fails with error"
     else
