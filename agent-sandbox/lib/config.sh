@@ -209,6 +209,8 @@ _containai_parse_config() {
     # Reset globals
     _CAI_VOLUME=""
     _CAI_EXCLUDES=()
+    _CAI_AGENT=""
+    _CAI_CREDENTIALS=""
 
     # Check if config file exists
     if [[ ! -f "$config_file" ]]; then
@@ -299,6 +301,28 @@ print(config.get('agent', {}).get('data_volume', ''))
 ")
     fi
     _CAI_VOLUME="$vol"
+
+    # Extract agent default from config (agent.default or just 'agent' if string)
+    local agent_default=""
+    agent_default=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+agent_section = config.get('agent', {})
+if isinstance(agent_section, dict):
+    print(agent_section.get('default', ''))
+")
+    _CAI_AGENT="$agent_default"
+
+    # Extract credentials.mode from config
+    local creds_mode=""
+    creds_mode=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+creds = config.get('credentials', {})
+if isinstance(creds, dict):
+    print(creds.get('mode', ''))
+")
+    _CAI_CREDENTIALS="$creds_mode"
 
     # Extract excludes with cumulative merge (pass JSON via stdin):
     # default_excludes + workspace.<key>.excludes (deduped)
@@ -481,6 +505,147 @@ _containai_resolve_excludes() {
     for exclude in "${_CAI_EXCLUDES[@]}"; do
         printf '%s\n' "$exclude"
     done
+}
+
+# ==============================================================================
+# Agent resolution
+# ==============================================================================
+
+# Resolve agent from CLI or config
+# Arguments: $1 = CLI --agent value (optional)
+#            $2 = workspace path (default: $PWD)
+#            $3 = explicit config path (optional)
+# Outputs: agent name (claude, gemini, etc.)
+# Precedence:
+#   1. --agent CLI flag
+#   2. CONTAINAI_AGENT env var
+#   3. Config file [agent].default
+#   4. Default: claude
+_containai_resolve_agent() {
+    local cli_agent="${1:-}"
+    local workspace="${2:-$PWD}"
+    local explicit_config="${3:-}"
+    local config_file
+
+    # 1. CLI flag always wins
+    if [[ -n "$cli_agent" ]]; then
+        printf '%s' "$cli_agent"
+        return 0
+    fi
+
+    # 2. Environment variable
+    if [[ -n "${CONTAINAI_AGENT:-}" ]]; then
+        printf '%s' "$CONTAINAI_AGENT"
+        return 0
+    fi
+
+    # 3. Resolve workspace to absolute path
+    if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
+        workspace="$PWD"
+    fi
+
+    # 4. Find and parse config file
+    if [[ -n "$explicit_config" ]]; then
+        if [[ ! -f "$explicit_config" ]]; then
+            # Config not found, fall through to default
+            printf '%s' "claude"
+            return 0
+        fi
+        config_file="$explicit_config"
+    else
+        config_file=$(_containai_find_config "$workspace")
+    fi
+
+    if [[ -n "$config_file" ]]; then
+        local strict_mode=""
+        if [[ -n "$explicit_config" ]]; then
+            strict_mode="strict"
+        fi
+        if _containai_parse_config "$config_file" "$workspace" "$strict_mode"; then
+            if [[ -n "$_CAI_AGENT" ]]; then
+                printf '%s' "$_CAI_AGENT"
+                return 0
+            fi
+        fi
+    fi
+
+    # 5. Default
+    printf '%s' "claude"
+}
+
+# ==============================================================================
+# Credentials resolution
+# ==============================================================================
+
+# Resolve credentials mode from CLI or config
+# Arguments: $1 = CLI --credentials value (optional)
+#            $2 = workspace path (default: $PWD)
+#            $3 = explicit config path (optional)
+# Outputs: credentials mode (none, host)
+# Precedence:
+#   1. --credentials CLI flag
+#   2. CONTAINAI_CREDENTIALS env var
+#   3. Config file [credentials].mode (ONLY if CLI --acknowledge-credential-risk is provided)
+#   4. Default: none
+# Note: Config credentials.mode=host is IGNORED unless CLI --acknowledge-credential-risk is set
+#       This ensures users cannot accidentally enable host credentials via config alone
+_containai_resolve_credentials() {
+    local cli_credentials="${1:-}"
+    local workspace="${2:-$PWD}"
+    local explicit_config="${3:-}"
+    local ack_risk="${4:-}"  # "true" if --acknowledge-credential-risk was provided
+    local config_file
+
+    # 1. CLI flag always wins (validation happens in caller)
+    if [[ -n "$cli_credentials" ]]; then
+        printf '%s' "$cli_credentials"
+        return 0
+    fi
+
+    # 2. Environment variable
+    if [[ -n "${CONTAINAI_CREDENTIALS:-}" ]]; then
+        printf '%s' "$CONTAINAI_CREDENTIALS"
+        return 0
+    fi
+
+    # 3. Resolve workspace to absolute path
+    if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
+        workspace="$PWD"
+    fi
+
+    # 4. Find and parse config file
+    if [[ -n "$explicit_config" ]]; then
+        if [[ ! -f "$explicit_config" ]]; then
+            # Config not found, fall through to default
+            printf '%s' "none"
+            return 0
+        fi
+        config_file="$explicit_config"
+    else
+        config_file=$(_containai_find_config "$workspace")
+    fi
+
+    if [[ -n "$config_file" ]]; then
+        local strict_mode=""
+        if [[ -n "$explicit_config" ]]; then
+            strict_mode="strict"
+        fi
+        if _containai_parse_config "$config_file" "$workspace" "$strict_mode"; then
+            if [[ -n "$_CAI_CREDENTIALS" ]]; then
+                # SECURITY: Only allow config credentials.mode=host if CLI ack is provided
+                if [[ "$_CAI_CREDENTIALS" == "host" && "$ack_risk" != "true" ]]; then
+                    # Silently ignore host from config - use default instead
+                    printf '%s' "none"
+                    return 0
+                fi
+                printf '%s' "$_CAI_CREDENTIALS"
+                return 0
+            fi
+        fi
+    fi
+
+    # 5. Default
+    printf '%s' "none"
 }
 
 return 0

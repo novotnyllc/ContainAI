@@ -594,6 +594,42 @@ _containai_check_container_ownership() {
     return 1
 }
 
+# Check if container's image matches the resolved image for the requested agent
+# Arguments: $1 = container name, $2 = resolved image name, $3 = quiet flag
+# Returns: 0 if match, 1 if mismatch (with warning)
+_containai_check_image_match() {
+    local container_name="$1"
+    local resolved_image="$2"
+    local quiet_flag="$3"
+    local actual_image
+
+    actual_image="$(_containai_get_container_image "$container_name")"
+
+    if [[ -z "$actual_image" ]]; then
+        # Can't determine image - allow proceeding
+        return 0
+    fi
+
+    if [[ "$actual_image" != "$resolved_image" ]]; then
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "[WARN] Image mismatch for container '$container_name'" >&2
+            echo "" >&2
+            echo "  Container image: $actual_image" >&2
+            echo "  Requested image: $resolved_image" >&2
+            echo "" >&2
+            echo "The container was created with a different agent/image." >&2
+            echo "To use the requested agent, recreate the container:" >&2
+            echo "  cai --restart" >&2
+            echo "Or specify a different container name:" >&2
+            echo "  cai --name <unique-name>" >&2
+            echo "" >&2
+        fi
+        return 1
+    fi
+
+    return 0
+}
+
 # Check if container's mounted volume matches the desired volume
 # Arguments: $1 = container name, $2 = desired volume name, $3 = quiet flag
 # Returns: 0 if match or no mount found, 1 if mismatch (with warning)
@@ -1022,6 +1058,11 @@ _containai_start_container() {
             if ! _containai_check_container_ownership "$container_name"; then
                 return 1
             fi
+            if ! _containai_check_image_match "$container_name" "$resolved_image" "$quiet_flag"; then
+                # Image mismatch: always block - user must use --restart or --name
+                echo "[ERROR] Image mismatch prevents attachment. Use --restart to recreate with requested agent." >&2
+                return 1
+            fi
             if ! _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"; then
                 # Volume mismatch: block unless caller opted for warn-only
                 if [[ "$volume_mismatch_warn" != "true" ]]; then
@@ -1047,6 +1088,11 @@ _containai_start_container() {
             ;;
         exited|created)
             if ! _containai_check_container_ownership "$container_name"; then
+                return 1
+            fi
+            if ! _containai_check_image_match "$container_name" "$resolved_image" "$quiet_flag"; then
+                # Image mismatch: always block - user must use --restart or --name
+                echo "[ERROR] Image mismatch prevents start. Use --restart to recreate with requested agent." >&2
                 return 1
             fi
             if ! _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"; then

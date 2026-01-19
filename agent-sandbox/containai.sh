@@ -1058,6 +1058,21 @@ _containai_run_cmd() {
         return 1
     fi
 
+    # Resolve agent (CLI > env > config > default)
+    local resolved_agent
+    resolved_agent=$(_containai_resolve_agent "$agent" "$resolved_workspace" "$explicit_config")
+
+    # Determine if credential risk is acknowledged (for config resolution)
+    local ack_risk_flag=""
+    if [[ -n "$acknowledge_credential_risk" ]]; then
+        ack_risk_flag="true"
+    fi
+
+    # Resolve credentials (CLI > env > config > default)
+    # Note: config credentials.mode=host requires --acknowledge-credential-risk on CLI
+    local resolved_credentials
+    resolved_credentials=$(_containai_resolve_credentials "$credentials" "$resolved_workspace" "$explicit_config" "$ack_risk_flag")
+
     # Build args for _containai_start_container
     local -a start_args=()
     start_args+=(--data-volume "$resolved_volume")
@@ -1071,15 +1086,13 @@ _containai_run_cmd() {
     if [[ -n "$container_name" ]]; then
         start_args+=(--name "$container_name")
     fi
-    if [[ -n "$agent" ]]; then
-        start_args+=(--agent "$agent")
-    fi
+    # Always pass resolved agent
+    start_args+=(--agent "$resolved_agent")
     if [[ -n "$image_tag" ]]; then
         start_args+=(--image-tag "$image_tag")
     fi
-    if [[ -n "$credentials" ]]; then
-        start_args+=(--credentials "$credentials")
-    fi
+    # Always pass resolved credentials
+    start_args+=(--credentials "$resolved_credentials")
     if [[ -n "$acknowledge_credential_risk" ]]; then
         start_args+=("$acknowledge_credential_risk")
     fi
