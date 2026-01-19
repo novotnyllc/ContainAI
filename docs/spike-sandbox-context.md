@@ -243,8 +243,8 @@ docker context rm test-unreachable
 
 - **fn-5-urz.10 (WSL Secure Engine):** BLOCKED - depends on this spike
 - **fn-5-urz.11 (macOS Lima VM):** BLOCKED - depends on this spike
-- **fn-5-urz.15 (Linux Sysbox):** CAN PROCEED - uses docker run, context verified
-- **fn-5-urz.16 (Dockerfile updates):** CAN PROCEED - uses docker run, context verified
+- **fn-5-urz.15 (Linux Sysbox):** BLOCKED - depends on this spike
+- **fn-5-urz.16 (Dockerfile updates):** BLOCKED - depends on this spike
 
-**If Docker Desktop testing shows context IS respected (outcome A):** Proceed with all tasks.
+**If Docker Desktop testing shows context IS respected (outcome A):** Proceed with all dependent tasks.
 **If context is IGNORED (outcome B):** Update PRD with ECI-only fallback recommendation.
