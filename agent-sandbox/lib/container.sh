@@ -62,11 +62,11 @@ fi
 # Volume name validation (local copy for independence from config.sh)
 # ==============================================================================
 
-# Validate Docker volume name pattern
+# Validate Docker volume name pattern (private helper to avoid collision with config.sh)
 # Pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
 # Length: 1-255 characters
 # Returns: 0=valid, 1=invalid
-_containai_validate_volume_name() {
+_containai__validate_volume_name() {
     local name="$1"
 
     # Check length
@@ -183,14 +183,19 @@ _containai_check_isolation() {
     fi
 
     # Use docker info --format for reliable structured output (proven approach from aliases.sh)
-    runtime=$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null)
-    if [[ $? -ne 0 ]] || [[ -z "$runtime" ]]; then
+    # Use if ! pattern for set -e safety
+    if ! runtime=$(docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then
+        echo "[WARN] Unable to determine isolation status" >&2
+        return 2
+    fi
+    if [[ -z "$runtime" ]]; then
         echo "[WARN] Unable to determine isolation status" >&2
         return 2
     fi
 
-    rootless=$(docker info --format '{{.Rootless}}' 2>/dev/null)
-    userns=$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)
+    # These can fail without blocking (we only use them if available)
+    rootless=$(docker info --format '{{.Rootless}}' 2>/dev/null) || rootless=""
+    userns=$(docker info --format '{{.SecurityOptions}}' 2>/dev/null) || userns=""
 
     # ECI enabled - sysbox-runc runtime
     if [[ "$runtime" == "sysbox-runc" ]]; then
@@ -373,7 +378,7 @@ _containai_ensure_volumes() {
     fi
 
     # Validate volume name
-    if ! _containai_validate_volume_name "$volume_name"; then
+    if ! _containai__validate_volume_name "$volume_name"; then
         echo "[ERROR] Invalid volume name: $volume_name" >&2
         echo "  Volume names must start with alphanumeric and contain only [a-zA-Z0-9_.-]" >&2
         return 1
@@ -400,12 +405,10 @@ _containai_ensure_volumes() {
 # Returns: 0=exists, 1=does not exist, 2=docker error (daemon down, etc.)
 _containai_container_exists() {
     local container_name="$1"
-    local inspect_output inspect_rc
+    local inspect_output
 
-    inspect_output=$(docker inspect --type container --format '{{.Id}}' "$container_name" 2>&1)
-    inspect_rc=$?
-
-    if [[ $inspect_rc -eq 0 ]]; then
+    # Use if ! pattern for set -e safety
+    if inspect_output=$(docker inspect --type container --format '{{.Id}}' "$container_name" 2>&1); then
         return 0  # Container exists
     fi
 
@@ -426,8 +429,8 @@ _containai_get_container_labels() {
     local container_name="$1"
     local new_label legacy_label
 
-    new_label=$(docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null)
-    if [[ $? -ne 0 ]]; then
+    # Use if ! pattern for set -e safety
+    if ! new_label=$(docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null); then
         return 1
     fi
     # Normalize "<no value>" to empty
@@ -435,8 +438,7 @@ _containai_get_container_labels() {
         new_label=""
     fi
 
-    legacy_label=$(docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null)
-    if [[ $? -ne 0 ]]; then
+    if ! legacy_label=$(docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null); then
         return 1
     fi
     if [[ "$legacy_label" == "<no value>" ]]; then
@@ -452,8 +454,8 @@ _containai_get_container_image() {
     local container_name="$1"
     local image_name
 
-    image_name=$(docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null)
-    if [[ $? -eq 0 ]]; then
+    # Use if pattern for set -e safety
+    if image_name=$(docker inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null); then
         printf '%s' "$image_name"
     else
         echo ""
@@ -466,8 +468,8 @@ _containai_get_container_data_volume() {
     local container_name="$1"
     local volume_name
 
-    volume_name=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null)
-    if [[ $? -eq 0 ]]; then
+    # Use if pattern for set -e safety
+    if volume_name=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null); then
         printf '%s' "$volume_name"
     else
         echo ""
@@ -488,9 +490,8 @@ _containai_is_our_container() {
         return 2  # Docker error
     fi
 
-    # Get both label values
-    labels=$(_containai_get_container_labels "$container_name")
-    if [[ $? -ne 0 ]]; then
+    # Get both label values - use if ! pattern for set -e safety
+    if ! labels=$(_containai_get_container_labels "$container_name"); then
         return 2  # Docker error
     fi
     new_label=$(printf '%s' "$labels" | head -1)
@@ -606,6 +607,7 @@ _containai_check_volume_match() {
 #   --name <name>        Container name (default: auto-generated)
 #   --workspace <path>   Workspace path (default: $PWD)
 #   --data-volume <vol>  Data volume name (required)
+#   --volume-mismatch-warn  Warn on volume mismatch instead of blocking (for implicit volumes)
 #   --restart            Force recreate container
 #   --force              Skip preflight checks
 #   --detached           Run detached
@@ -622,6 +624,7 @@ _containai_start_container() {
     local container_name=""
     local workspace=""
     local data_volume=""
+    local volume_mismatch_warn=false
     local restart_flag=false
     local force_flag=false
     local detached_flag=false
@@ -684,6 +687,10 @@ _containai_start_container() {
                 ;;
             --data-volume=*)
                 data_volume="${1#--data-volume=}"
+                shift
+                ;;
+            --volume-mismatch-warn)
+                volume_mismatch_warn=true
                 shift
                 ;;
             --restart)
@@ -797,18 +804,20 @@ _containai_start_container() {
     fi
 
     # Check container state
-    local container_state exists_rc inspect_output
+    local container_state exists_rc sandbox_rc
     _containai_container_exists "$container_name"
     exists_rc=$?
 
     if [[ $exists_rc -eq 0 ]]; then
-        container_state=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null)
+        # Use || true for set -e safety (success already confirmed by exists check)
+        container_state=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_state=""
     elif [[ $exists_rc -eq 1 ]]; then
         container_state="none"
     else
         # Docker error - run sandbox check for actionable messaging
         _containai_check_sandbox
-        if [[ $? -eq 1 ]]; then
+        sandbox_rc=$?
+        if [[ $sandbox_rc -eq 1 ]]; then
             return 1
         fi
         echo "[ERROR] Docker error checking container state" >&2
@@ -864,11 +873,11 @@ _containai_start_container() {
     # Check image exists when creating new container
     if [[ "$container_state" == "none" ]]; then
         local image_inspect
-        image_inspect=$(docker image inspect "$_CONTAINAI_IMAGE" 2>&1)
-        if [[ $? -ne 0 ]]; then
+        # Use if ! pattern for set -e safety
+        if ! image_inspect=$(docker image inspect "$_CONTAINAI_IMAGE" 2>&1); then
             if printf '%s' "$image_inspect" | grep -qiE "no such image|not found"; then
                 echo "[ERROR] Image '$_CONTAINAI_IMAGE' not found" >&2
-                echo "Please build the image first" >&2
+                echo "Please build the image first: agent-sandbox/build.sh" >&2
             else
                 echo "$image_inspect" >&2
             fi
@@ -882,8 +891,12 @@ _containai_start_container() {
                 return 1
             fi
             if ! _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"; then
-                echo "[ERROR] Volume mismatch prevents attachment. Use --restart to recreate." >&2
-                return 1
+                # Volume mismatch: block unless caller opted for warn-only
+                if [[ "$volume_mismatch_warn" != "true" ]]; then
+                    echo "[ERROR] Volume mismatch prevents attachment. Use --restart to recreate." >&2
+                    return 1
+                fi
+                # Warn mode: message already printed by check, proceed
             fi
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Attaching to running container..."
@@ -895,8 +908,12 @@ _containai_start_container() {
                 return 1
             fi
             if ! _containai_check_volume_match "$container_name" "$data_volume" "$quiet_flag"; then
-                echo "[ERROR] Volume mismatch prevents start. Use --restart to recreate." >&2
-                return 1
+                # Volume mismatch: block unless caller opted for warn-only
+                if [[ "$volume_mismatch_warn" != "true" ]]; then
+                    echo "[ERROR] Volume mismatch prevents start. Use --restart to recreate." >&2
+                    return 1
+                fi
+                # Warn mode: message already printed by check, proceed
             fi
             if ! _containai_preflight_checks "$force_flag"; then
                 return 1
@@ -917,10 +934,9 @@ _containai_start_container() {
             local -a vol_args=()
             vol_args+=("-v" "$data_volume:/mnt/agent-data")
 
-            # Check sandbox run help for supported flags
+            # Check sandbox run help for supported flags - use if ! pattern for set -e safety
             local sandbox_help
-            sandbox_help=$(docker sandbox run --help 2>&1)
-            if [[ $? -ne 0 ]]; then
+            if ! sandbox_help=$(docker sandbox run --help 2>&1); then
                 echo "[ERROR] docker sandbox run is not available" >&2
                 return 1
             fi
@@ -1014,11 +1030,13 @@ _containai_stop_all() {
 
     local containers labeled_containers legacy_labeled_containers ancestor_containers
 
-    labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
-    legacy_labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LEGACY_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
-    ancestor_containers=$(docker ps -a --filter "ancestor=$_CONTAINAI_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null)
+    # Use || true for set -e safety - empty result is valid
+    labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || labeled_containers=""
+    legacy_labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LEGACY_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || legacy_labeled_containers=""
+    ancestor_containers=$(docker ps -a --filter "ancestor=$_CONTAINAI_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_containers=""
 
-    containers=$(printf '%s\n%s\n%s' "$labeled_containers" "$legacy_labeled_containers" "$ancestor_containers" | grep -v '^$' | sort -t$'\t' -k1,1 -u)
+    # Use sed instead of grep -v for set -e safety (grep returns 1 on no match)
+    containers=$(printf '%s\n%s\n%s' "$labeled_containers" "$legacy_labeled_containers" "$ancestor_containers" | sed -e '/^$/d' | sort -t$'\t' -k1,1 -u)
 
     if [[ -z "$containers" ]]; then
         echo "No ContainAI containers found."

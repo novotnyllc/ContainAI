@@ -48,9 +48,8 @@ Stop all ContainAI containers.
 - [ ] `_containai_stop_all` works correctly
 - [ ] Functions are self-contained (can be sourced independently with config.sh)
 ## Done summary
-TBD
-
+Created lib/container.sh with container operation functions extracted from aliases.sh. All functions renamed from _asb_* to _containai_*, labels changed to containai.sandbox=containai, and _containai_ensure_volumes now takes volume name as parameter.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f506002, f6f9a00, ac25ac0, e590439
+- Tests: shellcheck agent-sandbox/lib/container.sh (passing)
 - PRs:
