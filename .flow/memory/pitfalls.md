@@ -51,3 +51,6 @@ BASH_SOURCE check must come AFTER BASH_VERSION check - BASH_SOURCE is bash-only 
 
 ## 2026-01-19 manual [pitfall]
 Use 'cd -- "$path"' not 'cd "$path"' - paths starting with - can be misinterpreted as cd options
+
+## 2026-01-19 manual [pitfall]
+Bash heredocs (<<EOF) override stdin for the command - cannot pipe data into python3 - with heredoc script

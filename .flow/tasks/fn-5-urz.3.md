@@ -63,9 +63,8 @@ seccomp_profile = ""  # optional path
 - [ ] Handles missing file gracefully (error to stderr, exit 1)
 - [ ] Handles missing key gracefully (empty output, exit 0 for --key)
 ## Done summary
-TBD
-
+Implemented parse-toml.py CLI with --file, --key, --json, --exists options. Uses tomllib (3.11+) with tomli fallback for Python 3.8+. Updated config.sh to use the new interface with stdin JSON passing for security.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3002600, b015788, c855bce
+- Tests: python3 parse-toml.py --file config.toml --key/--json/--exists, bash source containai.sh + _containai_parse_config
 - PRs:
