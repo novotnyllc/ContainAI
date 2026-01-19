@@ -149,11 +149,12 @@ Run Options:
   --detached, -d        Run in background
   --quiet, -q           Suppress verbose output
   -e, --env <VAR=val>   Set environment variable (repeatable)
-  -v, --volume <spec>   Extra volume mount (repeatable)
+  -v, --volume <spec>   Extra volume mount (requires --acknowledge-volume-risk)
   -- <args>             Pass arguments to agent
 
 Security Options:
   --acknowledge-credential-risk   Required when using --credentials=host
+  --acknowledge-volume-risk       Required when using --volume
   --mount-docker-socket           Mount Docker socket (DANGEROUS)
   --please-root-my-host           Acknowledge Docker socket danger
 
@@ -836,6 +837,7 @@ _containai_run_cmd() {
     local debug_flag=""
     local mount_docker_socket=""
     local please_root_my_host=""
+    local acknowledge_volume_risk=""
     local -a env_vars=()
     local -a extra_volumes=()
     local -a agent_args=()
@@ -1033,6 +1035,10 @@ _containai_run_cmd() {
                 extra_volumes+=("${1#-v}")
                 shift
                 ;;
+            --acknowledge-volume-risk)
+                acknowledge_volume_risk="true"
+                shift
+                ;;
             --help|-h)
                 _containai_help
                 return 0
@@ -1122,6 +1128,13 @@ _containai_run_cmd() {
     for env_var in "${env_vars[@]}"; do
         start_args+=(--env "$env_var")
     done
+
+    # FR-4: Extra volume mounts require explicit acknowledgment (security gate)
+    if [[ ${#extra_volumes[@]} -gt 0 && "$acknowledge_volume_risk" != "true" ]]; then
+        echo "[ERROR] --volume requires --acknowledge-volume-risk" >&2
+        echo "[INFO] Extra volume mounts can expose host data to the container" >&2
+        return 1
+    fi
     for vol in "${extra_volumes[@]}"; do
         start_args+=(--volume "$vol")
     done
