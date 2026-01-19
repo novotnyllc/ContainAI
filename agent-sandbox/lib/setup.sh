@@ -11,6 +11,7 @@
 #   _cai_show_seccomp_warning()    - Display seccomp warning
 #   _cai_install_sysbox_wsl2()     - Install Sysbox on WSL2
 #   _cai_configure_daemon_json()   - Configure Docker daemon.json
+#   _cai_configure_docker_socket() - Configure dedicated Docker socket
 #   _cai_create_containai_context()- Create containai-secure Docker context
 #   _cai_verify_sysbox_install()   - Verify Sysbox installation
 #
@@ -45,11 +46,45 @@ _CAI_SETUP_LOADED=1
 # Constants
 # ==============================================================================
 
-# Default socket path for containai-secure context
-_CAI_SECURE_SOCKET="/var/run/containai-docker.sock"
+# Default socket path for containai-secure context (separate from default Docker)
+_CAI_SECURE_SOCKET="/var/run/docker-containai.sock"
 
 # Default daemon.json path for WSL2 (standalone Docker, not Docker Desktop)
 _CAI_WSL2_DAEMON_JSON="/etc/docker/daemon.json"
+
+# Systemd drop-in directory for Docker socket override
+_CAI_DOCKER_DROPIN_DIR="/etc/systemd/system/docker.service.d"
+
+# ==============================================================================
+# WSL2 Detection
+# ==============================================================================
+
+# Check if running on WSL2 specifically (not WSL1)
+# Returns: 0=WSL2, 1=not WSL2
+# Outputs: Sets _CAI_WSL_KERNEL_VERSION with kernel info
+_cai_is_wsl2() {
+    _CAI_WSL_KERNEL_VERSION=""
+
+    # Check /proc/version for microsoft-standard (WSL2 kernel signature)
+    # WSL1 uses microsoft-standard-WSL2 pattern but without "standard"
+    if [[ -f /proc/version ]]; then
+        local version_content
+        version_content=$(cat /proc/version 2>/dev/null) || version_content=""
+        _CAI_WSL_KERNEL_VERSION="$version_content"
+
+        # WSL2 kernel contains "microsoft-standard" (case insensitive)
+        if [[ "$version_content" == *[Mm]icrosoft-[Ss]tandard* ]]; then
+            return 0
+        fi
+
+        # Also check for newer WSL2 kernel naming: "microsoft-WSL2"
+        if [[ "$version_content" == *[Mm]icrosoft-WSL2* ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
 
 # ==============================================================================
 # Seccomp Compatibility Testing
@@ -62,7 +97,7 @@ _CAI_WSL2_DAEMON_JSON="/etc/docker/daemon.json"
 _cai_test_wsl2_seccomp() {
     _CAI_SECCOMP_TEST_ERROR=""
 
-    # Check /proc/self/status for Seccomp field (current process's seccomp mode)
+    # Check /proc/1/status for Seccomp field (PID 1's seccomp mode)
     # Mode 2 (filter) on PID 1 indicates potential Sysbox conflict
     if [[ -f /proc/1/status ]]; then
         local seccomp_line pid1_mode
@@ -99,10 +134,8 @@ _cai_test_wsl2_seccomp() {
 }
 
 # Display seccomp warning box for WSL2
-# Arguments: $1 = wsl version info (optional)
+# Note: Per spec, shows big warning with options
 _cai_show_seccomp_warning() {
-    local wsl_info="${1:-unknown}"
-
     # Use printf for consistent output per memory convention
     printf '%s\n' ""
     printf '%s\n' "+==================================================================+"
@@ -122,6 +155,42 @@ _cai_show_seccomp_warning() {
     printf '%s\n' "|   3. Skip Sysbox:    Use Docker Sandbox without Sysbox          |"
     printf '%s\n' "+==================================================================+"
     printf '%s\n' ""
+}
+
+# ==============================================================================
+# Dependency Checks
+# ==============================================================================
+
+# Check required dependencies for setup
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=all deps available, 1=missing deps
+_cai_check_setup_deps() {
+    local dry_run="${1:-false}"
+    local missing=0
+
+    # Check for jq (used for JSON parsing instead of python3)
+    if ! command -v jq >/dev/null 2>&1; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[DRY-RUN] Would need: jq (JSON processor)"
+        else
+            _cai_error "jq is required but not installed"
+            _cai_error "  Install: sudo apt-get install jq"
+            missing=1
+        fi
+    fi
+
+    # Check for wget (used for downloads)
+    if ! command -v wget >/dev/null 2>&1; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[DRY-RUN] Would need: wget"
+        else
+            _cai_error "wget is required but not installed"
+            _cai_error "  Install: sudo apt-get install wget"
+            missing=1
+        fi
+    fi
+
+    return $missing
 }
 
 # ==============================================================================
@@ -185,6 +254,13 @@ _cai_install_sysbox_wsl2() {
         return 0
     fi
 
+    # Check dependencies first
+    if ! _cai_check_setup_deps "$dry_run"; then
+        if [[ "$dry_run" != "true" ]]; then
+            return 1
+        fi
+    fi
+
     _cai_step "Installing Sysbox dependencies"
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would run: apt-get update"
@@ -225,22 +301,26 @@ _cai_install_sysbox_wsl2() {
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would fetch latest release from: $release_url"
-        download_url="https://downloads.nestybox.com/sysbox/releases/vX.Y.Z/sysbox-ce_X.Y.Z-0.linux_${arch}.deb"
-    else
-        # Fetch release info
-        local release_json
-        release_json=$(wget -qO- "$release_url" 2>/dev/null) || {
-            _cai_error "Failed to fetch Sysbox release info from GitHub"
-            return 1
-        }
+        _cai_info "[DRY-RUN] Would download Sysbox .deb for architecture: $arch"
+        _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
+        _cai_ok "Sysbox installation (dry-run) complete"
+        return 0
+    fi
 
-        # Extract .deb download URL for this architecture
-        download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
+    # Fetch release info
+    local release_json
+    release_json=$(wget -qO- "$release_url" 2>/dev/null) || {
+        _cai_error "Failed to fetch Sysbox release info from GitHub"
+        _cai_error "  Check network connectivity"
+        return 1
+    }
 
-        if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
-            _cai_error "Could not find Sysbox .deb package for architecture: $arch"
-            return 1
-        fi
+    # Extract .deb download URL for this architecture
+    download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
+
+    if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
+        _cai_error "Could not find Sysbox .deb package for architecture: $arch"
+        return 1
     fi
 
     if [[ "$verbose" == "true" ]]; then
@@ -250,31 +330,28 @@ _cai_install_sysbox_wsl2() {
     # Download and install
     local tmpdir deb_file
     tmpdir=$(mktemp -d)
+    # Ensure cleanup on exit
+    trap "rm -rf '$tmpdir'" EXIT
     deb_file="$tmpdir/sysbox-ce.deb"
 
-    if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would download: $download_url"
-        _cai_info "[DRY-RUN] Would install: dpkg -i $deb_file"
-    else
-        _cai_step "Downloading Sysbox from: $download_url"
-        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
-            _cai_error "Failed to download Sysbox package"
-            rm -rf "$tmpdir"
+    _cai_step "Downloading Sysbox from: $download_url"
+    if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+        _cai_error "Failed to download Sysbox package"
+        return 1
+    fi
+
+    _cai_step "Installing Sysbox package"
+    if ! sudo dpkg -i "$deb_file"; then
+        _cai_warn "dpkg install had issues, attempting to fix dependencies"
+        if ! sudo apt-get install -f -y; then
+            _cai_error "Failed to install Sysbox package"
             return 1
         fi
-
-        _cai_step "Installing Sysbox package"
-        if ! sudo dpkg -i "$deb_file"; then
-            _cai_warn "dpkg install had issues, attempting to fix dependencies"
-            if ! sudo apt-get install -f -y; then
-                _cai_error "Failed to install Sysbox package"
-                rm -rf "$tmpdir"
-                return 1
-            fi
-        fi
-
-        rm -rf "$tmpdir"
     fi
+
+    # Clear trap and cleanup
+    trap - EXIT
+    rm -rf "$tmpdir"
 
     _cai_ok "Sysbox installation complete"
     return 0
@@ -309,42 +386,28 @@ _cai_configure_daemon_json() {
         fi
     fi
 
-    # Read existing config or create empty object
+    # Read existing config using sudo (may be root-only readable)
     local existing_config="{}"
     if [[ -f "$daemon_json" ]]; then
-        existing_config=$(cat "$daemon_json" 2>/dev/null) || existing_config="{}"
-        # Validate JSON
-        if ! printf '%s' "$existing_config" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null; then
+        if ! existing_config=$(sudo cat "$daemon_json" 2>/dev/null); then
+            _cai_error "Cannot read existing daemon.json: $daemon_json"
+            _cai_error "  Check file permissions"
+            return 1
+        fi
+        # Validate JSON using jq (more reliable than python3)
+        if ! printf '%s' "$existing_config" | jq . >/dev/null 2>&1; then
             _cai_error "Existing daemon.json is not valid JSON: $daemon_json"
             _cai_error "  Please fix or remove the file and try again"
             return 1
         fi
     fi
 
-    # Merge sysbox-runc runtime into config
-    # Use Python for reliable JSON manipulation
+    # Merge sysbox-runc runtime into config using jq
     local new_config
-    new_config=$(printf '%s' "$existing_config" | python3 -c "
-import json
-import sys
-
-config = json.load(sys.stdin)
-
-# Ensure runtimes section exists
-if 'runtimes' not in config:
-    config['runtimes'] = {}
-
-# Add sysbox-runc if not present
-if 'sysbox-runc' not in config['runtimes']:
-    config['runtimes']['sysbox-runc'] = {
-        'path': '/usr/bin/sysbox-runc'
-    }
-
-# DO NOT set default-runtime to sysbox-runc - keep runc as default
-# This is a safety measure per task spec
-
-print(json.dumps(config, indent=2))
-")
+    new_config=$(printf '%s' "$existing_config" | jq '
+        .runtimes = (.runtimes // {}) |
+        .runtimes["sysbox-runc"] = (.runtimes["sysbox-runc"] // {"path": "/usr/bin/sysbox-runc"})
+    ')
 
     if [[ -z "$new_config" ]]; then
         _cai_error "Failed to generate daemon.json configuration"
@@ -382,16 +445,79 @@ print(json.dumps(config, indent=2))
     return 0
 }
 
-# Restart Docker service
-# Arguments: $1 = dry_run flag ("true" to simulate)
+# Configure dedicated Docker socket for containai-secure context
+# Arguments: $1 = socket path
+#            $2 = dry_run flag ("true" to simulate)
+#            $3 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+# Note: Creates systemd drop-in to add additional socket listener
+_cai_configure_docker_socket() {
+    local socket_path="${1:-$_CAI_SECURE_SOCKET}"
+    local dry_run="${2:-false}"
+    local verbose="${3:-false}"
+
+    _cai_step "Configuring dedicated Docker socket: $socket_path"
+
+    local dropin_file="$_CAI_DOCKER_DROPIN_DIR/containai-socket.conf"
+
+    # Create drop-in content
+    # This adds an additional -H flag to dockerd for our dedicated socket
+    local dropin_content
+    dropin_content=$(cat <<EOF
+[Service]
+ExecStart=
+ExecStart=/usr/bin/dockerd -H fd:// -H unix://$socket_path --containerd=/run/containerd/containerd.sock
+EOF
+)
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Drop-in file: $dropin_file"
+        _cai_info "Content:"
+        printf '%s\n' "$dropin_content"
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would create directory: $_CAI_DOCKER_DROPIN_DIR"
+        _cai_info "[DRY-RUN] Would write drop-in: $dropin_file"
+        _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
+        return 0
+    fi
+
+    # Create drop-in directory
+    if ! sudo mkdir -p "$_CAI_DOCKER_DROPIN_DIR"; then
+        _cai_error "Failed to create drop-in directory: $_CAI_DOCKER_DROPIN_DIR"
+        return 1
+    fi
+
+    # Write drop-in file
+    if ! printf '%s\n' "$dropin_content" | sudo tee "$dropin_file" >/dev/null; then
+        _cai_error "Failed to write drop-in: $dropin_file"
+        return 1
+    fi
+
+    # Reload systemd
+    if ! sudo systemctl daemon-reload; then
+        _cai_error "Failed to reload systemd daemon"
+        return 1
+    fi
+
+    _cai_ok "Docker socket drop-in configured"
+    return 0
+}
+
+# Restart Docker service and wait for specific socket
+# Arguments: $1 = socket path to wait for
+#            $2 = dry_run flag ("true" to simulate)
 # Returns: 0=success, 1=failure
 _cai_restart_docker_service() {
-    local dry_run="${1:-false}"
+    local socket_path="${1:-$_CAI_SECURE_SOCKET}"
+    local dry_run="${2:-false}"
 
     _cai_step "Restarting Docker service"
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would run: systemctl restart docker"
+        _cai_info "[DRY-RUN] Would wait for socket: $socket_path"
         return 0
     fi
 
@@ -401,19 +527,27 @@ _cai_restart_docker_service() {
         return 1
     fi
 
-    # Wait for Docker to be ready
+    # Wait for the dedicated socket to be ready
     local wait_count=0
     local max_wait=30
-    while ! docker info >/dev/null 2>&1; do
+    _cai_step "Waiting for Docker socket: $socket_path"
+    while [[ ! -S "$socket_path" ]]; do
         sleep 1
         wait_count=$((wait_count + 1))
         if [[ $wait_count -ge $max_wait ]]; then
-            _cai_error "Docker did not become ready after ${max_wait}s"
+            _cai_error "Docker socket did not appear after ${max_wait}s: $socket_path"
+            _cai_error "  Check: sudo systemctl status docker"
             return 1
         fi
     done
 
-    _cai_ok "Docker service restarted"
+    # Verify Docker is accessible via the socket
+    if ! DOCKER_HOST="unix://$socket_path" docker info >/dev/null 2>&1; then
+        _cai_error "Docker daemon not accessible via socket: $socket_path"
+        return 1
+    fi
+
+    _cai_ok "Docker service restarted and socket ready"
     return 0
 }
 
@@ -426,7 +560,7 @@ _cai_restart_docker_service() {
 #            $2 = dry_run flag ("true" to simulate)
 #            $3 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
-# Note: This context points to standalone Docker daemon, NOT Docker Desktop
+# Note: This context points to dedicated Docker socket, NOT the default socket
 _cai_create_containai_context() {
     local socket_path="${1:-$_CAI_SECURE_SOCKET}"
     local dry_run="${2:-false}"
@@ -434,33 +568,41 @@ _cai_create_containai_context() {
 
     _cai_step "Creating containai-secure Docker context"
 
-    # For WSL2 with standalone dockerd, use the default socket
-    # The context is for isolation purposes - same daemon but explicit selection
-    # In production, this would point to a separate docker daemon socket
-    local docker_socket="/var/run/docker.sock"
+    local expected_host="unix://$socket_path"
 
     if [[ "$verbose" == "true" ]]; then
-        _cai_info "Socket path: unix://$docker_socket"
+        _cai_info "Expected socket: $expected_host"
     fi
 
     # Check if context already exists
     if docker context inspect containai-secure >/dev/null 2>&1; then
-        _cai_info "Context 'containai-secure' already exists"
-
-        # Verify it points to correct socket
+        # Verify it points to the expected socket
         local existing_host
         existing_host=$(docker context inspect containai-secure --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
-        if [[ "$verbose" == "true" ]]; then
-            _cai_info "Existing context endpoint: $existing_host"
-        fi
 
-        return 0
+        if [[ "$existing_host" == "$expected_host" ]]; then
+            _cai_info "Context 'containai-secure' already exists with correct endpoint"
+            return 0
+        else
+            _cai_warn "Context 'containai-secure' exists but points to: $existing_host"
+            _cai_warn "  Expected: $expected_host"
+
+            if [[ "$dry_run" == "true" ]]; then
+                _cai_info "[DRY-RUN] Would remove and recreate context"
+            else
+                _cai_step "Removing misconfigured context"
+                if ! docker context rm containai-secure >/dev/null 2>&1; then
+                    _cai_error "Failed to remove existing context"
+                    return 1
+                fi
+            fi
+        fi
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: docker context create containai-secure --docker host=unix://$docker_socket"
+        _cai_info "[DRY-RUN] Would run: docker context create containai-secure --docker host=$expected_host"
     else
-        if ! docker context create containai-secure --docker "host=unix://$docker_socket"; then
+        if ! docker context create containai-secure --docker "host=$expected_host"; then
             _cai_error "Failed to create Docker context 'containai-secure'"
             return 1
         fi
@@ -475,18 +617,20 @@ _cai_create_containai_context() {
 # ==============================================================================
 
 # Verify Sysbox installation
-# Arguments: $1 = dry_run flag ("true" to skip actual verification)
-#            $2 = verbose flag ("true" for verbose output)
+# Arguments: $1 = socket path for verification
+#            $2 = dry_run flag ("true" to skip actual verification)
+#            $3 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
 _cai_verify_sysbox_install() {
-    local dry_run="${1:-false}"
-    local verbose="${2:-false}"
+    local socket_path="${1:-$_CAI_SECURE_SOCKET}"
+    local dry_run="${2:-false}"
+    local verbose="${3:-false}"
 
     _cai_step "Verifying Sysbox installation"
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would verify sysbox-runc and sysbox-mgr"
-        _cai_info "[DRY-RUN] Would verify Docker runtime configuration"
+        _cai_info "[DRY-RUN] Would verify Docker runtime configuration via socket: $socket_path"
         _cai_info "[DRY-RUN] Would verify containai-secure context"
         return 0
     fi
@@ -513,11 +657,11 @@ _cai_verify_sysbox_install() {
         fi
     fi
 
-    # Check Docker recognizes sysbox-runc runtime
+    # Check Docker recognizes sysbox-runc runtime (via dedicated socket)
     local docker_runtimes
-    docker_runtimes=$(docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
+    docker_runtimes=$(DOCKER_HOST="unix://$socket_path" docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
     if [[ -z "$docker_runtimes" ]] || [[ "$docker_runtimes" == "null" ]]; then
-        _cai_error "Could not query Docker runtimes"
+        _cai_error "Could not query Docker runtimes via socket: $socket_path"
         return 1
     fi
 
@@ -537,7 +681,7 @@ _cai_verify_sysbox_install() {
         return 1
     fi
 
-    # Verify sysbox-runc works by running a minimal container
+    # Verify sysbox-runc works by running a minimal container via the context
     _cai_step "Testing sysbox-runc with minimal container"
     local test_output test_rc
     test_output=$(docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
@@ -608,18 +752,23 @@ _cai_setup_wsl2() {
         return 1
     fi
 
-    # Step 4: Restart Docker service (if not dry-run)
-    if ! _cai_restart_docker_service "$dry_run"; then
+    # Step 4: Configure dedicated Docker socket
+    if ! _cai_configure_docker_socket "$_CAI_SECURE_SOCKET" "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 5: Create containai-secure context
+    # Step 5: Restart Docker service (if not dry-run)
+    if ! _cai_restart_docker_service "$_CAI_SECURE_SOCKET" "$dry_run"; then
+        return 1
+    fi
+
+    # Step 6: Create containai-secure context
     if ! _cai_create_containai_context "$_CAI_SECURE_SOCKET" "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 6: Verify installation
-    if ! _cai_verify_sysbox_install "$dry_run" "$verbose"; then
+    # Step 7: Verify installation
+    if ! _cai_verify_sysbox_install "$_CAI_SECURE_SOCKET" "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Sysbox verification had issues - check output above"
     fi
@@ -677,12 +826,19 @@ _cai_setup() {
         printf '\n'
     fi
 
-    # Detect platform
+    # Detect platform - must be WSL2 specifically
     local platform
     platform=$(_cai_detect_platform)
 
     case "$platform" in
         wsl)
+            # Additional check: must be WSL2, not WSL1
+            if ! _cai_is_wsl2; then
+                _cai_error "WSL1 detected but WSL2 is required for Sysbox"
+                _cai_error "  Convert to WSL2: wsl --set-version <distro> 2"
+                _cai_error "  Or set default: wsl --set-default-version 2"
+                return 1
+            fi
             _cai_setup_wsl2 "$force" "$dry_run" "$verbose"
             return $?
             ;;
@@ -726,19 +882,22 @@ What It Does (WSL2):
   1. Checks seccomp compatibility (warns if WSL 1.1.0+ filter conflict)
   2. Downloads and installs Sysbox from GitHub releases
   3. Configures /etc/docker/daemon.json with sysbox-runc runtime
-  4. Creates 'containai-secure' Docker context
-  5. Verifies installation
+  4. Configures dedicated Docker socket at /var/run/docker-containai.sock
+  5. Creates 'containai-secure' Docker context pointing to dedicated socket
+  6. Verifies installation
 
 Requirements (WSL2):
-  - Ubuntu or Debian WSL distribution
+  - Ubuntu or Debian WSL2 distribution (WSL1 not supported)
   - systemd enabled ([boot] systemd=true in /etc/wsl.conf)
   - Docker Engine installed (standalone, not Docker Desktop integration)
   - Internet access to download Sysbox
+  - jq and wget installed (will install if missing)
 
 Security Notes:
   - Does NOT set sysbox-runc as default runtime (keeps runc default)
   - Does NOT modify Docker Desktop or default context
-  - Creates separate 'containai-secure' context for explicit isolation
+  - Creates SEPARATE Docker socket for isolation
+  - Creates 'containai-secure' context for explicit isolation
 
 Examples:
   cai setup                    Install Sysbox on WSL2
