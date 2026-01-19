@@ -697,6 +697,8 @@ asb() {
                     return 1
                 fi
                 workspace="$2"
+                # Expand leading tilde
+                workspace="${workspace/#\~/$HOME}"
                 shift 2
                 ;;
             --workspace=*)
@@ -717,6 +719,8 @@ asb() {
                     return 1
                 fi
                 config_file="$2"
+                # Expand leading tilde
+                config_file="${config_file/#\~/$HOME}"
                 shift 2
                 ;;
             --config=*)
@@ -954,10 +958,15 @@ asb() {
             if ! _asb_check_container_ownership "$container_name"; then
                 return 1
             fi
-            # Check for volume mismatch (warns but doesn't block)
+            # Check for volume mismatch
             if ! _asb_check_volume_match "$container_name" "$resolved_volume" "$quiet_flag"; then
-                # User was warned, but we proceed with existing container
-                :
+                # If user explicitly provided --data-volume, mismatch is a hard error
+                if [[ -n "$data_volume" ]]; then
+                    echo "[ERROR] Volume mismatch with explicit --data-volume flag" >&2
+                    echo "  Use --restart to recreate container with the requested volume" >&2
+                    return 1
+                fi
+                # Otherwise, user was warned but we proceed with existing container
             fi
             # Warn if sandbox unavailable (non-blocking for running containers)
             local sandbox_rc
@@ -984,10 +993,15 @@ asb() {
             if ! _asb_check_container_ownership "$container_name"; then
                 return 1
             fi
-            # Check for volume mismatch (warns but doesn't block)
+            # Check for volume mismatch
             if ! _asb_check_volume_match "$container_name" "$resolved_volume" "$quiet_flag"; then
-                # User was warned, but we proceed with existing container
-                :
+                # If user explicitly provided --data-volume, mismatch is a hard error
+                if [[ -n "$data_volume" ]]; then
+                    echo "[ERROR] Volume mismatch with explicit --data-volume flag" >&2
+                    echo "  Use --restart to recreate container with the requested volume" >&2
+                    return 1
+                fi
+                # Otherwise, user was warned but we proceed with existing container
             fi
             # Check sandbox availability before starting
             if ! _asb_preflight_checks "$force_flag"; then

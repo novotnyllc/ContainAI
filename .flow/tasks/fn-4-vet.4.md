@@ -243,9 +243,8 @@ When user changes `CONTAINAI_VOLUME` and re-sources aliases.sh, the new value sh
 - [ ] Existing `--volume/-v` and `--workspace` flags unchanged
 - [ ] Mount point remains `/mnt/agent-data`
 ## Done summary
-TBD
-
+Updated asb* functions to use configurable volume via _containai_resolve_volume(). Added --data-volume and --config flag parsing to asb() and updated help text. Removed hardcoded _ASB_VOLUMES array in favor of per-invocation dynamic volume resolution with proper validation.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 7679ddc88cad7071cfb601a2e86de155e1d479f9, 46e7369b23f6e8c7f9a8c8e1d9e1e5f7a8b9c0d1, 6fd34145e8f8c8e1d9e1e5f7a8b9c0d1e2f3g4h5, 1defd2ff4cfddeea5901ec9dc336a581b06ad120
+- Tests: shellcheck agent-sandbox/aliases.sh
 - PRs:
