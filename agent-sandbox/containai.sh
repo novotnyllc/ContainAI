@@ -170,8 +170,9 @@ Examples:
 
 Safe Defaults (FR-4):
   - Credentials mode defaults to 'none' (never 'host' by default)
+  - Config credentials.mode=host is NEVER honored (CLI --credentials=host required)
   - No Docker socket mounted by default
-  - No additional volume mounts beyond workspace
+  - No arbitrary volume mounts (only workspace + data volume for persistence)
 
 Volume Selection:
   Volume is automatically selected based on workspace path from config.

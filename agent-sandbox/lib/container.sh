@@ -1106,10 +1106,25 @@ _containai_start_container() {
             if ! _containai_preflight_checks "$force_flag"; then
                 return 1
             fi
-            if [[ "$quiet_flag" != "true" ]]; then
-                echo "Starting stopped container..."
+            # If agent_args provided, start container detached then exec with args
+            # docker start -ai doesn't support passing args to the entrypoint
+            if [[ ${#agent_args[@]} -gt 0 ]]; then
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "Starting stopped container with arguments..."
+                fi
+                docker start "$container_name" >/dev/null
+                # Wait briefly for container to be ready
+                sleep 1
+                # Run agent with arguments
+                local -a exec_cmd=("$agent")
+                exec_cmd+=("${agent_args[@]}")
+                docker exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
+            else
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "Starting stopped container..."
+                fi
+                docker start -ai "$container_name"
             fi
-            docker start -ai "$container_name"
             ;;
         none)
             if ! _containai_preflight_checks "$force_flag"; then
@@ -1179,7 +1194,10 @@ _containai_start_container() {
             fi
 
             if [[ "$shell_flag" == "true" ]]; then
-                docker sandbox run "${args[@]}" >/dev/null
+                if ! docker sandbox run "${args[@]}" >/dev/null; then
+                    echo "[ERROR] Failed to create sandbox container" >&2
+                    return 1
+                fi
                 docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
             else
                 docker sandbox run "${args[@]}"

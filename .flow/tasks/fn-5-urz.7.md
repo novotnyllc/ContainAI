@@ -73,9 +73,8 @@ Load from `.containai/config.toml` or `~/.config/containai/config.toml`:
 - [ ] Validates workspace exists before running
 - [ ] Integrates with doctor check (warns if no isolation)
 ## Done summary
-TBD
-
+Implemented `containai run` wrapper around `docker sandbox run` with safe defaults: credentials=none by default, no Docker socket mount, workspace defaults to current directory. The run command integrates with doctor checks, supports config-based agent selection, and requires explicit acknowledgment flags for risky operations like --credentials=host.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 593d358509228406ae09faaf3a9893cfb44f5db8
+- Tests: bash -c 'source agent-sandbox/containai.sh && type containai', bash -c 'source agent-sandbox/containai.sh && containai --help'
 - PRs:

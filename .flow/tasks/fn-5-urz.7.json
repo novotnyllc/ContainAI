@@ -8,10 +8,20 @@
     "fn-5-urz.3"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "593d358509228406ae09faaf3a9893cfb44f5db8"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -c 'source agent-sandbox/containai.sh && type containai'",
+      "bash -c 'source agent-sandbox/containai.sh && containai --help'"
+    ]
+  },
   "id": "fn-5-urz.7",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.7.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "containai run with safe defaults",
-  "updated_at": "2026-01-19T20:57:24.202438Z"
+  "updated_at": "2026-01-19T21:31:01.866279Z"
 }

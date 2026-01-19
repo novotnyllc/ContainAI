@@ -266,8 +266,9 @@ _containai_parse_config() {
         fi
         _cleanup_parse_stderr
     else
-        # No temp file available, stderr goes to parent stderr
-        if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>&1); then
+        # No temp file available, let stderr pass through to parent stderr
+        # DO NOT use 2>&1 - that would capture stderr into config_json and corrupt JSON
+        if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json); then
             if [[ "$strict" == "strict" ]]; then
                 echo "[ERROR] Failed to parse config file: $config_file" >&2
                 return 1
@@ -581,19 +582,21 @@ _containai_resolve_agent() {
 # Arguments: $1 = CLI --credentials value (optional)
 #            $2 = workspace path (default: $PWD)
 #            $3 = explicit config path (optional)
+#            $4 = unused (kept for API compatibility)
 # Outputs: credentials mode (none, host)
 # Precedence:
 #   1. --credentials CLI flag
 #   2. CONTAINAI_CREDENTIALS env var
-#   3. Config file [credentials].mode (ONLY if CLI --acknowledge-credential-risk is provided)
+#   3. Config file [credentials].mode (but NEVER returns 'host' from config)
 #   4. Default: none
-# Note: Config credentials.mode=host is IGNORED unless CLI --acknowledge-credential-risk is set
-#       This ensures users cannot accidentally enable host credentials via config alone
+# SECURITY: Config credentials.mode=host is ALWAYS ignored. Users must explicitly
+#           pass --credentials=host on the CLI to use host credentials. This ensures
+#           config files cannot escalate privileges without explicit user action.
 _containai_resolve_credentials() {
     local cli_credentials="${1:-}"
     local workspace="${2:-$PWD}"
     local explicit_config="${3:-}"
-    local ack_risk="${4:-}"  # "true" if --acknowledge-credential-risk was provided
+    # $4 is unused but kept for API compatibility
     local config_file
 
     # 1. CLI flag always wins (validation happens in caller)
@@ -632,8 +635,9 @@ _containai_resolve_credentials() {
         fi
         if _containai_parse_config "$config_file" "$workspace" "$strict_mode"; then
             if [[ -n "$_CAI_CREDENTIALS" ]]; then
-                # SECURITY: Only allow config credentials.mode=host if CLI ack is provided
-                if [[ "$_CAI_CREDENTIALS" == "host" && "$ack_risk" != "true" ]]; then
+                # SECURITY: NEVER allow config to set credentials=host
+                # Host credentials require explicit --credentials=host on CLI
+                if [[ "$_CAI_CREDENTIALS" == "host" ]]; then
                     # Silently ignore host from config - use default instead
                     printf '%s' "none"
                     return 0
