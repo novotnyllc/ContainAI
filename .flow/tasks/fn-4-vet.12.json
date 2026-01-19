@@ -1,7 +1,7 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-19T14:54:47.448473Z",
   "created_at": "2026-01-18T22:18:05.114181Z",
   "depends_on": [
     "fn-4-vet.9",
@@ -12,7 +12,7 @@
   "id": "fn-4-vet.12",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.12.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Create containai.sh - main CLI entry point",
-  "updated_at": "2026-01-18T22:19:44.563070Z"
+  "updated_at": "2026-01-19T14:54:47.448498Z"
 }
