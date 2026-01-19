@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Shell aliases for agent-sandbox
+# Shell aliases for ContainAI (agent-sandbox)
 # ==============================================================================
-# Provides:
-#   asb           - Agent Sandbox: start/attach to sandbox container
-#   asbd          - Agent Sandbox: start detached sandbox container
-#   asbs          - Agent Sandbox: start sandbox with shell (alias: asb-shell)
-#   asb-stop-all  - Interactive selection to stop sandbox containers
+# Primary commands (recommended):
+#   containai         - Start/attach to sandbox container
+#   cai               - Short alias for containai
+#   containai-shell   - Start sandbox with interactive shell
+#   cai-shell         - Short alias for containai-shell
+#   containaid        - Start detached sandbox container
+#   caid              - Short alias for containaid
+#   containai-stop-all - Interactive selection to stop sandbox containers
+#   cai-stop-all      - Short alias for containai-stop-all
+#
+# Deprecated commands (still work, show warning):
+#   asb               - Use 'containai' or 'cai' instead
+#   asbd              - Use 'containaid' or 'caid' instead
+#   asb-shell, asbs   - Use 'containai-shell' or 'cai-shell' instead
+#   asb-stop-all      - Use 'containai-stop-all' or 'cai-stop-all' instead
+#
+# Suppress deprecation warning: export CONTAINAI_NO_DEPRECATION_WARNING=1
 #
 # Usage: source aliases.sh
 # ==============================================================================
@@ -20,6 +32,29 @@ _ASB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default volume name (can be overridden via config)
 _CONTAINAI_DEFAULT_VOLUME="sandbox-agent-data"
+
+# ==============================================================================
+# Deprecation warning for asb* commands
+# ==============================================================================
+# Track if deprecation warning has been shown this session
+_containai_deprecation_warned=""
+
+# Show deprecation warning for asb commands (one-time per session)
+# Can be suppressed by setting CONTAINAI_NO_DEPRECATION_WARNING=1
+_containai_deprecation_check() {
+    # Check if suppressed via environment variable
+    if [[ "${CONTAINAI_NO_DEPRECATION_WARNING:-}" == "1" ]]; then
+        return 0
+    fi
+    # Check if already warned this session
+    if [[ -n "$_containai_deprecation_warned" ]]; then
+        return 0
+    fi
+    # Show warning
+    echo "[WARN] 'asb' commands are deprecated. Use 'containai' or 'cai' instead." >&2
+    echo "       Suppress this warning: export CONTAINAI_NO_DEPRECATION_WARNING=1" >&2
+    _containai_deprecation_warned=1
+}
 
 # ==============================================================================
 # Config loading functions for ContainAI
@@ -586,11 +621,13 @@ _asb_check_volume_match() {
     return 0
 }
 
-# Print help for asb/asbd
+# Print help for containai/cai/asb/asbd
 _asb_print_help() {
     local show_detached="$1"
     local show_shell="$2"
-    echo "Usage: asb [options] -- [claude-options]"
+    echo "Usage: containai [options] -- [claude-options]"
+    echo "       cai [options] -- [claude-options]"
+    echo "       asb [options] -- [claude-options]  (deprecated)"
     echo ""
     echo "Start a Claude Code instance inside a Docker sandbox with access to a host workspace."
     echo ""
@@ -619,10 +656,16 @@ _asb_print_help() {
     echo "                              (format: hostpath:sandboxpath[:readonly|:ro])"
     echo "  -w, --workspace string      Workspace path (default \".\")"
     echo "  -h, --help                  Show this help"
+    echo ""
+    echo "Related Commands:"
+    echo "  cai-stop-all                Stop all sandbox containers"
+    echo "  cai-shell                   Open shell in running sandbox"
+    echo "  caid                        Run in detached mode"
 }
 
-# Agent Sandbox - main function
-asb() {
+# Agent Sandbox - main implementation function
+# Called by containai, cai (primary), and asb (deprecated)
+_asb_impl() {
     local restart_flag=false
     local force_flag=false
     local container_name=""
@@ -1121,6 +1164,62 @@ asb() {
     esac
 }
 
+# ==============================================================================
+# Primary CLI aliases: containai, cai
+# ==============================================================================
+# These are the recommended commands - no deprecation warning
+
+# containai - primary command
+containai() {
+    _asb_impl "$@"
+}
+
+# cai - short alias for containai
+cai() {
+    _asb_impl "$@"
+}
+
+# containai-stop-all - stop sandbox containers
+containai-stop-all() {
+    asb-stop-all "$@"
+}
+
+# cai-stop-all - stop sandbox containers
+cai-stop-all() {
+    asb-stop-all "$@"
+}
+
+# containai-shell - open shell in sandbox
+containai-shell() {
+    asb-shell "$@"
+}
+
+# cai-shell - open shell in sandbox
+cai-shell() {
+    asb-shell "$@"
+}
+
+# containaid - run in detached mode
+containaid() {
+    asbd "$@"
+}
+
+# caid - run in detached mode
+caid() {
+    asbd "$@"
+}
+
+# ==============================================================================
+# Deprecated CLI aliases: asb*
+# ==============================================================================
+# These still work but show a one-time deprecation warning
+
+# asb - deprecated, shows warning then calls implementation
+asb() {
+    _containai_deprecation_check
+    _asb_impl "$@"
+}
+
 # Interactive container stop selection
 asb-stop-all() {
     local containers labeled_containers ancestor_containers
@@ -1205,9 +1304,11 @@ asbd() {
     asb --detached "$@"
 }
 
-# Print help for asb-shell/asbs
+# Print help for cai-shell/containai-shell/asb-shell/asbs
 _asb_shell_print_help() {
-    echo "Usage: asb-shell [options]"
+    echo "Usage: cai-shell [options]"
+    echo "       containai-shell [options]"
+    echo "       asb-shell [options]  (deprecated)"
     echo ""
     echo "Start a Docker sandbox and open an interactive bash shell."
     echo ""
