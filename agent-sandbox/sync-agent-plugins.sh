@@ -17,6 +17,7 @@ set -euo pipefail
 #   CONTAINAI_DATA_VOLUME    Volume name (overridden by --volume)
 #   CONTAINAI_CONFIG         Config file path (overridden by --config)
 #
+# Config discovery: Walks up from $PWD to git root, falls back to ~/.config/containai/
 # Platform: Linux only (blocks on macOS with error)
 # ==============================================================================
 
@@ -322,7 +323,7 @@ Environment:
   CONTAINAI_DATA_VOLUME    Volume name (overridden by --volume)
   CONTAINAI_CONFIG         Config file path (overridden by --config)
 
-Note: Config discovery uses current directory (\$PWD) as root.
+Config discovery: Walks up from \$PWD to git root, then falls back to ~/.config/containai/.
 EOF
 }
 

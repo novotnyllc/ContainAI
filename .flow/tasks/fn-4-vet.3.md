@@ -423,9 +423,25 @@ Add `--volume <name>` to usage output.
 - [ ] `--dry-run --volume test-vol` output includes "Using data volume: test-vol"
 - [ ] `CONTAINAI_DATA_VOLUME=x ./sync-agent-plugins.sh --dry-run` includes "Using data volume: x"
 ## Done summary
-TBD
+# fn-4-vet.3 Done Summary
 
+## Changes Made
+1. Updated header comment in sync-agent-plugins.sh with complete usage documentation including --volume, --config flags and environment variables
+2. Fixed temp file cleanup in _sync_resolve_config_volume() by replacing trap with explicit rm -f on both exit paths (consistent with aliases.sh pattern)
+3. Added comprehensive tests for volume parameterization to test-sync-integration.sh
+
+## Acceptance Criteria Verified
+All 9 acceptance criteria pass:
+- [x] --volume <name> skips config parsing
+- [x] CONTAINAI_DATA_VOLUME env var works
+- [x] Config file discovery from $PWD
+- [x] Precedence: --volume > env > config > default
+- [x] Prints "Using data volume: <name>" in output
+- [x] Default sandbox-agent-data used when no config
+- [x] Explicit --config with missing file fails
+- [x] --dry-run --volume test-vol output includes volume name
+- [x] CONTAINAI_DATA_VOLUME=x --dry-run includes volume name
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 6f1c67b
+- Tests: ./agent-sandbox/test-sync-integration.sh
 - PRs:

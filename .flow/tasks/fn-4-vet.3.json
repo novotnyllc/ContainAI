@@ -7,10 +7,22 @@
     "fn-4-vet.1"
   ],
   "epic": "fn-4-vet",
+  "evidence": {
+    "commits": [
+      "6f1c67b"
+    ],
+    "tests": [
+      "./agent-sandbox/test-sync-integration.sh"
+    ],
+    "verification": {
+      "acceptance_criteria": 9,
+      "passing": 9
+    }
+  },
   "id": "fn-4-vet.3",
   "priority": null,
   "spec_path": ".flow/tasks/fn-4-vet.3.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Parameterize volume name in sync-agent-plugins.sh",
-  "updated_at": "2026-01-19T08:21:52.346821Z"
+  "updated_at": "2026-01-19T08:54:12.615045Z"
 }

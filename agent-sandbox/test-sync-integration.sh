@@ -187,13 +187,14 @@ test_dry_run() {
     fi
 
     # Test config discovery from $PWD
+    # Note: Must clear env vars to ensure config discovery is tested, not env precedence
     local config_test_dir config_test_output config_test_exit=0
     config_test_dir=$(mktemp -d)
     mkdir -p "$config_test_dir/.containai"
     echo '[agent]' > "$config_test_dir/.containai/config.toml"
     echo 'data_volume = "config-discovered-vol"' >> "$config_test_dir/.containai/config.toml"
     docker volume create config-discovered-vol >/dev/null 2>&1 || true
-    config_test_output=$(cd "$config_test_dir" && "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || config_test_exit=$?
+    config_test_output=$(cd "$config_test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG "$SCRIPT_DIR/sync-agent-plugins.sh" --dry-run 2>&1) || config_test_exit=$?
     if echo "$config_test_output" | grep -q "Using data volume: config-discovered-vol"; then
         pass "Config discovery from \$PWD works"
     else
