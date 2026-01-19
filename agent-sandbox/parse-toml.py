@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Parse ContainAI TOML config. Requires Python 3.11+ (tomllib)."""
+import argparse
+import json
 import sys
+from pathlib import Path
 
 try:
     import tomllib
 except ImportError:
     print("Error: Python 3.11+ required (tomllib not available)", file=sys.stderr)
     sys.exit(1)
-
-import json
-from pathlib import Path
 
 
 def find_workspace(config: dict, workspace: str) -> dict | None:
@@ -59,17 +59,41 @@ def find_workspace(config: dict, workspace: str) -> dict | None:
     return best_match
 
 
+def validate_single_line(value: str, field_name: str) -> str:
+    """
+    Validate that a string value is single-line (no embedded newlines).
+
+    Args:
+        value: String value to validate
+        field_name: Field name for error message
+
+    Returns:
+        The value if valid
+
+    Raises:
+        ValueError: If value contains newlines
+    """
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"{field_name} must be single-line (no embedded newlines)")
+    return value
+
+
 def main():
-    # Check for --format=lines option
-    format_lines = "--format=lines" in sys.argv
-    args = [a for a in sys.argv[1:] if not a.startswith("--format=")]
+    parser = argparse.ArgumentParser(
+        description="Parse ContainAI TOML config file"
+    )
+    parser.add_argument(
+        "config",
+        help="Path to config.toml file"
+    )
+    parser.add_argument(
+        "workspace",
+        help="Workspace path for matching"
+    )
+    args = parser.parse_args()
 
-    if len(args) < 2:
-        print("Usage: parse-toml.py [--format=lines] <config> <workspace>", file=sys.stderr)
-        sys.exit(1)
-
-    config_path = args[0]
-    workspace = args[1]
+    config_path = args.config
+    workspace = args.workspace
 
     try:
         with open(config_path, "rb") as f:
@@ -108,27 +132,32 @@ def main():
     if not data_volume:
         data_volume = agent.get("data_volume", "sandbox-agent-data")
 
+    # Validate data_volume is single-line (required for line-based parsing)
+    try:
+        validate_single_line(data_volume, "data_volume")
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
     # Stable de-dupe preserving order (dict.fromkeys preserves insertion order)
     combined_excludes = default_excludes + ws_excludes
-    # Filter to only strings and dedupe
+    # Filter to only single-line strings and dedupe
     seen = {}
     for item in combined_excludes:
         if isinstance(item, str) and item not in seen:
-            seen[item] = True
+            try:
+                validate_single_line(item, "exclude pattern")
+                seen[item] = True
+            except ValueError:
+                # Skip excludes with embedded newlines
+                print(f"Warning: Skipping exclude with embedded newline: {repr(item)}", file=sys.stderr)
     excludes = list(seen.keys())
 
-    # Output format
-    if format_lines:
-        # Line-based format for bash: VOLUME=<vol> then one exclude per line
-        print(f"VOLUME={data_volume}")
-        for exc in excludes:
-            print(exc)
-    else:
-        # Compact JSON (no spaces) for reliable bash parsing
-        print(json.dumps({
-            "data_volume": data_volume,
-            "excludes": excludes
-        }, separators=(",", ":")))
+    # Output compact JSON (no spaces) for reliable bash parsing
+    print(json.dumps({
+        "data_volume": data_volume,
+        "excludes": excludes
+    }, separators=(",", ":")))
 
 
 if __name__ == "__main__":

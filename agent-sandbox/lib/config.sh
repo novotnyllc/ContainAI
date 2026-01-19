@@ -80,7 +80,7 @@ _containai_find_config() {
         workspace="$PWD"
     fi
 
-    # Resolve workspace to absolute path - error if invalid
+    # Resolve workspace to absolute path - warn if invalid
     if ! dir=$(cd "$workspace" 2>/dev/null && pwd); then
         echo "[WARN] Invalid workspace path, using \$PWD: $workspace" >&2
         dir="$PWD"
@@ -124,11 +124,65 @@ _containai_find_config() {
 }
 
 # ==============================================================================
+# JSON parsing helpers
+# ==============================================================================
+
+# Parse JSON using Python (fallback when jq not available)
+# Arguments: $1 = JSON string, $2 = field to extract ("volume" or "excludes")
+# Outputs: extracted value(s)
+_containai_parse_json_python() {
+    local json="$1"
+    local field="$2"
+
+    python3 -c "
+import json, sys
+data = json.loads(sys.argv[1])
+if sys.argv[2] == 'volume':
+    print(data.get('data_volume', ''))
+elif sys.argv[2] == 'excludes':
+    for exc in data.get('excludes', []):
+        print(exc)
+" "$json" "$field"
+}
+
+# Parse JSON to extract data_volume
+# Arguments: $1 = JSON string
+# Outputs: data_volume value
+_containai_extract_volume() {
+    local json="$1"
+
+    # Try jq first (faster, more robust)
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$json" | jq -r '.data_volume // empty'
+        return
+    fi
+
+    # Fall back to Python (already required for parse-toml.py)
+    _containai_parse_json_python "$json" "volume"
+}
+
+# Parse JSON to extract excludes array
+# Arguments: $1 = JSON string
+# Outputs: excludes (newline-separated)
+_containai_extract_excludes() {
+    local json="$1"
+
+    # Try jq first (faster, more robust)
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$json" | jq -r '.excludes[]? // empty'
+        return
+    fi
+
+    # Fall back to Python (already required for parse-toml.py)
+    _containai_parse_json_python "$json" "excludes"
+}
+
+# ==============================================================================
 # Config parsing
 # ==============================================================================
 
 # Parse config file for workspace matching
-# Calls parse-toml.py with --format=lines and sets global variables
+# Calls parse-toml.py and captures JSON output
 # Arguments: $1 = config file, $2 = workspace path
 # Sets globals: _CAI_VOLUME, _CAI_EXCLUDES
 # Returns: 0 on success (or graceful fallback), 1 only if config file missing
@@ -140,7 +194,7 @@ _containai_find_config() {
 _containai_parse_config() {
     local config_file="$1"
     local workspace="$2"
-    local script_dir output line
+    local script_dir json_result line
 
     # Reset globals
     _CAI_VOLUME=""
@@ -161,30 +215,22 @@ _containai_parse_config() {
     # Determine script directory (where parse-toml.py lives)
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-    # Call parse-toml.py with --format=lines for robust bash parsing
-    # Output format: VOLUME=<vol> then one exclude per line
-    if ! output=$(python3 "$script_dir/parse-toml.py" --format=lines "$config_file" "$workspace" 2>&1); then
+    # Call parse-toml.py - outputs JSON: {"data_volume": "...", "excludes": [...]}
+    if ! json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>&1); then
         echo "[WARN] Failed to parse config file: $config_file" >&2
-        echo "$output" >&2
+        echo "$json_result" >&2
         return 0  # Graceful fallback
     fi
 
-    # Parse output: first line is VOLUME=<name>, rest are excludes
-    local first_line=true
+    # Extract volume from JSON
+    _CAI_VOLUME=$(_containai_extract_volume "$json_result")
+
+    # Extract excludes from JSON into array
     while IFS= read -r line; do
-        if [[ "$first_line" == "true" ]]; then
-            first_line=false
-            # Extract volume from VOLUME=<name>
-            if [[ "$line" == VOLUME=* ]]; then
-                _CAI_VOLUME="${line#VOLUME=}"
-            fi
-        else
-            # Remaining lines are excludes
-            if [[ -n "$line" ]]; then
-                _CAI_EXCLUDES+=("$line")
-            fi
+        if [[ -n "$line" ]]; then
+            _CAI_EXCLUDES+=("$line")
         fi
-    done <<< "$output"
+    done < <(_containai_extract_excludes "$json_result")
 
     return 0
 }
