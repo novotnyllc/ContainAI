@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-18T23:55:53.904001Z",
+  "depends_on": [
+    "fn-5-urz.7"
+  ],
+  "epic": "fn-5-urz",
+  "id": "fn-5-urz.9",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-5-urz.9.md",
+  "status": "todo",
+  "title": "Unsafe opt-ins with acknowledgements",
+  "updated_at": "2026-01-18T23:58:29.287207Z"
+}

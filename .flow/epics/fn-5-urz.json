@@ -5,9 +5,9 @@
   "id": "fn-5-urz",
   "next_task": 1,
   "plan_review_status": "ship",
-  "plan_reviewed_at": "2026-01-19T00:04:20.135532Z",
+  "plan_reviewed_at": "2026-01-19T06:57:49.489566Z",
   "spec_path": ".flow/specs/fn-5-urz.md",
   "status": "open",
   "title": "ContainAI Secure Sandboxed Agent Runtime",
-  "updated_at": "2026-01-19T00:04:20.135550Z"
+  "updated_at": "2026-01-19T06:57:49.489588Z"
 }

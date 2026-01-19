@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-19T04:54:18.163792Z",
+  "depends_on": [
+    "fn-5-urz.1"
+  ],
+  "epic": "fn-5-urz",
+  "id": "fn-5-urz.15",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-5-urz.15.md",
+  "status": "todo",
+  "title": "cai setup - Linux native Sysbox installation",
+  "updated_at": "2026-01-19T04:55:25.974206Z"
+}

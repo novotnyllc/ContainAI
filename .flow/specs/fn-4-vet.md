@@ -32,6 +32,8 @@ import_excludes = [".custom/path"]
 | `cai import` | Yes (unless CLI/env set) | Yes (unless `--no-excludes`) |
 | `cai export` | Yes (unless CLI/env set) | N/A |
 | `cai stop` | No | No |
+| `cai setup` | No | No |
+| `cai doctor` | No | No |
 
 **Python required only when config is actually parsed** for the operation. If `--data-volume` set for `cai` run, no config parsed, no Python needed.
 
@@ -123,13 +125,19 @@ cai [global] [subcommand] [sub-flags] -- [args]
 
 ### Subcommands
 
-| Subcommand | Description |
-|------------|-------------|
-| (default) | Run |
-| `shell` | Shell |
-| `import` | Import |
-| `export` | Export |
-| `stop` | Stop |
+| Subcommand | Description | Epic |
+|------------|-------------|------|
+| (default) | Run agent in sandbox | fn-4-vet |
+| `shell` | Shell into running sandbox | fn-4-vet |
+| `import` | Import data to volume | fn-4-vet |
+| `export` | Export data from volume | fn-4-vet |
+| `stop` | Stop running sandbox | fn-4-vet |
+| `doctor` | Check system capabilities | fn-5-urz |
+| `setup` | Install Sysbox for enhanced isolation | fn-5-urz |
+| `sandbox reset` | Reset sandbox state | fn-5-urz |
+| `sandbox clear-credentials` | Clear sandbox credentials | fn-5-urz |
+
+**Note:** `doctor`, `setup`, and `sandbox` subcommands are defined in fn-5-urz (security features).
 
 ### Import/Export Flags
 
@@ -138,6 +146,14 @@ cai [global] [subcommand] [sub-flags] -- [args]
 | `--no-excludes` | Skip exclude patterns (no config parsing for excludes) |
 | `--dry-run` | (import) Show only |
 | `-o` | (export) Output path |
+
+### Setup Flags (fn-5-urz)
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Bypass Sysbox warnings on WSL2 |
+| `--dry-run` | Show what would be installed |
+| `--verbose` | Show detailed progress |
 
 ## Preflight Checks
 
@@ -176,7 +192,7 @@ cai [global] [subcommand] [sub-flags] -- [args]
 
 4. **Image availability**
 
-5. **Isolation warning** (non-blocking)
+5. **Isolation warning** (non-blocking) - recommends `cai setup` if Sysbox not available
 
 ## Export Directory Handling
 
@@ -201,6 +217,8 @@ fi
 | import | ✓ | ✗ | ✓ | ✗ |
 | export | ✓ | ✓* | ✓* | ✗ |
 | stop | ✓ | ✓ | ✓ | ✓ |
+| doctor | ✓ | ✓ | ✓ | ✓ |
+| setup | ✓ | ✓ | ✓ (with warnings) | ✗ |
 
 ## Value Precedence
 
@@ -256,3 +274,4 @@ Sanitization from aliases.sh:28-87.
 
 - `agent-sandbox/sync-agent-plugins.sh`
 - `agent-sandbox/aliases.sh`
+- fn-5-urz: Security features (doctor, setup, sandbox management)
