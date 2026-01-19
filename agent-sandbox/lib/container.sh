@@ -335,14 +335,21 @@ _containai_preflight_checks() {
         return 0
     fi
 
-    _containai_check_sandbox
-    sandbox_rc=$?
+    # Guard calls for set -e safety (non-zero is valid control flow)
+    if _containai_check_sandbox; then
+        sandbox_rc=0
+    else
+        sandbox_rc=$?
+    fi
     if [[ $sandbox_rc -eq 1 ]]; then
         return 1
     fi
 
-    _containai_check_isolation
-    isolation_rc=$?
+    if _containai_check_isolation; then
+        isolation_rc=0
+    else
+        isolation_rc=$?
+    fi
 
     if [[ "${CONTAINAI_REQUIRE_ISOLATION:-0}" == "1" ]]; then
         case $isolation_rc in
@@ -482,8 +489,12 @@ _containai_is_our_container() {
     local container_name="$1"
     local exists_rc labels new_label legacy_label image_name
 
-    _containai_container_exists "$container_name"
-    exists_rc=$?
+    # Guard for set -e safety (non-zero is valid control flow)
+    if _containai_container_exists "$container_name"; then
+        exists_rc=0
+    else
+        exists_rc=$?
+    fi
     if [[ $exists_rc -eq 1 ]]; then
         return 1  # Doesn't exist = not ours
     elif [[ $exists_rc -eq 2 ]]; then
@@ -524,8 +535,12 @@ _containai_check_container_ownership() {
     local container_name="$1"
     local exists_rc is_ours_rc labels new_label legacy_label actual_image
 
-    _containai_container_exists "$container_name"
-    exists_rc=$?
+    # Guard for set -e safety (non-zero is valid control flow)
+    if _containai_container_exists "$container_name"; then
+        exists_rc=0
+    else
+        exists_rc=$?
+    fi
     if [[ $exists_rc -eq 1 ]]; then
         return 2  # Container doesn't exist
     elif [[ $exists_rc -eq 2 ]]; then
@@ -533,8 +548,12 @@ _containai_check_container_ownership() {
         return 3
     fi
 
-    _containai_is_our_container "$container_name"
-    is_ours_rc=$?
+    # Guard for set -e safety (non-zero is valid control flow)
+    if _containai_is_our_container "$container_name"; then
+        is_ours_rc=0
+    else
+        is_ours_rc=$?
+    fi
     if [[ $is_ours_rc -eq 0 ]]; then
         return 0
     elif [[ $is_ours_rc -eq 2 ]]; then
@@ -542,8 +561,8 @@ _containai_check_container_ownership() {
         return 3
     fi
 
-    # Foreign container - show detailed info
-    labels=$(_containai_get_container_labels "$container_name")
+    # Foreign container - show detailed info (use || true for set -e safety on info gathering)
+    labels=$(_containai_get_container_labels "$container_name") || labels=""
     new_label=$(printf '%s' "$labels" | head -1)
     legacy_label=$(printf '%s' "$labels" | tail -1)
     actual_image="$(_containai_get_container_image "$container_name")"
@@ -803,10 +822,13 @@ _containai_start_container() {
         echo "Container: $container_name"
     fi
 
-    # Check container state
+    # Check container state - guard for set -e safety (non-zero is valid control flow)
     local container_state exists_rc sandbox_rc
-    _containai_container_exists "$container_name"
-    exists_rc=$?
+    if _containai_container_exists "$container_name"; then
+        exists_rc=0
+    else
+        exists_rc=$?
+    fi
 
     if [[ $exists_rc -eq 0 ]]; then
         # Use || true for set -e safety (success already confirmed by exists check)
@@ -827,8 +849,12 @@ _containai_start_container() {
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
         local is_ours_rc
-        _containai_is_our_container "$container_name"
-        is_ours_rc=$?
+        # Guard for set -e safety (non-zero is valid control flow)
+        if _containai_is_our_container "$container_name"; then
+            is_ours_rc=0
+        else
+            is_ours_rc=$?
+        fi
         if [[ $is_ours_rc -ne 0 ]]; then
             echo "[ERROR] Cannot restart - container '$container_name' was not created by ContainAI" >&2
             echo "Remove the conflicting container manually if needed: docker rm -f '$container_name'" >&2
