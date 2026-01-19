@@ -42,6 +42,9 @@ _CONTAINAI_LIB_LOADED=""
 
 # Check if all lib files exist
 _containai_libs_exist() {
+    [[ -f "$_CAI_SCRIPT_DIR/lib/core.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/platform.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/docker.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/config.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/container.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] && \
@@ -55,7 +58,23 @@ if ! _containai_libs_exist; then
 fi
 
 # Source library files with error checking
-# Note: config.sh must be sourced first as import.sh depends on _containai_resolve_excludes
+# Order matters: core.sh first (logging), then platform/docker, then config, then others
+# Note: config.sh must come before import.sh (depends on _containai_resolve_excludes)
+if ! source "$_CAI_SCRIPT_DIR/lib/core.sh"; then
+    echo "[ERROR] Failed to source lib/core.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/platform.sh"; then
+    echo "[ERROR] Failed to source lib/platform.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/docker.sh"; then
+    echo "[ERROR] Failed to source lib/docker.sh" >&2
+    return 1
+fi
+
 if ! source "$_CAI_SCRIPT_DIR/lib/config.sh"; then
     echo "[ERROR] Failed to source lib/config.sh" >&2
     return 1

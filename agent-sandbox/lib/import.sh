@@ -148,13 +148,43 @@ _IMPORT_SYNC_MAP=(
 fi
 
 # ==============================================================================
-# Color output helpers
+# Logging helpers - use core.sh functions if available, fallback to ASCII markers
 # ==============================================================================
-_import_info() { echo "ℹ️  $*"; }
-_import_success() { echo "✅ $*"; }
-_import_error() { echo "❌ $*" >&2; }
-_import_warn() { echo "⚠️  $*"; }
-_import_step() { echo "→ $*"; }
+_import_info() {
+    if declare -f _cai_info >/dev/null 2>&1; then
+        _cai_info "$@"
+    else
+        echo "[INFO] $*"
+    fi
+}
+_import_success() {
+    if declare -f _cai_ok >/dev/null 2>&1; then
+        _cai_ok "$@"
+    else
+        echo "[OK] $*"
+    fi
+}
+_import_error() {
+    if declare -f _cai_error >/dev/null 2>&1; then
+        _cai_error "$@"
+    else
+        echo "[ERROR] $*" >&2
+    fi
+}
+_import_warn() {
+    if declare -f _cai_warn >/dev/null 2>&1; then
+        _cai_warn "$@"
+    else
+        echo "[WARN] $*" >&2
+    fi
+}
+_import_step() {
+    if declare -f _cai_step >/dev/null 2>&1; then
+        _cai_step "$@"
+    else
+        echo "-> $*"
+    fi
+}
 
 # ==============================================================================
 # Main import function

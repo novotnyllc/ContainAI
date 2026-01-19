@@ -1,14 +1,14 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-19T16:12:18.552037Z",
   "created_at": "2026-01-18T23:55:51.135187Z",
   "depends_on": [],
   "epic": "fn-5-urz",
   "id": "fn-5-urz.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.2.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Implement shell library structure (containai.sh, lib/*.sh)",
-  "updated_at": "2026-01-18T23:56:53.835176Z"
+  "updated_at": "2026-01-19T16:12:18.553607Z"
 }
