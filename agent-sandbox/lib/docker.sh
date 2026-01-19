@@ -146,7 +146,10 @@ _cai_sandbox_available() {
         return 1
     fi
 
-    # Unknown error - return 2 (fail-open, let caller decide)
+    # Unknown error - warn and return 2 (fail-open, let caller decide)
+    if declare -f _cai_warn >/dev/null 2>&1; then
+        _cai_warn "Could not determine docker sandbox availability (unknown response)"
+    fi
     return 2
 }
 

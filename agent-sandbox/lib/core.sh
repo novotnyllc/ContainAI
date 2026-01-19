@@ -46,35 +46,36 @@ _CAI_CORE_LOADED=1
 # ==============================================================================
 
 # Info message (stdout)
+# Uses printf to avoid echo mis-handling messages starting with -n/-e
 _cai_info() {
-    echo "[INFO] $*"
+    printf '%s\n' "[INFO] $*"
 }
 
 # Success message (stdout)
 _cai_ok() {
-    echo "[OK] $*"
+    printf '%s\n' "[OK] $*"
 }
 
 # Warning message (stderr)
 _cai_warn() {
-    echo "[WARN] $*" >&2
+    printf '%s\n' "[WARN] $*" >&2
 }
 
 # Error message (stderr)
 _cai_error() {
-    echo "[ERROR] $*" >&2
+    printf '%s\n' "[ERROR] $*" >&2
 }
 
 # Debug message (stderr, only when CONTAINAI_DEBUG=1)
 _cai_debug() {
     if [[ "${CONTAINAI_DEBUG:-0}" == "1" ]]; then
-        echo "[DEBUG] $*" >&2
+        printf '%s\n' "[DEBUG] $*" >&2
     fi
 }
 
 # Step progress message (stdout)
 _cai_step() {
-    echo "-> $*"
+    printf '%s\n' "-> $*"
 }
 
 # ==============================================================================

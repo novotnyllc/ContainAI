@@ -21,6 +21,12 @@
 # Usage: source lib/config.sh
 # ==============================================================================
 
+# Require bash first (before using BASH_SOURCE)
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "[ERROR] lib/config.sh requires bash" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
 # Detect direct execution (must be sourced, not executed)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "[ERROR] lib/config.sh must be sourced, not executed directly" >&2
@@ -28,16 +34,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     exit 1
 fi
 
-# Require bash
-if [[ -z "${BASH_VERSION:-}" ]]; then
-    echo "[ERROR] lib/config.sh requires bash" >&2
-    return 1
+# Guard against re-sourcing side effects
+if [[ -n "${_CAI_CONFIG_LOADED:-}" ]]; then
+    return 0
 fi
+_CAI_CONFIG_LOADED=1
 
-# Default volume name (guard against re-sourcing)
+# Default volume name
 : "${_CONTAINAI_DEFAULT_VOLUME:=sandbox-agent-data}"
 
 # Global variables for parsed config (set by _containai_parse_config)
+# Only initialize once (guarded above)
 _CAI_VOLUME=""
 _CAI_EXCLUDES=()
 

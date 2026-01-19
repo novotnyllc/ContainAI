@@ -18,7 +18,7 @@
 # ==============================================================================
 
 # Require bash first (before using BASH_SOURCE)
-if [[ -z "${BASH_VERSION:-}" ]]; then
+if [ -z "${BASH_VERSION:-}" ]; then
     echo "[ERROR] containai.sh requires bash" >&2
     return 1 2>/dev/null || exit 1
 fi
@@ -30,6 +30,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     exit 1
 fi
 
+# Guard against re-sourcing side effects
+if [[ -n "${_CONTAINAI_LIB_LOADED:-}" ]]; then
+    return 0
+fi
+
 # Determine script directory
 _CAI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -37,8 +42,6 @@ _CAI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Library loading
 # ==============================================================================
 # Source modular libraries from lib/*.sh
-
-_CONTAINAI_LIB_LOADED=""
 
 # Check if all lib files exist
 _containai_libs_exist() {
