@@ -210,12 +210,10 @@ _sync_resolve_config_volume() {
     fi
 
     # Call parse-toml.py in workspace matching mode (workspace = $PWD)
-    local result parse_stderr parse_rc
+    # Use if-construct to avoid set -e terminating on non-zero exit
+    local result parse_stderr
     parse_stderr=$(mktemp)
-    result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" --workspace "$PWD" --config-dir "$config_dir" 2>"$parse_stderr")
-    parse_rc=$?
-
-    if [[ $parse_rc -ne 0 ]]; then
+    if ! result=$(python3 "$_SYNC_SCRIPT_DIR/parse-toml.py" "$config_file" --workspace "$PWD" --config-dir "$config_dir" 2>"$parse_stderr"); then
         echo "[WARN] Failed to parse config file: $config_file" >&2
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
@@ -265,6 +263,10 @@ parse_args() {
                 ;;
             --volume=*)
                 CLI_VOLUME="${1#--volume=}"
+                if [[ -z "$CLI_VOLUME" ]]; then
+                    error "--volume requires a value"
+                    exit 1
+                fi
                 shift
                 ;;
             --config)
@@ -277,6 +279,10 @@ parse_args() {
                 ;;
             --config=*)
                 EXPLICIT_CONFIG="${1#--config=}"
+                if [[ -z "$EXPLICIT_CONFIG" ]]; then
+                    error "--config requires a value"
+                    exit 1
+                fi
                 shift
                 ;;
             --help|-h)
@@ -317,8 +323,16 @@ DRY_RUN=false
 CLI_VOLUME=""
 EXPLICIT_CONFIG=""
 
-# DATA_VOLUME is set after resolve_data_volume() is called
+# DATA_VOLUME is set after resolve_data_volume() is called (then made readonly)
 DATA_VOLUME=""
+
+# Initialize EXPLICIT_CONFIG from environment if set
+# CONTAINAI_CONFIG env var can be overridden by --config flag
+_init_config_from_env() {
+    if [[ -z "$EXPLICIT_CONFIG" && -n "${CONTAINAI_CONFIG:-}" ]]; then
+        EXPLICIT_CONFIG="$CONTAINAI_CONFIG"
+    fi
+}
 
 # Resolve data volume with precedence:
 # 1. --volume CLI flag (skips config parsing)
@@ -367,6 +381,11 @@ resolve_data_volume() {
 
     # 4. Default
     DATA_VOLUME="$_SYNC_DEFAULT_VOLUME"
+}
+
+# Finalize DATA_VOLUME as readonly after resolution
+_finalize_data_volume() {
+    readonly DATA_VOLUME
 }
 
 # Check prerequisites
@@ -803,8 +822,12 @@ main() {
     # Parse arguments after platform check
     parse_args "$@"
 
+    # Initialize EXPLICIT_CONFIG from CONTAINAI_CONFIG env var if not set via --config
+    _init_config_from_env
+
     # Resolve data volume (must be after parse_args sets CLI_VOLUME and EXPLICIT_CONFIG)
     resolve_data_volume
+    _finalize_data_volume
 
     echo "═══════════════════════════════════════════════════════════════════"
     info "Syncing Claude Code plugins from host to Docker sandbox"
