@@ -12,7 +12,7 @@
 # 7. Shell sources .bashrc.d scripts
 # 8. tmux loads config
 # 9. gh CLI available in container
-# 10. Exclude patterns work
+# 10. opencode CLI available in container
 # 11-15. Workspace volume resolution tests
 # ==============================================================================
 

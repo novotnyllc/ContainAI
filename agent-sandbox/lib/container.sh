@@ -25,12 +25,6 @@
 # Constants:
 #   _CONTAINAI_IMAGE              - Default image name
 #   _CONTAINAI_LABEL              - Container label for ContainAI ownership
-#   _CONTAINAI_LEGACY_LABEL       - Legacy label for transition period (read-only)
-#
-# Note on legacy label support:
-#   This library discovers containers with the legacy asb.sandbox=agent-sandbox
-#   label but only CREATES containers with containai.sandbox=containai.
-#   This provides backward compatibility during the transition period.
 #
 # Usage: source lib/container.sh
 # ==============================================================================
@@ -55,8 +49,6 @@ fi
 # Guard against re-sourcing
 : "${_CONTAINAI_IMAGE:=agent-sandbox:latest}"
 : "${_CONTAINAI_LABEL:=containai.sandbox=containai}"
-# Legacy label for transition period - READ-ONLY (discover old containers, never create with this)
-: "${_CONTAINAI_LEGACY_LABEL:=asb.sandbox=agent-sandbox}"
 
 # ==============================================================================
 # Volume name validation (local copy for independence from config.sh)
@@ -428,31 +420,24 @@ _containai_container_exists() {
     return 2
 }
 
-# Get label values for both new and legacy labels from a container
+# Get label value for ContainAI container
 # Arguments: $1 = container name
-# Outputs to stdout: Two lines: "new_label_value" then "legacy_label_value" (may be empty)
+# Outputs to stdout: label value (may be empty)
 # Returns: 0 on success, 1 on docker error
-_containai_get_container_labels() {
+_containai_get_container_label() {
     local container_name="$1"
-    local new_label legacy_label
+    local label_value
 
     # Use if ! pattern for set -e safety
-    if ! new_label=$(docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null); then
+    if ! label_value=$(docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null); then
         return 1
     fi
     # Normalize "<no value>" to empty
-    if [[ "$new_label" == "<no value>" ]]; then
-        new_label=""
+    if [[ "$label_value" == "<no value>" ]]; then
+        label_value=""
     fi
 
-    if ! legacy_label=$(docker inspect --format '{{ index .Config.Labels "asb.sandbox" }}' "$container_name" 2>/dev/null); then
-        return 1
-    fi
-    if [[ "$legacy_label" == "<no value>" ]]; then
-        legacy_label=""
-    fi
-
-    printf '%s\n%s\n' "$new_label" "$legacy_label"
+    printf '%s' "$label_value"
     return 0
 }
 
@@ -487,7 +472,7 @@ _containai_get_container_data_volume() {
 # Returns: 0=ours (label or image matches), 1=foreign (no match), 2=docker error
 _containai_is_our_container() {
     local container_name="$1"
-    local exists_rc labels new_label legacy_label image_name
+    local exists_rc label_value image_name
 
     # Guard for set -e safety (non-zero is valid control flow)
     if _containai_container_exists "$container_name"; then
@@ -501,25 +486,18 @@ _containai_is_our_container() {
         return 2  # Docker error
     fi
 
-    # Get both label values - use if ! pattern for set -e safety
-    if ! labels=$(_containai_get_container_labels "$container_name"); then
+    # Get label value - use if ! pattern for set -e safety
+    if ! label_value=$(_containai_get_container_label "$container_name"); then
         return 2  # Docker error
     fi
-    new_label=$(printf '%s' "$labels" | head -1)
-    legacy_label=$(printf '%s' "$labels" | tail -1)
 
-    # Check new label
-    if [[ "$new_label" == "containai" ]]; then
+    # Check label
+    if [[ "$label_value" == "containai" ]]; then
         return 0
     fi
 
-    # Check legacy label value
-    if [[ "$legacy_label" == "agent-sandbox" ]]; then
-        return 0
-    fi
-
-    # Fallback: check image
-    if [[ -z "$new_label" ]] && [[ -z "$legacy_label" ]]; then
+    # Fallback: check image (for containers without label)
+    if [[ -z "$label_value" ]]; then
         image_name="$(_containai_get_container_image "$container_name")"
         if [[ "$image_name" == "$_CONTAINAI_IMAGE" ]]; then
             return 0
@@ -533,7 +511,7 @@ _containai_is_our_container() {
 # Returns: 0=owned, 1=foreign (with error), 2=does not exist, 3=docker error
 _containai_check_container_ownership() {
     local container_name="$1"
-    local exists_rc is_ours_rc labels new_label legacy_label actual_image
+    local exists_rc is_ours_rc label_value actual_image
 
     # Guard for set -e safety (non-zero is valid control flow)
     if _containai_container_exists "$container_name"; then
@@ -562,16 +540,13 @@ _containai_check_container_ownership() {
     fi
 
     # Foreign container - show detailed info (use || true for set -e safety on info gathering)
-    labels=$(_containai_get_container_labels "$container_name") || labels=""
-    new_label=$(printf '%s' "$labels" | head -1)
-    legacy_label=$(printf '%s' "$labels" | tail -1)
+    label_value=$(_containai_get_container_label "$container_name") || label_value=""
     actual_image="$(_containai_get_container_image "$container_name")"
 
     echo "[ERROR] Container '$container_name' exists but was not created by ContainAI" >&2
     echo "" >&2
     echo "  Expected label 'containai.sandbox': containai" >&2
-    echo "  Actual label 'containai.sandbox':   ${new_label:-<not set>}" >&2
-    echo "  Actual label 'asb.sandbox':         ${legacy_label:-<not set>}" >&2
+    echo "  Actual label 'containai.sandbox':   ${label_value:-<not set>}" >&2
     echo "  Expected image:                     $_CONTAINAI_IMAGE" >&2
     echo "  Actual image:                       ${actual_image:-<unknown>}" >&2
     echo "" >&2
@@ -1058,15 +1033,14 @@ _containai_stop_all() {
         return 1
     fi
 
-    local containers labeled_containers legacy_labeled_containers ancestor_containers
+    local containers labeled_containers ancestor_containers
 
     # Use || true for set -e safety - empty result is valid
     labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || labeled_containers=""
-    legacy_labeled_containers=$(docker ps -a --filter "label=$_CONTAINAI_LEGACY_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || legacy_labeled_containers=""
     ancestor_containers=$(docker ps -a --filter "ancestor=$_CONTAINAI_IMAGE" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_containers=""
 
     # Use sed instead of grep -v for set -e safety (grep returns 1 on no match)
-    containers=$(printf '%s\n%s\n%s' "$labeled_containers" "$legacy_labeled_containers" "$ancestor_containers" | sed -e '/^$/d' | sort -t$'\t' -k1,1 -u)
+    containers=$(printf '%s\n%s' "$labeled_containers" "$ancestor_containers" | sed -e '/^$/d' | sort -t$'\t' -k1,1 -u)
 
     if [[ -z "$containers" ]]; then
         echo "No ContainAI containers found."
