@@ -74,7 +74,7 @@ _containai_validate_volume_name() {
 
 # Find config file by walking up from workspace path
 # Checks: .containai/config.toml then falls back to XDG_CONFIG_HOME
-# Arguments: $1 = workspace path (required, must be valid directory)
+# Arguments: $1 = workspace path (default: $PWD, warns if invalid)
 # Outputs: config file path (or empty if not found)
 # Returns: 0 always (empty output = not found)
 _containai_find_config() {
@@ -151,19 +151,14 @@ elif sys.argv[2] == 'excludes':
 " "$json" "$field"
 }
 
-# Parse JSON to extract data_volume using parameter expansion
-# Avoids jq dependency and is safe with set -e
+# Parse JSON to extract data_volume using Python
 # Arguments: $1 = JSON string
 # Outputs: data_volume value
 _containai_extract_volume() {
     local json="$1"
-    local data_volume
 
-    # Use parameter expansion (same pattern as aliases.sh)
-    data_volume="${json#*\"data_volume\":\"}"
-    data_volume="${data_volume%%\"*}"
-
-    printf '%s' "$data_volume"
+    # Use Python for reliable JSON parsing (already required for parse-toml.py)
+    _containai_parse_json_python "$json" "volume"
 }
 
 # Parse JSON to extract excludes array using Python
@@ -182,18 +177,24 @@ _containai_extract_excludes() {
 
 # Parse config file for workspace matching
 # Calls parse-toml.py and captures JSON output
-# Arguments: $1 = config file, $2 = workspace path
+# Arguments: $1 = config file, $2 = workspace path, $3 = strict mode (optional, "strict")
 # Sets globals: _CAI_VOLUME, _CAI_EXCLUDES
-# Returns: 0 on success (or graceful fallback), 1 only if config file missing
+# Returns: 0 on success, 1 on failure
 #
-# Behavior:
+# Behavior in normal mode:
 # - If Python unavailable: warn and return 0 (use defaults)
 # - If parse fails: warn and return 0 (use defaults)
-# - Only hard fail (return 1) if config file doesn't exist when caller expects it
+# - Only hard fail (return 1) if config file doesn't exist
+#
+# Behavior in strict mode (explicit config):
+# - If Python unavailable: error and return 1
+# - If parse fails: error and return 1
+# - Hard fail on any error (no graceful fallback)
 _containai_parse_config() {
     local config_file="$1"
     local workspace="$2"
-    local script_dir json_result line
+    local strict="${3:-}"
+    local script_dir json_result line parse_stderr
 
     # Reset globals
     _CAI_VOLUME=""
@@ -207,6 +208,10 @@ _containai_parse_config() {
 
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
+        if [[ "$strict" == "strict" ]]; then
+            echo "[ERROR] Python required to parse config: $config_file" >&2
+            return 1
+        fi
         echo "[WARN] Python not found, cannot parse config. Using defaults." >&2
         return 0
     fi
@@ -216,19 +221,22 @@ _containai_parse_config() {
 
     # Call parse-toml.py - outputs JSON: {"data_volume": "...", "excludes": [...]}
     # Capture stderr separately to avoid corrupting JSON output
-    local parse_stderr parse_rc
     parse_stderr=$(mktemp)
 
-    # Run parser, capture exit code
-    json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>"$parse_stderr") && parse_rc=0 || parse_rc=$?
-
-    if [[ $parse_rc -ne 0 ]]; then
-        echo "[WARN] Failed to parse config file: $config_file" >&2
+    if ! json_result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$workspace" 2>"$parse_stderr"); then
+        if [[ "$strict" == "strict" ]]; then
+            echo "[ERROR] Failed to parse config file: $config_file" >&2
+        else
+            echo "[WARN] Failed to parse config file: $config_file" >&2
+        fi
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
         fi
         rm -f "$parse_stderr"
-        return 0  # Graceful fallback
+        if [[ "$strict" == "strict" ]]; then
+            return 1
+        fi
+        return 0  # Graceful fallback in non-strict mode
     fi
     rm -f "$parse_stderr"
 
@@ -307,10 +315,17 @@ _containai_resolve_volume() {
     fi
 
     # 5. Parse config with workspace matching
-    # Note: _containai_parse_config only fails if file missing (which we checked above)
-    # Python errors or parse errors result in graceful fallback (return 0, empty _CAI_VOLUME)
+    # Use strict mode for explicit config (fail on parse errors)
+    # Use normal mode for discovered config (graceful fallback)
     if [[ -n "$config_file" ]]; then
-        _containai_parse_config "$config_file" "$workspace"
+        local strict_mode=""
+        if [[ -n "$explicit_config" ]]; then
+            strict_mode="strict"
+        fi
+        if ! _containai_parse_config "$config_file" "$workspace" "$strict_mode"; then
+            # In strict mode, parse failure is fatal
+            return 1
+        fi
         if [[ -n "$_CAI_VOLUME" ]]; then
             # Validate volume name from config
             if ! _containai_validate_volume_name "$_CAI_VOLUME"; then
@@ -334,7 +349,7 @@ _containai_resolve_volume() {
 # Arguments: $1 = workspace path (default: $PWD)
 #            $2 = explicit config path (optional)
 # Outputs: excludes array (newline-separated)
-# Returns: 0 on success, 1 only if explicit config file missing
+# Returns: 0 on success, 1 on failure (explicit config missing or parse error)
 # Note: Returns cumulative excludes (default_excludes + workspace excludes)
 _containai_resolve_excludes() {
     local workspace="${1:-$PWD}"
@@ -365,7 +380,15 @@ _containai_resolve_excludes() {
     fi
 
     # Parse config - sets _CAI_EXCLUDES array
-    _containai_parse_config "$config_file" "$workspace"
+    # Use strict mode for explicit config (fail on parse errors)
+    local strict_mode=""
+    if [[ -n "$explicit_config" ]]; then
+        strict_mode="strict"
+    fi
+    if ! _containai_parse_config "$config_file" "$workspace" "$strict_mode"; then
+        # In strict mode, parse failure is fatal
+        return 1
+    fi
 
     # Output excludes (newline-separated)
     local exclude
