@@ -274,22 +274,22 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Sysbox available: no" "[WARN]  <- STRONGLY RECOMMENDED"
         case "${_CAI_SYSBOX_ERROR:-}" in
             socket_not_found)
-                printf '  %-44s %s\n' "" "(Sysbox not configured - see ContainAI setup documentation)"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox for enhanced isolation)"
                 ;;
             context_not_found)
-                printf '  %-44s %s\n' "" "(containai-secure context not configured)"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to configure containai-secure context)"
                 ;;
             daemon_unavailable)
                 printf '  %-44s %s\n' "" "(ContainAI Docker daemon not running)"
                 ;;
             runtime_not_found)
-                printf '  %-44s %s\n' "" "(Sysbox runtime not found in ContainAI daemon)"
+                printf '  %-44s %s\n' "" "(Sysbox runtime not found - run 'cai setup')"
                 ;;
             timeout)
                 printf '  %-44s %s\n' "" "(ContainAI Docker daemon timed out)"
                 ;;
             *)
-                printf '  %-44s %s\n' "" "(Sysbox check failed - run 'cai doctor --json' for details)"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' for enhanced isolation)"
                 ;;
         esac
     fi
@@ -308,6 +308,7 @@ _cai_doctor() {
             filter_warning)
                 printf '  %-44s %s\n' "Seccomp compatibility: warning" "[WARN]"
                 printf '  %-44s %s\n' "" "(WSL 1.1.0+ may have seccomp conflicts with Sysbox)"
+                printf '  %-44s %s\n' "" "(use --force with cai setup if needed)"
                 ;;
             unavailable)
                 printf '  %-44s %s\n' "Seccomp compatibility: not available" "[WARN]"
@@ -355,10 +356,10 @@ _cai_doctor() {
 
     if [[ "$sysbox_ok" == "true" ]]; then
         printf '  %-44s %s\n' "Sysbox:" "[OK] Available (strongly recommended)"
-        printf '  %-44s %s\n' "Recommended:" "Use ContainAI with full isolation"
+        printf '  %-44s %s\n' "Recommended:" "Use 'cai run' with full isolation"
     else
         printf '  %-44s %s\n' "Sysbox:" "[WARN] Not available (strongly recommended)"
-        printf '  %-44s %s\n' "Recommended:" "Configure Sysbox for enhanced security"
+        printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' for best security"
     fi
 
     # Exit code: 0 if sandbox available, 1 if not
