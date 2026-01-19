@@ -53,7 +53,8 @@ _containai_libs_exist() {
     [[ -f "$_CAI_SCRIPT_DIR/lib/config.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/container.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]]
+    [[ -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/setup.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -113,6 +114,11 @@ if ! source "$_CAI_SCRIPT_DIR/lib/export.sh"; then
     return 1
 fi
 
+if ! source "$_CAI_SCRIPT_DIR/lib/setup.sh"; then
+    echo "[ERROR] Failed to source lib/setup.sh" >&2
+    return 1
+fi
+
 # Mark libraries as loaded
 _CONTAINAI_LIB_LOADED="1"
 
@@ -131,6 +137,7 @@ Subcommands:
   run           Start/attach to sandbox container (default if omitted)
   shell         Open interactive shell in running container
   doctor        Check system capabilities and show diagnostics
+  setup         Install Sysbox Secure Engine (WSL2/Linux)
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
@@ -1243,6 +1250,10 @@ containai() {
         doctor)
             shift
             _containai_doctor_cmd "$@"
+            ;;
+        setup)
+            shift
+            _cai_setup "$@"
             ;;
         import)
             shift
