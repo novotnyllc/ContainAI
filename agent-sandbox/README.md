@@ -200,10 +200,12 @@ Plain `docker run` is allowed for CI/smoke tests (see Testing below).
 
 ## Container Management
 
-The `cai` command labels containers it creates with `asb.sandbox=agent-sandbox`. This label identifies containers as "managed by ContainAI" and enables:
+The `cai` command labels containers it creates with `containai.sandbox=containai`. This label identifies containers as "managed by ContainAI" and enables:
 
 - **Ownership verification**: `cai` checks this label before attaching to or restarting containers to prevent accidentally affecting containers with the same name created by other tools
 - **Container discovery**: `cai-stop-all` uses this label to find ContainAI-managed containers across all branches/directories
+
+**Legacy compatibility**: Containers created with the previous `asb.sandbox=agent-sandbox` label are still discovered and managed, but new containers use the `containai.sandbox=containai` label.
 
 If `docker sandbox run` does not support the `--label` flag, `cai` falls back to image-based detection with a warning. Use `cai --restart` to recreate the container with proper labeling when label support becomes available.
 

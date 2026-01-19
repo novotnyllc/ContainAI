@@ -837,8 +837,12 @@ _containai_start_container() {
         container_state="none"
     else
         # Docker error - run sandbox check for actionable messaging
-        _containai_check_sandbox
-        sandbox_rc=$?
+        # Guard for set -e safety (non-zero is valid control flow)
+        if _containai_check_sandbox; then
+            sandbox_rc=0
+        else
+            sandbox_rc=$?
+        fi
         if [[ $sandbox_rc -eq 1 ]]; then
             return 1
         fi
@@ -1104,7 +1108,11 @@ _containai_stop_all() {
     echo ""
     echo "Enter numbers to stop (space-separated), 'all', or 'q' to quit:"
     local selection
-    read -r selection
+    # Guard read for set -e safety (EOF returns non-zero)
+    if ! read -r selection; then
+        echo "Cancelled."
+        return 0
+    fi
 
     if [[ "$selection" == "q" || "$selection" == "Q" ]]; then
         echo "Cancelled."

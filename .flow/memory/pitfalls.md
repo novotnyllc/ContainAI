@@ -36,3 +36,6 @@ Tests checking env var/config precedence must clear external env vars (env -u) t
 
 ## 2026-01-19 manual [pitfall]
 grep -v with empty input fails under set -euo pipefail; use sed -e '/pattern/d' instead for filter pipelines
+
+## 2026-01-19 manual [pitfall]
+Functions returning non-zero for valid control flow (not just errors) need if/else guards for set -e: if func; then rc=0; else rc=$?; fi
