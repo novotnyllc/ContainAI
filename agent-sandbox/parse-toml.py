@@ -18,7 +18,10 @@ from pathlib import Path
 # Sentinel for "key not found" (distinct from None which is a valid TOML value)
 _NOT_FOUND = object()
 
-# Python 3.11+ has tomllib in stdlib, fallback to toml package for older versions
+# Python 3.11+ has tomllib in stdlib
+# Fallback chain: tomllib (3.11+) -> tomli (backport, installed via python3-tomli) -> toml (legacy)
+_TOML_DECODE_ERROR = Exception  # Default, will be overwritten
+
 try:
     import tomllib
 
@@ -31,20 +34,34 @@ try:
 
 except ImportError:
     try:
-        import toml
+        # tomli is the backport of tomllib for Python < 3.11
+        # Installed via python3-tomli on Debian/Ubuntu
+        import tomli
 
-        _TOML_DECODE_ERROR = toml.TomlDecodeError
+        _TOML_DECODE_ERROR = tomli.TOMLDecodeError
 
         def load_toml(path: Path) -> dict:
-            """Load TOML file using toml package (Python < 3.11)."""
-            return toml.load(path)
+            """Load TOML file using tomli (Python 3.8-3.10 backport)."""
+            with open(path, "rb") as f:
+                return tomli.load(f)
 
     except ImportError:
-        print(
-            "Error: No TOML parser available. Install 'toml' package for Python < 3.11",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        try:
+            # Legacy fallback to toml package
+            import toml
+
+            _TOML_DECODE_ERROR = toml.TomlDecodeError
+
+            def load_toml(path: Path) -> dict:
+                """Load TOML file using toml package (legacy fallback)."""
+                return toml.load(path)
+
+        except ImportError:
+            print(
+                "Error: No TOML parser available. Install 'tomli' or 'toml' package",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
 
 def get_nested_value(data: dict, key: str):
@@ -90,13 +107,9 @@ def format_value(value) -> str:
         return str(value)
     if isinstance(value, str):
         return value
-    # For complex types (list, dict, datetime), output as JSON
+    # For complex types (list, dict, datetime), output as compact JSON
     # Use default=str to handle TOML datetime types
-    try:
-        return json.dumps(value, separators=(",", ":"), default=str)
-    except TypeError as e:
-        print(f"Error: Cannot serialize value: {e}", file=sys.stderr)
-        sys.exit(1)
+    return json.dumps(value, separators=(",", ":"), default=str)
 
 
 class ErrorExitParser(argparse.ArgumentParser):
@@ -129,7 +142,7 @@ def main():
         "-j",
         action="store_true",
         dest="output_json",
-        help="Output entire config as JSON",
+        help="Output entire config as JSON (compact format)",
     )
     parser.add_argument(
         "--exists",
@@ -175,6 +188,10 @@ def main():
     except _TOML_DECODE_ERROR as e:
         print(f"Error: Invalid TOML: {e}", file=sys.stderr)
         sys.exit(1)
+    except Exception as e:
+        # Catch-all for unexpected errors (bugs, edge cases in TOML libraries)
+        print(f"Error: Failed to parse file: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Handle --exists mode
     if args.exists is not None:
@@ -184,11 +201,11 @@ def main():
         else:
             sys.exit(1)
 
-    # Handle --json mode
+    # Handle --json mode (compact format for shell consumption)
     if args.output_json:
         try:
-            print(json.dumps(config, indent=2, default=str))
-        except TypeError as e:
+            print(json.dumps(config, separators=(",", ":"), default=str))
+        except Exception as e:
             print(f"Error: Cannot serialize config: {e}", file=sys.stderr)
             sys.exit(1)
         sys.exit(0)
@@ -196,9 +213,9 @@ def main():
     # Handle --key mode
     if args.key is not None:
         value = get_nested_value(config, args.key)
-        # Missing key outputs empty string and exits 0 (per spec)
+        # Missing key outputs empty (no newline) and exits 0 (per spec)
         if value is _NOT_FOUND:
-            print("")
+            sys.stdout.write("")
         else:
             print(format_value(value))
         sys.exit(0)

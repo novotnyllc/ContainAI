@@ -83,7 +83,7 @@ _containai_validate_volume_name() {
 # Returns: 0 always (empty output = not found)
 _containai_find_config() {
     local workspace="$1"
-    local dir config_file git_root_found
+    local dir config_file
 
     # Require workspace argument
     if [[ -z "$workspace" ]]; then
@@ -95,7 +95,6 @@ _containai_find_config() {
         echo "[WARN] Invalid workspace path, using \$PWD: $workspace" >&2
         dir="$PWD"
     fi
-    git_root_found=false
 
     # Walk up directory tree looking for .containai/config.toml
     while [[ "$dir" != "/" ]]; do
@@ -108,7 +107,6 @@ _containai_find_config() {
         # Check for git root (stop walking up after git root)
         # Use -e to handle both .git directory and .git file (worktrees/submodules)
         if [[ -e "$dir/.git" ]]; then
-            git_root_found=true
             break
         fi
 
@@ -135,20 +133,19 @@ _containai_find_config() {
 # ==============================================================================
 
 # Find the best matching workspace section from config JSON
-# Arguments: $1 = full config JSON, $2 = workspace path (absolute)
+# Arguments: stdin = config JSON, $1 = workspace path (absolute)
 # Outputs: workspace key that matches (empty if none)
 # Matches workspace paths using longest path prefix (segment boundary)
 _containai_find_matching_workspace() {
-    local config_json="$1"
-    local workspace="$2"
+    local workspace="$1"
 
     python3 -c "
 import json
 import sys
 from pathlib import Path
 
-config = json.loads(sys.argv[1])
-workspace = Path(sys.argv[2]).resolve()
+config = json.load(sys.stdin)
+workspace = Path(sys.argv[1]).resolve()
 
 workspaces = config.get('workspace', {})
 if not isinstance(workspaces, dict):
@@ -181,7 +178,7 @@ for path_str, section in workspaces.items():
 
 if best_match:
     print(best_match)
-" "$config_json" "$workspace"
+" "$workspace"
 }
 
 # ==============================================================================
@@ -232,64 +229,84 @@ _containai_parse_config() {
     # Determine script directory (where parse-toml.py lives)
     script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-    # Call parse-toml.py --json to get full config
-    # Capture stderr separately to avoid corrupting JSON output
-    parse_stderr=$(mktemp)
+    # Create temp file for stderr capture with cleanup trap
+    if ! parse_stderr=$(mktemp 2>/dev/null); then
+        echo "[WARN] Failed to create temp file, cannot capture parse errors" >&2
+        parse_stderr=""
+    fi
 
-    if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>"$parse_stderr"); then
-        if [[ "$strict" == "strict" ]]; then
-            echo "[ERROR] Failed to parse config file: $config_file" >&2
-        else
-            echo "[WARN] Failed to parse config file: $config_file" >&2
+    # Cleanup function for temp file
+    _cleanup_parse_stderr() {
+        [[ -n "$parse_stderr" ]] && rm -f "$parse_stderr"
+    }
+
+    # Call parse-toml.py --json to get full config (compact JSON for shell safety)
+    if [[ -n "$parse_stderr" ]]; then
+        if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>"$parse_stderr"); then
+            if [[ "$strict" == "strict" ]]; then
+                echo "[ERROR] Failed to parse config file: $config_file" >&2
+            else
+                echo "[WARN] Failed to parse config file: $config_file" >&2
+            fi
+            if [[ -s "$parse_stderr" ]]; then
+                cat "$parse_stderr" >&2
+            fi
+            _cleanup_parse_stderr
+            if [[ "$strict" == "strict" ]]; then
+                return 1
+            fi
+            return 0  # Graceful fallback in non-strict mode
         fi
+
+        # Show any warnings from parse-toml.py
         if [[ -s "$parse_stderr" ]]; then
             cat "$parse_stderr" >&2
         fi
-        rm -f "$parse_stderr"
-        if [[ "$strict" == "strict" ]]; then
-            return 1
+        _cleanup_parse_stderr
+    else
+        # No temp file available, stderr goes to parent stderr
+        if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>&1); then
+            if [[ "$strict" == "strict" ]]; then
+                echo "[ERROR] Failed to parse config file: $config_file" >&2
+                return 1
+            fi
+            echo "[WARN] Failed to parse config file: $config_file" >&2
+            return 0
         fi
-        return 0  # Graceful fallback in non-strict mode
     fi
 
-    # Show any warnings from parse-toml.py
-    if [[ -s "$parse_stderr" ]]; then
-        cat "$parse_stderr" >&2
-    fi
-    rm -f "$parse_stderr"
+    # Find matching workspace section (pass JSON via stdin to avoid argv exposure)
+    ws_key=$(printf '%s' "$config_json" | _containai_find_matching_workspace "$workspace")
 
-    # Find matching workspace section
-    ws_key=$(_containai_find_matching_workspace "$config_json" "$workspace")
-
-    # Extract data_volume with fallback chain:
+    # Extract data_volume with fallback chain (pass JSON via stdin):
     # 1. workspace.<key>.data_volume (if workspace matches)
     # 2. agent.data_volume
     # 3. (leave empty, caller uses default)
     local vol=""
     if [[ -n "$ws_key" ]]; then
-        vol=$(python3 -c "
+        vol=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
-config = json.loads(sys.argv[1])
-ws = config.get('workspace', {}).get(sys.argv[2], {})
+config = json.load(sys.stdin)
+ws = config.get('workspace', {}).get(sys.argv[1], {})
 print(ws.get('data_volume', ''))
-" "$config_json" "$ws_key")
+" "$ws_key")
     fi
     if [[ -z "$vol" ]]; then
-        vol=$(python3 -c "
+        vol=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
-config = json.loads(sys.argv[1])
+config = json.load(sys.stdin)
 print(config.get('agent', {}).get('data_volume', ''))
-" "$config_json")
+")
     fi
     _CAI_VOLUME="$vol"
 
-    # Extract excludes with cumulative merge:
+    # Extract excludes with cumulative merge (pass JSON via stdin):
     # default_excludes + workspace.<key>.excludes (deduped)
     local excludes_output
-    excludes_output=$(python3 -c "
+    excludes_output=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
-config = json.loads(sys.argv[1])
-ws_key = sys.argv[2] if len(sys.argv) > 2 else ''
+config = json.load(sys.stdin)
+ws_key = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else ''
 
 default_excludes = config.get('default_excludes', [])
 if not isinstance(default_excludes, list):
@@ -310,7 +327,7 @@ for item in default_excludes + ws_excludes:
         if '\n' not in item and '\r' not in item:
             seen[item] = True
             print(item)
-" "$config_json" "$ws_key")
+" "$ws_key")
 
     # Parse excludes into array
     while IFS= read -r line; do
