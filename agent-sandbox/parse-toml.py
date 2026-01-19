@@ -12,14 +12,15 @@ import json
 from pathlib import Path
 
 
-def find_workspace(config: dict, workspace: str, config_dir: Path) -> dict | None:
+def find_workspace(config: dict, workspace: str) -> dict | None:
     """
     Find workspace with longest matching path (segment boundary).
+
+    Only absolute paths in workspace sections are matched; relative paths are skipped.
 
     Args:
         config: Parsed TOML config dict
         workspace: Workspace path to match
-        config_dir: Directory containing config file (for resolving relative paths)
 
     Returns:
         Matched workspace section or None
@@ -39,17 +40,11 @@ def find_workspace(config: dict, workspace: str, config_dir: Path) -> dict | Non
 
         cfg_path = Path(path_str)
 
-        # Handle relative paths: resolve relative to project root
-        # If config is in .containai/, project root is its parent
+        # Skip relative paths (spec: "Absolute paths only")
         if not cfg_path.is_absolute():
-            config_dir_name = config_dir.name
-            if config_dir_name == ".containai":
-                base_dir = config_dir.parent
-            else:
-                base_dir = config_dir
-            cfg_path = (base_dir / cfg_path).resolve()
-        else:
-            cfg_path = cfg_path.resolve()
+            continue
+
+        cfg_path = cfg_path.resolve()
 
         # Check if workspace is under cfg_path (segment boundary match)
         try:
@@ -69,11 +64,8 @@ def main():
         print("Usage: parse-toml.py <config> <workspace>", file=sys.stderr)
         sys.exit(1)
 
-    config_path = Path(sys.argv[1])
-    config_dir = config_path.parent.resolve()
-
     try:
-        with open(config_path, "rb") as f:
+        with open(sys.argv[1], "rb") as f:
             config = tomllib.load(f)
     except FileNotFoundError:
         print(f"Error: Config file not found: {sys.argv[1]}", file=sys.stderr)
@@ -82,7 +74,7 @@ def main():
         print(f"Error: Invalid TOML: {e}", file=sys.stderr)
         sys.exit(1)
 
-    ws = find_workspace(config, sys.argv[2], config_dir)
+    ws = find_workspace(config, sys.argv[2])
     agent = config.get("agent", {})
     default_excludes = config.get("default_excludes", [])
 
