@@ -60,3 +60,6 @@ When capturing function output to a variable, use stdout-only capture; mixing st
 
 ## 2026-01-20 manual [pitfall]
 Systemd drop-in ExecStart= clears then replaces - extract existing command and APPEND flags to preserve distro/user settings
+
+## 2026-01-20 manual [pitfall]
+When validating runtime availability, check .Runtimes contains the runtime, don't assume DefaultRuntime - explicit --runtime flags are needed when runtime is NOT set as default
