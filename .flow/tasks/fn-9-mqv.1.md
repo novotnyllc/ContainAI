@@ -24,9 +24,8 @@ Add `--from <path>` flag to the import CLI command handler.
 - [ ] `--from` value passed to `_containai_import()` function
 - [ ] Existing `cai import <vol>` (no --from) still works
 ## Done summary
-TBD
-
+Added --from flag to import CLI with argument parsing, tilde expansion, and help documentation. Flag value passed to _containai_import() as 7th parameter; currently a no-op with warning until fn-9-mqv.2-5 implement tgz/directory support.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: e119aac, bc5ffb4, 9268dca
+- Tests: bash -n containai.sh, bash -n lib/import.sh, _containai_import_help, _containai_import_cmd --from /path tests
 - PRs:
