@@ -8,10 +8,25 @@
     "fn-5-urz.11"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "a57a002",
+      "5c79177",
+      "3150f95",
+      "07884d5"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n agent-sandbox/lib/setup.sh",
+      "bash -n agent-sandbox/test-secure-engine.sh",
+      "shellcheck -x agent-sandbox/lib/setup.sh",
+      "shellcheck -x agent-sandbox/test-secure-engine.sh"
+    ]
+  },
   "id": "fn-5-urz.12",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.12.md",
   "status": "in_progress",
   "title": "Secure Engine runtime validation + integration tests",
-  "updated_at": "2026-01-20T00:53:55.781031Z"
+  "updated_at": "2026-01-20T01:26:46.359918Z"
 }

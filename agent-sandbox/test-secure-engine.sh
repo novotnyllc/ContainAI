@@ -126,60 +126,56 @@ test_engine_reachable() {
 }
 
 # ==============================================================================
-# Test 3: Default runtime is sysbox-runc (per spec)
+# Test 3: sysbox-runc runtime is available
 # ==============================================================================
 test_sysbox_runtime() {
-    section "Test 3: Default runtime is sysbox-runc"
+    section "Test 3: sysbox-runc runtime is available"
 
-    local default_runtime
-    # Try to extract from cached info output first
-    if [[ -n "${_TEST_INFO_OUTPUT:-}" ]]; then
-        default_runtime=$(printf '%s' "$_TEST_INFO_OUTPUT" | grep "Default Runtime:" | head -1 | sed 's/.*Default Runtime:[[:space:]]*//' || true)
+    # Note: sysbox-runc is NOT the default runtime (by design) - we check availability
+    local runtimes_json runtime_rc
+    runtimes_json=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" info --format '{{json .Runtimes}}' 2>/dev/null) && runtime_rc=0 || runtime_rc=$?
+
+    # Handle no timeout mechanism available
+    if [[ $runtime_rc -eq 125 ]]; then
+        runtimes_json=$(docker --context "$CONTEXT_NAME" info --format '{{json .Runtimes}}' 2>/dev/null || true)
     fi
 
-    # If not found, query directly
-    if [[ -z "$default_runtime" ]]; then
-        local runtime_rc
-        default_runtime=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" info --format '{{.DefaultRuntime}}' 2>/dev/null) && runtime_rc=0 || runtime_rc=$?
-        if [[ $runtime_rc -eq 125 ]]; then
-            default_runtime=$(docker --context "$CONTEXT_NAME" info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
-        fi
-    fi
-
-    if [[ -z "$default_runtime" ]]; then
-        fail "Could not query default runtime"
+    if [[ -z "$runtimes_json" ]] || [[ "$runtimes_json" == "null" ]]; then
+        fail "Could not query available runtimes"
         return
     fi
 
-    if [[ "$default_runtime" == "sysbox-runc" ]]; then
-        pass "Default runtime is sysbox-runc"
-        info "  Default runtime: $default_runtime"
+    if printf '%s' "$runtimes_json" | grep -q "sysbox-runc"; then
+        pass "sysbox-runc runtime is available"
+        info "  Available runtimes: $runtimes_json"
     else
-        fail "Default runtime is not sysbox-runc (got: $default_runtime)"
-        info "  Remediation: Run 'cai setup' to configure sysbox-runc as default"
+        fail "sysbox-runc runtime is NOT available"
+        info "  Available runtimes: $runtimes_json"
+        info "  Remediation: Run 'cai setup' to install Sysbox"
     fi
 }
 
 # ==============================================================================
-# Test 4: User namespace enabled
+# Test 4: User namespace enabled (with sysbox-runc)
 # ==============================================================================
 test_user_namespace() {
-    section "Test 4: User namespace isolation"
+    section "Test 4: User namespace isolation (sysbox-runc)"
 
     local uid_map_output uid_map_rc
     # Use pinned image with --pull=never first, then try with pull if missing
-    uid_map_output=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" run --rm --pull=never "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+    # Must use explicit --runtime=sysbox-runc since sysbox is NOT the default runtime
+    uid_map_output=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc --pull=never "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
 
     # Handle no timeout mechanism available
     if [[ $uid_map_rc -eq 125 ]]; then
-        uid_map_output=$(docker --context "$CONTEXT_NAME" run --rm --pull=never "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+        uid_map_output=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc --pull=never "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
     fi
 
     # Handle missing image - try with pull (use proper grouping to avoid precedence bug)
     if [[ $uid_map_rc -ne 0 ]] && { [[ "$uid_map_output" == *"image"*"not"*"found"* ]] || [[ "$uid_map_output" == *"No such image"* ]]; }; then
         info "  Pulling $TEST_IMAGE image..."
-        uid_map_output=$(run_with_timeout 60 docker --context "$CONTEXT_NAME" run --rm "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
-        [[ $uid_map_rc -eq 125 ]] && uid_map_output=$(docker --context "$CONTEXT_NAME" run --rm "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+        uid_map_output=$(run_with_timeout 60 docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+        [[ $uid_map_rc -eq 125 ]] && uid_map_output=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
     fi
 
     if [[ $uid_map_rc -eq 124 ]]; then
@@ -212,24 +208,25 @@ test_user_namespace() {
 }
 
 # ==============================================================================
-# Test 5: Test container runs successfully
+# Test 5: Test container runs successfully (with sysbox-runc)
 # ==============================================================================
 test_container_runs() {
-    section "Test 5: Test container runs successfully"
+    section "Test 5: Test container runs successfully (sysbox-runc)"
 
     local test_output test_rc
     # Use pinned image with --pull=never first
-    test_output=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" run --rm --pull=never "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+    # Must use explicit --runtime=sysbox-runc since sysbox is NOT the default runtime
+    test_output=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc --pull=never "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
     # Handle no timeout mechanism available
     if [[ $test_rc -eq 125 ]]; then
-        test_output=$(docker --context "$CONTEXT_NAME" run --rm --pull=never "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+        test_output=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc --pull=never "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
     fi
 
     # Handle missing image - try with pull (use proper grouping to avoid precedence bug)
     if [[ $test_rc -ne 0 ]] && { [[ "$test_output" == *"image"*"not"*"found"* ]] || [[ "$test_output" == *"No such image"* ]]; }; then
-        test_output=$(run_with_timeout 60 docker --context "$CONTEXT_NAME" run --rm "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
-        [[ $test_rc -eq 125 ]] && test_output=$(docker --context "$CONTEXT_NAME" run --rm "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+        test_output=$(run_with_timeout 60 docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+        [[ $test_rc -eq 125 ]] && test_output=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
     fi
 
     if [[ $test_rc -eq 124 ]]; then
@@ -413,15 +410,16 @@ test_idempotency() {
     section "Test 7: Idempotency (repeat key tests)"
 
     # Run the core test twice to ensure no state changes
+    # Must use explicit --runtime=sysbox-runc since sysbox is NOT the default runtime
     local first_result second_result first_rc second_rc
 
-    info "First run: checking container execution"
-    first_result=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" run --rm --pull=never "$TEST_IMAGE" echo "idempotency-test" 2>&1) && first_rc=0 || first_rc=$?
-    [[ $first_rc -eq 125 ]] && first_result=$(docker --context "$CONTEXT_NAME" run --rm --pull=never "$TEST_IMAGE" echo "idempotency-test" 2>&1) && first_rc=0 || first_rc=$?
+    info "First run: checking container execution (sysbox-runc)"
+    first_result=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc --pull=never "$TEST_IMAGE" echo "idempotency-test" 2>&1) && first_rc=0 || first_rc=$?
+    [[ $first_rc -eq 125 ]] && first_result=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc --pull=never "$TEST_IMAGE" echo "idempotency-test" 2>&1) && first_rc=0 || first_rc=$?
 
-    info "Second run: checking container execution"
-    second_result=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" run --rm --pull=never "$TEST_IMAGE" echo "idempotency-test" 2>&1) && second_rc=0 || second_rc=$?
-    [[ $second_rc -eq 125 ]] && second_result=$(docker --context "$CONTEXT_NAME" run --rm --pull=never "$TEST_IMAGE" echo "idempotency-test" 2>&1) && second_rc=0 || second_rc=$?
+    info "Second run: checking container execution (sysbox-runc)"
+    second_result=$(run_with_timeout "$TEST_TIMEOUT" docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc --pull=never "$TEST_IMAGE" echo "idempotency-test" 2>&1) && second_rc=0 || second_rc=$?
+    [[ $second_rc -eq 125 ]] && second_result=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc --pull=never "$TEST_IMAGE" echo "idempotency-test" 2>&1) && second_rc=0 || second_rc=$?
 
     if [[ $first_rc -eq $second_rc ]] && [[ "$first_result" == "$second_result" ]] && [[ "$first_result" == *"idempotency-test"* ]]; then
         pass "Tests are idempotent (same result on repeated runs)"

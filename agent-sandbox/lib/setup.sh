@@ -884,8 +884,10 @@ _cai_setup_wsl2() {
 
     printf '\n'
     _cai_ok "Secure Engine setup complete"
-    _cai_info "You can now use: cai run --context containai-secure"
-    _cai_info "Or set CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure"
+    _cai_info "To use the Secure Engine:"
+    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure"
+    _cai_info "  cai run --workspace /path/to/project"
+    _cai_info "Or use docker directly: docker --context containai-secure --runtime=sysbox-runc ..."
 
     return 0
 }
@@ -1353,8 +1355,10 @@ _cai_setup_macos() {
 
     printf '\n'
     _cai_ok "Secure Engine setup complete (macOS/Lima)"
-    _cai_info "You can now use: cai run --context containai-secure"
-    _cai_info "Or set CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure"
+    _cai_info "To use the Secure Engine:"
+    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure"
+    _cai_info "  cai run --workspace /path/to/project"
+    _cai_info "Or use docker directly: docker --context containai-secure --runtime=sysbox-runc ..."
     printf '\n'
     _cai_info "Lima VM management:"
     _cai_info "  Start:  limactl start $_CAI_LIMA_VM_NAME"
@@ -1637,51 +1641,51 @@ _cai_secure_engine_validate() {
         failed=1
     fi
 
-    # Validation 3: Default runtime is sysbox-runc (per spec)
-    # The containai-secure daemon should have sysbox-runc as default runtime
-    _cai_step "Check 3: Default runtime is sysbox-runc"
-    local default_runtime runtime_rc
-    # Use already captured info_output to avoid extra docker call
-    default_runtime=$(printf '%s' "$info_output" | grep "Default Runtime:" | head -1 | sed 's/.*Default Runtime:[[:space:]]*//' || true)
+    # Validation 3: sysbox-runc runtime is available
+    # Note: sysbox-runc is NOT the default runtime (by design) - we check availability
+    _cai_step "Check 3: sysbox-runc runtime is available"
+    local runtimes_json runtime_rc
+    # Query available runtimes via docker info
+    runtimes_json=$(_cai_timeout "$_CAI_VALIDATE_TIMEOUT" docker --context "$context_name" info --format '{{json .Runtimes}}' 2>/dev/null) && runtime_rc=0 || runtime_rc=$?
 
-    # If not found in output, try format query with timeout
-    if [[ -z "$default_runtime" ]]; then
-        default_runtime=$(_cai_timeout "$_CAI_VALIDATE_TIMEOUT" docker --context "$context_name" info --format '{{.DefaultRuntime}}' 2>/dev/null) && runtime_rc=0 || runtime_rc=$?
-        [[ $runtime_rc -eq 125 ]] && default_runtime=$(docker --context "$context_name" info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
+    # Handle timeout mechanism not available
+    if [[ $runtime_rc -eq 125 ]]; then
+        runtimes_json=$(docker --context "$context_name" info --format '{{json .Runtimes}}' 2>/dev/null || true)
     fi
 
-    if [[ -z "$default_runtime" ]]; then
-        printf '%s\n' "[FAIL] Could not query default runtime"
+    if [[ -z "$runtimes_json" ]] || [[ "$runtimes_json" == "null" ]]; then
+        printf '%s\n' "[FAIL] Could not query available runtimes"
         _cai_error "  Remediation: Ensure Docker daemon is running"
         failed=1
-    elif [[ "$default_runtime" == "sysbox-runc" ]]; then
-        printf '%s\n' "[PASS] Default runtime is sysbox-runc"
+    elif printf '%s' "$runtimes_json" | grep -q "sysbox-runc"; then
+        printf '%s\n' "[PASS] sysbox-runc runtime is available"
         if [[ "$verbose" == "true" ]]; then
-            _cai_info "  Default runtime: $default_runtime"
+            _cai_info "  Available runtimes: $runtimes_json"
         fi
     else
-        printf '%s\n' "[FAIL] Default runtime is not sysbox-runc (got: $default_runtime)"
-        _cai_error "  Remediation: Run 'cai setup' to configure sysbox-runc as default"
+        printf '%s\n' "[FAIL] sysbox-runc runtime is NOT available"
+        _cai_error "  Available runtimes: $runtimes_json"
+        _cai_error "  Remediation: Run 'cai setup' to install Sysbox"
         failed=1
     fi
 
-    # Validation 4: User namespace enabled (test with container)
-    _cai_step "Check 4: User namespace isolation"
+    # Validation 4: User namespace enabled (test with container using sysbox-runc)
+    _cai_step "Check 4: User namespace isolation (sysbox-runc)"
     local uid_map_output uid_map_rc
-    # Run container and check uid_map (with timeout, pinned image)
-    # Note: No explicit --runtime needed since sysbox-runc is default
-    uid_map_output=$(_cai_timeout "$_CAI_VALIDATE_TIMEOUT" docker --context "$context_name" run --rm --pull=never alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+    # Run container with --runtime=sysbox-runc and check uid_map (with timeout, pinned image)
+    # Must use explicit --runtime since sysbox-runc is NOT the default runtime
+    uid_map_output=$(_cai_timeout "$_CAI_VALIDATE_TIMEOUT" docker --context "$context_name" run --rm --runtime=sysbox-runc --pull=never alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
 
     # Handle timeout mechanism not available
     if [[ $uid_map_rc -eq 125 ]]; then
-        uid_map_output=$(docker --context "$context_name" run --rm --pull=never alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+        uid_map_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc --pull=never alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
     fi
 
     # Handle missing image - try with pull (use proper grouping to avoid precedence bug)
     if [[ $uid_map_rc -ne 0 ]] && { [[ "$uid_map_output" == *"image"*"not"*"found"* ]] || [[ "$uid_map_output" == *"No such image"* ]]; }; then
         _cai_info "  Pulling alpine:3.20 image..."
-        uid_map_output=$(_cai_timeout 60 docker --context "$context_name" run --rm alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
-        [[ $uid_map_rc -eq 125 ]] && uid_map_output=$(docker --context "$context_name" run --rm alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+        uid_map_output=$(_cai_timeout 60 docker --context "$context_name" run --rm --runtime=sysbox-runc alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+        [[ $uid_map_rc -eq 125 ]] && uid_map_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
     fi
 
     if [[ $uid_map_rc -eq 124 ]]; then
@@ -1714,20 +1718,21 @@ _cai_secure_engine_validate() {
         fi
     fi
 
-    # Validation 5: Test container starts successfully (with timeout, pinned image)
-    _cai_step "Check 5: Test container runs successfully"
+    # Validation 5: Test container starts successfully with sysbox-runc
+    _cai_step "Check 5: Test container runs successfully (sysbox-runc)"
     local hello_output hello_rc
-    hello_output=$(_cai_timeout "$_CAI_VALIDATE_TIMEOUT" docker --context "$context_name" run --rm --pull=never alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
+    # Use explicit --runtime=sysbox-runc since sysbox is NOT the default runtime
+    hello_output=$(_cai_timeout "$_CAI_VALIDATE_TIMEOUT" docker --context "$context_name" run --rm --runtime=sysbox-runc --pull=never alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
 
     # Handle timeout mechanism not available
     if [[ $hello_rc -eq 125 ]]; then
-        hello_output=$(docker --context "$context_name" run --rm --pull=never alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
+        hello_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc --pull=never alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
     fi
 
     # Handle missing image - try with pull (use proper grouping to avoid precedence bug)
     if [[ $hello_rc -ne 0 ]] && { [[ "$hello_output" == *"image"*"not"*"found"* ]] || [[ "$hello_output" == *"No such image"* ]]; }; then
-        hello_output=$(_cai_timeout 60 docker --context "$context_name" run --rm alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
-        [[ $hello_rc -eq 125 ]] && hello_output=$(docker --context "$context_name" run --rm alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
+        hello_output=$(_cai_timeout 60 docker --context "$context_name" run --rm --runtime=sysbox-runc alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
+        [[ $hello_rc -eq 125 ]] && hello_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
     fi
 
     if [[ $hello_rc -eq 124 ]]; then
