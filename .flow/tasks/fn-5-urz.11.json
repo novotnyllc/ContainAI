@@ -1,7 +1,7 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-20T00:37:19.558003Z",
   "created_at": "2026-01-18T23:55:54.206128Z",
   "depends_on": [
     "fn-5-urz.1"
@@ -10,7 +10,7 @@
   "id": "fn-5-urz.11",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.11.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "macOS Lima VM Secure Engine provisioning",
-  "updated_at": "2026-01-19T04:53:40.523779Z"
+  "updated_at": "2026-01-20T00:37:19.558024Z"
 }

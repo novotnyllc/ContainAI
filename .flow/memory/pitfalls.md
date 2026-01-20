@@ -57,3 +57,6 @@ Bash heredocs (<<EOF) override stdin for the command - cannot pipe data into pyt
 
 ## 2026-01-19 manual [pitfall]
 When capturing function output to a variable, use stdout-only capture; mixing stderr with 2>&1 can pollute the value with warning messages
+
+## 2026-01-20 manual [pitfall]
+Systemd drop-in ExecStart= clears then replaces - extract existing command and APPEND flags to preserve distro/user settings
