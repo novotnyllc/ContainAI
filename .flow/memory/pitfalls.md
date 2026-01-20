@@ -63,3 +63,9 @@ Systemd drop-in ExecStart= clears then replaces - extract existing command and A
 
 ## 2026-01-20 manual [pitfall]
 When validating runtime availability, check .Runtimes contains the runtime, don't assume DefaultRuntime - explicit --runtime flags are needed when runtime is NOT set as default
+
+## 2026-01-20 manual [pitfall]
+Docker sandbox commands require forcing default context (DOCKER_CONTEXT= DOCKER_HOST=) since they only work with Docker Desktop, not custom contexts
+
+## 2026-01-20 manual [pitfall]
+Verify by specific IDs not by attributes (workspace/name) to avoid false negatives from concurrent operations

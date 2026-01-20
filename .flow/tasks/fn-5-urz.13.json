@@ -7,10 +7,24 @@
     "fn-5-urz.7"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "7916085",
+      "b9af55b",
+      "3b3432e",
+      "f016a1d",
+      "fa3db03",
+      "760eddb"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n containai.sh"
+    ]
+  },
   "id": "fn-5-urz.13",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.13.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "containai sandbox reset command",
-  "updated_at": "2026-01-20T02:21:01.941246Z"
+  "updated_at": "2026-01-20T02:35:19.938018Z"
 }

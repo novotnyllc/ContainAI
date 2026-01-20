@@ -64,9 +64,8 @@ containai_sandbox_reset() {
 - [ ] Confirms successful removal
 - [ ] Does not affect sandboxes for other workspaces
 ## Done summary
-TBD
-
+Implemented `containai sandbox reset` command to remove Docker Desktop sandboxes for a workspace, allowing config changes to take effect on next run. The command properly handles running sandboxes (stops first), multiple sandboxes for the same workspace, symlink resolution, and verifies removal.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 7916085, b9af55b, 3b3432e, f016a1d, fa3db03, 760eddb
+- Tests: bash -n containai.sh
 - PRs:

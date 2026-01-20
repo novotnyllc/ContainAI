@@ -187,6 +187,7 @@ Examples:
   cai doctor                        Check system capabilities
   cai shell                         Open shell in running sandbox
   cai sandbox reset                 Remove sandbox for config changes
+  cai sandbox clear-credentials     Clear stored credentials (troubleshooting)
   cai stop --all                    Stop all containers
 
 Safe Defaults (FR-4):
@@ -281,7 +282,8 @@ ContainAI Sandbox - Manage Docker Desktop sandboxes
 Usage: cai sandbox <subcommand> [options]
 
 Subcommands:
-  reset           Remove sandbox for workspace (config changes require reset)
+  reset              Remove sandbox for workspace (config changes require reset)
+  clear-credentials  Remove sandbox credential volumes for troubleshooting
 
 Use 'cai sandbox <subcommand> --help' for subcommand-specific help.
 EOF
@@ -312,6 +314,38 @@ Sysbox mode containers should use 'cai stop' followed by 'cai --restart'.
 Examples:
   cai sandbox reset                  Reset sandbox for current directory
   cai sandbox reset --workspace ~/proj  Reset sandbox for specific workspace
+EOF
+}
+
+_containai_sandbox_clear_credentials_help() {
+    cat <<'EOF'
+ContainAI Sandbox Clear Credentials - Remove sandbox credential volumes
+
+Usage: cai sandbox clear-credentials [options]
+
+Removes the Docker sandbox credential volume for the specified agent.
+This is useful when troubleshooting authentication issues where the
+sandbox stores invalid or corrupted credentials.
+
+Options:
+  --agent <name>      Agent to clear credentials for (claude, gemini; default: claude)
+  -y, --yes           Skip confirmation prompt
+  -h, --help          Show this help message
+
+What it does:
+  1. Identifies the credential volume for the agent
+  2. Warns about data loss (requires confirmation)
+  3. Checks if volume is in use by a running sandbox
+  4. Removes the credential volume
+  5. Next sandbox run will prompt for re-authentication
+
+Note: This command is for Docker Desktop sandboxes only (ECI mode).
+Sysbox mode does not use persistent credential volumes.
+
+Examples:
+  cai sandbox clear-credentials               Clear Claude credentials
+  cai sandbox clear-credentials --agent gemini  Clear Gemini credentials
+  cai sandbox clear-credentials -y            Skip confirmation prompt
 EOF
 }
 
@@ -665,6 +699,10 @@ _containai_sandbox_cmd() {
             shift
             _containai_sandbox_reset_cmd "$@"
             ;;
+        clear-credentials)
+            shift
+            _containai_sandbox_clear_credentials_cmd "$@"
+            ;;
         --help|-h)
             _containai_sandbox_help
             return 0
@@ -880,6 +918,170 @@ _containai_sandbox_reset_cmd() {
     fi
 
     _cai_ok "Sandbox removed. New config will apply on next 'cai run'"
+    return 0
+}
+
+# Sandbox clear-credentials subcommand handler
+# Removes credential volumes for Docker Desktop sandboxes
+_containai_sandbox_clear_credentials_cmd() {
+    local agent="claude"
+    local skip_confirm="false"
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --agent)
+                if [[ -z "${2-}" ]]; then
+                    _cai_error "--agent requires a value"
+                    return 1
+                fi
+                agent="$2"
+                shift 2
+                ;;
+            --agent=*)
+                agent="${1#--agent=}"
+                if [[ -z "$agent" ]]; then
+                    _cai_error "--agent requires a value"
+                    return 1
+                fi
+                shift
+                ;;
+            -y|--yes)
+                skip_confirm="true"
+                shift
+                ;;
+            --help|-h)
+                _containai_sandbox_clear_credentials_help
+                return 0
+                ;;
+            *)
+                _cai_error "Unknown option: $1"
+                _cai_info "Use 'cai sandbox clear-credentials --help' for usage"
+                return 1
+                ;;
+        esac
+    done
+
+    # Validate agent name
+    case "$agent" in
+        claude|gemini)
+            ;;
+        *)
+            _cai_error "Unknown agent: $agent"
+            _cai_info "Supported agents: claude, gemini"
+            return 1
+            ;;
+    esac
+
+    # Check if docker sandbox is available (Docker Desktop feature)
+    # Force default context - sandbox commands only work with Docker Desktop
+    if ! DOCKER_CONTEXT= DOCKER_HOST= _cai_sandbox_feature_enabled; then
+        _cai_info "Credential volumes are a Docker Desktop sandbox feature"
+        _cai_info "Sysbox mode does not use persistent credential volumes"
+        return 1
+    fi
+
+    # Credential volume naming convention from Docker docs
+    # Claude: docker-claude-sandbox-data
+    # Gemini: docker-gemini-sandbox-data
+    local volume_name="docker-${agent}-sandbox-data"
+
+    # Check if volume exists
+    # Force default context for volume operations (Docker Desktop only)
+    local volume_inspect_output
+    if ! volume_inspect_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume inspect "$volume_name" 2>&1); then
+        # Check if it's "not found" vs other errors
+        if printf '%s' "$volume_inspect_output" | grep -qiE "no such volume|not found"; then
+            _cai_info "No credential volume found: $volume_name"
+            _cai_info "Nothing to clear"
+            return 0
+        fi
+        # Other error
+        _cai_error "Failed to inspect volume: $volume_inspect_output"
+        return 1
+    fi
+
+    # Volume exists - warn user and confirm
+    _cai_warn "This will remove stored credentials for $agent"
+    _cai_warn "Volume: $volume_name"
+    _cai_warn "You will need to re-authenticate on next sandbox run"
+
+    # Check if volume is in use by any container
+    # List containers using this volume (all states)
+    local using_containers
+    using_containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker ps -a --filter "volume=$volume_name" --format '{{.Names}} ({{.Status}})' 2>/dev/null) || using_containers=""
+
+    if [[ -n "$using_containers" ]]; then
+        _cai_warn "Volume is mounted by containers:"
+        local container_line
+        while IFS= read -r container_line; do
+            if [[ -n "$container_line" ]]; then
+                _cai_warn "  - $container_line"
+            fi
+        done <<< "$using_containers"
+
+        # Check if any are running
+        local running_containers
+        running_containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker ps --filter "volume=$volume_name" --format '{{.Names}}' 2>/dev/null) || running_containers=""
+
+        if [[ -n "$running_containers" ]]; then
+            _cai_error "Cannot remove volume while containers are running"
+            _cai_info "Stop the sandbox first: cai sandbox reset"
+            return 1
+        fi
+
+        _cai_info "Containers are not running - proceeding with removal"
+    fi
+
+    # Confirm unless -y/--yes specified
+    if [[ "$skip_confirm" != "true" ]]; then
+        if [[ ! -t 0 ]]; then
+            _cai_error "Non-interactive terminal - use -y/--yes to skip confirmation"
+            return 1
+        fi
+
+        printf '%s' "Remove credential volume? [y/N] "
+        local confirm
+        if ! read -r confirm; then
+            _cai_info "Cancelled"
+            return 0
+        fi
+
+        case "$confirm" in
+            y|Y|yes|YES)
+                ;;
+            *)
+                _cai_info "Cancelled"
+                return 0
+                ;;
+        esac
+    fi
+
+    # Remove the volume
+    _cai_info "Removing credential volume: $volume_name"
+    local rm_output rm_rc
+    rm_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume rm "$volume_name" 2>&1)
+    rm_rc=$?
+
+    if [[ $rm_rc -ne 0 ]]; then
+        # Check for "in use" error
+        if printf '%s' "$rm_output" | grep -qiE "in use|being used|volume is in use"; then
+            _cai_error "Volume is in use by a container"
+            _cai_info "Stop all sandboxes using this volume first: cai sandbox reset"
+            return 1
+        fi
+        _cai_error "Failed to remove volume: $rm_output"
+        return 1
+    fi
+
+    # Verify removal
+    if DOCKER_CONTEXT= DOCKER_HOST= docker volume inspect "$volume_name" >/dev/null 2>&1; then
+        _cai_error "Volume still exists after removal"
+        return 1
+    fi
+
+    _cai_ok "Credential volume removed: $volume_name"
+    _cai_info "Re-authenticate on next: cai --agent $agent"
     return 0
 }
 
