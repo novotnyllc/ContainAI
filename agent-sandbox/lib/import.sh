@@ -189,11 +189,16 @@ _import_restore_from_tgz() {
     # Archive validation uses alpine container for consistency with extraction
     # This ensures validation and extraction use the same tar implementation
     # Validate archive can be read and check for path traversal + entry types in one pass
+    # Note: We capture only stdout (not stderr) to avoid Docker pull progress polluting the result
+    # Docker stderr (pull progress, warnings) goes to our stderr for user visibility
     local validation_result
     if ! validation_result=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none -i alpine:3.20 sh -c '
         # Read archive from stdin, validate, and report issues
         # Store stdin to temp file since we need multiple passes
-        cat > /tmp/archive.tgz
+        if ! cat > /tmp/archive.tgz; then
+            echo "WRITE_FAILED"
+            exit 0
+        fi
 
         # Step 1: Check archive is readable
         if ! tar -tzf /tmp/archive.tgz >/dev/null 2>&1; then
@@ -209,6 +214,7 @@ _import_restore_from_tgz() {
 
         # Step 3: Check entry types using allowlist (only - and d allowed)
         # BusyBox tar -tv format: permissions owner/group size date time name
+        # Note: Symlinks/hardlinks are intentionally rejected per spec (security)
         disallowed=$(tar -tvzf /tmp/archive.tgz 2>/dev/null | cut -c1 | grep -vE "^[-d]$" | sort -u | tr "\n" " ")
         if [ -n "$disallowed" ]; then
             echo "DISALLOWED_TYPES:$disallowed"
@@ -216,12 +222,19 @@ _import_restore_from_tgz() {
         fi
 
         echo "OK"
-    ' < "$archive" 2>&1); then
-        _import_error "Failed to validate archive"
+    ' < "$archive"); then
+        _import_error "Failed to validate archive (container failed)"
         return 1
     fi
 
+    # Extract just the last line in case Docker output leaked (shouldn't with stdout-only capture)
+    validation_result=$(printf '%s\n' "$validation_result" | tail -n1)
+
     case "$validation_result" in
+        WRITE_FAILED)
+            _import_error "Failed to write archive to container (disk full or I/O error)"
+            return 1
+            ;;
         CORRUPT)
             _import_error "Failed to read archive (corrupt or not gzip-compressed tar): $archive"
             return 1
@@ -234,6 +247,7 @@ _import_restore_from_tgz() {
             local types="${validation_result#DISALLOWED_TYPES:}"
             _import_error "Archive contains disallowed entry types (only regular files and directories permitted)"
             _import_info "Symlinks, hardlinks, devices, FIFOs, and sockets are not allowed"
+            _import_info "This is a known limitation for security - see epic spec fn-9-mqv"
             _import_info "Found disallowed types: $types"
             return 1
             ;;
