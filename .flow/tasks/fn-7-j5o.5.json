@@ -7,10 +7,22 @@
     "fn-7-j5o.3"
   ],
   "epic": "fn-7-j5o",
+  "evidence": {
+    "commits": [
+      "ac3f93a",
+      "edadb9f",
+      "a65861f",
+      "1fd1eb3"
+    ],
+    "prs": [],
+    "tests": [
+      "grep -c '^### ' docs/troubleshooting.md"
+    ]
+  },
   "id": "fn-7-j5o.5",
   "priority": null,
   "spec_path": ".flow/tasks/fn-7-j5o.5.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create troubleshooting guide",
-  "updated_at": "2026-01-20T14:15:46.659086Z"
+  "updated_at": "2026-01-20T14:33:05.918367Z"
 }

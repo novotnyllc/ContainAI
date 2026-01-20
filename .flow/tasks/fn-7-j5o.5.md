@@ -33,9 +33,8 @@ Create an expanded troubleshooting guide covering 20+ common error scenarios, or
 - [ ] Covers credential/sync issues
 - [ ] Includes "Still stuck?" section with support channels
 ## Done summary
-TBD
-
+Created comprehensive troubleshooting guide with 48+ documented error scenarios, organized by symptom with Symptom->Diagnosis->Solution pattern for each issue.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: ac3f93a, edadb9f, a65861f, 1fd1eb3
+- Tests: grep -c '^### ' docs/troubleshooting.md
 - PRs:
