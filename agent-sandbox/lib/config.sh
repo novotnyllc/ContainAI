@@ -881,8 +881,12 @@ _containai_resolve_env_config() {
     fi
 
     # Determine script directory (where parse-toml.py lives)
-    # Guard with if/else for set -e safety
+    # Guard with if/else for set -e safety; fail fast in strict mode
     if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        if [[ -n "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Failed to determine script directory" >&2
+            return 1
+        fi
         printf '%s\n' "[WARN] Failed to determine script directory. Using defaults." >&2
         printf '%s' "$default_json"
         return 0
@@ -924,6 +928,11 @@ result = {
 }
 print(json.dumps(result, separators=(',', ':')))
 "); then
+        # Fail fast in strict mode; graceful fallback otherwise
+        if [[ -n "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Failed to normalize env config JSON" >&2
+            return 1
+        fi
         printf '%s\n' "[WARN] Failed to normalize env config JSON" >&2
         printf '%s' "$default_json"
         return 0
