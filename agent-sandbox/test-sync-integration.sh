@@ -1730,13 +1730,21 @@ from_host = true
 }
 
 # ==============================================================================
-# Test 31c: TOCTOU - mount point symlink rejected
+# Test 31c: TOCTOU - mount point symlink check (isolated helper test)
 # ==============================================================================
 # Tests that the Alpine helper container rejects volumes where /data is a symlink.
-# This is hard to simulate directly since Docker mounts volumes as real directories,
-# so we test by examining the Alpine helper script behavior with a modified check.
+#
+# TESTING LIMITATION: Docker ALWAYS mounts volumes as real directories - there is
+# no way to make Docker mount a symlink as /data. This is a fundamental Docker
+# design constraint. The mount point symlink check is defense-in-depth against
+# container escape attacks that might somehow create a symlink mount.
+#
+# We test this by:
+# 1. Running the guard logic in isolation with a simulated symlink scenario
+# 2. Verifying normal volumes pass the check in production code
+# 3. Verifying code contains the protection (static analysis)
 test_env_toctou_mount_symlink() {
-    section "Test 31c: TOCTOU - mount point symlink check exists"
+    section "Test 31c: TOCTOU - mount point symlink check"
 
     local test_dir test_vol
     test_dir=$(mktemp -d)
@@ -1753,70 +1761,154 @@ from_host = true
     docker volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
-    # We can't easily make Docker mount /data as a symlink, but we can verify
-    # the check logic exists by running the Alpine helper with a simulated symlink.
-    # Test that the script contains the mount point symlink check.
-    local script_check
-    script_check=$(docker run --rm alpine sh -c '
-        # Simulate the guard check that would reject a symlink mount point
-        if [ ! -L /data ] && [ -d /data ]; then
-            echo "MOUNT_CHECK_PASSED"
+    # Test 1: Run the guard logic in isolation with a simulated symlink
+    # This tests the SAME guard code that exists in env.sh helper
+    local guard_test
+    guard_test=$(docker run --rm alpine sh -c '
+        # Create a symlink to simulate what the guard checks for
+        mkdir -p /tmp/real_data
+        ln -s /tmp/real_data /tmp/symlink_data
+
+        # Test the guard logic (exact same as in env.sh Alpine helper)
+        check_mount() {
+            local path="$1"
+            if [ -L "$path" ]; then
+                echo "[ERROR] Mount point is symlink" >&2
+                return 1
+            fi
+            if [ ! -d "$path" ]; then
+                echo "[ERROR] Mount point is not directory" >&2
+                return 1
+            fi
+            return 0
+        }
+
+        # Test with real directory (should pass)
+        if check_mount /tmp/real_data 2>/dev/null; then
+            echo "REAL_DIR_PASSED"
+        fi
+
+        # Test with symlink (should fail with expected error)
+        if ! check_mount /tmp/symlink_data 2>&1 | grep -q "Mount point is symlink"; then
+            echo "SYMLINK_ERROR_MISSING"
         else
-            echo "MOUNT_CHECK_WOULD_FAIL"
+            echo "SYMLINK_REJECTED_WITH_ERROR"
         fi
     ' 2>&1) || true
 
-    # For a real volume, the check should pass (not a symlink, is a directory)
-    # We verify the check EXISTS by ensuring a normal import works
+    if echo "$guard_test" | grep -q "SYMLINK_REJECTED_WITH_ERROR"; then
+        pass "Guard logic rejects symlink mount with correct error message"
+    else
+        fail "Guard logic should reject symlink mount point"
+        info "Guard test output: $guard_test"
+    fi
+
+    if echo "$guard_test" | grep -q "REAL_DIR_PASSED"; then
+        pass "Guard logic accepts real directory"
+    else
+        fail "Guard logic should accept real directory"
+    fi
+
+    # Test 2: Normal import works (proves guard passes for real volumes in production)
     local import_output import_exit=0
     import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
         MOUNT_TEST_VAR=value \
         bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
 
     if [[ $import_exit -eq 0 ]]; then
-        pass "Normal volume passes mount point check (not symlink, is directory)"
+        pass "Normal volume passes mount point check in production code"
     else
         fail "Normal volume should pass mount point check"
         info "Exit: $import_exit, Output: $import_output"
     fi
 
-    # Verify by examining that the error message for symlink mount exists in code
-    # This is a code inspection test - verify the protection is implemented
+    # Test 3: Verify code contains the protection (static analysis)
     local env_sh_content
     env_sh_content=$(cat "$SCRIPT_DIR/lib/env.sh" 2>/dev/null || echo "")
-    if echo "$env_sh_content" | grep -q "Mount point is symlink\|! -L /data"; then
-        pass "Mount point symlink check implemented in env.sh"
+    if echo "$env_sh_content" | grep -q "Mount point is symlink"; then
+        pass "Mount point symlink error message in env.sh Alpine helper"
     else
-        fail "Mount point symlink check should be implemented"
+        fail "Mount point symlink error message should be in env.sh"
     fi
 
     rm -rf "$test_dir"
 }
 
 # ==============================================================================
-# Test 31d: TOCTOU - temp file symlink check exists
+# Test 31d: TOCTOU - temp file symlink check (isolated helper test)
 # ==============================================================================
 # Tests that the Alpine helper verifies temp files are not symlinks.
-# This is hard to test directly since mktemp creates new files, not symlinks.
-# We verify the protection exists in the code.
+#
+# TESTING LIMITATION: mktemp creates NEW files, never symlinks. The temp file
+# symlink check is defense-in-depth against TOCTOU race conditions where an
+# attacker might replace the temp file with a symlink between creation and write.
+# This is extremely difficult to trigger in a test environment.
+#
+# We test this by:
+# 1. Running the guard logic in isolation with a pre-created symlink
+# 2. Verifying code contains the protection (static analysis)
 test_env_toctou_temp_symlink() {
-    section "Test 31d: TOCTOU - temp file symlink check exists"
+    section "Test 31d: TOCTOU - temp file symlink check"
 
-    # Verify by examining that the temp file symlink check exists in code
+    # Test 1: Run the guard logic in isolation with a simulated symlink temp file
+    local guard_test
+    guard_test=$(docker run --rm alpine sh -c '
+        mkdir -p /tmp/data
+        # Create a symlink to simulate a TOCTOU-replaced temp file
+        touch /tmp/real_temp
+        ln -s /tmp/real_temp /tmp/data/symlink_temp
+
+        # Test the guard logic (exact same as in env.sh Alpine helper)
+        check_temp() {
+            local tmp="$1"
+            if [ -L "$tmp" ]; then
+                rm -f "$tmp"
+                echo "[ERROR] Temp file is symlink" >&2
+                return 1
+            fi
+            return 0
+        }
+
+        # Test with symlink (should fail with expected error)
+        if ! check_temp /tmp/data/symlink_temp 2>&1 | grep -q "Temp file is symlink"; then
+            echo "TEMP_SYMLINK_ERROR_MISSING"
+        else
+            echo "TEMP_SYMLINK_REJECTED"
+        fi
+
+        # Test with real file (should pass)
+        if check_temp /tmp/real_temp 2>/dev/null; then
+            echo "REAL_TEMP_PASSED"
+        fi
+    ' 2>&1) || true
+
+    if echo "$guard_test" | grep -q "TEMP_SYMLINK_REJECTED"; then
+        pass "Guard logic rejects symlink temp file with correct error"
+    else
+        fail "Guard logic should reject symlink temp file"
+        info "Guard test output: $guard_test"
+    fi
+
+    if echo "$guard_test" | grep -q "REAL_TEMP_PASSED"; then
+        pass "Guard logic accepts real temp file"
+    else
+        fail "Guard logic should accept real temp file"
+    fi
+
+    # Test 2: Verify code contains the protections (static analysis)
     local env_sh_content
     env_sh_content=$(cat "$SCRIPT_DIR/lib/env.sh" 2>/dev/null || echo "")
 
-    if echo "$env_sh_content" | grep -q 'Temp file is symlink\|! -L "$tmp"'; then
-        pass "Temp file symlink check implemented in env.sh"
+    if echo "$env_sh_content" | grep -q "Temp file is symlink"; then
+        pass "Temp file symlink error message in env.sh Alpine helper"
     else
-        fail "Temp file symlink check should be implemented"
+        fail "Temp file symlink error message should be in env.sh"
     fi
 
-    # Also verify the mount point directory check exists
-    if echo "$env_sh_content" | grep -q "Mount point is not directory\|-d /data"; then
-        pass "Mount point directory check implemented in env.sh"
+    if echo "$env_sh_content" | grep -q "Mount point is not directory"; then
+        pass "Mount point directory check error message in env.sh"
     else
-        fail "Mount point directory check should be implemented"
+        fail "Mount point directory check should be in env.sh"
     fi
 }
 
