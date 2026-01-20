@@ -205,8 +205,66 @@ ensure_volume_structure() {
   run_as_root chown -R --no-dereference 1000:1000 "${DATA_DIR}"
 }
 
+# Load environment variables from .env file safely (no shell source/eval)
+# Called AFTER ownership fix to ensure volume is readable
+_load_env_file() {
+  local env_file="${DATA_DIR}/.env"
+
+  # Guard against set -e - use if/else, not raw test
+  if [[ ! -f "$env_file" ]]; then
+    return 0  # Silent - expected for first run
+  fi
+  if [[ -L "$env_file" ]]; then
+    log "[WARN] .env is symlink - skipping"
+    return 0
+  fi
+  if [[ ! -r "$env_file" ]]; then
+    log "[WARN] .env unreadable - skipping"
+    return 0
+  fi
+
+  log "[INFO] Loading environment from .env"
+  local line_num=0
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # set -e safe increment (NOT ((line_num++)) which fails on 0)
+    line_num=$((line_num + 1))
+    # Strip CRLF
+    line="${line%$'\r'}"
+    # Skip comments (allows leading whitespace before #)
+    if [[ "$line" =~ ^[[:space:]]*# ]]; then continue; fi
+    # Skip blank/whitespace-only lines (spaces and tabs)
+    if [[ -z "${line//[[:space:]]/}" ]]; then continue; fi
+    # Strip optional 'export ' prefix (must be at line start, no leading whitespace)
+    if [[ "$line" =~ ^export[[:space:]]+ ]]; then
+      line="${line#export}"
+      line="${line#"${line%%[![:space:]]*}"}"  # trim leading whitespace after export
+    fi
+    # Require = before parsing
+    if [[ "$line" != *=* ]]; then
+      log "[WARN] line $line_num: no = found - skipping"
+      continue
+    fi
+    # Extract key and value (no whitespace trimming - strict format)
+    key="${line%%=*}"
+    value="${line#*=}"
+    # Validate key
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      log "[WARN] line $line_num: invalid key format - skipping"
+      continue
+    fi
+    # Only set if not present (empty string = present)
+    if [[ -z "${!key+x}" ]]; then
+      export "$key=$value" || { log "[WARN] line $line_num: export failed"; continue; }
+    fi
+  done < "$env_file"
+}
+
 # Ensure volume structure exists
 ensure_volume_structure
+
+# Load .env after ownership fix completes (volume readable now)
+_load_env_file
 
 # Check if .claude.json exists and is 0 bytes
 # Docker Sandbox creates the file when creating the container replacing a link
