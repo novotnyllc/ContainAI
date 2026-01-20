@@ -51,7 +51,7 @@ cai
 source ./containai.sh
 cai import
 ```
-Note: `cai import` syncs plugins, settings, and credentials from host to volume.
+Note: `cai import` is supported on Linux, macOS, and Windows (WSL2). It syncs plugins, settings, and credentials from host to volume.
 
 **`cai import` prerequisites:**
 - Docker Desktop (Linux, macOS, or Windows WSL2)
@@ -217,21 +217,28 @@ Plain `docker run` is allowed for CI/smoke tests (see Testing below).
 
 The `cai import` command syncs credentials and configuration from your host to the data volume. Be aware of what gets synced:
 
-| Host Path | Volume Path |
-|-----------|-------------|
-| `~/.claude/.credentials.json` | `/data/claude/credentials.json` |
-| `~/.codex/auth.json` | `/data/codex/auth.json` |
-| `~/.gemini/oauth_creds.json` | `/data/gemini/oauth_creds.json` |
-| `~/.config/gh/` | `/data/config/gh/` |
+| Host Path | Volume Path (relative to volume root) |
+|-----------|---------------------------------------|
+| `~/.claude/.credentials.json` | `claude/credentials.json` |
+| `~/.codex/auth.json` | `codex/auth.json` |
+| `~/.gemini/oauth_creds.json` | `gemini/oauth_creds.json` |
+| `~/.local/share/opencode/auth.json` | `local/share/opencode/auth.json` |
+| `~/.config/gh/` | `config/gh/` |
 
-Additional non-sensitive configuration (plugins, settings, shell aliases, tmux) is also synced.
+Inside the sandbox container, the volume mounts at `/mnt/agent-data` (e.g., `/mnt/agent-data/claude/credentials.json`).
+
+Additional configuration (plugins, settings, shell aliases, tmux, copilot) is also synced. For the complete list of synced paths, see `_IMPORT_SYNC_MAP` in `lib/import.sh`.
 
 **To remove synced credentials and reset the data volume:**
 ```bash
-# Find the volume name (default: sandbox-agent-data)
-docker volume ls | grep sandbox
+# Stop containers first (either method works)
+cai-stop-all                    # Interactive selection
+cai sandbox reset               # Remove sandbox for current workspace
 
-# Remove the volume (container must be stopped first)
+# List volumes to find the name (default: sandbox-agent-data)
+docker volume ls
+
+# Remove the volume
 docker volume rm sandbox-agent-data
 
 # Or with a custom volume name
