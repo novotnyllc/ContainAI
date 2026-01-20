@@ -1471,8 +1471,19 @@ _cai_install_sysbox_linux() {
         fi
     fi
 
-    # On native Linux, we don't need to check PID 1 is systemd like in WSL2
-    # because native Linux with systemd-based distros always has systemd as PID 1
+    # Verify systemd is actually the init system (PID 1)
+    # This catches containers, alternative inits, or minimal systems where systemctl exists
+    # but systemd is not the init
+    if [[ "$dry_run" != "true" ]]; then
+        local pid1_cmd
+        pid1_cmd=$(ps -p 1 -o comm= 2>/dev/null || true)
+        if [[ "$pid1_cmd" != "systemd" ]]; then
+            _cai_error "Sysbox requires systemd as the init system (PID 1)"
+            _cai_error "  Found PID 1: ${pid1_cmd:-unknown}"
+            _cai_error "  Sysbox services require systemd to manage sysbox-mgr and sysbox-fs"
+            return 1
+        fi
+    fi
 
     # Always check and install required tools (jq needed for daemon.json config)
     _cai_step "Ensuring required tools are installed"
@@ -1533,28 +1544,54 @@ _cai_install_sysbox_linux() {
             ;;
     esac
 
-    # Get latest Sysbox release URL from GitHub
-    local release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
-    local download_url
+    # Get Sysbox release URL from GitHub
+    # Support CAI_SYSBOX_VERSION override for pinning or rate limit workaround
+    local sysbox_version="${CAI_SYSBOX_VERSION:-}"
+    local release_url download_url
+
+    if [[ -n "$sysbox_version" ]]; then
+        # Use pinned version - construct URL directly (avoids API rate limits)
+        _cai_info "Using pinned Sysbox version: $sysbox_version"
+        download_url="https://github.com/nestybox/sysbox/releases/download/v${sysbox_version}/sysbox-ce_${sysbox_version}-0.linux_${arch}.deb"
+    else
+        release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
+    fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would fetch latest release from: $release_url"
-        _cai_info "[DRY-RUN] Would download Sysbox .deb for architecture: $arch"
+        if [[ -n "$sysbox_version" ]]; then
+            _cai_info "[DRY-RUN] Would download Sysbox $sysbox_version for architecture: $arch"
+        else
+            _cai_info "[DRY-RUN] Would fetch latest release from: $release_url"
+            _cai_info "[DRY-RUN] Would download Sysbox .deb for architecture: $arch"
+        fi
         _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
         _cai_ok "Sysbox installation (dry-run) complete"
         return 0
     fi
 
-    # Fetch release info
-    local release_json
-    release_json=$(wget -qO- "$release_url" 2>/dev/null) || {
-        _cai_error "Failed to fetch Sysbox release info from GitHub"
-        _cai_error "  Check network connectivity"
-        return 1
-    }
+    # Fetch release info from GitHub API if not using pinned version
+    if [[ -z "$sysbox_version" ]]; then
+        local release_json
+        release_json=$(wget -qO- "$release_url" 2>&1) || {
+            _cai_error "Failed to fetch Sysbox release info from GitHub"
+            _cai_error "  This may be due to GitHub API rate limiting or network issues"
+            _cai_error "  Workaround: Set CAI_SYSBOX_VERSION to pin a specific version"
+            _cai_error "  Example: export CAI_SYSBOX_VERSION=0.6.7"
+            return 1
+        }
 
-    # Extract .deb download URL for this architecture
-    download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
+        # Check for rate limit error
+        if printf '%s' "$release_json" | grep -qiE "API rate limit|rate limit exceeded"; then
+            _cai_error "GitHub API rate limit exceeded"
+            _cai_error "  Workaround: Set CAI_SYSBOX_VERSION to pin a specific version"
+            _cai_error "  Example: export CAI_SYSBOX_VERSION=0.6.7"
+            _cai_error "  Find versions at: https://github.com/nestybox/sysbox/releases"
+            return 1
+        fi
+
+        # Extract .deb download URL for this architecture
+        download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
+    fi
 
     if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
         _cai_error "Could not find Sysbox .deb package for architecture: $arch"
@@ -1669,23 +1706,21 @@ _cai_verify_sysbox_install_linux() {
     test_output=$(docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
     if [[ $test_rc -ne 0 ]]; then
-        _cai_warn "Sysbox test container failed"
-        if [[ "$verbose" == "true" ]]; then
-            _cai_info "Test output: $test_output"
-        fi
-        # Don't fail hard - Sysbox may work for actual use cases despite test failure
+        _cai_error "Sysbox test container failed (exit code: $test_rc)"
+        _cai_error "  Output: $test_output"
+        _cai_error "  Remediation: Check Sysbox installation and Docker configuration"
+        # Native Linux: fail on test failure (unlike WSL2 which has known seccomp issues)
+        return 1
     elif [[ "$test_output" == *"sysbox-test-ok"* ]]; then
         _cai_ok "Sysbox test container succeeded"
         test_passed=true
+    else
+        _cai_error "Sysbox test container did not produce expected output"
+        _cai_error "  Output: $test_output"
+        return 1
     fi
 
-    # Final message reflects actual test result
-    if [[ "$test_passed" == "true" ]]; then
-        _cai_ok "Sysbox installation verified"
-    else
-        _cai_warn "Sysbox installation completed but test container did not succeed"
-        _cai_warn "Sysbox may still work - try running a container manually"
-    fi
+    _cai_ok "Sysbox installation verified"
     return 0
 }
 
@@ -1701,6 +1736,38 @@ _cai_setup_linux() {
 
     _cai_info "Detected platform: Linux (native)"
     _cai_info "Setting up Secure Engine with Sysbox"
+
+    # Preflight: Check Docker is installed and reachable before making system changes
+    _cai_step "Preflight: Checking Docker installation"
+    if ! command -v docker >/dev/null 2>&1; then
+        _cai_error "Docker is not installed"
+        _cai_error "  Install Docker Engine first:"
+        _cai_error "  https://docs.docker.com/engine/install/"
+        return 1
+    fi
+
+    # Check if Docker daemon is reachable at the system socket
+    # Skip this check in dry-run mode since we may not have permissions
+    if [[ "$dry_run" != "true" ]]; then
+        if [[ ! -S /var/run/docker.sock ]]; then
+            _cai_error "Docker socket not found at /var/run/docker.sock"
+            _cai_error "  Ensure Docker Engine is installed and running:"
+            _cai_error "  sudo systemctl start docker"
+            return 1
+        fi
+
+        if ! DOCKER_HOST="unix:///var/run/docker.sock" docker info >/dev/null 2>&1; then
+            _cai_error "Cannot connect to Docker daemon at /var/run/docker.sock"
+            _cai_error "  Ensure Docker Engine is running:"
+            _cai_error "  sudo systemctl start docker"
+            _cai_error "  And ensure your user has permissions (add to docker group):"
+            _cai_error "  sudo usermod -aG docker \$USER"
+            return 1
+        fi
+        _cai_ok "Docker daemon is reachable"
+    else
+        _cai_info "[DRY-RUN] Would check Docker daemon at /var/run/docker.sock"
+    fi
 
     # Detect distribution first
     if ! _cai_linux_detect_distro; then
@@ -1757,11 +1824,12 @@ _cai_setup_linux() {
             return 1
         fi
 
-        # Wait for Docker to be ready
+        # Wait for Docker to be ready - explicitly target the system Docker socket
+        # to avoid false positives from Docker Desktop being reachable via default context
         local wait_count=0
         local max_wait=30
-        _cai_step "Waiting for Docker daemon"
-        while ! docker info >/dev/null 2>&1; do
+        _cai_step "Waiting for Docker daemon at /var/run/docker.sock"
+        while ! DOCKER_HOST="unix:///var/run/docker.sock" docker info >/dev/null 2>&1; do
             sleep 1
             wait_count=$((wait_count + 1))
             if [[ $wait_count -ge $max_wait ]]; then
@@ -2014,7 +2082,8 @@ _cai_secure_engine_validate() {
             expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
             ;;
         linux)
-            expected_socket="unix://$_CAI_SECURE_SOCKET"
+            # Native Linux uses the default Docker socket (not a dedicated socket like WSL2)
+            expected_socket="unix:///var/run/docker.sock"
             ;;
         *)
             _cai_error "Unknown platform: $platform"
