@@ -75,3 +75,6 @@ When adding platform-specific code paths, update ALL downstream consumers (valid
 
 ## 2026-01-20 manual [pitfall]
 dockerd fails if hosts is set in both daemon.json and -H flag; specify in exactly one place
+
+## 2026-01-20 manual [pitfall]
+When removing legacy paths, update ALL tests that reference them, including full-sync directory checks
