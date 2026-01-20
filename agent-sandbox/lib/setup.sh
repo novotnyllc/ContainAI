@@ -94,21 +94,41 @@ _cai_is_wsl2() {
 # Returns: 0=compatible, 1=seccomp filter conflict detected, 2=unknown
 # Outputs: Sets _CAI_SECCOMP_TEST_ERROR with details on failure
 #
-# Detection strategy:
-# 1. Primary: Check /proc/1/status Seccomp mode - if mode=2 (filter) on PID 1,
+# Detection strategy (per spec):
+# 1. Primary: Docker-based probe with seccomp=unconfined - tests actual container
+#    functionality which is what Sysbox needs
+# 2. Secondary: Check /proc/1/status Seccomp mode - if mode=2 (filter) on PID 1,
 #    WSL 1.1.0+ has attached a seccomp filter that can cause EBUSY when Sysbox
 #    tries to add seccomp-notify
-# 2. Fallback: If Docker is available, verify basic container functionality
 #
-# Note: We cannot test Sysbox directly before installation. The /proc/1/status
-# heuristic detects the WSL kernel condition that causes the conflict.
+# Note: We cannot test Sysbox directly before installation. The Docker probe
+# validates the seccomp environment, and the /proc/1/status check detects the
+# specific WSL kernel condition known to cause issues.
 # Post-installation verification in _cai_verify_sysbox_install tests actual
 # Sysbox container functionality.
 _cai_test_wsl2_seccomp() {
     _CAI_SECCOMP_TEST_ERROR=""
 
-    # Primary check: /proc/1/status Seccomp field (PID 1's seccomp mode)
+    # Primary: Docker-based probe (per spec)
+    # Run minimal container with seccomp=unconfined to test seccomp handling
+    if command -v docker >/dev/null 2>&1; then
+        local docker_test_output docker_test_rc
+        docker_test_output=$(docker run --rm --security-opt seccomp=unconfined alpine echo "seccomp-test-ok" 2>&1) && docker_test_rc=0 || docker_test_rc=$?
+        if [[ $docker_test_rc -ne 0 ]]; then
+            _CAI_SECCOMP_TEST_ERROR="Docker seccomp test failed: $docker_test_output"
+            return 1
+        fi
+        if [[ "$docker_test_output" == *"seccomp-test-ok"* ]]; then
+            # Docker with seccomp=unconfined works
+            # But still check /proc/1/status for WSL-specific filter mode
+            # which can cause EBUSY even when basic seccomp works
+            :
+        fi
+    fi
+
+    # Secondary: /proc/1/status Seccomp field check
     # Mode 2 (filter) on PID 1 indicates WSL 1.1.0+ seccomp filter
+    # This specific condition can cause Sysbox seccomp-notify EBUSY
     if [[ -f /proc/1/status ]]; then
         local seccomp_line pid1_mode
         # Guard grep with || true per pitfall memory
@@ -138,24 +158,13 @@ _cai_test_wsl2_seccomp() {
         fi
     fi
 
-    # Fallback: If Docker available, run minimal container test
-    # This verifies Docker seccomp handling but can't directly test Sysbox
-    # (Sysbox not installed yet). Useful as sanity check.
+    # If Docker test passed and no /proc/1 issues found, we're good
     if command -v docker >/dev/null 2>&1; then
-        local docker_test_output docker_test_rc
-        docker_test_output=$(docker run --rm --security-opt seccomp=unconfined alpine echo "seccomp-test-ok" 2>&1) && docker_test_rc=0 || docker_test_rc=$?
-        if [[ $docker_test_rc -ne 0 ]]; then
-            _CAI_SECCOMP_TEST_ERROR="Docker seccomp test failed: $docker_test_output"
-            return 1
-        fi
-        if [[ "$docker_test_output" == *"seccomp-test-ok"* ]]; then
-            # Docker with seccomp=unconfined works, likely Sysbox will too
-            return 0
-        fi
+        return 0
     fi
 
     # Cannot determine - return unknown
-    _CAI_SECCOMP_TEST_ERROR="Cannot determine seccomp status (no /proc/1/status Seccomp field, no Docker)"
+    _CAI_SECCOMP_TEST_ERROR="Cannot determine seccomp status (no Docker available, no /proc/1/status Seccomp field)"
     return 2
 }
 
@@ -522,13 +531,10 @@ _cai_configure_docker_socket() {
         # Check if socket already configured
         if [[ "$existing_execstart" == *"$socket_path"* ]]; then
             _cai_info "Socket $socket_path already configured in Docker service"
-            # Still write marker drop-in for tracking
-            dropin_content=$(cat <<EOF
-# ContainAI: Socket already configured
-[Service]
-Environment=CONTAINAI_SECURE_SOCKET=$socket_path
-EOF
-)
+            # Socket already present - skip drop-in modification
+            # This preserves any existing ExecStart override from a previous run
+            _cai_ok "Docker socket already configured"
+            return 0
         else
             # Append our socket to existing command
             # Insert -H unix://... before any trailing containerd flag or at end
