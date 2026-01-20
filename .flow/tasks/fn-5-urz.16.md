@@ -127,9 +127,8 @@ The main `agent-sandbox/Dockerfile` remains unchanged for production use. This i
 - [ ] Works with `--privileged` flag (required for nested Docker)
 - [ ] Documentation shows how to use in CI/testing
 ## Done summary
-TBD
-
+Created Dockerfile.test for CI testing with isolated dockerd and Sysbox runtime. The container uses /var/run/docker-test.sock to avoid conflicts with host Docker, includes startup scripts for Sysbox services, and provides a test helper for verification. Documentation added to README.md covering build, run, and requirements (BuildKit, --privileged, kernel 5.4+).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 547472a, 5f82154, c2a67fa, 756c326
+- Tests: flowctl codex impl-review fn-5-urz.16 --base fff5aeb (4 iterations, final SHIP)
 - PRs:

@@ -7,10 +7,22 @@
     "fn-5-urz.1"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "547472a",
+      "5f82154",
+      "c2a67fa",
+      "756c326"
+    ],
+    "prs": [],
+    "tests": [
+      "flowctl codex impl-review fn-5-urz.16 --base fff5aeb (4 iterations, final SHIP)"
+    ]
+  },
   "id": "fn-5-urz.16",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.16.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Dockerfile updates for testing with dockerd + Sysbox",
-  "updated_at": "2026-01-20T08:51:28.698167Z"
+  "updated_at": "2026-01-20T09:22:54.862943Z"
 }
