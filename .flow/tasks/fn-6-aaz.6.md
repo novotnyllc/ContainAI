@@ -10,24 +10,10 @@ Add integration tests for env var import feature covering all acceptance criteri
 
 - Follow test patterns at `test-sync-integration.sh:170-300`
 - Create test volume with unique name: `containai-test-env-${TEST_RUN_ID}`
-- Test all 18 acceptance criteria from epic spec
+- Test all acceptance criteria from epic spec (24 test cases)
 - Use `env -u` to clear external vars for hermetic tests
-- Cleanup test volumes after tests
+- Cleanup test volumes after tests via trap
 - Test context-aware behavior if multiple contexts available
-## Approach
-
-- Follow test patterns at `test-sync-integration.sh:170-300`
-- Create test volume with unique name: `containai-test-env-${TEST_RUN_ID}`
-- Test all acceptance criteria from epic spec
-- Use `env -u` to clear external vars for hermetic tests
-- Cleanup test volumes after tests
-## Approach
-
-- Follow test patterns at `test-sync-integration.sh:170-300`
-- Create test volume with unique name: `containai-test-env-${TEST_RUN_ID}`
-- Test cases: basic import, from_host flag, env_file source, missing vars, multiline skip
-- Use `env -u` to clear external vars for hermetic tests
-- Cleanup test volumes after tests
 ## Acceptance
 - [ ] Test: basic allowlist import from host env
 - [ ] Test: `from_host=false` prevents host env reading
