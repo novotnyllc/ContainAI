@@ -8,8 +8,12 @@
 # Then: cai / containai are available as shell functions
 #
 # Subcommands:
-#   (default)    Start/attach to sandbox container
+#   run          Start/attach to sandbox container (default if omitted)
 #   shell        Open interactive shell in running container
+#   doctor       Check system capabilities and show diagnostics
+#   setup        Install Sysbox Secure Engine (WSL2/macOS)
+#   validate     Validate Secure Engine configuration
+#   sandbox      Manage Docker Desktop sandboxes (reset, etc.)
 #   import       Sync host configs to data volume
 #   export       Export data volume to .tgz archive
 #   stop         Stop ContainAI containers
@@ -754,8 +758,9 @@ _containai_sandbox_reset_cmd() {
     fi
 
     if [[ $ls_rc -ne 0 ]]; then
-        # Check if command not found vs other error
-        if printf '%s' "$sandbox_list" | grep -qiE "unknown command|not found"; then
+        # Check if docker sandbox command is unavailable
+        # Match Docker's specific error messages to avoid false positives
+        if printf '%s' "$sandbox_list" | grep -qiE "'sandbox' is not a docker command|unknown docker command"; then
             _cai_error "docker sandbox command not available"
             _cai_info "This command requires Docker Desktop 4.50+"
             return 1
@@ -813,6 +818,11 @@ _containai_sandbox_reset_cmd() {
         _cai_info "Stopping sandbox $sandbox_id..."
         stop_output=$(_cai_timeout 30 docker sandbox stop "$sandbox_id" 2>&1)
         stop_rc=$?
+        # Handle no timeout mechanism (125) - run without timeout
+        if [[ $stop_rc -eq 125 ]]; then
+            stop_output=$(docker sandbox stop "$sandbox_id" 2>&1)
+            stop_rc=$?
+        fi
         if [[ $stop_rc -ne 0 ]]; then
             # Ignore "not running" errors
             if ! printf '%s' "$stop_output" | grep -qiE "not running|already stopped"; then
@@ -824,9 +834,14 @@ _containai_sandbox_reset_cmd() {
         _cai_info "Removing sandbox $sandbox_id..."
         rm_output=$(_cai_timeout 30 docker sandbox rm "$sandbox_id" 2>&1)
         rm_rc=$?
+        # Handle no timeout mechanism (125) - run without timeout
+        if [[ $rm_rc -eq 125 ]]; then
+            rm_output=$(docker sandbox rm "$sandbox_id" 2>&1)
+            rm_rc=$?
+        fi
         if [[ $rm_rc -ne 0 ]]; then
-            # Check for common errors
-            if printf '%s' "$rm_output" | grep -qiE "not found|no such"; then
+            # Check for "already removed" errors
+            if printf '%s' "$rm_output" | grep -qiE "no such sandbox|does not exist"; then
                 _cai_info "Sandbox $sandbox_id already removed"
                 continue
             fi
@@ -837,13 +852,24 @@ _containai_sandbox_reset_cmd() {
     done
 
     # Verify removal by re-listing sandboxes
+    # Note: verification failure doesn't mean removal failed - it means we can't confirm
     local verify_list verify_rc verify_found=false
     verify_list=$(_cai_timeout 10 docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>&1)
     verify_rc=$?
 
+    # Handle no timeout mechanism (125) - run without timeout
+    if [[ $verify_rc -eq 125 ]]; then
+        verify_list=$(docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>&1)
+        verify_rc=$?
+    fi
+
     if [[ $verify_rc -eq 124 ]]; then
-        _cai_warn "Verification timed out - cannot confirm removal"
-        return 1
+        # Timeout during verification - removal may have succeeded
+        _cai_warn "Verification timed out - removal may have succeeded but cannot confirm"
+        if [[ "$any_failed" == "true" ]]; then
+            return 1
+        fi
+        return 0
     elif [[ $verify_rc -eq 0 ]]; then
         while IFS=$'\t' read -r id ws; do
             [[ -z "$id" ]] && continue
@@ -859,8 +885,12 @@ _containai_sandbox_reset_cmd() {
             fi
         done <<< "$verify_list"
     else
-        _cai_warn "Verification listing failed - cannot confirm removal"
-        return 1
+        # Verification listing failed - removal may have succeeded
+        _cai_warn "Verification listing failed - removal may have succeeded but cannot confirm"
+        if [[ "$any_failed" == "true" ]]; then
+            return 1
+        fi
+        return 0
     fi
 
     if [[ "$verify_found" == "true" ]]; then
