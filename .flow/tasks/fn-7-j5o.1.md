@@ -30,9 +30,8 @@ Create a root README.md as the project's entry point. This is the first thing us
 - [ ] Links to agent-sandbox/README.md for detailed technical docs
 - [ ] Renders correctly on GitHub
 ## Done summary
-TBD
-
+Created root README.md as project entry point with value proposition, 3-step quickstart (source CLI, authenticate, run), badge row, and navigation links. Added required stub files (LICENSE, SECURITY.md, CONTRIBUTING.md, docs/quickstart.md) to satisfy acceptance criteria for link targets.
 ## Evidence
-- Commits:
+- Commits: bfd3ac9, 10a2388, 69254f8, 286f6a9
 - Tests:
 - PRs:
