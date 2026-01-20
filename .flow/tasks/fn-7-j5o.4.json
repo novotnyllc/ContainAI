@@ -7,10 +7,22 @@
     "fn-7-j5o.3"
   ],
   "epic": "fn-7-j5o",
+  "evidence": {
+    "commits": [
+      "76b1347",
+      "aa83e09",
+      "75084c8",
+      "543992f"
+    ],
+    "prs": [],
+    "tests": [
+      "Verified all acceptance criteria via grep checks"
+    ]
+  },
   "id": "fn-7-j5o.4",
   "priority": null,
   "spec_path": ".flow/tasks/fn-7-j5o.4.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create config reference",
-  "updated_at": "2026-01-20T13:35:28.718847Z"
+  "updated_at": "2026-01-20T14:08:51.401465Z"
 }

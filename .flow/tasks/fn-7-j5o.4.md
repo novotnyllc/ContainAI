@@ -31,9 +31,8 @@ Create comprehensive documentation of the config.toml schema and all configurati
 - [ ] Documents exclude patterns syntax
 - [ ] Links to lib/config.sh for implementation details
 ## Done summary
-TBD
-
+Created comprehensive docs/configuration.md documenting the complete config.toml schema including all sections ([agent], [credentials], [secure_engine], [env], [danger], default_excludes, workspace sections), config file discovery hierarchy with git boundary stopping, workspace matching behavior, volume naming conventions, exclude pattern syntax, environment variable overrides, error handling scenarios, and example configurations for single workspace, multi-workspace, and multi-agent setups. Includes implementation reference links to lib/config.sh.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 76b1347, aa83e09, 75084c8, 543992f
+- Tests: Verified all acceptance criteria via grep checks
 - PRs:
