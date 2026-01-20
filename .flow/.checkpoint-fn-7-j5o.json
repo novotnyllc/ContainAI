@@ -1,0 +1,175 @@
+{
+  "created_at": "2026-01-20T12:24:41.314723Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-7-j5o",
+      "created_at": "2026-01-20T07:54:34.309131Z",
+      "depends_on_epics": [],
+      "id": "fn-7-j5o",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-7-j5o.md",
+      "status": "open",
+      "title": "Comprehensive Documentation Suite",
+      "updated_at": "2026-01-20T07:55:18.336766Z"
+    },
+    "spec": "# Comprehensive Documentation Suite\n\n## Overview\n\nContainAI is a Docker-based sandboxing tool for AI coding agents that currently lacks user-facing documentation. This epic creates a complete documentation suite following the Diataxis framework (tutorials, how-to guides, reference, explanation) to enable user discovery, adoption, and contribution.\n\n**Current state:**\n- Main docs buried in `agent-sandbox/README.md` (not at project root)\n- No SECURITY.md despite being a security-critical tool\n- No quickstart guide (README assumes Docker familiarity)\n- No CONTRIBUTING.md (blocks community contributions)\n- No architecture overview (security model scattered across code)\n- No troubleshooting guide (only 4 scenarios in README)\n- No CHANGELOG.md (version history untracked)\n\n**Target state:**\n- Root README.md as clear entry point\n- Progressive documentation: quickstart \u2192 full guide \u2192 reference\n- Trust-building SECURITY.md for a sandboxing tool\n- Community-ready CONTRIBUTING.md\n- Comprehensive troubleshooting covering common failure modes\n\n## Scope\n\n### In Scope\n- Root README.md with value proposition and quickstart\n- SECURITY.md with threat model and vulnerability reporting\n- Standalone quickstart guide in docs/\n- Config reference (TOML schema documentation)\n- Expanded troubleshooting guide (20+ scenarios)\n- CONTRIBUTING.md with dev setup and testing\n- Architecture overview with Mermaid diagrams\n- CHANGELOG.md with retroactive history\n\n### Out of Scope\n- Documentation website/generator (future epic)\n- Video tutorials\n- Localization/translations\n- Auto-generated API reference from --help\n- Man pages for CLI commands\n\n## Phases\n\n### Phase 1: Discovery & Trust (Tasks 1-2)\nFoundation documents that enable users to find and trust the project.\n- Root README.md\n- SECURITY.md\n\n### Phase 2: Onboarding (Task 3)\nFast path to first successful sandbox run.\n- Quickstart guide\n\n### Phase 3: Reference & Troubleshooting (Tasks 4-5)\nDetailed documentation for configuration and problem-solving.\n- Config reference\n- Troubleshooting guide\n\n### Phase 4: Community & History (Tasks 6-8)\nEnable contributions and track project evolution.\n- CONTRIBUTING.md\n- Architecture overview\n- CHANGELOG.md\n\n## Architecture\n\n```mermaid\nflowchart TD\n    subgraph \"Documentation Structure\"\n        ROOT[README.md<br/>Entry Point]\n        SEC[SECURITY.md<br/>Trust Building]\n        \n        subgraph \"docs/\"\n            QS[quickstart.md]\n            CFG[configuration.md]\n            TS[troubleshooting.md]\n            ARCH[architecture.md]\n        end\n        \n        CONTRIB[CONTRIBUTING.md]\n        CHANGE[CHANGELOG.md]\n        \n        subgraph \"agent-sandbox/\"\n            EXISTING[README.md<br/>Technical Deep Dive]\n        end\n    end\n    \n    ROOT --> |\"Quick Start\"| QS\n    ROOT --> |\"Security\"| SEC\n    ROOT --> |\"Detailed Docs\"| EXISTING\n    ROOT --> |\"Contributing\"| CONTRIB\n    \n    QS --> |\"Configuration\"| CFG\n    QS --> |\"Problems?\"| TS\n    \n    CONTRIB --> ARCH\n    \n    style ROOT fill:#90EE90\n    style SEC fill:#FFB6C1\n    style QS fill:#87CEEB\n```\n\n## Alternatives Considered\n\n| Alternative | Decision | Rationale |\n|-------------|----------|-----------|\n| Move agent-sandbox/README.md to root | **No** | Keep technical depth separate; root README is entry point |\n| Use MkDocs for docs site | **Defer** | Markdown files sufficient for now; site generation is future epic |\n| Auto-generate config reference | **No** | Manual curation ensures quality; config is stable |\n| Generate CHANGELOG from git | **Partial** | Use git history as input but manually curate for clarity |\n\n## Non-Functional Requirements\n\n- **Discoverability**: New user can understand project purpose within 30 seconds of landing on repo\n- **Time-to-Hello-World**: Quickstart achieves first sandbox in <5 minutes (assuming Docker installed)\n- **Searchability**: All docs are markdown (GitHub-searchable, renders natively)\n- **Maintainability**: Docs reference code via file:line links for easy sync\n- **Accessibility**: No images required to understand content; alt text where images used\n\n## Risks and Mitigations\n\n| Risk | Likelihood | Impact | Mitigation |\n|------|------------|--------|------------|\n| Docs drift from code | Medium | High | Include file:line references; update docs in same PR as code |\n| Incomplete troubleshooting | Medium | Medium | Start with known issues from README; expand based on real support |\n| Security model misrepresentation | Low | High | Have security-focused review of SECURITY.md |\n| Overwhelming users | Medium | Low | Progressive disclosure: README \u2192 quickstart \u2192 detailed docs |\n\n## Rollout Plan\n\n1. **Phase 1 first**: Root README + SECURITY.md enable discovery\n2. **Atomic commits**: Each doc is self-contained, can be merged independently\n3. **No migration needed**: New files only, no breaking changes\n4. **Verification**: Each task includes manual verification steps\n\n## Rollback\n\n- All changes are additive (new files)\n- Any doc can be removed without breaking functionality\n- No code changes required\n\n## Quick Commands\n\n```bash\n# Verify docs structure\nls -la README.md SECURITY.md CONTRIBUTING.md CHANGELOG.md docs/\n\n# Check markdown rendering\ngh markdown-preview README.md\n\n# Validate links (requires markdown-link-check)\nfind . -name \"*.md\" -exec markdown-link-check {} \\;\n```\n\n## Acceptance Criteria\n\n- [ ] Root README.md exists with project description, quickstart, and navigation\n- [ ] SECURITY.md exists with vulnerability reporting and security model summary\n- [ ] docs/quickstart.md achieves first sandbox run in <5 minutes\n- [ ] docs/configuration.md documents full config.toml schema\n- [ ] docs/troubleshooting.md covers 20+ error scenarios\n- [ ] CONTRIBUTING.md enables new contributor to set up dev environment\n- [ ] docs/architecture.md includes Mermaid diagrams of system components\n- [ ] CHANGELOG.md has retroactive history from git commits\n- [ ] All docs render correctly on GitHub\n\n## References\n\n- Current main docs: `agent-sandbox/README.md`\n- CLI help source: `agent-sandbox/containai.sh:133-420`\n- Config schema source: `agent-sandbox/lib/config.sh`\n- Security implementation: `agent-sandbox/lib/eci.sh`, `agent-sandbox/lib/doctor.sh`\n- Existing docs directory: `docs/`\n- Conventions memory: `.flow/memory/conventions.md`\n- Decisions memory: `.flow/memory/decisions.md`\n"
+  },
+  "epic_id": "fn-7-j5o",
+  "schema_version": 1,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T07:55:26.922880Z",
+        "depends_on": [],
+        "epic": "fn-7-j5o",
+        "id": "fn-7-j5o.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-7-j5o.1.md",
+        "status": "todo",
+        "title": "Create root README.md",
+        "updated_at": "2026-01-20T07:56:02.423234Z"
+      },
+      "id": "fn-7-j5o.1",
+      "spec": "# fn-7-j5o.1 Create root README.md\n\n## Description\nCreate a root README.md as the project's entry point. This is the first thing users see when they land on the GitHub repo.\n\n**Size:** S\n**Files:** `README.md`\n\n## Approach\n\n- Follow pattern from GitHub CLI (`cli/cli`) and Docker Compose README structures\n- Lead with clear value proposition: \"Secure Docker sandboxes for AI agent execution\"\n- Include 3-step quickstart (source CLI \u2192 authenticate \u2192 run)\n- Progressive disclosure: link to detailed docs, don't duplicate content\n- Reference existing `agent-sandbox/README.md` for technical depth\n\n## Key Context\n\n- Current main docs are in `agent-sandbox/README.md` (1200+ lines)\n- CLI is `cai` or `containai` (bash-based, requires sourcing)\n- Multi-agent support: Claude, Gemini, Codex, Copilot, OpenCode\n- Two isolation modes: Docker Desktop ECI or Sysbox\n## Acceptance\n- [ ] README.md exists at project root\n- [ ] Opens with clear one-line value proposition\n- [ ] Includes badge row (license, build status if CI exists)\n- [ ] 3-step quickstart with copy-paste commands\n- [ ] Table of Contents for navigation\n- [ ] Links to docs/quickstart.md, SECURITY.md, CONTRIBUTING.md\n- [ ] Links to agent-sandbox/README.md for detailed technical docs\n- [ ] Renders correctly on GitHub\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T07:55:27.082335Z",
+        "depends_on": [],
+        "epic": "fn-7-j5o",
+        "id": "fn-7-j5o.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-7-j5o.2.md",
+        "status": "todo",
+        "title": "Create SECURITY.md",
+        "updated_at": "2026-01-20T07:56:03.106319Z"
+      },
+      "id": "fn-7-j5o.2",
+      "spec": "# fn-7-j5o.2 Create SECURITY.md\n\n## Description\nCreate SECURITY.md to establish trust for a security-critical sandboxing tool. Document the security model, supported versions, and vulnerability reporting process.\n\n**Size:** S\n**Files:** `SECURITY.md`\n\n## Approach\n\n- Follow GitHub's security policy best practices\n- Include threat model summary (what ContainAI protects against)\n- Document supported versions table\n- Provide clear vulnerability reporting process (private, not via public issues)\n- Include safe harbor statement for security researchers\n- Summarize security architecture (ECI/Sysbox isolation)\n\n## Key Context\n\n- ECI = Enhanced Container Isolation (Docker Desktop 4.50+)\n- Sysbox = Nestybox runtime for nested containers\n- Security implementation in `agent-sandbox/lib/eci.sh` and `lib/docker.sh`\n- FR-4 decision: reject dangerous options rather than gate behind flags\n## Acceptance\n- [ ] SECURITY.md exists at project root\n- [ ] Includes supported versions table\n- [ ] Documents vulnerability reporting process (email, not public issues)\n- [ ] Includes safe harbor statement\n- [ ] Summarizes security model (ECI vs Sysbox isolation)\n- [ ] Explains what threats ContainAI does/doesn't protect against\n- [ ] Links to detailed security info in agent-sandbox/README.md\n- [ ] Renders correctly on GitHub\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T07:55:27.245397Z",
+        "depends_on": [
+          "fn-7-j5o.1"
+        ],
+        "epic": "fn-7-j5o",
+        "id": "fn-7-j5o.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-7-j5o.3.md",
+        "status": "todo",
+        "title": "Create quickstart guide",
+        "updated_at": "2026-01-20T07:56:49.207365Z"
+      },
+      "id": "fn-7-j5o.3",
+      "spec": "# fn-7-j5o.3 Create quickstart guide\n\n## Description\nCreate a standalone quickstart guide that gets users from zero to first sandbox in under 5 minutes (assuming Docker is installed).\n\n**Size:** S\n**Files:** `docs/quickstart.md`\n\n## Approach\n\n- Separate from README to allow detail without bloating entry point\n- Clear prerequisites section (Docker Desktop 4.50+, bash shell)\n- Numbered steps with verification at each stage\n- Include \"What just happened?\" explanation section\n- End with \"Next steps\" linking to configuration and troubleshooting\n\n## Key Context\n\n- CLI must be sourced, not executed: `source agent-sandbox/containai.sh`\n- First run requires agent authentication (e.g., `claude login`)\n- Default agent is Claude, configurable via `--agent` flag\n- Works on Linux, WSL2, macOS (with different isolation modes)\n## Acceptance\n- [ ] docs/quickstart.md exists\n- [ ] Prerequisites section lists Docker Desktop version, bash requirement\n- [ ] Numbered steps from clone to first sandbox\n- [ ] Each step has verification command/output\n- [ ] Explains what happens during first run\n- [ ] Links to troubleshooting for common setup issues\n- [ ] Links to configuration guide for customization\n- [ ] Achievable in <5 minutes for user with Docker installed\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T07:55:27.412487Z",
+        "depends_on": [
+          "fn-7-j5o.3"
+        ],
+        "epic": "fn-7-j5o",
+        "id": "fn-7-j5o.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-7-j5o.4.md",
+        "status": "todo",
+        "title": "Create config reference",
+        "updated_at": "2026-01-20T07:56:49.368588Z"
+      },
+      "id": "fn-7-j5o.4",
+      "spec": "# fn-7-j5o.4 Create config reference\n\n## Description\nCreate comprehensive documentation of the config.toml schema and all configuration options.\n\n**Size:** M\n**Files:** `docs/configuration.md`\n\n## Approach\n\n- Document all config.toml keys with types, defaults, and examples\n- Explain config file discovery hierarchy (workspace \u2192 user \u2192 system)\n- Include complete example config.toml files for common scenarios\n- Document environment variable overrides if any\n- Reference implementation in `agent-sandbox/lib/config.sh`\n\n## Key Context\n\n- Config discovery stops at git root (not above)\n- Workspace matching uses longest path prefix\n- Volume names, agent selection, exclude patterns are configurable\n- Config locations: `.containai/config.toml`, `~/.config/containai/config.toml`\n- Parse via `agent-sandbox/parse-toml.py`\n## Acceptance\n- [ ] docs/configuration.md exists\n- [ ] Documents all config.toml keys with types and defaults\n- [ ] Explains config file discovery hierarchy\n- [ ] Includes example configs for: single workspace, multi-workspace, multi-agent\n- [ ] Documents workspace matching behavior\n- [ ] Documents volume naming conventions\n- [ ] Documents exclude patterns syntax\n- [ ] Links to lib/config.sh for implementation details\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T07:55:27.573053Z",
+        "depends_on": [
+          "fn-7-j5o.3"
+        ],
+        "epic": "fn-7-j5o",
+        "id": "fn-7-j5o.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-7-j5o.5.md",
+        "status": "todo",
+        "title": "Create troubleshooting guide",
+        "updated_at": "2026-01-20T07:56:49.528599Z"
+      },
+      "id": "fn-7-j5o.5",
+      "spec": "# fn-7-j5o.5 Create troubleshooting guide\n\n## Description\nCreate an expanded troubleshooting guide covering 20+ common error scenarios, organized by symptom (what user sees) rather than cause.\n\n**Size:** M\n**Files:** `docs/troubleshooting.md`\n\n## Approach\n\n- Organize by symptom (error message or observed behavior)\n- Include verbatim error messages for searchability\n- Provide diagnostic commands to gather info\n- Link to related GitHub issues where applicable\n- Include `cai doctor` output interpretation\n\n## Key Context\n\n- Current troubleshooting is only 4 scenarios in `agent-sandbox/README.md:259-280`\n- `cai doctor` runs system capability checks\n- Common issues: Docker context mismatch, ECI not available, Sysbox not installed\n- Platform differences: Linux vs WSL2 vs macOS\n- Credential sync via `cai import`, clear via `cai sandbox clear-credentials`\n## Acceptance\n- [ ] docs/troubleshooting.md exists\n- [ ] Organized by symptom/error message, not by cause\n- [ ] Includes 20+ documented scenarios\n- [ ] Error messages are verbatim and searchable\n- [ ] Each scenario has: Symptom \u2192 Diagnosis \u2192 Solution\n- [ ] Documents `cai doctor` output interpretation\n- [ ] Covers platform-specific issues (Linux, WSL2, macOS)\n- [ ] Covers ECI vs Sysbox mode issues\n- [ ] Covers credential/sync issues\n- [ ] Includes \"Still stuck?\" section with support channels\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T07:55:27.737857Z",
+        "depends_on": [
+          "fn-7-j5o.7"
+        ],
+        "epic": "fn-7-j5o",
+        "id": "fn-7-j5o.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-7-j5o.6.md",
+        "status": "todo",
+        "title": "Create CONTRIBUTING.md",
+        "updated_at": "2026-01-20T07:56:49.688929Z"
+      },
+      "id": "fn-7-j5o.6",
+      "spec": "# fn-7-j5o.6 Create CONTRIBUTING.md\n\n## Description\nCreate CONTRIBUTING.md to enable community contributions with clear development setup, coding conventions, and PR process.\n\n**Size:** S\n**Files:** `CONTRIBUTING.md`\n\n## Approach\n\n- Include development environment setup (bash requirement, Docker)\n- Reference coding conventions from `.flow/memory/conventions.md`\n- Document testing process (test-*.sh scripts)\n- Explain PR review process\n- Link to architecture docs for understanding codebase\n\n## Key Context\n\n- Tests in `agent-sandbox/test-*.sh` with `[PASS]/[FAIL]/[WARN]` markers\n- Coding conventions: `command -v` not `which`, `printf` not `echo`, ASCII markers\n- Shell scripts must be bash (not zsh compatible)\n- All loop variables must be declared local in sourced scripts\n## Acceptance\n- [ ] CONTRIBUTING.md exists at project root\n- [ ] Documents development environment setup\n- [ ] Documents coding conventions (shell scripting rules)\n- [ ] Documents testing process with test-*.sh scripts\n- [ ] Explains PR process and review expectations\n- [ ] Links to architecture overview for codebase understanding\n- [ ] Includes \"good first issue\" guidance for newcomers\n- [ ] References .flow/memory/conventions.md for detailed rules\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T07:55:27.907752Z",
+        "depends_on": [],
+        "epic": "fn-7-j5o",
+        "id": "fn-7-j5o.7",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-7-j5o.7.md",
+        "status": "todo",
+        "title": "Create architecture overview",
+        "updated_at": "2026-01-20T07:56:36.287204Z"
+      },
+      "id": "fn-7-j5o.7",
+      "spec": "# fn-7-j5o.7 Create architecture overview\n\n## Description\nCreate an architecture overview document with Mermaid diagrams explaining system components, data flow, and security boundaries.\n\n**Size:** M\n**Files:** `docs/architecture.md`\n\n## Approach\n\n- Use Mermaid diagrams (renders natively on GitHub)\n- Include: system context, component diagram, data flow, security boundaries\n- Explain modular lib/*.sh structure\n- Document volume lifecycle and data persistence\n- Reference ADRs from `.flow/memory/decisions.md`\n\n## Key Context\n\n- Modular design: `containai.sh` sources `lib/*.sh` modules\n- Two execution paths: ECI (Docker Desktop) or Sysbox\n- Volumes: data volume (per-agent) + workspace mount (per-workspace)\n- Security: user namespaces, seccomp, network isolation options\n- Key files: `lib/core.sh`, `lib/platform.sh`, `lib/docker.sh`, `lib/eci.sh`, `lib/container.sh`, `lib/config.sh`\n## Acceptance\n- [ ] docs/architecture.md exists\n- [ ] Includes system context Mermaid diagram\n- [ ] Includes component/module diagram\n- [ ] Explains data flow from CLI to container\n- [ ] Documents security boundaries (host vs sandbox)\n- [ ] Explains lib/*.sh modular structure\n- [ ] Documents volume types and lifecycle\n- [ ] References relevant ADRs for design decisions\n- [ ] All diagrams render correctly on GitHub\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T07:55:28.070772Z",
+        "depends_on": [],
+        "epic": "fn-7-j5o",
+        "id": "fn-7-j5o.8",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-7-j5o.8.md",
+        "status": "todo",
+        "title": "Create CHANGELOG.md",
+        "updated_at": "2026-01-20T07:56:36.946689Z"
+      },
+      "id": "fn-7-j5o.8",
+      "spec": "# fn-7-j5o.8 Create CHANGELOG.md\n\n## Description\nCreate CHANGELOG.md with retroactive history from git commits, following Keep a Changelog format.\n\n**Size:** S\n**Files:** `CHANGELOG.md`\n\n## Approach\n\n- Follow Keep a Changelog format (keepachangelog.com)\n- Generate initial history from git log\n- Categorize: Added, Changed, Fixed, Security, Deprecated, Removed\n- Group by semantic version or date ranges\n- Include [Unreleased] section for ongoing work\n\n## Key Context\n\n- Recent commits available via `git log`\n- Key milestones: ECI support, Sysbox support, multi-agent, credential sync\n- No existing versioning scheme - may use date-based releases\n- Reference: `git log --oneline` for history\n## Acceptance\n- [ ] CHANGELOG.md exists at project root\n- [ ] Follows Keep a Changelog format\n- [ ] Includes [Unreleased] section\n- [ ] Has retroactive history of major features\n- [ ] Categorized by: Added, Changed, Fixed, Security\n- [ ] Dates are included for each release/milestone\n- [ ] Links to relevant commits or PRs where applicable\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

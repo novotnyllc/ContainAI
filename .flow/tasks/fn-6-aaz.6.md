@@ -41,9 +41,8 @@ Add integration tests for env var import feature covering all acceptance criteri
 - [ ] Tests use hermetic env (env -u)
 - [ ] Test volumes cleaned up
 ## Done summary
-TBD
-
+Added 24 integration tests (Tests 16-39) for env var import feature covering all acceptance criteria including allowlist import, from_host behavior, env_file parsing, merge precedence, multiline handling, permissions, TOCTOU protections, log hygiene, and entrypoint loading semantics.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 1beadcd, e87742b, ba5b875, a4048a3, aa2c321
+- Tests: agent-sandbox/test-sync-integration.sh (Tests 16-39)
 - PRs:

@@ -8,10 +8,23 @@
     "fn-6-aaz.5"
   ],
   "epic": "fn-6-aaz",
+  "evidence": {
+    "commits": [
+      "1beadcd",
+      "e87742b",
+      "ba5b875",
+      "a4048a3",
+      "aa2c321"
+    ],
+    "prs": [],
+    "tests": [
+      "agent-sandbox/test-sync-integration.sh (Tests 16-39)"
+    ]
+  },
   "id": "fn-6-aaz.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-6-aaz.6.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Add integration tests for env import",
-  "updated_at": "2026-01-20T11:49:23.025594Z"
+  "updated_at": "2026-01-20T12:23:35.681882Z"
 }
