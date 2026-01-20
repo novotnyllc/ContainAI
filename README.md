@@ -2,6 +2,8 @@
 
 Secure Docker sandboxes for AI agent execution.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 ContainAI provides isolated, secure containers for running AI coding agents like Claude, Gemini, Codex, Copilot, and OpenCode. It enforces sandbox-first execution with fail-closed security defaults.
 
 ## Table of Contents
@@ -36,15 +38,18 @@ cd containai
 source agent-sandbox/containai.sh
 ```
 
-### 2. Check your environment
+### 2. Authenticate your agent
 
 ```bash
-cai doctor
+# Start the sandbox and authenticate
+cai
+
+# Inside the container, log in to your agent
+claude login    # for Claude
+# or: gemini auth  # for Gemini
 ```
 
-This detects your Docker configuration and confirms sandbox availability.
-
-### 3. Start and authenticate
+### 3. Run in your project
 
 ```bash
 # Navigate to your project directory
@@ -52,29 +57,22 @@ cd /path/to/your/project
 
 # Start the sandbox
 cai
-
-# On first run, authenticate inside the container
-# (e.g., run 'claude login' for Claude)
 ```
 
 The sandbox mounts your current directory and starts the configured AI agent.
 
 ## Documentation
 
-For detailed documentation, see the [Technical README](agent-sandbox/README.md), which covers:
-
-- Prerequisites and installation
-- Commands and usage
-- Volume management
-- Port forwarding
-- Security model
-- Troubleshooting
-- Image building and testing
+| Document | Description |
+|----------|-------------|
+| [Quickstart Guide](docs/quickstart.md) | Detailed setup with runtime decision tree |
+| [Technical README](agent-sandbox/README.md) | Image building, testing, and internals |
 
 ## Security
 
-ContainAI is a security-focused tool with fail-closed defaults:
+ContainAI is a security-focused tool. See [SECURITY.md](SECURITY.md) for vulnerability reporting and security model details.
 
+Key security features:
 - **Sandbox-first**: Containers run in Docker Desktop sandbox mode or Sysbox runtime
 - **Credential isolation**: Agent credentials stay inside the container by default
 - **TOCTOU protection**: Volume mounts are protected against symlink attacks
@@ -84,15 +82,8 @@ Unsafe operations require explicit opt-in flags (`--allow-host-credentials`, `--
 
 ## Contributing
 
-Contributions are welcome. To get started:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
-
-See the [Technical README](agent-sandbox/README.md) for development setup.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
