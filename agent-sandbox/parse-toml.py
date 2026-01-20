@@ -9,6 +9,7 @@ Usage:
     python3 parse-toml.py --file config.toml --key agent.data_volume
     python3 parse-toml.py --file config.toml --json
     python3 parse-toml.py --file config.toml --exists agent.data_volume
+    python3 parse-toml.py --file config.toml --env
 """
 import argparse
 import json
@@ -112,6 +113,93 @@ def format_value(value) -> str:
     return json.dumps(value, separators=(",", ":"), default=str)
 
 
+def validate_env_section(config: dict) -> dict | None:
+    """
+    Validate and extract the [env] section from config.
+
+    Validates types for:
+    - import: list of strings (required if section exists, but missing returns empty list with warning)
+    - from_host: boolean (default: false)
+    - env_file: optional string
+
+    Args:
+        config: The parsed TOML config dict
+
+    Returns:
+        Validated env config dict, or None if [env] section is missing.
+        Prints warnings to stderr for invalid types.
+
+    Raises:
+        SystemExit: If type validation fails (non-recoverable errors)
+    """
+    env_section = config.get("env")
+
+    # Missing [env] section - return None (not error)
+    if env_section is None:
+        return None
+
+    # [env] exists but is not a dict - error
+    if not isinstance(env_section, dict):
+        print("Error: [env] section must be a table/dict", file=sys.stderr)
+        sys.exit(1)
+
+    result = {}
+
+    # Validate 'import' key: must be list of strings
+    import_list = env_section.get("import")
+    if import_list is None:
+        # Missing import key - treat as empty list with warning
+        print("[WARN] [env].import missing, treating as empty list", file=sys.stderr)
+        result["import"] = []
+    elif not isinstance(import_list, list):
+        print(
+            f"Error: [env].import must be a list, got {type(import_list).__name__}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    else:
+        # Validate each item is a string
+        validated_imports = []
+        for i, item in enumerate(import_list):
+            if not isinstance(item, str):
+                print(
+                    f"Error: [env].import[{i}] must be a string, got {type(item).__name__}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            validated_imports.append(item)
+        result["import"] = validated_imports
+
+    # Validate 'from_host' key: must be boolean, default false
+    from_host = env_section.get("from_host")
+    if from_host is None:
+        result["from_host"] = False
+    elif not isinstance(from_host, bool):
+        print(
+            f"Error: [env].from_host must be a boolean, got {type(from_host).__name__}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    else:
+        result["from_host"] = from_host
+
+    # Validate 'env_file' key: must be string if present
+    env_file = env_section.get("env_file")
+    if env_file is None:
+        # Optional - don't include in result if not present
+        pass
+    elif not isinstance(env_file, str):
+        print(
+            f"Error: [env].env_file must be a string, got {type(env_file).__name__}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    else:
+        result["env_file"] = env_file
+
+    return result
+
+
 class ErrorExitParser(argparse.ArgumentParser):
     """ArgumentParser that exits with code 1 on errors (not 2)."""
 
@@ -149,22 +237,28 @@ def main():
         "-e",
         help="Check if key exists (exit 0 if exists, 1 if not)",
     )
+    parser.add_argument(
+        "--env",
+        action="store_true",
+        help="Extract and validate [env] section (output as JSON, null if missing)",
+    )
 
     args = parser.parse_args()
 
     # Validate mutually exclusive options
     # Use 'is not None' to correctly handle empty string keys
     mode_count = sum(
-        [args.key is not None, args.output_json, args.exists is not None]
+        [args.key is not None, args.output_json, args.exists is not None, args.env]
     )
     if mode_count == 0:
         print(
-            "Error: Must specify one of --key, --json, or --exists", file=sys.stderr
+            "Error: Must specify one of --key, --json, --exists, or --env",
+            file=sys.stderr,
         )
         sys.exit(1)
     if mode_count > 1:
         print(
-            "Error: Options --key, --json, and --exists are mutually exclusive",
+            "Error: Options --key, --json, --exists, and --env are mutually exclusive",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -200,6 +294,17 @@ def main():
             sys.exit(0)
         else:
             sys.exit(1)
+
+    # Handle --env mode (extract and validate [env] section)
+    if args.env:
+        env_config = validate_env_section(config)
+        # Output as JSON: validated dict or null if section missing
+        try:
+            print(json.dumps(env_config, separators=(",", ":")))
+        except Exception as e:
+            print(f"Error: Cannot serialize env config: {e}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
 
     # Handle --json mode (compact format for shell consumption)
     if args.output_json:

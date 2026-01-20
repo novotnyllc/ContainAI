@@ -54,7 +54,7 @@ env_file = ".env.sandbox"
 - `env_file` absolute path: rejected with error
 - `env_file` outside workspace: rejected with error (resolved relative to workspace root)
 - `env_file` set but missing/unreadable: **hard error** (not silent)
-- `env_file` with empty `import = []`: `env_file` still validated (error if missing/unreadable), but no vars imported
+- **`env_file` validation when import is invalid/missing**: If `[env]` section exists and `env_file` is set, `env_file` is ALWAYS validated (even when `import` is missing/invalid and treated as `[]`). This ensures "fail closed" semantics.
 
 **Dedicated env config resolution:**
 - Env config is resolved INDEPENDENTLY of volume/excludes resolution
@@ -89,6 +89,11 @@ Explicit parser for source `.env` file:
 - **Strip CRLF** (`\r`) from line endings
 - No quote stripping (literal values only)
 
+**Whitespace handling (explicit):**
+- Leading whitespace before `export` or key: NOT trimmed, treated as invalid key (intentional strictness)
+- Whitespace around `=`: NOT trimmed (e.g., `KEY = value` results in key `KEY ` which fails validation)
+- This strict approach avoids ambiguous edge cases; users must use standard `.env` format
+
 **Multiline value handling:**
 - File parser reads line-by-line, so multiline values aren't naturally parsed
 - If a line has no `=` and doesn't look like a key, it's likely a continuation - skip with `[WARN] line N: no = found`
@@ -110,14 +115,14 @@ Docker volume roots are typically `root:root 0755`. User 1000 cannot write direc
 
 **Solution**: Write as root in helper container, then chown/chmod:
 ```bash
-printf '%s\n' "$env_content" | docker --context "$ctx" run --rm -i \
+printf '%s\n' "$env_content" | DOCKER_CONTEXT= DOCKER_HOST= docker ${ctx:+--context "$ctx"} run --rm -i \
   --network=none \
   -v "$volume:/data" \
   alpine sh -c '
     # Verify mount point not symlink
     [ ! -L /data ] || exit 1
     [ -d /data ] || exit 1
-    # Create temp as root
+    # Create temp as root (busybox mktemp accepts no template)
     tmp=$(mktemp -p /data)
     [ ! -L "$tmp" ] || { rm -f "$tmp"; exit 1; }
     cat > "$tmp"
@@ -133,26 +138,66 @@ printf '%s\n' "$env_content" | docker --context "$ctx" run --rm -i \
 ## Context-Aware Operations (CRITICAL)
 
 **ALL docker commands in `cai import` must use the selected context.** This includes existing commands AND the new .env helper:
-- Volume inspect/create: `docker --context "$ctx" volume inspect/create`
-- Rsync container: `docker --context "$ctx" run`
-- Transform containers: `docker --context "$ctx` run`
-- Orphan cleanup: `docker --context "$ctx" run`
-- **New .env helper**: `docker --context "$ctx" run`
+- Volume inspect/create: `docker ${ctx:+--context "$ctx"} volume inspect/create`
+- Rsync container: `docker ${ctx:+--context "$ctx"} run`
+- Transform containers: `docker ${ctx:+--context "$ctx"} run`
+- Orphan cleanup: `docker ${ctx:+--context "$ctx"} run`
+- **New .env helper**: `docker ${ctx:+--context "$ctx"} run`
 
-**3-Tier Context Selection Strategy:**
-1. **Sysbox available**: Use `containai-secure` context (ECI/Sysbox mode)
-2. **Docker Desktop detected** (`docker context ls | grep -q desktop-linux`): Use `desktop-linux` context
-3. **Fallback**: Use `default` context with `[WARN] Using default context - volume may be on different daemon`
+**Context Selection (mirrors `cai run` in lib/container.sh exactly):**
+
+`cai import` MUST use the **identical** context selection sequence as `cai run`. Since `cai import` is called from `containai.sh` (which already sources all required libs), context selection happens there:
+
+**Implementation location**: Context selection stays in `containai.sh` (not lib/import.sh), matching how `cai run` works. The `_containai_import_cmd` function in `containai.sh` already has access to all required functions via existing sourcing.
+
+```bash
+# In _containai_import_cmd (containai.sh):
+
+# Step 1: Resolve config override (same as lib/container.sh line ~1105)
+local config_context_override=""
+if config_context_override=$(_containai_resolve_secure_engine_context "$workspace" "$explicit_config"); then
+    : # success
+else
+    # Parse error in strict mode - propagate failure
+    return 1
+fi
+
+# Step 2: Select context using temporary env assignment (not env -u, which only works with external commands)
+# Note: env -u only works with external commands, not shell functions!
+# Use VAR= prefix for temporary override when calling shell functions
+local selected_context=""
+if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" "$debug_mode"); then
+    : # success - selected_context is "" (ECI) or "containai-secure" (Sysbox)
+else
+    # No isolation available - fallback to default context with warning
+    echo "[WARN] No isolation available, using default Docker context" >&2
+    selected_context=""
+fi
+
+# Step 3: Pass selected_context to all docker calls via temporary env assignment
+# Use DOCKER_CONTEXT= DOCKER_HOST= prefix for each docker command
+```
+
+**Resulting context values:**
+- `""` (empty string) = Docker Desktop with ECI → NO `--context` flag (uses default)
+- `"containai-secure"` = Sysbox mode → use `--context containai-secure`
+- Selection failure (return 1) → fallback to `""` (default context) with `[WARN]`
 
 **Implementation approach:**
-1. Add context selection to `_containai_import_cmd` (mirroring `lib/container.sh`'s `_cai_select_context`)
-2. Create `docker_cmd` variable or pass `ctx` parameter to ALL docker invocations in `lib/import.sh`
-3. Apply to existing rsync/transform/orphan commands (not just new .env helper)
+1. Context selection happens in `containai.sh`'s `_containai_import_cmd` (NOT in lib/import.sh)
+2. All required functions already available via existing sourcing in containai.sh
+3. Use `DOCKER_CONTEXT= DOCKER_HOST=` prefix for context selection function call
+4. Store result in `selected_context` local variable
+5. Pass context to ALL docker invocations: `DOCKER_CONTEXT= DOCKER_HOST= docker ${selected_context:+--context "$selected_context"}`
+6. For dry-run: print selected context in output for debuggability
 
 **DOCKER_CONTEXT/DOCKER_HOST neutralization:**
-- When explicit `--context` flag is used, env vars should NOT override it
-- Before docker commands: `unset DOCKER_CONTEXT DOCKER_HOST` or use `env -u DOCKER_CONTEXT -u DOCKER_HOST docker --context ...`
-- This ensures `--context` flag is authoritative
+- Use `DOCKER_CONTEXT= DOCKER_HOST=` prefix (temporary env assignment) for shell function calls
+- Use `DOCKER_CONTEXT= DOCKER_HOST=` prefix for all docker commands (external commands)
+- This approach:
+  - Works correctly for both shell functions and external commands
+  - Does NOT mutate user's shell environment (since it's a temporary prefix, not `unset`)
+  - Is the same pattern used in `_cai_select_context` internally for its ECI check
 
 **Failure mode**: If context mismatch occurs, `.env` lands in wrong daemon's volume - completely broken. This is a correctness requirement, not just nice-to-have.
 
@@ -194,21 +239,21 @@ _load_env_file() {
     line_num=$((line_num + 1))
     # Strip CRLF
     line="${line%$'\r'}"
-    # Skip comments
+    # Skip comments (allows leading whitespace before #)
     if [[ "$line" =~ ^[[:space:]]*# ]]; then continue; fi
     # Skip blank/whitespace-only lines (spaces and tabs)
     if [[ -z "${line//[[:space:]]/}" ]]; then continue; fi
-    # Strip optional 'export ' prefix
+    # Strip optional 'export ' prefix (must be at line start, no leading whitespace)
     if [[ "$line" =~ ^export[[:space:]]+ ]]; then
       line="${line#export}"
-      line="${line#"${line%%[![:space:]]*}"}"  # trim leading whitespace
+      line="${line#"${line%%[![:space:]]*}"}"  # trim leading whitespace after export
     fi
     # Require = before parsing
     if [[ "$line" != *=* ]]; then
       log "WARN: line $line_num: no = found - skipping"
       continue
     fi
-    # Extract key and value
+    # Extract key and value (no whitespace trimming - strict format)
     local key="${line%%=*}"
     local value="${line#*=}"
     # Validate key
@@ -228,6 +273,7 @@ _load_env_file() {
 
 When `cai import --dry-run` is used:
 - Print what env vars would be imported/skipped (keys only, not values)
+- Print selected context (for debuggability): `[INFO] Docker context: <ctx or "default">`
 - Do NOT write `/mnt/agent-data/.env`
 - Do NOT create/modify the volume
 - Consistent with existing dry-run behavior in `test-sync-integration.sh`
@@ -276,18 +322,42 @@ Extend `agent-sandbox/test-sync-integration.sh` to cover:
 - Dry-run doesn't create `/data/.env`
 - Non-dry-run writes expected keys
 - Values never appear in logs (log hygiene)
-- Entrypoint doesn't override pre-set env vars (including empty string)
 - Permission handling (0600, owned by 1000:1000)
 - CRLF stripping works
 - `export KEY=VALUE` format accepted
 - Lines without `=` skipped with warning
 - Invalid key names skipped with warning
+- Whitespace edge cases (leading whitespace = invalid)
+
+**Entrypoint testing strategy:**
+The current integration tests bypass the entrypoint (`--entrypoint /bin/bash`) because `entrypoint.sh` requires Docker Sandbox's mirrored workspace mount (`findmnt` discovery).
+
+**Solution - Two-tier testing:**
+1. **Unit-style test for `_load_env_file`**: Extract the function to a separate testable file or add a `--test-env-load` mode that only runs the env loading portion. Test in a minimal container without workspace discovery.
+2. **Full entrypoint test (ECI/Sandbox only)**: Add tests that run under Docker Sandbox infrastructure where `findmnt` discovery works. Gate with: `if _cai_sandbox_feature_enabled; then ... fi`
+
+**Concrete approach for tier 1:**
+```bash
+# Create test container with .env pre-populated, verify env loading
+docker run --rm \
+  -v test-volume:/mnt/agent-data \
+  -e PRE_SET_VAR=original \
+  alpine sh -c '
+    # Simulate entrypoint env loading (inline the function)
+    env_file="/mnt/agent-data/.env"
+    # ... (simplified _load_env_file logic)
+    # Verify PRE_SET_VAR not overwritten
+    [ "$PRE_SET_VAR" = "original" ] || exit 1
+    # Verify NEW_VAR was set
+    [ "$NEW_VAR" = "from_file" ] || exit 1
+  '
+```
 
 **Context testing approach:**
-- Context selection is tested implicitly by verifying volume contents match expectations
-- Explicit multi-context tests require ECI/Sysbox infrastructure (skip on non-ECI CI)
-- Use `[[ -n "$(docker context ls | grep containai-secure)" ]]` to detect ECI availability
-- Non-ECI tests verify default/desktop-linux selection logic without requiring multiple daemons
+- Tests must use the SAME context selection as `cai import`
+- Before any docker volume/run operations in tests, call `_cai_select_context` and use result
+- For dry-run tests: verify printed context matches expected selection
+- Multi-daemon tests (ECI + Sysbox) skipped on non-ECI CI
 
 ## Acceptance Criteria
 
@@ -297,25 +367,34 @@ Extend `agent-sandbox/test-sync-integration.sh` to cover:
 4. [ ] Config `[env].from_host` (default false) enables host env reading
 5. [ ] Config `[env].env_file` specifies source .env file path (workspace-relative only)
 6. [ ] `env_file` set but missing/unreadable: **hard error**
-7. [ ] Only allowlisted vars are imported (no accidental leakage)
-8. [ ] Missing vars logged as warning (key only, not value), not fatal
-9. [ ] Output `.env` written atomically with TOCTOU protection
-10. [ ] Output `.env` has mode 0600, owned by 1000:1000
-11. [ ] Host env multiline values skipped with `[WARN] source=host: key 'FOO' skipped (multiline value)`
-12. [ ] Entrypoint loads `.env` safely (no shell `source`)
-13. [ ] Entrypoint only sets vars NOT already in environment (empty string = present)
-14. [ ] Entrypoint strips CRLF, handles `export ` prefix, and is `set -e` safe
-15. [ ] `cai import` triggers env var import via dedicated env config resolution
-16. [ ] ALL docker commands use correct context (existing + new)
-17. [ ] Values streamed via stdin, written as root, then chown/chmod
-18. [ ] Dry-run prints what would be imported (keys only), no volume write
-19. [ ] Log hygiene: never print values or raw lines in warnings
-20. [ ] Missing Python: skip env import with warning (fail fast if --config explicit)
+7. [ ] `env_file` ALWAYS validated when `[env]` section exists (even if import is empty/invalid)
+8. [ ] Only allowlisted vars are imported (no accidental leakage)
+9. [ ] Missing vars logged as warning (key only, not value), not fatal
+10. [ ] Output `.env` written atomically with TOCTOU protection
+11. [ ] Output `.env` has mode 0600, owned by 1000:1000
+12. [ ] Host env multiline values skipped with `[WARN] source=host: key 'FOO' skipped (multiline value)`
+13. [ ] Entrypoint loads `.env` safely (no shell `source`)
+14. [ ] Entrypoint only sets vars NOT already in environment (empty string = present)
+15. [ ] Entrypoint strips CRLF, handles `export ` prefix, and is `set -e` safe
+16. [ ] `cai import` uses identical context selection as `cai run` (resolve_secure_engine_context + select_context)
+17. [ ] Context selection happens in containai.sh (not lib/import.sh) to use existing sourcing
+18. [ ] ALL docker commands use `DOCKER_CONTEXT= DOCKER_HOST=` prefix (temporary env assignment)
+19. [ ] Context selection failure falls back to default context (`""`) with `[WARN]`
+20. [ ] Values streamed via stdin, written as root, then chown/chmod
+21. [ ] Dry-run prints what would be imported (keys only) AND selected context
+22. [ ] Log hygiene: never print values or raw lines in warnings
+23. [ ] Missing Python: skip env import with warning (fail fast if --config explicit)
+24. [ ] Whitespace handling is strict (no trimming, intentional)
+25. [ ] Tests use same context selection as import (not hardcoded default)
+26. [ ] Entrypoint tests have concrete strategy (unit-style + ECI-gated full test)
 
 ## References
 
 - Existing import: `agent-sandbox/lib/import.sh`
-- Context logic: `agent-sandbox/lib/container.sh`
+- Context selection: `agent-sandbox/lib/doctor.sh` (`_cai_select_context`)
+- Secure engine context: `agent-sandbox/lib/config.sh` (`_containai_resolve_secure_engine_context`)
+- Context logic: `agent-sandbox/lib/container.sh` (reference implementation at lines ~1100-1115)
+- Main entry: `agent-sandbox/containai.sh` (sources all libs, implements commands)
 - Config parsing: `agent-sandbox/lib/config.sh`, `agent-sandbox/parse-toml.py`
 - Entrypoint: `agent-sandbox/entrypoint.sh`
 - Volume mount: `/mnt/agent-data`

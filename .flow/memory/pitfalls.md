@@ -78,3 +78,6 @@ dockerd fails if hosts is set in both daemon.json and -H flag; specify in exactl
 
 ## 2026-01-20 manual [pitfall]
 When removing legacy paths, update ALL tests that reference them, including full-sync directory checks
+
+## 2026-01-20 manual [pitfall]
+env -u only works with external commands, not shell functions; use DOCKER_CONTEXT= DOCKER_HOST= func_call for temporary env override
