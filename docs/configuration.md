@@ -15,9 +15,10 @@ ContainAI searches for configuration in this order:
 
 1. Starting from the workspace directory, walk up the directory tree
 2. At each directory, check for `.containai/config.toml`
-3. **Stop at git root** - config search does not traverse above the repository boundary
-4. If no workspace config found, check user config at `XDG_CONFIG_HOME/containai/config.toml`
-5. If `XDG_CONFIG_HOME` is not set, defaults to `~/.config`
+3. **Stop at git root** - if in a git repo, config search does not traverse above the repository boundary
+4. If not in a git repo, discovery walks up to filesystem root (but never checks `/.containai/config.toml`)
+5. If no workspace config found, check user config at `XDG_CONFIG_HOME/containai/config.toml`
+6. If `XDG_CONFIG_HOME` is not set, defaults to `~/.config`
 
 ```
 /home/user/projects/myapp/src/  <- workspace (cwd)
@@ -134,12 +135,12 @@ env_file = ".env.local"
 
 ### `[danger]` Section
 
-Opt-in for dangerous features. **Requires matching CLI acknowledgment flags.**
+Optional audit trail for dangerous features. **This section is informational only - CLI flags are the actual gates.**
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `allow_host_credentials` | boolean | `false` | Pre-enable host credential access |
-| `allow_host_docker_socket` | boolean | `false` | Pre-enable Docker socket access |
+| `allow_host_credentials` | boolean | `false` | Audit marker for host credential access |
+| `allow_host_docker_socket` | boolean | `false` | Audit marker for Docker socket access |
 
 ```toml
 [danger]
@@ -147,18 +148,14 @@ allow_host_credentials = true
 allow_host_docker_socket = true
 ```
 
-**CLI acknowledgment required:**
+**Important:** The `[danger]` section does **not** enable dangerous features. CLI flags are the only gates:
 
-The `[danger]` section pre-enables dangerous features, but CLI flags are still required:
+| Feature | CLI Flag Required |
+|---------|-------------------|
+| Host credentials | `--allow-host-credentials` |
+| Docker socket | `--allow-host-docker-socket` |
 
-| Config Key | CLI Flag Required |
-|------------|-------------------|
-| `allow_host_credentials = true` | `--allow-host-credentials` |
-| `allow_host_docker_socket = true` | `--allow-host-docker-socket` |
-
-Without both config and CLI acknowledgment, the feature remains disabled. This ensures dangerous features require explicit action for audit trail.
-
-See `cai --help` for full details on dangerous option flags.
+The `[danger]` config keys are reserved for audit trail purposes (documenting intent in config files) but are not consulted by the implementation. See `cai --help` for CLI flag details.
 
 ### `default_excludes` (Top-level)
 
@@ -179,23 +176,24 @@ default_excludes = [
 
 **Pattern syntax:**
 
-Patterns use rsync/tar exclude-style matching:
+Patterns are passed directly to `rsync --exclude` (for import) and `tar --exclude` (for export), relative to the workspace root:
 
-- Simple names match anywhere: `node_modules` matches `./node_modules` and `./src/node_modules`
-- Patterns with `/` are path-relative: `build/` matches only top-level `build` directory
-- Glob patterns work: `*.log` matches all `.log` files
+- Patterns without `/` match any path component: `node_modules` matches at any depth
+- Glob patterns (`*`, `?`) are supported
+- Pattern behavior may differ slightly between rsync and tar; test your patterns
 - No multi-line values allowed (security)
 - Patterns from `default_excludes` and workspace-specific `excludes` are merged (deduplicated)
 
 **Examples:**
 ```toml
 default_excludes = [
-    ".git",           # Match .git anywhere
-    "node_modules",   # Match node_modules anywhere
+    ".git",           # Match .git at any depth
+    "node_modules",   # Match node_modules at any depth
     "*.log",          # Match all .log files
-    "dist/",          # Match top-level dist directory
 ]
 ```
+
+See rsync(1) and tar(1) documentation for detailed pattern matching rules.
 
 ### `[workspace."<path>"]` Sections
 
@@ -368,9 +366,13 @@ These environment variables override config file values:
 | Scenario | Discovered Config | Explicit Config (`--config`) |
 |----------|-------------------|------------------------------|
 | File not found | Silent (use defaults) | **Error** |
-| Parse error | Warning (use defaults) | **Error** |
+| Parse error (invalid TOML) | Warning (use defaults) | **Error** |
 | Python unavailable | Warning (use defaults) | **Error** |
-| Invalid value | Warning (use defaults) | **Error** |
+| Invalid volume name | **Error** | **Error** |
+| Invalid context name | Warning (ignored) | Warning (ignored) |
+| Invalid exclude pattern | Skipped with warning | Skipped with warning |
+
+**Note:** Invalid volume names (`agent.data_volume`, `workspace.*.data_volume`) always cause errors regardless of config source, as the container cannot start with an invalid volume.
 
 ### Common Errors
 
