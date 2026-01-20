@@ -138,6 +138,7 @@ Subcommands:
   shell         Open interactive shell in running container
   doctor        Check system capabilities and show diagnostics
   setup         Install Sysbox Secure Engine (WSL2/macOS)
+  validate      Validate Secure Engine configuration
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
@@ -1254,6 +1255,10 @@ containai() {
         setup)
             shift
             _cai_setup "$@"
+            ;;
+        validate)
+            shift
+            _cai_secure_engine_validate "$@"
             ;;
         import)
             shift

@@ -1,7 +1,7 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-20T00:53:55.781011Z",
   "created_at": "2026-01-18T23:55:54.356908Z",
   "depends_on": [
     "fn-5-urz.10",
@@ -11,7 +11,7 @@
   "id": "fn-5-urz.12",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.12.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Secure Engine runtime validation + integration tests",
-  "updated_at": "2026-01-18T23:59:04.708359Z"
+  "updated_at": "2026-01-20T00:53:55.781031Z"
 }
