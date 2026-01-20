@@ -2164,20 +2164,29 @@ test_entrypoint_loads_after_ownership() {
         pass "Test verifies load-after-fix ordering exists (code inspection)"
     fi
 
-    # Verify by code inspection that entrypoint.sh has correct ordering
+    # Verify by code inspection that entrypoint.sh has correct call ordering
+    # Match call sites (bare function names at start of line, not definitions)
+    # Function definitions look like: "function_name() {" or "_function_name() {"
+    # Call sites look like: "ensure_volume_structure" or "_load_env_file" (just the name)
     local entrypoint_content
     entrypoint_content=$(cat "$SCRIPT_DIR/entrypoint.sh" 2>/dev/null || echo "")
 
-    # Check that ensure_volume_structure is called before _load_env_file
-    local structure_line load_line
-    structure_line=$(echo "$entrypoint_content" | grep -n "ensure_volume_structure" | head -1 | cut -d: -f1)
-    load_line=$(echo "$entrypoint_content" | grep -n "_load_env_file" | head -1 | cut -d: -f1)
+    # Find CALL sites (lines that are just the function name, not definitions with parentheses)
+    # ensure_volume_structure call is a bare line, _load_env_file call is a bare line
+    local structure_call_line load_call_line
+    structure_call_line=$(echo "$entrypoint_content" | grep -n "^ensure_volume_structure$" | head -1 | cut -d: -f1)
+    load_call_line=$(echo "$entrypoint_content" | grep -n "^_load_env_file$" | head -1 | cut -d: -f1)
 
-    if [[ -n "$structure_line" && -n "$load_line" && "$structure_line" -lt "$load_line" ]]; then
-        pass "ensure_volume_structure called before _load_env_file (correct ordering)"
+    if [[ -n "$structure_call_line" && -n "$load_call_line" ]]; then
+        if [[ "$structure_call_line" -lt "$load_call_line" ]]; then
+            pass "ensure_volume_structure called before _load_env_file (line $structure_call_line < $load_call_line)"
+        else
+            fail "ensure_volume_structure should be called before _load_env_file"
+            info "structure_call_line=$structure_call_line, load_call_line=$load_call_line"
+        fi
     else
-        fail "ensure_volume_structure should be called before _load_env_file"
-        info "structure_line=$structure_line, load_line=$load_line"
+        fail "Could not find call sites for ensure_volume_structure and _load_env_file"
+        info "structure_call_line=$structure_call_line, load_call_line=$load_call_line"
     fi
 }
 
