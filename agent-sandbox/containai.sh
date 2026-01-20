@@ -1030,11 +1030,11 @@ _containai_sandbox_clear_credentials_cmd() {
     # Check if volume exists
     # Force default context for volume operations (Docker Desktop only)
     # Capture stderr to distinguish "not found" from real errors
-    local inspect_output inspect_rc
-    inspect_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume inspect "$volume_name" 2>&1)
-    inspect_rc=$?
-
-    if [[ $inspect_rc -ne 0 ]]; then
+    # Use if/else guard for set -e safety (pitfall: var=$(); rc=$? is dead code under set -e)
+    local inspect_output
+    if inspect_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume inspect "$volume_name" 2>&1); then
+        : # Volume exists - continue to removal flow
+    else
         # Distinguish "not found" (benign) from other errors (should surface)
         if printf '%s' "$inspect_output" | grep -qiE "no such volume|not found"; then
             _cai_info "No credential volume found: $volume_name"
@@ -1105,12 +1105,12 @@ _containai_sandbox_clear_credentials_cmd() {
     fi
 
     # Remove the volume
+    # Use if/else guard for set -e safety
     _cai_info "Removing volume: $volume_name"
-    local rm_output rm_rc
-    rm_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume rm "$volume_name" 2>&1)
-    rm_rc=$?
-
-    if [[ $rm_rc -ne 0 ]]; then
+    local rm_output
+    if rm_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume rm "$volume_name" 2>&1); then
+        : # Success - continue to verification
+    else
         # Check for "in use" error (race condition - container appeared after our check)
         if printf '%s' "$rm_output" | grep -qiE "in use|being used|volume is in use"; then
             _cai_error "Volume is in use by a container (appeared after check)"
