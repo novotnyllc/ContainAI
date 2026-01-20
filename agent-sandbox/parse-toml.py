@@ -113,24 +113,27 @@ def format_value(value) -> str:
     return json.dumps(value, separators=(",", ":"), default=str)
 
 
-def validate_env_section(config: dict) -> dict | None:
+def validate_env_section(config):
     """
     Validate and extract the [env] section from config.
 
     Validates types for:
-    - import: list of strings (required if section exists, but missing returns empty list with warning)
-    - from_host: boolean (default: false)
-    - env_file: optional string
+    - import: list of strings (missing/invalid treated as empty list with warning)
+    - from_host: boolean (default: false, invalid type is error)
+    - env_file: optional string (invalid type is error)
+
+    Per spec, env_file is always validated when [env] section exists, even if
+    import is missing or invalid. This ensures "fail closed" semantics.
 
     Args:
         config: The parsed TOML config dict
 
     Returns:
         Validated env config dict, or None if [env] section is missing.
-        Prints warnings to stderr for invalid types.
+        Prints warnings to stderr for recoverable issues.
 
     Raises:
-        SystemExit: If type validation fails (non-recoverable errors)
+        SystemExit: If type validation fails for from_host or env_file
     """
     env_section = config.get("env")
 
@@ -145,45 +148,8 @@ def validate_env_section(config: dict) -> dict | None:
 
     result = {}
 
-    # Validate 'import' key: must be list of strings
-    import_list = env_section.get("import")
-    if import_list is None:
-        # Missing import key - treat as empty list with warning
-        print("[WARN] [env].import missing, treating as empty list", file=sys.stderr)
-        result["import"] = []
-    elif not isinstance(import_list, list):
-        print(
-            f"Error: [env].import must be a list, got {type(import_list).__name__}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    else:
-        # Validate each item is a string
-        validated_imports = []
-        for i, item in enumerate(import_list):
-            if not isinstance(item, str):
-                print(
-                    f"Error: [env].import[{i}] must be a string, got {type(item).__name__}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            validated_imports.append(item)
-        result["import"] = validated_imports
-
-    # Validate 'from_host' key: must be boolean, default false
-    from_host = env_section.get("from_host")
-    if from_host is None:
-        result["from_host"] = False
-    elif not isinstance(from_host, bool):
-        print(
-            f"Error: [env].from_host must be a boolean, got {type(from_host).__name__}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    else:
-        result["from_host"] = from_host
-
-    # Validate 'env_file' key: must be string if present
+    # Validate 'env_file' key FIRST - per spec, always validated when [env] exists
+    # This ensures fail-closed semantics even if import is invalid
     env_file = env_section.get("env_file")
     if env_file is None:
         # Optional - don't include in result if not present
@@ -196,6 +162,47 @@ def validate_env_section(config: dict) -> dict | None:
         sys.exit(1)
     else:
         result["env_file"] = env_file
+
+    # Validate 'from_host' key: must be boolean, default false
+    # Invalid type is an error (not recoverable)
+    from_host = env_section.get("from_host")
+    if from_host is None:
+        result["from_host"] = False
+    elif not isinstance(from_host, bool):
+        print(
+            f"Error: [env].from_host must be a boolean, got {type(from_host).__name__}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    else:
+        result["from_host"] = from_host
+
+    # Validate 'import' key: must be list of strings
+    # Per spec: missing or non-list is treated as [] with warning (fail-soft)
+    import_list = env_section.get("import")
+    if import_list is None:
+        # Missing import key - treat as empty list with warning
+        print("[WARN] [env].import missing, treating as empty list", file=sys.stderr)
+        result["import"] = []
+    elif not isinstance(import_list, list):
+        # Non-list - treat as empty list with warning (per spec)
+        print(
+            f"[WARN] [env].import must be a list, got {type(import_list).__name__}; treating as empty list",
+            file=sys.stderr,
+        )
+        result["import"] = []
+    else:
+        # Validate each item is a string, skip non-strings with warning
+        validated_imports = []
+        for i, item in enumerate(import_list):
+            if not isinstance(item, str):
+                print(
+                    f"[WARN] [env].import[{i}] must be a string, got {type(item).__name__}; skipping",
+                    file=sys.stderr,
+                )
+                continue
+            validated_imports.append(item)
+        result["import"] = validated_imports
 
     return result
 
