@@ -215,8 +215,26 @@ _cai_sysbox_available() {
     _CAI_SYSBOX_ERROR=""
     _CAI_SYSBOX_CONTEXT_EXISTS="false"
 
-    # Use same socket path as setup.sh (consistent constant)
-    local socket="${_CAI_SECURE_SOCKET:-/var/run/docker-containai.sock}"
+    # Determine expected socket based on platform
+    # - WSL2: Uses dedicated socket at _CAI_SECURE_SOCKET
+    # - macOS: Uses Lima socket at _CAI_LIMA_SOCKET_PATH
+    # - Native Linux: Uses default socket at /var/run/docker.sock
+    local socket platform
+    platform=$(_cai_detect_platform)
+    case "$platform" in
+        wsl)
+            socket="${_CAI_SECURE_SOCKET:-/var/run/docker-containai.sock}"
+            ;;
+        macos)
+            socket="${_CAI_LIMA_SOCKET_PATH:-$HOME/.lima/containai-secure/sock/docker.sock}"
+            ;;
+        linux)
+            socket="/var/run/docker.sock"
+            ;;
+        *)
+            socket="${_CAI_SECURE_SOCKET:-/var/run/docker-containai.sock}"
+            ;;
+    esac
 
     # Check if socket exists
     if [[ ! -S "$socket" ]]; then

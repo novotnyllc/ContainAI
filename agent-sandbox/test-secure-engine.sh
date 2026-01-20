@@ -59,11 +59,17 @@ test_context_exists() {
     section "Test 1: Context exists with correct endpoint"
 
     # Determine expected socket based on platform
+    # - WSL2: Uses dedicated socket at _CAI_SECURE_SOCKET
+    # - macOS: Uses Lima socket at _CAI_LIMA_SOCKET_PATH
+    # - Native Linux: Uses default socket at /var/run/docker.sock
     local platform expected_socket
     platform=$(_cai_detect_platform)
     case "$platform" in
-        wsl|linux)
+        wsl)
             expected_socket="unix://$_CAI_SECURE_SOCKET"
+            ;;
+        linux)
+            expected_socket="unix:///var/run/docker.sock"
             ;;
         macos)
             expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"

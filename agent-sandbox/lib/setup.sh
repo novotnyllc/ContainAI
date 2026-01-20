@@ -2005,8 +2005,9 @@ Security Notes:
   - Does NOT set sysbox-runc as default runtime (keeps runc default)
   - Does NOT modify Docker Desktop or default context
   - Docker Desktop remains the default and unchanged (CRITICAL)
-  - Creates SEPARATE socket/context for isolation
   - Creates 'containai-secure' context for explicit isolation
+  - WSL2/macOS: Uses separate socket for isolation
+  - Native Linux: Uses default socket with separate context
 
 Lima VM Management (macOS):
   limactl start containai-secure    Start the VM
