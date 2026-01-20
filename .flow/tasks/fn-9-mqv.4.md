@@ -22,16 +22,17 @@ Support importing from arbitrary directory (not just `$HOME`).
 - Directory layout matches host layout (unlike tgz which has volume layout)
 - Must validate source directory exists and is readable
 ## Acceptance
-- [ ] `_containai_import vol --from /other/dir` syncs from that directory
-- [ ] SYNC_MAP paths resolve against specified source directory
-- [ ] Post-transforms read from source directory (not hardcoded $HOME)
-- [ ] Missing source directory produces clear error
-- [ ] No `--from` defaults to `$HOME` (backward compatible)
-- [ ] Dry-run mode works with custom source
+- [x] `_containai_import vol --from /other/dir` syncs from that directory
+- [x] SYNC_MAP paths resolve against specified source directory
+- [x] Post-transforms read from source directory (not hardcoded $HOME)
+- [x] Missing source directory produces clear error
+- [x] No `--from` defaults to `$HOME` (backward compatible)
+- [x] Dry-run mode works with custom source
+
 ## Done summary
-TBD
+Implemented directory source support for `cai import --from <dir>`. When --from points to a directory, syncs from that directory instead of $HOME. Post-transforms read source files from the specified directory and perform best-effort path rewriting for both $HOME and source_root prefixes.
 
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 4db0a37, 495af13, 3d0384a, c0b6eb7
+- Tests: manual verification of acceptance criteria
 - PRs:

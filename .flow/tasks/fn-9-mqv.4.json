@@ -7,10 +7,22 @@
     "fn-9-mqv.2"
   ],
   "epic": "fn-9-mqv",
+  "evidence": {
+    "commits": [
+      "4db0a37",
+      "495af13",
+      "3d0384a",
+      "c0b6eb7"
+    ],
+    "prs": [],
+    "tests": [
+      "manual verification of acceptance criteria"
+    ]
+  },
   "id": "fn-9-mqv.4",
   "priority": null,
   "spec_path": ".flow/tasks/fn-9-mqv.4.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Support directory source in import",
-  "updated_at": "2026-01-20T19:19:09.252917Z"
+  "updated_at": "2026-01-20T19:55:30.699497Z"
 }

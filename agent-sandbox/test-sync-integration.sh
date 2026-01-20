@@ -15,6 +15,7 @@
 # 10. opencode CLI check (optional - depends on image build)
 # 11-15. Workspace volume resolution tests
 # 16-39. Env var import tests (allowlist, from_host, env_file, entrypoint, etc.)
+# 40-41. --from source tests (directory sync, tgz restore mode)
 # ==============================================================================
 
 set -euo pipefail
@@ -2567,6 +2568,152 @@ from_host = true
 }
 
 # ==============================================================================
+# Test 40: --from directory syncs from alternate source
+# ==============================================================================
+test_from_directory() {
+    section "Test 40: --from directory syncs from alternate source"
+
+    local test_dir alt_source_dir test_vol
+    test_dir=$(mktemp -d)
+    alt_source_dir=$(mktemp -d "${REAL_HOME}/.containai-alt-source-XXXXXX")
+    test_vol="containai-test-from-dir-${TEST_RUN_ID}"
+
+    # Create config pointing to test volume
+    create_env_test_config "$test_dir" '
+[agent]
+data_volume = "'"$test_vol"'"
+'
+    docker volume create "$test_vol" >/dev/null
+    register_test_volume "$test_vol"
+
+    # Create alternate source directory with distinctive content
+    # This mimics a different $HOME with claude configs
+    mkdir -p "$alt_source_dir/.claude"
+    echo '{"test_marker": "from_alt_source_12345"}' > "$alt_source_dir/.claude/settings.json"
+
+    # Also create a distinctive plugins directory structure
+    mkdir -p "$alt_source_dir/.claude/plugins"
+    echo '{"plugins": {}}' > "$alt_source_dir/.claude/plugins/installed_plugins.json"
+
+    local import_output import_exit=0
+    # Run import with --from pointing to alternate source
+    import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -eq 0 ]]; then
+        pass "Import with --from directory succeeded"
+    else
+        fail "Import with --from directory failed (exit=$import_exit)"
+        info "Output: $import_output"
+    fi
+
+    # Verify the content came from alternate source (check for marker)
+    local settings_content
+    settings_content=$(run_in_rsync "cat /data/claude/settings.json 2>/dev/null" | tail -1) || settings_content=""
+
+    if echo "$settings_content" | grep -q "from_alt_source_12345"; then
+        pass "Volume contains content from --from directory (marker found)"
+    else
+        fail "Volume does NOT contain content from --from directory"
+        info "Settings content: $settings_content"
+    fi
+
+    # Verify output mentions using the alternate directory
+    if echo "$import_output" | grep -q "Using directory source:"; then
+        pass "Output indicates directory source used"
+    else
+        # May also appear as "Detected directory" or similar
+        if echo "$import_output" | grep -qi "directory.*source\|source.*directory"; then
+            pass "Output indicates directory source used"
+        else
+            info "Note: output may not explicitly mention directory source"
+        fi
+    fi
+
+    # Cleanup
+    rm -rf "$test_dir" "$alt_source_dir"
+}
+
+# ==============================================================================
+# Test 41: --from with tgz sets restore mode (skips env import)
+# ==============================================================================
+test_from_tgz_restore_mode() {
+    section "Test 41: --from with tgz sets restore mode"
+
+    local test_dir test_vol archive_path
+    test_dir=$(mktemp -d)
+    test_vol="containai-test-from-tgz-${TEST_RUN_ID}"
+    archive_path="$test_dir/test-backup.tgz"
+
+    # Create config with env import that should be SKIPPED in restore mode
+    create_env_test_config "$test_dir" '
+[agent]
+data_volume = "'"$test_vol"'"
+
+[env]
+import = ["RESTORE_MODE_TEST_VAR"]
+from_host = true
+'
+    docker volume create "$test_vol" >/dev/null
+    register_test_volume "$test_vol"
+
+    # Create a minimal test archive with distinctive content
+    local archive_src
+    archive_src=$(mktemp -d)
+    mkdir -p "$archive_src/claude"
+    echo '{"restore_marker": "tgz_restore_test_67890"}' > "$archive_src/claude/settings.json"
+    # Create archive (relative paths from inside archive_src)
+    (cd "$archive_src" && tar -czf "$archive_path" claude/)
+    rm -rf "$archive_src"
+
+    local import_output import_exit=0
+    # Run import with --from pointing to tgz archive
+    # Set env var that would normally be imported - should be skipped in restore mode
+    import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        RESTORE_MODE_TEST_VAR="should_not_appear" \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$archive_path" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -eq 0 ]]; then
+        pass "Import with --from tgz succeeded"
+    else
+        fail "Import with --from tgz failed (exit=$import_exit)"
+        info "Output: $import_output"
+    fi
+
+    # Verify the content came from archive (check for marker)
+    local settings_content
+    settings_content=$(run_in_rsync "cat /data/claude/settings.json 2>/dev/null" | tail -1) || settings_content=""
+
+    if echo "$settings_content" | grep -q "tgz_restore_test_67890"; then
+        pass "Volume contains content from tgz archive (marker found)"
+    else
+        fail "Volume does NOT contain content from tgz archive"
+        info "Settings content: $settings_content"
+    fi
+
+    # Verify output mentions tgz/archive restore
+    if echo "$import_output" | grep -qi "archive\|tgz\|restore"; then
+        pass "Output indicates archive restore mode"
+    else
+        info "Note: output may not explicitly mention restore mode"
+    fi
+
+    # Verify env import was skipped (no .env file should exist, or if it does, var not there)
+    local env_content
+    env_content=$(run_in_rsync "cat /data/.env 2>/dev/null" | tail -1) || env_content=""
+
+    if [[ -z "$env_content" ]] || ! echo "$env_content" | grep -q "RESTORE_MODE_TEST_VAR"; then
+        pass "Env import skipped in restore mode (no .env or var not present)"
+    else
+        fail "Env import was NOT skipped in restore mode"
+        info ".env content: $env_content"
+    fi
+
+    # Cleanup
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
@@ -2633,6 +2780,10 @@ main() {
     test_env_file_multiline_skipped
     test_env_missing_section_silent
     test_env_hermetic
+
+    # --from source tests (Tests 40-41)
+    test_from_directory
+    test_from_tgz_restore_mode
 
     # Summary
     echo ""

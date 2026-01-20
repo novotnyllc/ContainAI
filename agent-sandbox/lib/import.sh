@@ -97,6 +97,13 @@ _import_detect_source_type() {
     # For files, probe with tar to detect gzip-compressed tar archives
     # This is more reliable than file -b and doesn't require the file command
     if [[ -f "$source" ]]; then
+        # Require tar for archive detection
+        if ! command -v tar >/dev/null 2>&1; then
+            # Can't detect archive type without tar - return unknown
+            # Caller will get "unsupported source type" error with clear message
+            printf '%s\n' "unknown"
+            return 0
+        fi
         # Use -- to prevent argument injection from filenames starting with -
         if tar -tzf -- "$source" >/dev/null 2>&1; then
             printf '%s\n' "tgz"
@@ -574,12 +581,19 @@ _containai_import() {
                 # Use --mount instead of -v to avoid colon parsing issues
                 # Use --network=none for consistency with rest of import pipeline
                 # Note: DOCKER_CONTEXT/DOCKER_HOST neutralization still needed since docker_cmd may use --context
+                # Use eeacms/rsync (same image as actual sync) to avoid introducing new image dependency
                 local mount_error
                 if ! mount_error=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
                     --mount "type=bind,src=$from_source,dst=/test,readonly" \
-                    alpine:3.20 true 2>&1); then
-                    _import_error "Cannot mount '$from_source' - ensure it's within Docker's file-sharing paths"
-                    _import_info "On macOS/Windows, add the path in Docker Desktop Settings > Resources > File Sharing"
+                    eeacms/rsync true 2>&1); then
+                    # Distinguish image pull failure from mount failure
+                    if [[ "$mount_error" == *"Unable to find image"* ]] || [[ "$mount_error" == *"pull access denied"* ]] || [[ "$mount_error" == *"manifest unknown"* ]]; then
+                        _import_error "Failed to pull eeacms/rsync image (required for import)"
+                        _import_info "Check network connectivity or pre-pull the image: docker pull eeacms/rsync"
+                    else
+                        _import_error "Cannot mount '$from_source' - ensure it's within Docker's file-sharing paths"
+                        _import_info "On macOS/Windows, add the path in Docker Desktop Settings > Resources > File Sharing"
+                    fi
                     if [[ -n "$mount_error" ]]; then
                         _import_info "Docker error: $mount_error"
                     fi
