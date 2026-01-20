@@ -121,15 +121,31 @@ _import_detect_source_type() {
 
 # Restore volume from tgz archive (idempotent)
 # This is a "pure restore" that bypasses SYNC_MAP and all transforms.
-# Arguments:
+# Arguments (3-arg form for internal use):
 #   $1 = Docker context ("" for default)
 #   $2 = volume name (required)
 #   $3 = archive path (required, must be gzip-compressed tar)
+# Arguments (2-arg form for standalone use):
+#   $1 = volume name (required)
+#   $2 = archive path (required)
 # Returns: 0 on success, 1 on failure
 _import_restore_from_tgz() {
-    local ctx="${1:-}"
-    local volume="${2:-}"
-    local archive="${3:-}"
+    local ctx=""
+    local volume=""
+    local archive=""
+
+    # Support both 2-arg (volume, archive) and 3-arg (ctx, volume, archive) forms
+    # Detect by checking if $3 is set
+    if [[ -n "${3:-}" ]]; then
+        # 3-arg form: ctx, volume, archive
+        ctx="${1:-}"
+        volume="${2:-}"
+        archive="${3:-}"
+    else
+        # 2-arg form: volume, archive (ctx defaults to "")
+        volume="${1:-}"
+        archive="${2:-}"
+    fi
 
     # Build docker command prefix based on context
     local -a docker_cmd=(docker)
@@ -157,12 +173,6 @@ _import_restore_from_tgz() {
         return 1
     fi
 
-    # Check tar availability (required for validation)
-    if ! command -v tar >/dev/null 2>&1; then
-        _import_error "tar command not found (required for archive restore)"
-        return 1
-    fi
-
     # Validate archive exists and is readable
     if [[ ! -f "$archive" ]]; then
         _import_error "Archive not found: $archive"
@@ -176,34 +186,65 @@ _import_restore_from_tgz() {
 
     _import_step "Validating archive integrity..."
 
-    # Step 1: Validate archive can be read and check for path traversal
-    # Stream directly through grep to avoid storing in variable (handles large archives)
-    # and avoids echo issues with filenames starting with -n/-e
-    if ! tar -tzf "$archive" 2>/dev/null | grep -qE '(^/|(^|/)\.\.(/|$))'; then
-        : # No unsafe paths found, continue
-    else
-        _import_error "Archive contains unsafe paths (absolute or parent traversal)"
+    # Archive validation uses alpine container for consistency with extraction
+    # This ensures validation and extraction use the same tar implementation
+    # Validate archive can be read and check for path traversal + entry types in one pass
+    local validation_result
+    if ! validation_result=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none -i alpine:3.20 sh -c '
+        # Read archive from stdin, validate, and report issues
+        # Store stdin to temp file since we need multiple passes
+        cat > /tmp/archive.tgz
+
+        # Step 1: Check archive is readable
+        if ! tar -tzf /tmp/archive.tgz >/dev/null 2>&1; then
+            echo "CORRUPT"
+            exit 0
+        fi
+
+        # Step 2: Check for path traversal (absolute paths or ..)
+        if tar -tzf /tmp/archive.tgz 2>/dev/null | grep -qE "^/|(^|/)\.\.(/|$)"; then
+            echo "UNSAFE_PATH"
+            exit 0
+        fi
+
+        # Step 3: Check entry types using allowlist (only - and d allowed)
+        # BusyBox tar -tv format: permissions owner/group size date time name
+        disallowed=$(tar -tvzf /tmp/archive.tgz 2>/dev/null | cut -c1 | grep -vE "^[-d]$" | sort -u | tr "\n" " ")
+        if [ -n "$disallowed" ]; then
+            echo "DISALLOWED_TYPES:$disallowed"
+            exit 0
+        fi
+
+        echo "OK"
+    ' < "$archive" 2>&1); then
+        _import_error "Failed to validate archive"
         return 1
     fi
 
-    # Verify archive is readable (the grep above would succeed on empty output)
-    if ! tar -tzf "$archive" >/dev/null 2>&1; then
-        _import_error "Failed to read archive (corrupt or not gzip-compressed tar): $archive"
-        return 1
-    fi
-
-    # Step 2: Check entry types using verbose listing
-    # Use allowlist approach: only permit regular files (d) and directories (-)
-    # Stream through grep/cut to avoid variable storage issues
-    # The regex matches permission strings like "drwxr-xr-x" or "-rw-r--r--"
-    # Also handles ACL markers (+/@) that may appear after permissions
-    local disallowed_types
-    if disallowed_types=$(tar -tvzf "$archive" 2>/dev/null | grep -E '^[a-z-]([r-][w-][xsStT-]){3}' | cut -c1 | grep -vE '^[-d]$'); then
-        _import_error "Archive contains disallowed entry types (only regular files and directories permitted)"
-        _import_info "Symlinks, hardlinks, devices, FIFOs, and sockets are not allowed"
-        _import_info "Found disallowed types: $(printf '%s\n' "$disallowed_types" | sort -u | tr '\n' ' ')"
-        return 1
-    fi
+    case "$validation_result" in
+        CORRUPT)
+            _import_error "Failed to read archive (corrupt or not gzip-compressed tar): $archive"
+            return 1
+            ;;
+        UNSAFE_PATH)
+            _import_error "Archive contains unsafe paths (absolute or parent traversal)"
+            return 1
+            ;;
+        DISALLOWED_TYPES:*)
+            local types="${validation_result#DISALLOWED_TYPES:}"
+            _import_error "Archive contains disallowed entry types (only regular files and directories permitted)"
+            _import_info "Symlinks, hardlinks, devices, FIFOs, and sockets are not allowed"
+            _import_info "Found disallowed types: $types"
+            return 1
+            ;;
+        OK)
+            : # Validation passed
+            ;;
+        *)
+            _import_error "Unexpected validation result: $validation_result"
+            return 1
+            ;;
+    esac
 
     _import_success "Archive validation passed"
 
