@@ -41,7 +41,7 @@ ContainAI enforces the following security measures:
 
 | Protection | Location | Description |
 |------------|----------|-------------|
-| Sandbox availability check | `agent-sandbox/lib/container.sh` | Verifies sandbox feature is available before starting containers |
+| Isolation availability check | `agent-sandbox/lib/doctor.sh` | Verifies ECI sandbox or Sysbox runtime is available before starting containers |
 | Fail-closed on unknown errors | `agent-sandbox/lib/container.sh` | Blocks execution rather than proceeding with unknown status |
 | Symlink traversal defense | `agent-sandbox/entrypoint.sh` | `reject_symlink()` and `verify_path_under_data_dir()` prevent path escape |
 | Volume mount TOCTOU protection | `agent-sandbox/entrypoint.sh` | Validates paths before and after resolution |
