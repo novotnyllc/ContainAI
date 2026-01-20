@@ -2594,6 +2594,10 @@ test_from_directory() {
     alt_source_dir=$(mktemp -d "${REAL_HOME}/.containai-alt-source-XXXXXX")
     test_vol="containai-test-from-dir-${TEST_RUN_ID}"
 
+    # Cleanup trap for early exit (set -e) to prevent leaking under REAL_HOME
+    # shellcheck disable=SC2064
+    trap "rm -rf '$test_dir' '$alt_source_dir'" RETURN
+
     # Create config pointing to test volume
     create_env_test_config "$test_dir" '
 [agent]
@@ -2624,8 +2628,9 @@ data_volume = "'"$test_vol"'"
     fi
 
     # Verify the content came from alternate source (check for marker)
+    # Note: Use direct docker command with test_vol, not run_in_rsync (which uses DATA_VOLUME)
     local settings_content
-    settings_content=$(run_in_rsync "cat /data/claude/settings.json 2>/dev/null" | tail -1) || settings_content=""
+    settings_content=$(docker run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || settings_content=""
 
     if echo "$settings_content" | grep -q "from_alt_source_12345"; then
         pass "Volume contains content from --from directory (marker found)"
@@ -2645,9 +2650,7 @@ data_volume = "'"$test_vol"'"
             info "Note: output may not explicitly mention directory source"
         fi
     fi
-
-    # Cleanup
-    rm -rf "$test_dir" "$alt_source_dir"
+    # Cleanup handled by RETURN trap
 }
 
 # ==============================================================================
@@ -2657,9 +2660,14 @@ test_from_tgz_restore_mode() {
     section "Test 41: --from with tgz sets restore mode"
 
     local test_dir test_vol archive_path
-    test_dir=$(mktemp -d)
+    # Create temp dir under REAL_HOME for Docker Desktop macOS file-sharing compatibility
+    test_dir=$(mktemp -d "${REAL_HOME}/.containai-test-tgz41-XXXXXX")
     test_vol="containai-test-from-tgz-${TEST_RUN_ID}"
     archive_path="$test_dir/test-backup.tgz"
+
+    # Cleanup trap for early exit (set -e) to prevent leaking under REAL_HOME
+    # shellcheck disable=SC2064
+    trap "rm -rf '$test_dir'" RETURN
 
     # Create config with env import that should be SKIPPED in restore mode
     create_env_test_config "$test_dir" '
@@ -2697,8 +2705,9 @@ from_host = true
     fi
 
     # Verify the content came from archive (check for marker)
+    # Note: Use direct docker command with test_vol, not run_in_rsync (which uses DATA_VOLUME)
     local settings_content
-    settings_content=$(run_in_rsync "cat /data/claude/settings.json 2>/dev/null" | tail -1) || settings_content=""
+    settings_content=$(docker run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || settings_content=""
 
     if echo "$settings_content" | grep -q "tgz_restore_test_67890"; then
         pass "Volume contains content from tgz archive (marker found)"
@@ -2715,8 +2724,9 @@ from_host = true
     fi
 
     # Verify env import was skipped (no .env file should exist, or if it does, var not there)
+    # Note: Use direct docker command with test_vol and grep full file (not just last line)
     local env_content
-    env_content=$(run_in_rsync "cat /data/.env 2>/dev/null" | tail -1) || env_content=""
+    env_content=$(docker run --rm -v "$test_vol":/data alpine:3.19 cat /data/.env 2>/dev/null) || env_content=""
 
     if [[ -z "$env_content" ]] || ! echo "$env_content" | grep -q "RESTORE_MODE_TEST_VAR"; then
         pass "Env import skipped in restore mode (no .env or var not present)"
@@ -2724,9 +2734,7 @@ from_host = true
         fail "Env import was NOT skipped in restore mode"
         info ".env content: $env_content"
     fi
-
-    # Cleanup
-    rm -rf "$test_dir"
+    # Cleanup handled by RETURN trap
 }
 
 # ==============================================================================
@@ -2736,10 +2744,15 @@ test_export_import_roundtrip() {
     section "Test 42: Export volume, import from tgz, volume matches"
 
     local test_dir source_vol target_vol archive_path
-    test_dir=$(mktemp -d)
+    # Create temp dir under REAL_HOME for Docker Desktop macOS file-sharing compatibility
+    test_dir=$(mktemp -d "${REAL_HOME}/.containai-test-rt42-XXXXXX")
     source_vol="containai-test-export-src-${TEST_RUN_ID}"
     target_vol="containai-test-export-tgt-${TEST_RUN_ID}"
     archive_path="$test_dir/roundtrip-backup.tgz"
+
+    # Cleanup trap for early exit (set -e) to prevent leaking under REAL_HOME
+    # shellcheck disable=SC2064
+    trap "rm -rf '$test_dir'" RETURN
 
     # Create and register volumes
     docker volume create "$source_vol" >/dev/null
@@ -2829,9 +2842,7 @@ test_export_import_roundtrip() {
         fail "Target volume missing roundtrip marker"
         info "Content: $target_content"
     fi
-
-    # Cleanup
-    rm -rf "$test_dir"
+    # Cleanup handled by RETURN trap
 }
 
 # ==============================================================================
@@ -2841,9 +2852,14 @@ test_tgz_import_idempotent() {
     section "Test 43: Import from tgz twice produces identical result"
 
     local test_dir test_vol archive_path
-    test_dir=$(mktemp -d)
+    # Create temp dir under REAL_HOME for Docker Desktop macOS file-sharing compatibility
+    test_dir=$(mktemp -d "${REAL_HOME}/.containai-test-idemp43-XXXXXX")
     test_vol="containai-test-idemp-${TEST_RUN_ID}"
     archive_path="$test_dir/idempotent-test.tgz"
+
+    # Cleanup trap for early exit (set -e) to prevent leaking under REAL_HOME
+    # shellcheck disable=SC2064
+    trap "rm -rf '$test_dir'" RETURN
 
     # Create and register volume
     docker volume create "$test_vol" >/dev/null
@@ -2934,9 +2950,7 @@ test_tgz_import_idempotent() {
         fail "Volume content unexpected after imports"
         info "Content: $content"
     fi
-
-    # Cleanup
-    rm -rf "$test_dir"
+    # Cleanup handled by RETURN trap
 }
 
 # ==============================================================================
@@ -2946,9 +2960,14 @@ test_invalid_tgz_error() {
     section "Test 44: Invalid tgz produces error exit code"
 
     local test_dir test_vol invalid_archive
-    test_dir=$(mktemp -d)
+    # Create temp dir under REAL_HOME for Docker Desktop macOS file-sharing compatibility
+    test_dir=$(mktemp -d "${REAL_HOME}/.containai-test-inv44-XXXXXX")
     test_vol="containai-test-invalid-${TEST_RUN_ID}"
     invalid_archive="$test_dir/invalid.tgz"
+
+    # Cleanup trap for early exit (set -e) to prevent leaking under REAL_HOME
+    # shellcheck disable=SC2064
+    trap "rm -rf '$test_dir'" RETURN
 
     # Create and register volume
     docker volume create "$test_vol" >/dev/null
@@ -2997,9 +3016,7 @@ test_invalid_tgz_error() {
     else
         fail "Import with corrupt tgz should have failed but succeeded"
     fi
-
-    # Cleanup
-    rm -rf "$test_dir"
+    # Cleanup handled by RETURN trap
 }
 
 # ==============================================================================
