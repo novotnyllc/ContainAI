@@ -155,41 +155,43 @@ allow_host_docker_socket = true
 | Host credentials | `--allow-host-credentials` |
 | Docker socket | `--allow-host-docker-socket` |
 
-The `[danger]` config keys are reserved for audit trail purposes (documenting intent in config files) but are not consulted by the implementation. See `cai --help` for CLI flag details.
+The `[danger]` config keys do not enable or bypass safety gates - CLI flags are still required. These keys are parsed and available for audit purposes but currently have no effect on runtime behavior. See `cai --help` for CLI flag details.
 
 ### `default_excludes` (Top-level)
 
-Global list of patterns to exclude from workspace sync.
+Global list of patterns to exclude from import and export operations.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `default_excludes` | array of strings | `[]` | Patterns excluded from all workspaces |
+| `default_excludes` | array of strings | `[]` | Patterns excluded from import/export operations |
 
 ```toml
 default_excludes = [
-    ".git",
-    "node_modules",
-    ".env",
+    "claude/skills",
+    "vscode-server/extensions",
     "*.log"
 ]
 ```
 
+**What these patterns affect:**
+
+- **`cai import`** - Patterns are passed to `rsync --exclude` when syncing host configs to the data volume. Patterns are relative to each sync source root.
+- **`cai export`** - Patterns are passed to `tar --exclude` when archiving the data volume. Patterns are relative to the volume root (`/mnt/agent-data`).
+
 **Pattern syntax:**
 
-Patterns are passed directly to `rsync --exclude` (for import) and `tar --exclude` (for export), relative to the workspace root:
-
-- Patterns without `/` match any path component: `node_modules` matches at any depth
+- Patterns are passed through to rsync/tar; semantics depend on the underlying tool
+- Patterns without `/` match any path component: `skills` matches at any depth
 - Glob patterns (`*`, `?`) are supported
-- Pattern behavior may differ slightly between rsync and tar; test your patterns
-- No multi-line values allowed (security)
+- No multi-line values allowed (dropped silently for security)
 - Patterns from `default_excludes` and workspace-specific `excludes` are merged (deduplicated)
 
 **Examples:**
 ```toml
 default_excludes = [
-    ".git",           # Match .git at any depth
-    "node_modules",   # Match node_modules at any depth
-    "*.log",          # Match all .log files
+    "claude/skills",           # Exclude Claude skills directory
+    "vscode-server/extensions", # Exclude VS Code extensions
+    "*.log",                   # Exclude all log files
 ]
 ```
 
@@ -202,16 +204,16 @@ Workspace-specific configuration overrides.
 | Key | Type | Description |
 |-----|------|-------------|
 | `data_volume` | string | Override volume for this workspace |
-| `excludes` | array of strings | Additional exclude patterns for this workspace |
+| `excludes` | array of strings | Additional exclude patterns for import/export (merged with `default_excludes`) |
 
 ```toml
 [workspace."/home/user/projects/frontend"]
 data_volume = "frontend-agent-data"
-excludes = ["dist", "coverage", ".next"]
+excludes = ["claude/skills", "*.tmp"]
 
 [workspace."/home/user/projects/backend"]
 data_volume = "backend-agent-data"
-excludes = ["target", "*.pyc"]
+excludes = ["codex/skills"]
 ```
 
 **Workspace matching:**
@@ -243,9 +245,8 @@ default = "claude"
 data_volume = "myproject-agent-data"
 
 default_excludes = [
-    ".git",
-    "node_modules",
-    ".env"
+    "*.log",
+    "*.tmp"
 ]
 ```
 
@@ -261,20 +262,17 @@ default = "claude"
 data_volume = "shared-agent-data"
 
 default_excludes = [
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".env",
-    ".env.local"
+    "*.log",
+    "*.tmp"
 ]
 
 [workspace."/home/user/work/project-a"]
 data_volume = "project-a-data"
-excludes = ["dist", "build"]
+excludes = ["claude/skills"]
 
 [workspace."/home/user/work/project-b"]
 data_volume = "project-b-data"
-excludes = ["target", ".cargo"]
+excludes = ["codex/skills"]
 
 [workspace."/home/user/personal"]
 data_volume = "personal-data"
@@ -328,9 +326,8 @@ from_host = true
 env_file = ".env.sandbox"  # Workspace-relative path
 
 default_excludes = [
-    ".git",
-    ".env",           # Don't sync .env (we use .env.sandbox via config)
-    ".env.local"
+    "*.log",
+    "*.tmp"
 ]
 ```
 
@@ -370,7 +367,7 @@ These environment variables override config file values:
 | Python unavailable | Warning (use defaults) | **Error** |
 | Invalid volume name | **Error** | **Error** |
 | Invalid context name | Warning (ignored) | Warning (ignored) |
-| Invalid exclude pattern | Skipped with warning | Skipped with warning |
+| Multiline exclude pattern | Dropped silently | Dropped silently |
 
 **Note:** Invalid volume names (`agent.data_volume`, `workspace.*.data_volume`) always cause errors regardless of config source, as the container cannot start with an invalid volume.
 
