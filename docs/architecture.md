@@ -26,7 +26,7 @@ flowchart TB
         Workspace["Workspace<br/>(project directory)"]
     end
 
-    subgraph Docker["Docker Engine"]
+    subgraph DockerLayer["Docker Engine"]
         DD["Docker Desktop<br/>(ECI Mode)"]
         Sysbox["Sysbox Runtime<br/>(Secure Engine)"]
     end
@@ -40,16 +40,20 @@ flowchart TB
 
     User --> CLI
     CLI --> Config
-    CLI --> Docker
-    Docker --> Sandbox
-    Workspace -.->|bind mount| WorkMount
+    CLI --> DD
+    CLI --> Sysbox
+    DD --> Entry
+    Sysbox --> Entry
+    Workspace -.->|"workspace mount"| WorkMount
     DataVol -.->|persist| Agent
     Entry --> Agent
 
     style Host fill:#e1f5fe
-    style Docker fill:#fff3e0
+    style DockerLayer fill:#fff3e0
     style Sandbox fill:#e8f5e9
 ```
+
+> **Note**: Workspace mounting differs by mode: Sysbox uses a bind mount; ECI uses Docker Desktop's mirrored workspace mount with entrypoint symlink logic.
 
 ## Component Architecture
 
@@ -67,15 +71,15 @@ flowchart LR
         direction TB
         Core["core.sh<br/>(logging)"]
         Platform["platform.sh<br/>(OS detection)"]
-        Docker["docker.sh<br/>(Docker helpers)"]
-        ECI["eci.sh<br/>(ECI detection)"]
-        Doctor["doctor.sh<br/>(health checks)"]
-        Config["config.sh<br/>(TOML parsing)"]
-        Container["container.sh<br/>(container ops)"]
-        Import["import.sh<br/>(dotfile sync)"]
-        Export["export.sh<br/>(backup)"]
-        Setup["setup.sh<br/>(Sysbox install)"]
-        Env["env.sh<br/>(env var handling)"]
+        DockerLib["docker.sh<br/>(Docker helpers)"]
+        ECILib["eci.sh<br/>(ECI detection)"]
+        DoctorLib["doctor.sh<br/>(health checks)"]
+        ConfigLib["config.sh<br/>(TOML parsing)"]
+        ContainerLib["container.sh<br/>(container ops)"]
+        ImportLib["import.sh<br/>(dotfile sync)"]
+        ExportLib["export.sh<br/>(backup)"]
+        SetupLib["setup.sh<br/>(Sysbox install)"]
+        EnvLib["env.sh<br/>(env var handling)"]
     end
 
     subgraph Runtime["Container Runtime"]
@@ -84,8 +88,8 @@ flowchart LR
         Image["Dockerfile<br/>(container image)"]
     end
 
-    CLI --> Lib
-    Lib --> Runtime
+    Main --> Core
+    ContainerLib --> Entry
 
     style CLI fill:#bbdefb
     style Lib fill:#c8e6c9
@@ -135,9 +139,9 @@ flowchart TD
 
 All modules are located in `agent-sandbox/lib/`:
 
-| Module | Purpose | Key Functions |
-|--------|---------|---------------|
-| `core.sh` | Logging and utilities | `_cai_info`, `_cai_error`, `_cai_warn`, `_cai_debug` |
+| Module | Purpose | Example Functions |
+|--------|---------|-------------------|
+| `core.sh` | Logging and utilities | `_cai_info`, `_cai_error`, `_cai_warn`, `_cai_ok`, `_cai_debug` |
 | `platform.sh` | OS/platform detection | `_cai_detect_platform`, `_cai_is_wsl`, `_cai_is_macos` |
 | `docker.sh` | Docker availability/version | `_cai_docker_available`, `_cai_sandbox_feature_enabled`, `_cai_timeout` |
 | `eci.sh` | Enhanced Container Isolation | `_cai_eci_available`, `_cai_eci_enabled`, `_cai_eci_check_uid_map` |
@@ -236,7 +240,7 @@ sequenceDiagram
     Import->>Docker: docker run (temp container)
     Docker->>Volume: Mount data volume
     Import->>Volume: rsync host files -> volume
-    Note over Import,Volume: .ssh, .gitconfig, claude.json, etc.
+    Note over Import,Volume: .ssh, .gitconfig, .claude.json, etc.
     Volume-->>Import: Sync complete
     Import-->>User: Files synced
 ```
@@ -321,6 +325,15 @@ Volume selection follows this precedence (see `_containai_resolve_volume` in `ag
 
 Workspace-specific volumes enable isolated agent state per project.
 
+### Volume Lifecycle
+
+1. **Creation**: Data volumes are created implicitly on first `cai run` if they don't exist
+2. **Reuse**: Volumes persist across container restarts; `cai` reattaches to existing containers
+3. **Import prerequisite**: `cai import` creates the volume if it doesn't exist, then syncs files
+4. **Export**: `cai export` creates a `.tgz` backup of the volume contents
+5. **Cleanup**: Remove with `docker volume rm <volume-name>` (ensure no containers reference it)
+6. **Reset**: For Docker Desktop sandboxes, use `cai sandbox reset` to remove the sandbox; for Sysbox, use `cai stop` then recreate
+
 ## Security Boundaries
 
 ContainAI enforces strict security boundaries between host and sandbox.
@@ -334,27 +347,22 @@ flowchart TB
         HostFS["Host Filesystem"]
     end
 
-    subgraph Boundary["Security Boundary"]
-        direction LR
-        Userns["User Namespace<br/>(uid 0 -> 100000+)"]
-        Seccomp["Seccomp<br/>(runtime defaults)"]
-        Mounts["Mount Restrictions"]
-    end
+    IsolationLayer["Isolation Layer<br/>(userns, seccomp, mounts)"]
 
     subgraph Sandbox["Sandbox (UNTRUSTED)"]
         SandboxRoot["Container Root<br/>(unprivileged on host)"]
-        Agent["AI Agent"]
+        AgentProc["AI Agent"]
         SandboxFS["Container Filesystem"]
     end
 
-    HostDocker --> Boundary
-    Boundary --> Sandbox
+    HostDocker --> IsolationLayer
+    IsolationLayer --> SandboxRoot
 
     HostFS -.->|"workspace only"| SandboxFS
     HostUser -.->|"data volume"| SandboxFS
 
     style Host fill:#c8e6c9
-    style Boundary fill:#fff3e0
+    style IsolationLayer fill:#fff3e0
     style Sandbox fill:#ffcdd2
 ```
 
@@ -399,14 +407,14 @@ Key architectural decisions (see also [.flow/memory/decisions.md](../.flow/memor
 
 ### Safe Defaults (FR-4)
 
-**Decision**: Default to the safest configuration; dangerous options require explicit CLI flags with acknowledgment.
+**Decision**: Dangerous config options are rejected/ignored; only explicit CLI flags can enable unsafe behavior.
 
-**Rationale**: For a security tool, unsafe defaults with opt-out are worse than safe defaults with opt-in. Users must explicitly request dangerous operations via CLI flags.
+**Rationale**: For a security tool, config files should not be able to weaken security. Unsafe operations require explicit CLI flags (some with FR-5 acknowledgment flags).
 
 **Examples**:
-- `credentials.mode=host` in config is **never** honored; CLI `--allow-host-credentials` is required
+- `credentials.mode=host` in config is **ignored**; CLI `--allow-host-credentials` is required
 - Docker socket access requires `--allow-host-docker-socket` flag
-- Config-only options cannot enable dangerous behaviors
+- Config files control convenience options (volume names, agent defaults), not security boundaries
 
 ### Modular Shell Architecture
 
