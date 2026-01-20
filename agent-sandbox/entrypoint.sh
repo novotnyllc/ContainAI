@@ -243,10 +243,10 @@ _load_env_file() {
     fi
     # Require = before parsing
     if [[ "$line" != *=* ]]; then
-      # Use truncated line as key hint (for log hygiene, limit length)
-      local key_hint="${line:0:20}"
-      [[ ${#line} -gt 20 ]] && key_hint="${key_hint}..."
-      log "[WARN] line $line_num: no = found for '$key_hint' - skipping"
+      # Extract key token only (first word, no value content) for log hygiene
+      local key_token="${line%%[[:space:]]*}"
+      [[ -z "$key_token" ]] && key_token="<unknown>"
+      log "[WARN] line $line_num: no = found for '$key_token' - skipping"
       continue
     fi
     # Extract key and value (no whitespace trimming - strict format)
