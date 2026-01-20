@@ -148,6 +148,15 @@ _import_restore_from_tgz() {
         return 1
     fi
 
+    # Validate volume name to prevent bind mount injection
+    # This is critical - without validation, a path like "/" could be passed
+    # and the subsequent find -delete would wipe host files
+    if ! _import_validate_volume_name "$volume"; then
+        _import_error "Invalid volume name: $volume"
+        _import_error "Volume names must start with alphanumeric and contain only [a-zA-Z0-9_.-]"
+        return 1
+    fi
+
     # Check tar availability (required for validation)
     if ! command -v tar >/dev/null 2>&1; then
         _import_error "tar command not found (required for archive restore)"
@@ -168,37 +177,31 @@ _import_restore_from_tgz() {
     _import_step "Validating archive integrity..."
 
     # Step 1: Validate archive can be read and check for path traversal
-    # Use tar -tzf for path names (handles filenames with spaces correctly)
-    local tar_names
-    if ! tar_names=$(tar -tzf "$archive" 2>/dev/null); then
-        _import_error "Failed to read archive (corrupt or not gzip-compressed tar): $archive"
-        return 1
-    fi
-
-    # Check for absolute paths and parent directory traversal
-    if echo "$tar_names" | grep -qE '(^/|(^|/)\.\.(/|$))'; then
+    # Stream directly through grep to avoid storing in variable (handles large archives)
+    # and avoids echo issues with filenames starting with -n/-e
+    if ! tar -tzf "$archive" 2>/dev/null | grep -qE '(^/|(^|/)\.\.(/|$))'; then
+        : # No unsafe paths found, continue
+    else
         _import_error "Archive contains unsafe paths (absolute or parent traversal)"
         return 1
     fi
 
-    # Step 2: Check entry types using verbose listing
-    # Filter to actual entry lines only (start with type char + permissions)
-    local tar_types
-    if ! tar_types=$(tar -tvzf "$archive" 2>/dev/null); then
-        _import_error "Failed to list archive contents: $archive"
+    # Verify archive is readable (the grep above would succeed on empty output)
+    if ! tar -tzf "$archive" >/dev/null 2>&1; then
+        _import_error "Failed to read archive (corrupt or not gzip-compressed tar): $archive"
         return 1
     fi
 
-    # Extract only entry lines (start with file type indicator + permissions pattern)
-    # Then check for disallowed types
-    # Allow: d (directory), - (regular file)
-    # Reject: l (symlink), h (hardlink), b (block), c (char), p (FIFO), s (socket)
-    local entry_types
-    entry_types=$(echo "$tar_types" | grep -E '^[a-z-]([r-][w-][xsStT-]){3}' | cut -c1)
-
-    if echo "$entry_types" | grep -qE '^[lhbcps]'; then
+    # Step 2: Check entry types using verbose listing
+    # Use allowlist approach: only permit regular files (d) and directories (-)
+    # Stream through grep/cut to avoid variable storage issues
+    # The regex matches permission strings like "drwxr-xr-x" or "-rw-r--r--"
+    # Also handles ACL markers (+/@) that may appear after permissions
+    local disallowed_types
+    if disallowed_types=$(tar -tvzf "$archive" 2>/dev/null | grep -E '^[a-z-]([r-][w-][xsStT-]){3}' | cut -c1 | grep -vE '^[-d]$'); then
         _import_error "Archive contains disallowed entry types (only regular files and directories permitted)"
         _import_info "Symlinks, hardlinks, devices, FIFOs, and sockets are not allowed"
+        _import_info "Found disallowed types: $(printf '%s\n' "$disallowed_types" | sort -u | tr '\n' ' ')"
         return 1
     fi
 
