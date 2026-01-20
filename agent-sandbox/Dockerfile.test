@@ -57,6 +57,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 # Configure Docker with Sysbox runtime (NOT as default)
 # Use a different socket to avoid conflicts with any host Docker
+# Note: storage-driver is omitted to let dockerd auto-select (overlay2 may not work in nested environments)
 RUN mkdir -p /etc/docker && \
     printf '%s\n' \
         '{' \
@@ -65,8 +66,7 @@ RUN mkdir -p /etc/docker && \
         '    "sysbox-runc": {' \
         '      "path": "/usr/bin/sysbox-runc"' \
         '    }' \
-        '  },' \
-        '  "storage-driver": "overlay2"' \
+        '  }' \
         '}' > /etc/docker/daemon.json
 
 # Set default Docker host to test socket
@@ -87,10 +87,24 @@ RUN printf '%s\n' \
     'sysbox-fs &' \
     'SYSBOX_FS_PID=$!' \
     '' \
-    '# Wait for Sysbox to initialize' \
-    'sleep 2' \
+    '# Wait for Sysbox to be ready (poll for socket, max 10 seconds)' \
+    'echo "[INFO] Waiting for Sysbox services..."' \
+    'SYSBOX_TIMEOUT=10' \
+    'SYSBOX_COUNTER=0' \
+    'while [ ! -S /run/sysbox/sysmgr.sock ]; do' \
+    '    if ! kill -0 $SYSBOX_MGR_PID 2>/dev/null; then' \
+    '        echo "[ERROR] sysbox-mgr process died"' \
+    '        exit 1' \
+    '    fi' \
+    '    sleep 1' \
+    '    SYSBOX_COUNTER=$((SYSBOX_COUNTER + 1))' \
+    '    if [ $SYSBOX_COUNTER -ge $SYSBOX_TIMEOUT ]; then' \
+    '        echo "[ERROR] Sysbox failed to create socket within $SYSBOX_TIMEOUT seconds"' \
+    '        exit 1' \
+    '    fi' \
+    'done' \
     '' \
-    '# Verify Sysbox services are running' \
+    '# Verify both Sysbox services are still running' \
     'if ! kill -0 $SYSBOX_MGR_PID 2>/dev/null; then' \
     '    echo "[ERROR] sysbox-mgr failed to start"' \
     '    exit 1' \

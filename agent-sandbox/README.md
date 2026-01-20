@@ -303,7 +303,11 @@ For CI environments or development testing where you need to build and test Cont
 ### Build and Run
 
 ```bash
-# Build the test image
+# Build the test image (from repo root)
+docker build -t containai-test -f agent-sandbox/Dockerfile.test agent-sandbox/
+
+# Or build from the agent-sandbox directory
+cd agent-sandbox
 docker build -t containai-test -f Dockerfile.test .
 
 # Run the built-in verification tests (requires --privileged for nested Docker)
@@ -312,9 +316,9 @@ docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
 # Interactive testing
 docker run --privileged -it containai-test
 
-# Mount workspace for custom tests
-docker run --privileged -v $(pwd):/workspace containai-test \
-    bash -c "cd /workspace && ./agent-sandbox/test-secure-engine.sh"
+# Mount workspace and run custom commands
+docker run --privileged -v $(pwd):/workspace -w /workspace containai-test \
+    bash -c "docker build -t myimage . && docker run --rm --runtime=sysbox-runc myimage"
 ```
 
 ### Features
