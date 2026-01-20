@@ -281,7 +281,8 @@ test_full_sync() {
         "/data/gemini"
         "/data/copilot"
         "/data/shell"
-        "/data/tmux"
+        "/data/config/tmux"
+        "/data/local/share/tmux"
     )
 
     for dir in "${dirs_to_check[@]}"; do
@@ -526,23 +527,32 @@ test_tmux_config() {
         fail "tmux config symlink incorrect: $tmux_link (expected /mnt/agent-data/config/tmux)"
     fi
 
-    # Check tmux can load config from XDG path
+    # Check tmux actually reads config from XDG path by verifying a user option
     local tmux_test
     tmux_test=$(run_in_image_no_entrypoint '
         # Ensure XDG config directory exists (since we bypass entrypoint)
         mkdir -p /mnt/agent-data/config/tmux
-        touch /mnt/agent-data/config/tmux/tmux.conf
-        # Try to start tmux - it will auto-detect XDG config at ~/.config/tmux/tmux.conf
-        if tmux -L test-config new-session -d -s test 2>/dev/null; then
+        # Write a sentinel user option to prove config is read
+        echo "set -g @containai_test xdg_loaded" > /mnt/agent-data/config/tmux/tmux.conf
+        # Start tmux with explicit config path to guarantee XDG config is read
+        if tmux -f ~/.config/tmux/tmux.conf -L test-config new-session -d -s test 2>/dev/null; then
+            # Verify the sentinel option was actually loaded
+            result=$(tmux -L test-config show-options -gqv @containai_test 2>/dev/null || echo "")
             tmux -L test-config kill-session -t test 2>/dev/null || true
-            echo "config_loaded"
+            if [ "$result" = "xdg_loaded" ]; then
+                echo "config_verified"
+            else
+                echo "config_not_read"
+            fi
         else
             echo "config_failed"
         fi
     ')
 
-    if [[ "$tmux_test" == "config_loaded" ]]; then
-        pass "tmux can load config from XDG path"
+    if [[ "$tmux_test" == "config_verified" ]]; then
+        pass "tmux reads and applies config from XDG path"
+    elif [[ "$tmux_test" == "config_not_read" ]]; then
+        fail "tmux started but did not read XDG config"
     elif [[ "$tmux_test" == "docker_error" ]]; then
         fail "Docker container failed to start for tmux test"
     else
