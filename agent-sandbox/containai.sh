@@ -224,8 +224,9 @@ Usage: cai import [options]
 
 Options:
   --data-volume <vol>   Data volume name (overrides config)
-  --from <path>         Import source (directory or .tgz archive)
-                        [NOT YET IMPLEMENTED - currently ignored with warning]
+  --from <path>         Import source:
+                        - Directory: syncs from that directory (default: $HOME)
+                        - Archive (.tgz): restores archive to volume (idempotent)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path for config resolution
   --dry-run             Preview changes without applying
@@ -233,10 +234,12 @@ Options:
   -h, --help            Show this help message
 
 Examples:
-  cai import                    Sync configs to auto-resolved volume
-  cai import --dry-run          Preview what would be synced
-  cai import --no-excludes      Sync without applying excludes
-  cai import --data-volume vol  Sync to specific volume
+  cai import                           Sync configs to auto-resolved volume
+  cai import --dry-run                 Preview what would be synced
+  cai import --no-excludes             Sync without applying excludes
+  cai import --data-volume vol         Sync to specific volume
+  cai import --from ~/other-configs/   Sync from different directory
+  cai import --from backup.tgz         Restore volume from archive
 EOF
 }
 
@@ -583,7 +586,10 @@ _containai_import_cmd() {
     fi
 
     # Import env vars (after dotfile sync, with same context)
-    _containai_import_env "$selected_context" "$resolved_volume" "$resolved_workspace" "$explicit_config" "$dry_run"
+    # Skip for restore mode (tgz import) - restore bypasses all host-derived mutations
+    if [[ "${_CAI_RESTORE_MODE:-}" != "1" ]]; then
+        _containai_import_env "$selected_context" "$resolved_volume" "$resolved_workspace" "$explicit_config" "$dry_run"
+    fi
 }
 
 # Export subcommand handler

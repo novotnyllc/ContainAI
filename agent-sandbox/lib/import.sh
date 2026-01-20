@@ -20,7 +20,8 @@
 #   $5 = workspace path (optional, for exclude resolution, default: $PWD)
 #   $6 = explicit config path (optional, for exclude resolution)
 #   $7 = from_source path (optional, tgz file or directory; default: "" means $HOME)
-#        NOTE: Non-empty from_source not yet implemented (ignored with warning)
+#        - If tgz archive: restores directly to volume (bypasses sync/transforms)
+#        - If directory: syncs from that directory instead of $HOME
 #
 # Dependencies:
 #   - docker (for rsync container)
@@ -468,11 +469,104 @@ _containai_import() {
     local explicit_config="${6:-}"
     local from_source="${7:-}"
 
-    # Warn if --from is specified (not yet implemented, ignored for now)
-    # TODO: Implement in fn-9-mqv.2-5 (tgz restore, directory sync)
+    # Handle --from source: detect type and route accordingly
+    local source_type=""
+    local source_root="$HOME"  # Default to $HOME for backward compatibility
+
     if [[ -n "$from_source" ]]; then
-        _import_warn "--from is not yet implemented; ignoring '$from_source'"
-        _import_info "Import will use default \$HOME source"
+        # Normalize path: resolve to absolute path
+        local normalized_source
+        if [[ -d "$from_source" ]]; then
+            # Directory: resolve via cd
+            if ! normalized_source=$(cd -- "$from_source" 2>/dev/null && pwd); then
+                _import_error "Cannot access source directory: $from_source"
+                return 1
+            fi
+            from_source="$normalized_source"
+        elif [[ -f "$from_source" ]]; then
+            # File: resolve parent directory, then reconstruct full path
+            local parent_dir
+            parent_dir=$(dirname -- "$from_source")
+            local base_name
+            base_name=$(basename -- "$from_source")
+            if ! normalized_source=$(cd -- "$parent_dir" 2>/dev/null && pwd); then
+                _import_error "Cannot access source file parent directory: $parent_dir"
+                return 1
+            fi
+            from_source="$normalized_source/$base_name"
+        else
+            _import_error "Source not found: $from_source"
+            return 1
+        fi
+
+        # Detect source type
+        if ! source_type=$(_import_detect_source_type "$from_source"); then
+            _import_error "Source not found: $from_source"
+            return 1
+        fi
+
+        case "$source_type" in
+            tgz)
+                # tgz archive: delegate to restore function (bypasses sync/transforms)
+                _import_info "Detected tgz archive: $from_source"
+
+                # For dry-run, just list archive contents
+                if [[ "$dry_run" == "true" ]]; then
+                    _import_warn "DRY RUN MODE - Archive contents preview:"
+                    echo ""
+                    # List archive contents
+                    if ! tar -tvzf "$from_source" 2>/dev/null; then
+                        _import_error "Failed to list archive contents: $from_source"
+                        return 1
+                    fi
+                    echo ""
+                    _import_success "[dry-run] Archive listing complete (no changes made)"
+                    # Set restore mode flag for caller (containai.sh) to skip env import
+                    export _CAI_RESTORE_MODE=1
+                    return 0
+                fi
+
+                # Restore from archive
+                if ! _import_restore_from_tgz "$ctx" "$volume" "$from_source"; then
+                    return 1
+                fi
+
+                # Set restore mode flag for caller (containai.sh) to skip env import
+                export _CAI_RESTORE_MODE=1
+
+                # Return immediately - tgz restore bypasses sync pipeline and transforms
+                return 0
+                ;;
+            dir)
+                # Directory source: validate and use for sync
+                _import_info "Using directory source: $from_source"
+
+                # Validate readable and traversable
+                if [[ ! -r "$from_source" ]] || [[ ! -x "$from_source" ]]; then
+                    _import_error "Source directory not accessible (need read and execute permissions): $from_source"
+                    return 1
+                fi
+
+                # Check Docker can mount the directory (Docker Desktop file-sharing check)
+                if ! DOCKER_CONTEXT= DOCKER_HOST= docker run --rm -v "$from_source:/test:ro" alpine:3.20 true 2>/dev/null; then
+                    _import_error "Cannot mount '$from_source' - ensure it's within Docker's file-sharing paths"
+                    _import_info "On macOS/Windows, add the path in Docker Desktop Settings > Resources > File Sharing"
+                    return 1
+                fi
+
+                # Set source_root for directory sync
+                source_root="$from_source"
+                ;;
+            unknown)
+                _import_error "Unsupported source type: must be directory or gzip-compressed tar archive"
+                _import_error "Source: $from_source"
+                return 1
+                ;;
+            *)
+                _import_error "Unexpected source type: $source_type"
+                return 1
+                ;;
+        esac
     fi
 
     # Build docker command prefix based on context
@@ -792,9 +886,10 @@ done <<'"'"'MAP_DATA'"'"'
     fi
 
     # Run container with map data embedded in script via heredoc
+    # Use source_root (defaults to $HOME, or custom directory from --from)
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
-        --mount type=bind,src="$HOME",dst=/source,readonly \
+        --mount type=bind,src="$source_root",dst=/source,readonly \
         --mount type=volume,src="$volume",dst=/target \
         "${env_args[@]}" \
         eeacms/rsync sh -e -c "$script_with_data"; then
@@ -809,15 +904,15 @@ done <<'"'"'MAP_DATA'"'"'
     fi
 
     # Post-sync transformations (only in non-dry-run mode)
-    # Pass context to all transformation functions for context-aware docker calls
+    # Pass context, volume, and source_root to transformation functions
     if [[ "$dry_run" != "true" ]]; then
-        if ! _import_transform_installed_plugins "$ctx" "$volume"; then
+        if ! _import_transform_installed_plugins "$ctx" "$volume" "$source_root"; then
             _import_warn "Failed to transform installed_plugins.json"
         fi
-        if ! _import_transform_marketplaces "$ctx" "$volume"; then
+        if ! _import_transform_marketplaces "$ctx" "$volume" "$source_root"; then
             _import_warn "Failed to transform known_marketplaces.json"
         fi
-        if ! _import_merge_enabled_plugins "$ctx" "$volume"; then
+        if ! _import_merge_enabled_plugins "$ctx" "$volume" "$source_root"; then
             _import_warn "Failed to merge enabledPlugins"
         fi
         _import_remove_orphan_markers "$ctx" "$volume"
@@ -836,11 +931,12 @@ done <<'"'"'MAP_DATA'"'"'
 # ==============================================================================
 
 # Transform installed_plugins.json (fix paths + scope)
-# Arguments: $1 = context, $2 = volume
+# Arguments: $1 = context, $2 = volume, $3 = source_root (defaults to $HOME)
 _import_transform_installed_plugins() {
     local ctx="$1"
     local volume="$2"
-    local src_file="$HOME/.claude/plugins/installed_plugins.json"
+    local source_root="${3:-$HOME}"
+    local src_file="$source_root/.claude/plugins/installed_plugins.json"
 
     # Build docker command with context
     local -a docker_cmd=(docker)
@@ -860,21 +956,51 @@ _import_transform_installed_plugins() {
         return 0
     fi
 
+    # Check if path rewriting should be skipped (source differs from $HOME)
+    # Normalize paths for comparison
+    local normalized_source normalized_home skip_path_rewrite="false"
+    if normalized_source=$(cd -- "$source_root" 2>/dev/null && pwd) && \
+       normalized_home=$(cd -- "$HOME" 2>/dev/null && pwd); then
+        if [[ "$normalized_source" != "$normalized_home" ]]; then
+            skip_path_rewrite="true"
+            _import_warn "Skipping installPath transforms: source ($source_root) differs from \$HOME"
+            _import_info "Config files may contain paths that need manual adjustment"
+        fi
+    fi
+
     # Transform and capture result, checking for errors
     local transformed
-    if ! transformed=$(jq "
-        .plugins = (.plugins | to_entries | map({
-            key: .key,
-            value: (.value | map(
-                . + {
-                    scope: \"user\",
-                    installPath: (.installPath | gsub(\"$_IMPORT_HOST_PATH_PREFIX\"; \"$_IMPORT_CONTAINER_PATH_PREFIX\"))
-                } | del(.projectPath)
-            ))
-        }) | from_entries)
-    " "$src_file"); then
-        _import_error "jq transformation failed for installed_plugins.json"
-        return 1
+    if [[ "$skip_path_rewrite" == "true" ]]; then
+        # Only fix scope, don't rewrite paths
+        if ! transformed=$(jq "
+            .plugins = (.plugins | to_entries | map({
+                key: .key,
+                value: (.value | map(
+                    . + {
+                        scope: \"user\"
+                    } | del(.projectPath)
+                ))
+            }) | from_entries)
+        " "$src_file"); then
+            _import_error "jq transformation failed for installed_plugins.json"
+            return 1
+        fi
+    else
+        # Full transform with path rewriting
+        if ! transformed=$(jq "
+            .plugins = (.plugins | to_entries | map({
+                key: .key,
+                value: (.value | map(
+                    . + {
+                        scope: \"user\",
+                        installPath: (.installPath | gsub(\"$_IMPORT_HOST_PATH_PREFIX\"; \"$_IMPORT_CONTAINER_PATH_PREFIX\"))
+                    } | del(.projectPath)
+                ))
+            }) | from_entries)
+        " "$src_file"); then
+            _import_error "jq transformation failed for installed_plugins.json"
+            return 1
+        fi
     fi
 
     # Validate transformed JSON before writing
@@ -895,11 +1021,12 @@ _import_transform_installed_plugins() {
 }
 
 # Transform known_marketplaces.json
-# Arguments: $1 = context, $2 = volume
+# Arguments: $1 = context, $2 = volume, $3 = source_root (defaults to $HOME)
 _import_transform_marketplaces() {
     local ctx="$1"
     local volume="$2"
-    local src_file="$HOME/.claude/plugins/known_marketplaces.json"
+    local source_root="${3:-$HOME}"
+    local src_file="$source_root/.claude/plugins/known_marketplaces.json"
 
     # Build docker command with context
     local -a docker_cmd=(docker)
@@ -919,15 +1046,35 @@ _import_transform_marketplaces() {
         return 0
     fi
 
+    # Check if path rewriting should be skipped (source differs from $HOME)
+    # Normalize paths for comparison
+    local normalized_source normalized_home skip_path_rewrite="false"
+    if normalized_source=$(cd -- "$source_root" 2>/dev/null && pwd) && \
+       normalized_home=$(cd -- "$HOME" 2>/dev/null && pwd); then
+        if [[ "$normalized_source" != "$normalized_home" ]]; then
+            skip_path_rewrite="true"
+            # Warning already issued by _import_transform_installed_plugins
+        fi
+    fi
+
     # Transform and capture result, checking for errors
     local transformed
-    if ! transformed=$(jq "
-        with_entries(
-            .value.installLocation = (.value.installLocation | gsub(\"$_IMPORT_HOST_PATH_PREFIX\"; \"$_IMPORT_CONTAINER_PATH_PREFIX\"))
-        )
-    " "$src_file"); then
-        _import_error "jq transformation failed for known_marketplaces.json"
-        return 1
+    if [[ "$skip_path_rewrite" == "true" ]]; then
+        # Copy as-is without path rewriting (just read and validate)
+        if ! transformed=$(jq '.' "$src_file"); then
+            _import_error "jq read failed for known_marketplaces.json"
+            return 1
+        fi
+    else
+        # Full transform with path rewriting
+        if ! transformed=$(jq "
+            with_entries(
+                .value.installLocation = (.value.installLocation | gsub(\"$_IMPORT_HOST_PATH_PREFIX\"; \"$_IMPORT_CONTAINER_PATH_PREFIX\"))
+            )
+        " "$src_file"); then
+            _import_error "jq transformation failed for known_marketplaces.json"
+            return 1
+        fi
     fi
 
     # Validate transformed JSON before writing
@@ -948,11 +1095,12 @@ _import_transform_marketplaces() {
 }
 
 # Merge enabledPlugins into sandbox settings
-# Arguments: $1 = context, $2 = volume
+# Arguments: $1 = context, $2 = volume, $3 = source_root (defaults to $HOME)
 _import_merge_enabled_plugins() {
     local ctx="$1"
     local volume="$2"
-    local host_settings="$HOME/.claude/settings.json"
+    local source_root="${3:-$HOME}"
+    local host_settings="$source_root/.claude/settings.json"
 
     # Build docker command with context
     local -a docker_cmd=(docker)
@@ -963,19 +1111,19 @@ _import_merge_enabled_plugins() {
     _import_step "Merging enabledPlugins into sandbox settings..."
 
     if [[ ! -f "$host_settings" ]]; then
-        _import_warn "Host settings.json not found, skipping merge"
+        _import_warn "Source settings.json not found, skipping merge"
         return 0
     fi
 
-    # Validate host settings JSON first
+    # Validate source settings JSON first
     if ! jq -e '.' "$host_settings" >/dev/null 2>&1; then
-        _import_warn "Host settings.json is invalid JSON, skipping merge"
+        _import_warn "Source settings.json is invalid JSON, skipping merge"
         return 0
     fi
 
     local host_plugins
     if ! host_plugins=$(jq '.enabledPlugins // {}' "$host_settings"); then
-        _import_error "Failed to extract enabledPlugins from host settings"
+        _import_error "Failed to extract enabledPlugins from source settings"
         return 1
     fi
 
