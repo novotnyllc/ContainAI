@@ -196,22 +196,18 @@ _env_parse_file() {
             continue
         fi
 
-        # Detect multiline values (unclosed quotes indicate continuation)
-        # Count unescaped double quotes - odd count means unclosed
-        # Also check for single quotes similarly
-        # This detects values like: FOO="line1  (where line2" is on next line)
-        local dq_count=0 sq_count=0 i char prev_char=""
-        for ((i=0; i<${#value}; i++)); do
-            char="${value:i:1}"
-            if [[ "$char" == '"' && "$prev_char" != '\' ]]; then
-                dq_count=$((dq_count + 1))
-            elif [[ "$char" == "'" && "$prev_char" != '\' ]]; then
-                sq_count=$((sq_count + 1))
-            fi
-            prev_char="$char"
-        done
-        # Odd quote count means unclosed quote (multiline value)
-        if [[ $((dq_count % 2)) -ne 0 ]] || [[ $((sq_count % 2)) -ne 0 ]]; then
+        # Detect multiline values (unclosed quotes at start indicate continuation)
+        # Per spec: "literal values only" - quotes are not stripped, they're part of the value
+        # Only detect multiline if value STARTS with a quote and lacks matching close
+        # This handles: FOO="line1  (where line2" is on next line)
+        # But allows: FOO=O'Reilly (literal apostrophe, not multiline)
+        local first_char="${value:0:1}"
+        local last_char="${value: -1}"
+        if [[ "$first_char" == '"' && "$last_char" != '"' ]]; then
+            _env_warn "line $line_num: key '$key' skipped (multiline value)"
+            continue
+        fi
+        if [[ "$first_char" == "'" && "$last_char" != "'" ]]; then
             _env_warn "line $line_num: key '$key' skipped (multiline value)"
             continue
         fi
