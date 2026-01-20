@@ -84,3 +84,6 @@ env -u only works with external commands, not shell functions; use DOCKER_CONTEX
 
 ## 2026-01-20 manual [pitfall]
 When preserving original variable for error message, save it BEFORE the assignment that may clobber it (workspace_input=workspace before cd fails)
+
+## 2026-01-20 manual [pitfall]
+When detecting multiline quoted values in env file parsing, check for ANY matching quote in the remainder of the line (not just at end) - values like FOO="bar" #comment are valid single-line
