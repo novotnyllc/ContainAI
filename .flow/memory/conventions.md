@@ -15,3 +15,6 @@ Use printf '%s\n' instead of echo for shell logging - echo mis-handles messages 
 
 ## 2026-01-20 manual [convention]
 Tests should verify actual behavior (e.g., sentinel values) not just that operations succeed without error
+
+## 2026-01-20 manual [convention]
+In bash functions with strict/non-strict modes, apply consistent error handling: strict mode returns 1 with [ERROR], non-strict returns defaults with [WARN]

@@ -31,9 +31,8 @@ Add `_containai_resolve_env_config()` function to `lib/config.sh` for **dedicate
 - [ ] Python unavailable (discovered config): returns defaults with `[WARN]`
 - [ ] Python unavailable (explicit config): return 1 (fail fast per epic spec)
 ## Done summary
-TBD
-
+Added `_containai_resolve_env_config()` function to lib/config.sh for dedicated env var import configuration resolution, independent of volume/excludes. Returns JSON with `import`, `from_host`, and `env_file` keys, handles missing config gracefully with defaults, and properly separates strict/discovered config error handling per epic spec.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 982dc6f, cf90945, 27cfb5b, 1617b54, d5e009e
+- Tests: bash -n agent-sandbox/lib/config.sh, manual testing with various TOML configs
 - PRs:

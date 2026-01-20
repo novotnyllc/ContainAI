@@ -7,10 +7,24 @@
     "fn-6-aaz.1"
   ],
   "epic": "fn-6-aaz",
+  "evidence": {
+    "commits": [
+      "982dc6f",
+      "cf90945",
+      "27cfb5b",
+      "1617b54",
+      "d5e009e"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n agent-sandbox/lib/config.sh",
+      "manual testing with various TOML configs"
+    ]
+  },
   "id": "fn-6-aaz.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-6-aaz.2.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Add env config resolution to lib/config.sh",
-  "updated_at": "2026-01-20T10:18:06.756307Z"
+  "updated_at": "2026-01-20T10:43:49.765283Z"
 }

@@ -81,3 +81,6 @@ When removing legacy paths, update ALL tests that reference them, including full
 
 ## 2026-01-20 manual [pitfall]
 env -u only works with external commands, not shell functions; use DOCKER_CONTEXT= DOCKER_HOST= func_call for temporary env override
+
+## 2026-01-20 manual [pitfall]
+When preserving original variable for error message, save it BEFORE the assignment that may clobber it (workspace_input=workspace before cd fails)
