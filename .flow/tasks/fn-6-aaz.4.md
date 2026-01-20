@@ -54,9 +54,25 @@ Wire up env var import into `cai import` with full context plumbing for ALL dock
 - [ ] Import summary includes env var count (keys only)
 - [ ] `--dry-run` prints keys only, no volume write/modification
 ## Done summary
-TBD
+## Done Summary
 
+Integrated env import with cai import command by:
+
+1. **Sourced lib/env.sh** in containai.sh alongside other libs
+2. **Added context selection to _containai_import_cmd** mirroring lib/container.sh's pattern:
+   - Call `_containai_resolve_secure_engine_context` for config override
+   - Call `_cai_select_context` with `DOCKER_CONTEXT= DOCKER_HOST=` prefix
+   - Fall back to default context on failure with warning
+3. **Created _containai_docker_cmd helper** that wraps docker with context and env neutralization
+4. **Applied context to ALL docker operations in lib/import.sh**:
+   - Volume inspect/create
+   - Rsync containers
+   - Transform containers  
+   - Orphan cleanup
+   - New .env helper via `_containai_import_env`
+5. **Called _containai_import_env** after dotfile sync with 5 params: ctx, volume, workspace, explicit_config, dry_run
+6. **Dry-run support**: prints selected context and keys that would be imported
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c2cb874
+- Tests: Manual verification of context flow
 - PRs:

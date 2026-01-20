@@ -7,10 +7,23 @@
     "fn-6-aaz.3"
   ],
   "epic": "fn-6-aaz",
+  "evidence": {
+    "commits": [
+      "c2cb874"
+    ],
+    "review": {
+      "mode": "codex",
+      "session": "019bdb23-cc31-7291-a650-b5db7ae7e473",
+      "verdict": "SHIP"
+    },
+    "tests": [
+      "Manual verification of context flow"
+    ]
+  },
   "id": "fn-6-aaz.4",
   "priority": null,
   "spec_path": ".flow/tasks/fn-6-aaz.4.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Integrate env import with cai import command",
-  "updated_at": "2026-01-20T11:18:24.940367Z"
+  "updated_at": "2026-01-20T11:33:52.651324Z"
 }
