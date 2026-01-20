@@ -9,7 +9,7 @@
 #
 # Usage:
 #   docker build -t containai-test -f Dockerfile.test .
-#   docker run --privileged -v $(pwd):/workspace containai-test bash -c "cd /workspace && ./run-tests.sh"
+#   docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
 
 FROM ubuntu:24.04
 
@@ -100,9 +100,9 @@ RUN printf '%s\n' \
     '    exit 1' \
     'fi' \
     '' \
-    '# Start Docker daemon on test socket' \
+    '# Start Docker daemon on test socket (explicit -H for robustness against env overrides)' \
     'echo "[INFO] Starting dockerd on /var/run/docker-test.sock..."' \
-    'dockerd &' \
+    'dockerd -H unix:///var/run/docker-test.sock --config-file /etc/docker/daemon.json &' \
     'DOCKERD_PID=$!' \
     '' \
     '# Wait for Docker to be ready (max 30 seconds)' \
@@ -145,16 +145,16 @@ RUN printf '%s\n' \
     '' \
     'echo ""' \
     'echo "=== Test: Run container with default runtime ===" ' \
-    'docker run --rm alpine echo "Default runtime works"' \
+    'docker run --rm alpine:3.20 echo "Default runtime works"' \
     '' \
     'echo ""' \
     'echo "=== Test: Run container with Sysbox runtime ===" ' \
-    'docker run --rm --runtime=sysbox-runc alpine echo "Sysbox runtime works"' \
+    'docker run --rm --runtime=sysbox-runc alpine:3.20 echo "Sysbox runtime works"' \
     '' \
     'echo ""' \
     'echo "=== Test: Build simple image ===" ' \
     'docker build -t test-build - <<EOF' \
-    'FROM alpine' \
+    'FROM alpine:3.20' \
     'RUN echo "Build test"' \
     'EOF' \
     'docker rmi test-build' \

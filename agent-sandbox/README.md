@@ -306,15 +306,15 @@ For CI environments or development testing where you need to build and test Cont
 # Build the test image
 docker build -t containai-test -f Dockerfile.test .
 
-# Run tests inside the test container (requires --privileged for nested Docker)
-docker run --privileged -v $(pwd):/workspace containai-test \
-    bash -c "cd /workspace && ./run-tests.sh"
+# Run the built-in verification tests (requires --privileged for nested Docker)
+docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
 
 # Interactive testing
 docker run --privileged -it containai-test
 
-# Run the built-in verification tests
-docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
+# Mount workspace for custom tests
+docker run --privileged -v $(pwd):/workspace containai-test \
+    bash -c "cd /workspace && ./agent-sandbox/test-secure-engine.sh"
 ```
 
 ### Features
@@ -328,7 +328,13 @@ docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
 
 1. **CI pipelines**: Build and test ContainAI images in isolated environment
 2. **Development**: Test Sysbox integration without affecting host Docker setup
-3. **Testing context scenarios**: Validate `--context containai-secure` scenarios
+3. **Sysbox runtime testing**: Verify containers run correctly with `--runtime=sysbox-runc`
+
+**Note:** The container sets `DOCKER_HOST` to the test socket. To test Docker context selection
+(e.g., `--context containai-secure`), clear the environment variable first:
+```bash
+env -u DOCKER_HOST docker --context containai-secure info
+```
 
 ### Requirements
 
