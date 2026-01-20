@@ -49,7 +49,7 @@ ContainAI enforces the following security measures:
 | Credential isolation | `agent-sandbox/lib/container.sh` | Credentials stay inside container by default |
 | Docker socket access denied | `agent-sandbox/lib/container.sh` | Host Docker socket not mounted by default |
 
-**Note:** Isolation detection is best-effort. Use `--force` to bypass sandbox availability checks (not recommended). Set `CONTAINAI_REQUIRE_ISOLATION=1` for strict enforcement that also requires isolation detection to pass.
+**Note:** Isolation detection is best-effort and serves as a warning system. Use `--force` to bypass sandbox availability checks (not recommended for production use).
 
 ### Unsafe Opt-ins
 
