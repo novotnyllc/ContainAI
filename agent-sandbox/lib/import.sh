@@ -199,6 +199,7 @@ _import_step() {
 #        When true, disables both config excludes AND .system/ exclusion
 #   $5 = workspace path (optional, for exclude resolution, default: $PWD)
 #   $6 = explicit config path (optional, for exclude resolution)
+#   $7 = from_source path (optional, tgz file or directory; default: "" means $HOME)
 # Returns: 0 on success, 1 on failure
 _containai_import() {
     local ctx="${1:-}"
@@ -207,6 +208,7 @@ _containai_import() {
     local no_excludes="${4:-false}"
     local workspace="${5:-$PWD}"
     local explicit_config="${6:-}"
+    local from_source="${7:-}"
 
     # Build docker command prefix based on context
     # All docker calls in this function MUST use docker_cmd and neutralize DOCKER_CONTEXT/DOCKER_HOST

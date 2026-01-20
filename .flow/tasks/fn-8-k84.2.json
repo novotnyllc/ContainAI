@@ -5,10 +5,23 @@
   "created_at": "2026-01-20T07:55:37.936751Z",
   "depends_on": [],
   "epic": "fn-8-k84",
+  "evidence": {
+    "commits": [
+      "7a4d83a",
+      "c264476",
+      "7e44050",
+      "fbd61f4"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n test-sync-integration.sh (syntax check)",
+      "./test-sync-integration.sh (early guard verified - exits with FAIL when docker daemon not running)"
+    ]
+  },
   "id": "fn-8-k84.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-8-k84.2.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Make integration tests hermetic using temp HOME fixture",
-  "updated_at": "2026-01-20T16:44:08.146523Z"
+  "updated_at": "2026-01-20T17:12:47.867495Z"
 }

@@ -224,6 +224,8 @@ Usage: cai import [options]
 
 Options:
   --data-volume <vol>   Data volume name (overrides config)
+  --from <path>         Import source: directory or .tgz archive
+                        (default: sync from $HOME)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path for config resolution
   --dry-run             Preview changes without applying
@@ -235,6 +237,8 @@ Examples:
   cai import --dry-run          Preview what would be synced
   cai import --no-excludes      Sync without applying excludes
   cai import --data-volume vol  Sync to specific volume
+  cai import --from backup.tgz  Restore from tgz archive
+  cai import --from ~/configs/  Sync from directory instead of $HOME
 EOF
 }
 
@@ -436,6 +440,7 @@ _containai_import_cmd() {
     local cli_volume=""
     local workspace=""
     local explicit_config=""
+    local from_source=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -462,6 +467,24 @@ _containai_import_cmd() {
                     echo "[ERROR] --data-volume requires a value" >&2
                     return 1
                 fi
+                shift
+                ;;
+            --from)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --from requires a value" >&2
+                    return 1
+                fi
+                from_source="$2"
+                from_source="${from_source/#\~/$HOME}"
+                shift 2
+                ;;
+            --from=*)
+                from_source="${1#--from=}"
+                if [[ -z "$from_source" ]]; then
+                    echo "[ERROR] --from requires a value" >&2
+                    return 1
+                fi
+                from_source="${from_source/#\~/$HOME}"
                 shift
                 ;;
             --config)
@@ -557,7 +580,7 @@ _containai_import_cmd() {
     fi
 
     # Call import function with context
-    if ! _containai_import "$selected_context" "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config"; then
+    if ! _containai_import "$selected_context" "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config" "$from_source"; then
         return 1
     fi
 
