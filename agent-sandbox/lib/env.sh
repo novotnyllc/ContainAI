@@ -198,16 +198,18 @@ _env_parse_file() {
 
         # Detect multiline values (unclosed quotes at start indicate continuation)
         # Per spec: "literal values only" - quotes are not stripped, they're part of the value
-        # Only detect multiline if value STARTS with a quote and lacks matching close
+        # Only detect multiline if value STARTS with a quote and lacks ANY matching quote
+        # in the remainder of the line (not just at the end).
         # This handles: FOO="line1  (where line2" is on next line)
-        # But allows: FOO=O'Reilly (literal apostrophe, not multiline)
+        # But allows: FOO="bar" #comment (has closing " in the line)
+        # And allows: FOO=O'Reilly (doesn't start with quote)
         local first_char="${value:0:1}"
-        local last_char="${value: -1}"
-        if [[ "$first_char" == '"' && "$last_char" != '"' ]]; then
+        local rest_of_value="${value:1}"
+        if [[ "$first_char" == '"' && "$rest_of_value" != *'"'* ]]; then
             _env_warn "line $line_num: key '$key' skipped (multiline value)"
             continue
         fi
-        if [[ "$first_char" == "'" && "$last_char" != "'" ]]; then
+        if [[ "$first_char" == "'" && "$rest_of_value" != *"'"* ]]; then
             _env_warn "line $line_num: key '$key' skipped (multiline value)"
             continue
         fi
