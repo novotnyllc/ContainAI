@@ -110,67 +110,7 @@ docker context create containai-secure \
 - Sysbox WSL2 issue #32 (CLOSED - completed June 2025)
 - WSL seccomp issue: https://github.com/microsoft/WSL/issues/9548
 - Docker userns-remap: https://docs.docker.com/engine/security/userns-remap/
-## Overview
 
-Implement `containai install secure-engine` for WSL environments.
-
-**CRITICAL BLOCKER**: Sysbox does NOT officially support WSL2. This task must determine a viable path:
-1. Use unofficial Sysbox on WSL2 (community workarounds exist)
-2. Use alternative isolation (gVisor, userns-remap only)
-3. Document as unsupported, recommend Docker Business + ECI
-
-## Command
-
-```bash
-containai install secure-engine
-```
-
-## What It Does (if viable)
-
-1. Detect WSL distro and version
-2. Install Docker Engine (separate from Docker Desktop integration)
-3. Install Sysbox runtime (if supported) OR alternative
-4. Configure daemon.json:
-   - `default-runtime: "sysbox-runc"` (or alternative)
-   - `userns-remap: "default"`
-   - Optional seccomp profile
-5. Create Docker context `containai-secure`
-6. Verify installation
-
-## WSL-Specific Configuration
-
-```json
-// /etc/docker/daemon.json in Secure Engine distro
-{
-  "default-runtime": "sysbox-runc",
-  "userns-remap": "default",
-  "runtimes": {
-    "sysbox-runc": {
-      "path": "/usr/bin/sysbox-runc"
-    }
-  }
-}
-```
-
-## Context Creation
-
-```bash
-docker context create containai-secure \
-  --docker "host=unix:///path/to/secure/docker.sock"
-```
-
-## Depends On
-
-<!-- Updated by plan-sync: fn-5-urz.1 Sysbox context confirmed, sandbox context UNKNOWN (blocked) -->
-- Task 1 spike (fn-5-urz.1) findings:
-  - **Sysbox context: CONFIRMED** - Proceeds with Sysbox setup
-  - **Sandbox context: UNKNOWN** - Blocked pending Docker Desktop 4.50+ testing
-- Research on Sysbox WSL2 viability (GitHub issue #32)
-
-## References
-
-- Sysbox WSL2 issue: https://github.com/nestybox/sysbox/issues/32
-- Docker userns-remap: https://docs.docker.com/engine/security/userns-remap/
 ## Acceptance
 - [ ] Detects WSL2 environment correctly via `/proc/version`
 - [ ] Tests seccomp compatibility before Sysbox installation
@@ -186,9 +126,8 @@ docker context create containai-secure \
 - [ ] Provides clear output during installation
 - [ ] `--dry-run` shows what would be done without changes
 ## Done summary
-TBD
-
+Implemented `cai setup` for WSL2 Sysbox provisioning with seccomp compatibility detection, warning system with --force bypass, Sysbox package installation from GitHub, daemon.json configuration (runtime only, not default), dedicated Docker socket, and containai-secure context creation. Supports --dry-run and --verbose flags.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f1a40b26385286fd84dcd861a979cc5267724b18, 54240abf4b07c3a8e86f2f17b6e62f8a24a9c8c1, 2392310486bec2f4cce82568893f0b23e053857d
+- Tests: Codex impl-review (SHIP after 2 rounds)
 - PRs:

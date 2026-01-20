@@ -327,29 +327,35 @@ _cai_install_sysbox_wsl2() {
         _cai_info "Download URL: $download_url"
     fi
 
-    # Download and install
-    local tmpdir deb_file
-    tmpdir=$(mktemp -d)
-    # Ensure cleanup on function return (RETURN trap doesn't affect caller shell)
-    trap "rm -rf '$tmpdir'" RETURN
-    deb_file="$tmpdir/sysbox-ce.deb"
+    # Download and install in subshell to contain cleanup trap
+    # RETURN trap in sourced script affects entire shell session, so use subshell + EXIT
+    local install_rc
+    (
+        set -e
+        tmpdir=$(mktemp -d)
+        trap "rm -rf '$tmpdir'" EXIT
+        deb_file="$tmpdir/sysbox-ce.deb"
 
-    _cai_step "Downloading Sysbox from: $download_url"
-    if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
-        _cai_error "Failed to download Sysbox package"
+        echo "[STEP] Downloading Sysbox from: $download_url"
+        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+            echo "[ERROR] Failed to download Sysbox package" >&2
+            exit 1
+        fi
+
+        echo "[STEP] Installing Sysbox package"
+        if ! sudo dpkg -i "$deb_file"; then
+            echo "[WARN] dpkg install had issues, attempting to fix dependencies" >&2
+            if ! sudo apt-get install -f -y; then
+                echo "[ERROR] Failed to install Sysbox package" >&2
+                exit 1
+            fi
+        fi
+        exit 0
+    ) && install_rc=0 || install_rc=$?
+
+    if [[ $install_rc -ne 0 ]]; then
         return 1
     fi
-
-    _cai_step "Installing Sysbox package"
-    if ! sudo dpkg -i "$deb_file"; then
-        _cai_warn "dpkg install had issues, attempting to fix dependencies"
-        if ! sudo apt-get install -f -y; then
-            _cai_error "Failed to install Sysbox package"
-            return 1
-        fi
-    fi
-
-    # Cleanup handled by RETURN trap
 
     _cai_ok "Sysbox installation complete"
     return 0
@@ -415,10 +421,11 @@ _cai_configure_daemon_json() {
     fi
 
     # Merge sysbox-runc runtime into config using jq
+    # Always overwrite path to ensure correct value (fixes misconfigured existing entries)
     local new_config
     new_config=$(printf '%s' "$existing_config" | jq '
         .runtimes = (.runtimes // {}) |
-        .runtimes["sysbox-runc"] = (.runtimes["sysbox-runc"] // {"path": "/usr/bin/sysbox-runc"})
+        .runtimes["sysbox-runc"] = {"path": "/usr/bin/sysbox-runc"}
     ')
 
     if [[ -z "$new_config" ]]; then
@@ -466,15 +473,41 @@ _cai_configure_docker_socket() {
 
     local dropin_file="$_CAI_DOCKER_DROPIN_DIR/containai-socket.conf"
 
-    # Create drop-in content
-    # This adds an additional -H flag to dockerd for our dedicated socket
+    # Read existing ExecStart to preserve distro/user flags
+    # We only want to ADD our socket, not replace the entire command
+    local existing_execstart
+    existing_execstart=$(systemctl show -p ExecStart docker 2>/dev/null | sed 's/^ExecStart=//' | head -1 || true)
+
+    # Build drop-in that preserves existing config
+    # Strategy: Use Environment= to pass our socket, let daemon.json handle hosts
+    # This avoids clobbering any distro-specific flags
     local dropin_content
-    dropin_content=$(cat <<EOF
+
+    if [[ -n "$existing_execstart" ]] && [[ "$existing_execstart" != *"$socket_path"* ]]; then
+        # Existing ExecStart found - preserve it and add our socket via supplementary drop-in
+        # We use daemon.json "hosts" instead of ExecStart override for safety
+        _cai_info "Preserving existing Docker service configuration"
+        _cai_info "Adding socket via daemon.json instead of ExecStart override"
+
+        # Instead of ExecStart override, we'll configure socket in daemon.json
+        # This is safer as it doesn't clobber distro-specific flags
+        dropin_content=$(cat <<EOF
+# ContainAI: Additional Docker socket configuration
+# Socket configured via daemon.json to avoid clobbering distro flags
+[Service]
+# Marker file to indicate ContainAI setup
+Environment=CONTAINAI_SECURE_SOCKET=$socket_path
+EOF
+)
+    else
+        # No existing ExecStart or already has our socket - use simple drop-in
+        dropin_content=$(cat <<EOF
 [Service]
 ExecStart=
 ExecStart=/usr/bin/dockerd -H fd:// -H unix://$socket_path --containerd=/run/containerd/containerd.sock
 EOF
 )
+    fi
 
     if [[ "$verbose" == "true" ]]; then
         _cai_info "Drop-in file: $dropin_file"
@@ -499,6 +532,25 @@ EOF
     if ! printf '%s\n' "$dropin_content" | sudo tee "$dropin_file" >/dev/null; then
         _cai_error "Failed to write drop-in: $dropin_file"
         return 1
+    fi
+
+    # If we're using daemon.json for socket (safe mode), add hosts entry there
+    if [[ "$existing_execstart" != *"$socket_path"* ]] && [[ -n "$existing_execstart" ]]; then
+        _cai_step "Adding socket to daemon.json"
+        local daemon_json="$_CAI_WSL2_DAEMON_JSON"
+        local existing_config="{}"
+        if [[ -f "$daemon_json" ]]; then
+            existing_config=$(sudo cat "$daemon_json" 2>/dev/null) || existing_config="{}"
+        fi
+        # Add our socket to hosts array (preserve existing hosts)
+        local socket_config
+        socket_config=$(printf '%s' "$existing_config" | jq --arg sock "unix://$socket_path" '
+            .hosts = ((.hosts // ["fd://"]) + [$sock] | unique)
+        ')
+        if ! printf '%s\n' "$socket_config" | sudo tee "$daemon_json" >/dev/null; then
+            _cai_error "Failed to add socket to daemon.json"
+            return 1
+        fi
     fi
 
     # Reload systemd
@@ -689,7 +741,7 @@ _cai_verify_sysbox_install() {
 
     # Verify sysbox-runc works by running a minimal container via the context
     _cai_step "Testing sysbox-runc with minimal container"
-    local test_output test_rc
+    local test_output test_rc test_passed=false
     test_output=$(docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
     if [[ $test_rc -ne 0 ]]; then
@@ -697,12 +749,19 @@ _cai_verify_sysbox_install() {
         if [[ "$verbose" == "true" ]]; then
             _cai_info "Test output: $test_output"
         fi
-        # Don't fail - Sysbox may work for actual use cases despite test failure
+        # Don't fail hard - Sysbox may work for actual use cases despite test failure
     elif [[ "$test_output" == *"sysbox-test-ok"* ]]; then
         _cai_ok "Sysbox test container succeeded"
+        test_passed=true
     fi
 
-    _cai_ok "Sysbox installation verified"
+    # Final message reflects actual test result
+    if [[ "$test_passed" == "true" ]]; then
+        _cai_ok "Sysbox installation verified"
+    else
+        _cai_warn "Sysbox installation completed but test container did not succeed"
+        _cai_warn "Sysbox may still work - try running a container manually"
+    fi
     return 0
 }
 

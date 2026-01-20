@@ -7,10 +7,21 @@
     "fn-5-urz.1"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "f1a40b26385286fd84dcd861a979cc5267724b18",
+      "54240abf4b07c3a8e86f2f17b6e62f8a24a9c8c1",
+      "2392310486bec2f4cce82568893f0b23e053857d"
+    ],
+    "prs": [],
+    "tests": [
+      "Codex impl-review (SHIP after 2 rounds)"
+    ]
+  },
   "id": "fn-5-urz.10",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.10.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "WSL Secure Engine provisioning",
-  "updated_at": "2026-01-19T23:42:39.423381Z"
+  "updated_at": "2026-01-20T00:16:06.005977Z"
 }

@@ -137,7 +137,7 @@ Subcommands:
   run           Start/attach to sandbox container (default if omitted)
   shell         Open interactive shell in running container
   doctor        Check system capabilities and show diagnostics
-  setup         Install Sysbox Secure Engine (WSL2/Linux)
+  setup         Install Sysbox Secure Engine (WSL2 only)
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
