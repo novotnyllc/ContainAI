@@ -76,7 +76,7 @@ Credential handling configuration.
 mode = "none"
 ```
 
-**Security restriction:** Setting `credentials.mode = "host"` in config is **ignored**. Host credentials require explicit `--credentials=host` on the command line. This prevents config files from escalating privileges without user awareness.
+**Security restriction:** Setting `credentials.mode = "host"` in config is **ignored**. Host credentials require explicit CLI opt-in via `--allow-host-credentials` (or legacy `--credentials=host`). This prevents config files from escalating privileges without user awareness.
 
 ### `[secure_engine]` Section
 
@@ -105,25 +105,32 @@ Environment variable import configuration. This section is **global-only** (no w
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `import` | array of strings | `[]` | Environment variable names/patterns to import |
+| `import` | array of strings | `[]` | Environment variable names to import (explicit names only, no wildcards) |
 | `from_host` | boolean | `false` | Import from host environment |
-| `env_file` | string | `null` | Path to `.env` file to load |
+| `env_file` | string | `null` | Workspace-relative path to `.env` file to load |
 
 ```toml
 [env]
-import = ["GITHUB_TOKEN", "AWS_*", "CUSTOM_VAR"]
+import = ["GITHUB_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
 from_host = true
 env_file = ".env.local"
 ```
 
-**Import patterns:**
-- Exact match: `"GITHUB_TOKEN"` - imports only `GITHUB_TOKEN`
-- Wildcard: `"AWS_*"` - imports `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc.
+**Import list rules:**
+- Each entry must be a valid POSIX environment variable name
+- Pattern: `^[A-Za-z_][A-Za-z0-9_]*$`
+- **No wildcards** - each variable must be listed explicitly
+- Invalid names are skipped with a warning
+
+**env_file rules:**
+- Must be workspace-relative (no absolute paths)
+- Cannot escape workspace directory (e.g., `../secrets.env` is rejected)
+- Symlinks are rejected for security
+- File must exist and be readable
 
 **Behavior:**
 - If `[env]` section is missing, no environment variables are imported (silent)
 - If `import` is missing or invalid, treated as empty list with a warning
-- `env_file` path is relative to config file location or absolute
 
 ### `[danger]` Section
 
@@ -140,12 +147,18 @@ allow_host_credentials = true
 allow_host_docker_socket = true
 ```
 
-**Two-factor acknowledgment:**
-1. Setting `danger.allow_*` in config pre-enables the feature
-2. You **must also** pass the CLI flag (`--allow-host-credentials` or `--allow-host-docker-socket`)
-3. Without both, the feature remains disabled
+**CLI acknowledgment required:**
 
-This ensures dangerous features require explicit action in both config and command line for audit trail.
+The `[danger]` section pre-enables dangerous features, but CLI flags are still required:
+
+| Config Key | CLI Flag Required |
+|------------|-------------------|
+| `allow_host_credentials = true` | `--allow-host-credentials` |
+| `allow_host_docker_socket = true` | `--allow-host-docker-socket` |
+
+Without both config and CLI acknowledgment, the feature remains disabled. This ensures dangerous features require explicit action for audit trail.
+
+See `cai --help` for full details on dangerous option flags.
 
 ### `default_excludes` (Top-level)
 
@@ -165,9 +178,24 @@ default_excludes = [
 ```
 
 **Pattern syntax:**
-- Patterns are matched against file/directory names
+
+Patterns use rsync/tar exclude-style matching:
+
+- Simple names match anywhere: `node_modules` matches `./node_modules` and `./src/node_modules`
+- Patterns with `/` are path-relative: `build/` matches only top-level `build` directory
+- Glob patterns work: `*.log` matches all `.log` files
 - No multi-line values allowed (security)
 - Patterns from `default_excludes` and workspace-specific `excludes` are merged (deduplicated)
+
+**Examples:**
+```toml
+default_excludes = [
+    ".git",           # Match .git anywhere
+    "node_modules",   # Match node_modules anywhere
+    "*.log",          # Match all .log files
+    "dist/",          # Match top-level dist directory
+]
+```
 
 ### `[workspace."<path>"]` Sections
 
@@ -267,7 +295,8 @@ data_volume = "default-agent-data"
 
 [workspace."/home/user/gemini-projects"]
 data_volume = "gemini-agent-data"
-# Note: agent selection is via CLI --agent flag, not config
+# Note: agent selection is global via [agent].default or CLI --agent flag
+# Per-workspace agent selection is not supported
 
 [workspace."/home/user/claude-projects"]
 data_volume = "claude-agent-data"
@@ -288,15 +317,17 @@ Configuration with environment variable import:
 default = "claude"
 
 [env]
+# Each variable must be listed explicitly (no wildcards)
 import = [
     "GITHUB_TOKEN",
     "NPM_TOKEN",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
-    "AWS_REGION"
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION"
 ]
 from_host = true
-env_file = ".env.sandbox"
+env_file = ".env.sandbox"  # Workspace-relative path
 
 default_excludes = [
     ".git",
