@@ -1737,7 +1737,32 @@ _cai_setup_linux() {
     _cai_info "Detected platform: Linux (native)"
     _cai_info "Setting up Secure Engine with Sysbox"
 
+    # Detect distribution FIRST - if unsupported, show manual instructions
+    # regardless of Docker status (per acceptance criteria: "handle unsupported
+    # distributions gracefully with clear message")
+    if ! _cai_linux_detect_distro; then
+        # Distribution not supported for auto-install
+        _cai_error "Auto-install not supported for distribution: ${_CAI_LINUX_DISTRO:-unknown}"
+        printf '\n'
+        _cai_info "Supported distributions for auto-install:"
+        _cai_info "  - Ubuntu 22.04, 24.04"
+        _cai_info "  - Debian 11, 12"
+        printf '\n'
+        _cai_info "For other distributions, install Sysbox manually:"
+        _cai_info "  Fedora/RHEL: Build from source"
+        _cai_info "  Arch Linux: AUR package (sysbox-ce-bin)"
+        _cai_info ""
+        _cai_info "Manual installation steps:"
+        _cai_info "  1. Install Sysbox: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
+        _cai_info "  2. Configure /etc/docker/daemon.json with sysbox-runc runtime"
+        _cai_info "  3. Restart Docker: sudo systemctl restart docker"
+        _cai_info "  4. Create context: docker context create containai-secure --docker host=unix:///var/run/docker.sock"
+        return 1
+    fi
+
     # Preflight: Check Docker is installed and reachable before making system changes
+    # (Only run after distro detection succeeds to ensure unsupported distros get
+    # manual instructions regardless of Docker status)
     _cai_step "Preflight: Checking Docker installation"
     if ! command -v docker >/dev/null 2>&1; then
         _cai_error "Docker is not installed"
@@ -1767,27 +1792,6 @@ _cai_setup_linux() {
         _cai_ok "Docker daemon is reachable"
     else
         _cai_info "[DRY-RUN] Would check Docker daemon at /var/run/docker.sock"
-    fi
-
-    # Detect distribution first
-    if ! _cai_linux_detect_distro; then
-        # Distribution not supported for auto-install
-        _cai_error "Auto-install not supported for distribution: ${_CAI_LINUX_DISTRO:-unknown}"
-        printf '\n'
-        _cai_info "Supported distributions for auto-install:"
-        _cai_info "  - Ubuntu 22.04, 24.04"
-        _cai_info "  - Debian 11, 12"
-        printf '\n'
-        _cai_info "For other distributions, install Sysbox manually:"
-        _cai_info "  Fedora/RHEL: Build from source"
-        _cai_info "  Arch Linux: AUR package (sysbox-ce-bin)"
-        _cai_info ""
-        _cai_info "Manual installation steps:"
-        _cai_info "  1. Install Sysbox: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
-        _cai_info "  2. Configure /etc/docker/daemon.json with sysbox-runc runtime"
-        _cai_info "  3. Restart Docker: sudo systemctl restart docker"
-        _cai_info "  4. Create context: docker context create containai-secure --docker host=unix:///var/run/docker.sock"
-        return 1
     fi
 
     # Step 1: Check for Docker Desktop coexistence
@@ -1848,9 +1852,11 @@ _cai_setup_linux() {
     fi
 
     # Step 6: Verify installation
+    # Native Linux: verification failure is fatal (unlike WSL2 which has known seccomp issues)
     if ! _cai_verify_sysbox_install_linux "/var/run/docker.sock" "$dry_run" "$verbose"; then
-        # Verification failure is a warning, not fatal
-        _cai_warn "Sysbox verification had issues - check output above"
+        _cai_error "Sysbox verification failed - setup did not complete successfully"
+        _cai_error "  Check the error messages above for details"
+        return 1
     fi
 
     printf '\n'
