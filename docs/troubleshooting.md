@@ -189,6 +189,8 @@ pgrep -f "Docker Desktop" || pgrep dockerd
 
 **Diagnosis:**
 ```bash
+docker version --format '{{.Server.Version}}'
+# Or get full platform info including version
 docker version --format '{{.Server.Platform.Name}}'
 ```
 
