@@ -923,6 +923,10 @@ provision:
       #!/bin/bash
       set -eux
 
+      # Update package lists and install dependencies
+      apt-get update
+      apt-get install -y curl wget
+
       # Install Docker Engine
       curl -fsSL https://get.docker.com | sh
       usermod -aG docker "${LIMA_CIDATA_USER}"
@@ -934,6 +938,7 @@ provision:
           echo "Failed to download Sysbox for ${ARCH}" >&2
           exit 1
       }
+      # Install sysbox with dependency resolution
       apt-get install -y /tmp/sysbox.deb || {
           apt-get install -f -y
           apt-get install -y /tmp/sysbox.deb
@@ -1011,7 +1016,13 @@ _cai_lima_install() {
 # Returns: 0=exists, 1=does not exist
 _cai_lima_vm_exists() {
     local vm_name="${1:-$_CAI_LIMA_VM_NAME}"
-    limactl list --json 2>/dev/null | grep -q "\"name\":\"$vm_name\""
+    # Use limactl list with format flag for reliable detection
+    # Falls back to grep-based check if format flag not available
+    if limactl list --format '{{.Name}}' 2>/dev/null | grep -qx "$vm_name"; then
+        return 0
+    fi
+    # Fallback: JSON parsing (less reliable but works with older Lima)
+    limactl list --json 2>/dev/null | grep -q "\"name\":\"$vm_name\"" || limactl list --json 2>/dev/null | grep -q "\"name\": \"$vm_name\""
 }
 
 # Get Lima VM status
@@ -1019,7 +1030,17 @@ _cai_lima_vm_exists() {
 # Returns: status string via stdout (Running, Stopped, etc.)
 _cai_lima_vm_status() {
     local vm_name="${1:-$_CAI_LIMA_VM_NAME}"
-    limactl list --json 2>/dev/null | grep -o "\"name\":\"$vm_name\"[^}]*\"status\":\"[^\"]*\"" | sed 's/.*"status":"\([^"]*\)".*/\1/' || true
+    local status
+    # Prefer limactl list with format for reliable status
+    status=$(limactl list --format '{{.Name}}\t{{.Status}}' 2>/dev/null | grep "^${vm_name}[[:space:]]" | cut -f2 | head -1) || status=""
+    if [[ -n "$status" ]]; then
+        printf '%s' "$status"
+        return 0
+    fi
+    # Fallback: JSON parsing (less reliable)
+    # Handle both compact and pretty-printed JSON
+    status=$(limactl list --json 2>/dev/null | grep -o "\"name\":[ ]*\"$vm_name\"[^}]*\"status\":[ ]*\"[^\"]*\"" | sed 's/.*"status":[ ]*"\([^"]*\)".*/\1/' | head -1) || status=""
+    printf '%s' "$status"
 }
 
 # Create Lima VM with Docker + Sysbox
@@ -1055,8 +1076,9 @@ _cai_lima_create_vm() {
     fi
 
     # Generate template to temporary file
+    # Use portable mktemp syntax that works on both GNU and BSD (macOS)
     local template_file
-    template_file=$(mktemp -t containai-lima-XXXXXX.yaml)
+    template_file=$(mktemp "${TMPDIR:-/tmp}/containai-lima.XXXXXX.yaml")
     # Use subshell trap for cleanup to avoid affecting main shell
     (
         trap "rm -f '$template_file'" EXIT
@@ -1076,8 +1098,9 @@ _cai_lima_create_vm() {
 
         printf '%s\n' "-> Creating Lima VM (this may take several minutes)..."
 
-        # Create VM from template (non-interactive, yes to prompts)
-        if ! limactl create --name="$_CAI_LIMA_VM_NAME" "$template_file" --tty=false; then
+        # Create VM from template (non-interactive)
+        # Put flags before positional args for compatibility
+        if ! limactl create --name="$_CAI_LIMA_VM_NAME" --tty=false "$template_file"; then
             printf '%s\n' "[ERROR] Failed to create Lima VM" >&2
             exit 1
         fi
@@ -1250,34 +1273,35 @@ _cai_lima_verify_install() {
     test_output=$(docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
     if [[ $test_rc -ne 0 ]]; then
-        _cai_warn "Sysbox test container failed"
-        if [[ "$verbose" == "true" ]]; then
-            _cai_info "Test output: $test_output"
-        fi
+        _cai_error "Sysbox test container failed (exit code: $test_rc)"
+        _cai_error "  Output: $test_output"
+        _cai_error "  Check VM provisioning: limactl shell $_CAI_LIMA_VM_NAME"
+        return 1
     elif [[ "$test_output" == *"sysbox-test-ok"* ]]; then
         _cai_ok "Sysbox test container succeeded"
         test_passed=true
+    else
+        _cai_error "Sysbox test container did not produce expected output"
+        _cai_error "  Output: $test_output"
+        return 1
     fi
 
     # Verify Docker Desktop is still default context
     _cai_step "Verifying Docker Desktop remains default"
     local current_context
     current_context=$(docker context show 2>/dev/null || true)
+    # Per spec: Docker Desktop should be default or desktop-linux
     if [[ "$current_context" == "containai-secure" ]]; then
         _cai_warn "containai-secure is currently the active context"
         _cai_warn "  Docker Desktop should remain default for safety"
         _cai_warn "  Switch back: docker context use default"
+    elif [[ "$current_context" == "default" ]] || [[ "$current_context" == "desktop-linux" ]]; then
+        _cai_ok "Docker Desktop remains the active context: $current_context"
     else
-        _cai_info "Current Docker context: $current_context (not containai-secure - good)"
+        _cai_info "Current Docker context: $current_context (not containai-secure - acceptable)"
     fi
 
-    # Final message
-    if [[ "$test_passed" == "true" ]]; then
-        _cai_ok "Lima + Sysbox installation verified"
-    else
-        _cai_warn "Lima + Sysbox installation completed but test container did not succeed"
-        _cai_warn "Sysbox may still work - try running a container manually"
-    fi
+    _cai_ok "Lima + Sysbox installation verified"
     return 0
 }
 
