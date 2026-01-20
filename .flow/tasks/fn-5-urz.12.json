@@ -13,20 +13,22 @@
       "a57a002",
       "5c79177",
       "3150f95",
-      "07884d5"
+      "07884d5",
+      "4bd8ddb"
     ],
     "prs": [],
     "tests": [
       "bash -n agent-sandbox/lib/setup.sh",
       "bash -n agent-sandbox/test-secure-engine.sh",
       "shellcheck -x agent-sandbox/lib/setup.sh",
-      "shellcheck -x agent-sandbox/test-secure-engine.sh"
+      "shellcheck -x agent-sandbox/test-secure-engine.sh",
+      "Codex impl-review (NEEDS_WORK, addressed)"
     ]
   },
   "id": "fn-5-urz.12",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.12.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Secure Engine runtime validation + integration tests",
-  "updated_at": "2026-01-20T01:26:46.359918Z"
+  "updated_at": "2026-01-20T01:40:12.234830Z"
 }

@@ -297,6 +297,25 @@ _cai_install_sysbox_wsl2() {
         fi
     fi
 
+    # Always check and install required tools (jq needed for daemon.json config)
+    # Do this BEFORE checking for Sysbox to ensure jq is available for configure step
+    _cai_step "Ensuring required tools are installed"
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would ensure jq is installed"
+    else
+        if ! command -v jq >/dev/null 2>&1; then
+            _cai_info "Installing jq (required for daemon.json configuration)"
+            if ! sudo apt-get update -qq; then
+                _cai_error "Failed to run apt-get update"
+                return 1
+            fi
+            if ! sudo apt-get install -y jq; then
+                _cai_error "Failed to install jq"
+                return 1
+            fi
+        fi
+    fi
+
     _cai_step "Checking for existing Sysbox installation"
     if command -v sysbox-runc >/dev/null 2>&1; then
         local existing_version
@@ -1525,12 +1544,13 @@ _CAI_VALIDATE_TIMEOUT=30
 # Returns: 0=all checks pass, 1=one or more checks failed
 # Outputs: Prints validation results to stdout with [PASS]/[FAIL]/[WARN] markers
 #
-# Validation checks (per spec):
+# Validation checks:
 # 1. Context exists and endpoint matches expected socket
 # 2. Engine reachable: docker --context containai-secure info
-# 3. Runtime is sysbox-runc: DefaultRuntime must be sysbox-runc
-# 4. User namespace enabled: Run container and check uid_map
-# 5. Test container starts: docker --context containai-secure run --rm hello-world
+# 3. sysbox-runc is available: Check .Runtimes contains sysbox-runc
+#    (Note: sysbox-runc is NOT set as default runtime, by design)
+# 4. User namespace enabled: Run container with --runtime=sysbox-runc and check uid_map
+# 5. Test container starts: docker run --runtime=sysbox-runc alpine:3.20 echo "..."
 _cai_secure_engine_validate() {
     local verbose="false"
 

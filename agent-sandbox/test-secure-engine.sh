@@ -5,9 +5,9 @@
 # Verifies:
 # 1. containai-secure Docker context exists with correct endpoint
 # 2. Engine is reachable via context
-# 3. Default runtime is sysbox-runc (per spec)
-# 4. User namespace isolation is enabled
-# 5. Test container runs successfully
+# 3. sysbox-runc runtime is available (NOT default - by design)
+# 4. User namespace isolation works with --runtime=sysbox-runc
+# 5. Test container runs successfully with --runtime=sysbox-runc
 # 6. Platform-specific tests (WSL socket, macOS Lima VM)
 # ==============================================================================
 
