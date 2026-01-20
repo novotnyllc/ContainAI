@@ -1,14 +1,39 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-20T09:23:35.019369Z",
   "created_at": "2026-01-19T20:02:19.345645Z",
   "depends_on": [],
   "epic": "fn-5-urz",
+  "evidence": {
+    "acceptance_criteria": {
+      "entrypoint_keeps_xdg_config_tmux": {
+        "detail": "Kept ensure_dir for ${DATA_DIR}/config/tmux",
+        "status": "pass"
+      },
+      "entrypoint_no_legacy_tmux_dir": {
+        "detail": "Removed ensure_dir for ${DATA_DIR}/tmux",
+        "status": "pass"
+      },
+      "entrypoint_no_legacy_tmux_subdir": {
+        "detail": "Removed ensure_dir for ${DATA_DIR}/tmux/.tmux",
+        "status": "pass"
+      },
+      "test_uses_xdg_path": {
+        "detail": "Test now checks ~/.config/tmux symlink instead of ~/.tmux.conf",
+        "status": "pass"
+      }
+    },
+    "files_modified": [
+      "agent-sandbox/entrypoint.sh",
+      "agent-sandbox/test-sync-integration.sh"
+    ],
+    "syntax_check": "bash -n passed for both files"
+  },
   "id": "fn-5-urz.17",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.17.md",
-  "status": "todo",
+  "status": "done",
   "title": "Simplify tmux to XDG-only paths",
-  "updated_at": "2026-01-19T20:02:34.402408Z"
+  "updated_at": "2026-01-20T09:24:50.684962Z"
 }

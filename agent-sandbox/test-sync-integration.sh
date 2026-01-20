@@ -503,37 +503,37 @@ test_bashrc_sourcing() {
 }
 
 # ==============================================================================
-# Test 8: tmux loads config
+# Test 8: tmux loads config (XDG paths)
 # ==============================================================================
 test_tmux_config() {
-    section "Test 8: tmux loads config"
+    section "Test 8: tmux loads config (XDG paths)"
 
-    # Check tmux symlink
+    # Check tmux XDG config directory symlink
     local tmux_link
     tmux_link=$(run_in_image_no_entrypoint '
-        if [ -L ~/.tmux.conf ]; then
-            readlink ~/.tmux.conf
+        if [ -L ~/.config/tmux ]; then
+            readlink ~/.config/tmux
         else
             echo "not_symlink"
         fi
     ')
 
-    if [[ "$tmux_link" == "/mnt/agent-data/tmux/.tmux.conf" ]]; then
-        pass "tmux.conf symlink points to volume"
+    if [[ "$tmux_link" == "/mnt/agent-data/config/tmux" ]]; then
+        pass "~/.config/tmux symlink points to volume"
     elif [[ "$tmux_link" == "docker_error" ]]; then
         fail "Docker container failed to start for tmux symlink check"
     else
-        fail "tmux.conf symlink incorrect: $tmux_link"
+        fail "tmux config symlink incorrect: $tmux_link (expected /mnt/agent-data/config/tmux)"
     fi
 
-    # Check tmux can load config (actually reads the config file)
+    # Check tmux can load config from XDG path
     local tmux_test
     tmux_test=$(run_in_image_no_entrypoint '
-        # Ensure config file exists (since we bypass entrypoint)
-        mkdir -p /mnt/agent-data/tmux
-        touch /mnt/agent-data/tmux/.tmux.conf
-        # Try to start tmux with explicit config to prove it can be read
-        if tmux -f ~/.tmux.conf -L test-config new-session -d -s test 2>/dev/null; then
+        # Ensure XDG config directory exists (since we bypass entrypoint)
+        mkdir -p /mnt/agent-data/config/tmux
+        touch /mnt/agent-data/config/tmux/tmux.conf
+        # Try to start tmux - it will auto-detect XDG config at ~/.config/tmux/tmux.conf
+        if tmux -L test-config new-session -d -s test 2>/dev/null; then
             tmux -L test-config kill-session -t test 2>/dev/null || true
             echo "config_loaded"
         else
@@ -542,7 +542,7 @@ test_tmux_config() {
     ')
 
     if [[ "$tmux_test" == "config_loaded" ]]; then
-        pass "tmux can load config from volume symlink"
+        pass "tmux can load config from XDG path"
     elif [[ "$tmux_test" == "docker_error" ]]; then
         fail "Docker container failed to start for tmux test"
     else

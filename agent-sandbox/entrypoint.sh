@@ -142,11 +142,9 @@ ensure_volume_structure() {
   # OpenCode config (SYNC_MAP flags: d)
   ensure_dir "${DATA_DIR}/config/opencode"
 
-  # tmux (SYNC_MAP flags: f for .tmux.conf, d for .tmux and config/tmux)
-  ensure_dir "${DATA_DIR}/tmux"
-  #ensure_file "${DATA_DIR}/tmux/.tmux.conf"
-  ensure_dir "${DATA_DIR}/tmux/.tmux"
+  # tmux (SYNC_MAP uses XDG paths: config/tmux, local/share/tmux)
   ensure_dir "${DATA_DIR}/config/tmux"
+  ensure_dir "${DATA_DIR}/local/share/tmux"
 
   # Shell (SYNC_MAP flags: f for .bash_aliases, d for .bashrc.d)
   ensure_dir "${DATA_DIR}/shell"
