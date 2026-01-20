@@ -93,12 +93,22 @@ _cai_is_wsl2() {
 # Test WSL2 seccomp compatibility for Sysbox
 # Returns: 0=compatible, 1=seccomp filter conflict detected, 2=unknown
 # Outputs: Sets _CAI_SECCOMP_TEST_ERROR with details on failure
-# Note: WSL 1.1.0+ has seccomp filter on PID 1 that may conflict with Sysbox's seccomp-notify
+#
+# Detection strategy:
+# 1. Primary: Check /proc/1/status Seccomp mode - if mode=2 (filter) on PID 1,
+#    WSL 1.1.0+ has attached a seccomp filter that can cause EBUSY when Sysbox
+#    tries to add seccomp-notify
+# 2. Fallback: If Docker is available, verify basic container functionality
+#
+# Note: We cannot test Sysbox directly before installation. The /proc/1/status
+# heuristic detects the WSL kernel condition that causes the conflict.
+# Post-installation verification in _cai_verify_sysbox_install tests actual
+# Sysbox container functionality.
 _cai_test_wsl2_seccomp() {
     _CAI_SECCOMP_TEST_ERROR=""
 
-    # Check /proc/1/status for Seccomp field (PID 1's seccomp mode)
-    # Mode 2 (filter) on PID 1 indicates potential Sysbox conflict
+    # Primary check: /proc/1/status Seccomp field (PID 1's seccomp mode)
+    # Mode 2 (filter) on PID 1 indicates WSL 1.1.0+ seccomp filter
     if [[ -f /proc/1/status ]]; then
         local seccomp_line pid1_mode
         # Guard grep with || true per pitfall memory
@@ -128,8 +138,24 @@ _cai_test_wsl2_seccomp() {
         fi
     fi
 
+    # Fallback: If Docker available, run minimal container test
+    # This verifies Docker seccomp handling but can't directly test Sysbox
+    # (Sysbox not installed yet). Useful as sanity check.
+    if command -v docker >/dev/null 2>&1; then
+        local docker_test_output docker_test_rc
+        docker_test_output=$(docker run --rm --security-opt seccomp=unconfined alpine echo "seccomp-test-ok" 2>&1) && docker_test_rc=0 || docker_test_rc=$?
+        if [[ $docker_test_rc -ne 0 ]]; then
+            _CAI_SECCOMP_TEST_ERROR="Docker seccomp test failed: $docker_test_output"
+            return 1
+        fi
+        if [[ "$docker_test_output" == *"seccomp-test-ok"* ]]; then
+            # Docker with seccomp=unconfined works, likely Sysbox will too
+            return 0
+        fi
+    fi
+
     # Cannot determine - return unknown
-    _CAI_SECCOMP_TEST_ERROR="Cannot determine seccomp status"
+    _CAI_SECCOMP_TEST_ERROR="Cannot determine seccomp status (no /proc/1/status Seccomp field, no Docker)"
     return 2
 }
 
@@ -474,33 +500,52 @@ _cai_configure_docker_socket() {
     local dropin_file="$_CAI_DOCKER_DROPIN_DIR/containai-socket.conf"
 
     # Read existing ExecStart to preserve distro/user flags
-    # We only want to ADD our socket, not replace the entire command
-    local existing_execstart
-    existing_execstart=$(systemctl show -p ExecStart docker 2>/dev/null | sed 's/^ExecStart=//' | head -1 || true)
+    # Format from systemctl show: ExecStart={ path=/usr/bin/dockerd ; argv[]=/usr/bin/dockerd -H fd:// ... }
+    local existing_execstart_raw existing_execstart
+    existing_execstart_raw=$(systemctl show -p ExecStart docker 2>/dev/null || true)
+    # Extract the actual command from the systemd format
+    # Format: ExecStart={ path=... ; argv[]=cmd arg1 arg2 ... ; ... }
+    existing_execstart=$(printf '%s' "$existing_execstart_raw" | sed -n 's/.*argv\[\]=\([^;]*\).*/\1/p' | head -1 || true)
+    # Trim leading/trailing whitespace
+    existing_execstart=$(printf '%s' "$existing_execstart" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
-    # Build drop-in that preserves existing config
-    # Strategy: Use Environment= to pass our socket, let daemon.json handle hosts
-    # This avoids clobbering any distro-specific flags
-    local dropin_content
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Existing ExecStart: ${existing_execstart:-<none>}"
+    fi
 
-    if [[ -n "$existing_execstart" ]] && [[ "$existing_execstart" != *"$socket_path"* ]]; then
-        # Existing ExecStart found - preserve it and add our socket via supplementary drop-in
-        # We use daemon.json "hosts" instead of ExecStart override for safety
-        _cai_info "Preserving existing Docker service configuration"
-        _cai_info "Adding socket via daemon.json instead of ExecStart override"
+    # Build drop-in content
+    # Strategy: Extract existing command and APPEND our socket flag
+    # This preserves all distro/user flags (data-root, cgroup-driver, proxies, etc.)
+    local dropin_content new_execstart
 
-        # Instead of ExecStart override, we'll configure socket in daemon.json
-        # This is safer as it doesn't clobber distro-specific flags
-        dropin_content=$(cat <<EOF
-# ContainAI: Additional Docker socket configuration
-# Socket configured via daemon.json to avoid clobbering distro flags
+    if [[ -n "$existing_execstart" ]]; then
+        # Check if socket already configured
+        if [[ "$existing_execstart" == *"$socket_path"* ]]; then
+            _cai_info "Socket $socket_path already configured in Docker service"
+            # Still write marker drop-in for tracking
+            dropin_content=$(cat <<EOF
+# ContainAI: Socket already configured
 [Service]
-# Marker file to indicate ContainAI setup
 Environment=CONTAINAI_SECURE_SOCKET=$socket_path
 EOF
 )
+        else
+            # Append our socket to existing command
+            # Insert -H unix://... before any trailing containerd flag or at end
+            new_execstart="$existing_execstart -H unix://$socket_path"
+            _cai_info "Appending socket to existing Docker configuration"
+
+            dropin_content=$(cat <<EOF
+[Service]
+ExecStart=
+ExecStart=$new_execstart
+EOF
+)
+        fi
     else
-        # No existing ExecStart or already has our socket - use simple drop-in
+        # No existing ExecStart found (unusual but handle it)
+        # Use minimal default that matches most distros
+        _cai_warn "No existing Docker ExecStart found, using default"
         dropin_content=$(cat <<EOF
 [Service]
 ExecStart=
@@ -532,25 +577,6 @@ EOF
     if ! printf '%s\n' "$dropin_content" | sudo tee "$dropin_file" >/dev/null; then
         _cai_error "Failed to write drop-in: $dropin_file"
         return 1
-    fi
-
-    # If we're using daemon.json for socket (safe mode), add hosts entry there
-    if [[ "$existing_execstart" != *"$socket_path"* ]] && [[ -n "$existing_execstart" ]]; then
-        _cai_step "Adding socket to daemon.json"
-        local daemon_json="$_CAI_WSL2_DAEMON_JSON"
-        local existing_config="{}"
-        if [[ -f "$daemon_json" ]]; then
-            existing_config=$(sudo cat "$daemon_json" 2>/dev/null) || existing_config="{}"
-        fi
-        # Add our socket to hosts array (preserve existing hosts)
-        local socket_config
-        socket_config=$(printf '%s' "$existing_config" | jq --arg sock "unix://$socket_path" '
-            .hosts = ((.hosts // ["fd://"]) + [$sock] | unique)
-        ')
-        if ! printf '%s\n' "$socket_config" | sudo tee "$daemon_json" >/dev/null; then
-            _cai_error "Failed to add socket to daemon.json"
-            return 1
-        fi
     fi
 
     # Reload systemd
