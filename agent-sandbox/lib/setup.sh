@@ -1640,7 +1640,7 @@ _cai_secure_engine_validate() {
     # Validation 3: Default runtime is sysbox-runc (per spec)
     # The containai-secure daemon should have sysbox-runc as default runtime
     _cai_step "Check 3: Default runtime is sysbox-runc"
-    local default_runtime runtimes_json runtime_rc
+    local default_runtime runtime_rc
     # Use already captured info_output to avoid extra docker call
     default_runtime=$(printf '%s' "$info_output" | grep "Default Runtime:" | head -1 | sed 's/.*Default Runtime:[[:space:]]*//' || true)
 
