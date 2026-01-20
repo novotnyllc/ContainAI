@@ -1,7 +1,7 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-20T11:18:24.940349Z",
   "created_at": "2026-01-20T04:51:49.836522Z",
   "depends_on": [
     "fn-6-aaz.3"
@@ -10,7 +10,7 @@
   "id": "fn-6-aaz.4",
   "priority": null,
   "spec_path": ".flow/tasks/fn-6-aaz.4.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Integrate env import with cai import command",
-  "updated_at": "2026-01-20T05:24:27.952214Z"
+  "updated_at": "2026-01-20T11:18:24.940367Z"
 }

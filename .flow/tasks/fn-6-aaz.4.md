@@ -13,7 +13,8 @@ Wire up env var import into `cai import` with full context plumbing for ALL dock
 - **Create docker_cmd or pass ctx** to ALL docker invocations in lib/import.sh
 - Apply context to: volume ops, rsync, transforms, orphan cleanup, AND .env helper
 - Neutralize DOCKER_CONTEXT/DOCKER_HOST when default context intended
-- Call dedicated `_containai_resolve_env_config()` (independent of volume/excludes)
+- Call `_containai_import_env "$ctx" "$volume" "$workspace" "$explicit_config" "$dry_run"` (config resolution is internal)
+<!-- Updated by plan-sync: fn-6-aaz.3 implemented _containai_import_env with 5 params, handles config resolution internally -->
 ## Approach
 
 - Source `lib/env.sh` in containai.sh alongside other libs
@@ -47,8 +48,8 @@ Wire up env var import into `cai import` with full context plumbing for ALL dock
 - [ ] Context applied to: volume inspect/create, rsync, transforms, orphan cleanup
 - [ ] Context applied to: new .env helper
 - [ ] DOCKER_CONTEXT/DOCKER_HOST neutralized for default context
-- [ ] Env config resolved via dedicated `_containai_resolve_env_config()`
-- [ ] Env config resolved even with `--data-volume` or `--no-excludes`
+- [ ] Calls `_containai_import_env "$ctx" "$volume" "$workspace" "$explicit_config" "$dry_run"` (config resolved internally)
+- [ ] Env import works even with `--data-volume` or `--no-excludes`
 - [ ] `.env` written to correct volume (same daemon as container will use)
 - [ ] Import summary includes env var count (keys only)
 - [ ] `--dry-run` prints keys only, no volume write/modification

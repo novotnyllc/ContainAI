@@ -10,14 +10,15 @@
 # Usage:
 #   source lib/config.sh
 #   source lib/import.sh
-#   _containai_import "volume-name" "false" "false" "$PWD" ""
+#   _containai_import "" "volume-name" "false" "false" "$PWD" ""
 #
 # Arguments:
-#   $1 = volume name (required)
-#   $2 = dry_run flag ("true" or "false", default: "false")
-#   $3 = no_excludes flag ("true" or "false", default: "false")
-#   $4 = workspace path (optional, for exclude resolution, default: $PWD)
-#   $5 = explicit config path (optional, for exclude resolution)
+#   $1 = Docker context ("" for default, "containai-secure" for Sysbox)
+#   $2 = volume name (required)
+#   $3 = dry_run flag ("true" or "false", default: "false")
+#   $4 = no_excludes flag ("true" or "false", default: "false")
+#   $5 = workspace path (optional, for exclude resolution, default: $PWD)
+#   $6 = explicit config path (optional, for exclude resolution)
 #
 # Dependencies:
 #   - docker (for rsync container)
@@ -191,19 +192,28 @@ _import_step() {
 
 # Import host configs to data volume via rsync container
 # Arguments:
-#   $1 = volume name (required)
-#   $2 = dry_run flag ("true" or "false", default: "false")
-#   $3 = no_excludes flag ("true" or "false", default: "false")
+#   $1 = Docker context ("" for default, "containai-secure" for Sysbox)
+#   $2 = volume name (required)
+#   $3 = dry_run flag ("true" or "false", default: "false")
+#   $4 = no_excludes flag ("true" or "false", default: "false")
 #        When true, disables both config excludes AND .system/ exclusion
-#   $4 = workspace path (optional, for exclude resolution, default: $PWD)
-#   $5 = explicit config path (optional, for exclude resolution)
+#   $5 = workspace path (optional, for exclude resolution, default: $PWD)
+#   $6 = explicit config path (optional, for exclude resolution)
 # Returns: 0 on success, 1 on failure
 _containai_import() {
-    local volume="${1:-}"
-    local dry_run="${2:-false}"
-    local no_excludes="${3:-false}"
-    local workspace="${4:-$PWD}"
-    local explicit_config="${5:-}"
+    local ctx="${1:-}"
+    local volume="${2:-}"
+    local dry_run="${3:-false}"
+    local no_excludes="${4:-false}"
+    local workspace="${5:-$PWD}"
+    local explicit_config="${6:-}"
+
+    # Build docker command prefix based on context
+    # All docker calls in this function MUST use docker_cmd and neutralize DOCKER_CONTEXT/DOCKER_HOST
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
 
     # Validate required arguments
     if [[ -z "$volume" ]]; then
@@ -240,16 +250,17 @@ _containai_import() {
     # Ensure volume exists
     # Note: dry-run requires volume to exist because rsync container mounts it
     # This is intentional - dry-run previews changes to an existing volume
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
     if [[ "$dry_run" != "true" ]]; then
-        if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+        if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" volume inspect "$volume" >/dev/null 2>&1; then
             _import_warn "Data volume does not exist, creating..."
-            if ! docker volume create "$volume" >/dev/null; then
+            if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" volume create "$volume" >/dev/null; then
                 _import_error "Failed to create volume $volume"
                 return 1
             fi
         fi
     else
-        if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+        if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" volume inspect "$volume" >/dev/null 2>&1; then
             _import_error "Data volume does not exist: $volume"
             _import_error "Create it first with: docker volume create $volume"
             return 1
@@ -514,7 +525,8 @@ done <<'"'"'MAP_DATA'"'"'
     fi
 
     # Run container with map data embedded in script via heredoc
-    if ! docker run --rm --network=none --user 0:0 \
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
         --mount type=bind,src="$HOME",dst=/source,readonly \
         --mount type=volume,src="$volume",dst=/target \
         "${env_args[@]}" \
@@ -530,17 +542,18 @@ done <<'"'"'MAP_DATA'"'"'
     fi
 
     # Post-sync transformations (only in non-dry-run mode)
+    # Pass context to all transformation functions for context-aware docker calls
     if [[ "$dry_run" != "true" ]]; then
-        if ! _import_transform_installed_plugins "$volume"; then
+        if ! _import_transform_installed_plugins "$ctx" "$volume"; then
             _import_warn "Failed to transform installed_plugins.json"
         fi
-        if ! _import_transform_marketplaces "$volume"; then
+        if ! _import_transform_marketplaces "$ctx" "$volume"; then
             _import_warn "Failed to transform known_marketplaces.json"
         fi
-        if ! _import_merge_enabled_plugins "$volume"; then
+        if ! _import_merge_enabled_plugins "$ctx" "$volume"; then
             _import_warn "Failed to merge enabledPlugins"
         fi
-        _import_remove_orphan_markers "$volume"
+        _import_remove_orphan_markers "$ctx" "$volume"
     else
         _import_step "[dry-run] Would transform installed_plugins.json"
         _import_step "[dry-run] Would transform known_marketplaces.json"
@@ -556,9 +569,17 @@ done <<'"'"'MAP_DATA'"'"'
 # ==============================================================================
 
 # Transform installed_plugins.json (fix paths + scope)
+# Arguments: $1 = context, $2 = volume
 _import_transform_installed_plugins() {
-    local volume="$1"
+    local ctx="$1"
+    local volume="$2"
     local src_file="$HOME/.claude/plugins/installed_plugins.json"
+
+    # Build docker command with context
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
 
     _import_step "Transforming installed_plugins.json (fixing paths and scope)..."
 
@@ -596,7 +617,8 @@ _import_transform_installed_plugins() {
     fi
 
     # Write to volume with network isolation
-    if ! echo "$transformed" | docker run --rm -i --network=none --user 1000:1000 -v "$volume":/target alpine sh -c "cat > /target/claude/plugins/installed_plugins.json"; then
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    if ! echo "$transformed" | DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -i --network=none --user 1000:1000 -v "$volume":/target alpine sh -c "cat > /target/claude/plugins/installed_plugins.json"; then
         _import_error "Failed to write transformed installed_plugins.json to volume"
         return 1
     fi
@@ -606,9 +628,17 @@ _import_transform_installed_plugins() {
 }
 
 # Transform known_marketplaces.json
+# Arguments: $1 = context, $2 = volume
 _import_transform_marketplaces() {
-    local volume="$1"
+    local ctx="$1"
+    local volume="$2"
     local src_file="$HOME/.claude/plugins/known_marketplaces.json"
+
+    # Build docker command with context
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
 
     _import_step "Transforming known_marketplaces.json..."
 
@@ -640,7 +670,8 @@ _import_transform_marketplaces() {
     fi
 
     # Write to volume with network isolation
-    if ! echo "$transformed" | docker run --rm -i --network=none --user 1000:1000 -v "$volume":/target alpine sh -c "cat > /target/claude/plugins/known_marketplaces.json"; then
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    if ! echo "$transformed" | DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -i --network=none --user 1000:1000 -v "$volume":/target alpine sh -c "cat > /target/claude/plugins/known_marketplaces.json"; then
         _import_error "Failed to write transformed known_marketplaces.json to volume"
         return 1
     fi
@@ -650,9 +681,17 @@ _import_transform_marketplaces() {
 }
 
 # Merge enabledPlugins into sandbox settings
+# Arguments: $1 = context, $2 = volume
 _import_merge_enabled_plugins() {
-    local volume="$1"
+    local ctx="$1"
+    local volume="$2"
     local host_settings="$HOME/.claude/settings.json"
+
+    # Build docker command with context
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
 
     _import_step "Merging enabledPlugins into sandbox settings..."
 
@@ -674,7 +713,8 @@ _import_merge_enabled_plugins() {
     fi
 
     local existing_settings
-    existing_settings=$(docker run --rm --network=none -v "$volume":/target alpine cat /target/claude/settings.json 2>/dev/null || echo '{}')
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    existing_settings=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none -v "$volume":/target alpine cat /target/claude/settings.json 2>/dev/null || echo '{}')
 
     if [[ -z "$existing_settings" ]] || ! echo "$existing_settings" | jq -e '.' >/dev/null 2>&1; then
         existing_settings='{"permissions":{"allow":[],"defaultMode":"dontAsk"},"enabledPlugins":{},"autoUpdatesChannel":"latest"}'
@@ -692,7 +732,8 @@ _import_merge_enabled_plugins() {
         return 1
     fi
 
-    if ! echo "$merged" | docker run --rm -i --network=none -v "$volume":/target alpine sh -c "cat > /target/claude/settings.json && chown 1000:1000 /target/claude/settings.json"; then
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    if ! echo "$merged" | DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -i --network=none -v "$volume":/target alpine sh -c "cat > /target/claude/settings.json && chown 1000:1000 /target/claude/settings.json"; then
         _import_error "Failed to write merged settings.json to volume"
         return 1
     fi
@@ -702,13 +743,22 @@ _import_merge_enabled_plugins() {
 }
 
 # Remove .orphaned_at markers
+# Arguments: $1 = context, $2 = volume
 _import_remove_orphan_markers() {
-    local volume="$1"
+    local ctx="$1"
+    local volume="$2"
+
+    # Build docker command with context
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
 
     _import_step "Removing .orphaned_at markers..."
 
     local removed
-    removed=$(docker run --rm --network=none -v "$volume":/plugins alpine sh -c '
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    removed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none -v "$volume":/plugins alpine sh -c '
         find /plugins/claude/plugins/cache -name ".orphaned_at" -delete -print 2>/dev/null | wc -l || echo 0
     ')
 

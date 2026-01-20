@@ -58,7 +58,8 @@ _containai_libs_exist() {
     [[ -f "$_CAI_SCRIPT_DIR/lib/container.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/setup.sh" ]]
+    [[ -f "$_CAI_SCRIPT_DIR/lib/setup.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -120,6 +121,11 @@ fi
 
 if ! source "$_CAI_SCRIPT_DIR/lib/setup.sh"; then
     echo "[ERROR] Failed to source lib/setup.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/env.sh"; then
+    echo "[ERROR] Failed to source lib/env.sh" >&2
     return 1
 fi
 
@@ -518,6 +524,31 @@ _containai_import_cmd() {
         return 1
     fi
 
+    # === CONTEXT SELECTION (mirrors cai run in lib/container.sh) ===
+    # Resolve secure engine context from config (for context override)
+    local config_context_override=""
+    if [[ -n "$explicit_config" ]]; then
+        # Explicit config: strict mode - fail on parse errors
+        if ! config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config"); then
+            echo "[ERROR] Failed to parse config: $explicit_config" >&2
+            return 1
+        fi
+    else
+        # Discovered config: suppress errors gracefully
+        config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
+    fi
+
+    # Auto-select Docker context based on isolation availability
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix for shell function call (pitfall: env -u only works with external commands)
+    local selected_context=""
+    if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
+        : # success - selected_context is "" (ECI) or "containai-secure" (Sysbox)
+    else
+        # No isolation available - fallback to default context with warning
+        echo "[WARN] No isolation available, using default Docker context" >&2
+        selected_context=""
+    fi
+
     # Resolve volume
     local resolved_volume
     if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
@@ -525,8 +556,13 @@ _containai_import_cmd() {
         return 1
     fi
 
-    # Call import function
-    _containai_import "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config"
+    # Call import function with context
+    if ! _containai_import "$selected_context" "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config"; then
+        return 1
+    fi
+
+    # Import env vars (after dotfile sync, with same context)
+    _containai_import_env "$selected_context" "$resolved_volume" "$resolved_workspace" "$explicit_config" "$dry_run"
 }
 
 # Export subcommand handler
