@@ -28,7 +28,8 @@ Add `_containai_resolve_env_config()` function to `lib/config.sh` for **dedicate
 - [ ] Runs independently of `--data-volume` and `--no-excludes` flags
 - [ ] Calls `parse-toml.py` with correct arguments
 - [ ] Error handling follows existing patterns (if/else guards for set -e)
-- [ ] Python unavailable: returns defaults with `[WARN]`
+- [ ] Python unavailable (discovered config): returns defaults with `[WARN]`
+- [ ] Python unavailable (explicit config): return 1 (fail fast per epic spec)
 ## Done summary
 TBD
 

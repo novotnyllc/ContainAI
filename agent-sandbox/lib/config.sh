@@ -881,7 +881,12 @@ _containai_resolve_env_config() {
     fi
 
     # Determine script directory (where parse-toml.py lives)
-    script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    # Guard with if/else for set -e safety
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        printf '%s\n' "[WARN] Failed to determine script directory. Using defaults." >&2
+        printf '%s' "$default_json"
+        return 0
+    fi
 
     # Call parse-toml.py --env to extract and validate [env] section
     # The script handles validation and returns JSON (or null if [env] missing)
