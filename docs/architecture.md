@@ -59,7 +59,7 @@ The ContainAI system consists of three main layers.
 flowchart LR
     subgraph CLI["CLI Layer"]
         direction TB
-        Main["containai.sh<br/>(entry point)"]
+        Main["agent-sandbox/containai.sh<br/>(entry point, sourced)"]
         Cmds["Subcommands<br/>(run, shell, doctor, import, export, stop)"]
     end
 
@@ -94,7 +94,7 @@ flowchart LR
 
 ## Modular Library Structure
 
-ContainAI uses a modular shell library design where `containai.sh` sources individual `lib/*.sh` modules. This provides:
+ContainAI uses a modular shell library design where `agent-sandbox/containai.sh` sources individual `agent-sandbox/lib/*.sh` modules. This provides:
 
 - **Separation of concerns**: Each module handles one aspect
 - **Testability**: Modules can be tested independently
@@ -102,7 +102,7 @@ ContainAI uses a modular shell library design where `containai.sh` sources indiv
 
 ### Module Dependency Order
 
-The libraries must be sourced in a specific order due to dependencies:
+The libraries must be sourced in a specific order due to dependencies. All paths below are relative to `agent-sandbox/`:
 
 ```mermaid
 flowchart TD
@@ -133,6 +133,8 @@ flowchart TD
 
 ### Module Responsibilities
 
+All modules are located in `agent-sandbox/lib/`:
+
 | Module | Purpose | Key Functions |
 |--------|---------|---------------|
 | `core.sh` | Logging and utilities | `_cai_info`, `_cai_error`, `_cai_warn`, `_cai_debug` |
@@ -153,31 +155,32 @@ ContainAI supports two isolation mechanisms, automatically selected based on ava
 
 ```mermaid
 flowchart TD
-    Start["cai run"] --> Doctor["cai doctor<br/>(auto-detection)"]
-    Doctor --> ECICheck{"ECI Available?<br/>(Docker Desktop 4.50+)"}
+    Start["cai run"] --> SandboxCheck{"Docker Desktop<br/>Sandbox Available?<br/>(4.50+, feature enabled)"}
 
-    ECICheck -->|Yes| ECI["ECI Mode<br/>(docker sandbox run)"]
-    ECICheck -->|No| SysboxCheck{"Sysbox Available?<br/>(containai-secure context)"}
+    SandboxCheck -->|Yes| Sandbox["Docker Desktop Sandbox Mode<br/>(docker sandbox run)"]
+    SandboxCheck -->|No| SysboxCheck{"Sysbox Available?<br/>(containai-secure context)"}
 
     SysboxCheck -->|Yes| Sysbox["Sysbox Mode<br/>(--runtime=sysbox-runc)"]
     SysboxCheck -->|No| Fail["ERROR: No isolation<br/>(actionable message)"]
 
-    ECI --> Container["Container Running<br/>(isolated)"]
+    Sandbox --> Container["Container Running<br/>(isolated)"]
     Sysbox --> Container
 
-    style ECI fill:#c8e6c9
+    style Sandbox fill:#c8e6c9
     style Sysbox fill:#bbdefb
     style Fail fill:#ffcdd2
 ```
 
-### ECI Mode (Docker Desktop)
+### Docker Desktop Sandbox Mode
 
 **Requirements**: Docker Desktop 4.50+ with sandbox feature enabled
 
 - Uses `docker sandbox run` command
-- Leverages Docker Desktop's Enhanced Container Isolation
-- Automatic user namespace remapping (uid 0 -> 100000+)
-- Built-in sysbox-runc runtime
+- Provides isolated execution environment
+- When Enhanced Container Isolation (ECI) is additionally enabled:
+  - Automatic user namespace remapping (uid 0 -> 100000+)
+  - sysbox-runc runtime for stronger isolation
+- ECI requires Docker Business subscription and admin enablement
 
 ### Sysbox Mode (Linux/WSL)
 
@@ -185,7 +188,7 @@ flowchart TD
 
 - Uses standard `docker run` with `--runtime=sysbox-runc`
 - Requires manual Sysbox installation via `cai setup`
-- Creates dedicated Docker context pointing to Sysbox socket
+- Creates dedicated Docker context pointing to Sysbox-enabled daemon
 - Available on WSL2 and native Linux
 
 ## Data Flow
@@ -357,11 +360,11 @@ These protections are **always enforced**:
 
 | Protection | Implementation | Code Reference |
 |------------|----------------|----------------|
-| **Volume mount TOCTOU** | Path validation in entrypoint | `entrypoint.sh:verify_path_under_data_dir()` |
-| **Symlink traversal** | Reject symlinks, realpath validation | `entrypoint.sh:reject_symlink()` |
-| **Safe .env parsing** | CRLF handling, quote validation | `lib/env.sh` |
-| **Credential isolation** | Default `credentials.mode=none` | `lib/config.sh`, `lib/container.sh` |
-| **Docker socket denied** | No socket mount by default | `lib/container.sh` |
+| **Volume mount TOCTOU** | Path validation in entrypoint | `agent-sandbox/entrypoint.sh:verify_path_under_data_dir()` |
+| **Symlink traversal** | Reject symlinks, realpath validation | `agent-sandbox/entrypoint.sh:reject_symlink()` |
+| **Safe .env parsing** | CRLF handling, quote validation | `agent-sandbox/lib/env.sh` |
+| **Credential isolation** | Default `credentials.mode=none` | `agent-sandbox/lib/config.sh`, `agent-sandbox/lib/container.sh` |
+| **Docker socket denied** | No socket mount by default | `agent-sandbox/lib/container.sh` |
 
 ### Unsafe Opt-ins (FR-5)
 
@@ -382,19 +385,22 @@ These can be enabled with explicit flags (require acknowledgment):
 
 ## Design Decisions
 
-Key architectural decisions documented in [.flow/memory/decisions.md](../.flow/memory/decisions.md):
+Key architectural decisions (see also [.flow/memory/decisions.md](../.flow/memory/decisions.md)):
 
-### ADR-1: Fail-Closed Security
+### Safe Defaults (FR-4)
 
-**Decision**: Reject dangerous options entirely rather than gating behind acknowledgment flags.
+**Decision**: Default to the safest configuration; dangerous options require explicit CLI flags with acknowledgment.
 
-**Rationale**: For a security tool, unsafe defaults with opt-out are worse than safe defaults with opt-in. Users must explicitly request dangerous operations.
+**Rationale**: For a security tool, unsafe defaults with opt-out are worse than safe defaults with opt-in. Users must explicitly request dangerous operations via CLI flags.
 
-**Example**: `credentials.mode=host` in config is **never** honored. CLI `--allow-host-credentials` is required.
+**Examples**:
+- `credentials.mode=host` in config is **never** honored; CLI `--allow-host-credentials` is required
+- Docker socket access requires `--allow-host-docker-socket` flag
+- Config-only options cannot enable dangerous behaviors
 
-### ADR-2: Modular Shell Architecture
+### Modular Shell Architecture
 
-**Decision**: Split CLI into sourced `lib/*.sh` modules rather than monolithic script.
+**Decision**: Split CLI into sourced `agent-sandbox/lib/*.sh` modules rather than monolithic script.
 
 **Rationale**:
 - Enables unit testing of individual functions
@@ -402,16 +408,16 @@ Key architectural decisions documented in [.flow/memory/decisions.md](../.flow/m
 - Allows parallel development
 - Makes dependencies explicit via source order
 
-### ADR-3: Dual Isolation Paths
+### Dual Isolation Paths
 
-**Decision**: Support both Docker Desktop ECI and Sysbox modes with automatic selection.
+**Decision**: Support both Docker Desktop sandbox and Sysbox modes with automatic selection.
 
 **Rationale**:
-- ECI: Best for macOS/Windows users (Docker Desktop integration)
+- Docker Desktop sandbox: Best for macOS/Windows users (Docker Desktop integration)
 - Sysbox: Best for Linux/WSL users (native performance)
 - Auto-detection reduces user friction
 
-### ADR-4: Workspace-Scoped Configuration
+### Workspace-Scoped Configuration
 
 **Decision**: Config files use workspace path keys for per-project settings.
 
