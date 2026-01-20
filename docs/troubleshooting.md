@@ -125,6 +125,12 @@ sudo apt install perl
 [ERROR] jq is not installed (required for JSON processing)
 ```
 
+**Diagnosis:**
+```bash
+which jq
+jq --version
+```
+
 **Solution:**
 
 **macOS:**
@@ -153,6 +159,12 @@ or
 Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
 ```
 
+**Diagnosis:**
+```bash
+docker info
+pgrep -f "Docker Desktop" || pgrep dockerd
+```
+
 **Solution:**
 
 1. **macOS:** Open Docker Desktop from Applications
@@ -175,6 +187,11 @@ Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docke
 [ERROR] Docker Desktop 4.50+ required (found: 4.35.1)
 ```
 
+**Diagnosis:**
+```bash
+docker version --format '{{.Server.Platform.Name}}'
+```
+
 **Solution:**
 
 1. Open Docker Desktop
@@ -191,6 +208,12 @@ https://www.docker.com/products/docker-desktop/
 **Symptom:**
 ```
 [ERROR] docker sandbox command not found - enable experimental features
+```
+
+**Diagnosis:**
+```bash
+docker sandbox version
+docker --help | grep sandbox
 ```
 
 **Solution:**
@@ -228,6 +251,11 @@ docker sandbox ls
 [ERROR] Sandboxes disabled by administrator policy
 ```
 
+**Diagnosis:**
+```bash
+docker sandbox ls 2>&1 | head -5
+```
+
 **Solution:**
 
 Your organization's Docker Desktop administrator has disabled sandbox features. Contact your IT administrator to:
@@ -242,6 +270,11 @@ See: https://docs.docker.com/desktop/settings-and-maintenance/settings/
 **Symptom:**
 ```
 ECI (Enhanced Container Isolation):     [WARN] Available but not enabled
+```
+
+**Diagnosis:**
+```bash
+cai doctor --json | jq '.eci'
 ```
 
 **Solution:**
@@ -275,9 +308,16 @@ docker system df
 
 1. Restart Docker Desktop
 2. If problem persists, check system resources (CPU, memory, disk)
-3. Clear unused Docker resources:
+3. If disk space is low, carefully clear unused resources:
    ```bash
-   docker system prune -a
+   # First, check what would be removed (non-destructive)
+   docker system df
+
+   # Remove stopped containers and dangling images only (safer)
+   docker system prune
+
+   # CAUTION: This removes ALL unused images (may require large re-downloads)
+   # docker system prune -a
    ```
 
 ---
@@ -397,6 +437,11 @@ cai setup
 [ERROR] Image not found: docker/sandbox-templates:claude-code
 ```
 
+**Diagnosis:**
+```bash
+docker images | grep sandbox-templates
+```
+
 **Solution:**
 
 Pull the required image:
@@ -417,6 +462,11 @@ docker --context containai-secure pull docker/sandbox-templates:claude-code
 
   Expected label 'containai.sandbox': containai
   Actual label 'containai.sandbox':   <not set>
+```
+
+**Diagnosis:**
+```bash
+docker inspect myproject-main --format '{{.Config.Labels}}'
 ```
 
 **Cause:** A container with the same name already exists but wasn't created by ContainAI.
@@ -448,6 +498,11 @@ cai run --restart
 [ERROR] Image mismatch prevents attachment.
 ```
 
+**Diagnosis:**
+```bash
+docker inspect <container-name> --format '{{.Config.Image}}'
+```
+
 **Cause:** Container was created with a different agent/image than requested.
 
 **Solution:**
@@ -469,6 +524,11 @@ cai run --name claude-sandbox --agent claude
 [WARN] Data volume mismatch:
   Running:   project-a-data
   Requested: project-b-data
+```
+
+**Diagnosis:**
+```bash
+docker inspect <container-name> --format '{{.Mounts}}'
 ```
 
 **Cause:** Container was created with a different data volume.
@@ -514,6 +574,11 @@ docker volume inspect sandbox-agent-data
 [ERROR] Invalid volume name: my volume
 ```
 
+**Diagnosis:**
+```bash
+echo "my volume" | grep -E '^[a-zA-Z0-9][a-zA-Z0-9_.-]*$' || echo "Invalid"
+```
+
 **Cause:** Volume names must start with alphanumeric and contain only `[a-zA-Z0-9_.-]`.
 
 **Solution:**
@@ -530,6 +595,11 @@ cai run --data-volume my.volume  # Valid
 **Symptom:**
 ```
 [ERROR] Unexpected container state: paused
+```
+
+**Diagnosis:**
+```bash
+docker inspect <container-name> --format '{{.State.Status}}'
 ```
 
 **Solution:**
@@ -551,6 +621,11 @@ cai run
 **Symptom:**
 ```
 [ERROR] Config file not found: /path/to/.containai/config.toml
+```
+
+**Diagnosis:**
+```bash
+ls -la /path/to/.containai/config.toml
 ```
 
 **Cause:** Explicit `--config` path doesn't exist.
@@ -610,13 +685,20 @@ excludes = ["*.log", "node_modules/"]
 [ERROR] Python required to parse config: .containai/config.toml
 ```
 
+**Diagnosis:**
+```bash
+which python3
+python3 --version
+```
+
 **Solution:**
 
 Install Python 3:
 
 **macOS:**
 ```bash
-brew install python3
+brew install python
+# Homebrew's python formula installs Python 3 and creates python3 symlink
 ```
 
 **Linux:**
@@ -629,6 +711,11 @@ sudo apt install python3
 **Symptom:**
 ```
 [WARN] Invalid workspace path, using $PWD: /nonexistent/path
+```
+
+**Diagnosis:**
+```bash
+ls -la /nonexistent/path
 ```
 
 **Solution:**
@@ -646,6 +733,11 @@ cai run --workspace /path/to/workspace
 [ERROR] Workspace path does not exist: /path/to/workspace
 ```
 
+**Diagnosis:**
+```bash
+ls -la /path/to/workspace
+```
+
 **Solution:**
 
 Create the directory or use an existing path:
@@ -657,11 +749,55 @@ mkdir -p /path/to/workspace
 
 ## Credential/Import Issues
 
+### Stale or corrupted credentials in sandbox
+
+**Symptom:**
+
+Agent fails to authenticate, shows credential errors, or uses outdated tokens:
+```
+[ERROR] Authentication failed
+```
+or
+```
+[ERROR] Invalid credentials
+```
+or agent cannot access GitHub, APIs, or other services that previously worked.
+
+**Diagnosis:**
+```bash
+# Check volume contents for credential files
+docker run --rm -v sandbox-agent-data:/data alpine ls -la /data/claude/
+docker run --rm -v sandbox-agent-data:/data alpine ls -la /data/config/gh/
+```
+
+**Solution:**
+
+Clear credentials from the data volume and re-import:
+```bash
+# Clear all credentials from the volume (interactive confirmation)
+cai sandbox clear-credentials
+
+# Clear credentials for specific agent
+cai sandbox clear-credentials --agent claude
+
+# Skip confirmation prompt
+cai sandbox clear-credentials -y
+
+# Then re-import fresh credentials from host
+cai import
+```
+
 ### "--credentials=host requires acknowledgement"
 
 **Symptom:**
 ```
 [ERROR] --credentials=host requires --acknowledge-credential-risk
+```
+
+**Diagnosis:**
+```bash
+# Check current credential mode
+cai run --help | grep -A2 credentials
 ```
 
 **Cause:** Host credential sharing requires explicit acknowledgement.
@@ -687,6 +823,11 @@ cai run --allow-host-credentials --i-understand-this-exposes-host-credentials
 [ERROR] --credentials=host / --allow-host-credentials is only supported in ECI mode (Docker Desktop)
 
 Current mode: Sysbox (context: containai-secure)
+```
+
+**Diagnosis:**
+```bash
+cai doctor | grep -E "ECI|Sysbox"
 ```
 
 **Cause:** Host credential sharing is a Docker Desktop sandbox feature, not available with Sysbox.
@@ -729,6 +870,12 @@ docker volume inspect sandbox-agent-data
 **Symptom:**
 ```
 [WARN] Source not found, skipping: /source/.claude.json
+```
+
+**Diagnosis:**
+```bash
+ls -la ~/.claude.json
+ls -la ~/.claude/
 ```
 
 **Cause:** The source file doesn't exist on your host.
@@ -880,6 +1027,11 @@ newgrp docker  # Apply immediately
 [ERROR] --mount-docker-socket requires --please-root-my-host acknowledgement
 ```
 
+**Diagnosis:**
+```bash
+cai run --help | grep -A2 docker-socket
+```
+
 **Cause:** Docker socket mounting is extremely dangerous.
 
 **Solution:**
@@ -902,6 +1054,11 @@ cai run --allow-host-docker-socket --i-understand-this-grants-root-access
 ```
 Status:                                  [ERROR] No isolation available
 Recommended: Install Docker Desktop 4.50+ with ECI, or run 'cai setup'
+```
+
+**Diagnosis:**
+```bash
+cai doctor
 ```
 
 **Cause:** Neither Docker Desktop sandboxes nor Sysbox are available.
@@ -929,6 +1086,12 @@ cai run --force
 [ERROR] Container isolation required but not detected. Use --force to bypass.
 ```
 
+**Diagnosis:**
+```bash
+echo $CONTAINAI_REQUIRE_ISOLATION
+cai doctor
+```
+
 **Cause:** `CONTAINAI_REQUIRE_ISOLATION=1` is set but isolation isn't available.
 
 **Solution:**
@@ -953,6 +1116,12 @@ Diagnostics:
 {...findmnt output...}
 ```
 
+**Diagnosis:**
+```bash
+# From inside the container (if you can access it)
+findmnt --real --json
+```
+
 **Cause:** Docker sandbox didn't properly mount the workspace.
 
 **Solution:**
@@ -971,6 +1140,12 @@ Diagnostics:
 ERROR: Refusing suspicious workspace candidate: /etc
 ```
 
+**Diagnosis:**
+```bash
+echo $PWD
+ls -la /etc  # Verify you're not accidentally in a system directory
+```
+
 **Cause:** Workspace resolved to a system directory.
 
 **Solution:**
@@ -985,6 +1160,11 @@ cai run --workspace ~/projects/myproject
 **Symptom:**
 ```
 ERROR: /home/agent/workspace is a mountpoint. Refusing to delete.
+```
+
+**Diagnosis:**
+```bash
+docker inspect <container-name> --format '{{.Mounts}}'
 ```
 
 **Cause:** Internal container error during workspace setup.
@@ -1002,6 +1182,12 @@ cai run
 **Symptom:**
 ```
 ERROR: Path escapes data directory: /mnt/agent-data/../../../etc/passwd -> /etc/passwd
+```
+
+**Diagnosis:**
+```bash
+# Inspect the volume for symlinks
+docker run --rm -v sandbox-agent-data:/data alpine find /data -type l -ls
 ```
 
 **Cause:** Symlink traversal attack detected in the data volume.
@@ -1066,21 +1252,45 @@ Quick reference of error messages and their section in this guide:
 | Error Message | Section |
 |---------------|---------|
 | "Docker is not installed" | [Installation Issues](#installation-issues) |
+| "No timeout command available" | [Installation Issues](#installation-issues) |
+| "jq is not installed" | [Installation Issues](#installation-issues) |
 | "Docker Desktop is not running" | [Docker Desktop Issues](#docker-desktop-issues) |
 | "Docker Desktop 4.50+ required" | [Docker Desktop Issues](#docker-desktop-issues) |
 | "docker sandbox command not found" | [Docker Desktop Issues](#docker-desktop-issues) |
+| "Docker Sandboxes feature is not enabled" | [Docker Desktop Issues](#docker-desktop-issues) |
 | "Sandboxes disabled by administrator" | [Docker Desktop Issues](#docker-desktop-issues) |
+| "ECI available but not enabled" | [Docker Desktop Issues](#docker-desktop-issues) |
+| "Docker command timed out" | [Docker Desktop Issues](#docker-desktop-issues) |
 | "containai-secure context not found" | [Sysbox Issues](#sysboxsecure-engine-issues) |
 | "Sysbox runtime not found" | [Sysbox Issues](#sysboxsecure-engine-issues) |
+| "Docker daemon for 'containai-secure' not running" | [Sysbox Issues](#sysboxsecure-engine-issues) |
+| "Socket not found" | [Sysbox Issues](#sysboxsecure-engine-issues) |
 | "Image not found" | [Container Issues](#container-issues) |
 | "Container exists but was not created by ContainAI" | [Container Issues](#container-issues) |
 | "Image mismatch" | [Container Issues](#container-issues) |
 | "Volume mismatch" | [Container Issues](#container-issues) |
+| "Failed to create volume" | [Container Issues](#container-issues) |
+| "Invalid volume name" | [Container Issues](#container-issues) |
+| "Unexpected container state" | [Container Issues](#container-issues) |
 | "Config file not found" | [Configuration Issues](#configuration-issues) |
 | "Failed to parse config file" | [Configuration Issues](#configuration-issues) |
+| "Python required to parse config" | [Configuration Issues](#configuration-issues) |
+| "Invalid workspace path" | [Configuration Issues](#configuration-issues) |
+| "Workspace path does not exist" | [Configuration Issues](#configuration-issues) |
+| "Authentication failed" / "Invalid credentials" | [Credential Issues](#stale-or-corrupted-credentials-in-sandbox) |
 | "--credentials=host requires acknowledgement" | [Credential Issues](#credentialimport-issues) |
+| "--credentials=host only supported in ECI mode" | [Credential Issues](#credentialimport-issues) |
 | "Rsync sync failed" | [Credential Issues](#credentialimport-issues) |
+| "Source not found, skipping" | [Credential Issues](#credentialimport-issues) |
+| "jq transformation failed" | [Credential Issues](#credentialimport-issues) |
 | "Seccomp compatibility: warning" | [WSL2 Issues](#platform-specific-issues) |
+| "Docker context issue" | [WSL2 Issues](#platform-specific-issues) |
+| "ECI not available" | [macOS Issues](#platform-specific-issues) |
 | "Permission denied" | [Linux Issues](#platform-specific-issues) |
+| "--mount-docker-socket requires acknowledgement" | [Security Issues](#security-related-issues) |
 | "No isolation available" | [Security Issues](#security-related-issues) |
+| "Container isolation required but not detected" | [Security Issues](#security-related-issues) |
+| "Could not discover mirrored workspace mount" | [Startup Issues](#startupentrypoint-issues) |
+| "Refusing suspicious workspace candidate" | [Startup Issues](#startupentrypoint-issues) |
+| "Workspace is a mountpoint" | [Startup Issues](#startupentrypoint-issues) |
 | "Path escapes data directory" | [Startup Issues](#startupentrypoint-issues) |
