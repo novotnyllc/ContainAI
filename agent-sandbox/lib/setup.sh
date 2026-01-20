@@ -135,11 +135,13 @@ _cai_test_wsl2_seccomp() {
 
 # Display seccomp warning box for WSL2
 # Note: Per spec, shows big warning with options
+# Uses ASCII box drawing for portability across terminals/locales
 _cai_show_seccomp_warning() {
     # Use printf for consistent output per memory convention
+    # ASCII box characters used for maximum terminal compatibility
     printf '%s\n' ""
     printf '%s\n' "+==================================================================+"
-    printf '%s\n' "|                          WARNING                                 |"
+    printf '%s\n' "|                       *** WARNING ***                            |"
     printf '%s\n' "+==================================================================+"
     printf '%s\n' "| Sysbox on WSL2 may not work due to seccomp filter conflicts.    |"
     printf '%s\n' "|                                                                  |"
@@ -161,36 +163,28 @@ _cai_show_seccomp_warning() {
 # Dependency Checks
 # ==============================================================================
 
-# Check required dependencies for setup
-# Arguments: $1 = dry_run flag ("true" to simulate)
-# Returns: 0=all deps available, 1=missing deps
-_cai_check_setup_deps() {
-    local dry_run="${1:-false}"
-    local missing=0
+# Check required dependencies for setup (informational only)
+# Arguments: none
+# Returns: 0 always (just logs what's missing)
+# Note: Does NOT abort - deps will be installed via apt-get
+_cai_check_setup_deps_info() {
+    local missing=""
 
-    # Check for jq (used for JSON parsing instead of python3)
+    # Check for jq (used for JSON parsing)
     if ! command -v jq >/dev/null 2>&1; then
-        if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would need: jq (JSON processor)"
-        else
-            _cai_error "jq is required but not installed"
-            _cai_error "  Install: sudo apt-get install jq"
-            missing=1
-        fi
+        missing="${missing}jq "
     fi
 
     # Check for wget (used for downloads)
     if ! command -v wget >/dev/null 2>&1; then
-        if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would need: wget"
-        else
-            _cai_error "wget is required but not installed"
-            _cai_error "  Install: sudo apt-get install wget"
-            missing=1
-        fi
+        missing="${missing}wget "
     fi
 
-    return $missing
+    if [[ -n "$missing" ]]; then
+        _cai_info "Will install missing dependencies: $missing"
+    fi
+
+    return 0
 }
 
 # ==============================================================================
@@ -226,24 +220,34 @@ _cai_install_sysbox_wsl2() {
     esac
 
     # Check for systemd (required for Sysbox service)
+    # In dry-run mode, warn but continue
     if ! command -v systemctl >/dev/null 2>&1; then
-        _cai_error "Sysbox requires systemd (systemctl not found)"
-        _cai_error "  Enable systemd in your WSL distribution:"
-        _cai_error "  Add 'systemd=true' to /etc/wsl.conf under [boot] section"
-        return 1
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_warn "[DRY-RUN] systemctl not found - systemd required for actual install"
+        else
+            _cai_error "Sysbox requires systemd (systemctl not found)"
+            _cai_error "  Enable systemd in your WSL distribution:"
+            _cai_error "  Add 'systemd=true' to /etc/wsl.conf under [boot] section"
+            return 1
+        fi
     fi
 
     # Check if systemd is actually running (PID 1)
+    # In dry-run mode, warn but continue
     local pid1_cmd
     pid1_cmd=$(ps -p 1 -o comm= 2>/dev/null || true)
     if [[ "$pid1_cmd" != "systemd" ]]; then
-        _cai_error "Systemd is not running as PID 1 (found: $pid1_cmd)"
-        _cai_error "  Configure WSL to boot with systemd:"
-        _cai_error "  1. Add to /etc/wsl.conf:"
-        _cai_error "     [boot]"
-        _cai_error "     systemd=true"
-        _cai_error "  2. Restart WSL: wsl --shutdown"
-        return 1
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_warn "[DRY-RUN] Systemd not running as PID 1 (found: $pid1_cmd) - required for actual install"
+        else
+            _cai_error "Systemd is not running as PID 1 (found: $pid1_cmd)"
+            _cai_error "  Configure WSL to boot with systemd:"
+            _cai_error "  1. Add to /etc/wsl.conf:"
+            _cai_error "     [boot]"
+            _cai_error "     systemd=true"
+            _cai_error "  2. Restart WSL: wsl --shutdown"
+            return 1
+        fi
     fi
 
     _cai_step "Checking for existing Sysbox installation"
@@ -254,12 +258,8 @@ _cai_install_sysbox_wsl2() {
         return 0
     fi
 
-    # Check dependencies first
-    if ! _cai_check_setup_deps "$dry_run"; then
-        if [[ "$dry_run" != "true" ]]; then
-            return 1
-        fi
-    fi
+    # Log what deps will be installed (informational only, no abort)
+    _cai_check_setup_deps_info
 
     _cai_step "Installing Sysbox dependencies"
     if [[ "$dry_run" == "true" ]]; then
@@ -330,8 +330,8 @@ _cai_install_sysbox_wsl2() {
     # Download and install
     local tmpdir deb_file
     tmpdir=$(mktemp -d)
-    # Ensure cleanup on exit
-    trap "rm -rf '$tmpdir'" EXIT
+    # Ensure cleanup on function return (RETURN trap doesn't affect caller shell)
+    trap "rm -rf '$tmpdir'" RETURN
     deb_file="$tmpdir/sysbox-ce.deb"
 
     _cai_step "Downloading Sysbox from: $download_url"
@@ -349,9 +349,7 @@ _cai_install_sysbox_wsl2() {
         fi
     fi
 
-    # Clear trap and cleanup
-    trap - EXIT
-    rm -rf "$tmpdir"
+    # Cleanup handled by RETURN trap
 
     _cai_ok "Sysbox installation complete"
     return 0
@@ -374,15 +372,29 @@ _cai_configure_daemon_json() {
 
     _cai_step "Configuring Docker daemon"
 
+    # In dry-run mode, show static preview without requiring jq/sudo
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would ensure directory exists: $(dirname "$daemon_json")"
+        _cai_info "[DRY-RUN] Would read existing config: $daemon_json"
+        _cai_info "[DRY-RUN] Would merge sysbox-runc runtime into daemon.json"
+        _cai_info "[DRY-RUN] Would write to: $daemon_json"
+        _cai_info "[DRY-RUN] Config would include:"
+        printf '%s\n' '{
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "/usr/bin/sysbox-runc"
+    }
+  }
+}'
+        _cai_ok "Docker daemon configuration (dry-run) complete"
+        return 0
+    fi
+
     # Ensure /etc/docker directory exists
     if [[ ! -d "$(dirname "$daemon_json")" ]]; then
-        if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would create directory: $(dirname "$daemon_json")"
-        else
-            if ! sudo mkdir -p "$(dirname "$daemon_json")"; then
-                _cai_error "Failed to create directory: $(dirname "$daemon_json")"
-                return 1
-            fi
+        if ! sudo mkdir -p "$(dirname "$daemon_json")"; then
+            _cai_error "Failed to create directory: $(dirname "$daemon_json")"
+            return 1
         fi
     fi
 
@@ -419,26 +431,20 @@ _cai_configure_daemon_json() {
         printf '%s\n' "$new_config"
     fi
 
-    if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would write to: $daemon_json"
-        _cai_info "[DRY-RUN] Content:"
-        printf '%s\n' "$new_config"
-    else
-        # Backup existing config
-        if [[ -f "$daemon_json" ]]; then
-            local backup_file="${daemon_json}.bak.$(date +%Y%m%d-%H%M%S)"
-            if ! sudo cp "$daemon_json" "$backup_file"; then
-                _cai_warn "Failed to backup existing daemon.json"
-            else
-                _cai_info "Backed up existing config to: $backup_file"
-            fi
+    # Backup existing config
+    if [[ -f "$daemon_json" ]]; then
+        local backup_file="${daemon_json}.bak.$(date +%Y%m%d-%H%M%S)"
+        if ! sudo cp "$daemon_json" "$backup_file"; then
+            _cai_warn "Failed to backup existing daemon.json"
+        else
+            _cai_info "Backed up existing config to: $backup_file"
         fi
+    fi
 
-        # Write new config
-        if ! printf '%s\n' "$new_config" | sudo tee "$daemon_json" >/dev/null; then
-            _cai_error "Failed to write daemon.json"
-            return 1
-        fi
+    # Write new config
+    if ! printf '%s\n' "$new_config" | sudo tee "$daemon_json" >/dev/null; then
+        _cai_error "Failed to write daemon.json"
+        return 1
     fi
 
     _cai_ok "Docker daemon configured with sysbox-runc runtime"
