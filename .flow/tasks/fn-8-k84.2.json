@@ -9,6 +9,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-8-k84.2.md",
   "status": "todo",
-  "title": "Add Mac-specific integration test for cai import",
+  "title": "Make integration tests hermetic using temp HOME fixture",
   "updated_at": "2026-01-20T07:55:56.358910Z"
 }

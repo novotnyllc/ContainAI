@@ -46,12 +46,19 @@ cai
 # Then run: claude login (inside the container)
 ```
 
-**Existing Claude users on Linux/WSL** (sync plugins and settings from host):
+**Existing Claude users** (sync plugins and settings from host):
 ```bash
 source ./containai.sh
 cai import
 ```
-Note: `cai import` syncs plugins, settings, and credentials from host to volume. **Linux/WSL only** - macOS is not yet supported.
+Note: `cai import` syncs plugins, settings, and credentials from host to volume.
+
+**`cai import` prerequisites:**
+- Docker Desktop (Linux, macOS, or Windows WSL2)
+- `jq` (JSON parsing)
+- `python3` (config file parsing)
+
+**macOS users:** Docker Desktop must have file-sharing enabled for your home directory (`$HOME`). This is typically enabled by default in Settings > Resources > File sharing.
 
 **Using a custom volume name:**
 ```bash
@@ -205,6 +212,33 @@ Docker sandbox provides security isolation through:
 **No manual security configuration required.** The `cai` command enforces sandbox usage with fail-closed behavior: blocks when sandbox is unavailable or status cannot be verified.
 
 Plain `docker run` is allowed for CI/smoke tests (see Testing below).
+
+### Credential Syncing (`cai import`)
+
+The `cai import` command syncs credentials and configuration from your host to the data volume. Be aware of what gets synced:
+
+| Host Path | Volume Path |
+|-----------|-------------|
+| `~/.claude/.credentials.json` | `/data/claude/credentials.json` |
+| `~/.codex/auth.json` | `/data/codex/auth.json` |
+| `~/.gemini/oauth_creds.json` | `/data/gemini/oauth_creds.json` |
+| `~/.config/gh/` | `/data/config/gh/` |
+
+Additional non-sensitive configuration (plugins, settings, shell aliases, tmux) is also synced.
+
+**To remove synced credentials and reset the data volume:**
+```bash
+# Find the volume name (default: sandbox-agent-data)
+docker volume ls | grep sandbox
+
+# Remove the volume (container must be stopped first)
+docker volume rm sandbox-agent-data
+
+# Or with a custom volume name
+docker volume rm <your-volume-name>
+```
+
+The volume will be recreated on the next `cai` run. Use `cai import` again to re-sync your settings.
 
 ## Container Management
 

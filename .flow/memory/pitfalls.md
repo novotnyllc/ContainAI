@@ -87,3 +87,6 @@ When preserving original variable for error message, save it BEFORE the assignme
 
 ## 2026-01-20 manual [pitfall]
 When detecting multiline quoted values in env file parsing, check for ANY matching quote in the remainder of the line (not just at end) - values like FOO="bar" #comment are valid single-line
+
+## 2026-01-20 manual [pitfall]
+When overriding HOME for tests, preserve DOCKER_CONFIG pointing to real home to avoid breaking Docker CLI context

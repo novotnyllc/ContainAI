@@ -4,10 +4,10 @@
   "depends_on_epics": [],
   "id": "fn-8-k84",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-20T16:31:52.381145Z",
   "spec_path": ".flow/specs/fn-8-k84.md",
   "status": "open",
   "title": "Add Mac support for import scripts",
-  "updated_at": "2026-01-20T07:55:31.260529Z"
+  "updated_at": "2026-01-20T16:31:52.381164Z"
 }
