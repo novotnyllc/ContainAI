@@ -227,8 +227,9 @@ _import_restore_from_tgz() {
         # Step 3: Check entry types using allowlist (only - and d allowed)
         # BusyBox tar -tv format: permissions owner/group size date time name
         # Note: Symlinks/hardlinks are intentionally rejected per spec (security)
-        # Capture listing first to ensure tar succeeds before processing
-        if ! listing=$(tar -tvzf /tmp/archive.tgz 2>&1); then
+        # Capture only stdout to avoid tar warnings polluting type check
+        # Non-zero exit is handled as LIST_FAILED, stderr untouched for diagnostics
+        if ! listing=$(tar -tvzf /tmp/archive.tgz); then
             echo "LIST_FAILED"
             exit 0
         fi
