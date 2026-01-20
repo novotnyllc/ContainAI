@@ -21,6 +21,48 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ==============================================================================
+# Early guard: Docker availability check
+# ==============================================================================
+# Check docker binary first
+if ! command -v docker &>/dev/null; then
+    echo "[SKIP] docker binary not found - skipping integration tests"
+    exit 0
+fi
+
+# Check docker daemon is running (don't hide regressions)
+if ! docker info &>/dev/null; then
+    echo "[WARN] docker daemon not running (docker info failed)" >&2
+    echo "[FAIL] Cannot run integration tests without docker daemon" >&2
+    exit 1
+fi
+
+# ==============================================================================
+# Hermetic fixture setup
+# ==============================================================================
+# Save real HOME before any overrides - needed for:
+# 1. Creating fixture under real home (Docker Desktop file-sharing on macOS)
+# 2. Preserving DOCKER_CONFIG so Docker CLI keeps working
+REAL_HOME="$HOME"
+
+# Create fixture directory under real home (required for Docker Desktop file-sharing)
+FIXTURE_HOME="${REAL_HOME}/.containai-test-home-$$"
+mkdir -p "$FIXTURE_HOME"
+
+# Preserve Docker config pointing to real home's .docker directory
+# (per pitfall: "When overriding HOME for tests, preserve DOCKER_CONFIG pointing to real home")
+export DOCKER_CONFIG="${REAL_HOME}/.docker"
+
+# Cleanup function for fixture directory
+cleanup_fixture() {
+    if [[ -d "$FIXTURE_HOME" ]]; then
+        rm -rf "$FIXTURE_HOME"
+    fi
+}
+
+# ==============================================================================
+# Test configuration
+# ==============================================================================
 # Use isolated test volumes by default to prevent clobbering user data
 # Each test run gets a unique volume name
 TEST_RUN_ID="test-$(date +%s)-$$"
@@ -57,7 +99,13 @@ cleanup_test_volumes() {
         echo "$run_volumes" | xargs docker volume rm 2>/dev/null || true
     fi
 }
-trap cleanup_test_volumes EXIT
+
+# Combined cleanup: volumes AND fixture directory
+cleanup_all() {
+    cleanup_test_volumes
+    cleanup_fixture
+}
+trap cleanup_all EXIT
 
 # Register the main test volume
 register_test_volume "$DATA_VOLUME"
@@ -103,6 +151,67 @@ run_in_image_no_entrypoint() {
     if ! docker run --rm --entrypoint /bin/bash -v "$DATA_VOLUME":/mnt/agent-data "$IMAGE_NAME" -c "$1" 2>/dev/null; then
         echo "docker_error"
     fi
+}
+
+# ==============================================================================
+# Hermetic fixture population
+# ==============================================================================
+# Create minimal subset of source files needed for test_full_sync assertions.
+# These files are created in FIXTURE_HOME, which is used as HOME for cai import
+# invocations, making tests deterministic and portable across platforms.
+#
+# Files created match what _IMPORT_SYNC_MAP expects and what test_full_sync checks:
+# - ~/.claude.json -> /data/claude/claude.json
+# - ~/.claude/.credentials.json -> /data/claude/credentials.json
+# - ~/.claude/settings.json -> /data/claude/settings.json
+# - ~/.claude/plugins/ (directory) -> /data/claude/plugins/
+# - ~/.config/gh/hosts.yml -> /data/config/gh/
+# - ~/.bash_aliases -> /data/shell/
+# - ~/.codex/auth.json -> /data/codex/
+# - ~/.gemini/oauth_creds.json -> /data/gemini/
+# - ~/.copilot/config.json -> /data/copilot/
+# - ~/.config/tmux/tmux.conf -> /data/config/tmux/
+# - ~/.local/share/tmux/plugins/ (directory) -> /data/local/share/tmux/
+#
+populate_fixture() {
+    local fixture="$1"
+
+    # Claude Code files
+    mkdir -p "$fixture/.claude/plugins"
+    echo '{"test": true}' > "$fixture/.claude.json"
+    echo '{"credentials": "test"}' > "$fixture/.claude/.credentials.json"
+    echo '{"settings": "test"}' > "$fixture/.claude/settings.json"
+    # Create a dummy plugin to verify plugins directory syncs
+    mkdir -p "$fixture/.claude/plugins/cache/test-plugin"
+    echo '{}' > "$fixture/.claude/plugins/cache/test-plugin/plugin.json"
+
+    # GitHub CLI
+    mkdir -p "$fixture/.config/gh"
+    echo 'github.com:' > "$fixture/.config/gh/hosts.yml"
+    echo '  oauth_token: test-token' >> "$fixture/.config/gh/hosts.yml"
+
+    # Shell
+    echo 'alias test="echo test"' > "$fixture/.bash_aliases"
+
+    # Codex
+    mkdir -p "$fixture/.codex"
+    echo '{"auth": "test"}' > "$fixture/.codex/auth.json"
+
+    # Gemini
+    mkdir -p "$fixture/.gemini"
+    echo '{"oauth": "test"}' > "$fixture/.gemini/oauth_creds.json"
+
+    # Copilot
+    mkdir -p "$fixture/.copilot"
+    echo '{"config": "test"}' > "$fixture/.copilot/config.json"
+
+    # tmux config
+    mkdir -p "$fixture/.config/tmux"
+    echo 'set -g prefix C-a' > "$fixture/.config/tmux/tmux.conf"
+
+    # tmux plugins (data directory)
+    mkdir -p "$fixture/.local/share/tmux/plugins/tpm"
+    echo '# TPM' > "$fixture/.local/share/tmux/plugins/tpm/tpm"
 }
 
 # ==============================================================================
@@ -266,9 +375,15 @@ test_dry_run() {
 test_full_sync() {
     section "Test 3: Full sync copies all configs"
 
-    # Run full sync via cai import and require success
+    # Populate fixture with known test files (hermetic test setup)
+    populate_fixture "$FIXTURE_HOME"
+    pass "Fixture populated with test files"
+
+    # Run full sync via cai import using fixture HOME
+    # HOME override is ONLY for the cai import invocation (per spec)
+    # DOCKER_CONFIG is already exported globally pointing to real home's .docker
     local sync_exit=0
-    bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$DATA_VOLUME'" >/dev/null 2>&1 || sync_exit=$?
+    HOME="$FIXTURE_HOME" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$DATA_VOLUME'" >/dev/null 2>&1 || sync_exit=$?
     if [[ $sync_exit -ne 0 ]]; then
         fail "Full sync failed with exit code $sync_exit"
         return
@@ -2442,11 +2557,9 @@ main() {
     echo "Integration Tests for ContainAI"
     echo "=============================================================================="
 
-    # Check prerequisites
-    if ! command -v docker &>/dev/null; then
-        echo "ERROR: docker is required" >&2
-        exit 1
-    fi
+    # Docker availability already verified by early guard at script start
+    # Populate hermetic fixture for test_full_sync (done once, used by multiple tests)
+    info "Using hermetic fixture at: $FIXTURE_HOME"
 
     # Check if image exists (build if needed)
     if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then

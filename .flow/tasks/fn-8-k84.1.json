@@ -5,10 +5,20 @@
   "created_at": "2026-01-20T07:55:36.658203Z",
   "depends_on": [],
   "epic": "fn-8-k84",
+  "evidence": {
+    "commits": [
+      "7424901",
+      "fcd02e4"
+    ],
+    "prs": [],
+    "tests": [
+      "manual README review"
+    ]
+  },
   "id": "fn-8-k84.1",
   "priority": null,
   "spec_path": ".flow/tasks/fn-8-k84.1.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Update README with Mac support, prerequisites, and security note",
-  "updated_at": "2026-01-20T16:32:32.842620Z"
+  "updated_at": "2026-01-20T16:42:41.045227Z"
 }
