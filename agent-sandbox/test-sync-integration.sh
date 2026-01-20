@@ -15,7 +15,7 @@
 # 10. opencode CLI check (optional - depends on image build)
 # 11-15. Workspace volume resolution tests
 # 16-39. Env var import tests (allowlist, from_host, env_file, entrypoint, etc.)
-# 40-41. --from source tests (directory sync, tgz restore mode)
+# 40-45. --from source tests (directory sync, tgz restore, roundtrip, idempotency, errors)
 # ==============================================================================
 
 set -euo pipefail
@@ -2568,6 +2568,22 @@ from_host = true
 }
 
 # ==============================================================================
+# Hermetic cai export helper
+# ==============================================================================
+# Run cai export with HOME overridden to FIXTURE_HOME for hermetic testing.
+# DOCKER_CONFIG is preserved globally so Docker CLI keeps working.
+#
+# Usage: run_cai_export [extra_args...]
+# Example: run_cai_export --data-volume "$vol" -o /path/to/backup.tgz
+#
+# Returns: exit code from cai export
+# Stdout: cai export output (for capture)
+#
+run_cai_export() {
+    HOME="$FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai export "$@"' _ "$SCRIPT_DIR" "$@" 2>&1
+}
+
+# ==============================================================================
 # Test 40: --from directory syncs from alternate source
 # ==============================================================================
 test_from_directory() {
@@ -2714,6 +2730,323 @@ from_host = true
 }
 
 # ==============================================================================
+# Test 42: Export volume, import from tgz, volume matches
+# ==============================================================================
+test_export_import_roundtrip() {
+    section "Test 42: Export volume, import from tgz, volume matches"
+
+    local test_dir source_vol target_vol archive_path
+    test_dir=$(mktemp -d)
+    source_vol="containai-test-export-src-${TEST_RUN_ID}"
+    target_vol="containai-test-export-tgt-${TEST_RUN_ID}"
+    archive_path="$test_dir/roundtrip-backup.tgz"
+
+    # Create and register volumes
+    docker volume create "$source_vol" >/dev/null
+    docker volume create "$target_vol" >/dev/null
+    register_test_volume "$source_vol"
+    register_test_volume "$target_vol"
+
+    # Populate source volume with distinctive test content
+    docker run --rm -v "$source_vol":/data alpine:3.19 sh -c '
+        mkdir -p /data/claude /data/config/gh /data/shell
+        echo "{\"roundtrip_test\": \"marker_98765\"}" > /data/claude/settings.json
+        echo "oauth_token: roundtrip_test" > /data/config/gh/hosts.yml
+        echo "alias rt=\"echo roundtrip\"" > /data/shell/bash_aliases
+        # Create a nested directory structure
+        mkdir -p /data/claude/plugins/test-plugin
+        echo "{\"name\": \"test-plugin\"}" > /data/claude/plugins/test-plugin/manifest.json
+    ' 2>/dev/null
+
+    pass "Source volume populated with test content"
+
+    # Export source volume to tgz
+    local export_output export_exit=0
+    export_output=$(run_cai_export --data-volume "$source_vol" -o "$archive_path") || export_exit=$?
+
+    if [[ $export_exit -eq 0 ]] && [[ -f "$archive_path" ]]; then
+        pass "Export created archive successfully"
+    else
+        fail "Export failed (exit=$export_exit)"
+        info "Output: $export_output"
+        rm -rf "$test_dir"
+        return
+    fi
+
+    # Verify archive is a valid gzip tarball
+    if tar -tzf "$archive_path" >/dev/null 2>&1; then
+        pass "Archive is valid gzip tarball"
+    else
+        fail "Archive is not a valid gzip tarball"
+        rm -rf "$test_dir"
+        return
+    fi
+
+    # Import archive to target volume
+    local import_output import_exit=0
+    import_output=$(run_cai_import --data-volume "$target_vol" --from "$archive_path") || import_exit=$?
+
+    if [[ $import_exit -eq 0 ]]; then
+        pass "Import from tgz succeeded"
+    else
+        fail "Import from tgz failed (exit=$import_exit)"
+        info "Output: $import_output"
+        rm -rf "$test_dir"
+        return
+    fi
+
+    # Compare checksums of key files between source and target
+    # Using md5sum in alpine container (busybox md5sum)
+    local source_checksums target_checksums
+    source_checksums=$(docker run --rm -v "$source_vol":/data alpine:3.19 sh -c '
+        find /data -type f -exec md5sum {} \; 2>/dev/null | sort
+    ') || source_checksums=""
+    target_checksums=$(docker run --rm -v "$target_vol":/data alpine:3.19 sh -c '
+        find /data -type f -exec md5sum {} \; 2>/dev/null | sort
+    ') || target_checksums=""
+
+    if [[ "$source_checksums" == "$target_checksums" ]]; then
+        pass "File checksums match between source and target volumes"
+    else
+        fail "File checksums differ between source and target volumes"
+        info "Source checksums:"
+        printf '%s\n' "$source_checksums" | head -10 | while IFS= read -r line; do
+            echo "    $line"
+        done
+        info "Target checksums:"
+        printf '%s\n' "$target_checksums" | head -10 | while IFS= read -r line; do
+            echo "    $line"
+        done
+    fi
+
+    # Verify distinctive content exists in target
+    local target_content
+    target_content=$(docker run --rm -v "$target_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || target_content=""
+
+    if echo "$target_content" | grep -q "marker_98765"; then
+        pass "Target volume contains roundtrip marker"
+    else
+        fail "Target volume missing roundtrip marker"
+        info "Content: $target_content"
+    fi
+
+    # Cleanup
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
+# Test 43: Import from tgz twice produces identical result (idempotency)
+# ==============================================================================
+test_tgz_import_idempotent() {
+    section "Test 43: Import from tgz twice produces identical result"
+
+    local test_dir test_vol archive_path
+    test_dir=$(mktemp -d)
+    test_vol="containai-test-idemp-${TEST_RUN_ID}"
+    archive_path="$test_dir/idempotent-test.tgz"
+
+    # Create and register volume
+    docker volume create "$test_vol" >/dev/null
+    register_test_volume "$test_vol"
+
+    # Create a test archive with known content
+    local archive_src
+    archive_src=$(mktemp -d)
+    mkdir -p "$archive_src/claude/plugins" "$archive_src/config/gh"
+    echo '{"idempotent_test": "first_import_12345"}' > "$archive_src/claude/settings.json"
+    echo '{"auth": "test"}' > "$archive_src/claude/credentials.json"
+    echo 'oauth_token: idemp_test' > "$archive_src/config/gh/hosts.yml"
+    # Create nested content
+    mkdir -p "$archive_src/claude/plugins/test"
+    echo '{"plugin": true}' > "$archive_src/claude/plugins/test/config.json"
+    (cd "$archive_src" && tar -czf "$archive_path" .)
+    rm -rf "$archive_src"
+
+    pass "Test archive created"
+
+    # First import
+    local import1_output import1_exit=0
+    import1_output=$(run_cai_import --data-volume "$test_vol" --from "$archive_path") || import1_exit=$?
+
+    if [[ $import1_exit -eq 0 ]]; then
+        pass "First import succeeded"
+    else
+        fail "First import failed (exit=$import1_exit)"
+        info "Output: $import1_output"
+        rm -rf "$test_dir"
+        return
+    fi
+
+    # Capture state after first import
+    local checksums_after_first state_after_first
+    checksums_after_first=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        find /data -type f -exec md5sum {} \; 2>/dev/null | sort
+    ') || checksums_after_first=""
+    state_after_first=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        find /data -type f -exec stat -c "%a %s %n" {} \; 2>/dev/null | sort
+    ') || state_after_first=""
+
+    # Second import (same archive, same volume)
+    local import2_output import2_exit=0
+    import2_output=$(run_cai_import --data-volume "$test_vol" --from "$archive_path") || import2_exit=$?
+
+    if [[ $import2_exit -eq 0 ]]; then
+        pass "Second import succeeded"
+    else
+        fail "Second import failed (exit=$import2_exit)"
+        info "Output: $import2_output"
+        rm -rf "$test_dir"
+        return
+    fi
+
+    # Capture state after second import
+    local checksums_after_second state_after_second
+    checksums_after_second=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        find /data -type f -exec md5sum {} \; 2>/dev/null | sort
+    ') || checksums_after_second=""
+    state_after_second=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        find /data -type f -exec stat -c "%a %s %n" {} \; 2>/dev/null | sort
+    ') || state_after_second=""
+
+    # Compare checksums
+    if [[ "$checksums_after_first" == "$checksums_after_second" ]]; then
+        pass "File checksums identical after first and second import"
+    else
+        fail "File checksums differ between imports"
+        info "After first: $(echo "$checksums_after_first" | wc -l) files"
+        info "After second: $(echo "$checksums_after_second" | wc -l) files"
+    fi
+
+    # Compare file attributes (permissions, sizes)
+    if [[ "$state_after_first" == "$state_after_second" ]]; then
+        pass "File permissions and sizes identical after both imports"
+    else
+        fail "File permissions or sizes differ between imports"
+    fi
+
+    # Verify content is correct
+    local content
+    content=$(docker run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || content=""
+
+    if echo "$content" | grep -q "first_import_12345"; then
+        pass "Volume contains expected content after idempotent imports"
+    else
+        fail "Volume content unexpected after imports"
+        info "Content: $content"
+    fi
+
+    # Cleanup
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
+# Test 44: Invalid tgz produces error exit code
+# ==============================================================================
+test_invalid_tgz_error() {
+    section "Test 44: Invalid tgz produces error exit code"
+
+    local test_dir test_vol invalid_archive
+    test_dir=$(mktemp -d)
+    test_vol="containai-test-invalid-${TEST_RUN_ID}"
+    invalid_archive="$test_dir/invalid.tgz"
+
+    # Create and register volume
+    docker volume create "$test_vol" >/dev/null
+    register_test_volume "$test_vol"
+
+    # Create an invalid "tgz" file (not a valid gzip tarball)
+    echo "This is not a valid tgz archive" > "$invalid_archive"
+
+    # Attempt import with invalid archive - should fail
+    local import_output import_exit=0
+    import_output=$(run_cai_import --data-volume "$test_vol" --from "$invalid_archive") || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        pass "Import with invalid tgz failed as expected (exit=$import_exit)"
+    else
+        fail "Import with invalid tgz should have failed but succeeded"
+        info "Output: $import_output"
+    fi
+
+    # Verify error message mentions archive/invalid
+    if echo "$import_output" | grep -qi "invalid\|archive\|gzip\|tar"; then
+        pass "Error message indicates archive problem"
+    else
+        info "Note: Error message may not explicitly mention archive"
+        info "Output: $(echo "$import_output" | head -5)"
+    fi
+
+    # Test with truncated/corrupt gzip file
+    local corrupt_archive="$test_dir/corrupt.tgz"
+    # Create a valid archive first, then corrupt it
+    local archive_src
+    archive_src=$(mktemp -d)
+    mkdir -p "$archive_src/test"
+    echo "test content" > "$archive_src/test/file.txt"
+    (cd "$archive_src" && tar -czf "$corrupt_archive" .)
+    rm -rf "$archive_src"
+    # Truncate the file to corrupt it
+    head -c 50 "$corrupt_archive" > "$corrupt_archive.tmp"
+    mv "$corrupt_archive.tmp" "$corrupt_archive"
+
+    local corrupt_output corrupt_exit=0
+    corrupt_output=$(run_cai_import --data-volume "$test_vol" --from "$corrupt_archive") || corrupt_exit=$?
+
+    if [[ $corrupt_exit -ne 0 ]]; then
+        pass "Import with corrupt tgz failed as expected (exit=$corrupt_exit)"
+    else
+        fail "Import with corrupt tgz should have failed but succeeded"
+    fi
+
+    # Cleanup
+    rm -rf "$test_dir"
+}
+
+# ==============================================================================
+# Test 45: Missing source produces error exit code
+# ==============================================================================
+test_missing_source_error() {
+    section "Test 45: Missing source produces error exit code"
+
+    local test_vol
+    test_vol="containai-test-missing-${TEST_RUN_ID}"
+
+    # Create and register volume
+    docker volume create "$test_vol" >/dev/null
+    register_test_volume "$test_vol"
+
+    # Test with non-existent file path
+    local import_output import_exit=0
+    import_output=$(run_cai_import --data-volume "$test_vol" --from "/nonexistent/path/backup.tgz") || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        pass "Import with missing file source failed as expected (exit=$import_exit)"
+    else
+        fail "Import with missing file source should have failed but succeeded"
+        info "Output: $import_output"
+    fi
+
+    # Verify error message mentions source not found
+    if echo "$import_output" | grep -qi "not found\|does not exist\|no such\|invalid path"; then
+        pass "Error message indicates source not found"
+    else
+        info "Note: Error message may not explicitly mention 'not found'"
+        info "Output: $(echo "$import_output" | head -5)"
+    fi
+
+    # Test with non-existent directory path
+    local dir_output dir_exit=0
+    dir_output=$(run_cai_import --data-volume "$test_vol" --from "/nonexistent/directory/") || dir_exit=$?
+
+    if [[ $dir_exit -ne 0 ]]; then
+        pass "Import with missing directory source failed as expected (exit=$dir_exit)"
+    else
+        fail "Import with missing directory source should have failed but succeeded"
+        info "Output: $dir_output"
+    fi
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
@@ -2781,9 +3114,13 @@ main() {
     test_env_missing_section_silent
     test_env_hermetic
 
-    # --from source tests (Tests 40-41)
+    # --from source tests (Tests 40-45)
     test_from_directory
     test_from_tgz_restore_mode
+    test_export_import_roundtrip
+    test_tgz_import_idempotent
+    test_invalid_tgz_error
+    test_missing_source_error
 
     # Summary
     echo ""
