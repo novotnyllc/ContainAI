@@ -116,6 +116,137 @@ _import_detect_source_type() {
 }
 
 # ==============================================================================
+# tgz restore function
+# ==============================================================================
+
+# Restore volume from tgz archive (idempotent)
+# This is a "pure restore" that bypasses SYNC_MAP and all transforms.
+# Arguments:
+#   $1 = Docker context ("" for default)
+#   $2 = volume name (required)
+#   $3 = archive path (required, must be gzip-compressed tar)
+# Returns: 0 on success, 1 on failure
+_import_restore_from_tgz() {
+    local ctx="${1:-}"
+    local volume="${2:-}"
+    local archive="${3:-}"
+
+    # Build docker command prefix based on context
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
+
+    # Validate required arguments
+    if [[ -z "$volume" ]]; then
+        _import_error "Volume name is required"
+        return 1
+    fi
+
+    if [[ -z "$archive" ]]; then
+        _import_error "Archive path is required"
+        return 1
+    fi
+
+    # Check tar availability (required for validation)
+    if ! command -v tar >/dev/null 2>&1; then
+        _import_error "tar command not found (required for archive restore)"
+        return 1
+    fi
+
+    # Validate archive exists and is readable
+    if [[ ! -f "$archive" ]]; then
+        _import_error "Archive not found: $archive"
+        return 1
+    fi
+
+    if [[ ! -r "$archive" ]]; then
+        _import_error "Archive not readable: $archive"
+        return 1
+    fi
+
+    _import_step "Validating archive integrity..."
+
+    # Step 1: Validate archive can be read and check for path traversal
+    # Use tar -tzf for path names (handles filenames with spaces correctly)
+    local tar_names
+    if ! tar_names=$(tar -tzf "$archive" 2>/dev/null); then
+        _import_error "Failed to read archive (corrupt or not gzip-compressed tar): $archive"
+        return 1
+    fi
+
+    # Check for absolute paths and parent directory traversal
+    if echo "$tar_names" | grep -qE '(^/|(^|/)\.\.(/|$))'; then
+        _import_error "Archive contains unsafe paths (absolute or parent traversal)"
+        return 1
+    fi
+
+    # Step 2: Check entry types using verbose listing
+    # Filter to actual entry lines only (start with type char + permissions)
+    local tar_types
+    if ! tar_types=$(tar -tvzf "$archive" 2>/dev/null); then
+        _import_error "Failed to list archive contents: $archive"
+        return 1
+    fi
+
+    # Extract only entry lines (start with file type indicator + permissions pattern)
+    # Then check for disallowed types
+    # Allow: d (directory), - (regular file)
+    # Reject: l (symlink), h (hardlink), b (block), c (char), p (FIFO), s (socket)
+    local entry_types
+    entry_types=$(echo "$tar_types" | grep -E '^[a-z-]([r-][w-][xsStT-]){3}' | cut -c1)
+
+    if echo "$entry_types" | grep -qE '^[lhbcps]'; then
+        _import_error "Archive contains disallowed entry types (only regular files and directories permitted)"
+        _import_info "Symlinks, hardlinks, devices, FIFOs, and sockets are not allowed"
+        return 1
+    fi
+
+    _import_success "Archive validation passed"
+
+    # Ensure volume exists (create if needed)
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" volume inspect "$volume" >/dev/null 2>&1; then
+        _import_step "Creating volume: $volume"
+        if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" volume create "$volume" >/dev/null; then
+            _import_error "Failed to create volume $volume"
+            return 1
+        fi
+    fi
+
+    _import_step "Clearing volume contents for idempotent restore..."
+
+    # Clear volume contents (including dotfiles) for idempotency
+    # Use find -mindepth 1 -delete to remove all contents but preserve mount point
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
+        -v "$volume":/data \
+        alpine:3.20 \
+        find /data -mindepth 1 -delete; then
+        _import_error "Failed to clear volume contents"
+        return 1
+    fi
+
+    _import_step "Extracting archive to volume..."
+
+    # Extract archive to volume via alpine container
+    # Pattern from export.sh:233-243 - use docker run with tar extraction
+    # Read archive via stdin to avoid needing to mount the archive file
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
+        -v "$volume":/data \
+        -i \
+        alpine:3.20 \
+        tar -xzf - -C /data < "$archive"; then
+        _import_error "Failed to extract archive to volume"
+        return 1
+    fi
+
+    _import_success "Archive restored to volume: $volume"
+    return 0
+}
+
+# ==============================================================================
 # SYNC_MAP: Declarative configuration array for syncing host configs to volume
 # ==============================================================================
 # Format: "source:target:flags"
