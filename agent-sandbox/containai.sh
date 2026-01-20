@@ -726,8 +726,9 @@ _containai_sandbox_reset_cmd() {
     done
 
     # Check if docker sandbox is available (Docker Desktop feature)
+    # Force default context - sandbox commands only work with Docker Desktop
     # Let _cai_sandbox_feature_enabled show its detailed diagnostics
-    if ! _cai_sandbox_feature_enabled; then
+    if ! DOCKER_CONTEXT= DOCKER_HOST= _cai_sandbox_feature_enabled; then
         _cai_info "For Sysbox mode, use: cai stop && cai --restart"
         return 1
     fi
@@ -742,8 +743,11 @@ _containai_sandbox_reset_cmd() {
 
     # Find sandboxes by workspace using docker sandbox ls (with timeout)
     # Get ID and Workspace (status check is not reliable, we always try stop)
-    local sandbox_list ls_rc
-    sandbox_list=$(_cai_timeout 10 docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>&1)
+    # Force default context for sandbox commands (Docker Desktop only)
+    # Capture stdout only for parsing; stderr goes to /dev/null for clean parsing
+    # (errors are detected via exit code, not stderr content)
+    local sandbox_list ls_rc ls_stderr
+    sandbox_list=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_timeout 10 docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>/dev/null)
     ls_rc=$?
 
     # Handle timeout exit codes
@@ -751,23 +755,20 @@ _containai_sandbox_reset_cmd() {
         _cai_error "docker sandbox ls timed out"
         _cai_info "Check Docker Desktop is running and responsive"
         return 1
-    elif [[ $ls_rc -eq 125 ]] && [[ "${_CAI_TIMEOUT_UNAVAILABLE:-}" == "1" ]]; then
-        # No timeout mechanism - run without timeout (check flag to avoid masking real 125 exits)
-        unset _CAI_TIMEOUT_UNAVAILABLE
-        sandbox_list=$(docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>&1)
-        ls_rc=$?
     fi
 
     if [[ $ls_rc -ne 0 ]]; then
+        # Re-run to capture error message for diagnostics
+        ls_stderr=$(DOCKER_CONTEXT= DOCKER_HOST= docker sandbox ls --format '{{.ID}}' 2>&1 >/dev/null) || true
         # Check if docker sandbox command is unavailable
         # Match Docker's specific error messages to avoid false positives
         # Docker outputs: "docker: 'sandbox' is not a docker command" or "unknown command: sandbox"
-        if printf '%s' "$sandbox_list" | grep -qiE "'sandbox' is not a docker command|unknown command.*sandbox"; then
+        if printf '%s' "$ls_stderr" | grep -qiE "'sandbox' is not a docker command|unknown command.*sandbox"; then
             _cai_error "docker sandbox command not available"
             _cai_info "This command requires Docker Desktop 4.50+"
             return 1
         fi
-        _cai_error "Failed to list sandboxes: $sandbox_list"
+        _cai_error "Failed to list sandboxes: $ls_stderr"
         return 1
     fi
 
@@ -776,8 +777,9 @@ _containai_sandbox_reset_cmd() {
     local -a matching_ids=()
     local id ws resolved_ws
     while IFS=$'\t' read -r id ws; do
-        # Skip empty lines
+        # Skip empty lines or lines missing required fields
         [[ -z "$id" ]] && continue
+        [[ -z "$ws" ]] && continue
 
         # Try to resolve sandbox workspace path (handles symlinks)
         # Fall back to raw string comparison if cd fails (workspace path inaccessible)
@@ -811,6 +813,7 @@ _containai_sandbox_reset_cmd() {
     # Stop and remove each matching sandbox
     # Always attempt stop first (don't rely on status field - not always reliable)
     # Ignore "not running" errors from stop
+    # Force default context for sandbox commands (Docker Desktop only)
     local sandbox_id idx stop_output rm_output stop_rc rm_rc
     local any_failed=false
     for idx in "${!matching_ids[@]}"; do
@@ -818,15 +821,8 @@ _containai_sandbox_reset_cmd() {
 
         # Always try to stop (ignore "not running" errors)
         _cai_info "Stopping sandbox $sandbox_id..."
-        stop_output=$(_cai_timeout 30 docker sandbox stop "$sandbox_id" 2>&1)
+        stop_output=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_timeout 30 docker sandbox stop "$sandbox_id" 2>&1)
         stop_rc=$?
-        # Handle no timeout mechanism (125) - run without timeout
-        # Check flag to avoid masking real 125 exits
-        if [[ $stop_rc -eq 125 ]] && [[ "${_CAI_TIMEOUT_UNAVAILABLE:-}" == "1" ]]; then
-            unset _CAI_TIMEOUT_UNAVAILABLE
-            stop_output=$(docker sandbox stop "$sandbox_id" 2>&1)
-            stop_rc=$?
-        fi
         if [[ $stop_rc -ne 0 ]]; then
             # Ignore "not running" errors
             if ! printf '%s' "$stop_output" | grep -qiE "not running|already stopped"; then
@@ -836,15 +832,8 @@ _containai_sandbox_reset_cmd() {
 
         # Remove the sandbox
         _cai_info "Removing sandbox $sandbox_id..."
-        rm_output=$(_cai_timeout 30 docker sandbox rm "$sandbox_id" 2>&1)
+        rm_output=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_timeout 30 docker sandbox rm "$sandbox_id" 2>&1)
         rm_rc=$?
-        # Handle no timeout mechanism (125) - run without timeout
-        # Check flag to avoid masking real 125 exits
-        if [[ $rm_rc -eq 125 ]] && [[ "${_CAI_TIMEOUT_UNAVAILABLE:-}" == "1" ]]; then
-            unset _CAI_TIMEOUT_UNAVAILABLE
-            rm_output=$(docker sandbox rm "$sandbox_id" 2>&1)
-            rm_rc=$?
-        fi
         if [[ $rm_rc -ne 0 ]]; then
             # Check for "already removed" errors
             if printf '%s' "$rm_output" | grep -qiE "no such sandbox|does not exist"; then
@@ -857,46 +846,31 @@ _containai_sandbox_reset_cmd() {
         fi
     done
 
-    # Verify removal by re-listing sandboxes
-    # Note: verification failure doesn't mean removal failed - it means we can't confirm
-    local verify_list verify_rc verify_found=false
-    verify_list=$(_cai_timeout 10 docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>&1)
+    # Verify removal by checking that the specific removed IDs no longer exist
+    # This avoids false negatives if a new sandbox was created concurrently for the same workspace
+    local verify_list verify_rc
+    verify_list=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_timeout 10 docker sandbox ls --format '{{.ID}}' 2>/dev/null)
     verify_rc=$?
-
-    # Handle no timeout mechanism (125) - run without timeout
-    # Check flag to avoid masking real 125 exits
-    if [[ $verify_rc -eq 125 ]] && [[ "${_CAI_TIMEOUT_UNAVAILABLE:-}" == "1" ]]; then
-        unset _CAI_TIMEOUT_UNAVAILABLE
-        verify_list=$(docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>&1)
-        verify_rc=$?
-    fi
 
     if [[ $verify_rc -eq 124 ]]; then
         # Timeout during verification - cannot confirm removal (fail-closed)
         _cai_error "Verification timed out - cannot confirm removal"
         return 1
     elif [[ $verify_rc -eq 0 ]]; then
-        while IFS=$'\t' read -r id ws; do
-            [[ -z "$id" ]] && continue
-            # Match using same logic as initial matching
-            if resolved_ws=$(cd -- "$ws" 2>/dev/null && pwd -P); then
-                if [[ "$resolved_ws" == "$resolved_workspace" ]]; then
-                    verify_found=true
-                    break
-                fi
-            elif [[ "$ws" == "$resolved_workspace" ]]; then
-                verify_found=true
-                break
+        # Check if any of the removed IDs still exist
+        local removed_id still_exists=false
+        for removed_id in "${matching_ids[@]}"; do
+            if printf '%s\n' "$verify_list" | grep -qxF "$removed_id"; then
+                _cai_error "Sandbox $removed_id still exists after removal"
+                still_exists=true
             fi
-        done <<< "$verify_list"
+        done
+        if [[ "$still_exists" == "true" ]]; then
+            return 1
+        fi
     else
         # Verification listing failed - cannot confirm removal (fail-closed)
         _cai_error "Verification listing failed - cannot confirm removal"
-        return 1
-    fi
-
-    if [[ "$verify_found" == "true" ]]; then
-        _cai_error "Sandbox removal verification failed - sandbox still exists"
         return 1
     fi
 
