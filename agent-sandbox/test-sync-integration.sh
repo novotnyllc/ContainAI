@@ -228,7 +228,33 @@ populate_fixture() {
 # Stdout: cai import output (for capture)
 #
 run_cai_import() {
-    HOME="$FIXTURE_HOME" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import $*" 2>&1
+    # Use "$@" with proper argument passing to preserve boundaries
+    HOME="$FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SCRIPT_DIR" "$@" 2>&1
+}
+
+# Hermetic cai import helper with env var overrides
+# Usage: run_cai_import_env "VAR1=val1 VAR2=val2" [extra_args...]
+# The first argument is a space-separated list of env vars to set
+run_cai_import_env() {
+    local env_vars="$1"
+    shift
+    # shellcheck disable=SC2086
+    HOME="$FIXTURE_HOME" env $env_vars bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SCRIPT_DIR" "$@" 2>&1
+}
+
+# Hermetic cai import helper for tests with temp dirs and env clearing
+# Usage: run_cai_import_from_dir "dir" "VAR1=val1" [extra_args...]
+# First arg: directory to run from
+# Second arg: space-separated env vars to set (use "" for none)
+# Remaining args: cai import arguments
+# Note: Always clears CONTAINAI_DATA_VOLUME and CONTAINAI_CONFIG for hermetic tests
+run_cai_import_from_dir() {
+    local dir="$1"
+    local env_spec="$2"
+    shift 2
+    # shellcheck disable=SC2086
+    (cd -- "$dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG $env_spec \
+        bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SCRIPT_DIR" "$@" 2>&1)
 }
 
 # ==============================================================================
@@ -275,10 +301,10 @@ test_dry_run() {
     local before_snapshot
     before_snapshot=$(run_in_rsync 'find /data -exec stat -c "%a %s %n" {} \; 2>/dev/null | sort')
 
-    # Run dry-run via cai import - should succeed when prerequisites are met
+    # Run dry-run via hermetic cai import - should succeed when prerequisites are met
     local dry_run_exit=0
     local dry_run_output
-    dry_run_output=$(bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$DATA_VOLUME' --dry-run" 2>&1) || dry_run_exit=$?
+    dry_run_output=$(run_cai_import --data-volume "$DATA_VOLUME" --dry-run) || dry_run_exit=$?
 
     if [[ $dry_run_exit -ne 0 ]]; then
         fail "Dry-run failed with exit code $dry_run_exit"
@@ -309,9 +335,9 @@ test_dry_run() {
     register_test_volume "$env_vol"
     register_test_volume "$cli_vol"
 
-    # Test CONTAINAI_DATA_VOLUME env var precedence
+    # Test CONTAINAI_DATA_VOLUME env var precedence (hermetic via run_cai_import_env)
     local env_test_output env_test_exit=0
-    env_test_output=$(CONTAINAI_DATA_VOLUME="$env_vol" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --dry-run" 2>&1) || env_test_exit=$?
+    env_test_output=$(run_cai_import_env "CONTAINAI_DATA_VOLUME=$env_vol" --dry-run) || env_test_exit=$?
     if echo "$env_test_output" | grep -q "Using data volume: $env_vol"; then
         pass "CONTAINAI_DATA_VOLUME env var respected"
     else
@@ -321,7 +347,7 @@ test_dry_run() {
 
     # Test --data-volume flag takes precedence over env var
     local cli_test_output cli_test_exit=0
-    cli_test_output=$(CONTAINAI_DATA_VOLUME="$env_vol" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$cli_vol' --dry-run" 2>&1) || cli_test_exit=$?
+    cli_test_output=$(run_cai_import_env "CONTAINAI_DATA_VOLUME=$env_vol" --data-volume "$cli_vol" --dry-run) || cli_test_exit=$?
     if echo "$cli_test_output" | grep -q "Using data volume: $cli_vol"; then
         pass "--data-volume flag takes precedence over env var"
     else
@@ -331,7 +357,7 @@ test_dry_run() {
 
     # Test --data-volume takes precedence (skips config discovery)
     local skip_config_output skip_config_exit=0
-    skip_config_output=$(bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$DATA_VOLUME' --dry-run" 2>&1) || skip_config_exit=$?
+    skip_config_output=$(run_cai_import --data-volume "$DATA_VOLUME" --dry-run) || skip_config_exit=$?
     if echo "$skip_config_output" | grep -q "Using data volume: $DATA_VOLUME"; then
         pass "--data-volume takes precedence (uses specified volume directly)"
     else
@@ -340,9 +366,8 @@ test_dry_run() {
     fi
 
     # Test explicit --config with missing file fails
-    # Note: Must clear env vars to ensure config parsing is attempted
     local missing_config_output missing_config_exit=0
-    missing_config_output=$(env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --config '/nonexistent/config.toml' --dry-run" 2>&1) || missing_config_exit=$?
+    missing_config_output=$(run_cai_import --config '/nonexistent/config.toml' --dry-run) || missing_config_exit=$?
     if [[ $missing_config_exit -ne 0 ]] && echo "$missing_config_output" | grep -q "Config file not found"; then
         pass "Explicit --config with missing file fails with error"
     else
@@ -351,7 +376,7 @@ test_dry_run() {
     fi
 
     # Test config discovery from $PWD (use unique run-scoped volume name)
-    # Note: Must clear env vars to ensure config discovery is tested, not env precedence
+    # Note: Uses fixture HOME but runs from a temp dir with its own config
     local config_test_dir config_test_output config_test_exit=0
     local config_vol="containai-test-config-${TEST_RUN_ID}"
     config_test_dir=$(mktemp -d)
@@ -364,7 +389,8 @@ test_dry_run() {
         return
     fi
     register_test_volume "$config_vol"
-    config_test_output=$(cd "$config_test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --dry-run" 2>&1) || config_test_exit=$?
+    # Run from config_test_dir with hermetic HOME
+    config_test_output=$(cd "$config_test_dir" && HOME="$FIXTURE_HOME" bash -c 'source "$1/containai.sh" && cai import --dry-run' _ "$SCRIPT_DIR" 2>&1) || config_test_exit=$?
     if echo "$config_test_output" | grep -q "Using data volume: $config_vol"; then
         pass "Config discovery from \$PWD works"
     else
@@ -1004,11 +1030,9 @@ from_host = true
     docker volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
-    # Run import with hermetic env (env -u clears external vars per pitfall memory)
+    # Run import with hermetic env and fixture HOME
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        TEST_IMPORT_VAR1=value1 TEST_IMPORT_VAR2=value2 \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "TEST_IMPORT_VAR1=value1 TEST_IMPORT_VAR2=value2") || import_exit=$?
 
     if [[ $import_exit -eq 0 ]]; then
         pass "Basic import completed successfully"
@@ -1064,9 +1088,7 @@ env_file = "test.env"
 
     # Run import with host var set (should NOT be used since from_host=false)
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        TEST_NOHOST_VAR=from_host_should_be_ignored \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "TEST_NOHOST_VAR=from_host_should_be_ignored") || true
 
     local env_content
     env_content=$(run_in_alpine "$test_vol" 'cat /data/.env 2>/dev/null || echo "MISSING"')
@@ -1114,8 +1136,7 @@ env_file = "test.env"
     register_test_volume "$test_vol"
 
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || true
 
     local env_content
     env_content=$(run_in_alpine "$test_vol" 'cat /data/.env 2>/dev/null || echo "MISSING"')
@@ -1169,9 +1190,7 @@ env_file = "test.env"
 
     # Host env should take precedence
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        PRECEDENCE_VAR=from_host \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "PRECEDENCE_VAR=from_host") || true
 
     local env_content
     env_content=$(run_in_alpine "$test_vol" 'cat /data/.env 2>/dev/null || echo "MISSING"')
@@ -1210,9 +1229,7 @@ from_host = true
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        EXISTING_VAR=exists \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "EXISTING_VAR=exists") || import_exit=$?
 
     # Should succeed (not fatal)
     if [[ $import_exit -eq 0 ]]; then
@@ -1253,11 +1270,11 @@ from_host = true
     docker volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
-    # Export multiline var (newline embedded)
+    # Export multiline var (newline embedded) - hermetic with fixture HOME
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+    import_output=$(cd "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
         MULTILINE_VAR=$'line1\nline2' NORMAL_VAR=normal \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+        bash -c 'source "$1/containai.sh" && cai import' _ "$SCRIPT_DIR" 2>&1) || true
 
     # Should warn about multiline
     if echo "$import_output" | grep -q "MULTILINE_VAR.*multiline"; then
@@ -1308,8 +1325,7 @@ from_host = true
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || import_exit=$?
 
     if [[ $import_exit -eq 0 ]]; then
         pass "Empty allowlist does not cause error"
@@ -1358,9 +1374,7 @@ from_host = true
     register_test_volume "$test_vol"
 
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        PERM_TEST_VAR=test \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "PERM_TEST_VAR=test") || true
 
     local perm
     perm=$(run_in_alpine "$test_vol" 'stat -c "%a" /data/.env 2>/dev/null || echo "missing"')
@@ -1405,10 +1419,9 @@ from_host = true
     docker volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
+    # Hermetic with fixture HOME
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        VALID_VAR=valid _VALID_UNDERSCORE=also_valid \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "VALID_VAR=valid _VALID_UNDERSCORE=also_valid") || true
 
     # Should warn about invalid names
     if echo "$import_output" | grep -q "123INVALID.*invalid\|Invalid.*123INVALID"; then
@@ -1457,10 +1470,9 @@ from_host = true
     docker volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
+    # Hermetic with fixture HOME
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        DUP_VAR=value OTHER_VAR=other \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "DUP_VAR=value OTHER_VAR=other") || true
 
     local env_content
     env_content=$(run_in_alpine "$test_vol" 'cat /data/.env 2>/dev/null || echo "MISSING"')
@@ -1505,8 +1517,7 @@ env_file = "test.env"
     register_test_volume "$test_vol"
 
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || true
 
     local env_content
     env_content=$(run_in_alpine "$test_vol" 'cat /data/.env 2>/dev/null || echo "MISSING"')
@@ -1547,8 +1558,7 @@ env_file = "test.env"
     register_test_volume "$test_vol"
 
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || true
 
     local env_content
     env_content=$(run_in_alpine "$test_vol" 'cat /data/.env 2>/dev/null || echo "MISSING"')
@@ -1715,10 +1725,9 @@ from_host = true
     docker volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
+    # Hermetic with fixture HOME
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        DRYRUN_VAR1=secret_value1 DRYRUN_VAR2=secret_value2 \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --dry-run" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "DRYRUN_VAR1=secret_value1 DRYRUN_VAR2=secret_value2" --dry-run) || import_exit=$?
 
     # Must succeed (exit 0) for dry-run
     if [[ $import_exit -ne 0 ]]; then
@@ -1790,8 +1799,7 @@ env_file = "link.env"
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || import_exit=$?
 
     # Should fail with error about symlink
     if [[ $import_exit -ne 0 ]] && echo "$import_output" | grep -qi "symlink"; then
@@ -1833,9 +1841,7 @@ from_host = true
     '
 
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        TOCTOU_VAR=value \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "TOCTOU_VAR=value") || import_exit=$?
 
     # Should fail because the Alpine helper detects .env is a symlink
     if [[ $import_exit -ne 0 ]] && echo "$import_output" | grep -qi "symlink\|Target.*symlink"; then
@@ -1946,9 +1952,7 @@ from_host = true
 
     # Test 2: Normal import works (proves guard passes for real volumes in production)
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        MOUNT_TEST_VAR=value \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "MOUNT_TEST_VAR=value") || import_exit=$?
 
     if [[ $import_exit -eq 0 ]]; then
         pass "Normal volume passes mount point check in production code"
@@ -2077,8 +2081,7 @@ env_file = "test.env"
     register_test_volume "$test_vol"
 
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || true
 
     # Should NOT print the raw line content
     if echo "$import_output" | grep -q "secret_data_here"; then
@@ -2122,8 +2125,7 @@ env_file = "/etc/passwd"
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || import_exit=$?
 
     if [[ $import_exit -ne 0 ]] && echo "$import_output" | grep -qi "absolute.*reject\|workspace-relative"; then
         pass "Absolute env_file path rejected"
@@ -2158,8 +2160,7 @@ env_file = "../../../etc/passwd"
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || import_exit=$?
 
     if [[ $import_exit -ne 0 ]] && echo "$import_output" | grep -qi "escape\|outside"; then
         pass "env_file escaping workspace rejected"
@@ -2448,8 +2449,7 @@ env_file = "test.env"
     register_test_volume "$test_vol"
 
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || true
 
     # Should warn about multiline with line number and key name
     if echo "$import_output" | grep -qi "line 2.*MULTILINE_VAR.*multiline\|MULTILINE_VAR.*multiline"; then
@@ -2504,8 +2504,7 @@ data_volume = "'"$test_vol"'"
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || import_exit=$?
+    import_output=$(run_cai_import_from_dir "$test_dir" "") || import_exit=$?
 
     if [[ $import_exit -eq 0 ]]; then
         pass "Import succeeds with missing [env] section"
@@ -2550,9 +2549,7 @@ from_host = true
     export CONTAINAI_CONFIG="should-be-cleared"
 
     local import_output
-    import_output=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        HERMETIC_TEST_VAR=hermetic_value \
-        bash -c "source '$SCRIPT_DIR/containai.sh' && cai import" 2>&1) || true
+    import_output=$(run_cai_import_from_dir "$test_dir" "HERMETIC_TEST_VAR=hermetic_value") || true
 
     # Should use config-discovered volume, not env var
     if echo "$import_output" | grep -q "Using data volume: $test_vol"; then
