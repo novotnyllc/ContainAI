@@ -20,7 +20,7 @@
 #   $5 = workspace path (optional, for exclude resolution, default: $PWD)
 #   $6 = explicit config path (optional, for exclude resolution)
 #   $7 = from_source path (optional, tgz file or directory; default: "" means $HOME)
-#        NOTE: Non-empty from_source not yet implemented (fails fast)
+#        NOTE: Non-empty from_source not yet implemented (ignored with warning)
 #
 # Dependencies:
 #   - docker (for rsync container)
@@ -212,12 +212,11 @@ _containai_import() {
     local explicit_config="${6:-}"
     local from_source="${7:-}"
 
-    # Fail fast if --from is specified (not yet implemented)
+    # Warn if --from is specified (not yet implemented, ignored for now)
     # TODO: Implement in fn-9-mqv.2-5 (tgz restore, directory sync)
     if [[ -n "$from_source" ]]; then
-        _import_error "--from is not yet implemented"
-        _import_info "This feature is planned for a future release"
-        return 1
+        _import_warn "--from is not yet implemented; ignoring '$from_source'"
+        _import_info "Import will use default \$HOME source"
     fi
 
     # Build docker command prefix based on context

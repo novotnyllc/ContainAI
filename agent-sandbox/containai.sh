@@ -224,8 +224,8 @@ Usage: cai import [options]
 
 Options:
   --data-volume <vol>   Data volume name (overrides config)
-  --from <path>         Import source: directory or .tgz archive
-                        (default: sync from $HOME) [PLANNED - not yet implemented]
+  --from <path>         Import source (directory or .tgz archive)
+                        [NOT YET IMPLEMENTED - currently ignored with warning]
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path for config resolution
   --dry-run             Preview changes without applying
