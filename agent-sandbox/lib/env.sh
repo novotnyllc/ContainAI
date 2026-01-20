@@ -26,14 +26,14 @@
 
 # Require bash first (before using BASH_SOURCE)
 if [[ -z "${BASH_VERSION:-}" ]]; then
-    echo "[ERROR] lib/env.sh requires bash" >&2
+    printf '%s\n' "[ERROR] lib/env.sh requires bash" >&2
     return 1 2>/dev/null || exit 1
 fi
 
 # Detect direct execution (must be sourced, not executed)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    echo "[ERROR] lib/env.sh must be sourced, not executed directly" >&2
-    echo "Usage: source lib/env.sh" >&2
+    printf '%s\n' "[ERROR] lib/env.sh must be sourced, not executed directly" >&2
+    printf '%s\n' "Usage: source lib/env.sh" >&2
     exit 1
 fi
 
@@ -209,6 +209,7 @@ _env_parse_file() {
 # ==============================================================================
 
 # Read host environment variables filtered by allowlist
+# Uses printenv to read only exported env vars (not shell-local variables)
 # Checks for multiline values and skips with warning
 # Arguments:
 #   stdin = allowlist (newline-separated var names)
@@ -224,12 +225,12 @@ _env_read_host() {
     while IFS= read -r var_name; do
         [[ -z "$var_name" ]] && continue
 
-        # Check if var is set in host environment
-        if [[ -z "${!var_name+x}" ]]; then
+        # Use printenv to read only exported env vars (not shell-local variables)
+        # printenv returns non-zero if var is not set, which we handle with || true
+        if ! var_value=$(printenv "$var_name" 2>/dev/null); then
+            # Var not set in environment - skip silently
             continue
         fi
-
-        var_value="${!var_name}"
 
         # Check for multiline value
         if [[ "$var_value" == *$'\n'* ]]; then
@@ -301,20 +302,25 @@ _containai_import_env() {
         return 1
     fi
 
-    # Check for Python availability (env_config will be defaults if Python unavailable)
-    if [[ "$env_config" == '{"import":[],"from_host":false,"env_file":null}' ]]; then
-        # Could be defaults due to missing [env] section or Python unavailable
-        # Either way, nothing to import - return silently (per spec: missing [env] = silent skip)
-        return 0
-    fi
-
     # Parse env config JSON
     if ! command -v python3 >/dev/null 2>&1; then
         _env_warn "Python not found, skipping env import"
         return 0
     fi
 
-    # Extract import list, from_host, env_file from config
+    # Extract _section_present, import list, from_host, env_file from config
+    local section_present
+    section_present=$(printf '%s' "$env_config" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print('true' if data.get('_section_present', False) else 'false')
+")
+
+    # If [env] section is missing, skip silently (per spec)
+    if [[ "$section_present" != "true" ]]; then
+        return 0
+    fi
+
     import_list=$(printf '%s' "$env_config" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
@@ -345,6 +351,7 @@ if ef is not None:
     done <<< "$import_list"
 
     # Empty allowlist: skip with [INFO] per spec
+    # This logs only when [env] section exists but import is empty/invalid
     if [[ ${#allowlist[@]} -eq 0 ]]; then
         _env_info "Empty env import allowlist, skipping env import"
         return 0
@@ -407,7 +414,8 @@ if ef is not None:
             return 1
         fi
 
-        # Evaluate the parsed declarations
+        # Clear any stale values from previous calls, then evaluate the parsed declarations
+        unset _env_file_vars
         eval "$file_parse_output"
 
         # Copy to file_vars (filter by allowlist)
@@ -422,6 +430,8 @@ if ef is not None:
     if [[ "$from_host" == "true" ]]; then
         local host_parse_output
         host_parse_output=$(printf '%s\n' "${validated_allowlist[@]}" | _env_read_host "_env_host_vars")
+        # Clear any stale values from previous calls, then evaluate the parsed declarations
+        unset _env_host_vars
         eval "$host_parse_output"
 
         # Copy to host_vars

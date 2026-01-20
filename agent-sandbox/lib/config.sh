@@ -836,7 +836,8 @@ _containai_resolve_env_config() {
     local config_file script_dir env_json
 
     # Default JSON output (for missing config or Python unavailable)
-    local default_json='{"import":[],"from_host":false,"env_file":null}'
+    # _section_present=false indicates [env] section is missing (silent skip)
+    local default_json='{"import":[],"from_host":false,"env_file":null,"_section_present":false}'
 
     # Resolve workspace to absolute path (preserve original for warning message)
     local workspace_input="$workspace"
@@ -916,15 +917,18 @@ _containai_resolve_env_config() {
 
     # parse-toml.py may not include env_file key if not present - ensure consistent output
     # Use Python to normalize the output with all expected keys
+    # _section_present=true indicates [env] section exists (for proper logging behavior)
     local normalized_json
     if ! normalized_json=$(printf '%s' "$env_json" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 # Ensure all keys present with defaults
+# _section_present=true since we only reach here if [env] section exists
 result = {
     'import': data.get('import', []),
     'from_host': data.get('from_host', False),
-    'env_file': data.get('env_file', None)
+    'env_file': data.get('env_file', None),
+    '_section_present': True
 }
 print(json.dumps(result, separators=(',', ':')))
 "); then
