@@ -215,7 +215,8 @@ _cai_sysbox_available() {
     _CAI_SYSBOX_ERROR=""
     _CAI_SYSBOX_CONTEXT_EXISTS="false"
 
-    local socket="/var/run/containai-docker.sock"
+    # Use same socket path as setup.sh (consistent constant)
+    local socket="${_CAI_SECURE_SOCKET:-/var/run/docker-containai.sock}"
 
     # Check if socket exists
     if [[ ! -S "$socket" ]]; then

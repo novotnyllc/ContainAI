@@ -3,7 +3,7 @@
 # Integration tests for ContainAI Secure Engine
 # ==============================================================================
 # Verifies:
-# 1. containai-secure Docker context exists
+# 1. containai-secure Docker context exists with correct endpoint
 # 2. Engine is reachable via context
 # 3. Sysbox runtime (sysbox-runc) is available
 # 4. User namespace isolation is enabled
@@ -16,8 +16,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source containai library for platform detection and validation
-if ! source "$SCRIPT_DIR/containai.sh" 2>/dev/null; then
-    echo "[ERROR] Failed to source containai.sh" >&2
+# Don't suppress stderr - show error output on failure
+if ! source "$SCRIPT_DIR/containai.sh"; then
+    printf '%s\n' "[ERROR] Failed to source containai.sh" >&2
     exit 1
 fi
 
@@ -37,20 +38,51 @@ FAILED=0
 # Context name constant
 CONTEXT_NAME="containai-secure"
 
+# Default timeout for docker commands (seconds)
+TEST_TIMEOUT=30
+
+# Pinned image for reproducibility
+TEST_IMAGE="alpine:3.20"
+
 # ==============================================================================
-# Test 1: Context exists
+# Test 1: Context exists with correct endpoint
 # ==============================================================================
 test_context_exists() {
-    section "Test 1: Context exists"
+    section "Test 1: Context exists with correct endpoint"
 
-    if docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
-        pass "Context '$CONTEXT_NAME' exists"
-        local endpoint
-        endpoint=$(docker context inspect "$CONTEXT_NAME" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
-        info "  Endpoint: $endpoint"
-    else
+    # Determine expected socket based on platform
+    local platform expected_socket
+    platform=$(_cai_detect_platform)
+    case "$platform" in
+        wsl|linux)
+            expected_socket="unix://$_CAI_SECURE_SOCKET"
+            ;;
+        macos)
+            expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
+            ;;
+        *)
+            warn "Unknown platform: $platform - skipping endpoint check"
+            expected_socket=""
+            ;;
+    esac
+
+    if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
         fail "Context '$CONTEXT_NAME' not found"
         info "  Remediation: Run 'cai setup' to create the context"
+        return
+    fi
+
+    local actual_endpoint
+    actual_endpoint=$(docker context inspect "$CONTEXT_NAME" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+
+    if [[ -n "$expected_socket" ]] && [[ "$actual_endpoint" != "$expected_socket" ]]; then
+        fail "Context '$CONTEXT_NAME' has wrong endpoint"
+        info "  Expected: $expected_socket"
+        info "  Actual: $actual_endpoint"
+        info "  Remediation: Run 'cai setup' to reconfigure the context"
+    else
+        pass "Context '$CONTEXT_NAME' exists with correct endpoint"
+        info "  Endpoint: $actual_endpoint"
     fi
 }
 
@@ -61,9 +93,12 @@ test_engine_reachable() {
     section "Test 2: Engine is reachable"
 
     local info_output info_rc
-    info_output=$(docker --context "$CONTEXT_NAME" info 2>&1) && info_rc=0 || info_rc=$?
+    info_output=$(timeout "${TEST_TIMEOUT}s" docker --context "$CONTEXT_NAME" info 2>&1) && info_rc=0 || info_rc=$?
 
-    if [[ $info_rc -eq 0 ]]; then
+    if [[ $info_rc -eq 124 ]]; then
+        fail "Engine connection timed out after ${TEST_TIMEOUT}s"
+        info "  Remediation: Check if Docker daemon is responding"
+    elif [[ $info_rc -eq 0 ]]; then
         pass "Engine is reachable via context '$CONTEXT_NAME'"
         local server_version
         server_version=$(docker --context "$CONTEXT_NAME" info --format '{{.ServerVersion}}' 2>/dev/null || true)
@@ -81,7 +116,7 @@ test_sysbox_runtime() {
     section "Test 3: Sysbox runtime available"
 
     local runtimes_json default_runtime
-    runtimes_json=$(docker --context "$CONTEXT_NAME" info --format '{{json .Runtimes}}' 2>/dev/null || true)
+    runtimes_json=$(timeout "${TEST_TIMEOUT}s" docker --context "$CONTEXT_NAME" info --format '{{json .Runtimes}}' 2>/dev/null || true)
     default_runtime=$(docker --context "$CONTEXT_NAME" info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
 
     if [[ -z "$runtimes_json" ]] || [[ "$runtimes_json" == "null" ]]; then
@@ -109,7 +144,19 @@ test_user_namespace() {
     section "Test 4: User namespace isolation"
 
     local uid_map_output uid_map_rc
-    uid_map_output=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc alpine cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+    # Use pinned image with --pull=never first, then try with pull if missing
+    uid_map_output=$(timeout "${TEST_TIMEOUT}s" docker --context "$CONTEXT_NAME" run --rm --pull=never --runtime=sysbox-runc "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+
+    # Handle missing image - try with pull
+    if [[ $uid_map_rc -ne 0 ]] && { [[ "$uid_map_output" == *"image"*"not"*"found"* ]] || [[ "$uid_map_output" == *"No such image"* ]]; }; then
+        info "  Pulling $TEST_IMAGE image..."
+        uid_map_output=$(timeout 60s docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc "$TEST_IMAGE" cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+    fi
+
+    if [[ $uid_map_rc -eq 124 ]]; then
+        fail "User namespace check timed out after ${TEST_TIMEOUT}s"
+        return
+    fi
 
     if [[ $uid_map_rc -ne 0 ]]; then
         fail "Could not run test container to check user namespace"
@@ -117,14 +164,21 @@ test_user_namespace() {
         return
     fi
 
-    # If UID 0 maps to 0 with full range (0 0 4294967295), user namespace is NOT enabled
+    # Parse uid_map robustly: normalize whitespace and check for full range
+    # Format: "         0          0 4294967295" or similar with variable whitespace
+    local uid_map_normalized
+    uid_map_normalized=$(printf '%s' "$uid_map_output" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
+
+    # Check if first line shows full UID range (0 0 4294967295 = no remapping)
     # Sysbox should show mapped UIDs like "0 165536 65536" (container root mapped to host subuid)
-    if [[ "$uid_map_output" == *"0         0 4294967295"* ]] || [[ "$uid_map_output" == *"0 0 4294967295"* ]]; then
-        warn "User namespace may not be fully enabled (uid_map shows full range)"
-        info "  uid_map: $uid_map_output"
+    if printf '%s' "$uid_map_normalized" | head -1 | grep -qE '^0 0 4294967295'; then
+        # Full UID range mapping = no user namespace remapping - this is a FAIL
+        fail "User namespace isolation is NOT enabled"
+        info "  uid_map shows full range (no remapping): $uid_map_normalized"
+        info "  Remediation: Verify Sysbox is properly configured"
     else
         pass "User namespace isolation is enabled"
-        info "  uid_map: $(printf '%s' "$uid_map_output" | tr '\n' ' ')"
+        info "  uid_map: $uid_map_normalized"
     fi
 }
 
@@ -135,9 +189,17 @@ test_container_runs() {
     section "Test 5: Test container runs successfully"
 
     local test_output test_rc
-    test_output=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+    # Use pinned image with --pull=never first
+    test_output=$(timeout "${TEST_TIMEOUT}s" docker --context "$CONTEXT_NAME" run --rm --pull=never --runtime=sysbox-runc "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
-    if [[ $test_rc -eq 0 ]] && [[ "$test_output" == *"sysbox-test-ok"* ]]; then
+    # Handle missing image - try with pull
+    if [[ $test_rc -ne 0 ]] && { [[ "$test_output" == *"image"*"not"*"found"* ]] || [[ "$test_output" == *"No such image"* ]]; }; then
+        test_output=$(timeout 60s docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc "$TEST_IMAGE" echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+    fi
+
+    if [[ $test_rc -eq 124 ]]; then
+        fail "Test container timed out after ${TEST_TIMEOUT}s"
+    elif [[ $test_rc -eq 0 ]] && [[ "$test_output" == *"sysbox-test-ok"* ]]; then
         pass "Test container ran successfully with sysbox-runc"
     else
         fail "Test container failed to run with sysbox-runc"
@@ -177,7 +239,7 @@ test_wsl_specific() {
     info "Running WSL-specific tests"
 
     # Check socket path exists
-    local socket_path="/var/run/docker-containai.sock"
+    local socket_path="$_CAI_SECURE_SOCKET"
     if [[ -S "$socket_path" ]]; then
         pass "WSL socket exists: $socket_path"
     else
@@ -237,7 +299,7 @@ test_macos_specific() {
     fi
 
     # Check Lima VM exists and is running
-    local vm_name="containai-secure"
+    local vm_name="$_CAI_LIMA_VM_NAME"
     if limactl list --format '{{.Name}}' 2>/dev/null | grep -qx "$vm_name"; then
         pass "Lima VM '$vm_name' exists"
         local vm_status
@@ -254,7 +316,7 @@ test_macos_specific() {
     fi
 
     # Check Lima socket path
-    local socket_path="$HOME/.lima/containai-secure/sock/docker.sock"
+    local socket_path="$_CAI_LIMA_SOCKET_PATH"
     if [[ -S "$socket_path" ]]; then
         pass "Lima socket exists: $socket_path"
     else
@@ -280,7 +342,7 @@ test_linux_specific() {
     info "Running Linux-specific tests"
 
     # Check socket path
-    local socket_path="/var/run/docker-containai.sock"
+    local socket_path="$_CAI_SECURE_SOCKET"
     if [[ -S "$socket_path" ]]; then
         pass "Linux socket exists: $socket_path"
     else
@@ -316,20 +378,20 @@ test_idempotency() {
     section "Test 7: Idempotency (repeat key tests)"
 
     # Run the core test twice to ensure no state changes
-    local first_result second_result
+    local first_result second_result first_rc second_rc
 
     info "First run: checking container execution"
-    first_result=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc alpine echo "idempotency-test" 2>&1) || true
+    first_result=$(timeout "${TEST_TIMEOUT}s" docker --context "$CONTEXT_NAME" run --rm --pull=never --runtime=sysbox-runc "$TEST_IMAGE" echo "idempotency-test" 2>&1) && first_rc=0 || first_rc=$?
 
     info "Second run: checking container execution"
-    second_result=$(docker --context "$CONTEXT_NAME" run --rm --runtime=sysbox-runc alpine echo "idempotency-test" 2>&1) || true
+    second_result=$(timeout "${TEST_TIMEOUT}s" docker --context "$CONTEXT_NAME" run --rm --pull=never --runtime=sysbox-runc "$TEST_IMAGE" echo "idempotency-test" 2>&1) && second_rc=0 || second_rc=$?
 
-    if [[ "$first_result" == "$second_result" ]] && [[ "$first_result" == *"idempotency-test"* ]]; then
+    if [[ $first_rc -eq $second_rc ]] && [[ "$first_result" == "$second_result" ]] && [[ "$first_result" == *"idempotency-test"* ]]; then
         pass "Tests are idempotent (same result on repeated runs)"
     else
         warn "Test results differ between runs"
-        info "  First: $first_result"
-        info "  Second: $second_result"
+        info "  First (rc=$first_rc): $first_result"
+        info "  Second (rc=$second_rc): $second_result"
     fi
 }
 
@@ -344,6 +406,11 @@ main() {
     # Check prerequisites
     if ! command -v docker >/dev/null 2>&1; then
         printf '%s\n' "[ERROR] docker is required" >&2
+        exit 1
+    fi
+
+    if ! command -v timeout >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] timeout command is required" >&2
         exit 1
     fi
 

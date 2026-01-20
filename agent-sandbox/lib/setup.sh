@@ -1513,19 +1513,42 @@ EOF
 # Secure Engine Validation
 # ==============================================================================
 
+# Default timeout for docker commands (seconds)
+_CAI_VALIDATE_TIMEOUT=30
+
 # Validate Secure Engine is correctly configured and operational
-# Arguments: $1 = verbose flag ("true" for verbose output)
+# Arguments: Parsed from command line (--verbose/-v, --help/-h)
 # Returns: 0=all checks pass, 1=one or more checks failed
 # Outputs: Prints validation results to stdout with [PASS]/[FAIL]/[WARN] markers
 #
 # Validation checks (per spec):
-# 1. Context exists: docker context inspect containai-secure
+# 1. Context exists and endpoint matches expected socket
 # 2. Engine reachable: docker --context containai-secure info
-# 3. Runtime is sysbox-runc: Check default runtime
+# 3. Runtime is sysbox-runc: Check available (we use explicit --runtime flag)
 # 4. User namespace enabled: Run container and check uid_map
 # 5. Test container starts: docker --context containai-secure run --rm hello-world
 _cai_secure_engine_validate() {
-    local verbose="${1:-false}"
+    local verbose="false"
+
+    # Parse arguments (same pattern as _cai_setup)
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --verbose|-v)
+                verbose="true"
+                shift
+                ;;
+            --help|-h)
+                _cai_validate_help
+                return 0
+                ;;
+            *)
+                _cai_error "Unknown option: $1"
+                _cai_error "Use 'cai validate --help' for usage"
+                return 1
+                ;;
+        esac
+    done
+
     local failed=0
     local context_name="containai-secure"
 
@@ -1534,18 +1557,18 @@ _cai_secure_engine_validate() {
     _cai_info "========================"
     printf '\n'
 
-    # Detect platform for socket path
-    local platform socket_path
+    # Detect platform for expected socket path
+    local platform expected_socket
     platform=$(_cai_detect_platform)
     case "$platform" in
         wsl)
-            socket_path="$_CAI_SECURE_SOCKET"
+            expected_socket="unix://$_CAI_SECURE_SOCKET"
             ;;
         macos)
-            socket_path="$_CAI_LIMA_SOCKET_PATH"
+            expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
             ;;
         linux)
-            socket_path="$_CAI_SECURE_SOCKET"
+            expected_socket="unix://$_CAI_SECURE_SOCKET"
             ;;
         *)
             _cai_error "Unknown platform: $platform"
@@ -1553,26 +1576,38 @@ _cai_secure_engine_validate() {
             ;;
     esac
 
-    # Validation 1: Context exists
-    _cai_step "Check 1: Context exists"
-    if docker context inspect "$context_name" >/dev/null 2>&1; then
-        printf '%s\n' "[PASS] Context '$context_name' exists"
-        if [[ "$verbose" == "true" ]]; then
-            local endpoint
-            endpoint=$(docker context inspect "$context_name" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
-            _cai_info "  Endpoint: $endpoint"
-        fi
-    else
+    # Validation 1: Context exists AND endpoint matches expected socket
+    _cai_step "Check 1: Context exists with correct endpoint"
+    local actual_endpoint
+    if ! docker context inspect "$context_name" >/dev/null 2>&1; then
         printf '%s\n' "[FAIL] Context '$context_name' not found"
         _cai_error "  Remediation: Run 'cai setup' to create the context"
         failed=1
+    else
+        actual_endpoint=$(docker context inspect "$context_name" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+        if [[ "$actual_endpoint" == "$expected_socket" ]]; then
+            printf '%s\n' "[PASS] Context '$context_name' exists with correct endpoint"
+            if [[ "$verbose" == "true" ]]; then
+                _cai_info "  Endpoint: $actual_endpoint"
+            fi
+        else
+            printf '%s\n' "[FAIL] Context '$context_name' has wrong endpoint"
+            _cai_error "  Expected: $expected_socket"
+            _cai_error "  Actual: $actual_endpoint"
+            _cai_error "  Remediation: Run 'cai setup' to reconfigure the context"
+            failed=1
+        fi
     fi
 
-    # Validation 2: Engine reachable
+    # Validation 2: Engine reachable (with timeout)
     _cai_step "Check 2: Engine is reachable"
     local info_output info_rc
-    info_output=$(docker --context "$context_name" info 2>&1) && info_rc=0 || info_rc=$?
-    if [[ $info_rc -eq 0 ]]; then
+    info_output=$(timeout "${_CAI_VALIDATE_TIMEOUT}s" docker --context "$context_name" info 2>&1) && info_rc=0 || info_rc=$?
+    if [[ $info_rc -eq 124 ]]; then
+        printf '%s\n' "[FAIL] Engine connection timed out after ${_CAI_VALIDATE_TIMEOUT}s"
+        _cai_error "  Remediation: Check if Docker daemon is responding"
+        failed=1
+    elif [[ $info_rc -eq 0 ]]; then
         printf '%s\n' "[PASS] Engine is reachable via context '$context_name'"
         if [[ "$verbose" == "true" ]]; then
             local server_version
@@ -1581,10 +1616,10 @@ _cai_secure_engine_validate() {
         fi
     else
         printf '%s\n' "[FAIL] Engine not reachable via context '$context_name'"
-        _cai_error "  Error: $info_output"
+        _cai_error "  Error: $(printf '%s' "$info_output" | head -3)"
         case "$platform" in
             wsl)
-                _cai_error "  Remediation: Ensure Docker is running and socket exists at $socket_path"
+                _cai_error "  Remediation: Ensure Docker is running and socket exists"
                 _cai_error "  Try: sudo systemctl status docker"
                 ;;
             macos)
@@ -1595,10 +1630,11 @@ _cai_secure_engine_validate() {
         failed=1
     fi
 
-    # Validation 3: Runtime is sysbox-runc (check if available, not necessarily default)
+    # Validation 3: Runtime sysbox-runc is available
+    # Note: We check availability, not default. We use explicit --runtime=sysbox-runc.
     _cai_step "Check 3: Sysbox runtime available"
     local runtimes_json default_runtime
-    runtimes_json=$(docker --context "$context_name" info --format '{{json .Runtimes}}' 2>/dev/null || true)
+    runtimes_json=$(timeout "${_CAI_VALIDATE_TIMEOUT}s" docker --context "$context_name" info --format '{{json .Runtimes}}' 2>/dev/null || true)
     default_runtime=$(docker --context "$context_name" info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
 
     if [[ -z "$runtimes_json" ]] || [[ "$runtimes_json" == "null" ]]; then
@@ -1624,35 +1660,60 @@ _cai_secure_engine_validate() {
     # Validation 4: User namespace enabled (test with container)
     _cai_step "Check 4: User namespace isolation"
     local uid_map_output uid_map_rc
-    # Run container with sysbox-runc and check uid_map
-    # If UID 0 maps to 0 with full range (0 0 4294967295), user namespace is NOT enabled
-    uid_map_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc alpine cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+    # Run container with sysbox-runc and check uid_map (with timeout, pinned image)
+    uid_map_output=$(timeout "${_CAI_VALIDATE_TIMEOUT}s" docker --context "$context_name" run --rm --pull=never --runtime=sysbox-runc alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
 
-    if [[ $uid_map_rc -ne 0 ]]; then
+    # Handle missing image - try with pull
+    if [[ $uid_map_rc -ne 0 ]] && [[ "$uid_map_output" == *"image"*"not"*"found"* ]] || [[ "$uid_map_output" == *"No such image"* ]]; then
+        _cai_info "  Pulling alpine:3.20 image..."
+        uid_map_output=$(timeout 60s docker --context "$context_name" run --rm --runtime=sysbox-runc alpine:3.20 cat /proc/self/uid_map 2>&1) && uid_map_rc=0 || uid_map_rc=$?
+    fi
+
+    if [[ $uid_map_rc -eq 124 ]]; then
+        printf '%s\n' "[FAIL] User namespace check timed out"
+        _cai_error "  Remediation: Check if Docker daemon is responding"
+        failed=1
+    elif [[ $uid_map_rc -ne 0 ]]; then
         printf '%s\n' "[FAIL] Could not run test container to check user namespace"
         _cai_error "  Error: $uid_map_output"
         _cai_error "  Remediation: Verify Sysbox is properly installed"
         failed=1
-    elif [[ "$uid_map_output" == *"0         0 4294967295"* ]] || [[ "$uid_map_output" == *"0 0 4294967295"* ]]; then
-        # Full UID range mapping = no user namespace remapping
-        printf '%s\n' "[WARN] User namespace may not be fully enabled"
-        _cai_warn "  uid_map shows full range (no remapping)"
-        if [[ "$verbose" == "true" ]]; then
-            _cai_info "  uid_map: $uid_map_output"
-        fi
     else
-        printf '%s\n' "[PASS] User namespace isolation is enabled"
-        if [[ "$verbose" == "true" ]]; then
-            _cai_info "  uid_map: $uid_map_output"
+        # Parse uid_map robustly: normalize whitespace and check for full range
+        # Format: "         0          0 4294967295" or similar with variable whitespace
+        local uid_map_normalized
+        uid_map_normalized=$(printf '%s' "$uid_map_output" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
+
+        # Check if first line shows full UID range (0 0 4294967295 = no remapping)
+        if printf '%s' "$uid_map_normalized" | head -1 | grep -qE '^0 0 4294967295'; then
+            # Full UID range mapping = no user namespace remapping - this is a FAIL
+            printf '%s\n' "[FAIL] User namespace isolation is NOT enabled"
+            _cai_error "  uid_map shows full range (no remapping): $uid_map_normalized"
+            _cai_error "  Remediation: Verify Sysbox is properly configured"
+            failed=1
+        else
+            printf '%s\n' "[PASS] User namespace isolation is enabled"
+            if [[ "$verbose" == "true" ]]; then
+                _cai_info "  uid_map: $uid_map_normalized"
+            fi
         fi
     fi
 
-    # Validation 5: Test container starts successfully
+    # Validation 5: Test container starts successfully (with timeout, pinned image)
     _cai_step "Check 5: Test container runs successfully"
     local hello_output hello_rc
-    hello_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc alpine echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
+    hello_output=$(timeout "${_CAI_VALIDATE_TIMEOUT}s" docker --context "$context_name" run --rm --pull=never --runtime=sysbox-runc alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
 
-    if [[ $hello_rc -eq 0 ]] && [[ "$hello_output" == *"containai-validation-ok"* ]]; then
+    # Handle missing image - try with pull
+    if [[ $hello_rc -ne 0 ]] && [[ "$hello_output" == *"image"*"not"*"found"* ]] || [[ "$hello_output" == *"No such image"* ]]; then
+        hello_output=$(timeout 60s docker --context "$context_name" run --rm --runtime=sysbox-runc alpine:3.20 echo "containai-validation-ok" 2>&1) && hello_rc=0 || hello_rc=$?
+    fi
+
+    if [[ $hello_rc -eq 124 ]]; then
+        printf '%s\n' "[FAIL] Test container timed out"
+        _cai_error "  Remediation: Check if Docker daemon is responding"
+        failed=1
+    elif [[ $hello_rc -eq 0 ]] && [[ "$hello_output" == *"containai-validation-ok"* ]]; then
         printf '%s\n' "[PASS] Test container ran successfully with sysbox-runc"
     else
         printf '%s\n' "[FAIL] Test container failed to run"
@@ -1681,6 +1742,32 @@ _cai_secure_engine_validate() {
         _cai_error "  Run 'cai setup' to configure Secure Engine"
         return 1
     fi
+}
+
+# Validate help text
+_cai_validate_help() {
+    cat <<'EOF'
+ContainAI Validate - Check Secure Engine Configuration
+
+Usage: cai validate [options]
+
+Verifies that the Secure Engine (Sysbox) is correctly configured and operational.
+
+Options:
+  --verbose, -v   Show detailed information for each check
+  -h, --help      Show this help message
+
+Validation Checks:
+  1. Context exists with correct endpoint
+  2. Engine is reachable via the context
+  3. Sysbox runtime (sysbox-runc) is available
+  4. User namespace isolation is enabled
+  5. Test container runs successfully with sysbox-runc
+
+Examples:
+  cai validate             Run all validation checks
+  cai validate --verbose   Run checks with detailed output
+EOF
 }
 
 return 0
