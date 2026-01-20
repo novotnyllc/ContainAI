@@ -61,8 +61,10 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 USER root
 
 # Prevent interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 # Remove ubuntu user from base image
 # Configure bash for color prompt for both root and agent users 
