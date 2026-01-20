@@ -476,7 +476,12 @@ _containai_import_cmd() {
                     return 1
                 fi
                 from_source="$2"
-                from_source="${from_source/#\~/$HOME}"
+                # Expand ~ only for ~ or ~/ (not ~user which would become $HOMEuser)
+                if [[ "$from_source" == "~" ]]; then
+                    from_source="$HOME"
+                elif [[ "$from_source" == "~/"* ]]; then
+                    from_source="$HOME/${from_source:2}"
+                fi
                 shift 2
                 ;;
             --from=*)
@@ -485,7 +490,12 @@ _containai_import_cmd() {
                     echo "[ERROR] --from requires a value" >&2
                     return 1
                 fi
-                from_source="${from_source/#\~/$HOME}"
+                # Expand ~ only for ~ or ~/ (not ~user which would become $HOMEuser)
+                if [[ "$from_source" == "~" ]]; then
+                    from_source="$HOME"
+                elif [[ "$from_source" == "~/"* ]]; then
+                    from_source="$HOME/${from_source:2}"
+                fi
                 shift
                 ;;
             --config)

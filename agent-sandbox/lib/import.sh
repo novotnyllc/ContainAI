@@ -475,9 +475,9 @@ _containai_import() {
 
     if [[ -n "$from_source" ]]; then
         # Validate path doesn't contain dangerous characters that could cause Docker mount injection
-        # Comma breaks --mount option parsing, colon breaks -v parsing, newline breaks command parsing
-        if [[ "$from_source" == *,* ]] || [[ "$from_source" == *$'\n'* ]]; then
-            _import_error "Source path contains invalid characters (comma or newline): $from_source"
+        # Comma breaks --mount option parsing, newline/carriage-return break command parsing
+        if [[ "$from_source" == *,* ]] || [[ "$from_source" == *$'\n'* ]] || [[ "$from_source" == *$'\r'* ]]; then
+            _import_error "Source path contains invalid characters (comma or control characters): $from_source"
             return 1
         fi
 
@@ -507,7 +507,7 @@ _containai_import() {
         fi
 
         # Re-validate after normalization (cd && pwd could theoretically produce different path)
-        if [[ "$from_source" == *,* ]] || [[ "$from_source" == *$'\n'* ]]; then
+        if [[ "$from_source" == *,* ]] || [[ "$from_source" == *$'\n'* ]] || [[ "$from_source" == *$'\r'* ]]; then
             _import_error "Resolved source path contains invalid characters: $from_source"
             return 1
         fi
@@ -989,16 +989,20 @@ _import_transform_installed_plugins() {
 
     # Transform and capture result, checking for errors
     # Do best-effort rewriting: try both home and source prefixes
+    # Use startswith + slicing instead of gsub to avoid regex interpretation of metacharacters
     local transformed
     if ! transformed=$(jq --arg home_prefix "$home_prefix" \
                           --arg source_prefix "$source_prefix" \
                           --arg container_prefix "$_IMPORT_CONTAINER_PATH_PREFIX" '
+        # Helper function: replace prefix if string starts with it (non-regex)
+        def replace_prefix(old; new):
+            if startswith(old) then new + .[old | length:] else . end;
         .plugins = (.plugins | to_entries | map({
             key: .key,
             value: (.value | map(
                 . + {
                     scope: "user",
-                    installPath: (.installPath | gsub($home_prefix; $container_prefix) | gsub($source_prefix; $container_prefix))
+                    installPath: (.installPath | replace_prefix($home_prefix; $container_prefix) | replace_prefix($source_prefix; $container_prefix))
                 } | del(.projectPath)
             ))
         }) | from_entries)
@@ -1058,12 +1062,16 @@ _import_transform_marketplaces() {
 
     # Transform and capture result, checking for errors
     # Do best-effort rewriting: try both home and source prefixes
+    # Use startswith + slicing instead of gsub to avoid regex interpretation of metacharacters
     local transformed
     if ! transformed=$(jq --arg home_prefix "$home_prefix" \
                           --arg source_prefix "$source_prefix" \
                           --arg container_prefix "$_IMPORT_CONTAINER_PATH_PREFIX" '
+        # Helper function: replace prefix if string starts with it (non-regex)
+        def replace_prefix(old; new):
+            if startswith(old) then new + .[old | length:] else . end;
         with_entries(
-            .value.installLocation = (.value.installLocation | gsub($home_prefix; $container_prefix) | gsub($source_prefix; $container_prefix))
+            .value.installLocation = (.value.installLocation | replace_prefix($home_prefix; $container_prefix) | replace_prefix($source_prefix; $container_prefix))
         )
     ' "$src_file"); then
         _import_error "jq transformation failed for known_marketplaces.json"
