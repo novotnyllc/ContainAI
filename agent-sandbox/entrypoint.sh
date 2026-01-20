@@ -243,7 +243,10 @@ _load_env_file() {
     fi
     # Require = before parsing
     if [[ "$line" != *=* ]]; then
-      log "[WARN] line $line_num: no = found - skipping"
+      # Use truncated line as key hint (for log hygiene, limit length)
+      local key_hint="${line:0:20}"
+      [[ ${#line} -gt 20 ]] && key_hint="${key_hint}..."
+      log "[WARN] line $line_num: no = found for '$key_hint' - skipping"
       continue
     fi
     # Extract key and value (no whitespace trimming - strict format)
