@@ -7,10 +7,20 @@
     "fn-6-aaz.2"
   ],
   "epic": "fn-6-aaz",
+  "evidence": {
+    "commits": [
+      "af9478a948311778dc9419159ced313afaa9daad"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n agent-sandbox/lib/env.sh",
+      "shellcheck agent-sandbox/lib/env.sh"
+    ]
+  },
   "id": "fn-6-aaz.3",
   "priority": null,
   "spec_path": ".flow/tasks/fn-6-aaz.3.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Implement env import core logic",
-  "updated_at": "2026-01-20T10:46:28.637532Z"
+  "updated_at": "2026-01-20T10:51:11.805129Z"
 }

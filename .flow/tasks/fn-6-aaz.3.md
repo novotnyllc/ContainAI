@@ -94,9 +94,8 @@ Implement core env var import logic with proper permission handling and multilin
 - [ ] Missing vars logged as `[WARN]` (key only), not fatal
 - [ ] Empty allowlist skips with `[INFO]`
 ## Done summary
-TBD
-
+Implemented `_containai_import_env` function in `agent-sandbox/lib/env.sh` for allowlist-based env var import. Function validates var names against POSIX pattern, deduplicates allowlist, parses env files with CRLF stripping, reads host env with multiline checks, and writes atomically to volume with proper permission handling (root write + chown 1000:1000 + chmod 600).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: af9478a948311778dc9419159ced313afaa9daad
+- Tests: bash -n agent-sandbox/lib/env.sh, shellcheck agent-sandbox/lib/env.sh
 - PRs:
