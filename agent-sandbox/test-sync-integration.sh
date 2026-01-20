@@ -389,8 +389,8 @@ test_dry_run() {
         return
     fi
     register_test_volume "$config_vol"
-    # Run from config_test_dir with hermetic HOME
-    config_test_output=$(cd "$config_test_dir" && HOME="$FIXTURE_HOME" bash -c 'source "$1/containai.sh" && cai import --dry-run' _ "$SCRIPT_DIR" 2>&1) || config_test_exit=$?
+    # Run from config_test_dir with hermetic HOME and cleared env vars
+    config_test_output=$(run_cai_import_from_dir "$config_test_dir" "" --dry-run) || config_test_exit=$?
     if echo "$config_test_output" | grep -q "Using data volume: $config_vol"; then
         pass "Config discovery from \$PWD works"
     else
