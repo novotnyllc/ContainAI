@@ -1,14 +1,14 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-20T18:14:41.169486Z",
   "created_at": "2026-01-20T08:17:41.073375Z",
   "depends_on": [],
   "epic": "fn-9-mqv",
   "id": "fn-9-mqv.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-9-mqv.2.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Add source type detection helper",
-  "updated_at": "2026-01-20T08:18:07.739359Z"
+  "updated_at": "2026-01-20T18:14:41.169508Z"
 }

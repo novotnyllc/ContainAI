@@ -71,6 +71,51 @@ _import_validate_volume_name() {
 }
 
 # ==============================================================================
+# Source type detection
+# ==============================================================================
+
+# Detect source type for --from argument
+# Uses file -b for reliable detection (not extension-based)
+# Arguments: $1 = source path (file or directory)
+# Returns via stdout: "dir", "tgz", or "unknown"
+# Exit code: 0=success, 1=source does not exist
+_import_detect_source_type() {
+    local source="$1"
+
+    # Check source exists
+    if [[ ! -e "$source" ]]; then
+        return 1
+    fi
+
+    # Check for directory (handles symlinks via -d resolving them)
+    if [[ -d "$source" ]]; then
+        printf '%s\n' "dir"
+        return 0
+    fi
+
+    # For files, use file -b for reliable detection
+    if [[ -f "$source" ]]; then
+        local file_type
+        if ! file_type=$(file -b -- "$source" 2>/dev/null); then
+            printf '%s\n' "unknown"
+            return 0
+        fi
+
+        # Check for gzip compressed data
+        case "$file_type" in
+            *gzip\ compressed*)
+                printf '%s\n' "tgz"
+                return 0
+                ;;
+        esac
+    fi
+
+    # Not a recognized type
+    printf '%s\n' "unknown"
+    return 0
+}
+
+# ==============================================================================
 # SYNC_MAP: Declarative configuration array for syncing host configs to volume
 # ==============================================================================
 # Format: "source:target:flags"

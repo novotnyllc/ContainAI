@@ -8,11 +8,12 @@ Support importing from arbitrary directory (not just `$HOME`).
 
 ## Approach
 
-- Modify `_containai_import()` signature to accept source path parameter
-- Replace hardcoded `$HOME` bind mount at line 517-521
+<!-- Updated by plan-sync: fn-9-mqv.1 already added from_source as 7th parameter -->
+- Use existing `from_source` (7th parameter) in `_containai_import()` - already added by fn-9-mqv.1
+- Replace hardcoded `$HOME` bind mount at line 517-521 with `$from_source` when set
 - Keep existing SYNC_MAP and rsync mechanism
 - Run post-transforms reading from source directory (not `$HOME`)
-- Default to `$HOME` when no source specified (backward compatible)
+- Default to `$HOME` when `from_source` is empty (backward compatible)
 
 ## Key context
 
