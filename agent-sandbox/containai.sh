@@ -732,71 +732,114 @@ _containai_sandbox_reset_cmd() {
         return 1
     fi
 
-    # Find sandbox by workspace using docker sandbox ls
-    # docker sandbox ls --format outputs sandbox info - we need to match workspace
-    local sandbox_list sandbox_id sandbox_workspace line
-    if ! sandbox_list=$(docker sandbox ls --format '{{.ID}} {{.Workspace}}' 2>&1); then
-        # Check if command not found vs other error
+    # Find sandboxes by workspace using docker sandbox ls (with timeout)
+    # Get ID, Workspace, and Status in a single call to avoid TOCTOU issues
+    local sandbox_list
+    if ! sandbox_list=$(_cai_timeout 10 docker sandbox ls --format '{{.ID}}	{{.Workspace}}	{{.Status}}' 2>&1); then
+        # Check if command not found vs timeout vs other error
         if printf '%s' "$sandbox_list" | grep -qiE "unknown command|not found"; then
             _cai_error "docker sandbox command not available"
             _cai_info "This command requires Docker Desktop 4.50+"
+            return 1
+        fi
+        if printf '%s' "$sandbox_list" | grep -qiE "timeout|timed out"; then
+            _cai_error "docker sandbox ls timed out"
+            _cai_info "Check Docker Desktop is running and responsive"
             return 1
         fi
         _cai_error "Failed to list sandboxes: $sandbox_list"
         return 1
     fi
 
-    # Parse the output to find sandbox matching our workspace
-    # Need to handle symlinks and resolve paths consistently
-    sandbox_id=""
-    while IFS=' ' read -r id ws; do
+    # Collect ALL matching sandbox IDs (handle multiple sandboxes for same workspace)
+    local -a matching_ids=()
+    local -a matching_statuses=()
+    local id ws status resolved_ws
+    while IFS=$'\t' read -r id ws status; do
         # Skip empty lines
         [[ -z "$id" ]] && continue
 
         # Resolve sandbox workspace path (handles symlinks)
-        local resolved_ws
         if resolved_ws=$(cd -- "$ws" 2>/dev/null && pwd -P); then
             if [[ "$resolved_ws" == "$resolved_workspace" ]]; then
-                sandbox_id="$id"
-                break
+                matching_ids+=("$id")
+                matching_statuses+=("$status")
             fi
         fi
     done <<< "$sandbox_list"
 
-    if [[ -z "$sandbox_id" ]]; then
+    if [[ ${#matching_ids[@]} -eq 0 ]]; then
         _cai_info "No sandbox found for workspace: $resolved_workspace"
         _cai_info "Nothing to reset"
         return 0
     fi
 
-    _cai_info "Found sandbox $sandbox_id for workspace: $resolved_workspace"
-
-    # Check if sandbox is running - stop it first if so
-    local sandbox_status
-    sandbox_status=$(docker sandbox ls --format '{{.ID}} {{.Status}}' 2>/dev/null | \
-        grep "^${sandbox_id} " | awk '{print $2}') || sandbox_status=""
-
-    if [[ "$sandbox_status" == "running" ]] || [[ "$sandbox_status" == "Running" ]]; then
-        _cai_info "Stopping running sandbox..."
-        if ! docker sandbox stop "$sandbox_id" >/dev/null 2>&1; then
-            _cai_warn "Failed to stop sandbox gracefully, proceeding with removal"
-        fi
+    # Warn if multiple sandboxes found (spec says handle gracefully)
+    if [[ ${#matching_ids[@]} -gt 1 ]]; then
+        _cai_warn "Found ${#matching_ids[@]} sandboxes for workspace (removing all):"
+        local i
+        for i in "${!matching_ids[@]}"; do
+            _cai_info "  - ${matching_ids[$i]} (${matching_statuses[$i]})"
+        done
+    else
+        _cai_info "Found sandbox ${matching_ids[0]} for workspace: $resolved_workspace"
     fi
 
-    # Remove the sandbox
-    _cai_info "Removing sandbox $sandbox_id..."
-    local rm_output
-    if ! rm_output=$(docker sandbox rm "$sandbox_id" 2>&1); then
-        # Check for common errors
-        if printf '%s' "$rm_output" | grep -qiE "not found|no such"; then
-            _cai_info "Sandbox already removed"
-            return 0
+    # Stop and remove each matching sandbox
+    local sandbox_id sandbox_status idx
+    local any_failed=false
+    for idx in "${!matching_ids[@]}"; do
+        sandbox_id="${matching_ids[$idx]}"
+        sandbox_status="${matching_statuses[$idx]}"
+
+        # Check if sandbox is running - stop it first if so
+        if [[ "${sandbox_status,,}" == "running" ]]; then
+            _cai_info "Stopping running sandbox $sandbox_id..."
+            if ! _cai_timeout 30 docker sandbox stop "$sandbox_id" >/dev/null 2>&1; then
+                _cai_warn "Failed to stop sandbox $sandbox_id gracefully, proceeding with removal"
+            fi
         fi
-        _cai_error "Failed to remove sandbox: $rm_output"
+
+        # Remove the sandbox
+        _cai_info "Removing sandbox $sandbox_id..."
+        local rm_output
+        if ! rm_output=$(_cai_timeout 30 docker sandbox rm "$sandbox_id" 2>&1); then
+            # Check for common errors
+            if printf '%s' "$rm_output" | grep -qiE "not found|no such"; then
+                _cai_info "Sandbox $sandbox_id already removed"
+                continue
+            fi
+            _cai_error "Failed to remove sandbox $sandbox_id: $rm_output"
+            any_failed=true
+            continue
+        fi
+    done
+
+    # Verify removal by re-listing sandboxes
+    local verify_list verify_found=false
+    if verify_list=$(_cai_timeout 10 docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>/dev/null); then
+        while IFS=$'\t' read -r id ws; do
+            [[ -z "$id" ]] && continue
+            if resolved_ws=$(cd -- "$ws" 2>/dev/null && pwd -P); then
+                if [[ "$resolved_ws" == "$resolved_workspace" ]]; then
+                    verify_found=true
+                    break
+                fi
+            fi
+        done <<< "$verify_list"
+    fi
+
+    if [[ "$verify_found" == "true" ]]; then
+        _cai_error "Sandbox removal verification failed - sandbox still exists"
         return 1
     fi
 
-    _cai_info "[OK] Sandbox removed. New config will apply on next 'cai run'"
+    if [[ "$any_failed" == "true" ]]; then
+        _cai_warn "Some sandboxes failed to remove"
+        return 1
+    fi
+
+    _cai_ok "Sandbox removed. New config will apply on next 'cai run'"
     return 0
 }
 
