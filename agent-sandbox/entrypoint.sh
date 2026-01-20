@@ -244,7 +244,9 @@ _load_env_file() {
     # Require = before parsing
     if [[ "$line" != *=* ]]; then
       # Extract key token only (first word, no value content) for log hygiene
-      local key_token="${line%%[[:space:]]*}"
+      # Trim leading whitespace, then take up to first whitespace
+      local key_token="${line#"${line%%[![:space:]]*}"}"
+      key_token="${key_token%%[[:space:]]*}"
       [[ -z "$key_token" ]] && key_token="<unknown>"
       log "[WARN] line $line_num: no = found for '$key_token' - skipping"
       continue
