@@ -22,7 +22,7 @@ Enhanced Container Isolation (ECI) via Docker Desktop's `docker sandbox` command
 - Seccomp profiles and capability restrictions
 - Isolated credential storage per sandbox
 
-Detection: `lib/eci.sh` verifies both uid_map remapping and sysbox-runc runtime.
+Detection: [`agent-sandbox/lib/eci.sh`](agent-sandbox/lib/eci.sh) verifies both uid_map remapping and sysbox-runc runtime.
 
 ### Sysbox Mode (Linux)
 
@@ -31,7 +31,7 @@ For Linux environments without Docker Desktop, ContainAI uses the Sysbox runtime
 - Nested container support with isolation
 - User namespace isolation
 
-Detection: `lib/doctor.sh` verifies Sysbox runtime availability in the Docker daemon.
+Detection: [`agent-sandbox/lib/doctor.sh`](agent-sandbox/lib/doctor.sh) verifies Sysbox runtime availability in the Docker daemon.
 
 ## Security Guarantees
 
@@ -41,13 +41,15 @@ ContainAI enforces the following security measures:
 
 | Protection | Location | Description |
 |------------|----------|-------------|
-| Sandbox-first execution | `lib/container.sh` | Containers only start after isolation verification passes |
-| Fail-closed on unknown errors | `lib/container.sh` | Blocks execution rather than proceeding with unknown status |
-| Symlink traversal defense | `entrypoint.sh` | `reject_symlink()` and `verify_path_under_data_dir()` prevent path escape |
-| Volume mount TOCTOU protection | `entrypoint.sh` | Validates paths before and after resolution |
-| Safe .env parsing | `entrypoint.sh` | CRLF handling, key validation, no shell eval |
-| Credential isolation | `lib/container.sh` | Credentials stay inside container by default |
-| Docker socket access denied | `lib/container.sh` | Host Docker socket not mounted by default |
+| Sandbox availability check | `agent-sandbox/lib/container.sh` | Verifies sandbox feature is available before starting containers |
+| Fail-closed on unknown errors | `agent-sandbox/lib/container.sh` | Blocks execution rather than proceeding with unknown status |
+| Symlink traversal defense | `agent-sandbox/entrypoint.sh` | `reject_symlink()` and `verify_path_under_data_dir()` prevent path escape |
+| Volume mount TOCTOU protection | `agent-sandbox/entrypoint.sh` | Validates paths before and after resolution |
+| Safe .env parsing | `agent-sandbox/entrypoint.sh` | CRLF handling, key validation, no shell eval |
+| Credential isolation | `agent-sandbox/lib/container.sh` | Credentials stay inside container by default |
+| Docker socket access denied | `agent-sandbox/lib/container.sh` | Host Docker socket not mounted by default |
+
+**Note:** Isolation detection is best-effort. Use `--force` to bypass sandbox availability checks (not recommended). Set `CONTAINAI_REQUIRE_ISOLATION=1` for strict enforcement that also requires isolation detection to pass.
 
 ### Unsafe Opt-ins
 
@@ -101,8 +103,8 @@ We will not pursue legal action against researchers who follow these guidelines.
 
 For detailed technical information about ContainAI's security implementation, see:
 
-- [Technical README](agent-sandbox/README.md) - Container isolation details
-- `agent-sandbox/lib/eci.sh` - ECI detection implementation
-- `agent-sandbox/lib/docker.sh` - Docker sandbox detection
-- `agent-sandbox/lib/container.sh` - Container start with isolation checks
-- `agent-sandbox/entrypoint.sh` - Volume mount security and .env parsing
+- [Technical README - Security Section](agent-sandbox/README.md#security) - Container isolation details
+- [`agent-sandbox/lib/eci.sh`](agent-sandbox/lib/eci.sh) - ECI detection implementation
+- [`agent-sandbox/lib/docker.sh`](agent-sandbox/lib/docker.sh) - Docker sandbox detection
+- [`agent-sandbox/lib/container.sh`](agent-sandbox/lib/container.sh) - Container start with isolation checks
+- [`agent-sandbox/entrypoint.sh`](agent-sandbox/entrypoint.sh) - Volume mount security and .env parsing
