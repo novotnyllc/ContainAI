@@ -76,7 +76,7 @@ _import_validate_volume_name() {
 # ==============================================================================
 
 # Detect source type for --from argument
-# Uses file -b for reliable detection (not extension-based)
+# Uses tar -tzf for reliable gzip archive detection (not extension-based)
 # Arguments: $1 = source path (file or directory)
 # Returns via stdout: "dir", "tgz", or "unknown"
 # Exit code: 0=success, 1=source does not exist
@@ -94,21 +94,14 @@ _import_detect_source_type() {
         return 0
     fi
 
-    # For files, use file -b for reliable detection
+    # For files, probe with tar to detect gzip-compressed tar archives
+    # This is more reliable than file -b and doesn't require the file command
     if [[ -f "$source" ]]; then
-        local file_type
-        if ! file_type=$(file -b -- "$source" 2>/dev/null); then
-            printf '%s\n' "unknown"
+        # Use -- to prevent argument injection from filenames starting with -
+        if tar -tzf -- "$source" >/dev/null 2>&1; then
+            printf '%s\n' "tgz"
             return 0
         fi
-
-        # Check for gzip compressed data
-        case "$file_type" in
-            *gzip\ compressed*)
-                printf '%s\n' "tgz"
-                return 0
-                ;;
-        esac
     fi
 
     # Not a recognized type
@@ -469,6 +462,13 @@ _containai_import() {
     local explicit_config="${6:-}"
     local from_source="${7:-}"
 
+    # Build docker command prefix based on context (needed early for source validation)
+    # All docker calls in this function MUST use docker_cmd and neutralize DOCKER_CONTEXT/DOCKER_HOST
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
+
     # Handle --from source: detect type and route accordingly
     local source_type=""
     local source_root="$HOME"  # Default to $HOME for backward compatibility
@@ -514,11 +514,14 @@ _containai_import() {
                 if [[ "$dry_run" == "true" ]]; then
                     _import_warn "DRY RUN MODE - Archive contents preview:"
                     echo ""
-                    # List archive contents
-                    if ! tar -tvzf "$from_source" 2>/dev/null; then
+                    # List archive contents (use -- to prevent argument injection from filenames starting with -)
+                    local tar_output
+                    if ! tar_output=$(tar -tvzf -- "$from_source" 2>&1); then
                         _import_error "Failed to list archive contents: $from_source"
+                        _import_error "$tar_output"
                         return 1
                     fi
+                    printf '%s\n' "$tar_output"
                     echo ""
                     _import_success "[dry-run] Archive listing complete (no changes made)"
                     # Set restore mode flag for caller (containai.sh) to skip env import
@@ -547,10 +550,22 @@ _containai_import() {
                     return 1
                 fi
 
+                # Check Docker is available before mount preflight
+                if ! command -v docker >/dev/null 2>&1; then
+                    _import_error "Docker is not installed or not in PATH"
+                    return 1
+                fi
+
                 # Check Docker can mount the directory (Docker Desktop file-sharing check)
-                if ! DOCKER_CONTEXT= DOCKER_HOST= docker run --rm -v "$from_source:/test:ro" alpine:3.20 true 2>/dev/null; then
+                # Use docker_cmd to respect the selected context
+                # Note: DOCKER_CONTEXT/DOCKER_HOST neutralization still needed since docker_cmd may use --context
+                local mount_error
+                if ! mount_error=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -v "$from_source:/test:ro" alpine:3.20 true 2>&1); then
                     _import_error "Cannot mount '$from_source' - ensure it's within Docker's file-sharing paths"
                     _import_info "On macOS/Windows, add the path in Docker Desktop Settings > Resources > File Sharing"
+                    if [[ -n "$mount_error" ]]; then
+                        _import_info "Docker error: $mount_error"
+                    fi
                     return 1
                 fi
 
@@ -567,13 +582,6 @@ _containai_import() {
                 return 1
                 ;;
         esac
-    fi
-
-    # Build docker command prefix based on context
-    # All docker calls in this function MUST use docker_cmd and neutralize DOCKER_CONTEXT/DOCKER_HOST
-    local -a docker_cmd=(docker)
-    if [[ -n "$ctx" ]]; then
-        docker_cmd=(docker --context "$ctx")
     fi
 
     # Validate required arguments
@@ -1053,7 +1061,6 @@ _import_transform_marketplaces() {
        normalized_home=$(cd -- "$HOME" 2>/dev/null && pwd); then
         if [[ "$normalized_source" != "$normalized_home" ]]; then
             skip_path_rewrite="true"
-            # Warning already issued by _import_transform_installed_plugins
         fi
     fi
 
@@ -1061,6 +1068,7 @@ _import_transform_marketplaces() {
     local transformed
     if [[ "$skip_path_rewrite" == "true" ]]; then
         # Copy as-is without path rewriting (just read and validate)
+        _import_info "Skipping installLocation transforms for known_marketplaces.json (source differs from \$HOME)"
         if ! transformed=$(jq '.' "$src_file"); then
             _import_error "jq read failed for known_marketplaces.json"
             return 1

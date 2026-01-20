@@ -580,8 +580,12 @@ _containai_import_cmd() {
         return 1
     fi
 
+    # Clear restore mode flag from any previous run (avoids session pollution)
+    unset _CAI_RESTORE_MODE
+
     # Call import function with context
     if ! _containai_import "$selected_context" "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config" "$from_source"; then
+        unset _CAI_RESTORE_MODE
         return 1
     fi
 
@@ -590,6 +594,9 @@ _containai_import_cmd() {
     if [[ "${_CAI_RESTORE_MODE:-}" != "1" ]]; then
         _containai_import_env "$selected_context" "$resolved_volume" "$resolved_workspace" "$explicit_config" "$dry_run"
     fi
+
+    # Clear restore mode flag after use
+    unset _CAI_RESTORE_MODE
 }
 
 # Export subcommand handler
