@@ -827,8 +827,9 @@ _containai_resolve_secure_engine_context() {
 # Behavior:
 # - Missing [env] section: returns defaults (import=[], from_host=false, env_file=null)
 # - [env] exists but import missing/invalid: returns import=[] with [WARN] (from parse-toml.py)
-# - Python unavailable: returns defaults with [WARN]
-# - Explicit config but Python unavailable: return 1 (fail fast)
+# - Python unavailable (discovered config): returns defaults with [WARN]
+# - Python unavailable (explicit config): return 1 (fail fast, matches epic spec)
+# - Env config is global-only (no workspace-specific overrides per spec)
 _containai_resolve_env_config() {
     local workspace="${1:-$PWD}"
     local explicit_config="${2:-}"
@@ -837,9 +838,10 @@ _containai_resolve_env_config() {
     # Default JSON output (for missing config or Python unavailable)
     local default_json='{"import":[],"from_host":false,"env_file":null}'
 
-    # Resolve workspace to absolute path
+    # Resolve workspace to absolute path (preserve original for warning message)
+    local workspace_input="$workspace"
     if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
-        printf '%s\n' "[WARN] Invalid workspace path, using \$PWD: $workspace" >&2
+        printf '%s\n' "[WARN] Invalid workspace path, using \$PWD: $workspace_input" >&2
         workspace="$PWD"
     fi
 
