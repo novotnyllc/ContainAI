@@ -7,10 +7,11 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 
 ## [Unreleased]
 
-### Added
-- Nothing yet
+_No unreleased changes._
 
-## [2026-01-20] - Documentation Suite
+## [2026-01-20]
+
+Major documentation overhaul, environment variable import, and Secure Engine setup automation.
 
 ### Added
 - Root README.md as canonical project entry point
@@ -21,46 +22,36 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - Troubleshooting guide (`docs/troubleshooting.md`) covering 20+ scenarios
 - Architecture overview (`docs/architecture.md`) with Mermaid diagrams
 - This CHANGELOG.md with retroactive history
+- Environment variable import via `cai import` with `.env` file support
+- Safe `.env` file parsing with CRLF handling and `set -e` safety
+- Multiline value detection in environment file parser
+- Integration tests for environment variable import functionality
+- `cai setup` command for automated Sysbox runtime installation
+  - WSL2 support with distro detection
+  - macOS Lima VM provisioning
+  - Linux native installation
+- `cai validate` command for verifying Secure Engine configuration
+- `Dockerfile.test` for CI testing with dockerd + Sysbox
+- `cai sandbox reset` command for troubleshooting sandbox state
+- `cai sandbox clear-credentials` command for credential cleanup
 
 ### Changed
 - `agent-sandbox/README.md` now includes banner pointing to root README
 
 ### Fixed
 - Documentation reconciliation between root and agent-sandbox READMEs
-
-## [2026-01-20] - Environment Variable Import
-
-### Added
-- `cai import-env` command for importing host environment variables into sandboxes
-- Safe `.env` file parsing with CRLF handling and `set -e` safety
-- Multiline value detection in environment file parser
-- Integration tests for environment variable import functionality
-
-### Fixed
 - TOCTOU protections for environment file imports
 - Symlink traversal defense ordering in entrypoint
-
-### Security
-- Environment file validation before loading into sandbox
-
-## [2026-01-20] - Secure Engine Setup Commands
-
-### Added
-- `cai setup` command for automated Sysbox runtime installation
-  - WSL2 support with distro detection
-  - macOS Lima VM provisioning
-  - Linux native installation
-- `cai setup validate` for verifying Secure Engine configuration
-- `Dockerfile.test` for CI testing with dockerd + Sysbox
-- `cai sandbox reset` command for troubleshooting sandbox state
-- `cai sandbox clear-credentials` command for credential cleanup
-
-### Fixed
 - Validation now correctly checks `.Runtimes` instead of assuming default runtime
 - Docker context forcing for sandbox commands (required for Docker Desktop)
 - Tmux configuration simplified to XDG-only paths
 
-## [2026-01-19] - Unsafe Opt-ins with Acknowledgements
+### Security
+- Environment file validation before loading into sandbox
+
+## [2026-01-19]
+
+Unsafe opt-ins with acknowledgements and configuration system enhancements.
 
 ### Added
 - FR-5 unsafe opt-ins with explicit acknowledgement requirements
@@ -68,14 +59,6 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - `--allow-host-docker-socket` flag for Docker socket access
 - `--force` flag for bypassing safety checks
 - Config `[danger]` section for persistent acknowledgements
-
-### Security
-- Dangerous operations now require explicit opt-in flags
-- Safe defaults reject dangerous options entirely
-
-## [2026-01-19] - Configuration System Enhancements
-
-### Added
 - TOML parser extended for `[env]` section support
 - Environment configuration resolution function
 - Strict mode error handling for configuration parsing
@@ -84,7 +67,13 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - `set -e` guards for script directory resolution
 - Fail-fast behavior in strict mode for all error paths
 
-## [2026-01-18] - ECI and Sysbox Dual Runtime Support
+### Security
+- Dangerous operations now require explicit opt-in flags
+- Safe defaults reject dangerous options entirely
+
+## [2026-01-18]
+
+ECI and Sysbox dual runtime support.
 
 ### Added
 - Docker Desktop Enhanced Container Isolation (ECI) support
@@ -96,7 +85,9 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - Container launch now supports both ECI and Sysbox isolation modes
 - Documentation updated to reflect dual-runtime architecture
 
-## [2025-11-16] - SSH and GPG Handling Improvements
+## [2025-11-16]
+
+SSH and GPG handling improvements.
 
 ### Added
 - Enhanced SSH key handling in launch scripts
@@ -106,25 +97,15 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - GPG signing disabled for test repositories to prevent CI failures
 - PowerShell script output commands standardized to `Write-Output`
 
-## [2025-11-15] - Security Architecture Documentation
+## [2025-11-15]
+
+Security architecture documentation and credential proxy integration.
 
 ### Added
 - Comprehensive security findings documentation
 - Architecture insights documentation
 - Container runtime detection test function
 - Coding conventions for PowerShell and Bash
-
-### Fixed
-- Dockerfile updates for Ubuntu 24.04 package transitions
-  - `libasound2` replaced with `libasound2t64`
-  - `libssl3` replaced with `libssl3t64`
-
-### Changed
-- Test execution refactored with `Invoke-Test` and `run_test` functions
-
-## [2025-11-15] - Credential Proxy and VS Code Integration
-
-### Added
 - Credential proxy server for secure credential forwarding
 - GPG proxy server for commit signing
 - VS Code task setup for container development
@@ -132,9 +113,17 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - MCP secrets configuration support
 
 ### Changed
+- Test execution refactored with `Invoke-Test` and `run_test` functions
 - MCP configuration handling refactored for improved GitHub CLI checks
 
-## [2025-11-14] - Documentation and Integration Testing
+### Fixed
+- Dockerfile updates for Ubuntu 24.04 package transitions
+  - `libasound2` replaced with `libasound2t64`
+  - `libssl3` replaced with `libssl3t64`
+
+## [2025-11-14]
+
+Documentation expansion and integration testing framework.
 
 ### Added
 - Getting started guide
@@ -152,7 +141,9 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - Launch-agent command syntax changed to require agent type as first argument
 - Workspace isolation model clarified with rationale against git worktrees
 
-## [2025-11-13] - Multi-Agent Support and Auto Features
+## [2025-11-13]
+
+Multi-agent support and auto features.
 
 ### Added
 - Squid proxy sidecar for network monitoring and control
@@ -169,7 +160,9 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - Agent configurations and initialization scripts streamlined
 - Launch scripts refactored for improved `-NoPush` handling
 
-## [2025-11-10] - Initial Release
+## [2025-11-10]
+
+Initial release.
 
 ### Added
 - Ultra-simple launchers for coding agents (Claude, Codex, Copilot)
@@ -192,12 +185,13 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 | 2025-11-13 | Multi-Agent, Auto Features, Proxy Sidecar |
 | 2025-11-10 | Initial Release |
 
-[Unreleased]: https://github.com/novotnyllc/containai/compare/HEAD...main
-[2026-01-20]: https://github.com/novotnyllc/containai/commits/main?since=2026-01-20
-[2026-01-19]: https://github.com/novotnyllc/containai/commits/main?after=2026-01-20&since=2026-01-19
-[2026-01-18]: https://github.com/novotnyllc/containai/commits/main?after=2026-01-19&since=2026-01-18
-[2025-11-16]: https://github.com/novotnyllc/containai/commits/main?after=2026-01-18&since=2025-11-16
-[2025-11-15]: https://github.com/novotnyllc/containai/commits/main?after=2025-11-16&since=2025-11-15
-[2025-11-14]: https://github.com/novotnyllc/containai/commits/main?after=2025-11-15&since=2025-11-14
-[2025-11-13]: https://github.com/novotnyllc/containai/commits/main?after=2025-11-14&since=2025-11-13
-[2025-11-10]: https://github.com/novotnyllc/containai/commits/main?after=2025-11-13&since=2025-11-10
+<!-- Reference links use date-range queries; once release tags exist, update to tag-based compare links -->
+[Unreleased]: https://github.com/novotnyllc/containai/commits/main
+[2026-01-20]: https://github.com/novotnyllc/containai/commits/main?since=2026-01-20&until=2026-01-21
+[2026-01-19]: https://github.com/novotnyllc/containai/commits/main?since=2026-01-19&until=2026-01-20
+[2026-01-18]: https://github.com/novotnyllc/containai/commits/main?since=2026-01-18&until=2026-01-19
+[2025-11-16]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-16&until=2025-11-17
+[2025-11-15]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-15&until=2025-11-16
+[2025-11-14]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-14&until=2025-11-15
+[2025-11-13]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-13&until=2025-11-14
+[2025-11-10]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-10&until=2025-11-11
