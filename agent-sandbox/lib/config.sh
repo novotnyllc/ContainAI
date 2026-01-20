@@ -15,6 +15,7 @@
 #   _containai_resolve_agent      - Resolve agent from config
 #   _containai_resolve_credentials - Resolve credentials mode from config
 #   _containai_resolve_secure_engine_context - Resolve secure engine context from config
+#   _containai_resolve_env_config - Resolve env config for allowlist-based env var import
 #   _containai_validate_volume_name - Validate Docker volume name
 #
 # Global variables set by _containai_parse_config:
@@ -807,6 +808,121 @@ _containai_resolve_secure_engine_context() {
     fi
 
     # 4. Default: empty (let caller decide)
+    return 0
+}
+
+# ==============================================================================
+# Env config resolution (for allowlist-based env var import)
+# ==============================================================================
+
+# Resolve env config from config file for env var import
+# This is INDEPENDENT of volume/excludes resolution (runs even with --data-volume or --no-excludes)
+#
+# Arguments: $1 = workspace path (default: $PWD)
+#            $2 = explicit config path (optional)
+# Outputs: JSON with keys: import (array), from_host (bool), env_file (string or null)
+#          Returns default JSON if [env] section missing or Python unavailable
+# Returns: 0 on success, 1 on fatal error (explicit config missing or strict parse error)
+#
+# Behavior:
+# - Missing [env] section: returns defaults (import=[], from_host=false, env_file=null)
+# - [env] exists but import missing/invalid: returns import=[] with [WARN] (from parse-toml.py)
+# - Python unavailable: returns defaults with [WARN]
+# - Explicit config but Python unavailable: return 1 (fail fast)
+_containai_resolve_env_config() {
+    local workspace="${1:-$PWD}"
+    local explicit_config="${2:-}"
+    local config_file script_dir env_json
+
+    # Default JSON output (for missing config or Python unavailable)
+    local default_json='{"import":[],"from_host":false,"env_file":null}'
+
+    # Resolve workspace to absolute path
+    if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
+        printf '%s\n' "[WARN] Invalid workspace path, using \$PWD: $workspace" >&2
+        workspace="$PWD"
+    fi
+
+    # Find config file
+    if [[ -n "$explicit_config" ]]; then
+        # Explicit config: must exist
+        if [[ ! -f "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Config file not found: $explicit_config" >&2
+            return 1
+        fi
+        config_file="$explicit_config"
+    else
+        config_file=$(_containai_find_config "$workspace")
+    fi
+
+    # If no config found, return defaults
+    if [[ -z "$config_file" ]]; then
+        printf '%s' "$default_json"
+        return 0
+    fi
+
+    # Check if config file exists (for discovered config)
+    if [[ ! -f "$config_file" ]]; then
+        printf '%s' "$default_json"
+        return 0
+    fi
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        if [[ -n "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Python required to parse config: $config_file" >&2
+            return 1
+        fi
+        printf '%s\n' "[WARN] Python not found, cannot parse config. Using defaults." >&2
+        printf '%s' "$default_json"
+        return 0
+    fi
+
+    # Determine script directory (where parse-toml.py lives)
+    script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    # Call parse-toml.py --env to extract and validate [env] section
+    # The script handles validation and returns JSON (or null if [env] missing)
+    # IMPORTANT: Do NOT use 2>&1 - that would capture stderr into env_json and corrupt JSON
+    # Let stderr from parse-toml.py (warnings) pass through to parent stderr
+    if ! env_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --env); then
+        # Parse failed - check if strict mode applies
+        if [[ -n "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Failed to parse config file: $config_file" >&2
+            return 1
+        fi
+        printf '%s\n' "[WARN] Failed to parse config file: $config_file" >&2
+        printf '%s' "$default_json"
+        return 0
+    fi
+
+    # parse-toml.py --env returns "null" (JSON null) if [env] section is missing
+    # Convert null to defaults
+    if [[ "$env_json" == "null" ]]; then
+        printf '%s' "$default_json"
+        return 0
+    fi
+
+    # parse-toml.py may not include env_file key if not present - ensure consistent output
+    # Use Python to normalize the output with all expected keys
+    local normalized_json
+    if ! normalized_json=$(printf '%s' "$env_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+# Ensure all keys present with defaults
+result = {
+    'import': data.get('import', []),
+    'from_host': data.get('from_host', False),
+    'env_file': data.get('env_file', None)
+}
+print(json.dumps(result, separators=(',', ':')))
+"); then
+        printf '%s\n' "[WARN] Failed to normalize env config JSON" >&2
+        printf '%s' "$default_json"
+        return 0
+    fi
+
+    printf '%s' "$normalized_json"
     return 0
 }
 

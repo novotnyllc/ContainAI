@@ -25,9 +25,8 @@ Extend `parse-toml.py` to support the `[env]` section for env var import configu
 - [ ] Missing `[env]` section returns empty/null (not error)
 - [ ] JSON output includes env config
 ## Done summary
-TBD
-
+Extended parse-toml.py with --env mode to validate and extract [env] section for env var import configuration. Supports import (list), from_host (bool), and env_file (string) with proper type validation and fail-soft/fail-closed semantics per spec.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: cd6da7e, d635293
+- Tests: python3 -m py_compile agent-sandbox/parse-toml.py, manual testing with various TOML configs
 - PRs:

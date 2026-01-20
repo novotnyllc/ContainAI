@@ -5,10 +5,21 @@
   "created_at": "2026-01-20T04:51:49.377697Z",
   "depends_on": [],
   "epic": "fn-6-aaz",
+  "evidence": {
+    "commits": [
+      "cd6da7e",
+      "d635293"
+    ],
+    "prs": [],
+    "tests": [
+      "python3 -m py_compile agent-sandbox/parse-toml.py",
+      "manual testing with various TOML configs"
+    ]
+  },
   "id": "fn-6-aaz.1",
   "priority": null,
   "spec_path": ".flow/tasks/fn-6-aaz.1.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Extend TOML parser for [env] section",
-  "updated_at": "2026-01-20T10:04:03.678745Z"
+  "updated_at": "2026-01-20T10:16:45.959638Z"
 }
