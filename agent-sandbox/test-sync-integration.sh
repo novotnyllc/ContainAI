@@ -45,18 +45,19 @@ fi
 # 2. Preserving DOCKER_CONFIG so Docker CLI keeps working
 REAL_HOME="$HOME"
 
-# Create fixture directory under real home (required for Docker Desktop file-sharing)
-FIXTURE_HOME="${REAL_HOME}/.containai-test-home-$$"
-mkdir -p "$FIXTURE_HOME"
+# Create fixture directory under real home using mktemp for true randomness
+# (required for Docker Desktop file-sharing and to avoid stale file issues)
+FIXTURE_HOME=$(mktemp -d "${REAL_HOME}/.containai-test-home-XXXXXX")
 
-# Preserve Docker config pointing to real home's .docker directory
+# Preserve Docker config - use existing DOCKER_CONFIG if set, else default to real home's .docker
 # (per pitfall: "When overriding HOME for tests, preserve DOCKER_CONFIG pointing to real home")
-export DOCKER_CONFIG="${REAL_HOME}/.docker"
+export DOCKER_CONFIG="${DOCKER_CONFIG:-${REAL_HOME}/.docker}"
 
-# Cleanup function for fixture directory
+# Cleanup function for fixture directory (best-effort, don't fail the test run)
 cleanup_fixture() {
-    if [[ -d "$FIXTURE_HOME" ]]; then
-        rm -rf "$FIXTURE_HOME"
+    # Sanity check: only delete if path matches expected pattern
+    if [[ -d "$FIXTURE_HOME" && "$FIXTURE_HOME" == "${REAL_HOME}/.containai-test-home-"* ]]; then
+        rm -rf "$FIXTURE_HOME" 2>/dev/null || true
     fi
 }
 
@@ -212,6 +213,22 @@ populate_fixture() {
     # tmux plugins (data directory)
     mkdir -p "$fixture/.local/share/tmux/plugins/tpm"
     echo '# TPM' > "$fixture/.local/share/tmux/plugins/tpm/tpm"
+}
+
+# ==============================================================================
+# Hermetic cai import helper
+# ==============================================================================
+# Run cai import with HOME overridden to FIXTURE_HOME for hermetic testing.
+# DOCKER_CONFIG is preserved globally so Docker CLI keeps working.
+#
+# Usage: run_cai_import [extra_args...]
+# Example: run_cai_import --data-volume "$vol" --dry-run
+#
+# Returns: exit code from cai import
+# Stdout: cai import output (for capture)
+#
+run_cai_import() {
+    HOME="$FIXTURE_HOME" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import $*" 2>&1
 }
 
 # ==============================================================================
@@ -379,13 +396,16 @@ test_full_sync() {
     populate_fixture "$FIXTURE_HOME"
     pass "Fixture populated with test files"
 
-    # Run full sync via cai import using fixture HOME
-    # HOME override is ONLY for the cai import invocation (per spec)
-    # DOCKER_CONFIG is already exported globally pointing to real home's .docker
-    local sync_exit=0
-    HOME="$FIXTURE_HOME" bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --data-volume '$DATA_VOLUME'" >/dev/null 2>&1 || sync_exit=$?
+    # Run full sync via cai import using hermetic helper
+    # Captures output for diagnostic context on failure
+    local sync_exit=0 sync_output
+    sync_output=$(run_cai_import --data-volume "$DATA_VOLUME") || sync_exit=$?
     if [[ $sync_exit -ne 0 ]]; then
         fail "Full sync failed with exit code $sync_exit"
+        info "Output (first 50 lines):"
+        echo "$sync_output" | head -50 | while IFS= read -r line; do
+            echo "    $line"
+        done
         return
     fi
     pass "Full sync completed successfully"
@@ -2558,7 +2578,7 @@ main() {
     echo "=============================================================================="
 
     # Docker availability already verified by early guard at script start
-    # Populate hermetic fixture for test_full_sync (done once, used by multiple tests)
+    # Hermetic fixture directory created at script start; populated by test_full_sync
     info "Using hermetic fixture at: $FIXTURE_HOME"
 
     # Check if image exists (build if needed)
