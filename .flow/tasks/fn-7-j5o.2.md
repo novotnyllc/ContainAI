@@ -31,9 +31,8 @@ Create SECURITY.md to establish trust for a security-critical sandboxing tool. D
 - [ ] Links to detailed security info in agent-sandbox/README.md
 - [ ] Renders correctly on GitHub
 ## Done summary
-TBD
-
+Created SECURITY.md with security policy, supported versions, security model (ECI vs Sysbox), security guarantees, unsafe opt-ins documentation, non-goals, vulnerability reporting process, and safe harbor statement.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 124e40d, bc5b672, 70886f9, 99b20dd
+- Tests: codex impl-review (SHIP)
 - PRs:

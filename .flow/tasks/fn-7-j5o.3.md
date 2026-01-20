@@ -30,8 +30,19 @@ Create a standalone quickstart guide that gets users from zero to first sandbox 
 - [ ] Links to configuration guide for customization
 - [ ] Achievable in <5 minutes for user with Docker installed
 ## Done summary
-TBD
+Created comprehensive quickstart guide at `docs/quickstart.md` with:
 
+- Prerequisites table (Docker Desktop 4.50+, bash shell, git)
+- 5 numbered steps from clone to first sandbox with verification at each
+- Runtime decision tree with `cai doctor` (ECI vs Sysbox paths)
+- "What Just Happened?" section explaining first-run behavior
+- ASCII diagram showing sandbox architecture
+- Common commands table
+- Links to troubleshooting and configuration
+- Platform-specific notes (Linux, WSL2, macOS)
+- Quick reference for shell setup
+
+Updated root README.md description for quickstart link.
 ## Evidence
 - Commits:
 - Tests:

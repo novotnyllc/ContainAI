@@ -5,10 +5,22 @@
   "created_at": "2026-01-20T07:55:27.082335Z",
   "depends_on": [],
   "epic": "fn-7-j5o",
+  "evidence": {
+    "commits": [
+      "124e40d",
+      "bc5b672",
+      "70886f9",
+      "99b20dd"
+    ],
+    "prs": [],
+    "tests": [
+      "codex impl-review (SHIP)"
+    ]
+  },
   "id": "fn-7-j5o.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-7-j5o.2.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create SECURITY.md",
-  "updated_at": "2026-01-20T12:56:00.223714Z"
+  "updated_at": "2026-01-20T13:17:09.092494Z"
 }

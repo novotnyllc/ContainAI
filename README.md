@@ -64,7 +64,7 @@ The sandbox mounts your current directory and starts the configured AI agent.
 
 | Document | Description |
 |----------|-------------|
-| [Quickstart Guide](docs/quickstart.md) | Getting started guide |
+| [Quickstart Guide](docs/quickstart.md) | Zero to first sandbox in 5 minutes |
 | [Technical README](agent-sandbox/README.md) | Image building, testing, and internals |
 
 ## Security
