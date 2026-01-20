@@ -1,14 +1,14 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-20T12:56:00.223697Z",
   "created_at": "2026-01-20T07:55:27.082335Z",
   "depends_on": [],
   "epic": "fn-7-j5o",
   "id": "fn-7-j5o.2",
   "priority": null,
   "spec_path": ".flow/tasks/fn-7-j5o.2.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Create SECURITY.md",
-  "updated_at": "2026-01-20T07:56:03.106319Z"
+  "updated_at": "2026-01-20T12:56:00.223714Z"
 }
