@@ -93,3 +93,4 @@ When overriding HOME for tests, preserve DOCKER_CONFIG pointing to real home to 
 
 ## 2026-01-20 manual [pitfall]
 In bash -c wrappers, use "$@" with proper argument passing (bash -c 'cmd "$@"' _ arg1 arg2) not $* which loses argument boundaries
+

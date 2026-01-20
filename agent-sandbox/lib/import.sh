@@ -134,9 +134,15 @@ _import_restore_from_tgz() {
     local volume=""
     local archive=""
 
+    # Validate argument count
+    if [[ $# -lt 2 || $# -gt 3 ]]; then
+        _import_error "Usage: _import_restore_from_tgz [ctx] volume archive"
+        _import_error "Got $# arguments, expected 2 or 3"
+        return 1
+    fi
+
     # Support both 2-arg (volume, archive) and 3-arg (ctx, volume, archive) forms
-    # Detect by checking if $3 is set
-    if [[ -n "${3:-}" ]]; then
+    if [[ $# -eq 3 ]]; then
         # 3-arg form: ctx, volume, archive
         ctx="${1:-}"
         volume="${2:-}"
@@ -215,7 +221,12 @@ _import_restore_from_tgz() {
         # Step 3: Check entry types using allowlist (only - and d allowed)
         # BusyBox tar -tv format: permissions owner/group size date time name
         # Note: Symlinks/hardlinks are intentionally rejected per spec (security)
-        disallowed=$(tar -tvzf /tmp/archive.tgz 2>/dev/null | cut -c1 | grep -vE "^[-d]$" | sort -u | tr "\n" " ")
+        # Capture listing first to ensure tar succeeds before processing
+        if ! listing=$(tar -tvzf /tmp/archive.tgz 2>&1); then
+            echo "LIST_FAILED"
+            exit 0
+        fi
+        disallowed=$(printf "%s\n" "$listing" | cut -c1 | grep -vE "^[-d]$" | sort -u | tr "\n" " ")
         if [ -n "$disallowed" ]; then
             echo "DISALLOWED_TYPES:$disallowed"
             exit 0
@@ -237,6 +248,10 @@ _import_restore_from_tgz() {
             ;;
         CORRUPT)
             _import_error "Failed to read archive (corrupt or not gzip-compressed tar): $archive"
+            return 1
+            ;;
+        LIST_FAILED)
+            _import_error "Failed to list archive contents for validation: $archive"
             return 1
             ;;
         UNSAFE_PATH)
