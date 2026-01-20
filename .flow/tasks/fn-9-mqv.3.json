@@ -7,10 +7,23 @@
     "fn-9-mqv.2"
   ],
   "epic": "fn-9-mqv",
+  "evidence": {
+    "commits": [
+      "e77584b",
+      "9d40d06",
+      "397831f",
+      "007677e",
+      "6f944a7"
+    ],
+    "prs": [],
+    "tests": [
+      "Code review verified against acceptance criteria"
+    ]
+  },
   "id": "fn-9-mqv.3",
   "priority": null,
   "spec_path": ".flow/tasks/fn-9-mqv.3.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Implement tgz restore function",
-  "updated_at": "2026-01-20T18:24:57.265692Z"
+  "updated_at": "2026-01-20T18:59:17.224637Z"
 }

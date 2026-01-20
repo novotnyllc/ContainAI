@@ -31,9 +31,8 @@ Implement function to restore volume from tgz archive (idempotent).
 - [ ] Uses `--network=none` for container isolation
 - [ ] Uses `alpine:3.20` image (matches export)
 ## Done summary
-TBD
-
+Implemented `_import_restore_from_tgz()` function that restores a Docker volume from a tgz archive with full validation (path traversal, file types, integrity), volume clearing for idempotency, and network isolation using alpine:3.20.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: e77584b, 9d40d06, 397831f, 007677e, 6f944a7
+- Tests: Code review verified against acceptance criteria
 - PRs:

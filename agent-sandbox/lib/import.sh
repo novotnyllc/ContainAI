@@ -170,6 +170,12 @@ _import_restore_from_tgz() {
         return 1
     fi
 
+    # Validate docker is available (for standalone use)
+    if ! command -v docker >/dev/null 2>&1; then
+        _import_error "Docker is not installed or not in PATH"
+        return 1
+    fi
+
     # Validate volume name to prevent bind mount injection
     # This is critical - without validation, a path like "/" could be passed
     # and the subsequent find -delete would wipe host files
