@@ -61,9 +61,8 @@ Update container entrypoint to safely load `.env` file with CRLF handling and `s
 - [ ] Rejects symlinks (mirrors existing helpers)
 - [ ] Log message: `[INFO] Loading environment from .env`
 ## Done summary
-TBD
-
+Added safe .env file loading to entrypoint with CRLF stripping, set -e safety guards, and key-only logging for malformed lines to prevent value leakage.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 8899f11, 6a17e1c, 107a607, 10fec15, 2e6e963
+- Tests: bash -n entrypoint.sh, unit tests for _load_env_file
 - PRs:

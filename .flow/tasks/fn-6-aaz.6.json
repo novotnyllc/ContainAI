@@ -1,7 +1,7 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-20T11:49:23.025574Z",
   "created_at": "2026-01-20T04:51:50.160794Z",
   "depends_on": [
     "fn-6-aaz.4",
@@ -11,7 +11,7 @@
   "id": "fn-6-aaz.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-6-aaz.6.md",
-  "status": "todo",
+  "status": "in_progress",
   "title": "Add integration tests for env import",
-  "updated_at": "2026-01-20T05:16:11.137498Z"
+  "updated_at": "2026-01-20T11:49:23.025594Z"
 }

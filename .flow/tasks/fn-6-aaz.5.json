@@ -5,10 +5,24 @@
   "created_at": "2026-01-20T04:51:49.996344Z",
   "depends_on": [],
   "epic": "fn-6-aaz",
+  "evidence": {
+    "commits": [
+      "8899f11",
+      "6a17e1c",
+      "107a607",
+      "10fec15",
+      "2e6e963"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n entrypoint.sh",
+      "unit tests for _load_env_file"
+    ]
+  },
   "id": "fn-6-aaz.5",
   "priority": null,
   "spec_path": ".flow/tasks/fn-6-aaz.5.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Update entrypoint to source .env",
-  "updated_at": "2026-01-20T11:34:51.462754Z"
+  "updated_at": "2026-01-20T11:48:10.303461Z"
 }
