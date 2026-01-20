@@ -225,7 +225,7 @@ Usage: cai import [options]
 Options:
   --data-volume <vol>   Data volume name (overrides config)
   --from <path>         Import source: directory or .tgz archive
-                        (default: sync from $HOME)
+                        (default: sync from $HOME) [PLANNED - not yet implemented]
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path for config resolution
   --dry-run             Preview changes without applying
@@ -237,8 +237,6 @@ Examples:
   cai import --dry-run          Preview what would be synced
   cai import --no-excludes      Sync without applying excludes
   cai import --data-volume vol  Sync to specific volume
-  cai import --from backup.tgz  Restore from tgz archive
-  cai import --from ~/configs/  Sync from directory instead of $HOME
 EOF
 }
 

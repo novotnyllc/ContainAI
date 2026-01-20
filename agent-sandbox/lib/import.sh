@@ -10,7 +10,7 @@
 # Usage:
 #   source lib/config.sh
 #   source lib/import.sh
-#   _containai_import "" "volume-name" "false" "false" "$PWD" ""
+#   _containai_import "" "volume-name" "false" "false" "$PWD" "" ""
 #
 # Arguments:
 #   $1 = Docker context ("" for default, "containai-secure" for Sysbox)
@@ -19,6 +19,8 @@
 #   $4 = no_excludes flag ("true" or "false", default: "false")
 #   $5 = workspace path (optional, for exclude resolution, default: $PWD)
 #   $6 = explicit config path (optional, for exclude resolution)
+#   $7 = from_source path (optional, tgz file or directory; default: "" means $HOME)
+#        NOTE: Non-empty from_source not yet implemented (fails fast)
 #
 # Dependencies:
 #   - docker (for rsync container)
@@ -209,6 +211,14 @@ _containai_import() {
     local workspace="${5:-$PWD}"
     local explicit_config="${6:-}"
     local from_source="${7:-}"
+
+    # Fail fast if --from is specified (not yet implemented)
+    # TODO: Implement in fn-9-mqv.2-5 (tgz restore, directory sync)
+    if [[ -n "$from_source" ]]; then
+        _import_error "--from is not yet implemented"
+        _import_info "This feature is planned for a future release"
+        return 1
+    fi
 
     # Build docker command prefix based on context
     # All docker calls in this function MUST use docker_cmd and neutralize DOCKER_CONTEXT/DOCKER_HOST
