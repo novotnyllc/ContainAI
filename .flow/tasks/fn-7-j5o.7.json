@@ -5,10 +5,22 @@
   "created_at": "2026-01-20T07:55:27.907752Z",
   "depends_on": [],
   "epic": "fn-7-j5o",
+  "evidence": {
+    "commits": [
+      "ee50f01",
+      "4f2d53d",
+      "f5e6e3e",
+      "70195cb"
+    ],
+    "prs": [],
+    "tests": [
+      "Manual verification of Mermaid diagram syntax"
+    ]
+  },
   "id": "fn-7-j5o.7",
   "priority": null,
   "spec_path": ".flow/tasks/fn-7-j5o.7.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create architecture overview",
-  "updated_at": "2026-01-20T14:35:14.819913Z"
+  "updated_at": "2026-01-20T15:09:07.737349Z"
 }
