@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-20T07:55:37.936751Z",
+  "depends_on": [],
+  "epic": "fn-8-k84",
+  "id": "fn-8-k84.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-8-k84.2.md",
+  "status": "todo",
+  "title": "Add Mac-specific integration test for cai import",
+  "updated_at": "2026-01-20T07:55:56.358910Z"
+}

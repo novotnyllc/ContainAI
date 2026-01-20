@@ -1,0 +1,140 @@
+{
+  "created_at": "2026-01-20T04:53:09.322222Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-6-aaz",
+      "created_at": "2026-01-20T04:51:11.238750Z",
+      "depends_on_epics": [],
+      "id": "fn-6-aaz",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-6-aaz.md",
+      "status": "open",
+      "title": "Allowlist-based env var import",
+      "updated_at": "2026-01-20T04:51:41.470549Z"
+    },
+    "spec": "# Allowlist-based Env Var Import\n\n## Overview\n\nExtend `cai import` to support allowlist-based environment variable import. Users specify which env vars to import via config, optionally reading from host environment (opt-in) and/or a source `.env` file. The result is a combined `.env` file written to the data volume.\n\n**Key principle**: No accidental env var leakage. Explicit allowlist required, host env reading is opt-in (default: disabled).\n\n## Scope\n\n**In scope:**\n- Config schema for env var allowlist (`[env]` section)\n- Reading from host environment (opt-in)\n- Reading from source `.env` file\n- Writing combined `.env` to data volume\n- Entrypoint sourcing of `.env`\n- Integration with `cai import`\n\n**Out of scope:**\n- Pattern matching in allowlist (`APP_*` - literals only)\n- `--env-file` flag for docker commands (use entrypoint sourcing)\n- Secrets management (just env vars)\n- Workspace-specific env config (future enhancement)\n\n## Config Schema\n\n```toml\n[env]\n# Required: Explicit list of env var names to import\n# Only these vars will be imported - all others ignored\nimport = [\"ANTHROPIC_API_KEY\", \"CONTEXT7_API_KEY\", \"DEBUG\"]\n\n# Optional: Read values from host environment\n# Default: false (must opt-in explicitly)\nfrom_host = true\n\n# Optional: Read values from .env file (relative to workspace)\n# Merged with host env (host takes precedence if both have same var)\nenv_file = \".env.sandbox\"\n```\n\n## Precedence (highest wins)\n\n1. Host environment (if `from_host = true`)\n2. Source `.env` file (if `env_file` specified)\n3. *(CLI `-e` flags handled separately at runtime)*\n\n## Output\n\n- **Path**: `/mnt/agent-data/.env`\n- **Format**: Docker-style env file (no quotes, literal values)\n- **Permissions**: `0600` (owner read/write only)\n- **Encoding**: UTF-8, no multiline values (skipped with warning)\n\n## User Flow\n\n```bash\n# 1. User creates config\ncat > .containai/config.toml <<'CONFIG'\n[env]\nimport = [\"ANTHROPIC_API_KEY\", \"CONTEXT7_API_KEY\"]\nfrom_host = true\nCONFIG\n\n# 2. User runs import (or cai run which calls import automatically)\ncai import\n\n# Output:\n# [INFO] Importing env vars to volume: containai-data\n# [OK] Imported 2 env vars: ANTHROPIC_API_KEY, CONTEXT7_API_KEY\n# [WARN] Skipped 0 vars (not found in host or file)\n\n# 3. Container starts, entrypoint sources /mnt/agent-data/.env\ncai run\n```\n\n## Quick Commands\n\n```bash\n# Smoke test: import with config\ncat > /tmp/test-config.toml <<'TOML'\n[env]\nimport = [\"TEST_VAR\"]\nfrom_host = true\nTOML\nTEST_VAR=hello cai import --config /tmp/test-config.toml\n\n# Verify .env was created in volume\ndocker run --rm -v containai-data:/data alpine cat /data/.env\n# Expected: TEST_VAR=hello\n```\n\n## Acceptance Criteria\n\n1. [ ] Config `[env].import` specifies allowlist of env var names\n2. [ ] Config `[env].from_host` (default false) enables host env reading\n3. [ ] Config `[env].env_file` specifies source .env file path\n4. [ ] Only allowlisted vars are imported (no accidental leakage)\n5. [ ] Missing vars logged as warning, not fatal\n6. [ ] Output `.env` written atomically to volume\n7. [ ] Output `.env` has mode 0600\n8. [ ] Multiline values skipped with warning\n9. [ ] Entrypoint sources `/mnt/agent-data/.env` if present\n10. [ ] `cai import` triggers env var import\n11. [ ] Works in both Sandbox and Sysbox modes\n\n## References\n\n- Existing import: `agent-sandbox/lib/import.sh`\n- Config parsing: `agent-sandbox/lib/config.sh`, `agent-sandbox/parse-toml.py`\n- Entrypoint: `agent-sandbox/entrypoint.sh`\n- Volume mount: `/mnt/agent-data`\n- OWASP guidance: env vars visible via docker inspect (not for high-sensitivity secrets)\n"
+  },
+  "epic_id": "fn-6-aaz",
+  "schema_version": 1,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T04:51:49.377697Z",
+        "depends_on": [],
+        "epic": "fn-6-aaz",
+        "id": "fn-6-aaz.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-6-aaz.1.md",
+        "status": "todo",
+        "title": "Extend TOML parser for [env] section",
+        "updated_at": "2026-01-20T04:52:07.383066Z"
+      },
+      "id": "fn-6-aaz.1",
+      "spec": "# fn-6-aaz.1 Extend TOML parser for [env] section\n\n## Description\nExtend `parse-toml.py` to support the `[env]` section for env var import configuration.\n\n**Size:** S  \n**Files:** `agent-sandbox/parse-toml.py`\n\n## Approach\n\n- Follow existing pattern at `parse-toml.py:89-140` for section parsing\n- Add handler for `[env]` section with keys: `import` (list), `from_host` (bool), `env_file` (string)\n- Return env config as JSON alongside existing volume/excludes output\n\n## Key Context\n\n- Existing parser uses `tomllib` (Python 3.11+) or `tomli` fallback\n- Output format is JSON to stdout, consumed by bash\n- Error handling: invalid types should print clear error message\n## Acceptance\n- [ ] `[env].import` parsed as list of strings\n- [ ] `[env].from_host` parsed as boolean (default: false)\n- [ ] `[env].env_file` parsed as optional string\n- [ ] Invalid types produce clear error messages\n- [ ] Missing `[env]` section returns empty/null (not error)\n- [ ] JSON output includes env config\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T04:51:49.528969Z",
+        "depends_on": [
+          "fn-6-aaz.1"
+        ],
+        "epic": "fn-6-aaz",
+        "id": "fn-6-aaz.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-6-aaz.2.md",
+        "status": "todo",
+        "title": "Add env config resolution to lib/config.sh",
+        "updated_at": "2026-01-20T04:52:16.861762Z"
+      },
+      "id": "fn-6-aaz.2",
+      "spec": "# fn-6-aaz.2 Add env config resolution to lib/config.sh\n\n## Description\nAdd `_containai_resolve_env_config()` function to `lib/config.sh` to resolve env import configuration from TOML config.\n\n**Size:** S  \n**Files:** `agent-sandbox/lib/config.sh`\n\n## Approach\n\n- Follow pattern at `lib/config.sh:441-512` (`_containai_resolve_volume`)\n- Call `parse-toml.py` and extract env section\n- Return JSON with: `import` (array), `from_host` (bool), `env_file` (string or null)\n- Handle missing config gracefully (return empty/defaults)\n## Acceptance\n- [ ] `_containai_resolve_env_config` function exists\n- [ ] Returns JSON with `import`, `from_host`, `env_file` keys\n- [ ] Missing config returns defaults: `import=[]`, `from_host=false`, `env_file=null`\n- [ ] Calls `parse-toml.py` with correct arguments\n- [ ] Error handling follows existing patterns (if/else guards for set -e)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T04:51:49.682088Z",
+        "depends_on": [
+          "fn-6-aaz.2"
+        ],
+        "epic": "fn-6-aaz",
+        "id": "fn-6-aaz.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-6-aaz.3.md",
+        "status": "todo",
+        "title": "Implement env import core logic",
+        "updated_at": "2026-01-20T04:52:28.444263Z"
+      },
+      "id": "fn-6-aaz.3",
+      "spec": "# fn-6-aaz.3 Implement env import core logic\n\n## Description\nImplement core env var import logic: read from sources, filter by allowlist, write combined `.env` to volume.\n\n**Size:** M  \n**Files:** `agent-sandbox/lib/env.sh` (new file)\n\n## Approach\n\n- Create new `lib/env.sh` with `_containai_import_env()` function\n- Parse source .env file using safe line-by-line reading (no eval/source)\n- Read from host env using `printenv` filtered by allowlist\n- Merge sources (host takes precedence over file)\n- Write atomically: temp file + `mv` rename\n- Set permissions `chmod 600`\n- Skip multiline values with warning\n\n## Key Context\n\n- Use `printf '%s\\n'` not `echo` (per conventions)\n- Use `[OK]`, `[WARN]`, `[ERROR]` markers\n- Docker env-file format: no quotes, literal values\n- Symlink validation: reject symlinks on source .env file\n## Acceptance\n- [ ] `_containai_import_env` function exists in `lib/env.sh`\n- [ ] Reads source .env file safely (no eval/source)\n- [ ] Reads host env only if `from_host=true`\n- [ ] Filters by allowlist (only specified vars imported)\n- [ ] Merges sources with host taking precedence\n- [ ] Writes atomically (temp file + mv)\n- [ ] Output file has mode 0600\n- [ ] Skips multiline values with `[WARN]` message\n- [ ] Missing vars logged as `[WARN]`, not fatal\n- [ ] Source .env symlink rejected with error\n- [ ] Empty allowlist produces empty .env (not error)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T04:51:49.836522Z",
+        "depends_on": [
+          "fn-6-aaz.3"
+        ],
+        "epic": "fn-6-aaz",
+        "id": "fn-6-aaz.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-6-aaz.4.md",
+        "status": "todo",
+        "title": "Integrate env import with cai import command",
+        "updated_at": "2026-01-20T04:52:48.442593Z"
+      },
+      "id": "fn-6-aaz.4",
+      "spec": "# fn-6-aaz.4 Integrate env import with cai import command\n\n## Description\nWire up env var import into the `cai import` command flow.\n\n**Size:** S  \n**Files:** `agent-sandbox/lib/import.sh`, `agent-sandbox/containai.sh`\n\n## Approach\n\n- Source `lib/env.sh` in containai.sh alongside other libs\n- Call `_containai_resolve_env_config()` in import flow\n- Call `_containai_import_env()` after dotfile sync\n- Pass volume name and workspace to env import function\n- Use rsync container pattern (network=none) for writing to volume\n## Acceptance\n- [ ] `lib/env.sh` sourced in containai.sh\n- [ ] `cai import` calls env import after dotfile sync\n- [ ] Env config resolved using `_containai_resolve_env_config()`\n- [ ] Env import uses same volume as dotfile import\n- [ ] .env file written to `/mnt/agent-data/.env` in volume\n- [ ] Import summary includes env var count\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T04:51:49.996344Z",
+        "depends_on": [],
+        "epic": "fn-6-aaz",
+        "id": "fn-6-aaz.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-6-aaz.5.md",
+        "status": "todo",
+        "title": "Update entrypoint to source .env",
+        "updated_at": "2026-01-20T04:52:48.607076Z"
+      },
+      "id": "fn-6-aaz.5",
+      "spec": "# fn-6-aaz.5 Update entrypoint to source .env\n\n## Description\nUpdate container entrypoint to source `.env` file from data volume if present.\n\n**Size:** S  \n**Files:** `agent-sandbox/entrypoint.sh`\n\n## Approach\n\n- Add sourcing near start of entrypoint, after volume structure setup\n- Use `set -a` to auto-export, then `source`, then `set +a`\n- Only source if file exists and is regular file (not symlink)\n- Follow pattern at `entrypoint.sh:122-208` for file validation\n## Acceptance\n- [ ] Entrypoint sources `/mnt/agent-data/.env` if present\n- [ ] Uses `set -a` / `set +a` for auto-export\n- [ ] Skips if file missing (not error)\n- [ ] Rejects symlinks (security)\n- [ ] Sourcing happens after volume structure setup\n- [ ] Log message: `[INFO] Loading environment from .env`\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-20T04:51:50.160794Z",
+        "depends_on": [
+          "fn-6-aaz.4",
+          "fn-6-aaz.5"
+        ],
+        "epic": "fn-6-aaz",
+        "id": "fn-6-aaz.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-6-aaz.6.md",
+        "status": "todo",
+        "title": "Add integration tests for env import",
+        "updated_at": "2026-01-20T04:52:48.774282Z"
+      },
+      "id": "fn-6-aaz.6",
+      "spec": "# fn-6-aaz.6 Add integration tests for env import\n\n## Description\nAdd integration tests for env var import feature.\n\n**Size:** M  \n**Files:** `agent-sandbox/test-sync-integration.sh` (extend existing)\n\n## Approach\n\n- Follow test patterns at `test-sync-integration.sh:170-300`\n- Create test volume with unique name: `containai-test-env-${TEST_RUN_ID}`\n- Test cases: basic import, from_host flag, env_file source, missing vars, multiline skip\n- Use `env -u` to clear external vars for hermetic tests\n- Cleanup test volumes after tests\n## Acceptance\n- [ ] Test: basic allowlist import from host env\n- [ ] Test: `from_host=false` prevents host env reading\n- [ ] Test: source .env file parsed correctly\n- [ ] Test: merge precedence (host > file)\n- [ ] Test: missing vars produce warning, not error\n- [ ] Test: multiline values skipped with warning\n- [ ] Test: empty allowlist produces empty .env\n- [ ] Test: .env file has correct permissions (0600)\n- [ ] Tests use hermetic env (env -u)\n- [ ] Test volumes cleaned up\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

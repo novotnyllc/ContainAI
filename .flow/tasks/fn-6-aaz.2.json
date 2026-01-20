@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-20T04:51:49.528969Z",
+  "depends_on": [
+    "fn-6-aaz.1"
+  ],
+  "epic": "fn-6-aaz",
+  "id": "fn-6-aaz.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-6-aaz.2.md",
+  "status": "todo",
+  "title": "Add env config resolution to lib/config.sh",
+  "updated_at": "2026-01-20T05:24:07.754561Z"
+}

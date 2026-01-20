@@ -1,0 +1,17 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-20T04:51:50.160794Z",
+  "depends_on": [
+    "fn-6-aaz.4",
+    "fn-6-aaz.5"
+  ],
+  "epic": "fn-6-aaz",
+  "id": "fn-6-aaz.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-6-aaz.6.md",
+  "status": "todo",
+  "title": "Add integration tests for env import",
+  "updated_at": "2026-01-20T05:16:11.137498Z"
+}

@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-8-k84",
+  "created_at": "2026-01-20T07:55:05.273783Z",
+  "depends_on_epics": [],
+  "id": "fn-8-k84",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-8-k84.md",
+  "status": "open",
+  "title": "Add Mac support for import scripts",
+  "updated_at": "2026-01-20T07:55:31.260529Z"
+}

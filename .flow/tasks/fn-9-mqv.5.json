@@ -1,0 +1,17 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-20T08:17:41.556618Z",
+  "depends_on": [
+    "fn-9-mqv.3",
+    "fn-9-mqv.4"
+  ],
+  "epic": "fn-9-mqv",
+  "id": "fn-9-mqv.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-9-mqv.5.md",
+  "status": "todo",
+  "title": "Add import source integration tests",
+  "updated_at": "2026-01-20T08:18:38.477626Z"
+}

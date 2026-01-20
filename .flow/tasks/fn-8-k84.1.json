@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-20T07:55:36.658203Z",
+  "depends_on": [],
+  "epic": "fn-8-k84",
+  "id": "fn-8-k84.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-8-k84.1.md",
+  "status": "todo",
+  "title": "Update README to indicate Mac support for cai import",
+  "updated_at": "2026-01-20T07:55:55.624570Z"
+}

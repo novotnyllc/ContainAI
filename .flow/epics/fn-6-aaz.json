@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-6-aaz",
+  "created_at": "2026-01-20T04:51:11.238750Z",
+  "depends_on_epics": [],
+  "id": "fn-6-aaz",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-6-aaz.md",
+  "status": "open",
+  "title": "Allowlist-based env var import",
+  "updated_at": "2026-01-20T05:23:56.088131Z"
+}

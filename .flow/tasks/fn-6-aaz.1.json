@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-20T04:51:49.377697Z",
+  "depends_on": [],
+  "epic": "fn-6-aaz",
+  "id": "fn-6-aaz.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-6-aaz.1.md",
+  "status": "todo",
+  "title": "Extend TOML parser for [env] section",
+  "updated_at": "2026-01-20T04:52:07.383066Z"
+}

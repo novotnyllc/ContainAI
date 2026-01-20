@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-20T07:55:27.737857Z",
+  "depends_on": [
+    "fn-7-j5o.7"
+  ],
+  "epic": "fn-7-j5o",
+  "id": "fn-7-j5o.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-7-j5o.6.md",
+  "status": "todo",
+  "title": "Create CONTRIBUTING.md",
+  "updated_at": "2026-01-20T07:56:49.688929Z"
+}

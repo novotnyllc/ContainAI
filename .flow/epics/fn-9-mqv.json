@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-9-mqv",
+  "created_at": "2026-01-20T08:17:07.674864Z",
+  "depends_on_epics": [],
+  "id": "fn-9-mqv",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-9-mqv.md",
+  "status": "open",
+  "title": "Import source specification with tgz/directory support",
+  "updated_at": "2026-01-20T08:17:35.153589Z"
+}
