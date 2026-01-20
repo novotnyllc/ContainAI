@@ -274,7 +274,7 @@ ECI (Enhanced Container Isolation):     [WARN] Available but not enabled
 
 **Diagnosis:**
 ```bash
-cai doctor --json | jq '.eci'
+cai doctor --json | jq '.docker_desktop.eci_enabled'
 ```
 
 **Solution:**
@@ -974,6 +974,12 @@ CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure cai run
 ECI (Enhanced Container Isolation): not available    [WARN]
 ```
 
+**Diagnosis:**
+```bash
+cai doctor --json | jq '.docker_desktop'
+docker info
+```
+
 **Cause:** Docker Desktop for macOS may require Business subscription for ECI.
 
 **Solution:**
@@ -993,6 +999,12 @@ ECI (Enhanced Container Isolation): not available    [WARN]
 Pull alpine:3.20: docker pull alpine:3.20
 ```
 
+**Diagnosis:**
+```bash
+docker images alpine
+docker images | grep alpine
+```
+
 **Cause:** ECI detection requires the Alpine image for uid_map checks.
 
 **Solution:**
@@ -1005,6 +1017,12 @@ docker pull alpine:3.20
 **Symptom:**
 ```
 [ERROR] Permission denied accessing Docker
+```
+
+**Diagnosis:**
+```bash
+groups
+ls -l /var/run/docker.sock
 ```
 
 **Solution:**
