@@ -41,12 +41,11 @@ source agent-sandbox/containai.sh
 ### 2. Authenticate your agent
 
 ```bash
-# Start the sandbox and authenticate
+# Start the sandbox
 cai
 
 # Inside the container, log in to your agent
-claude login    # for Claude
-# or: gemini auth  # for Gemini
+claude login
 ```
 
 ### 3. Run in your project
@@ -65,7 +64,7 @@ The sandbox mounts your current directory and starts the configured AI agent.
 
 | Document | Description |
 |----------|-------------|
-| [Quickstart Guide](docs/quickstart.md) | Detailed setup with runtime decision tree |
+| [Quickstart Guide](docs/quickstart.md) | Getting started guide |
 | [Technical README](agent-sandbox/README.md) | Image building, testing, and internals |
 
 ## Security
