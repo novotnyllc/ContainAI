@@ -31,7 +31,7 @@ Thank you for your interest in contributing to ContainAI! This guide covers deve
 
 - **Bash 4.0+** - The CLI requires bash (not zsh or fish)
 - **Docker Desktop 4.50+** with sandbox feature enabled, OR
-- **Sysbox runtime** installed (for Linux/WSL)
+- **Sysbox runtime** installed (for Linux/WSL2/macOS via Lima)
 - **Git** for version control
 
 ### Shell Requirement
@@ -95,12 +95,12 @@ ContainAI follows strict shell scripting conventions for portability and safety.
 ```bash
 # Good
 if command -v docker >/dev/null 2>&1; then
-    echo "Docker found"
+    printf '%s\n' "Docker found"
 fi
 
 # Bad - 'which' is not a shell builtin and may not exist
 if which docker >/dev/null 2>&1; then
-    echo "Docker found"
+    printf '%s\n' "Docker found"
 fi
 ```
 
