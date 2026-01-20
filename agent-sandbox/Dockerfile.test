@@ -1,0 +1,174 @@
+# syntax=docker/dockerfile:1
+# Docker Test Container for ContainAI with dockerd + Sysbox
+#
+# This Dockerfile creates a testing environment with its own dockerd and Sysbox
+# runtime. Used for CI or development testing of ContainAI images directly
+# inside a container.
+#
+# IMPORTANT: Uses /var/run/docker-test.sock to avoid conflicts with host Docker.
+#
+# Usage:
+#   docker build -t containai-test -f Dockerfile.test .
+#   docker run --privileged -v $(pwd):/workspace containai-test bash -c "cd /workspace && ./run-tests.sh"
+
+FROM ubuntu:24.04
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC
+
+# Install base dependencies
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        lsb-release \
+        wget \
+        jq \
+        git \
+        iproute2 \
+        iptables \
+        kmod \
+        procps \
+        fuse
+
+# Install Docker daemon
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io
+
+# Install Sysbox
+ARG SYSBOX_VERSION=0.6.7
+RUN ARCH=$(dpkg --print-architecture) && \
+    wget -q -O /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" && \
+    apt-get install -y /tmp/sysbox.deb && \
+    rm /tmp/sysbox.deb
+
+# Configure Docker with Sysbox runtime (NOT as default)
+# Use a different socket to avoid conflicts with any host Docker
+RUN mkdir -p /etc/docker && \
+    printf '%s\n' \
+        '{' \
+        '  "hosts": ["unix:///var/run/docker-test.sock"],' \
+        '  "runtimes": {' \
+        '    "sysbox-runc": {' \
+        '      "path": "/usr/bin/sysbox-runc"' \
+        '    }' \
+        '  },' \
+        '  "storage-driver": "overlay2"' \
+        '}' > /etc/docker/daemon.json
+
+# Set default Docker host to test socket
+ENV DOCKER_HOST=unix:///var/run/docker-test.sock
+
+# Create startup script
+# Note: Using printf to avoid heredoc stdin issues (pitfall from memory)
+RUN printf '%s\n' \
+    '#!/bin/bash' \
+    'set -e' \
+    '' \
+    '# Start Sysbox services' \
+    'echo "[INFO] Starting sysbox-mgr..."' \
+    'sysbox-mgr &' \
+    'SYSBOX_MGR_PID=$!' \
+    '' \
+    'echo "[INFO] Starting sysbox-fs..."' \
+    'sysbox-fs &' \
+    'SYSBOX_FS_PID=$!' \
+    '' \
+    '# Wait for Sysbox to initialize' \
+    'sleep 2' \
+    '' \
+    '# Verify Sysbox services are running' \
+    'if ! kill -0 $SYSBOX_MGR_PID 2>/dev/null; then' \
+    '    echo "[ERROR] sysbox-mgr failed to start"' \
+    '    exit 1' \
+    'fi' \
+    'if ! kill -0 $SYSBOX_FS_PID 2>/dev/null; then' \
+    '    echo "[ERROR] sysbox-fs failed to start"' \
+    '    exit 1' \
+    'fi' \
+    '' \
+    '# Start Docker daemon on test socket' \
+    'echo "[INFO] Starting dockerd on /var/run/docker-test.sock..."' \
+    'dockerd &' \
+    'DOCKERD_PID=$!' \
+    '' \
+    '# Wait for Docker to be ready (max 30 seconds)' \
+    'echo "[INFO] Waiting for Docker to be ready..."' \
+    'TIMEOUT=30' \
+    'COUNTER=0' \
+    'while ! docker info >/dev/null 2>&1; do' \
+    '    if ! kill -0 $DOCKERD_PID 2>/dev/null; then' \
+    '        echo "[ERROR] dockerd process died"' \
+    '        exit 1' \
+    '    fi' \
+    '    sleep 1' \
+    '    COUNTER=$((COUNTER + 1))' \
+    '    if [ $COUNTER -ge $TIMEOUT ]; then' \
+    '        echo "[ERROR] Docker failed to start within $TIMEOUT seconds"' \
+    '        exit 1' \
+    '    fi' \
+    'done' \
+    '' \
+    'echo "[OK] Docker + Sysbox ready on /var/run/docker-test.sock"' \
+    'echo "[INFO] Sysbox runtime available as: --runtime=sysbox-runc"' \
+    '' \
+    '# Execute the command passed to the container' \
+    'exec "$@"' \
+    > /usr/local/bin/start-test-docker.sh && \
+    chmod +x /usr/local/bin/start-test-docker.sh
+
+# Create test helper script
+RUN printf '%s\n' \
+    '#!/bin/bash' \
+    '# Test that Docker + Sysbox is working correctly' \
+    'set -e' \
+    '' \
+    'echo "=== Docker Info ===" ' \
+    'docker info' \
+    '' \
+    'echo ""' \
+    'echo "=== Available Runtimes ===" ' \
+    'docker info --format "{{json .Runtimes}}" | jq .' \
+    '' \
+    'echo ""' \
+    'echo "=== Test: Run container with default runtime ===" ' \
+    'docker run --rm alpine echo "Default runtime works"' \
+    '' \
+    'echo ""' \
+    'echo "=== Test: Run container with Sysbox runtime ===" ' \
+    'docker run --rm --runtime=sysbox-runc alpine echo "Sysbox runtime works"' \
+    '' \
+    'echo ""' \
+    'echo "=== Test: Build simple image ===" ' \
+    'docker build -t test-build - <<EOF' \
+    'FROM alpine' \
+    'RUN echo "Build test"' \
+    'EOF' \
+    'docker rmi test-build' \
+    '' \
+    'echo ""' \
+    'echo "[OK] All Docker + Sysbox tests passed"' \
+    > /usr/local/bin/test-docker-sysbox.sh && \
+    chmod +x /usr/local/bin/test-docker-sysbox.sh
+
+# Clean up apt cache to reduce image size
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/start-test-docker.sh"]
+CMD ["bash"]

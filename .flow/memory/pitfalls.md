@@ -69,3 +69,6 @@ Docker sandbox commands require forcing default context (DOCKER_CONTEXT= DOCKER_
 
 ## 2026-01-20 manual [pitfall]
 Verify by specific IDs not by attributes (workspace/name) to avoid false negatives from concurrent operations
+
+## 2026-01-20 manual [pitfall]
+When adding platform-specific code paths, update ALL downstream consumers (validation, doctor, tests) to handle the new platform's configuration

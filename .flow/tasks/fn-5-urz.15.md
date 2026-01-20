@@ -108,9 +108,8 @@ fi
 - [ ] `--dry-run` shows what would be done without changes
 - [ ] Handles unsupported distributions gracefully with clear message
 ## Done summary
-TBD
-
+Implemented native Linux Sysbox installation in `cai setup` with distro detection (Ubuntu/Debian auto-install), Docker preflight checks, daemon.json configuration, and verification via test container. Updated doctor.sh and test-secure-engine.sh to expect correct socket path for native Linux.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: fff5aeb86d3a36e88dfcb3e955d5c31fe589ed42, 56184c9, 5195cf9, e8135a8
+- Tests: shellcheck -s bash agent-sandbox/lib/setup.sh, cai setup --help
 - PRs:

@@ -7,10 +7,23 @@
     "fn-5-urz.1"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "fff5aeb86d3a36e88dfcb3e955d5c31fe589ed42",
+      "56184c9",
+      "5195cf9",
+      "e8135a8"
+    ],
+    "prs": [],
+    "tests": [
+      "shellcheck -s bash agent-sandbox/lib/setup.sh",
+      "cai setup --help"
+    ]
+  },
   "id": "fn-5-urz.15",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.15.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "cai setup - Linux native Sysbox installation",
-  "updated_at": "2026-01-20T08:23:39.117583Z"
+  "updated_at": "2026-01-20T08:50:06.958261Z"
 }

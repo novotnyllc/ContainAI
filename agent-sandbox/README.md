@@ -288,3 +288,66 @@ Or use the symlinked version directly:
 ```
 
 The build script tags the image as both `:latest` and `:<YYYY-MM-DD>` for reproducibility.
+
+## Testing with Dockerfile.test
+
+For CI environments or development testing where you need to build and test ContainAI images inside a container with its own Docker daemon and Sysbox runtime, use `Dockerfile.test`.
+
+### Overview
+
+`Dockerfile.test` creates a testing container with:
+- Its own Docker daemon (dockerd)
+- Sysbox runtime installed (available as `--runtime=sysbox-runc`)
+- Isolated socket at `/var/run/docker-test.sock` (does NOT interfere with host Docker)
+
+### Build and Run
+
+```bash
+# Build the test image
+docker build -t containai-test -f Dockerfile.test .
+
+# Run tests inside the test container (requires --privileged for nested Docker)
+docker run --privileged -v $(pwd):/workspace containai-test \
+    bash -c "cd /workspace && ./run-tests.sh"
+
+# Interactive testing
+docker run --privileged -it containai-test
+
+# Run the built-in verification tests
+docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
+```
+
+### Features
+
+- **Context isolation**: Uses `/var/run/docker-test.sock` to avoid conflicts with any host Docker socket
+- **Sysbox runtime**: Available as `--runtime=sysbox-runc` (NOT the default)
+- **Build support**: Can build Docker images inside the container
+- **Nested containers**: Can run containers (including Sysbox containers) inside the test container
+
+### Use Cases
+
+1. **CI pipelines**: Build and test ContainAI images in isolated environment
+2. **Development**: Test Sysbox integration without affecting host Docker setup
+3. **Testing context scenarios**: Validate `--context containai-secure` scenarios
+
+### Requirements
+
+- `--privileged` flag is required for nested Docker
+- Host must support Linux kernel features needed by Sysbox (kernel 5.4+)
+
+### Startup Script
+
+The container runs `/usr/local/bin/start-test-docker.sh` on startup, which:
+1. Starts Sysbox services (sysbox-mgr, sysbox-fs)
+2. Starts dockerd on `/var/run/docker-test.sock`
+3. Waits for Docker to be ready
+4. Executes the command passed to the container
+
+### Test Helper
+
+A test helper script is included at `/usr/local/bin/test-docker-sysbox.sh` that verifies:
+- Docker daemon is running
+- Available runtimes (should include sysbox-runc)
+- Container runs with default runtime
+- Container runs with Sysbox runtime
+- Image builds work
