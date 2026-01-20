@@ -7,10 +7,21 @@
     "fn-5-urz.1"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "24d4724",
+      "2b45c64"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n agent-sandbox/lib/setup.sh",
+      "shellcheck -x agent-sandbox/lib/setup.sh"
+    ]
+  },
   "id": "fn-5-urz.11",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.11.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "macOS Lima VM Secure Engine provisioning",
-  "updated_at": "2026-01-20T00:37:19.558024Z"
+  "updated_at": "2026-01-20T00:52:21.446236Z"
 }

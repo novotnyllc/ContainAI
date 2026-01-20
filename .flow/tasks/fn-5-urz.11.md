@@ -221,9 +221,8 @@ docker context create containai-secure \
 - [ ] VM can be started/stopped via `limactl start/stop containai-secure`
 - [ ] `--dry-run` shows what would be done without changes
 ## Done summary
-TBD
-
+Implemented macOS Lima VM Secure Engine provisioning for `cai setup`. Creates a Lima VM with Docker Engine + Sysbox, exposes Docker socket to macOS host, and creates `containai-secure` Docker context. Supports both Intel and Apple Silicon Macs. Does NOT interfere with Docker Desktop (remains default context).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 24d4724, 2b45c64
+- Tests: bash -n agent-sandbox/lib/setup.sh, shellcheck -x agent-sandbox/lib/setup.sh
 - PRs:
