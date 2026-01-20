@@ -72,3 +72,6 @@ Verify by specific IDs not by attributes (workspace/name) to avoid false negativ
 
 ## 2026-01-20 manual [pitfall]
 When adding platform-specific code paths, update ALL downstream consumers (validation, doctor, tests) to handle the new platform's configuration
+
+## 2026-01-20 manual [pitfall]
+dockerd fails if hosts is set in both daemon.json and -H flag; specify in exactly one place

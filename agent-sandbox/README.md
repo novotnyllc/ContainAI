@@ -342,6 +342,7 @@ env -u DOCKER_HOST docker --context containai-secure info
 
 ### Requirements
 
+- BuildKit enabled (Docker 23.0+ has it by default, or set `DOCKER_BUILDKIT=1`)
 - `--privileged` flag is required for nested Docker
 - Host must support Linux kernel features needed by Sysbox (kernel 5.4+)
 

@@ -7,9 +7,11 @@
 #
 # IMPORTANT: Uses /var/run/docker-test.sock to avoid conflicts with host Docker.
 #
-# Usage:
-#   docker build -t containai-test -f Dockerfile.test .
+# Usage (from repo root):
+#   docker build -t containai-test -f agent-sandbox/Dockerfile.test agent-sandbox/
 #   docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
+#
+# Note: Requires BuildKit (DOCKER_BUILDKIT=1 or Docker 23.0+)
 
 FROM ubuntu:24.04
 
@@ -114,9 +116,9 @@ RUN printf '%s\n' \
     '    exit 1' \
     'fi' \
     '' \
-    '# Start Docker daemon on test socket (explicit -H for robustness against env overrides)' \
+    '# Start Docker daemon (hosts configured in daemon.json; do NOT use -H flag to avoid conflict)' \
     'echo "[INFO] Starting dockerd on /var/run/docker-test.sock..."' \
-    'dockerd -H unix:///var/run/docker-test.sock --config-file /etc/docker/daemon.json &' \
+    'dockerd --config-file /etc/docker/daemon.json &' \
     'DOCKERD_PID=$!' \
     '' \
     '# Wait for Docker to be ready (max 30 seconds)' \
