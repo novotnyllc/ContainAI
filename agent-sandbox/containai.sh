@@ -1027,19 +1027,23 @@ _containai_sandbox_clear_credentials_cmd() {
     # Gemini: docker-gemini-sandbox-data
     local volume_name="docker-${agent}-sandbox-data"
 
-    # Check if volume exists (discard output - only used for existence check)
+    # Check if volume exists
     # Force default context for volume operations (Docker Desktop only)
-    local inspect_rc
-    if DOCKER_CONTEXT= DOCKER_HOST= docker volume inspect "$volume_name" >/dev/null 2>&1; then
-        inspect_rc=0
-    else
-        inspect_rc=$?
-    fi
+    # Capture stderr to distinguish "not found" from real errors
+    local inspect_output inspect_rc
+    inspect_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume inspect "$volume_name" 2>&1)
+    inspect_rc=$?
 
     if [[ $inspect_rc -ne 0 ]]; then
-        _cai_info "No credential volume found: $volume_name"
-        _cai_info "Nothing to clear"
-        return 0
+        # Distinguish "not found" (benign) from other errors (should surface)
+        if printf '%s' "$inspect_output" | grep -qiE "no such volume|not found"; then
+            _cai_info "No credential volume found: $volume_name"
+            _cai_info "Nothing to clear"
+            return 0
+        fi
+        # Real error - surface it
+        _cai_error "Failed to inspect volume: $inspect_output"
+        return 1
     fi
 
     # Volume exists - warn user and confirm
