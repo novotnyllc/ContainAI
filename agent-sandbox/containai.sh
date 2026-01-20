@@ -139,6 +139,7 @@ Subcommands:
   doctor        Check system capabilities and show diagnostics
   setup         Install Sysbox Secure Engine (WSL2/macOS)
   validate      Validate Secure Engine configuration
+  sandbox       Manage Docker Desktop sandboxes (reset, etc.)
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
@@ -181,6 +182,7 @@ Examples:
   cai -- --print                    Pass --print to Claude
   cai doctor                        Check system capabilities
   cai shell                         Open shell in running sandbox
+  cai sandbox reset                 Remove sandbox for config changes
   cai stop --all                    Stop all containers
 
 Safe Defaults (FR-4):
@@ -265,6 +267,47 @@ Options:
 Examples:
   cai stop        Interactive selection to stop containers
   cai stop --all  Stop all ContainAI containers
+EOF
+}
+
+_containai_sandbox_help() {
+    cat <<'EOF'
+ContainAI Sandbox - Manage Docker Desktop sandboxes
+
+Usage: cai sandbox <subcommand> [options]
+
+Subcommands:
+  reset           Remove sandbox for workspace (config changes require reset)
+
+Use 'cai sandbox <subcommand> --help' for subcommand-specific help.
+EOF
+}
+
+_containai_sandbox_reset_help() {
+    cat <<'EOF'
+ContainAI Sandbox Reset - Remove workspace sandbox for config changes
+
+Usage: cai sandbox reset [options]
+
+Removes the Docker Desktop sandbox for the current workspace so that
+configuration changes (env vars, mounts, credentials mode) take effect.
+
+Options:
+  --workspace <path>  Workspace path (default: current directory)
+  -h, --help          Show this help message
+
+What it does:
+  1. Identifies the sandbox associated with the workspace
+  2. Stops the sandbox if running
+  3. Removes the sandbox
+  4. New configuration will apply on next 'cai run'
+
+Note: This command is for Docker Desktop sandboxes only (ECI mode).
+Sysbox mode containers should use 'cai stop' followed by 'cai --restart'.
+
+Examples:
+  cai sandbox reset                  Reset sandbox for current directory
+  cai sandbox reset --workspace ~/proj  Reset sandbox for specific workspace
 EOF
 }
 
@@ -602,6 +645,159 @@ _containai_stop_cmd() {
     done
 
     _containai_stop_all "$@"
+}
+
+# Sandbox subcommand handler - routes to sandbox sub-subcommands
+_containai_sandbox_cmd() {
+    local subcmd="${1:-}"
+
+    if [[ -z "$subcmd" ]]; then
+        _containai_sandbox_help
+        return 0
+    fi
+
+    case "$subcmd" in
+        reset)
+            shift
+            _containai_sandbox_reset_cmd "$@"
+            ;;
+        --help|-h)
+            _containai_sandbox_help
+            return 0
+            ;;
+        *)
+            _cai_error "Unknown sandbox subcommand: $subcmd"
+            _cai_info "Use 'cai sandbox --help' for available subcommands"
+            return 1
+            ;;
+    esac
+}
+
+# Sandbox reset subcommand handler
+# Removes the Docker Desktop sandbox for a workspace so config changes take effect
+_containai_sandbox_reset_cmd() {
+    local workspace=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --workspace|-w)
+                if [[ -z "${2-}" ]]; then
+                    _cai_error "--workspace requires a value"
+                    return 1
+                fi
+                workspace="$2"
+                workspace="${workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                if [[ -z "$workspace" ]]; then
+                    _cai_error "--workspace requires a value"
+                    return 1
+                fi
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            -w*)
+                workspace="${1#-w}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            --help|-h)
+                _containai_sandbox_reset_help
+                return 0
+                ;;
+            *)
+                _cai_error "Unknown option: $1"
+                _cai_info "Use 'cai sandbox reset --help' for usage"
+                return 1
+                ;;
+        esac
+    done
+
+    # Check if docker sandbox is available (Docker Desktop feature)
+    if ! _cai_sandbox_feature_enabled 2>/dev/null; then
+        _cai_error "Docker sandbox feature is not available"
+        _cai_info "This command requires Docker Desktop with sandboxes enabled"
+        _cai_info "For Sysbox mode, use: cai stop && cai --restart"
+        return 1
+    fi
+
+    # Resolve workspace path (handles relative paths and symlinks)
+    local resolved_workspace
+    resolved_workspace="${workspace:-$PWD}"
+    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
+        _cai_error "Workspace path does not exist: ${workspace:-$PWD}"
+        return 1
+    fi
+
+    # Find sandbox by workspace using docker sandbox ls
+    # docker sandbox ls --format outputs sandbox info - we need to match workspace
+    local sandbox_list sandbox_id sandbox_workspace line
+    if ! sandbox_list=$(docker sandbox ls --format '{{.ID}} {{.Workspace}}' 2>&1); then
+        # Check if command not found vs other error
+        if printf '%s' "$sandbox_list" | grep -qiE "unknown command|not found"; then
+            _cai_error "docker sandbox command not available"
+            _cai_info "This command requires Docker Desktop 4.50+"
+            return 1
+        fi
+        _cai_error "Failed to list sandboxes: $sandbox_list"
+        return 1
+    fi
+
+    # Parse the output to find sandbox matching our workspace
+    # Need to handle symlinks and resolve paths consistently
+    sandbox_id=""
+    while IFS=' ' read -r id ws; do
+        # Skip empty lines
+        [[ -z "$id" ]] && continue
+
+        # Resolve sandbox workspace path (handles symlinks)
+        local resolved_ws
+        if resolved_ws=$(cd -- "$ws" 2>/dev/null && pwd -P); then
+            if [[ "$resolved_ws" == "$resolved_workspace" ]]; then
+                sandbox_id="$id"
+                break
+            fi
+        fi
+    done <<< "$sandbox_list"
+
+    if [[ -z "$sandbox_id" ]]; then
+        _cai_info "No sandbox found for workspace: $resolved_workspace"
+        _cai_info "Nothing to reset"
+        return 0
+    fi
+
+    _cai_info "Found sandbox $sandbox_id for workspace: $resolved_workspace"
+
+    # Check if sandbox is running - stop it first if so
+    local sandbox_status
+    sandbox_status=$(docker sandbox ls --format '{{.ID}} {{.Status}}' 2>/dev/null | \
+        grep "^${sandbox_id} " | awk '{print $2}') || sandbox_status=""
+
+    if [[ "$sandbox_status" == "running" ]] || [[ "$sandbox_status" == "Running" ]]; then
+        _cai_info "Stopping running sandbox..."
+        if ! docker sandbox stop "$sandbox_id" >/dev/null 2>&1; then
+            _cai_warn "Failed to stop sandbox gracefully, proceeding with removal"
+        fi
+    fi
+
+    # Remove the sandbox
+    _cai_info "Removing sandbox $sandbox_id..."
+    local rm_output
+    if ! rm_output=$(docker sandbox rm "$sandbox_id" 2>&1); then
+        # Check for common errors
+        if printf '%s' "$rm_output" | grep -qiE "not found|no such"; then
+            _cai_info "Sandbox already removed"
+            return 0
+        fi
+        _cai_error "Failed to remove sandbox: $rm_output"
+        return 1
+    fi
+
+    _cai_info "[OK] Sandbox removed. New config will apply on next 'cai run'"
+    return 0
 }
 
 # Doctor subcommand handler
@@ -1271,6 +1467,10 @@ containai() {
         stop)
             shift
             _containai_stop_cmd "$@"
+            ;;
+        sandbox)
+            shift
+            _containai_sandbox_cmd "$@"
             ;;
         help|-h|--help)
             _containai_help
