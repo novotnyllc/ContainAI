@@ -211,12 +211,13 @@ _load_env_file() {
   local env_file="${DATA_DIR}/.env"
 
   # Guard against set -e - use if/else, not raw test
-  if [[ ! -f "$env_file" ]]; then
-    return 0  # Silent - expected for first run
-  fi
+  # Check symlink FIRST (before -f) to properly reject symlinks to non-files
   if [[ -L "$env_file" ]]; then
     log "[WARN] .env is symlink - skipping"
     return 0
+  fi
+  if [[ ! -f "$env_file" ]]; then
+    return 0  # Silent - expected for first run
   fi
   if [[ ! -r "$env_file" ]]; then
     log "[WARN] .env unreadable - skipping"
@@ -250,12 +251,12 @@ _load_env_file() {
     value="${line#*=}"
     # Validate key
     if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-      log "[WARN] line $line_num: invalid key format - skipping"
+      log "[WARN] line $line_num: invalid key '$key' - skipping"
       continue
     fi
     # Only set if not present (empty string = present)
     if [[ -z "${!key+x}" ]]; then
-      export "$key=$value" || { log "[WARN] line $line_num: export failed"; continue; }
+      export "$key=$value" || { log "[WARN] line $line_num: export failed for '$key'"; continue; }
     fi
   done < "$env_file"
 }
