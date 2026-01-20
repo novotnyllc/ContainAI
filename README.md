@@ -2,8 +2,6 @@
 
 Secure Docker sandboxes for AI agent execution.
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
 ContainAI provides isolated, secure containers for running AI coding agents like Claude, Gemini, Codex, Copilot, and OpenCode. It enforces sandbox-first execution with fail-closed security defaults.
 
 ## Table of Contents
@@ -13,6 +11,7 @@ ContainAI provides isolated, secure containers for running AI coding agents like
 - [Documentation](#documentation)
 - [Security](#security)
 - [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
@@ -23,6 +22,8 @@ ContainAI provides isolated, secure containers for running AI coding agents like
 - **Auto-attach behavior** - Reconnect to existing containers automatically
 
 ## Quick Start
+
+> **Note:** The CLI requires **bash**. If your default shell is zsh or fish, run `bash` first.
 
 ### 1. Source the CLI
 
@@ -43,7 +44,7 @@ cai doctor
 
 This detects your Docker configuration and confirms sandbox availability.
 
-### 3. Start a sandbox
+### 3. Start and authenticate
 
 ```bash
 # Navigate to your project directory
@@ -51,34 +52,47 @@ cd /path/to/your/project
 
 # Start the sandbox
 cai
+
+# On first run, authenticate inside the container
+# (e.g., run 'claude login' for Claude)
 ```
 
 The sandbox mounts your current directory and starts the configured AI agent.
 
-> **Note:** On first run, you may need to authenticate your agent inside the container (e.g., `claude login`).
-
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Quickstart Guide](docs/quickstart.md) | Detailed setup with runtime decision tree |
-| [Configuration Reference](docs/configuration.md) | TOML config schema and options |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
-| [Architecture](docs/architecture.md) | System design and security model |
-| [Technical README](agent-sandbox/README.md) | Image building, testing, and internals |
+For detailed documentation, see the [Technical README](agent-sandbox/README.md), which covers:
+
+- Prerequisites and installation
+- Commands and usage
+- Volume management
+- Port forwarding
+- Security model
+- Troubleshooting
+- Image building and testing
 
 ## Security
 
-ContainAI is a security-focused tool. See [SECURITY.md](SECURITY.md) for:
+ContainAI is a security-focused tool with fail-closed defaults:
 
-- Security guarantees and threat model
-- Unsafe opt-in flags and their risks
-- Vulnerability reporting process
+- **Sandbox-first**: Containers run in Docker Desktop sandbox mode or Sysbox runtime
+- **Credential isolation**: Agent credentials stay inside the container by default
+- **TOCTOU protection**: Volume mounts are protected against symlink attacks
+- **Safe config parsing**: Environment files are validated before use
+
+Unsafe operations require explicit opt-in flags (`--allow-host-credentials`, `--allow-host-docker-socket`, `--force`).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+Contributions are welcome. To get started:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Submit a pull request
+
+See the [Technical README](agent-sandbox/README.md) for development setup.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
