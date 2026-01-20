@@ -474,6 +474,13 @@ _containai_import() {
     local source_root="$HOME"  # Default to $HOME for backward compatibility
 
     if [[ -n "$from_source" ]]; then
+        # Validate path doesn't contain dangerous characters that could cause Docker mount injection
+        # Comma breaks --mount option parsing, colon breaks -v parsing, newline breaks command parsing
+        if [[ "$from_source" == *,* ]] || [[ "$from_source" == *$'\n'* ]]; then
+            _import_error "Source path contains invalid characters (comma or newline): $from_source"
+            return 1
+        fi
+
         # Normalize path: resolve to absolute path
         local normalized_source
         if [[ -d "$from_source" ]]; then
@@ -496,6 +503,12 @@ _containai_import() {
             from_source="$normalized_source/$base_name"
         else
             _import_error "Source not found: $from_source"
+            return 1
+        fi
+
+        # Re-validate after normalization (cd && pwd could theoretically produce different path)
+        if [[ "$from_source" == *,* ]] || [[ "$from_source" == *$'\n'* ]]; then
+            _import_error "Resolved source path contains invalid characters: $from_source"
             return 1
         fi
 
@@ -558,9 +571,13 @@ _containai_import() {
 
                 # Check Docker can mount the directory (Docker Desktop file-sharing check)
                 # Use docker_cmd to respect the selected context
+                # Use --mount instead of -v to avoid colon parsing issues
+                # Use --network=none for consistency with rest of import pipeline
                 # Note: DOCKER_CONTEXT/DOCKER_HOST neutralization still needed since docker_cmd may use --context
                 local mount_error
-                if ! mount_error=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -v "$from_source:/test:ro" alpine:3.20 true 2>&1); then
+                if ! mount_error=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
+                    --mount "type=bind,src=$from_source,dst=/test,readonly" \
+                    alpine:3.20 true 2>&1); then
                     _import_error "Cannot mount '$from_source' - ensure it's within Docker's file-sharing paths"
                     _import_info "On macOS/Windows, add the path in Docker Desktop Settings > Resources > File Sharing"
                     if [[ -n "$mount_error" ]]; then
@@ -964,51 +981,30 @@ _import_transform_installed_plugins() {
         return 0
     fi
 
-    # Check if path rewriting should be skipped (source differs from $HOME)
-    # Normalize paths for comparison
-    local normalized_source normalized_home skip_path_rewrite="false"
-    if normalized_source=$(cd -- "$source_root" 2>/dev/null && pwd) && \
-       normalized_home=$(cd -- "$HOME" 2>/dev/null && pwd); then
-        if [[ "$normalized_source" != "$normalized_home" ]]; then
-            skip_path_rewrite="true"
-            _import_warn "Skipping installPath transforms: source ($source_root) differs from \$HOME"
-            _import_info "Config files may contain paths that need manual adjustment"
-        fi
-    fi
+    # Build path prefixes for rewriting
+    # Always try to rewrite both $HOME/.claude/plugins/ and $source_root/.claude/plugins/
+    # This handles configs that may reference either location
+    local home_prefix="$HOME/.claude/plugins/"
+    local source_prefix="$source_root/.claude/plugins/"
 
     # Transform and capture result, checking for errors
+    # Do best-effort rewriting: try both home and source prefixes
     local transformed
-    if [[ "$skip_path_rewrite" == "true" ]]; then
-        # Only fix scope, don't rewrite paths
-        if ! transformed=$(jq "
-            .plugins = (.plugins | to_entries | map({
-                key: .key,
-                value: (.value | map(
-                    . + {
-                        scope: \"user\"
-                    } | del(.projectPath)
-                ))
-            }) | from_entries)
-        " "$src_file"); then
-            _import_error "jq transformation failed for installed_plugins.json"
-            return 1
-        fi
-    else
-        # Full transform with path rewriting
-        if ! transformed=$(jq "
-            .plugins = (.plugins | to_entries | map({
-                key: .key,
-                value: (.value | map(
-                    . + {
-                        scope: \"user\",
-                        installPath: (.installPath | gsub(\"$_IMPORT_HOST_PATH_PREFIX\"; \"$_IMPORT_CONTAINER_PATH_PREFIX\"))
-                    } | del(.projectPath)
-                ))
-            }) | from_entries)
-        " "$src_file"); then
-            _import_error "jq transformation failed for installed_plugins.json"
-            return 1
-        fi
+    if ! transformed=$(jq --arg home_prefix "$home_prefix" \
+                          --arg source_prefix "$source_prefix" \
+                          --arg container_prefix "$_IMPORT_CONTAINER_PATH_PREFIX" '
+        .plugins = (.plugins | to_entries | map({
+            key: .key,
+            value: (.value | map(
+                . + {
+                    scope: "user",
+                    installPath: (.installPath | gsub($home_prefix; $container_prefix) | gsub($source_prefix; $container_prefix))
+                } | del(.projectPath)
+            ))
+        }) | from_entries)
+    ' "$src_file"); then
+        _import_error "jq transformation failed for installed_plugins.json"
+        return 1
     fi
 
     # Validate transformed JSON before writing
@@ -1054,35 +1050,24 @@ _import_transform_marketplaces() {
         return 0
     fi
 
-    # Check if path rewriting should be skipped (source differs from $HOME)
-    # Normalize paths for comparison
-    local normalized_source normalized_home skip_path_rewrite="false"
-    if normalized_source=$(cd -- "$source_root" 2>/dev/null && pwd) && \
-       normalized_home=$(cd -- "$HOME" 2>/dev/null && pwd); then
-        if [[ "$normalized_source" != "$normalized_home" ]]; then
-            skip_path_rewrite="true"
-        fi
-    fi
+    # Build path prefixes for rewriting
+    # Always try to rewrite both $HOME/.claude/plugins/ and $source_root/.claude/plugins/
+    # This handles configs that may reference either location
+    local home_prefix="$HOME/.claude/plugins/"
+    local source_prefix="$source_root/.claude/plugins/"
 
     # Transform and capture result, checking for errors
+    # Do best-effort rewriting: try both home and source prefixes
     local transformed
-    if [[ "$skip_path_rewrite" == "true" ]]; then
-        # Copy as-is without path rewriting (just read and validate)
-        _import_info "Skipping installLocation transforms for known_marketplaces.json (source differs from \$HOME)"
-        if ! transformed=$(jq '.' "$src_file"); then
-            _import_error "jq read failed for known_marketplaces.json"
-            return 1
-        fi
-    else
-        # Full transform with path rewriting
-        if ! transformed=$(jq "
-            with_entries(
-                .value.installLocation = (.value.installLocation | gsub(\"$_IMPORT_HOST_PATH_PREFIX\"; \"$_IMPORT_CONTAINER_PATH_PREFIX\"))
-            )
-        " "$src_file"); then
-            _import_error "jq transformation failed for known_marketplaces.json"
-            return 1
-        fi
+    if ! transformed=$(jq --arg home_prefix "$home_prefix" \
+                          --arg source_prefix "$source_prefix" \
+                          --arg container_prefix "$_IMPORT_CONTAINER_PATH_PREFIX" '
+        with_entries(
+            .value.installLocation = (.value.installLocation | gsub($home_prefix; $container_prefix) | gsub($source_prefix; $container_prefix))
+        )
+    ' "$src_file"); then
+        _import_error "jq transformation failed for known_marketplaces.json"
+        return 1
     fi
 
     # Validate transformed JSON before writing
