@@ -60,7 +60,7 @@ flowchart LR
     subgraph CLI["CLI Layer"]
         direction TB
         Main["agent-sandbox/containai.sh<br/>(entry point, sourced)"]
-        Cmds["Subcommands<br/>(run, shell, doctor, import, export, stop)"]
+        Cmds["Subcommands<br/>(run, shell, doctor, setup, etc.)"]
     end
 
     subgraph Lib["Library Layer"]
@@ -155,41 +155,43 @@ ContainAI supports two isolation mechanisms, automatically selected based on ava
 
 ```mermaid
 flowchart TD
-    Start["cai run"] --> SandboxCheck{"Docker Desktop<br/>Sandbox Available?<br/>(4.50+, feature enabled)"}
+    Start["cai run"] --> ECICheck{"ECI Enabled +<br/>Sandboxes Available?"}
 
-    SandboxCheck -->|Yes| Sandbox["Docker Desktop Sandbox Mode<br/>(docker sandbox run)"]
-    SandboxCheck -->|No| SysboxCheck{"Sysbox Available?<br/>(containai-secure context)"}
+    ECICheck -->|Yes| ECI["Docker Desktop ECI Mode<br/>(docker sandbox run)"]
+    ECICheck -->|No| SysboxCheck{"Sysbox Available?<br/>(containai-secure context)"}
 
     SysboxCheck -->|Yes| Sysbox["Sysbox Mode<br/>(--runtime=sysbox-runc)"]
-    SysboxCheck -->|No| Fail["ERROR: No isolation<br/>(actionable message)"]
+    SysboxCheck -->|No| Fail["ERROR: No isolation<br/>(run cai doctor)"]
 
-    Sandbox --> Container["Container Running<br/>(isolated)"]
+    ECI --> Container["Container Running<br/>(isolated)"]
     Sysbox --> Container
 
-    style Sandbox fill:#c8e6c9
+    style ECI fill:#c8e6c9
     style Sysbox fill:#bbdefb
     style Fail fill:#ffcdd2
 ```
 
-### Docker Desktop Sandbox Mode
+### Docker Desktop ECI Mode
 
-**Requirements**: Docker Desktop 4.50+ with sandbox feature enabled
+**Requirements**: Docker Desktop with ECI enabled AND sandbox feature available
 
+The Docker Desktop path requires BOTH conditions (see `_cai_select_context` in `agent-sandbox/lib/doctor.sh`):
+1. Enhanced Container Isolation (ECI) enabled (requires Business subscription + admin)
+2. Sandbox feature available (`docker sandbox` command works)
+
+When both are met:
 - Uses `docker sandbox run` command
-- Provides isolated execution environment
-- When Enhanced Container Isolation (ECI) is additionally enabled:
-  - Automatic user namespace remapping (uid 0 -> 100000+)
-  - sysbox-runc runtime for stronger isolation
-- ECI requires Docker Business subscription and admin enablement
+- Automatic user namespace remapping (uid 0 -> 100000+)
+- sysbox-runc runtime for stronger isolation
 
-### Sysbox Mode (Linux/WSL)
+### Sysbox Mode (WSL2/macOS)
 
 **Requirements**: Sysbox runtime installed, `containai-secure` Docker context
 
 - Uses standard `docker run` with `--runtime=sysbox-runc`
-- Requires manual Sysbox installation via `cai setup`
+- `cai setup` installs Sysbox on WSL2 and macOS (via Lima)
 - Creates dedicated Docker context pointing to Sysbox-enabled daemon
-- Available on WSL2 and native Linux
+- Native Linux requires manual Sysbox installation (see Sysbox docs)
 
 ## Data Flow
 
@@ -309,11 +311,13 @@ The data volume (`/mnt/agent-data`) contains:
 
 ### Volume Selection
 
-Volume selection follows this precedence:
+Volume selection follows this precedence (see `_containai_resolve_volume` in `agent-sandbox/lib/config.sh`):
 
-1. `--data-volume` CLI flag (explicit)
-2. Config file `[workspace."/path"].data_volume`
-3. Default: `sandbox-agent-data`
+1. `--data-volume` CLI flag (skips config parsing)
+2. `CONTAINAI_DATA_VOLUME` env var (skips config parsing)
+3. Config file `[workspace."/path"].data_volume` (workspace match)
+4. Config file `[agent].data_volume` (global)
+5. Default: `sandbox-agent-data`
 
 Workspace-specific volumes enable isolated agent state per project.
 
@@ -333,7 +337,7 @@ flowchart TB
     subgraph Boundary["Security Boundary"]
         direction LR
         Userns["User Namespace<br/>(uid 0 -> 100000+)"]
-        Seccomp["Seccomp Profile"]
+        Seccomp["Seccomp<br/>(runtime defaults)"]
         Mounts["Mount Restrictions"]
     end
 
@@ -356,15 +360,21 @@ flowchart TB
 
 ### Security Guarantees
 
-These protections are **always enforced**:
+**Always enforced hardening** (cannot be disabled):
 
 | Protection | Implementation | Code Reference |
 |------------|----------------|----------------|
 | **Volume mount TOCTOU** | Path validation in entrypoint | `agent-sandbox/entrypoint.sh:verify_path_under_data_dir()` |
 | **Symlink traversal** | Reject symlinks, realpath validation | `agent-sandbox/entrypoint.sh:reject_symlink()` |
-| **Safe .env parsing** | CRLF handling, quote validation | `agent-sandbox/lib/env.sh` |
-| **Credential isolation** | Default `credentials.mode=none` | `agent-sandbox/lib/config.sh`, `agent-sandbox/lib/container.sh` |
-| **Docker socket denied** | No socket mount by default | `agent-sandbox/lib/container.sh` |
+| **Config refuses dangerous modes** | `credentials.mode=host` in config is never honored | `agent-sandbox/lib/config.sh` |
+
+**Safe defaults** (active unless explicitly overridden via CLI):
+
+| Default | Override Flag | Code Reference |
+|---------|--------------|----------------|
+| **Credential isolation** | `--allow-host-credentials` | `agent-sandbox/lib/container.sh` |
+| **Docker socket denied** | `--allow-host-docker-socket` | `agent-sandbox/lib/container.sh` |
+| **Safe .env parsing** | (always on when env imported) | `agent-sandbox/lib/env.sh` |
 
 ### Unsafe Opt-ins (FR-5)
 
