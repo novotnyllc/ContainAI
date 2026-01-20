@@ -85,6 +85,94 @@ ECI and Sysbox dual runtime support.
 - Container launch now supports both ECI and Sysbox isolation modes
 - Documentation updated to reflect dual-runtime architecture
 
+## [2026-01-13 to 2026-01-17]
+
+Agent sandbox refactor and CLI improvements.
+
+### Added
+- Flow-Next task tracking integration
+- BuildKit cache mounts for faster builds
+- OCI labels for image metadata
+- Interactive shell mode (`cai shell`)
+- Plugin synchronization scripts
+
+### Changed
+- Renamed project commands from `csd`/`dotnet-sandbox` to `asb`/`agent-sandbox`
+- Standardized status messages to use ASCII markers (`[OK]`, `[ERROR]`, `[WARN]`)
+- Volume consolidation for simpler data management
+
+### Fixed
+- Shell precedence in cleanup commands
+- Docker arguments passed correctly to build
+- Layer caching improved by moving dynamic labels to end of Dockerfile
+
+## [2025-12-01 to 2025-12-12]
+
+Security hardening and log collection infrastructure.
+
+### Added
+- LogCollector service with Unix socket communication
+- AppArmor and seccomp profile management with verification
+- Supply chain security with SBOM generation and attestations
+- MCP server isolation with deterministic UID allocation
+- Host-side secret broker utilities for capability management
+- CI testing with Docker-in-Docker and Sysbox
+
+### Changed
+- Security profiles updated for channel-specific enforcement
+- Integration tests refactored for improved reliability
+
+### Fixed
+- MITM CA key permissions and certificate generation
+- Proxy CA support for Node.js and other runtimes
+
+### Security
+- AppArmor profiles for agent isolation
+- Seccomp filters for syscall blocking
+- Audit logging for security events
+
+## [2025-11-21 to 2025-11-30]
+
+Release infrastructure and installer development.
+
+### Added
+- PowerShell and Bash installers for ContainAI releases
+- Payload verification and attestation support
+- Channel-specific security profile generation
+- MITM CA generation for Squid proxy
+- Log forwarder with AppArmor and seccomp profiles
+- WHY.md explaining project purpose and security model
+
+### Changed
+- Project renamed from CodingAgents to ContainAI
+- Security asset management refactored for channel support
+- Build workflows enhanced with zstd compression
+
+### Fixed
+- AppArmor profile loading and verification
+- Installer placeholder replacements validated
+
+## [2025-11-17 to 2025-11-20]
+
+Container hardening and security analysis.
+
+### Added
+- Comprehensive security analysis documentation
+- Threat model and tool danger matrix
+- Secret broker architecture for credential management
+- Container hardening with cap-drop and pids-limit
+- Health check scripts for installation verification
+- WSL shim for cross-platform support
+
+### Changed
+- Squid proxy hardening rules block metadata and private IP ranges
+- Documentation updated to specify Docker as only supported runtime
+
+### Security
+- Capability checks ensure privileges are dropped
+- Seccomp mount enforcement validates syscall blocking
+- Launcher integrity checks implemented
+
 ## [2025-11-16]
 
 SSH and GPG handling improvements.
@@ -174,11 +262,15 @@ Initial release.
 
 ## Version History Summary
 
-| Date | Milestone |
-|------|-----------|
+| Date Range | Milestone |
+|------------|-----------|
 | 2026-01-20 | Documentation Suite, Env Import, Secure Engine Setup |
 | 2026-01-19 | Unsafe Opt-ins, Config Enhancements |
 | 2026-01-18 | ECI and Sysbox Dual Runtime |
+| 2026-01-13 to 2026-01-17 | Agent Sandbox Refactor, CLI Improvements |
+| 2025-12-01 to 2025-12-12 | Security Hardening, Log Collection |
+| 2025-11-21 to 2025-11-30 | Release Infrastructure, Installers |
+| 2025-11-17 to 2025-11-20 | Container Hardening, Security Analysis |
 | 2025-11-16 | SSH/GPG Handling |
 | 2025-11-15 | Security Docs, Credential Proxy, VS Code |
 | 2025-11-14 | Documentation, Integration Testing |
@@ -190,6 +282,10 @@ Initial release.
 [2026-01-20]: https://github.com/novotnyllc/containai/commits/main?since=2026-01-20&until=2026-01-21
 [2026-01-19]: https://github.com/novotnyllc/containai/commits/main?since=2026-01-19&until=2026-01-20
 [2026-01-18]: https://github.com/novotnyllc/containai/commits/main?since=2026-01-18&until=2026-01-19
+[2026-01-13 to 2026-01-17]: https://github.com/novotnyllc/containai/commits/main?since=2026-01-13&until=2026-01-18
+[2025-12-01 to 2025-12-12]: https://github.com/novotnyllc/containai/commits/main?since=2025-12-01&until=2025-12-13
+[2025-11-21 to 2025-11-30]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-21&until=2025-12-01
+[2025-11-17 to 2025-11-20]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-17&until=2025-11-21
 [2025-11-16]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-16&until=2025-11-17
 [2025-11-15]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-15&until=2025-11-16
 [2025-11-14]: https://github.com/novotnyllc/containai/commits/main?since=2025-11-14&until=2025-11-15
