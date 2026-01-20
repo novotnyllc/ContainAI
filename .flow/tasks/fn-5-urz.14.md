@@ -68,9 +68,8 @@ containai_sandbox_clear_credentials() {
 - [ ] Works for different agents (claude, gemini)
 - [ ] Confirms successful removal
 ## Done summary
-TBD
-
+Implemented `cai sandbox clear-credentials` command to remove Docker sandbox credential volumes for troubleshooting authentication issues. The command identifies the correct volume per agent (docker-<agent>-sandbox-data), warns about data loss, refuses if any containers reference the volume, and verifies removal.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 46d40f3, 7951791, 197c6e1, 75354c5
+- Tests: bash -n containai.sh, cai sandbox --help, cai sandbox clear-credentials --help, cai sandbox clear-credentials --agent unknown, cai sandbox clear-credentials --workspace /tmp
 - PRs:

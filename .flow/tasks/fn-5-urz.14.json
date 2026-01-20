@@ -7,10 +7,26 @@
     "fn-5-urz.7"
   ],
   "epic": "fn-5-urz",
+  "evidence": {
+    "commits": [
+      "46d40f3",
+      "7951791",
+      "197c6e1",
+      "75354c5"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n containai.sh",
+      "cai sandbox --help",
+      "cai sandbox clear-credentials --help",
+      "cai sandbox clear-credentials --agent unknown",
+      "cai sandbox clear-credentials --workspace /tmp"
+    ]
+  },
   "id": "fn-5-urz.14",
   "priority": null,
   "spec_path": ".flow/tasks/fn-5-urz.14.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "containai sandbox clear-credentials command",
-  "updated_at": "2026-01-20T02:37:00.589328Z"
+  "updated_at": "2026-01-20T02:54:53.228425Z"
 }
