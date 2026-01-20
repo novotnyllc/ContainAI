@@ -30,9 +30,8 @@ Create CONTRIBUTING.md to enable community contributions with clear development 
 - [ ] Includes "good first issue" guidance for newcomers
 - [ ] References .flow/memory/conventions.md for detailed rules
 ## Done summary
-TBD
-
+Created comprehensive CONTRIBUTING.md with development setup, shell scripting conventions, testing process, PR workflow, and good first issue guidance.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: dc2e2e3, 5e05bc8
+- Tests: Manual verification of markdown rendering
 - PRs:

@@ -7,10 +7,20 @@
     "fn-7-j5o.7"
   ],
   "epic": "fn-7-j5o",
+  "evidence": {
+    "commits": [
+      "dc2e2e3",
+      "5e05bc8"
+    ],
+    "prs": [],
+    "tests": [
+      "Manual verification of markdown rendering"
+    ]
+  },
   "id": "fn-7-j5o.6",
   "priority": null,
   "spec_path": ".flow/tasks/fn-7-j5o.6.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Create CONTRIBUTING.md",
-  "updated_at": "2026-01-20T15:17:46.492885Z"
+  "updated_at": "2026-01-20T15:31:19.644372Z"
 }
