@@ -101,9 +101,10 @@ Names are sanitized (lowercase, alphanumeric + dashes, max 63 chars).
 ### Related Commands
 
 ```bash
-cai-stop-all     # Interactive selection to stop sandbox containers
-cai-shell        # Start sandbox with interactive shell instead of agent
-caid             # Start sandbox in detached mode
+cai-stop-all        # Interactive selection to stop sandbox containers
+cai-shell           # Start sandbox with interactive shell instead of agent
+caid                # Start sandbox in detached mode
+cai sandbox reset   # Remove sandbox for workspace (config changes require this)
 ```
 
 ## Volumes

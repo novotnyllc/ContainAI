@@ -297,8 +297,8 @@ Removes the Docker Desktop sandbox for the current workspace so that
 configuration changes (env vars, mounts, credentials mode) take effect.
 
 Options:
-  --workspace <path>  Workspace path (default: current directory)
-  -h, --help          Show this help message
+  -w, --workspace <path>  Workspace path (default: current directory)
+  -h, --help              Show this help message
 
 What it does:
   1. Identifies the sandbox associated with the workspace
@@ -751,8 +751,9 @@ _containai_sandbox_reset_cmd() {
         _cai_error "docker sandbox ls timed out"
         _cai_info "Check Docker Desktop is running and responsive"
         return 1
-    elif [[ $ls_rc -eq 125 ]]; then
-        # No timeout mechanism - run without timeout
+    elif [[ $ls_rc -eq 125 ]] && [[ "${_CAI_TIMEOUT_UNAVAILABLE:-}" == "1" ]]; then
+        # No timeout mechanism - run without timeout (check flag to avoid masking real 125 exits)
+        unset _CAI_TIMEOUT_UNAVAILABLE
         sandbox_list=$(docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>&1)
         ls_rc=$?
     fi
@@ -760,7 +761,8 @@ _containai_sandbox_reset_cmd() {
     if [[ $ls_rc -ne 0 ]]; then
         # Check if docker sandbox command is unavailable
         # Match Docker's specific error messages to avoid false positives
-        if printf '%s' "$sandbox_list" | grep -qiE "'sandbox' is not a docker command|unknown docker command"; then
+        # Docker outputs: "docker: 'sandbox' is not a docker command" or "unknown command: sandbox"
+        if printf '%s' "$sandbox_list" | grep -qiE "'sandbox' is not a docker command|unknown command.*sandbox"; then
             _cai_error "docker sandbox command not available"
             _cai_info "This command requires Docker Desktop 4.50+"
             return 1
@@ -819,7 +821,9 @@ _containai_sandbox_reset_cmd() {
         stop_output=$(_cai_timeout 30 docker sandbox stop "$sandbox_id" 2>&1)
         stop_rc=$?
         # Handle no timeout mechanism (125) - run without timeout
-        if [[ $stop_rc -eq 125 ]]; then
+        # Check flag to avoid masking real 125 exits
+        if [[ $stop_rc -eq 125 ]] && [[ "${_CAI_TIMEOUT_UNAVAILABLE:-}" == "1" ]]; then
+            unset _CAI_TIMEOUT_UNAVAILABLE
             stop_output=$(docker sandbox stop "$sandbox_id" 2>&1)
             stop_rc=$?
         fi
@@ -835,7 +839,9 @@ _containai_sandbox_reset_cmd() {
         rm_output=$(_cai_timeout 30 docker sandbox rm "$sandbox_id" 2>&1)
         rm_rc=$?
         # Handle no timeout mechanism (125) - run without timeout
-        if [[ $rm_rc -eq 125 ]]; then
+        # Check flag to avoid masking real 125 exits
+        if [[ $rm_rc -eq 125 ]] && [[ "${_CAI_TIMEOUT_UNAVAILABLE:-}" == "1" ]]; then
+            unset _CAI_TIMEOUT_UNAVAILABLE
             rm_output=$(docker sandbox rm "$sandbox_id" 2>&1)
             rm_rc=$?
         fi
@@ -858,18 +864,17 @@ _containai_sandbox_reset_cmd() {
     verify_rc=$?
 
     # Handle no timeout mechanism (125) - run without timeout
-    if [[ $verify_rc -eq 125 ]]; then
+    # Check flag to avoid masking real 125 exits
+    if [[ $verify_rc -eq 125 ]] && [[ "${_CAI_TIMEOUT_UNAVAILABLE:-}" == "1" ]]; then
+        unset _CAI_TIMEOUT_UNAVAILABLE
         verify_list=$(docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>&1)
         verify_rc=$?
     fi
 
     if [[ $verify_rc -eq 124 ]]; then
-        # Timeout during verification - removal may have succeeded
-        _cai_warn "Verification timed out - removal may have succeeded but cannot confirm"
-        if [[ "$any_failed" == "true" ]]; then
-            return 1
-        fi
-        return 0
+        # Timeout during verification - cannot confirm removal (fail-closed)
+        _cai_error "Verification timed out - cannot confirm removal"
+        return 1
     elif [[ $verify_rc -eq 0 ]]; then
         while IFS=$'\t' read -r id ws; do
             [[ -z "$id" ]] && continue
@@ -885,12 +890,9 @@ _containai_sandbox_reset_cmd() {
             fi
         done <<< "$verify_list"
     else
-        # Verification listing failed - removal may have succeeded
-        _cai_warn "Verification listing failed - removal may have succeeded but cannot confirm"
-        if [[ "$any_failed" == "true" ]]; then
-            return 1
-        fi
-        return 0
+        # Verification listing failed - cannot confirm removal (fail-closed)
+        _cai_error "Verification listing failed - cannot confirm removal"
+        return 1
     fi
 
     if [[ "$verify_found" == "true" ]]; then
