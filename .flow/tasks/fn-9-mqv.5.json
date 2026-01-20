@@ -8,10 +8,20 @@
     "fn-9-mqv.4"
   ],
   "epic": "fn-9-mqv",
+  "evidence": {
+    "commits": [
+      "c65d5fed0d53a4a7a0e1ec86488fdb1bf9cdcdac",
+      "ca9eaee429c4044617da4ff2bd18b2c18ca3e38a"
+    ],
+    "prs": [],
+    "tests": [
+      "bash -n agent-sandbox/test-sync-integration.sh"
+    ]
+  },
   "id": "fn-9-mqv.5",
   "priority": null,
   "spec_path": ".flow/tasks/fn-9-mqv.5.md",
-  "status": "in_progress",
+  "status": "done",
   "title": "Add import source integration tests",
-  "updated_at": "2026-01-20T20:25:09.362477Z"
+  "updated_at": "2026-01-20T20:38:58.468755Z"
 }

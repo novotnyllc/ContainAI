@@ -31,9 +31,8 @@ Add integration tests for import source functionality.
 - [ ] Test: missing source produces error exit code
 - [ ] Tests clean up volumes on exit
 ## Done summary
-TBD
-
+Added integration tests for import source functionality: export-import round-trip verification, tgz import idempotency, invalid/corrupt tgz error handling, and missing source error handling.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c65d5fed0d53a4a7a0e1ec86488fdb1bf9cdcdac, ca9eaee429c4044617da4ff2bd18b2c18ca3e38a
+- Tests: bash -n agent-sandbox/test-sync-integration.sh
 - PRs:
