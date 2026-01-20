@@ -1388,6 +1388,413 @@ _cai_setup_macos() {
     return 0
 }
 
+# ==============================================================================
+# Native Linux Setup
+# ==============================================================================
+
+# Native Linux supported distributions
+# Returns: 0 if distro is fully supported (auto-install), 1 otherwise
+# Outputs: Sets _CAI_LINUX_DISTRO, _CAI_LINUX_VERSION_ID
+_cai_linux_detect_distro() {
+    _CAI_LINUX_DISTRO=""
+    _CAI_LINUX_VERSION_ID=""
+
+    if [[ ! -f /etc/os-release ]]; then
+        return 1
+    fi
+
+    # Source os-release to get ID and VERSION_ID
+    # shellcheck disable=SC1091
+    _CAI_LINUX_DISTRO=$(. /etc/os-release && printf '%s' "${ID:-unknown}")
+    # shellcheck disable=SC1091
+    _CAI_LINUX_VERSION_ID=$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")
+
+    # Check if this is a supported distribution for auto-install
+    case "$_CAI_LINUX_DISTRO" in
+        ubuntu|debian)
+            return 0
+            ;;
+        fedora|rhel|centos|arch|manjaro)
+            # These are recognized but not auto-install supported
+            return 1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Check if Docker Desktop is running on Linux (can coexist)
+# Returns: 0 if Docker Desktop detected, 1 otherwise
+_cai_linux_docker_desktop_detected() {
+    # Check for Docker Desktop process
+    if pgrep -x "docker-desktop" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Check for desktop-linux context (Docker Desktop creates this)
+    if docker context ls 2>/dev/null | grep -q "desktop-linux"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Install Sysbox on native Linux (Ubuntu/Debian)
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+# Note: Similar to WSL2 but without WSL-specific checks (systemd PID 1, seccomp)
+_cai_install_sysbox_linux() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    # Detect distro
+    if ! _cai_linux_detect_distro; then
+        _cai_error "Sysbox auto-install only supports Ubuntu/Debian on native Linux"
+        _cai_error "  Detected distro: ${_CAI_LINUX_DISTRO:-unknown}"
+        _cai_error "  For other distros, install Sysbox manually:"
+        _cai_error "  https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
+        return 1
+    fi
+
+    _cai_info "Detected distribution: $_CAI_LINUX_DISTRO $_CAI_LINUX_VERSION_ID"
+
+    # Check for systemd (required for Sysbox service)
+    if ! command -v systemctl >/dev/null 2>&1; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_warn "[DRY-RUN] systemctl not found - systemd required for actual install"
+        else
+            _cai_error "Sysbox requires systemd (systemctl not found)"
+            _cai_error "  Sysbox services require systemd to be the init system"
+            return 1
+        fi
+    fi
+
+    # On native Linux, we don't need to check PID 1 is systemd like in WSL2
+    # because native Linux with systemd-based distros always has systemd as PID 1
+
+    # Always check and install required tools (jq needed for daemon.json config)
+    _cai_step "Ensuring required tools are installed"
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would ensure jq is installed"
+    else
+        if ! command -v jq >/dev/null 2>&1; then
+            _cai_info "Installing jq (required for daemon.json configuration)"
+            if ! sudo apt-get update -qq; then
+                _cai_error "Failed to run apt-get update"
+                return 1
+            fi
+            if ! sudo apt-get install -y jq; then
+                _cai_error "Failed to install jq"
+                return 1
+            fi
+        fi
+    fi
+
+    _cai_step "Checking for existing Sysbox installation"
+    if command -v sysbox-runc >/dev/null 2>&1; then
+        local existing_version
+        existing_version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
+        _cai_info "Sysbox already installed: $existing_version"
+        return 0
+    fi
+
+    _cai_step "Installing Sysbox dependencies"
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would run: apt-get update"
+        _cai_info "[DRY-RUN] Would run: apt-get install -y jq wget"
+    else
+        if ! sudo apt-get update; then
+            _cai_error "Failed to run apt-get update"
+            return 1
+        fi
+        if ! sudo apt-get install -y jq wget; then
+            _cai_error "Failed to install dependencies (jq, wget)"
+            return 1
+        fi
+    fi
+
+    _cai_step "Downloading Sysbox package"
+
+    # Determine architecture
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)
+            arch="amd64"
+            ;;
+        aarch64)
+            arch="arm64"
+            ;;
+        *)
+            _cai_error "Unsupported architecture: $arch"
+            return 1
+            ;;
+    esac
+
+    # Get latest Sysbox release URL from GitHub
+    local release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
+    local download_url
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would fetch latest release from: $release_url"
+        _cai_info "[DRY-RUN] Would download Sysbox .deb for architecture: $arch"
+        _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
+        _cai_ok "Sysbox installation (dry-run) complete"
+        return 0
+    fi
+
+    # Fetch release info
+    local release_json
+    release_json=$(wget -qO- "$release_url" 2>/dev/null) || {
+        _cai_error "Failed to fetch Sysbox release info from GitHub"
+        _cai_error "  Check network connectivity"
+        return 1
+    }
+
+    # Extract .deb download URL for this architecture
+    download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
+
+    if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
+        _cai_error "Could not find Sysbox .deb package for architecture: $arch"
+        return 1
+    fi
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Download URL: $download_url"
+    fi
+
+    # Download and install in subshell to contain cleanup trap
+    local install_rc
+    (
+        set -e
+        tmpdir=$(mktemp -d)
+        trap "rm -rf '$tmpdir'" EXIT
+        deb_file="$tmpdir/sysbox-ce.deb"
+
+        echo "[STEP] Downloading Sysbox from: $download_url"
+        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+            echo "[ERROR] Failed to download Sysbox package" >&2
+            exit 1
+        fi
+
+        echo "[STEP] Installing Sysbox package"
+        if ! sudo dpkg -i "$deb_file"; then
+            echo "[WARN] dpkg install had issues, attempting to fix dependencies" >&2
+            if ! sudo apt-get install -f -y; then
+                echo "[ERROR] Failed to install Sysbox package" >&2
+                exit 1
+            fi
+        fi
+        exit 0
+    ) && install_rc=0 || install_rc=$?
+
+    if [[ $install_rc -ne 0 ]]; then
+        return 1
+    fi
+
+    _cai_ok "Sysbox installation complete"
+    return 0
+}
+
+# Verify Sysbox installation on native Linux
+# Arguments: $1 = socket path for verification
+#            $2 = dry_run flag ("true" to skip actual verification)
+#            $3 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+_cai_verify_sysbox_install_linux() {
+    local socket_path="${1:-/var/run/docker.sock}"
+    local dry_run="${2:-false}"
+    local verbose="${3:-false}"
+
+    _cai_step "Verifying Sysbox installation"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would verify sysbox-runc and sysbox-mgr"
+        _cai_info "[DRY-RUN] Would verify Docker runtime configuration via socket: $socket_path"
+        _cai_info "[DRY-RUN] Would verify containai-secure context"
+        return 0
+    fi
+
+    # Check sysbox-runc binary
+    if ! command -v sysbox-runc >/dev/null 2>&1; then
+        _cai_error "sysbox-runc not found in PATH"
+        return 1
+    fi
+
+    local sysbox_version
+    sysbox_version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "sysbox-runc version: $sysbox_version"
+    fi
+
+    # Check sysbox-mgr service
+    if command -v systemctl >/dev/null 2>&1; then
+        if ! systemctl is-active --quiet sysbox-mgr 2>/dev/null; then
+            _cai_warn "sysbox-mgr service is not running"
+            _cai_warn "  Start with: sudo systemctl start sysbox-mgr"
+        elif [[ "$verbose" == "true" ]]; then
+            _cai_info "sysbox-mgr service: running"
+        fi
+    fi
+
+    # Check Docker recognizes sysbox-runc runtime (via specified socket)
+    local docker_runtimes
+    docker_runtimes=$(DOCKER_HOST="unix://$socket_path" docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
+    if [[ -z "$docker_runtimes" ]] || [[ "$docker_runtimes" == "null" ]]; then
+        _cai_error "Could not query Docker runtimes via socket: $socket_path"
+        return 1
+    fi
+
+    if ! printf '%s' "$docker_runtimes" | grep -q "sysbox-runc"; then
+        _cai_error "Docker does not recognize sysbox-runc runtime"
+        _cai_error "  Restart Docker: sudo systemctl restart docker"
+        return 1
+    fi
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Docker runtimes: $docker_runtimes"
+    fi
+
+    # Check containai-secure context
+    if ! docker context inspect containai-secure >/dev/null 2>&1; then
+        _cai_error "containai-secure context not found"
+        return 1
+    fi
+
+    # Verify sysbox-runc works by running a minimal container via the context
+    _cai_step "Testing sysbox-runc with minimal container"
+    local test_output test_rc test_passed=false
+    test_output=$(docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+
+    if [[ $test_rc -ne 0 ]]; then
+        _cai_warn "Sysbox test container failed"
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Test output: $test_output"
+        fi
+        # Don't fail hard - Sysbox may work for actual use cases despite test failure
+    elif [[ "$test_output" == *"sysbox-test-ok"* ]]; then
+        _cai_ok "Sysbox test container succeeded"
+        test_passed=true
+    fi
+
+    # Final message reflects actual test result
+    if [[ "$test_passed" == "true" ]]; then
+        _cai_ok "Sysbox installation verified"
+    else
+        _cai_warn "Sysbox installation completed but test container did not succeed"
+        _cai_warn "Sysbox may still work - try running a container manually"
+    fi
+    return 0
+}
+
+# Native Linux-specific setup
+# Arguments: $1 = force flag (unused for native Linux, kept for API consistency)
+#            $2 = dry_run flag ("true" to simulate)
+#            $3 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+_cai_setup_linux() {
+    local force="${1:-false}"
+    local dry_run="${2:-false}"
+    local verbose="${3:-false}"
+
+    _cai_info "Detected platform: Linux (native)"
+    _cai_info "Setting up Secure Engine with Sysbox"
+
+    # Detect distribution first
+    if ! _cai_linux_detect_distro; then
+        # Distribution not supported for auto-install
+        _cai_error "Auto-install not supported for distribution: ${_CAI_LINUX_DISTRO:-unknown}"
+        printf '\n'
+        _cai_info "Supported distributions for auto-install:"
+        _cai_info "  - Ubuntu 22.04, 24.04"
+        _cai_info "  - Debian 11, 12"
+        printf '\n'
+        _cai_info "For other distributions, install Sysbox manually:"
+        _cai_info "  Fedora/RHEL: Build from source"
+        _cai_info "  Arch Linux: AUR package (sysbox-ce-bin)"
+        _cai_info ""
+        _cai_info "Manual installation steps:"
+        _cai_info "  1. Install Sysbox: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
+        _cai_info "  2. Configure /etc/docker/daemon.json with sysbox-runc runtime"
+        _cai_info "  3. Restart Docker: sudo systemctl restart docker"
+        _cai_info "  4. Create context: docker context create containai-secure --docker host=unix:///var/run/docker.sock"
+        return 1
+    fi
+
+    # Step 1: Check for Docker Desktop coexistence
+    _cai_step "Checking for Docker Desktop"
+    if _cai_linux_docker_desktop_detected; then
+        printf '\n'
+        _cai_warn "Docker Desktop detected on this system"
+        _cai_warn "  ContainAI will create a separate 'containai-secure' context"
+        _cai_warn "  Docker Desktop configuration will NOT be modified"
+        _cai_warn "  Use --context containai-secure to access Sysbox isolation"
+        printf '\n'
+    fi
+
+    # Step 2: Install Sysbox
+    if ! _cai_install_sysbox_linux "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 3: Configure daemon.json
+    # Native Linux uses /etc/docker/daemon.json (same as WSL2)
+    if ! _cai_configure_daemon_json "$_CAI_WSL2_DAEMON_JSON" "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 4: Restart Docker service (if not dry-run)
+    # Native Linux uses default socket /var/run/docker.sock
+    _cai_step "Restarting Docker service"
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would run: systemctl restart docker"
+    else
+        if ! sudo systemctl restart docker; then
+            _cai_error "Failed to restart Docker service"
+            _cai_error "  Check: sudo systemctl status docker"
+            return 1
+        fi
+
+        # Wait for Docker to be ready
+        local wait_count=0
+        local max_wait=30
+        _cai_step "Waiting for Docker daemon"
+        while ! docker info >/dev/null 2>&1; do
+            sleep 1
+            wait_count=$((wait_count + 1))
+            if [[ $wait_count -ge $max_wait ]]; then
+                _cai_error "Docker daemon did not start after ${max_wait}s"
+                _cai_error "  Check: sudo systemctl status docker"
+                return 1
+            fi
+        done
+        _cai_ok "Docker service restarted"
+    fi
+
+    # Step 5: Create containai-secure context
+    # On native Linux, use the default socket (unlike WSL2 which uses a dedicated socket)
+    if ! _cai_create_containai_context "/var/run/docker.sock" "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 6: Verify installation
+    if ! _cai_verify_sysbox_install_linux "/var/run/docker.sock" "$dry_run" "$verbose"; then
+        # Verification failure is a warning, not fatal
+        _cai_warn "Sysbox verification had issues - check output above"
+    fi
+
+    printf '\n'
+    _cai_ok "Secure Engine setup complete"
+    _cai_info "To use the Secure Engine:"
+    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure"
+    _cai_info "  cai run --workspace /path/to/project"
+    _cai_info "Or use docker directly: docker --context containai-secure run --runtime=sysbox-runc ..."
+
+    return 0
+}
+
 # Main setup entry point
 # Arguments: parsed from command line
 # Returns: 0=success, 1=failure
@@ -1454,10 +1861,8 @@ _cai_setup() {
             return $?
             ;;
         linux)
-            _cai_info "Detected platform: Linux (native)"
-            _cai_error "Native Linux Secure Engine setup not yet implemented"
-            _cai_error "  See task fn-5-urz.15 for native Linux Sysbox installation"
-            return 1
+            _cai_setup_linux "$force" "$dry_run" "$verbose"
+            return $?
             ;;
         *)
             _cai_error "Unknown platform: $platform"
@@ -1474,13 +1879,22 @@ ContainAI Setup - Secure Engine Provisioning
 Usage: cai setup [options]
 
 Installs and configures Sysbox for enhanced container isolation.
-Supports WSL2 (with systemd) and macOS (via Lima VM).
+Supports native Linux (Ubuntu/Debian), WSL2 (with systemd), and macOS (via Lima VM).
 
 Options:
   --force       Bypass seccomp compatibility warning and proceed (WSL2 only)
   --dry-run     Show what would be done without making changes
   --verbose     Show detailed progress information
   -h, --help    Show this help message
+
+What It Does (Linux native):
+  1. Detects distribution (Ubuntu/Debian supported for auto-install)
+  2. Downloads and installs Sysbox from GitHub releases
+  3. Configures /etc/docker/daemon.json with sysbox-runc runtime
+  4. Restarts Docker daemon
+  5. Creates 'containai-secure' Docker context pointing to default socket
+  6. Verifies installation with test container
+  Note: Fedora/RHEL/Arch users need to install Sysbox manually.
 
 What It Does (WSL2):
   1. Checks seccomp compatibility (warns if WSL 1.1.0+ filter conflict)
@@ -1497,6 +1911,14 @@ What It Does (macOS):
   4. Exposes Docker socket to macOS host via Lima port forwarding
   5. Creates 'containai-secure' Docker context pointing to Lima socket
   6. Verifies installation
+
+Requirements (Linux native):
+  - Ubuntu 22.04/24.04 or Debian 11/12 (auto-install)
+  - Other distros: Manual Sysbox installation required
+  - systemd-based init system
+  - Docker Engine installed
+  - Internet access to download Sysbox
+  - jq and wget installed (will install if missing)
 
 Requirements (WSL2):
   - Ubuntu or Debian WSL2 distribution (WSL1 not supported)
