@@ -75,7 +75,11 @@ def ensure_flow_exists() -> bool:
 
 def get_default_config() -> dict:
     """Return default config structure."""
-    return {"memory": {"enabled": False}, "planSync": {"enabled": False}}
+    return {
+        "memory": {"enabled": False},
+        "planSync": {"enabled": False, "crossEpic": False},
+        "review": {"backend": None},
+    }
 
 
 def deep_merge(base: dict, override: dict) -> dict:
@@ -274,6 +278,7 @@ def build_chat_payload(
     mode: str,
     new_chat: bool = False,
     chat_name: Optional[str] = None,
+    chat_id: Optional[str] = None,
     selected_paths: Optional[list[str]] = None,
 ) -> str:
     payload: dict[str, Any] = {
@@ -284,6 +289,8 @@ def build_chat_payload(
         payload["new_chat"] = True
     if chat_name:
         payload["chat_name"] = chat_name
+    if chat_id:
+        payload["chat_id"] = chat_id
     if selected_paths:
         payload["selected_paths"] = selected_paths
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -861,6 +868,35 @@ a thorough review requires understanding the system, not just the diff.
 6. **Tests** - Adequate coverage? Testing behavior?
 7. **Security** - Injection? Auth gaps?
 
+## Scenario Exploration (for changed code only)
+
+Walk through these scenarios for new/modified code paths:
+- Happy path: Normal operation with valid inputs
+- Invalid inputs: Null, empty, malformed data
+- Boundary conditions: Min/max values, empty collections
+- Concurrent access: Race conditions, deadlocks
+- Network issues: Timeouts, partial failures
+- Resource exhaustion: Memory, disk, connections
+- Security attacks: Injection, overflow, DoS vectors
+- Data corruption: Partial writes, inconsistency
+- Cascading failures: Downstream service issues
+
+Only flag issues in the **changed code** - not pre-existing patterns.
+
+## Verdict Scope
+
+Explore broadly to understand impact, but your VERDICT must only consider:
+- Issues **introduced** by this changeset
+- Issues **directly affected** by this changeset (e.g., broken by the change)
+- Pre-existing issues that would **block shipping** this specific change
+
+Do NOT mark NEEDS_WORK for:
+- Pre-existing issues unrelated to the change
+- "Nice to have" improvements outside the change scope
+- Style nitpicks in untouched code
+
+You MAY mention these as "FYI" observations without affecting the verdict.
+
 ## Output Format
 
 For each issue found:
@@ -892,6 +928,20 @@ Do NOT skip this tag. The automation depends on it."""
 5. **Risks** - Blockers identified? Security gaps? Mitigation?
 6. **Scope** - Right-sized? Over/under-engineering?
 7. **Testability** - How will we verify this works?
+
+## Verdict Scope
+
+Explore the codebase to understand context, but your VERDICT must only consider:
+- Issues **within this plan** that block implementation
+- Feasibility problems given the **current codebase state**
+- Missing requirements that are **part of the stated goal**
+
+Do NOT mark NEEDS_WORK for:
+- Pre-existing codebase issues unrelated to this plan
+- Suggestions for features outside the plan scope
+- "While we're at it" improvements
+
+You MAY mention these as "FYI" observations without affecting the verdict.
 
 ## Output Format
 
@@ -1615,6 +1665,31 @@ def cmd_config_set(args: argparse.Namespace) -> None:
         print(f"{args.key} set to {new_value}")
 
 
+def cmd_review_backend(args: argparse.Namespace) -> None:
+    """Get review backend for skill conditionals. Returns ASK if not configured."""
+    # Priority: FLOW_REVIEW_BACKEND env > config > ASK
+    env_val = os.environ.get("FLOW_REVIEW_BACKEND", "").strip()
+    if env_val and env_val in ("rp", "codex", "none"):
+        backend = env_val
+        source = "env"
+    elif ensure_flow_exists():
+        cfg_val = get_config("review.backend")
+        if cfg_val and cfg_val in ("rp", "codex", "none"):
+            backend = cfg_val
+            source = "config"
+        else:
+            backend = "ASK"
+            source = "none"
+    else:
+        backend = "ASK"
+        source = "none"
+
+    if args.json:
+        json_output({"backend": backend, "source": source})
+    else:
+        print(backend)
+
+
 MEMORY_TEMPLATES = {
     "pitfalls.md": """# Pitfalls
 
@@ -2276,7 +2351,7 @@ def cmd_tasks(args: argparse.Namespace) -> None:
             tasks.append(
                 {
                     "id": task_data["id"],
-                    "epic": task_data["epic_id"],
+                    "epic": task_data["epic"],
                     "title": task_data["title"],
                     "status": task_data["status"],
                     "priority": task_data.get("priority"),
@@ -2351,16 +2426,16 @@ def cmd_list(args: argparse.Namespace) -> None:
             task_data = normalize_task(
                 load_json_or_exit(task_file, f"Task {stem}", use_json=args.json)
             )
-            if "id" not in task_data or "epic_id" not in task_data:
+            if "id" not in task_data or "epic" not in task_data:
                 continue  # Skip artifact files (GH-21)
-            epic_id = task_data["epic_id"]
+            epic_id = task_data["epic"]
             if epic_id not in tasks_by_epic:
                 tasks_by_epic[epic_id] = []
             tasks_by_epic[epic_id].append(task_data)
             all_tasks.append(
                 {
                     "id": task_data["id"],
-                    "epic": task_data["epic_id"],
+                    "epic": task_data["epic"],
                     "title": task_data["title"],
                     "status": task_data["status"],
                     "priority": task_data.get("priority"),
@@ -3838,19 +3913,60 @@ def cmd_rp_ensure_workspace(args: argparse.Namespace) -> None:
 def cmd_rp_builder(args: argparse.Namespace) -> None:
     window = args.window
     summary = args.summary
+    response_type = getattr(args, "response_type", None)
+
+    # Build builder command with optional response-type
+    builder_expr = f"builder {json.dumps(summary)}"
+    if response_type:
+        builder_expr += f" --response-type {response_type}"
+
     cmd = [
         "-w",
         str(window),
+        "--raw-json" if response_type else "",
         "-e",
-        f"builder {json.dumps(summary)}",
+        builder_expr,
     ]
+    cmd = [c for c in cmd if c]  # Remove empty strings
     res = run_rp_cli(cmd)
     output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
-    tab = parse_builder_tab(output)
-    if args.json:
-        print(json.dumps({"window": window, "tab": tab}))
+
+    # For review response-type, parse the full JSON response
+    if response_type == "review":
+        try:
+            data = json.loads(res.stdout or "{}")
+            tab = data.get("tab_id", "")
+            chat_id = data.get("review", {}).get("chat_id", "")
+            review_response = data.get("review", {}).get("response", "")
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "window": window,
+                            "tab": tab,
+                            "chat_id": chat_id,
+                            "review": review_response,
+                            "file_count": data.get("file_count", 0),
+                            "total_tokens": data.get("total_tokens", 0),
+                        }
+                    )
+                )
+            else:
+                print(f"T={tab} CHAT_ID={chat_id}")
+                if review_response:
+                    print(review_response)
+        except json.JSONDecodeError:
+            tab = parse_builder_tab(output)
+            if args.json:
+                print(json.dumps({"window": window, "tab": tab, "error": "parse_failed"}))
+            else:
+                print(tab)
     else:
-        print(tab)
+        tab = parse_builder_tab(output)
+        if args.json:
+            print(json.dumps({"window": window, "tab": tab}))
+        else:
+            print(tab)
 
 
 def cmd_rp_prompt_get(args: argparse.Namespace) -> None:
@@ -3891,11 +4007,14 @@ def cmd_rp_select_add(args: argparse.Namespace) -> None:
 
 def cmd_rp_chat_send(args: argparse.Namespace) -> None:
     message = read_text_or_exit(Path(args.message_file), "Message file", use_json=False)
+    chat_id_arg = getattr(args, "chat_id", None)
+    mode = getattr(args, "mode", "chat") or "chat"
     payload = build_chat_payload(
         message=message,
-        mode="chat",
+        mode=mode,
         new_chat=args.new_chat,
         chat_name=args.chat_name,
+        chat_id=chat_id_arg,
         selected_paths=args.selected_paths,
     )
     cmd = [
@@ -3932,15 +4051,19 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
     """Atomic setup: pick-window + builder.
 
     Returns W=<window> T=<tab> on success, exits non-zero on failure.
+    With --response-type review, also returns CHAT_ID and review findings.
     Writes state file for ralph-guard to verify pick-window ran.
 
     Note: ensure-workspace removed - if user opens RP on a folder, workspace
     already exists. pick-window matches by folder path.
+
+    Requires RepoPrompt 1.6.0+ for --response-type review.
     """
     import hashlib
 
     repo_root = os.path.realpath(args.repo_root)
     summary = args.summary
+    response_type = getattr(args, "response_type", None)
 
     # Step 1: pick-window
     roots = normalize_repo_root(repo_root)
@@ -3967,34 +4090,88 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
                 break
 
     if win_id is None:
-        error_exit("No RepoPrompt window matches repo root", use_json=False, code=2)
+        if getattr(args, "create", False):
+            # Auto-create window via workspace create --new-window (RP 1.5.68+)
+            ws_name = os.path.basename(repo_root)
+            create_cmd = f"workspace create {shlex.quote(ws_name)} --new-window --folder-path {shlex.quote(repo_root)}"
+            create_res = run_rp_cli(["--raw-json", "-e", create_cmd])
+            try:
+                data = json.loads(create_res.stdout or "{}")
+                win_id = data.get("window_id")
+            except json.JSONDecodeError:
+                pass
+            if not win_id:
+                error_exit(
+                    f"Failed to create RP window: {create_res.stderr or create_res.stdout}",
+                    use_json=False,
+                    code=2,
+                )
+        else:
+            error_exit("No RepoPrompt window matches repo root", use_json=False, code=2)
 
     # Write state file for ralph-guard verification
     repo_hash = hashlib.sha256(repo_root.encode()).hexdigest()[:16]
     state_file = Path(f"/tmp/.ralph-pick-window-{repo_hash}")
     state_file.write_text(f"{win_id}\n{repo_root}\n")
 
-    # Step 2: builder
+    # Step 2: builder (with optional response-type for RP 1.6.0+)
+    builder_expr = f"builder {json.dumps(summary)}"
+    if response_type:
+        builder_expr += f" --response-type {response_type}"
+
     builder_cmd = [
         "-w",
         str(win_id),
+        "--raw-json" if response_type else "",
         "-e",
-        f"builder {json.dumps(summary)}",
+        builder_expr,
     ]
+    builder_cmd = [c for c in builder_cmd if c]  # Remove empty strings
     builder_res = run_rp_cli(builder_cmd)
     output = (builder_res.stdout or "") + (
         "\n" + builder_res.stderr if builder_res.stderr else ""
     )
-    tab = parse_builder_tab(output)
 
-    if not tab:
-        error_exit("Builder did not return a tab id", use_json=False, code=2)
+    # Parse response based on response-type
+    if response_type == "review":
+        try:
+            data = json.loads(builder_res.stdout or "{}")
+            tab = data.get("tab_id", "")
+            chat_id = data.get("review", {}).get("chat_id", "")
+            review_response = data.get("review", {}).get("response", "")
 
-    # Output
-    if args.json:
-        print(json.dumps({"window": win_id, "tab": tab, "repo_root": repo_root}))
+            if not tab:
+                error_exit("Builder did not return a tab id", use_json=False, code=2)
+
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "window": win_id,
+                            "tab": tab,
+                            "chat_id": chat_id,
+                            "review": review_response,
+                            "repo_root": repo_root,
+                            "file_count": data.get("file_count", 0),
+                            "total_tokens": data.get("total_tokens", 0),
+                        }
+                    )
+                )
+            else:
+                print(f"W={win_id} T={tab} CHAT_ID={chat_id}")
+                if review_response:
+                    print(review_response)
+        except json.JSONDecodeError:
+            error_exit("Failed to parse builder review response", use_json=False, code=2)
     else:
-        print(f"W={win_id} T={tab}")
+        tab = parse_builder_tab(output)
+        if not tab:
+            error_exit("Builder did not return a tab id", use_json=False, code=2)
+
+        if args.json:
+            print(json.dumps({"window": win_id, "tab": tab, "repo_root": repo_root}))
+        else:
+            print(f"W={win_id} T={tab}")
 
 
 # --- Codex Commands ---
@@ -4044,6 +4221,35 @@ Review all changes on the current branch compared to {base_branch}.
 3. **Simplicity** - Is this the simplest solution?
 4. **Security** - Injection, auth gaps, resource exhaustion?
 5. **Edge Cases** - Failure modes, race conditions, malformed input?
+
+## Scenario Exploration (for changed code only)
+
+Walk through these scenarios for new/modified code paths:
+- Happy path: Normal operation with valid inputs
+- Invalid inputs: Null, empty, malformed data
+- Boundary conditions: Min/max values, empty collections
+- Concurrent access: Race conditions, deadlocks
+- Network issues: Timeouts, partial failures
+- Resource exhaustion: Memory, disk, connections
+- Security attacks: Injection, overflow, DoS vectors
+- Data corruption: Partial writes, inconsistency
+- Cascading failures: Downstream service issues
+
+Only flag issues in the **changed code** - not pre-existing patterns.
+
+## Verdict Scope
+
+Your VERDICT must only consider issues in the **changed code**:
+- Issues **introduced** by this changeset
+- Issues **directly affected** by this changeset
+- Pre-existing issues that would **block shipping** this specific change
+
+Do NOT mark NEEDS_WORK for:
+- Pre-existing issues in untouched code
+- "Nice to have" improvements outside the diff
+- Style nitpicks in files you didn't change
+
+You MAY mention these as "FYI" observations without affecting the verdict.
 
 ## Output Format
 
@@ -4151,6 +4357,13 @@ def cmd_codex_impl_review(args: argparse.Namespace) -> None:
             "timestamp": now_iso(),
             "review": output,  # Full review feedback for fix loop
         }
+        # Add iteration if running under Ralph
+        ralph_iter = os.environ.get("RALPH_ITERATION")
+        if ralph_iter:
+            try:
+                receipt_data["iteration"] = int(ralph_iter)
+            except ValueError:
+                pass
         if focus:
             receipt_data["focus"] = focus
         Path(receipt_path).write_text(
@@ -4240,6 +4453,13 @@ def cmd_codex_plan_review(args: argparse.Namespace) -> None:
             "timestamp": now_iso(),
             "review": output,  # Full review feedback for fix loop
         }
+        # Add iteration if running under Ralph
+        ralph_iter = os.environ.get("RALPH_ITERATION")
+        if ralph_iter:
+            try:
+                receipt_data["iteration"] = int(ralph_iter)
+            except ValueError:
+                pass
         Path(receipt_path).write_text(
             json.dumps(receipt_data, indent=2) + "\n", encoding="utf-8"
         )
@@ -4618,6 +4838,13 @@ def main() -> None:
     p_config_set.add_argument("--json", action="store_true", help="JSON output")
     p_config_set.set_defaults(func=cmd_config_set)
 
+    # review-backend (helper for skills)
+    p_review_backend = subparsers.add_parser(
+        "review-backend", help="Get review backend (ASK if not configured)"
+    )
+    p_review_backend.add_argument("--json", action="store_true", help="JSON output")
+    p_review_backend.set_defaults(func=cmd_review_backend)
+
     # memory
     p_memory = subparsers.add_parser("memory", help="Memory commands")
     memory_sub = p_memory.add_subparsers(dest="memory_cmd", required=True)
@@ -4945,6 +5172,12 @@ def main() -> None:
     p_rp_builder = rp_sub.add_parser("builder", help="Run builder and return tab")
     p_rp_builder.add_argument("--window", type=int, required=True, help="Window id")
     p_rp_builder.add_argument("--summary", required=True, help="Builder summary")
+    p_rp_builder.add_argument(
+        "--response-type",
+        dest="response_type",
+        choices=["review", "plan", "question"],
+        help="Builder response type (requires RP 1.6.0+)",
+    )
     p_rp_builder.add_argument("--json", action="store_true", help="JSON output")
     p_rp_builder.set_defaults(func=cmd_rp_builder)
 
@@ -4977,6 +5210,17 @@ def main() -> None:
     p_rp_chat.add_argument("--new-chat", action="store_true", help="Start new chat")
     p_rp_chat.add_argument("--chat-name", help="Chat name (with --new-chat)")
     p_rp_chat.add_argument(
+        "--chat-id",
+        dest="chat_id",
+        help="Continue specific chat by ID (RP 1.6.0+)",
+    )
+    p_rp_chat.add_argument(
+        "--mode",
+        choices=["chat", "review", "plan", "edit"],
+        default="chat",
+        help="Chat mode (default: chat)",
+    )
+    p_rp_chat.add_argument(
         "--selected-paths", nargs="*", help="Override selected paths"
     )
     p_rp_chat.add_argument(
@@ -4994,7 +5238,18 @@ def main() -> None:
         "setup-review", help="Atomic: pick-window + workspace + builder"
     )
     p_rp_setup.add_argument("--repo-root", required=True, help="Repo root path")
-    p_rp_setup.add_argument("--summary", required=True, help="Builder summary")
+    p_rp_setup.add_argument("--summary", required=True, help="Builder summary/instructions")
+    p_rp_setup.add_argument(
+        "--response-type",
+        dest="response_type",
+        choices=["review"],
+        help="Use builder review mode (requires RP 1.6.0+)",
+    )
+    p_rp_setup.add_argument(
+        "--create",
+        action="store_true",
+        help="Create new RP window if none matches (requires RP 1.5.68+)",
+    )
     p_rp_setup.add_argument("--json", action="store_true", help="JSON output")
     p_rp_setup.set_defaults(func=cmd_rp_setup_review)
 

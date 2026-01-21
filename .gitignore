@@ -481,5 +481,5 @@ $RECYCLE.BIN/
 *.swp
 
 # Flow-Next
-!.flow/bin/*
+!.flow/bin/
 .flow/tmp/

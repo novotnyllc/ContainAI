@@ -38,7 +38,7 @@ Ralph mode rules (must follow):
    mkdir -p "$(dirname '{{REVIEW_RECEIPT_PATH}}')"
    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
    cat > '{{REVIEW_RECEIPT_PATH}}' <<EOF
-   {"type":"plan_review","id":"{{EPIC_ID}}","mode":"rp","timestamp":"$ts"}
+   {"type":"plan_review","id":"{{EPIC_ID}}","mode":"rp","timestamp":"$ts","iteration":{{RALPH_ITERATION}}}
    EOF
    ```
    For codex mode, receipt is written automatically by `flowctl codex plan-review --receipt`.
