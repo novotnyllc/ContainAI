@@ -1,0 +1,654 @@
+{
+  "created_at": "2026-01-21T18:23:47.904901Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-10-vep",
+      "created_at": "2026-01-21T04:41:46.482493Z",
+      "depends_on_epics": [],
+      "id": "fn-10-vep",
+      "next_task": 1,
+      "plan_review_status": "ship",
+      "plan_reviewed_at": "2026-01-21T09:15:39.058163Z",
+      "spec_path": ".flow/specs/fn-10-vep.md",
+      "status": "open",
+      "title": "Docker-in-Docker, Sysbox Integration & Distribution Overhaul",
+      "updated_at": "2026-01-21T18:21:07.328809Z"
+    },
+    "spec": "# fn-10-vep: Sysbox-Only Sandbox Runtime (Docker Desktop Independence)\n\n## Overview\n\n**Architectural Pivot**: Remove all Docker Desktop/ECI dependency. ContainAI will always use our own Sysbox installation and provide sandbox-equivalent security features ourselves.\n\n**Value Proposition**: Users get Docker Desktop sandbox-like isolation WITHOUT requiring Docker Desktop Business subscription. Works on any Linux (WSL2, native) or macOS (via Lima VM).\n\n### Key Changes from Previous Plan\n1. ~~Dual-path (ECI or Sysbox)~~ \u2192 **Sysbox-only**\n2. ~~Rely on Docker Desktop sandbox features~~ \u2192 **Implement equivalent features ourselves**\n3. ~~ECI detection~~ \u2192 **Sysbox detection only**\n4. ~~`docker sandbox run`~~ \u2192 **`docker run --runtime=sysbox-runc` with security flags**\n\n## Problem Statement\n\n**Docker Desktop Lock-in**:\n- Docker Desktop Business subscription required for sandbox/ECI features\n- Users want isolation without enterprise licensing costs\n- Current dual-path architecture is complex and confusing\n\n**Security Gap**:\n- Without Docker Desktop sandbox, users lose:\n  - Automatic userns-remapping (root \u2192 unprivileged)\n  - MaskedPaths/ReadonlyPaths protection\n  - Workspace UID/GID mapping\n\n**Lima Socket Issue (macOS)**:\n- Users report: \"socket exists but docker info failed\"\n- User not in docker group inside Lima VM\n- Socket forwarding works but permissions block access\n\n## Scope\n\n### In Scope\n\n**Phase 1: Remove ECI Dependency**\n- Remove `docker sandbox run` code path from lib/container.sh\n- Remove ECI detection logic (lib/eci.sh becomes optional/deprecated)\n- Update `_cai_select_context()` to always prefer Sysbox context\n- Update `cai doctor` to not require Docker Desktop\n\n**Phase 2: Sysbox Installation & Configuration**\n- Automated Sysbox installation in `cai setup`:\n  - Linux (native/WSL2): Download from nestybox releases, install .deb\n  - macOS: Lima VM with Sysbox pre-configured\n- Configure daemon.json with `sysbox-runc` runtime\n- Verify installation with runtime availability check\n\n**Phase 3: Security Hardening (Sandbox-Equivalent)**\n\n**MaskedPaths** (hide from container):\n```\n/proc/acpi, /proc/asound, /proc/interrupts, /proc/kcore, /proc/keys,\n/proc/latency_stats, /proc/sched_debug, /proc/scsi, /proc/timer_list,\n/proc/timer_stats, /sys/devices/virtual/powercap, /sys/firmware\n```\n\n**ReadonlyPaths** (read-only in container):\n```\n/proc/bus, /proc/fs, /proc/irq, /proc/sys, /proc/sysrq-trigger\n```\n\n**Implementation**: Docker applies these by default. Sysbox respects them. We add explicit `--security-opt` flags to ensure they're applied even if defaults change.\n\n**Additional hardening**:\n- `--security-opt=no-new-privileges` - prevent privilege escalation\n- `--cap-drop=ALL --cap-add=<minimal>` - drop unnecessary capabilities\n- Sysbox provides automatic userns-remapping (root inside \u2192 unprivileged outside)\n\n**Phase 4: Workspace UID/GID Mapping**\n\n**Problem**: Files created in container may have wrong ownership on host.\n\n**Solution**: Sysbox with kernel 5.12+ uses ID-mapped mounts automatically.\n- Container UID 1000 (agent) maps transparently to host user\n- No manual `/etc/subuid` or ACL configuration needed\n- Fallback for older kernels: document manual ACL setup\n\n**Workspace mounting strategy** (like Docker Desktop sandbox):\n- Mount workspace at `/workspace` inside container\n- Create symlink from `/workspace` to actual host path (e.g., `/home/user/projects/myapp`)\n- Entrypoint discovers workspace path from mount and creates symlink\n- One container per workspace directory (persistence via naming convention)\n\n**Phase 5: Lima VM Fixes (macOS)**\n\n**Socket issue root cause**: User not in docker group inside Lima VM.\n\n**Fix**:\n1. Lima provision script: `usermod -aG docker ${LIMA_CIDATA_USER}`\n2. After adding to group, restart Lima VM (SSH master socket persists old group membership)\n3. Update `cai setup` to automatically restart Lima VM after docker group change\n4. Add diagnostic to `cai doctor` for Lima socket permissions\n\n**Phase 6: Git Configuration**\n\n**Requirement**: Container needs git user.name and user.email configured.\n\n**Implementation**:\n- `cai import` reads git config from host: `git config --global user.name` and `user.email`\n- Writes to `/mnt/agent-data/.gitconfig` in volume\n- Entrypoint sets `HOME/.gitconfig` symlink or copies config\n- Also set `safe.directory` for mounted workspace\n\n**Phase 7: Container Persistence (Sandbox-Like)**\n\n**Auto-mapping**: One container per workspace directory.\n- Container name derived from workspace path hash\n- `cai run /path/to/workspace` \u2192 reuses existing container if present\n- `cai run --fresh /path/to/workspace` \u2192 removes old, creates new\n\n**Data persistence**:\n- `/mnt/agent-data` volume persists across container restarts\n- Git config, shell history, tool caches preserved\n- Workspace files persist on host (bind mount)\n\n**Phase 8: DinD Support (Existing)**\n- dockerd auto-start inside Sysbox container (already in plan)\n- Inner containers use runc (not nested Sysbox)\n\n**Phase 9: Distribution & Updates (Existing)**\n- GHCR publishing, install.sh, cai update (already in plan)\n\n### Out of Scope\n- Docker Desktop ECI support (removed - users wanting ECI use Docker Desktop directly)\n- Windows native (WSL2 only)\n- Podman support\n- Kernel < 5.5 support (Sysbox minimum requirement)\n\n## Technical Details\n\n### Runtime Architecture (Sysbox-Only)\n\n```\nHost (Linux/WSL2 or macOS via Lima VM)\n\u251c\u2500\u2500 Docker Engine with Sysbox runtime\n\u2502   \u2514\u2500\u2500 sysbox-runc (installed by cai setup)\n\u2502\n\u2514\u2500\u2500 ContainAI Container (sysbox-runc runtime)\n    \u251c\u2500\u2500 Automatic userns-remapping (Sysbox provides)\n    \u251c\u2500\u2500 MaskedPaths/ReadonlyPaths (Docker defaults + explicit flags)\n    \u251c\u2500\u2500 Workspace bind mount with ID-mapped ownership\n    \u251c\u2500\u2500 /mnt/agent-data volume for persistence\n    \u2514\u2500\u2500 (Optional) dockerd for DinD\n```\n\n### Security Flags Applied to Every Container\n\n```bash\ndocker run \\\n  --runtime=sysbox-runc \\\n  --security-opt=no-new-privileges \\\n  --cap-drop=ALL \\\n  --cap-add=CHOWN \\\n  --cap-add=DAC_OVERRIDE \\\n  --cap-add=FOWNER \\\n  --cap-add=SETGID \\\n  --cap-add=SETUID \\\n  --cap-add=NET_BIND_SERVICE \\\n  -v \"$WORKSPACE:/workspace:rw\" \\\n  -v \"$DATA_VOLUME:/mnt/agent-data:rw\" \\\n  --label \"containai.workspace=$WORKSPACE\" \\\n  --name \"containai-$(echo $WORKSPACE | sha256sum | cut -c1-12)\" \\\n  ...\n```\n\nNote: MaskedPaths/ReadonlyPaths are Docker defaults. We don't need explicit flags unless overriding.\n\n### Workspace Symlink Strategy\n\n```bash\n# In entrypoint.sh\n# 1. Detect workspace mount point\nWORKSPACE_MOUNT=$(findmnt -n -o TARGET --target /workspace 2>/dev/null || echo \"/workspace\")\n\n# 2. Get original host path from container label or mount source\nORIGINAL_PATH=$(docker inspect --format '{{index .Config.Labels \"containai.workspace\"}}' \"$HOSTNAME\" 2>/dev/null)\n\n# 3. Create symlink for tools expecting original path\nif [[ -n \"$ORIGINAL_PATH\" && \"$ORIGINAL_PATH\" != \"/workspace\" ]]; then\n  mkdir -p \"$(dirname \"$ORIGINAL_PATH\")\"\n  ln -sfn /workspace \"$ORIGINAL_PATH\"\nfi\n```\n\n### Lima VM Template Update\n\n```yaml\n# containai-sysbox.yaml\nvmType: vz  # Use native macOS virtualization\nimages:\n  - location: \"https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img\"\n    arch: \"x86_64\"\n  - location: \"https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img\"\n    arch: \"aarch64\"\n\nprovision:\n  - mode: system\n    script: |\n      #!/bin/bash\n      set -eux\n      # Install Docker\n      curl -fsSL https://get.docker.com | sh\n      \n      # Add Lima user to docker group\n      usermod -aG docker ${LIMA_CIDATA_USER}\n      \n      # Install Sysbox\n      SYSBOX_VERSION=\"0.6.7\"\n      ARCH=$(dpkg --print-architecture)\n      wget -q \"https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb\"\n      apt-get install -y jq \"./sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb\"\n      rm \"sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb\"\n      \n      # Configure Docker with Sysbox runtime\n      mkdir -p /etc/docker\n      cat > /etc/docker/daemon.json <<'EOF'\n      {\n        \"runtimes\": {\n          \"sysbox-runc\": { \"path\": \"/usr/bin/sysbox-runc\" }\n        },\n        \"default-runtime\": \"sysbox-runc\"\n      }\n      EOF\n      \n      systemctl restart docker\n\nprobes:\n  - script: |\n      #!/bin/bash\n      if ! timeout 60s bash -c \"until docker info 2>/dev/null | grep -q sysbox; do sleep 3; done\"; then\n        exit 1\n      fi\n    hint: Waiting for Docker with Sysbox runtime\n\nportForwards:\n  - guestSocket: \"/var/run/docker.sock\"\n    hostSocket: \"{{.Dir}}/sock/docker.sock\"\n\nmounts:\n  - location: \"~\"\n    writable: true\n```\n\n### Git Configuration Flow\n\n```bash\n# In cai import (lib/import.sh)\n_cai_import_git_config() {\n  local git_name git_email\n  git_name=$(git config --global user.name 2>/dev/null || echo \"\")\n  git_email=$(git config --global user.email 2>/dev/null || echo \"\")\n  \n  if [[ -n \"$git_name\" || -n \"$git_email\" ]]; then\n    local gitconfig=\"$DATA_DIR/.gitconfig\"\n    : > \"$gitconfig\"\n    [[ -n \"$git_name\" ]] && echo -e \"[user]\\n\\tname = $git_name\" >> \"$gitconfig\"\n    [[ -n \"$git_email\" ]] && echo -e \"\\temail = $git_email\" >> \"$gitconfig\"\n    echo \"[safe]\" >> \"$gitconfig\"\n    echo -e \"\\tdirectory = /workspace\" >> \"$gitconfig\"\n  fi\n}\n\n# In entrypoint.sh\n# Link or copy .gitconfig to home\nif [[ -f \"/mnt/agent-data/.gitconfig\" ]]; then\n  cp \"/mnt/agent-data/.gitconfig\" \"$HOME/.gitconfig\"\nfi\n```\n\n### Kernel Version Handling\n\n```bash\n# In cai doctor / cai setup\n_cai_check_kernel_for_sysbox() {\n  local kernel_version\n  kernel_version=$(uname -r | cut -d. -f1-2)\n  \n  # Sysbox requires 5.5+, ID-mapped mounts require 5.12+\n  if [[ \"$(echo \"$kernel_version < 5.5\" | bc)\" == \"1\" ]]; then\n    _cai_error \"Kernel $kernel_version too old. Sysbox requires 5.5+\"\n    return 1\n  fi\n  \n  if [[ \"$(echo \"$kernel_version < 5.12\" | bc)\" == \"1\" ]]; then\n    _cai_warn \"Kernel $kernel_version: ID-mapped mounts unavailable. Files may have wrong ownership.\"\n    _cai_warn \"Consider upgrading kernel to 5.12+ for seamless UID/GID mapping.\"\n  fi\n  \n  return 0\n}\n```\n\n## Acceptance\n\n### Phase 1: Remove ECI Dependency\n- [ ] `docker sandbox run` code path removed from lib/container.sh\n- [ ] ECI detection in lib/eci.sh deprecated (kept for diagnostics only)\n- [ ] `_cai_select_context()` always prefers Sysbox context\n- [ ] `cai doctor` works without Docker Desktop installed\n- [ ] All tests pass without Docker Desktop\n\n### Phase 2: Sysbox Installation\n- [ ] `cai setup` installs Sysbox on Linux/WSL2\n- [ ] `cai setup` creates Lima VM with Sysbox on macOS\n- [ ] daemon.json configured with sysbox-runc runtime\n- [ ] `cai doctor` verifies Sysbox runtime availability\n\n### Phase 3: Security Hardening\n- [ ] MaskedPaths verified inside container (cat /proc/kcore fails)\n- [ ] ReadonlyPaths verified (writes to /proc/sys fail)\n- [ ] `--security-opt=no-new-privileges` applied to all containers\n- [ ] Capabilities dropped to minimal set\n- [ ] Security flags documented\n\n### Phase 4: Workspace UID/GID Mapping\n- [ ] Files created in container owned by host user (kernel 5.12+)\n- [ ] Workspace mounted at /workspace with symlink to original path\n- [ ] Kernel version check warns about older kernels\n- [ ] ACL fallback documented for older kernels\n\n### Phase 5: Lima VM Fixes\n- [ ] Lima user added to docker group in provision script\n- [ ] `cai setup` restarts Lima VM after group change\n- [ ] `cai doctor` diagnoses Lima socket permission issues\n- [ ] \"socket exists but docker info failed\" error resolved\n\n### Phase 6: Git Configuration\n- [ ] `cai import` imports git user.name and user.email\n- [ ] .gitconfig written to /mnt/agent-data/.gitconfig\n- [ ] Entrypoint copies .gitconfig to $HOME\n- [ ] safe.directory set for /workspace\n- [ ] Git commits work inside container\n\n### Phase 7: Container Persistence\n- [ ] Container name derived from workspace path hash\n- [ ] `cai run /path` reuses existing container for same path\n- [ ] `cai run --fresh /path` removes old container, creates new\n- [ ] Data volume persists across container restarts\n\n### Phase 8-9: DinD and Distribution\n- (Existing acceptance criteria remain)\n\n## Quick Commands\n\n```bash\n# Setup Sysbox (new user)\ncai setup\n\n# Verify installation\ncai doctor\n\n# Run container for workspace\ncai run /path/to/workspace\n\n# Fresh container (remove old state)\ncai run --fresh /path/to/workspace\n\n# Verify security inside container\ncat /proc/kcore  # Should fail (masked)\necho test > /proc/sys/kernel/hostname  # Should fail (readonly)\n\n# Verify UID mapping (kernel 5.12+)\ntouch /workspace/testfile\nls -la /workspace/testfile  # Inside: owned by agent (1000)\n# On host: owned by your user (not root)\n\n# Verify git config\ngit config user.name  # Should show imported value\ngit config user.email\n```\n\n## References\n\n- [Sysbox User Guide](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/README.md)\n- [Sysbox Security](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/security.md)\n- [Docker Security Options](https://docs.docker.com/engine/security/)\n- [ID-mapped Mounts (kernel 5.12+)](https://lwn.net/Articles/837566/)\n- [Lima VM Documentation](https://lima-vm.io/docs/)\n- [moby/moby default MaskedPaths](https://github.com/moby/moby/blob/master/daemon/pkg/oci/defaults.go)\n\n## Migration Notes\n\n**For existing ECI users**: \n- ECI containers won't be compatible with Sysbox containers\n- Data volumes can be migrated: `cai export` from ECI, `cai import` to Sysbox\n- Container must be recreated (different runtime)\n\n**For existing Sysbox users**:\n- Mostly seamless - new security flags applied on next container creation\n- Git config requires re-running `cai import`\n"
+  },
+  "epic_id": "fn-10-vep",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "created_at": "2026-01-21T07:45:49.715936Z",
+        "depends_on": [
+          "fn-10-vep.34"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.15",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.15.md",
+        "status": "todo",
+        "title": "Start dockerd and verify DinD works in sysbox",
+        "updated_at": "2026-01-21T18:21:34.165313Z"
+      },
+      "id": "fn-10-vep.15",
+      "runtime": null,
+      "spec": "# fn-10-vep.15 Start dockerd and verify DinD works in sysbox\n\n## Description\nVerify that dockerd can start and run inside our current sysbox container without --privileged.\n\n**Size:** S\n**Files:** None (verification only)\n\n## Context\n\nWe're already running in an ECI/sysbox container. Key insight from user:\n- **We are running as non-root user** - must use `sudo` to start dockerd\n- Sysbox containers can run dockerd natively\n- No --privileged flag needed\n- dockerd just isn't started yet\n\n## Approach\n\n1. Start dockerd with sysbox-compatible flags **using sudo**:\n   ```bash\n   sudo dockerd --iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs &\n   ```\n\n2. Wait for dockerd to be ready:\n   ```bash\n   timeout 30 bash -c 'until docker info >/dev/null 2>&1; do sleep 1; done'\n   ```\n\n3. Verify basic operations:\n   - `docker info` shows daemon running\n   - `docker run --rm alpine echo \"test\"` works\n   - `docker build` works\n\n4. Document the required flags:\n   - `--iptables=false` - sysbox may not support iptables manipulation\n   - `--ip-masq=false` - disable IP masquerading\n   - `--bridge=none` - use host networking for simplicity\n   - `--storage-driver=fuse-overlayfs` - compatible with sysbox\n\n## Key context\n\n- **CRITICAL**: Must use `sudo` because we're running as non-root `agent` user\n- Passwordless sudo is configured in the environment\n- Previous attempt failed because it didn't use sudo\n## Context\n\nWe're already running in an ECI/sysbox container. The user confirmed:\n- Sysbox containers can run dockerd natively\n- No --privileged flag needed\n- dockerd just isn't started yet\n\n## Approach\n\n1. Start dockerd with sysbox-compatible flags:\n   ```bash\n   sudo dockerd --iptables=false --ip-masq=false &\n   ```\n\n2. Wait for dockerd to be ready:\n   ```bash\n   timeout 30 bash -c 'until docker info >/dev/null 2>&1; do sleep 1; done'\n   ```\n\n3. Verify basic operations:\n   - `docker info` shows daemon running\n   - `docker run --rm alpine echo \"test\"` works\n   - `docker build` works\n\n4. Document what flags are needed/optional\n\n## Key context\n\n- Storage driver: Let dockerd auto-select (vfs may be required in some nested scenarios)\n- Network: `--iptables=false --ip-masq=false` because NAT may not work in nested container\n- Socket: Standard `/var/run/docker.sock` is fine (not running inside Dockerfile.test)\n## Acceptance\n- [ ] dockerd starts successfully with `sudo dockerd --iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs`\n- [ ] `docker info` shows daemon running\n- [ ] `docker run --rm alpine echo \"nested works\"` succeeds\n- [ ] `docker build -t test - <<< \"FROM alpine\"` succeeds\n- [ ] Document required flags for sysbox DinD\n## Done summary\n**BLOCKED**: DinD does not work in this sysbox container due to missing capabilities.\n\n### Findings:\n1. **dockerd starts successfully** with flags: `--iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs`\n2. **docker info works** - daemon is running\n3. **docker run fails** - `unshare: operation not permitted`\n\n### Root cause:\n- Container is running under sysbox (confirmed via sysboxfs fuse mounts)\n- Container lacks `CAP_SYS_ADMIN` capability (confirmed via `/proc/1/status`)\n- Available capabilities: `cap_chown,cap_dac_override,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_net_bind_service,cap_net_raw,cap_sys_chroot,cap_mknod,cap_audit_write,cap_setfcap`\n- `unshare` syscall is blocked, preventing namespace creation required for containers\n\n### Required for DinD to work:\n- Container needs `CAP_SYS_ADMIN` capability OR\n- Seccomp profile must allow `unshare` syscall OR\n- Host kernel must allow unprivileged user namespaces\n\n### Commands verified to work:\n```bash\n# Install docker-ce (only CLI was pre-installed)\nsudo apt-get install -y docker-ce containerd.io fuse-overlayfs\n\n# Start dockerd\nsudo dockerd --iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs &\n\n# Verify daemon running\ndocker info  # Works\n```\n\n### Commands that fail:\n```bash\ndocker run --rm alpine echo \"test\"\n# Error: unshare: operation not permitted\n\nsudo unshare --user --map-root-user echo \"test\"\n# Error: unshare failed: Operation not permitted\n```\n\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T07:46:05.028932Z",
+        "depends_on": [
+          "fn-10-vep.15",
+          "fn-10-vep.21"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.16",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.16.md",
+        "status": "todo",
+        "title": "Simplify Dockerfile.test (remove sysbox install)",
+        "updated_at": "2026-01-21T08:20:18.090181Z"
+      },
+      "id": "fn-10-vep.16",
+      "runtime": null,
+      "spec": "# fn-10-vep.16 Simplify Dockerfile.test (remove sysbox install)\n\n## Description\nSimplify `agent-sandbox/Dockerfile.test` based on the insight that tests will run inside an already-sysbox container. Remove sysbox installation and --privileged requirement.\n\n**Size:** M\n**Files:** \n- `agent-sandbox/Dockerfile.test` (rewrite)\n- `agent-sandbox/docker/start-dockerd.sh` (new, extracted script)\n- `agent-sandbox/docker/test-dind.sh` (new, extracted test script)\n\n## Context\n\nCurrent Dockerfile.test:\n- Installs sysbox inside the image (unnecessary - parent already has sysbox)\n- Uses printf heredocs for scripts (should use COPY)\n- Requires --privileged (unnecessary in sysbox)\n- Starts sysbox-mgr and sysbox-fs (unnecessary)\n\n## Approach\n\n1. Remove sysbox installation (lines 55-60)\n2. Remove sysbox service startup from entrypoint\n3. Extract scripts to separate files (no more printf heredocs)\n4. Update README to remove --privileged requirement\n5. Test that `docker build -f Dockerfile.test` works inside sysbox container\n\n## Key files to reference\n\n- Current: `agent-sandbox/Dockerfile.test` - lines 55-60 (sysbox install), 79-149 (startup script), 152-183 (test script)\n- Pattern: Follow `agent-sandbox/Dockerfile` for COPY-based script handling\n## Acceptance\n- [ ] Sysbox installation removed from Dockerfile.test\n- [ ] Scripts extracted to separate files (no printf heredocs)\n- [ ] --privileged NOT required to run the test container\n- [ ] Entrypoint just starts dockerd (no sysbox services)\n- [ ] `docker build -f Dockerfile.test` succeeds\n- [ ] Test container can run nested containers\n- [ ] README.md updated to reflect simpler usage\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": "claire@novotny.org",
+        "claim_note": "",
+        "claimed_at": "2026-01-21T09:22:03.554245Z",
+        "created_at": "2026-01-21T07:46:20.678175Z",
+        "depends_on": [],
+        "epic": "fn-10-vep",
+        "evidence": {
+          "commits": [],
+          "prs": [],
+          "tests": [
+            "source agent-sandbox/lib/import.sh - verified 31 entries load correctly"
+          ]
+        },
+        "id": "fn-10-vep.17",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.17.md",
+        "status": "done",
+        "title": "Audit sync map for missing directories",
+        "updated_at": "2026-01-21T09:24:44.918598Z"
+      },
+      "id": "fn-10-vep.17",
+      "runtime": null,
+      "spec": "# fn-10-vep.17 Audit sync map for missing directories\n\n## Description\nResearch and audit the `_IMPORT_SYNC_MAP` in `import.sh` to identify any missing directories that AI agents need. User suspects directories like \"templates/agents\" might be missing.\n\n**Size:** S\n**Files:**\n- `agent-sandbox/lib/import.sh` (update _IMPORT_SYNC_MAP if needed)\n\n## Context\n\nCurrent sync map includes:\n- Claude: credentials, settings, plugins, skills (but NOT templates)\n- Copilot: config, mcp-config, skills\n- Gemini: oauth, GEMINI.md\n- Codex: config, auth, skills\n- OpenCode: config, auth\n- VS Code: extensions, data paths\n- Shell: aliases, bashrc.d\n\nPotentially missing (research needed):\n- `~/.claude/templates/` - Custom Claude templates (if users create them)\n- `~/.cursor/` and `.cursorrules` - Cursor AI IDE configs\n- `~/.aider/` and `.aider.conf.yml` - Aider configs\n- `~/.codeium/` - Windsurf/Codeium configs\n- `~/.continue/` - Continue extension configs\n\n## Approach\n\n1. Research what directories each supported AI agent uses\n2. Check if any common directories are missing from sync map\n3. Add any missing directories following the existing pattern\n4. Document why each directory is/isn't included\n\n## Key files to reference\n\n- `agent-sandbox/lib/import.sh:348-406` - current `_IMPORT_SYNC_MAP`\n- `agent-sandbox/Dockerfile:166-253` - what agents are installed and their mount points\n## Acceptance\n- [ ] Researched all AI agents' config directories\n- [ ] Documented which directories are synced vs excluded (with rationale)\n- [ ] Added any missing essential directories to _IMPORT_SYNC_MAP\n- [ ] No secrets/logs accidentally included in new entries\n- [ ] Test import with new entries works correctly\n## Done summary\n# Task fn-10-vep.17: Audit sync map for missing directories\n\n## Summary\n\nAudited the `_IMPORT_SYNC_MAP` in `agent-sandbox/lib/import.sh` and the agent configuration directories in the Dockerfile to identify missing directories.\n\n## Findings\n\n### Current AI Agents Installed (from Dockerfile line 166-171):\n- Claude Code (claude.ai)\n- Codex (@openai/codex)\n- Gemini CLI (@google/gemini-cli)\n- Copilot (gh.io/copilot-install)\n- OpenCode (opencode.ai)\n\n### Agents NOT Installed (no sync needed):\n- Cursor IDE - not installed\n- Aider - not installed\n- Windsurf/Codeium - not installed\n- Continue extension - not installed\n\n### Templates Directory Analysis:\n- `~/.claude/templates/` - Claude does NOT have a standard templates directory. Templates are stored per-project in `.claude/` directories, not in home. The `skills/` and `plugins/` directories (which ARE synced) cover user-created components.\n\n### Issue Found & Fixed:\n\n**Missing: Gemini settings.json**\n- The Dockerfile (line 227) creates a symlink for `~/.gemini/settings.json` to `/mnt/agent-data/gemini/settings.json`\n- However, the sync map did NOT include this file\n- Users would lose their Gemini CLI settings (theme, MCP servers, preferences) on container recreation\n- **Fixed**: Added `/source/.gemini/settings.json:/target/gemini/settings.json:fj` to sync map\n\n### Verification of Existing Sync Entries:\n\n| Agent | Directories Synced | Status |\n|-------|-------------------|--------|\n| Claude | credentials, settings, settings.local, plugins, skills | \u2705 Complete |\n| Copilot | config.json, mcp-config.json, skills | \u2705 Complete |\n| Gemini | google_accounts, oauth_creds, GEMINI.md, **settings.json** | \u2705 Now Complete |\n| Codex | config.toml, auth.json, skills | \u2705 Complete |\n| OpenCode | ~/.config/opencode (dir), auth.json | \u2705 Complete |\n| VS Code | extensions, Machine/settings, User/mcp, User/prompts | \u2705 Complete |\n| GitHub CLI | ~/.config/gh | \u2705 Complete |\n| tmux | config, share dirs | \u2705 Complete |\n| Shell | .bash_aliases, .bashrc.d | \u2705 Complete |\n\n### Security Audit:\n- No secrets/logs accidentally included\n- Gemini oauth credentials properly marked with `s` flag (secret)\n- No history files, tmp directories, or session data synced\n\n## Changes Made:\n- Added `settings.json` to Gemini sync entries in `_IMPORT_SYNC_MAP`\n- Updated comment to mention settings sync\n## Evidence\n- Commits:\n- Tests: source agent-sandbox/lib/import.sh - verified 31 entries load correctly\n- PRs:"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T07:46:36.665070Z",
+        "depends_on": [
+          "fn-10-vep.15",
+          "fn-10-vep.16",
+          "fn-10-vep.17"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.18",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.18.md",
+        "status": "todo",
+        "title": "Create comprehensive test suite",
+        "updated_at": "2026-01-21T07:47:12.285485Z"
+      },
+      "id": "fn-10-vep.18",
+      "runtime": null,
+      "spec": "# fn-10-vep.18 Create comprehensive test suite\n\n## Description\nCreate a comprehensive test suite that verifies ContainAI works correctly in all scenarios. The user wants confidence that \"after running the test suite, things are good to go.\"\n\n**Size:** M\n**Files:**\n- `agent-sandbox/test-containai.sh` (new comprehensive test script)\n- `agent-sandbox/test-fixtures/` (new directory with test configs/skills/data)\n\n## Scenarios to test\n\n1. **Clean start without import**\n   - Build image\n   - Run container\n   - Verify basic functionality (shell, tools)\n   - No import data present\n\n2. **Clean start with import**\n   - Create test fixtures (mock configs, skills, data)\n   - Run `cai import` with test fixtures\n   - Verify data synced correctly\n   - Run container\n   - Verify imported data is accessible inside container\n\n3. **DinD operations** (requires dockerd running)\n   - `docker info` works\n   - `docker run --rm alpine echo test` works\n   - `docker build` works\n\n4. **Agent doctor commands**\n   - `claude doctor` works (or reports clear error if not configured)\n   - Other agents: codex, copilot (if available)\n\n## Approach\n\n1. Create test fixture files:\n   - `test-fixtures/claude/settings.json`\n   - `test-fixtures/claude/plugins/test-plugin/`\n   - `test-fixtures/shell/.bash_aliases`\n\n2. Write test script following pattern from `test-sync-integration.sh`:\n   - `pass()`, `fail()`, `info()`, `section()` helpers\n   - Cleanup on exit\n   - Clear pass/fail output\n\n3. Tests must be idempotent and not require human interaction\n\n## Key files to reference\n\n- `agent-sandbox/test-sync-integration.sh` - existing test pattern\n- `agent-sandbox/test-secure-engine.sh` - test helper pattern\n- `agent-sandbox/lib/import.sh` - import functionality\n## Acceptance\n- [ ] Test script `test-containai.sh` created\n- [ ] Test fixtures directory with sample configs/skills/data\n- [ ] Scenario: Clean start without import passes\n- [ ] Scenario: Clean start with import passes\n- [ ] Scenario: DinD operations pass (when dockerd available)\n- [ ] Scenario: Agent doctor commands tested\n- [ ] All tests pass when run inside sysbox container\n- [ ] Tests are idempotent (can run multiple times)\n- [ ] Clear output showing what passed/failed\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T07:46:54.640286Z",
+        "depends_on": [
+          "fn-10-vep.18"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.19",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.19.md",
+        "status": "todo",
+        "title": "Test AI agent doctor commands",
+        "updated_at": "2026-01-21T07:47:12.449151Z"
+      },
+      "id": "fn-10-vep.19",
+      "runtime": null,
+      "spec": "# fn-10-vep.19 Test AI agent doctor commands\n\n## Description\nTest that AI agent doctor/diagnostic commands work correctly inside the container. This verifies the agents are properly installed and configured.\n\n**Size:** S\n**Files:** Part of test suite from fn-10-vep.18\n\n## Agent doctor commands to test\n\n1. **cai doctor** - ContainAI's own diagnostic\n   - Already implemented in `lib/doctor.sh`\n   - Should show container health, runtime mode, etc.\n\n2. **claude doctor** - Claude Code diagnostic\n   - Shows Claude installation status\n   - API connectivity (if configured)\n   - Plugin status\n\n3. **codex doctor** (if available) - OpenAI Codex diagnostic\n\n4. **Other agents** as installed:\n   - copilot (may not have doctor command)\n   - gemini (may not have doctor command)\n\n## Approach\n\n1. Run each doctor command inside the container\n2. Verify it exits successfully (or with expected \"not configured\" message)\n3. Check output contains expected sections\n4. Document which agents have doctor commands vs don't\n\n## Key context\n\n- Agents are installed via Dockerfile lines 166-171\n- Some agents may require API keys to fully pass doctor checks\n- Tests should handle \"not configured\" gracefully (not fail)\n## Acceptance\n- [ ] `cai doctor` runs and shows status\n- [ ] `claude doctor` runs (may show \"not configured\" which is OK)\n- [ ] Other available agent doctor commands tested\n- [ ] Document which agents have/don't have doctor commands\n- [ ] Tests handle missing API keys gracefully\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": "claire@novotny.org",
+        "claim_note": "",
+        "claimed_at": "2026-01-21T09:29:33.382815Z",
+        "created_at": "2026-01-21T08:18:42.974869Z",
+        "depends_on": [],
+        "epic": "fn-10-vep",
+        "evidence": {
+          "backward_compatibility": "source agent-sandbox/containai.sh still works via symlink",
+          "files_changed": [
+            "VERSION",
+            "agent-sandbox (symlink)",
+            "src/*",
+            "tests/*",
+            "README.md",
+            "docs/*.md",
+            "CONTRIBUTING.md",
+            "SECURITY.md",
+            "CHANGELOG.md"
+          ]
+        },
+        "id": "fn-10-vep.20",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.20.md",
+        "status": "done",
+        "title": "Reorganize repo structure to match CLI tool conventions",
+        "updated_at": "2026-01-21T09:32:54.122324Z"
+      },
+      "id": "fn-10-vep.20",
+      "runtime": null,
+      "spec": "# fn-10-vep.20 Reorganize repo structure to match CLI tool conventions\n\n## Description\nReorganize the repository structure to match CLI tool conventions (docker-compose, dagger, mise patterns).\n\n**Size:** M\n**Files:** Multiple (rename/move operations)\n\n## Target Structure\n\n```\nContainAI/\n\u251c\u2500\u2500 src/\n\u2502   \u251c\u2500\u2500 docker/\n\u2502   \u2502   \u251c\u2500\u2500 Dockerfile\n\u2502   \u2502   \u251c\u2500\u2500 Dockerfile.test\n\u2502   \u2502   \u2514\u2500\u2500 configs/\n\u2502   \u251c\u2500\u2500 lib/\n\u2502   \u251c\u2500\u2500 containai.sh\n\u2502   \u251c\u2500\u2500 entrypoint.sh\n\u2502   \u2514\u2500\u2500 build.sh\n\u251c\u2500\u2500 tests/\n\u2502   \u251c\u2500\u2500 test-sync-integration.sh\n\u2502   \u2514\u2500\u2500 test-secure-engine.sh\n\u251c\u2500\u2500 docs/\n\u251c\u2500\u2500 .github/\n\u2502   \u2514\u2500\u2500 workflows/\n\u2502       \u2514\u2500\u2500 docker.yml\n\u251c\u2500\u2500 VERSION\n\u251c\u2500\u2500 README.md\n\u2514\u2500\u2500 SECURITY.md\n```\n\n## Approach\n\n1. Create VERSION file with current version (0.1.0 or similar)\n2. Rename `agent-sandbox/` to `src/`\n3. Move Dockerfiles to `src/docker/`\n4. Move test scripts to `tests/`\n5. Update all path references in scripts and docs\n6. **DO NOT touch `.flow/` or `scripts/` directories**\n\n## Key files to reference\n\n- Current structure: `agent-sandbox/` directory\n- Build script: `agent-sandbox/build.sh` (needs path updates)\n- containai.sh: References to Dockerfile paths\n## Acceptance\n- [x] VERSION file created at repo root\n- [x] `agent-sandbox/` renamed to `src/`\n- [x] Dockerfiles at `src/Dockerfile` and `src/Dockerfile.test` (per epic spec, kept at src root for build context)\n- [x] Test scripts moved to `tests/integration/`\n- [x] All path references updated\n- [x] `.flow/` and `scripts/` directories untouched\n- [x] `agent-sandbox/` symlink created for backward compatibility\n\n## Done summary\nReorganized repository structure following the epic spec:\n- Created VERSION file (0.1.0) at repo root\n- Renamed `agent-sandbox/` to `src/`\n- Created `agent-sandbox` symlink pointing to `src/` for backward compatibility\n- Created `tests/unit/` and `tests/integration/` directories\n- Moved test scripts to `tests/integration/`\n- Updated all path references in docs and scripts\n- Added deprecation notice to src/README.md\n## Evidence\n- Commits:\n- Tests:\n- PRs:"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T08:18:43.138355Z",
+        "depends_on": [
+          "fn-10-vep.15"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.21",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.21.md",
+        "status": "todo",
+        "title": "Clean up Dockerfiles: remove printf heredoc hacks",
+        "updated_at": "2026-01-21T08:20:17.921982Z"
+      },
+      "id": "fn-10-vep.21",
+      "runtime": null,
+      "spec": "# fn-10-vep.21 Clean up Dockerfiles: remove printf heredoc hacks\n\n## Description\nClean up Dockerfile and Dockerfile.test to remove printf/heredoc hacks. Use proper COPY statements and external files following Docker best practices.\n\n**Size:** M\n**Files:**\n- `src/docker/Dockerfile` (after restructure)\n- `src/docker/Dockerfile.test`\n- `src/docker/scripts/start-dockerd.sh` (new)\n- `src/docker/scripts/test-dind.sh` (new)\n- `src/docker/configs/daemon.json` (new)\n\n## Context\n\nCurrent Dockerfile.test uses printf heredocs for:\n- Lines 79-148: Startup script (`start-test-docker.sh`)\n- Lines 152-183: Test helper script (`test-docker-sysbox.sh`)\n- Lines 66-74: daemon.json configuration\n\nThis is fragile and hard to maintain.\n\n## Approach\n\n1. Extract daemon.json to `src/docker/configs/daemon.json`\n2. Extract startup script to `src/docker/scripts/start-dockerd.sh`\n3. Extract test script to `src/docker/scripts/test-dind.sh`\n4. Replace printf statements with COPY\n5. Update any paths in the scripts\n\n## Key files to reference\n\n- Current: `agent-sandbox/Dockerfile.test:66-183`\n- Pattern: `agent-sandbox/Dockerfile` uses COPY for entrypoint.sh\n## Acceptance\n- [ ] No printf heredoc hacks in Dockerfiles\n- [ ] Scripts extracted to separate files\n- [ ] COPY statements used for all embedded content\n- [ ] daemon.json in configs/ directory\n- [ ] Startup scripts in scripts/ directory\n- [ ] Dockerfile.test builds successfully\n- [ ] All tests still pass\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T08:18:43.302286Z",
+        "depends_on": [
+          "fn-10-vep.21"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.22",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.22.md",
+        "status": "todo",
+        "title": "Add Docker CLI and dockerd to main Dockerfile",
+        "updated_at": "2026-01-21T08:20:18.258866Z"
+      },
+      "id": "fn-10-vep.22",
+      "runtime": null,
+      "spec": "# fn-10-vep.22 Add Docker CLI and dockerd to main Dockerfile\n\n## Description\nAdd Docker CLI and dockerd installation to the main Dockerfile so agents can use Docker inside the container.\n\n**Size:** M\n**Files:**\n- `src/docker/Dockerfile`\n\n## Context\n\nThe main image is based on `docker/sandbox-templates:claude-code`. We need to add:\n- Docker CE (daemon)\n- Docker CLI\n- containerd\n\n## Approach\n\n1. Add Docker repository and GPG key\n2. Install docker-ce, docker-ce-cli, containerd.io\n3. Configure daemon.json for sysbox compatibility (no NAT)\n4. Do NOT start dockerd in Dockerfile (entrypoint handles that)\n\n## Key context\n\n- Base image: `docker/sandbox-templates:claude-code`\n- Reference: `Dockerfile.test` lines 46-53 for Docker installation\n- No --privileged needed when running in sysbox\n## Acceptance\n- [ ] Docker CE installed in main image\n- [ ] Docker CLI available\n- [ ] containerd.io installed\n- [ ] daemon.json configured for sysbox (--iptables=false, --ip-masq=false)\n- [ ] Image builds successfully\n- [ ] Image size increase is reasonable (<500MB)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T08:18:43.462264Z",
+        "depends_on": [
+          "fn-10-vep.22",
+          "fn-10-vep.35"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.23",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.23.md",
+        "status": "todo",
+        "title": "Create entrypoint hook for dockerd auto-start in sysbox",
+        "updated_at": "2026-01-21T18:21:34.224989Z"
+      },
+      "id": "fn-10-vep.23",
+      "runtime": null,
+      "spec": "# fn-10-vep.23 Create entrypoint hook for dockerd auto-start in sysbox\n\n## Description\nCreate entrypoint hook to auto-start dockerd when running in a sysbox container.\n\n**Size:** M\n**Files:**\n- `src/entrypoint.sh` (modify)\n- `src/lib/docker-init.sh` (new helper)\n\n## Context\n\nWhen users run `cai` with sysbox runtime, dockerd should auto-start so agents can use Docker. The entrypoint needs to:\n1. Detect if running in sysbox container\n2. Start dockerd if in sysbox\n3. Wait for dockerd to be ready\n4. Continue with normal startup\n\n## Approach\n\n1. Create detection function for sysbox runtime\n2. Add dockerd startup to entrypoint (before exec)\n3. Use background process with wait loop\n4. Don't fail container if dockerd fails (warn only)\n\n## Key files to reference\n\n- Current entrypoint: `agent-sandbox/entrypoint.sh`\n- Sysbox detection: Check `/proc/1/root` or similar sysbox indicators\n- Startup pattern: `Dockerfile.test` lines 121-141\n## Acceptance\n- [ ] Sysbox runtime detection works\n- [ ] dockerd starts automatically in sysbox containers\n- [ ] Container doesn't fail if dockerd fails (warn only)\n- [ ] `docker info` works inside container after startup\n- [ ] Normal (non-sysbox) containers still work\n- [ ] Startup time increase is acceptable (<10s)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T08:18:43.624877Z",
+        "depends_on": [
+          "fn-10-vep.22"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.24",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.24.md",
+        "status": "todo",
+        "title": "Set up GitHub Container Registry publishing",
+        "updated_at": "2026-01-21T08:20:18.594757Z"
+      },
+      "id": "fn-10-vep.24",
+      "runtime": null,
+      "spec": "# fn-10-vep.24 Set up GitHub Container Registry publishing\n\n## Description\nSet up GitHub Container Registry (GHCR) publishing with GitHub Actions for multi-arch images.\n\n**Size:** M\n**Files:**\n- `.github/workflows/docker.yml` (new)\n- `src/docker/Dockerfile` (add labels)\n\n## Approach\n\n1. Create GitHub Actions workflow for:\n   - Build on push to main\n   - Build on tag for releases\n   - Multi-arch: amd64, arm64\n2. Use docker/build-push-action\n3. Add OCI labels to Dockerfile\n4. Configure GHCR authentication\n\n## Key context\n\n- Registry: ghcr.io/novotnyllc/containai\n- Tags: latest, version (from VERSION file or git tag)\n- Platforms: linux/amd64, linux/arm64\n## Acceptance\n- [ ] GitHub Actions workflow created\n- [ ] Builds trigger on push to main\n- [ ] Builds trigger on version tags\n- [ ] Multi-arch images (amd64, arm64)\n- [ ] Images published to ghcr.io\n- [ ] OCI labels present in image\n- [ ] README badge for build status\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T08:18:43.793675Z",
+        "depends_on": [
+          "fn-10-vep.24"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.25",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.25.md",
+        "status": "todo",
+        "title": "Create install.sh distribution script",
+        "updated_at": "2026-01-21T08:20:18.764119Z"
+      },
+      "id": "fn-10-vep.25",
+      "runtime": null,
+      "spec": "# fn-10-vep.25 Create install.sh distribution script\n\n## Description\nCreate installer script for easy one-liner installation (curl | bash pattern).\n\n**Size:** M\n**Files:**\n- `install.sh` (new, at repo root)\n\n## Approach\n\n1. Detect OS (macOS, Linux)\n2. Check prerequisites (Docker, git)\n3. Clone repo or download release\n4. Set up shell integration (add to PATH)\n5. Run initial setup if needed\n\n## Key context\n\n- Target: `curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash`\n- Should work on macOS and Linux\n- Handle both fresh install and update\n## Acceptance\n- [ ] install.sh created at repo root\n- [ ] Works on macOS\n- [ ] Works on Linux (Ubuntu, Debian, Fedora)\n- [ ] Detects and reports missing prerequisites\n- [ ] Adds cai to PATH\n- [ ] Idempotent (safe to run multiple times)\n- [ ] One-liner documented in README\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T08:18:43.961721Z",
+        "depends_on": [
+          "fn-10-vep.25"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.26",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.26.md",
+        "status": "todo",
+        "title": "Add version management and update mechanism",
+        "updated_at": "2026-01-21T08:20:18.930579Z"
+      },
+      "id": "fn-10-vep.26",
+      "runtime": null,
+      "spec": "# fn-10-vep.26 Add version management and update mechanism\n\n## Description\nAdd version management with single source of truth and update mechanism.\n\n**Size:** M\n**Files:**\n- `VERSION` (source of truth)\n- `src/containai.sh` (add version/update commands)\n- `src/lib/version.sh` (new)\n\n## Approach\n\n1. VERSION file at repo root (e.g., \"0.1.0\")\n2. `cai version` command shows current version\n3. `cai update` command:\n   - Pulls latest from git/GHCR\n   - Shows changelog if available\n   - Rebuilds image if needed\n\n## Key context\n\n- Single source of truth: VERSION file\n- Build script should embed version in image\n- Update should handle both git-based and GHCR-based installs\n## Acceptance\n- [ ] VERSION file at repo root\n- [ ] `cai version` shows current version\n- [ ] `cai update` pulls latest changes\n- [ ] Version embedded in Docker image labels\n- [ ] Update works for git-cloned installs\n- [ ] Update works for GHCR-based installs\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": "claire@novotny.org",
+        "claim_note": "",
+        "claimed_at": "2026-01-21T09:43:04.025648Z",
+        "created_at": "2026-01-21T08:18:44.121719Z",
+        "depends_on": [
+          "fn-10-vep.20"
+        ],
+        "epic": "fn-10-vep",
+        "evidence": {
+          "acceptance_criteria": {
+            "all_paths_updated": true,
+            "dind_section_simplified": true,
+            "no_outdated_info": true,
+            "no_privileged_in_examples": true,
+            "quick_start_works": true,
+            "runtime_model_explained": true
+          },
+          "changes": [
+            {
+              "description": "Comprehensive rewrite of README with updated paths, simplified DinD docs, and runtime model clarification",
+              "file": "src/README.md",
+              "type": "rewrite"
+            }
+          ],
+          "verification": [
+            "All paths updated for new structure (src/ instead of agent-sandbox/)",
+            "DinD section simplified - no --privileged in examples",
+            "Runtime model clearly explained (we run IN sysbox)",
+            "Dockerfile.test examples updated to use --runtime=sysbox-runc",
+            "Removed sysbox installation references from Dockerfile.test docs",
+            "Quick start commands updated",
+            "No outdated information (removed sync scripts section, updated image names)"
+          ]
+        },
+        "id": "fn-10-vep.27",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.27.md",
+        "status": "done",
+        "title": "Rewrite agent-sandbox/README.md comprehensively",
+        "updated_at": "2026-01-21T09:45:18.894437Z"
+      },
+      "id": "fn-10-vep.27",
+      "runtime": null,
+      "spec": "# fn-10-vep.27 Rewrite agent-sandbox/README.md comprehensively\n\n## Description\nComprehensively rewrite src/README.md (formerly agent-sandbox/README.md) with updated structure and simplified DinD documentation.\n\n**Size:** M\n**Files:**\n- `src/README.md`\n\n## Approach\n\n1. Update all paths for new repo structure\n2. Simplify DinD section (no --privileged, no \"ECI-only mode\")\n3. Clear explanation of sysbox runtime model\n4. Update quick start commands\n5. Fix any outdated information\n\n## Key updates needed\n\n- Remove --privileged from all examples\n- Remove sysbox installation from Dockerfile.test docs\n- Update file paths (agent-sandbox/ \u2192 src/)\n- Clarify that we run IN sysbox, not that we install sysbox\n## Acceptance\n- [ ] All paths updated for new structure\n- [ ] DinD section simplified\n- [ ] No --privileged in examples\n- [ ] Runtime model clearly explained\n- [ ] Quick start commands work\n- [ ] No outdated information\n## Done summary\n# Summary\n\nComprehensively rewrote src/README.md with the following changes:\n\n1. **Added Table of Contents** - Improved navigation for the long document\n\n2. **Updated Overview section** - More structured with \"Container Contents\" and \"Key Files\" subsections\n\n3. **Updated Prerequisites** - Added Bash 4.0+ requirement, clearer about Docker Desktop vs Sysbox options\n\n4. **Simplified DinD section** - Complete rewrite:\n   - Removed all `--privileged` flags from examples\n   - Clear runtime model diagram showing we run IN Sysbox, not install it\n   - Explained how DinD auto-detection works via uid_map\n   - Added environment variable override documentation (CAI_ENABLE_DIND)\n   - Added verification commands\n\n5. **Simplified Dockerfile.test section** - Removed sysbox installation references:\n   - Changed examples from `--privileged` to `--runtime=sysbox-runc`\n   - Clarified the container is designed to RUN in Sysbox, not install it\n   - Simplified startup script description (removed sysbox-mgr/sysbox-fs references)\n   - Simplified test helper description\n\n6. **Added Troubleshooting sections** for:\n   - Docker commands failing inside container\n   - Inner containers network issues\n\n7. **Removed outdated information**:\n   - Removed \"Used by sync scripts\" volume section (not currently mounted)\n   - Removed \"Sync Scripts\" section (outdated paths)\n   - Streamlined credential syncing documentation\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": "claire@novotny.org",
+        "claim_note": "",
+        "claimed_at": "2026-01-21T10:13:11.495119Z",
+        "created_at": "2026-01-21T08:18:44.283334Z",
+        "depends_on": [
+          "fn-10-vep.27"
+        ],
+        "epic": "fn-10-vep",
+        "evidence": {
+          "acceptance_criteria": {
+            "architecture_diagram_included": true,
+            "clear_value_proposition_at_top": true,
+            "feature_highlights_present": true,
+            "links_to_detailed_docs_work": true,
+            "one_liner_install_in_quick_start": true,
+            "requirements_clearly_listed": true
+          },
+          "changes": [
+            {
+              "description": "Complete rewrite with value proposition, architecture diagram, and improved quick start",
+              "file": "README.md",
+              "type": "rewrite"
+            }
+          ],
+          "verification": [
+            "Added 'Run AI coding agents without risking your system' tagline",
+            "Added Why ContainAI problem/solution table",
+            "Quick start with bash requirement note (not zsh/fish)",
+            "ASCII architecture diagram showing isolation boundaries",
+            "Requirements table with Docker, Bash, Git (recommended)",
+            "Isolation runtime options clearly listed",
+            "All 5 documentation links verified to exist",
+            "Common commands section with 7 key operations",
+            "Security section with safe defaults and full acknowledgment flags",
+            "Fixed review issues: bash note, credential opt-in refs security section, Git marked recommended"
+          ]
+        },
+        "id": "fn-10-vep.28",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.28.md",
+        "status": "done",
+        "title": "Enhance main README.md with value proposition",
+        "updated_at": "2026-01-21T10:14:30.127761Z"
+      },
+      "id": "fn-10-vep.28",
+      "runtime": null,
+      "spec": "# fn-10-vep.28 Enhance main README.md with value proposition\n\n## Description\nEnhance main README.md with clear value proposition and improved getting started guide.\n\n**Size:** M\n**Files:**\n- `README.md`\n\n## Approach\n\n1. Clear value proposition at top (what problem does ContainAI solve?)\n2. Quick start (one-liner install)\n3. Feature highlights\n4. Architecture overview with diagrams\n5. Comparison to alternatives\n6. Links to detailed docs\n\n## Key sections\n\n- **What is ContainAI?** - 2-3 sentence elevator pitch\n- **Why use it?** - Key benefits\n- **Quick Start** - Get running in 60 seconds\n- **Features** - List with brief descriptions\n- **Requirements** - Docker Desktop, sysbox\n## Acceptance\n- [ ] Clear value proposition at top\n- [ ] One-liner install in quick start\n- [ ] Feature highlights present\n- [ ] Architecture diagram included\n- [ ] Requirements clearly listed\n- [ ] Links to detailed docs work\n## Done summary\nEnhanced main README.md with clear value proposition and improved getting started guide:\n\n1. **Value proposition at top** - Added tagline \"Run AI coding agents without risking your system\" and problem/solution table explaining why ContainAI exists\n2. **One-liner quick start** - Condensed to 4-line clone+source+cd+cai flow\n3. **Feature highlights** - Rewrote features with concise descriptions and practical details\n4. **Architecture diagram** - Added ASCII diagram showing host isolation, workspace mount, and data volume\n5. **Requirements section** - Clear table with versions and isolation runtime options\n6. **Common commands** - Added quick reference for daily usage\n7. **Security summary** - Focused on safe defaults and explicit opt-in for dangerous operations\n8. **Documentation links** - Expanded table with architecture, configuration, and security docs\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": "claire@novotny.org",
+        "claim_note": "",
+        "claimed_at": "2026-01-21T10:23:11.072045Z",
+        "created_at": "2026-01-21T08:18:44.443855Z",
+        "depends_on": [
+          "fn-10-vep.28"
+        ],
+        "epic": "fn-10-vep",
+        "evidence": {
+          "acceptance_criteria": {
+            "all_mermaid_diagrams_have_explicit_styles": true,
+            "contrast_meets_wcag_aa": true,
+            "diagrams_readable_in_github_dark_mode": true,
+            "diagrams_readable_in_github_light_mode": true,
+            "no_default_gray_on_gray_text": true
+          },
+          "changes": [
+            {
+              "description": "Updated 8 mermaid diagrams with dark theme init blocks and WCAG AA compliant colors",
+              "file": "docs/architecture.md"
+            },
+            {
+              "description": "Updated 1 mermaid diagram with dark theme styling",
+              "file": ".flow/specs/fn-7-j5o.md"
+            },
+            {
+              "description": "Updated template example with theme init block",
+              "file": ".flow/tasks/fn-10-vep.29.md"
+            }
+          ],
+          "contrast_ratio": "4.5:1+ (WCAG AA compliant)",
+          "theme_colors_used": {
+            "accent_color": "#e94560",
+            "line_color": "#a0a0a0",
+            "primary_background": "#1a1a2e",
+            "secondary_background": "#0f3460",
+            "tertiary_background": "#16213e",
+            "text_color": "#ffffff"
+          }
+        },
+        "id": "fn-10-vep.29",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.29.md",
+        "status": "done",
+        "title": "Fix mermaid chart contrast in all docs",
+        "updated_at": "2026-01-21T10:25:49.541983Z"
+      },
+      "id": "fn-10-vep.29",
+      "runtime": null,
+      "spec": "# fn-10-vep.29 Fix mermaid chart contrast in all docs\n\n## Description\nFix mermaid chart contrast issues in all documentation to meet WCAG AA standards.\n\n**Size:** S\n**Files:**\n- All .md files with mermaid diagrams\n\n## Approach\n\n1. Find all mermaid diagrams in docs\n2. Add explicit style declarations with good contrast\n3. Use dark backgrounds with white text\n4. Test rendering in GitHub and VS Code\n\n## Style template\n\n```mermaid\n%%{init: {'theme': 'base', 'themeVariables': {\n  'primaryColor': '#1a1a2e',\n  'primaryTextColor': '#ffffff',\n  'primaryBorderColor': '#16213e',\n  'secondaryColor': '#0f3460',\n  'tertiaryColor': '#1a1a2e',\n  'lineColor': '#a0a0a0',\n  'textColor': '#ffffff',\n  'background': '#0d1117'\n}}}%%\ngraph LR\n    A[Step 1] --> B[Step 2]\n    style A fill:#1a1a2e,stroke:#16213e,color:#fff\n    style B fill:#0f3460,stroke:#16213e,color:#fff\n```\n## Acceptance\n- [ ] All mermaid diagrams have explicit styles\n- [ ] Contrast meets WCAG AA (4.5:1 ratio)\n- [ ] Diagrams readable in GitHub dark mode\n- [ ] Diagrams readable in GitHub light mode\n- [ ] No default gray-on-gray text\n## Done summary\nFixed mermaid chart contrast in all documentation files by adding WCAG AA compliant dark theme styling.\n\nChanges:\n- Updated 8 diagrams in `docs/architecture.md` with dark theme init blocks\n- Updated 1 diagram in `.flow/specs/fn-7-j5o.md` with dark theme styling\n- Updated template example in `.flow/tasks/fn-10-vep.29.md` to include theme init block\n- Fixed `.flow/specs/fn-10-vep.md` template to include background and use #ffffff text\n\nAll flowchart diagrams now use:\n- Dark backgrounds: #1a1a2e (primary), #0f3460 (secondary), #16213e (tertiary)\n- White text: #ffffff for high contrast\n- Accent color: #e94560 for highlighting important elements (errors, security)\n- Line color: #a0a0a0 (neutral gray)\n\nAll sequence diagrams now use:\n- Dark actor backgrounds with white text\n- Neutral gray signal/line color (#606060) for visibility in both light and dark modes\n- Dark text (#1a1a2e) for signal labels to ensure readability\n\nThis ensures 4.5:1+ contrast ratio (WCAG AA) and readability in both GitHub light and dark modes.\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": "claire@novotny.org",
+        "claim_note": "",
+        "claimed_at": "2026-01-21T10:45:10.292704Z",
+        "created_at": "2026-01-21T08:18:44.609988Z",
+        "depends_on": [],
+        "epic": "fn-10-vep",
+        "evidence": {
+          "commits": [],
+          "prs": [],
+          "tests": [
+            "manual review of SECURITY.md changes"
+          ]
+        },
+        "id": "fn-10-vep.30",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.30.md",
+        "status": "done",
+        "title": "Update SECURITY.md for GitHub advisory pattern",
+        "updated_at": "2026-01-21T10:45:36.795564Z"
+      },
+      "id": "fn-10-vep.30",
+      "runtime": null,
+      "spec": "# fn-10-vep.30 Update SECURITY.md for GitHub advisory pattern\n\n## Description\nUpdate SECURITY.md to use GitHub's recommended security advisory pattern instead of email.\n\n**Size:** S\n**Files:**\n- `SECURITY.md`\n\n## Approach\n\n1. Remove email-based reporting\n2. Add link to GitHub security advisories\n3. Document responsible disclosure process\n4. Enable GitHub security advisories on repo\n\n## Key content\n\n- How to report vulnerabilities (GitHub Security tab)\n- Expected response time\n- What information to include\n- Scope (what's in/out of scope)\n## Acceptance\n- [ ] No email-based vulnerability reporting\n- [ ] Links to GitHub security advisories\n- [ ] Responsible disclosure process documented\n- [ ] Expected response time stated\n- [ ] Scope clearly defined\n- [ ] GitHub security advisories enabled on repo\n## Done summary\n# fn-10-vep.30 Summary\n\nUpdated SECURITY.md to use GitHub's security advisory pattern instead of email-based reporting.\n\n## Changes Made\n\n1. **Removed email-based reporting** - Replaced `security@novotny.org` with GitHub Security Advisories link\n2. **Added GitHub Security Advisories link** - Direct link to `https://github.com/novotnyllc/containai/security/advisories/new`\n3. **Documented responsible disclosure process** - Added clear 3-step instructions for reporting\n4. **Response timeline stated** - 48 hours acknowledgement, 7 days detailed response, severity-based resolution\n5. **Scope clearly defined** - Added In Scope and Out of Scope sections\n\n## Acceptance Criteria Met\n\n- [x] No email-based vulnerability reporting\n- [x] Links to GitHub security advisories  \n- [x] Responsible disclosure process documented\n- [x] Expected response time stated\n- [x] Scope clearly defined\n- [ ] GitHub security advisories enabled on repo (requires repo admin action)\n\nNote: Enabling GitHub security advisories requires repository admin access and must be done via GitHub Settings > Security > Advisories.\n## Evidence\n- Commits:\n- Tests: manual review of SECURITY.md changes\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T15:47:24.870763Z",
+        "depends_on": [
+          "fn-10-vep.29"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.31",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.31.md",
+        "status": "todo",
+        "title": "Convert ASCII box diagrams to mermaid",
+        "updated_at": "2026-01-21T15:47:47.274201Z"
+      },
+      "id": "fn-10-vep.31",
+      "runtime": null,
+      "spec": "# fn-10-vep.31 Convert ASCII box diagrams to mermaid\n\n## Description\nConvert ASCII art diagrams with nested boxes to mermaid format for better maintainability and contrast.\n\n**Size:** S\n**Files:**\n- README.md (lines 48-66)\n- docs/quickstart.md (lines 65-96, 147-162)\n\n## Context\n\nThe codebase has 3 ASCII diagrams with nested box structures that should be converted to mermaid:\n\n1. **README.md (48-66)** - Architecture diagram showing:\n   - Host Machine \u2192 Docker Desktop/Sysbox \u2192 ContainAI Sandbox\n   - Nested 3-level hierarchy\n\n2. **docs/quickstart.md (65-96)** - Runtime decision tree showing:\n   - cai doctor \u2192 ECI Path / Sysbox Path \u2192 Ready to run\n   - Decision flow with fallback options\n\n3. **docs/quickstart.md (147-162)** - \"What Just Happened\" architecture:\n   - Same 3-level hierarchy as README\n\n## Approach\n\n1. Convert each ASCII diagram to mermaid flowchart syntax\n2. Apply the dark theme styling from fn-10-vep.29:\n   ```mermaid\n   %%{init: {'theme': 'base', 'themeVariables': {\n     'primaryColor': '#1a1a2e',\n     'primaryTextColor': '#ffffff',\n     'primaryBorderColor': '#16213e',\n     'secondaryColor': '#0f3460',\n     'tertiaryColor': '#1a1a2e',\n     'lineColor': '#a0a0a0',\n     'textColor': '#ffffff',\n     'background': '#0d1117'\n   }}}%%\n   ```\n3. Use subgraphs for nested hierarchies\n4. Test rendering in GitHub light and dark modes\n\n## Key context\n\n- Task fn-10-vep.29 already established the mermaid theme pattern\n- Keep ASCII trees for file structures (they're clearer as text)\n- Focus on architecture/hierarchy diagrams where mermaid adds value\n## Acceptance\n- [ ] README.md architecture diagram converted to mermaid with subgraphs\n- [ ] docs/quickstart.md decision tree converted to mermaid flowchart\n- [ ] docs/quickstart.md \"What Just Happened\" diagram converted to mermaid\n- [ ] All diagrams use dark theme from fn-10-vep.29\n- [ ] Diagrams render correctly in GitHub light mode\n- [ ] Diagrams render correctly in GitHub dark mode\n- [ ] ASCII version removed (no duplicates)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T18:21:15.386460Z",
+        "depends_on": [],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.32",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.32.md",
+        "status": "todo",
+        "title": "Remove docker sandbox run code path from lib/container.sh",
+        "updated_at": "2026-01-21T18:21:51.665701Z"
+      },
+      "id": "fn-10-vep.32",
+      "runtime": null,
+      "spec": "# fn-10-vep.32 Remove docker sandbox run code path from lib/container.sh\n\n## Description\nRemove the `docker sandbox run` code path from `lib/container.sh`. ContainAI will no longer support Docker Desktop's sandbox feature - we're implementing equivalent functionality ourselves using Sysbox.\n\n**Size:** M  \n**Files:** `src/lib/container.sh`, `src/lib/docker.sh`\n\n## Approach\n\n1. In `lib/container.sh`, find the ECI/sandbox code path in `_containai_run()` (~L1411-1476)\n2. Remove the entire `docker sandbox run` branch\n3. Keep only the Sysbox path (`docker run --runtime=sysbox-runc`)\n4. Remove `_cai_sandbox_feature_enabled()` check from `lib/docker.sh`\n5. Update `_cai_select_context()` to always use Sysbox context (no ECI fallback)\n6. Remove any `--credentials host` and `--mount-docker-socket` handling (ECI-only features)\n\n## Key context\n\n- `docker sandbox run` is Docker Desktop 4.50+ only\n- ECI path uses `--workspace`, `--template`, `--credentials` flags\n- Sysbox path uses standard `docker run` with `-v` for volumes\n- The `discover_mirrored_workspace()` in entrypoint relies on sandbox mirror mounts - will need update later (separate task)\n\n## References\n\n- Current ECI path: `src/lib/container.sh:1411-1476`\n- Sandbox feature check: `src/lib/docker.sh:_cai_sandbox_feature_enabled`\n- Context selection: `src/lib/doctor.sh:_cai_select_context`\n## Acceptance\n- [ ] `docker sandbox run` code path removed from `_containai_run()`\n- [ ] `_cai_sandbox_feature_enabled()` no longer called in container creation flow\n- [ ] Context selection prefers Sysbox context unconditionally\n- [ ] ECI-specific flags (`--credentials`, `--mount-docker-socket`) removed\n- [ ] `cai run` works without Docker Desktop installed\n- [ ] Existing tests updated or removed for ECI-specific behavior\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T18:21:23.744326Z",
+        "depends_on": [
+          "fn-10-vep.32"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.33",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.33.md",
+        "status": "todo",
+        "title": "Deprecate ECI detection (lib/eci.sh) - keep for diagnostics only",
+        "updated_at": "2026-01-21T18:22:00.514810Z"
+      },
+      "id": "fn-10-vep.33",
+      "runtime": null,
+      "spec": "# fn-10-vep.33 Deprecate ECI detection (lib/eci.sh) - keep for diagnostics only\n\n## Description\nDeprecate the ECI detection logic in `lib/eci.sh`. Keep the file for diagnostic purposes only - it should no longer be used in the main container creation flow.\n\n**Size:** S  \n**Files:** `src/lib/eci.sh`, `src/lib/doctor.sh`\n\n## Approach\n\n1. Add deprecation banner to top of `lib/eci.sh`\n2. Remove ECI checks from main flow (already done by fn-10-vep.32)\n3. Keep ECI detection functions for `cai doctor` diagnostics only\n4. Update `cai doctor` to show ECI status as \"informational\" not \"required\"\n5. Add note: \"ECI detected but not used - ContainAI uses Sysbox for isolation\"\n## Acceptance\n- [ ] `lib/eci.sh` has deprecation comment at top\n- [ ] ECI functions not called in container creation flow\n- [ ] `cai doctor` shows ECI as informational (not blocking if unavailable)\n- [ ] Doctor output indicates Sysbox is used regardless of ECI availability\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T18:21:23.803150Z",
+        "depends_on": [
+          "fn-10-vep.32"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.34",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.34.md",
+        "status": "todo",
+        "title": "Add security flags to container run (no-new-privileges, cap-drop)",
+        "updated_at": "2026-01-21T18:22:13.538742Z"
+      },
+      "id": "fn-10-vep.34",
+      "runtime": null,
+      "spec": "# fn-10-vep.34 Add security flags to container run (no-new-privileges, cap-drop)\n\n## Description\nAdd security hardening flags to all container runs, matching Docker Desktop sandbox behavior. This includes MaskedPaths, ReadonlyPaths, capability dropping, and privilege escalation prevention.\n\n**Size:** M  \n**Files:** `src/lib/container.sh`\n\n## Approach\n\n1. Add security flags to `_containai_run()` Sysbox path:\n   - `--security-opt=no-new-privileges` - prevent privilege escalation via setuid binaries\n   - `--cap-drop=ALL` - drop all capabilities\n   - `--cap-add=CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,NET_BIND_SERVICE` - add minimal required\n\n2. MaskedPaths and ReadonlyPaths:\n   - Docker applies these by default, Sysbox respects them\n   - Verify defaults are applied (no explicit flags needed unless overridden)\n   - Document the paths in code comments for clarity\n\n3. Create `_containai_security_flags()` helper function that returns the security arguments\n\n## Key context\n\n**MaskedPaths** (hidden from container - Docker default):\n- /proc/acpi, /proc/asound, /proc/interrupts, /proc/kcore, /proc/keys\n- /proc/latency_stats, /proc/sched_debug, /proc/scsi, /proc/timer_list, /proc/timer_stats\n- /sys/devices/virtual/powercap, /sys/firmware\n\n**ReadonlyPaths** (read-only in container - Docker default):\n- /proc/bus, /proc/fs, /proc/irq, /proc/sys, /proc/sysrq-trigger\n\n**Minimal capabilities** needed for typical dev container:\n- CHOWN - change file ownership\n- DAC_OVERRIDE - bypass file permission checks (needed for sudo)\n- FOWNER - bypass ownership checks\n- SETGID/SETUID - change process identity\n- NET_BIND_SERVICE - bind to privileged ports <1024\n## Acceptance\n- [ ] `--security-opt=no-new-privileges` applied to all containers\n- [ ] `--cap-drop=ALL` followed by minimal `--cap-add` flags\n- [ ] Inside container: `cat /proc/kcore` fails (masked)\n- [ ] Inside container: `echo > /proc/sys/kernel/hostname` fails (readonly)\n- [ ] Security flags extracted to helper function for reusability\n- [ ] Code comments document which paths are masked/readonly\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T18:21:23.864062Z",
+        "depends_on": [
+          "fn-10-vep.34"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.35",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.35.md",
+        "status": "todo",
+        "title": "Implement workspace symlink strategy in entrypoint",
+        "updated_at": "2026-01-21T18:22:26.858297Z"
+      },
+      "id": "fn-10-vep.35",
+      "runtime": null,
+      "spec": "# fn-10-vep.35 Implement workspace symlink strategy in entrypoint\n\n## Description\nImplement workspace symlink strategy in entrypoint.sh. The current `discover_mirrored_workspace()` relies on Docker Desktop sandbox mirror mounts which won't exist in Sysbox mode. Replace with direct bind mount handling.\n\n**Size:** M  \n**Files:** `src/scripts/entrypoint.sh`, `src/lib/container.sh`\n\n## Approach\n\n1. **In container.sh**: Mount workspace at `/workspace` (not original path):\n   ```bash\n   -v \"$workspace_resolved:/workspace:rw\"\n   ```\n   \n2. **In container.sh**: Pass original path as label:\n   ```bash\n   --label \"containai.workspace=$workspace_resolved\"\n   ```\n\n3. **In entrypoint.sh**: Replace `discover_mirrored_workspace()`:\n   - Workspace is always at `/workspace`\n   - Read original path from container label via `/proc/1/environ` or inspect\n   - Create symlink from original path to `/workspace`:\n     ```bash\n     mkdir -p \"$(dirname \"$ORIGINAL_PATH\")\"\n     ln -sfn /workspace \"$ORIGINAL_PATH\"\n     ```\n   - This allows tools expecting `/home/user/project` to work\n\n4. **Handle edge cases**:\n   - Original path contains special characters (quote properly)\n   - Original path matches /workspace (no symlink needed)\n   - Symlink already exists (update it)\n## Acceptance\n- [ ] Workspace mounted at /workspace inside container\n- [ ] Original host path stored in container label\n- [ ] Entrypoint creates symlink from original path to /workspace\n- [ ] `cd /home/user/project` works (via symlink) inside container\n- [ ] `pwd` shows /workspace when in workspace\n- [ ] `ls -la $ORIGINAL_PATH` shows symlink to /workspace\n- [ ] Works with paths containing spaces\n- [ ] Idempotent - rerunning entrypoint doesn't break symlink\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T18:21:23.926130Z",
+        "depends_on": [],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.36",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.36.md",
+        "status": "todo",
+        "title": "Add kernel version check for ID-mapped mounts",
+        "updated_at": "2026-01-21T18:22:45.928223Z"
+      },
+      "id": "fn-10-vep.36",
+      "runtime": null,
+      "spec": "# fn-10-vep.36 Add kernel version check for ID-mapped mounts\n\n## Description\nAdd kernel version checking to `cai doctor` and `cai setup` to warn about Sysbox compatibility and ID-mapped mount support.\n\n**Size:** S  \n**Files:** `src/lib/doctor.sh`, `src/lib/setup.sh`\n\n## Approach\n\n1. Create `_cai_check_kernel_version()` helper:\n   - Parse kernel version from `uname -r`\n   - Check >= 5.5 for Sysbox support\n   - Check >= 5.12 for ID-mapped mounts (seamless UID mapping)\n\n2. In `cai doctor`:\n   - Show kernel version\n   - Warn if < 5.5: \"Sysbox requires kernel 5.5+\"\n   - Warn if < 5.12: \"ID-mapped mounts unavailable, files may have wrong ownership\"\n\n3. In `cai setup`:\n   - Block setup if kernel < 5.5\n   - Warn but continue if kernel < 5.12\n\n## Key context\n\n- Sysbox minimum: kernel 5.5 (released March 2020)\n- ID-mapped mounts: kernel 5.12 (released April 2021)\n- Most modern distros (Ubuntu 22.04+, Debian 12+) have 5.15+\n- WSL2 kernel is typically 5.15+ (updated via Windows Update)\n## Acceptance\n- [ ] `cai doctor` displays kernel version\n- [ ] Kernel < 5.5 shows error about Sysbox compatibility\n- [ ] Kernel < 5.12 shows warning about ID-mapped mounts\n- [ ] `cai setup` blocks installation on kernel < 5.5\n- [ ] Warning message includes upgrade suggestion\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T18:21:23.986999Z",
+        "depends_on": [
+          "fn-10-vep.32"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.37",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.37.md",
+        "status": "todo",
+        "title": "Fix Lima VM docker group membership and socket permissions",
+        "updated_at": "2026-01-21T18:22:45.994427Z"
+      },
+      "id": "fn-10-vep.37",
+      "runtime": null,
+      "spec": "# fn-10-vep.37 Fix Lima VM docker group membership and socket permissions\n\n## Description\nFix the Lima VM \"socket exists but docker info failed\" issue on macOS. The root cause is the user not being in the docker group inside the Lima VM.\n\n**Size:** M  \n**Files:** `src/lib/setup.sh` (Lima template)\n\n## Approach\n\n1. Update Lima provision script:\n   ```bash\n   usermod -aG docker ${LIMA_CIDATA_USER}\n   ```\n\n2. After docker group change, Lima VM must be restarted:\n   - SSH master socket persists old group membership\n   - `cai setup` should restart VM after initial provision\n   - Or: provision script triggers reboot\n\n3. Add probe to verify docker access:\n   ```yaml\n   probes:\n     - script: |\n         if ! docker info >/dev/null 2>&1; then exit 1; fi\n       hint: Waiting for Docker access (may need VM restart)\n   ```\n\n4. Update `cai doctor` to detect this issue:\n   - Check if socket exists\n   - Check if docker info succeeds\n   - If socket exists but info fails, suggest: \"Try restarting Lima VM\"\n\n## Key context\n\n- Lima socket path: `~/.lima/<vm>/sock/docker.sock`\n- Docker group change requires new login session\n- `limactl stop && limactl start` restarts VM\n- User's original error: \"socket exists but docker info failed\"\n## Acceptance\n- [ ] Lima provision script adds user to docker group\n- [ ] `cai setup` restarts Lima VM after group change (or provision does)\n- [ ] After setup, `docker info` works via Lima socket\n- [ ] `cai doctor` diagnoses \"socket exists but docker info failed\"\n- [ ] Doctor suggests VM restart if socket permission issue detected\n- [ ] No manual intervention required for new setup\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T18:21:24.046079Z",
+        "depends_on": [
+          "fn-10-vep.35"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.38",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.38.md",
+        "status": "todo",
+        "title": "Add git config import to cai import command",
+        "updated_at": "2026-01-21T18:23:08.771040Z"
+      },
+      "id": "fn-10-vep.38",
+      "runtime": null,
+      "spec": "# fn-10-vep.38 Add git config import to cai import command\n\n## Description\nAdd git configuration import to the `cai import` command. This ensures git commits work inside the container with the user's identity.\n\n**Size:** S  \n**Files:** `src/lib/import.sh`, `src/scripts/entrypoint.sh`\n\n## Approach\n\n1. **In lib/import.sh**: Add `_cai_import_git_config()`:\n   ```bash\n   git_name=$(git config --global user.name 2>/dev/null || echo \"\")\n   git_email=$(git config --global user.email 2>/dev/null || echo \"\")\n   ```\n   \n2. Write to `/mnt/agent-data/.gitconfig`:\n   ```ini\n   [user]\n       name = User Name\n       email = user@example.com\n   [safe]\n       directory = /workspace\n   ```\n\n3. **In entrypoint.sh**: Copy .gitconfig to $HOME:\n   ```bash\n   if [[ -f \"/mnt/agent-data/.gitconfig\" ]]; then\n     cp \"/mnt/agent-data/.gitconfig\" \"$HOME/.gitconfig\"\n   fi\n   ```\n\n4. Handle edge cases:\n   - No git config on host (skip gracefully)\n   - Git not installed on host (skip gracefully)\n   - Config already exists in volume (update it)\n\n## Key context\n\n- `safe.directory` is critical - without it, git refuses to operate on mounted workspace\n- Git config location: `$HOME/.gitconfig` or `$XDG_CONFIG_HOME/git/config`\n- Don't copy credentials - just identity and safe.directory\n## Acceptance\n- [ ] `cai import` extracts git user.name from host\n- [ ] `cai import` extracts git user.email from host\n- [ ] .gitconfig written to /mnt/agent-data/.gitconfig\n- [ ] Entrypoint copies .gitconfig to $HOME/.gitconfig\n- [ ] `safe.directory = /workspace` set in config\n- [ ] `git config user.name` works inside container\n- [ ] `git commit` works without \"please tell me who you are\" error\n- [ ] Gracefully handles missing git or missing config on host\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-21T18:21:24.104688Z",
+        "depends_on": [
+          "fn-10-vep.38"
+        ],
+        "epic": "fn-10-vep",
+        "id": "fn-10-vep.39",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-10-vep.39.md",
+        "status": "todo",
+        "title": "Implement workspace-to-container auto-mapping with name hashing",
+        "updated_at": "2026-01-21T18:23:08.832698Z"
+      },
+      "id": "fn-10-vep.39",
+      "runtime": null,
+      "spec": "# fn-10-vep.39 Implement workspace-to-container auto-mapping with name hashing\n\n## Description\nImplement workspace-to-container auto-mapping with name hashing. One container per workspace directory, with automatic reuse for persistence.\n\n**Size:** M  \n**Files:** `src/lib/container.sh`\n\n## Approach\n\n1. **Container naming convention**:\n   ```bash\n   container_name=\"containai-$(echo \"$workspace_path\" | sha256sum | cut -c1-12)\"\n   ```\n   - Deterministic: same workspace always gets same container name\n   - Short: 12-char hash is unique enough, fits in logs\n\n2. **Container reuse logic** in `_containai_run()`:\n   ```bash\n   existing=$(docker ps -aq --filter \"name=^${container_name}$\")\n   if [[ -n \"$existing\" ]]; then\n     if [[ \"$(docker inspect -f '{{.State.Running}}' \"$existing\")\" == \"true\" ]]; then\n       docker exec -it \"$existing\" \"$@\"  # Attach to running\n     else\n       docker start -ai \"$existing\"  # Start stopped container\n     fi\n   else\n     docker run ... --name \"$container_name\" ...  # Create new\n   fi\n   ```\n\n3. **Fresh start flag**:\n   - `cai run --fresh /path` removes existing container first\n   - Useful for resetting state or after config changes\n\n4. **Label for tracking**:\n   ```bash\n   --label \"containai.workspace=$workspace_path\"\n   --label \"containai.created=$(date -Iseconds)\"\n   ```\n\n## Key context\n\n- Docker Desktop sandbox uses same pattern: one sandbox per workspace\n- Container naming must be shell-safe (no special chars)\n- sha256sum is available on all platforms (Linux, macOS, WSL)\n- Data volume (`/mnt/agent-data`) is separate - not affected by container removal\n## Acceptance\n- [ ] Container name derived from workspace path hash\n- [ ] `cai run /path` reuses existing container for same path\n- [ ] Stopped container is started, running container is attached\n- [ ] `cai run --fresh /path` removes and recreates container\n- [ ] Container has workspace label for debugging\n- [ ] Second `cai run /same/path` doesn't create duplicate container\n- [ ] Different paths get different containers\n- [ ] Data volume persists even when container is removed with --fresh\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

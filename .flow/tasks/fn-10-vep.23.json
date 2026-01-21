@@ -4,7 +4,8 @@
   "claimed_at": null,
   "created_at": "2026-01-21T08:18:43.462264Z",
   "depends_on": [
-    "fn-10-vep.22"
+    "fn-10-vep.22",
+    "fn-10-vep.35"
   ],
   "epic": "fn-10-vep",
   "id": "fn-10-vep.23",
@@ -12,5 +13,5 @@
   "spec_path": ".flow/tasks/fn-10-vep.23.md",
   "status": "todo",
   "title": "Create entrypoint hook for dockerd auto-start in sysbox",
-  "updated_at": "2026-01-21T08:20:18.431668Z"
+  "updated_at": "2026-01-21T18:21:34.224989Z"
 }

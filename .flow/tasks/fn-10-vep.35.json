@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T18:21:23.864062Z",
+  "depends_on": [
+    "fn-10-vep.34"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.35",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.35.md",
+  "status": "todo",
+  "title": "Implement workspace symlink strategy in entrypoint",
+  "updated_at": "2026-01-21T18:35:00.701136Z"
+}

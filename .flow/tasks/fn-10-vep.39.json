@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T18:21:24.104688Z",
+  "depends_on": [
+    "fn-10-vep.38"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.39",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.39.md",
+  "status": "todo",
+  "title": "Implement workspace-to-container auto-mapping with name hashing",
+  "updated_at": "2026-01-21T18:35:27.483284Z"
+}
