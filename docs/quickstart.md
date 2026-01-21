@@ -23,14 +23,14 @@ cd containai
 
 **Verify:**
 ```bash
-ls agent-sandbox/containai.sh
-# Should show: agent-sandbox/containai.sh
+ls src/containai.sh
+# Should show: src/containai.sh
 ```
 
 ## Step 2: Source the CLI
 
 ```bash
-source agent-sandbox/containai.sh
+source src/containai.sh
 ```
 
 **Verify:**
@@ -173,8 +173,8 @@ When you ran `cai`, ContainAI:
 
 ## Next Steps
 
-- **Configure ContainAI** - See the [Technical README](../agent-sandbox/README.md#commands) for volume, naming, and configuration options
-- **Troubleshoot issues** - See [Troubleshooting](../agent-sandbox/README.md#troubleshooting) for common problems
+- **Configure ContainAI** - See the [Technical README](../src/README.md#commands) for volume, naming, and configuration options
+- **Troubleshoot issues** - See [Troubleshooting](../src/README.md#troubleshooting) for common problems
 - **Security model** - See [SECURITY.md](../SECURITY.md) for security guarantees and threat model
 
 ---
@@ -185,10 +185,10 @@ When you ran `cai`, ContainAI:
 
 ```bash
 # Add to ~/.bashrc for permanent access
-echo 'source /path/to/containai/agent-sandbox/containai.sh' >> ~/.bashrc
+echo 'source /path/to/containai/src/containai.sh' >> ~/.bashrc
 
 # Or source manually each session
-source agent-sandbox/containai.sh
+source src/containai.sh
 ```
 
 ### Platform-specific notes

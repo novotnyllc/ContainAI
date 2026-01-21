@@ -18,6 +18,16 @@ This document provides a comprehensive overview of ContainAI's architecture, inc
 ContainAI sits between the user's shell and Docker, providing secure sandbox orchestration for AI coding agents.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
 flowchart TB
     subgraph Host["Host System"]
         User["User Shell<br/>(bash)"]
@@ -48,9 +58,9 @@ flowchart TB
     DataVol -.->|persist| Agent
     Entry --> Agent
 
-    style Host fill:#e1f5fe
-    style DockerLayer fill:#fff3e0
-    style Sandbox fill:#e8f5e9
+    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
+    style DockerLayer fill:#0f3460,stroke:#16213e,color:#fff
+    style Sandbox fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 > **Note**: Workspace mounting differs by mode: Sysbox uses a bind mount; ECI uses Docker Desktop's mirrored workspace mount with entrypoint symlink logic.
@@ -60,10 +70,20 @@ flowchart TB
 The ContainAI system consists of three main layers.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
 flowchart LR
     subgraph CLI["CLI Layer"]
         direction TB
-        Main["agent-sandbox/containai.sh<br/>(entry point, sourced)"]
+        Main["src/containai.sh<br/>(entry point, sourced)"]
         Cmds["Subcommands<br/>(run, shell, doctor, setup, etc.)"]
     end
 
@@ -91,14 +111,14 @@ flowchart LR
     Main --> Core
     ContainerLib --> Entry
 
-    style CLI fill:#bbdefb
-    style Lib fill:#c8e6c9
-    style Runtime fill:#ffe0b2
+    style CLI fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Lib fill:#0f3460,stroke:#16213e,color:#fff
+    style Runtime fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ## Modular Library Structure
 
-ContainAI uses a modular shell library design where `agent-sandbox/containai.sh` sources individual `agent-sandbox/lib/*.sh` modules. This provides:
+ContainAI uses a modular shell library design where `src/containai.sh` sources individual `src/lib/*.sh` modules. This provides:
 
 - **Separation of concerns**: Each module handles one aspect
 - **Testability**: Modules can be tested independently
@@ -106,9 +126,19 @@ ContainAI uses a modular shell library design where `agent-sandbox/containai.sh`
 
 ### Module Dependency Order
 
-The libraries must be sourced in a specific order due to dependencies. All paths below are relative to `agent-sandbox/`:
+The libraries must be sourced in a specific order due to dependencies. All paths below are relative to `src/`:
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
 flowchart TD
     Main["containai.sh"] --> Core["lib/core.sh<br/>(logging)"]
     Core --> Platform["lib/platform.sh<br/>(OS detection)"]
@@ -122,22 +152,23 @@ flowchart TD
     Export --> Setup["lib/setup.sh<br/>(Sysbox install)"]
     Setup --> Env["lib/env.sh<br/>(env handling)"]
 
-    style Core fill:#ffccbc
-    style Platform fill:#ffccbc
-    style Docker fill:#c5cae9
-    style ECI fill:#c5cae9
-    style Doctor fill:#c5cae9
-    style Config fill:#dcedc8
-    style Container fill:#b2ebf2
-    style Import fill:#b2ebf2
-    style Export fill:#b2ebf2
-    style Setup fill:#f0f4c3
-    style Env fill:#f0f4c3
+    style Main fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Core fill:#e94560,stroke:#16213e,color:#fff
+    style Platform fill:#e94560,stroke:#16213e,color:#fff
+    style Docker fill:#0f3460,stroke:#16213e,color:#fff
+    style ECI fill:#0f3460,stroke:#16213e,color:#fff
+    style Doctor fill:#0f3460,stroke:#16213e,color:#fff
+    style Config fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Container fill:#16213e,stroke:#0f3460,color:#fff
+    style Import fill:#16213e,stroke:#0f3460,color:#fff
+    style Export fill:#16213e,stroke:#0f3460,color:#fff
+    style Setup fill:#0f3460,stroke:#e94560,color:#fff
+    style Env fill:#0f3460,stroke:#e94560,color:#fff
 ```
 
 ### Module Responsibilities
 
-All modules are located in `agent-sandbox/lib/`:
+All modules are located in `src/lib/`:
 
 | Module | Purpose | Example Functions |
 |--------|---------|-------------------|
@@ -158,6 +189,16 @@ All modules are located in `agent-sandbox/lib/`:
 ContainAI supports two isolation mechanisms, automatically selected based on availability.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
 flowchart TD
     Start["cai run"] --> ECICheck{"ECI Enabled +<br/>Sandboxes Available?"}
 
@@ -170,16 +211,20 @@ flowchart TD
     ECI --> Container["Container Running<br/>(isolated)"]
     Sysbox --> Container
 
-    style ECI fill:#c8e6c9
-    style Sysbox fill:#bbdefb
-    style Fail fill:#ffcdd2
+    style Start fill:#1a1a2e,stroke:#16213e,color:#fff
+    style ECICheck fill:#0f3460,stroke:#16213e,color:#fff
+    style SysboxCheck fill:#0f3460,stroke:#16213e,color:#fff
+    style ECI fill:#16213e,stroke:#16213e,color:#fff
+    style Sysbox fill:#16213e,stroke:#16213e,color:#fff
+    style Fail fill:#e94560,stroke:#16213e,color:#fff
+    style Container fill:#1a1a2e,stroke:#16213e,color:#fff
 ```
 
 ### Docker Desktop ECI Mode
 
 **Requirements**: Docker Desktop with ECI enabled AND sandbox feature available
 
-The Docker Desktop path requires BOTH conditions (see `_cai_select_context` in `agent-sandbox/lib/doctor.sh`):
+The Docker Desktop path requires BOTH conditions (see `_cai_select_context` in `src/lib/doctor.sh`):
 1. Enhanced Container Isolation (ECI) enabled (requires Business subscription + admin)
 2. Sandbox feature available (`docker sandbox` command works)
 
@@ -202,6 +247,25 @@ When both are met:
 ### CLI to Container Flow
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'background': '#f5f5f5',
+  'actorBkg': '#1a1a2e',
+  'actorTextColor': '#ffffff',
+  'actorBorder': '#16213e',
+  'actorLineColor': '#606060',
+  'signalColor': '#606060',
+  'signalTextColor': '#1a1a2e',
+  'labelBoxBkgColor': '#0f3460',
+  'labelBoxBorderColor': '#16213e',
+  'labelTextColor': '#ffffff',
+  'loopTextColor': '#1a1a2e',
+  'noteBkgColor': '#0f3460',
+  'noteTextColor': '#ffffff',
+  'noteBorderColor': '#16213e',
+  'activationBkgColor': '#16213e',
+  'activationBorderColor': '#0f3460',
+  'sequenceNumberColor': '#1a1a2e'
+}}}%%
 sequenceDiagram
     participant User
     participant CLI as containai.sh
@@ -228,6 +292,25 @@ sequenceDiagram
 ### Import Flow (Dotfile Sync)
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'background': '#f5f5f5',
+  'actorBkg': '#1a1a2e',
+  'actorTextColor': '#ffffff',
+  'actorBorder': '#16213e',
+  'actorLineColor': '#606060',
+  'signalColor': '#606060',
+  'signalTextColor': '#1a1a2e',
+  'labelBoxBkgColor': '#0f3460',
+  'labelBoxBorderColor': '#16213e',
+  'labelTextColor': '#ffffff',
+  'loopTextColor': '#1a1a2e',
+  'noteBkgColor': '#0f3460',
+  'noteTextColor': '#ffffff',
+  'noteBorderColor': '#16213e',
+  'activationBkgColor': '#16213e',
+  'activationBorderColor': '#0f3460',
+  'sequenceNumberColor': '#1a1a2e'
+}}}%%
 sequenceDiagram
     participant User
     participant CLI as cai import
@@ -250,6 +333,16 @@ sequenceDiagram
 ContainAI uses two types of volumes to separate concerns.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
 flowchart LR
     subgraph Host["Host System"]
         Workspace["Workspace<br/>(/path/to/project)"]
@@ -277,8 +370,12 @@ flowchart LR
     DataMount --> DataStructure
     HostConfigs -.->|"cai import"| DataVol
 
-    style DataVol fill:#c8e6c9
-    style Workspace fill:#bbdefb
+    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Volumes fill:#16213e,stroke:#0f3460,color:#fff
+    style Container fill:#0f3460,stroke:#16213e,color:#fff
+    style DataStructure fill:#1a1a2e,stroke:#16213e,color:#fff
+    style DataVol fill:#16213e,stroke:#16213e,color:#fff
+    style Workspace fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ### Volume Types
@@ -315,7 +412,7 @@ The data volume (`/mnt/agent-data`) contains:
 
 ### Volume Selection
 
-Volume selection follows this precedence (see `_containai_resolve_volume` in `agent-sandbox/lib/config.sh`):
+Volume selection follows this precedence (see `_containai_resolve_volume` in `src/lib/config.sh`):
 
 1. `--data-volume` CLI flag (skips config parsing)
 2. `CONTAINAI_DATA_VOLUME` env var (skips config parsing)
@@ -339,6 +436,16 @@ Workspace-specific volumes enable isolated agent state per project.
 ContainAI enforces strict security boundaries between host and sandbox.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
 flowchart TB
     subgraph Host["Host (TRUSTED)"]
         HostRoot["Root User"]
@@ -361,9 +468,9 @@ flowchart TB
     HostFS -.->|"workspace only"| SandboxFS
     HostUser -.->|"data volume"| SandboxFS
 
-    style Host fill:#c8e6c9
-    style IsolationLayer fill:#fff3e0
-    style Sandbox fill:#ffcdd2
+    style Host fill:#16213e,stroke:#16213e,color:#fff
+    style IsolationLayer fill:#0f3460,stroke:#16213e,color:#fff
+    style Sandbox fill:#e94560,stroke:#16213e,color:#fff
 ```
 
 ### Security Guarantees
@@ -372,17 +479,17 @@ flowchart TB
 
 | Protection | Implementation | Code Reference |
 |------------|----------------|----------------|
-| **Volume mount TOCTOU** | Path validation in entrypoint | `agent-sandbox/entrypoint.sh:verify_path_under_data_dir()` |
-| **Symlink traversal** | Reject symlinks, realpath validation | `agent-sandbox/entrypoint.sh:reject_symlink()` |
-| **Config refuses dangerous modes** | `credentials.mode=host` in config is never honored | `agent-sandbox/lib/config.sh` |
+| **Volume mount TOCTOU** | Path validation in entrypoint | `src/entrypoint.sh:verify_path_under_data_dir()` |
+| **Symlink traversal** | Reject symlinks, realpath validation | `src/entrypoint.sh:reject_symlink()` |
+| **Config refuses dangerous modes** | `credentials.mode=host` in config is never honored | `src/lib/config.sh` |
 
 **Safe defaults** (active unless explicitly overridden via CLI):
 
 | Default | Override Flag | Code Reference |
 |---------|--------------|----------------|
-| **Credential isolation** | `--allow-host-credentials` | `agent-sandbox/lib/container.sh` |
-| **Docker socket denied** | `--allow-host-docker-socket` | `agent-sandbox/lib/container.sh` |
-| **Safe .env parsing** | (always on when env imported) | `agent-sandbox/lib/env.sh` |
+| **Credential isolation** | `--allow-host-credentials` | `src/lib/container.sh` |
+| **Docker socket denied** | `--allow-host-docker-socket` | `src/lib/container.sh` |
+| **Safe .env parsing** | (always on when env imported) | `src/lib/env.sh` |
 
 ### Unsafe Opt-ins (FR-5)
 
@@ -418,7 +525,7 @@ Key architectural decisions (see also [.flow/memory/decisions.md](../.flow/memor
 
 ### Modular Shell Architecture
 
-**Decision**: Split CLI into sourced `agent-sandbox/lib/*.sh` modules rather than monolithic script.
+**Decision**: Split CLI into sourced `src/lib/*.sh` modules rather than monolithic script.
 
 **Rationale**:
 - Enables unit testing of individual functions
@@ -450,4 +557,4 @@ Key architectural decisions (see also [.flow/memory/decisions.md](../.flow/memor
 - [Configuration Reference](configuration.md) - Full config schema
 - [Troubleshooting Guide](troubleshooting.md) - Common issues
 - [SECURITY.md](../SECURITY.md) - Security model details
-- [Technical README](../agent-sandbox/README.md) - Image building and internals
+- [Technical README](../src/README.md) - Image building and internals

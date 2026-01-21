@@ -43,14 +43,14 @@ ContainAI scripts require **bash**. If your default shell is zsh or fish:
 bash
 
 # Or run bash explicitly
-bash ./agent-sandbox/test-secure-engine.sh
+bash ./tests/integration/test-secure-engine.sh
 ```
 
 ### Setup
 
 ```bash
 # Source the CLI to load all functions
-source agent-sandbox/containai.sh
+source src/containai.sh
 
 # Verify your environment
 cai doctor
@@ -60,7 +60,7 @@ cai doctor
 
 ```
 containai/
-├── agent-sandbox/           # Main CLI and container runtime
+├── src/                     # Main CLI and container runtime
 │   ├── containai.sh         # Entry point (sources lib/*.sh)
 │   ├── lib/                 # Modular shell libraries
 │   │   ├── core.sh          # Logging utilities
@@ -75,8 +75,10 @@ containai/
 │   │   ├── setup.sh         # Sysbox installation
 │   │   └── env.sh           # Environment handling
 │   ├── entrypoint.sh        # Container entrypoint (security validation)
-│   ├── test-*.sh            # Integration tests
 │   └── Dockerfile           # Container image definition
+├── tests/                   # Test suites
+│   ├── unit/                # Unit tests (portable)
+│   └── integration/         # Integration tests (require Docker)
 ├── docs/                    # Documentation
 ├── SECURITY.md              # Security model
 └── README.md                # Project overview
@@ -185,7 +187,7 @@ Common pitfalls to avoid are documented in [.flow/memory/pitfalls.md](.flow/memo
 
 ### Test Scripts
 
-Integration tests are located in `agent-sandbox/test-*.sh`:
+Integration tests are located in `tests/integration/`:
 
 | Script | Purpose |
 |--------|---------|
@@ -195,14 +197,14 @@ Integration tests are located in `agent-sandbox/test-*.sh`:
 ### Running Tests
 
 ```bash
-# Run from the agent-sandbox directory
-cd agent-sandbox
+# Run from the repo root
+cd containai
 
 # Run secure engine tests
-./test-secure-engine.sh
+./tests/integration/test-secure-engine.sh
 
 # Run sync integration tests (requires Docker)
-./test-sync-integration.sh
+./tests/integration/test-sync-integration.sh
 ```
 
 ### Test Output Format
@@ -262,9 +264,8 @@ exit $FAILED
 
 1. **Run tests** to ensure nothing is broken:
    ```bash
-   cd agent-sandbox
-   ./test-secure-engine.sh
-   ./test-sync-integration.sh
+   ./tests/integration/test-secure-engine.sh
+   ./tests/integration/test-sync-integration.sh
    ```
 
 2. **Follow coding conventions** described above
@@ -341,11 +342,11 @@ For a comprehensive understanding of the codebase:
 
 - [Architecture Overview](docs/architecture.md) - System components, data flow, and design decisions
 - [Configuration Reference](docs/configuration.md) - TOML config schema and semantics
-- [Technical README](agent-sandbox/README.md) - Image building and container internals
+- [Technical README](src/README.md) - Image building and container internals
 
 Key concepts:
 - **Dual isolation paths**: Docker Desktop sandbox (ECI) or Sysbox runtime
-- **Modular libraries**: `agent-sandbox/lib/*.sh` modules with explicit dependencies
+- **Modular libraries**: `src/lib/*.sh` modules with explicit dependencies
 - **Safe defaults**: Dangerous operations require explicit CLI flags
 - **Workspace-scoped config**: Per-project settings via TOML config files
 

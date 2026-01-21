@@ -1,16 +1,48 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-21T10:23:11.072045Z",
   "created_at": "2026-01-21T08:18:44.443855Z",
   "depends_on": [
     "fn-10-vep.28"
   ],
   "epic": "fn-10-vep",
+  "evidence": {
+    "acceptance_criteria": {
+      "all_mermaid_diagrams_have_explicit_styles": true,
+      "contrast_meets_wcag_aa": true,
+      "diagrams_readable_in_github_dark_mode": true,
+      "diagrams_readable_in_github_light_mode": true,
+      "no_default_gray_on_gray_text": true
+    },
+    "changes": [
+      {
+        "description": "Updated 8 mermaid diagrams with dark theme init blocks and WCAG AA compliant colors",
+        "file": "docs/architecture.md"
+      },
+      {
+        "description": "Updated 1 mermaid diagram with dark theme styling",
+        "file": ".flow/specs/fn-7-j5o.md"
+      },
+      {
+        "description": "Updated template example with theme init block",
+        "file": ".flow/tasks/fn-10-vep.29.md"
+      }
+    ],
+    "contrast_ratio": "4.5:1+ (WCAG AA compliant)",
+    "theme_colors_used": {
+      "accent_color": "#e94560",
+      "line_color": "#a0a0a0",
+      "primary_background": "#1a1a2e",
+      "secondary_background": "#0f3460",
+      "tertiary_background": "#16213e",
+      "text_color": "#ffffff"
+    }
+  },
   "id": "fn-10-vep.29",
   "priority": null,
   "spec_path": ".flow/tasks/fn-10-vep.29.md",
-  "status": "todo",
+  "status": "done",
   "title": "Fix mermaid chart contrast in all docs",
-  "updated_at": "2026-01-21T08:20:19.490678Z"
+  "updated_at": "2026-01-21T10:25:49.541983Z"
 }

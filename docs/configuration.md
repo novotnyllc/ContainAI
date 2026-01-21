@@ -396,8 +396,8 @@ Python 3 with TOML support not available.
 ## Implementation Details
 
 Configuration is implemented in:
-- [`lib/config.sh`](../agent-sandbox/lib/config.sh) - Bash config resolution
-- [`parse-toml.py`](../agent-sandbox/parse-toml.py) - TOML parsing (requires Python 3.11+ or `tomli`/`toml` package)
+- [`lib/config.sh`](../src/lib/config.sh) - Bash config resolution
+- [`parse-toml.py`](../src/parse-toml.py) - TOML parsing (requires Python 3.11+ or `tomli`/`toml` package)
 
 Key functions:
 - `_containai_find_config()` - Discovery with git boundary
@@ -410,5 +410,5 @@ Key functions:
 ## See Also
 
 - [Quickstart Guide](quickstart.md) - Getting started with ContainAI
-- [Technical README](../agent-sandbox/README.md) - Full CLI documentation
+- [Technical README](../src/README.md) - Full CLI documentation
 - [SECURITY.md](../SECURITY.md) - Security model and guarantees

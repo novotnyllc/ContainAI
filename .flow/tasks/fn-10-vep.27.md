@@ -29,7 +29,37 @@ Comprehensively rewrite src/README.md (formerly agent-sandbox/README.md) with up
 - [ ] Quick start commands work
 - [ ] No outdated information
 ## Done summary
-TBD
+# Summary
+
+Comprehensively rewrote src/README.md with the following changes:
+
+1. **Added Table of Contents** - Improved navigation for the long document
+
+2. **Updated Overview section** - More structured with "Container Contents" and "Key Files" subsections
+
+3. **Updated Prerequisites** - Added Bash 4.0+ requirement, clearer about Docker Desktop vs Sysbox options
+
+4. **Simplified DinD section** - Complete rewrite:
+   - Removed all `--privileged` flags from examples
+   - Clear runtime model diagram showing we run IN Sysbox, not install it
+   - Explained how DinD auto-detection works via uid_map
+   - Added environment variable override documentation (CAI_ENABLE_DIND)
+   - Added verification commands
+
+5. **Simplified Dockerfile.test section** - Removed sysbox installation references:
+   - Changed examples from `--privileged` to `--runtime=sysbox-runc`
+   - Clarified the container is designed to RUN in Sysbox, not install it
+   - Simplified startup script description (removed sysbox-mgr/sysbox-fs references)
+   - Simplified test helper description
+
+6. **Added Troubleshooting sections** for:
+   - Docker commands failing inside container
+   - Inner containers network issues
+
+7. **Removed outdated information**:
+   - Removed "Used by sync scripts" volume section (not currently mounted)
+   - Removed "Sync Scripts" section (outdated paths)
+   - Streamlined credential syncing documentation
 
 ## Evidence
 - Commits:

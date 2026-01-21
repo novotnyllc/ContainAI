@@ -22,7 +22,7 @@ Enhanced Container Isolation (ECI) via Docker Desktop's `docker sandbox` command
 - Seccomp profiles and capability restrictions
 - Isolated credential storage per sandbox
 
-Detection: [`agent-sandbox/lib/eci.sh`](agent-sandbox/lib/eci.sh) verifies both uid_map remapping and sysbox-runc runtime.
+Detection: [`src/lib/eci.sh`](src/lib/eci.sh) verifies both uid_map remapping and sysbox-runc runtime.
 
 ### Sysbox Mode (Linux)
 
@@ -31,7 +31,7 @@ For Linux environments without Docker Desktop, ContainAI uses the Sysbox runtime
 - Nested container support with isolation
 - User namespace isolation
 
-Detection: [`agent-sandbox/lib/doctor.sh`](agent-sandbox/lib/doctor.sh) verifies Sysbox runtime availability in the Docker daemon.
+Detection: [`src/lib/doctor.sh`](src/lib/doctor.sh) verifies Sysbox runtime availability in the Docker daemon.
 
 ## Security Guarantees
 
@@ -41,13 +41,13 @@ ContainAI enforces the following security measures:
 
 | Protection | Location | Description |
 |------------|----------|-------------|
-| Isolation availability check | `agent-sandbox/lib/doctor.sh` | Verifies ECI sandbox or Sysbox runtime is available before starting containers |
-| Fail-closed on unknown errors | `agent-sandbox/lib/container.sh` | Blocks execution rather than proceeding with unknown status |
-| Symlink traversal defense | `agent-sandbox/entrypoint.sh` | `reject_symlink()` and `verify_path_under_data_dir()` prevent path escape |
-| Volume mount TOCTOU protection | `agent-sandbox/entrypoint.sh` | Validates paths before and after resolution |
-| Safe .env parsing | `agent-sandbox/entrypoint.sh` | CRLF handling, key validation, no shell eval |
-| Credential isolation | `agent-sandbox/lib/container.sh` | Credentials stay inside container by default |
-| Docker socket access denied | `agent-sandbox/lib/container.sh` | Host Docker socket not mounted by default |
+| Isolation availability check | `src/lib/doctor.sh` | Verifies ECI sandbox or Sysbox runtime is available before starting containers |
+| Fail-closed on unknown errors | `src/lib/container.sh` | Blocks execution rather than proceeding with unknown status |
+| Symlink traversal defense | `src/entrypoint.sh` | `reject_symlink()` and `verify_path_under_data_dir()` prevent path escape |
+| Volume mount TOCTOU protection | `src/entrypoint.sh` | Validates paths before and after resolution |
+| Safe .env parsing | `src/entrypoint.sh` | CRLF handling, key validation, no shell eval |
+| Credential isolation | `src/lib/container.sh` | Credentials stay inside container by default |
+| Docker socket access denied | `src/lib/container.sh` | Host Docker socket not mounted by default |
 
 **Note:** Isolation detection is best-effort and serves as a warning system. Use `--force` to bypass sandbox availability checks (not recommended for production use).
 
@@ -74,19 +74,46 @@ ContainAI does **not** protect against:
 | Resource exhaustion | No cgroup limits enforced by default |
 | Host kernel exploits | Container isolation relies on kernel security |
 
-## Vulnerability Reporting
+## Reporting a Vulnerability
 
 **Do not report security vulnerabilities through public GitHub issues.**
 
-Instead, please email security reports to: **security@novotny.org**
+### How to Report
 
-Include:
+Report vulnerabilities through [GitHub Security Advisories](https://github.com/novotnyllc/containai/security/advisories/new):
+
+1. Go to the **Security** tab in the repository
+2. Click **Report a vulnerability**
+3. Fill out the advisory form
+
+### What to Include
+
 - Description of the vulnerability
 - Steps to reproduce
-- Potential impact
-- Any suggested fixes (optional)
+- Potential impact assessment
+- Affected versions/branches
+- Any suggested mitigations (optional)
 
-We will acknowledge receipt within 48 hours and provide a detailed response within 7 days.
+### Response Timeline
+
+- **Initial acknowledgement:** Within 48 hours
+- **Detailed response:** Within 7 days
+- **Resolution target:** Based on severity
+
+### Scope
+
+**In Scope:**
+- Container isolation bypasses
+- Host credential exposure
+- Path traversal vulnerabilities
+- Docker socket access escalation
+- Authentication/authorization issues
+
+**Out of Scope:**
+- Vulnerabilities in upstream dependencies (report to respective maintainers)
+- Issues requiring physical access
+- Social engineering attacks
+- Denial of service against your own containers
 
 ## Safe Harbor
 
@@ -103,8 +130,8 @@ We will not pursue legal action against researchers who follow these guidelines.
 
 For detailed technical information about ContainAI's security implementation, see:
 
-- [Technical README - Security Section](agent-sandbox/README.md#security) - Container isolation details
-- [`agent-sandbox/lib/eci.sh`](agent-sandbox/lib/eci.sh) - ECI detection implementation
-- [`agent-sandbox/lib/docker.sh`](agent-sandbox/lib/docker.sh) - Docker sandbox detection
-- [`agent-sandbox/lib/container.sh`](agent-sandbox/lib/container.sh) - Container start with isolation checks
-- [`agent-sandbox/entrypoint.sh`](agent-sandbox/entrypoint.sh) - Volume mount security and .env parsing
+- [Technical README - Security Section](src/README.md#security) - Container isolation details
+- [`src/lib/eci.sh`](src/lib/eci.sh) - ECI detection implementation
+- [`src/lib/docker.sh`](src/lib/docker.sh) - Docker sandbox detection
+- [`src/lib/container.sh`](src/lib/container.sh) - Container start with isolation checks
+- [`src/entrypoint.sh`](src/entrypoint.sh) - Volume mount security and .env parsing

@@ -4,7 +4,7 @@
 # ==============================================================================
 # This file must be sourced, not executed directly.
 #
-# Usage: source agent-sandbox/containai.sh
+# Usage: source src/containai.sh (or agent-sandbox/containai.sh for backward compatibility)
 # Then: cai / containai are available as shell functions
 #
 # Subcommands:
@@ -30,7 +30,7 @@ fi
 # Detect direct execution (must be sourced, not executed)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "[ERROR] containai.sh must be sourced, not executed directly" >&2
-    echo "Usage: source agent-sandbox/containai.sh" >&2
+    echo "Usage: source src/containai.sh" >&2
     exit 1
 fi
 

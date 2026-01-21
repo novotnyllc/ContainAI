@@ -42,10 +42,10 @@ Documentation suite, environment variable import, and Secure Engine setup automa
 - `cai sandbox clear-credentials` command for credential cleanup
 
 ### Changed
-- `agent-sandbox/README.md` now includes banner pointing to root README
+- `src/README.md` (formerly `agent-sandbox/README.md`) now includes banner pointing to root README
 
 ### Fixed
-- Documentation reconciliation between root and agent-sandbox READMEs
+- Documentation reconciliation between root and src READMEs
 - TOCTOU protections for environment file imports
 - Symlink traversal defense ordering in entrypoint
 - Validation now correctly checks `.Runtimes` instead of assuming default runtime

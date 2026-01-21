@@ -8,7 +8,7 @@
 # IMPORTANT: Uses /var/run/docker-test.sock to avoid conflicts with host Docker.
 #
 # Usage (from repo root):
-#   docker build -t containai-test -f agent-sandbox/Dockerfile.test agent-sandbox/
+#   docker build -t containai-test -f src/Dockerfile.test src/
 #   docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
 #
 # Note: Requires BuildKit (DOCKER_BUILDKIT=1 or Docker 23.0+)

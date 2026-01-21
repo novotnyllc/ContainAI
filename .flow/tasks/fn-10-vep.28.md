@@ -31,7 +31,16 @@ Enhance main README.md with clear value proposition and improved getting started
 - [ ] Requirements clearly listed
 - [ ] Links to detailed docs work
 ## Done summary
-TBD
+Enhanced main README.md with clear value proposition and improved getting started guide:
+
+1. **Value proposition at top** - Added tagline "Run AI coding agents without risking your system" and problem/solution table explaining why ContainAI exists
+2. **One-liner quick start** - Condensed to 4-line clone+source+cd+cai flow
+3. **Feature highlights** - Rewrote features with concise descriptions and practical details
+4. **Architecture diagram** - Added ASCII diagram showing host isolation, workspace mount, and data volume
+5. **Requirements section** - Clear table with versions and isolation runtime options
+6. **Common commands** - Added quick reference for daily usage
+7. **Security summary** - Focused on safe defaults and explicit opt-in for dangerous operations
+8. **Documentation links** - Expanded table with architecture, configuration, and security docs
 
 ## Evidence
 - Commits:

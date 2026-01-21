@@ -1,16 +1,42 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-21T09:43:04.025648Z",
   "created_at": "2026-01-21T08:18:44.121719Z",
   "depends_on": [
     "fn-10-vep.20"
   ],
   "epic": "fn-10-vep",
+  "evidence": {
+    "acceptance_criteria": {
+      "all_paths_updated": true,
+      "dind_section_simplified": true,
+      "no_outdated_info": true,
+      "no_privileged_in_examples": true,
+      "quick_start_works": true,
+      "runtime_model_explained": true
+    },
+    "changes": [
+      {
+        "description": "Comprehensive rewrite of README with updated paths, simplified DinD docs, and runtime model clarification",
+        "file": "src/README.md",
+        "type": "rewrite"
+      }
+    ],
+    "verification": [
+      "All paths updated for new structure (src/ instead of agent-sandbox/)",
+      "DinD section simplified - no --privileged in examples",
+      "Runtime model clearly explained (we run IN sysbox)",
+      "Dockerfile.test examples updated to use --runtime=sysbox-runc",
+      "Removed sysbox installation references from Dockerfile.test docs",
+      "Quick start commands updated",
+      "No outdated information (removed sync scripts section, updated image names)"
+    ]
+  },
   "id": "fn-10-vep.27",
   "priority": null,
   "spec_path": ".flow/tasks/fn-10-vep.27.md",
-  "status": "todo",
+  "status": "done",
   "title": "Rewrite agent-sandbox/README.md comprehensively",
-  "updated_at": "2026-01-21T08:20:19.103463Z"
+  "updated_at": "2026-01-21T09:45:18.894437Z"
 }

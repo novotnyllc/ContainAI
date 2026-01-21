@@ -389,9 +389,10 @@ _IMPORT_SYNC_MAP=(
   "/source/.copilot/skills:/target/copilot/skills:d"
 
   # --- Gemini ---
-  # Selective sync: credentials + user instructions (exclude tmp/, antigravity/)
+  # Selective sync: credentials + settings + user instructions (exclude tmp/, antigravity/)
   "/source/.gemini/google_accounts.json:/target/gemini/google_accounts.json:fs"
   "/source/.gemini/oauth_creds.json:/target/gemini/oauth_creds.json:fs"
+  "/source/.gemini/settings.json:/target/gemini/settings.json:fj"
   "/source/.gemini/GEMINI.md:/target/gemini/GEMINI.md:f"
 
   # --- Codex ---

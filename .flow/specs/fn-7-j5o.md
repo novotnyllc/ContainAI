@@ -78,39 +78,49 @@ Enable contributions and track project evolution.
 ## Architecture
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
 flowchart TD
     subgraph "Documentation Structure"
         ROOT[README.md<br/>Entry Point]
         SEC[SECURITY.md<br/>Trust Building]
-        
+
         subgraph "docs/"
             QS[quickstart.md<br/>Tutorial]
             CFG[configuration.md<br/>Reference]
             TS[troubleshooting.md<br/>How-to]
             ARCH[architecture.md<br/>Explanation]
         end
-        
+
         CONTRIB[CONTRIBUTING.md<br/>How-to]
         CHANGE[CHANGELOG.md<br/>Reference]
-        
-        subgraph "agent-sandbox/"
+
+        subgraph "src/"
             EXISTING[README.md<br/>Technical Deep Dive<br/>+ Banner to Root]
         end
     end
-    
+
     ROOT --> |"Quick Start"| QS
     ROOT --> |"Security"| SEC
     ROOT --> |"Detailed Docs"| EXISTING
     ROOT --> |"Contributing"| CONTRIB
-    
+
     QS --> |"Configuration"| CFG
     QS --> |"Problems?"| TS
-    
+
     CONTRIB --> ARCH
-    
-    style ROOT fill:#90EE90
-    style SEC fill:#FFB6C1
-    style QS fill:#87CEEB
+
+    style ROOT fill:#16213e,stroke:#16213e,color:#fff
+    style SEC fill:#e94560,stroke:#16213e,color:#fff
+    style QS fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ## Key Design Decisions

@@ -14,10 +14,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+SRC_DIR="$REPO_ROOT/src"
 
 # Source containai library for platform detection, _cai_timeout, and constants
 # Don't suppress stderr - show error output on failure
-if ! source "$SCRIPT_DIR/containai.sh"; then
+if ! source "$SRC_DIR/containai.sh"; then
     printf '%s\n' "[ERROR] Failed to source containai.sh" >&2
     exit 1
 fi

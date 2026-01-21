@@ -1,14 +1,28 @@
 {
-  "assignee": null,
+  "assignee": "claire@novotny.org",
   "claim_note": "",
-  "claimed_at": null,
+  "claimed_at": "2026-01-21T09:29:33.382815Z",
   "created_at": "2026-01-21T08:18:42.974869Z",
   "depends_on": [],
   "epic": "fn-10-vep",
+  "evidence": {
+    "backward_compatibility": "source agent-sandbox/containai.sh still works via symlink",
+    "files_changed": [
+      "VERSION",
+      "agent-sandbox (symlink)",
+      "src/*",
+      "tests/*",
+      "README.md",
+      "docs/*.md",
+      "CONTRIBUTING.md",
+      "SECURITY.md",
+      "CHANGELOG.md"
+    ]
+  },
   "id": "fn-10-vep.20",
   "priority": null,
   "spec_path": ".flow/tasks/fn-10-vep.20.md",
-  "status": "todo",
+  "status": "done",
   "title": "Reorganize repo structure to match CLI tool conventions",
-  "updated_at": "2026-01-21T08:18:58.636861Z"
+  "updated_at": "2026-01-21T09:32:54.122324Z"
 }

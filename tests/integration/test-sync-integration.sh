@@ -21,6 +21,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SRC_DIR="$REPO_ROOT/src"
 
 # ==============================================================================
 # Early guard: Docker availability check
@@ -266,7 +268,7 @@ test_cli_help() {
 
     # Test cai --help works
     local help_output help_exit=0
-    help_output=$(bash -c "source '$SCRIPT_DIR/containai.sh' && cai --help" 2>&1) || help_exit=$?
+    help_output=$(bash -c "source '$SRC_DIR/containai.sh' && cai --help" 2>&1) || help_exit=$?
     if [[ $help_exit -eq 0 ]] && echo "$help_output" | grep -q "ContainAI"; then
         pass "cai --help works"
     else
@@ -276,7 +278,7 @@ test_cli_help() {
 
     # Test cai import --help works
     local import_help_output import_help_exit=0
-    import_help_output=$(bash -c "source '$SCRIPT_DIR/containai.sh' && cai import --help" 2>&1) || import_help_exit=$?
+    import_help_output=$(bash -c "source '$SRC_DIR/containai.sh' && cai import --help" 2>&1) || import_help_exit=$?
     if [[ $import_help_exit -eq 0 ]] && echo "$import_help_output" | grep -q "Import"; then
         pass "cai import --help works"
     else
@@ -811,7 +813,7 @@ EOF
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir/subproject" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir/subproject'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir/subproject" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SRC_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir/subproject'" 2>"$stderr_file"); then
         if [[ "$resolved" == "$test_vol" ]]; then
             pass "Workspace path matching works"
         else
@@ -851,7 +853,7 @@ EOF
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SRC_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "$default_vol" ]]; then
             pass "Falls back to [agent] when no workspace match"
         else
@@ -893,7 +895,7 @@ EOF
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir/project/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir/project/subdir'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir/project/subdir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SRC_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir/project/subdir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "subdir-vol" ]]; then
             pass "Longest workspace path match wins"
         else
@@ -933,7 +935,7 @@ EOF
     # Capture stdout only (stderr may contain warnings)
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume 'cli-vol'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SRC_DIR/containai.sh' && _containai_resolve_volume 'cli-vol'" 2>"$stderr_file"); then
         if [[ "$resolved" == "cli-vol" ]]; then
             pass "CLI volume overrides workspace config"
         else
@@ -973,7 +975,7 @@ EOF
     # Must clear env vars to ensure config discovery is tested
     local resolved stderr_file
     stderr_file=$(mktemp)
-    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SCRIPT_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
+    if resolved=$(cd "$test_dir" && env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG bash -c "source '$SRC_DIR/containai.sh' && _containai_resolve_volume '' '$test_dir'" 2>"$stderr_file"); then
         if [[ "$resolved" == "agent-default-vol" ]]; then
             pass "Relative workspace paths are skipped (falls back to agent default)"
         else
@@ -1964,7 +1966,7 @@ from_host = true
 
     # Test 3: Verify code contains the protection (static analysis)
     local env_sh_content
-    env_sh_content=$(cat "$SCRIPT_DIR/lib/env.sh" 2>/dev/null || echo "")
+    env_sh_content=$(cat "$SRC_DIR/lib/env.sh" 2>/dev/null || echo "")
     if echo "$env_sh_content" | grep -q "Mount point is symlink"; then
         pass "Mount point symlink error message in env.sh Alpine helper"
     else
@@ -2037,7 +2039,7 @@ test_env_toctou_temp_symlink() {
 
     # Test 2: Verify code contains the protections (static analysis)
     local env_sh_content
-    env_sh_content=$(cat "$SCRIPT_DIR/lib/env.sh" 2>/dev/null || echo "")
+    env_sh_content=$(cat "$SRC_DIR/lib/env.sh" 2>/dev/null || echo "")
 
     if echo "$env_sh_content" | grep -q "Temp file is symlink"; then
         pass "Temp file symlink error message in env.sh Alpine helper"
@@ -2398,7 +2400,7 @@ test_entrypoint_loads_after_ownership() {
     # Function definitions look like: "function_name() {" or "_function_name() {"
     # Call sites look like: "ensure_volume_structure" or "_load_env_file" (just the name)
     local entrypoint_content
-    entrypoint_content=$(cat "$SCRIPT_DIR/entrypoint.sh" 2>/dev/null || echo "")
+    entrypoint_content=$(cat "$SRC_DIR/entrypoint.sh" 2>/dev/null || echo "")
 
     # Find CALL sites (lines that are just the function name, not definitions with parentheses)
     # ensure_volume_structure call is a bare line, _load_env_file call is a bare line
@@ -3078,7 +3080,7 @@ main() {
     # Check if image exists (build if needed)
     if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
         info "Building test image..."
-        if ! docker build -t "$IMAGE_NAME" "$SCRIPT_DIR" >/dev/null 2>&1; then
+        if ! docker build -t "$IMAGE_NAME" "$SRC_DIR" >/dev/null 2>&1; then
             echo "ERROR: Failed to build test image" >&2
             exit 1
         fi
