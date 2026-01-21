@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T20:34:19.467728Z",
+  "depends_on": [
+    "fn-10-vep.49"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.55",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.55.md",
+  "status": "todo",
+  "title": "Update cai doctor to validate SSH setup and connectivity",
+  "updated_at": "2026-01-21T20:34:32.145316Z"
+}

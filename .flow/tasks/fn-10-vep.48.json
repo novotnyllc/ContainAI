@@ -1,0 +1,17 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T20:34:17.491753Z",
+  "depends_on": [
+    "fn-10-vep.47",
+    "fn-10-vep.46"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.48",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.48.md",
+  "status": "todo",
+  "title": "Implement SSH pub key injection and known_hosts management",
+  "updated_at": "2026-01-21T20:34:31.791723Z"
+}

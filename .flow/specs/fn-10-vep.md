@@ -1,245 +1,243 @@
-# fn-10-vep: Sysbox-Only Sandbox Runtime (Docker Desktop Independence)
+# fn-10-vep: Sysbox-Only Sandbox Runtime with SSH Access
 
 ## Overview
 
-**Architectural Pivot**: Remove all Docker Desktop/ECI dependency. ContainAI will always use our own Sysbox installation and provide sandbox-equivalent security features ourselves.
+**Architectural Pivot**: Remove all Docker Desktop/ECI dependency. ContainAI uses its own Sysbox installation with a dedicated Docker context (`docker-containai`), systemd-based container lifecycle, and SSH-based agent access.
 
-**Value Proposition**: Users get Docker Desktop sandbox-like isolation WITHOUT requiring Docker Desktop Business subscription.
+**Value Proposition**: Users get Docker Desktop sandbox-like isolation WITHOUT requiring Docker Desktop Business subscription, plus real SSH access (agent forwarding, port tunneling, IDE integration).
 
 ## Problem Statement
 
 - Docker Desktop Business subscription required for sandbox/ECI features
 - Users want isolation without enterprise licensing costs
+- `docker exec` model lacks SSH features (agent forwarding, tunneling, IDE Remote-SSH)
 - Lima socket issue: "socket exists but docker info failed"
+
+## Architectural Model
+
+### Container Lifecycle (Systemd + SSH)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Container (sysbox-runc runtime)                             │
+│  PID 1: /sbin/init (systemd)                                │
+│  ├── sshd.service (port 22 internal)                        │
+│  ├── dockerd.service (DinD support)                         │
+│  └── containai-init.service (workspace setup, one-shot)     │
+└─────────────────────────────────────────────────────────────┘
+         ▲
+         │ SSH (port 2300-2500 mapped)
+         │
+┌────────┴────────┐
+│ Host CLI        │
+│ cai shell → ssh │
+│ cai run → ssh   │
+└─────────────────┘
+```
+
+**Key changes from previous Phase 7:**
+- PID 1: `systemd` (was: `sleep infinity`)
+- Agent access: SSH (was: `docker exec`)
+- entrypoint.sh logic: migrated to systemd units
+- Container naming: per-workspace only (was: per-workspace + per-image)
+
+### Setup Flow
+
+```
+cai setup
+  ├── Docker context: docker-containai
+  │   └── sysbox-runc default, userns mapping, cgroup limits
+  ├── SSH key: ~/.config/containai/id_containai (ed25519)
+  ├── SSH config: ~/.ssh/containai.d/*.conf
+  │   └── Include added to ~/.ssh/config (if not present)
+  └── Config: ~/.config/containai/config.toml
+```
+
+### Container Launch Flow
+
+```
+cai run /workspace
+  ├── Find/create container (per-workspace naming)
+  ├── Container starts: systemd → sshd ready
+  ├── Pick available port (2300-2500 range)
+  ├── Add pub key to container's authorized_keys
+  ├── Update known_hosts (StrictHostKeyChecking=accept-new)
+  ├── Write SSH host config to ~/.ssh/containai.d/{container}.conf
+  └── SSH into container, run agent command
+```
 
 ## Scope
 
-### Phase 1: Remove ECI Dependency
+### Phase 1: Remove ECI Dependency ✅ (fn-10-vep.32 done)
 - Remove `docker sandbox run` code path from lib/container.sh
 - Remove ECI detection logic (lib/eci.sh deprecated)
 - Update `_cai_select_context()` to always prefer Sysbox context
-- Update `cai doctor` to not require Docker Desktop
-- Remove/deprecate `cai sandbox` subcommands
-- Update all docs and tests
+
+### Phase 2: Docker Context (docker-containai)
+- Create dedicated Docker context with sysbox-runc enabled by default
+- Configure userns mapping in context
+- Add cgroup limits (memory, CPU) as defaults
 
 **Acceptance**:
-- [ ] `docker sandbox run` code path removed
-- [ ] Context selection prefers Sysbox unconditionally
-- [ ] ECI-specific flags removed
-- [ ] `cai run` works without Docker Desktop
-- [ ] `cai sandbox` deprecated
-- [ ] All docs updated
-- [ ] Tests updated
+- [ ] `docker-containai` context created via `cai setup`
+- [ ] sysbox-runc is default runtime in context
+- [ ] userns mapping configured
+- [ ] Default cgroup limits (4GB memory, 2 CPUs)
+- [ ] `cai doctor` validates context
 
-### Phase 2: Sysbox Installation & Configuration
-- Automated Sysbox installation in `cai setup`
-- Configure daemon.json with `sysbox-runc` runtime
-- Keep `runc` as default runtime
-
-**Acceptance**:
-- [ ] `cai setup` installs Sysbox
-- [ ] daemon.json configured
-- [ ] runc remains default
-- [ ] `cai doctor` verifies Sysbox
-
-### Phase 3: Security Hardening
-- Rely on Docker's default MaskedPaths/ReadonlyPaths
-- Never pass `--security-opt systempaths=unconfined`
-- Defer aggressive cap-drop and NNP (future work)
+### Phase 3: SSH Infrastructure
+- Generate dedicated SSH key during `cai setup`
+- Create `~/.ssh/containai.d/` directory
+- Add `Include ~/.ssh/containai.d/*.conf` to `~/.ssh/config`
+- Validate OpenSSH version (7.3p1+ for Include)
 
 **Acceptance**:
-- [ ] Docker defaults relied upon
-- [ ] NO `systempaths=unconfined`
-- [ ] Validation via mount metadata
-- [ ] NNP and cap-drop deferred
+- [ ] SSH key generated at `~/.config/containai/id_containai`
+- [ ] `~/.ssh/containai.d/` created with 700 permissions
+- [ ] Include directive added (no duplicates)
+- [ ] OpenSSH version check with clear error if < 7.3p1
+- [ ] Existing SSH config preserved
 
-### Phase 4: Workspace UID/GID Mapping
-- Sysbox with kernel 5.12+ uses ID-mapped mounts automatically
-- Keep existing mount path `/home/agent/workspace`
-- Pass original path via `CAI_HOST_WORKSPACE` env var
-- Entrypoint workspace logic is NON-FATAL
-
-**Acceptance**:
-- [ ] Workspace at `/home/agent/workspace`
-- [ ] `CAI_HOST_WORKSPACE` env var used
-- [ ] Entrypoint NON-FATAL
-- [ ] Kernel check skipped on macOS
-
-### Phase 5: Lima VM Fixes
-- Fix docker group membership in provision script
-- Add repair path for existing VMs
-- Enhanced diagnostics
+### Phase 4: Split Dockerfile (base/sdks/full)
+- **base**: Ubuntu 24.04 LTS + systemd + sshd + dockerd + agent user + .bashrc.d
+- **sdks**: .NET SDK, Rust, Go, Node (via nvm), Python tools (uv, pipx)
+- **full** (default): AI agents (claude, gemini, copilot, codex), gh CLI
 
 **Acceptance**:
-- [ ] Docker group fixed
-- [ ] Existing VM repair works
-- [ ] Failure mode diagnostics
+- [ ] base layer: systemd as init, sshd running, dockerd available
+- [ ] base layer: agent user, /home/agent/.bashrc.d/ pattern
+- [ ] base layer: tmux, jq, yq, bun installed
+- [ ] sdks layer: .NET SDK (latest LTS), Rust, Go
+- [ ] sdks layer: nvm with latest Node LTS
+- [ ] sdks layer: uv, pipx installed
+- [ ] full layer: all current agents installed
+- [ ] full layer: gh CLI installed
+- [ ] All layers build successfully
+- [ ] Images tagged: containai/base, containai/sdks, containai/full
 
-### Phase 6: Git Configuration
-- Import git user.name and user.email
-- Entrypoint creates symlink (not copy)
-
-**Acceptance**:
-- [ ] Git config imported
-- [ ] Symlink in entrypoint
-- [ ] Updates visible immediately
-
-### Phase 7: Container Persistence (Sandbox-Like)
-
-**Container lifecycle model**:
-- Container runs detached with PID 1 as `sleep infinity`
-- Agent sessions always use `docker exec`
-- Container stays running between sessions
-
-**Container naming** (includes full image reference):
-- Name incorporates workspace path AND **full image reference** (repo+tag)
-- Formula: `containai-$(hash "$workspace_path:$full_image_ref")`
-
-**Environment variable handling**:
-
-**Key change**: Disable entrypoint `.env` loading for Sysbox containers. All `.env` handling moves to exec-time.
-
-Rationale:
-- Entrypoint runs once at container creation (PID 1 = sleep infinity)
-- With exec-based model, entrypoint env vars don't propagate to exec sessions
-- Moving `.env` to exec-time makes updates take effect immediately and allows removals
-
-**Implementation**:
-- Add env var `CAI_SKIP_ENV_LOAD=1` at container creation
-- Entrypoint checks this and skips `_load_env_file()` when set
-- All `.env` loading happens at `docker exec` time via CLI
-
-**Precedence** (session flags win):
-1. `--env` flags (session-only, highest priority)
-2. `/mnt/agent-data/.env` (persistent, lower priority)
-
-**Parser** (mirrors entrypoint exactly, populates array by reference):
-```bash
-# Mirror src/entrypoint.sh:_load_env_file parsing rules exactly
-# Populates array by reference to avoid NUL truncation in command substitution
-_cai_parse_env_file() {
-  local env_content="$1"
-  local -n _out_array="$2"  # nameref to output array
-  
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    # Strip CRLF line endings (Windows .env files)
-    line="${line%$'\r'}"
-    
-    # Skip empty lines and whitespace-only lines (matches entrypoint)
-    [[ -z "${line// /}" ]] && continue
-    
-    # Skip comments (matches entrypoint)
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    
-    # Strip 'export' with optional whitespace (matches entrypoint)
-    if [[ "$line" =~ ^export[[:space:]]+ ]]; then
-      line="${line#export}"
-      line="${line#"${line%%[![:space:]]*}"}"
-    fi
-    
-    # Validate KEY=VALUE format (matches entrypoint)
-    if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-      local key="${line%%=*}"
-      local value="${line#*=}"
-      # Session env takes precedence - only add if not in session
-      if [[ -z "${_session_env[$key]:-}" ]]; then
-        _out_array+=(-e "$key=$value")
-      fi
-    fi
-  done <<< "$env_content"
-}
-```
-
-**CLI and container selection**:
-
-When multiple containers exist for same workspace (different images):
-- `cai run` and `cai shell` require `--agent` or `--image-tag` to disambiguate
-- Error if multiple containers match and no agent/image specified:
-  "Multiple containers exist for this workspace. Specify --agent or --image-tag."
-- `--agent` maps to image via config (e.g., `--agent claude` → `ghcr.io/containai/claude:latest`)
-
-**CLI modes**:
-
-| CLI Flag | Execution | .env Applied? |
-|----------|-----------|---------------|
-| `cai run <ws>` | `docker exec -it <ctr> <agent>` | Yes |
-| `cai run <ws> -- <cmd>` | `docker exec -it <ctr> <cmd> <args...>` | Yes |
-| `cai run --shell <ws>` | `docker exec -it <ctr> bash` | Yes |
-| `cai run --detached <ws> -- <cmd>` | `docker exec -d <ctr> <cmd>` | Yes |
-| `cai shell <ws>` | `docker exec -it <ctr> bash` | Yes |
-| `cai shell --agent claude <ws>` | Select container for claude agent | Yes |
-| `cai shell --fresh <ws>` | Recreate container then bash | Yes |
-
-**Container recreation triggers** (require `--fresh` or error):
-- `--data-volume` mismatch (via label)
-- `--volume` mismatch (via label)
-- Image mismatch (automatic - different hash)
-
-**Volume mismatch detection**:
-```bash
-# Store mounts as label at creation
-extra_mounts_label=$(printf '%s\n' "${extra_mounts[@]}" | sort | tr '\n' '|')
---label "containai.mounts=$extra_mounts_label"
-
-# Compare at reuse time
-existing_mounts=$(docker inspect -f '{{index .Config.Labels "containai.mounts"}}' "$container")
-if [[ "$existing_mounts" != "$requested_mounts" ]]; then
-  _cai_error "Container exists with different mounts. Use --fresh to recreate."
-  return 1
-fi
-```
-
-**`--name` flag is DEPRECATED**
+### Phase 5: Systemd Container Lifecycle
+- Replace entrypoint.sh with systemd services
+- containai-init.service: workspace setup (one-shot)
+- sshd.service: SSH daemon
+- dockerd.service: DinD support (optional)
+- Use SIGRTMIN+3 for graceful shutdown (100s timeout)
 
 **Acceptance**:
-- [ ] Detached with `sleep infinity`
-- [ ] `docker exec` for all sessions
-- [ ] NO `--rm` flag
-- [ ] Default command is configured agent
-- [ ] Container name includes full image reference (repo+tag)
-- [ ] `--data-volume` mismatch errors without `--fresh`
-- [ ] `--volume` mismatch errors without `--fresh` (via labels)
-- [ ] **Entrypoint `.env` loading disabled** (`CAI_SKIP_ENV_LOAD=1`)
-- [ ] **All `.env` loading at exec-time**
-- [ ] **`.env` removals take effect** (no stale entrypoint env)
-- [ ] `--env` has precedence over .env
-- [ ] Parser mirrors entrypoint exactly (CRLF, whitespace-only lines)
-- [ ] Parser uses nameref to avoid NUL truncation
-- [ ] All CLI modes apply .env consistently
-- [ ] **`cai shell` accepts `--agent`/`--image-tag`**
-- [ ] **`cai shell` accepts `--fresh`**
-- [ ] **Error if multiple containers for workspace without agent specified**
-- [ ] Arguments passed with proper quoting
-- [ ] `--name` deprecated with warning
-- [ ] Portable hashing works
+- [ ] PID 1 is `/sbin/init --log-level=err`
+- [ ] containai-init.service handles workspace discovery
+- [ ] sshd enabled and running by default
+- [ ] dockerd enabled when DinD requested
+- [ ] `docker stop --time=100` used for shutdown
+- [ ] entrypoint.sh removed or deprecated
+
+### Phase 6: SSH-Based Container Access
+- Port allocation: find available in 2300-2500 range
+- Add pub key to container's `/home/agent/.ssh/authorized_keys`
+- Update known_hosts with container's host key
+- Generate host config in `~/.ssh/containai.d/{container}.conf`
+- `cai shell` calls SSH underneath
+
+**Acceptance**:
+- [ ] Port allocation via `ss -tulpn` (not netstat)
+- [ ] Port stored in container label `containai.ssh-port`
+- [ ] Pub key injected on first connection
+- [ ] known_hosts managed with StrictHostKeyChecking=accept-new
+- [ ] Host config written per-container
+- [ ] `cai shell <ws>` connects via SSH transparently
+- [ ] `cai run <ws>` runs agent via SSH
+- [ ] `cai run <ws> -- <cmd>` runs arbitrary command via SSH
+
+### Phase 7: SSH Config Options
+- Config for agent forwarding, tunneled ports
+- `config.toml` [ssh] section for user preferences
+- Support VS Code Remote-SSH compatibility
+
+**Acceptance**:
+- [ ] `[ssh].forward_agent = true/false` in config.toml
+- [ ] `[ssh].local_forward` for port tunneling
+- [ ] Generated host configs include user settings
+- [ ] VS Code can connect using containai SSH config
+
+### Phase 8: Container Naming (Simplified)
+- Per-workspace naming (no per-image complexity)
+- Formula: `containai-$(hash "$workspace_path")`
+- No `--agent` or `--image-tag` disambiguation needed
+
+**Acceptance**:
+- [ ] Container name is workspace-only hash
+- [ ] One container per workspace
 - [ ] `--fresh` recreates container
-- [ ] Docker context passed to all container queries
+- [ ] No multi-container disambiguation needed
 
-### Phase 8: DinD Support
+### Phase 9: Security Hardening
+- cgroup limits enforced (memory, CPU)
+- Rely on Docker's default MaskedPaths/ReadonlyPaths
+- SSH key-only auth (no passwords)
+- sshd_config hardened (PermitRootLogin no, PasswordAuthentication no)
+
+**Acceptance**:
+- [ ] Memory limit: 4GB default (configurable)
+- [ ] CPU limit: 2 cores default (configurable)
+- [ ] NO `systempaths=unconfined`
+- [ ] SSH password auth disabled
+- [ ] Root SSH login disabled
+
+### Phase 10: DinD Support (existing)
 - dockerd auto-start inside Sysbox container
 - Inner containers use runc
 
 **Acceptance**:
-- [ ] dockerd starts in Sysbox
+- [ ] dockerd starts in Sysbox container
 - [ ] Inner containers use runc
 - [ ] DinD verification test passes
 
-### Phase 9: Distribution & Updates
+### Phase 11: Distribution & Updates (existing)
 - GHCR publishing
 - install.sh script
 - cai update command
 
 **Acceptance**:
-- [ ] GHCR images published
+- [ ] GHCR images published (base, sdks, full)
 - [ ] install.sh works Linux/macOS
 - [ ] `cai update` works
 
-### Out of Scope
-- Docker Desktop ECI support
+## Out of Scope
+
+- Docker Desktop ECI support (removed)
 - Windows native (WSL2 only)
 - Aggressive capability dropping (future)
 - `cai stop --remove` command
 - Hot-reload of config without `--fresh`
+- Multi-container per workspace (simplified to single container)
+- `--name` flag (removed, was deprecated)
+
+## Quick Commands
+
+```bash
+# Setup
+cai setup                  # Creates context, SSH key, config dirs
+
+# Diagnostics  
+cai doctor                 # Validates sysbox, context, SSH
+
+# Container access
+cai run /path/to/workspace           # Launch agent via SSH
+cai run /path/to/workspace -- bash   # Run command via SSH
+cai shell /path/to/workspace         # Interactive shell via SSH
+cai shell --fresh /path/to/workspace # Recreate container, then shell
+
+# SSH config location
+cat ~/.ssh/containai.d/containai-*.conf
+```
+
+## Migration Notes
+
+- **Breaking**: Containers now use systemd, not sleep infinity
+- **Breaking**: Access via SSH, not docker exec
+- **Breaking**: One container per workspace (no per-image split)
+- **New**: SSH features available (agent forwarding, tunneling)
+- **New**: VS Code Remote-SSH compatible
+- Existing containers will need `--fresh` to recreate
 
 ## Technical Details
 
@@ -248,147 +246,96 @@ fi
 ```bash
 _cai_container_name() {
   local workspace="$1"
-  local image_ref="$2"  # Full: ghcr.io/containai/claude:latest
-  local normalized hash_input
+  local normalized
   normalized=$(cd "$workspace" 2>/dev/null && pwd -P || printf '%s' "$workspace")
-  hash_input="${normalized}:${image_ref}"
   
   if command -v shasum >/dev/null 2>&1; then
-    printf 'containai-%s' "$(printf '%s' "$hash_input" | shasum -a 256 | cut -c1-12)"
+    printf 'containai-%s' "$(printf '%s' "$normalized" | shasum -a 256 | cut -c1-12)"
   elif command -v sha256sum >/dev/null 2>&1; then
-    printf 'containai-%s' "$(printf '%s' "$hash_input" | sha256sum | cut -c1-12)"
+    printf 'containai-%s' "$(printf '%s' "$normalized" | sha256sum | cut -c1-12)"
   else
-    printf 'containai-%s' "$(printf '%s' "$hash_input" | openssl dgst -sha256 | awk '{print substr($NF,1,12)}')"
+    printf 'containai-%s' "$(printf '%s' "$normalized" | openssl dgst -sha256 | awk '{print substr($NF,1,12)}')"
   fi
 }
+```
+
+### Port Allocation
+
+```bash
+_cai_find_available_port() {
+  local start=${1:-2300}
+  local end=${2:-2500}
+  
+  # Get used ports via ss (more reliable than netstat)
+  local used_ports
+  used_ports=$(ss -Htan | awk '{print $4}' | grep -oE '[0-9]+$' | sort -nu)
+  
+  for port in $(seq "$start" "$end"); do
+    if ! echo "$used_ports" | grep -qx "$port"; then
+      printf '%d' "$port"
+      return 0
+    fi
+  done
+  
+  return 1  # No port available
+}
+```
+
+### SSH Host Config Template
+
+```bash
+# ~/.ssh/containai.d/containai-{hash}.conf
+Host containai-{hash}
+    HostName 127.0.0.1
+    Port {allocated_port}
+    User agent
+    IdentityFile ~/.config/containai/id_containai
+    StrictHostKeyChecking accept-new
+    UserKnownHostsFile ~/.config/containai/known_hosts
+    ForwardAgent {yes|no from config}
+    # LocalForward lines from config
 ```
 
 ### Container Creation
 
 ```bash
-docker run -d \
+docker --context docker-containai run -d \
   --runtime=sysbox-runc \
+  --memory=4g --cpus=2 \
   -e CAI_HOST_WORKSPACE="$workspace_resolved" \
-  -e CAI_SKIP_ENV_LOAD=1 \
   -v "$workspace_resolved:/home/agent/workspace:rw" \
   -v "$data_volume:/mnt/agent-data:rw" \
-  "${extra_mount_args[@]}" \
+  -p "${ssh_port}:22" \
   -w /home/agent/workspace \
   --label "containai.workspace=$workspace_resolved" \
-  --label "containai.image=$image_ref" \
+  --label "containai.ssh-port=$ssh_port" \
   --label "containai.data-volume=$data_volume" \
-  --label "containai.mounts=$extra_mounts_label" \
-  --name "$(_cai_container_name "$workspace_resolved" "$image_ref")" \
-  "$image_ref" \
-  sleep infinity
+  --stop-timeout 100 \
+  --name "$(_cai_container_name "$workspace_resolved")" \
+  ghcr.io/containai/full:latest
 ```
 
-### Entrypoint Update
+### Pub Key Injection
 
 ```bash
-# In src/entrypoint.sh
-# Skip .env loading for Sysbox exec-based model
-if [[ "${CAI_SKIP_ENV_LOAD:-}" != "1" ]]; then
-  _load_env_file
-fi
-```
-
-### Agent Execution
-
-```bash
-_cai_exec_agent() {
+_cai_inject_ssh_key() {
   local container="$1"
-  shift
-  local -a cmd_args=("$@")
+  local pubkey
+  pubkey=$(cat ~/.config/containai/id_containai.pub)
   
-  # Build env args: session first (they have priority)
-  local -a env_args=()
-  for key in "${!_session_env[@]}"; do
-    env_args+=(-e "$key=${_session_env[$key]}")
-  done
-  
-  # Add persistent env via nameref (avoids NUL truncation)
-  local env_file
-  env_file=$(docker exec "$container" cat /mnt/agent-data/.env 2>/dev/null || true)
-  _cai_parse_env_file "$env_file" env_args
-  
-  docker exec -it "${env_args[@]}" "$container" "${cmd_args[@]}"
+  docker exec "$container" sh -c "
+    mkdir -p /home/agent/.ssh
+    chmod 700 /home/agent/.ssh
+    echo '$pubkey' >> /home/agent/.ssh/authorized_keys
+    chmod 600 /home/agent/.ssh/authorized_keys
+    chown -R agent:agent /home/agent/.ssh
+  "
 }
 ```
 
-### Multi-Container Selection
+## References
 
-```bash
-_cai_find_container() {
-  local workspace="$1"
-  local agent="${2:-}"  # Optional: specific agent
-  local context="${_selected_context:-}"  # Docker context to use
-  
-  local normalized
-  normalized=$(cd "$workspace" 2>/dev/null && pwd -P || printf '%s' "$workspace")
-  
-  # Build context args if set
-  local -a ctx_args=()
-  [[ -n "$context" ]] && ctx_args=(--context "$context")
-  
-  # If agent specified, resolve directly by container name (most efficient)
-  if [[ -n "$agent" ]]; then
-    local image_ref
-    image_ref=$(_cai_resolve_agent_image "$agent")
-    local target_name
-    target_name=$(_cai_container_name "$normalized" "$image_ref")
-    
-    if docker "${ctx_args[@]}" ps -aq --filter "name=^${target_name}$" | grep -q .; then
-      echo "$target_name"
-      return 0
-    else
-      return 1  # No container for this agent
-    fi
-  fi
-  
-  # No agent specified - find all containers for this workspace
-  local containers
-  containers=$(docker "${ctx_args[@]}" ps -aq --filter "label=containai.workspace=$normalized")
-  
-  local count
-  count=$(echo "$containers" | grep -c . || echo 0)
-  
-  if [[ "$count" -eq 0 ]]; then
-    return 1  # No container
-  elif [[ "$count" -eq 1 ]]; then
-    echo "$containers"
-    return 0
-  else
-    # Multiple containers - need agent to disambiguate
-    _cai_error "Multiple containers exist for this workspace. Specify --agent or --image-tag."
-    return 1
-  fi
-}
-```
-
-## Quick Commands
-
-```bash
-cai setup
-cai doctor
-cai run /path/to/workspace  # Launches agent with .env applied
-cai run --shell /path/to/workspace  # Bash with .env applied
-cai run --env DEBUG=1 /path/to/workspace  # DEBUG=1 overrides .env
-cai run --fresh /path/to/workspace  # Recreate container
-cai shell --agent claude /path/to/workspace  # Select specific agent container
-cai shell --fresh /path/to/workspace  # Recreate container then bash
-```
-
-## Migration Notes
-
-- New lifecycle model (sleep infinity + exec)
-- Different agent/image → different container
-- `.env` changes take effect immediately
-- Session `--env` always overrides persistent `.env`
-- Entrypoint no longer loads `.env` (exec-time loading only)
-
-## Future Enhancements (Out of Scope)
-
-- Entrypoint restructure for NNP
-- Aggressive capability dropping
-- `cai stop --remove` command
+- Sysbox systemd guide: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/systemd.md
+- SSH Include directive (OpenSSH 7.3p1+): https://man.openbsd.org/ssh_config
+- Docker contexts: https://docs.docker.com/engine/manage-resources/contexts/
+- Kernel 5.12+ for ID-mapped mounts

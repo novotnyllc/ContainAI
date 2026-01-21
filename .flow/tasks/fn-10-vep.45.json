@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T20:34:16.612648Z",
+  "depends_on": [
+    "fn-10-vep.44"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.45",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.45.md",
+  "status": "todo",
+  "title": "Create full Dockerfile layer (agents, gh CLI)",
+  "updated_at": "2026-01-21T20:34:31.550789Z"
+}

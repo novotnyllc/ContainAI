@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T20:34:18.929254Z",
+  "depends_on": [
+    "fn-10-vep.40"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.53",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.53.md",
+  "status": "todo",
+  "title": "Add cgroup limits (memory, CPU) to container creation",
+  "updated_at": "2026-01-21T20:34:32.086480Z"
+}

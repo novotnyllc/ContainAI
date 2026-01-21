@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T20:34:15.692081Z",
+  "depends_on": [
+    "fn-10-vep.41"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.42",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.42.md",
+  "status": "todo",
+  "title": "Setup ~/.ssh/containai.d/ with Include directive",
+  "updated_at": "2026-01-21T20:34:31.376480Z"
+}

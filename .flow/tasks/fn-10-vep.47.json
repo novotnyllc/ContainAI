@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T20:34:17.203348Z",
+  "depends_on": [
+    "fn-10-vep.42"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.47",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.47.md",
+  "status": "todo",
+  "title": "Implement SSH port allocation (2300-2500 range)",
+  "updated_at": "2026-01-21T20:34:31.675867Z"
+}
