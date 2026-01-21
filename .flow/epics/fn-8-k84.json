@@ -7,7 +7,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-20T16:31:52.381145Z",
   "spec_path": ".flow/specs/fn-8-k84.md",
-  "status": "open",
+  "status": "done",
   "title": "Add Mac support for import scripts",
-  "updated_at": "2026-01-20T16:31:52.381164Z"
+  "updated_at": "2026-01-21T04:28:45.370429Z"
 }

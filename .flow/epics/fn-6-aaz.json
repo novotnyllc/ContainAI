@@ -7,7 +7,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-20T10:03:17.625429Z",
   "spec_path": ".flow/specs/fn-6-aaz.md",
-  "status": "open",
+  "status": "done",
   "title": "Allowlist-based env var import",
-  "updated_at": "2026-01-20T10:03:17.625446Z"
+  "updated_at": "2026-01-21T04:28:21.459597Z"
 }
