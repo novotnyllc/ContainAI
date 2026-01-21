@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T20:57:52.992448Z",
+  "depends_on": [
+    "fn-10-vep.45"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.61",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.61.md",
+  "status": "todo",
+  "title": "Rewrite main README.md with value prop and quick start",
+  "updated_at": "2026-01-21T20:58:56.720259Z"
+}

@@ -12,5 +12,5 @@
   "spec_path": ".flow/tasks/fn-10-vep.50.md",
   "status": "todo",
   "title": "Update cai run to use SSH instead of docker exec",
-  "updated_at": "2026-01-21T20:34:31.911328Z"
+  "updated_at": "2026-01-21T20:36:33.077039Z"
 }

@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T20:57:52.816525Z",
+  "depends_on": [
+    "fn-10-vep.52"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.58",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.58.md",
+  "status": "todo",
+  "title": "Support --name flag for custom container names",
+  "updated_at": "2026-01-21T20:58:55.681780Z"
+}
