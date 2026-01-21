@@ -1,14 +1,11 @@
 {
-  "assignee": "claire@novotny.org",
-  "claim_note": "",
-  "claimed_at": "2026-01-21T09:16:07.962389Z",
   "created_at": "2026-01-21T07:45:49.715936Z",
   "depends_on": [],
   "epic": "fn-10-vep",
   "id": "fn-10-vep.15",
   "priority": null,
   "spec_path": ".flow/tasks/fn-10-vep.15.md",
-  "status": "blocked",
+  "status": "todo",
   "title": "Start dockerd and verify DinD works in sysbox",
-  "updated_at": "2026-01-21T09:21:27.305314Z"
+  "updated_at": "2026-01-21T15:46:25.013027Z"
 }

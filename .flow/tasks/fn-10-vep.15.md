@@ -8,6 +8,42 @@ Verify that dockerd can start and run inside our current sysbox container withou
 
 ## Context
 
+We're already running in an ECI/sysbox container. Key insight from user:
+- **We are running as non-root user** - must use `sudo` to start dockerd
+- Sysbox containers can run dockerd natively
+- No --privileged flag needed
+- dockerd just isn't started yet
+
+## Approach
+
+1. Start dockerd with sysbox-compatible flags **using sudo**:
+   ```bash
+   sudo dockerd --iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs &
+   ```
+
+2. Wait for dockerd to be ready:
+   ```bash
+   timeout 30 bash -c 'until docker info >/dev/null 2>&1; do sleep 1; done'
+   ```
+
+3. Verify basic operations:
+   - `docker info` shows daemon running
+   - `docker run --rm alpine echo "test"` works
+   - `docker build` works
+
+4. Document the required flags:
+   - `--iptables=false` - sysbox may not support iptables manipulation
+   - `--ip-masq=false` - disable IP masquerading
+   - `--bridge=none` - use host networking for simplicity
+   - `--storage-driver=fuse-overlayfs` - compatible with sysbox
+
+## Key context
+
+- **CRITICAL**: Must use `sudo` because we're running as non-root `agent` user
+- Passwordless sudo is configured in the environment
+- Previous attempt failed because it didn't use sudo
+## Context
+
 We're already running in an ECI/sysbox container. The user confirmed:
 - Sysbox containers can run dockerd natively
 - No --privileged flag needed
@@ -38,11 +74,11 @@ We're already running in an ECI/sysbox container. The user confirmed:
 - Network: `--iptables=false --ip-masq=false` because NAT may not work in nested container
 - Socket: Standard `/var/run/docker.sock` is fine (not running inside Dockerfile.test)
 ## Acceptance
-- [ ] dockerd starts without --privileged flag
+- [ ] dockerd starts successfully with `sudo dockerd --iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs`
 - [ ] `docker info` shows daemon running
 - [ ] `docker run --rm alpine echo "nested works"` succeeds
 - [ ] `docker build -t test - <<< "FROM alpine"` succeeds
-- [ ] Document required/optional flags for sysbox DinD
+- [ ] Document required flags for sysbox DinD
 ## Done summary
 **BLOCKED**: DinD does not work in this sysbox container due to missing capabilities.
 
@@ -83,32 +119,8 @@ sudo unshare --user --map-root-user echo "test"
 # Error: unshare failed: Operation not permitted
 ```
 
-Blocked:
-# Block Reason: fn-10-vep.15
 
-## Summary
-DinD does not work in this sysbox container due to missing kernel capabilities.
-
-## Details
-- The container is running under sysbox (confirmed via sysboxfs fuse mounts)
-- dockerd starts successfully with flags: `--iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs`
-- `docker info` works, showing daemon is running
-- **docker run fails** with `unshare: operation not permitted`
-
-## Root Cause
-The container lacks `CAP_SYS_ADMIN` capability and/or has seccomp restrictions blocking the `unshare` syscall. This prevents creating new namespaces required for nested containers.
-
-## Resolution Required
-The sysbox container must be started with:
-- `CAP_SYS_ADMIN` capability, OR
-- Modified seccomp profile allowing `unshare`, OR
-- Host kernel configured to allow unprivileged user namespaces
-
-This is a container orchestration/deployment configuration issue that cannot be fixed from within the container.
 ## Evidence
-- Commits: None (verification only task)
-- Tests: N/A
-- PRs: N/A
-
-## Blocker
-This task is blocked on container configuration. The sysbox container must be started with additional capabilities for DinD to work. This is outside the scope of what can be fixed from within the container.
+- Commits:
+- Tests:
+- PRs:

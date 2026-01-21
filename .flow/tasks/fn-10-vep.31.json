@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T15:47:24.870763Z",
+  "depends_on": [
+    "fn-10-vep.29"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.31",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.31.md",
+  "status": "todo",
+  "title": "Convert ASCII box diagrams to mermaid",
+  "updated_at": "2026-01-21T15:47:47.274201Z"
+}

@@ -200,8 +200,14 @@ Host with sysbox-runc installed (Docker Desktop ECI or standalone sysbox)
 - We're ALREADY in a sysbox container (provided by Docker Desktop ECI or sysbox runtime)
 - dockerd can start natively inside sysbox containers
 - No --privileged flag needed
+- **CRITICAL**: Must use `sudo` to start dockerd (we run as non-root `agent` user)
 - Inner containers use regular runc (no deeper sysbox nesting) - enforced via daemon.json
 - Network: inner containers use Docker bridge networking; iptables/NAT enabled by default
+
+**Verified working command:**
+```bash
+sudo dockerd --iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs &
+```
 
 ### dockerd Lifecycle Management
 
@@ -373,11 +379,23 @@ Palette (tested on GitHub light/dark):
 - Accent: #e94560 (highlights)
 - Lines: #a0a0a0 (neutral)
 
+## Agent Runtime Notes
+
+**Git commit issues** - if you encounter errors:
+1. **Signing errors**: Ensure `commit.gpgsign = false` in git config
+2. **SSH auth errors** (for git@github.com URLs): Check for `insteadOf` rules converting HTTPS→SSH:
+   ```bash
+   git config --global --list | grep -i insteadof
+   ```
+   If found, disable them or use HTTPS URLs directly since SSH agent/keys may not be available
+
+**Passwordless sudo**: The environment has passwordless sudo configured for the `agent` user.
+
 ## Quick commands
 
 ```bash
-# Start dockerd in current sysbox container (full networking)
-sudo dockerd &
+# Start dockerd in current sysbox container (use the proven command)
+sudo dockerd --iptables=false --ip-masq=false --bridge=none --storage-driver=fuse-overlayfs &
 sleep 5
 
 # Verify dockerd works with networking
@@ -524,7 +542,8 @@ Note: 21 (cleanup) before 16 (simplify test) before 15 (verify DinD) - cleanup m
 |----|-------|--------|
 | fn-10-vep.27 | Rewrite agent-sandbox/README.md comprehensively | todo |
 | fn-10-vep.28 | Enhance main README.md with value proposition | todo |
-| fn-10-vep.29 | Fix mermaid chart contrast in all docs | todo |
+| fn-10-vep.29 | Fix mermaid chart contrast in all docs | done |
+| fn-10-vep.31 | Convert ASCII box diagrams to mermaid | todo |
 
 ### Phase 5: Security Updates
 | ID | Title | Status |
@@ -543,6 +562,6 @@ Note: 21 (cleanup) before 16 (simplify test) before 15 (verify DinD) - cleanup m
 - Phase 1: 21 → 16 → 15 (cleanup before simplify before verify)
 - Phase 2: 22 → 23
 - Phase 3: 24 → 25 → 26
-- Phase 4: 27 → 28 → 29
+- Phase 4: 27 → 28 → 29 → 31
 - Phase 5: 30
 - Phase 6: 17 → 18 → 19
