@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T08:18:44.283334Z",
+  "depends_on": [
+    "fn-10-vep.27"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.28",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.28.md",
+  "status": "todo",
+  "title": "Enhance main README.md with value proposition",
+  "updated_at": "2026-01-21T08:20:19.275515Z"
+}

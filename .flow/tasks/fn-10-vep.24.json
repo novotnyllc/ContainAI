@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T08:18:43.624877Z",
+  "depends_on": [
+    "fn-10-vep.22"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.24",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.24.md",
+  "status": "todo",
+  "title": "Set up GitHub Container Registry publishing",
+  "updated_at": "2026-01-21T08:20:18.594757Z"
+}

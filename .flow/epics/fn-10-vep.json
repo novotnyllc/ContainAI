@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-10-vep",
+  "created_at": "2026-01-21T04:41:46.482493Z",
+  "depends_on_epics": [],
+  "id": "fn-10-vep",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-10-vep.md",
+  "status": "open",
+  "title": "Docker-in-Docker, Sysbox Integration & Distribution Overhaul",
+  "updated_at": "2026-01-21T08:18:35.309552Z"
+}

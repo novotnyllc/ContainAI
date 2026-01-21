@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T08:18:43.793675Z",
+  "depends_on": [
+    "fn-10-vep.24"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.25",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.25.md",
+  "status": "todo",
+  "title": "Create install.sh distribution script",
+  "updated_at": "2026-01-21T08:20:18.764119Z"
+}

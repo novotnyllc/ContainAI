@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T08:18:42.974869Z",
+  "depends_on": [],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.20",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.20.md",
+  "status": "todo",
+  "title": "Reorganize repo structure to match CLI tool conventions",
+  "updated_at": "2026-01-21T08:18:58.636861Z"
+}

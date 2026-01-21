@@ -1,0 +1,18 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T07:46:36.665070Z",
+  "depends_on": [
+    "fn-10-vep.15",
+    "fn-10-vep.16",
+    "fn-10-vep.17"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.18",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.18.md",
+  "status": "todo",
+  "title": "Create comprehensive test suite",
+  "updated_at": "2026-01-21T07:47:12.285485Z"
+}

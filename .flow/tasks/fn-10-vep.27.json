@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T08:18:44.121719Z",
+  "depends_on": [
+    "fn-10-vep.20"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.27",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.27.md",
+  "status": "todo",
+  "title": "Rewrite agent-sandbox/README.md comprehensively",
+  "updated_at": "2026-01-21T08:20:19.103463Z"
+}

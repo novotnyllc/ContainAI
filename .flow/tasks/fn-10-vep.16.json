@@ -1,0 +1,17 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T07:46:05.028932Z",
+  "depends_on": [
+    "fn-10-vep.15",
+    "fn-10-vep.21"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.16",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.16.md",
+  "status": "todo",
+  "title": "Simplify Dockerfile.test (remove sysbox install)",
+  "updated_at": "2026-01-21T08:20:18.090181Z"
+}

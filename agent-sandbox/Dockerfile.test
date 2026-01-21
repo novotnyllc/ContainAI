@@ -19,7 +19,9 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=UTC
+    TZ=UTC \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 # Install base dependencies
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

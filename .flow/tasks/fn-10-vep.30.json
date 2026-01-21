@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T08:18:44.609988Z",
+  "depends_on": [],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.30",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.30.md",
+  "status": "todo",
+  "title": "Update SECURITY.md for GitHub advisory pattern",
+  "updated_at": "2026-01-21T08:20:05.986346Z"
+}
