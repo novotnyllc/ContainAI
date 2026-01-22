@@ -324,7 +324,7 @@ cd src
 docker build -t containai-test -f Dockerfile.test .
 
 # Run the built-in verification tests (requires --privileged for nested Docker)
-docker run --privileged containai-test /usr/local/bin/test-docker-sysbox.sh
+docker run --privileged containai-test /usr/local/bin/test-dind.sh
 
 # Interactive testing
 docker run --privileged -it containai-test
@@ -360,7 +360,7 @@ env -u DOCKER_HOST docker --context containai-secure info
 
 ### Startup Script
 
-The container runs `/usr/local/bin/start-test-docker.sh` on startup, which:
+The container runs `/usr/local/bin/start-dockerd.sh` on startup, which:
 1. Starts Sysbox services (sysbox-mgr, sysbox-fs)
 2. Starts dockerd on `/var/run/docker-test.sock`
 3. Waits for Docker to be ready
@@ -368,7 +368,7 @@ The container runs `/usr/local/bin/start-test-docker.sh` on startup, which:
 
 ### Test Helper
 
-A test helper script is included at `/usr/local/bin/test-docker-sysbox.sh` that verifies:
+A test helper script is included at `/usr/local/bin/test-dind.sh` that verifies:
 - Docker daemon is running
 - Available runtimes (should include sysbox-runc)
 - Container runs with default runtime

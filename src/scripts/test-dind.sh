@@ -1,7 +1,7 @@
 #!/bin/bash
 # Test that Docker + Sysbox is working correctly
 # Run after start-dockerd.sh has initialized the environment
-set -e
+set -euo pipefail
 
 echo "=== Docker Info ==="
 docker info
