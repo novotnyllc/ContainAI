@@ -73,8 +73,8 @@ Implement workspace-to-container auto-mapping with clear lifecycle model: `--ini
 - [ ] Data volume persists even when container is removed with --fresh
 - [ ] FR-4 mount validation prevents tainted containers from being used by run
 ## Done summary
-Implemented workspace-to-container auto-mapping with deterministic naming via SHA-256 path hashing. Containers use tini (--init) as PID 1 for zombie reaping, running sleep infinity as a child process. Agent sessions attach via docker exec, allowing containers to persist between sessions. Added --fresh flag to remove and recreate containers while preserving data volumes. FR-4 mount validation prevents tainted containers from being used by run.
+Implemented workspace-to-container auto-mapping with deterministic naming via SHA-256 path hashing. Containers use tini (--init) as PID 1 for zombie reaping, running sleep infinity as a child process. Agent sessions attach via docker exec, allowing containers to persist between sessions. Added --fresh flag to remove and recreate containers while preserving data volumes. FR-4 mount validation prevents tainted containers from being used by run. Also added --agent and --image-tag options to cai shell command for consistency.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c87802a, b003980, b867944, 5381f99, bf9c46e, c66990f, 793ab6b
+- Tests: shell script syntax validation, git log verification, help output review
 - PRs:
