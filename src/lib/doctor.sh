@@ -191,6 +191,7 @@ _cai_select_context() {
 # Returns: 0=available, 1=not available
 # Outputs: Sets _CAI_SYSBOX_CONTEXT_ERROR with reason on failure
 # Error codes:
+#   socket_not_found - Socket file does not exist (unix socket contexts)
 #   context_not_found - Docker context not configured
 #   timeout - Connection timed out
 #   permission_denied - User not in docker group (Lima/macOS)
@@ -205,6 +206,17 @@ _cai_sysbox_available_for_context() {
     if ! docker context inspect "$context_name" >/dev/null 2>&1; then
         _CAI_SYSBOX_CONTEXT_ERROR="context_not_found"
         return 1
+    fi
+
+    # For unix socket contexts, check if socket file exists before attempting docker info
+    local context_host
+    context_host=$(docker context inspect "$context_name" --format '{{.Endpoints.docker.Host}}' 2>/dev/null) || context_host=""
+    if [[ "$context_host" == unix://* ]]; then
+        local socket_path="${context_host#unix://}"
+        if [[ ! -S "$socket_path" ]]; then
+            _CAI_SYSBOX_CONTEXT_ERROR="socket_not_found"
+            return 1
+        fi
     fi
 
     # Check if we can connect to the daemon on this context

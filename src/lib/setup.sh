@@ -966,7 +966,8 @@ provision:
 
       # Install Docker Engine
       curl -fsSL https://get.docker.com | sh
-      usermod -aG docker "${LIMA_CIDATA_USER}"
+      # Add Lima user to docker group (default to 'lima' if LIMA_CIDATA_USER not set)
+      usermod -aG docker "${LIMA_CIDATA_USER:-lima}"
 
       # Install Sysbox (architecture-specific)
       ARCH=$(dpkg --print-architecture)
@@ -1250,14 +1251,14 @@ _cai_lima_wait_socket() {
 
             # Try to repair docker access
             if _cai_lima_repair_docker_access "$dry_run"; then
-                # Wait for socket to come back after VM restart
+                # Wait for socket to come back after VM restart (reuse caller's timeout)
                 _cai_step "Waiting for socket after VM restart"
                 wait_count=0
                 while [[ ! -S "$socket_path" ]]; do
                     sleep 1
                     wait_count=$((wait_count + 1))
-                    if [[ $wait_count -ge 60 ]]; then
-                        _cai_error "Socket did not reappear after repair"
+                    if [[ $wait_count -ge $timeout ]]; then
+                        _cai_error "Socket did not reappear after repair (waited ${timeout}s)"
                         return 1
                     fi
                 done
