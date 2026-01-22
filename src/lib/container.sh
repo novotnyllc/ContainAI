@@ -197,10 +197,67 @@ _containai_check_docker() {
 # Container naming
 # ==============================================================================
 
-# Generate sanitized container name from git repo/branch or directory
-# Format: <repo>-<branch> (sanitized)
+# Portable path hashing for container naming
+# Normalizes path then hashes with SHA-256, returns first 12 hex characters
+# Works on Linux (sha256sum), macOS (shasum -a 256), and fallback (openssl)
+# Arguments: $1 = path to hash
+# Returns: 12-character hex hash via stdout
+_cai_hash_path() {
+    local path="$1"
+    local normalized hash
+
+    # Normalize path: resolve symlinks and canonicalize
+    # cd + pwd -P is most portable; fallback to path as-is if it doesn't exist yet
+    if normalized=$(cd -- "$path" 2>/dev/null && pwd -P); then
+        : # success
+    else
+        # Path doesn't exist or isn't a directory - use as-is
+        normalized="$path"
+    fi
+
+    # Hash with most available tool (all output same format for same input)
+    if command -v sha256sum >/dev/null 2>&1; then
+        # Linux: sha256sum
+        hash=$(printf '%s' "$normalized" | sha256sum | cut -c1-12)
+    elif command -v shasum >/dev/null 2>&1; then
+        # macOS: shasum -a 256
+        hash=$(printf '%s' "$normalized" | shasum -a 256 | cut -c1-12)
+    elif command -v openssl >/dev/null 2>&1; then
+        # Fallback: openssl dgst -sha256
+        hash=$(printf '%s' "$normalized" | openssl dgst -sha256 | awk '{print substr($NF,1,12)}')
+    else
+        # Last resort: use basename as fallback (no hashing available)
+        hash=$(printf '%s' "$(basename "$normalized")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+        hash="${hash:0:12}"
+    fi
+
+    printf '%s' "$hash"
+}
+
+# Generate container name from workspace path hash
+# Format: containai-<12-char-hash>
+# Arguments: $1 = workspace path (required)
 # Returns: container name via stdout
 _containai_container_name() {
+    local workspace_path="$1"
+    local hash name
+
+    if [[ -z "$workspace_path" ]]; then
+        # Fallback to current directory if no workspace provided
+        workspace_path="$(pwd)"
+    fi
+
+    hash=$(_cai_hash_path "$workspace_path")
+    name="containai-${hash}"
+
+    printf '%s' "$name"
+}
+
+# Legacy container name generation (git repo/branch based)
+# Kept for backward compatibility with existing containers
+# Format: <repo>-<branch> (sanitized)
+# Returns: container name via stdout
+_containai_container_name_legacy() {
     local name repo_name branch_name
 
     # Guard git usage to avoid "command not found" noise in minimal environments
@@ -712,6 +769,7 @@ _containai_start_container() {
     local ack_host_docker_socket=false
     local volume_mismatch_warn=false
     local restart_flag=false
+    local fresh_flag=false
     local force_flag=false
     local detached_flag=false
     local shell_flag=false
@@ -849,6 +907,10 @@ _containai_start_container() {
                 ;;
             --restart)
                 restart_flag=true
+                shift
+                ;;
+            --fresh)
+                fresh_flag=true
                 shift
                 ;;
             --force)
@@ -1024,9 +1086,9 @@ _containai_start_container() {
         docker_cmd=(docker --context "$selected_context")
     fi
 
-    # Get container name
+    # Get container name (based on workspace path hash for deterministic naming)
     if [[ -z "$container_name" ]]; then
-        container_name="$(_containai_container_name)"
+        container_name="$(_containai_container_name "$workspace_resolved")"
     fi
     if [[ "$quiet_flag" != "true" ]]; then
         echo "Container: $container_name"
@@ -1048,7 +1110,43 @@ _containai_start_container() {
         container_state="none"
     fi
 
-    # Handle --restart flag
+    # Handle --fresh flag (removes and recreates container, preserves data volume)
+    # --fresh is equivalent to --restart but with clearer semantics for the new lifecycle model
+    if [[ "$fresh_flag" == "true" && "$container_state" != "none" ]]; then
+        # Check if container belongs to ContainAI using context-aware inspection (label or image fallback)
+        local fresh_label_val fresh_image_fallback
+        fresh_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || fresh_label_val=""
+        if [[ "$fresh_label_val" != "true" ]]; then
+            # Fallback: check if image is from our repo (for legacy containers without label)
+            fresh_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || fresh_image_fallback=""
+            if [[ "$fresh_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                echo "[ERROR] Cannot use --fresh - container '$container_name' was not created by ContainAI" >&2
+                echo "Remove the conflicting container manually if needed: docker rm -f '$container_name'" >&2
+                return 1
+            fi
+        fi
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "Removing existing container (--fresh)..."
+        fi
+        # Stop container, ignoring "not running" errors but surfacing others
+        local fresh_stop_output
+        fresh_stop_output="$("${docker_cmd[@]}" stop "$container_name" 2>&1)" || {
+            if ! printf '%s' "$fresh_stop_output" | grep -qiE "is not running"; then
+                echo "$fresh_stop_output" >&2
+            fi
+        }
+        # Remove container, ignoring "not found" errors but surfacing others
+        local fresh_rm_output
+        fresh_rm_output="$("${docker_cmd[@]}" rm "$container_name" 2>&1)" || {
+            if ! printf '%s' "$fresh_rm_output" | grep -qiE "no such container|not found"; then
+                echo "$fresh_rm_output" >&2
+                return 1
+            fi
+        }
+        container_state="none"
+    fi
+
+    # Handle --restart flag (legacy, same behavior as --fresh)
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
         # Check if container belongs to ContainAI using context-aware inspection (label or image fallback)
         local label_val restart_image_fallback
@@ -1186,7 +1284,7 @@ _containai_start_container() {
                     echo "  Running:   $exited_image" >&2
                     echo "  Requested: $resolved_image" >&2
                 fi
-                echo "[ERROR] Image mismatch prevents start. Use --restart to recreate with requested agent." >&2
+                echo "[ERROR] Image mismatch prevents start. Use --fresh to recreate with requested agent." >&2
                 return 1
             fi
             # Check volume match using context-aware docker command
@@ -1199,43 +1297,46 @@ _containai_start_container() {
                     echo "  Requested: $data_volume" >&2
                 fi
                 if [[ "$volume_mismatch_warn" != "true" ]]; then
-                    echo "[ERROR] Volume mismatch prevents start. Use --restart to recreate." >&2
+                    echo "[ERROR] Volume mismatch prevents start. Use --fresh to recreate." >&2
                     return 1
                 fi
             fi
-            # Skip preflight checks - context selection already validated isolation
-            # If agent_args provided, start container detached then exec with args
-            # docker start -ai doesn't support passing args to the entrypoint
-            if [[ ${#agent_args[@]} -gt 0 ]]; then
+            # Start stopped container (PID 1 is sleep infinity, container stays running)
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "Starting stopped container..."
+            fi
+            "${docker_cmd[@]}" start "$container_name" >/dev/null
+            # Wait for container to be running (poll with bounded timeout)
+            local wait_count=0
+            local max_wait=30
+            while [[ $wait_count -lt $max_wait ]]; do
+                local state
+                state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || state=""
+                if [[ "$state" == "running" ]]; then
+                    break
+                fi
+                sleep 0.5
+                ((wait_count++))
+            done
+            if [[ $wait_count -ge $max_wait ]]; then
+                echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
+                return 1
+            fi
+            # Execute agent session via docker exec (container stays running after exec exits)
+            if [[ "$shell_flag" == "true" ]]; then
+                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" bash
+            elif [[ "$detached_flag" == "true" ]]; then
+                # Detached mode - just start the container and return
                 if [[ "$quiet_flag" != "true" ]]; then
-                    echo "Starting stopped container with arguments..."
+                    echo "Container started in detached mode"
                 fi
-                "${docker_cmd[@]}" start "$container_name" >/dev/null
-                # Wait for container to be running (poll with bounded timeout)
-                local wait_count=0
-                local max_wait=30
-                while [[ $wait_count -lt $max_wait ]]; do
-                    local state
-                    state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || state=""
-                    if [[ "$state" == "running" ]]; then
-                        break
-                    fi
-                    sleep 0.5
-                    ((wait_count++))
-                done
-                if [[ $wait_count -ge $max_wait ]]; then
-                    echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
-                    return 1
-                fi
-                # Run agent with arguments
-                local -a exec_cmd=("$agent")
-                exec_cmd+=("${agent_args[@]}")
-                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
             else
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "Starting stopped container..."
+                # Run agent with any provided arguments
+                local -a exec_cmd=("$agent")
+                if [[ ${#agent_args[@]} -gt 0 ]]; then
+                    exec_cmd+=("${agent_args[@]}")
                 fi
-                "${docker_cmd[@]}" start -ai "$container_name"
+                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
             fi
             ;;
         none)
@@ -1249,15 +1350,17 @@ _containai_start_container() {
             local -a vol_args=()
             vol_args+=("-v" "$data_volume:/mnt/agent-data")
 
-            # Start container with Sysbox runtime
+            # Create new container with sleep infinity as PID 1 (long-lived init)
+            # Agent sessions use docker exec; container stays running between sessions
             if [[ "$quiet_flag" != "true" ]]; then
                 if [[ -n "$selected_context" ]]; then
-                    echo "Starting new container (Sysbox mode, context: $selected_context)..."
+                    echo "Creating new container (Sysbox mode, context: $selected_context)..."
                 else
-                    echo "Starting new container (Sysbox mode)..."
+                    echo "Creating new container (Sysbox mode)..."
                 fi
             fi
 
+            # Build container creation args - always detached with sleep infinity
             local -a args=()
             if [[ -n "$selected_context" ]]; then
                 args+=(--context "$selected_context")
@@ -1266,20 +1369,8 @@ _containai_start_container() {
             args+=(--runtime=sysbox-runc)
             args+=(--name "$container_name")
             args+=(--label "$_CONTAINAI_LABEL")
-
-            # Interactive/TTY flags
-            if [[ "$shell_flag" == "true" ]]; then
-                args+=(-d)
-            elif [[ "$detached_flag" == "true" ]]; then
-                args+=(-d)
-            else
-                args+=(-it)
-            fi
-
-            # Remove container on exit (only if not detached)
-            if [[ "$detached_flag" != "true" && "$shell_flag" != "true" ]]; then
-                args+=(--rm)
-            fi
+            args+=(--label "containai.workspace=$workspace_resolved")
+            args+=(-d)  # Always detached - PID 1 is sleep infinity
 
             # Volume mounts
             args+=("${vol_args[@]}")
@@ -1302,44 +1393,47 @@ _containai_start_container() {
             # Image
             args+=("$resolved_image")
 
-            # Command: agent with any args
-            args+=("$agent")
-            if [[ ${#agent_args[@]} -gt 0 ]]; then
-                args+=("${agent_args[@]}")
+            # PID 1: sleep infinity (container stays running between sessions)
+            args+=(sleep infinity)
+
+            # Create the container
+            if ! docker "${args[@]}" >/dev/null; then
+                echo "[ERROR] Failed to create container" >&2
+                return 1
             fi
 
+            # Wait for container to be running
+            local wait_count=0
+            local max_wait=30
+            while [[ $wait_count -lt $max_wait ]]; do
+                local state
+                state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || state=""
+                if [[ "$state" == "running" ]]; then
+                    break
+                fi
+                sleep 0.5
+                ((wait_count++))
+            done
+            if [[ $wait_count -ge $max_wait ]]; then
+                echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
+                return 1
+            fi
+
+            # Execute agent session via docker exec (container stays running after exec exits)
             if [[ "$shell_flag" == "true" ]]; then
-                # For shell mode, start container with sleep infinity to keep it running
-                # Build args without the agent command
-                local -a shell_args=()
-                if [[ -n "$selected_context" ]]; then
-                    shell_args+=(--context "$selected_context")
-                fi
-                shell_args+=(run)
-                shell_args+=(--runtime=sysbox-runc)
-                shell_args+=(--name "$container_name")
-                shell_args+=(--label "$_CONTAINAI_LABEL")
-                shell_args+=(-d)
-                shell_args+=("${vol_args[@]}")
-                shell_args+=(-v "$workspace_resolved:/home/agent/workspace")
-                for vol in "${extra_volumes[@]}"; do
-                    shell_args+=(-v "$vol")
-                done
-                # Environment variables - pass original workspace path for symlink strategy
-                shell_args+=(-e "CAI_HOST_WORKSPACE=$workspace_resolved")
-                for env_var in "${env_vars[@]}"; do
-                    shell_args+=(-e "$env_var")
-                done
-                shell_args+=(-w /home/agent/workspace)
-                shell_args+=("$resolved_image")
-                shell_args+=(sleep infinity)
-                if ! docker "${shell_args[@]}" >/dev/null; then
-                    echo "[ERROR] Failed to create container" >&2
-                    return 1
-                fi
                 "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" bash
+            elif [[ "$detached_flag" == "true" ]]; then
+                # Detached mode - container is already running, just report success
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "Container created in detached mode"
+                fi
             else
-                docker "${args[@]}"
+                # Run agent with any provided arguments
+                local -a exec_cmd=("$agent")
+                if [[ ${#agent_args[@]} -gt 0 ]]; then
+                    exec_cmd+=("${agent_args[@]}")
+                fi
+                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
             fi
             ;;
         *)

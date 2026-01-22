@@ -166,13 +166,19 @@ Run Options:
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
-  --name <name>         Container name (default: auto-generated)
-  --restart             Force recreate container
+  --name <name>         Container name (default: auto-generated from path hash)
+  --fresh               Remove and recreate container (preserves data volume)
+  --restart             Force recreate container (alias for --fresh)
   --force               Skip isolation checks (for testing only)
   --detached, -d        Run in background
   --quiet, -q           Suppress verbose output
   -e, --env <VAR=val>   Set environment variable (repeatable)
   -- <args>             Pass arguments to agent
+
+Container Lifecycle:
+  Containers use sleep infinity as PID 1 (long-lived init).
+  Agent sessions attach via docker exec. Container stays running between sessions.
+  Same workspace path always maps to same container (deterministic naming via hash).
 
 Global Options:
   -h, --help            Show help (use with subcommand for subcommand help)
@@ -727,6 +733,7 @@ _containai_shell_cmd() {
     local explicit_config=""
     local container_name=""
     local restart_flag=""
+    local fresh_flag=""
     local force_flag=""
     local quiet_flag=""
     local debug_flag=""
@@ -817,6 +824,10 @@ _containai_shell_cmd() {
                 ;;
             --restart)
                 restart_flag="--restart"
+                shift
+                ;;
+            --fresh)
+                fresh_flag="--fresh"
                 shift
                 ;;
             --force)
@@ -930,6 +941,9 @@ _containai_shell_cmd() {
     if [[ -n "$restart_flag" ]]; then
         start_args+=("$restart_flag")
     fi
+    if [[ -n "$fresh_flag" ]]; then
+        start_args+=("$fresh_flag")
+    fi
     if [[ -n "$force_flag" ]]; then
         start_args+=("$force_flag")
     fi
@@ -986,6 +1000,7 @@ _containai_run_cmd() {
     local allow_host_docker_socket=""
     local ack_host_docker_socket=""
     local restart_flag=""
+    local fresh_flag=""
     local force_flag=""
     local detached_flag=""
     local quiet_flag=""
@@ -1132,6 +1147,10 @@ _containai_run_cmd() {
                 restart_flag="--restart"
                 shift
                 ;;
+            --fresh)
+                fresh_flag="--fresh"
+                shift
+                ;;
             --force)
                 force_flag="--force"
                 shift
@@ -1262,6 +1281,9 @@ _containai_run_cmd() {
     fi
     if [[ -n "$restart_flag" ]]; then
         start_args+=("$restart_flag")
+    fi
+    if [[ -n "$fresh_flag" ]]; then
+        start_args+=("$fresh_flag")
     fi
     if [[ -n "$force_flag" ]]; then
         start_args+=("$force_flag")
