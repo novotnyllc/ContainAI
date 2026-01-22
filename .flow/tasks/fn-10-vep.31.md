@@ -56,9 +56,8 @@ The codebase has 3 ASCII diagrams with nested box structures that should be conv
 - [ ] Diagrams render correctly in GitHub dark mode
 - [ ] ASCII version removed (no duplicates)
 ## Done summary
-TBD
-
+Converted 3 ASCII box diagrams to mermaid flowcharts with dark theme styling: README.md architecture diagram, quickstart.md runtime decision tree, and quickstart.md "What Just Happened" architecture diagram.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c0b0704, 3cf17d9, 21f46e0
+- Tests: visual inspection of mermaid syntax
 - PRs:
