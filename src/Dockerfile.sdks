@@ -1,0 +1,205 @@
+# syntax=docker/dockerfile:1
+# ContainAI SDKs Layer - Development SDKs and Tools
+#
+# Includes: .NET SDK, Rust, Go, Node.js (via nvm), Python tools (uv, pipx)
+#
+# Usage (from repo root, requires BuildKit):
+#   docker build -t containai/sdks -f src/Dockerfile.sdks src/
+#
+# Requires containai/base:latest to be built first:
+#   docker build -t containai/base -f src/Dockerfile.base src/
+#
+# Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
+
+# =============================================================================
+# .NET SDK INSTALLER STAGE
+# Downloads .NET SDK to copy into final image
+# =============================================================================
+FROM buildpack-deps:bookworm-curl AS dotnet-installer
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Build arguments for .NET channel selection
+# Default to 10.0 to ensure consistent builds regardless of LTS status
+# Can override with --build-arg DOTNET_CHANNEL=lts to track latest LTS
+ARG DOTNET_CHANNEL=10.0
+
+ENV DOTNET_ROOT=/usr/share/dotnet
+ENV PATH=${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libatomic1 \
+        libc6 \
+        libgcc-s1 \
+        libgssapi-krb5-2 \
+        libicu72 \
+        libssl3 \
+        libstdc++6 \
+        zlib1g && \
+    curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel ${DOTNET_CHANNEL} --install-dir ${DOTNET_ROOT}
+
+# Install PowerShell global tool
+RUN mkdir -p ${DOTNET_ROOT}/tools && \
+    dotnet tool install PowerShell --tool-path ${DOTNET_ROOT}/tools && \
+    dotnet nuget locals all --clear && \
+    # Remove cached nupkg files to reduce image size
+    find ${DOTNET_ROOT}/tools -print | grep -i '.*[.]nupkg$' | xargs rm -f
+
+# =============================================================================
+# MAIN IMAGE
+# =============================================================================
+FROM containai/base:latest
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# =============================================================================
+# .NET RUNTIME DEPENDENCIES AND SDK
+# =============================================================================
+USER root
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        # .NET runtime dependencies
+        libatomic1 \
+        libc6 \
+        libgcc-s1 \
+        libgssapi-krb5-2 \
+        libicu74 \
+        libssl3t64 \
+        libstdc++6 \
+        tzdata \
+        zlib1g \
+        # Build essentials (needed for native compilation)
+        build-essential \
+        # Python base (required for pipx)
+        python3 \
+        python3-pip \
+        python3-venv \
+        python3-dev \
+        pipx
+
+# Copy .NET SDK from installer stage
+ENV DOTNET_ROOT=/home/agent/.dotnet
+ENV PATH=${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}
+COPY --from=dotnet-installer --chown=agent:agent /usr/share/dotnet /home/agent/.dotnet
+
+# .NET environment variables
+ENV DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
+    DOTNET_NOLOGO=true \
+    DOTNET_USE_POLLING_FILE_WATCHER=true \
+    NUGET_XMLDOC_MODE=skip \
+    DOTNET_ROLL_FORWARD=Major \
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+# =============================================================================
+# RUST (via rustup)
+# =============================================================================
+USER agent
+WORKDIR /home/agent
+
+# Install Rust with minimal profile (no docs, clippy, rustfmt by default)
+# These can be added later with: rustup component add clippy rustfmt
+ARG RUST_VERSION=stable
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain ${RUST_VERSION} --profile minimal && \
+    # Source cargo env and verify installation
+    . /home/agent/.cargo/env && \
+    rustc --version && \
+    cargo --version
+
+ENV PATH="/home/agent/.cargo/bin:${PATH}"
+
+# =============================================================================
+# GO (from official tarball)
+# =============================================================================
+ARG GO_VERSION=1.23.5
+ARG GO_SHA256_AMD64=cbcad4a6482107c7c7926df1608106c189417163428200ce357695cc7e01d091
+ARG GO_SHA256_ARM64=47c84d332172c1cbd4c2db7d2a610b494ae0c9c030f5f598e00c47cc747b33f1
+
+USER root
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then GO_ARCH="amd64"; EXPECTED_SHA256="${GO_SHA256_AMD64}"; \
+    elif [ "$ARCH" = "arm64" ]; then GO_ARCH="arm64"; EXPECTED_SHA256="${GO_SHA256_ARM64}"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz && \
+    echo "${EXPECTED_SHA256}  /tmp/go.tar.gz" | sha256sum -c - && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
+
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/home/agent/go
+ENV PATH="${GOPATH}/bin:${GOROOT}/bin:${PATH}"
+
+# Create Go workspace directories for agent user
+USER agent
+RUN mkdir -p /home/agent/go/bin /home/agent/go/src /home/agent/go/pkg
+
+# =============================================================================
+# NODE.JS (via nvm)
+# =============================================================================
+USER agent
+WORKDIR /home/agent
+
+ENV NVM_DIR=/home/agent/.nvm
+
+# Install nvm and latest LTS Node.js
+ARG NVM_VERSION=0.40.1
+RUN curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh" | bash && \
+    . "${NVM_DIR}/nvm.sh" && \
+    nvm install --lts && \
+    nvm alias default 'lts/*' && \
+    echo 'lts/*' > /home/agent/.nvmrc && \
+    # Verify installation
+    node --version && \
+    npm --version
+
+# Create .bash_env for non-interactive shell access to nvm
+RUN printf '%s\n' \
+    '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh"' \
+    > /home/agent/.bash_env
+
+ENV BASH_ENV=/home/agent/.bash_env
+
+# =============================================================================
+# PYTHON TOOLS (uv, pipx)
+# pipx is already installed via apt, just need uv
+# =============================================================================
+USER agent
+WORKDIR /home/agent
+
+# Install uv (fast Python package installer)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+ENV PATH="/home/agent/.local/bin:${PATH}"
+
+# =============================================================================
+# FINAL CONFIGURATION
+# =============================================================================
+USER root
+
+# Dynamic build args at end to avoid cache invalidation
+ARG BUILD_DATE=unknown
+ARG VCS_REF=unknown
+ARG VERSION=unknown
+
+LABEL org.opencontainers.image.title="ContainAI SDKs" \
+      org.opencontainers.image.description="Development SDKs layer with .NET, Rust, Go, Node.js, and Python tools" \
+      org.opencontainers.image.url="https://github.com/novotnyllc/containai" \
+      org.opencontainers.image.source="https://github.com/novotnyllc/containai" \
+      org.opencontainers.image.documentation="https://github.com/novotnyllc/containai#readme" \
+      org.opencontainers.image.vendor="Novotny LLC" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+# Inherit entrypoint from base (systemd)

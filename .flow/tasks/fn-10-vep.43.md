@@ -55,9 +55,8 @@ A system container runs like a lightweight VM:
 - [ ] Image builds successfully
 - [ ] Image tagged: containai/base
 ## Done summary
-TBD
-
+Created src/Dockerfile.base - the foundation layer for ContainAI system containers with Ubuntu 24.04 LTS, systemd as PID 1, hardened sshd (key-only auth), Docker CE with Sysbox for secure DinD, and essential tools (tmux, jq, yq, bun with checksums).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 44b8119, 0065c2b, 5378b0b
+- Tests: Dockerfile syntax validated by impl-review, All acceptance criteria verified against spec
 - PRs:

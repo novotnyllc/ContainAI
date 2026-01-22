@@ -115,3 +115,9 @@ Docker volume .Source is host path (e.g., /var/lib/docker/volumes/name/_data), n
 
 ## 2026-01-22 manual [pitfall]
 When detecting user-editable config lines, use case-insensitive patterns that handle whitespace/path variants - exact matching fails for legitimate variations
+
+## 2026-01-22 manual [pitfall]
+During Docker build, systemctl mask/enable fail because systemd isn't PID 1; use symlinks to /dev/null (mask) or multi-user.target.wants (enable) instead
+
+## 2026-01-22 manual [pitfall]
+SSH host keys generated at docker build time are baked into the image - all containers share keys, creating MITM risk; delete at build, generate on first boot via systemd oneshot
