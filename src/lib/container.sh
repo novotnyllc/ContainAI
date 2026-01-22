@@ -226,9 +226,15 @@ _cai_hash_path() {
         # Fallback: openssl dgst -sha256
         hash=$(printf '%s' "$normalized" | openssl dgst -sha256 | awk '{print substr($NF,1,12)}')
     else
-        # Last resort: use basename as fallback (no hashing available)
-        hash=$(printf '%s' "$(basename "$normalized")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-        hash="${hash:0:12}"
+        # No SHA-256 tool available - this is a hard error since deterministic naming requires hashing
+        echo "[ERROR] No SHA-256 tool available (sha256sum, shasum, or openssl required)" >&2
+        return 1
+    fi
+
+    # Ensure hash is non-empty (should never happen with proper SHA-256 tools)
+    if [[ -z "$hash" ]]; then
+        echo "[ERROR] Hash computation failed for path: $normalized" >&2
+        return 1
     fi
 
     printf '%s' "$hash"
@@ -744,7 +750,8 @@ _containai_check_volume_match() {
 #   --image-tag <tag>    Override image tag (default: agent-specific)
 #   --credentials <mode> Credential mode (none; default: none)
 #   --volume-mismatch-warn  Warn on volume mismatch instead of blocking (for implicit volumes)
-#   --restart            Force recreate container
+#   --fresh              Remove and recreate container (preserves data volume)
+#   --restart            Alias for --fresh (legacy)
 #   --force              Skip preflight checks
 #   --detached           Run detached
 #   --shell              Start with shell instead of agent
@@ -1236,11 +1243,21 @@ _containai_start_container() {
             fi
             # FR-4: Validate container has only expected mounts (workspace bind + data volume)
             # This prevents shell --volume from tainting containers that run will later use
+            # Note: Docker adds /etc/hosts, /etc/hostname, /etc/resolv.conf - these are allowed
             if [[ "$shell_flag" != "true" ]]; then
-                local mount_count
-                mount_count=$("${docker_cmd[@]}" inspect --format '{{len .Mounts}}' "$container_name" 2>/dev/null) || mount_count="0"
-                if [[ "$mount_count" -gt 2 ]]; then
-                    echo "[ERROR] Container has unexpected mounts (FR-4 violation)" >&2
+                local mount_dests
+                mount_dests=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$container_name" 2>/dev/null) || mount_dests=""
+                local unexpected_mount=""
+                while IFS= read -r dest; do
+                    [[ -z "$dest" ]] && continue
+                    case "$dest" in
+                        /home/agent/workspace|/mnt/agent-data) ;;  # Expected mounts
+                        /etc/hosts|/etc/hostname|/etc/resolv.conf) ;;  # Docker-managed
+                        *) unexpected_mount="$dest"; break ;;
+                    esac
+                done <<< "$mount_dests"
+                if [[ -n "$unexpected_mount" ]]; then
+                    echo "[ERROR] Container has unexpected mount: $unexpected_mount (FR-4 violation)" >&2
                     echo "[INFO] Container may have been tainted by 'cai shell --volume'" >&2
                     echo "[INFO] Use --fresh to recreate with clean mount configuration" >&2
                     return 1
@@ -1310,6 +1327,27 @@ _containai_start_container() {
                 fi
                 if [[ "$volume_mismatch_warn" != "true" ]]; then
                     echo "[ERROR] Volume mismatch prevents start. Use --fresh to recreate." >&2
+                    return 1
+                fi
+            fi
+            # FR-4: Validate container has only expected mounts (before starting)
+            # This prevents shell --volume from tainting containers that run will later use
+            if [[ "$shell_flag" != "true" ]]; then
+                local exited_mount_dests
+                exited_mount_dests=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$container_name" 2>/dev/null) || exited_mount_dests=""
+                local exited_unexpected_mount=""
+                while IFS= read -r dest; do
+                    [[ -z "$dest" ]] && continue
+                    case "$dest" in
+                        /home/agent/workspace|/mnt/agent-data) ;;  # Expected mounts
+                        /etc/hosts|/etc/hostname|/etc/resolv.conf) ;;  # Docker-managed
+                        *) exited_unexpected_mount="$dest"; break ;;
+                    esac
+                done <<< "$exited_mount_dests"
+                if [[ -n "$exited_unexpected_mount" ]]; then
+                    echo "[ERROR] Container has unexpected mount: $exited_unexpected_mount (FR-4 violation)" >&2
+                    echo "[INFO] Container may have been tainted by 'cai shell --volume'" >&2
+                    echo "[INFO] Use --fresh to recreate with clean mount configuration" >&2
                     return 1
                 fi
             fi
