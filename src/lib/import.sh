@@ -1261,18 +1261,36 @@ _cai_import_git_config() {
     gitconfig_content+="    directory = /workspace"$'\n'
     gitconfig_content+="    directory = /home/agent/workspace"$'\n'
 
-    # Write to volume
+    # Write to volume as root (volume root may be root-owned on fresh volumes),
+    # then chown to 1000:1000. Also protect against symlink attacks by refusing
+    # to write if target is a symlink or non-regular file.
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
-    if ! printf '%s' "$gitconfig_content" | DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -i --network=none --user 1000:1000 -v "$volume":/target alpine sh -c "cat > /target/.gitconfig"; then
+    if ! printf '%s' "$gitconfig_content" | DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -i --network=none --user 0:0 -v "$volume":/target alpine sh -c '
+        # Refuse if target exists and is symlink or non-regular file
+        if [ -L /target/.gitconfig ]; then
+            echo "ERROR: /target/.gitconfig is a symlink - refusing to write" >&2
+            exit 1
+        fi
+        if [ -e /target/.gitconfig ] && [ ! -f /target/.gitconfig ]; then
+            echo "ERROR: /target/.gitconfig exists but is not a regular file" >&2
+            exit 1
+        fi
+        cat > /target/.gitconfig && chown 1000:1000 /target/.gitconfig
+    '; then
         _import_error "Failed to write .gitconfig to volume"
         return 1
     fi
 
-    if [[ -n "$git_name" ]]; then
-        _import_success "Git config imported (user.name: $git_name)"
-    else
-        _import_success "Git config imported (safe.directory only)"
+    # Build success message based on what was written
+    local success_msg="Git config imported"
+    if [[ -n "$git_name" && -n "$git_email" ]]; then
+        success_msg="Git config imported (user.name: $git_name, user.email: $git_email)"
+    elif [[ -n "$git_name" ]]; then
+        success_msg="Git config imported (user.name: $git_name)"
+    elif [[ -n "$git_email" ]]; then
+        success_msg="Git config imported (user.email: $git_email)"
     fi
+    _import_success "$success_msg"
     return 0
 }
 
