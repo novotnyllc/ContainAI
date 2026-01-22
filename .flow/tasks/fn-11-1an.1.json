@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-22T05:41:20.797418Z",
+  "depends_on": [],
+  "epic": "fn-11-1an",
+  "id": "fn-11-1an.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-11-1an.1.md",
+  "status": "todo",
+  "title": "Add symlink detection and path mapping helper",
+  "updated_at": "2026-01-22T05:41:57.878928Z"
+}

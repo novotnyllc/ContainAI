@@ -1,0 +1,15 @@
+{
+  "branch_name": "fn-11-1an",
+  "created_at": "2026-01-22T05:40:42.664251Z",
+  "depends_on_epics": [
+    "fn-9-mqv"
+  ],
+  "id": "fn-11-1an",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-11-1an.md",
+  "status": "open",
+  "title": "Symlink relinking during import",
+  "updated_at": "2026-01-22T05:41:14.886763Z"
+}

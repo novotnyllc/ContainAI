@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-22T05:41:26.065853Z",
+  "depends_on": [
+    "fn-11-1an.1"
+  ],
+  "epic": "fn-11-1an",
+  "id": "fn-11-1an.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-11-1an.2.md",
+  "status": "todo",
+  "title": "Implement symlink relinking in rsync copy script",
+  "updated_at": "2026-01-22T05:42:11.170218Z"
+}
