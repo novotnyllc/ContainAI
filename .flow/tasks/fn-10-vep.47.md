@@ -53,9 +53,8 @@ Implement SSH port allocation in the 2300-2500 range with graceful error handlin
 - [ ] Port reused on container restart when available
 - [ ] No silent failures - all errors are user-visible
 ## Done summary
-TBD
-
+Implemented SSH port allocation functions in lib/ssh.sh with automatic port assignment (range 2300-2500 by default, configurable via [ssh] section in config.toml). Integrated port allocation into container creation in container.sh with proper labeling, locking for concurrency safety, and automatic container recreation on port conflicts during restart.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f7f3831, c8c3748, fb51ce0, 18f9fd6, 587df88, ca50262, e444d03, 89800ce
+- Tests: bash -n src/lib/ssh.sh, bash -n src/lib/container.sh, bash -n src/lib/config.sh
 - PRs:
