@@ -1,0 +1,17 @@
+# SSH host key generation service
+# Generates SSH host keys on first boot if missing
+# This is required because keys are not baked into the image for security
+
+[Unit]
+Description=Generate SSH host keys if missing
+ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key
+ConditionVirtualization=container
+Before=ssh.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/ssh-keygen -A
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

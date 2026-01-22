@@ -1,0 +1,24 @@
+# ContainAI initialization service
+# One-shot service to prepare volume structure and workspace symlink on boot
+#
+# This service handles:
+# - Volume directory structure initialization
+# - Environment file loading (.env)
+# - Git config setup from data volume
+# - Workspace symlink creation (CAI_HOST_WORKSPACE -> /home/agent/workspace)
+
+[Unit]
+Description=ContainAI initialization (volume structure, workspace symlink)
+After=local-fs.target
+Before=ssh.service docker.service
+ConditionVirtualization=container
+
+[Service]
+Type=oneshot
+User=agent
+Environment=HOME=/home/agent
+ExecStart=/usr/local/lib/containai/init.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

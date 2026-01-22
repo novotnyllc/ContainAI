@@ -31,8 +31,8 @@ Create the full Dockerfile layer with AI agents and gh CLI.
 - [ ] Agents are runnable: `claude --version`, `gemini --version`, etc.
 - [ ] `src/Dockerfile` updated as build alias for full
 ## Done summary
-Created the full Dockerfile layer with AI agents (Claude, Gemini, Copilot, Codex, OpenCode) and gh CLI, building from containai/sdks:latest. Updated main Dockerfile to be a simple alias that builds from containai/full:latest.
+Created the full Dockerfile layer with AI agents (Claude, Gemini, Copilot, Codex, OpenCode, agent-browser) and gh CLI, building from containai/sdks:latest. Added containai-init systemd service for volume structure setup on first boot, with proper HOME environment handling.
 ## Evidence
-- Commits: 2159a531c1304506facf4d56e7a1682c0ff339be
-- Tests: docker build --check (syntax validation)
+- Commits: 51405c8, 5cca4e8, 51b0887, c1f0e4b, feb88a2
+- Tests: codex impl-review SHIP verdict
 - PRs:

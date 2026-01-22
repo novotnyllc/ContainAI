@@ -114,23 +114,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     mkdir -p /etc/systemd/system/multi-user.target.wants && \
     ln -sf /lib/systemd/system/ssh.service /etc/systemd/system/multi-user.target.wants/ssh.service
 
-# Generate SSH host keys on first boot if missing
-RUN mkdir -p /etc/systemd/system && \
-    printf '%s\n' \
-        '[Unit]' \
-        'Description=Generate SSH host keys if missing' \
-        'ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key' \
-        'Before=ssh.service' \
-        '' \
-        '[Service]' \
-        'Type=oneshot' \
-        'ExecStart=/usr/bin/ssh-keygen -A' \
-        'RemainAfterExit=yes' \
-        '' \
-        '[Install]' \
-        'WantedBy=multi-user.target' \
-        > /etc/systemd/system/ssh-keygen.service && \
-    ln -sf /etc/systemd/system/ssh-keygen.service /etc/systemd/system/multi-user.target.wants/ssh-keygen.service
+# Copy systemd service files for container-aware operation
+COPY services/ssh-keygen.service /etc/systemd/system/ssh-keygen.service
+COPY services/ssh.service.d/ /etc/systemd/system/ssh.service.d/
+RUN ln -sf /etc/systemd/system/ssh-keygen.service /etc/systemd/system/multi-user.target.wants/ssh-keygen.service
 
 EXPOSE 22
 
@@ -186,13 +173,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ln -sf /lib/systemd/system/sysbox-mgr.service /etc/systemd/system/multi-user.target.wants/sysbox-mgr.service && \
     ln -sf /lib/systemd/system/sysbox-fs.service /etc/systemd/system/multi-user.target.wants/sysbox-fs.service
 
-# Add Docker->Sysbox ordering to ensure sysbox is ready before dockerd starts
-RUN mkdir -p /etc/systemd/system/docker.service.d && \
-    printf '%s\n' \
-        '[Unit]' \
-        'After=sysbox-mgr.service sysbox-fs.service' \
-        'Requires=sysbox-mgr.service sysbox-fs.service' \
-        > /etc/systemd/system/docker.service.d/sysbox-dependency.conf
+# Copy Docker service drop-in for container awareness and sysbox dependency
+COPY services/docker.service.d/ /etc/systemd/system/docker.service.d/
 
 # Configure inner Docker daemon with sysbox-runc as default runtime
 # This provides security consistency for nested containers
@@ -276,6 +258,10 @@ USER root
 # Create mount point for agent data volume
 RUN mkdir -p /mnt/agent-data && \
     chown agent:agent /mnt/agent-data
+
+# Set container environment variable for systemd ConditionVirtualization
+# This allows systemd to detect it's running in a container
+ENV container=docker
 
 # Use SIGRTMIN+3 for graceful systemd shutdown
 STOPSIGNAL SIGRTMIN+3

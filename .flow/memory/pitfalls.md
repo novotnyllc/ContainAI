@@ -121,3 +121,6 @@ During Docker build, systemctl mask/enable fail because systemd isn't PID 1; use
 
 ## 2026-01-22 manual [pitfall]
 SSH host keys generated at docker build time are baked into the image - all containers share keys, creating MITM risk; delete at build, generate on first boot via systemd oneshot
+
+## 2026-01-22 manual [pitfall]
+Systemd services with User= don't set HOME env var - add Environment=HOME=/path or set default in script with : "${HOME:=/default}"
