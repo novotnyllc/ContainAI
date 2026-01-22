@@ -285,11 +285,16 @@ setup_workspace_symlink() {
     return 0
   fi
 
-  # Only allow paths under /home/ or /tmp/ for safety
-  if [[ "$host_path" != /home/* && "$host_path" != /tmp/* ]]; then
-    log "[WARN] CAI_HOST_WORKSPACE must be under /home/ or /tmp/: $host_path"
-    return 0
-  fi
+  # Only allow paths under safe prefixes (blocks /etc, /usr, /bin, etc.)
+  # Allowed: /home/, /tmp/, /mnt/ (WSL), /workspaces/ (devcontainers), /Users/ (macOS)
+  case "$host_path" in
+    /home/*|/tmp/*|/mnt/*|/workspaces/*|/Users/*)
+      ;;
+    *)
+      log "[WARN] CAI_HOST_WORKSPACE must be under /home/, /tmp/, /mnt/, /workspaces/, or /Users/: $host_path"
+      return 0
+      ;;
+  esac
 
   if ! run_as_root mkdir -p "$(dirname "$host_path")"; then
     log "[WARN] Failed to create parent directory for workspace symlink: $host_path"
