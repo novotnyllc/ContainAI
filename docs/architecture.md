@@ -37,7 +37,6 @@ flowchart TB
     end
 
     subgraph DockerLayer["Docker Engine"]
-        DD["Docker Desktop<br/>(ECI Mode)"]
         Sysbox["Sysbox Runtime<br/>(Secure Engine)"]
     end
 
@@ -50,9 +49,7 @@ flowchart TB
 
     User --> CLI
     CLI --> Config
-    CLI --> DD
     CLI --> Sysbox
-    DD --> Entry
     Sysbox --> Entry
     Workspace -.->|"workspace mount"| WorkMount
     DataVol -.->|persist| Agent
@@ -63,7 +60,7 @@ flowchart TB
     style Sandbox fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
-> **Note**: Workspace mounting differs by mode: Sysbox uses a bind mount; ECI uses Docker Desktop's mirrored workspace mount with entrypoint symlink logic.
+> **Note**: Workspace is bind-mounted from host to `/workspace` inside the container.
 
 ## Component Architecture
 
@@ -256,11 +253,11 @@ sequenceDiagram
     CLI->>Config: Find and parse config
     Config-->>CLI: Volume, excludes, agent
     CLI->>Doctor: Check isolation
-    Doctor->>Docker: docker info / docker sandbox ls
-    Docker-->>Doctor: ECI or Sysbox available
-    Doctor-->>CLI: Selected context
+    Doctor->>Docker: docker info (check Sysbox context)
+    Docker-->>Doctor: Sysbox available
+    Doctor-->>CLI: Selected context (containai-secure)
     CLI->>Container: Start container
-    Container->>Docker: docker [sandbox] run ...
+    Container->>Docker: docker run --runtime=sysbox-runc ...
     Docker->>Sandbox: Create/attach container
     Sandbox->>Sandbox: entrypoint.sh (validate mounts)
     Sandbox-->>User: Agent interactive session
@@ -406,7 +403,7 @@ Workspace-specific volumes enable isolated agent state per project.
 3. **Import prerequisite**: `cai import` creates the volume if it doesn't exist, then syncs files
 4. **Export**: `cai export` creates a `.tgz` backup of the volume contents
 5. **Cleanup**: Remove with `docker volume rm <volume-name>` (ensure no containers reference it)
-6. **Reset**: For Docker Desktop sandboxes, use `cai sandbox reset` to remove the sandbox; for Sysbox, use `cai stop` then recreate
+6. **Reset**: Use `cai stop` then `cai --restart` to recreate the container
 
 ## Security Boundaries
 
@@ -464,19 +461,17 @@ flowchart TB
 
 | Default | Override Flag | Code Reference |
 |---------|--------------|----------------|
-| **Credential isolation** | `--allow-host-credentials` | `src/lib/container.sh` |
-| **Docker socket denied** | `--allow-host-docker-socket` | `src/lib/container.sh` |
+| **Credential isolation** | N/A (always enforced with Sysbox) | `src/lib/container.sh` |
+| **Docker socket denied** | N/A (always enforced with Sysbox) | `src/lib/container.sh` |
 | **Safe .env parsing** | (always on when env imported) | `src/lib/env.sh` |
 
-### Unsafe Opt-ins (FR-5)
-
-These can be enabled with explicit flags (require acknowledgment):
+### Unsafe Opt-ins
 
 | Opt-in | Risk | Required Flag |
 |--------|------|---------------|
-| `--allow-host-credentials` | Exposes ~/.ssh, ~/.gitconfig, API tokens | `--i-understand-this-exposes-host-credentials` |
-| `--allow-host-docker-socket` | Full root access, sandbox escape | `--i-understand-this-grants-root-access` |
 | `--force` | Skips isolation checks | (standalone) |
+
+> **Note**: Host credential sharing (`--allow-host-credentials`) and Docker socket access (`--allow-host-docker-socket`) are no longer supported with Sysbox isolation. Use `cai import` to copy credentials into the container instead.
 
 ### What ContainAI Does NOT Protect Against
 
@@ -496,9 +491,9 @@ Key architectural decisions (see also [.flow/memory/decisions.md](../.flow/memor
 **Rationale**: For a security tool, config files should not be able to weaken security. Unsafe operations require explicit CLI flags (some with FR-5 acknowledgment flags).
 
 **Examples**:
-- `credentials.mode=host` in config is **ignored**; CLI `--allow-host-credentials` is required
-- Docker socket access requires `--allow-host-docker-socket` flag
+- `credentials.mode=host` in config is **ignored** (host credential sharing not supported with Sysbox)
 - Config files control convenience options (volume names, agent defaults), not security boundaries
+- Use `cai import` to safely copy credentials into the container
 
 ### Modular Shell Architecture
 

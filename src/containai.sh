@@ -484,11 +484,11 @@ _containai_import_cmd() {
         config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
     fi
 
-    # Auto-select Docker context based on isolation availability
+    # Auto-select Docker context based on Sysbox availability
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix for shell function call (pitfall: env -u only works with external commands)
     local selected_context=""
     if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
-        : # success - selected_context is "" (ECI) or "containai-secure" (Sysbox)
+        : # success - selected_context is "containai-secure" (Sysbox)
     else
         # No isolation available - fallback to default context with warning
         echo "[WARN] No isolation available, using default Docker context" >&2

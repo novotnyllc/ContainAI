@@ -127,7 +127,7 @@ claude --version
 
 When you ran `cai`, ContainAI:
 
-1. **Detected isolation mode** - Checked for Docker Desktop ECI or Sysbox runtime
+1. **Detected isolation mode** - Checked for Sysbox runtime availability
 2. **Created a named container** - Based on your git repo and branch (e.g., `myproject-main`)
 3. **Mounted your workspace** - Your current directory is available at `/workspace` inside the container
 4. **Created a data volume** - `sandbox-agent-data` stores your agent credentials and plugins
@@ -146,7 +146,7 @@ When you ran `cai`, ContainAI:
 }}}%%
 flowchart TB
     subgraph host["Your Host Machine"]
-        subgraph runtime["Docker Desktop / Sysbox"]
+        subgraph runtime["Sysbox Runtime"]
             subgraph sandbox["ContainAI Sandbox"]
                 workspace["/workspace<br/>Your project directory"]
                 data["/mnt/agent-data<br/>Persistent credentials/plugins"]
@@ -197,6 +197,6 @@ source src/containai.sh
 
 ### Minimum versions
 
-- Docker Desktop: 4.50+ (ECI path) **OR** Docker Engine: 24.0+ (Sysbox path)
+- Docker Engine: 24.0+ with Sysbox runtime
 - Git: any recent version
 - Bash: 4.0+ (macOS default is 3.2; use `brew install bash`)
