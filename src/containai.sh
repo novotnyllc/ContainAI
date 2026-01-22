@@ -17,6 +17,8 @@
 #   import       Sync host configs to data volume
 #   export       Export data volume to .tgz archive
 #   stop         Stop ContainAI containers
+#   version      Show current version
+#   update       Update ContainAI installation
 #   help         Show help message
 #
 # ==============================================================================
@@ -59,7 +61,8 @@ _containai_libs_exist() {
     [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/setup.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]]
+    [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -129,6 +132,11 @@ if ! source "$_CAI_SCRIPT_DIR/lib/env.sh"; then
     return 1
 fi
 
+if ! source "$_CAI_SCRIPT_DIR/lib/version.sh"; then
+    echo "[ERROR] Failed to source lib/version.sh" >&2
+    return 1
+fi
+
 # Mark libraries as loaded
 _CONTAINAI_LIB_LOADED="1"
 
@@ -153,6 +161,8 @@ Subcommands:
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
+  version       Show current version
+  update        Update ContainAI installation
   help          Show this help message
 
 Run Options:
@@ -1883,6 +1893,14 @@ containai() {
         sandbox)
             shift
             _containai_sandbox_cmd "$@"
+            ;;
+        version)
+            shift
+            _cai_version "$@"
+            ;;
+        update)
+            shift
+            _cai_update "$@"
             ;;
         help|-h|--help)
             _containai_help

@@ -59,24 +59,31 @@ That's it. ContainAI detects your isolation runtime (Docker Desktop sandbox or S
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Your Host Machine                       │
-│                                                             │
-│  ~/.ssh, ~/.aws, etc.    ← NOT accessible to agent         │
-│                                                             │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │              Docker Desktop / Sysbox                   │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │            ContainAI Sandbox                      │  │ │
-│  │  │                                                   │  │ │
-│  │  │  ~/workspace      ← Your project (read/write)     │  │ │
-│  │  │  /mnt/agent-data  ← Persistent volume (creds)     │  │ │
-│  │  │  AI Agent         ← Claude/Gemini/Codex           │  │ │
-│  │  │                                                   │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+flowchart TB
+    subgraph host["Your Host Machine"]
+        secrets["~/.ssh, ~/.aws, etc.<br/><i>NOT accessible to agent</i>"]
+
+        subgraph runtime["Docker Desktop / Sysbox"]
+            subgraph sandbox["ContainAI Sandbox"]
+                workspace["~/workspace<br/><i>Your project (read/write)</i>"]
+                data["mnt/agent-data<br/><i>Persistent volume (creds)</i>"]
+                agent["AI Agent<br/><i>Claude/Gemini/Codex</i>"]
+            end
+        end
+    end
+
+    secrets -.->|blocked| sandbox
 ```
 
 The agent sees only your project and its own data volume. Host credentials, Docker socket, and other sensitive resources are isolated by default.

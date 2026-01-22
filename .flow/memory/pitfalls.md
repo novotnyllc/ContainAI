@@ -94,3 +94,6 @@ In bash -c wrappers, use "$@" with proper argument passing (bash -c 'cmd "$@"' _
 
 ## 2026-01-22 manual [pitfall]
 When checking if a path exists in a config file, use grep -qF with full path to avoid false positives from partial matches (e.g., ~/.local/bin matching /usr/local/bin)
+
+## 2026-01-22 manual [pitfall]
+When comparing git branches for ahead/behind commits, compare the named branch refs not HEAD - HEAD may be on a different branch

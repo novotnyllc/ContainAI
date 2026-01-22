@@ -62,37 +62,30 @@ cai doctor
 
 ### Runtime Decision Tree
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      cai doctor                             │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-            ┌─────────────┴─────────────┐
-            │                           │
-     ┌──────▼──────┐            ┌───────▼───────┐
-     │ ECI Path    │            │ Sysbox Path   │
-     │ [OK]        │            │ [OK]          │
-     └──────┬──────┘            └───────┬───────┘
-            │                           │
-            │    ┌──────────────────────┘
-            ▼    ▼
-    ┌───────────────────┐
-    │   Ready to run!   │
-    │      cai          │
-    └───────────────────┘
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+flowchart TD
+    doctor["cai doctor"]
+    doctor --> eci["ECI Path<br/>[OK]"]
+    doctor --> sysbox["Sysbox Path<br/>[OK]"]
+    eci --> ready["Ready to run!<br/><b>cai</b>"]
+    sysbox --> ready
 
-If neither path is [OK]:
-┌─────────────────────────────────────────────────────────────┐
-│ Option A: Enable Docker Desktop sandbox feature             │
-│   1. Open Docker Desktop Settings                           │
-│   2. Go to "Features in development"                        │
-│   3. Enable "Docker sandbox" or "Enhanced Container         │
-│      Isolation"                                             │
-│   4. Restart Docker Desktop                                 │
-├─────────────────────────────────────────────────────────────┤
-│ Option B: Install Sysbox Secure Engine (Linux/WSL2)         │
-│   Run: cai setup                                            │
-└─────────────────────────────────────────────────────────────┘
+    doctor -.->|neither OK| fallback
+
+    subgraph fallback["If neither path is OK"]
+        optionA["<b>Option A:</b> Enable Docker Desktop sandbox<br/>1. Open Docker Desktop Settings<br/>2. Go to Features in development<br/>3. Enable Docker sandbox or ECI<br/>4. Restart Docker Desktop"]
+        optionB["<b>Option B:</b> Install Sysbox (Linux/WSL2)<br/>Run: <code>cai setup</code>"]
+    end
 ```
 
 ## Step 4: Start Your First Sandbox
@@ -144,21 +137,27 @@ When you ran `cai`, ContainAI:
 4. **Created a data volume** - `sandbox-agent-data` stores your agent credentials and plugins
 5. **Started the AI agent** - Claude (or your configured agent) is ready to use
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Your Host Machine                       │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │              Docker Desktop / Sysbox                   │ │
-│  │  ┌──────────────────────────────────────────────────┐  │ │
-│  │  │            ContainAI Sandbox                      │  │ │
-│  │  │                                                   │  │ │
-│  │  │  /workspace  ←──── Your project directory         │  │ │
-│  │  │  /mnt/agent-data ← Persistent credentials/plugins │  │ │
-│  │  │  Claude/Gemini agent running                      │  │ │
-│  │  │                                                   │  │ │
-│  │  └──────────────────────────────────────────────────┘  │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+flowchart TB
+    subgraph host["Your Host Machine"]
+        subgraph runtime["Docker Desktop / Sysbox"]
+            subgraph sandbox["ContainAI Sandbox"]
+                workspace["/workspace<br/><i>Your project directory</i>"]
+                data["/mnt/agent-data<br/><i>Persistent credentials/plugins</i>"]
+                agent["Claude/Gemini agent running"]
+            end
+        end
+    end
 ```
 
 ## Common First-Run Commands
