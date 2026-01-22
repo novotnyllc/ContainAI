@@ -73,9 +73,8 @@ Configure security defaults for all container runs. Docker applies MaskedPaths/R
 - [ ] Code comments document Docker's default MaskedPaths/ReadonlyPaths
 - [ ] Future hardening documented as out-of-scope enhancement
 ## Done summary
-TBD
-
+Added security documentation and validation helper for Docker's default MaskedPaths/ReadonlyPaths. Code comments document that --privileged and systempaths=unconfined must never be used. Created _containai_validate_masked_paths() helper that validates via mount metadata (not cat exit codes). Deferred hardening (no-new-privileges, cap-drop) documented as future work.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 341d28602717c15b56954adbdd22fbda16b61b6e, d584b7a6a7d11d2e3198a543a531dc52db22e594
+- Tests: bash -n src/lib/container.sh
 - PRs:
