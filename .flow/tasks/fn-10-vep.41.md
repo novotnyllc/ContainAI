@@ -27,9 +27,8 @@ Generate a dedicated ed25519 SSH key for ContainAI during `cai setup`.
 - [ ] Idempotent: re-running setup does not overwrite existing key
 - [ ] `config.toml` created in same directory (can be empty initially)
 ## Done summary
-TBD
-
+Created `src/lib/ssh.sh` with `_cai_setup_ssh_key()` function that generates dedicated ed25519 SSH key at `~/.config/containai/id_containai` during `cai setup`. Key creates config directory with 700 permissions, private key with 600, public key with 644, and empty config.toml. Idempotent - does not overwrite existing keys. Integrated into main `_cai_setup()` flow.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 28d8ad1
+- Tests: Manual: verified ssh.sh sourcing, key generation, permissions (700/600/644), idempotence
 - PRs:

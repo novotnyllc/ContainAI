@@ -6,8 +6,11 @@
 #
 # Provides:
 #   _cai_setup_ssh_key()         - Generate dedicated SSH key for ContainAI
+#   _cai_setup_ssh_config()      - Setup ~/.ssh/containai.d/ and Include directive
+#   _cai_check_ssh_version()     - Check if OpenSSH supports Include directive
 #   _cai_get_ssh_key_path()      - Return path to ContainAI SSH private key
 #   _cai_get_ssh_pubkey_path()   - Return path to ContainAI SSH public key
+#   _cai_get_ssh_config_dir()    - Return path to ContainAI SSH config directory
 #
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
@@ -48,6 +51,12 @@ _CAI_SSH_PUBKEY_PATH="$_CAI_CONFIG_DIR/id_containai.pub"
 # Config file path
 _CAI_CONFIG_FILE="$_CAI_CONFIG_DIR/config.toml"
 
+# SSH config directory for per-container configs
+_CAI_SSH_CONFIG_DIR="$HOME/.ssh/containai.d"
+
+# Minimum OpenSSH version for Include directive support
+_CAI_SSH_MIN_VERSION="7.3"
+
 # ==============================================================================
 # Path getters
 # ==============================================================================
@@ -60,6 +69,11 @@ _cai_get_ssh_key_path() {
 # Return path to ContainAI SSH public key
 _cai_get_ssh_pubkey_path() {
     printf '%s' "$_CAI_SSH_PUBKEY_PATH"
+}
+
+# Return path to ContainAI SSH config directory
+_cai_get_ssh_config_dir() {
+    printf '%s' "$_CAI_SSH_CONFIG_DIR"
 }
 
 # ==============================================================================
@@ -156,6 +170,164 @@ _cai_setup_ssh_key() {
     fi
 
     _cai_ok "SSH key setup complete"
+    return 0
+}
+
+# ==============================================================================
+# SSH Config Setup
+# ==============================================================================
+
+# Check if installed OpenSSH version supports Include directive
+# Arguments: none
+# Returns: 0=supported, 1=not supported or cannot determine
+# Output: version string on stdout
+_cai_check_ssh_version() {
+    local ssh_version_output version_str major minor
+
+    # Get SSH version output
+    if ! ssh_version_output=$(ssh -V 2>&1); then
+        _cai_debug "Could not determine SSH version"
+        return 1
+    fi
+
+    # Parse version from output like "OpenSSH_8.9p1 Ubuntu-3ubuntu0.6"
+    # Extract the version number (e.g., "8.9" from "OpenSSH_8.9p1")
+    if [[ "$ssh_version_output" =~ OpenSSH_([0-9]+)\.([0-9]+) ]]; then
+        major="${BASH_REMATCH[1]}"
+        minor="${BASH_REMATCH[2]}"
+        version_str="${major}.${minor}"
+        printf '%s' "$version_str"
+
+        # Compare version: minimum is 7.3
+        local min_major min_minor
+        min_major="${_CAI_SSH_MIN_VERSION%%.*}"
+        min_minor="${_CAI_SSH_MIN_VERSION#*.}"
+
+        if (( major > min_major )) || { (( major == min_major )) && (( minor >= min_minor )); }; then
+            return 0
+        else
+            return 1
+        fi
+    else
+        _cai_debug "Could not parse SSH version from: $ssh_version_output"
+        return 1
+    fi
+}
+
+# Setup ~/.ssh/containai.d/ directory and add Include directive to SSH config
+# Arguments: none
+# Returns: 0=success, 1=failure
+#
+# Behavior:
+# - Creates ~/.ssh/ directory with 700 permissions if missing
+# - Creates ~/.ssh/containai.d/ directory with 700 permissions if missing
+# - Creates ~/.ssh/config with 600 permissions if missing
+# - Adds "Include ~/.ssh/containai.d/*.conf" at TOP of ~/.ssh/config if not present
+# - Warns if OpenSSH version < 7.3p1 (Include directive not supported)
+# - Idempotent: does NOT duplicate Include directive on re-run
+# - Preserves existing SSH config content
+_cai_setup_ssh_config() {
+    local ssh_dir="$HOME/.ssh"
+    local config_dir="$_CAI_SSH_CONFIG_DIR"
+    local ssh_config="$ssh_dir/config"
+    local include_line="Include ~/.ssh/containai.d/*.conf"
+    local ssh_version
+
+    _cai_step "Setting up SSH config for ContainAI"
+
+    # Check OpenSSH version for Include directive support
+    if ssh_version=$(_cai_check_ssh_version); then
+        _cai_debug "OpenSSH version $ssh_version supports Include directive"
+    else
+        if [[ -n "$ssh_version" ]]; then
+            _cai_warn "OpenSSH version $ssh_version may not support Include directive (requires 7.3+)"
+            _cai_warn "SSH host configs will be created but may not be used automatically"
+        else
+            _cai_warn "Could not determine OpenSSH version; Include directive may not work"
+        fi
+    fi
+
+    # Create ~/.ssh/ directory if missing
+    if [[ ! -d "$ssh_dir" ]]; then
+        _cai_debug "Creating SSH directory: $ssh_dir"
+        if ! mkdir -p "$ssh_dir"; then
+            _cai_error "Failed to create directory: $ssh_dir"
+            return 1
+        fi
+        if ! chmod 700 "$ssh_dir"; then
+            _cai_error "Failed to set permissions on: $ssh_dir"
+            return 1
+        fi
+    fi
+
+    # Create ~/.ssh/containai.d/ directory with 700 permissions
+    if [[ ! -d "$config_dir" ]]; then
+        _cai_debug "Creating SSH config directory: $config_dir"
+        if ! mkdir -p "$config_dir"; then
+            _cai_error "Failed to create directory: $config_dir"
+            return 1
+        fi
+        if ! chmod 700 "$config_dir"; then
+            _cai_error "Failed to set permissions on: $config_dir"
+            return 1
+        fi
+        _cai_info "Created SSH config directory: $config_dir"
+    else
+        # Verify permissions on existing directory
+        local dir_perms
+        dir_perms=$(stat -c "%a" "$config_dir" 2>/dev/null || stat -f "%OLp" "$config_dir" 2>/dev/null)
+        if [[ "$dir_perms" != "700" ]]; then
+            _cai_debug "Fixing permissions on SSH config directory"
+            if ! chmod 700 "$config_dir"; then
+                _cai_warn "Could not fix permissions on: $config_dir"
+            fi
+        fi
+        _cai_debug "SSH config directory already exists: $config_dir"
+    fi
+
+    # Create ~/.ssh/config if missing
+    if [[ ! -f "$ssh_config" ]]; then
+        _cai_debug "Creating SSH config file: $ssh_config"
+        if ! printf '%s\n' "$include_line" > "$ssh_config"; then
+            _cai_error "Failed to create SSH config: $ssh_config"
+            return 1
+        fi
+        if ! chmod 600 "$ssh_config"; then
+            _cai_error "Failed to set permissions on: $ssh_config"
+            return 1
+        fi
+        _cai_info "Created SSH config with Include directive"
+    else
+        # Check if Include directive already present
+        # Use grep -F for literal matching to avoid regex issues
+        # Match the full line to avoid partial matches
+        if grep -qF "containai.d" "$ssh_config"; then
+            _cai_debug "Include directive already present in SSH config"
+        else
+            # Add Include directive at TOP of config file
+            # This is critical - Include must come before any Host definitions
+            _cai_debug "Adding Include directive to SSH config"
+            local temp_file
+            temp_file=$(mktemp)
+            if ! {
+                printf '%s\n\n' "$include_line"
+                cat "$ssh_config"
+            } > "$temp_file"; then
+                _cai_error "Failed to prepare SSH config update"
+                rm -f "$temp_file"
+                return 1
+            fi
+            if ! mv "$temp_file" "$ssh_config"; then
+                _cai_error "Failed to update SSH config"
+                rm -f "$temp_file"
+                return 1
+            fi
+            chmod 600 "$ssh_config"
+            _cai_info "Added Include directive to SSH config"
+        fi
+    fi
+
+    _cai_ok "SSH config setup complete"
     return 0
 }
 
