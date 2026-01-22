@@ -28,9 +28,8 @@ Setup `~/.ssh/containai.d/` directory and add Include directive to SSH config.
 - [ ] OpenSSH version check warns if < 7.3p1
 - [ ] Existing SSH config preserved (not overwritten)
 ## Done summary
-TBD
-
+Added `_cai_setup_ssh_config()` to create `~/.ssh/containai.d/` directory and add `Include ~/.ssh/containai.d/*.conf` directive at top of `~/.ssh/config`. Integrated into setup flow with dry-run support. Implementation handles case variants, path variants, whitespace, symlinks, and ensures idempotence with OpenSSH version check.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 99bcba9, 1003fb4, 8c88e70, fbd18b2
+- Tests: Manual: verified directory creation with 700 perms, Manual: verified Include directive at top of config, Manual: verified idempotence (no duplicates), Manual: verified symlink preservation, Manual: verified case-insensitive detection, Manual: verified absolute path detection, Manual: verified whitespace-tolerant detection
 - PRs:

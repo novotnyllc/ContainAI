@@ -112,3 +112,6 @@ When writing config files, use native tools (git config -f, jq) instead of templ
 
 ## 2026-01-22 manual [pitfall]
 Docker volume .Source is host path (e.g., /var/lib/docker/volumes/name/_data), not volume name; use .Name field for named volume identification
+
+## 2026-01-22 manual [pitfall]
+When detecting user-editable config lines, use case-insensitive patterns that handle whitespace/path variants - exact matching fails for legitimate variations

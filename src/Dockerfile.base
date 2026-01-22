@@ -1,0 +1,231 @@
+# syntax=docker/dockerfile:1
+# ContainAI Base Layer - System Container Foundation
+#
+# A system container that runs like a lightweight VM:
+# - systemd as PID 1 (real init system)
+# - sshd for secure remote access (key-only auth)
+# - dockerd for Docker-in-Docker (via sysbox-runc)
+#
+# Usage:
+#   docker build -t containai/base -f Dockerfile.base .
+#
+# Run with sysbox-runc runtime:
+#   docker run --runtime=sysbox-runc -d containai/base
+
+FROM ubuntu:24.04
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# =============================================================================
+# SYSTEMD INSTALLATION
+# Pattern from nestybox/dockerfiles for systemd in containers
+# =============================================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        # Systemd core
+        systemd \
+        systemd-sysv \
+        libsystemd0 \
+        # Essential system utilities
+        ca-certificates \
+        curl \
+        wget \
+        gnupg \
+        dbus \
+        sudo \
+        locales \
+        locales-all \
+        # Network utilities (required by sysbox)
+        iptables \
+        iproute2 \
+        kmod \
+        # FUSE support (required by sysbox-fs)
+        fuse \
+        # Process utilities
+        procps && \
+    # Disable journald kmsg reading (not available in containers)
+    echo "ReadKMsg=no" >> /etc/systemd/journald.conf
+
+# Mask problematic systemd units that don't work in containers
+RUN systemctl mask \
+    systemd-udevd.service \
+    systemd-udevd-kernel.socket \
+    systemd-udevd-control.socket \
+    systemd-modules-load.service \
+    systemd-journald-audit.socket \
+    systemd-udev-trigger.service \
+    systemd-firstboot.service \
+    sys-kernel-debug.mount \
+    sys-kernel-tracing.mount
+
+# =============================================================================
+# AGENT USER SETUP
+# =============================================================================
+RUN useradd --create-home --shell /bin/bash --uid 1000 agent && \
+    echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/agent && \
+    chmod 0440 /etc/sudoers.d/agent
+
+# =============================================================================
+# SSHD INSTALLATION AND HARDENING
+# Key-only authentication, no root login, no password auth
+# =============================================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends openssh-server && \
+    # Create SSH directories
+    mkdir -p /run/sshd && \
+    mkdir -p /home/agent/.ssh && \
+    chmod 700 /home/agent/.ssh && \
+    touch /home/agent/.ssh/authorized_keys && \
+    chmod 600 /home/agent/.ssh/authorized_keys && \
+    chown -R agent:agent /home/agent/.ssh && \
+    # Configure sshd for security
+    sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/^#*ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#*UsePAM.*/UsePAM no/' /etc/ssh/sshd_config && \
+    # Enable sshd service
+    systemctl enable ssh.service
+
+EXPOSE 22
+
+# =============================================================================
+# DOCKER CE INSTALLATION
+# For Docker-in-Docker support via Sysbox
+# =============================================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    # Add Docker's official GPG key
+    install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    # Add Docker repository
+    . /etc/os-release && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${UBUNTU_CODENAME:-$VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin && \
+    # Add agent user to docker group
+    usermod -aG docker agent && \
+    # Enable docker service
+    systemctl enable docker.service containerd.service
+
+# =============================================================================
+# SYSBOX CE INSTALLATION
+# Enables secure Docker-in-Docker without --privileged
+# Inner Docker also uses sysbox-runc by default for security consistency
+# =============================================================================
+# Checksums from https://github.com/nestybox/sysbox/releases/tag/v0.6.7
+ARG SYSBOX_VERSION=0.6.7
+ARG SYSBOX_SHA256_AMD64=b7ac389e5a19592cadf16e0ca30e40919516128f6e1b7f99e1cb4ff64554172e
+ARG SYSBOX_SHA256_ARM64=16d80123ba53058cf90f5a68686e297621ea97942602682e34b3352783908f91
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_AMD64}"; \
+    elif [ "$ARCH" = "arm64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_ARM64}"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    wget -q -O /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" && \
+    echo "${EXPECTED_SHA256}  /tmp/sysbox.deb" | sha256sum -c - && \
+    apt-get install -y --no-install-recommends /tmp/sysbox.deb && \
+    rm /tmp/sysbox.deb
+
+# Configure inner Docker daemon with sysbox-runc as default runtime
+# This provides security consistency for nested containers
+RUN mkdir -p /etc/docker && \
+    printf '%s\n' \
+        '{' \
+        '  "default-runtime": "sysbox-runc",' \
+        '  "runtimes": {' \
+        '    "sysbox-runc": {' \
+        '      "path": "/usr/bin/sysbox-runc"' \
+        '    }' \
+        '  }' \
+        '}' > /etc/docker/daemon.json
+
+# =============================================================================
+# ESSENTIAL TOOLS
+# tmux, jq, yq, bun
+# =============================================================================
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        tmux \
+        jq \
+        git
+
+# Install yq (YAML processor)
+ARG YQ_VERSION=4.44.3
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${ARCH}" -o /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+# Switch to agent user for bun installation
+USER agent
+WORKDIR /home/agent
+
+# Set up .bashrc.d pattern for modular shell configuration
+RUN mkdir -p /home/agent/.bashrc.d && \
+    # Configure bash for color prompt
+    sed -i 's/^#\s*force_color_prompt=yes/force_color_prompt=yes/' /home/agent/.bashrc && \
+    # Add .bashrc.d sourcing hook (idempotent check)
+    { grep -qxF 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' /home/agent/.bashrc || \
+      { echo '# Source all scripts in .bashrc.d if directory exists'; \
+        echo 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> /home/agent/.bashrc; }
+
+# Install bun (JavaScript runtime)
+RUN curl -fsSL https://bun.com/install | bash
+
+ENV PATH="/home/agent/.bun/bin:${PATH}"
+
+# Switch back to root for final setup
+USER root
+
+# =============================================================================
+# FINAL CONFIGURATION
+# =============================================================================
+
+# Create mount point for agent data volume
+RUN mkdir -p /mnt/agent-data && \
+    chown agent:agent /mnt/agent-data
+
+# Use SIGRTMIN+3 for graceful systemd shutdown
+STOPSIGNAL SIGRTMIN+3
+
+# Dynamic build args at end to avoid cache invalidation
+ARG BUILD_DATE=unknown
+ARG VCS_REF=unknown
+ARG VERSION=unknown
+
+LABEL org.opencontainers.image.title="ContainAI Base" \
+      org.opencontainers.image.description="System container with systemd, sshd, and Docker-in-Docker support" \
+      org.opencontainers.image.url="https://github.com/novotnyllc/containai" \
+      org.opencontainers.image.source="https://github.com/novotnyllc/containai" \
+      org.opencontainers.image.documentation="https://github.com/novotnyllc/containai#readme" \
+      org.opencontainers.image.vendor="Novotny LLC" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+# systemd as PID 1
+ENTRYPOINT [ "/sbin/init", "--log-level=err" ]
