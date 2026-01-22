@@ -3,14 +3,12 @@
   "claim_note": "",
   "claimed_at": null,
   "created_at": "2026-01-21T20:34:16.005873Z",
-  "depends_on": [
-    "fn-10-vep.40"
-  ],
+  "depends_on": [],
   "epic": "fn-10-vep",
   "id": "fn-10-vep.43",
   "priority": null,
   "spec_path": ".flow/tasks/fn-10-vep.43.md",
   "status": "todo",
   "title": "Create base Dockerfile layer (systemd + sshd + dockerd)",
-  "updated_at": "2026-01-21T20:36:30.910661Z"
+  "updated_at": "2026-01-21T22:33:52.413987Z"
 }

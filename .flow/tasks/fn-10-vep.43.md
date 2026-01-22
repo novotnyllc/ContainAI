@@ -1,40 +1,59 @@
 # fn-10-vep.43 Create base Dockerfile layer (systemd + sshd + dockerd)
 
 ## Description
-Create the base Dockerfile layer with systemd, sshd, dockerd, and basic tooling.
+Create the base Dockerfile layer for a **system container** - Ubuntu 24.04 LTS with systemd, sshd, AND dockerd for DinD support. This is the foundation of ContainAI's VM-like container environment.
 
 **Size:** M
-**Files:** src/Dockerfile.base (new), src/systemd/ (new directory)
+**Files:** src/Dockerfile.base
+
+## What is a System Container?
+
+A system container runs like a lightweight VM:
+- **systemd as PID 1** - real init system, service management
+- **Multiple services** - sshd, dockerd, custom services
+- **DinD without --privileged** - Sysbox enables this safely
+- **Automatic isolation** - Sysbox handles user namespace mapping
 
 ## Approach
 
-1. Base from `ubuntu:24.04` (latest LTS)
-2. Install systemd, openssh-server, docker.io
-3. Configure systemd as init (`/sbin/init --log-level=err`)
-4. Mask unnecessary systemd units (per nestybox/dockerfiles pattern)
-5. Create `agent` user with proper permissions
-6. Setup `/home/agent/.bashrc.d/` pattern for modular bashrc
-7. Install base tools: tmux, jq, yq, bun
-8. Configure sshd: PermitRootLogin no, PasswordAuthentication no
-9. Set STOPSIGNAL to SIGRTMIN+3
+1. Base image: Ubuntu 24.04 LTS
+2. Install systemd and configure as PID 1
+3. Install and configure sshd:
+   - `PermitRootLogin no`
+   - `PasswordAuthentication no`
+   - `PubkeyAuthentication yes`
+4. Install Docker CE + sysbox for DinD:
+   - docker-ce, docker-ce-cli, containerd.io
+   - sysbox-ce for secure inner container runtime
+   - Configure daemon.json with sysbox-runc as default
+   - Inner Docker uses /var/lib/docker inside the container
+5. Create agent user with proper home directory
+6. Add agent user to docker group
+7. Set up /home/agent/.bashrc.d/ pattern for modular shell config
+8. Install essential tools: tmux, jq, yq, bun
+9. Configure SIGRTMIN+3 for graceful shutdown
 
 ## Key context
 
-- Pattern from practice-scout: nestybox/dockerfiles for systemd in containers
+- This is a SYSTEM CONTAINER - runs systemd, multiple services
+- Inner Docker also uses sysbox-runc by default for security consistency
+- Inner Docker data at /var/lib/docker (inside container, isolated)
+- agent user needs docker group membership for DinD access
+- Pattern from nestybox/dockerfiles for systemd in containers
 - Mask: systemd-journald-audit.socket, systemd-udev-trigger.service, systemd-firstboot.service
 - sshd hardening: key-only auth, no root login
+
 ## Acceptance
-- [ ] `src/Dockerfile.base` created
-- [ ] Base image is `ubuntu:24.04`
-- [ ] systemd installed and configured as init
-- [ ] openssh-server installed with hardened config
-- [ ] docker.io (dockerd + CLI) installed
-- [ ] `agent` user created with home directory
-- [ ] `/home/agent/.bashrc.d/` directory exists
+- [ ] Base image is Ubuntu 24.04 LTS
+- [ ] systemd as init (PID 1)
+- [ ] sshd installed and configured for key-only auth
+- [ ] docker-ce + sysbox-ce installed for DinD
+- [ ] Inner Docker configured with sysbox-runc as default runtime
+- [ ] agent user created with docker group membership
+- [ ] /home/agent/.bashrc.d/ pattern set up
 - [ ] tmux, jq, yq, bun installed
-- [ ] STOPSIGNAL is SIGRTMIN+3
-- [ ] Image builds successfully with `docker build -f src/Dockerfile.base`
-- [ ] Container starts with `docker run --runtime=sysbox-runc -d`
+- [ ] Image builds successfully
+- [ ] Image tagged: containai/base
 ## Done summary
 TBD
 

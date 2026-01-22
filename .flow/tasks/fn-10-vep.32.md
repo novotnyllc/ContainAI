@@ -1,11 +1,19 @@
 # fn-10-vep.32 Remove docker sandbox run code path from lib/container.sh
 
 ## Description
-Remove the `docker sandbox run` code path from `lib/container.sh` and clean up the entire ECI-related CLI surface. ContainAI will no longer support Docker Desktop's sandbox feature.
+Remove all legacy code from lib/container.sh and delete lib/eci.sh entirely. Start fresh with Sysbox-only implementation.
 
-**Size:** M  
-**Files:** `src/lib/container.sh`, `src/lib/docker.sh`, `src/containai.sh`, `docs/architecture.md`, `docs/quickstart.md`
+**Size:** M
+**Files:** lib/container.sh, lib/eci.sh (delete), lib/docker.sh
 
+## Approach
+
+1. Delete `lib/eci.sh` file completely
+2. Remove all references to ECI from lib/container.sh
+3. Remove `docker sandbox run` code path
+4. Remove any `_cai_sandbox_*` functions
+5. Clean up lib/docker.sh to remove ECI-related code
+6. Update any imports/sources that reference eci.sh
 ## Approach
 
 1. In `lib/container.sh`, find the ECI/sandbox code path in `_containai_run()` (~L1411-1476)
@@ -47,16 +55,11 @@ Remove the `docker sandbox run` code path from `lib/container.sh` and clean up t
 - Sandbox feature check: `src/lib/docker.sh:_cai_sandbox_feature_enabled`
 - Context selection: `src/lib/doctor.sh:_cai_select_context`
 ## Acceptance
-- [ ] `docker sandbox run` code path removed from `_containai_run()`
-- [ ] `_cai_sandbox_feature_enabled()` no longer called in container creation flow
-- [ ] Context selection prefers Sysbox context unconditionally
-- [ ] ECI-specific flags (`--credentials`, `--mount-docker-socket`) removed
-- [ ] `cai run` works without Docker Desktop installed
-- [ ] `cai sandbox` subcommands removed or show deprecation message
-- [ ] docs/architecture.md updated (ECI paths removed or marked legacy)
-- [ ] docs/quickstart.md updated (ECI not shown as option)
-- [ ] Help strings no longer mention ECI
-- [ ] Tests referencing `docker sandbox` updated
+- [ ] lib/eci.sh deleted entirely
+- [ ] No ECI references in any lib/*.sh files
+- [ ] No `docker sandbox` code paths
+- [ ] Clean codebase with no legacy references
+- [ ] All tests still pass (or are updated)
 ## Done summary
 TBD
 

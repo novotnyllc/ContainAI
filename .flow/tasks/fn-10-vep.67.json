@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-22T02:59:49.236666Z",
+  "depends_on": [],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.67",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.67.md",
+  "status": "todo",
+  "title": "Create security comparison docs: sysbox vs Docker sandbox vs alternatives",
+  "updated_at": "2026-01-22T02:59:49.236682Z"
+}

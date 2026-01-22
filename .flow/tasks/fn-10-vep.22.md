@@ -1,38 +1,40 @@
-# fn-10-vep.22 Add Docker CLI and dockerd to main Dockerfile
+# fn-10-vep.22 Add Docker CE to main Dockerfile for DinD
 
 ## Description
-Add Docker CLI and dockerd installation to the main Dockerfile so agents can use Docker inside the container.
+Add Docker CE (full installation) to the main Dockerfile so agents can use Docker inside the system container (DinD). Inner Docker defaults to sysbox-runc for consistent security.
 
 **Size:** M
-**Files:**
-- `src/docker/Dockerfile`
-
-## Context
-
-The main image is based on `docker/sandbox-templates:claude-code`. We need to add:
-- Docker CE (daemon)
-- Docker CLI
-- containerd
+**Files:** src/Dockerfile
 
 ## Approach
 
-1. Add Docker repository and GPG key
-2. Install docker-ce, docker-ce-cli, containerd.io
-3. Configure daemon.json for sysbox compatibility (no NAT)
-4. Do NOT start dockerd in Dockerfile (entrypoint handles that)
+1. Install Docker CE:
+   - docker-ce (daemon)
+   - docker-ce-cli
+   - containerd.io
+   - sysbox-ce (for inner Docker runtime)
+
+2. Configure daemon.json for DinD with sysbox:
+   - Default runtime: sysbox-runc (consistent with host)
+   - Standard /var/lib/docker data path (inside container)
+   - Sysbox enables DinD without --privileged
+
+3. Do NOT start dockerd in Dockerfile - systemd handles that (fn-10-vep.46)
 
 ## Key context
 
-- Base image: `docker/sandbox-templates:claude-code`
-- Reference: `Dockerfile.test` lines 46-53 for Docker installation
-- No --privileged needed when running in sysbox
+- This is Docker INSIDE the sysbox system container (inner Docker)
+- Inner Docker also uses sysbox-runc by default for security consistency
+- dockerd is started by systemd (fn-10-vep.46)
+- agent user needs docker group membership
+- Sysbox handles all the complexity of enabling secure DinD
+
 ## Acceptance
-- [ ] Docker CE installed in main image
-- [ ] Docker CLI available
-- [ ] containerd.io installed
-- [ ] daemon.json configured for sysbox (--iptables=false, --ip-masq=false)
+- [ ] Docker CE (docker-ce, docker-ce-cli, containerd.io) installed
+- [ ] sysbox-ce installed inside the container
+- [ ] daemon.json configured with sysbox-runc as default runtime
 - [ ] Image builds successfully
-- [ ] Image size increase is reasonable (<500MB)
+- [ ] Image size increase is reasonable
 ## Done summary
 TBD
 

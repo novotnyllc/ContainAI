@@ -9,6 +9,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-10-vep.36.md",
   "status": "todo",
-  "title": "Add kernel version check for ID-mapped mounts",
+  "title": "Add kernel version check for sysbox compatibility",
   "updated_at": "2026-01-21T18:35:00.760163Z"
 }

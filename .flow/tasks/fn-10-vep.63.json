@@ -4,7 +4,8 @@
   "claimed_at": null,
   "created_at": "2026-01-21T20:57:53.105464Z",
   "depends_on": [
-    "fn-10-vep.55"
+    "fn-10-vep.55",
+    "fn-10-vep.64"
   ],
   "epic": "fn-10-vep",
   "id": "fn-10-vep.63",
@@ -12,5 +13,5 @@
   "spec_path": ".flow/tasks/fn-10-vep.63.md",
   "status": "todo",
   "title": "Implement cai doctor --fix for auto-remediation",
-  "updated_at": "2026-01-21T20:58:57.425003Z"
+  "updated_at": "2026-01-21T22:14:16.044313Z"
 }

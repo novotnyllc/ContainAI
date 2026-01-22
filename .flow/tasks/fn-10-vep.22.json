@@ -11,6 +11,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-10-vep.22.md",
   "status": "todo",
-  "title": "Add Docker CLI and dockerd to main Dockerfile",
-  "updated_at": "2026-01-21T08:20:18.258866Z"
+  "title": "Add Docker CE to main Dockerfile for DinD",
+  "updated_at": "2026-01-21T22:34:17.715119Z"
 }

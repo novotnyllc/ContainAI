@@ -1,11 +1,36 @@
 # fn-10-vep.48 Implement SSH pub key injection and known_hosts management
 
 ## Description
-Implement SSH public key injection and known_hosts management.
+Implement SSH pub key injection and known_hosts management with sshd readiness checking and retry logic.
 
 **Size:** M
-**Files:** lib/ssh.sh, lib/container.sh
+**Files:** lib/ssh.sh
 
+## Approach
+
+1. Wait for sshd ready before key injection:
+   - Poll with exponential backoff (100ms, 200ms, 400ms...)
+   - Max wait: 30 seconds
+   - Check via `docker exec` to test sshd status
+
+2. Pub key injection:
+   - Inject public key to `/home/agent/.ssh/authorized_keys`
+   - Set proper permissions (600 for file, 700 for .ssh dir)
+
+3. known_hosts management:
+   - Use `ssh-keyscan` to get container's host key
+   - Store in `~/.config/containai/known_hosts`
+   - Auto-clean stale entries on `--fresh` flag
+
+4. Handle stale host keys:
+   - On connection failure due to host key mismatch, offer to clean
+   - Auto-clean when container is recreated with `--fresh`
+
+## Key context
+
+- sshd may take 1-5 seconds to start after container boot
+- Host key changes when container is recreated
+- Use `ssh-keyscan -p <port> localhost` for key retrieval
 ## Approach
 
 1. Create `_cai_inject_ssh_key()`:
@@ -28,13 +53,13 @@ Implement SSH public key injection and known_hosts management.
 - ssh-keyscan can fail if sshd not ready - add retry with backoff
 - Permissions are critical: 600 for authorized_keys, 700 for .ssh
 ## Acceptance
-- [ ] Public key injected into container's authorized_keys
-- [ ] Proper permissions set (700 .ssh, 600 authorized_keys)
-- [ ] known_hosts updated with container's host key
-- [ ] SSH host config written to `~/.ssh/containai.d/{name}.conf`
-- [ ] StrictHostKeyChecking=accept-new in generated config
-- [ ] Idempotent: re-running doesn't duplicate keys
-- [ ] Handles sshd startup delay (retry logic)
+- [ ] sshd readiness check with exponential backoff (max 30s)
+- [ ] Pub key injected to /home/agent/.ssh/authorized_keys
+- [ ] Proper permissions set (600/700)
+- [ ] known_hosts populated via ssh-keyscan
+- [ ] Stale known_hosts entries cleaned on `--fresh`
+- [ ] Clear error if sshd doesn't start within timeout
+- [ ] No host key prompts during normal operation
 ## Done summary
 TBD
 

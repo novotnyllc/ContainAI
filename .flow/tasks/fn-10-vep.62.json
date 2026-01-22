@@ -11,6 +11,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-10-vep.62.md",
   "status": "todo",
-  "title": "Update docs/architecture.md with SSH and systemd diagrams",
-  "updated_at": "2026-01-21T20:58:57.068956Z"
+  "title": "Update docs/architecture.md with system container architecture",
+  "updated_at": "2026-01-21T22:14:08.314533Z"
 }

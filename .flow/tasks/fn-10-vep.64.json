@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-21T22:13:13.190192Z",
+  "depends_on": [
+    "fn-10-vep.42"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.64",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.64.md",
+  "status": "todo",
+  "title": "Implement cai ssh cleanup command",
+  "updated_at": "2026-01-21T22:13:26.585388Z"
+}

@@ -1,11 +1,34 @@
 # fn-10-vep.47 Implement SSH port allocation (2300-2500 range)
 
 ## Description
-Implement SSH port allocation in the 2300-2500 range.
+Implement SSH port allocation in the 2300-2500 range with graceful error handling for port exhaustion.
 
-**Size:** S
-**Files:** lib/ssh.sh
+**Size:** M
+**Files:** lib/ssh.sh, lib/container.sh
 
+## Approach
+
+1. Port allocation function:
+   - Scan ports 2300-2500 using `ss -tulpn`
+   - Find first available port
+   - Handle port exhaustion with clear error message
+
+2. Port exhaustion handling:
+   - If all 200 ports are in use, provide actionable error
+   - Suggest running `cai ssh cleanup` to remove stale configs
+   - List containers using ports for user review
+
+3. Store allocated port in container label `containai.ssh-port`
+
+4. Port reuse on container restart:
+   - If container already has port label, try to reuse it
+   - If port now in use, reallocate
+
+## Key context
+
+- Use `ss -tulpn` not netstat (more portable)
+- Port must be stored in container label for persistence
+- Consider concurrent allocation (file locking if needed)
 ## Approach
 
 1. Create `_cai_find_available_port()`:
@@ -22,12 +45,13 @@ Implement SSH port allocation in the 2300-2500 range.
 - Don't use ephemeral range (32768+) to avoid conflicts with Docker/OS
 - Store allocated port in container label: `containai.ssh-port`
 ## Acceptance
-- [ ] `_cai_find_available_port()` function created
-- [ ] Uses `ss` (not netstat) for port detection
-- [ ] Default range is 2300-2500
-- [ ] Range is configurable via config.toml
-- [ ] Returns error with clear message if no ports available
-- [ ] Port stored in container label on creation
+- [ ] Port allocation scans 2300-2500 range
+- [ ] Uses `ss -tulpn` for port checking
+- [ ] Clear error message if all ports exhausted
+- [ ] Error message suggests `cai ssh cleanup`
+- [ ] Port stored in container label `containai.ssh-port`
+- [ ] Port reused on container restart when available
+- [ ] No silent failures - all errors are user-visible
 ## Done summary
 TBD
 

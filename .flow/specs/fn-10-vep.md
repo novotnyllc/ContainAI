@@ -1,32 +1,66 @@
-# fn-10-vep: Sysbox-Only Sandbox Runtime with SSH Access
+# fn-10-vep: Sysbox System Containers with SSH Access
 
 ## Overview
 
-**Architectural Pivot**: Remove all Docker Desktop/ECI dependency. ContainAI uses its own Sysbox installation with a dedicated Docker context (`docker-containai`), systemd-based container lifecycle, and SSH-based agent access.
+ContainAI provides **system containers** - lightweight, VM-like environments that can run systemd, services, and even Docker itself. Using Nestybox's Sysbox runtime, these containers provide stronger isolation than regular containers while enabling capabilities that normally require `--privileged` (like Docker-in-Docker) without the security risks.
 
-**Value Proposition**: 
-- **Free Docker Desktop sandbox-equivalent isolation** - No Business subscription required
+**What is a System Container?**
+
+A system container is a container that acts like a light-weight virtual host:
+- Runs **systemd as PID 1** (like a real Linux system)
+- Can run **multiple services** (sshd, dockerd, your apps)
+- Enables **Docker-in-Docker** without `--privileged` flag
+- Provides **VM-like isolation** with container efficiency
+
+**Value Proposition**:
+- **Secure by default** - Sysbox provides automatic user namespace isolation (root in container → unprivileged on host)
+- **Docker-in-Docker built-in** - Agents can build and run containers without `--privileged`
 - **Real SSH access** - Agent forwarding, port tunneling, VS Code Remote-SSH
-- **Docker-in-Docker built-in** - Run containers inside your dev environment
-- **One command setup** - `cai setup && cai run .`
+- **Works alongside Docker Desktop** - Separate installation, no conflicts
+- **No manual userns config** - Sysbox handles UID/GID mapping automatically via `/etc/subuid` and `/etc/subgid`
 
-## Problem Statement
+## Architecture
 
-- Docker Desktop Business subscription required for sandbox/ECI features ($21/user/month)
-- Users want isolation without enterprise licensing costs
-- `docker exec` model lacks SSH features (agent forwarding, tunneling, IDE Remote-SSH)
-- Lima socket issue: "socket exists but docker info failed"
+```
+Host System (may have Docker Desktop)
+│
+├── Docker Desktop (if present) ─────────────────────────────────
+│    └── /var/run/docker.sock (NOT USED by containai)
+│
+└── ContainAI docker-ce ─────────────────────────────────────────
+     ├── Socket: /var/run/containai-docker.sock
+     ├── Config: /etc/containai/docker/daemon.json
+     ├── Data: /var/lib/containai-docker/
+     ├── Runtime: sysbox-runc (default)
+     └── Service: containai-docker.service
+          │
+          └── Sysbox System Container ────────────────────────────
+               ├── PID 1: /sbin/init (systemd)
+               ├── sshd.service (port 22 → mapped to 2300-2500)
+               ├── docker.service (inner Docker, default: sysbox-runc)
+               │    └── /var/lib/docker (inside container)
+               └── containai-init.service (workspace setup)
 
-## Architectural Model
+               Note: Inner Docker uses sysbox-runc by default for DinD.
+               Sysbox enables this without --privileged.
+```
 
-### Container Lifecycle (Systemd + SSH)
+### Why Separate docker-ce?
+
+1. **Docker Desktop doesn't support sysbox** - Only supports its own Enhanced Container Isolation (ECI), which has different limitations
+2. **System containers need sysbox** - For systemd, DinD without `--privileged`, and VM-like behavior
+3. **Sysbox provides comprehensive isolation** - Automatic user namespace mapping, procfs/sysfs virtualization, syscall interception
+4. **No conflicts** - ContainAI docker uses its own socket and paths (`/var/run/containai-docker.sock`)
+
+### Container Lifecycle
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Container (sysbox-runc runtime)                             │
+│ Sysbox System Container (created by containai docker-ce)    │
+│  Runtime: sysbox-runc                                       │
 │  PID 1: /sbin/init (systemd)                                │
 │  ├── sshd.service (auto-start, port 22)                     │
-│  ├── dockerd.service (auto-start, DinD ready)               │
+│  ├── docker.service (auto-start, DinD with sysbox-runc)     │
 │  └── containai-init.service (workspace setup, one-shot)     │
 └─────────────────────────────────────────────────────────────┘
          ▲
@@ -39,21 +73,22 @@
 └─────────────────┘
 ```
 
-**Key changes from previous Phase 7:**
-- PID 1: `systemd` (was: `sleep infinity`)
-- Agent access: SSH (was: `docker exec`)
-- entrypoint.sh logic: migrated to systemd units
-- sshd + dockerd: always auto-start (not optional)
-
 ### Setup Flow
 
 ```
 cai setup
+  ├── Install docker-ce (if not present)
+  │   ├── Socket: /var/run/containai-docker.sock
+  │   ├── Config: /etc/containai/docker/daemon.json
+  │   ├── Data: /var/lib/containai-docker/
+  │   └── Runtime: sysbox-runc (default)
+  ├── Install sysbox (if not present)
+  │   └── sysbox-mgr, sysbox-fs services
   ├── Docker context: docker-containai
-  │   └── sysbox-runc default, userns mapping
+  │   └── Points to containai-docker.sock
   ├── SSH key: ~/.config/containai/id_containai (ed25519)
   ├── SSH config: ~/.ssh/containai.d/*.conf
-  │   └── Include added to ~/.ssh/config (if not present)
+  │   └── Include added to ~/.ssh/config
   └── Config: ~/.config/containai/config.toml
 ```
 
@@ -61,289 +96,183 @@ cai setup
 
 ```
 cai run /workspace [--dry-run]
+  ├── Use docker-containai context (NOT Docker Desktop)
   ├── Find/create container (supports --name, --data-volume)
   ├── Container starts: systemd → sshd + dockerd ready
   ├── Pick available port (2300-2500 range, configurable)
   ├── Add pub key to container's authorized_keys
-  ├── Update known_hosts (StrictHostKeyChecking=accept-new)
+  ├── Wait for sshd ready with retry
+  ├── Update known_hosts
   ├── Write SSH host config to ~/.ssh/containai.d/{container}.conf
   └── SSH into container, run agent command
 ```
 
 ## Scope
 
-### Phase 1: Remove ECI Dependency ✅ (fn-10-vep.32 done)
-- Remove `docker sandbox run` code path from lib/container.sh
-- Remove ECI detection logic (lib/eci.sh deprecated)
-- Update `_cai_select_context()` to always prefer Sysbox context
+### Phase 1: Clean Slate
+- Remove all legacy code paths from lib/container.sh
+- Delete lib/eci.sh entirely
+- Start fresh with Sysbox-only implementation
 
-### Phase 2: Docker Context (docker-containai)
-- Create dedicated Docker context with sysbox-runc enabled by default
-- Configure userns mapping in context
+### Phase 2: Separate docker-ce Installation
+- Install docker-ce alongside Docker Desktop
+- Configure isolated socket, config, data directories
+- Install and configure sysbox
+- Create docker-containai context
 
 **Acceptance**:
-- [ ] `docker-containai` context created via `cai setup`
-- [ ] sysbox-runc is default runtime in context
-- [ ] userns mapping configured
-- [ ] `cai doctor` validates context
+- [ ] docker-ce installed with isolated paths
+- [ ] Socket at `/var/run/containai-docker.sock`
+- [ ] Config at `/etc/containai/docker/daemon.json`
+- [ ] Data at `/var/lib/containai-docker/`
+- [ ] sysbox-runc is default runtime
+- [ ] sysbox services running
+- [ ] `docker-containai` context created
+- [ ] Docker Desktop (if present) unaffected
 
 ### Phase 3: SSH Infrastructure
 - Generate dedicated SSH key during `cai setup`
 - Create `~/.ssh/containai.d/` directory
 - Add `Include ~/.ssh/containai.d/*.conf` to `~/.ssh/config`
-- Validate OpenSSH version (7.3p1+ for Include)
+- SSH config cleanup command
 
 **Acceptance**:
-- [ ] SSH key generated at `~/.config/containai/id_containai`
+- [ ] SSH key at `~/.config/containai/id_containai`
 - [ ] `~/.ssh/containai.d/` created with 700 permissions
 - [ ] Include directive added (no duplicates)
-- [ ] OpenSSH version check with clear error if < 7.3p1
-- [ ] Existing SSH config preserved
+- [ ] `cai ssh cleanup` removes stale configs
+- [ ] Auto-cleanup on container removal
 
 ### Phase 4: Split Dockerfile (base/sdks/full)
-- **base**: Ubuntu 24.04 LTS + systemd + sshd + dockerd + agent user + .bashrc.d
-- **sdks**: .NET SDK, Rust, Go, Node (via nvm), Python tools (uv, pipx)
-- **full** (default): AI agents (claude, gemini, copilot, codex), gh CLI
+- **base**: Ubuntu 24.04 LTS + systemd + sshd + dockerd + agent user
+- **sdks**: .NET SDK, Rust, Go, Node (via nvm), Python tools
+- **full** (default): AI agents, gh CLI
 
 **Acceptance**:
-- [ ] base layer: systemd as init, sshd auto-start, dockerd auto-start
-- [ ] base layer: agent user, /home/agent/.bashrc.d/ pattern
-- [ ] base layer: tmux, jq, yq, bun installed
-- [ ] sdks layer: .NET SDK (latest LTS), Rust, Go
-- [ ] sdks layer: nvm with latest Node LTS
-- [ ] sdks layer: uv, pipx installed
-- [ ] full layer: all current agents installed
-- [ ] full layer: gh CLI installed
+- [ ] base layer: systemd as init, sshd + dockerd auto-start
+- [ ] base layer: agent user with docker group membership
+- [ ] Inner Docker uses runc (not sysbox)
+- [ ] DinD works: `docker run hello-world` inside container
 - [ ] All layers build successfully
-- [ ] Images tagged: containai/base, containai/sdks, containai/full
 
 ### Phase 5: Systemd Container Lifecycle
-- Replace entrypoint.sh with systemd services
 - containai-init.service: workspace setup (one-shot)
 - sshd.service: auto-start (always)
-- dockerd.service: auto-start (always, not optional)
-- Use SIGRTMIN+3 for graceful shutdown (100s timeout)
+- docker.service: auto-start (always, for DinD)
+- Use SIGRTMIN+3 for graceful shutdown
 
 **Acceptance**:
 - [ ] PID 1 is `/sbin/init --log-level=err`
-- [ ] containai-init.service handles workspace discovery
 - [ ] sshd enabled and auto-starts
-- [ ] dockerd enabled and auto-starts (not optional)
-- [ ] `docker stop --time=100` used for shutdown
-- [ ] entrypoint.sh removed or deprecated
+- [ ] dockerd enabled and auto-starts
+- [ ] DinD verification passes
 
-### Phase 6: SSH-Based Container Access
-- Port allocation: find available in 2300-2500 range (configurable)
-- Add pub key to container's `/home/agent/.ssh/authorized_keys`
-- Update known_hosts with container's host key
-- Generate host config in `~/.ssh/containai.d/{container}.conf`
-- `cai shell` calls SSH underneath
+### Phase 6: SSH-Based Container Access (Bulletproof)
+- Port allocation with graceful exhaustion handling
+- sshd readiness retry with exponential backoff
+- Auto-recovery from stale host keys
+- `cai shell` always connects or provides clear error
 
 **Acceptance**:
-- [ ] Port allocation via `ss -tulpn` (not netstat)
-- [ ] Port stored in container label `containai.ssh-port`
-- [ ] Pub key injected on first connection
-- [ ] known_hosts managed with StrictHostKeyChecking=accept-new
-- [ ] Host config written per-container
-- [ ] `cai shell <ws>` connects via SSH transparently
-- [ ] `cai run <ws>` runs agent via SSH
-- [ ] `cai run <ws> -- <cmd>` runs arbitrary command via SSH
+- [ ] Port allocation via `ss -tulpn`
+- [ ] Clear error if ports exhausted
+- [ ] sshd readiness retry (max 30s)
+- [ ] Stale known_hosts auto-cleaned on `--fresh`
+- [ ] `cai shell` retries on transient failures
+- [ ] Auto-recover from stale SSH state
 
 ### Phase 7: CLI Enhancements
-- `--dry-run` flag for all commands (show what would happen)
-- `--data-volume` flag support (custom data volume name)
-- `--name` flag support (custom container name)
-- `cai import` for hot-reload of config into running container
-
-**Acceptance**:
-- [ ] `--dry-run` shows planned actions without executing
-- [ ] `--data-volume` allows custom volume name
-- [ ] `--name` allows custom container name
-- [ ] `cai import` hot-reloads config (env, credentials) into container
-- [ ] All flags documented in help
+- `--dry-run` flag
+- `--data-volume` and `--name` flags
+- `cai import` for hot-reload
+- `cai ssh cleanup`
 
 ### Phase 8: Dynamic Resource Limits
-- cgroup limits default to 50% of host machine (configurable)
-- Auto-detect host resources (memory, CPUs)
-- Configurable via `[container]` section in config.toml
-
-**Acceptance**:
-- [ ] Auto-detect host memory and CPUs
-- [ ] Default: 50% of host memory, 50% of host CPUs
-- [ ] Minimum: 2GB memory, 1 CPU
-- [ ] Configurable via `[container].memory` and `[container].cpus`
-- [ ] `--memory` and `--cpus` CLI flags override config
+- cgroup limits default to 50% of host
+- Configurable via config.toml
 
 ### Phase 9: SSH Config Options
-- Config for agent forwarding, tunneled ports
-- `config.toml` [ssh] section for user preferences
-- Support VS Code Remote-SSH compatibility
-
-**Acceptance**:
-- [ ] `[ssh].forward_agent = true/false` in config.toml
-- [ ] `[ssh].local_forward` for port tunneling
-- [ ] Generated host configs include user settings
-- [ ] VS Code can connect using containai SSH config
+- Agent forwarding, port tunneling
+- VS Code Remote-SSH compatibility
 
 ### Phase 10: Security Hardening
-- Rely on Docker's default MaskedPaths/ReadonlyPaths
-- SSH key-only auth (no passwords)
-- sshd_config hardened (PermitRootLogin no, PasswordAuthentication no)
+- SSH key-only auth
+- Host socket access blocked by default
 
-**Acceptance**:
-- [ ] NO `systempaths=unconfined`
-- [ ] SSH password auth disabled
-- [ ] Root SSH login disabled
+### Phase 11: DinD Verification
+- Verify nested Docker works
+- Test container builds inside container
 
-### Phase 11: DinD Support
-- dockerd always auto-starts inside Sysbox container
-- Inner containers use runc
-
-**Acceptance**:
-- [ ] dockerd auto-starts in Sysbox container
-- [ ] Inner containers use runc
-- [ ] DinD verification test passes
-
-### Phase 12: Documentation Overhaul
-- Main README: immediately attractive, clear value prop, quick start
-- Architecture docs: updated diagrams, SSH flow, systemd lifecycle
-- User guides: comprehensive setup and usage docs
-
-**Acceptance**:
-- [ ] README.md: Hero section with value prop
-- [ ] README.md: One-liner install and first run
-- [ ] README.md: Comparison table (vs Docker Desktop, vs devcontainers)
-- [ ] docs/architecture.md: Updated diagrams (mermaid)
-- [ ] docs/quickstart.md: Step-by-step with screenshots
-- [ ] docs/configuration.md: All config options documented
+### Phase 12: Documentation
+- README with value prop
+- Architecture docs
+- Troubleshooting guide
 
 ### Phase 13: cai doctor --fix
-- `cai doctor` diagnoses issues
-- `cai doctor --fix` attempts auto-remediation
+- Diagnose and auto-remediate issues
 
-**Acceptance**:
-- [ ] `cai doctor` shows all checks with pass/fail
-- [ ] `cai doctor --fix` attempts to fix failed checks
-- [ ] Fix actions: regenerate SSH key, recreate context, fix permissions
-- [ ] Clear output showing what was fixed
-
-### Phase 14: Distribution & Updates
+### Phase 14: Distribution
 - GHCR publishing
 - install.sh script
-- cai update command
-
-**Acceptance**:
-- [ ] GHCR images published (base, sdks, full)
-- [ ] install.sh works Linux/macOS
-- [ ] `cai update` works
-
-## Out of Scope
-
-- Docker Desktop ECI support (removed)
-- Windows native (WSL2 only)
-- Aggressive capability dropping (future)
-- `cai stop --remove` command
-
-## Future Work
-
-- **cai as .NET AOT binary**: Single-file, no dependencies, fast startup
-- **cai plugins**: Extensible agent support
-- **Remote container support**: SSH to remote Docker hosts
 
 ## Quick Commands
 
 ```bash
-# Setup
-cai setup                  # Creates context, SSH key, config dirs
+# Setup (installs containai docker-ce + sysbox)
+cai setup
 
 # Diagnostics  
-cai doctor                 # Validates sysbox, context, SSH
+cai doctor                 # Validates containai docker, sysbox, SSH
 cai doctor --fix           # Auto-fix common issues
 
 # Container access
 cai run /path/to/workspace           # Launch agent via SSH
 cai run /path/to/workspace -- bash   # Run command via SSH
-cai run --dry-run /path/to/workspace # Show what would happen
 cai shell /path/to/workspace         # Interactive shell via SSH
-cai shell --fresh /path/to/workspace # Recreate container, then shell
 
-# Custom options
-cai run --name mydev --data-volume mydata /path  # Custom names
-cai run --memory 8g --cpus 4 /path               # Override resources
+# SSH management
+cai ssh cleanup                      # Remove stale SSH configs
 
-# Hot reload
-cai import /path/to/workspace        # Reload config into running container
-
-# SSH config location
-cat ~/.ssh/containai.d/containai-*.conf
+# Inside the container (DinD works)
+docker run hello-world               # Nested containers work
+docker build -t myimage .            # Builds work
 ```
-
-## Migration Notes
-
-- **Breaking**: Containers now use systemd, not sleep infinity
-- **Breaking**: Access via SSH, not docker exec
-- **New**: SSH features available (agent forwarding, tunneling)
-- **New**: VS Code Remote-SSH compatible
-- **New**: dockerd always running (DinD ready)
-- Existing containers will need `--fresh` to recreate
 
 ## Technical Details
 
-### Container Naming
+### Host: ContainAI Docker Configuration
 
-Default: `containai-$(hash "$workspace_path")`
-Custom: `--name <name>` overrides
+`/etc/containai/docker/daemon.json` - The docker-ce instance on the host:
 
-```bash
-_cai_container_name() {
-  local workspace="$1"
-  local custom_name="${2:-}"
-  
-  if [[ -n "$custom_name" ]]; then
-    printf '%s' "$custom_name"
-    return 0
-  fi
-  
-  local normalized
-  normalized=$(cd "$workspace" 2>/dev/null && pwd -P || printf '%s' "$workspace")
-  
-  if command -v shasum >/dev/null 2>&1; then
-    printf 'containai-%s' "$(printf '%s' "$normalized" | shasum -a 256 | cut -c1-12)"
-  elif command -v sha256sum >/dev/null 2>&1; then
-    printf 'containai-%s' "$(printf '%s' "$normalized" | sha256sum | cut -c1-12)"
-  else
-    printf 'containai-%s' "$(printf '%s' "$normalized" | openssl dgst -sha256 | awk '{print substr($NF,1,12)}')"
-  fi
+```json
+{
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "/usr/bin/sysbox-runc"
+    }
+  },
+  "default-runtime": "sysbox-runc",
+  "hosts": ["unix:///var/run/containai-docker.sock"],
+  "data-root": "/var/lib/containai-docker"
 }
 ```
 
-### Dynamic Resource Detection
+### Inner Docker Configuration (Inside System Container)
 
-```bash
-_cai_detect_resources() {
-  local mem_total_kb mem_total_gb cpus
-  
-  # Detect memory
-  if [[ -f /proc/meminfo ]]; then
-    mem_total_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    mem_total_gb=$((mem_total_kb / 1024 / 1024))
-  elif command -v sysctl >/dev/null 2>&1; then
-    mem_total_gb=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
-  fi
-  
-  # Detect CPUs
-  cpus=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-  
-  # 50% of resources, with minimums
-  local mem_limit=$((mem_total_gb / 2))
-  local cpu_limit=$((cpus / 2))
-  
-  [[ $mem_limit -lt 2 ]] && mem_limit=2
-  [[ $cpu_limit -lt 1 ]] && cpu_limit=1
-  
-  printf '%dg %d' "$mem_limit" "$cpu_limit"
+`/etc/docker/daemon.json` - The Docker daemon inside the system container also defaults to sysbox-runc for DinD:
+
+```json
+{
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "/usr/bin/sysbox-runc"
+    }
+  },
+  "default-runtime": "sysbox-runc"
 }
 ```
+
+This allows agents to run containers inside the system container with the same security benefits.
 
 ### Container Creation
 
@@ -359,7 +288,6 @@ docker --context docker-containai run -d \
   -w /home/agent/workspace \
   --label "containai.workspace=$workspace_resolved" \
   --label "containai.ssh-port=$ssh_port" \
-  --label "containai.data-volume=$data_volume" \
   --stop-timeout 100 \
   --name "${container_name}" \
   ghcr.io/containai/full:latest
@@ -367,7 +295,8 @@ docker --context docker-containai run -d \
 
 ## References
 
+- Sysbox: https://github.com/nestybox/sysbox
 - Sysbox systemd guide: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/systemd.md
-- SSH Include directive (OpenSSH 7.3p1+): https://man.openbsd.org/ssh_config
+- Sysbox DinD guide: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/dind.md
+- SSH Include directive: https://man.openbsd.org/ssh_config
 - Docker contexts: https://docs.docker.com/engine/manage-resources/contexts/
-- Kernel 5.12+ for ID-mapped mounts
