@@ -276,18 +276,19 @@ _containai_validate_masked_paths() {
     # Check for /proc/kcore being masked via mount metadata
     # In a properly secured container, /proc/kcore should be bind-mounted from /dev/null
     # We verify by checking mount info rather than trying to read the file
-    if grep -q "/proc/kcore" /proc/self/mountinfo 2>/dev/null; then
+    #
+    # mountinfo format (space-separated fields):
+    #   mount_id parent_id major:minor root mountpoint options ...
+    # For masked paths, the mountpoint field will be exactly " /proc/kcore "
+    # and the mount source will be /dev/null
+    #
+    # Use grep -F for fixed string matching to avoid regex interpretation
+    if grep -qF ' /proc/kcore ' /proc/self/mountinfo 2>/dev/null; then
         return 0
     fi
 
-    # Alternative: use findmnt to check if path has special mount
-    if command -v findmnt >/dev/null 2>&1; then
-        if findmnt -T /proc/kcore >/dev/null 2>&1; then
-            return 0
-        fi
-    fi
-
     # Could not verify MaskedPaths are applied
+    # This is expected when running on the host (not in a container)
     return 1
 }
 
