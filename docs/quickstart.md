@@ -81,6 +81,7 @@ flowchart TD
     sysbox --> ready
 
     doctor -.->|neither OK| optionA
+    doctor -.->|neither OK| optionB
 
     subgraph fallback["If neither path is OK"]
         optionA["Option A: Enable Docker Desktop sandbox<br/>1. Open Docker Desktop Settings<br/>2. Go to Features in development<br/>3. Enable Docker sandbox or ECI<br/>4. Restart Docker Desktop"]
