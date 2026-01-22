@@ -6,11 +6,13 @@
 # - sshd for secure remote access (key-only auth)
 # - dockerd for Docker-in-Docker (via sysbox-runc)
 #
-# Usage (from repo root):
+# Usage (from repo root, requires BuildKit):
 #   docker build -t containai/base -f src/Dockerfile.base src/
 #
 # Run with sysbox-runc runtime:
 #   docker run --runtime=sysbox-runc -d containai/base
+#
+# Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 
 FROM ubuntu:24.04
 
@@ -73,6 +75,8 @@ RUN for unit in \
 
 # =============================================================================
 # AGENT USER SETUP
+# Note: NOPASSWD sudo is intentional - this is a sandboxed AI agent environment
+# where sysbox provides isolation. SSH key auth implies full container access.
 # =============================================================================
 RUN useradd --create-home --shell /bin/bash --uid 1000 agent && \
     echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/agent && \
@@ -104,8 +108,29 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         'KbdInteractiveAuthentication no' \
         'UsePAM no' \
         > /etc/ssh/sshd_config.d/99-containai-security.conf && \
+    # Remove baked-in host keys - will be generated on first boot
+    rm -f /etc/ssh/ssh_host_* && \
     # Enable sshd service via symlink (systemctl requires systemd as PID 1)
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
     ln -sf /lib/systemd/system/ssh.service /etc/systemd/system/multi-user.target.wants/ssh.service
+
+# Generate SSH host keys on first boot if missing
+RUN mkdir -p /etc/systemd/system && \
+    printf '%s\n' \
+        '[Unit]' \
+        'Description=Generate SSH host keys if missing' \
+        'ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key' \
+        'Before=ssh.service' \
+        '' \
+        '[Service]' \
+        'Type=oneshot' \
+        'ExecStart=/usr/bin/ssh-keygen -A' \
+        'RemainAfterExit=yes' \
+        '' \
+        '[Install]' \
+        'WantedBy=multi-user.target' \
+        > /etc/systemd/system/ssh-keygen.service && \
+    ln -sf /etc/systemd/system/ssh-keygen.service /etc/systemd/system/multi-user.target.wants/ssh-keygen.service
 
 EXPOSE 22
 
@@ -161,6 +186,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ln -sf /lib/systemd/system/sysbox-mgr.service /etc/systemd/system/multi-user.target.wants/sysbox-mgr.service && \
     ln -sf /lib/systemd/system/sysbox-fs.service /etc/systemd/system/multi-user.target.wants/sysbox-fs.service
 
+# Add Docker->Sysbox ordering to ensure sysbox is ready before dockerd starts
+RUN mkdir -p /etc/systemd/system/docker.service.d && \
+    printf '%s\n' \
+        '[Unit]' \
+        'After=sysbox-mgr.service sysbox-fs.service' \
+        'Requires=sysbox-mgr.service sysbox-fs.service' \
+        > /etc/systemd/system/docker.service.d/sysbox-dependency.conf
+
 # Configure inner Docker daemon with sysbox-runc as default runtime
 # This provides security consistency for nested containers
 RUN mkdir -p /etc/docker && \
@@ -207,7 +240,7 @@ WORKDIR /home/agent
 # Set up .bashrc.d pattern for modular shell configuration
 RUN mkdir -p /home/agent/.bashrc.d && \
     # Configure bash for color prompt
-    sed -i 's/^#\s*force_color_prompt=yes/force_color_prompt=yes/' /home/agent/.bashrc && \
+    sed -i 's/^#[[:space:]]*force_color_prompt=yes/force_color_prompt=yes/' /home/agent/.bashrc && \
     # Add .bashrc.d sourcing hook (idempotent check)
     { grep -qxF 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' /home/agent/.bashrc || \
       { echo '# Source all scripts in .bashrc.d if directory exists'; \
