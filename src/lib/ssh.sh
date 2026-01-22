@@ -68,6 +68,9 @@ _CAI_SSH_MIN_VERSION="7.3"
 _CAI_SSH_PORT_RANGE_START=2300
 _CAI_SSH_PORT_RANGE_END=2500
 
+# Lock file for port allocation (prevents concurrent allocation races)
+_CAI_SSH_PORT_LOCK_FILE="$_CAI_CONFIG_DIR/.ssh-port.lock"
+
 # ==============================================================================
 # Path getters
 # ==============================================================================

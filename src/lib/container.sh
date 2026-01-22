@@ -1364,6 +1364,19 @@ _containai_start_container() {
                     return 1
                 fi
             fi
+            # Check if the container's SSH port is still available before starting
+            local existing_port
+            if existing_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context"); then
+                # Port is labeled on container - check if it's in use by another process
+                if ! _cai_is_port_available "$existing_port"; then
+                    # Port in use - need to recreate container with new port
+                    echo "[WARN] SSH port $existing_port is in use by another process" >&2
+                    echo "[ERROR] Cannot start container - port conflict. Use --fresh to recreate with a new port." >&2
+                    return 1
+                fi
+                _cai_debug "SSH port $existing_port is available for restart"
+            fi
+
             # Start stopped container (tini is PID 1 managing sleep infinity)
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Starting stopped container..."
@@ -1457,9 +1470,24 @@ _containai_start_container() {
             if [[ -n "$selected_context" ]]; then
                 args+=(--context "$selected_context")
             fi
-            # Allocate SSH port for this container
-            local ssh_port
+
+            # Allocate SSH port and create container atomically under lock
+            # This prevents race conditions where concurrent allocations pick the same port
+            local ssh_port lock_fd lock_file="$_CAI_CONFIG_DIR/.ssh-port.lock"
+            mkdir -p "$_CAI_CONFIG_DIR" 2>/dev/null || true
+
+            # Use flock if available for atomic port allocation + container creation
+            if command -v flock >/dev/null 2>&1; then
+                exec {lock_fd}>"$lock_file"
+                if ! flock -w 30 "$lock_fd"; then
+                    echo "[ERROR] Timeout acquiring port allocation lock" >&2
+                    return 1
+                fi
+            fi
+
+            # Allocate SSH port for this container (inside lock)
             if ! ssh_port=$(_cai_allocate_ssh_port "$container_name" "$selected_context"); then
+                [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
                 echo "[ERROR] Failed to allocate SSH port for container" >&2
                 return 1
             fi
@@ -1497,12 +1525,16 @@ _containai_start_container() {
             # Command: sleep infinity (runs as child of tini, container stays running between sessions)
             args+=(sleep infinity)
 
-            # Create the container
+            # Create the container (inside lock to reserve the port)
             local create_output
             if ! create_output=$(docker "${args[@]}" 2>&1); then
+                [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
                 echo "[ERROR] Failed to create container: $create_output" >&2
                 return 1
             fi
+
+            # Release lock after container is created (port is now reserved by container)
+            [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
 
             # Wait for container to be running
             local wait_count=0
