@@ -49,10 +49,15 @@ FROM docker/sandbox-templates:claude-code
 
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
-LABEL org.opencontainers.image.title="Agent Sandbox" \
-      org.opencontainers.image.description="Docker sandbox for AI coding agents" \
-      org.opencontainers.image.source="https://github.com/clairernovotny/containai" \
+ARG VERSION=unknown
+LABEL org.opencontainers.image.title="ContainAI" \
+      org.opencontainers.image.description="Secure Docker sandbox for AI coding agents with Docker-in-Docker support" \
+      org.opencontainers.image.url="https://github.com/novotnyllc/containai" \
+      org.opencontainers.image.source="https://github.com/novotnyllc/containai" \
+      org.opencontainers.image.documentation="https://github.com/novotnyllc/containai#readme" \
+      org.opencontainers.image.vendor="Novotny LLC" \
       org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}"
 

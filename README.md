@@ -2,6 +2,7 @@
 
 **Run AI coding agents without risking your system.**
 
+[![Build](https://github.com/novotnyllc/containai/actions/workflows/docker.yml/badge.svg)](https://github.com/novotnyllc/containai/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 AI coding agents like Claude, Gemini, and Codex can execute arbitrary code on your machine. That's powerful—but dangerous. ContainAI puts them in a secure Docker sandbox with fail-closed defaults, so an agent can't accidentally (or maliciously) damage your system, leak credentials, or access files you didn't intend to share.
