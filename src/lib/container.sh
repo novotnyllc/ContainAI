@@ -263,64 +263,84 @@ _containai_container_name() {
     printf '%s' "$name"
 }
 
-# Legacy container name generation (git repo/branch based)
-# Kept for backward compatibility with existing containers
-# Format: <repo>-<branch> (sanitized)
-# Returns: container name via stdout
-_containai_container_name_legacy() {
-    local name repo_name branch_name
+# FR-4: Validate container mounts match expected configuration
+# Validates that workspace bind mount has correct source and data volume is correct
+# Arguments:
+#   $1 = docker_cmd array name (for context)
+#   $2 = container name
+#   $3 = expected workspace path
+#   $4 = expected data volume name
+# Returns: 0 if valid, 1 if tainted (with error message)
+_containai_validate_fr4_mounts() {
+    local -n _docker_cmd=$1
+    local container_name="$2"
+    local expected_workspace="$3"
+    local expected_volume="$4"
 
-    # Guard git usage to avoid "command not found" noise in minimal environments
-    if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        repo_name="$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)"
+    # Get mount info in JSON-like format: Type|Source|Destination per line
+    local mount_info mount_line
+    mount_info=$("${_docker_cmd[@]}" inspect --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{"\n"}}{{end}}' "$container_name" 2>/dev/null) || mount_info=""
 
-        # Check for detached HEAD
-        if git symbolic-ref -q HEAD >/dev/null 2>&1; then
-            branch_name="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
-        else
-            # Detached HEAD - use short SHA
-            branch_name="detached-$(git rev-parse --short HEAD 2>/dev/null)"
-        fi
+    local workspace_found=false
+    local volume_found=false
+    local mount_type mount_source mount_dest
 
-        name="${repo_name}-${branch_name}"
-    else
-        # Fall back to current directory name
-        name="$(basename "$(pwd)")"
+    while IFS='|' read -r mount_type mount_source mount_dest; do
+        [[ -z "$mount_dest" ]] && continue
+
+        case "$mount_dest" in
+            /home/agent/workspace)
+                # Must be a bind mount with correct source
+                if [[ "$mount_type" != "bind" ]]; then
+                    echo "[ERROR] FR-4: Workspace mount is not a bind mount (type: $mount_type)" >&2
+                    return 1
+                fi
+                if [[ "$mount_source" != "$expected_workspace" ]]; then
+                    echo "[ERROR] FR-4: Workspace mount source mismatch" >&2
+                    echo "  Expected: $expected_workspace" >&2
+                    echo "  Actual:   $mount_source" >&2
+                    return 1
+                fi
+                workspace_found=true
+                ;;
+            /mnt/agent-data)
+                # Must be a named volume with correct name
+                if [[ "$mount_type" != "volume" ]]; then
+                    echo "[ERROR] FR-4: Data mount is not a named volume (type: $mount_type)" >&2
+                    return 1
+                fi
+                if [[ "$mount_source" != "$expected_volume" ]]; then
+                    echo "[ERROR] FR-4: Data volume name mismatch" >&2
+                    echo "  Expected: $expected_volume" >&2
+                    echo "  Actual:   $mount_source" >&2
+                    return 1
+                fi
+                volume_found=true
+                ;;
+            /etc/hosts|/etc/hostname|/etc/resolv.conf)
+                # Docker-managed, allowed
+                ;;
+            *)
+                # Unexpected mount destination
+                echo "[ERROR] FR-4: Container has unexpected mount: $mount_dest" >&2
+                echo "[INFO] Container may have been tainted by 'cai shell --volume'" >&2
+                echo "[INFO] Use --fresh to recreate with clean mount configuration" >&2
+                return 1
+                ;;
+        esac
+    done <<< "$mount_info"
+
+    # Ensure both required mounts are present
+    if [[ "$workspace_found" != "true" ]]; then
+        echo "[ERROR] FR-4: Workspace mount not found" >&2
+        return 1
+    fi
+    if [[ "$volume_found" != "true" ]]; then
+        echo "[ERROR] FR-4: Data volume mount not found" >&2
+        return 1
     fi
 
-    # Sanitize: lowercase, replace non-alphanumeric with dash, collapse repeated dashes
-    # Use sed 's/--*/-/g' for POSIX portability (BSD/macOS compatible)
-    name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g')"
-
-    # Strip leading/trailing dashes
-    name="$(printf '%s' "$name" | sed 's/^-*//;s/-*$//')"
-
-    # Handle empty or dash-only names
-    if [[ -z "$name" || "$name" =~ ^-+$ ]]; then
-        name="sandbox-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-*//;s/-*$//')"
-    fi
-
-    # Truncate to 63 characters (Docker limit)
-    name="${name:0:63}"
-
-    # Final cleanup of trailing dashes from truncation
-    name="$(printf '%s' "$name" | sed 's/-*$//')"
-
-    # Final fallback if name became empty after all processing
-    if [[ -z "$name" ]]; then
-        local dir_fallback
-        dir_fallback="$(basename "$(pwd)")"
-        dir_fallback="$(printf '%s' "$dir_fallback" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-*//;s/-*$//')"
-        if [[ -n "$dir_fallback" ]]; then
-            name="sandbox-$dir_fallback"
-            name="${name:0:63}"
-            name="$(printf '%s' "$name" | sed 's/-*$//')"
-        else
-            name="sandbox-default"
-        fi
-    fi
-
-    printf '%s' "$name"
+    return 0
 }
 
 # ==============================================================================
@@ -1085,11 +1105,13 @@ _containai_start_container() {
     fi
     if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
         if [[ "$force_flag" == "true" ]]; then
-            echo "[WARN] No isolation available but --force specified. Proceeding without isolation checks." >&2
+            echo "[WARN] No Sysbox context available but --force specified." >&2
+            echo "[WARN] Container creation will still require sysbox-runc runtime." >&2
+            echo "[WARN] This may fail if Sysbox is not installed on the default Docker host." >&2
             selected_context=""
         else
             _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
-            _cai_error "Use --force to bypass (for testing only - not recommended)"
+            _cai_error "Use --force to bypass context selection (Sysbox runtime still required)"
             return 1
         fi
     fi
@@ -1248,25 +1270,10 @@ _containai_start_container() {
                     return 1
                 fi
             fi
-            # FR-4: Validate container has only expected mounts (workspace bind + data volume)
+            # FR-4: Validate container mounts match expected configuration (type + source)
             # This prevents shell --volume from tainting containers that run will later use
-            # Note: Docker adds /etc/hosts, /etc/hostname, /etc/resolv.conf - these are allowed
             if [[ "$shell_flag" != "true" ]]; then
-                local mount_dests
-                mount_dests=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$container_name" 2>/dev/null) || mount_dests=""
-                local unexpected_mount=""
-                while IFS= read -r dest; do
-                    [[ -z "$dest" ]] && continue
-                    case "$dest" in
-                        /home/agent/workspace|/mnt/agent-data) ;;  # Expected mounts
-                        /etc/hosts|/etc/hostname|/etc/resolv.conf) ;;  # Docker-managed
-                        *) unexpected_mount="$dest"; break ;;
-                    esac
-                done <<< "$mount_dests"
-                if [[ -n "$unexpected_mount" ]]; then
-                    echo "[ERROR] Container has unexpected mount: $unexpected_mount (FR-4 violation)" >&2
-                    echo "[INFO] Container may have been tainted by 'cai shell --volume'" >&2
-                    echo "[INFO] Use --fresh to recreate with clean mount configuration" >&2
+                if ! _containai_validate_fr4_mounts docker_cmd "$container_name" "$workspace_resolved" "$data_volume"; then
                     return 1
                 fi
             fi
@@ -1337,28 +1344,14 @@ _containai_start_container() {
                     return 1
                 fi
             fi
-            # FR-4: Validate container has only expected mounts (before starting)
+            # FR-4: Validate container mounts match expected configuration (type + source)
             # This prevents shell --volume from tainting containers that run will later use
             if [[ "$shell_flag" != "true" ]]; then
-                local exited_mount_dests
-                exited_mount_dests=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$container_name" 2>/dev/null) || exited_mount_dests=""
-                local exited_unexpected_mount=""
-                while IFS= read -r dest; do
-                    [[ -z "$dest" ]] && continue
-                    case "$dest" in
-                        /home/agent/workspace|/mnt/agent-data) ;;  # Expected mounts
-                        /etc/hosts|/etc/hostname|/etc/resolv.conf) ;;  # Docker-managed
-                        *) exited_unexpected_mount="$dest"; break ;;
-                    esac
-                done <<< "$exited_mount_dests"
-                if [[ -n "$exited_unexpected_mount" ]]; then
-                    echo "[ERROR] Container has unexpected mount: $exited_unexpected_mount (FR-4 violation)" >&2
-                    echo "[INFO] Container may have been tainted by 'cai shell --volume'" >&2
-                    echo "[INFO] Use --fresh to recreate with clean mount configuration" >&2
+                if ! _containai_validate_fr4_mounts docker_cmd "$container_name" "$workspace_resolved" "$data_volume"; then
                     return 1
                 fi
             fi
-            # Start stopped container (PID 1 is tini+sleep, container stays running)
+            # Start stopped container (tini is PID 1 managing sleep infinity)
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Starting stopped container..."
             fi
@@ -1428,6 +1421,24 @@ _containai_start_container() {
                 fi
             fi
 
+            # Validate extra_volumes don't target protected paths (FR-4)
+            local vol vol_dest
+            for vol in "${extra_volumes[@]}"; do
+                # Extract destination from volume spec (format: src:dest or src:dest:opts)
+                vol_dest="${vol#*:}"  # Remove source prefix
+                vol_dest="${vol_dest%%:*}"  # Remove options suffix
+                case "$vol_dest" in
+                    /home/agent/workspace|/home/agent/workspace/*)
+                        echo "[ERROR] FR-4: --volume cannot target /home/agent/workspace (protected path)" >&2
+                        return 1
+                        ;;
+                    /mnt/agent-data|/mnt/agent-data/*)
+                        echo "[ERROR] FR-4: --volume cannot target /mnt/agent-data (protected path)" >&2
+                        return 1
+                        ;;
+                esac
+            done
+
             # Build container creation args - always detached with tini init + sleep infinity
             local -a args=()
             if [[ -n "$selected_context" ]]; then
@@ -1435,17 +1446,17 @@ _containai_start_container() {
             fi
             args+=(run)
             args+=(--runtime=sysbox-runc)
-            args+=(--init)  # Use tini as PID 1 to properly reap zombie processes
+            args+=(--init)  # tini becomes PID 1 to properly reap zombie processes
             args+=(--name "$container_name")
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
-            args+=(-d)  # Always detached - tini manages sleep infinity
+            args+=(-d)  # Always detached - tini manages sleep infinity as child
 
             # Volume mounts
             args+=("${vol_args[@]}")
             args+=(-v "$workspace_resolved:/home/agent/workspace")
 
-            local vol env_var
+            local env_var
             for vol in "${extra_volumes[@]}"; do
                 args+=(-v "$vol")
             done
@@ -1460,12 +1471,13 @@ _containai_start_container() {
             # Image
             args+=("$resolved_image")
 
-            # PID 1: sleep infinity (container stays running between sessions)
+            # Command: sleep infinity (runs as child of tini, container stays running between sessions)
             args+=(sleep infinity)
 
             # Create the container
-            if ! docker "${args[@]}" >/dev/null; then
-                echo "[ERROR] Failed to create container" >&2
+            local create_output
+            if ! create_output=$(docker "${args[@]}" 2>&1); then
+                echo "[ERROR] Failed to create container: $create_output" >&2
                 return 1
             fi
 
