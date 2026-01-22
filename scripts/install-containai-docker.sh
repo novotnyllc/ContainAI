@@ -505,8 +505,7 @@ create_daemon_json() {
   "data-root": "$CAI_DOCKER_DATA_ROOT",
   "exec-root": "$CAI_DOCKER_EXEC_ROOT",
   "pidfile": "$CAI_DOCKER_PIDFILE",
-  "bridge": "$CAI_DOCKER_BRIDGE",
-  "iptables": false
+  "bridge": "$CAI_DOCKER_BRIDGE"
 }
 EOF
 )
@@ -551,7 +550,7 @@ Requires=containerd.service
 Type=notify
 # dockerd reads config from daemon.json which includes:
 # - isolated socket, data-root, exec-root, pidfile
-# - separate bridge (cai0) with iptables disabled to avoid conflicts
+# - separate bridge (cai0) with separate network to avoid conflicts
 ExecStart=/usr/bin/dockerd --config-file=$CAI_DOCKER_DAEMON_JSON
 ExecReload=/bin/kill -s HUP \$MAINPID
 TimeoutStartSec=0
@@ -798,7 +797,7 @@ Paths (isolated from existing Docker):
   Data:      /var/lib/containai-docker/
   Exec-root: /var/run/containai-docker/
   Pidfile:   /var/run/containai-docker.pid
-  Bridge:    cai0 (iptables disabled)
+  Bridge:    cai0 (separate network)
   Service:   containai-docker.service
   Context:   docker-containai
 
@@ -837,10 +836,20 @@ HELP
     distro=$(detect_distro)
     _log_info "Detected distribution: $distro"
 
-    if [[ "$distro" != "ubuntu" ]] && [[ "$distro" != "debian" ]]; then
-        _log_error "Only Ubuntu and Debian are supported for auto-installation"
-        exit 1
-    fi
+    # Validate supported distribution
+    case "$distro" in
+        ubuntu|debian|fedora|centos|rhel|rocky|almalinux)
+            # Supported
+            ;;
+        *)
+            _log_error "Unsupported distribution: $distro"
+            _log_error ""
+            _log_error "Supported distributions:"
+            _log_error "  - Ubuntu, Debian (apt)"
+            _log_error "  - Fedora, CentOS, RHEL, Rocky, AlmaLinux (yum/dnf)"
+            exit 1
+            ;;
+    esac
 
     if ! check_systemd; then
         exit 1
