@@ -110,7 +110,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         > /etc/ssh/sshd_config.d/99-containai-security.conf && \
     # Remove baked-in host keys - will be generated on first boot
     rm -f /etc/ssh/ssh_host_* && \
-    # Enable sshd service via symlink (systemctl requires systemd as PID 1)
+    # Enable ssh service via symlink (systemctl requires systemd as PID 1)
+    # Note: Ubuntu uses ssh.service (not sshd.service)
     mkdir -p /etc/systemd/system/multi-user.target.wants && \
     ln -sf /lib/systemd/system/ssh.service /etc/systemd/system/multi-user.target.wants/ssh.service
 

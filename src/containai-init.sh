@@ -279,8 +279,29 @@ setup_workspace_symlink() {
     return 0
   fi
 
-  run_as_root mkdir -p "$(dirname "$host_path")" 2>/dev/null || true
-  run_as_root ln -sfn "$mount_path" "$host_path" 2>/dev/null || true
+  # Validate host_path is absolute and under allowed prefixes
+  if [[ "$host_path" != /* ]]; then
+    log "[WARN] CAI_HOST_WORKSPACE must be absolute path: $host_path"
+    return 0
+  fi
+
+  # Only allow paths under /home/ or /tmp/ for safety
+  if [[ "$host_path" != /home/* && "$host_path" != /tmp/* ]]; then
+    log "[WARN] CAI_HOST_WORKSPACE must be under /home/ or /tmp/: $host_path"
+    return 0
+  fi
+
+  if ! run_as_root mkdir -p "$(dirname "$host_path")"; then
+    log "[WARN] Failed to create parent directory for workspace symlink: $host_path"
+    return 0
+  fi
+
+  if ! run_as_root ln -sfn "$mount_path" "$host_path"; then
+    log "[WARN] Failed to create workspace symlink: $host_path -> $mount_path"
+    return 0
+  fi
+
+  log "[INFO] Workspace symlink created: $host_path -> $mount_path"
 }
 
 # Main initialization

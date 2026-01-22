@@ -9,7 +9,7 @@
 
 [Unit]
 Description=ContainAI initialization (volume structure, workspace symlink)
-After=local-fs.target
+After=local-fs.target network.target
 Before=ssh.service docker.service
 ConditionVirtualization=container
 

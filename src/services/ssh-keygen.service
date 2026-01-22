@@ -4,7 +4,7 @@
 
 [Unit]
 Description=Generate SSH host keys if missing
-ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key
+# Run ssh-keygen -A on every boot - it's idempotent and only generates missing keys
 ConditionVirtualization=container
 Before=ssh.service
 
