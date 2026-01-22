@@ -114,6 +114,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     locales-all \
     # Build tools
     build-essential \
+    # Docker
+    \
+    docker-ce \
+    docker-ce-cli \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-compose-plugin \
+    \
     # Python with dev headers (for building native extensions)
     python3 \
     python3-pip \

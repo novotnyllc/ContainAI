@@ -328,6 +328,9 @@ is_mountpoint() {
 }
 
 main() {
+  
+  sudo -n dockerd --iptables=false --ip6tables=false --ip-masq=false --bridge=none &
+  
   MIRRORED="$(discover_mirrored_workspace || true)"
 
   diag="$(findmnt --real --json 2>&1)"
