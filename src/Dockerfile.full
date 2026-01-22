@@ -1,0 +1,156 @@
+# syntax=docker/dockerfile:1
+# ContainAI Full Layer - AI Agents and CLI Tools
+#
+# Includes: Claude Code, Gemini CLI, Copilot, Codex, OpenCode, agent-browser, gh CLI
+#
+# Usage (from repo root, requires BuildKit):
+#   docker build -t containai/full -f src/Dockerfile.full src/
+#
+# Requires containai/sdks:latest to be built first:
+#   docker build -t containai/base -f src/Dockerfile.base src/
+#   docker build -t containai/sdks -f src/Dockerfile.sdks src/
+#
+# Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
+
+FROM containai/sdks:latest
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# =============================================================================
+# GITHUB CLI
+# =============================================================================
+USER root
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    # Add GitHub CLI GPG key and repository
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gh && \
+    # Verify gh installed correctly
+    gh --version
+
+# =============================================================================
+# AI AGENTS
+# Installed as agent user for proper permissions
+# =============================================================================
+USER agent
+WORKDIR /home/agent
+
+# Create agent data directories for config/auth file symlinks
+RUN mkdir -p \
+    /home/agent/.claude \
+    /home/agent/.copilot \
+    /home/agent/.gemini \
+    /home/agent/.codex \
+    /home/agent/.local/share/opencode
+
+# Install Claude Code via official installer
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    # Verify claude installed correctly
+    /home/agent/.claude/local/bin/claude --version
+
+# Add Claude to PATH via .bashrc.d
+RUN printf '%s\n' \
+    'export PATH="/home/agent/.claude/local/bin:${PATH}"' \
+    > /home/agent/.bashrc.d/01-claude.sh
+
+ENV PATH="/home/agent/.claude/local/bin:${PATH}"
+
+# Install Gemini CLI, Codex, and agent-browser via bun
+# Using --trust to allow postinstall scripts
+RUN . /home/agent/.nvm/nvm.sh && \
+    bun install -g --trust @google/gemini-cli @openai/codex agent-browser && \
+    # Verify installations
+    gemini --version && \
+    codex --version
+
+# Install Copilot CLI via official installer
+RUN curl -fsSL https://gh.io/copilot-install | bash && \
+    # Verify copilot installed correctly
+    /home/agent/.local/bin/copilot --version
+
+# Install OpenCode via official installer
+RUN curl -fsSL https://opencode.ai/install | bash && \
+    # Verify opencode installed correctly (opencode may not have --version)
+    test -x /home/agent/.local/bin/opencode
+
+# =============================================================================
+# AGENT CONFIGURATION SYMLINKS
+# Symlink config files to /mnt/agent-data for persistence across container restarts
+# =============================================================================
+
+# Claude configuration symlinks
+RUN mkdir -p /mnt/agent-data/claude/skills /mnt/agent-data/claude/plugins && \
+    # Move default claude.json to agent-data location
+    if [ -f /home/agent/.claude.json ]; then mv /home/agent/.claude.json /mnt/agent-data/claude/claude.json; fi && \
+    ln -sfn /mnt/agent-data/claude/credentials.json /home/agent/.claude/.credentials.json && \
+    ln -sfn /mnt/agent-data/claude/claude.json /home/agent/.claude.json && \
+    ln -sfn /mnt/agent-data/claude/settings.json /home/agent/.claude/settings.json && \
+    ln -sfn /mnt/agent-data/claude/plugins /home/agent/.claude/plugins && \
+    ln -sfn /mnt/agent-data/claude/skills /home/agent/.claude/skills
+
+# Copilot configuration symlinks
+RUN mkdir -p /mnt/agent-data/copilot/skills && \
+    ln -sfn /mnt/agent-data/copilot/config.json /home/agent/.copilot/config.json && \
+    ln -sfn /mnt/agent-data/copilot/mcp-config.json /home/agent/.copilot/mcp-config.json && \
+    rm -rf /home/agent/.copilot/skills && \
+    ln -sfn /mnt/agent-data/copilot/skills /home/agent/.copilot/skills
+
+# Gemini configuration symlinks
+RUN ln -sfn /mnt/agent-data/gemini/google_accounts.json /home/agent/.gemini/google_accounts.json && \
+    ln -sfn /mnt/agent-data/gemini/oauth_creds.json /home/agent/.gemini/oauth_creds.json && \
+    ln -sfn /mnt/agent-data/gemini/settings.json /home/agent/.gemini/settings.json && \
+    ln -sfn /mnt/agent-data/gemini/GEMINI.md /home/agent/.gemini/GEMINI.md
+
+# Codex configuration symlinks
+RUN mkdir -p /mnt/agent-data/codex/skills && \
+    ln -sfn /mnt/agent-data/codex/auth.json /home/agent/.codex/auth.json && \
+    ln -sfn /mnt/agent-data/codex/config.toml /home/agent/.codex/config.toml && \
+    rm -rf /home/agent/.codex/skills && \
+    ln -sfn /mnt/agent-data/codex/skills /home/agent/.codex/skills
+
+# OpenCode configuration symlinks (uses XDG_DATA_HOME)
+RUN mkdir -p /mnt/agent-data/local/share/opencode && \
+    ln -sfn /mnt/agent-data/local/share/opencode/auth.json /home/agent/.local/share/opencode/auth.json
+
+# =============================================================================
+# AGENT ALIASES
+# Convenience aliases for running agents in autonomous mode
+# =============================================================================
+RUN printf '%s\n' \
+    'alias claude="claude --dangerously-skip-permissions"' \
+    'alias codex="codex --dangerously-bypass-approvals-and-sandbox"' \
+    'alias copilot="copilot --yolo"' \
+    'alias gemini="gemini --yolo"' \
+    > /home/agent/.bash_aliases
+
+# =============================================================================
+# FINAL CONFIGURATION
+# =============================================================================
+USER root
+
+# Clean up temporary files
+RUN rm -rf /tmp/*
+
+# Dynamic build args at end to avoid cache invalidation
+ARG BUILD_DATE=unknown
+ARG VCS_REF=unknown
+ARG VERSION=unknown
+
+LABEL org.opencontainers.image.title="ContainAI Full" \
+      org.opencontainers.image.description="Complete AI agent sandbox with Claude, Gemini, Copilot, Codex, OpenCode, and gh CLI" \
+      org.opencontainers.image.url="https://github.com/novotnyllc/containai" \
+      org.opencontainers.image.source="https://github.com/novotnyllc/containai" \
+      org.opencontainers.image.documentation="https://github.com/novotnyllc/containai#readme" \
+      org.opencontainers.image.vendor="Novotny LLC" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+# Inherit entrypoint from base (systemd)
