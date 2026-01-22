@@ -8,17 +8,15 @@
 #   _cai_doctor()              - Run all checks and output formatted report
 #   _cai_doctor_json()         - Run all checks and output JSON report
 #   _cai_check_wsl_seccomp()   - Check WSL2 seccomp compatibility status
-#   _cai_select_context()      - Auto-select Docker context based on isolation availability
+#   _cai_select_context()      - Auto-select Docker context based on Sysbox availability
 #
-# Requirements Hierarchy:
-#   Docker Sandbox: Hard requirement - blocks usage if not available
-#   Sysbox:         Strong suggestion - warns but allows usage if not available
+# Requirements:
+#   Sysbox: Required for container isolation
 #
 # Dependencies:
 #   - Requires lib/core.sh to be sourced first for logging functions
 #   - Requires lib/platform.sh to be sourced first for platform detection
 #   - Requires lib/docker.sh to be sourced first for Docker availability checks
-#   - Requires lib/eci.sh to be sourced first for ECI detection
 #
 # Usage: source lib/doctor.sh
 # ==============================================================================
@@ -93,10 +91,10 @@ _cai_check_wsl_seccomp() {
 # Context Auto-Selection
 # ==============================================================================
 
-# Auto-select Docker context based on isolation availability
+# Auto-select Docker context based on Sysbox availability
 # Returns context name via stdout:
-#   - "" (empty) for default context (Docker Desktop with ECI)
 #   - "containai-secure" for Sysbox context (or config override)
+#   - "" (empty) if using default context with Sysbox installed
 #   - Nothing (return 1) if no isolation available
 # Arguments: $1 = config override for context name (optional)
 #            $2 = debug flag ("debug" to enable debug output)
@@ -105,30 +103,7 @@ _cai_check_wsl_seccomp() {
 _cai_select_context() {
     local config_context_name="${1:-}"
     local debug_flag="${2:-}"
-    local eci_status
 
-    # Check ECI status first (ensure we use default context for this check)
-    # Unset DOCKER_CONTEXT to ensure we check Docker Desktop, not a custom context
-    eci_status=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_eci_status)
-
-    # ECI path requires BOTH ECI enabled AND sandbox feature available
-    if [[ "$eci_status" == "enabled" ]]; then
-        # Also verify sandbox feature is enabled (docker sandbox command works)
-        if _cai_sandbox_feature_enabled 2>/dev/null; then
-            # ECI enabled with sandboxes - use default context (Docker Desktop)
-            if [[ "$debug_flag" == "debug" ]]; then
-                printf '%s\n' "[DEBUG] Context selection: ECI enabled + sandboxes available, using default context" >&2
-            fi
-            printf '%s' ""
-            return 0
-        else
-            if [[ "$debug_flag" == "debug" ]]; then
-                printf '%s\n' "[DEBUG] Context selection: ECI enabled but sandboxes not available, checking Sysbox" >&2
-            fi
-        fi
-    fi
-
-    # ECI path not usable - check for Secure Engine context
     # Use config override if provided, otherwise default to containai-secure
     local context_name="${config_context_name:-containai-secure}"
     local default_context="containai-secure"
@@ -161,7 +136,7 @@ _cai_select_context() {
 
     # No isolation available
     if [[ "$debug_flag" == "debug" ]]; then
-        printf '%s\n' "[DEBUG] Context selection: No isolation available (ECI status=$eci_status, context '$context_name' not ready)" >&2
+        printf '%s\n' "[DEBUG] Context selection: No isolation available (context '$context_name' not ready)" >&2
     fi
     return 1
 }
@@ -292,14 +267,10 @@ _cai_doctor_status() {
 }
 
 # Run doctor command with text output
-# Returns: 0 if any isolation available (Sandbox OR Sysbox)
+# Returns: 0 if Sysbox isolation is available
 #          1 if no isolation available (cannot proceed)
 _cai_doctor() {
-    local sandbox_ok="false"
-    local eci_enabled="false"
     local sysbox_ok="false"
-    local dd_version=""
-    local dd_available="false"
     local docker_cli_ok="false"
     local docker_daemon_ok="false"
     local platform
@@ -345,62 +316,8 @@ _cai_doctor() {
 
     printf '\n'
 
-    # === Docker Desktop / ECI Section ===
-    printf '%s\n' "Docker Desktop (ECI Path)"
-
-    if [[ "$docker_daemon_ok" != "true" ]]; then
-        printf '  %-44s %s\n' "Status:" "[SKIP] Docker daemon not available"
-    elif _cai_docker_desktop_version >/dev/null 2>&1; then
-        dd_version=$(_cai_docker_desktop_version)
-        dd_available="true"
-        printf '  %-44s %s\n' "Version: $dd_version" "[OK]"
-
-        # Check if Docker Desktop version is sufficient (4.50+)
-        local dd_major dd_minor dd_rest
-        dd_major="${dd_version%%.*}"
-        dd_rest="${dd_version#*.}"
-        dd_minor="${dd_rest%%.*}"
-
-        if [[ "$dd_major" -lt 4 ]] || { [[ "$dd_major" -eq 4 ]] && [[ "$dd_minor" -lt 50 ]]; }; then
-            printf '  %-44s %s\n' "Sandboxes feature:" "[ERROR] Version $dd_version < 4.50"
-            printf '  %-44s %s\n' "" "(Upgrade Docker Desktop to 4.50+)"
-        elif _cai_sandbox_feature_enabled 2>/dev/null; then
-            sandbox_ok="true"
-            printf '  %-44s %s\n' "Sandboxes feature:" "[OK] Enabled"
-
-            # Check if ECI is actually enabled (required for cai run to use this path)
-            local eci_status
-            eci_status=$(_cai_eci_status)
-            if [[ "$eci_status" == "enabled" ]]; then
-                eci_enabled="true"
-                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation):" "[OK] Enabled"
-            elif [[ "$eci_status" == "available_not_enabled" ]]; then
-                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation):" "[WARN] Available but not enabled"
-                printf '  %-44s %s\n' "" "(Enable in Settings > Security for this path to work)"
-            else
-                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation):" "[WARN] Status unknown"
-            fi
-        else
-            printf '  %-44s %s\n' "Sandboxes feature:" "[ERROR] Not enabled"
-            printf '  %-44s %s\n' "" "(Enable in Docker Desktop Settings > Features in development)"
-        fi
-    else
-        # Not Docker Desktop
-        case "${_CAI_DD_VERSION_ERROR:-}" in
-            not_docker_desktop)
-                printf '  %-44s %s\n' "Status:" "[INFO] Not Docker Desktop (using Docker Engine)"
-                printf '  %-44s %s\n' "" "(ECI path requires Docker Desktop 4.50+)"
-                ;;
-            *)
-                printf '  %-44s %s\n' "Status:" "[WARN] Could not detect Docker Desktop"
-                ;;
-        esac
-    fi
-
-    printf '\n'
-
     # === Sysbox / Secure Engine Section ===
-    printf '%s\n' "Secure Engine (Sysbox Path)"
+    printf '%s\n' "Sysbox Isolation"
 
     # Resolve configured context name (env/config), default to containai-secure
     local sysbox_context_name="containai-secure"
@@ -417,7 +334,7 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK]"
         printf '  %-44s %s\n' "Context '$sysbox_context_name':" "[OK] Configured"
     else
-        printf '  %-44s %s\n' "Sysbox available:" "[INFO] Not configured"
+        printf '  %-44s %s\n' "Sysbox available:" "[ERROR] Not configured"
         case "${_CAI_SYSBOX_CONTEXT_ERROR:-${_CAI_SYSBOX_ERROR:-}}" in
             socket_not_found)
                 printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox)"
@@ -468,23 +385,6 @@ _cai_doctor() {
         printf '\n'
     elif [[ "$platform" == "macos" ]]; then
         printf '%s\n' "Platform: macOS"
-
-        # Check ECI status on macOS
-        local eci_status
-        eci_status=$(_cai_eci_status)
-        case "$eci_status" in
-            enabled)
-                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): enabled" "[OK]"
-                ;;
-            available_not_enabled)
-                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): available" "[WARN]"
-                printf '  %-44s %s\n' "" "(Enable in Settings > Security for additional isolation)"
-                ;;
-            *)
-                printf '  %-44s %s\n' "ECI (Enhanced Container Isolation): not available" "[WARN]"
-                ;;
-        esac
-
         printf '\n'
     elif [[ "$platform" == "linux" ]]; then
         printf '%s\n' "Platform: Linux"
@@ -494,53 +394,18 @@ _cai_doctor() {
     # === Summary Section ===
     printf '%s\n' "Summary"
 
-    # Isolation is available if ECI is enabled (for sandbox path) OR Sysbox is available
-    # Note: sandbox_ok means sandboxes feature is enabled, but cai run requires ECI enabled
-    local isolation_available="false"
-    if [[ "$eci_enabled" == "true" ]] || [[ "$sysbox_ok" == "true" ]]; then
-        isolation_available="true"
-    fi
-
-    # ECI path status (requires both sandboxes AND ECI enabled)
-    if [[ "$eci_enabled" == "true" ]]; then
-        printf '  %-44s %s\n' "ECI Path:" "[OK] Ready (Docker Desktop + ECI)"
-    elif [[ "$sandbox_ok" == "true" ]]; then
-        printf '  %-44s %s\n' "ECI Path:" "[WARN] Sandboxes enabled but ECI not enabled"
-        printf '  %-44s %s\n' "" "(Enable ECI in Docker Desktop Settings > Security)"
-    else
-        if [[ "$sysbox_ok" == "true" ]]; then
-            printf '  %-44s %s\n' "ECI Path:" "[INFO] Not available (using Sysbox instead)"
-        else
-            printf '  %-44s %s\n' "ECI Path:" "[ERROR] Not available"
-        fi
-    fi
-
     # Sysbox path status
     if [[ "$sysbox_ok" == "true" ]]; then
-        printf '  %-44s %s\n' "Sysbox Path:" "[OK] Ready"
-    else
-        if [[ "$eci_enabled" == "true" ]]; then
-            printf '  %-44s %s\n' "Sysbox Path:" "[INFO] Not configured (using ECI instead)"
-        else
-            printf '  %-44s %s\n' "Sysbox Path:" "[WARN] Not available"
-            printf '  %-44s %s\n' "" "(Run 'cai setup' to configure)"
-        fi
-    fi
-
-    # Overall status
-    if [[ "$isolation_available" == "true" ]]; then
+        printf '  %-44s %s\n' "Sysbox:" "[OK] Ready"
         printf '  %-44s %s\n' "Status:" "[OK] Ready to use 'cai run'"
     else
+        printf '  %-44s %s\n' "Sysbox:" "[ERROR] Not available"
         printf '  %-44s %s\n' "Status:" "[ERROR] No isolation available"
-        if [[ "$sandbox_ok" == "true" ]]; then
-            printf '  %-44s %s\n' "Recommended:" "Enable ECI in Docker Desktop Settings > Security"
-        else
-            printf '  %-44s %s\n' "Recommended:" "Install Docker Desktop 4.50+ with ECI, or run 'cai setup'"
-        fi
+        printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure Sysbox"
     fi
 
-    # Exit code: 0 if any isolation available, 1 if not
-    if [[ "$isolation_available" == "true" ]]; then
+    # Exit code: 0 if Sysbox available, 1 if not
+    if [[ "$sysbox_ok" == "true" ]]; then
         return 0
     else
         return 1
@@ -566,20 +431,15 @@ _cai_json_escape() {
 }
 
 # Run doctor command with JSON output
-# Returns: 0 if any isolation available (ECI enabled OR Sysbox)
+# Returns: 0 if Sysbox isolation is available
 #          1 if no isolation available (cannot proceed)
 _cai_doctor_json() {
-    local sandboxes_available="false"
-    local sandbox_enabled="false"
-    local eci_enabled="false"
     local sysbox_ok="false"
-    local dd_version=""
     local platform
     local platform_json
     local seccomp_status=""
     local seccomp_compatible="true"
     local seccomp_warning=""
-    local eci_status="not_available"
     local sysbox_runtime=""
     local sysbox_context_exists="false"
     local sysbox_context_name="containai-secure"
@@ -598,35 +458,6 @@ _cai_doctor_json() {
     config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
     if [[ -n "$config_context" ]]; then
         sysbox_context_name="$config_context"
-    fi
-
-    # Check Docker availability
-    if _cai_docker_cli_available && _cai_docker_daemon_available; then
-        if _cai_docker_desktop_version >/dev/null 2>&1; then
-            dd_version=$(_cai_docker_desktop_version)
-
-            # Check version requirement
-            local dd_major dd_minor dd_rest
-            dd_major="${dd_version%%.*}"
-            dd_rest="${dd_version#*.}"
-            dd_minor="${dd_rest%%.*}"
-
-            if [[ "$dd_major" -gt 4 ]] || { [[ "$dd_major" -eq 4 ]] && [[ "$dd_minor" -ge 50 ]]; }; then
-                # Version sufficient - check if sandbox plugin is available
-                if _cai_sandbox_available; then
-                    sandboxes_available="true"
-                fi
-                # Check if sandbox feature is actually enabled
-                if _cai_sandbox_feature_enabled 2>/dev/null; then
-                    sandbox_enabled="true"
-                    # Check if ECI is actually enabled (required for cai run)
-                    eci_status=$(_cai_eci_status)
-                    if [[ "$eci_status" == "enabled" ]]; then
-                        eci_enabled="true"
-                    fi
-                fi
-            fi
-        fi
     fi
 
     # Check Sysbox with configured context name
@@ -656,38 +487,19 @@ _cai_doctor_json() {
                 seccomp_compatible="false"
                 ;;
         esac
-    elif [[ "$platform" == "macos" ]]; then
-        # eci_status already set above if Docker Desktop available
-        if [[ "$eci_status" == "not_available" ]]; then
-            eci_status=$(_cai_eci_status)
-        fi
     fi
 
-    # Isolation requires ECI enabled (for sandbox path) OR Sysbox available
+    # Isolation requires Sysbox available
     local isolation_available="false"
-    if [[ "$eci_enabled" == "true" ]] || [[ "$sysbox_ok" == "true" ]]; then
+    if [[ "$sysbox_ok" == "true" ]]; then
         isolation_available="true"
-    fi
-
-    # Determine recommended action
-    if [[ "$eci_enabled" == "true" ]] && [[ "$sysbox_ok" == "true" ]]; then
         recommended_action="ready"
-    elif [[ "$eci_enabled" == "true" ]] || [[ "$sysbox_ok" == "true" ]]; then
-        recommended_action="ready"  # Either one is sufficient
-    elif [[ "$sandbox_enabled" == "true" ]]; then
-        recommended_action="enable_eci"  # Sandboxes work but ECI not enabled
     else
         recommended_action="setup_required"
     fi
 
     # Output JSON
     printf '{\n'
-    printf '  "docker_desktop": {\n'
-    printf '    "version": "%s",\n' "$(_cai_json_escape "$dd_version")"
-    printf '    "sandboxes_available": %s,\n' "$sandboxes_available"
-    printf '    "sandboxes_enabled": %s,\n' "$sandbox_enabled"
-    printf '    "eci_enabled": %s\n' "$eci_enabled"
-    printf '  },\n'
     printf '  "sysbox": {\n'
     printf '    "available": %s,\n' "$sysbox_ok"
     if [[ -n "$sysbox_runtime" ]]; then
@@ -707,21 +519,18 @@ _cai_doctor_json() {
         else
             printf '    "warning": null\n'
         fi
-    elif [[ "$platform" == "macos" ]]; then
-        printf '    "eci_status": "%s"\n' "$eci_status"
     else
         printf '    "warning": null\n'
     fi
     printf '  },\n'
     printf '  "summary": {\n'
-    printf '    "eci_enabled": %s,\n' "$eci_enabled"
     printf '    "sysbox_ok": %s,\n' "$sysbox_ok"
     printf '    "isolation_available": %s,\n' "$isolation_available"
     printf '    "recommended_action": "%s"\n' "$recommended_action"
     printf '  }\n'
     printf '}\n'
 
-    # Exit code: 0 if any isolation available, 1 if not
+    # Exit code: 0 if Sysbox available, 1 if not
     if [[ "$isolation_available" == "true" ]]; then
         return 0
     else

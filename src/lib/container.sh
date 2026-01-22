@@ -7,8 +7,6 @@
 # Provides:
 #   _containai_container_name     - Generate sanitized container name
 #   _containai_check_isolation    - Detect container isolation status
-#   _containai_check_sandbox      - Check if docker sandbox is available
-#   _containai_preflight_checks   - Run preflight checks before container ops
 #   _containai_ensure_volumes     - Ensure a volume exists (takes volume name param)
 #   _containai_start_container    - Start or attach to container
 #   _containai_stop_all           - Stop all ContainAI containers
@@ -29,7 +27,6 @@
 # Dependencies:
 #   - lib/core.sh (logging functions)
 #   - lib/docker.sh (Docker availability checks)
-#   - lib/eci.sh (ECI detection functions)
 #   - lib/doctor.sh (context selection: _cai_select_context, _cai_sysbox_available_for_context)
 #
 # Usage: source lib/container.sh
@@ -53,7 +50,7 @@ fi
 # ==============================================================================
 
 # Guard against re-sourcing
-: "${_CONTAINAI_LABEL:=containai.sandbox=containai}"
+: "${_CONTAINAI_LABEL:=containai.managed=true}"
 : "${_CONTAINAI_DEFAULT_REPO:=agent-sandbox}"
 : "${_CONTAINAI_DEFAULT_AGENT:=claude}"
 : "${_CONTAINAI_DEFAULT_CREDENTIALS:=none}"
@@ -236,8 +233,8 @@ _containai_container_name() {
 # ==============================================================================
 
 # Container isolation detection (conservative - prefer return 2 over false positive/negative)
-# Uses both docker info checks AND the ECI detection functions for high confidence.
-# Requires: Docker must be available (call _containai_check_docker first or _containai_check_sandbox)
+# Checks docker info for Sysbox runtime, rootless mode, or user namespace remapping.
+# Requires: Docker must be available (call _containai_check_docker first)
 # Returns: 0=isolated (detected), 1=not isolated (definite), 2=unknown (ambiguous)
 _containai_check_isolation() {
     local runtime rootless userns
@@ -248,25 +245,6 @@ _containai_check_isolation() {
         return 2
     fi
 
-    # Gate ECI detection behind availability check to avoid unnecessary container spawning
-    # _cai_eci_available is cheap (version check only), while _cai_eci_enabled spawns containers
-    # This avoids "pull alpine" requirement in airgapped non-Docker-Desktop environments
-    if _cai_eci_available; then
-        # Docker Desktop 4.29+ - check if ECI is actually enabled
-        # _cai_eci_enabled requires both uid_map + runtime checks to pass
-        if _cai_eci_enabled; then
-            return 0
-        fi
-
-        # ECI detection failed - check if it was operational failure vs definitive "not enabled"
-        # _CAI_ECI_DETECTION_UNCERTAIN=1 means we couldn't determine status (timeout, image not found, etc.)
-        if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
-            echo "[WARN] ECI detection uncertain (${_CAI_ECI_ENABLED_ERROR:-unknown})" >&2
-            # Continue to docker info checks as fallback, but remember uncertainty
-        fi
-    fi
-
-    # ECI not available/enabled or uncertain - fall back to docker info checks for other isolation methods
     # Use docker info --format for reliable structured output with timeout
     # Use if ! pattern for set -e safety
     if ! runtime=$(_cai_timeout 5 docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then
@@ -283,7 +261,7 @@ _containai_check_isolation() {
     rootless=$(_cai_timeout 5 docker info --format '{{.Rootless}}' 2>/dev/null) || rootless=""
     userns=$(_cai_timeout 5 docker info --format '{{.SecurityOptions}}' 2>/dev/null) || userns=""
 
-    # ECI enabled via default runtime - sysbox-runc (fallback check via docker info)
+    # Sysbox runtime provides isolation
     if [[ "$runtime" == "sysbox-runc" ]]; then
         return 0
     fi
@@ -300,11 +278,6 @@ _containai_check_isolation() {
 
     # Standard runc without isolation features
     if [[ "$runtime" == "runc" ]]; then
-        # If ECI detection was uncertain, return unknown instead of definite "not isolated"
-        if [[ "${_CAI_ECI_DETECTION_UNCERTAIN:-0}" == "1" ]]; then
-            echo "[WARN] Unable to definitively determine isolation status" >&2
-            return 2
-        fi
         echo "[WARN] No additional isolation detected (standard runtime)" >&2
         return 1
     fi
@@ -314,51 +287,18 @@ _containai_check_isolation() {
 }
 
 # ==============================================================================
-# Sandbox availability check
-# ==============================================================================
-
-# Check if docker sandbox is available
-# Returns: 0=yes (sandbox confirmed working), 1=no (fail-closed)
-#
-# Design decision: This function is now fail-closed for security. Previously it
-# returned 2 for "unknown" cases and proceeded anyway (fail-open). Now any
-# unclassified error blocks sandbox usage. This is safer because:
-# - Sandboxes provide security isolation; better to block than run unsecured
-# - All known error cases have actionable remediation messages
-# - Users can use --force to bypass if they know what they're doing
-#
-# Note: Delegates to _cai_sandbox_feature_enabled() for actual detection logic
-_containai_check_sandbox() {
-    # Delegate to the comprehensive detection in lib/docker.sh
-    # _cai_sandbox_feature_enabled handles:
-    # - Docker CLI availability
-    # - Docker daemon accessibility (with timeout)
-    # - Docker Desktop version check (4.50+)
-    # - Sandbox plugin availability
-    # - Admin policy blocks
-    # - Actionable error messages
-    if _cai_sandbox_feature_enabled; then
-        return 0
-    fi
-
-    # _cai_sandbox_feature_enabled already printed detailed error messages
-    # Return 1 for definite failure (fail-closed for security)
-    return 1
-}
-
-# ==============================================================================
 # Preflight checks
 # ==============================================================================
 
-# Preflight checks for sandbox/isolation before container start
+# Preflight checks for isolation before container start
 # Arguments: $1 = force flag ("true" to skip checks)
 # Returns: 0=proceed, 1=block
 _containai_preflight_checks() {
     local force_flag="$1"
-    local sandbox_rc isolation_rc
+    local isolation_rc
 
     if [[ "$force_flag" == "true" ]]; then
-        echo "[WARN] Skipping sandbox availability check (--force)" >&2
+        echo "[WARN] Skipping isolation check (--force)" >&2
         if [[ "${CONTAINAI_REQUIRE_ISOLATION:-0}" == "1" ]]; then
             echo "*** WARNING: Bypassing isolation requirement with --force" >&2
             echo "*** Running without verified isolation may expose host system" >&2
@@ -366,16 +306,7 @@ _containai_preflight_checks() {
         return 0
     fi
 
-    # Guard calls for set -e safety (non-zero is valid control flow)
-    if _containai_check_sandbox; then
-        sandbox_rc=0
-    else
-        sandbox_rc=$?
-    fi
-    if [[ $sandbox_rc -eq 1 ]]; then
-        return 1
-    fi
-
+    # Guard for set -e safety (non-zero is valid control flow)
     if _containai_check_isolation; then
         isolation_rc=0
     else
@@ -475,7 +406,7 @@ _containai_get_container_label() {
     local label_value
 
     # Use if ! pattern for set -e safety
-    if ! label_value=$(docker inspect --format '{{ index .Config.Labels "containai.sandbox" }}' "$container_name" 2>/dev/null); then
+    if ! label_value=$(docker inspect --format '{{ index .Config.Labels "containai.managed" }}' "$container_name" 2>/dev/null); then
         return 1
     fi
     # Normalize "<no value>" to empty
@@ -547,7 +478,7 @@ _containai_is_our_container() {
     fi
 
     # Check label
-    if [[ "$label_value" == "containai" ]]; then
+    if [[ "$label_value" == "true" ]]; then
         return 0
     fi
 
@@ -600,8 +531,8 @@ _containai_check_container_ownership() {
 
     echo "[ERROR] Container '$container_name' exists but was not created by ContainAI" >&2
     echo "" >&2
-    echo "  Expected label 'containai.sandbox': containai" >&2
-    echo "  Actual label 'containai.sandbox':   ${label_value:-<not set>}" >&2
+    echo "  Expected label 'containai.managed': containai" >&2
+    echo "  Actual label 'containai.managed':   ${label_value:-<not set>}" >&2
     echo "  Expected image prefix:              ${_CONTAINAI_DEFAULT_REPO}:" >&2
     echo "  Actual image:                       ${actual_image:-<unknown>}" >&2
     echo "" >&2
@@ -957,114 +888,31 @@ _containai_start_container() {
         agent="$_CONTAINAI_DEFAULT_AGENT"
     fi
 
-    # FR-5: Unsafe opt-ins with acknowledgements
-    # New flags: --allow-host-credentials + --i-understand-this-exposes-host-credentials
-    # Legacy flags: --credentials=host + --acknowledge-credential-risk (kept for compatibility)
-    # Config [danger].allow_host_credentials is optional (for audit trail, not a gate)
-
-    # Validate --allow-host-credentials requires acknowledgement
-    if [[ "$allow_host_credentials" == "true" ]]; then
-        if [[ "$ack_host_credentials" != "true" ]]; then
-            echo "" >&2
-            echo "[ERROR] --allow-host-credentials requires --i-understand-this-exposes-host-credentials" >&2
-            echo "" >&2
-            echo "This will share your host credentials with the sandbox:" >&2
-            echo "  - ~/.ssh (SSH keys, config)" >&2
-            echo "  - ~/.gitconfig (git identity, credentials)" >&2
-            echo "  - API tokens and credentials stored in your home directory" >&2
-            echo "" >&2
-            echo "The AI agent will have access to these sensitive files." >&2
-            echo "" >&2
-            echo "To proceed, add: --i-understand-this-exposes-host-credentials" >&2
-            echo "" >&2
-            return 1
-        fi
-        # Override credentials to host when using the new flag
-        credentials="host"
-        # Warning will be printed after context selection (ECI-only check)
+    # Reject legacy ECI-only options that are no longer supported
+    # These features were only available with Docker Desktop's docker sandbox run command
+    if [[ "$allow_host_credentials" == "true" ]] || [[ "$credentials" == "host" ]]; then
+        echo "" >&2
+        echo "[ERROR] --credentials=host and --allow-host-credentials are no longer supported" >&2
+        echo "" >&2
+        echo "Host credential sharing was an ECI (docker sandbox run) feature." >&2
+        echo "ContainAI now uses Sysbox for container isolation." >&2
+        echo "" >&2
+        echo "For credential access inside containers, use 'cai import' to copy credentials." >&2
+        echo "" >&2
+        return 1
     fi
 
-    # Legacy path: --credentials=host with --acknowledge-credential-risk
-    # Keep backward compatibility - independent of [danger] config section
-    if [[ "$credentials" == "host" && "$allow_host_credentials" != "true" ]]; then
-        if [[ "$acknowledge_credential_risk" != "true" ]]; then
-            echo "" >&2
-            echo "[ERROR] --credentials=host requires --acknowledge-credential-risk" >&2
-            echo "" >&2
-            echo "Using --credentials=host forwards your host credentials to the sandbox." >&2
-            echo "This grants the AI agent access to your credentials (API keys, tokens, etc.)." >&2
-            echo "" >&2
-            echo "To proceed, add: --acknowledge-credential-risk" >&2
-            echo "" >&2
-            echo "Alternatively, use the new explicit flags:" >&2
-            echo "  --allow-host-credentials --i-understand-this-exposes-host-credentials" >&2
-            echo "" >&2
-            return 1
-        fi
-        # Warning will be printed after context selection (ECI-only check)
-    fi
-
-    # Validate credentials mode (FR-4: safe defaults)
-    case "$credentials" in
-        none)
-            # Safe default - no acknowledgement required
-            ;;
-        host)
-            # Already validated above (via allow_host_credentials or legacy path)
-            ;;
-        *)
-            echo "[ERROR] Invalid credentials mode: $credentials" >&2
-            echo "  Valid modes: none, host" >&2
-            return 1
-            ;;
-    esac
-
-    # FR-5: Unsafe opt-ins for Docker socket
-    # New flags: --allow-host-docker-socket + --i-understand-this-grants-root-access
-    # Legacy flags: --mount-docker-socket + --please-root-my-host (kept for compatibility)
-    # Config [danger].allow_host_docker_socket is optional (for audit trail, not a gate)
-
-    # Validate --allow-host-docker-socket requires acknowledgement
-    if [[ "$allow_host_docker_socket" == "true" ]]; then
-        if [[ "$ack_host_docker_socket" != "true" ]]; then
-            echo "" >&2
-            echo "[ERROR] --allow-host-docker-socket requires --i-understand-this-grants-root-access" >&2
-            echo "" >&2
-            echo "Mounting the Docker socket grants FULL ROOT ACCESS to your host system." >&2
-            echo "" >&2
-            echo "Risks:" >&2
-            echo "  - Complete sandbox escape possible" >&2
-            echo "  - AI agent can run arbitrary containers with host access" >&2
-            echo "  - Host filesystem can be mounted and modified" >&2
-            echo "  - Privilege escalation to root on host is trivial" >&2
-            echo "" >&2
-            echo "This COMPLETELY DEFEATS the purpose of running in a sandbox." >&2
-            echo "" >&2
-            echo "To proceed, add: --i-understand-this-grants-root-access" >&2
-            echo "" >&2
-            return 1
-        fi
-        # Enable the underlying flag
-        mount_docker_socket=true
-        # Warning will be printed after context selection (ECI-only check)
-    fi
-
-    # Legacy path: --mount-docker-socket with --please-root-my-host
-    # Keep backward compatibility - independent of [danger] config section
-    if [[ "$mount_docker_socket" == "true" && "$allow_host_docker_socket" != "true" ]]; then
-        if [[ "$please_root_my_host" != "true" ]]; then
-            echo "" >&2
-            echo "[ERROR] --mount-docker-socket requires --please-root-my-host acknowledgement" >&2
-            echo "" >&2
-            echo "Mounting the Docker socket grants FULL ROOT ACCESS to your host system." >&2
-            echo "This COMPLETELY DEFEATS the purpose of running in a sandbox." >&2
-            echo "" >&2
-            echo "Alternatively, use the new explicit flags:" >&2
-            echo "  --allow-host-docker-socket --i-understand-this-grants-root-access" >&2
-            echo "" >&2
-            return 1
-        fi
-        # Warning will be printed after context selection (ECI-only check)
+    if [[ "$allow_host_docker_socket" == "true" ]] || [[ "$mount_docker_socket" == "true" ]]; then
+        echo "" >&2
+        echo "[ERROR] --mount-docker-socket and --allow-host-docker-socket are no longer supported" >&2
+        echo "" >&2
+        echo "Docker socket mounting was an ECI (docker sandbox run) feature." >&2
+        echo "ContainAI now uses Sysbox for container isolation." >&2
+        echo "" >&2
+        echo "Sysbox containers have Docker-in-Docker capability built in." >&2
+        echo "Use the inner Docker daemon instead of mounting the host socket." >&2
+        echo "" >&2
+        return 1
     fi
 
     # Resolve image based on agent and optional tag override
@@ -1116,41 +964,10 @@ _containai_start_container() {
     fi
 
     # Build docker command prefix based on context
-    # Empty context = default (ECI mode), non-empty = Sysbox mode
+    # Context is always Sysbox mode (ECI/docker sandbox was removed)
     local -a docker_cmd=(docker)
     if [[ -n "$selected_context" ]]; then
         docker_cmd=(docker --context "$selected_context")
-    fi
-
-    # FR-5: Unsafe opts are ECI-only - error if used with Sysbox mode
-    # --credentials=host and --mount-docker-socket are docker sandbox features
-    if [[ -n "$selected_context" ]]; then
-        if [[ "$credentials" == "host" ]]; then
-            echo "" >&2
-            echo "[ERROR] --credentials=host / --allow-host-credentials is only supported in ECI mode (Docker Desktop)" >&2
-            echo "" >&2
-            echo "Current mode: Sysbox (context: $selected_context)" >&2
-            echo "Host credential sharing requires 'docker sandbox run' which is an ECI feature." >&2
-            echo "" >&2
-            return 1
-        fi
-        if [[ "$mount_docker_socket" == "true" ]]; then
-            echo "" >&2
-            echo "[ERROR] --mount-docker-socket / --allow-host-docker-socket is only supported in ECI mode (Docker Desktop)" >&2
-            echo "" >&2
-            echo "Current mode: Sysbox (context: $selected_context)" >&2
-            echo "Docker socket mounting requires 'docker sandbox run' which is an ECI feature." >&2
-            echo "" >&2
-            return 1
-        fi
-    else
-        # ECI mode - print warnings for unsafe opts (after mode validation)
-        if [[ "$credentials" == "host" ]]; then
-            echo "[WARN] Running with host credentials - ~/.ssh, ~/.gitconfig, and other credentials are accessible" >&2
-        fi
-        if [[ "$mount_docker_socket" == "true" ]]; then
-            echo "[WARN] Docker socket mounted - sandbox isolation is BYPASSED, root access to host is possible" >&2
-        fi
     fi
 
     # Get container name
@@ -1177,35 +994,12 @@ _containai_start_container() {
         container_state="none"
     fi
 
-    # FR-5: Unsafe opts require --restart when container already exists
-    # Without restart, we'd attach to existing container which may not have these opts
-    if [[ "$container_state" != "none" && "$restart_flag" != "true" ]]; then
-        if [[ "$credentials" == "host" ]]; then
-            echo "" >&2
-            echo "[ERROR] --allow-host-credentials / --credentials=host requires --restart when container exists" >&2
-            echo "" >&2
-            echo "Container '$container_name' already exists and may not have host credentials enabled." >&2
-            echo "Add --restart to recreate the container with the new configuration." >&2
-            echo "" >&2
-            return 1
-        fi
-        if [[ "$mount_docker_socket" == "true" ]]; then
-            echo "" >&2
-            echo "[ERROR] --allow-host-docker-socket / --mount-docker-socket requires --restart when container exists" >&2
-            echo "" >&2
-            echo "Container '$container_name' already exists and may not have Docker socket mounted." >&2
-            echo "Add --restart to recreate the container with the new configuration." >&2
-            echo "" >&2
-            return 1
-        fi
-    fi
-
     # Handle --restart flag
     if [[ "$restart_flag" == "true" && "$container_state" != "none" ]]; then
         # Check if container belongs to ContainAI using context-aware inspection (label or image fallback)
         local label_val restart_image_fallback
-        label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || label_val=""
-        if [[ "$label_val" != "containai" ]]; then
+        label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || label_val=""
+        if [[ "$label_val" != "true" ]]; then
             # Fallback: check if image is from our repo (for legacy containers without label)
             restart_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || restart_image_fallback=""
             if [[ "$restart_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
@@ -1239,8 +1033,8 @@ _containai_start_container() {
     if [[ "$shell_flag" == "true" ]] && [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
         # Check ownership using context-aware docker command (label or image fallback)
         local shell_label_val shell_image_fallback
-        shell_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || shell_label_val=""
-        if [[ "$shell_label_val" != "containai" ]]; then
+        shell_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || shell_label_val=""
+        if [[ "$shell_label_val" != "true" ]]; then
             # Fallback: check if image is from our repo (for legacy containers without label)
             shell_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || shell_image_fallback=""
             if [[ "$shell_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
@@ -1267,8 +1061,8 @@ _containai_start_container() {
         running)
             # Check ownership using context-aware docker command (label or image fallback)
             local running_label_val running_image_val
-            running_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || running_label_val=""
-            if [[ "$running_label_val" != "containai" ]]; then
+            running_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || running_label_val=""
+            if [[ "$running_label_val" != "true" ]]; then
                 # Fallback: check if image is from our repo (for legacy containers without label)
                 running_image_val=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || running_image_val=""
                 if [[ "$running_image_val" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
@@ -1320,8 +1114,8 @@ _containai_start_container() {
         exited|created)
             # Check ownership using context-aware docker command (label or image fallback)
             local exited_label_val exited_image_fallback
-            exited_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.sandbox"}}' "$container_name" 2>/dev/null) || exited_label_val=""
-            if [[ "$exited_label_val" != "containai" ]]; then
+            exited_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || exited_label_val=""
+            if [[ "$exited_label_val" != "true" ]]; then
                 # Fallback: check if image is from our repo (for legacy containers without label)
                 exited_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || exited_image_fallback=""
                 if [[ "$exited_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
@@ -1401,157 +1195,94 @@ _containai_start_container() {
             local -a vol_args=()
             vol_args+=("-v" "$data_volume:/mnt/agent-data")
 
-            # Branch based on context selection:
-            # - Empty context = default (Docker Desktop) -> use docker sandbox run
-            # - Non-empty context = Sysbox -> use docker --context X run --runtime=sysbox-runc
-            if [[ -z "$selected_context" ]]; then
-                # Sandbox mode (Docker Desktop with ECI)
-                # Check sandbox run help for supported flags - use if ! pattern for set -e safety
-                # Use timeout to avoid hanging if CLI/daemon wedges
-                local sandbox_help
-                if ! sandbox_help=$(_cai_timeout 10 docker sandbox run --help 2>&1); then
-                    echo "[ERROR] docker sandbox run is not available" >&2
+            # Start container with Sysbox runtime
+            if [[ "$quiet_flag" != "true" ]]; then
+                if [[ -n "$selected_context" ]]; then
+                    echo "Starting new container (Sysbox mode, context: $selected_context)..."
+                else
+                    echo "Starting new container (Sysbox mode)..."
+                fi
+            fi
+
+            local -a args=()
+            if [[ -n "$selected_context" ]]; then
+                args+=(--context "$selected_context")
+            fi
+            args+=(run)
+            args+=(--runtime=sysbox-runc)
+            args+=(--name "$container_name")
+            args+=(--label "$_CONTAINAI_LABEL")
+
+            # Interactive/TTY flags
+            if [[ "$shell_flag" == "true" ]]; then
+                args+=(-d)
+            elif [[ "$detached_flag" == "true" ]]; then
+                args+=(-d)
+            else
+                args+=(-it)
+            fi
+
+            # Remove container on exit (only if not detached)
+            if [[ "$detached_flag" != "true" && "$shell_flag" != "true" ]]; then
+                args+=(--rm)
+            fi
+
+            # Volume mounts
+            args+=("${vol_args[@]}")
+            args+=(-v "$workspace_resolved:/home/agent/workspace")
+
+            local vol env_var
+            for vol in "${extra_volumes[@]}"; do
+                args+=(-v "$vol")
+            done
+
+            # Environment variables
+            for env_var in "${env_vars[@]}"; do
+                args+=(-e "$env_var")
+            done
+
+            # Working directory
+            args+=(-w /home/agent/workspace)
+
+            # Image
+            args+=("$resolved_image")
+
+            # Command: agent with any args
+            args+=("$agent")
+            if [[ ${#agent_args[@]} -gt 0 ]]; then
+                args+=("${agent_args[@]}")
+            fi
+
+            if [[ "$shell_flag" == "true" ]]; then
+                # For shell mode, start container with sleep infinity to keep it running
+                # Build args without the agent command
+                local -a shell_args=()
+                if [[ -n "$selected_context" ]]; then
+                    shell_args+=(--context "$selected_context")
+                fi
+                shell_args+=(run)
+                shell_args+=(--runtime=sysbox-runc)
+                shell_args+=(--name "$container_name")
+                shell_args+=(--label "$_CONTAINAI_LABEL")
+                shell_args+=(-d)
+                shell_args+=("${vol_args[@]}")
+                shell_args+=(-v "$workspace_resolved:/home/agent/workspace")
+                for vol in "${extra_volumes[@]}"; do
+                    shell_args+=(-v "$vol")
+                done
+                for env_var in "${env_vars[@]}"; do
+                    shell_args+=(-e "$env_var")
+                done
+                shell_args+=(-w /home/agent/workspace)
+                shell_args+=("$resolved_image")
+                shell_args+=(sleep infinity)
+                if ! docker "${shell_args[@]}" >/dev/null; then
+                    echo "[ERROR] Failed to create container" >&2
                     return 1
                 fi
-
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "Starting new sandbox container (ECI mode)..."
-                fi
-
-                local -a args=()
-                args+=(--name "$container_name")
-
-                # Add label if supported - ALWAYS use new label for creation
-                if printf '%s' "$sandbox_help" | grep -q -- '--label'; then
-                    args+=(--label "$_CONTAINAI_LABEL")
-                fi
-
-                args+=("${vol_args[@]}")
-
-                local vol env_var
-                for vol in "${extra_volumes[@]}"; do
-                    args+=(-v "$vol")
-                done
-                for env_var in "${env_vars[@]}"; do
-                    args+=(-e "$env_var")
-                done
-
-                if [[ "$shell_flag" == "true" ]]; then
-                    args+=(--detached --quiet)
-                else
-                    if [[ "$detached_flag" == "true" ]]; then
-                        args+=(--detached)
-                    fi
-                    if [[ "$quiet_flag" == "true" ]]; then
-                        args+=(--quiet)
-                    fi
-                fi
-                if [[ "$debug_flag" == "true" ]]; then
-                    args+=(--debug)
-                fi
-                if [[ "$mount_docker_socket" == "true" ]]; then
-                    args+=(--mount-docker-socket)
-                fi
-
-                args+=(--workspace "$workspace_resolved")
-                args+=(--template "$resolved_image")
-                args+=(--credentials "$credentials")
-                args+=("$agent")
-
-                if [[ ${#agent_args[@]} -gt 0 ]]; then
-                    args+=("${agent_args[@]}")
-                fi
-
-                if [[ "$shell_flag" == "true" ]]; then
-                    if ! docker sandbox run "${args[@]}" >/dev/null; then
-                        echo "[ERROR] Failed to create sandbox container" >&2
-                        return 1
-                    fi
-                    docker exec -it --user agent -w /home/agent/workspace "$container_name" bash
-                else
-                    docker sandbox run "${args[@]}"
-                fi
+                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" bash
             else
-                # Sysbox mode (containai-secure context)
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "Starting new sandbox container (Sysbox mode, context: $selected_context)..."
-                fi
-
-                local -a args=()
-                args+=(--context "$selected_context")
-                args+=(run)
-                args+=(--runtime=sysbox-runc)
-                args+=(--name "$container_name")
-                args+=(--label "$_CONTAINAI_LABEL")
-
-                # Interactive/TTY flags
-                if [[ "$shell_flag" == "true" ]]; then
-                    args+=(-d)
-                elif [[ "$detached_flag" == "true" ]]; then
-                    args+=(-d)
-                else
-                    args+=(-it)
-                fi
-
-                # Remove container on exit (only if not detached)
-                if [[ "$detached_flag" != "true" && "$shell_flag" != "true" ]]; then
-                    args+=(--rm)
-                fi
-
-                # Volume mounts
-                args+=("${vol_args[@]}")
-                args+=(-v "$workspace_resolved:/home/agent/workspace")
-
-                local vol env_var
-                for vol in "${extra_volumes[@]}"; do
-                    args+=(-v "$vol")
-                done
-
-                # Environment variables
-                for env_var in "${env_vars[@]}"; do
-                    args+=(-e "$env_var")
-                done
-
-                # Working directory
-                args+=(-w /home/agent/workspace)
-
-                # Image
-                args+=("$resolved_image")
-
-                # Command: agent with any args
-                args+=("$agent")
-                if [[ ${#agent_args[@]} -gt 0 ]]; then
-                    args+=("${agent_args[@]}")
-                fi
-
-                if [[ "$shell_flag" == "true" ]]; then
-                    # For shell mode, start container with sleep infinity to keep it running
-                    # Build args without the agent command
-                    local -a shell_args=()
-                    shell_args+=(--context "$selected_context")
-                    shell_args+=(run)
-                    shell_args+=(--name "$container_name")
-                    shell_args+=(--label "$_CONTAINAI_LABEL")
-                    shell_args+=(-d)
-                    shell_args+=("${vol_args[@]}")
-                    shell_args+=(-v "$workspace_resolved:/home/agent/workspace")
-                    for vol in "${extra_volumes[@]}"; do
-                        shell_args+=(-v "$vol")
-                    done
-                    for env_var in "${env_vars[@]}"; do
-                        shell_args+=(-e "$env_var")
-                    done
-                    shell_args+=(-w /home/agent/workspace)
-                    shell_args+=("$resolved_image")
-                    shell_args+=(sleep infinity)
-                    if ! docker "${shell_args[@]}" >/dev/null; then
-                        echo "[ERROR] Failed to create Sysbox container" >&2
-                        return 1
-                    fi
-                    docker --context "$selected_context" exec -it --user agent -w /home/agent/workspace "$container_name" bash
-                else
-                    docker "${args[@]}"
-                fi
+                docker "${args[@]}"
             fi
             ;;
         *)
