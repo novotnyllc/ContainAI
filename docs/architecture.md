@@ -505,14 +505,15 @@ Key architectural decisions (see also [.flow/memory/decisions.md](../.flow/memor
 - Allows parallel development
 - Makes dependencies explicit via source order
 
-### Dual Isolation Paths
+### Sysbox Isolation
 
-**Decision**: Support both Docker Desktop sandbox and Sysbox modes with automatic selection.
+**Decision**: Use Sysbox as the sole container isolation mechanism.
 
 **Rationale**:
-- Docker Desktop sandbox: Best for macOS/Windows users (Docker Desktop integration)
-- Sysbox: Best for Linux/WSL users (native performance)
-- Auto-detection reduces user friction
+- Provides strong isolation with user namespace remapping
+- Works consistently across Linux, WSL2, and macOS (via Lima)
+- `cai setup` handles installation automatically
+- Simpler architecture with single code path
 
 ### Workspace-Scoped Configuration
 

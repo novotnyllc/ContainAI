@@ -625,8 +625,7 @@ _containai_check_volume_match() {
 #   --data-volume <vol>  Data volume name (required)
 #   --agent <name>       Agent to run (claude, gemini; default: claude)
 #   --image-tag <tag>    Override image tag (default: agent-specific)
-#   --credentials <mode> Credential mode (none, host; default: none)
-#   --acknowledge-credential-risk  Required when using --credentials=host
+#   --credentials <mode> Credential mode (none; default: none)
 #   --volume-mismatch-warn  Warn on volume mismatch instead of blocking (for implicit volumes)
 #   --restart            Force recreate container
 #   --force              Skip preflight checks
@@ -634,8 +633,6 @@ _containai_check_volume_match() {
 #   --shell              Start with shell instead of agent
 #   --quiet              Suppress verbose output
 #   --debug              Enable debug logging
-#   --mount-docker-socket Mount docker socket (dangerous)
-#   --please-root-my-host Acknowledge docker socket danger
 #   -e, --env <VAR=val>  Environment variable (repeatable)
 #   -v, --volume <spec>  Extra volume mount (repeatable)
 #   -- <agent_args>      Arguments to pass to agent

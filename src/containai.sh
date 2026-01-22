@@ -279,7 +279,7 @@ for container isolation instead of Docker Desktop sandboxes.
 
 Migration:
   cai sandbox reset         -> cai stop && cai --restart
-  cai sandbox clear-credentials -> Not needed (Sysbox mode doesn't store credentials)
+  cai sandbox clear-credentials -> Remove data volume: docker volume rm <volume-name>
 
 For container management, use:
   cai stop                  Stop the container
