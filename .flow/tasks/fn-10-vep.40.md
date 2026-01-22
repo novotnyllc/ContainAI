@@ -70,9 +70,8 @@ System containers provide:
 - [ ] Docker Desktop (if present) continues to work unchanged
 - [ ] `cai doctor` validates containai docker setup
 ## Done summary
-TBD
-
+Implemented docker-containai context with sysbox-runc as default runtime. Created install-containai-docker.sh script that installs a separate docker-ce instance with isolated paths (socket, config, data, exec-root, pidfile, bridge) to avoid conflicts with Docker Desktop. Added helper functions in lib/docker.sh and validation in lib/doctor.sh.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 29b5e65, 096bb68, c5bacc8, 300ed9c, ca00040, 39bc8ad
+- Tests: bash -n scripts/install-containai-docker.sh, bash -n src/lib/docker.sh, bash -n src/lib/doctor.sh, bash -n src/lib/setup.sh
 - PRs:
