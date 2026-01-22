@@ -61,9 +61,20 @@ Implement SSH pub key injection and known_hosts management with sshd readiness c
 - [ ] Clear error if sshd doesn't start within timeout
 - [ ] No host key prompts during normal operation
 ## Done summary
-TBD
+Implemented complete SSH pub key injection and known_hosts management with sshd readiness checking and exponential backoff retry logic.
 
+Added functions to lib/ssh.sh:
+- `_cai_wait_for_sshd()` with exponential backoff (100ms-2s, max 30s) using wall-clock time tracking
+- `_cai_inject_ssh_key()` for authorized_keys management with proper 700/600 permissions (idempotent)
+- `_cai_update_known_hosts()` with ssh-keyscan, flock-based concurrency safety, and per-key-type change detection
+- `_cai_clean_known_hosts()` using ssh-keygen -R for safe removal
+- `_cai_check_ssh_accept_new_support()` for OpenSSH version detection
+- `_cai_write_ssh_host_config()` with fallback to StrictHostKeyChecking=yes on OpenSSH < 7.6
+- `_cai_setup_container_ssh()` as main entry point combining all steps
+- `_cai_cleanup_container_ssh()` for --fresh/--restart cleanup
+
+Integrated SSH setup in container.sh for all container states (new, stopped, running) with --fresh cleanup support.
 ## Evidence
-- Commits:
+- Commits: ce940bcfc90a27906edf26ccb2481e375f429b75
 - Tests:
 - PRs:
