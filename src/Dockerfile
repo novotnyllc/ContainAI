@@ -121,6 +121,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     containerd.io \
     docker-buildx-plugin \
     docker-compose-plugin \
+    # Sysbox dependencies
+    fuse \
+    iproute2 \
+    iptables \
+    rsync \
     \
     # Python with dev headers (for building native extensions)
     python3 \
@@ -154,8 +159,26 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libcups2 \
     libcairo2 \
     libpango-1.0-0 \
-    libatk-bridge2.0-0 
+    libatk-bridge2.0-0
 
+# Install Sysbox for secure DinD (inner Docker also uses sysbox-runc)
+# Checksums from https://github.com/nestybox/sysbox/releases/tag/v0.6.7
+ARG SYSBOX_VERSION=0.6.7
+ARG SYSBOX_SHA256_AMD64=b7ac389e5a19592cadf16e0ca30e40919516128f6e1b7f99e1cb4ff64554172e
+ARG SYSBOX_SHA256_ARM64=16d80123ba53058cf90f5a68686e297621ea97942602682e34b3352783908f91
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_AMD64}"; \
+    elif [ "$ARCH" = "arm64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_ARM64}"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    wget -q -O /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" && \
+    echo "${EXPECTED_SHA256}  /tmp/sysbox.deb" | sha256sum -c - && \
+    apt-get install -y --no-install-recommends /tmp/sysbox.deb && \
+    rm /tmp/sysbox.deb
+
+# Configure Docker daemon with sysbox-runc as default runtime
+COPY configs/daemon.json /etc/docker/daemon.json
 
 USER agent
 
