@@ -475,7 +475,7 @@ _containai_import_cmd() {
 
     # Resolve workspace
     local resolved_workspace="${workspace:-$PWD}"
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd); then
+    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
         echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
         return 1
     fi
@@ -640,7 +640,7 @@ _containai_export_cmd() {
 
     # Resolve workspace
     local resolved_workspace="${workspace:-$PWD}"
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd); then
+    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
         echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
         return 1
     fi
@@ -916,7 +916,7 @@ _containai_shell_cmd() {
 
     # Resolve workspace
     local resolved_workspace="${workspace:-$PWD}"
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd); then
+    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
         echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
         return 1
     fi
@@ -1240,7 +1240,7 @@ _containai_run_cmd() {
 
     # Resolve workspace
     local resolved_workspace="${workspace:-$PWD}"
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd); then
+    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
         echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
         return 1
     fi

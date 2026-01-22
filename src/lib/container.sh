@@ -1046,7 +1046,8 @@ _containai_start_container() {
     # Resolve workspace
     local workspace_resolved
     workspace_resolved="${workspace:-$PWD}"
-    if ! workspace_resolved=$(cd -- "$workspace_resolved" 2>/dev/null && pwd); then
+    # Use pwd -P to resolve symlinks consistently (matches _cai_hash_path normalization)
+    if ! workspace_resolved=$(cd -- "$workspace_resolved" 2>/dev/null && pwd -P); then
         echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
         return 1
     fi
@@ -1233,6 +1234,18 @@ _containai_start_container() {
                     return 1
                 fi
             fi
+            # FR-4: Validate container has only expected mounts (workspace bind + data volume)
+            # This prevents shell --volume from tainting containers that run will later use
+            if [[ "$shell_flag" != "true" ]]; then
+                local mount_count
+                mount_count=$("${docker_cmd[@]}" inspect --format '{{len .Mounts}}' "$container_name" 2>/dev/null) || mount_count="0"
+                if [[ "$mount_count" -gt 2 ]]; then
+                    echo "[ERROR] Container has unexpected mounts (FR-4 violation)" >&2
+                    echo "[INFO] Container may have been tainted by 'cai shell --volume'" >&2
+                    echo "[INFO] Use --fresh to recreate with clean mount configuration" >&2
+                    return 1
+                fi
+            fi
             # Handle detached mode for already running container
             if [[ "$detached_flag" == "true" ]]; then
                 if [[ "$quiet_flag" != "true" ]]; then
@@ -1300,11 +1313,15 @@ _containai_start_container() {
                     return 1
                 fi
             fi
-            # Start stopped container (PID 1 is sleep infinity, container stays running)
+            # Start stopped container (PID 1 is tini+sleep, container stays running)
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Starting stopped container..."
             fi
-            "${docker_cmd[@]}" start "$container_name" >/dev/null
+            local start_output
+            if ! start_output=$("${docker_cmd[@]}" start "$container_name" 2>&1); then
+                echo "[ERROR] Failed to start container: $start_output" >&2
+                return 1
+            fi
             # Wait for container to be running (poll with bounded timeout)
             local wait_count=0
             local max_wait=30
@@ -1388,11 +1405,9 @@ _containai_start_container() {
                 args+=(-v "$vol")
             done
 
-            # Environment variables - pass original workspace path for symlink strategy
+            # Environment variables - only stable non-secret vars at container creation
+            # User-provided --env values are passed via docker exec to avoid persisting secrets
             args+=(-e "CAI_HOST_WORKSPACE=$workspace_resolved")
-            for env_var in "${env_vars[@]}"; do
-                args+=(-e "$env_var")
-            done
 
             # Working directory
             args+=(-w /home/agent/workspace)

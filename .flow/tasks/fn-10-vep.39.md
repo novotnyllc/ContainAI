@@ -1,15 +1,15 @@
 # fn-10-vep.39 Implement workspace-to-container auto-mapping with name hashing
 
 ## Description
-Implement workspace-to-container auto-mapping with clear lifecycle model: PID 1 is `sleep infinity`, agent sessions use `docker exec`.
+Implement workspace-to-container auto-mapping with clear lifecycle model: `--init` (tini) as PID 1 for zombie reaping, running `sleep infinity`. Agent sessions use `docker exec`.
 
-**Size:** M  
+**Size:** M
 **Files:** `src/lib/container.sh`
 
 ## Approach
 
 1. **Container lifecycle model**:
-   - PID 1 is `sleep infinity` (long-lived init process)
+   - PID 1 is tini (`--init`) for proper zombie reaping, running `sleep infinity`
    - Agent sessions attach via `docker exec -it <container> <command>`
    - Container stays running between sessions
 
@@ -52,51 +52,16 @@ Implement workspace-to-container auto-mapping with clear lifecycle model: PID 1 
 
 ## Key context
 
-- sha256sum is Linux only; macOS has shasum
-- Path normalization with realpath/pwd -P before hashing
-- sleep infinity is portable and low-resource
+- sha256sum is Linux only; macOS has shasum (implementation uses fallback chain)
+- Path normalization with pwd -P before hashing
+- tini (--init) + sleep infinity for proper zombie reaping
 - docker exec preserves container state
-## Approach
-
-1. **Container naming convention**:
-   ```bash
-   container_name="containai-$(echo "$workspace_path" | sha256sum | cut -c1-12)"
-   ```
-   - Deterministic: same workspace always gets same container name
-   - Short: 12-char hash is unique enough, fits in logs
-
-2. **Container reuse logic** in `_containai_run()`:
-   ```bash
-   existing=$(docker ps -aq --filter "name=^${container_name}$")
-   if [[ -n "$existing" ]]; then
-     if [[ "$(docker inspect -f '{{.State.Running}}' "$existing")" == "true" ]]; then
-       docker exec -it "$existing" "$@"  # Attach to running
-     else
-       docker start -ai "$existing"  # Start stopped container
-     fi
-   else
-     docker run ... --name "$container_name" ...  # Create new
-   fi
-   ```
-
-3. **Fresh start flag**:
-   - `cai run --fresh /path` removes existing container first
-   - Useful for resetting state or after config changes
-
-4. **Label for tracking**:
-   ```bash
-   --label "containai.workspace=$workspace_path"
-   --label "containai.created=$(date -Iseconds)"
-   ```
-
-## Key context
-
 - Docker Desktop sandbox uses same pattern: one sandbox per workspace
 - Container naming must be shell-safe (no special chars)
-- sha256sum is available on all platforms (Linux, macOS, WSL)
 - Data volume (`/mnt/agent-data`) is separate - not affected by container removal
+- FR-4 mount validation ensures shell --volume cannot taint run containers
 ## Acceptance
-- [ ] Container PID 1 is `sleep infinity` (long-lived init)
+- [ ] Container uses `--init` (tini) as PID 1 for zombie reaping, running `sleep infinity`
 - [ ] Agent sessions use `docker exec -it <container> <command>`
 - [ ] Container stays running between sessions
 - [ ] Container name uses portable hashing (shasum/sha256sum/openssl)
@@ -106,6 +71,7 @@ Implement workspace-to-container auto-mapping with clear lifecycle model: PID 1 
 - [ ] `cai run --fresh /path` removes and recreates container
 - [ ] Hashing works on both Linux and macOS
 - [ ] Data volume persists even when container is removed with --fresh
+- [ ] FR-4 mount validation prevents tainted containers from being used by run
 ## Done summary
 Implemented workspace-to-container auto-mapping with deterministic naming via SHA-256 path hashing. Containers now use sleep infinity as PID 1 (long-lived init) with agent sessions attaching via docker exec, allowing containers to persist between sessions. Added --fresh flag to remove and recreate containers while preserving data volumes.
 ## Evidence
