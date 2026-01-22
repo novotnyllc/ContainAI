@@ -147,6 +147,13 @@ install_docker_ce() {
             # Install docker-ce
             apt-get update -qq
             apt-get install -y docker-ce docker-ce-cli containerd.io
+
+            # CRITICAL: Disable the default docker.service and docker.socket
+            # to prevent conflicts with Docker Desktop or other Docker installations.
+            # We only want containai-docker.service to run our isolated daemon.
+            _log_step "Disabling default docker.service to prevent conflicts"
+            systemctl disable --now docker.service docker.socket 2>/dev/null || true
+            _log_info "Default docker.service disabled (containai-docker will use separate service)"
             ;;
         *)
             _log_error "Unsupported distribution: $distro"
@@ -170,91 +177,16 @@ install_docker_ce() {
 # Sysbox Installation
 # ==============================================================================
 
-# Install sysbox-ce if not present
-install_sysbox() {
+# Verify sysbox services are running (start if needed)
+# This is called both after fresh install and when sysbox is already installed
+verify_sysbox_services() {
     local dry_run="${1:-false}"
-    local verbose="${2:-false}"
-
-    _log_step "Checking for sysbox installation"
-
-    if command -v sysbox-runc >/dev/null 2>&1; then
-        local version
-        version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
-        _log_info "Sysbox already installed: $version"
-        return 0
-    fi
-
-    _log_step "Installing sysbox-ce"
 
     if [[ "$dry_run" == "true" ]]; then
-        _log_info "[DRY-RUN] Would download and install sysbox-ce"
+        _log_info "[DRY-RUN] Would verify sysbox-mgr and sysbox-fs services"
         return 0
     fi
 
-    # Ensure wget and jq are available
-    apt-get install -y wget jq
-
-    # Determine architecture
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64)
-            arch="amd64"
-            ;;
-        aarch64)
-            arch="arm64"
-            ;;
-        *)
-            _log_error "Unsupported architecture: $arch"
-            return 1
-            ;;
-    esac
-
-    # Get latest sysbox release from GitHub
-    local release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
-    local release_json download_url
-
-    release_json=$(wget -qO- "$release_url" 2>/dev/null) || {
-        _log_error "Failed to fetch sysbox release info from GitHub"
-        return 1
-    }
-
-    download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
-
-    if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
-        _log_error "Could not find sysbox .deb package for architecture: $arch"
-        return 1
-    fi
-
-    if [[ "$verbose" == "true" ]]; then
-        _log_info "Download URL: $download_url"
-    fi
-
-    # Download and install
-    local tmpdir deb_file
-    tmpdir=$(mktemp -d)
-    deb_file="$tmpdir/sysbox-ce.deb"
-
-    _log_step "Downloading sysbox from: $download_url"
-    if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
-        rm -rf "$tmpdir"
-        _log_error "Failed to download sysbox package"
-        return 1
-    fi
-
-    _log_step "Installing sysbox package"
-    if ! dpkg -i "$deb_file"; then
-        _log_warn "dpkg install had issues, attempting to fix dependencies"
-        if ! apt-get install -f -y; then
-            rm -rf "$tmpdir"
-            _log_error "Failed to install sysbox package"
-            return 1
-        fi
-    fi
-
-    rm -rf "$tmpdir"
-
-    # Verify sysbox services are running
     _log_step "Verifying sysbox services"
     systemctl daemon-reload
 
@@ -275,6 +207,104 @@ install_sysbox() {
         fi
         _log_info "$service is running"
     done
+
+    return 0
+}
+
+# Install sysbox-ce if not present, then verify services
+install_sysbox() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+    local sysbox_already_installed="false"
+
+    _log_step "Checking for sysbox installation"
+
+    if command -v sysbox-runc >/dev/null 2>&1; then
+        local version
+        version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
+        _log_info "Sysbox already installed: $version"
+        sysbox_already_installed="true"
+    fi
+
+    # If sysbox is not installed, install it
+    if [[ "$sysbox_already_installed" == "false" ]]; then
+        _log_step "Installing sysbox-ce"
+
+        if [[ "$dry_run" == "true" ]]; then
+            _log_info "[DRY-RUN] Would download and install sysbox-ce"
+            # Still verify services in dry-run mode
+            verify_sysbox_services "$dry_run"
+            return $?
+        fi
+
+        # Ensure wget and jq are available
+        apt-get install -y wget jq
+
+        # Determine architecture
+        local arch
+        arch=$(uname -m)
+        case "$arch" in
+            x86_64)
+                arch="amd64"
+                ;;
+            aarch64)
+                arch="arm64"
+                ;;
+            *)
+                _log_error "Unsupported architecture: $arch"
+                return 1
+                ;;
+        esac
+
+        # Get latest sysbox release from GitHub
+        local release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
+        local release_json download_url
+
+        release_json=$(wget -qO- "$release_url" 2>/dev/null) || {
+            _log_error "Failed to fetch sysbox release info from GitHub"
+            return 1
+        }
+
+        download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
+
+        if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
+            _log_error "Could not find sysbox .deb package for architecture: $arch"
+            return 1
+        fi
+
+        if [[ "$verbose" == "true" ]]; then
+            _log_info "Download URL: $download_url"
+        fi
+
+        # Download and install
+        local tmpdir deb_file
+        tmpdir=$(mktemp -d)
+        deb_file="$tmpdir/sysbox-ce.deb"
+
+        _log_step "Downloading sysbox from: $download_url"
+        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+            rm -rf "$tmpdir"
+            _log_error "Failed to download sysbox package"
+            return 1
+        fi
+
+        _log_step "Installing sysbox package"
+        if ! dpkg -i "$deb_file"; then
+            _log_warn "dpkg install had issues, attempting to fix dependencies"
+            if ! apt-get install -f -y; then
+                rm -rf "$tmpdir"
+                _log_error "Failed to install sysbox package"
+                return 1
+            fi
+        fi
+
+        rm -rf "$tmpdir"
+    fi
+
+    # ALWAYS verify sysbox services (whether fresh install or already present)
+    if ! verify_sysbox_services "$dry_run"; then
+        return 1
+    fi
 
     _log_ok "Sysbox installed and services running"
     return 0

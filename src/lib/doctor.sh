@@ -556,6 +556,10 @@ _cai_doctor() {
             context_not_found)
                 printf '  %-44s %s\n' "" "(Context 'docker-containai' not configured)"
                 ;;
+            wrong_endpoint)
+                printf '  %-44s %s\n' "" "(Context 'docker-containai' points to wrong socket)"
+                printf '  %-44s %s\n' "" "(Expected: unix://$_CAI_CONTAINAI_DOCKER_SOCKET)"
+                ;;
             socket_not_found)
                 printf '  %-44s %s\n' "" "(Socket $_CAI_CONTAINAI_DOCKER_SOCKET not found)"
                 ;;

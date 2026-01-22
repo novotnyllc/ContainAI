@@ -308,8 +308,8 @@ _CAI_CONTAINAI_DOCKER_CONTEXT="docker-containai"
 _CAI_CONTAINAI_DOCKER_CONFIG="/etc/containai/docker/daemon.json"
 _CAI_CONTAINAI_DOCKER_DATA="/var/lib/containai-docker"
 
-# Check if docker-containai context exists
-# Returns: 0=exists, 1=does not exist
+# Check if docker-containai context exists and points to the correct socket
+# Returns: 0=exists with correct endpoint, 1=does not exist or wrong endpoint
 # Outputs: Sets _CAI_CONTAINAI_CONTEXT_ERROR with error details
 _cai_containai_docker_context_exists() {
     _CAI_CONTAINAI_CONTEXT_ERROR=""
@@ -319,12 +319,22 @@ _cai_containai_docker_context_exists() {
         return 1
     fi
 
-    if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
-        return 0
+    if ! docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        _CAI_CONTAINAI_CONTEXT_ERROR="context_not_found"
+        return 1
     fi
 
-    _CAI_CONTAINAI_CONTEXT_ERROR="context_not_found"
-    return 1
+    # Verify the context points to the expected socket
+    local expected_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+    local actual_host
+    actual_host=$(docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+
+    if [[ "$actual_host" != "$expected_host" ]]; then
+        _CAI_CONTAINAI_CONTEXT_ERROR="wrong_endpoint"
+        return 1
+    fi
+
+    return 0
 }
 
 # Check if containai-docker socket exists
