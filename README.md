@@ -19,7 +19,22 @@ AI coding agents like Claude, Gemini, and Codex can execute arbitrary code on yo
 
 ## Quick Start
 
-> **Note:** The CLI requires **bash** (not zsh or fish). If your default shell is zsh, run `bash` first.
+### One-liner Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash
+```
+
+This installs `cai` to `~/.local/bin` and adds it to your PATH. Open a new terminal and run:
+
+```bash
+cd /path/to/your/project
+cai
+```
+
+### Manual Install
+
+> **Note:** The CLI requires **bash 4.0+** (not zsh or fish). macOS ships with bash 3.2; install via `brew install bash`.
 
 ```bash
 # Clone and source the CLI (must be in bash)
@@ -32,8 +47,6 @@ cai
 ```
 
 That's it. ContainAI detects your isolation runtime (Docker Desktop sandbox or Sysbox), mounts your current directory, and starts Claude. First run? Authenticate inside the container with `claude login`.
-
-> **Requires bash 4.0+.** macOS ships with bash 3.2; install via `brew install bash`.
 
 ## Features
 

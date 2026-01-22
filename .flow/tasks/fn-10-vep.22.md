@@ -36,9 +36,12 @@ Add Docker CE (full installation) to the main Dockerfile so agents can use Docke
 - [ ] Image builds successfully
 - [ ] Image size increase is reasonable
 ## Done summary
-TBD
-
+Added Docker CE with sysbox-runc as default runtime for secure DinD:
+- Installed sysbox-ce with SHA256 checksum verification
+- Created daemon.json config with sysbox-runc as default runtime
+- Added required sysbox dependencies (fuse, iproute2, iptables, rsync)
+- Used BuildKit apt cache mounts for efficient builds
 ## Evidence
-- Commits:
-- Tests:
+- Commits: afdcdb8
+- Tests: jq . src/configs/daemon.json
 - PRs:

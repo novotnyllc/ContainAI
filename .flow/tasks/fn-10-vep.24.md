@@ -32,9 +32,8 @@ Set up GitHub Container Registry (GHCR) publishing with GitHub Actions for multi
 - [ ] OCI labels present in image
 - [ ] README badge for build status
 ## Done summary
-TBD
-
+Set up GitHub Actions workflow for multi-arch Docker builds published to ghcr.io/novotnyllc/containai, with OCI labels in Dockerfile and build status badge in README.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 362667c, 1fd0d9a
+- Tests: workflow file syntax validation
 - PRs:
