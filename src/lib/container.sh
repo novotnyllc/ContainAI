@@ -1290,7 +1290,8 @@ _containai_start_container() {
                 args+=(-v "$vol")
             done
 
-            # Environment variables
+            # Environment variables - pass original workspace path for symlink strategy
+            args+=(-e "CAI_HOST_WORKSPACE=$workspace_resolved")
             for env_var in "${env_vars[@]}"; do
                 args+=(-e "$env_var")
             done
@@ -1324,6 +1325,8 @@ _containai_start_container() {
                 for vol in "${extra_volumes[@]}"; do
                     shell_args+=(-v "$vol")
                 done
+                # Environment variables - pass original workspace path for symlink strategy
+                shell_args+=(-e "CAI_HOST_WORKSPACE=$workspace_resolved")
                 for env_var in "${env_vars[@]}"; do
                     shell_args+=(-e "$env_var")
                 done

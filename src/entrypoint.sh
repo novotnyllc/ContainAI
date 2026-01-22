@@ -279,103 +279,60 @@ if [[ -f "$CLAUDE_JSON" && ! -s "$CLAUDE_JSON" ]]; then
   echo "{}"> "$CLAUDE_JSON" # Claude complains if there's an empty file and if it creates it it breaks the symlink
 fi
 
-# Discover the mirrored workspace mount.
-# In Docker Sandbox, the workspace shows up in `findmnt --real` as:
-#   TARGET=/some/abs/path
-#   SOURCE=/dev/sdX[/some/abs/path]
-discover_mirrored_workspace() {
-  findmnt --real --json \
-  | jq -r '
-      # Flatten the tree: any object with target+source is a mount entry.
-      def mounts:
-        .. | objects | select(has("target") and has("source"))
-        | {target: .target, source: .source};
+# Setup workspace symlink from original host path to mount point.
+# The container mounts workspace at /home/agent/workspace, and the original
+# host path is passed via CAI_HOST_WORKSPACE environment variable.
+# If host path differs from mount point, we create a symlink so tools
+# expecting the original path can find the workspace.
+#
+# This approach:
+# - Avoids docker inspect (would require Docker socket inside container)
+# - Gracefully handles permission errors
+# - Works with paths containing spaces
+# - Is idempotent (safe to rerun)
+setup_workspace_symlink() {
+  local host_path="${CAI_HOST_WORKSPACE:-}"
+  local mount_path="/home/agent/workspace"
 
-      # Matching rule:
-      # 1) source ends with [target]
-      # 2) macOS Docker Desktop: source ends with [target without leading /Volumes]
-      def is_match($t; $s):
-        ($s | endswith("[" + $t + "]"))
-        or (
-          ($t | startswith("/Volumes"))
-          and ($s | endswith("[" + ($t | sub("^/Volumes"; "")) + "]"))
-        );
-
-      # Choose the deepest target (longest string) among matches, skip "/".
-      [ mounts
-        | select(.target != "/")
-        | select(is_match(.target; .source))
-      ]
-      | sort_by(.target | length)
-      | last
-      | .target
-      // empty
-    '
-}
-
-# Conservative safety check: refuse to replace if TARGET_LINK is a mountpoint.
-is_mountpoint() {
-  if command -v mountpoint >/dev/null 2>&1; then
-    mountpoint -q --nofollow "$1"
-    return $?
+  # No host path provided - nothing to do
+  if [[ -z "$host_path" ]]; then
+    return 0
   fi
 
-  # Fallback: parse /proc/self/mountinfo
-  # Mountpoint is field 5 (mount point) in mountinfo.
-  local p
-  p="$(readlink -f "$1" 2>/dev/null || echo "$1")"
-  awk -v p="$p" '$5 == p { found=1 } END { exit(found ? 0 : 1) }' /proc/self/mountinfo
+  # Host path matches mount path - no symlink needed
+  if [[ "$host_path" == "$mount_path" ]]; then
+    return 0
+  fi
+
+  # Create parent directory for symlink (may need to exist)
+  # Use 2>/dev/null || true to gracefully handle permission errors
+  mkdir -p "$(dirname "$host_path")" 2>/dev/null || true
+
+  # Create symlink from original path to mount point
+  # Use ln -sfn:
+  #   -s: create symbolic link
+  #   -f: remove existing destination files
+  #   -n: treat destination that is symlink to dir as if it were a normal file
+  # Gracefully handle permission errors (|| true)
+  ln -sfn "$mount_path" "$host_path" 2>/dev/null || true
 }
 
 main() {
-  
+  # Start dockerd for Docker-in-Docker capability
   sudo -n dockerd --iptables=false --ip6tables=false --ip-masq=false --bridge=none &
-  
-  MIRRORED="$(discover_mirrored_workspace || true)"
 
-  diag="$(findmnt --real --json 2>&1)"
+  # Setup workspace symlink if original host path differs from mount path
+  # This allows tools expecting the original path (e.g., /home/user/project)
+  # to find the workspace which is mounted at /home/agent/workspace
+  setup_workspace_symlink
 
-  if [[ -z "${MIRRORED:-}" || ! -d "$MIRRORED" ]]; then
-    log "ERROR: Could not discover mirrored workspace mount via findmnt."
-    log "Diagnostics:"
-    log "$diag"
+  # Verify workspace directory exists and is accessible
+  if [[ ! -d "$AGENT_WORKSPACE" ]]; then
+    log "ERROR: Workspace directory does not exist: $AGENT_WORKSPACE"
     exit 1
   fi
 
-  case "$MIRRORED" in
-    /|/etc/*|/proc/*|/sys/*|/run/*|/dev/*)
-      log "ERROR: Refusing suspicious workspace candidate: $MIRRORED"
-      exit 1
-      ;;
-  esac
-
-  # Replace /home/agent/workspace with a symlink to the mirrored workspace.
-  # First cd away from the directory we're about to delete (WORKDIR sets cwd to workspace)
-  cd /tmp
-
-  # Safety check: refuse to delete if workspace is a mountpoint
-  if is_mountpoint "$AGENT_WORKSPACE"; then
-    log "ERROR: $AGENT_WORKSPACE is a mountpoint. Refusing to delete."
-    exit 1
-  fi
-
-  # Handle workspace replacement robustly:
-  # - If it's a symlink, remove it
-  # - If it's an empty directory, remove it
-  # - If it's a non-empty directory, move it aside (shouldn't happen normally)
-  if [[ -L "$AGENT_WORKSPACE" ]]; then
-    rm "$AGENT_WORKSPACE"
-  elif [[ -d "$AGENT_WORKSPACE" ]]; then
-    if ! rm -d "$AGENT_WORKSPACE" 2>/dev/null; then
-      # Directory not empty - move aside with timestamp
-      local backup="${AGENT_WORKSPACE}.bak.$(date +%s)"
-      log "WARNING: $AGENT_WORKSPACE not empty. Moving to $backup"
-      mv "$AGENT_WORKSPACE" "$backup"
-    fi
-  fi
-
-  ln -s "$MIRRORED" "$AGENT_WORKSPACE"
-  cd "$AGENT_WORKSPACE"
+  cd -- "$AGENT_WORKSPACE"
 
   # Continue with the container's original command
   exec "$@"
