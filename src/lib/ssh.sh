@@ -300,19 +300,22 @@ _cai_setup_ssh_config() {
         fi
         _cai_info "Created SSH config with Include directive"
     else
-        # Check if exact Include directive already present at TOP of config
+        # Check if Include directive for containai.d already present at TOP of config
         # The Include directive MUST be at the top (before any Host/Match definitions)
-        # Use exact line matching to avoid false positives from comments or similar paths
+        # Use regex pattern to handle whitespace variants and trailing comments
+        # Pattern matches: Include ~/.ssh/containai.d/*.conf with optional leading/trailing whitespace and comments
+        local include_pattern='^[[:space:]]*Include[[:space:]]+~/\.ssh/containai\.d/\*\.conf([[:space:]]*(#.*)?)?$'
         local first_effective_line include_present include_at_top
         include_present=false
         include_at_top=false
 
-        # Check if the exact include line exists anywhere in the file
-        if grep -qFx "$include_line" "$ssh_config"; then
+        # Check if include directive exists anywhere in the file (with whitespace tolerance)
+        if grep -qE "$include_pattern" "$ssh_config"; then
             include_present=true
             # Check if it's at the top (first non-empty, non-comment line)
             first_effective_line=$(grep -v '^[[:space:]]*$' "$ssh_config" | grep -v '^[[:space:]]*#' | head -1)
-            if [[ "$first_effective_line" == "$include_line" ]]; then
+            # Check if first effective line matches our include pattern
+            if printf '%s' "$first_effective_line" | grep -qE "$include_pattern"; then
                 include_at_top=true
             fi
         fi
@@ -332,7 +335,8 @@ _cai_setup_ssh_config() {
             if ! {
                 printf '%s\n\n' "$include_line"
                 # Remove any existing Include line for containai.d to avoid duplicates
-                grep -vFx "$include_line" "$ssh_config" || true
+                # Use same pattern with -v to remove all variants
+                grep -vE "$include_pattern" "$ssh_config" || true
             } > "$temp_file"; then
                 _cai_error "Failed to prepare SSH config update"
                 rm -f "$temp_file"
