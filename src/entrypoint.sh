@@ -305,16 +305,18 @@ setup_workspace_symlink() {
   fi
 
   # Create parent directory for symlink (may need to exist)
-  # Use 2>/dev/null || true to gracefully handle permission errors
-  mkdir -p "$(dirname "$host_path")" 2>/dev/null || true
+  # Use run_as_root since host paths like /home/user/... require root inside container
+  # Gracefully handle permission errors (|| true) in case sudo is unavailable
+  run_as_root mkdir -p "$(dirname "$host_path")" 2>/dev/null || true
 
   # Create symlink from original path to mount point
   # Use ln -sfn:
   #   -s: create symbolic link
   #   -f: remove existing destination files
   #   -n: treat destination that is symlink to dir as if it were a normal file
-  # Gracefully handle permission errors (|| true)
-  ln -sfn "$mount_path" "$host_path" 2>/dev/null || true
+  # Use run_as_root since host paths typically require elevated privileges
+  # Gracefully handle permission errors (|| true) in case sudo is unavailable
+  run_as_root ln -sfn "$mount_path" "$host_path" 2>/dev/null || true
 }
 
 main() {
