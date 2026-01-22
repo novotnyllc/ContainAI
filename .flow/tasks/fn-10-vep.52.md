@@ -34,9 +34,8 @@ Simplify container naming to per-workspace only (remove per-image complexity).
 - [ ] Existing container lookup simplified
 - [ ] No "multiple containers" disambiguation error
 ## Done summary
-TBD
-
+Simplified container naming to per-workspace only by removing --agent and --image-tag flags from CLI, removing image mismatch checks, and using default image for all containers. One container per workspace, named by workspace path hash.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 74f159840e38985f383ffe43518fe4b2aec41797
+- Tests: bash -n src/containai.sh, bash -n src/lib/container.sh
 - PRs:

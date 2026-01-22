@@ -26,6 +26,8 @@
 #   _CAI_SECURE_ENGINE_CONTEXT - Secure engine context name override
 #   _CAI_SSH_PORT_RANGE_START - SSH port range start (from [ssh] section)
 #   _CAI_SSH_PORT_RANGE_END   - SSH port range end (from [ssh] section)
+#   _CAI_CONTAINER_MEMORY     - Memory limit (from [container] section, e.g., "4g")
+#   _CAI_CONTAINER_CPUS       - CPU limit (from [container] section, e.g., 2)
 #
 # Usage: source lib/config.sh
 # ==============================================================================
@@ -61,6 +63,8 @@ _CAI_DANGER_ALLOW_HOST_CREDENTIALS=""
 _CAI_DANGER_ALLOW_HOST_DOCKER_SOCKET=""
 _CAI_SSH_PORT_RANGE_START=""
 _CAI_SSH_PORT_RANGE_END=""
+_CAI_CONTAINER_MEMORY=""
+_CAI_CONTAINER_CPUS=""
 
 # ==============================================================================
 # Volume name validation
@@ -230,6 +234,8 @@ _containai_parse_config() {
     _CAI_DANGER_ALLOW_HOST_DOCKER_SOCKET=""
     _CAI_SSH_PORT_RANGE_START=""
     _CAI_SSH_PORT_RANGE_END=""
+    _CAI_CONTAINER_MEMORY=""
+    _CAI_CONTAINER_CPUS=""
 
     # Check if config file exists
     if [[ ! -f "$config_file" ]]; then
@@ -413,6 +419,36 @@ if isinstance(ssh, dict):
 ")
     _CAI_SSH_PORT_RANGE_START="$ssh_port_start"
     _CAI_SSH_PORT_RANGE_END="$ssh_port_end"
+
+    # Extract [container] section for resource limits
+    local container_memory container_cpus
+    container_memory=$(printf '%s' "$config_json" | python3 -c "
+import json, sys, re
+config = json.load(sys.stdin)
+container = config.get('container', {})
+if isinstance(container, dict):
+    val = container.get('memory', '')
+    if isinstance(val, str) and val:
+        # Validate memory format: number followed by unit (k, m, g, t)
+        if re.match(r'^[0-9]+(\.[0-9]+)?[kmgtKMGT]?$', val):
+            print(val)
+        else:
+            print('[WARN] container.memory invalid format, ignoring', file=sys.stderr)
+")
+    container_cpus=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+container = config.get('container', {})
+if isinstance(container, dict):
+    val = container.get('cpus', '')
+    # Accept int or float, must be positive
+    if isinstance(val, (int, float)) and val > 0:
+        print(val)
+    elif isinstance(val, str) and val:
+        print('[WARN] container.cpus should be a number, not a string', file=sys.stderr)
+")
+    _CAI_CONTAINER_MEMORY="$container_memory"
+    _CAI_CONTAINER_CPUS="$container_cpus"
 
     # Extract excludes with cumulative merge (pass JSON via stdin):
     # default_excludes + workspace.<key>.excludes (deduped)

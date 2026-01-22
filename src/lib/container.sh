@@ -1050,20 +1050,30 @@ _containai_start_container() {
         return 1
     fi
 
-    # === CONTEXT SELECTION (must happen before container state checks) ===
-    # Resolve secure engine context from config (for context override)
-    # Note: capture stdout only for context value; let stderr flow to parent stderr
-    local config_context_override=""
+    # === CONFIG PARSING (must happen early to populate globals) ===
+    # Parse config file to populate global settings including:
+    # - _CAI_SECURE_ENGINE_CONTEXT (for context selection)
+    # - _CAI_CONTAINER_MEMORY, _CAI_CONTAINER_CPUS (for resource limits)
+    # Note: We parse directly here to preserve globals (subshell would lose them)
+    local config_file=""
     if [[ -n "$explicit_config" ]]; then
-        # Explicit config: strict mode - fail on parse errors
-        if ! config_context_override=$(_containai_resolve_secure_engine_context "$workspace_resolved" "$explicit_config"); then
+        if [[ ! -f "$explicit_config" ]]; then
+            echo "[ERROR] Config file not found: $explicit_config" >&2
+            return 1
+        fi
+        config_file="$explicit_config"
+        if ! _containai_parse_config "$config_file" "$workspace_resolved" "strict"; then
             echo "[ERROR] Failed to parse config: $explicit_config" >&2
             return 1
         fi
     else
         # Discovered config: suppress errors gracefully
-        config_context_override=$(_containai_resolve_secure_engine_context "$workspace_resolved" "" 2>/dev/null) || config_context_override=""
+        config_file=$(_containai_find_config "$workspace_resolved")
+        if [[ -n "$config_file" ]]; then
+            _containai_parse_config "$config_file" "$workspace_resolved" 2>/dev/null || true
+        fi
     fi
+    local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
 
     # Auto-select Docker context based on isolation availability
     local selected_context debug_mode=""
@@ -1510,6 +1520,14 @@ _containai_start_container() {
             args+=(--label "containai.ssh-port=$ssh_port")
             args+=(-p "${ssh_port}:22")  # Map allocated port to container SSH
             args+=(-d)  # Always detached - tini manages sleep infinity as child
+
+            # Cgroup resource limits (configurable via [container] config section)
+            # Default: 4g memory, 2 CPUs, 100s stop timeout for systemd graceful shutdown
+            local mem_limit="${_CAI_CONTAINER_MEMORY:-4g}"
+            local cpu_limit="${_CAI_CONTAINER_CPUS:-2}"
+            args+=(--memory="$mem_limit" --memory-swap="$mem_limit")  # memory-swap=memory disables swap
+            args+=(--cpus="$cpu_limit")
+            args+=(--stop-timeout 100)  # Allow systemd services to shut down gracefully
 
             # Volume mounts
             args+=("${vol_args[@]}")
