@@ -272,6 +272,36 @@ ensure_volume_structure
 # Load .env after ownership fix completes (volume readable now)
 _load_env_file
 
+# Copy .gitconfig from data volume to $HOME if it exists
+# This enables git commits inside the container with the user's identity
+# and sets safe.directory for the workspace mount
+_setup_git_config() {
+  local src="${DATA_DIR}/.gitconfig"
+  local dst="${HOME}/.gitconfig"
+
+  # Check symlink FIRST (before -f) to properly reject symlinks
+  if [[ -L "$src" ]]; then
+    log "[WARN] .gitconfig is symlink - skipping"
+    return 0
+  fi
+  if [[ ! -f "$src" ]]; then
+    return 0  # Silent - expected if cai import wasn't run with git config
+  fi
+  if [[ ! -r "$src" ]]; then
+    log "[WARN] .gitconfig unreadable - skipping"
+    return 0
+  fi
+
+  # Copy to $HOME (overwrite if exists)
+  if cp "$src" "$dst" 2>/dev/null; then
+    log "[INFO] Git config loaded from data volume"
+  else
+    log "[WARN] Failed to copy .gitconfig to $HOME"
+  fi
+}
+
+_setup_git_config
+
 # Check if .claude.json exists and is 0 bytes
 # Docker Sandbox creates the file when creating the container replacing a link
 CLAUDE_JSON="${AGENT_WORKSPACE}/.claude.json"

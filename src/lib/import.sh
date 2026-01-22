@@ -957,11 +957,16 @@ done <<'"'"'MAP_DATA'"'"'
             _import_warn "Failed to merge enabledPlugins"
         fi
         _import_remove_orphan_markers "$ctx" "$volume"
+        # Import git config (user identity + safe.directory)
+        if ! _cai_import_git_config "$ctx" "$volume"; then
+            _import_warn "Failed to import git config"
+        fi
     else
         _import_step "[dry-run] Would transform installed_plugins.json"
         _import_step "[dry-run] Would transform known_marketplaces.json"
         _import_step "[dry-run] Would merge enabledPlugins into sandbox settings"
         _import_step "[dry-run] Would remove orphan markers"
+        _import_step "[dry-run] Would import git config (user identity + safe.directory)"
     fi
 
     return 0
@@ -1195,6 +1200,80 @@ _import_remove_orphan_markers() {
     ')
 
     _import_success "Removed $removed orphan markers"
+}
+
+# ==============================================================================
+# Git config import
+# ==============================================================================
+
+# Import git user config from host to data volume
+# Writes a .gitconfig file with user identity and safe.directory settings
+# Arguments: $1 = context, $2 = volume
+# Returns: 0 on success (including graceful skip), 1 on failure
+_cai_import_git_config() {
+    local ctx="$1"
+    local volume="$2"
+
+    # Build docker command with context
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
+
+    _import_step "Importing git config..."
+
+    # Check if git is installed on host
+    if ! command -v git >/dev/null 2>&1; then
+        _import_warn "Git not installed on host, skipping git config import"
+        return 0
+    fi
+
+    # Extract git user.name and user.email from host
+    # Use git config --global to get user-level settings
+    # Note: These commands return non-zero if config is not set, which is fine
+    local git_name git_email
+    git_name=$(git config --global user.name 2>/dev/null || printf '%s\n' "")
+    git_email=$(git config --global user.email 2>/dev/null || printf '%s\n' "")
+
+    # Check if we have at least name or email
+    if [[ -z "$git_name" && -z "$git_email" ]]; then
+        _import_warn "No git user.name or user.email configured on host, skipping git config import"
+        return 0
+    fi
+
+    # Build .gitconfig content
+    # Include [user] section only if we have values
+    # Always include [safe] section with /workspace
+    local gitconfig_content=""
+
+    if [[ -n "$git_name" || -n "$git_email" ]]; then
+        gitconfig_content+="[user]"$'\n'
+        if [[ -n "$git_name" ]]; then
+            gitconfig_content+="    name = $git_name"$'\n'
+        fi
+        if [[ -n "$git_email" ]]; then
+            gitconfig_content+="    email = $git_email"$'\n'
+        fi
+    fi
+
+    # Add safe.directory for workspace (critical for git operations on mounted volumes)
+    gitconfig_content+="[safe]"$'\n'
+    gitconfig_content+="    directory = /workspace"$'\n'
+    gitconfig_content+="    directory = /home/agent/workspace"$'\n'
+
+    # Write to volume
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    if ! printf '%s' "$gitconfig_content" | DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -i --network=none --user 1000:1000 -v "$volume":/target alpine sh -c "cat > /target/.gitconfig"; then
+        _import_error "Failed to write .gitconfig to volume"
+        return 1
+    fi
+
+    if [[ -n "$git_name" ]]; then
+        _import_success "Git config imported (user.name: $git_name)"
+    else
+        _import_success "Git config imported (safe.directory only)"
+    fi
+    return 0
 }
 
 return 0
