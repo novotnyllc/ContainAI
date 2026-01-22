@@ -61,9 +61,8 @@ Remove all legacy code from lib/container.sh and delete lib/eci.sh entirely. Sta
 - [ ] Clean codebase with no legacy references
 - [ ] All tests still pass (or are updated)
 ## Done summary
-TBD
-
+Removed all ECI (Enhanced Container Isolation) and Docker Desktop sandbox code paths from lib files, leaving Sysbox as the sole isolation mechanism. Updated documentation (architecture.md, quickstart.md) to reflect Sysbox-only mode.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 57fd235029b7cee4d8d0e619c0976d642bd8ac09, 1bef06e, 0a7b9ac, 71929a0, 7e6b4d8, 4759080
+- Tests: bash -n src/containai.sh, bash -n src/lib/container.sh, bash -n src/lib/doctor.sh
 - PRs:

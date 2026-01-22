@@ -97,3 +97,6 @@ When checking if a path exists in a config file, use grep -qF with full path to 
 
 ## 2026-01-22 manual [pitfall]
 When comparing git branches for ahead/behind commits, compare the named branch refs not HEAD - HEAD may be on a different branch
+
+## 2026-01-22 manual [pitfall]
+When removing a feature, search docs/ for references - architecture diagrams, decision docs, and quickstart guides often lag behind code changes

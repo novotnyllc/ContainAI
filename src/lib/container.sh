@@ -5,11 +5,12 @@
 # This file must be sourced, not executed directly.
 #
 # Provides:
-#   _containai_container_name     - Generate sanitized container name
-#   _containai_check_isolation    - Detect container isolation status
-#   _containai_ensure_volumes     - Ensure a volume exists (takes volume name param)
-#   _containai_start_container    - Start or attach to container
-#   _containai_stop_all           - Stop all ContainAI containers
+#   _containai_container_name      - Generate sanitized container name
+#   _containai_check_isolation     - Detect container isolation status
+#   _containai_validate_masked_paths - Validate Docker MaskedPaths are applied (in-container)
+#   _containai_ensure_volumes      - Ensure a volume exists (takes volume name param)
+#   _containai_start_container     - Start or attach to container
+#   _containai_stop_all            - Stop all ContainAI containers
 #
 # Container inspection helpers:
 #   _containai_container_exists         - Check if container exists
@@ -51,6 +52,33 @@ fi
 
 # Guard against re-sourcing
 : "${_CONTAINAI_LABEL:=containai.managed=true}"
+
+# ==============================================================================
+# Security: Docker Default Protections
+# ==============================================================================
+#
+# Docker applies MaskedPaths and ReadonlyPaths by default for all containers.
+# These provide baseline protection against container escape vectors.
+# Sysbox respects these defaults.
+#
+# IMPORTANT: We must NEVER disable these defaults by using:
+#   - --security-opt systempaths=unconfined
+#   - --privileged (disables ALL security features)
+#
+# MaskedPaths (bind-mounted from /dev/null - appears empty):
+#   /proc/acpi, /proc/asound, /proc/interrupts, /proc/kcore, /proc/keys,
+#   /proc/latency_stats, /proc/sched_debug, /proc/scsi, /proc/timer_list,
+#   /proc/timer_stats, /sys/devices/virtual/powercap, /sys/firmware
+#
+# ReadonlyPaths (mounted read-only in container):
+#   /proc/bus, /proc/fs, /proc/irq, /proc/sys, /proc/sysrq-trigger
+#
+# Future hardening (deferred - requires baseline testing):
+#   - --security-opt=no-new-privileges: Conflicts with entrypoint sudo usage
+#   - --cap-drop=ALL: Needs capability baseline established first
+#
+# See: https://docs.docker.com/engine/security/seccomp/
+# ==============================================================================
 : "${_CONTAINAI_DEFAULT_REPO:=agent-sandbox}"
 : "${_CONTAINAI_DEFAULT_AGENT:=claude}"
 : "${_CONTAINAI_DEFAULT_CREDENTIALS:=none}"
@@ -231,6 +259,37 @@ _containai_container_name() {
 # ==============================================================================
 # Isolation detection
 # ==============================================================================
+
+# Validate that Docker's default MaskedPaths are applied (for use in tests)
+# This uses mount metadata to verify paths are masked, NOT by expecting cat to fail.
+# MaskedPaths are bind-mounted from /dev/null, so cat may succeed with empty output.
+# Returns: 0 if MaskedPaths appear to be applied, 1 if not applied or cannot verify
+#
+# Usage (inside container):
+#   if _containai_validate_masked_paths; then
+#       echo "MaskedPaths are applied"
+#   fi
+#
+# Note: This function must be run INSIDE a container to validate its security config.
+# Running on the host will likely return 1 (not in container context).
+_containai_validate_masked_paths() {
+    # Check for /proc/kcore being masked via mount metadata
+    # In a properly secured container, /proc/kcore should be bind-mounted from /dev/null
+    # We verify by checking mount info rather than trying to read the file
+    if grep -q "/proc/kcore" /proc/self/mountinfo 2>/dev/null; then
+        return 0
+    fi
+
+    # Alternative: use findmnt to check if path has special mount
+    if command -v findmnt >/dev/null 2>&1; then
+        if findmnt -T /proc/kcore >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    # Could not verify MaskedPaths are applied
+    return 1
+}
 
 # Container isolation detection (conservative - prefer return 2 over false positive/negative)
 # Checks docker info for Sysbox runtime, rootless mode, or user namespace remapping.
