@@ -13,7 +13,7 @@
 #   doctor       Check system capabilities and show diagnostics
 #   setup        Install Sysbox Secure Engine (WSL2/macOS)
 #   validate     Validate Secure Engine configuration
-#   sandbox      Manage Docker Desktop sandboxes (reset, etc.)
+#   sandbox      (Deprecated - use 'cai stop && cai --restart')
 #   import       Sync host configs to data volume
 #   export       Export data volume to .tgz archive
 #   stop         Stop ContainAI containers
@@ -1227,7 +1227,7 @@ _containai_run_cmd() {
     resolved_agent=$(_containai_resolve_agent "$agent" "$resolved_workspace" "$explicit_config")
 
     # Resolve credentials (CLI > env > config > default)
-    # Note: config credentials.mode=host is NEVER honored - CLI --credentials=host required
+    # Note: credentials.mode=host is no longer supported (Sysbox-only mode)
     # The 4th parameter is unused but kept for API compatibility
     local resolved_credentials
     resolved_credentials=$(_containai_resolve_credentials "$credentials" "$resolved_workspace" "$explicit_config" "")
