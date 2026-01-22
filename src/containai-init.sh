@@ -126,10 +126,10 @@ ensure_volume_structure() {
   ensure_dir "${DATA_DIR}/config/tmux"
   ensure_dir "${DATA_DIR}/local/share/tmux"
 
-  # Shell
+  # Shell (paths match import.sh: shell/bash_aliases, shell/bashrc.d - no dots)
   ensure_dir "${DATA_DIR}/shell"
-  ensure_file "${DATA_DIR}/shell/.bash_aliases"
-  ensure_dir "${DATA_DIR}/shell/.bashrc.d"
+  ensure_file "${DATA_DIR}/shell/bash_aliases"
+  ensure_dir "${DATA_DIR}/shell/bashrc.d"
 
   # VS Code Server
   ensure_dir "${DATA_DIR}/vscode-server/extensions"
