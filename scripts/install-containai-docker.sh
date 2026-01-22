@@ -101,75 +101,109 @@ check_systemd() {
 # Docker CE Installation
 # ==============================================================================
 
+# Ensure default docker.service is disabled to prevent conflicts
+# This must run whether docker-ce was just installed or already present
+disable_default_docker_service() {
+    local dry_run="${1:-false}"
+
+    _log_step "Ensuring default docker.service is disabled"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _log_info "[DRY-RUN] Would disable docker.service and docker.socket"
+        return 0
+    fi
+
+    # Check current state
+    local docker_active="false"
+    if systemctl is-active --quiet docker.service 2>/dev/null; then
+        docker_active="true"
+    fi
+
+    # Disable and stop the default docker service/socket
+    # This prevents conflicts with containai-docker which runs a separate daemon
+    systemctl disable --now docker.service docker.socket 2>/dev/null || true
+
+    if [[ "$docker_active" == "true" ]]; then
+        _log_info "Stopped and disabled default docker.service"
+    else
+        _log_info "Default docker.service was already disabled or not present"
+    fi
+
+    return 0
+}
+
 # Install docker-ce packages if not present
 install_docker_ce() {
     local dry_run="${1:-false}"
+    local docker_already_installed="false"
 
     _log_step "Checking for docker-ce installation"
 
     # Check if docker-ce is already installed
     if dpkg -l docker-ce 2>/dev/null | grep -q "^ii"; then
         _log_info "docker-ce is already installed"
-        return 0
+        docker_already_installed="true"
     fi
 
-    _log_step "Installing docker-ce"
+    # Install docker-ce if not present
+    if [[ "$docker_already_installed" == "false" ]]; then
+        _log_step "Installing docker-ce"
 
-    if [[ "$dry_run" == "true" ]]; then
-        _log_info "[DRY-RUN] Would install docker-ce via apt"
-        return 0
+        if [[ "$dry_run" == "true" ]]; then
+            _log_info "[DRY-RUN] Would install docker-ce via apt"
+            # Still run the disable step in dry-run
+            disable_default_docker_service "$dry_run"
+            return 0
+        fi
+
+        local distro
+        distro=$(detect_distro)
+
+        case "$distro" in
+            ubuntu|debian)
+                # Install prerequisites
+                apt-get update -qq
+                apt-get install -y ca-certificates curl gnupg
+
+                # Add Docker's official GPG key
+                install -m 0755 -d /etc/apt/keyrings
+                if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
+                    curl -fsSL "https://download.docker.com/linux/$distro/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                    chmod a+r /etc/apt/keyrings/docker.gpg
+                fi
+
+                # Set up the repository
+                # shellcheck disable=SC1091
+                local version_codename
+                version_codename=$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")
+                local arch
+                arch=$(dpkg --print-architecture)
+                printf '%s\n' "deb [arch=$arch signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$distro $version_codename stable" > /etc/apt/sources.list.d/docker.list
+
+                # Install docker-ce
+                apt-get update -qq
+                apt-get install -y docker-ce docker-ce-cli containerd.io
+                ;;
+            *)
+                _log_error "Unsupported distribution: $distro"
+                _log_error ""
+                _log_error "This script currently supports Ubuntu and Debian only."
+                _log_error "(RHEL/Fedora/CentOS support is planned for a future release)"
+                _log_error ""
+                _log_error "Manual installation steps:"
+                _log_error "  1. Install docker-ce from Docker's official repository"
+                _log_error "  2. Re-run this script to configure containai-docker"
+                return 1
+                ;;
+        esac
+
+        _log_ok "docker-ce installed"
     fi
 
-    local distro
-    distro=$(detect_distro)
+    # ALWAYS disable the default docker.service (whether just installed or already present)
+    # This is critical to prevent conflicts with containai-docker
+    disable_default_docker_service "$dry_run"
 
-    case "$distro" in
-        ubuntu|debian)
-            # Install prerequisites
-            apt-get update -qq
-            apt-get install -y ca-certificates curl gnupg
-
-            # Add Docker's official GPG key
-            install -m 0755 -d /etc/apt/keyrings
-            if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
-                curl -fsSL "https://download.docker.com/linux/$distro/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-                chmod a+r /etc/apt/keyrings/docker.gpg
-            fi
-
-            # Set up the repository
-            # shellcheck disable=SC1091
-            local version_codename
-            version_codename=$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")
-            local arch
-            arch=$(dpkg --print-architecture)
-            printf '%s\n' "deb [arch=$arch signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$distro $version_codename stable" > /etc/apt/sources.list.d/docker.list
-
-            # Install docker-ce
-            apt-get update -qq
-            apt-get install -y docker-ce docker-ce-cli containerd.io
-
-            # CRITICAL: Disable the default docker.service and docker.socket
-            # to prevent conflicts with Docker Desktop or other Docker installations.
-            # We only want containai-docker.service to run our isolated daemon.
-            _log_step "Disabling default docker.service to prevent conflicts"
-            systemctl disable --now docker.service docker.socket 2>/dev/null || true
-            _log_info "Default docker.service disabled (containai-docker will use separate service)"
-            ;;
-        *)
-            _log_error "Unsupported distribution: $distro"
-            _log_error ""
-            _log_error "This script currently supports Ubuntu and Debian only."
-            _log_error "For other distributions:"
-            _log_error "  - RHEL/Fedora/CentOS: Install docker-ce via yum/dnf repository"
-            _log_error "  - Arch Linux: Install docker-ce from AUR"
-            _log_error "  - Other: Follow Docker's official installation guide"
-            _log_error ""
-            _log_error "After installing docker-ce manually, re-run this script."
-            return 1
-            ;;
-    esac
-
-    _log_ok "docker-ce installed"
     return 0
 }
 

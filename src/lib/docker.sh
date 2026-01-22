@@ -395,7 +395,8 @@ _cai_containai_docker_available() {
     fi
 
     if ! _cai_containai_docker_context_exists; then
-        _CAI_CONTAINAI_ERROR="context_not_found"
+        # Propagate the specific error from context check
+        _CAI_CONTAINAI_ERROR="${_CAI_CONTAINAI_CONTEXT_ERROR:-context_not_found}"
         return 1
     fi
 
