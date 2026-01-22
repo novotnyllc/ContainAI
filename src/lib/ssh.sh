@@ -223,9 +223,11 @@ _cai_check_ssh_version() {
 # - Creates ~/.ssh/containai.d/ directory with 700 permissions if missing
 # - Creates ~/.ssh/config with 600 permissions if missing
 # - Adds "Include ~/.ssh/containai.d/*.conf" at TOP of ~/.ssh/config if not present
+# - If Include exists but not at top, moves it to top (required for SSH to process it)
 # - Warns if OpenSSH version < 7.3p1 (Include directive not supported)
 # - Idempotent: does NOT duplicate Include directive on re-run
 # - Preserves existing SSH config content
+# - Preserves symlinks (uses cp instead of mv)
 _cai_setup_ssh_config() {
     local ssh_dir="$HOME/.ssh"
     local config_dir="$_CAI_SSH_CONFIG_DIR"
@@ -298,32 +300,63 @@ _cai_setup_ssh_config() {
         fi
         _cai_info "Created SSH config with Include directive"
     else
-        # Check if Include directive already present
-        # Use grep -F for literal matching to avoid regex issues
-        # Match the full line to avoid partial matches
-        if grep -qF "containai.d" "$ssh_config"; then
-            _cai_debug "Include directive already present in SSH config"
+        # Check if exact Include directive already present at TOP of config
+        # The Include directive MUST be at the top (before any Host/Match definitions)
+        # Use exact line matching to avoid false positives from comments or similar paths
+        local first_effective_line include_present include_at_top
+        include_present=false
+        include_at_top=false
+
+        # Check if the exact include line exists anywhere in the file
+        if grep -qFx "$include_line" "$ssh_config"; then
+            include_present=true
+            # Check if it's at the top (first non-empty, non-comment line)
+            first_effective_line=$(grep -v '^[[:space:]]*$' "$ssh_config" | grep -v '^[[:space:]]*#' | head -1)
+            if [[ "$first_effective_line" == "$include_line" ]]; then
+                include_at_top=true
+            fi
+        fi
+
+        if [[ "$include_present" == "true" ]] && [[ "$include_at_top" == "true" ]]; then
+            _cai_debug "Include directive already present at top of SSH config"
         else
-            # Add Include directive at TOP of config file
-            # This is critical - Include must come before any Host definitions
-            _cai_debug "Adding Include directive to SSH config"
+            # Need to update config: either add Include or move it to top
+            _cai_debug "Updating SSH config with Include directive at top"
             local temp_file
-            temp_file=$(mktemp)
+            if ! temp_file=$(mktemp); then
+                _cai_error "Failed to create temporary file"
+                return 1
+            fi
+
+            # Build new config: Include line at top, then existing content (minus any existing Include)
             if ! {
                 printf '%s\n\n' "$include_line"
-                cat "$ssh_config"
+                # Remove any existing Include line for containai.d to avoid duplicates
+                grep -vFx "$include_line" "$ssh_config" || true
             } > "$temp_file"; then
                 _cai_error "Failed to prepare SSH config update"
                 rm -f "$temp_file"
                 return 1
             fi
-            if ! mv "$temp_file" "$ssh_config"; then
+
+            # Use cp instead of mv to preserve symlinks
+            # cp will follow the symlink and overwrite the target file content
+            if ! cp "$temp_file" "$ssh_config"; then
                 _cai_error "Failed to update SSH config"
                 rm -f "$temp_file"
                 return 1
             fi
-            chmod 600 "$ssh_config"
-            _cai_info "Added Include directive to SSH config"
+            rm -f "$temp_file"
+
+            if ! chmod 600 "$ssh_config"; then
+                _cai_warn "Could not set permissions on SSH config"
+            fi
+
+            if [[ "$include_present" == "true" ]]; then
+                _cai_info "Moved Include directive to top of SSH config"
+            else
+                _cai_info "Added Include directive to SSH config"
+            fi
         fi
     fi
 

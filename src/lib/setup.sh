@@ -2047,10 +2047,17 @@ _cai_setup() {
             return 1
         fi
         printf '\n'
+        if ! _cai_setup_ssh_config; then
+            _cai_error "Failed to setup SSH config"
+            return 1
+        fi
+        printf '\n'
     else
         _cai_info "[DRY-RUN] Would create ~/.config/containai/ directory"
         _cai_info "[DRY-RUN] Would generate ed25519 SSH key at ~/.config/containai/id_containai"
         _cai_info "[DRY-RUN] Would create ~/.config/containai/config.toml"
+        _cai_info "[DRY-RUN] Would create ~/.ssh/containai.d/ directory"
+        _cai_info "[DRY-RUN] Would add Include directive to ~/.ssh/config"
         printf '\n'
     fi
 
