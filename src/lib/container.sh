@@ -1104,7 +1104,7 @@ _containai_start_container() {
     # Get container name (based on workspace path hash for deterministic naming)
     if [[ -z "$container_name" ]]; then
         if ! container_name=$(_containai_container_name "$workspace_resolved"); then
-            echo "[ERROR] Failed to generate container name for workspace" >&2
+            echo "[ERROR] Failed to generate container name for workspace: $workspace_resolved" >&2
             return 1
         fi
     fi

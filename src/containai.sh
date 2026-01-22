@@ -307,6 +307,8 @@ Opens a bash shell in the running container.
 If no container exists, creates one first.
 
 Options:
+  --agent <name>        Agent type (claude, gemini; default: claude)
+  --image-tag <tag>     Override image tag (default: agent-specific)
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
@@ -323,6 +325,7 @@ Examples:
   cai shell                    Open shell in default container
   cai shell --fresh            Recreate container and open shell
   cai shell -e DEBUG=1         Open shell with environment variable
+  cai shell --agent gemini     Open shell in Gemini container
 EOF
 }
 
@@ -975,6 +978,12 @@ _containai_shell_cmd() {
 
     if [[ -n "$container_name" ]]; then
         start_args+=(--name "$container_name")
+    fi
+    if [[ -n "$agent" ]]; then
+        start_args+=(--agent "$agent")
+    fi
+    if [[ -n "$image_tag" ]]; then
+        start_args+=(--image-tag "$image_tag")
     fi
     if [[ -n "$restart_flag" ]]; then
         start_args+=("$restart_flag")
