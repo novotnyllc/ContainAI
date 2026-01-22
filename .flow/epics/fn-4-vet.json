@@ -7,7 +7,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-18T22:52:02.727316Z",
   "spec_path": ".flow/specs/fn-4-vet.md",
-  "status": "open",
+  "status": "done",
   "title": "Configurable Volume Names & ContainAI Rename",
-  "updated_at": "2026-01-19T04:56:40.399574Z"
+  "updated_at": "2026-01-22T07:54:24.102828Z"
 }
