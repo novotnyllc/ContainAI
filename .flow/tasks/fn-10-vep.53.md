@@ -34,9 +34,8 @@ Add cgroup limits (memory, CPU) to container creation.
 - [ ] `docker stats` shows limits applied
 - [ ] Container stops gracefully (no SIGKILL)
 ## Done summary
-TBD
-
+Added cgroup resource limits to container creation: --memory=4g --memory-swap=4g --cpus=2 --stop-timeout=100. Limits are configurable via [container] config section (memory and cpus fields).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3fa10c5867d857056bf16794e3122deb4e73fe86
+- Tests: manual verification of docker run args
 - PRs:
