@@ -11,6 +11,10 @@
 #   _cai_get_ssh_key_path()      - Return path to ContainAI SSH private key
 #   _cai_get_ssh_pubkey_path()   - Return path to ContainAI SSH public key
 #   _cai_get_ssh_config_dir()    - Return path to ContainAI SSH config directory
+#   _cai_find_available_port()   - Find first available port in SSH range (2300-2500)
+#   _cai_allocate_ssh_port()     - Allocate SSH port for container (with reuse support)
+#   _cai_get_container_ssh_port() - Get SSH port from container label
+#   _cai_is_port_available()     - Check if a specific port is available
 #
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
@@ -56,6 +60,10 @@ _CAI_SSH_CONFIG_DIR="$HOME/.ssh/containai.d"
 
 # Minimum OpenSSH version for Include directive support
 _CAI_SSH_MIN_VERSION="7.3"
+
+# Default SSH port range for ContainAI containers
+_CAI_SSH_PORT_RANGE_START=2300
+_CAI_SSH_PORT_RANGE_END=2500
 
 # ==============================================================================
 # Path getters
@@ -367,6 +375,229 @@ _cai_setup_ssh_config() {
     fi
 
     _cai_ok "SSH config setup complete"
+    return 0
+}
+
+# ==============================================================================
+# SSH Port Allocation
+# ==============================================================================
+
+# Get list of ports currently in use (listening TCP ports)
+# Arguments: none
+# Outputs: one port number per line (listening TCP ports only)
+# Returns: 0 on success, 1 if ss command fails
+_cai_get_used_ports() {
+    local ss_output port line local_addr
+
+    # Use ss -Htan (no header, TCP, all states, numeric) for reliability
+    # Filter for LISTEN state only (ports actually bound)
+    # Extract local address column and parse port number
+    if ! ss_output=$(ss -Htan state listening 2>/dev/null); then
+        # Fallback: try without state filter (older ss versions)
+        if ! ss_output=$(ss -Htan 2>/dev/null); then
+            _cai_debug "ss command failed, cannot determine used ports"
+            return 1
+        fi
+        # Filter for LISTEN manually if state filter not supported
+        ss_output=$(printf '%s' "$ss_output" | grep -E '^LISTEN' || true)
+    fi
+
+    # Parse output: extract port from Local Address column
+    # ss -tan format: State Recv-Q Send-Q Local Address:Port Peer Address:Port
+    # Local address can be:
+    #   - *:port (all interfaces)
+    #   - 0.0.0.0:port (IPv4 all)
+    #   - [::]:port (IPv6 all)
+    #   - 127.0.0.1:port (localhost)
+    #   - [::1]:port (IPv6 localhost)
+    printf '%s\n' "$ss_output" | while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        # Extract local address:port (4th column in ss -tan output)
+        # Handle both IPv4 (addr:port) and IPv6 ([addr]:port) formats
+        local_addr=$(printf '%s' "$line" | awk '{print $4}')
+        if [[ -z "$local_addr" ]]; then
+            continue
+        fi
+        # Extract port number (everything after last colon)
+        port="${local_addr##*:}"
+        # Validate it's a number
+        if [[ "$port" =~ ^[0-9]+$ ]]; then
+            printf '%s\n' "$port"
+        fi
+    done
+}
+
+# Find first available port in the ContainAI SSH port range
+# Arguments:
+#   $1 = port range start (optional, default: $_CAI_SSH_PORT_RANGE_START)
+#   $2 = port range end (optional, default: $_CAI_SSH_PORT_RANGE_END)
+# Outputs: available port number on success
+# Returns: 0=port found, 1=all ports exhausted, 2=cannot check ports
+#
+# On exhaustion, outputs error message to stderr suggesting cleanup
+_cai_find_available_port() {
+    local range_start="${1:-$_CAI_SSH_PORT_RANGE_START}"
+    local range_end="${2:-$_CAI_SSH_PORT_RANGE_END}"
+    local used_ports port
+
+    # Validate range
+    if [[ ! "$range_start" =~ ^[0-9]+$ ]] || [[ ! "$range_end" =~ ^[0-9]+$ ]]; then
+        _cai_error "Invalid port range: $range_start-$range_end"
+        return 2
+    fi
+    if (( range_start >= range_end )); then
+        _cai_error "Invalid port range: start ($range_start) must be less than end ($range_end)"
+        return 2
+    fi
+
+    # Get list of used ports
+    if ! used_ports=$(_cai_get_used_ports); then
+        _cai_error "Cannot determine used ports (ss command failed)"
+        _cai_error "Ensure 'ss' (iproute2) is installed"
+        return 2
+    fi
+
+    # Convert to associative array for O(1) lookup
+    local -A used_ports_map
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && used_ports_map["$line"]=1
+    done <<< "$used_ports"
+
+    # Find first available port in range
+    for (( port = range_start; port <= range_end; port++ )); do
+        if [[ -z "${used_ports_map[$port]:-}" ]]; then
+            printf '%s' "$port"
+            return 0
+        fi
+    done
+
+    # All ports exhausted - provide actionable error
+    _cai_error "All SSH ports in range $range_start-$range_end are in use"
+    _cai_error ""
+    _cai_error "To free up ports, you can:"
+    _cai_error "  1. Run 'cai ssh cleanup' to remove stale SSH configs"
+    _cai_error "  2. Stop unused containers: 'cai stop-all'"
+    _cai_error "  3. Check which processes are using ports:"
+    _cai_error "     ss -tlpn | grep -E ':2[3-5][0-9]{2}'"
+    _cai_error ""
+    return 1
+}
+
+# Get the SSH port for a container from its label
+# Arguments: $1 = container name, $2 = docker context (optional)
+# Outputs: port number if found
+# Returns: 0=port found, 1=no port label
+_cai_get_container_ssh_port() {
+    local container_name="$1"
+    local context="${2:-}"
+    local port
+
+    local -a docker_cmd=(docker)
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    # Get the containai.ssh-port label value
+    if ! port=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.ssh-port"}}' "$container_name" 2>/dev/null); then
+        return 1
+    fi
+
+    # Check for <no value> or empty
+    if [[ -z "$port" ]] || [[ "$port" == "<no value>" ]]; then
+        return 1
+    fi
+
+    printf '%s' "$port"
+    return 0
+}
+
+# Allocate SSH port for a container
+# If container already has a port label, tries to reuse it (if still available)
+# Otherwise allocates a new port from the range
+#
+# Arguments:
+#   $1 = container name
+#   $2 = docker context (optional)
+#   $3 = port range start (optional)
+#   $4 = port range end (optional)
+# Outputs: allocated port number
+# Returns: 0=success, 1=exhausted, 2=error
+#
+# Note: This does NOT update the container label - caller should do that
+# when creating/updating the container
+_cai_allocate_ssh_port() {
+    local container_name="$1"
+    local context="${2:-}"
+    local range_start="${3:-$_CAI_SSH_PORT_RANGE_START}"
+    local range_end="${4:-$_CAI_SSH_PORT_RANGE_END}"
+    local existing_port used_ports line port_in_use
+
+    # Check if container already has an allocated port
+    if existing_port=$(_cai_get_container_ssh_port "$container_name" "$context"); then
+        # Validate the existing port is a number and in range
+        if [[ "$existing_port" =~ ^[0-9]+$ ]]; then
+            if (( existing_port >= range_start && existing_port <= range_end )); then
+                # Check if the port is still available
+                if ! used_ports=$(_cai_get_used_ports); then
+                    # Can't verify, assume it's fine (container may be stopped)
+                    printf '%s' "$existing_port"
+                    return 0
+                fi
+
+                # Check if port is in use by something OTHER than this container
+                # Note: If the container is running, its port WILL be in use (by itself)
+                # We consider that "available" for reuse
+                port_in_use=false
+                while IFS= read -r line; do
+                    if [[ "$line" == "$existing_port" ]]; then
+                        port_in_use=true
+                        break
+                    fi
+                done <<< "$used_ports"
+
+                # If port is not in use at all, reuse it
+                if [[ "$port_in_use" == "false" ]]; then
+                    _cai_debug "Reusing existing SSH port $existing_port for container $container_name"
+                    printf '%s' "$existing_port"
+                    return 0
+                fi
+
+                # Port is in use - check if it's by our container (if running)
+                # For now, if container exists with this port, trust it
+                # The container startup will handle any conflicts
+                _cai_debug "SSH port $existing_port in use, will allocate new port"
+            else
+                _cai_debug "Existing SSH port $existing_port outside configured range, allocating new"
+            fi
+        fi
+    fi
+
+    # Allocate new port
+    _cai_find_available_port "$range_start" "$range_end"
+}
+
+# Check if a specific port is available (not in use)
+# Arguments: $1 = port number
+# Returns: 0=available, 1=in use, 2=cannot check
+_cai_is_port_available() {
+    local port="$1"
+    local used_ports line
+
+    if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+        return 2
+    fi
+
+    if ! used_ports=$(_cai_get_used_ports); then
+        return 2
+    fi
+
+    while IFS= read -r line; do
+        if [[ "$line" == "$port" ]]; then
+            return 1
+        fi
+    done <<< "$used_ports"
+
     return 0
 }
 
