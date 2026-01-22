@@ -184,15 +184,36 @@ install_docker_ce() {
                 apt-get update -qq
                 apt-get install -y docker-ce docker-ce-cli containerd.io
                 ;;
+            fedora)
+                # Install prerequisites
+                dnf install -y dnf-plugins-core
+
+                # Add Docker's official repository
+                dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+
+                # Install docker-ce
+                dnf install -y docker-ce docker-ce-cli containerd.io
+                ;;
+            centos|rhel|rocky|almalinux)
+                # Install prerequisites
+                if command -v dnf >/dev/null 2>&1; then
+                    dnf install -y yum-utils
+                    dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                    dnf install -y docker-ce docker-ce-cli containerd.io
+                else
+                    yum install -y yum-utils
+                    yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                    yum install -y docker-ce docker-ce-cli containerd.io
+                fi
+                ;;
             *)
                 _log_error "Unsupported distribution: $distro"
                 _log_error ""
-                _log_error "This script currently supports Ubuntu and Debian only."
-                _log_error "(RHEL/Fedora/CentOS support is planned for a future release)"
+                _log_error "Supported distributions:"
+                _log_error "  - Ubuntu, Debian (apt)"
+                _log_error "  - Fedora, CentOS, RHEL, Rocky, AlmaLinux (yum/dnf)"
                 _log_error ""
-                _log_error "Manual installation steps:"
-                _log_error "  1. Install docker-ce from Docker's official repository"
-                _log_error "  2. Re-run this script to configure containai-docker"
+                _log_error "For other distributions, install docker-ce manually and re-run this script."
                 return 1
                 ;;
         esac
@@ -271,8 +292,29 @@ install_sysbox() {
             return $?
         fi
 
+        # Detect distro to use correct package manager
+        local distro
+        distro=$(detect_distro)
+
         # Ensure wget and jq are available
-        apt-get install -y wget jq
+        case "$distro" in
+            ubuntu|debian)
+                apt-get install -y wget jq
+                ;;
+            fedora)
+                dnf install -y wget jq
+                ;;
+            centos|rhel|rocky|almalinux)
+                if command -v dnf >/dev/null 2>&1; then
+                    dnf install -y wget jq
+                else
+                    yum install -y wget jq
+                fi
+                ;;
+            *)
+                _log_warn "Unknown distro, assuming wget/jq are available"
+                ;;
+        esac
 
         # Determine architecture
         local arch
@@ -292,17 +334,38 @@ install_sysbox() {
 
         # Get latest sysbox release from GitHub
         local release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
-        local release_json download_url
+        local release_json download_url pkg_pattern
 
         release_json=$(wget -qO- "$release_url" 2>/dev/null) || {
             _log_error "Failed to fetch sysbox release info from GitHub"
             return 1
         }
 
-        download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
+        # Determine package format based on distro
+        # Note: Sysbox primarily provides .deb packages. For RPM distros,
+        # we use alien to convert or check if RPM packages are available.
+        case "$distro" in
+            ubuntu|debian)
+                pkg_pattern="sysbox-ce.*${arch}.deb"
+                ;;
+            fedora|centos|rhel|rocky|almalinux)
+                # Try RPM first, fall back to DEB with alien
+                pkg_pattern="sysbox-ce.*${arch}.rpm"
+                download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"$pkg_pattern\")) | .browser_download_url" | head -1)
+                if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
+                    _log_info "No RPM package found, will use .deb package with alien"
+                    pkg_pattern="sysbox-ce.*${arch}.deb"
+                fi
+                ;;
+            *)
+                pkg_pattern="sysbox-ce.*${arch}.deb"
+                ;;
+        esac
+
+        download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"$pkg_pattern\")) | .browser_download_url" | head -1)
 
         if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
-            _log_error "Could not find sysbox .deb package for architecture: $arch"
+            _log_error "Could not find sysbox package for architecture: $arch"
             return 1
         fi
 
@@ -311,26 +374,89 @@ install_sysbox() {
         fi
 
         # Download and install
-        local tmpdir deb_file
+        local tmpdir pkg_file pkg_ext
         tmpdir=$(mktemp -d)
-        deb_file="$tmpdir/sysbox-ce.deb"
+
+        # Determine package extension from URL
+        if [[ "$download_url" == *.rpm ]]; then
+            pkg_ext="rpm"
+            pkg_file="$tmpdir/sysbox-ce.rpm"
+        else
+            pkg_ext="deb"
+            pkg_file="$tmpdir/sysbox-ce.deb"
+        fi
 
         _log_step "Downloading sysbox from: $download_url"
-        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+        if ! wget -q --show-progress -O "$pkg_file" "$download_url"; then
             rm -rf "$tmpdir"
             _log_error "Failed to download sysbox package"
             return 1
         fi
 
         _log_step "Installing sysbox package"
-        if ! dpkg -i "$deb_file"; then
-            _log_warn "dpkg install had issues, attempting to fix dependencies"
-            if ! apt-get install -f -y; then
-                rm -rf "$tmpdir"
-                _log_error "Failed to install sysbox package"
-                return 1
-            fi
-        fi
+        case "$pkg_ext" in
+            deb)
+                case "$distro" in
+                    ubuntu|debian)
+                        if ! dpkg -i "$pkg_file"; then
+                            _log_warn "dpkg install had issues, attempting to fix dependencies"
+                            if ! apt-get install -f -y; then
+                                rm -rf "$tmpdir"
+                                _log_error "Failed to install sysbox package"
+                                return 1
+                            fi
+                        fi
+                        ;;
+                    fedora|centos|rhel|rocky|almalinux)
+                        # Use alien to convert .deb to .rpm
+                        _log_step "Converting .deb package using alien"
+                        if ! command -v alien >/dev/null 2>&1; then
+                            if command -v dnf >/dev/null 2>&1; then
+                                dnf install -y alien
+                            else
+                                yum install -y alien
+                            fi
+                        fi
+                        cd "$tmpdir"
+                        if ! alien -r "$pkg_file"; then
+                            rm -rf "$tmpdir"
+                            _log_error "Failed to convert .deb package"
+                            return 1
+                        fi
+                        local rpm_file
+                        rpm_file=$(ls "$tmpdir"/*.rpm 2>/dev/null | head -1)
+                        if [[ -z "$rpm_file" ]]; then
+                            rm -rf "$tmpdir"
+                            _log_error "No RPM file generated by alien"
+                            return 1
+                        fi
+                        rpm -ivh --nodeps "$rpm_file" || {
+                            rm -rf "$tmpdir"
+                            _log_error "Failed to install converted RPM package"
+                            return 1
+                        }
+                        cd - >/dev/null
+                        ;;
+                    *)
+                        if ! dpkg -i "$pkg_file"; then
+                            rm -rf "$tmpdir"
+                            _log_error "Failed to install sysbox package"
+                            return 1
+                        fi
+                        ;;
+                esac
+                ;;
+            rpm)
+                rpm -ivh "$pkg_file" || {
+                    _log_warn "rpm install had issues, attempting with --nodeps"
+                    rpm -ivh --nodeps "$pkg_file" || {
+                        rm -rf "$tmpdir"
+                        _log_error "Failed to install sysbox RPM package"
+                        return 1
+                    }
+                }
+                ;;
+        esac
 
         rm -rf "$tmpdir"
     fi
@@ -677,7 +803,7 @@ Paths (isolated from existing Docker):
   Context:   docker-containai
 
 Requirements:
-  - Ubuntu/Debian distribution
+  - Ubuntu/Debian (apt) or Fedora/CentOS/RHEL (yum/dnf)
   - systemd enabled and running
   - Root/sudo access
   - Internet access to download packages
