@@ -1161,6 +1161,27 @@ _containai_start_container() {
         container_state="none"
     fi
 
+    # Check for SSH port conflict on stopped containers and auto-recreate if needed
+    # This handles the case where the allocated port is now in use by another process
+    if [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
+        local existing_ssh_port
+        if existing_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context"); then
+            if ! _cai_is_port_available "$existing_ssh_port"; then
+                # Port is in use by another process - need to recreate with new port
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "[WARN] SSH port $existing_ssh_port is in use by another process" >&2
+                    echo "Recreating container with new port allocation..."
+                fi
+                # Remove the old container (like --fresh but automatic)
+                if ! "${docker_cmd[@]}" rm -f "$container_name" >/dev/null 2>&1; then
+                    echo "[ERROR] Failed to remove container for port reallocation" >&2
+                    return 1
+                fi
+                container_state="none"
+            fi
+        fi
+    fi
+
     # Handle --fresh flag (removes and recreates container, preserves data volume)
     # --fresh is equivalent to --restart but with clearer semantics for the new lifecycle model
     if [[ "$fresh_flag" == "true" && "$container_state" != "none" ]]; then
@@ -1364,18 +1385,8 @@ _containai_start_container() {
                     return 1
                 fi
             fi
-            # Check if the container's SSH port is still available before starting
-            local existing_port
-            if existing_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context"); then
-                # Port is labeled on container - check if it's in use by another process
-                if ! _cai_is_port_available "$existing_port"; then
-                    # Port in use - need to recreate container with new port
-                    echo "[WARN] SSH port $existing_port is in use by another process" >&2
-                    echo "[ERROR] Cannot start container - port conflict. Use --fresh to recreate with a new port." >&2
-                    return 1
-                fi
-                _cai_debug "SSH port $existing_port is available for restart"
-            fi
+            # Note: SSH port conflict check is handled earlier in the function (before case statement)
+            # If we reach here, the port is available
 
             # Start stopped container (tini is PID 1 managing sleep infinity)
             if [[ "$quiet_flag" != "true" ]]; then
