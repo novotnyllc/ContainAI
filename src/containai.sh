@@ -171,6 +171,7 @@ Run Options:
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
   --name <name>         Container name (default: auto-generated from path hash)
+  --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --fresh               Remove and recreate container (preserves data volume)
   --restart             Force recreate container (alias for --fresh)
   --force               Skip isolation checks (for testing only)
@@ -313,6 +314,7 @@ Options:
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
   --name <name>         Container name (default: auto-generated)
+  --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --fresh               Remove and recreate container (preserves data volume)
   --restart             Force recreate container (alias for --fresh)
   --force               Skip isolation checks (for testing only)
@@ -738,6 +740,7 @@ _containai_shell_cmd() {
     local workspace=""
     local explicit_config=""
     local container_name=""
+    local image_tag=""
     local restart_flag=""
     local fresh_flag=""
     local force_flag=""
@@ -846,6 +849,22 @@ _containai_shell_cmd() {
                 ;;
             --debug|-D)
                 debug_flag="--debug"
+                shift
+                ;;
+            --image-tag)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                image_tag="$2"
+                shift 2
+                ;;
+            --image-tag=*)
+                image_tag="${1#--image-tag=}"
+                if [[ -z "$image_tag" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --mount-docker-socket)
@@ -959,6 +978,9 @@ _containai_shell_cmd() {
     if [[ -n "$debug_flag" ]]; then
         start_args+=("$debug_flag")
     fi
+    if [[ -n "$image_tag" ]]; then
+        start_args+=(--image-tag "$image_tag")
+    fi
     if [[ -n "$explicit_config" ]]; then
         start_args+=(--config "$explicit_config")
     fi
@@ -997,6 +1019,7 @@ _containai_run_cmd() {
     local workspace=""
     local explicit_config=""
     local container_name=""
+    local image_tag=""
     local credentials=""
     local acknowledge_credential_risk=""
     local allow_host_credentials=""
@@ -1139,6 +1162,22 @@ _containai_run_cmd() {
                 debug_flag="--debug"
                 shift
                 ;;
+            --image-tag)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                image_tag="$2"
+                shift 2
+                ;;
+            --image-tag=*)
+                image_tag="${1#--image-tag=}"
+                if [[ -z "$image_tag" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
             --mount-docker-socket)
                 mount_docker_socket="--mount-docker-socket"
                 shift
@@ -1266,6 +1305,9 @@ _containai_run_cmd() {
     fi
     if [[ -n "$debug_flag" ]]; then
         start_args+=("$debug_flag")
+    fi
+    if [[ -n "$image_tag" ]]; then
+        start_args+=(--image-tag "$image_tag")
     fi
     if [[ -n "$mount_docker_socket" ]]; then
         start_args+=("$mount_docker_socket")

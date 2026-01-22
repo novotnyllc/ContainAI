@@ -6,6 +6,7 @@
 #
 # Provides:
 #   _containai_container_name      - Generate sanitized container name
+#   _cai_find_container            - Find container by workspace and optional image-tag filter
 #   _containai_check_isolation     - Detect container isolation status
 #   _containai_validate_masked_paths - Validate Docker MaskedPaths are applied (in-container)
 #   _containai_ensure_volumes      - Ensure a volume exists (takes volume name param)
@@ -261,6 +262,64 @@ _containai_container_name() {
     name="containai-${hash}"
 
     printf '%s' "$name"
+}
+
+# Find container by workspace and optionally filter by image-tag label
+# This is for advanced/debugging use when running multiple images per workspace.
+# Normal use (one container per workspace) should use _containai_container_name directly.
+#
+# Arguments:
+#   $1 = workspace path (required)
+#   $2 = docker context (optional, empty for default)
+#   $3 = image-tag filter (optional, filters by containai.image-tag label)
+#
+# Returns: container name via stdout, or 1 if not found/error
+# Note: Returns the first matching container if multiple match (deterministic via sort)
+_cai_find_container() {
+    local workspace_path="$1"
+    local docker_context="${2:-}"
+    local image_tag_filter="${3:-}"
+    local container_name containers line
+
+    if [[ -z "$workspace_path" ]]; then
+        echo "[ERROR] workspace path is required" >&2
+        return 1
+    fi
+
+    # Get the expected container name for this workspace
+    if ! container_name=$(_containai_container_name "$workspace_path"); then
+        return 1
+    fi
+
+    # Build docker command with optional context
+    local -a docker_cmd=(docker)
+    if [[ -n "$docker_context" ]]; then
+        docker_cmd=(docker --context "$docker_context")
+    fi
+
+    # If no image-tag filter, just check if the container exists
+    if [[ -z "$image_tag_filter" ]]; then
+        if "${docker_cmd[@]}" inspect --type container "$container_name" >/dev/null 2>&1; then
+            printf '%s' "$container_name"
+            return 0
+        fi
+        return 1
+    fi
+
+    # With image-tag filter, search for containers with matching workspace AND image-tag labels
+    # This supports advanced use cases where users want multiple images per workspace
+    local filter_output
+    filter_output=$("${docker_cmd[@]}" ps -a \
+        --filter "label=containai.workspace=$workspace_path" \
+        --filter "label=containai.image-tag=$image_tag_filter" \
+        --format '{{.Names}}' 2>/dev/null | sort | head -1) || filter_output=""
+
+    if [[ -n "$filter_output" ]]; then
+        printf '%s' "$filter_output"
+        return 0
+    fi
+
+    return 1
 }
 
 # FR-4: Validate container mounts match expected configuration
@@ -790,6 +849,7 @@ _containai_check_volume_match() {
 #   --shell              Start with shell instead of agent
 #   --quiet              Suppress verbose output
 #   --debug              Enable debug logging
+#   --image-tag <tag>    Image tag for container (advanced/debugging, stored as label)
 #   -e, --env <VAR=val>  Environment variable (repeatable)
 #   -v, --volume <spec>  Extra volume mount (repeatable)
 #   -- <agent_args>      Arguments to pass to agent
@@ -799,6 +859,7 @@ _containai_start_container() {
     local workspace=""
     local data_volume=""
     local explicit_config=""
+    local image_tag=""
     local credentials="$_CONTAINAI_DEFAULT_CREDENTIALS"
     local acknowledge_credential_risk=false
     local allow_host_credentials=false
@@ -939,6 +1000,22 @@ _containai_start_container() {
                 debug_flag=true
                 shift
                 ;;
+            --image-tag)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                image_tag="$2"
+                shift 2
+                ;;
+            --image-tag=*)
+                image_tag="${1#--image-tag=}"
+                if [[ -z "$image_tag" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
             --mount-docker-socket)
                 mount_docker_socket=true
                 shift
@@ -1032,8 +1109,15 @@ _containai_start_container() {
         return 1
     fi
 
-    # Use default image - one container per workspace, image determined at creation
-    local resolved_image="${_CONTAINAI_DEFAULT_REPO}:${_CONTAINAI_AGENT_TAGS[$_CONTAINAI_DEFAULT_AGENT]}"
+    # Resolve image: use --image-tag if provided (advanced/debugging), else default
+    local resolved_image
+    if [[ -n "$image_tag" ]]; then
+        # Advanced mode: explicit image tag for debugging or multi-image workflows
+        resolved_image="${_CONTAINAI_DEFAULT_REPO}:${image_tag}"
+    else
+        # Default: one container per workspace with default agent image
+        resolved_image="${_CONTAINAI_DEFAULT_REPO}:${_CONTAINAI_AGENT_TAGS[$_CONTAINAI_DEFAULT_AGENT]}"
+    fi
 
     # Early docker check
     if ! command -v docker >/dev/null 2>&1; then
@@ -1518,6 +1602,10 @@ _containai_start_container() {
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
             args+=(--label "containai.ssh-port=$ssh_port")
+            # Store image-tag label when explicitly specified (advanced/debugging feature)
+            if [[ -n "$image_tag" ]]; then
+                args+=(--label "containai.image-tag=$image_tag")
+            fi
             args+=(-p "${ssh_port}:22")  # Map allocated port to container SSH
             args+=(-d)  # Always detached - tini manages sleep infinity as child
 
