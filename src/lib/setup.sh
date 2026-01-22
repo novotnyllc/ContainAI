@@ -2146,6 +2146,23 @@ Lima VM Management (macOS):
   limactl shell containai-secure    Shell into the VM
   limactl list                      Show VM status
 
+ContainAI Docker (separate docker-ce with sysbox-runc default):
+  For advanced use cases requiring sysbox-runc as the DEFAULT runtime
+  (system containers, DinD without --privileged), use:
+
+    sudo scripts/install-containai-docker.sh
+
+  This creates an isolated docker-ce instance:
+    Socket:  /var/run/containai-docker.sock
+    Config:  /etc/containai/docker/daemon.json
+    Data:    /var/lib/containai-docker/
+    Service: containai-docker.service
+    Context: docker-containai
+
+  Usage after installation:
+    docker --context docker-containai info
+    docker --context docker-containai run hello-world
+
 Examples:
   cai setup                    Install Sysbox (auto-detects platform)
   cai setup --dry-run          Preview changes without installing

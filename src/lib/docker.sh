@@ -8,6 +8,9 @@
 #   _cai_docker_available()          - Check if Docker is available and running
 #   _cai_docker_version()            - Get Docker daemon version
 #   _cai_docker_desktop_version()    - Get Docker Desktop version as semver (empty if not DD)
+#   _cai_containai_docker_available() - Check if containai-docker is available
+#   _cai_containai_docker_context_exists() - Check if docker-containai context exists
+#   _cai_containai_docker_default_runtime() - Get default runtime for containai-docker
 #
 # Dependencies:
 #   - Requires lib/core.sh to be sourced first for logging functions
@@ -293,6 +296,159 @@ _cai_docker_desktop_version() {
 
     printf '%s' "$version"
     return 0
+}
+
+# ==============================================================================
+# ContainAI Docker Context Helpers
+# ==============================================================================
+
+# Constants for containai-docker paths
+_CAI_CONTAINAI_DOCKER_SOCKET="/var/run/containai-docker.sock"
+_CAI_CONTAINAI_DOCKER_CONTEXT="docker-containai"
+_CAI_CONTAINAI_DOCKER_CONFIG="/etc/containai/docker/daemon.json"
+_CAI_CONTAINAI_DOCKER_DATA="/var/lib/containai-docker"
+
+# Check if docker-containai context exists
+# Returns: 0=exists, 1=does not exist
+# Outputs: Sets _CAI_CONTAINAI_CONTEXT_ERROR with error details
+_cai_containai_docker_context_exists() {
+    _CAI_CONTAINAI_CONTEXT_ERROR=""
+
+    if ! _cai_docker_cli_available; then
+        _CAI_CONTAINAI_CONTEXT_ERROR="no_cli"
+        return 1
+    fi
+
+    if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    _CAI_CONTAINAI_CONTEXT_ERROR="context_not_found"
+    return 1
+}
+
+# Check if containai-docker socket exists
+# Returns: 0=socket exists, 1=socket does not exist
+_cai_containai_docker_socket_exists() {
+    [[ -S "$_CAI_CONTAINAI_DOCKER_SOCKET" ]]
+}
+
+# Check if containai-docker daemon is accessible
+# Returns: 0=accessible, 1=not accessible
+# Outputs: Sets _CAI_CONTAINAI_DAEMON_ERROR with error details
+_cai_containai_docker_daemon_available() {
+    _CAI_CONTAINAI_DAEMON_ERROR=""
+
+    # First check if socket exists
+    if ! _cai_containai_docker_socket_exists; then
+        _CAI_CONTAINAI_DAEMON_ERROR="socket_not_found"
+        return 1
+    fi
+
+    # Try to connect to the daemon
+    local output rc
+    output=$(_cai_timeout 10 docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" info 2>&1) && rc=0 || rc=$?
+
+    if [[ $rc -eq 124 ]]; then
+        _CAI_CONTAINAI_DAEMON_ERROR="timeout"
+        return 1
+    fi
+
+    if [[ $rc -eq 125 ]]; then
+        _CAI_CONTAINAI_DAEMON_ERROR="no_timeout"
+        return 1
+    fi
+
+    if [[ $rc -ne 0 ]]; then
+        if printf '%s' "$output" | grep -qiE "permission denied"; then
+            _CAI_CONTAINAI_DAEMON_ERROR="permission_denied"
+        elif printf '%s' "$output" | grep -qiE "connection refused"; then
+            _CAI_CONTAINAI_DAEMON_ERROR="connection_refused"
+        else
+            _CAI_CONTAINAI_DAEMON_ERROR="daemon_unavailable"
+        fi
+        return 1
+    fi
+
+    return 0
+}
+
+# Check if containai-docker is fully available (context + socket + daemon)
+# Returns: 0=available, 1=not available
+# Outputs: Sets _CAI_CONTAINAI_ERROR with detailed error
+_cai_containai_docker_available() {
+    _CAI_CONTAINAI_ERROR=""
+
+    if ! _cai_docker_cli_available; then
+        _CAI_CONTAINAI_ERROR="no_cli"
+        return 1
+    fi
+
+    if ! _cai_containai_docker_context_exists; then
+        _CAI_CONTAINAI_ERROR="context_not_found"
+        return 1
+    fi
+
+    if ! _cai_containai_docker_socket_exists; then
+        _CAI_CONTAINAI_ERROR="socket_not_found"
+        return 1
+    fi
+
+    if ! _cai_containai_docker_daemon_available; then
+        _CAI_CONTAINAI_ERROR="${_CAI_CONTAINAI_DAEMON_ERROR:-daemon_unavailable}"
+        return 1
+    fi
+
+    return 0
+}
+
+# Get default runtime for containai-docker
+# Outputs: Runtime name (e.g., "sysbox-runc") or empty if unavailable
+# Returns: 0=success, 1=failure
+_cai_containai_docker_default_runtime() {
+    if ! _cai_containai_docker_available; then
+        return 1
+    fi
+
+    local runtime
+    runtime=$(docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" info --format '{{.DefaultRuntime}}' 2>/dev/null) || {
+        return 1
+    }
+
+    if [[ -z "$runtime" ]]; then
+        return 1
+    fi
+
+    printf '%s' "$runtime"
+    return 0
+}
+
+# Check if sysbox-runc is available on containai-docker
+# Returns: 0=available, 1=not available
+_cai_containai_docker_has_sysbox() {
+    if ! _cai_containai_docker_available; then
+        return 1
+    fi
+
+    local runtimes
+    runtimes=$(docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" info --format '{{json .Runtimes}}' 2>/dev/null) || {
+        return 1
+    }
+
+    if printf '%s' "$runtimes" | grep -q "sysbox-runc"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Check if sysbox-runc is the default runtime on containai-docker
+# Returns: 0=sysbox is default, 1=not default
+_cai_containai_docker_sysbox_is_default() {
+    local runtime
+    runtime=$(_cai_containai_docker_default_runtime) || return 1
+
+    [[ "$runtime" == "sysbox-runc" ]]
 }
 
 return 0

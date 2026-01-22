@@ -522,6 +522,55 @@ _cai_doctor() {
         printf '\n'
     fi
 
+    # === ContainAI Docker Section ===
+    local containai_docker_ok="false"
+    local containai_docker_sysbox_default="false"
+
+    printf '%s\n' "ContainAI Docker"
+
+    # Check containai docker availability
+    if _cai_containai_docker_available; then
+        containai_docker_ok="true"
+        printf '  %-44s %s\n' "Context 'docker-containai':" "[OK]"
+        printf '  %-44s %s\n' "Socket: $_CAI_CONTAINAI_DOCKER_SOCKET" "[OK]"
+
+        # Check if sysbox-runc is available and default
+        if _cai_containai_docker_has_sysbox; then
+            printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK] Available"
+
+            if _cai_containai_docker_sysbox_is_default; then
+                containai_docker_sysbox_default="true"
+                printf '  %-44s %s\n' "Default runtime: sysbox-runc" "[OK]"
+            else
+                local actual_default
+                actual_default=$(_cai_containai_docker_default_runtime) || actual_default="unknown"
+                printf '  %-44s %s\n' "Default runtime: $actual_default" "[WARN]"
+                printf '  %-44s %s\n' "" "(Expected sysbox-runc as default)"
+            fi
+        else
+            printf '  %-44s %s\n' "Runtime: sysbox-runc" "[ERROR] Not found"
+        fi
+    else
+        printf '  %-44s %s\n' "ContainAI Docker:" "[NOT INSTALLED]"
+        case "${_CAI_CONTAINAI_ERROR:-}" in
+            context_not_found)
+                printf '  %-44s %s\n' "" "(Context 'docker-containai' not configured)"
+                ;;
+            socket_not_found)
+                printf '  %-44s %s\n' "" "(Socket $_CAI_CONTAINAI_DOCKER_SOCKET not found)"
+                ;;
+            connection_refused|daemon_unavailable)
+                printf '  %-44s %s\n' "" "(containai-docker service not running)"
+                printf '  %-44s %s\n' "" "(Try: sudo systemctl start containai-docker)"
+                ;;
+            *)
+                printf '  %-44s %s\n' "" "(Run 'sudo scripts/install-containai-docker.sh')"
+                ;;
+        esac
+    fi
+
+    printf '\n'
+
     # === Summary Section ===
     printf '%s\n' "Summary"
 
@@ -544,6 +593,15 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Sysbox:" "[ERROR] Not available"
         printf '  %-44s %s\n' "Status:" "[ERROR] No isolation available"
         printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure Sysbox"
+    fi
+
+    # ContainAI Docker summary
+    if [[ "$containai_docker_ok" == "true" ]] && [[ "$containai_docker_sysbox_default" == "true" ]]; then
+        printf '  %-44s %s\n' "ContainAI Docker:" "[OK] sysbox-runc default"
+    elif [[ "$containai_docker_ok" == "true" ]]; then
+        printf '  %-44s %s\n' "ContainAI Docker:" "[WARN] sysbox-runc not default"
+    else
+        printf '  %-44s %s\n' "ContainAI Docker:" "[NOT INSTALLED]"
     fi
 
     # Exit code: 0 if isolation ready (Sysbox available AND kernel compatible), 1 if not
@@ -678,6 +736,22 @@ _cai_doctor_json() {
         esac
     fi
 
+    # Check containai-docker status
+    local containai_docker_ok="false"
+    local containai_docker_error=""
+    local containai_docker_sysbox_default="false"
+    local containai_docker_default_runtime=""
+
+    if _cai_containai_docker_available; then
+        containai_docker_ok="true"
+        containai_docker_default_runtime=$(_cai_containai_docker_default_runtime) || containai_docker_default_runtime=""
+        if _cai_containai_docker_sysbox_is_default; then
+            containai_docker_sysbox_default="true"
+        fi
+    else
+        containai_docker_error="${_CAI_CONTAINAI_ERROR:-unknown}"
+    fi
+
     # Output JSON
     printf '{\n'
     printf '  "sysbox": {\n'
@@ -691,6 +765,22 @@ _cai_doctor_json() {
     printf '    "context_name": "%s",\n' "$(_cai_json_escape "$sysbox_context_name")"
     if [[ -n "$sysbox_error" ]]; then
         printf '    "error": "%s"\n' "$(_cai_json_escape "$sysbox_error")"
+    else
+        printf '    "error": null\n'
+    fi
+    printf '  },\n'
+    printf '  "containai_docker": {\n'
+    printf '    "available": %s,\n' "$containai_docker_ok"
+    printf '    "context_name": "%s",\n' "$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    printf '    "socket": "%s",\n' "$_CAI_CONTAINAI_DOCKER_SOCKET"
+    if [[ -n "$containai_docker_default_runtime" ]]; then
+        printf '    "default_runtime": "%s",\n' "$(_cai_json_escape "$containai_docker_default_runtime")"
+    else
+        printf '    "default_runtime": null,\n'
+    fi
+    printf '    "sysbox_is_default": %s,\n' "$containai_docker_sysbox_default"
+    if [[ -n "$containai_docker_error" ]]; then
+        printf '    "error": "%s"\n' "$(_cai_json_escape "$containai_docker_error")"
     else
         printf '    "error": null\n'
     fi
@@ -714,6 +804,7 @@ _cai_doctor_json() {
     printf '  },\n'
     printf '  "summary": {\n'
     printf '    "sysbox_ok": %s,\n' "$sysbox_ok"
+    printf '    "containai_docker_ok": %s,\n' "$containai_docker_ok"
     printf '    "isolation_available": %s,\n' "$isolation_available"
     printf '    "recommended_action": "%s"\n' "$recommended_action"
     printf '  }\n'
