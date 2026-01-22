@@ -781,8 +781,6 @@ _containai_check_volume_match() {
 #   --name <name>        Container name (default: auto-generated)
 #   --workspace <path>   Workspace path (default: $PWD)
 #   --data-volume <vol>  Data volume name (required)
-#   --agent <name>       Agent to run (claude, gemini; default: claude)
-#   --image-tag <tag>    Override image tag (default: agent-specific)
 #   --credentials <mode> Credential mode (none; default: none)
 #   --volume-mismatch-warn  Warn on volume mismatch instead of blocking (for implicit volumes)
 #   --fresh              Remove and recreate container (preserves data volume)
@@ -801,8 +799,6 @@ _containai_start_container() {
     local workspace=""
     local data_volume=""
     local explicit_config=""
-    local agent=""
-    local image_tag=""
     local credentials="$_CONTAINAI_DEFAULT_CREDENTIALS"
     local acknowledge_credential_risk=false
     local allow_host_credentials=false
@@ -887,38 +883,6 @@ _containai_start_container() {
                 explicit_config="${1#--config=}"
                 if [[ -z "$explicit_config" ]]; then
                     echo "[ERROR] --config requires a value" >&2
-                    return 1
-                fi
-                shift
-                ;;
-            --agent)
-                if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --agent requires a value" >&2
-                    return 1
-                fi
-                agent="$2"
-                shift 2
-                ;;
-            --agent=*)
-                agent="${1#--agent=}"
-                if [[ -z "$agent" ]]; then
-                    echo "[ERROR] --agent requires a value" >&2
-                    return 1
-                fi
-                shift
-                ;;
-            --image-tag)
-                if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --image-tag requires a value" >&2
-                    return 1
-                fi
-                image_tag="$2"
-                shift 2
-                ;;
-            --image-tag=*)
-                image_tag="${1#--image-tag=}"
-                if [[ -z "$image_tag" ]]; then
-                    echo "[ERROR] --image-tag requires a value" >&2
                     return 1
                 fi
                 shift
@@ -1044,11 +1008,6 @@ _containai_start_container() {
         return 1
     fi
 
-    # Set agent default if not specified
-    if [[ -z "$agent" ]]; then
-        agent="$_CONTAINAI_DEFAULT_AGENT"
-    fi
-
     # Reject legacy options that are no longer supported
     if [[ "$allow_host_credentials" == "true" ]] || [[ "$credentials" == "host" ]]; then
         echo "" >&2
@@ -1073,11 +1032,8 @@ _containai_start_container() {
         return 1
     fi
 
-    # Resolve image based on agent and optional tag override
-    local resolved_image
-    if ! resolved_image=$(_containai_resolve_image "$agent" "$image_tag"); then
-        return 1
-    fi
+    # Use default image - one container per workspace, image determined at creation
+    local resolved_image="${_CONTAINAI_DEFAULT_REPO}:${_CONTAINAI_AGENT_TAGS[$_CONTAINAI_DEFAULT_AGENT]}"
 
     # Early docker check
     if ! command -v docker >/dev/null 2>&1; then
@@ -1316,18 +1272,6 @@ _containai_start_container() {
                     return 1
                 fi
             fi
-            # Check image match using context-aware docker command
-            local running_image
-            running_image=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || running_image=""
-            if [[ "$running_image" != "$resolved_image" ]]; then
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "[WARN] Container image mismatch:" >&2
-                    echo "  Running:   $running_image" >&2
-                    echo "  Requested: $resolved_image" >&2
-                fi
-                echo "[ERROR] Image mismatch prevents attachment. Use --fresh to recreate with requested agent." >&2
-                return 1
-            fi
             # Check volume match using context-aware docker command
             local running_volume
             running_volume=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null) || running_volume=""
@@ -1384,8 +1328,8 @@ _containai_start_container() {
             if [[ "$shell_flag" == "true" ]]; then
                 "${exec_base[@]}" bash
             else
-                # Run agent with any provided arguments
-                local -a exec_cmd=("$agent")
+                # Run default agent with any provided arguments
+                local -a exec_cmd=("$_CONTAINAI_DEFAULT_AGENT")
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     exec_cmd+=("${agent_args[@]}")
                 fi
@@ -1403,18 +1347,6 @@ _containai_start_container() {
                     echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
                     return 1
                 fi
-            fi
-            # Check image match using context-aware docker command
-            local exited_image
-            exited_image=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || exited_image=""
-            if [[ "$exited_image" != "$resolved_image" ]]; then
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "[WARN] Container image mismatch:" >&2
-                    echo "  Running:   $exited_image" >&2
-                    echo "  Requested: $resolved_image" >&2
-                fi
-                echo "[ERROR] Image mismatch prevents start. Use --fresh to recreate with requested agent." >&2
-                return 1
             fi
             # Check volume match using context-aware docker command
             local exited_volume
@@ -1495,7 +1427,7 @@ _containai_start_container() {
                 fi
             else
                 # Run agent with any provided arguments
-                local -a exec_cmd=("$agent")
+                local -a exec_cmd=("$_CONTAINAI_DEFAULT_AGENT")
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     exec_cmd+=("${agent_args[@]}")
                 fi
@@ -1653,7 +1585,7 @@ _containai_start_container() {
                 fi
             else
                 # Run agent with any provided arguments
-                local -a exec_cmd=("$agent")
+                local -a exec_cmd=("$_CONTAINAI_DEFAULT_AGENT")
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     exec_cmd+=("${agent_args[@]}")
                 fi

@@ -167,9 +167,6 @@ Subcommands:
 
 Run Options:
   <path>                Workspace path (positional, alternative to --workspace)
-  --agent <name>        Agent to run (claude, gemini; default: claude)
-  --credentials <mode>  Credential mode (none; default: none)
-  --image-tag <tag>     Override image tag (default: agent-specific)
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
@@ -191,11 +188,10 @@ Global Options:
   -h, --help            Show help (use with subcommand for subcommand help)
 
 Examples:
-  cai                               Start Claude container (default)
+  cai                               Start container (default)
   cai /path/to/project              Start container for specified workspace
   cai --fresh /path/to/project      Recreate container for workspace
-  cai --agent gemini                Start Gemini container
-  cai -- --print                    Pass --print to Claude
+  cai -- --print                    Pass --print to agent
   cai doctor                        Check system capabilities
   cai shell                         Open shell in running container
   cai stop --all                    Stop all containers
@@ -313,8 +309,6 @@ Opens a bash shell in the running container.
 If no container exists, creates one first.
 
 Options:
-  --agent <name>        Agent type (claude, gemini; default: claude)
-  --image-tag <tag>     Override image tag (default: agent-specific)
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
@@ -331,7 +325,6 @@ Examples:
   cai shell                    Open shell in default container
   cai shell --fresh            Recreate container and open shell
   cai shell -e DEBUG=1         Open shell with environment variable
-  cai shell --agent gemini     Open shell in Gemini container
 EOF
 }
 
@@ -745,8 +738,6 @@ _containai_shell_cmd() {
     local workspace=""
     local explicit_config=""
     local container_name=""
-    local agent=""
-    local image_tag=""
     local restart_flag=""
     local fresh_flag=""
     local force_flag=""
@@ -764,38 +755,6 @@ _containai_shell_cmd() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --agent)
-                if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --agent requires a value" >&2
-                    return 1
-                fi
-                agent="$2"
-                shift 2
-                ;;
-            --agent=*)
-                agent="${1#--agent=}"
-                if [[ -z "$agent" ]]; then
-                    echo "[ERROR] --agent requires a value" >&2
-                    return 1
-                fi
-                shift
-                ;;
-            --image-tag)
-                if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --image-tag requires a value" >&2
-                    return 1
-                fi
-                image_tag="$2"
-                shift 2
-                ;;
-            --image-tag=*)
-                image_tag="${1#--image-tag=}"
-                if [[ -z "$image_tag" ]]; then
-                    echo "[ERROR] --image-tag requires a value" >&2
-                    return 1
-                fi
-                shift
-                ;;
             --data-volume)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --data-volume requires a value" >&2
@@ -985,12 +944,6 @@ _containai_shell_cmd() {
     if [[ -n "$container_name" ]]; then
         start_args+=(--name "$container_name")
     fi
-    if [[ -n "$agent" ]]; then
-        start_args+=(--agent "$agent")
-    fi
-    if [[ -n "$image_tag" ]]; then
-        start_args+=(--image-tag "$image_tag")
-    fi
     if [[ -n "$restart_flag" ]]; then
         start_args+=("$restart_flag")
     fi
@@ -1044,8 +997,6 @@ _containai_run_cmd() {
     local workspace=""
     local explicit_config=""
     local container_name=""
-    local agent=""
-    local image_tag=""
     local credentials=""
     local acknowledge_credential_risk=""
     local allow_host_credentials=""
@@ -1070,38 +1021,6 @@ _containai_run_cmd() {
                 shift
                 agent_args=("$@")
                 break
-                ;;
-            --agent)
-                if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --agent requires a value" >&2
-                    return 1
-                fi
-                agent="$2"
-                shift 2
-                ;;
-            --agent=*)
-                agent="${1#--agent=}"
-                if [[ -z "$agent" ]]; then
-                    echo "[ERROR] --agent requires a value" >&2
-                    return 1
-                fi
-                shift
-                ;;
-            --image-tag)
-                if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --image-tag requires a value" >&2
-                    return 1
-                fi
-                image_tag="$2"
-                shift 2
-                ;;
-            --image-tag=*)
-                image_tag="${1#--image-tag=}"
-                if [[ -z "$image_tag" ]]; then
-                    echo "[ERROR] --image-tag requires a value" >&2
-                    return 1
-                fi
-                shift
                 ;;
             --credentials)
                 if [[ -z "${2-}" ]]; then
@@ -1301,10 +1220,6 @@ _containai_run_cmd() {
         return 1
     fi
 
-    # Resolve agent (CLI > env > config > default)
-    local resolved_agent
-    resolved_agent=$(_containai_resolve_agent "$agent" "$resolved_workspace" "$explicit_config")
-
     # Resolve credentials (CLI > env > config > default)
     # Note: credentials.mode=host is no longer supported (Sysbox-only mode)
     # The 4th parameter is unused but kept for API compatibility
@@ -1328,11 +1243,6 @@ _containai_run_cmd() {
 
     if [[ -n "$container_name" ]]; then
         start_args+=(--name "$container_name")
-    fi
-    # Always pass resolved agent
-    start_args+=(--agent "$resolved_agent")
-    if [[ -n "$image_tag" ]]; then
-        start_args+=(--image-tag "$image_tag")
     fi
     # Always pass resolved credentials
     start_args+=(--credentials "$resolved_credentials")
