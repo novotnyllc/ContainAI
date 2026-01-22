@@ -60,6 +60,7 @@ _containai_libs_exist() {
     [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/setup.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/ssh.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]]
 }
@@ -118,6 +119,11 @@ fi
 
 if ! source "$_CAI_SCRIPT_DIR/lib/setup.sh"; then
     echo "[ERROR] Failed to source lib/setup.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/ssh.sh"; then
+    echo "[ERROR] Failed to source lib/ssh.sh" >&2
     return 1
 fi
 

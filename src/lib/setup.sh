@@ -26,6 +26,7 @@
 #   - Requires lib/platform.sh for platform detection
 #   - Requires lib/docker.sh for Docker availability checks
 #   - Requires lib/doctor.sh for _cai_check_kernel_for_sysbox
+#   - Requires lib/ssh.sh for SSH key setup
 #
 # Usage: source lib/setup.sh
 # ==============================================================================
@@ -2036,6 +2037,20 @@ _cai_setup() {
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN MODE] No changes will be made"
+        printf '\n'
+    fi
+
+    # Step 0: Setup SSH key and config directory (common to all platforms)
+    if [[ "$dry_run" != "true" ]]; then
+        if ! _cai_setup_ssh_key; then
+            _cai_error "Failed to setup SSH key"
+            return 1
+        fi
+        printf '\n'
+    else
+        _cai_info "[DRY-RUN] Would create ~/.config/containai/ directory"
+        _cai_info "[DRY-RUN] Would generate ed25519 SSH key at ~/.config/containai/id_containai"
+        _cai_info "[DRY-RUN] Would create ~/.config/containai/config.toml"
         printf '\n'
     fi
 
