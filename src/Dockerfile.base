@@ -6,8 +6,8 @@
 # - sshd for secure remote access (key-only auth)
 # - dockerd for Docker-in-Docker (via sysbox-runc)
 #
-# Usage:
-#   docker build -t containai/base -f Dockerfile.base .
+# Usage (from repo root):
+#   docker build -t containai/base -f src/Dockerfile.base src/
 #
 # Run with sysbox-runc runtime:
 #   docker run --runtime=sysbox-runc -d containai/base
@@ -57,16 +57,19 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     echo "ReadKMsg=no" >> /etc/systemd/journald.conf
 
 # Mask problematic systemd units that don't work in containers
-RUN systemctl mask \
-    systemd-udevd.service \
-    systemd-udevd-kernel.socket \
-    systemd-udevd-control.socket \
-    systemd-modules-load.service \
-    systemd-journald-audit.socket \
-    systemd-udev-trigger.service \
-    systemd-firstboot.service \
-    sys-kernel-debug.mount \
-    sys-kernel-tracing.mount
+# Use symlinks instead of systemctl mask (systemctl requires systemd as PID 1)
+RUN for unit in \
+        systemd-udevd.service \
+        systemd-udevd-kernel.socket \
+        systemd-udevd-control.socket \
+        systemd-modules-load.service \
+        systemd-journald-audit.socket \
+        systemd-udev-trigger.service \
+        systemd-firstboot.service \
+        sys-kernel-debug.mount \
+        sys-kernel-tracing.mount; do \
+        ln -sf /dev/null "/etc/systemd/system/$unit"; \
+    done
 
 # =============================================================================
 # AGENT USER SETUP
@@ -90,15 +93,19 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     touch /home/agent/.ssh/authorized_keys && \
     chmod 600 /home/agent/.ssh/authorized_keys && \
     chown -R agent:agent /home/agent/.ssh && \
-    # Configure sshd for security
-    sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*UsePAM.*/UsePAM no/' /etc/ssh/sshd_config && \
-    # Enable sshd service
-    systemctl enable ssh.service
+    # Configure sshd for security using drop-in config (more robust than sed)
+    mkdir -p /etc/ssh/sshd_config.d && \
+    printf '%s\n' \
+        '# ContainAI security hardening' \
+        'PermitRootLogin no' \
+        'PasswordAuthentication no' \
+        'PubkeyAuthentication yes' \
+        'ChallengeResponseAuthentication no' \
+        'KbdInteractiveAuthentication no' \
+        'UsePAM no' \
+        > /etc/ssh/sshd_config.d/99-containai-security.conf && \
+    # Enable sshd service via symlink (systemctl requires systemd as PID 1)
+    ln -sf /lib/systemd/system/ssh.service /etc/systemd/system/multi-user.target.wants/ssh.service
 
 EXPOSE 22
 
@@ -124,8 +131,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         docker-compose-plugin && \
     # Add agent user to docker group
     usermod -aG docker agent && \
-    # Enable docker service
-    systemctl enable docker.service containerd.service
+    # Enable docker and containerd services via symlinks (systemctl requires systemd as PID 1)
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf /lib/systemd/system/docker.service /etc/systemd/system/multi-user.target.wants/docker.service && \
+    ln -sf /lib/systemd/system/containerd.service /etc/systemd/system/multi-user.target.wants/containerd.service
 
 # =============================================================================
 # SYSBOX CE INSTALLATION
@@ -139,6 +148,7 @@ ARG SYSBOX_SHA256_ARM64=16d80123ba53058cf90f5a68686e297621ea97942602682e34b33527
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
     ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_AMD64}"; \
     elif [ "$ARCH" = "arm64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_ARM64}"; \
@@ -146,7 +156,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     wget -q -O /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" && \
     echo "${EXPECTED_SHA256}  /tmp/sysbox.deb" | sha256sum -c - && \
     apt-get install -y --no-install-recommends /tmp/sysbox.deb && \
-    rm /tmp/sysbox.deb
+    rm /tmp/sysbox.deb && \
+    # Enable sysbox services via symlinks (systemctl requires systemd as PID 1)
+    ln -sf /lib/systemd/system/sysbox-mgr.service /etc/systemd/system/multi-user.target.wants/sysbox-mgr.service && \
+    ln -sf /lib/systemd/system/sysbox-fs.service /etc/systemd/system/multi-user.target.wants/sysbox-fs.service
 
 # Configure inner Docker daemon with sysbox-runc as default runtime
 # This provides security consistency for nested containers
@@ -171,15 +184,23 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get install -y --no-install-recommends \
         tmux \
         jq \
-        git
+        git \
+        unzip
 
-# Install yq (YAML processor)
+# Install yq (YAML processor) with checksum verification
 ARG YQ_VERSION=4.44.3
+ARG YQ_SHA256_AMD64=a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7
+ARG YQ_SHA256_ARM64=0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156
 RUN ARCH=$(dpkg --print-architecture) && \
-    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${ARCH}" -o /usr/local/bin/yq && \
+    if [ "$ARCH" = "amd64" ]; then EXPECTED_SHA256="${YQ_SHA256_AMD64}"; \
+    elif [ "$ARCH" = "arm64" ]; then EXPECTED_SHA256="${YQ_SHA256_ARM64}"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${ARCH}" -o /tmp/yq && \
+    echo "${EXPECTED_SHA256}  /tmp/yq" | sha256sum -c - && \
+    mv /tmp/yq /usr/local/bin/yq && \
     chmod +x /usr/local/bin/yq
 
-# Switch to agent user for bun installation
+# Switch to agent user for user-level installations
 USER agent
 WORKDIR /home/agent
 
@@ -192,8 +213,23 @@ RUN mkdir -p /home/agent/.bashrc.d && \
       { echo '# Source all scripts in .bashrc.d if directory exists'; \
         echo 'if [ -d ~/.bashrc.d ]; then for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> /home/agent/.bashrc; }
 
-# Install bun (JavaScript runtime)
-RUN curl -fsSL https://bun.com/install | bash
+# Install bun (JavaScript runtime) with version pinning and checksum verification
+ARG BUN_VERSION=1.3.6
+ARG BUN_SHA256_X64=9ba98d2134550d6690875b23a4f5c48e74b7cb267e8cc1b8f52605921c6c11ef
+ARG BUN_SHA256_ARM64=5afd12b366ba2d8297245cc29c039416334dd872152c1db02e5c8aa8c66e96b1
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+        BUN_ARCH="x64"; EXPECTED_SHA256="${BUN_SHA256_X64}"; \
+    elif [ "$ARCH" = "arm64" ]; then \
+        BUN_ARCH="aarch64"; EXPECTED_SHA256="${BUN_SHA256_ARM64}"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${BUN_ARCH}.zip" -o /tmp/bun.zip && \
+    echo "${EXPECTED_SHA256}  /tmp/bun.zip" | sha256sum -c - && \
+    mkdir -p /home/agent/.bun/bin && \
+    unzip -q /tmp/bun.zip -d /tmp && \
+    mv /tmp/bun-linux-${BUN_ARCH}/bun /home/agent/.bun/bin/bun && \
+    chmod +x /home/agent/.bun/bin/bun && \
+    rm -rf /tmp/bun.zip /tmp/bun-linux-*
 
 ENV PATH="/home/agent/.bun/bin:${PATH}"
 
