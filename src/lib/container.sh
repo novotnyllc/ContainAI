@@ -121,7 +121,7 @@ _containai_resolve_image() {
         tag="${_CONTAINAI_AGENT_TAGS[$agent]}"
     fi
 
-    printf "agent-sandbox:latest"
+    printf '%s:%s' "$repo" "$tag"
     return 0
 }
 
@@ -1032,7 +1032,10 @@ _containai_start_container() {
     fi
 
     # Resolve image based on agent and optional tag override
-    local resolved_image="agent-sandbox:latest"
+    local resolved_image
+    if ! resolved_image=$(_containai_resolve_image "$agent" "$image_tag"); then
+        return 1
+    fi
 
     # Early docker check
     if ! command -v docker >/dev/null 2>&1; then
@@ -1181,26 +1184,8 @@ _containai_start_container() {
         container_state="none"
     fi
 
-    # Handle shell mode with stopped container
-    if [[ "$shell_flag" == "true" ]] && [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
-        # Check ownership using context-aware docker command (label or image fallback)
-        local shell_label_val shell_image_fallback
-        shell_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || shell_label_val=""
-        if [[ "$shell_label_val" != "true" ]]; then
-            # Fallback: check if image is from our repo (for legacy containers without label)
-            shell_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || shell_image_fallback=""
-            if [[ "$shell_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
-                echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
-                return 1
-            fi
-        fi
-        # Skip preflight checks - context selection already validated isolation
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "Recreating container for shell access..."
-        fi
-        "${docker_cmd[@]}" rm "$container_name" >/dev/null 2>&1
-        container_state="none"
-    fi
+    # Note: Shell mode with stopped container is handled by the exited|created case
+    # which starts the container and exec's into it (no recreation needed)
 
     # Check image exists when creating new container (use selected context)
     if [[ "$container_state" == "none" ]]; then
@@ -1247,6 +1232,13 @@ _containai_start_container() {
                     echo "[ERROR] Volume mismatch prevents attachment. Use --fresh to recreate." >&2
                     return 1
                 fi
+            fi
+            # Handle detached mode for already running container
+            if [[ "$detached_flag" == "true" ]]; then
+                if [[ "$quiet_flag" != "true" ]]; then
+                    echo "Container already running (detached mode - no action needed)"
+                fi
+                return 0
             fi
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Attaching to running container..."

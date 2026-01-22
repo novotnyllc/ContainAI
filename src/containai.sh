@@ -177,7 +177,7 @@ Run Options:
   -- <args>             Pass arguments to agent
 
 Container Lifecycle:
-  Containers use sleep infinity as PID 1 (long-lived init).
+  Containers use tini (--init) as PID 1 for proper zombie reaping, running sleep infinity.
   Agent sessions attach via docker exec. Container stays running between sessions.
   Same workspace path always maps to same container (deterministic naming via hash).
 
@@ -311,7 +311,8 @@ Options:
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
   --name <name>         Container name (default: auto-generated)
-  --restart             Force recreate container
+  --fresh               Remove and recreate container (preserves data volume)
+  --restart             Force recreate container (alias for --fresh)
   --force               Skip isolation checks (for testing only)
   -q, --quiet           Suppress verbose output
   -e, --env <VAR=val>   Set environment variable (repeatable)
@@ -320,7 +321,7 @@ Options:
 
 Examples:
   cai shell                    Open shell in default container
-  cai shell --restart          Recreate container and open shell
+  cai shell --fresh            Recreate container and open shell
   cai shell -e DEBUG=1         Open shell with environment variable
 EOF
 }
