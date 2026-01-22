@@ -54,7 +54,7 @@ fi
 
 # Guard against re-sourcing
 : "${_CONTAINAI_LABEL:=containai.sandbox=containai}"
-: "${_CONTAINAI_DEFAULT_REPO:=docker/sandbox-templates}"
+: "${_CONTAINAI_DEFAULT_REPO:=agent-sandbox}"
 : "${_CONTAINAI_DEFAULT_AGENT:=claude}"
 : "${_CONTAINAI_DEFAULT_CREDENTIALS:=none}"
 
@@ -96,7 +96,7 @@ _containai_resolve_image() {
         tag="${_CONTAINAI_AGENT_TAGS[$agent]}"
     fi
 
-    printf '%s:%s' "$repo" "$tag"
+    printf "agent-sandbox:latest"
     return 0
 }
 
@@ -1068,10 +1068,7 @@ _containai_start_container() {
     fi
 
     # Resolve image based on agent and optional tag override
-    local resolved_image
-    if ! resolved_image=$(_containai_resolve_image "$agent" "$image_tag"); then
-        return 1
-    fi
+    local resolved_image="agent-sandbox:latest"
 
     # Early docker check
     if ! command -v docker >/dev/null 2>&1; then
@@ -1533,7 +1530,6 @@ _containai_start_container() {
                     local -a shell_args=()
                     shell_args+=(--context "$selected_context")
                     shell_args+=(run)
-                    shell_args+=(--runtime=sysbox-runc)
                     shell_args+=(--name "$container_name")
                     shell_args+=(--label "$_CONTAINAI_LABEL")
                     shell_args+=(-d)

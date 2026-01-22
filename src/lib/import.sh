@@ -364,10 +364,11 @@ _IMPORT_SYNC_MAP=(
   # --- tmux ---
   "/source/.config/tmux:/target/config/tmux:d"
   "/source/.local/share/tmux:/target/local/share/tmux:d"
+  "/source/.local/share/fonts:/target/local/share/fonts:d"
 
   # --- Shell ---
-  "/source/.bash_aliases:/target/shell/.bash_aliases:f"
-  "/source/.bashrc.d:/target/shell/.bashrc.d:d"
+  "/source/.bash_aliases:/target/shell/bash_aliases:f"
+  "/source/.bashrc.d:/target/shell/bashrc.d:d"
 
   # --- VS Code Server ---
   # Sync entire data subtrees (no overlapping entries)

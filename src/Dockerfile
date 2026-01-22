@@ -149,7 +149,8 @@ RUN printf '%s\n' \
 ENV BASH_ENV=${HOME}/.bash_env
 
 RUN curl -fsSL https://bun.com/install | bash \
-    && curl -LsSf https://astral.sh/uv/install.sh | bash
+    && curl -LsSf https://astral.sh/uv/install.sh | bash \
+    && curl -s https://ohmyposh.dev/install.sh | bash -s \
 
 # Download and install nvm
 RUN --mount=type=cache,target=${HOME}/.npm/_cacache,uid=1000,gid=1000 \
@@ -239,6 +240,7 @@ RUN  mkdir -p ${HOME}/.vscode-server/data/Machine \
     && mkdir -p /mnt/agent-data/local/share/tmux \
     && ln -sfn /mnt/agent-data/config/tmux ${HOME}/.config/tmux \
     && ln -sfn /mnt/agent-data/local/share/tmux ${HOME}/.local/share/tmux \
+    && ln -sfn /mnt/agent-data/local/share/fonts ${HOME}/.local/share/fonts \
     \
     # Shell configs
     && mkdir -p /mnt/agent-data/shell/.bashrc.d \
