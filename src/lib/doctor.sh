@@ -320,6 +320,8 @@ _cai_doctor() {
     local docker_daemon_ok="false"
     local platform
     local seccomp_status=""
+    local kernel_ok="true"  # Default to true (macOS doesn't need kernel check)
+    local kernel_version=""
 
     platform=$(_cai_detect_platform)
 
@@ -409,7 +411,6 @@ _cai_doctor() {
         printf '%s\n' "Platform: WSL2"
 
         # Kernel version check (WSL2 and Linux need kernel 5.5+ for Sysbox)
-        local kernel_version kernel_ok
         kernel_version=$(_cai_check_kernel_for_sysbox) && kernel_ok="true" || kernel_ok="false"
         if [[ "$kernel_ok" == "true" ]]; then
             printf '  %-44s %s\n' "Kernel version: $kernel_version" "[OK]"
@@ -447,7 +448,6 @@ _cai_doctor() {
         printf '%s\n' "Platform: Linux"
 
         # Kernel version check (Linux needs kernel 5.5+ for Sysbox)
-        local kernel_version kernel_ok
         kernel_version=$(_cai_check_kernel_for_sysbox) && kernel_ok="true" || kernel_ok="false"
         if [[ "$kernel_ok" == "true" ]]; then
             printf '  %-44s %s\n' "Kernel version: $kernel_version" "[OK]"
@@ -462,18 +462,29 @@ _cai_doctor() {
     # === Summary Section ===
     printf '%s\n' "Summary"
 
+    # Isolation requires both Sysbox available AND compatible kernel
+    local isolation_ready="false"
+    if [[ "$sysbox_ok" == "true" ]] && [[ "$kernel_ok" == "true" ]]; then
+        isolation_ready="true"
+    fi
+
     # Sysbox path status
-    if [[ "$sysbox_ok" == "true" ]]; then
+    if [[ "$isolation_ready" == "true" ]]; then
         printf '  %-44s %s\n' "Sysbox:" "[OK] Ready"
         printf '  %-44s %s\n' "Status:" "[OK] Ready to use 'cai run'"
+    elif [[ "$sysbox_ok" == "true" ]] && [[ "$kernel_ok" == "false" ]]; then
+        # Sysbox installed but kernel too old
+        printf '  %-44s %s\n' "Sysbox:" "[WARN] Installed but kernel incompatible"
+        printf '  %-44s %s\n' "Status:" "[ERROR] Kernel 5.5+ required for Sysbox"
+        printf '  %-44s %s\n' "Recommended:" "Upgrade kernel to 5.5+"
     else
         printf '  %-44s %s\n' "Sysbox:" "[ERROR] Not available"
         printf '  %-44s %s\n' "Status:" "[ERROR] No isolation available"
         printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure Sysbox"
     fi
 
-    # Exit code: 0 if Sysbox available, 1 if not
-    if [[ "$sysbox_ok" == "true" ]]; then
+    # Exit code: 0 if isolation ready (Sysbox available AND kernel compatible), 1 if not
+    if [[ "$isolation_ready" == "true" ]]; then
         return 0
     else
         return 1
@@ -564,11 +575,14 @@ _cai_doctor_json() {
         esac
     fi
 
-    # Isolation requires Sysbox available
+    # Isolation requires Sysbox available AND compatible kernel
     local isolation_available="false"
-    if [[ "$sysbox_ok" == "true" ]]; then
+    if [[ "$sysbox_ok" == "true" ]] && [[ "$kernel_compatible" == "true" ]]; then
         isolation_available="true"
         recommended_action="ready"
+    elif [[ "$sysbox_ok" == "true" ]] && [[ "$kernel_compatible" == "false" ]]; then
+        # Sysbox installed but kernel too old
+        recommended_action="upgrade_kernel"
     else
         recommended_action="setup_required"
     fi

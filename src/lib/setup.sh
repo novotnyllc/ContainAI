@@ -25,6 +25,7 @@
 #   - Requires lib/core.sh for logging functions
 #   - Requires lib/platform.sh for platform detection
 #   - Requires lib/docker.sh for Docker availability checks
+#   - Requires lib/doctor.sh for _cai_check_kernel_for_sysbox
 #
 # Usage: source lib/setup.sh
 # ==============================================================================
