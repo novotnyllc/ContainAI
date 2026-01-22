@@ -25,9 +25,12 @@ CAI_DOCKER_SOCKET="/var/run/containai-docker.sock"
 CAI_DOCKER_CONFIG_DIR="/etc/containai/docker"
 CAI_DOCKER_DAEMON_JSON="$CAI_DOCKER_CONFIG_DIR/daemon.json"
 CAI_DOCKER_DATA_ROOT="/var/lib/containai-docker"
+CAI_DOCKER_EXEC_ROOT="/var/run/containai-docker"
+CAI_DOCKER_PIDFILE="/var/run/containai-docker.pid"
 CAI_DOCKER_SERVICE="containai-docker"
 CAI_DOCKER_SERVICE_FILE="/etc/systemd/system/${CAI_DOCKER_SERVICE}.service"
 CAI_DOCKER_CONTEXT="docker-containai"
+CAI_DOCKER_BRIDGE="cai0"
 
 # ==============================================================================
 # Logging Functions
@@ -147,7 +150,14 @@ install_docker_ce() {
             ;;
         *)
             _log_error "Unsupported distribution: $distro"
-            _log_error "Please install docker-ce manually"
+            _log_error ""
+            _log_error "This script currently supports Ubuntu and Debian only."
+            _log_error "For other distributions:"
+            _log_error "  - RHEL/Fedora/CentOS: Install docker-ce via yum/dnf repository"
+            _log_error "  - Arch Linux: Install docker-ce from AUR"
+            _log_error "  - Other: Follow Docker's official installation guide"
+            _log_error ""
+            _log_error "After installing docker-ce manually, re-run this script."
             return 1
             ;;
     esac
@@ -251,11 +261,22 @@ install_sysbox() {
     for service in sysbox-mgr sysbox-fs; do
         if ! systemctl is-active --quiet "$service" 2>/dev/null; then
             _log_info "Starting $service service"
-            systemctl start "$service" || true
+            if ! systemctl start "$service"; then
+                _log_error "Failed to start $service service"
+                _log_error "  Check: systemctl status $service"
+                return 1
+            fi
         fi
+        # Verify the service is actually running
+        if ! systemctl is-active --quiet "$service"; then
+            _log_error "$service is not running after start attempt"
+            _log_error "  Check: systemctl status $service"
+            return 1
+        fi
+        _log_info "$service is running"
     done
 
-    _log_ok "Sysbox installed"
+    _log_ok "Sysbox installed and services running"
     return 0
 }
 
@@ -270,17 +291,32 @@ create_daemon_json() {
 
     _log_step "Creating daemon.json at $CAI_DOCKER_DAEMON_JSON"
 
+    # Determine sysbox-runc path dynamically
+    local sysbox_path
+    sysbox_path=$(command -v sysbox-runc 2>/dev/null || true)
+    if [[ -z "$sysbox_path" ]]; then
+        _log_error "sysbox-runc not found in PATH"
+        _log_error "  Ensure sysbox is installed correctly"
+        return 1
+    fi
+
+    _log_info "Found sysbox-runc at: $sysbox_path"
+
     local config
-    config=$(cat <<'EOF'
+    config=$(cat <<EOF
 {
   "runtimes": {
     "sysbox-runc": {
-      "path": "/usr/bin/sysbox-runc"
+      "path": "$sysbox_path"
     }
   },
   "default-runtime": "sysbox-runc",
-  "hosts": ["unix:///var/run/containai-docker.sock"],
-  "data-root": "/var/lib/containai-docker"
+  "hosts": ["unix://$CAI_DOCKER_SOCKET"],
+  "data-root": "$CAI_DOCKER_DATA_ROOT",
+  "exec-root": "$CAI_DOCKER_EXEC_ROOT",
+  "pidfile": "$CAI_DOCKER_PIDFILE",
+  "bridge": "$CAI_DOCKER_BRIDGE",
+  "iptables": false
 }
 EOF
 )
@@ -317,13 +353,15 @@ create_systemd_service() {
 [Unit]
 Description=ContainAI Docker Application Container Engine
 Documentation=https://github.com/containai/containai
-After=network-online.target containerd.service sysbox.service
-Wants=network-online.target
+After=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
+Wants=network-online.target sysbox-mgr.service sysbox-fs.service
 Requires=containerd.service
 
 [Service]
 Type=notify
-# dockerd reads hosts from daemon.json, do NOT use -H flag
+# dockerd reads config from daemon.json which includes:
+# - isolated socket, data-root, exec-root, pidfile
+# - separate bridge (cai0) with iptables disabled to avoid conflicts
 ExecStart=/usr/bin/dockerd --config-file=$CAI_DOCKER_DAEMON_JSON
 ExecReload=/bin/kill -s HUP \$MAINPID
 TimeoutStartSec=0
@@ -367,20 +405,25 @@ EOF
     return 0
 }
 
-# Create data directory
-create_data_directory() {
+# Create data and exec-root directories
+create_directories() {
     local dry_run="${1:-false}"
 
-    _log_step "Creating data directory: $CAI_DOCKER_DATA_ROOT"
+    _log_step "Creating directories"
 
     if [[ "$dry_run" == "true" ]]; then
         _log_info "[DRY-RUN] Would create: $CAI_DOCKER_DATA_ROOT"
+        _log_info "[DRY-RUN] Would create: $CAI_DOCKER_EXEC_ROOT"
         return 0
     fi
 
     mkdir -p "$CAI_DOCKER_DATA_ROOT"
+    _log_info "Created data directory: $CAI_DOCKER_DATA_ROOT"
 
-    _log_ok "Data directory created"
+    mkdir -p "$CAI_DOCKER_EXEC_ROOT"
+    _log_info "Created exec-root directory: $CAI_DOCKER_EXEC_ROOT"
+
+    _log_ok "Directories created"
     return 0
 }
 
@@ -437,16 +480,20 @@ create_docker_context() {
         return 0
     fi
 
-    # Run as the actual user if specified, otherwise as current user
-    local docker_cmd="docker"
-    if [[ -n "$user" ]]; then
-        docker_cmd="sudo -u $user docker"
-    fi
+    # Helper function to run docker as target user with proper HOME
+    run_docker_as_user() {
+        if [[ -n "$user" ]]; then
+            # Use -H to set HOME properly for the target user
+            sudo -u "$user" -H docker "$@"
+        else
+            docker "$@"
+        fi
+    }
 
     # Check if context already exists
-    if $docker_cmd context inspect "$CAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+    if run_docker_as_user context inspect "$CAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
         local existing_host
-        existing_host=$($docker_cmd context inspect "$CAI_DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+        existing_host=$(run_docker_as_user context inspect "$CAI_DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
 
         if [[ "$existing_host" == "$expected_host" ]]; then
             _log_info "Context '$CAI_DOCKER_CONTEXT' already exists with correct endpoint"
@@ -454,12 +501,12 @@ create_docker_context() {
         else
             _log_warn "Context '$CAI_DOCKER_CONTEXT' exists but points to: $existing_host"
             _log_step "Removing misconfigured context"
-            $docker_cmd context rm "$CAI_DOCKER_CONTEXT" >/dev/null 2>&1 || true
+            run_docker_as_user context rm "$CAI_DOCKER_CONTEXT" >/dev/null 2>&1 || true
         fi
     fi
 
     # Create context
-    if ! $docker_cmd context create "$CAI_DOCKER_CONTEXT" --docker "host=$expected_host"; then
+    if ! run_docker_as_user context create "$CAI_DOCKER_CONTEXT" --docker "host=$expected_host"; then
         _log_error "Failed to create Docker context"
         return 1
     fi
@@ -555,12 +602,15 @@ Options:
   --verbose     Show detailed progress information
   -h, --help    Show this help message
 
-Paths:
-  Socket:  /var/run/containai-docker.sock
-  Config:  /etc/containai/docker/daemon.json
-  Data:    /var/lib/containai-docker/
-  Service: containai-docker.service
-  Context: docker-containai
+Paths (isolated from existing Docker):
+  Socket:    /var/run/containai-docker.sock
+  Config:    /etc/containai/docker/daemon.json
+  Data:      /var/lib/containai-docker/
+  Exec-root: /var/run/containai-docker/
+  Pidfile:   /var/run/containai-docker.pid
+  Bridge:    cai0 (iptables disabled)
+  Service:   containai-docker.service
+  Context:   docker-containai
 
 Requirements:
   - Ubuntu/Debian distribution
@@ -611,7 +661,7 @@ HELP
     # Installation steps
     install_docker_ce "$dry_run" || exit 1
     install_sysbox "$dry_run" "$verbose" || exit 1
-    create_data_directory "$dry_run" || exit 1
+    create_directories "$dry_run" || exit 1
     create_daemon_json "$dry_run" "$verbose" || exit 1
     create_systemd_service "$dry_run" "$verbose" || exit 1
     start_service "$dry_run" || exit 1
