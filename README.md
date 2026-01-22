@@ -22,7 +22,7 @@ AI coding agents like Claude, Gemini, and Codex can execute arbitrary code on yo
 ### One-liner Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/novotnyllc/ContainAI/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
 ```
 
 This installs `cai` to `~/.local/bin` and adds it to your PATH. Open a new terminal and run:
