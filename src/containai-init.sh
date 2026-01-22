@@ -125,9 +125,10 @@ ensure_volume_structure() {
   # OpenCode config
   ensure_dir "${DATA_DIR}/config/opencode"
 
-  # tmux
+  # tmux and fonts
   ensure_dir "${DATA_DIR}/config/tmux"
   ensure_dir "${DATA_DIR}/local/share/tmux"
+  ensure_dir "${DATA_DIR}/local/share/fonts"
 
   # Shell (paths match import.sh: shell/bash_aliases, shell/bashrc.d - no dots)
   ensure_dir "${DATA_DIR}/shell"
