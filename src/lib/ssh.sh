@@ -302,14 +302,16 @@ _cai_setup_ssh_config() {
     else
         # Check if Include directive for containai.d already present at TOP of config
         # The Include directive MUST be at the top (before any Host/Match definitions)
-        # Use regex pattern to handle whitespace variants and trailing comments
-        # Pattern matches: Include ~/.ssh/containai.d/*.conf with optional leading/trailing whitespace and comments
-        local include_pattern='^[[:space:]]*Include[[:space:]]+~/\.ssh/containai\.d/\*\.conf([[:space:]]*(#.*)?)?$'
+        # Use case-insensitive regex to handle:
+        # - Case variants (Include, include, INCLUDE)
+        # - Path variants (~, $HOME, absolute path like /home/user)
+        # - Whitespace variants and trailing comments
+        local include_pattern='^[[:space:]]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]]+[^#]*containai\.d/\*\.conf'
         local first_effective_line include_present include_at_top
         include_present=false
         include_at_top=false
 
-        # Check if include directive exists anywhere in the file (with whitespace tolerance)
+        # Check if include directive exists anywhere in the file (case-insensitive, path-tolerant)
         if grep -qE "$include_pattern" "$ssh_config"; then
             include_present=true
             # Check if it's at the top (first non-empty, non-comment line)
@@ -335,7 +337,7 @@ _cai_setup_ssh_config() {
             if ! {
                 printf '%s\n\n' "$include_line"
                 # Remove any existing Include line for containai.d to avoid duplicates
-                # Use same pattern with -v to remove all variants
+                # Use same case-insensitive pattern to remove all variants (tilde, $HOME, absolute path)
                 grep -vE "$include_pattern" "$ssh_config" || true
             } > "$temp_file"; then
                 _cai_error "Failed to prepare SSH config update"
