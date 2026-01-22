@@ -1175,6 +1175,18 @@ _containai_start_container() {
                 return 1
             elif [[ $port_check_rc -eq 1 ]]; then
                 # Port is in use by another process - need to recreate with new port
+                # First verify this is a ContainAI-managed container before deleting
+                local port_conflict_label port_conflict_image
+                port_conflict_label=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || port_conflict_label=""
+                if [[ "$port_conflict_label" != "true" ]]; then
+                    # Check image fallback for legacy containers
+                    port_conflict_image=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || port_conflict_image=""
+                    if [[ "$port_conflict_image" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                        echo "[ERROR] Cannot recreate container - '$container_name' was not created by ContainAI" >&2
+                        echo "[ERROR] SSH port $existing_ssh_port is in use. Remove the container manually or use a different name." >&2
+                        return 1
+                    fi
+                fi
                 if [[ "$quiet_flag" != "true" ]]; then
                     echo "[WARN] SSH port $existing_ssh_port is in use by another process" >&2
                     echo "Recreating container with new port allocation..."

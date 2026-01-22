@@ -127,3 +127,6 @@ Systemd services with User= don't set HOME env var - add Environment=HOME=/path 
 
 ## 2026-01-22 manual [pitfall]
 Systemd Wants= is advisory - unit starts even if wanted unit doesn't exist; use Requires= for hard dependencies
+
+## 2026-01-22 manual [pitfall]
+When using return codes to distinguish error types (e.g., 0=ok, 1=conflict, 2=cannot-check), callers must handle all codes explicitly to avoid wrong actions on tool unavailability
