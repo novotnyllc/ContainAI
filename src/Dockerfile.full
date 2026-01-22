@@ -119,6 +119,49 @@ RUN mkdir -p /mnt/agent-data/local/share/opencode && \
     ln -sfn /mnt/agent-data/local/share/opencode/auth.json /home/agent/.local/share/opencode/auth.json
 
 # =============================================================================
+# VS CODE SERVER SYMLINKS
+# Persist VS Code settings, extensions, and MCP config across container restarts
+# =============================================================================
+RUN mkdir -p /home/agent/.vscode-server/data/Machine \
+             /home/agent/.vscode-server/data/User \
+             /home/agent/.vscode-server-insiders/data/Machine \
+             /home/agent/.vscode-server-insiders/data/User && \
+    # VS Code stable
+    ln -sfn /mnt/agent-data/vscode-server/data/Machine/settings.json /home/agent/.vscode-server/data/Machine/settings.json && \
+    ln -sfn /mnt/agent-data/vscode-server/extensions /home/agent/.vscode-server/extensions && \
+    ln -sfn /mnt/agent-data/vscode-server/data/User/mcp.json /home/agent/.vscode-server/data/User/mcp.json && \
+    ln -sfn /mnt/agent-data/vscode-server/data/User/prompts /home/agent/.vscode-server/data/User/prompts && \
+    ln -sfn /mnt/agent-data/vscode-server/data/User/mcp /home/agent/.vscode-server/data/User/mcp && \
+    # VS Code Insiders
+    ln -sfn /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /home/agent/.vscode-server-insiders/data/Machine/settings.json && \
+    ln -sfn /mnt/agent-data/vscode-server-insiders/extensions /home/agent/.vscode-server-insiders/extensions && \
+    ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/mcp.json /home/agent/.vscode-server-insiders/data/User/mcp.json && \
+    ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/prompts /home/agent/.vscode-server-insiders/data/User/prompts && \
+    ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/mcp /home/agent/.vscode-server-insiders/data/User/mcp
+
+# =============================================================================
+# TMUX AND SHELL CONFIG SYMLINKS
+# Persist tmux config, shell aliases, and .bashrc.d scripts
+# =============================================================================
+RUN mkdir -p /home/agent/.config /home/agent/.local/share && \
+    # tmux
+    mkdir -p /mnt/agent-data/config/tmux /mnt/agent-data/local/share/tmux && \
+    ln -sfn /mnt/agent-data/config/tmux /home/agent/.config/tmux && \
+    ln -sfn /mnt/agent-data/local/share/tmux /home/agent/.local/share/tmux && \
+    ln -sfn /mnt/agent-data/local/share/fonts /home/agent/.local/share/fonts && \
+    # Shell configs (imported aliases from host via cai import)
+    mkdir -p /mnt/agent-data/shell/.bashrc.d && \
+    rm -rf /home/agent/.bash_aliases_imported && \
+    ln -sfn /mnt/agent-data/shell/.bash_aliases /home/agent/.bash_aliases_imported && \
+    # Add sourcing hooks for imported aliases and volume .bashrc.d scripts
+    # Note: Build-time .bashrc.d scripts (like 01-claude.sh) are already sourced via base layer
+    # This adds sourcing for user-imported scripts from the data volume
+    { grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' /home/agent/.bashrc \
+      || { echo '# Source imported bash_aliases if exists'; echo '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported'; } >> /home/agent/.bashrc; } && \
+    { grep -qxF 'if [ -d /mnt/agent-data/shell/.bashrc.d ]; then for f in /mnt/agent-data/shell/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' /home/agent/.bashrc \
+      || { echo '# Source user scripts from data volume'; echo 'if [ -d /mnt/agent-data/shell/.bashrc.d ]; then for f in /mnt/agent-data/shell/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> /home/agent/.bashrc; }
+
+# =============================================================================
 # AGENT ALIASES
 # Convenience aliases for running agents in autonomous mode
 # =============================================================================
@@ -130,9 +173,37 @@ RUN printf '%s\n' \
     > /home/agent/.bash_aliases
 
 # =============================================================================
-# FINAL CONFIGURATION
+# CONTAINAI-INIT SERVICE
+# One-shot systemd service to prepare volume structure on first boot
+# This handles the runtime setup that entrypoint.sh did in Docker sandbox mode
 # =============================================================================
 USER root
+
+COPY containai-init.sh /usr/local/lib/containai/init.sh
+RUN chmod +x /usr/local/lib/containai/init.sh && \
+    mkdir -p /etc/systemd/system && \
+    printf '%s\n' \
+        '[Unit]' \
+        'Description=ContainAI initialization (volume structure, workspace symlink)' \
+        'After=local-fs.target' \
+        'Before=ssh.service' \
+        '' \
+        '[Service]' \
+        'Type=oneshot' \
+        'User=agent' \
+        'ExecStart=/usr/local/lib/containai/init.sh' \
+        'RemainAfterExit=yes' \
+        '' \
+        '[Install]' \
+        'WantedBy=multi-user.target' \
+        > /etc/systemd/system/containai-init.service && \
+    # Enable the service via symlink (systemctl requires systemd as PID 1)
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf /etc/systemd/system/containai-init.service /etc/systemd/system/multi-user.target.wants/containai-init.service
+
+# =============================================================================
+# FINAL CONFIGURATION
+# =============================================================================
 
 # Clean up temporary files
 RUN rm -rf /tmp/*
@@ -153,4 +224,5 @@ LABEL org.opencontainers.image.title="ContainAI Full" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-# Inherit entrypoint from base (systemd)
+# Inherit entrypoint from base (systemd as PID 1)
+# Volume setup is handled by containai-init.service on first boot
