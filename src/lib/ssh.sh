@@ -19,6 +19,15 @@
 #   _cai_get_reserved_container_ports() - Get all ports reserved by ContainAI containers
 #   _cai_list_containers_with_ports() - List containers with their SSH port allocations
 #   _cai_is_port_available()     - Check if a specific port is available
+#   _cai_wait_for_sshd()         - Wait for sshd readiness with exponential backoff
+#   _cai_inject_ssh_key()        - Inject public key into container's authorized_keys
+#   _cai_update_known_hosts()    - Populate known_hosts via ssh-keyscan
+#   _cai_clean_known_hosts()     - Remove stale known_hosts entries for a container
+#   _cai_check_ssh_accept_new_support() - Check if OpenSSH supports accept-new
+#   _cai_write_ssh_host_config() - Write per-container SSH host config
+#   _cai_remove_ssh_host_config() - Remove SSH host config for a container
+#   _cai_setup_container_ssh()   - Complete SSH setup for a container
+#   _cai_cleanup_container_ssh() - Clean up SSH configuration for container removal
 #
 # Port range is configurable via [ssh] section in config.toml:
 #   [ssh]
@@ -27,6 +36,7 @@
 #
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
+#   - Requires lib/docker.sh for _cai_timeout (portable timeout wrapper)
 #
 # Usage: source lib/ssh.sh
 # ==============================================================================
@@ -76,6 +86,18 @@ _CAI_SSH_PORT_RANGE_END_DEFAULT=2500
 
 # Lock file for port allocation (prevents concurrent allocation races)
 _CAI_SSH_PORT_LOCK_FILE="$_CAI_CONFIG_DIR/.ssh-port.lock"
+
+# Known hosts file for ContainAI containers
+_CAI_KNOWN_HOSTS_FILE="$_CAI_CONFIG_DIR/known_hosts"
+
+# Maximum wait time for sshd to become ready (seconds)
+_CAI_SSHD_WAIT_MAX=30
+
+# Lock file for known_hosts updates (prevents concurrent modification races)
+_CAI_KNOWN_HOSTS_LOCK_FILE="$_CAI_CONFIG_DIR/.known_hosts.lock"
+
+# Minimum OpenSSH version for StrictHostKeyChecking=accept-new (7.6)
+_CAI_SSH_ACCEPT_NEW_MIN_VERSION="7.6"
 
 # Get effective SSH port range (config overrides defaults)
 # Outputs: "start end" (space-separated)
@@ -524,8 +546,9 @@ _cai_find_available_port() {
     fi
 
     _cai_error "To free up ports, you can:"
-    _cai_error "  1. Run 'cai ssh cleanup' to remove stale SSH configs"
-    _cai_error "  2. Stop unused containers: cai-stop-all --all"
+    _cai_error "  1. Stop unused containers: cai-stop-all --all"
+    _cai_error "  2. Remove stale SSH configs:"
+    _cai_error "     rm ~/.ssh/containai.d/*.conf"
     _cai_error "  3. Check which processes are using ports:"
     _cai_error "     ss -tulpn | grep -E ':2[3-4][0-9]{2}|:2500'"
     _cai_error ""
@@ -764,6 +787,629 @@ _cai_is_port_available() {
             return 1
         fi
     done <<< "$used_ports"
+
+    return 0
+}
+
+# ==============================================================================
+# SSH Connection Setup Functions
+# ==============================================================================
+
+# Wait for sshd to become ready in a container with exponential backoff
+# Arguments:
+#   $1 = container name
+#   $2 = SSH port (on host)
+#   $3 = docker context (optional)
+# Returns: 0=sshd ready, 1=timeout (sshd not ready within max wait time)
+#
+# Uses exponential backoff starting at 100ms, doubling each attempt up to 2s max interval
+# Total max wait time is controlled by _CAI_SSHD_WAIT_MAX (default 30s)
+# Uses wall-clock time tracking to ensure accurate timeout regardless of command duration
+_cai_wait_for_sshd() {
+    local container_name="$1"
+    local ssh_port="$2"
+    local context="${3:-}"
+    local -a docker_cmd=(docker)
+    local wait_ms=100  # Start at 100ms
+    local max_interval_ms=2000  # Cap at 2 seconds between retries
+    local attempt=0
+
+    # Validate port is numeric
+    if [[ ! "$ssh_port" =~ ^[0-9]+$ ]]; then
+        _cai_error "Invalid SSH port: $ssh_port (must be numeric)"
+        return 1
+    fi
+
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    # Check if ssh-keyscan is available
+    if ! command -v ssh-keyscan >/dev/null 2>&1; then
+        _cai_error "ssh-keyscan is not installed or not in PATH"
+        _cai_error "Install OpenSSH client tools to enable SSH access"
+        return 1
+    fi
+
+    _cai_debug "Waiting for sshd to become ready on port $ssh_port (max ${_CAI_SSHD_WAIT_MAX}s)..."
+
+    # Track wall-clock time using SECONDS builtin
+    local start_seconds=$SECONDS
+
+    while (( SECONDS - start_seconds < _CAI_SSHD_WAIT_MAX )); do
+        attempt=$((attempt + 1))
+
+        # First check: verify container is still running (with timeout to prevent hangs)
+        local container_state inspect_rc
+        if container_state=$(_cai_timeout 5 "${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$container_name" 2>/dev/null); then
+            inspect_rc=0
+        else
+            inspect_rc=$?
+        fi
+
+        # Handle timeout unavailable
+        if [[ $inspect_rc -eq 125 ]]; then
+            _cai_error "No timeout mechanism available (timeout/gtimeout/perl not found)"
+            _cai_error "Install GNU coreutils to enable SSH wait functionality"
+            _cai_error "  macOS: brew install coreutils"
+            _cai_error "  Linux: apt install coreutils (usually pre-installed)"
+            return 1
+        fi
+
+        if [[ "$container_state" != "running" ]]; then
+            _cai_error "Container '$container_name' is not running (state: ${container_state:-unknown})"
+            return 1
+        fi
+
+        # Second check: try to connect to sshd via ssh-keyscan (quick TCP connection test)
+        # ssh-keyscan returns 0 if it can connect and get a host key, non-zero otherwise
+        # Use _cai_timeout for portability (macOS doesn't have timeout by default)
+        local keyscan_rc
+        if _cai_timeout 2 ssh-keyscan -p "$ssh_port" -T 1 localhost >/dev/null 2>&1; then
+            keyscan_rc=0
+        else
+            keyscan_rc=$?
+        fi
+
+        if [[ $keyscan_rc -eq 0 ]]; then
+            local elapsed=$((SECONDS - start_seconds))
+            _cai_debug "sshd is ready on port $ssh_port (after ${elapsed}s, attempt $attempt)"
+            return 0
+        fi
+
+        # Sleep before retry (exponential backoff)
+        local sleep_sec
+        # Convert ms to seconds with decimal (e.g., 100ms -> 0.1)
+        sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_ms / 1000}")
+        sleep "$sleep_sec"
+
+        # Double the wait time, capped at max interval
+        wait_ms=$((wait_ms * 2))
+        if (( wait_ms > max_interval_ms )); then
+            wait_ms=$max_interval_ms
+        fi
+    done
+
+    _cai_error "sshd did not become ready within ${_CAI_SSHD_WAIT_MAX} seconds"
+    _cai_error "  Container: $container_name"
+    _cai_error "  Port: $ssh_port"
+    _cai_error ""
+    _cai_error "Troubleshooting:"
+    _cai_error "  1. Check container logs: docker logs $container_name"
+    _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
+    _cai_error "  3. Check listening ports: docker exec $container_name ss -tlnp"
+    _cai_error "  4. Check if port is exposed: docker port $container_name 22"
+    return 1
+}
+
+# Inject SSH public key into container's authorized_keys
+# Creates /home/agent/.ssh/ directory if missing and adds the key
+# Arguments:
+#   $1 = container name
+#   $2 = docker context (optional)
+# Returns: 0=success, 1=failure
+#
+# Behavior:
+# - Reads pubkey from ~/.config/containai/id_containai.pub
+# - Creates /home/agent/.ssh/ with 700 permissions via docker exec
+# - Appends key to /home/agent/.ssh/authorized_keys (idempotent)
+# - Sets 600 permissions on authorized_keys
+# - Runs as root via docker exec, then chowns files to agent user
+_cai_inject_ssh_key() {
+    local container_name="$1"
+    local context="${2:-}"
+    local -a docker_cmd=(docker)
+    local pubkey_path="$_CAI_SSH_PUBKEY_PATH"
+    local pubkey_content
+
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    # Read public key
+    if [[ ! -f "$pubkey_path" ]]; then
+        _cai_error "SSH public key not found: $pubkey_path"
+        _cai_error "Run 'cai setup' to generate SSH keys"
+        return 1
+    fi
+
+    if ! pubkey_content=$(cat "$pubkey_path"); then
+        _cai_error "Failed to read SSH public key: $pubkey_path"
+        return 1
+    fi
+
+    # Validate key format (should start with ssh- or ecdsa-)
+    if [[ ! "$pubkey_content" =~ ^(ssh-|ecdsa-) ]]; then
+        _cai_error "Invalid SSH public key format in: $pubkey_path"
+        return 1
+    fi
+
+    _cai_debug "Injecting SSH key into container $container_name"
+
+    # Create .ssh directory with correct permissions (as root, then chown)
+    # Use a single docker exec with a script to minimize round trips
+    local inject_script
+    inject_script=$(cat <<'SCRIPT_EOF'
+set -e
+SSH_DIR="/home/agent/.ssh"
+AUTH_KEYS="$SSH_DIR/authorized_keys"
+PUBKEY="$1"
+
+# Create .ssh directory if missing
+if [ ! -d "$SSH_DIR" ]; then
+    mkdir -p "$SSH_DIR"
+fi
+chmod 700 "$SSH_DIR"
+chown agent:agent "$SSH_DIR"
+
+# Create authorized_keys if missing
+if [ ! -f "$AUTH_KEYS" ]; then
+    touch "$AUTH_KEYS"
+fi
+chmod 600 "$AUTH_KEYS"
+chown agent:agent "$AUTH_KEYS"
+
+# Add key if not already present (idempotent)
+# Extract key material (field 2) for matching - ignores comment changes
+KEY_MATERIAL=$(printf '%s' "$PUBKEY" | awk '{print $2}')
+if [ -n "$KEY_MATERIAL" ] && ! grep -qF "$KEY_MATERIAL" "$AUTH_KEYS" 2>/dev/null; then
+    printf '%s\n' "$PUBKEY" >> "$AUTH_KEYS"
+fi
+SCRIPT_EOF
+)
+
+    # Execute the injection script in the container
+    # Pass pubkey as argument to avoid shell escaping issues
+    if ! "${docker_cmd[@]}" exec -- "$container_name" bash -c "$inject_script" _ "$pubkey_content"; then
+        _cai_error "Failed to inject SSH key into container"
+        return 1
+    fi
+
+    _cai_debug "SSH key injected successfully"
+    return 0
+}
+
+# Update known_hosts with container's SSH host key
+# Uses ssh-keyscan to retrieve the host key and stores it in ContainAI's known_hosts
+# Arguments:
+#   $1 = container name
+#   $2 = SSH port (on host)
+#   $3 = docker context (optional, unused but kept for API compatibility)
+#   $4 = force_update (optional, "true" to replace keys without warning)
+# Returns: 0=success, 1=failure
+#
+# Behavior:
+# - Runs ssh-keyscan -p <port> localhost to get container's host key
+# - Stores in ~/.config/containai/known_hosts
+# - Handles port-specific host key format ([localhost]:port)
+# - Retry with backoff since ssh-keyscan can fail if sshd just started
+# - Detects host key changes and warns user (unless force_update=true)
+# - Uses file locking to prevent concurrent modification races
+_cai_update_known_hosts() {
+    local container_name="$1"
+    local ssh_port="$2"
+    local context="${3:-}"  # Unused but kept for API compatibility
+    local force_update="${4:-false}"
+    local known_hosts_file="$_CAI_KNOWN_HOSTS_FILE"
+    local lock_file="$_CAI_KNOWN_HOSTS_LOCK_FILE"
+    local host_keys retry_count=0 max_retries=3
+    local wait_ms=200
+    local lock_fd
+
+    # Validate port is numeric
+    if [[ ! "$ssh_port" =~ ^[0-9]+$ ]]; then
+        _cai_error "Invalid SSH port: $ssh_port (must be numeric)"
+        return 1
+    fi
+
+    _cai_debug "Retrieving SSH host keys for container $container_name on port $ssh_port"
+
+    # Ensure config directory exists
+    if ! mkdir -p "$(dirname "$known_hosts_file")" 2>/dev/null; then
+        _cai_error "Failed to create config directory for known_hosts"
+        return 1
+    fi
+
+    # Ensure known_hosts file exists with correct permissions
+    if [[ ! -f "$known_hosts_file" ]]; then
+        if ! touch "$known_hosts_file"; then
+            _cai_error "Failed to create known_hosts file: $known_hosts_file"
+            return 1
+        fi
+        if ! chmod 600 "$known_hosts_file"; then
+            _cai_error "Failed to set permissions on known_hosts file"
+            return 1
+        fi
+    fi
+
+    # Retrieve host keys with retry (ssh-keyscan can fail if sshd just started)
+    # Do this BEFORE acquiring lock to minimize lock hold time
+    while (( retry_count < max_retries )); do
+        # ssh-keyscan -p outputs keys in format: [localhost]:port ssh-type key
+        # -T 5 sets connection timeout, -t rsa,ed25519 gets specific key types
+        if host_keys=$(ssh-keyscan -p "$ssh_port" -T 5 -t rsa,ed25519,ecdsa localhost 2>/dev/null); then
+            if [[ -n "$host_keys" ]]; then
+                break
+            fi
+        fi
+
+        retry_count=$((retry_count + 1))
+        if (( retry_count < max_retries )); then
+            _cai_debug "ssh-keyscan failed, retrying (attempt $((retry_count + 1))/$max_retries)..."
+            local sleep_sec
+            sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_ms / 1000}")
+            sleep "$sleep_sec"
+            wait_ms=$((wait_ms * 2))
+        fi
+    done
+
+    if [[ -z "$host_keys" ]]; then
+        _cai_error "Failed to retrieve SSH host keys for port $ssh_port"
+        _cai_error "ssh-keyscan failed after $max_retries attempts"
+        return 1
+    fi
+
+    # Acquire lock for atomic known_hosts modification
+    # This prevents concurrent cai start commands from corrupting the file
+    if command -v flock >/dev/null 2>&1; then
+        exec {lock_fd}>"$lock_file"
+        if ! flock -w 10 "$lock_fd"; then
+            _cai_warn "Timeout acquiring known_hosts lock, proceeding without lock"
+            # Close the FD to avoid leak before clearing
+            exec {lock_fd}>&-
+            lock_fd=""
+        fi
+    fi
+
+    # Check for existing keys and detect changes (unless force_update)
+    # Host spec format depends on port (22 uses "localhost", others use "[localhost]:port")
+    local host_spec
+    if [[ "$ssh_port" == "22" ]]; then
+        host_spec="localhost"
+    else
+        host_spec="[localhost]:${ssh_port}"
+    fi
+    local existing_keys=""
+    if [[ -f "$known_hosts_file" ]]; then
+        existing_keys=$(grep -F "$host_spec" "$known_hosts_file" 2>/dev/null || true)
+    fi
+
+    if [[ -n "$existing_keys" && "$force_update" != "true" ]]; then
+        # Compare existing keys with scanned keys per key type
+        # Only flag as mismatch if an existing key type has CHANGED
+        # Allow adding new key types without warning
+        local key_changed=false
+        local key_type existing_key scanned_key
+
+        # Check each existing key type to see if it changed
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            key_type=$(printf '%s' "$line" | awk '{print $2}')
+            existing_key=$(printf '%s' "$line" | awk '{print $3}')
+
+            # Find the same key type in scanned keys
+            scanned_key=$(printf '%s\n' "$host_keys" | awk -v t="$key_type" '$2 == t {print $3}')
+
+            if [[ -n "$scanned_key" && "$existing_key" != "$scanned_key" ]]; then
+                # Same key type but different key material - this is a real change
+                key_changed=true
+                _cai_warn "SSH host key has changed for container $container_name (port $ssh_port)"
+                _cai_warn "  Key type: $key_type"
+                _cai_warn ""
+                _cai_warn "This could indicate:"
+                _cai_warn "  1. Container was recreated (expected after --fresh)"
+                _cai_warn "  2. A potential security concern (man-in-the-middle)"
+                _cai_warn ""
+                _cai_warn "If you trust this is the correct container, clean the old key with:"
+                _cai_warn "  ssh-keygen -R \"$host_spec\" -f \"$known_hosts_file\""
+                _cai_warn "Then retry the operation, or use --fresh to force recreation."
+                break
+            fi
+        done <<< "$existing_keys"
+
+        if [[ "$key_changed" == "true" ]]; then
+            # Release lock before returning
+            if [[ -n "${lock_fd:-}" ]]; then
+                exec {lock_fd}>&-
+            fi
+            return 1
+        fi
+
+        # Check if there are new key types to add
+        local new_keys_to_add=""
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            key_type=$(printf '%s' "$line" | awk '{print $2}')
+            # If this key type doesn't exist in existing_keys, it's new
+            if ! printf '%s\n' "$existing_keys" | grep -q "^${host_spec} ${key_type} "; then
+                new_keys_to_add="${new_keys_to_add}${line}"$'\n'
+            fi
+        done <<< "$host_keys"
+
+        if [[ -n "$new_keys_to_add" ]]; then
+            # Add new key types (this is safe - not a change)
+            printf '%s' "$new_keys_to_add" >> "$known_hosts_file"
+            _cai_debug "Added new key type(s) to known_hosts"
+        else
+            _cai_debug "Host keys unchanged for port $ssh_port"
+        fi
+    else
+        # No existing keys or force_update - clean and add
+        _cai_clean_known_hosts "$ssh_port"
+
+        # Append host keys to known_hosts file
+        if ! printf '%s\n' "$host_keys" >> "$known_hosts_file"; then
+            _cai_error "Failed to write host keys to known_hosts file"
+            if [[ -n "${lock_fd:-}" ]]; then
+                exec {lock_fd}>&-
+            fi
+            return 1
+        fi
+        _cai_debug "Added $(printf '%s\n' "$host_keys" | wc -l) host key(s) to known_hosts"
+    fi
+
+    # Release lock
+    if [[ -n "${lock_fd:-}" ]]; then
+        exec {lock_fd}>&-
+    fi
+
+    return 0
+}
+
+# Remove stale known_hosts entries for a specific port
+# Arguments:
+#   $1 = SSH port
+# Returns: 0 always
+#
+# Removes entries matching [localhost]:<port> pattern (or localhost for port 22)
+# Called before updating known_hosts to handle container recreation
+# Uses ssh-keygen -R for robust removal (avoids regex injection risks)
+_cai_clean_known_hosts() {
+    local ssh_port="$1"
+    local known_hosts_file="$_CAI_KNOWN_HOSTS_FILE"
+
+    if [[ ! -f "$known_hosts_file" ]]; then
+        return 0
+    fi
+
+    # Validate port is numeric to prevent injection
+    if [[ ! "$ssh_port" =~ ^[0-9]+$ ]]; then
+        _cai_debug "Invalid port for known_hosts cleanup: $ssh_port"
+        return 0
+    fi
+
+    # ssh-keyscan output format depends on port:
+    # - Port 22: "localhost" (no brackets)
+    # - Other ports: "[localhost]:port"
+    # Use ssh-keygen -R for robust removal (handles hashed keys, avoids regex issues)
+    # -f specifies the known_hosts file to modify
+
+    # ssh-keygen -R exits 0 even if no matching entry found
+    # Suppress output (it prints "Host found" messages to stdout)
+    if [[ "$ssh_port" == "22" ]]; then
+        # Port 22 uses "localhost" without brackets
+        ssh-keygen -R "localhost" -f "$known_hosts_file" >/dev/null 2>&1 || true
+        # Also try with brackets in case it was added that way
+        ssh-keygen -R "[localhost]:22" -f "$known_hosts_file" >/dev/null 2>&1 || true
+    else
+        # Non-standard ports use [localhost]:port format
+        ssh-keygen -R "[localhost]:${ssh_port}" -f "$known_hosts_file" >/dev/null 2>&1 || true
+    fi
+
+    _cai_debug "Cleaned known_hosts entries for port $ssh_port"
+    return 0
+}
+
+# Check if installed OpenSSH supports StrictHostKeyChecking=accept-new
+# Requires OpenSSH 7.6 or later
+# Returns: 0=supported, 1=not supported
+_cai_check_ssh_accept_new_support() {
+    local ssh_version major minor min_major min_minor
+
+    # Get SSH version
+    if ! ssh_version=$(_cai_check_ssh_version 2>/dev/null); then
+        return 1
+    fi
+
+    # Parse version (format: "X.Y")
+    if [[ "$ssh_version" =~ ^([0-9]+)\.([0-9]+) ]]; then
+        major="${BASH_REMATCH[1]}"
+        minor="${BASH_REMATCH[2]}"
+    else
+        return 1
+    fi
+
+    # Compare against minimum (7.6)
+    min_major="${_CAI_SSH_ACCEPT_NEW_MIN_VERSION%%.*}"
+    min_minor="${_CAI_SSH_ACCEPT_NEW_MIN_VERSION#*.}"
+
+    if (( major > min_major )) || { (( major == min_major )) && (( minor >= min_minor )); }; then
+        return 0
+    fi
+    return 1
+}
+
+# Write SSH host config for a container to ~/.ssh/containai.d/
+# Arguments:
+#   $1 = container name
+#   $2 = SSH port (on host)
+# Returns: 0=success, 1=failure
+#
+# Creates a config file at ~/.ssh/containai.d/<container-name>.conf with:
+# - Host alias matching container name
+# - Connection to localhost:<port>
+# - ContainAI identity key
+# - ContainAI known_hosts file
+# - StrictHostKeyChecking=accept-new (secure but allows first connection)
+#   Falls back to 'yes' on older OpenSSH versions
+_cai_write_ssh_host_config() {
+    local container_name="$1"
+    local ssh_port="$2"
+    local config_dir="$_CAI_SSH_CONFIG_DIR"
+    local identity_file="$_CAI_SSH_KEY_PATH"
+    local known_hosts_file="$_CAI_KNOWN_HOSTS_FILE"
+    local config_file="$config_dir/${container_name}.conf"
+    local strict_host_key_checking
+
+    # Ensure config directory exists
+    if [[ ! -d "$config_dir" ]]; then
+        _cai_debug "SSH config directory not found, running setup..."
+        if ! _cai_setup_ssh_config; then
+            return 1
+        fi
+    fi
+
+    # Determine StrictHostKeyChecking value based on OpenSSH version
+    # accept-new (7.6+): accepts new keys, rejects changes (ideal for containers)
+    # yes: requires key to exist in known_hosts already (we pre-populate via ssh-keyscan)
+    if _cai_check_ssh_accept_new_support; then
+        strict_host_key_checking="accept-new"
+    else
+        _cai_debug "OpenSSH < 7.6 detected, using StrictHostKeyChecking=yes"
+        strict_host_key_checking="yes"
+    fi
+
+    _cai_debug "Writing SSH host config for $container_name to $config_file"
+
+    # Write the config file
+    # Use StrictHostKeyChecking=accept-new which:
+    # - Accepts new keys on first connection
+    # - Rejects if key changes (MITM protection)
+    # - Better than StrictHostKeyChecking=no which accepts everything
+    cat > "$config_file" << EOF
+# ContainAI SSH config for container: $container_name
+# Auto-generated - do not edit manually
+# Generated at: $(date -Iseconds 2>/dev/null || date)
+
+Host $container_name
+    HostName localhost
+    Port $ssh_port
+    User agent
+    IdentityFile $identity_file
+    IdentitiesOnly yes
+    UserKnownHostsFile $known_hosts_file
+    StrictHostKeyChecking $strict_host_key_checking
+    # Disable password auth (key-only)
+    PreferredAuthentications publickey
+    # Faster connection (no GSSAPI, no password)
+    GSSAPIAuthentication no
+    PasswordAuthentication no
+EOF
+
+    if [[ $? -ne 0 ]]; then
+        _cai_error "Failed to write SSH config: $config_file"
+        return 1
+    fi
+
+    chmod 600 "$config_file"
+    _cai_debug "SSH host config written: $config_file"
+    _cai_info "SSH access configured: ssh $container_name"
+    return 0
+}
+
+# Remove SSH host config for a container
+# Arguments:
+#   $1 = container name
+# Returns: 0 always (idempotent)
+#
+# Removes ~/.ssh/containai.d/<container-name>.conf if it exists
+_cai_remove_ssh_host_config() {
+    local container_name="$1"
+    local config_file="$_CAI_SSH_CONFIG_DIR/${container_name}.conf"
+
+    if [[ -f "$config_file" ]]; then
+        rm -f "$config_file"
+        _cai_debug "Removed SSH host config: $config_file"
+    fi
+    return 0
+}
+
+# Complete SSH setup for a container after creation/start
+# This is the main entry point for SSH setup, combining all steps
+# Arguments:
+#   $1 = container name
+#   $2 = SSH port (on host)
+#   $3 = docker context (optional)
+#   $4 = force_update (optional, "true" for --fresh/new containers)
+# Returns: 0=success, 1=failure
+#
+# Steps:
+# 1. Wait for sshd to become ready
+# 2. Inject public key to authorized_keys
+# 3. Update known_hosts via ssh-keyscan (detects changes unless force_update)
+# 4. Write SSH host config
+_cai_setup_container_ssh() {
+    local container_name="$1"
+    local ssh_port="$2"
+    local context="${3:-}"
+    local force_update="${4:-false}"
+
+    _cai_step "Configuring SSH access for container $container_name"
+
+    # Step 1: Wait for sshd
+    if ! _cai_wait_for_sshd "$container_name" "$ssh_port" "$context"; then
+        return 1
+    fi
+
+    # Step 2: Inject SSH key
+    if ! _cai_inject_ssh_key "$container_name" "$context"; then
+        return 1
+    fi
+
+    # Step 3: Update known_hosts (force_update bypasses change detection)
+    if ! _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "$force_update"; then
+        return 1
+    fi
+
+    # Step 4: Write SSH host config
+    if ! _cai_write_ssh_host_config "$container_name" "$ssh_port"; then
+        return 1
+    fi
+
+    _cai_ok "SSH access configured for container $container_name"
+    return 0
+}
+
+# Clean up SSH configuration for a container (on --fresh or container removal)
+# Arguments:
+#   $1 = container name
+#   $2 = SSH port (on host)
+# Returns: 0 always
+#
+# Removes:
+# - SSH host config file
+# - known_hosts entries for the port
+_cai_cleanup_container_ssh() {
+    local container_name="$1"
+    local ssh_port="$2"
+
+    _cai_debug "Cleaning up SSH configuration for container $container_name"
+
+    # Remove SSH host config
+    _cai_remove_ssh_host_config "$container_name"
+
+    # Clean known_hosts entries for this port
+    _cai_clean_known_hosts "$ssh_port"
 
     return 0
 }

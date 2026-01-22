@@ -1195,6 +1195,8 @@ _containai_start_container() {
                     echo "[WARN] SSH port $existing_ssh_port is in use by another process" >&2
                     echo "Recreating container with new port allocation..."
                 fi
+                # Clean up SSH configuration before removing container
+                _cai_cleanup_container_ssh "$container_name" "$existing_ssh_port"
                 # Remove the old container (like --fresh but automatic)
                 if ! "${docker_cmd[@]}" rm -f "$container_name" >/dev/null 2>&1; then
                     echo "[ERROR] Failed to remove container for port reallocation" >&2
@@ -1224,6 +1226,9 @@ _containai_start_container() {
         if [[ "$quiet_flag" != "true" ]]; then
             echo "Removing existing container (--fresh)..."
         fi
+        # Get SSH port before removal for cleanup
+        local fresh_ssh_port
+        fresh_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context") || fresh_ssh_port=""
         # Stop container, ignoring "not running" errors but surfacing others
         local fresh_stop_output
         fresh_stop_output="$("${docker_cmd[@]}" stop "$container_name" 2>&1)" || {
@@ -1239,6 +1244,10 @@ _containai_start_container() {
                 return 1
             fi
         }
+        # Clean up SSH configuration after successful container removal
+        if [[ -n "$fresh_ssh_port" ]]; then
+            _cai_cleanup_container_ssh "$container_name" "$fresh_ssh_port"
+        fi
         container_state="none"
     fi
 
@@ -1259,6 +1268,9 @@ _containai_start_container() {
         if [[ "$quiet_flag" != "true" ]]; then
             echo "Stopping existing container..."
         fi
+        # Get SSH port before removal for cleanup
+        local restart_ssh_port
+        restart_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context") || restart_ssh_port=""
         # Stop container, ignoring "not running" errors but surfacing others
         local stop_output
         stop_output="$("${docker_cmd[@]}" stop "$container_name" 2>&1)" || {
@@ -1274,6 +1286,10 @@ _containai_start_container() {
                 return 1
             fi
         }
+        # Clean up SSH configuration after successful container removal
+        if [[ -n "$restart_ssh_port" ]]; then
+            _cai_cleanup_container_ssh "$container_name" "$restart_ssh_port"
+        fi
         container_state="none"
     fi
 
@@ -1334,6 +1350,19 @@ _containai_start_container() {
                     return 1
                 fi
             fi
+            # Ensure SSH setup is configured for running container
+            # This handles containers that were running before SSH setup was added
+            local running_ssh_port
+            running_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context") || running_ssh_port=""
+            if [[ -n "$running_ssh_port" ]]; then
+                # Setup SSH without force_update (detect host key changes)
+                if ! _cai_setup_container_ssh "$container_name" "$running_ssh_port" "$selected_context"; then
+                    # SSH setup failure is non-fatal for running containers
+                    # User can still attach via docker exec
+                    _cai_warn "SSH setup failed; you can still attach via docker exec"
+                fi
+            fi
+
             # Handle detached mode for already running container
             if [[ "$detached_flag" == "true" ]]; then
                 if [[ "$quiet_flag" != "true" ]]; then
@@ -1437,6 +1466,18 @@ _containai_start_container() {
                 echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
                 return 1
             fi
+
+            # Set up SSH access (wait for sshd, inject key, update known_hosts, write config)
+            # Get SSH port from container label for stopped containers being started
+            local exited_ssh_port
+            exited_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context") || exited_ssh_port=""
+            if [[ -n "$exited_ssh_port" ]]; then
+                if ! _cai_setup_container_ssh "$container_name" "$exited_ssh_port" "$selected_context"; then
+                    echo "[ERROR] SSH setup failed for container" >&2
+                    return 1
+                fi
+            fi
+
             # Build exec command with env vars
             local -a exec_base=("${docker_cmd[@]}" exec -it)
             local env_var
@@ -1585,6 +1626,13 @@ _containai_start_container() {
             done
             if [[ $wait_count -ge $max_wait ]]; then
                 echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
+                return 1
+            fi
+
+            # Set up SSH access (wait for sshd, inject key, update known_hosts, write config)
+            # Force update for newly created containers (host keys are fresh)
+            if ! _cai_setup_container_ssh "$container_name" "$ssh_port" "$selected_context" "true"; then
+                echo "[ERROR] SSH setup failed for container" >&2
                 return 1
             fi
 
