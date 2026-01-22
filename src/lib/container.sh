@@ -1164,9 +1164,16 @@ _containai_start_container() {
     # Check for SSH port conflict on stopped containers and auto-recreate if needed
     # This handles the case where the allocated port is now in use by another process
     if [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
-        local existing_ssh_port
+        local existing_ssh_port port_check_rc
         if existing_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context"); then
-            if ! _cai_is_port_available "$existing_ssh_port"; then
+            _cai_is_port_available "$existing_ssh_port"
+            port_check_rc=$?
+            if [[ $port_check_rc -eq 2 ]]; then
+                # ss command failed - cannot determine port availability, abort without deleting
+                echo "[ERROR] Cannot verify SSH port availability (ss command failed)" >&2
+                echo "[ERROR] Ensure 'ss' (iproute2) is installed" >&2
+                return 1
+            elif [[ $port_check_rc -eq 1 ]]; then
                 # Port is in use by another process - need to recreate with new port
                 if [[ "$quiet_flag" != "true" ]]; then
                     echo "[WARN] SSH port $existing_ssh_port is in use by another process" >&2
@@ -1179,6 +1186,7 @@ _containai_start_container() {
                 fi
                 container_state="none"
             fi
+            # port_check_rc == 0 means port is available, continue normally
         fi
     fi
 
