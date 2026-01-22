@@ -72,18 +72,18 @@ That's it. ContainAI detects your isolation runtime (Docker Desktop sandbox or S
 }}}%%
 flowchart TB
     subgraph host["Your Host Machine"]
-        secrets["~/.ssh, ~/.aws, etc.<br/><i>NOT accessible to agent</i>"]
+        secrets["~/.ssh, ~/.aws, etc.<br/>NOT accessible to agent"]
 
         subgraph runtime["Docker Desktop / Sysbox"]
             subgraph sandbox["ContainAI Sandbox"]
-                workspace["~/workspace<br/><i>Your project (read/write)</i>"]
-                data["mnt/agent-data<br/><i>Persistent volume (creds)</i>"]
-                agent["AI Agent<br/><i>Claude/Gemini/Codex</i>"]
+                workspace["/workspace<br/>Your project - read/write"]
+                data["/mnt/agent-data<br/>Persistent volume - creds"]
+                agent["AI Agent<br/>Claude/Gemini/Codex"]
             end
         end
     end
 
-    secrets -.->|blocked| sandbox
+    secrets -.->|blocked| agent
 ```
 
 The agent sees only your project and its own data volume. Host credentials, Docker socket, and other sensitive resources are isolated by default.

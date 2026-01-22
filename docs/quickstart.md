@@ -77,14 +77,14 @@ flowchart TD
     doctor["cai doctor"]
     doctor --> eci["ECI Path<br/>[OK]"]
     doctor --> sysbox["Sysbox Path<br/>[OK]"]
-    eci --> ready["Ready to run!<br/><b>cai</b>"]
+    eci --> ready["Ready to run!<br/>cai"]
     sysbox --> ready
 
-    doctor -.->|neither OK| fallback
+    doctor -.->|neither OK| optionA
 
     subgraph fallback["If neither path is OK"]
-        optionA["<b>Option A:</b> Enable Docker Desktop sandbox<br/>1. Open Docker Desktop Settings<br/>2. Go to Features in development<br/>3. Enable Docker sandbox or ECI<br/>4. Restart Docker Desktop"]
-        optionB["<b>Option B:</b> Install Sysbox (Linux/WSL2)<br/>Run: <code>cai setup</code>"]
+        optionA["Option A: Enable Docker Desktop sandbox<br/>1. Open Docker Desktop Settings<br/>2. Go to Features in development<br/>3. Enable Docker sandbox or ECI<br/>4. Restart Docker Desktop"]
+        optionB["Option B: Install Sysbox - Linux/WSL2<br/>Run: cai setup"]
     end
 ```
 
@@ -152,8 +152,8 @@ flowchart TB
     subgraph host["Your Host Machine"]
         subgraph runtime["Docker Desktop / Sysbox"]
             subgraph sandbox["ContainAI Sandbox"]
-                workspace["/workspace<br/><i>Your project directory</i>"]
-                data["/mnt/agent-data<br/><i>Persistent credentials/plugins</i>"]
+                workspace["/workspace<br/>Your project directory"]
+                data["/mnt/agent-data<br/>Persistent credentials/plugins"]
                 agent["Claude/Gemini agent running"]
             end
         end
