@@ -42,14 +42,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libssl3 \
         libstdc++6 \
         zlib1g && \
-    curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel ${DOTNET_CHANNEL} --install-dir ${DOTNET_ROOT}
+    curl -fsSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel ${DOTNET_CHANNEL} --install-dir ${DOTNET_ROOT} && \
+    # Verify dotnet installed correctly
+    ${DOTNET_ROOT}/dotnet --version
 
 # Install PowerShell global tool
 RUN mkdir -p ${DOTNET_ROOT}/tools && \
     dotnet tool install PowerShell --tool-path ${DOTNET_ROOT}/tools && \
     dotnet nuget locals all --clear && \
-    # Remove cached nupkg files to reduce image size
-    find ${DOTNET_ROOT}/tools -print | grep -i '.*[.]nupkg$' | xargs rm -f
+    # Remove cached nupkg files to reduce image size (use -delete to avoid pipefail issues)
+    find ${DOTNET_ROOT}/tools -iname '*.nupkg' -delete
 
 # =============================================================================
 # MAIN IMAGE
@@ -90,6 +92,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ENV DOTNET_ROOT=/home/agent/.dotnet
 ENV PATH=${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}
 COPY --from=dotnet-installer --chown=agent:agent /usr/share/dotnet /home/agent/.dotnet
+
+# Verify .NET SDK copied correctly
+RUN /home/agent/.dotnet/dotnet --version
 
 # .NET environment variables
 ENV DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
@@ -133,7 +138,9 @@ RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz && \
     echo "${EXPECTED_SHA256}  /tmp/go.tar.gz" | sha256sum -c - && \
     tar -C /usr/local -xzf /tmp/go.tar.gz && \
-    rm /tmp/go.tar.gz
+    rm /tmp/go.tar.gz && \
+    # Verify Go installed correctly
+    /usr/local/go/bin/go version
 
 ENV GOROOT=/usr/local/go
 ENV GOPATH=/home/agent/go
@@ -163,8 +170,9 @@ RUN curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/insta
     npm --version
 
 # Create .bash_env for non-interactive shell access to nvm
+# Source nvm and activate default version silently
 RUN printf '%s\n' \
-    '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh"' \
+    '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh" && nvm use default --silent 2>/dev/null' \
     > /home/agent/.bash_env
 
 ENV BASH_ENV=/home/agent/.bash_env
@@ -177,7 +185,9 @@ USER agent
 WORKDIR /home/agent
 
 # Install uv (fast Python package installer)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN curl -fsSL https://astral.sh/uv/install.sh | sh && \
+    # Verify uv installed correctly
+    /home/agent/.local/bin/uv --version
 
 ENV PATH="/home/agent/.local/bin:${PATH}"
 
