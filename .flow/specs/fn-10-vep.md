@@ -215,6 +215,18 @@ cai run /workspace [--dry-run]
 - GHCR publishing
 - install.sh script
 
+### Phase 15: Setup Documentation
+- Comprehensive setup guide (docs/setup-guide.md)
+- Platform-specific instructions (WSL2, Linux, macOS)
+- Component locations and verification
+
+### Phase 16: Clean Uninstall
+- `cai uninstall` command
+- Stop/disable/remove containai-docker.service
+- Remove Docker context
+- Preserve config and data (/etc/containai/, /var/lib/containai-docker/, ~/.config/containai/)
+- Optional --containers flag to also remove containers
+
 ## Quick Commands
 
 ```bash
@@ -232,6 +244,12 @@ cai shell /path/to/workspace         # Interactive shell via SSH
 
 # SSH management
 cai ssh cleanup                      # Remove stale SSH configs
+
+# Uninstall (preserves config and data)
+cai uninstall                        # Stop service, remove context
+cai uninstall --dry-run              # Preview what would be removed
+cai uninstall --containers           # Also remove containers
+cai uninstall --containers --volumes # Also remove container volumes
 
 # Inside the container (DinD works)
 docker run hello-world               # Nested containers work

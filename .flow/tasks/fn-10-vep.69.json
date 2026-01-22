@@ -1,0 +1,18 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-22T04:41:41.375688Z",
+  "depends_on": [
+    "fn-10-vep.46",
+    "fn-10-vep.41",
+    "fn-10-vep.40"
+  ],
+  "epic": "fn-10-vep",
+  "id": "fn-10-vep.69",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-10-vep.69.md",
+  "status": "todo",
+  "title": "Create comprehensive setup documentation (docs/setup-guide.md)",
+  "updated_at": "2026-01-22T04:41:41.375703Z"
+}
