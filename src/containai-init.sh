@@ -3,6 +3,9 @@
 # Runs as a oneshot systemd service to prepare volume structure and workspace
 set -euo pipefail
 
+# Ensure HOME is set (systemd services may not have it even with User=)
+: "${HOME:=/home/agent}"
+
 # Canonical location
 AGENT_WORKSPACE="${HOME}/workspace"
 

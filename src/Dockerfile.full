@@ -203,6 +203,7 @@ RUN chmod +x /usr/local/lib/containai/init.sh && \
         '[Service]' \
         'Type=oneshot' \
         'User=agent' \
+        'Environment=HOME=/home/agent' \
         'ExecStart=/usr/local/lib/containai/init.sh' \
         'RemainAfterExit=yes' \
         '' \
