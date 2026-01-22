@@ -80,9 +80,8 @@ Fix the Lima VM "socket exists but docker info failed" issue. Handle both new VM
 - [ ] After setup, `docker info` works via Lima socket
 - [ ] No manual intervention required for new or existing VMs
 ## Done summary
-TBD
-
+Implemented Lima VM docker group repair and enhanced failure diagnostics. Added _cai_lima_repair_docker_access() to automatically fix permission denied errors by adding user to docker group and restarting VM. Enhanced cai doctor with socket existence check and platform-specific remediation messages for macOS/Lima failures.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 79440fd, 50740923b36697a8944ac10e0aca86805ac59cec
+- Tests: bash -n src/lib/setup.sh, bash -n src/lib/doctor.sh, source all libs
 - PRs:

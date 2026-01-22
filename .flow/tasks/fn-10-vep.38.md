@@ -50,9 +50,8 @@ Add git configuration import to the `cai import` command. This ensures git commi
 - [ ] `git commit` works without "please tell me who you are" error
 - [ ] Gracefully handles missing git or missing config on host
 ## Done summary
-TBD
-
+Added git config import to `cai import` command. The feature extracts git user.name and user.email from the host using `git config --global`, writes them safely to `/mnt/agent-data/.gitconfig` using `git config -f` (preventing injection attacks), and the entrypoint copies this to `$HOME/.gitconfig` on container startup. Includes safe.directory entries for mounted workspaces and comprehensive symlink attack protection.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: ad7c436, df43b81, 53c24b2
+- Tests: bash -n src/lib/import.sh, bash -n src/entrypoint.sh, flowctl codex impl-review (SHIP verdict)
 - PRs:
