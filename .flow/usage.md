@@ -14,18 +14,18 @@ Task tracking for AI agents. All state lives in `.flow/`.
 ```
 .flow/
 ├── bin/flowctl         # CLI (this install)
-├── epics/fn-N.json     # Epic metadata
-├── specs/fn-N.md       # Epic specifications
-├── tasks/fn-N.M.json   # Task metadata
-├── tasks/fn-N.M.md     # Task specifications
+├── epics/fn-N-xxx.json # Epic metadata
+├── specs/fn-N-xxx.md   # Epic specifications
+├── tasks/fn-N-xxx.M.json # Task metadata
+├── tasks/fn-N-xxx.M.md   # Task specifications
 ├── memory/             # Context memory
 └── meta.json           # Project metadata
 ```
 
 ## IDs
 
-- Epics: `fn-N` (e.g., fn-1, fn-2)
-- Tasks: `fn-N.M` (e.g., fn-1.1, fn-1.2)
+- Epics: `fn-N-xxx` (e.g., fn-1-abc, fn-2-z9k) or legacy `fn-N`
+- Tasks: `fn-N-xxx.M` (e.g., fn-1-abc.1, fn-1-abc.2) or legacy `fn-N.M`
 
 ## Common Commands
 
