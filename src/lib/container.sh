@@ -1166,8 +1166,12 @@ _containai_start_container() {
     if [[ "$container_state" == "exited" || "$container_state" == "created" ]]; then
         local existing_ssh_port port_check_rc
         if existing_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context"); then
-            _cai_is_port_available "$existing_ssh_port"
-            port_check_rc=$?
+            # Capture return code safely (set -e safe)
+            if _cai_is_port_available "$existing_ssh_port"; then
+                port_check_rc=0
+            else
+                port_check_rc=$?
+            fi
             if [[ $port_check_rc -eq 2 ]]; then
                 # ss command failed - cannot determine port availability, abort without deleting
                 echo "[ERROR] Cannot verify SSH port availability (ss command failed)" >&2

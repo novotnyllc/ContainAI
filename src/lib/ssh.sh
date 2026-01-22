@@ -11,13 +11,19 @@
 #   _cai_get_ssh_key_path()      - Return path to ContainAI SSH private key
 #   _cai_get_ssh_pubkey_path()   - Return path to ContainAI SSH public key
 #   _cai_get_ssh_config_dir()    - Return path to ContainAI SSH config directory
-#   _cai_find_available_port()   - Find first available port in SSH range (2300-2500)
+#   _cai_get_ssh_port_range()    - Get effective SSH port range (config or defaults)
+#   _cai_find_available_port()   - Find first available port in SSH range
 #   _cai_allocate_ssh_port()     - Allocate SSH port for container (with reuse support)
 #   _cai_get_container_ssh_port() - Get SSH port from container label
 #   _cai_set_container_ssh_port() - Validate port setting (must use --label at creation)
 #   _cai_get_reserved_container_ports() - Get all ports reserved by ContainAI containers
 #   _cai_list_containers_with_ports() - List containers with their SSH port allocations
 #   _cai_is_port_available()     - Check if a specific port is available
+#
+# Port range is configurable via [ssh] section in config.toml:
+#   [ssh]
+#   port_range_start = 2300
+#   port_range_end = 2500
 #
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
@@ -65,11 +71,23 @@ _CAI_SSH_CONFIG_DIR="$HOME/.ssh/containai.d"
 _CAI_SSH_MIN_VERSION="7.3"
 
 # Default SSH port range for ContainAI containers
-_CAI_SSH_PORT_RANGE_START=2300
-_CAI_SSH_PORT_RANGE_END=2500
+_CAI_SSH_PORT_RANGE_START_DEFAULT=2300
+_CAI_SSH_PORT_RANGE_END_DEFAULT=2500
 
 # Lock file for port allocation (prevents concurrent allocation races)
 _CAI_SSH_PORT_LOCK_FILE="$_CAI_CONFIG_DIR/.ssh-port.lock"
+
+# Get effective SSH port range (config overrides defaults)
+# Outputs: "start end" (space-separated)
+# Returns: 0 always
+_cai_get_ssh_port_range() {
+    local start="${_CAI_SSH_PORT_RANGE_START:-$_CAI_SSH_PORT_RANGE_START_DEFAULT}"
+    local end="${_CAI_SSH_PORT_RANGE_END:-$_CAI_SSH_PORT_RANGE_END_DEFAULT}"
+
+    # Use defaults from config.sh globals if set (parsed from [ssh] section)
+    # These will be set by _containai_parse_config() if config has [ssh].port_range_start/end
+    printf '%s %s' "$start" "$end"
+}
 
 # ==============================================================================
 # Path getters
@@ -431,16 +449,19 @@ _cai_get_used_ports() {
 
 # Find first available port in the ContainAI SSH port range
 # Arguments:
-#   $1 = port range start (optional, default: $_CAI_SSH_PORT_RANGE_START)
-#   $2 = port range end (optional, default: $_CAI_SSH_PORT_RANGE_END)
+#   $1 = port range start (optional, uses config or default 2300)
+#   $2 = port range end (optional, uses config or default 2500)
 #   $3 = docker context (optional, for checking container labels)
 # Outputs: available port number on success
 # Returns: 0=port found, 1=all ports exhausted, 2=cannot check ports
 #
 # On exhaustion, outputs error message to stderr suggesting cleanup
 _cai_find_available_port() {
-    local range_start="${1:-$_CAI_SSH_PORT_RANGE_START}"
-    local range_end="${2:-$_CAI_SSH_PORT_RANGE_END}"
+    # Use config values if available, otherwise use defaults
+    local default_start="${_CAI_SSH_PORT_RANGE_START:-$_CAI_SSH_PORT_RANGE_START_DEFAULT}"
+    local default_end="${_CAI_SSH_PORT_RANGE_END:-$_CAI_SSH_PORT_RANGE_END_DEFAULT}"
+    local range_start="${1:-$default_start}"
+    local range_end="${2:-$default_end}"
     local context="${3:-}"
     local used_ports port
 
@@ -650,8 +671,8 @@ _cai_get_container_ssh_port() {
 # Arguments:
 #   $1 = container name
 #   $2 = docker context (optional)
-#   $3 = port range start (optional)
-#   $4 = port range end (optional)
+#   $3 = port range start (optional, uses config or default 2300)
+#   $4 = port range end (optional, uses config or default 2500)
 # Outputs: allocated port number
 # Returns: 0=success, 1=exhausted, 2=error
 #
@@ -660,8 +681,11 @@ _cai_get_container_ssh_port() {
 _cai_allocate_ssh_port() {
     local container_name="$1"
     local context="${2:-}"
-    local range_start="${3:-$_CAI_SSH_PORT_RANGE_START}"
-    local range_end="${4:-$_CAI_SSH_PORT_RANGE_END}"
+    # Use config values if available, otherwise use defaults
+    local default_start="${_CAI_SSH_PORT_RANGE_START:-$_CAI_SSH_PORT_RANGE_START_DEFAULT}"
+    local default_end="${_CAI_SSH_PORT_RANGE_END:-$_CAI_SSH_PORT_RANGE_END_DEFAULT}"
+    local range_start="${3:-$default_start}"
+    local range_end="${4:-$default_end}"
     local existing_port used_ports line port_in_use container_state
 
     local -a docker_cmd=(docker)

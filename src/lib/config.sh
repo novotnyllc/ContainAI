@@ -24,6 +24,8 @@
 #   _CAI_AGENT    - Default agent name
 #   _CAI_CREDENTIALS - Credentials mode
 #   _CAI_SECURE_ENGINE_CONTEXT - Secure engine context name override
+#   _CAI_SSH_PORT_RANGE_START - SSH port range start (from [ssh] section)
+#   _CAI_SSH_PORT_RANGE_END   - SSH port range end (from [ssh] section)
 #
 # Usage: source lib/config.sh
 # ==============================================================================
@@ -57,6 +59,8 @@ _CAI_EXCLUDES=()
 _CAI_SECURE_ENGINE_CONTEXT=""
 _CAI_DANGER_ALLOW_HOST_CREDENTIALS=""
 _CAI_DANGER_ALLOW_HOST_DOCKER_SOCKET=""
+_CAI_SSH_PORT_RANGE_START=""
+_CAI_SSH_PORT_RANGE_END=""
 
 # ==============================================================================
 # Volume name validation
@@ -224,6 +228,8 @@ _containai_parse_config() {
     _CAI_SECURE_ENGINE_CONTEXT=""
     _CAI_DANGER_ALLOW_HOST_CREDENTIALS=""
     _CAI_DANGER_ALLOW_HOST_DOCKER_SOCKET=""
+    _CAI_SSH_PORT_RANGE_START=""
+    _CAI_SSH_PORT_RANGE_END=""
 
     # Check if config file exists
     if [[ ! -f "$config_file" ]]; then
@@ -384,6 +390,29 @@ if isinstance(danger, dict):
 ")
     _CAI_DANGER_ALLOW_HOST_CREDENTIALS="$danger_creds"
     _CAI_DANGER_ALLOW_HOST_DOCKER_SOCKET="$danger_socket"
+
+    # Extract [ssh] section for port range configuration
+    local ssh_port_start ssh_port_end
+    ssh_port_start=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+ssh = config.get('ssh', {})
+if isinstance(ssh, dict):
+    val = ssh.get('port_range_start', '')
+    if isinstance(val, int) and 1024 <= val <= 65535:
+        print(val)
+")
+    ssh_port_end=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+ssh = config.get('ssh', {})
+if isinstance(ssh, dict):
+    val = ssh.get('port_range_end', '')
+    if isinstance(val, int) and 1024 <= val <= 65535:
+        print(val)
+")
+    _CAI_SSH_PORT_RANGE_START="$ssh_port_start"
+    _CAI_SSH_PORT_RANGE_END="$ssh_port_end"
 
     # Extract excludes with cumulative merge (pass JSON via stdin):
     # default_excludes + workspace.<key>.excludes (deduped)
