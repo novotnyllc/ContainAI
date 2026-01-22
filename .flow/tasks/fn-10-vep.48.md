@@ -75,6 +75,6 @@ Added functions to lib/ssh.sh:
 
 Integrated SSH setup in container.sh for all container states (new, stopped, running) with --fresh cleanup support.
 ## Evidence
-- Commits: ce940bcfc90a27906edf26ccb2481e375f429b75
-- Tests:
+- Commits: ce940bc feat(ssh): implement SSH pub key injection and known_hosts management
+- Tests: bash -n src/lib/ssh.sh (syntax check passed)
 - PRs:
