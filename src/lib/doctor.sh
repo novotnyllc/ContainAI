@@ -94,7 +94,6 @@ _cai_check_wsl_seccomp() {
 # Auto-select Docker context based on Sysbox availability
 # Returns context name via stdout:
 #   - "containai-secure" for Sysbox context (or config override)
-#   - "" (empty) if using default context with Sysbox installed
 #   - Nothing (return 1) if no isolation available
 # Arguments: $1 = config override for context name (optional)
 #            $2 = debug flag ("debug" to enable debug output)

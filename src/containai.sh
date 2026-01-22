@@ -174,36 +174,19 @@ Run Options:
   -e, --env <VAR=val>   Set environment variable (repeatable)
   -- <args>             Pass arguments to agent
 
-Security Options (FR-5 Unsafe Opt-ins):
-  --allow-host-credentials        Enable host credential sharing (ECI mode only)
-      RISKS: Exposes ~/.ssh, ~/.gitconfig, API tokens to sandbox
-      Requires: --i-understand-this-exposes-host-credentials
-
-  --allow-host-docker-socket      Mount Docker socket (ECI mode only)
-      RISKS: Full root access, sandbox escape, host compromise
-      Requires: --i-understand-this-grants-root-access
-
-  Legacy (deprecated, still functional):
-  --credentials host + --acknowledge-credential-risk
-  --mount-docker-socket + --please-root-my-host
-
 Global Options:
   -h, --help            Show help (use with subcommand for subcommand help)
 
 Examples:
-  cai                               Start Claude sandbox (default)
-  cai --agent gemini                Start Gemini sandbox
+  cai                               Start Claude container (default)
+  cai --agent gemini                Start Gemini container
   cai -- --print                    Pass --print to Claude
   cai doctor                        Check system capabilities
-  cai shell                         Open shell in running sandbox
-  cai sandbox reset                 Remove sandbox for config changes
-  cai sandbox clear-credentials     Clear stored credentials (troubleshooting)
+  cai shell                         Open shell in running container
   cai stop --all                    Stop all containers
 
-Safe Defaults (FR-4):
-  - Credentials mode defaults to 'none' (never 'host' by default)
-  - Config credentials.mode=host is NEVER honored
-  - Host credentials require: --allow-host-credentials (or legacy --credentials=host)
+Safe Defaults:
+  - Credentials mode defaults to 'none'
   - No Docker socket mounted by default
   - No arbitrary volume mounts (only workspace + data volume for persistence)
 
@@ -212,10 +195,7 @@ Volume Selection:
   Use --data-volume to override automatic selection.
 
 Context Selection:
-  Context is automatically selected based on isolation availability:
-  - If ECI (Enhanced Container Isolation) is enabled: uses default Docker Desktop context
-  - Otherwise if containai-secure context exists: uses Sysbox isolation
-  - Otherwise: fails with actionable error message
+  Context is automatically selected based on Sysbox availability.
   Override with [secure_engine].context_name in config.
 EOF
 }
@@ -292,89 +272,29 @@ EOF
 
 _containai_sandbox_help() {
     cat <<'EOF'
-ContainAI Sandbox - Manage Docker Desktop sandboxes
+ContainAI Sandbox - DEPRECATED
 
-Usage: cai sandbox <subcommand> [options]
+The 'cai sandbox' command has been removed. ContainAI now uses Sysbox
+for container isolation instead of Docker Desktop sandboxes.
 
-Subcommands:
-  reset              Remove sandbox for workspace (config changes require reset)
-  clear-credentials  Remove sandbox credential volumes for troubleshooting
+Migration:
+  cai sandbox reset         -> cai stop && cai --restart
+  cai sandbox clear-credentials -> Not needed (Sysbox mode doesn't store credentials)
 
-Use 'cai sandbox <subcommand> --help' for subcommand-specific help.
-EOF
-}
-
-_containai_sandbox_reset_help() {
-    cat <<'EOF'
-ContainAI Sandbox Reset - Remove workspace sandbox for config changes
-
-Usage: cai sandbox reset [options]
-
-Removes the Docker Desktop sandbox for the current workspace so that
-configuration changes (env vars, mounts, credentials mode) take effect.
-
-Options:
-  -w, --workspace <path>  Workspace path (default: current directory)
-  -h, --help              Show this help message
-
-What it does:
-  1. Identifies the sandbox associated with the workspace
-  2. Stops the sandbox if running
-  3. Removes the sandbox
-  4. New configuration will apply on next 'cai run'
-
-Note: This command is for Docker Desktop sandboxes only (ECI mode).
-Sysbox mode containers should use 'cai stop' followed by 'cai --restart'.
-
-Examples:
-  cai sandbox reset                  Reset sandbox for current directory
-  cai sandbox reset --workspace ~/proj  Reset sandbox for specific workspace
-EOF
-}
-
-_containai_sandbox_clear_credentials_help() {
-    cat <<'EOF'
-ContainAI Sandbox Clear Credentials - Remove sandbox credential volumes
-
-Usage: cai sandbox clear-credentials [options]
-
-Removes the Docker sandbox credential volume for the specified agent.
-This is useful when troubleshooting authentication issues where the
-sandbox stores invalid or corrupted credentials.
-
-Options:
-  --agent <name>      Agent to clear credentials for (claude, gemini; default: claude)
-  -w, --workspace <path>  Workspace path (currently unused - volumes are global per agent)
-  -y, --yes           Skip confirmation prompt
-  -h, --help          Show this help message
-
-What it does:
-  1. Identifies the credential volume for the agent (docker-<agent>-sandbox-data)
-  2. Warns about data loss (requires confirmation)
-  3. Checks if volume is referenced by any containers (refuses if so)
-  4. Removes the credential volume
-  5. Next sandbox run will prompt for re-authentication
-
-Note: This command is for Docker Desktop sandboxes only (ECI mode).
-Sysbox mode does not use persistent credential volumes.
-
-Credential volumes are global per agent, not per workspace. All sandboxes
-using the same agent share the same credential volume.
-
-Examples:
-  cai sandbox clear-credentials               Clear Claude credentials
-  cai sandbox clear-credentials --agent gemini  Clear Gemini credentials
-  cai sandbox clear-credentials -y            Skip confirmation prompt
+For container management, use:
+  cai stop                  Stop the container
+  cai --restart             Recreate with new configuration
+  cai doctor                Check Sysbox availability
 EOF
 }
 
 _containai_shell_help() {
     cat <<'EOF'
-ContainAI Shell - Open interactive shell in sandbox
+ContainAI Shell - Open interactive shell in container
 
 Usage: cai shell [options]
 
-Opens a bash shell in the running sandbox container.
+Opens a bash shell in the running container.
 If no container exists, creates one first.
 
 Options:
@@ -389,17 +309,8 @@ Options:
   -v, --volume <spec>   Extra volume mount (repeatable)
   -h, --help            Show this help message
 
-Security Options (FR-5 Unsafe Opt-ins):
-  --allow-host-credentials        Enable host credential sharing (ECI mode only)
-      RISKS: Exposes ~/.ssh, ~/.gitconfig, API tokens to sandbox
-      Requires: --i-understand-this-exposes-host-credentials
-
-  --allow-host-docker-socket      Mount Docker socket (ECI mode only)
-      RISKS: Full root access, sandbox escape, host compromise
-      Requires: --i-understand-this-grants-root-access
-
 Examples:
-  cai shell                    Open shell in default sandbox
+  cai shell                    Open shell in default container
   cai shell --restart          Recreate container and open shell
   cai shell -e DEBUG=1         Open shell with environment variable
 EOF
@@ -411,22 +322,19 @@ ContainAI Doctor - Check system capabilities and diagnostics
 
 Usage: cai doctor [options]
 
-Checks Docker Desktop, Sandbox feature, and Sysbox availability.
+Checks Docker availability and Sysbox isolation configuration.
 Reports requirement levels and actionable remediation guidance.
 
 Requirements:
-  Docker Sandbox: REQUIRED - cai run will not work without this
-  Sysbox:         STRONGLY RECOMMENDED - enhanced isolation
+  Sysbox: REQUIRED - cai run requires Sysbox for container isolation
 
 Options:
   --json          Output machine-parseable JSON
   -h, --help      Show this help message
 
 Exit Codes:
-  0    Docker Sandbox available (minimum requirement met)
-  1    Docker Sandbox NOT available (cannot proceed)
-
-Note: Missing Sysbox produces a warning (exit 0), not an error.
+  0    Sysbox available (ready to use)
+  1    Sysbox NOT available (run 'cai setup' to configure)
 
 Examples:
   cai doctor                    Run all checks, show formatted report
@@ -773,447 +681,12 @@ _containai_stop_cmd() {
     _containai_stop_all "$@"
 }
 
-# Sandbox subcommand handler - routes to sandbox sub-subcommands
+# Sandbox subcommand - DEPRECATED (show migration message)
 _containai_sandbox_cmd() {
-    local subcmd="${1:-}"
-
-    if [[ -z "$subcmd" ]]; then
-        _containai_sandbox_help
-        return 0
-    fi
-
-    case "$subcmd" in
-        reset)
-            shift
-            _containai_sandbox_reset_cmd "$@"
-            ;;
-        clear-credentials)
-            shift
-            _containai_sandbox_clear_credentials_cmd "$@"
-            ;;
-        --help|-h)
-            _containai_sandbox_help
-            return 0
-            ;;
-        *)
-            _cai_error "Unknown sandbox subcommand: $subcmd"
-            _cai_info "Use 'cai sandbox --help' for available subcommands"
-            return 1
-            ;;
-    esac
-}
-
-# Sandbox reset subcommand handler
-# Removes the Docker Desktop sandbox for a workspace so config changes take effect
-_containai_sandbox_reset_cmd() {
-    local workspace=""
-
-    # Parse arguments
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --workspace|-w)
-                if [[ -z "${2-}" ]]; then
-                    _cai_error "--workspace requires a value"
-                    return 1
-                fi
-                workspace="$2"
-                workspace="${workspace/#\~/$HOME}"
-                shift 2
-                ;;
-            --workspace=*)
-                workspace="${1#--workspace=}"
-                if [[ -z "$workspace" ]]; then
-                    _cai_error "--workspace requires a value"
-                    return 1
-                fi
-                workspace="${workspace/#\~/$HOME}"
-                shift
-                ;;
-            -w*)
-                workspace="${1#-w}"
-                # Validate -w<path> has a non-empty, non-flag-like value
-                if [[ -z "$workspace" ]] || [[ "$workspace" == -* ]]; then
-                    _cai_error "-w requires a valid path value"
-                    return 1
-                fi
-                workspace="${workspace/#\~/$HOME}"
-                shift
-                ;;
-            --help|-h)
-                _containai_sandbox_reset_help
-                return 0
-                ;;
-            *)
-                _cai_error "Unknown option: $1"
-                _cai_info "Use 'cai sandbox reset --help' for usage"
-                return 1
-                ;;
-        esac
-    done
-
-    # Check if docker sandbox is available (Docker Desktop feature)
-    # Force default context - sandbox commands only work with Docker Desktop
-    # Let _cai_sandbox_feature_enabled show its detailed diagnostics
-    if ! DOCKER_CONTEXT= DOCKER_HOST= _cai_sandbox_feature_enabled; then
-        _cai_info "For Sysbox mode, use: cai stop && cai --restart"
-        return 1
-    fi
-
-    # Resolve workspace path (handles relative paths and symlinks)
-    local resolved_workspace
-    resolved_workspace="${workspace:-$PWD}"
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
-        _cai_error "Workspace path does not exist: ${workspace:-$PWD}"
-        return 1
-    fi
-
-    # Find sandboxes by workspace using docker sandbox ls (with timeout)
-    # Get ID and Workspace (status check is not reliable, we always try stop)
-    # Force default context for sandbox commands (Docker Desktop only)
-    # Capture stdout only for parsing; stderr goes to /dev/null for clean parsing
-    # (errors are detected via exit code, not stderr content)
-    local sandbox_list ls_rc ls_stderr
-    sandbox_list=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_timeout 10 docker sandbox ls --format '{{.ID}}	{{.Workspace}}' 2>/dev/null)
-    ls_rc=$?
-
-    # Handle timeout exit codes
-    if [[ $ls_rc -eq 124 ]]; then
-        _cai_error "docker sandbox ls timed out"
-        _cai_info "Check Docker Desktop is running and responsive"
-        return 1
-    fi
-
-    if [[ $ls_rc -ne 0 ]]; then
-        # Re-run to capture error message for diagnostics
-        ls_stderr=$(DOCKER_CONTEXT= DOCKER_HOST= docker sandbox ls --format '{{.ID}}' 2>&1 >/dev/null) || true
-        # Check if docker sandbox command is unavailable
-        # Match Docker's specific error messages to avoid false positives
-        # Docker outputs: "docker: 'sandbox' is not a docker command" or "unknown command: sandbox"
-        if printf '%s' "$ls_stderr" | grep -qiE "'sandbox' is not a docker command|unknown command.*sandbox"; then
-            _cai_error "docker sandbox command not available"
-            _cai_info "This command requires Docker Desktop 4.50+"
-            return 1
-        fi
-        _cai_error "Failed to list sandboxes: $ls_stderr"
-        return 1
-    fi
-
-    # Collect ALL matching sandbox IDs (handle multiple sandboxes for same workspace)
-    # Match by resolved path when possible, fall back to raw string comparison
-    local -a matching_ids=()
-    local id ws resolved_ws
-    while IFS=$'\t' read -r id ws; do
-        # Skip empty lines or lines missing required fields
-        [[ -z "$id" ]] && continue
-        [[ -z "$ws" ]] && continue
-
-        # Try to resolve sandbox workspace path (handles symlinks)
-        # Fall back to raw string comparison if cd fails (workspace path inaccessible)
-        if resolved_ws=$(cd -- "$ws" 2>/dev/null && pwd -P); then
-            if [[ "$resolved_ws" == "$resolved_workspace" ]]; then
-                matching_ids+=("$id")
-            fi
-        elif [[ "$ws" == "$resolved_workspace" ]]; then
-            # Fallback: raw path matches (sandbox workspace inaccessible but paths match)
-            matching_ids+=("$id")
-        fi
-    done <<< "$sandbox_list"
-
-    if [[ ${#matching_ids[@]} -eq 0 ]]; then
-        _cai_info "No sandbox found for workspace: $resolved_workspace"
-        _cai_info "Nothing to reset"
-        return 0
-    fi
-
-    # Warn if multiple sandboxes found (spec says handle gracefully)
-    if [[ ${#matching_ids[@]} -gt 1 ]]; then
-        _cai_warn "Found ${#matching_ids[@]} sandboxes for workspace (removing all):"
-        local i
-        for i in "${!matching_ids[@]}"; do
-            _cai_info "  - ${matching_ids[$i]}"
-        done
-    else
-        _cai_info "Found sandbox ${matching_ids[0]} for workspace: $resolved_workspace"
-    fi
-
-    # Stop and remove each matching sandbox
-    # Always attempt stop first (don't rely on status field - not always reliable)
-    # Ignore "not running" errors from stop
-    # Force default context for sandbox commands (Docker Desktop only)
-    local sandbox_id idx stop_output rm_output stop_rc rm_rc
-    local any_failed=false
-    for idx in "${!matching_ids[@]}"; do
-        sandbox_id="${matching_ids[$idx]}"
-
-        # Always try to stop (ignore "not running" errors)
-        _cai_info "Stopping sandbox $sandbox_id..."
-        stop_output=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_timeout 30 docker sandbox stop "$sandbox_id" 2>&1)
-        stop_rc=$?
-        if [[ $stop_rc -ne 0 ]]; then
-            # Ignore "not running" errors
-            if ! printf '%s' "$stop_output" | grep -qiE "not running|already stopped"; then
-                _cai_warn "Failed to stop sandbox $sandbox_id: $stop_output"
-            fi
-        fi
-
-        # Remove the sandbox
-        _cai_info "Removing sandbox $sandbox_id..."
-        rm_output=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_timeout 30 docker sandbox rm "$sandbox_id" 2>&1)
-        rm_rc=$?
-        if [[ $rm_rc -ne 0 ]]; then
-            # Check for "already removed" errors
-            if printf '%s' "$rm_output" | grep -qiE "no such sandbox|does not exist"; then
-                _cai_info "Sandbox $sandbox_id already removed"
-                continue
-            fi
-            _cai_error "Failed to remove sandbox $sandbox_id: $rm_output"
-            any_failed=true
-            continue
-        fi
-    done
-
-    # Verify removal by checking that the specific removed IDs no longer exist
-    # This avoids false negatives if a new sandbox was created concurrently for the same workspace
-    local verify_list verify_rc
-    verify_list=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_timeout 10 docker sandbox ls --format '{{.ID}}' 2>/dev/null)
-    verify_rc=$?
-
-    if [[ $verify_rc -eq 124 ]]; then
-        # Timeout during verification - cannot confirm removal (fail-closed)
-        _cai_error "Verification timed out - cannot confirm removal"
-        return 1
-    elif [[ $verify_rc -eq 0 ]]; then
-        # Check if any of the removed IDs still exist
-        local removed_id still_exists=false
-        for removed_id in "${matching_ids[@]}"; do
-            if printf '%s\n' "$verify_list" | grep -qxF "$removed_id"; then
-                _cai_error "Sandbox $removed_id still exists after removal"
-                still_exists=true
-            fi
-        done
-        if [[ "$still_exists" == "true" ]]; then
-            return 1
-        fi
-    else
-        # Verification listing failed - cannot confirm removal (fail-closed)
-        _cai_error "Verification listing failed - cannot confirm removal"
-        return 1
-    fi
-
-    if [[ "$any_failed" == "true" ]]; then
-        _cai_warn "Some sandboxes failed to remove"
-        return 1
-    fi
-
-    _cai_ok "Sandbox removed. New config will apply on next 'cai run'"
-    return 0
-}
-
-# Sandbox clear-credentials subcommand handler
-# Removes credential volumes for Docker Desktop sandboxes
-_containai_sandbox_clear_credentials_cmd() {
-    local agent="claude"
-    local workspace=""
-    local skip_confirm="false"
-
-    # Parse arguments
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --agent)
-                if [[ -z "${2-}" ]]; then
-                    _cai_error "--agent requires a value"
-                    return 1
-                fi
-                agent="$2"
-                shift 2
-                ;;
-            --agent=*)
-                agent="${1#--agent=}"
-                if [[ -z "$agent" ]]; then
-                    _cai_error "--agent requires a value"
-                    return 1
-                fi
-                shift
-                ;;
-            --workspace|-w)
-                # Accept --workspace for spec compatibility, but volumes are global per agent
-                if [[ -z "${2-}" ]]; then
-                    _cai_error "--workspace requires a value"
-                    return 1
-                fi
-                workspace="$2"
-                workspace="${workspace/#\~/$HOME}"
-                shift 2
-                ;;
-            --workspace=*)
-                workspace="${1#--workspace=}"
-                if [[ -z "$workspace" ]]; then
-                    _cai_error "--workspace requires a value"
-                    return 1
-                fi
-                workspace="${workspace/#\~/$HOME}"
-                shift
-                ;;
-            -w*)
-                workspace="${1#-w}"
-                if [[ -z "$workspace" ]] || [[ "$workspace" == -* ]]; then
-                    _cai_error "-w requires a valid path value"
-                    return 1
-                fi
-                workspace="${workspace/#\~/$HOME}"
-                shift
-                ;;
-            -y|--yes)
-                skip_confirm="true"
-                shift
-                ;;
-            --help|-h)
-                _containai_sandbox_clear_credentials_help
-                return 0
-                ;;
-            *)
-                _cai_error "Unknown option: $1"
-                _cai_info "Use 'cai sandbox clear-credentials --help' for usage"
-                return 1
-                ;;
-        esac
-    done
-
-    # Validate agent name
-    case "$agent" in
-        claude|gemini)
-            ;;
-        *)
-            _cai_error "Unknown agent: $agent"
-            _cai_info "Supported agents: claude, gemini"
-            return 1
-            ;;
-    esac
-
-    # Note: --workspace is accepted for spec compatibility but credential volumes
-    # are global per agent (not per workspace). All sandboxes using the same agent
-    # share the same credential volume (docker-<agent>-sandbox-data).
-    if [[ -n "$workspace" ]]; then
-        _cai_info "Note: Credential volumes are global per agent, not per workspace"
-    fi
-
-    # Check if docker sandbox is available (Docker Desktop feature)
-    # Force default context - sandbox commands only work with Docker Desktop
-    if ! DOCKER_CONTEXT= DOCKER_HOST= _cai_sandbox_feature_enabled; then
-        _cai_info "Credential volumes are a Docker Desktop sandbox feature"
-        _cai_info "Sysbox mode does not use persistent credential volumes"
-        return 1
-    fi
-
-    # Credential volume naming convention from Docker docs:
-    # https://docs.docker.com/ai/sandboxes/troubleshooting/
-    # Claude: docker-claude-sandbox-data
-    # Gemini: docker-gemini-sandbox-data
-    local volume_name="docker-${agent}-sandbox-data"
-
-    # Check if volume exists
-    # Force default context for volume operations (Docker Desktop only)
-    # Capture stderr to distinguish "not found" from real errors
-    # Use if/else guard for set -e safety (pitfall: var=$(); rc=$? is dead code under set -e)
-    local inspect_output
-    if inspect_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume inspect "$volume_name" 2>&1); then
-        : # Volume exists - continue to removal flow
-    else
-        # Distinguish "not found" (benign) from other errors (should surface)
-        if printf '%s' "$inspect_output" | grep -qiE "no such volume|not found"; then
-            _cai_info "No credential volume found: $volume_name"
-            _cai_info "Nothing to clear"
-            return 0
-        fi
-        # Real error - surface it
-        _cai_error "Failed to inspect volume: $inspect_output"
-        return 1
-    fi
-
-    # Volume exists - warn user and confirm
-    _cai_warn "This will remove sandbox data volume for $agent"
-    _cai_warn "Volume: $volume_name"
-    _cai_warn "This volume stores credentials and may contain other sandbox data"
-    _cai_warn "You will need to re-authenticate on next sandbox run"
-
-    # Check if volume is referenced by any container (running OR stopped)
-    # Docker cannot remove volumes that are referenced by any container
-    local using_containers container_names
-    using_containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker ps -a --filter "volume=$volume_name" --format '{{.Names}} ({{.Status}})' 2>/dev/null) || using_containers=""
-    container_names=$(DOCKER_CONTEXT= DOCKER_HOST= docker ps -a --filter "volume=$volume_name" --format '{{.Names}}' 2>/dev/null) || container_names=""
-
-    if [[ -n "$using_containers" ]]; then
-        _cai_error "Cannot remove volume - referenced by containers:"
-        local container_line
-        while IFS= read -r container_line; do
-            if [[ -n "$container_line" ]]; then
-                _cai_error "  - $container_line"
-            fi
-        done <<< "$using_containers"
-
-        _cai_info ""
-        _cai_info "Remove the containers first with one of:"
-        _cai_info "  cai sandbox reset    (removes sandbox for current workspace)"
-        # Show specific container names for manual removal
-        local name_line
-        while IFS= read -r name_line; do
-            if [[ -n "$name_line" ]]; then
-                _cai_info "  docker rm $name_line"
-            fi
-        done <<< "$container_names"
-        return 1
-    fi
-
-    # Confirm unless -y/--yes specified
-    if [[ "$skip_confirm" != "true" ]]; then
-        if [[ ! -t 0 ]]; then
-            _cai_error "Non-interactive terminal - use -y/--yes to skip confirmation"
-            return 1
-        fi
-
-        printf '%s' "Remove sandbox data volume? [y/N] "
-        local confirm
-        if ! read -r confirm; then
-            _cai_info "Cancelled"
-            return 0
-        fi
-
-        case "$confirm" in
-            y|Y|yes|YES)
-                ;;
-            *)
-                _cai_info "Cancelled"
-                return 0
-                ;;
-        esac
-    fi
-
-    # Remove the volume
-    # Use if/else guard for set -e safety
-    _cai_info "Removing volume: $volume_name"
-    local rm_output
-    if rm_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker volume rm "$volume_name" 2>&1); then
-        : # Success - continue to verification
-    else
-        # Check for "in use" error (race condition - container appeared after our check)
-        if printf '%s' "$rm_output" | grep -qiE "in use|being used|volume is in use"; then
-            _cai_error "Volume is in use by a container (appeared after check)"
-            _cai_info "Remove containers referencing this volume first"
-            return 1
-        fi
-        _cai_error "Failed to remove volume: $rm_output"
-        return 1
-    fi
-
-    # Verify removal
-    if DOCKER_CONTEXT= DOCKER_HOST= docker volume inspect "$volume_name" >/dev/null 2>&1; then
-        _cai_error "Volume still exists after removal"
-        return 1
-    fi
-
-    _cai_ok "Sandbox data volume removed: $volume_name"
-    _cai_info "Re-authenticate on next: cai --agent $agent"
-    return 0
+    _containai_sandbox_help
+    _cai_error "The 'cai sandbox' command has been removed"
+    _cai_info "Use 'cai stop && cai --restart' to recreate containers"
+    return 1
 }
 
 # Doctor subcommand handler

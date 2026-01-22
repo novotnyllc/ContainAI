@@ -888,14 +888,12 @@ _containai_start_container() {
         agent="$_CONTAINAI_DEFAULT_AGENT"
     fi
 
-    # Reject legacy ECI-only options that are no longer supported
-    # These features were only available with Docker Desktop's docker sandbox run command
+    # Reject legacy options that are no longer supported
     if [[ "$allow_host_credentials" == "true" ]] || [[ "$credentials" == "host" ]]; then
         echo "" >&2
         echo "[ERROR] --credentials=host and --allow-host-credentials are no longer supported" >&2
         echo "" >&2
-        echo "Host credential sharing was an ECI (docker sandbox run) feature." >&2
-        echo "ContainAI now uses Sysbox for container isolation." >&2
+        echo "Host credential sharing is not available with Sysbox isolation." >&2
         echo "" >&2
         echo "For credential access inside containers, use 'cai import' to copy credentials." >&2
         echo "" >&2
@@ -906,8 +904,7 @@ _containai_start_container() {
         echo "" >&2
         echo "[ERROR] --mount-docker-socket and --allow-host-docker-socket are no longer supported" >&2
         echo "" >&2
-        echo "Docker socket mounting was an ECI (docker sandbox run) feature." >&2
-        echo "ContainAI now uses Sysbox for container isolation." >&2
+        echo "Docker socket mounting is not available with Sysbox isolation." >&2
         echo "" >&2
         echo "Sysbox containers have Docker-in-Docker capability built in." >&2
         echo "Use the inner Docker daemon instead of mounting the host socket." >&2
