@@ -531,7 +531,7 @@ _containai_check_container_ownership() {
 
     echo "[ERROR] Container '$container_name' exists but was not created by ContainAI" >&2
     echo "" >&2
-    echo "  Expected label 'containai.managed': containai" >&2
+    echo "  Expected label 'containai.managed': true" >&2
     echo "  Actual label 'containai.managed':   ${label_value:-<not set>}" >&2
     echo "  Expected image prefix:              ${_CONTAINAI_DEFAULT_REPO}:" >&2
     echo "  Actual image:                       ${actual_image:-<unknown>}" >&2
@@ -961,7 +961,7 @@ _containai_start_container() {
     fi
 
     # Build docker command prefix based on context
-    # Context is always Sysbox mode (ECI/docker sandbox was removed)
+    # Context is always Sysbox mode
     local -a docker_cmd=(docker)
     if [[ -n "$selected_context" ]]; then
         docker_cmd=(docker --context "$selected_context")

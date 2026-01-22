@@ -151,7 +151,7 @@ Subcommands:
   doctor        Check system capabilities and show diagnostics
   setup         Install Sysbox Secure Engine (WSL2/macOS)
   validate      Validate Secure Engine configuration
-  sandbox       Manage Docker Desktop sandboxes (reset, etc.)
+  sandbox       (Deprecated - use 'cai stop && cai --restart')
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
@@ -161,7 +161,7 @@ Subcommands:
 
 Run Options:
   --agent <name>        Agent to run (claude, gemini; default: claude)
-  --credentials <mode>  Credential mode (none, host; default: none)
+  --credentials <mode>  Credential mode (none; default: none)
   --image-tag <tag>     Override image tag (default: agent-specific)
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)

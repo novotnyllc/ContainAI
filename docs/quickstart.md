@@ -56,9 +56,8 @@ cai doctor
 
 | Output | Meaning | Action |
 |--------|---------|--------|
-| `ECI Path: [OK]` | Docker Desktop with Enhanced Container Isolation | Ready to go! |
-| `Sysbox Path: [OK]` | Sysbox runtime configured | Ready to go! |
-| `ECI Path: [ERROR]` + `Sysbox Path: [WARN]` | No isolation available | See runtime options below |
+| `Sysbox: [OK]` | Sysbox runtime configured | Ready to go! |
+| `Sysbox: [ERROR]` | No isolation available | Install Sysbox (see below) |
 
 ### Runtime Decision Tree
 
@@ -75,17 +74,13 @@ cai doctor
 }}}%%
 flowchart TD
     doctor["cai doctor"]
-    doctor --> eci["ECI Path<br/>[OK]"]
-    doctor --> sysbox["Sysbox Path<br/>[OK]"]
-    eci --> ready["Ready to run!<br/>cai"]
-    sysbox --> ready
+    doctor --> sysbox["Sysbox<br/>[OK]"]
+    sysbox --> ready["Ready to run!<br/>cai"]
 
-    doctor -.->|neither OK| optionA
-    doctor -.->|neither OK| optionB
+    doctor -.->|not OK| install
 
-    subgraph fallback["If neither path is OK"]
-        optionA["Option A: Enable Docker Desktop sandbox<br/>1. Open Docker Desktop Settings<br/>2. Go to Features in development<br/>3. Enable Docker sandbox or ECI<br/>4. Restart Docker Desktop"]
-        optionB["Option B: Install Sysbox - Linux/WSL2<br/>Run: cai setup"]
+    subgraph fallback["If Sysbox not available"]
+        install["Install Sysbox<br/>WSL2/macOS: Run 'cai setup'<br/>Native Linux: See Sysbox docs"]
     end
 ```
 

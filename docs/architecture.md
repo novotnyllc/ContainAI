@@ -92,7 +92,6 @@ flowchart LR
         Core["core.sh<br/>(logging)"]
         Platform["platform.sh<br/>(OS detection)"]
         DockerLib["docker.sh<br/>(Docker helpers)"]
-        ECILib["eci.sh<br/>(ECI detection)"]
         DoctorLib["doctor.sh<br/>(health checks)"]
         ConfigLib["config.sh<br/>(TOML parsing)"]
         ContainerLib["container.sh<br/>(container ops)"]
@@ -143,8 +142,7 @@ flowchart TD
     Main["containai.sh"] --> Core["lib/core.sh<br/>(logging)"]
     Core --> Platform["lib/platform.sh<br/>(OS detection)"]
     Platform --> Docker["lib/docker.sh<br/>(Docker helpers)"]
-    Docker --> ECI["lib/eci.sh<br/>(ECI detection)"]
-    ECI --> Doctor["lib/doctor.sh<br/>(health checks)"]
+    Docker --> Doctor["lib/doctor.sh<br/>(health checks)"]
     Doctor --> Config["lib/config.sh<br/>(TOML parsing)"]
     Config --> Container["lib/container.sh<br/>(container ops)"]
     Container --> Import["lib/import.sh<br/>(dotfile sync)"]
@@ -156,7 +154,6 @@ flowchart TD
     style Core fill:#e94560,stroke:#16213e,color:#fff
     style Platform fill:#e94560,stroke:#16213e,color:#fff
     style Docker fill:#0f3460,stroke:#16213e,color:#fff
-    style ECI fill:#0f3460,stroke:#16213e,color:#fff
     style Doctor fill:#0f3460,stroke:#16213e,color:#fff
     style Config fill:#1a1a2e,stroke:#16213e,color:#fff
     style Container fill:#16213e,stroke:#0f3460,color:#fff
@@ -174,8 +171,7 @@ All modules are located in `src/lib/`:
 |--------|---------|-------------------|
 | `core.sh` | Logging and utilities | `_cai_info`, `_cai_error`, `_cai_warn`, `_cai_ok`, `_cai_debug` |
 | `platform.sh` | OS/platform detection | `_cai_detect_platform`, `_cai_is_wsl`, `_cai_is_macos` |
-| `docker.sh` | Docker availability/version | `_cai_docker_available`, `_cai_sandbox_feature_enabled`, `_cai_timeout` |
-| `eci.sh` | Enhanced Container Isolation | `_cai_eci_available`, `_cai_eci_enabled`, `_cai_eci_check_uid_map` |
+| `docker.sh` | Docker availability/version | `_cai_docker_available`, `_cai_docker_version`, `_cai_timeout` |
 | `doctor.sh` | System health checks | `_cai_doctor`, `_cai_select_context`, `_cai_sysbox_available_for_context` |
 | `config.sh` | TOML config parsing | `_containai_find_config`, `_containai_parse_config`, `_containai_resolve_volume` |
 | `container.sh` | Container lifecycle | `_containai_start_container`, `_containai_stop_all`, `_containai_check_isolation` |
@@ -184,9 +180,9 @@ All modules are located in `src/lib/`:
 | `setup.sh` | Sysbox installation | `_cai_setup` (install Sysbox Secure Engine) |
 | `env.sh` | Environment variables | `_containai_import_env` (allowlist-based env import) |
 
-## Execution Paths
+## Execution Path
 
-ContainAI supports two isolation mechanisms, automatically selected based on availability.
+ContainAI uses Sysbox for container isolation.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -200,38 +196,19 @@ ContainAI supports two isolation mechanisms, automatically selected based on ava
   'background': '#0d1117'
 }}}%%
 flowchart TD
-    Start["cai run"] --> ECICheck{"ECI Enabled +<br/>Sandboxes Available?"}
-
-    ECICheck -->|Yes| ECI["Docker Desktop ECI Mode<br/>(docker sandbox run)"]
-    ECICheck -->|No| SysboxCheck{"Sysbox Available?<br/>(containai-secure context)"}
+    Start["cai run"] --> SysboxCheck{"Sysbox Available?<br/>(containai-secure context)"}
 
     SysboxCheck -->|Yes| Sysbox["Sysbox Mode<br/>(--runtime=sysbox-runc)"]
     SysboxCheck -->|No| Fail["ERROR: No isolation<br/>(run cai doctor)"]
 
-    ECI --> Container["Container Running<br/>(isolated)"]
-    Sysbox --> Container
+    Sysbox --> Container["Container Running<br/>(isolated)"]
 
     style Start fill:#1a1a2e,stroke:#16213e,color:#fff
-    style ECICheck fill:#0f3460,stroke:#16213e,color:#fff
     style SysboxCheck fill:#0f3460,stroke:#16213e,color:#fff
-    style ECI fill:#16213e,stroke:#16213e,color:#fff
     style Sysbox fill:#16213e,stroke:#16213e,color:#fff
     style Fail fill:#e94560,stroke:#16213e,color:#fff
     style Container fill:#1a1a2e,stroke:#16213e,color:#fff
 ```
-
-### Docker Desktop ECI Mode
-
-**Requirements**: Docker Desktop with ECI enabled AND sandbox feature available
-
-The Docker Desktop path requires BOTH conditions (see `_cai_select_context` in `src/lib/doctor.sh`):
-1. Enhanced Container Isolation (ECI) enabled (requires Business subscription + admin)
-2. Sandbox feature available (`docker sandbox` command works)
-
-When both are met:
-- Uses `docker sandbox run` command
-- Automatic user namespace remapping (uid 0 -> 100000+)
-- sysbox-runc runtime for stronger isolation
 
 ### Sysbox Mode (WSL2/macOS)
 
