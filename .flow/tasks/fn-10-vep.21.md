@@ -41,9 +41,8 @@ This is fragile and hard to maintain.
 - [ ] Dockerfile.test builds successfully
 - [ ] All tests still pass
 ## Done summary
-TBD
-
+Extracted printf heredoc hacks from Dockerfile.test into external files: daemon.json config to src/configs/daemon-test.json, startup script to src/scripts/start-dockerd.sh, and test script to src/scripts/test-dind.sh. Updated Dockerfile.test to use COPY statements and updated README documentation to reference the new script paths.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: a82177da2fa85073bbf0416bd25f75156dc565b8, 51e3a48fe71a232a7d219a8aa3f2cac965117101
+- Tests: shellcheck src/scripts/start-dockerd.sh, shellcheck src/scripts/test-dind.sh, jq . src/configs/daemon-test.json
 - PRs:
