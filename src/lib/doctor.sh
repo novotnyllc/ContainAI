@@ -190,6 +190,13 @@ _cai_select_context() {
 # Arguments: $1 = context name
 # Returns: 0=available, 1=not available
 # Outputs: Sets _CAI_SYSBOX_CONTEXT_ERROR with reason on failure
+# Error codes:
+#   context_not_found - Docker context not configured
+#   timeout - Connection timed out
+#   permission_denied - User not in docker group (Lima/macOS)
+#   connection_refused - Docker daemon not running
+#   daemon_unavailable - Generic daemon error
+#   runtime_not_found - Sysbox runtime not registered
 _cai_sysbox_available_for_context() {
     local context_name="${1:-containai-secure}"
     _CAI_SYSBOX_CONTEXT_ERROR=""
@@ -210,7 +217,14 @@ _cai_sysbox_available_for_context() {
     fi
 
     if [[ $rc -ne 0 ]]; then
-        _CAI_SYSBOX_CONTEXT_ERROR="daemon_unavailable"
+        # Diagnose specific failure modes
+        if printf '%s' "$info_output" | grep -qi "permission denied"; then
+            _CAI_SYSBOX_CONTEXT_ERROR="permission_denied"
+        elif printf '%s' "$info_output" | grep -qi "connection refused"; then
+            _CAI_SYSBOX_CONTEXT_ERROR="connection_refused"
+        else
+            _CAI_SYSBOX_CONTEXT_ERROR="daemon_unavailable"
+        fi
         return 1
     fi
 
@@ -231,6 +245,14 @@ _cai_sysbox_available_for_context() {
 # Returns: 0=available, 1=not available
 # Outputs: Sets _CAI_SYSBOX_ERROR with reason on failure
 #          Sets _CAI_SYSBOX_CONTEXT_EXISTS with true/false
+# Error codes:
+#   socket_not_found - Socket file does not exist
+#   context_not_found - Docker context not configured
+#   timeout - Connection timed out
+#   permission_denied - User not in docker group (Lima/macOS)
+#   connection_refused - Docker daemon not running
+#   daemon_unavailable - Generic daemon error
+#   runtime_not_found - Sysbox runtime not registered
 _cai_sysbox_available() {
     _CAI_SYSBOX_ERROR=""
     _CAI_SYSBOX_CONTEXT_EXISTS="false"
@@ -280,7 +302,14 @@ _cai_sysbox_available() {
     fi
 
     if [[ $rc -ne 0 ]]; then
-        _CAI_SYSBOX_ERROR="daemon_unavailable"
+        # Diagnose specific failure modes
+        if printf '%s' "$info_output" | grep -qi "permission denied"; then
+            _CAI_SYSBOX_ERROR="permission_denied"
+        elif printf '%s' "$info_output" | grep -qi "connection refused"; then
+            _CAI_SYSBOX_ERROR="connection_refused"
+        else
+            _CAI_SYSBOX_ERROR="daemon_unavailable"
+        fi
         return 1
     fi
 
@@ -382,12 +411,34 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Context '$sysbox_context_name':" "[OK] Configured"
     else
         printf '  %-44s %s\n' "Sysbox available:" "[ERROR] Not configured"
-        case "${_CAI_SYSBOX_CONTEXT_ERROR:-${_CAI_SYSBOX_ERROR:-}}" in
+        local sysbox_error="${_CAI_SYSBOX_CONTEXT_ERROR:-${_CAI_SYSBOX_ERROR:-}}"
+        case "$sysbox_error" in
             socket_not_found)
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox)"
+                if [[ "$platform" == "macos" ]]; then
+                    printf '  %-44s %s\n' "" "(Lima VM not running or not provisioned)"
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' or 'limactl start containai-secure')"
+                else
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox)"
+                fi
                 ;;
             context_not_found)
                 printf '  %-44s %s\n' "" "(Run 'cai setup' to configure '$sysbox_context_name' context)"
+                ;;
+            permission_denied)
+                if [[ "$platform" == "macos" ]]; then
+                    printf '  %-44s %s\n' "" "(User not in docker group inside Lima VM)"
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' to repair, or restart Lima VM)"
+                else
+                    printf '  %-44s %s\n' "" "(Permission denied - check docker group membership)"
+                fi
+                ;;
+            connection_refused)
+                if [[ "$platform" == "macos" ]]; then
+                    printf '  %-44s %s\n' "" "(Docker daemon not running inside Lima VM)"
+                    printf '  %-44s %s\n' "" "(Try: limactl shell containai-secure sudo systemctl start docker)"
+                else
+                    printf '  %-44s %s\n' "" "(Docker daemon not running)"
+                fi
                 ;;
             daemon_unavailable)
                 printf '  %-44s %s\n' "" "(Docker daemon for '$sysbox_context_name' not running)"
@@ -542,11 +593,13 @@ _cai_doctor_json() {
     fi
 
     # Check Sysbox with configured context name
+    local sysbox_error=""
     if _cai_sysbox_available_for_context "$sysbox_context_name"; then
         sysbox_ok="true"
         sysbox_runtime="sysbox-runc"
         sysbox_context_exists="true"
     else
+        sysbox_error="${_CAI_SYSBOX_CONTEXT_ERROR:-unknown}"
         # Check if context exists even if not usable
         if docker context inspect "$sysbox_context_name" >/dev/null 2>&1; then
             sysbox_context_exists="true"
@@ -584,7 +637,33 @@ _cai_doctor_json() {
         # Sysbox installed but kernel too old
         recommended_action="upgrade_kernel"
     else
-        recommended_action="setup_required"
+        # Determine recommended action based on error code
+        case "$sysbox_error" in
+            socket_not_found)
+                if [[ "$platform" == "macos" ]]; then
+                    recommended_action="start_lima_vm"
+                else
+                    recommended_action="setup_required"
+                fi
+                ;;
+            permission_denied)
+                if [[ "$platform" == "macos" ]]; then
+                    recommended_action="restart_lima_vm"
+                else
+                    recommended_action="setup_required"
+                fi
+                ;;
+            connection_refused)
+                if [[ "$platform" == "macos" ]]; then
+                    recommended_action="start_docker_in_lima"
+                else
+                    recommended_action="start_docker"
+                fi
+                ;;
+            *)
+                recommended_action="setup_required"
+                ;;
+        esac
     fi
 
     # Output JSON
@@ -597,7 +676,12 @@ _cai_doctor_json() {
         printf '    "runtime": null,\n'
     fi
     printf '    "context_exists": %s,\n' "$sysbox_context_exists"
-    printf '    "context_name": "%s"\n' "$(_cai_json_escape "$sysbox_context_name")"
+    printf '    "context_name": "%s",\n' "$(_cai_json_escape "$sysbox_context_name")"
+    if [[ -n "$sysbox_error" ]]; then
+        printf '    "error": "%s"\n' "$(_cai_json_escape "$sysbox_error")"
+    else
+        printf '    "error": null\n'
+    fi
     printf '  },\n'
     printf '  "platform": {\n'
     printf '    "type": "%s",\n' "$platform_json"
