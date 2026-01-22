@@ -342,13 +342,9 @@ WRAPPER_EOF
             path_line="export PATH=\"$BIN_DIR:\$PATH\""
         fi
 
-        # Extract basename of BIN_DIR for grep pattern (handle custom paths)
-        local bin_dir_pattern
-        bin_dir_pattern="$(basename "$BIN_DIR")"
-
         if [[ -f "$rc_file" ]]; then
-            # Check if already present (look for the bin directory name)
-            if ! grep -q "$bin_dir_pattern" "$rc_file" 2>/dev/null; then
+            # Check if already present (match full BIN_DIR path to avoid false positives)
+            if ! grep -qF -- "$BIN_DIR" "$rc_file" 2>/dev/null; then
                 {
                     echo ""
                     echo "# Added by ContainAI installer"
@@ -357,7 +353,7 @@ WRAPPER_EOF
                 success "Added $BIN_DIR to PATH in $rc_file"
                 warn "Run 'source $rc_file' or start a new terminal to use cai"
             else
-                info "$rc_file already contains PATH entry for $bin_dir_pattern"
+                info "$rc_file already contains PATH entry for $BIN_DIR"
             fi
         else
             # Create the rc file
