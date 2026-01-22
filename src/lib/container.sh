@@ -1457,12 +1457,22 @@ _containai_start_container() {
             if [[ -n "$selected_context" ]]; then
                 args+=(--context "$selected_context")
             fi
+            # Allocate SSH port for this container
+            local ssh_port
+            if ! ssh_port=$(_cai_allocate_ssh_port "$container_name" "$selected_context"); then
+                echo "[ERROR] Failed to allocate SSH port for container" >&2
+                return 1
+            fi
+            _cai_debug "Allocated SSH port $ssh_port for container $container_name"
+
             args+=(run)
             args+=(--runtime=sysbox-runc)
             args+=(--init)  # tini becomes PID 1 to properly reap zombie processes
             args+=(--name "$container_name")
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
+            args+=(--label "containai.ssh-port=$ssh_port")
+            args+=(-p "${ssh_port}:22")  # Map allocated port to container SSH
             args+=(-d)  # Always detached - tini manages sleep infinity as child
 
             # Volume mounts

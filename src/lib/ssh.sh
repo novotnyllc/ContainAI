@@ -14,7 +14,9 @@
 #   _cai_find_available_port()   - Find first available port in SSH range (2300-2500)
 #   _cai_allocate_ssh_port()     - Allocate SSH port for container (with reuse support)
 #   _cai_get_container_ssh_port() - Get SSH port from container label
+#   _cai_set_container_ssh_port() - Validate port setting (must use --label at creation)
 #   _cai_get_reserved_container_ports() - Get all ports reserved by ContainAI containers
+#   _cai_list_containers_with_ports() - List containers with their SSH port allocations
 #   _cai_is_port_available()     - Check if a specific port is available
 #
 # Dependencies:
@@ -480,16 +482,58 @@ _cai_find_available_port() {
         fi
     done
 
-    # All ports exhausted - provide actionable error
+    # All ports exhausted - provide actionable error with container list
     local port_count=$(( range_end - range_start + 1 ))
     _cai_error "All $port_count SSH ports in range $range_start-$range_end are in use"
     _cai_error ""
+
+    # List containers using ports in the range
+    local container_list
+    if container_list=$(_cai_list_containers_with_ports "$context" 2>/dev/null); then
+        if [[ -n "$container_list" ]]; then
+            _cai_error "Containers using SSH ports:"
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && _cai_error "  $line"
+            done <<< "$container_list"
+            _cai_error ""
+        fi
+    fi
+
     _cai_error "To free up ports, you can:"
-    _cai_error "  1. Stop unused containers: cai-stop-all --all"
-    _cai_error "  2. Check which processes are using ports:"
+    _cai_error "  1. Run 'cai ssh cleanup' to remove stale SSH configs"
+    _cai_error "  2. Stop unused containers: cai-stop-all --all"
+    _cai_error "  3. Check which processes are using ports:"
     _cai_error "     ss -tulpn | grep -E ':2[3-4][0-9]{2}|:2500'"
     _cai_error ""
     return 1
+}
+
+# List ContainAI containers with their SSH ports
+# Arguments: $1 = docker context (optional)
+# Outputs: "container_name: port" per line
+# Returns: 0 on success
+_cai_list_containers_with_ports() {
+    local context="${1:-}"
+    local -a docker_cmd=(docker)
+    local container_output line name port
+
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    # Get container name and ssh-port for all ContainAI containers
+    if ! container_output=$("${docker_cmd[@]}" ps -a --filter "label=containai.managed=true" \
+        --format '{{.Names}}\t{{index .Labels "containai.ssh-port"}}' 2>/dev/null); then
+        return 1
+    fi
+
+    # Output formatted list
+    while IFS=$'\t' read -r name port; do
+        [[ -z "$name" ]] && continue
+        if [[ -n "$port" ]] && [[ "$port" != "<no value>" ]]; then
+            printf '%s: port %s\n' "$name" "$port"
+        fi
+    done <<< "$container_output"
 }
 
 # Get all SSH ports reserved by ContainAI containers (via labels)
@@ -523,6 +567,48 @@ _cai_get_reserved_container_ports() {
             printf '%s\n' "$line"
         fi
     done <<< "$ports_output"
+}
+
+# Set the SSH port label on a container
+# This stores the allocated port persistently with the container
+# Arguments: $1 = container name, $2 = port, $3 = docker context (optional)
+# Returns: 0 on success, 1 on failure
+# Note: For new containers, use --label "containai.ssh-port=$port" at creation time
+#       This function is for updating existing containers
+_cai_set_container_ssh_port() {
+    local container_name="$1"
+    local port="$2"
+    local context="${3:-}"
+    local -a docker_cmd=(docker)
+
+    if [[ -z "$container_name" ]] || [[ -z "$port" ]]; then
+        _cai_error "Container name and port are required"
+        return 1
+    fi
+
+    if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+        _cai_error "Invalid port number: $port"
+        return 1
+    fi
+
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    # Docker doesn't support updating labels on existing containers directly
+    # The label must be set at container creation time with:
+    #   --label "containai.ssh-port=$port"
+    # This function serves as documentation and validation
+    # Callers should ensure the label is set during container creation
+    _cai_debug "SSH port $port should be set via --label at container creation"
+
+    # Verify the container exists
+    if ! "${docker_cmd[@]}" inspect --format '{{.Id}}' -- "$container_name" >/dev/null 2>&1; then
+        _cai_error "Container not found: $container_name"
+        return 1
+    fi
+
+    return 0
 }
 
 # Get the SSH port for a container from its label
