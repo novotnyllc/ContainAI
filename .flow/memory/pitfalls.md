@@ -124,3 +124,6 @@ SSH host keys generated at docker build time are baked into the image - all cont
 
 ## 2026-01-22 manual [pitfall]
 Systemd services with User= don't set HOME env var - add Environment=HOME=/path or set default in script with : "${HOME:=/default}"
+
+## 2026-01-22 manual [pitfall]
+Systemd Wants= is advisory - unit starts even if wanted unit doesn't exist; use Requires= for hard dependencies
