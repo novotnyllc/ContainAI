@@ -75,6 +75,9 @@ RUN rm -rf /home/ubuntu \
     && chown agent:agent /home/agent/.bashrc \
     && chown agent:agent /home/agent/.profile \
     \
+    && groupadd docker \
+    && usermod -aG docker agent \
+    \
     && rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 
 # Install system dependencies and build tools in one layer
@@ -84,13 +87,20 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && . /etc/os-release && \
+        echo "Types: deb" > /etc/apt/sources.list.d/docker.sources && \
+        echo "URIs: https://download.docker.com/linux/ubuntu" >> /etc/apt/sources.list.d/docker.sources && \
+        echo "Suites: ${UBUNTU_CODENAME:-$VERSION_CODENAME}" >> /etc/apt/sources.list.d/docker.sources && \
+        echo "Components: stable" >> /etc/apt/sources.list.d/docker.sources && \
+        echo "Signed-By: /etc/apt/keyrings/docker.gpg" >> /etc/apt/sources.list.d/docker.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     # Core utilities
-    curl \
     wget \
     git \
-    ca-certificates \
     gnupg \
     lsb-release \
     software-properties-common \
@@ -121,7 +131,23 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libssl3t64 \
     libstdc++6 \
     tzdata \
-    zlib1g
+    zlib1g \
+    libnss3 \
+    # Additional dependencies for browser-based agents & remotion
+    libdbus-1-3 \
+    libatk1.0-0 \
+    libasound2t64 \
+    libxrandr2 \
+    libxkbcommon-dev \
+    libxfixes3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libgbm-dev \
+    libcups2 \
+    libcairo2 \
+    libpango-1.0-0 \
+    libatk-bridge2.0-0 
+
 
 USER agent
 
@@ -150,7 +176,7 @@ ENV BASH_ENV=${HOME}/.bash_env
 
 RUN curl -fsSL https://bun.com/install | bash \
     && curl -LsSf https://astral.sh/uv/install.sh | bash \
-    && curl -s https://ohmyposh.dev/install.sh | bash -s \
+    && curl -s https://ohmyposh.dev/install.sh | bash -s 
 
 # Download and install nvm
 RUN --mount=type=cache,target=${HOME}/.npm/_cacache,uid=1000,gid=1000 \
