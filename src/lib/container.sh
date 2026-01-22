@@ -266,26 +266,35 @@ _containai_container_name() {
 # FR-4: Validate container mounts match expected configuration
 # Validates that workspace bind mount has correct source and data volume is correct
 # Arguments:
-#   $1 = docker_cmd array name (for context)
+#   $1 = docker context (empty string for default context)
 #   $2 = container name
 #   $3 = expected workspace path
 #   $4 = expected data volume name
+#   $5 = skip_volume_check (optional, "true" to skip volume name validation)
 # Returns: 0 if valid, 1 if tainted (with error message)
 _containai_validate_fr4_mounts() {
-    local -n _docker_cmd=$1
+    local docker_context="$1"
     local container_name="$2"
     local expected_workspace="$3"
     local expected_volume="$4"
+    local skip_volume_check="${5:-false}"
 
-    # Get mount info in JSON-like format: Type|Source|Destination per line
-    local mount_info mount_line
-    mount_info=$("${_docker_cmd[@]}" inspect --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{"\n"}}{{end}}' "$container_name" 2>/dev/null) || mount_info=""
+    # Build docker command with optional context
+    local -a docker_cmd=(docker)
+    if [[ -n "$docker_context" ]]; then
+        docker_cmd=(docker --context "$docker_context")
+    fi
+
+    # Get mount info: Type|Source|Name|Destination per line
+    # Source is host path (useful for bind mounts), Name is volume name (for volumes)
+    local mount_info
+    mount_info=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Name}}|{{.Destination}}{{"\n"}}{{end}}' "$container_name" 2>/dev/null) || mount_info=""
 
     local workspace_found=false
     local volume_found=false
-    local mount_type mount_source mount_dest
+    local mount_type mount_source mount_name mount_dest
 
-    while IFS='|' read -r mount_type mount_source mount_dest; do
+    while IFS='|' read -r mount_type mount_source mount_name mount_dest; do
         [[ -z "$mount_dest" ]] && continue
 
         case "$mount_dest" in
@@ -304,15 +313,17 @@ _containai_validate_fr4_mounts() {
                 workspace_found=true
                 ;;
             /mnt/agent-data)
-                # Must be a named volume with correct name
+                # Must be a named volume
                 if [[ "$mount_type" != "volume" ]]; then
                     echo "[ERROR] FR-4: Data mount is not a named volume (type: $mount_type)" >&2
                     return 1
                 fi
-                if [[ "$mount_source" != "$expected_volume" ]]; then
+                # Check volume name (using .Name field, not .Source which is host path)
+                # Skip if volume_mismatch_warn is enabled
+                if [[ "$skip_volume_check" != "true" ]] && [[ "$mount_name" != "$expected_volume" ]]; then
                     echo "[ERROR] FR-4: Data volume name mismatch" >&2
                     echo "  Expected: $expected_volume" >&2
-                    echo "  Actual:   $mount_source" >&2
+                    echo "  Actual:   $mount_name" >&2
                     return 1
                 fi
                 volume_found=true
@@ -1273,7 +1284,8 @@ _containai_start_container() {
             # FR-4: Validate container mounts match expected configuration (type + source)
             # This prevents shell --volume from tainting containers that run will later use
             if [[ "$shell_flag" != "true" ]]; then
-                if ! _containai_validate_fr4_mounts docker_cmd "$container_name" "$workspace_resolved" "$data_volume"; then
+                # Pass volume_mismatch_warn to skip strict volume name check when allowed
+                if ! _containai_validate_fr4_mounts "$selected_context" "$container_name" "$workspace_resolved" "$data_volume" "$volume_mismatch_warn"; then
                     return 1
                 fi
             fi
@@ -1347,7 +1359,8 @@ _containai_start_container() {
             # FR-4: Validate container mounts match expected configuration (type + source)
             # This prevents shell --volume from tainting containers that run will later use
             if [[ "$shell_flag" != "true" ]]; then
-                if ! _containai_validate_fr4_mounts docker_cmd "$container_name" "$workspace_resolved" "$data_volume"; then
+                # Pass volume_mismatch_warn to skip strict volume name check when allowed
+                if ! _containai_validate_fr4_mounts "$selected_context" "$container_name" "$workspace_resolved" "$data_volume" "$volume_mismatch_warn"; then
                     return 1
                 fi
             fi

@@ -109,3 +109,6 @@ Docker volume root is often root-owned; write as root then chown to target user 
 
 ## 2026-01-22 manual [pitfall]
 When writing config files, use native tools (git config -f, jq) instead of templating raw values to prevent injection via newlines/control characters
+
+## 2026-01-22 manual [pitfall]
+Docker volume .Source is host path (e.g., /var/lib/docker/volumes/name/_data), not volume name; use .Name field for named volume identification
