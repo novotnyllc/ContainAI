@@ -107,9 +107,8 @@ Implement workspace-to-container auto-mapping with clear lifecycle model: PID 1 
 - [ ] Hashing works on both Linux and macOS
 - [ ] Data volume persists even when container is removed with --fresh
 ## Done summary
-TBD
-
+Implemented workspace-to-container auto-mapping with deterministic naming via SHA-256 path hashing. Containers now use sleep infinity as PID 1 (long-lived init) with agent sessions attaching via docker exec, allowing containers to persist between sessions. Added --fresh flag to remove and recreate containers while preserving data volumes.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 793ab6bcaea1f8cffd9da226a3de50d09464202f
+- Tests: bash -n src/lib/container.sh, bash -n src/containai.sh, source src/lib/core.sh && source src/lib/container.sh && _cai_hash_path /home/claire/dev/ContainAI, source src/lib/core.sh && source src/lib/container.sh && _containai_container_name /home/claire/dev/ContainAI
 - PRs:

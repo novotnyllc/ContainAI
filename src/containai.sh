@@ -160,6 +160,7 @@ Subcommands:
   help          Show this help message
 
 Run Options:
+  <path>                Workspace path (positional, alternative to --workspace)
   --agent <name>        Agent to run (claude, gemini; default: claude)
   --credentials <mode>  Credential mode (none; default: none)
   --image-tag <tag>     Override image tag (default: agent-specific)
@@ -185,6 +186,8 @@ Global Options:
 
 Examples:
   cai                               Start Claude container (default)
+  cai /path/to/project              Start container for specified workspace
+  cai --fresh /path/to/project      Recreate container for workspace
   cai --agent gemini                Start Gemini container
   cai -- --print                    Pass --print to Claude
   cai doctor                        Check system capabilities
@@ -1220,9 +1223,16 @@ _containai_run_cmd() {
                 return 0
                 ;;
             *)
-                echo "[ERROR] Unknown option: $1" >&2
-                echo "Use 'cai --help' for usage" >&2
-                return 1
+                # Check if it's a directory path (positional workspace argument)
+                if [[ -z "$workspace" && -d "$1" ]]; then
+                    workspace="$1"
+                    workspace="${workspace/#\~/$HOME}"
+                    shift
+                else
+                    echo "[ERROR] Unknown option: $1" >&2
+                    echo "Use 'cai --help' for usage" >&2
+                    return 1
+                fi
                 ;;
         esac
     done

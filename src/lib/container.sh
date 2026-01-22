@@ -1231,7 +1231,7 @@ _containai_start_container() {
                     echo "  Running:   $running_image" >&2
                     echo "  Requested: $resolved_image" >&2
                 fi
-                echo "[ERROR] Image mismatch prevents attachment. Use --restart to recreate with requested agent." >&2
+                echo "[ERROR] Image mismatch prevents attachment. Use --fresh to recreate with requested agent." >&2
                 return 1
             fi
             # Check volume match using context-aware docker command
@@ -1244,23 +1244,30 @@ _containai_start_container() {
                     echo "  Requested: $data_volume" >&2
                 fi
                 if [[ "$volume_mismatch_warn" != "true" ]]; then
-                    echo "[ERROR] Volume mismatch prevents attachment. Use --restart to recreate." >&2
+                    echo "[ERROR] Volume mismatch prevents attachment. Use --fresh to recreate." >&2
                     return 1
                 fi
             fi
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Attaching to running container..."
             fi
+            # Build exec command with env vars
+            local -a exec_base=("${docker_cmd[@]}" exec -it)
+            local env_var
+            for env_var in "${env_vars[@]}"; do
+                exec_base+=(-e "$env_var")
+            done
+            exec_base+=(--user agent -w /home/agent/workspace "$container_name")
             # Execute agent command (with args if provided) or shell if in shell mode
             if [[ "$shell_flag" == "true" ]]; then
-                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" bash
+                "${exec_base[@]}" bash
             else
                 # Run agent with any provided arguments
                 local -a exec_cmd=("$agent")
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     exec_cmd+=("${agent_args[@]}")
                 fi
-                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
+                "${exec_base[@]}" "${exec_cmd[@]}"
             fi
             ;;
         exited|created)
@@ -1322,9 +1329,16 @@ _containai_start_container() {
                 echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
                 return 1
             fi
+            # Build exec command with env vars
+            local -a exec_base=("${docker_cmd[@]}" exec -it)
+            local env_var
+            for env_var in "${env_vars[@]}"; do
+                exec_base+=(-e "$env_var")
+            done
+            exec_base+=(--user agent -w /home/agent/workspace "$container_name")
             # Execute agent session via docker exec (container stays running after exec exits)
             if [[ "$shell_flag" == "true" ]]; then
-                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" bash
+                "${exec_base[@]}" bash
             elif [[ "$detached_flag" == "true" ]]; then
                 # Detached mode - just start the container and return
                 if [[ "$quiet_flag" != "true" ]]; then
@@ -1336,7 +1350,7 @@ _containai_start_container() {
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     exec_cmd+=("${agent_args[@]}")
                 fi
-                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
+                "${exec_base[@]}" "${exec_cmd[@]}"
             fi
             ;;
         none)
@@ -1360,17 +1374,18 @@ _containai_start_container() {
                 fi
             fi
 
-            # Build container creation args - always detached with sleep infinity
+            # Build container creation args - always detached with tini init + sleep infinity
             local -a args=()
             if [[ -n "$selected_context" ]]; then
                 args+=(--context "$selected_context")
             fi
             args+=(run)
             args+=(--runtime=sysbox-runc)
+            args+=(--init)  # Use tini as PID 1 to properly reap zombie processes
             args+=(--name "$container_name")
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
-            args+=(-d)  # Always detached - PID 1 is sleep infinity
+            args+=(-d)  # Always detached - tini manages sleep infinity
 
             # Volume mounts
             args+=("${vol_args[@]}")
@@ -1419,9 +1434,16 @@ _containai_start_container() {
                 return 1
             fi
 
+            # Build exec command with env vars (for session, not container creation which already has them)
+            local -a exec_base=("${docker_cmd[@]}" exec -it)
+            local env_var
+            for env_var in "${env_vars[@]}"; do
+                exec_base+=(-e "$env_var")
+            done
+            exec_base+=(--user agent -w /home/agent/workspace "$container_name")
             # Execute agent session via docker exec (container stays running after exec exits)
             if [[ "$shell_flag" == "true" ]]; then
-                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" bash
+                "${exec_base[@]}" bash
             elif [[ "$detached_flag" == "true" ]]; then
                 # Detached mode - container is already running, just report success
                 if [[ "$quiet_flag" != "true" ]]; then
@@ -1433,7 +1455,7 @@ _containai_start_container() {
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     exec_cmd+=("${agent_args[@]}")
                 fi
-                "${docker_cmd[@]}" exec -it --user agent -w /home/agent/workspace "$container_name" "${exec_cmd[@]}"
+                "${exec_base[@]}" "${exec_cmd[@]}"
             fi
             ;;
         *)
