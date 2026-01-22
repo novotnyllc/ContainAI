@@ -29,6 +29,17 @@ jobs:
         id: version
         run: echo "version=$(cat VERSION | tr -d '[:space:]')" >> $GITHUB_OUTPUT
 
+      - name: Determine image version
+        id: image_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # For tag builds, use the tag version (strip leading 'v')
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          else
+            # For branch builds, use VERSION file
+            echo "version=${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -68,10 +79,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ steps.image_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
