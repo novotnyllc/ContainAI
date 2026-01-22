@@ -75,6 +75,6 @@ Implement workspace-to-container auto-mapping with clear lifecycle model: `--ini
 ## Done summary
 Implemented workspace-to-container auto-mapping with deterministic naming via SHA-256 path hashing. Containers use tini (--init) as PID 1 for zombie reaping, running sleep infinity as a child process. Agent sessions attach via docker exec, allowing containers to persist between sessions. Added --fresh flag to remove and recreate containers while preserving data volumes. FR-4 mount validation prevents tainted containers from being used by run.
 ## Evidence
-- Commits: 793ab6bcaea1f8cffd9da226a3de50d09464202f
-- Tests: bash -n src/lib/container.sh, bash -n src/containai.sh, source src/lib/core.sh && source src/lib/container.sh && _cai_hash_path /home/claire/dev/ContainAI, source src/lib/core.sh && source src/lib/container.sh && _containai_container_name /home/claire/dev/ContainAI
+- Commits:
+- Tests:
 - PRs:

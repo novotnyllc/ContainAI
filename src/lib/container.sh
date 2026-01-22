@@ -243,7 +243,7 @@ _cai_hash_path() {
 # Generate container name from workspace path hash
 # Format: containai-<12-char-hash>
 # Arguments: $1 = workspace path (required)
-# Returns: container name via stdout
+# Returns: container name via stdout, or 1 on error
 _containai_container_name() {
     local workspace_path="$1"
     local hash name
@@ -253,7 +253,11 @@ _containai_container_name() {
         workspace_path="$(pwd)"
     fi
 
-    hash=$(_cai_hash_path "$workspace_path")
+    # Propagate hash errors - don't create invalid container names
+    if ! hash=$(_cai_hash_path "$workspace_path"); then
+        return 1
+    fi
+
     name="containai-${hash}"
 
     printf '%s' "$name"
@@ -1099,7 +1103,10 @@ _containai_start_container() {
 
     # Get container name (based on workspace path hash for deterministic naming)
     if [[ -z "$container_name" ]]; then
-        container_name="$(_containai_container_name "$workspace_resolved")"
+        if ! container_name=$(_containai_container_name "$workspace_resolved"); then
+            echo "[ERROR] Failed to generate container name for workspace" >&2
+            return 1
+        fi
     fi
     if [[ "$quiet_flag" != "true" ]]; then
         echo "Container: $container_name"

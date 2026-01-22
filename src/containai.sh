@@ -736,6 +736,8 @@ _containai_shell_cmd() {
     local workspace=""
     local explicit_config=""
     local container_name=""
+    local agent=""
+    local image_tag=""
     local restart_flag=""
     local fresh_flag=""
     local force_flag=""
@@ -753,6 +755,38 @@ _containai_shell_cmd() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --agent)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --agent requires a value" >&2
+                    return 1
+                fi
+                agent="$2"
+                shift 2
+                ;;
+            --agent=*)
+                agent="${1#--agent=}"
+                if [[ -z "$agent" ]]; then
+                    echo "[ERROR] --agent requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --image-tag)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                image_tag="$2"
+                shift 2
+                ;;
+            --image-tag=*)
+                image_tag="${1#--image-tag=}"
+                if [[ -z "$image_tag" ]]; then
+                    echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
             --data-volume)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --data-volume requires a value" >&2
