@@ -91,3 +91,6 @@ When overriding HOME for tests, preserve DOCKER_CONFIG pointing to real home to 
 ## 2026-01-20 manual [pitfall]
 In bash -c wrappers, use "$@" with proper argument passing (bash -c 'cmd "$@"' _ arg1 arg2) not $* which loses argument boundaries
 
+
+## 2026-01-22 manual [pitfall]
+When checking if a path exists in a config file, use grep -qF with full path to avoid false positives from partial matches (e.g., ~/.local/bin matching /usr/local/bin)
