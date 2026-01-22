@@ -72,9 +72,8 @@ Note: **Sysbox handles all userns mapping automatically** via /etc/subuid and /e
 - [ ] No bc dependency - uses bash arithmetic
 - [ ] Gracefully handles unparseable kernel versions (warn, don't fail)
 ## Done summary
-TBD
-
+Added kernel version check for Sysbox compatibility (requires 5.5+). Updated cai doctor to display kernel version and incorporate it into isolation status. Updated cai setup to block installation on incompatible kernels with helpful upgrade instructions.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: a8dfec1, 60a39e7
+- Tests: bash -c 'source src/containai.sh && _cai_check_kernel_for_sysbox', bash -c 'source src/containai.sh && _cai_doctor', bash -c 'source src/containai.sh && _cai_doctor_json', bash -c 'source src/containai.sh && _cai_setup --dry-run'
 - PRs:
