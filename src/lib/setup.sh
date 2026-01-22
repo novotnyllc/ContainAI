@@ -845,6 +845,21 @@ _cai_setup_wsl2() {
     _cai_info "Detected platform: WSL2"
     _cai_info "Setting up Secure Engine with Sysbox"
 
+    # Step 0: Check kernel version (Sysbox requires 5.5+)
+    _cai_step "Checking kernel version"
+    local kernel_version kernel_ok
+    kernel_version=$(_cai_check_kernel_for_sysbox) && kernel_ok="true" || kernel_ok="false"
+    if [[ "$kernel_ok" == "true" ]]; then
+        _cai_ok "Kernel version $kernel_version (5.5+ required)"
+    else
+        _cai_error "Kernel $kernel_version is too old. Sysbox requires kernel 5.5+"
+        _cai_error "  Update your WSL kernel:"
+        _cai_error "  wsl --update"
+        _cai_error "  wsl --shutdown"
+        _cai_error "  # Then restart your WSL distribution"
+        return 1
+    fi
+
     # Step 1: Test seccomp compatibility
     _cai_step "Checking seccomp compatibility"
     local seccomp_rc
@@ -1736,6 +1751,19 @@ _cai_setup_linux() {
 
     _cai_info "Detected platform: Linux (native)"
     _cai_info "Setting up Secure Engine with Sysbox"
+
+    # Step 0: Check kernel version (Sysbox requires 5.5+)
+    _cai_step "Checking kernel version"
+    local kernel_version kernel_ok
+    kernel_version=$(_cai_check_kernel_for_sysbox) && kernel_ok="true" || kernel_ok="false"
+    if [[ "$kernel_ok" == "true" ]]; then
+        _cai_ok "Kernel version $kernel_version (5.5+ required)"
+    else
+        _cai_error "Kernel $kernel_version is too old. Sysbox requires kernel 5.5+"
+        _cai_error "  Upgrade your kernel to 5.5+ to use Sysbox."
+        _cai_error "  Most modern distros (Ubuntu 22.04+, Debian 12+) include 5.15+."
+        return 1
+    fi
 
     # Detect distribution FIRST - if unsupported, show manual instructions
     # regardless of Docker status (per acceptance criteria: "handle unsupported

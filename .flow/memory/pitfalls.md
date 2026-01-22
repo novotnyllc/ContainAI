@@ -100,3 +100,6 @@ When comparing git branches for ahead/behind commits, compare the named branch r
 
 ## 2026-01-22 manual [pitfall]
 When removing a feature, search docs/ for references - architecture diagrams, decision docs, and quickstart guides often lag behind code changes
+
+## 2026-01-22 manual [pitfall]
+Inside containers, creating files/symlinks in host-style paths (e.g., /home/user/) requires root privileges - use sudo/run_as_root wrappers

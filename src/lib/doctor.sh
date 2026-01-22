@@ -8,6 +8,7 @@
 #   _cai_doctor()              - Run all checks and output formatted report
 #   _cai_doctor_json()         - Run all checks and output JSON report
 #   _cai_check_wsl_seccomp()   - Check WSL2 seccomp compatibility status
+#   _cai_check_kernel_for_sysbox() - Check kernel version for Sysbox compatibility
 #   _cai_select_context()      - Auto-select Docker context based on Sysbox availability
 #
 # Requirements:
@@ -84,6 +85,51 @@ _cai_check_wsl_seccomp() {
 
     # No seccomp status found - cannot determine
     printf '%s' "unknown"
+    return 0
+}
+
+# ==============================================================================
+# Kernel Version Check for Sysbox
+# ==============================================================================
+
+# Check kernel version for Sysbox compatibility
+# Sysbox requires kernel 5.5+ for user namespace and syscall interception features
+# Returns: 0=compatible, 1=incompatible
+# Outputs: Kernel version to stdout (e.g., "6.6")
+# Sets: _CAI_KERNEL_MAJOR, _CAI_KERNEL_MINOR with parsed values
+# Note: Uses bash arithmetic only (no bc dependency)
+_cai_check_kernel_for_sysbox() {
+    local kernel_version major minor
+    _CAI_KERNEL_MAJOR=""
+    _CAI_KERNEL_MINOR=""
+
+    kernel_version=$(uname -r)
+
+    # Parse major.minor from kernel version
+    # Handles WSL2 format: 5.15.133.1-microsoft-standard-WSL2
+    # cut -d. -f1 gets "5", cut -d. -f2 gets "15"
+    major=$(printf '%s' "$kernel_version" | cut -d. -f1)
+    minor=$(printf '%s' "$kernel_version" | cut -d. -f2)
+
+    # Validate we got numbers
+    if ! [[ "$major" =~ ^[0-9]+$ ]] || ! [[ "$minor" =~ ^[0-9]+$ ]]; then
+        _cai_warn "Could not parse kernel version: $kernel_version"
+        # Output the raw version anyway
+        printf '%s' "$kernel_version"
+        return 0  # Don't block, just warn
+    fi
+
+    _CAI_KERNEL_MAJOR="$major"
+    _CAI_KERNEL_MINOR="$minor"
+
+    # Output parsed version
+    printf '%s.%s' "$major" "$minor"
+
+    # Sysbox requires 5.5+
+    if [[ "$major" -lt 5 ]] || { [[ "$major" -eq 5 ]] && [[ "$minor" -lt 5 ]]; }; then
+        return 1
+    fi
+
     return 0
 }
 
@@ -362,6 +408,16 @@ _cai_doctor() {
     if [[ "$platform" == "wsl" ]]; then
         printf '%s\n' "Platform: WSL2"
 
+        # Kernel version check (WSL2 and Linux need kernel 5.5+ for Sysbox)
+        local kernel_version kernel_ok
+        kernel_version=$(_cai_check_kernel_for_sysbox) && kernel_ok="true" || kernel_ok="false"
+        if [[ "$kernel_ok" == "true" ]]; then
+            printf '  %-44s %s\n' "Kernel version: $kernel_version" "[OK]"
+        else
+            printf '  %-44s %s\n' "Kernel version: $kernel_version" "[ERROR]"
+            printf '  %-44s %s\n' "" "(Sysbox requires kernel 5.5+)"
+        fi
+
         seccomp_status=$(_cai_check_wsl_seccomp)
         case "$seccomp_status" in
             ok)
@@ -384,9 +440,22 @@ _cai_doctor() {
         printf '\n'
     elif [[ "$platform" == "macos" ]]; then
         printf '%s\n' "Platform: macOS"
+        # Note: macOS uses Lima VM, kernel is inside the VM (Ubuntu 24.04 has 5.15+)
+        printf '  %-44s %s\n' "Sysbox runs inside Lima VM" "[OK]"
         printf '\n'
     elif [[ "$platform" == "linux" ]]; then
         printf '%s\n' "Platform: Linux"
+
+        # Kernel version check (Linux needs kernel 5.5+ for Sysbox)
+        local kernel_version kernel_ok
+        kernel_version=$(_cai_check_kernel_for_sysbox) && kernel_ok="true" || kernel_ok="false"
+        if [[ "$kernel_ok" == "true" ]]; then
+            printf '  %-44s %s\n' "Kernel version: $kernel_version" "[OK]"
+        else
+            printf '  %-44s %s\n' "Kernel version: $kernel_version" "[ERROR]"
+            printf '  %-44s %s\n' "" "(Sysbox requires kernel 5.5+)"
+        fi
+
         printf '\n'
     fi
 
@@ -443,6 +512,8 @@ _cai_doctor_json() {
     local sysbox_context_exists="false"
     local sysbox_context_name="containai-secure"
     local recommended_action="setup_required"
+    local kernel_version=""
+    local kernel_compatible="true"
 
     platform=$(_cai_detect_platform)
     # Normalize platform type for JSON (wsl -> wsl2 per spec)
@@ -472,6 +543,11 @@ _cai_doctor_json() {
     fi
 
     # Platform-specific checks
+    if [[ "$platform" == "wsl" ]] || [[ "$platform" == "linux" ]]; then
+        # Kernel version check (WSL2 and Linux need kernel 5.5+ for Sysbox)
+        kernel_version=$(_cai_check_kernel_for_sysbox) && kernel_compatible="true" || kernel_compatible="false"
+    fi
+
     if [[ "$platform" == "wsl" ]]; then
         seccomp_status=$(_cai_check_wsl_seccomp)
         case "$seccomp_status" in
@@ -511,6 +587,10 @@ _cai_doctor_json() {
     printf '  },\n'
     printf '  "platform": {\n'
     printf '    "type": "%s",\n' "$platform_json"
+    if [[ "$platform" == "wsl" ]] || [[ "$platform" == "linux" ]]; then
+        printf '    "kernel_version": "%s",\n' "$(_cai_json_escape "$kernel_version")"
+        printf '    "kernel_compatible": %s,\n' "$kernel_compatible"
+    fi
     if [[ "$platform" == "wsl" ]]; then
         printf '    "seccomp_compatible": %s,\n' "$seccomp_compatible"
         if [[ -n "$seccomp_warning" ]]; then

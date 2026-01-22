@@ -73,9 +73,8 @@ Implement workspace symlink strategy in entrypoint.sh using environment variable
 - [ ] Idempotent - rerunning entrypoint doesn't break symlink
 - [ ] No Docker socket needed inside container
 ## Done summary
-TBD
-
+Implemented workspace symlink strategy using CAI_HOST_WORKSPACE environment variable. Container passes original workspace path via env var, and entrypoint creates symlink from original path to /home/agent/workspace mount point using run_as_root for proper permissions.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: cc34b43, b7e450e
+- Tests: bash -n src/entrypoint.sh, bash -n src/lib/container.sh, shellcheck src/entrypoint.sh src/lib/container.sh
 - PRs:
