@@ -78,8 +78,13 @@ RUN for unit in \
 # Note: NOPASSWD sudo is intentional - this is a sandboxed AI agent environment
 # where sysbox provides isolation. SSH key auth implies full container access.
 # =============================================================================
-RUN useradd --create-home --shell /bin/bash --uid 1000 agent && \
-    echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/agent && \
+RUN existing_user="$(getent passwd 1000 | cut -d: -f1 || true)" && \
+    if [ "$existing_user" = "agent" ]; then \
+        echo "agent user already exists with uid 1000"; \
+    else \
+        useradd --create-home --shell /bin/bash --uid 1000 agent; \
+    fi && \
+    echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \
     chmod 0440 /etc/sudoers.d/agent
 
 # =============================================================================
