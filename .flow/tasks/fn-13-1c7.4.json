@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-23T18:46:08.106995Z",
+  "depends_on": [
+    "fn-13-1c7.1"
+  ],
+  "epic": "fn-13-1c7",
+  "id": "fn-13-1c7.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-13-1c7.4.md",
+  "status": "todo",
+  "title": "Evaluate direct JSON parsing approach",
+  "updated_at": "2026-01-23T18:54:26.092786Z"
+}

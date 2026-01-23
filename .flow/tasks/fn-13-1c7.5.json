@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-23T18:46:09.206113Z",
+  "depends_on": [
+    "fn-13-1c7.1"
+  ],
+  "epic": "fn-13-1c7",
+  "id": "fn-13-1c7.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-13-1c7.5.md",
+  "status": "todo",
+  "title": "Evaluate alternative approaches (DevPod, Envbuilder)",
+  "updated_at": "2026-01-23T18:47:21.229536Z"
+}

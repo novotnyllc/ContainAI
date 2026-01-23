@@ -1,0 +1,169 @@
+{
+  "created_at": "2026-01-23T18:47:51.867498Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-13-1c7",
+      "created_at": "2026-01-23T18:45:18.482528Z",
+      "depends_on_epics": [],
+      "id": "fn-13-1c7",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-13-1c7.md",
+      "status": "open",
+      "title": "Research Devcontainer Support Options",
+      "updated_at": "2026-01-23T18:45:51.658154Z"
+    },
+    "spec": "# Research Devcontainer Support Options\n\n## Overview\n\nInvestigate how ContainAI could support projects with `.devcontainer/devcontainer.json` configurations, launching them securely through `cai` instead of regular `docker run`. This is a **research epic** to explore options and produce recommendations\u2014no implementation code.\n\n**Goal**: Present 3-4 viable integration options with security analysis, tradeoffs, and recommendations.\n\n**Non-goal**: Implementing devcontainer support (that's a follow-up epic).\n\n## Scope\n\n**In scope**:\n- Deep analysis of devcontainer specification and security implications\n- Evaluation of integration approaches (wrap CLI vs parse directly vs alternatives)\n- Property-by-property security classification of devcontainer.json schema\n- Analysis of real-world devcontainer usage patterns\n- Recommendations for ContainAI's security model compatibility\n- Documentation of dependencies and blockers\n\n**Out of scope**:\n- Writing implementation code\n- Docker Compose multi-container support (may note as future work)\n- VS Code Remote extension integration specifics\n\n## Background\n\nDevcontainers are a popular way to define reproducible development environments. However, they have significant security risks for sandboxing AI agents:\n\n- **`initializeCommand`** runs on the HOST machine before container creation\n- **`runArgs`** can include `--privileged`, arbitrary volume mounts\n- **Features** execute `install.sh` as root during build\n- **Lifecycle hooks** can exfiltrate mounted secrets\n\nContainAI must find a way to support devcontainers while maintaining its security guarantees.\n\n## Key Questions to Answer\n\n1. What is the minimum viable scope? Run ANY devcontainer securely, or a SUBSET of safe configs?\n2. How to handle `initializeCommand`? Block, sandbox, warn, or require approval?\n3. What about Features? Ignore, allowlist, or sandbox feature installation?\n4. Should ContainAI parse devcontainer.json directly or wrap @devcontainers/cli?\n5. How to resolve conflicts between devcontainer config and ContainAI's model?\n\n## Integration Options to Evaluate\n\n### Option A: Wrap @devcontainers/cli\nUse `devcontainer read-configuration` to parse, filter dangerous properties, then use ContainAI's own `docker run`.\n\n### Option B: Direct JSON Parsing\nParse devcontainer.json with jq/Python, build own container configuration, full control over security.\n\n### Option C: DevPod-Style Provider\nAbstract container creation behind a \"provider\" interface, allowing different isolation backends.\n\n### Option D: Envbuilder-Style Daemonless\nBuild devcontainer images using Kaniko without Docker daemon, strongest isolation.\n\n### Option E: Hybrid Approach\nUse CLI for parsing only, then apply security policy layer before ContainAI's container launch.\n\n## Dependencies\n\n- **fn-12-css** (in-progress): Workspace-centric config may affect devcontainer discovery\n- **fn-10-vep** (complete): System container infrastructure to build on\n- **fn-5-urz** (complete): Security model to maintain compatibility with\n\n## Quick commands\n\n```bash\n# View epic status\n.flow/bin/flowctl show fn-13-1c7\n\n# List tasks\n.flow/bin/flowctl tasks --epic fn-13-1c7\n\n# View devcontainer spec (reference)\n# https://containers.dev/implementors/json_reference/\n```\n\n## Acceptance\n\n- [ ] Property-by-property security classification document for devcontainer.json\n- [ ] At least 3 integration options evaluated with pros/cons/effort\n- [ ] Analysis of real-world devcontainer usage (which properties are commonly used)\n- [ ] Clear recommendation with rationale\n- [ ] List of follow-up implementation tasks for chosen approach\n- [ ] Security implications documented for each option\n\n## References\n\n- [Dev Container Specification](https://containers.dev/implementors/spec/)\n- [Dev Container JSON Reference](https://containers.dev/implementors/json_reference/)\n- [devcontainers/cli](https://github.com/devcontainers/cli) - Official CLI\n- [loft-sh/devpod](https://github.com/loft-sh/devpod) - Open-source Codespaces alternative\n- [coder/envbuilder](https://github.com/coder/envbuilder) - Daemonless devcontainer builds\n- [STRML/claude-cells](https://github.com/STRML/claude-cells) - Security tier example\n- [Security blog post](https://blog.theredguild.org/where-do-you-run-your-code-part-ii-2/)\n"
+  },
+  "epic_id": "fn-13-1c7",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T18:46:04.734348Z",
+        "depends_on": [],
+        "epic": "fn-13-1c7",
+        "id": "fn-13-1c7.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-13-1c7.1.md",
+        "status": "todo",
+        "title": "Security audit devcontainer.json schema",
+        "updated_at": "2026-01-23T18:47:11.256963Z"
+      },
+      "id": "fn-13-1c7.1",
+      "runtime": null,
+      "spec": "# fn-13-1c7.1 Security audit devcontainer.json schema\n\n## Description\nCreate a comprehensive security classification of every property in the devcontainer.json schema, categorizing each as SAFE, FILTERED, BLOCKED, or WARN based on its risk to ContainAI's sandbox model.\n\n**Size:** M\n**Files:** Output to `.flow/research/fn-13-1c7/security-classification.md`\n\n## Approach\n\n1. Fetch the official schema from https://containers.dev/implementors/json_reference/\n2. For each property, analyze:\n   - Does it run code on the host? (BLOCKED)\n   - Does it grant elevated privileges? (BLOCKED or FILTERED)\n   - Does it mount sensitive paths? (FILTERED)\n   - Is it purely informational? (SAFE)\n3. Document justification for each classification\n4. Pay special attention to:\n   - `initializeCommand` (runs on HOST - highest risk)\n   - `runArgs` (can include --privileged, volume mounts)\n   - `mounts` (can escape sandbox)\n   - `capAdd`, `securityOpt` (privilege escalation)\n   - Feature properties (`privileged`, `capAdd` in features)\n\n## Key context\n\nThe devcontainer spec has ~50+ properties. Focus on:\n- Container lifecycle properties (runArgs, mounts, etc.)\n- Lifecycle commands (initializeCommand, postCreateCommand, etc.)\n- Feature-related properties\n- User/permission properties\n## Acceptance\n- [ ] All devcontainer.json root properties classified\n- [ ] All lifecycle command properties analyzed with host vs container execution noted\n- [ ] Feature-related properties analyzed\n- [ ] Each classification has security justification\n- [ ] Document includes recommendation for handling each category\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T18:46:05.945391Z",
+        "depends_on": [],
+        "epic": "fn-13-1c7",
+        "id": "fn-13-1c7.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-13-1c7.2.md",
+        "status": "todo",
+        "title": "Analyze real-world devcontainer usage patterns",
+        "updated_at": "2026-01-23T18:47:11.498235Z"
+      },
+      "id": "fn-13-1c7.2",
+      "runtime": null,
+      "spec": "# fn-13-1c7.2 Analyze real-world devcontainer usage patterns\n\n## Description\nAnalyze how devcontainers are used in real-world projects to understand which properties are commonly used, which features are popular, and what percentage of existing devcontainers would work with a restricted parser.\n\n**Size:** M\n**Files:** Output to `.flow/research/fn-13-1c7/usage-analysis.md`\n\n## Approach\n\n1. Sample 50-100 popular GitHub repos with `.devcontainer/devcontainer.json`\n2. Use `gh search code \"devcontainer.json\" --language json` and manual sampling\n3. Track frequency of each property across repos\n4. Identify common patterns:\n   - Most used features (docker-in-docker, node, python, etc.)\n   - Common runArgs patterns\n   - Lifecycle command usage\n5. Estimate what % would work if we:\n   - Block initializeCommand\n   - Block privileged mode\n   - Restrict mounts to workspace only\n\n## Key context\n\nLook at repos from diverse ecosystems:\n- Node.js/TypeScript projects\n- Python projects\n- Go projects\n- Rust projects\n- Multi-language monorepos\n## Acceptance\n- [ ] At least 50 devcontainer.json files analyzed\n- [ ] Property frequency table produced\n- [ ] Feature usage statistics gathered\n- [ ] Estimate of \"safe subset\" compatibility percentage\n- [ ] Common patterns documented with examples\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T18:46:07.124012Z",
+        "depends_on": [
+          "fn-13-1c7.1"
+        ],
+        "epic": "fn-13-1c7",
+        "id": "fn-13-1c7.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-13-1c7.3.md",
+        "status": "todo",
+        "title": "Evaluate CLI wrapping approach",
+        "updated_at": "2026-01-23T18:47:21.101860Z"
+      },
+      "id": "fn-13-1c7.3",
+      "runtime": null,
+      "spec": "# fn-13-1c7.3 Evaluate CLI wrapping approach\n\n## Description\nEvaluate using @devcontainers/cli as the parsing layer, filtering its output before container creation. Analyze feasibility, security implications, and implementation complexity.\n\n**Size:** M\n**Files:** Output to `.flow/research/fn-13-1c7/option-cli-wrapping.md`\n\n## Approach\n\n1. Install and test @devcontainers/cli locally\n2. Analyze `devcontainer read-configuration` output format\n3. Determine which security-sensitive fields appear in output\n4. Prototype filtering the output (conceptual, not implementation)\n5. Identify limitations:\n   - Can we intercept before Docker commands run?\n   - Does the CLI respect filtered config or re-read original?\n   - Node.js dependency implications for shell-based ContainAI\n6. Document pros/cons vs direct parsing\n\n## Key context\n\nKey CLI commands to investigate:\n- `devcontainer read-configuration` - parses and merges config\n- `devcontainer up` - creates container (may be hard to intercept)\n- `devcontainer run-user-commands` - executes lifecycle hooks\n- `devcontainer exec` - runs commands in container\n\nThe CLI is Node.js-based which may complicate integration with bash-based ContainAI.\n## Acceptance\n- [ ] CLI output format documented\n- [ ] Security-sensitive fields in output identified\n- [ ] Filtering feasibility assessed\n- [ ] Node.js dependency implications documented\n- [ ] Pros/cons table vs alternatives\n- [ ] Clear recommendation on viability\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T18:46:08.106995Z",
+        "depends_on": [
+          "fn-13-1c7.1"
+        ],
+        "epic": "fn-13-1c7",
+        "id": "fn-13-1c7.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-13-1c7.4.md",
+        "status": "todo",
+        "title": "Evaluate direct JSON parsing approach",
+        "updated_at": "2026-01-23T18:47:21.166353Z"
+      },
+      "id": "fn-13-1c7.4",
+      "runtime": null,
+      "spec": "# fn-13-1c7.4 Evaluate direct JSON parsing approach\n\n## Description\nEvaluate parsing devcontainer.json directly with jq/Python, building container configuration from scratch. Analyze complexity, spec compliance risks, and maintenance burden.\n\n**Size:** M\n**Files:** Output to `.flow/research/fn-13-1c7/option-direct-parsing.md`\n\n## Approach\n\n1. Document minimum viable parsing requirements:\n   - Which properties must ContainAI understand?\n   - Which can be safely ignored?\n2. Analyze JSONC parsing challenge (devcontainer.json supports comments)\n3. Evaluate parser options:\n   - Strip comments then jq (fragile)\n   - Python json5/hjson library\n   - Custom comment stripper in bash\n4. Document spec compliance risks:\n   - Variable expansion (`${localWorkspaceFolder}`)\n   - Feature merging algorithm\n   - Config file precedence rules\n5. Estimate maintenance burden for tracking spec changes\n\n## Key context\n\nContainAI already has:\n- TOML parsing via `parse-toml.py`\n- JSON parsing via `jq` (hard dependency)\n- Config file discovery via `_containai_find_config()`\n\nThese could be extended for devcontainer.json parsing.\n## Acceptance\n- [ ] Minimum viable property set documented\n- [ ] JSONC parsing solution identified\n- [ ] Variable expansion requirements analyzed\n- [ ] Feature merging complexity assessed\n- [ ] Maintenance burden estimate provided\n- [ ] Pros/cons table vs CLI wrapping\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T18:46:09.206113Z",
+        "depends_on": [
+          "fn-13-1c7.1"
+        ],
+        "epic": "fn-13-1c7",
+        "id": "fn-13-1c7.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-13-1c7.5.md",
+        "status": "todo",
+        "title": "Evaluate alternative approaches (DevPod, Envbuilder)",
+        "updated_at": "2026-01-23T18:47:21.229536Z"
+      },
+      "id": "fn-13-1c7.5",
+      "runtime": null,
+      "spec": "# fn-13-1c7.5 Evaluate alternative approaches (DevPod, Envbuilder)\n\n## Description\nEvaluate alternative approaches to devcontainer support: DevPod-style provider abstraction, Envbuilder-style daemonless builds, and any other creative options discovered during research.\n\n**Size:** M\n**Files:** Output to `.flow/research/fn-13-1c7/option-alternatives.md`\n\n## Approach\n\n1. **DevPod analysis** (loft-sh/devpod):\n   - How does their provider abstraction work?\n   - Could ContainAI be a \"provider\" for DevPod?\n   - Security properties they enforce\n   - Integration complexity\n\n2. **Envbuilder analysis** (coder/envbuilder):\n   - How does daemonless building work (Kaniko)?\n   - Could this eliminate Docker socket exposure?\n   - Compatibility with Sysbox\n   - Build time implications\n\n3. **Other options**:\n   - Running @devcontainers/cli inside the container (not on host)\n   - Pre-built image registry (skip build, use curated images)\n   - Minimal devcontainer subset (only image + workspaceFolder)\n\n4. Document each with effort estimate and security tradeoffs\n\n## Key context\n\nReference implementations found:\n- coder/coder: Go interface wrapping devcontainer CLI\n- loft-sh/devpod: Full parsing with security properties\n- coder/envbuilder: Kaniko-based daemonless builds\n- STRML/claude-cells: Security tier system for AI sandboxing\n## Acceptance\n- [ ] DevPod architecture analyzed\n- [ ] Envbuilder architecture analyzed\n- [ ] At least one creative alternative explored\n- [ ] Each option has effort estimate (S/M/L)\n- [ ] Security tradeoffs documented for each\n- [ ] Clear ranking of options\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T18:46:10.299941Z",
+        "depends_on": [],
+        "epic": "fn-13-1c7",
+        "id": "fn-13-1c7.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-13-1c7.6.md",
+        "status": "todo",
+        "title": "Investigate Sysbox compatibility with devcontainer patterns",
+        "updated_at": "2026-01-23T18:47:12.470101Z"
+      },
+      "id": "fn-13-1c7.6",
+      "runtime": null,
+      "spec": "# fn-13-1c7.6 Investigate Sysbox compatibility with devcontainer patterns\n\n## Description\nInvestigate which devcontainer patterns are compatible with Sysbox runtime (ContainAI's security foundation) and which break. Produce a compatibility matrix.\n\n**Size:** S\n**Files:** Output to `.flow/research/fn-13-1c7/sysbox-compatibility.md`\n\n## Approach\n\n1. Review Sysbox documentation for limitations:\n   - Which capabilities are virtualized vs blocked?\n   - What happens when a container requests `--privileged`?\n   - How does user namespace remapping affect devcontainer users?\n\n2. Test key devcontainer patterns against Sysbox:\n   - Docker-in-Docker feature (should work - Sysbox's strength)\n   - Privileged mode requests (should be safely ignored)\n   - Custom user configurations\n   - Volume mounts to protected paths\n\n3. Document workarounds for incompatible patterns\n\n## Key context\n\nContainAI uses Sysbox for secure Docker-in-Docker without `--privileged`. Key Sysbox behaviors:\n- Runs containers in user namespace (root \u2192 unprivileged)\n- Virtualizes /proc, /sys for nested containers\n- Allows DinD without privileged mode\n- May block some kernel-level operations\n\nReference: `/home/claire/dev/ContainAI/.flow/specs/fn-10-vep.md`\n## Acceptance\n- [ ] Sysbox capability limitations documented\n- [ ] Docker-in-Docker compatibility confirmed\n- [ ] Privileged mode handling documented\n- [ ] User namespace implications analyzed\n- [ ] Compatibility matrix produced\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T18:46:11.579386Z",
+        "depends_on": [
+          "fn-13-1c7.1",
+          "fn-13-1c7.2",
+          "fn-13-1c7.3",
+          "fn-13-1c7.4",
+          "fn-13-1c7.5",
+          "fn-13-1c7.6"
+        ],
+        "epic": "fn-13-1c7",
+        "id": "fn-13-1c7.7",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-13-1c7.7.md",
+        "status": "todo",
+        "title": "Write final recommendations document",
+        "updated_at": "2026-01-23T18:47:21.034242Z"
+      },
+      "id": "fn-13-1c7.7",
+      "runtime": null,
+      "spec": "# fn-13-1c7.7 Write final recommendations document\n\n## Description\nSynthesize all research into a final recommendations document with clear decision guidance, implementation roadmap, and security assessment.\n\n**Size:** M\n**Files:** Output to `.flow/research/fn-13-1c7/RECOMMENDATIONS.md`\n\n## Approach\n\n1. Summarize findings from tasks 1-6\n2. Rank integration options by:\n   - Security (highest weight for ContainAI)\n   - Implementation effort\n   - Spec compliance / compatibility\n   - Maintenance burden\n3. Make a clear recommendation with rationale\n4. Outline implementation phases:\n   - Phase 1: Minimal safe subset\n   - Phase 2: Feature support\n   - Phase 3: Full spec (if feasible)\n5. Document known limitations and future work\n6. List follow-up implementation epic tasks\n\n## Key context\n\nThe recommendation should consider ContainAI's principles:\n- Security first - sandbox integrity is non-negotiable\n- Bash-based tooling - prefer shell over Node.js dependencies\n- Sysbox foundation - solutions must work with Sysbox runtime\n- User transparency - make clear what's blocked and why\n## Acceptance\n- [ ] All research findings synthesized\n- [ ] Options ranked with clear criteria\n- [ ] Single recommended approach with rationale\n- [ ] Phased implementation roadmap\n- [ ] Known limitations documented\n- [ ] Follow-up implementation tasks listed\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}
