@@ -141,7 +141,9 @@ _cai_check_kernel_for_sysbox() {
 
 # Auto-select Docker context based on Sysbox availability
 # Returns context name via stdout:
-#   - "containai-secure" for Sysbox context (or config override)
+#   - "containai-docker" for isolated daemon (Linux/WSL2)
+#   - "containai-secure" for Lima VM (macOS) or legacy installs
+#   - Config override if specified and available
 #   - Nothing (return 1) if no isolation available
 # Arguments: $1 = config override for context name (optional)
 #            $2 = debug flag ("debug" to enable debug output)
@@ -574,20 +576,35 @@ _cai_doctor() {
         case "${_CAI_CONTAINAI_ERROR:-}" in
             context_not_found)
                 printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' not configured)"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to create isolated Docker daemon)"
                 ;;
             wrong_endpoint)
                 printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' points to wrong socket)"
                 printf '  %-44s %s\n' "" "(Expected: unix://$_CAI_CONTAINAI_DOCKER_SOCKET)"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to reconfigure)"
                 ;;
             socket_not_found)
                 printf '  %-44s %s\n' "" "(Socket $_CAI_CONTAINAI_DOCKER_SOCKET not found)"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' or start service: sudo systemctl start containai-docker)"
                 ;;
             connection_refused | daemon_unavailable)
                 printf '  %-44s %s\n' "" "(containai-docker service not running)"
                 printf '  %-44s %s\n' "" "(Try: sudo systemctl start containai-docker)"
                 ;;
+            permission_denied)
+                printf '  %-44s %s\n' "" "(Permission denied accessing Docker socket)"
+                printf '  %-44s %s\n' "" "(Add user to docker group: sudo usermod -aG docker \$USER)"
+                ;;
+            timeout)
+                printf '  %-44s %s\n' "" "(Docker command timed out)"
+                printf '  %-44s %s\n' "" "(Check if daemon is responsive: sudo systemctl status containai-docker)"
+                ;;
+            no_timeout)
+                printf '  %-44s %s\n' "" "(No timeout command available)"
+                printf '  %-44s %s\n' "" "(Install coreutils: apt install coreutils)"
+                ;;
             *)
-                printf '  %-44s %s\n' "" "(Run 'sudo scripts/install-containai-docker.sh')"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to install isolated Docker daemon)"
                 ;;
         esac
     fi

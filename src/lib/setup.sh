@@ -2356,17 +2356,28 @@ _cai_setup_linux() {
         return 1
     fi
 
-    # Preflight: Check Docker is installed before making system changes
+    # Preflight: Check Docker Engine is installed before making system changes
     # (Only run after distro detection succeeds to ensure unsupported distros get
     # manual instructions regardless of Docker status)
-    _cai_step "Preflight: Checking Docker installation"
+    # We need both docker CLI and dockerd for the isolated daemon
+    _cai_step "Preflight: Checking Docker Engine installation"
     if ! command -v docker >/dev/null 2>&1; then
-        _cai_error "Docker is not installed"
+        _cai_error "Docker CLI is not installed"
         _cai_error "  Install Docker Engine first:"
         _cai_error "  https://docs.docker.com/engine/install/"
         return 1
     fi
     _cai_ok "Docker CLI available"
+
+    # Check for dockerd (required for isolated daemon)
+    if ! command -v dockerd >/dev/null 2>&1; then
+        _cai_error "Docker daemon (dockerd) is not installed"
+        _cai_error "  The isolated Docker daemon requires dockerd from Docker Engine"
+        _cai_error "  Docker Desktop alone is not sufficient - install Docker Engine:"
+        _cai_error "  https://docs.docker.com/engine/install/"
+        return 1
+    fi
+    _cai_ok "Docker daemon (dockerd) available"
 
     # Step 1: Check for Docker Desktop coexistence
     _cai_step "Checking for Docker Desktop"
