@@ -274,7 +274,7 @@ _cai_sysbox_available() {
     # Determine expected socket based on platform
     # - WSL2: Uses dedicated socket at _CAI_CONTAINAI_DOCKER_SOCKET
     # - macOS: Uses Lima socket at _CAI_LIMA_SOCKET_PATH
-    # - Native Linux: Uses dedicated socket at _CAI_CONTAINAI_DOCKER_SOCKET
+    # - Native Linux: Uses default socket (until setup is migrated)
     local socket platform
     platform=$(_cai_detect_platform)
     case "$platform" in
@@ -285,7 +285,8 @@ _cai_sysbox_available() {
             socket="${_CAI_LIMA_SOCKET_PATH:-$HOME/.lima/containai-secure/sock/docker.sock}"
             ;;
         linux)
-            socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/var/run/containai-docker.sock}"
+            # Native Linux currently uses default socket (will be migrated in fn-14-nm0.3)
+            socket="/var/run/docker.sock"
             ;;
         *)
             socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/var/run/containai-docker.sock}"
@@ -533,7 +534,7 @@ _cai_doctor() {
     # Check containai docker availability
     if _cai_containai_docker_available; then
         containai_docker_ok="true"
-        printf '  %-44s %s\n' "Context 'docker-containai':" "[OK]"
+        printf '  %-44s %s\n' "Context '$_CAI_CONTAINAI_DOCKER_CONTEXT':" "[OK]"
         printf '  %-44s %s\n' "Socket: $_CAI_CONTAINAI_DOCKER_SOCKET" "[OK]"
 
         # Check if sysbox-runc is available and default
@@ -556,10 +557,10 @@ _cai_doctor() {
         printf '  %-44s %s\n' "ContainAI Docker:" "[NOT INSTALLED]"
         case "${_CAI_CONTAINAI_ERROR:-}" in
             context_not_found)
-                printf '  %-44s %s\n' "" "(Context 'docker-containai' not configured)"
+                printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' not configured)"
                 ;;
             wrong_endpoint)
-                printf '  %-44s %s\n' "" "(Context 'docker-containai' points to wrong socket)"
+                printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' points to wrong socket)"
                 printf '  %-44s %s\n' "" "(Expected: unix://$_CAI_CONTAINAI_DOCKER_SOCKET)"
                 ;;
             socket_not_found)
@@ -640,11 +641,11 @@ _cai_doctor() {
     if [[ "$ssh_key_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]] && [[ "$containai_docker_ok" == "true" ]]; then
         # Check if any ContainAI containers are running (with timeout to keep doctor fast)
         local running_containers
-        running_containers=$(_cai_timeout 5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-docker-containai}" ps --filter "label=containai.workspace" --format '{{.Names}}' 2>/dev/null | head -1) || running_containers=""
+        running_containers=$(_cai_timeout 5 docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" ps --filter "label=containai.workspace" --format '{{.Names}}' 2>/dev/null | head -1) || running_containers=""
         if [[ -n "$running_containers" ]]; then
             local test_container="$running_containers"
             local ssh_port
-            ssh_port=$(_cai_timeout 5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-docker-containai}" inspect "$test_container" --format '{{index .Config.Labels "containai.ssh-port"}}' 2>/dev/null) || ssh_port=""
+            ssh_port=$(_cai_timeout 5 docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" inspect "$test_container" --format '{{index .Config.Labels "containai.ssh-port"}}' 2>/dev/null) || ssh_port=""
             if [[ -n "$ssh_port" ]]; then
                 # Try connectivity test with BatchMode and short timeout
                 # Use same known_hosts file as cai shell/run for accurate UX reflection

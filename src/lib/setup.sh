@@ -984,8 +984,9 @@ provision:
       rm -f /tmp/sysbox.deb
 
       # Configure Docker with Sysbox runtime (NOT as default)
-      mkdir -p /etc/docker
-      cat > /etc/docker/daemon.json << 'EOF'
+      # Note: Inside Lima VM, /etc/containai/docker is the isolated path
+      mkdir -p /etc/containai/docker
+      cat > /etc/containai/docker/daemon.json << 'EOF'
       {
         "runtimes": {
           "sysbox-runc": {
@@ -1879,9 +1880,9 @@ _cai_setup_linux() {
         _cai_info ""
         _cai_info "Manual installation steps:"
         _cai_info "  1. Install Sysbox: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
-        _cai_info "  2. Configure /etc/docker/daemon.json with sysbox-runc runtime"
-        _cai_info "  3. Restart Docker: sudo systemctl restart docker"
-        _cai_info "  4. Create context: docker context create containai-secure --docker host=unix:///var/run/docker.sock"
+        _cai_info "  2. Configure daemon.json with sysbox-runc runtime"
+        _cai_info "  3. Start the containai-docker service"
+        _cai_info "  4. Create context: docker context create containai-docker --docker host=unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
         return 1
     fi
 
@@ -2110,18 +2111,18 @@ Options:
 What It Does (Linux native):
   1. Detects distribution (Ubuntu/Debian supported for auto-install)
   2. Downloads and installs Sysbox from GitHub releases
-  3. Configures /etc/docker/daemon.json with sysbox-runc runtime
-  4. Restarts Docker daemon
-  5. Creates 'containai-secure' Docker context pointing to default socket
+  3. Configures isolated daemon.json with sysbox-runc runtime
+  4. Starts containai-docker service
+  5. Creates 'containai-docker' Docker context pointing to isolated socket
   6. Verifies installation with test container
   Note: Fedora/RHEL/Arch users need to install Sysbox manually.
 
 What It Does (WSL2):
   1. Checks seccomp compatibility (warns if WSL 1.1.0+ filter conflict)
   2. Downloads and installs Sysbox from GitHub releases
-  3. Configures /etc/docker/daemon.json with sysbox-runc runtime
-  4. Configures dedicated Docker socket at /var/run/docker-containai.sock
-  5. Creates 'containai-secure' Docker context pointing to dedicated socket
+  3. Configures isolated daemon.json with sysbox-runc runtime
+  4. Configures dedicated Docker socket at /var/run/containai-docker.sock
+  5. Creates 'containai-docker' Docker context pointing to dedicated socket
   6. Verifies installation
 
 What It Does (macOS):
@@ -2252,8 +2253,8 @@ _cai_secure_engine_validate() {
             expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
             ;;
         linux)
-            # Native Linux uses the isolated ContainAI Docker socket
-            expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+            # Native Linux currently uses the default Docker socket (will be migrated in fn-14-nm0.3)
+            expected_socket="unix:///var/run/docker.sock"
             ;;
         *)
             _cai_error "Unknown platform: $platform"
