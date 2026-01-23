@@ -4,7 +4,7 @@
 # ==============================================================================
 # Verifies ContainAI works correctly in all scenarios:
 # 1. Clean start without import - basic container functionality
-# 2. Clean start with import - config syncing works correctly
+# 2. Clean start with import - config syncing works correctly (fresh container)
 # 3. DinD operations - Docker-in-Docker works (when dockerd available)
 # 4. Agent doctor commands - claude/codex/copilot doctor works or reports clear errors
 #
@@ -12,6 +12,7 @@
 # - Docker daemon running
 # - Sysbox installed and containai-secure context available
 # - containai.sh sourced
+# - jq installed on host (for JSON validation)
 #
 # Usage:
 #   ./tests/integration/test-containai.sh
@@ -40,19 +41,22 @@ fi
 # ==============================================================================
 
 pass() { printf '%s\n' "[PASS] $*"; }
-fail() { printf '%s\n' "[FAIL] $*" >&2; FAILED=1; }
+fail() { printf '%s\n' "[FAIL] $*" >&2; FAILED=1; SCENARIO_FAILED=1; }
 warn() { printf '%s\n' "[WARN] $*"; }
 info() { printf '%s\n' "[INFO] $*"; }
 section() { printf '\n'; printf '%s\n' "=== $* ==="; }
 
 FAILED=0
+SCENARIO_FAILED=0
 
 # Context name for sysbox containers
 CONTEXT_NAME="containai-secure"
 
+# Pinned alpine image for verification containers (avoids flakiness)
+ALPINE_IMAGE="alpine:3.20"
+
 # Timeouts
 DOCKERD_WAIT_TIMEOUT=60
-SSHD_WAIT_TIMEOUT=30
 TEST_TIMEOUT=60
 CONTAINER_STOP_TIMEOUT=30
 
@@ -69,6 +73,9 @@ TEST_IMAGE="${CONTAINAI_TEST_IMAGE:-ghcr.io/novotnyllc/containai/base:latest}"
 declare -a CLEANUP_CONTAINERS=()
 declare -a CLEANUP_VOLUMES=()
 declare -a CLEANUP_DIRS=()
+
+# Track if core setup succeeded (container is running)
+CONTAINER_READY=0
 
 # ==============================================================================
 # Cleanup function
@@ -126,32 +133,8 @@ run_with_timeout() {
 # Wait helpers
 # ==============================================================================
 
-# Wait for SSH daemon to be ready inside container
-# Returns 0 when sshd is ready, 1 on timeout
-wait_for_sshd() {
-    local container="$1"
-    local timeout="${2:-$SSHD_WAIT_TIMEOUT}"
-    local elapsed=0
-    local interval=2
-
-    info "Waiting for sshd to start (timeout: ${timeout}s)..."
-
-    while [[ $elapsed -lt $timeout ]]; do
-        # Check if sshd is listening
-        if docker --context "$CONTEXT_NAME" exec "$container" pgrep -x sshd >/dev/null 2>&1; then
-            info "sshd is ready (took ${elapsed}s)"
-            return 0
-        fi
-
-        sleep "$interval"
-        elapsed=$((elapsed + interval))
-    done
-
-    return 1
-}
-
 # Wait for dockerd to be ready inside container
-# Returns 0 when dockerd is ready, 1 on timeout
+# Returns 0 when dockerd is ready, 1 on timeout or container not running
 wait_for_dockerd() {
     local container="$1"
     local timeout="${2:-$DOCKERD_WAIT_TIMEOUT}"
@@ -161,6 +144,14 @@ wait_for_dockerd() {
     info "Waiting for inner dockerd to start (timeout: ${timeout}s)..."
 
     while [[ $elapsed -lt $timeout ]]; do
+        # Fast-fail if container doesn't exist or isn't running
+        local container_state
+        container_state=$(docker --context "$CONTEXT_NAME" inspect --format '{{.State.Status}}' "$container" 2>/dev/null) || container_state=""
+        if [[ "$container_state" != "running" ]]; then
+            warn "Container '$container' is not running (state: ${container_state:-not found})"
+            return 1
+        fi
+
         # Check if docker info succeeds inside the container
         if docker --context "$CONTEXT_NAME" exec "$container" docker info >/dev/null 2>&1; then
             info "Inner dockerd is ready (took ${elapsed}s)"
@@ -200,6 +191,13 @@ check_prerequisites() {
     fi
     pass "Docker daemon running"
 
+    # Check jq is available on host (needed for JSON validation)
+    if ! command -v jq >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] jq not found (required for JSON validation)" >&2
+        exit 1
+    fi
+    pass "jq available on host"
+
     # Check containai-secure context exists
     if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
         printf '%s\n' "[ERROR] Context '$CONTEXT_NAME' not found" >&2
@@ -229,7 +227,17 @@ check_prerequisites() {
     # Check test image is available (or can be pulled)
     if ! docker --context "$CONTEXT_NAME" image inspect "$TEST_IMAGE" >/dev/null 2>&1; then
         info "Pulling test image: $TEST_IMAGE"
-        if ! run_with_timeout 120 docker --context "$CONTEXT_NAME" pull "$TEST_IMAGE"; then
+        local pull_rc
+        pull_rc=0
+        run_with_timeout 120 docker --context "$CONTEXT_NAME" pull "$TEST_IMAGE" || pull_rc=$?
+
+        # Handle no timeout mechanism (rc=125)
+        if [[ $pull_rc -eq 125 ]]; then
+            warn "No timeout mechanism available, pulling without timeout"
+            docker --context "$CONTEXT_NAME" pull "$TEST_IMAGE" || pull_rc=$?
+        fi
+
+        if [[ $pull_rc -ne 0 ]]; then
             fail "Failed to pull test image: $TEST_IMAGE"
             return 1
         fi
@@ -243,6 +251,7 @@ check_prerequisites() {
 
 test_clean_start_without_import() {
     section "Scenario 1: Clean Start Without Import"
+    SCENARIO_FAILED=0
 
     # Create test workspace
     mkdir -p "$TEST_WORKSPACE"
@@ -287,6 +296,7 @@ test_clean_start_without_import() {
         return 1
     fi
     pass "Container is running"
+    CONTAINER_READY=1
 
     # Verify systemd is PID 1
     local pid1_cmd
@@ -296,7 +306,6 @@ test_clean_start_without_import() {
         pass "systemd is running as PID 1"
     else
         fail "PID 1 is not systemd (found: $pid1_cmd)"
-        return 1
     fi
 
     # Verify workspace is mounted
@@ -304,7 +313,6 @@ test_clean_start_without_import() {
         pass "Workspace is mounted correctly"
     else
         fail "Workspace not mounted or README.md not found"
-        return 1
     fi
 
     # Verify data volume is mounted
@@ -312,7 +320,6 @@ test_clean_start_without_import() {
         pass "Data volume is mounted"
     else
         fail "Data volume not mounted"
-        return 1
     fi
 
     # Verify basic tools are available
@@ -340,7 +347,12 @@ test_clean_start_without_import() {
         warn "Unexpected: claude settings found in data volume"
     fi
 
-    pass "Scenario 1: Clean start without import - PASSED"
+    # Scenario summary
+    if [[ $SCENARIO_FAILED -eq 0 ]]; then
+        pass "Scenario 1: Clean start without import - PASSED"
+    else
+        fail "Scenario 1: Clean start without import - FAILED"
+    fi
 }
 
 # ==============================================================================
@@ -349,6 +361,22 @@ test_clean_start_without_import() {
 
 test_clean_start_with_import() {
     section "Scenario 2: Clean Start With Import"
+    SCENARIO_FAILED=0
+
+    # This scenario tests import into a fresh volume BEFORE container start,
+    # then verifies data is accessible after container startup.
+    # We use a separate container/volume to test the full wiring.
+
+    local import_container="${TEST_RUN_ID}-import"
+    local import_volume="${TEST_RUN_ID}-import-data"
+
+    # Create a fresh data volume for import test
+    if ! docker --context "$CONTEXT_NAME" volume create "$import_volume" >/dev/null; then
+        fail "Failed to create import test data volume"
+        return 1
+    fi
+    register_volume "$import_volume"
+    pass "Created import test data volume: $import_volume"
 
     # Prepare a temporary home directory with fixture structure
     local fixture_home
@@ -370,10 +398,10 @@ test_clean_start_with_import() {
 
     info "Created fixture home at: $fixture_home"
 
-    # Run import from fixture directory to existing test data volume
-    info "Running import from fixture directory..."
+    # Run import BEFORE starting the container (key difference from before)
+    info "Running import from fixture directory to fresh volume..."
     local import_output import_rc
-    import_output=$(_containai_import "$CONTEXT_NAME" "$TEST_DATA_VOLUME" "false" "false" "$TEST_WORKSPACE" "" "$fixture_home" 2>&1) && import_rc=0 || import_rc=$?
+    import_output=$(_containai_import "$CONTEXT_NAME" "$import_volume" "false" "false" "$TEST_WORKSPACE" "" "$fixture_home" 2>&1) && import_rc=0 || import_rc=$?
 
     if [[ $import_rc -ne 0 ]]; then
         fail "Import failed"
@@ -382,12 +410,12 @@ test_clean_start_with_import() {
     fi
     pass "Import completed successfully"
 
-    # Verify imported data in volume
-    info "Verifying imported data..."
+    # Verify imported data in volume using pinned alpine with --pull=never
+    info "Verifying imported data in volume..."
 
-    # Check claude settings
+    # Check claude settings using exec inside existing container (avoids extra pulls)
     local settings_check
-    settings_check=$(docker --context "$CONTEXT_NAME" run --rm -v "$TEST_DATA_VOLUME":/data alpine cat /data/claude/settings.json 2>/dev/null) || settings_check=""
+    settings_check=$(docker --context "$CONTEXT_NAME" run --rm --pull=never -v "$import_volume":/data "$ALPINE_IMAGE" cat /data/claude/settings.json 2>/dev/null) || settings_check=""
 
     if [[ -n "$settings_check" ]] && printf '%s' "$settings_check" | jq -e '.enabledPlugins["test-plugin"]' >/dev/null 2>&1; then
         pass "Claude settings imported correctly"
@@ -398,7 +426,7 @@ test_clean_start_with_import() {
 
     # Check plugin manifest
     local plugin_check
-    plugin_check=$(docker --context "$CONTEXT_NAME" run --rm -v "$TEST_DATA_VOLUME":/data alpine cat /data/claude/plugins/test-plugin/manifest.json 2>/dev/null) || plugin_check=""
+    plugin_check=$(docker --context "$CONTEXT_NAME" run --rm --pull=never -v "$import_volume":/data "$ALPINE_IMAGE" cat /data/claude/plugins/test-plugin/manifest.json 2>/dev/null) || plugin_check=""
 
     if [[ -n "$plugin_check" ]] && printf '%s' "$plugin_check" | jq -e '.name == "test-plugin"' >/dev/null 2>&1; then
         pass "Plugin manifest imported correctly"
@@ -409,7 +437,7 @@ test_clean_start_with_import() {
 
     # Check bash aliases
     local aliases_check
-    aliases_check=$(docker --context "$CONTEXT_NAME" run --rm -v "$TEST_DATA_VOLUME":/data alpine cat /data/shell/bash_aliases 2>/dev/null) || aliases_check=""
+    aliases_check=$(docker --context "$CONTEXT_NAME" run --rm --pull=never -v "$import_volume":/data "$ALPINE_IMAGE" cat /data/shell/bash_aliases 2>/dev/null) || aliases_check=""
 
     if [[ "$aliases_check" == *"containai-test"* ]]; then
         pass "Bash aliases imported correctly"
@@ -420,7 +448,7 @@ test_clean_start_with_import() {
 
     # Check gh config
     local gh_check
-    gh_check=$(docker --context "$CONTEXT_NAME" run --rm -v "$TEST_DATA_VOLUME":/data alpine cat /data/config/gh/hosts.yml 2>/dev/null) || gh_check=""
+    gh_check=$(docker --context "$CONTEXT_NAME" run --rm --pull=never -v "$import_volume":/data "$ALPINE_IMAGE" cat /data/config/gh/hosts.yml 2>/dev/null) || gh_check=""
 
     if [[ "$gh_check" == *"github.com"* ]]; then
         pass "GitHub CLI config imported correctly"
@@ -429,14 +457,53 @@ test_clean_start_with_import() {
         info "  Got: $gh_check"
     fi
 
-    # Verify data is accessible inside the running container
-    if exec_in_container test -f /mnt/agent-data/claude/settings.json; then
-        pass "Imported data accessible inside container"
+    # Now start a fresh container with the pre-imported volume
+    info "Starting container with pre-imported data volume..."
+    local run_output run_rc
+    run_output=$(docker --context "$CONTEXT_NAME" run -d \
+        --runtime=sysbox-runc \
+        --name "$import_container" \
+        --hostname "containai-import-test" \
+        -v "$TEST_WORKSPACE:/home/agent/workspace:rw" \
+        -v "$import_volume:/mnt/agent-data:rw" \
+        -w /home/agent/workspace \
+        --stop-timeout "$CONTAINER_STOP_TIMEOUT" \
+        "$TEST_IMAGE" 2>&1) && run_rc=0 || run_rc=$?
+
+    if [[ $run_rc -ne 0 ]]; then
+        fail "Failed to start import test container"
+        info "  Error: $run_output"
+        return 1
+    fi
+    register_container "$import_container"
+    pass "Import test container started"
+
+    # Give container a moment to initialize
+    sleep 3
+
+    # Verify data is accessible inside the fresh container
+    if docker --context "$CONTEXT_NAME" exec "$import_container" test -f /mnt/agent-data/claude/settings.json; then
+        pass "Imported data accessible inside fresh container"
     else
-        fail "Imported data not accessible inside container"
+        fail "Imported data not accessible inside fresh container"
     fi
 
-    pass "Scenario 2: Clean start with import - PASSED"
+    # Verify settings content is correct inside container
+    local in_container_settings
+    in_container_settings=$(docker --context "$CONTEXT_NAME" exec "$import_container" cat /mnt/agent-data/claude/settings.json 2>/dev/null) || in_container_settings=""
+
+    if [[ -n "$in_container_settings" ]] && printf '%s' "$in_container_settings" | jq -e '.enabledPlugins["test-plugin"]' >/dev/null 2>&1; then
+        pass "Settings content verified inside container"
+    else
+        fail "Settings content incorrect inside container"
+    fi
+
+    # Scenario summary
+    if [[ $SCENARIO_FAILED -eq 0 ]]; then
+        pass "Scenario 2: Clean start with import - PASSED"
+    else
+        fail "Scenario 2: Clean start with import - FAILED"
+    fi
 }
 
 # ==============================================================================
@@ -445,6 +512,14 @@ test_clean_start_with_import() {
 
 test_dind_operations() {
     section "Scenario 3: Docker-in-Docker Operations"
+    SCENARIO_FAILED=0
+
+    # Skip if core container setup failed
+    if [[ $CONTAINER_READY -ne 1 ]]; then
+        warn "Skipping DinD tests - container not ready from Scenario 1"
+        fail "Scenario 3: DinD operations - SKIPPED (container not ready)"
+        return 1
+    fi
 
     # Wait for inner dockerd to be ready
     if ! wait_for_dockerd "$TEST_CONTAINER_NAME" "$DOCKERD_WAIT_TIMEOUT"; then
@@ -547,10 +622,10 @@ CMD ["echo", "build-success"]'
     info "Testing nested container networking..."
     local network_output network_rc
     # Use BusyBox-compatible wget flags: -T (timeout) not --timeout
-    network_output=$(run_with_timeout "$TEST_TIMEOUT" exec_in_container docker run --rm alpine:3.20 wget -q -O /dev/null -T 10 https://github.com 2>&1) && network_rc=0 || network_rc=$?
+    network_output=$(run_with_timeout "$TEST_TIMEOUT" exec_in_container docker run --rm "$ALPINE_IMAGE" wget -q -O /dev/null -T 10 https://github.com 2>&1) && network_rc=0 || network_rc=$?
 
     if [[ $network_rc -eq 125 ]]; then
-        network_output=$(exec_in_container docker run --rm alpine:3.20 wget -q -O /dev/null -T 10 https://github.com 2>&1) && network_rc=0 || network_rc=$?
+        network_output=$(exec_in_container docker run --rm "$ALPINE_IMAGE" wget -q -O /dev/null -T 10 https://github.com 2>&1) && network_rc=0 || network_rc=$?
     fi
 
     if [[ $network_rc -eq 0 ]]; then
@@ -574,7 +649,12 @@ CMD ["echo", "build-success"]'
         warn "Inner Docker default runtime: $default_runtime (expected: sysbox-runc)"
     fi
 
-    pass "Scenario 3: DinD operations - PASSED"
+    # Scenario summary
+    if [[ $SCENARIO_FAILED -eq 0 ]]; then
+        pass "Scenario 3: DinD operations - PASSED"
+    else
+        fail "Scenario 3: DinD operations - FAILED"
+    fi
 }
 
 # ==============================================================================
@@ -583,24 +663,37 @@ CMD ["echo", "build-success"]'
 
 test_agent_doctor_commands() {
     section "Scenario 4: Agent Doctor Commands"
+    SCENARIO_FAILED=0
+
+    # Skip if core container setup failed
+    if [[ $CONTAINER_READY -ne 1 ]]; then
+        warn "Skipping doctor tests - container not ready from Scenario 1"
+        fail "Scenario 4: Agent doctor commands - SKIPPED (container not ready)"
+        return 1
+    fi
 
     # Test: claude doctor (if claude is available)
     info "Testing claude doctor..."
     if exec_in_container command -v claude >/dev/null 2>&1; then
         local claude_doctor_output claude_doctor_rc
-        # Claude doctor may fail if not configured, but should provide clear output
-        claude_doctor_output=$(exec_in_container claude doctor 2>&1) && claude_doctor_rc=0 || claude_doctor_rc=$?
+        # Use timeout to avoid hangs
+        claude_doctor_output=$(run_with_timeout 30 exec_in_container claude doctor 2>&1) && claude_doctor_rc=0 || claude_doctor_rc=$?
+
+        # Handle no timeout mechanism
+        if [[ $claude_doctor_rc -eq 125 ]]; then
+            claude_doctor_output=$(exec_in_container claude doctor 2>&1) && claude_doctor_rc=0 || claude_doctor_rc=$?
+        fi
 
         if [[ $claude_doctor_rc -eq 0 ]]; then
             pass "claude doctor succeeded"
             info "  Output (truncated): $(printf '%s' "$claude_doctor_output" | head -5)"
         else
             # Check if the error message is clear/helpful
-            if printf '%s' "$claude_doctor_output" | grep -qiE "api.key|authentication|credentials|logged.in|sign.in|not.configured"; then
+            if printf '%s' "$claude_doctor_output" | grep -qiE "api.key|authentication|credentials|logged.in|sign.in|not.configured|not authenticated"; then
                 pass "claude doctor reports clear error (not configured)"
                 info "  Message: $(printf '%s' "$claude_doctor_output" | head -3)"
             else
-                warn "claude doctor failed with unclear error"
+                fail "claude doctor failed with unclear error"
                 info "  Exit code: $claude_doctor_rc"
                 info "  Output: $(printf '%s' "$claude_doctor_output" | head -5)"
             fi
@@ -614,16 +707,21 @@ test_agent_doctor_commands() {
     info "Testing codex doctor..."
     if exec_in_container command -v codex >/dev/null 2>&1; then
         local codex_doctor_output codex_doctor_rc
-        codex_doctor_output=$(exec_in_container codex doctor 2>&1) && codex_doctor_rc=0 || codex_doctor_rc=$?
+        codex_doctor_output=$(run_with_timeout 30 exec_in_container codex doctor 2>&1) && codex_doctor_rc=0 || codex_doctor_rc=$?
+
+        if [[ $codex_doctor_rc -eq 125 ]]; then
+            codex_doctor_output=$(exec_in_container codex doctor 2>&1) && codex_doctor_rc=0 || codex_doctor_rc=$?
+        fi
 
         if [[ $codex_doctor_rc -eq 0 ]]; then
             pass "codex doctor succeeded"
         else
-            if printf '%s' "$codex_doctor_output" | grep -qiE "api.key|authentication|credentials|logged.in|sign.in|not.configured"; then
+            if printf '%s' "$codex_doctor_output" | grep -qiE "api.key|authentication|credentials|logged.in|sign.in|not.configured|not authenticated"; then
                 pass "codex doctor reports clear error (not configured)"
             else
-                warn "codex doctor failed"
+                fail "codex doctor failed with unclear error"
                 info "  Exit code: $codex_doctor_rc"
+                info "  Output: $(printf '%s' "$codex_doctor_output" | head -5)"
             fi
         fi
     else
@@ -635,16 +733,21 @@ test_agent_doctor_commands() {
     info "Testing copilot doctor..."
     if exec_in_container command -v copilot >/dev/null 2>&1; then
         local copilot_doctor_output copilot_doctor_rc
-        copilot_doctor_output=$(exec_in_container copilot doctor 2>&1) && copilot_doctor_rc=0 || copilot_doctor_rc=$?
+        copilot_doctor_output=$(run_with_timeout 30 exec_in_container copilot doctor 2>&1) && copilot_doctor_rc=0 || copilot_doctor_rc=$?
+
+        if [[ $copilot_doctor_rc -eq 125 ]]; then
+            copilot_doctor_output=$(exec_in_container copilot doctor 2>&1) && copilot_doctor_rc=0 || copilot_doctor_rc=$?
+        fi
 
         if [[ $copilot_doctor_rc -eq 0 ]]; then
             pass "copilot doctor succeeded"
         else
-            if printf '%s' "$copilot_doctor_output" | grep -qiE "api.key|authentication|credentials|logged.in|sign.in|not.configured"; then
+            if printf '%s' "$copilot_doctor_output" | grep -qiE "api.key|authentication|credentials|logged.in|sign.in|not.configured|not authenticated"; then
                 pass "copilot doctor reports clear error (not configured)"
             else
-                warn "copilot doctor failed"
+                fail "copilot doctor failed with unclear error"
                 info "  Exit code: $copilot_doctor_rc"
+                info "  Output: $(printf '%s' "$copilot_doctor_output" | head -5)"
             fi
         fi
     else
@@ -662,7 +765,7 @@ test_agent_doctor_commands() {
             pass "gh CLI available"
             info "  Version: $(printf '%s' "$gh_version_output" | head -1)"
         else
-            warn "gh CLI found but version check failed"
+            fail "gh CLI found but version check failed"
         fi
 
         # Check auth status (will fail if not logged in, but should give clear message)
@@ -675,7 +778,8 @@ test_agent_doctor_commands() {
             if printf '%s' "$gh_auth_output" | grep -qiE "not logged|no account|gh auth login"; then
                 pass "gh auth status shows clear 'not logged in' message"
             else
-                warn "gh auth status failed with unexpected output"
+                fail "gh auth status failed with unexpected output"
+                info "  Output: $(printf '%s' "$gh_auth_output" | head -3)"
             fi
         fi
     else
@@ -683,7 +787,12 @@ test_agent_doctor_commands() {
         pass "gh CLI test skipped (not installed)"
     fi
 
-    pass "Scenario 4: Agent doctor commands - PASSED"
+    # Scenario summary
+    if [[ $SCENARIO_FAILED -eq 0 ]]; then
+        pass "Scenario 4: Agent doctor commands - PASSED"
+    else
+        fail "Scenario 4: Agent doctor commands - FAILED"
+    fi
 }
 
 # ==============================================================================
@@ -692,6 +801,7 @@ test_agent_doctor_commands() {
 
 test_idempotency() {
     section "Scenario 5: Idempotency Test"
+    SCENARIO_FAILED=0
 
     # Re-run import to verify idempotency
     info "Re-running import to test idempotency..."
@@ -710,7 +820,7 @@ test_idempotency() {
 
     cp "$FIXTURES_DIR/shell/bash_aliases" "$fixture_home/.bash_aliases" 2>/dev/null || true
 
-    # Run import again
+    # Run import again on original test volume
     local import_output import_rc
     import_output=$(_containai_import "$CONTEXT_NAME" "$TEST_DATA_VOLUME" "false" "false" "$TEST_WORKSPACE" "" "$fixture_home" 2>&1) && import_rc=0 || import_rc=$?
 
@@ -721,9 +831,9 @@ test_idempotency() {
         info "  Output: $import_output"
     fi
 
-    # Verify data is still correct after re-import
+    # Verify data is still correct after re-import using pinned alpine
     local settings_check
-    settings_check=$(docker --context "$CONTEXT_NAME" run --rm -v "$TEST_DATA_VOLUME":/data alpine cat /data/claude/settings.json 2>/dev/null) || settings_check=""
+    settings_check=$(docker --context "$CONTEXT_NAME" run --rm --pull=never -v "$TEST_DATA_VOLUME":/data "$ALPINE_IMAGE" cat /data/claude/settings.json 2>/dev/null) || settings_check=""
 
     if [[ -n "$settings_check" ]] && printf '%s' "$settings_check" | jq -e '.enabledPlugins["test-plugin"]' >/dev/null 2>&1; then
         pass "Data integrity preserved after re-import"
@@ -731,7 +841,12 @@ test_idempotency() {
         fail "Data corrupted after re-import"
     fi
 
-    pass "Scenario 5: Idempotency - PASSED"
+    # Scenario summary
+    if [[ $SCENARIO_FAILED -eq 0 ]]; then
+        pass "Scenario 5: Idempotency - PASSED"
+    else
+        fail "Scenario 5: Idempotency - FAILED"
+    fi
 }
 
 # ==============================================================================
@@ -750,8 +865,13 @@ main() {
     check_prerequisites || exit 1
 
     # Run test scenarios
+    # Scenario 1 sets up core container - must run first and succeed for others
     test_clean_start_without_import || true
+
+    # Scenario 2 is independent (uses its own container/volume)
     test_clean_start_with_import || true
+
+    # Scenarios 3-5 depend on Scenario 1's container being ready
     test_dind_operations || true
     test_agent_doctor_commands || true
     test_idempotency || true
