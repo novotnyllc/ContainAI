@@ -137,7 +137,8 @@ local_forward = ["8080:localhost:8080", "3000:localhost:3000"]
 
 **VS Code Remote-SSH compatibility:**
 - The generated SSH config is fully compatible with VS Code Remote-SSH extension
-- Use the container name (e.g., `containai-myproject`) as the SSH host in VS Code
+- Use the container name as the SSH host in VS Code (run `cai list` to see container names)
+- Container names are automatically generated based on workspace path hash
 - Port forwarding configured here will be available in VS Code sessions
 
 ### `[env]` Section

@@ -1318,13 +1318,18 @@ _cai_write_ssh_host_config() {
 
     _cai_debug "Writing SSH host config for $container_name to $config_file"
 
-    # Build ForwardAgent directive if enabled in config
+    # Build ForwardAgent directive based on config
     # SECURITY: ForwardAgent allows the container to use your SSH agent for
     # authentication to other hosts. Only enable if you trust the container.
+    # IMPORTANT: We ALWAYS write an explicit ForwardAgent directive to override
+    # any user's global config (e.g., "Host *" with ForwardAgent yes).
     local forward_agent_line=""
     if [[ "${_CAI_SSH_FORWARD_AGENT:-}" == "true" ]]; then
         forward_agent_line="    ForwardAgent yes"
         _cai_debug "ForwardAgent enabled via config"
+    else
+        forward_agent_line="    ForwardAgent no"
+        _cai_debug "ForwardAgent explicitly disabled (default)"
     fi
 
     # Build LocalForward directives from config
@@ -1372,11 +1377,9 @@ Host $container_name
     PasswordAuthentication no
 EOF
 
-        # Add ForwardAgent if enabled
-        if [[ -n "$forward_agent_line" ]]; then
-            printf '%s\n' "    # SSH agent forwarding (from [ssh].forward_agent config)"
-            printf '%s\n' "$forward_agent_line"
-        fi
+        # Add ForwardAgent directive (always explicit to override global config)
+        printf '%s\n' "    # SSH agent forwarding (explicit to override global config)"
+        printf '%s\n' "$forward_agent_line"
 
         # Add LocalForward entries if configured
         if [[ -n "$local_forward_lines" ]]; then

@@ -441,7 +441,7 @@ if isinstance(ssh, dict):
 
     # Extract local_forward array from [ssh] section
     # Format: 'localport:remotehost:remoteport' (e.g., '8080:localhost:8080')
-    # Security: validates format, rejects multi-line values, sanitizes for SSH config
+    # Security: validates format, port ranges, rejects multi-line values
     ssh_local_forwards_output=$(printf '%s' "$config_json" | python3 -c "
 import json, sys, re
 config = json.load(sys.stdin)
@@ -454,10 +454,10 @@ if not isinstance(local_forwards, list):
     print('[WARN] [ssh].local_forward must be a list, ignoring', file=sys.stderr)
     sys.exit(0)
 
-# Pattern for LocalForward: port:host:port or bind_address:port:host:port
-# Conservative pattern: allow digits, letters, dots, colons
-# Format: localport:remotehost:remoteport
-pattern = re.compile(r'^[0-9]+:[a-zA-Z0-9._-]+:[0-9]+$')
+# Pattern for LocalForward: localport:remotehost:remoteport
+# remotehost: hostname with alphanumeric, dots, underscores, dashes
+# Note: Does NOT support bind_address:port:host:port or IPv6 formats
+pattern = re.compile(r'^([0-9]+):([a-zA-Z0-9._-]+):([0-9]+)$')
 
 for i, item in enumerate(local_forwards):
     if not isinstance(item, str):
@@ -468,8 +468,18 @@ for i, item in enumerate(local_forwards):
         print(f'[WARN] [ssh].local_forward[{i}] contains newlines, skipping', file=sys.stderr)
         continue
     # Validate format
-    if not pattern.match(item):
+    match = pattern.match(item)
+    if not match:
         print(f'[WARN] [ssh].local_forward[{i}] invalid format \"{item}\", expected localport:host:port, skipping', file=sys.stderr)
+        continue
+    # Validate port ranges (1-65535)
+    local_port = int(match.group(1))
+    remote_port = int(match.group(3))
+    if not (1 <= local_port <= 65535):
+        print(f'[WARN] [ssh].local_forward[{i}] local port {local_port} out of range (1-65535), skipping', file=sys.stderr)
+        continue
+    if not (1 <= remote_port <= 65535):
+        print(f'[WARN] [ssh].local_forward[{i}] remote port {remote_port} out of range (1-65535), skipping', file=sys.stderr)
         continue
     print(item)
 ")

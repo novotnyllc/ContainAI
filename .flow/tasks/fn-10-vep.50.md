@@ -36,9 +36,8 @@ Update `cai run` to use SSH instead of docker exec.
 - [ ] Exit codes propagated correctly
 - [ ] Command arguments properly quoted/escaped
 ## Done summary
-TBD
-
+Updated cai run to use SSH instead of docker exec for agent execution. Added _cai_ssh_run() function with env var support, TTY allocation, detached mode via nohup, and proper argument escaping. Commands after -- now run directly (e.g., cai run /path -- bash runs bash). Removed auto SSH agent forwarding for security.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: bb46167, 51847de, 4a7b650
+- Tests: bash -n src/lib/ssh.sh, bash -n src/lib/container.sh
 - PRs:
