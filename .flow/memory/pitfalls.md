@@ -154,3 +154,6 @@ String prefix checks (case "$path" in "$prefix"*) don't prevent ../ path escapes
 
 ## 2026-01-23 manual [pitfall]
 POSIX sh case patterns with variable prefixes break if the variable has trailing slash - normalize paths by stripping trailing slash (except root) before pattern matching
+
+## 2026-01-23 manual [pitfall]
+When stripping trailing slash with ${var%/}, root path / becomes empty - use case statement to handle root specially

@@ -134,9 +134,8 @@ relink_internal_symlinks() {
 - [ ] POSIX-safe iteration (find -exec, not find | while read)
 
 ## Done summary
-TBD
-
+Implemented symlink relinking in rsync copy script. After rsync copies files during --from directory imports, a post-sync pass finds absolute symlinks pointing within the import source and relinks them to use /mnt/agent-data/... runtime paths. Includes security checks for path traversal and proper handling of edge cases like root paths.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 5b62602, 58f5725, b39af2b
+- Tests: shellcheck -x src/lib/import.sh
 - PRs:
