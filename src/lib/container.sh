@@ -2052,14 +2052,27 @@ _containai_stop_all() {
 
             if [[ "$remove_flag" == "true" ]]; then
                 echo "Removing: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+                local rm_success=false
                 if [[ -n "$ctx_to_use" ]]; then
-                    docker --context "$ctx_to_use" rm -f "$container_to_stop" >/dev/null 2>&1 || true
+                    if docker --context "$ctx_to_use" rm -f "$container_to_stop" >/dev/null 2>&1; then
+                        rm_success=true
+                    fi
                 else
-                    docker rm -f "$container_to_stop" >/dev/null 2>&1 || true
+                    if docker rm -f "$container_to_stop" >/dev/null 2>&1; then
+                        rm_success=true
+                    fi
                 fi
-                # Clean up SSH config after removal
-                if [[ -n "$ssh_port" ]]; then
-                    _cai_cleanup_container_ssh "$container_to_stop" "$ssh_port"
+                # Only clean up SSH config after SUCCESSFUL removal
+                if [[ "$rm_success" == "true" ]]; then
+                    # Clean by port if known, otherwise just remove config file by name
+                    if [[ -n "$ssh_port" ]]; then
+                        _cai_cleanup_container_ssh "$container_to_stop" "$ssh_port"
+                    else
+                        # Legacy container without port label - still clean config file
+                        _cai_remove_ssh_host_config "$container_to_stop"
+                    fi
+                else
+                    echo "  Warning: Failed to remove $container_to_stop (skipping SSH cleanup)"
                 fi
             else
                 echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
@@ -2133,14 +2146,27 @@ _containai_stop_all() {
 
         if [[ "$remove_flag" == "true" ]]; then
             echo "Removing: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+            local rm_success=false
             if [[ -n "$ctx_to_use" ]]; then
-                docker --context "$ctx_to_use" rm -f "$container_to_stop" >/dev/null 2>&1 || true
+                if docker --context "$ctx_to_use" rm -f "$container_to_stop" >/dev/null 2>&1; then
+                    rm_success=true
+                fi
             else
-                docker rm -f "$container_to_stop" >/dev/null 2>&1 || true
+                if docker rm -f "$container_to_stop" >/dev/null 2>&1; then
+                    rm_success=true
+                fi
             fi
-            # Clean up SSH config after removal
-            if [[ -n "$ssh_port" ]]; then
-                _cai_cleanup_container_ssh "$container_to_stop" "$ssh_port"
+            # Only clean up SSH config after SUCCESSFUL removal
+            if [[ "$rm_success" == "true" ]]; then
+                # Clean by port if known, otherwise just remove config file by name
+                if [[ -n "$ssh_port" ]]; then
+                    _cai_cleanup_container_ssh "$container_to_stop" "$ssh_port"
+                else
+                    # Legacy container without port label - still clean config file
+                    _cai_remove_ssh_host_config "$container_to_stop"
+                fi
+            else
+                echo "  Warning: Failed to remove $container_to_stop (skipping SSH cleanup)"
             fi
         else
             echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
