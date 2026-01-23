@@ -256,14 +256,14 @@ When using `Dockerfile.test`:
 Host (containai docker-ce + sysbox)
   └── Test container (runs with --runtime=sysbox-runc)
         └── dockerd on /var/run/docker-test.sock
-              └── Inner containers (use sysbox-runc by default)
+              └── Inner containers (use runc - isolation from outer sysbox)
 ```
 
 **Key points:**
-- `Dockerfile.test` installs the sysbox-runc binary but does NOT start sysbox services
+- `Dockerfile.test` does NOT install sysbox - the host provides it
 - The test container must be run with `--runtime=sysbox-runc` (NOT `--privileged`)
-- The host's sysbox runtime provides coordination and isolation
-- Inner Docker uses sysbox-runc as its default runtime for nested containers
+- The host's sysbox runtime provides all DinD capability and isolation
+- Inner Docker uses runc (default); sysbox isolation comes from the outer container
 - The test socket (`/var/run/docker-test.sock`) avoids conflicts with host Docker
 
 **Usage:**
@@ -313,14 +313,14 @@ The build script tags the image as both `agent-sandbox:latest` and `agent-sandbo
 
 ## Testing with Dockerfile.test
 
-For CI environments or development testing where you need to build and test ContainAI images inside a container with its own Docker daemon and Sysbox runtime, use `Dockerfile.test`.
+For CI environments or development testing where you need to build and test ContainAI images inside a container with its own Docker daemon, use `Dockerfile.test`.
 
 ### Overview
 
-`Dockerfile.test` creates a testing container with:
+`Dockerfile.test` creates a lightweight testing container with:
 - Its own Docker daemon (dockerd)
-- Sysbox runtime installed and running (sysbox-mgr, sysbox-fs)
 - Isolated socket at `/var/run/docker-test.sock` (does NOT interfere with host Docker)
+- No sysbox installation - the host provides DinD capability via `--runtime=sysbox-runc`
 
 ### Build and Run
 
@@ -332,29 +332,30 @@ docker build -t containai-test -f src/Dockerfile.test src/
 cd src
 docker build -t containai-test -f Dockerfile.test .
 
-# Run the built-in verification tests (requires --privileged for nested Docker)
-docker run --privileged containai-test /usr/local/bin/test-dind.sh
+# Run the built-in verification tests (use --runtime=sysbox-runc, NOT --privileged)
+docker --context containai-secure run --rm --runtime=sysbox-runc containai-test
 
 # Interactive testing
-docker run --privileged -it containai-test
+docker --context containai-secure run --rm -it --runtime=sysbox-runc containai-test bash
 
 # Mount workspace and run custom commands
-docker run --privileged -v $(pwd):/workspace -w /workspace containai-test \
-    bash -c "docker build -t myimage . && docker run --rm --runtime=sysbox-runc myimage"
+docker --context containai-secure run --rm --runtime=sysbox-runc \
+    -v $(pwd):/workspace -w /workspace containai-test \
+    bash -c "docker build -t myimage . && docker run --rm myimage"
 ```
 
 ### Features
 
 - **Context isolation**: Uses `/var/run/docker-test.sock` to avoid conflicts with any host Docker socket
-- **Sysbox runtime**: Available as `--runtime=sysbox-runc` for inner containers
+- **No --privileged**: Uses `--runtime=sysbox-runc` for secure DinD (host sysbox provides isolation)
 - **Build support**: Can build Docker images inside the container
-- **Nested containers**: Can run containers (including Sysbox containers) inside the test container
+- **Nested containers**: Can run containers inside the test container
 
 ### Use Cases
 
 1. **CI pipelines**: Build and test ContainAI images in isolated environment
 2. **Development**: Test Docker operations without affecting host Docker setup
-3. **Sysbox testing**: Verify containers run correctly with `--runtime=sysbox-runc`
+3. **DinD verification**: Verify Docker-in-Docker works correctly in sysbox containers
 
 **Note:** The container sets `DOCKER_HOST` to the test socket. To test Docker context selection (e.g., `--context containai-secure`), clear the environment variable first:
 ```bash
@@ -364,24 +365,22 @@ env -u DOCKER_HOST docker --context containai-secure info
 ### Requirements
 
 - BuildKit enabled (Docker 23.0+ has it by default, or set `DOCKER_BUILDKIT=1`)
-- `--privileged` flag is required for nested Docker and Sysbox services
+- Host must have sysbox installed and `containai-secure` context configured (run `cai setup`)
+- Must use `--runtime=sysbox-runc` flag (NOT `--privileged`)
 - Host must support Linux kernel features needed by Sysbox (kernel 5.4+)
 
 ### Startup Script
 
 The container runs `/usr/local/bin/start-dockerd.sh` on startup, which:
-1. Starts Sysbox services (sysbox-mgr, sysbox-fs)
-2. Starts dockerd on `/var/run/docker-test.sock`
-3. Waits for Docker to be ready
-4. Executes the command passed to the container
+1. Starts dockerd on `/var/run/docker-test.sock`
+2. Waits for Docker to be ready (with diagnostics on failure)
+3. Executes the command passed to the container
 
 ### Test Helper
 
 A test helper script is included at `/usr/local/bin/test-dind.sh` that verifies:
 - Docker daemon is running
-- Available runtimes (should include sysbox-runc)
 - Container runs with default runtime
-- Container runs with Sysbox runtime
 - Image builds work
 
 ## Known Limitations
