@@ -62,7 +62,7 @@ flowchart LR
 ```
 1. npm install fetches packages
 2. Malicious postinstall script runs automatically
-3. Script exploits a kernel vulnerability or misconfiguration
+3. Script exploits a container escape or runtime misconfiguration
 4. Attacker has root on your host system
 5. Steals: SSH keys, AWS credentials, browser cookies, source code
 6. Installs: cryptominer, ransomware, or persistent backdoor
@@ -75,8 +75,8 @@ flowchart LR
 2. Malicious postinstall script runs automatically
 3. Script attempts the same exploit
 4. User namespace mapping: root in container = unprivileged host UID
-5. Even if escape succeeds, attacker has no root privileges on host
-6. Access limited to what the mapped UID can reach
+5. For most container escapes, attacker lands as unprivileged user
+6. Blast radius dramatically reduced (not eliminated for kernel bugs)
 ```
 
 ### Side-by-Side Comparison
@@ -88,8 +88,8 @@ flowchart LR
 | Malicious code runs              | Malicious code runs              |
 | Escapes container                | Escapes container                |
 | Has ROOT on host                 | No root privileges on host       |
-| Steals credentials, installs     | Attack contained, host safe      |
-| malware, game over               |                                  |
+| Steals credentials, installs     | Blast radius reduced; workspace  |
+| malware, game over               | still at risk                    |
 +----------------------------------+----------------------------------+
 ```
 
@@ -462,7 +462,7 @@ Use true Docker-in-Docker with Sysbox:
 
 ### The Lesson
 
-Mounting the Docker socket is not a security compromise you can mitigate - it is equivalent to giving root access. There is no safe way to mount `/var/run/docker.sock`. If you need containers to build containers, use proper Docker-in-Docker with Sysbox.
+Mounting the rootful Docker socket is generally equivalent to giving root access. While mitigations exist (rootless Docker, API proxies, heavily constrained setups), they add complexity and still carry risk. If you need containers to build containers, use proper Docker-in-Docker with Sysbox instead.
 
 **Reference**: [Docker Security Best Practices](https://docs.docker.com/engine/security/)
 

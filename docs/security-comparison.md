@@ -88,7 +88,7 @@ flowchart TB
 | Feature | Docker Sandbox | Docker ECI | ContainAI | SRT | gVisor | microVMs |
 |---------|---------------|------------|-----------|-----|--------|----------|
 | **User Namespaces** | :x: | :white_check_mark: | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: |
-| **Syscall Filtering** | :x: | :white_check_mark: | :white_check_mark: | :x: | :white_check_mark: :white_check_mark: | :white_check_mark: |
+| **Enhanced Syscall Vetting** | :warning: | :white_check_mark: | :white_check_mark: | :x: | :white_check_mark: :white_check_mark: | :white_check_mark: |
 | **Docker-in-Docker** | :warning: | :white_check_mark: | :white_check_mark: | :x: | :warning: | :white_check_mark: |
 | **systemd Support** | :x: | :white_check_mark: | :white_check_mark: | :x: | :warning: | :white_check_mark: |
 | **Cost** | Free | Business tier | Free | Free | Free | Varies |
@@ -99,6 +99,10 @@ flowchart TB
 **Notes on Docker-in-Docker**:
 - **Docker Sandbox** (:warning:): Includes Docker CLI that talks to the host Docker daemon (not a nested daemon)
 - **gVisor** (:warning:): Requires special configuration flags and has compatibility limitations
+
+**Notes on Enhanced Syscall Vetting**:
+- **Docker Sandbox** (:warning:): Has Docker's default seccomp profile but no sysbox-style procfs/sysfs virtualization
+- **gVisor** (:white_check_mark: :white_check_mark:): Intercepts all syscalls via user-space kernel (strongest)
 
 **Building block tools** (Bubblewrap, nsjail, Firejail) are not included in the main comparison as they are low-level components rather than complete solutions. See their dedicated sections below.
 
