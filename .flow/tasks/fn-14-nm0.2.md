@@ -57,7 +57,9 @@ _cai_detect_wsl2_mirrored_mode() {
    - Print: "Cannot continue setup with mirrored networking mode. Please disable it manually and re-run setup."
    - Exit with error
 
-**Why mirrored mode breaks us:** Mirrored networking changes how Docker networking works - the WSL2 VM shares Windows network interfaces directly, which conflicts with Docker's bridge networking and our isolated daemon's network configuration.
+**Why mirrored mode breaks us:** WSL2's init process (PID 1) installs its own restrictive seccomp filters during boot to support mirrored networking.
+
+Upstream Issue: This behavior is tracked in the WSL repository (e.g., microsoft/WSL#9783 regarding systemd and seccomp interactions). The pre-existing filters can prevent nested container runtimes from installing their own interceptors, resulting in a EBUSY error code.
 
 ### Steps 1-5: Existing isolated Docker setup (already implemented)
 
