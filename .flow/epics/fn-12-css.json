@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-12-css",
+  "created_at": "2026-01-23T18:08:52.838494Z",
+  "depends_on_epics": [],
+  "id": "fn-12-css",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-12-css.md",
+  "status": "open",
+  "title": "Workspace-Centric UX & Config Improvements",
+  "updated_at": "2026-01-23T18:08:52.838516Z"
+}

@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-23T18:10:24.557424Z",
+  "depends_on": [
+    "fn-12-css.1"
+  ],
+  "epic": "fn-12-css",
+  "id": "fn-12-css.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-12-css.2.md",
+  "status": "todo",
+  "title": "Update cai run/shell to persist workspace state",
+  "updated_at": "2026-01-23T18:10:24.557444Z"
+}

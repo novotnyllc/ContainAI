@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-23T18:10:47.563177Z",
+  "depends_on": [
+    "fn-12-css.7"
+  ],
+  "epic": "fn-12-css",
+  "id": "fn-12-css.8",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-12-css.8.md",
+  "status": "todo",
+  "title": "Remove host env import behavior",
+  "updated_at": "2026-01-23T18:10:47.563200Z"
+}

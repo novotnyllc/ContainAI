@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-23T18:10:20.503364Z",
+  "depends_on": [],
+  "epic": "fn-12-css",
+  "id": "fn-12-css.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-12-css.1.md",
+  "status": "todo",
+  "title": "Add workspace state helpers to lib/config.sh",
+  "updated_at": "2026-01-23T18:10:20.503385Z"
+}

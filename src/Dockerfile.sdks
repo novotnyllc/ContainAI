@@ -92,7 +92,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         pipx \
         # Additional dev tools
         shellcheck \
-        shfmt
+        shfmt \
+        pre-commit
 
 # Copy .NET SDK from installer stage
 ENV DOTNET_ROOT=/home/agent/.dotnet

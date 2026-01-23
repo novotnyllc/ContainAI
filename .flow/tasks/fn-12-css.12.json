@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-23T18:11:05.427796Z",
+  "depends_on": [
+    "fn-12-css.11"
+  ],
+  "epic": "fn-12-css",
+  "id": "fn-12-css.12",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-12-css.12.md",
+  "status": "todo",
+  "title": "Delete scripts/install-containai-docker.sh",
+  "updated_at": "2026-01-23T18:11:05.427816Z"
+}
