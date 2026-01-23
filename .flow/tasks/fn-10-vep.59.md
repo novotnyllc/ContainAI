@@ -30,9 +30,8 @@ Implement `cai import` for hot-reload of config into running container.
 - [ ] Clear output showing what was imported
 - [ ] Errors if container not running
 ## Done summary
-TBD
-
+Implemented hot-reload for `cai import` command. When a workspace path is provided (positional or via --workspace), configs are synced to the data volume AND reloaded into the running container via SSH without restarting. The command validates the container is running before proceeding and shows clear output of what was reloaded (env vars and git config).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 2cb7f0579391e68d3c7ee509b78f8f92ee7b3388
+- Tests: shellcheck -x src/containai.sh src/lib/import.sh, source src/containai.sh && _containai_import_help
 - PRs:

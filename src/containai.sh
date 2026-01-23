@@ -224,10 +224,14 @@ Hot-Reload Mode (with workspace path):
   When a workspace path is provided, imports configs AND reloads them into
   the running container via SSH. Container must be running.
 
-  What gets reloaded:
-  - Environment variables from .env
+  What gets synced to volume:
+  - Environment variables from host (via [env] config)
   - Git config (user.name, user.email)
-  - Credentials (SSH agent keys available, tokens in data volume)
+  - Credentials (synced to data volume, available to new processes)
+
+  What gets activated in container:
+  - Git config is copied to agent's home directory
+  - Env vars are written to shell init for future sessions
 
 Volume-Only Mode (no workspace path):
   Syncs configs to data volume only. Does not affect running containers.
