@@ -1,0 +1,3 @@
+# Test codex config for ContainAI test suite
+[settings]
+test_mode = true

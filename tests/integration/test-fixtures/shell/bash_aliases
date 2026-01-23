@@ -1,0 +1,3 @@
+# Test bash aliases for ContainAI test suite
+alias containai-test="echo 'ContainAI test alias works'"
+alias ll="ls -la"

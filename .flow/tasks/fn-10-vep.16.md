@@ -51,9 +51,8 @@ Current Dockerfile.test issues:
 "Inner Docker configured with sysbox-runc as default" (requires the binary). Resolution:
 install sysbox for the binary, but do NOT start sysbox services. See decisions.md.
 ## Done summary
-TBD
-
+Simplified Dockerfile.test for sysbox system container environment: removed sysbox service startup from entrypoint, kept sysbox binary for inner Docker sysbox-runc support, removed --privileged requirement, updated documentation to reflect new runtime model.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: ce767b2, 0c29694, 440becc, 8b04c55, ddf4302, 89ea266
+- Tests: shellcheck -x src/scripts/start-dockerd.sh src/scripts/test-dind.sh
 - PRs:

@@ -5,8 +5,8 @@ Create a comprehensive test suite that verifies ContainAI works correctly in all
 
 **Size:** M
 **Files:**
-- `agent-sandbox/test-containai.sh` (new comprehensive test script)
-- `agent-sandbox/test-fixtures/` (new directory with test configs/skills/data)
+- `tests/integration/test-containai.sh` (new comprehensive test script)
+- `tests/integration/test-fixtures/` (new directory with test configs/skills/data)
 
 ## Scenarios to test
 
@@ -48,9 +48,9 @@ Create a comprehensive test suite that verifies ContainAI works correctly in all
 
 ## Key files to reference
 
-- `agent-sandbox/test-sync-integration.sh` - existing test pattern
-- `agent-sandbox/test-secure-engine.sh` - test helper pattern
-- `agent-sandbox/lib/import.sh` - import functionality
+- `tests/integration/test-sync-integration.sh` - existing test pattern
+- `tests/integration/test-secure-engine.sh` - test helper pattern
+- `src/lib/import.sh` - import functionality
 ## Acceptance
 - [ ] Test script `test-containai.sh` created
 - [ ] Test fixtures directory with sample configs/skills/data
