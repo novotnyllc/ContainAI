@@ -37,9 +37,8 @@ Implement `cai ssh cleanup` command to remove stale SSH configurations and known
 - [ ] Auto-cleanup on container removal
 - [ ] No errors if nothing to clean
 ## Done summary
-TBD
-
+Implemented `cai ssh cleanup` command to remove stale SSH configs for non-existent containers, with --dry-run support. Also added `cai stop --remove` flag for auto-cleanup during container removal.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 695cb6e, fe5f660, 637811a, 2fecdd7, 2855b0a
+- Tests: shellcheck -x src/lib/ssh.sh src/containai.sh src/lib/container.sh, bash -c 'source src/containai.sh && cai ssh --help', bash -c 'source src/containai.sh && cai ssh cleanup --help', bash -c 'source src/containai.sh && cai ssh cleanup --dry-run', bash -c 'source src/containai.sh && cai stop --help'
 - PRs:

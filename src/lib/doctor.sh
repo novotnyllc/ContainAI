@@ -575,6 +575,96 @@ _cai_doctor() {
 
     printf '\n'
 
+    # === SSH Section ===
+    local ssh_key_ok="false"
+    local ssh_config_dir_ok="false"
+    local ssh_include_ok="false"
+    local ssh_version_ok="false"
+    local ssh_version=""
+    local ssh_all_ok="false"
+
+    printf '%s\n' "SSH"
+
+    # Check OpenSSH version (7.3+ required for Include directive)
+    if ssh_version=$(_cai_check_ssh_version 2>/dev/null); then
+        ssh_version_ok="true"
+        printf '  %-44s %s\n' "OpenSSH version: $ssh_version" "[OK]"
+    else
+        if [[ -n "$ssh_version" ]]; then
+            printf '  %-44s %s\n' "OpenSSH version: $ssh_version" "[ERROR]"
+            printf '  %-44s %s\n' "" "(OpenSSH 7.3+ required for Include directive)"
+        else
+            printf '  %-44s %s\n' "OpenSSH version:" "[ERROR] Cannot determine"
+            printf '  %-44s %s\n' "" "(Verify ssh is installed)"
+        fi
+    fi
+
+    # Check SSH key exists
+    local ssh_key_path="$_CAI_SSH_KEY_PATH"
+    if [[ -f "$ssh_key_path" ]]; then
+        ssh_key_ok="true"
+        printf '  %-44s %s\n' "SSH key: $ssh_key_path" "[OK]"
+    else
+        printf '  %-44s %s\n' "SSH key: $ssh_key_path" "[ERROR] Not found"
+        printf '  %-44s %s\n' "" "(Run 'cai setup' to configure SSH)"
+    fi
+
+    # Check SSH config directory exists
+    local ssh_config_dir="$_CAI_SSH_CONFIG_DIR"
+    if [[ -d "$ssh_config_dir" ]]; then
+        ssh_config_dir_ok="true"
+        printf '  %-44s %s\n' "SSH config dir: $ssh_config_dir" "[OK]"
+    else
+        printf '  %-44s %s\n' "SSH config dir: $ssh_config_dir" "[ERROR] Not found"
+        printf '  %-44s %s\n' "" "(Run 'cai setup' to configure SSH)"
+    fi
+
+    # Check Include directive in ~/.ssh/config
+    local ssh_config="$HOME/.ssh/config"
+    local include_pattern='^[[:space:]]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]]+[^#]*containai\.d/\*\.conf'
+    if [[ -f "$ssh_config" ]] && grep -qE "$include_pattern" "$ssh_config" 2>/dev/null; then
+        ssh_include_ok="true"
+        printf '  %-44s %s\n' "Include directive in ~/.ssh/config:" "[OK]"
+    else
+        if [[ ! -f "$ssh_config" ]]; then
+            printf '  %-44s %s\n' "Include directive in ~/.ssh/config:" "[ERROR] File not found"
+        else
+            printf '  %-44s %s\n' "Include directive in ~/.ssh/config:" "[ERROR] Not present"
+        fi
+        printf '  %-44s %s\n' "" "(Run 'cai setup' to configure SSH)"
+    fi
+
+    # SSH connectivity test for running containers
+    if [[ "$ssh_key_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]]; then
+        # Check if any ContainAI containers are running
+        local running_containers
+        running_containers=$(docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-docker-containai}" ps --filter "label=containai.workspace" --format '{{.Names}}' 2>/dev/null | head -1) || running_containers=""
+        if [[ -n "$running_containers" ]]; then
+            local test_container="$running_containers"
+            local ssh_port
+            ssh_port=$(docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-docker-containai}" inspect "$test_container" --format '{{index .Config.Labels "containai.ssh-port"}}' 2>/dev/null) || ssh_port=""
+            if [[ -n "$ssh_port" ]]; then
+                # Try connectivity test with BatchMode and short timeout
+                if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+                       -o UserKnownHostsFile=/dev/null -i "$ssh_key_path" \
+                       -p "$ssh_port" agent@localhost true 2>/dev/null; then
+                    printf '  %-44s %s\n' "SSH connectivity ($test_container):" "[OK]"
+                else
+                    printf '  %-44s %s\n' "SSH connectivity ($test_container):" "[WARN] Failed"
+                    printf '  %-44s %s\n' "" "(Container may need 'cai import' or SSH restart)"
+                fi
+            fi
+        fi
+    fi
+
+    # Summary for SSH section
+    if [[ "$ssh_version_ok" == "true" ]] && [[ "$ssh_key_ok" == "true" ]] && \
+       [[ "$ssh_config_dir_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]]; then
+        ssh_all_ok="true"
+    fi
+
+    printf '\n'
+
     # === Resources Section ===
     printf '%s\n' "Resources"
 
@@ -640,8 +730,16 @@ _cai_doctor() {
         printf '  %-44s %s\n' "ContainAI Docker:" "[NOT INSTALLED]"
     fi
 
-    # Exit code: 0 if isolation ready (Sysbox available AND kernel compatible), 1 if not
-    if [[ "$isolation_ready" == "true" ]]; then
+    # SSH summary
+    if [[ "$ssh_all_ok" == "true" ]]; then
+        printf '  %-44s %s\n' "SSH:" "[OK] Configured"
+    else
+        printf '  %-44s %s\n' "SSH:" "[ERROR] Not configured"
+        printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure SSH"
+    fi
+
+    # Exit code: 0 if isolation ready AND SSH configured, 1 if not
+    if [[ "$isolation_ready" == "true" ]] && [[ "$ssh_all_ok" == "true" ]]; then
         return 0
     else
         return 1
@@ -788,6 +886,42 @@ _cai_doctor_json() {
         containai_docker_error="${_CAI_CONTAINAI_ERROR:-unknown}"
     fi
 
+    # Check SSH setup
+    local ssh_key_ok="false"
+    local ssh_config_dir_ok="false"
+    local ssh_include_ok="false"
+    local ssh_version_ok="false"
+    local ssh_version_json=""
+    local ssh_all_ok="false"
+
+    # Check OpenSSH version
+    if ssh_version_json=$(_cai_check_ssh_version 2>/dev/null); then
+        ssh_version_ok="true"
+    fi
+
+    # Check SSH key exists
+    if [[ -f "$_CAI_SSH_KEY_PATH" ]]; then
+        ssh_key_ok="true"
+    fi
+
+    # Check SSH config directory exists
+    if [[ -d "$_CAI_SSH_CONFIG_DIR" ]]; then
+        ssh_config_dir_ok="true"
+    fi
+
+    # Check Include directive in ~/.ssh/config
+    local ssh_config="$HOME/.ssh/config"
+    local include_pattern='^[[:space:]]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]]+[^#]*containai\.d/\*\.conf'
+    if [[ -f "$ssh_config" ]] && grep -qE "$include_pattern" "$ssh_config" 2>/dev/null; then
+        ssh_include_ok="true"
+    fi
+
+    # All SSH checks pass?
+    if [[ "$ssh_version_ok" == "true" ]] && [[ "$ssh_key_ok" == "true" ]] && \
+       [[ "$ssh_config_dir_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]]; then
+        ssh_all_ok="true"
+    fi
+
     # Output JSON
     printf '{\n'
     printf '  "sysbox": {\n'
@@ -867,16 +1001,31 @@ _cai_doctor_json() {
         printf '    "config_cpus": null\n'
     fi
     printf '  },\n'
+    printf '  "ssh": {\n'
+    printf '    "version_ok": %s,\n' "$ssh_version_ok"
+    if [[ -n "$ssh_version_json" ]]; then
+        printf '    "version": "%s",\n' "$(_cai_json_escape "$ssh_version_json")"
+    else
+        printf '    "version": null,\n'
+    fi
+    printf '    "key_exists": %s,\n' "$ssh_key_ok"
+    printf '    "key_path": "%s",\n' "$(_cai_json_escape "$_CAI_SSH_KEY_PATH")"
+    printf '    "config_dir_exists": %s,\n' "$ssh_config_dir_ok"
+    printf '    "config_dir": "%s",\n' "$(_cai_json_escape "$_CAI_SSH_CONFIG_DIR")"
+    printf '    "include_directive_present": %s,\n' "$ssh_include_ok"
+    printf '    "all_ok": %s\n' "$ssh_all_ok"
+    printf '  },\n'
     printf '  "summary": {\n'
     printf '    "sysbox_ok": %s,\n' "$sysbox_ok"
     printf '    "containai_docker_ok": %s,\n' "$containai_docker_ok"
+    printf '    "ssh_ok": %s,\n' "$ssh_all_ok"
     printf '    "isolation_available": %s,\n' "$isolation_available"
     printf '    "recommended_action": "%s"\n' "$recommended_action"
     printf '  }\n'
     printf '}\n'
 
-    # Exit code: 0 if Sysbox available, 1 if not
-    if [[ "$isolation_available" == "true" ]]; then
+    # Exit code: 0 if Sysbox available AND SSH configured, 1 if not
+    if [[ "$isolation_available" == "true" ]] && [[ "$ssh_all_ok" == "true" ]]; then
         return 0
     else
         return 1
