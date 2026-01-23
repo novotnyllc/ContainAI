@@ -30,9 +30,8 @@ Dynamic resource detection - default to 50% of host memory/CPU.
 - [ ] `--memory` and `--cpus` CLI flags override config
 - [ ] `cai doctor` shows detected vs configured resources
 ## Done summary
-TBD
-
+Added dynamic resource detection that defaults to 50% of host memory/CPU with minimums of 2GB and 1 CPU. Resources configurable via [container].memory and [container].cpus in config, or --memory and --cpus CLI flags on cai run/shell. cai doctor now shows detected vs configured resources.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 38bdc37, ad28cda
+- Tests: shellcheck -x src/*.sh src/lib/*.sh, source src/containai.sh && _cai_detect_resources 50 2 1, source src/containai.sh && _cai_doctor
 - PRs:
