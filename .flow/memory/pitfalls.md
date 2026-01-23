@@ -136,3 +136,6 @@ Dry-run simulations must mirror exact runtime logic (e.g., port allocation with 
 
 ## 2026-01-23 manual [pitfall]
 Never use 'source' or 'eval' on .env files - use safe line-by-line KEY=VALUE parsing to prevent command injection
+
+## 2026-01-23 manual [pitfall]
+Alpine/BusyBox wget uses -T for timeout (not --timeout which is GNU wget only)

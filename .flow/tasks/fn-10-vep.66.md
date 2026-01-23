@@ -47,9 +47,8 @@ System containers enable agents to:
 - [ ] Clear error message if dockerd fails to start
 - [ ] Test is part of CI suite
 ## Done summary
-TBD
-
+Created comprehensive DinD test suite verifying Docker-in-Docker works in sysbox system containers with tests for systemd init, dockerd startup, hello-world, docker build, nested networking (with opt-out), volume mounts, and error handling.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 420dded, 266bab3
+- Tests: shellcheck -x tests/integration/test-dind.sh, bash -n tests/integration/test-dind.sh
 - PRs:
