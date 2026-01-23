@@ -12,7 +12,8 @@
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 
-FROM ghcr.io/novotnyllc/containai/sdks:latest
+ARG SDKS_IMAGE=ghcr.io/novotnyllc/containai/sdks:latest
+FROM ${SDKS_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
