@@ -119,7 +119,7 @@ flowchart TB
 
     subgraph SysContainer["System Container (sysbox-runc)"]
         Systemd["PID 1: systemd"]
-        SSHD["sshd.service<br/>(port 22 -> 2300-2500)"]
+        SSHD["ssh.service<br/>(port 22 -> 2300-2500)"]
         Dockerd["docker.service<br/>(inner Docker)"]
         Init["containai-init.service<br/>(workspace setup)"]
     end
@@ -142,7 +142,7 @@ flowchart TB
 
 ### Why Separate docker-ce?
 
-1. **Docker Desktop does not support Sysbox** - Docker Desktop has its own Enhanced Container Isolation (ECI) which has different limitations
+1. **Docker Desktop does not support Sysbox** - The `sysbox-runc` runtime is not available in Docker Desktop
 2. **System containers need Sysbox** - For systemd, DinD without `--privileged`, and VM-like behavior
 3. **No conflicts** - ContainAI uses its own socket (`/var/run/containai-docker.sock`) and data directory
 
@@ -200,7 +200,7 @@ sequenceDiagram
     Container->>Systemd: Start systemd as PID 1
 
     par Service Startup
-        Systemd->>SSH: Start sshd.service
+        Systemd->>SSH: Start ssh.service
         Systemd->>Container: Start docker.service
         Systemd->>Container: Start containai-init.service
     end
@@ -214,6 +214,17 @@ sequenceDiagram
     CLI->>SSH: SSH connect
     SSH->>Agent: Run agent command
     Agent-->>User: Interactive session
+
+    Note over User: Session ends or user runs cai stop
+
+    User->>CLI: cai stop
+    CLI->>Docker: docker stop (SIGRTMIN+3)
+    Docker->>Systemd: Graceful shutdown signal
+    Systemd->>SSH: Stop ssh.service
+    Systemd->>Container: Stop docker.service
+    Systemd->>Container: Stop containai-init.service
+    Docker->>Container: Container stopped
+    CLI->>CLI: Clean up SSH config
 ```
 
 ### Container Startup Sequence
@@ -470,12 +481,12 @@ The CLI sources modular shell libraries from `src/lib/`:
 | `doctor.sh` | Health checks | `_cai_doctor`, `_cai_select_context` |
 | `config.sh` | TOML config parsing | `_containai_parse_config`, `_containai_resolve_volume` |
 | `container.sh` | Container lifecycle | `_containai_start_container`, `_containai_stop_all` |
-| `ssh.sh` | SSH infrastructure | `_cai_setup_ssh_key`, `_cai_allocate_ssh_port`, `_cai_ssh_run` |
 | `import.sh` | Dotfile sync | `_containai_import` |
 | `export.sh` | Volume backup | `_containai_export` |
 | `setup.sh` | Sysbox installation | `_cai_setup` |
+| `ssh.sh` | SSH infrastructure | `_cai_setup_ssh_key`, `_cai_allocate_ssh_port`, `_cai_ssh_run` |
 | `env.sh` | Environment handling | `_containai_import_env` |
-| `resources.sh` | Resource detection | `_cai_detect_host_resources` |
+| `version.sh` | Version management | `_cai_version`, `_cai_check_update` |
 
 ### Module Dependencies
 
@@ -494,12 +505,15 @@ flowchart TD
     Main["containai.sh"] --> Core["core.sh"]
     Core --> Platform["platform.sh"]
     Platform --> Docker["docker.sh"]
-    Docker --> SSH["ssh.sh"]
-    SSH --> Doctor["doctor.sh"]
+    Docker --> Doctor["doctor.sh"]
     Doctor --> Config["config.sh"]
     Config --> Container["container.sh"]
     Container --> Import["import.sh"]
-    Import --> Resources["resources.sh"]
+    Import --> Export["export.sh"]
+    Export --> Setup["setup.sh"]
+    Setup --> SSH["ssh.sh"]
+    SSH --> Env["env.sh"]
+    Env --> Version["version.sh"]
 
     style Main fill:#1a1a2e,stroke:#16213e,color:#fff
     style Core fill:#e94560,stroke:#16213e,color:#fff
