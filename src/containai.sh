@@ -227,11 +227,12 @@ Hot-Reload Mode (with workspace path):
   What gets synced to volume:
   - Environment variables from host (via [env] config)
   - Git config (user.name, user.email)
-  - Credentials (synced to data volume, available to new processes)
+  - API tokens/credentials (synced to data volume paths)
 
   What gets activated in container:
   - Git config is copied to agent's home directory
-  - Env vars are written to shell init for future sessions
+  - Env vars loaded via shell init hook for future sessions
+  - SSH: use ssh -A for agent forwarding (keys stay on host)
 
 Volume-Only Mode (no workspace path):
   Syncs configs to data volume only. Does not affect running containers.
@@ -579,22 +580,46 @@ _containai_import_cmd() {
     # For hot-reload mode, validate container is running before proceeding
     local container_name=""
     if [[ "$hot_reload" == "true" ]]; then
-        # Get container name from workspace
-        if ! container_name=$(_containai_container_name "$resolved_workspace"); then
-            echo "[ERROR] Failed to generate container name for workspace: $resolved_workspace" >&2
-            return 1
-        fi
-
         # Build docker command with context
         local -a docker_cmd=(docker)
         if [[ -n "$selected_context" ]]; then
             docker_cmd=(docker --context "$selected_context")
         fi
 
+        # Try to find container by workspace label first (handles --name containers)
+        # Label format: containai.workspace=/absolute/path
+        local label_filter="containai.workspace=$resolved_workspace"
+        local found_containers
+        found_containers=$("${docker_cmd[@]}" ps -q --filter "label=$label_filter" 2>/dev/null | head -2)
+
+        if [[ -n "$found_containers" ]]; then
+            # Count matches
+            local match_count
+            match_count=$(echo "$found_containers" | wc -l)
+            if [[ "$match_count" -gt 1 ]]; then
+                echo "[ERROR] Multiple containers found for workspace: $resolved_workspace" >&2
+                echo "" >&2
+                echo "Containers:" >&2
+                "${docker_cmd[@]}" ps --filter "label=$label_filter" --format "  {{.Names}} ({{.Status}})" >&2
+                echo "" >&2
+                echo "Stop extra containers or use a unique workspace path." >&2
+                return 1
+            fi
+            # Get container name from ID
+            container_name=$("${docker_cmd[@]}" inspect --format '{{.Name}}' "$found_containers" 2>/dev/null)
+            container_name="${container_name#/}"  # Remove leading /
+        else
+            # Fallback: try hash-based container name
+            if ! container_name=$(_containai_container_name "$resolved_workspace"); then
+                echo "[ERROR] Failed to generate container name for workspace: $resolved_workspace" >&2
+                return 1
+            fi
+        fi
+
         # Check container exists and is running
         local container_state
         if ! container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$container_name" 2>/dev/null); then
-            echo "[ERROR] Container not found: $container_name" >&2
+            echo "[ERROR] Container not found for workspace: $resolved_workspace" >&2
             echo "" >&2
             echo "To create a container for this workspace, run:" >&2
             echo "  cai run $resolved_workspace" >&2
@@ -602,7 +627,7 @@ _containai_import_cmd() {
         fi
 
         if [[ "$container_state" != "running" ]]; then
-            echo "[ERROR] Container is not running (state: $container_state)" >&2
+            echo "[ERROR] Container '$container_name' is not running (state: $container_state)" >&2
             echo "" >&2
             echo "Start the container first with:" >&2
             echo "  cai shell $resolved_workspace" >&2
@@ -611,7 +636,7 @@ _containai_import_cmd() {
         fi
 
         if [[ "$dry_run" != "true" ]]; then
-            _cai_info "Hot-reload mode: will sync configs and reload into running container"
+            _cai_info "Hot-reload mode: will sync configs and reload into container '$container_name'"
         fi
     fi
 

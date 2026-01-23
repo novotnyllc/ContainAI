@@ -18,3 +18,9 @@ Tests should verify actual behavior (e.g., sentinel values) not just that operat
 
 ## 2026-01-20 manual [convention]
 In bash functions with strict/non-strict modes, apply consistent error handling: strict mode returns 1 with [ERROR], non-strict returns defaults with [WARN]
+
+## 2026-01-23 manual [convention]
+Hot-reload env vars into containers via bashrc.d hook script that sources .env, not one-shot SSH export which doesn't persist
+
+## 2026-01-23 manual [convention]
+Reuse existing SSH infrastructure (_cai_ssh_run) for retry logic and host-key recovery instead of reimplementing SSH options
