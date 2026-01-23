@@ -158,6 +158,25 @@ run_in_image_no_entrypoint() {
     fi
 }
 
+# Portable timeout wrapper (macOS lacks `timeout` command)
+# Usage: run_with_timeout <seconds> <command...>
+# Returns: 124 on timeout, or the command's exit code
+# Note: On systems without timeout, runs without limit and warns once
+_TIMEOUT_WARNED=0
+run_with_timeout() {
+    local seconds="$1"
+    shift
+    if command -v timeout &>/dev/null; then
+        timeout "$seconds" "$@"
+    else
+        if [[ $_TIMEOUT_WARNED -eq 0 ]]; then
+            info "timeout command not available - running without timeout protection"
+            _TIMEOUT_WARNED=1
+        fi
+        "$@"
+    fi
+}
+
 # ==============================================================================
 # Hermetic fixture population
 # ==============================================================================
@@ -3131,7 +3150,7 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     local import_output import_exit=0
     import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
+        run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
 
     if [[ $import_exit -eq 124 ]]; then
         fail "Import timed out (possible infinite loop in symlink handling)"
@@ -3276,7 +3295,7 @@ data_volume = "'"$pitfall_vol"'"
     # Run import with timeout
     local pitfall_output pitfall_exit=0
     pitfall_output=$(cd -- "$pitfall_test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$pitfall_vol" "$pitfall_source_dir" 2>&1) || pitfall_exit=$?
+        run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$pitfall_vol" "$pitfall_source_dir" 2>&1) || pitfall_exit=$?
 
     # Check import succeeded before checking filesystem
     if [[ $pitfall_exit -ne 0 ]]; then
