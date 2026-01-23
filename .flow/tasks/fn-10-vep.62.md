@@ -60,9 +60,8 @@ Update docs/architecture.md to explain the **system container** architecture - h
 - [ ] Component documentation
 - [ ] NO legacy references (no ECI, no docker exec mentions)
 ## Done summary
-TBD
-
+Rewrote docs/architecture.md with comprehensive system container architecture documentation including mermaid diagrams for container lifecycle (start/stop), SSH connection flow, systemd service dependencies, and Docker-in-Docker architecture. Added security model section explaining Sysbox isolation, and updated module documentation to match actual codebase.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 89a4901, 6a5e2a1, 5fd2691
+- Tests: shellcheck (via pre-commit)
 - PRs:
