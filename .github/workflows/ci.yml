@@ -47,6 +47,9 @@ jobs:
       - name: Validate test scripts
         run: |
           # Ensure test scripts are syntactically valid
+          # Note: test-secure-engine.sh and test-dind.sh require Sysbox runtime
+          # which is not available on GitHub-hosted runners. Runtime validation
+          # must be performed on a self-hosted runner with Sysbox installed.
           bash -n ./tests/integration/test-secure-engine.sh
           bash -n ./tests/integration/test-sync-integration.sh
           bash -n ./tests/integration/test-dind.sh

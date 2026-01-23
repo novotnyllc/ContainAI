@@ -188,16 +188,25 @@ test_dockerd_ready() {
         info "Diagnostic information:"
 
         # Check docker service status
-        local service_status
-        service_status=$(exec_in_container systemctl status docker.service 2>&1 | head -20) || service_status="(unavailable)"
+        # Note: systemctl status returns non-zero for failed/inactive services, so we
+        # capture output first and only use "(unavailable)" if exec itself fails
+        local service_status service_status_rc
+        service_status=$(exec_in_container systemctl status docker.service --no-pager 2>&1 | head -20) && service_status_rc=0 || service_status_rc=$?
+        if [[ -z "$service_status" ]]; then
+            service_status="(unavailable - exec failed with rc=$service_status_rc)"
+        fi
         info "  docker.service status:"
         printf '%s\n' "$service_status" | while IFS= read -r line; do
             info "    $line"
         done
 
         # Check journal logs for docker
-        local journal_logs
-        journal_logs=$(exec_in_container journalctl -u docker.service --no-pager -n 20 2>&1) || journal_logs="(unavailable)"
+        # Note: journalctl may return non-zero in some container environments
+        local journal_logs journal_logs_rc
+        journal_logs=$(exec_in_container journalctl -u docker.service --no-pager -n 20 2>&1) && journal_logs_rc=0 || journal_logs_rc=$?
+        if [[ -z "$journal_logs" ]]; then
+            journal_logs="(unavailable - exec failed with rc=$journal_logs_rc)"
+        fi
         info "  Recent docker.service logs:"
         printf '%s\n' "$journal_logs" | while IFS= read -r line; do
             info "    $line"
@@ -303,31 +312,44 @@ test_nested_networking() {
     section "Test 6: Nested container networking"
 
     # Test internet connectivity from nested container
-    # Use a simple wget/curl to a known endpoint
+    # Use BusyBox-compatible wget flags: -T (timeout) not --timeout
     info "Testing internet connectivity from nested container..."
 
     local network_output network_rc
-    network_output=$(run_with_timeout "$TEST_TIMEOUT" exec_in_container docker run --rm alpine:3.20 wget -q -O /dev/null --timeout=10 https://github.com 2>&1) && network_rc=0 || network_rc=$?
+    # Note: Alpine uses BusyBox wget which requires -T for timeout (not --timeout)
+    network_output=$(run_with_timeout "$TEST_TIMEOUT" exec_in_container docker run --rm alpine:3.20 wget -q -O /dev/null -T 10 https://github.com 2>&1) && network_rc=0 || network_rc=$?
 
     # Handle no timeout mechanism
     if [[ $network_rc -eq 125 ]]; then
-        network_output=$(exec_in_container docker run --rm alpine:3.20 wget -q -O /dev/null --timeout=10 https://github.com 2>&1) && network_rc=0 || network_rc=$?
+        network_output=$(exec_in_container docker run --rm alpine:3.20 wget -q -O /dev/null -T 10 https://github.com 2>&1) && network_rc=0 || network_rc=$?
     fi
 
     if [[ $network_rc -eq 124 ]]; then
-        warn "Nested container networking test timed out"
+        # Timeout - this is a failure unless explicitly allowed
+        if [[ "${CAI_ALLOW_NETWORK_FAILURE:-}" == "1" ]]; then
+            warn "Nested container networking test timed out (allowed by CAI_ALLOW_NETWORK_FAILURE=1)"
+            return 0
+        fi
+        fail "Nested container networking test timed out after ${TEST_TIMEOUT}s"
         info "  This may indicate network configuration issues"
-        # Don't fail the test - networking issues are often environment-specific
-        return 0
+        info "  Set CAI_ALLOW_NETWORK_FAILURE=1 to skip this check in restricted environments"
+        return 1
     fi
 
     if [[ $network_rc -eq 0 ]]; then
         pass "Nested container has internet connectivity"
     else
-        warn "Nested container could not reach internet"
-        info "  This is environment-dependent and may be acceptable"
+        # Network failure - fail by default per acceptance criteria
+        if [[ "${CAI_ALLOW_NETWORK_FAILURE:-}" == "1" ]]; then
+            warn "Nested container could not reach internet (allowed by CAI_ALLOW_NETWORK_FAILURE=1)"
+            info "  Error output: $network_output"
+            return 0
+        fi
+        fail "Nested container networking failed"
+        info "  Exit code: $network_rc"
         info "  Error output: $network_output"
-        # Don't fail - some CI environments have restricted networking
+        info "  Set CAI_ALLOW_NETWORK_FAILURE=1 to skip this check in restricted environments"
+        return 1
     fi
 }
 
