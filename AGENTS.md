@@ -20,6 +20,9 @@ cai doctor
 # Build with buildx setup (installs binfmt + builder if needed)
 ./src/build.sh --build-setup
 
+# Build and tag for a registry (prefix applies to all layers)
+./src/build.sh --image-prefix ghcr.io/ORG/containai --push --platforms linux/amd64,linux/arm64 --build-setup
+
 # CI-style multi-arch build (amd64 + arm64)
 ./src/build.sh --platforms linux/amd64,linux/arm64 --push --build-setup
 
@@ -62,7 +65,7 @@ docs/                   # Architecture, config, quickstart
 - All function variables must be `local` to prevent shell pollution
 - Functions return status codes; use stdout for data, stderr for errors
 - Error handling: `set -euo pipefail` at script start
-- Build images use buildx by default; platform defaults to `linux/<host-arch>`. Use `--platforms` for CI multi-arch and `--build-setup` to configure buildx/binfmt.
+- Build images use buildx by default; platform defaults to `linux/<host-arch>`. Use `--platforms` for CI multi-arch, `--build-setup` to configure buildx/binfmt, and `--image-prefix` to tag/push to a registry.
 
 See `.flow/memory/conventions.md` for discovered patterns.
 

@@ -7,6 +7,7 @@ set -euo pipefail
 # Usage: ./build.sh [options] [docker buildx options]
 #   --dotnet-channel CHANNEL  .NET SDK channel (default: 10.0)
 #   --layer LAYER             Build only specific layer (base|sdks|full|all)
+#   --image-prefix PREFIX     Image name prefix (default: containai)
 #   --platforms PLATFORMS     Build with buildx for platforms (e.g., linux/amd64,linux/arm64)
 #   --builder NAME            Use a specific buildx builder
 #   --build-setup             Configure buildx builder + binfmt if required
@@ -22,6 +23,7 @@ set -euo pipefail
 #   ./build.sh                          # Build all layers
 #   ./build.sh --layer base             # Build only base layer
 #   ./build.sh --dotnet-channel lts     # Use latest LTS for .NET
+#   ./build.sh --image-prefix ghcr.io/org/containai
 #   ./build.sh --no-cache               # Pass option to docker build/buildx
 #   ./build.sh --platforms linux/amd64  # Cross-build single platform with buildx
 #   ./build.sh --platforms linux/amd64,linux/arm64 --push
@@ -33,6 +35,7 @@ DATE_TAG="$(date +%Y-%m-%d)"
 # Defaults
 DOTNET_CHANNEL="10.0"
 BUILD_LAYER="all"
+IMAGE_PREFIX="containai"
 PLATFORMS=""
 BUILDX_BUILDER=""
 BUILDX_PUSH=0
@@ -60,6 +63,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             BUILD_LAYER="$2"
+            shift 2
+            ;;
+        --image-prefix)
+            if [[ -z "${2-}" ]]; then
+                echo "ERROR: --image-prefix requires a value" >&2
+                exit 1
+            fi
+            IMAGE_PREFIX="$2"
             shift 2
             ;;
         --platforms|--platform)
@@ -96,7 +107,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help | -h)
-            sed -n '4,26p' "$0" | sed 's/^# //' | sed 's/^#//'
+            sed -n '4,34p' "$0" | sed 's/^# //' | sed 's/^#//'
             exit 0
             ;;
         --platforms=*|--platform=*)
@@ -115,6 +126,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             BUILDX_REQUESTED=1
+            shift
+            ;;
+        --image-prefix=*)
+            IMAGE_PREFIX="${1#*=}"
+            if [[ -z "$IMAGE_PREFIX" ]]; then
+                echo "ERROR: --image-prefix requires a value" >&2
+                exit 1
+            fi
             shift
             ;;
         *)
@@ -143,6 +162,20 @@ detect_host_arch() {
             return 1
             ;;
     esac
+}
+
+normalize_image_prefix() {
+    local prefix="$1"
+    prefix="${prefix%/}"
+    if [[ -z "$prefix" ]]; then
+        printf 'ERROR: --image-prefix cannot be empty\n' >&2
+        return 1
+    fi
+    if [[ "$prefix" =~ [[:space:]] ]]; then
+        printf 'ERROR: --image-prefix must not contain whitespace\n' >&2
+        return 1
+    fi
+    printf '%s' "$prefix"
 }
 
 normalize_platforms() {
@@ -242,6 +275,12 @@ buildx_check_platforms() {
 }
 
 # Buildx validation/setup
+IMAGE_PREFIX="$(normalize_image_prefix "$IMAGE_PREFIX")" || exit 1
+IMAGE_BASE="${IMAGE_PREFIX}/base"
+IMAGE_SDKS="${IMAGE_PREFIX}/sdks"
+IMAGE_FULL="${IMAGE_PREFIX}/full"
+IMAGE_MAIN="${IMAGE_PREFIX}"
+
 if [[ "$USE_BUILDX" -eq 1 ]]; then
     HAS_OUTPUT=0
     if [[ " ${DOCKER_ARGS[*]-} " =~ [[:space:]]--output([[:space:]]|=) ]]; then
@@ -307,6 +346,7 @@ build_layer() {
     local name="$1"
     local dockerfile="$2"
     local extra_args=("${@:3}")
+    local repo="${IMAGE_PREFIX}/${name}"
     local build_cmd=(docker build)
 
     echo ""
@@ -329,8 +369,8 @@ build_layer() {
     fi
 
     "${build_cmd[@]}" \
-        -t "containai/${name}:latest" \
-        -t "containai/${name}:${DATE_TAG}" \
+        -t "${repo}:latest" \
+        -t "${repo}:${DATE_TAG}" \
         --build-arg BUILD_DATE="$BUILD_DATE" \
         --build-arg VCS_REF="$VCS_REF" \
         ${extra_args[@]+"${extra_args[@]}"} \
@@ -338,7 +378,7 @@ build_layer() {
         -f "${SCRIPT_DIR}/${dockerfile}" \
         "$SCRIPT_DIR"
 
-    echo "  Tagged: containai/${name}:latest, containai/${name}:${DATE_TAG}"
+    echo "  Tagged: ${repo}:latest, ${repo}:${DATE_TAG}"
 }
 
 # Build layers based on selection
@@ -347,10 +387,12 @@ case "$BUILD_LAYER" in
         build_layer "base" "Dockerfile.base"
         ;;
     sdks)
-        build_layer "sdks" "Dockerfile.sdks" --build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL"
+        build_layer "sdks" "Dockerfile.sdks" \
+            --build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL" \
+            --build-arg BASE_IMAGE="${IMAGE_BASE}:latest"
         ;;
     full)
-        build_layer "full" "Dockerfile.full"
+        build_layer "full" "Dockerfile.full" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
         ;;
     all)
         echo "Building all ContainAI layers..."
@@ -358,8 +400,10 @@ case "$BUILD_LAYER" in
 
         # Build in dependency order
         build_layer "base" "Dockerfile.base"
-        build_layer "sdks" "Dockerfile.sdks" --build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL"
-        build_layer "full" "Dockerfile.full"
+        build_layer "sdks" "Dockerfile.sdks" \
+            --build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL" \
+            --build-arg BASE_IMAGE="${IMAGE_BASE}:latest"
+        build_layer "full" "Dockerfile.full" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
 
         # Build final alias image
         echo ""
@@ -381,14 +425,15 @@ case "$BUILD_LAYER" in
             fi
         fi
         "${final_cmd[@]}" \
-            -t "containai:latest" \
-            -t "containai:${DATE_TAG}" \
+            -t "${IMAGE_MAIN}:latest" \
+            -t "${IMAGE_MAIN}:${DATE_TAG}" \
             --build-arg BUILD_DATE="$BUILD_DATE" \
             --build-arg VCS_REF="$VCS_REF" \
+            --build-arg FULL_IMAGE="${IMAGE_FULL}:latest" \
             ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
             -f "${SCRIPT_DIR}/Dockerfile" \
             "$SCRIPT_DIR"
-        echo "  Tagged: containai:latest, containai:${DATE_TAG}"
+        echo "  Tagged: ${IMAGE_MAIN}:latest, ${IMAGE_MAIN}:${DATE_TAG}"
         ;;
     *)
         echo "ERROR: Unknown layer '$BUILD_LAYER'. Use: base, sdks, full, or all" >&2
@@ -402,5 +447,5 @@ echo ""
 if [[ "$USE_BUILDX" -eq 1 && "$BUILDX_LOAD" -eq 0 && ( "$BUILDX_PUSH" -eq 1 || "$HAS_OUTPUT" -eq 1 ) ]]; then
     printf 'Images were pushed or exported; no local images loaded.\n'
 else
-    docker images "containai*" --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | head -20
+    docker images "${IMAGE_PREFIX}*" --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | head -20
 fi

@@ -67,6 +67,9 @@ ContainAI builds use Docker buildx by default to match CI behavior. The default 
 # Configure buildx builder/binfmt (first-time setup)
 ./src/build.sh --build-setup
 
+# Build and tag for a registry (all layers)
+./src/build.sh --image-prefix ghcr.io/ORG/containai --platforms linux/amd64,linux/arm64 --push --build-setup
+
 # Multi-arch build (CI style) - requires --push or --output
 ./src/build.sh --platforms linux/amd64,linux/arm64 --push --build-setup
 ```

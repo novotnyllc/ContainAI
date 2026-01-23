@@ -76,7 +76,16 @@ jobs:
             echo "tag_suffix=latest" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build images (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          ./src/build.sh \
+            --image-prefix containai \
+            --platforms linux/amd64 \
+            --load
+
       - name: Build and push base image
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: src
@@ -93,6 +102,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=base
 
       - name: Build and push sdks image
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: src
@@ -110,6 +120,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=sdks
 
       - name: Build and push full image
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: src
@@ -143,24 +154,6 @@ jobs:
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
             # SHA for all builds
             type=sha,prefix=sha-
-
-      - name: Build Docker image (PR)
-        if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v6
-        with:
-          context: src
-          file: src/Dockerfile
-          platforms: ${{ steps.build_strategy.outputs.platforms }}
-          push: ${{ steps.build_strategy.outputs.push }}
-          load: ${{ steps.build_strategy.outputs.load }}
-          tags: containai:${{ steps.build_strategy.outputs.tag_suffix }}
-          build-args: |
-            FULL_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/full:${{ steps.build_strategy.outputs.tag_suffix }}
-            BUILD_DATE=${{ github.run_started_at }}
-            VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.image_version.outputs.version }}
-          cache-from: type=gha,scope=main
-          cache-to: type=gha,mode=max,scope=main
 
       - name: Build and push Docker image
         if: github.event_name != 'pull_request'
