@@ -137,8 +137,9 @@ local_forward = ["8080:localhost:8080", "3000:localhost:3000"]
 
 **VS Code Remote-SSH compatibility:**
 - The generated SSH config is fully compatible with VS Code Remote-SSH extension
-- Use the container name as the SSH host in VS Code (run `cai list` to see container names)
-- Container names are automatically generated based on workspace path hash
+- After running `cai shell` or `cai run`, the container name is shown in output
+- SSH host configs are written to `~/.ssh/containai.d/<container-name>.conf`
+- Use the container name as the Remote-SSH host (e.g., `containai-a1b2c3d4`)
 - Port forwarding configured here will be available in VS Code sessions
 
 ### `[env]` Section

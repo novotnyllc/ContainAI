@@ -1684,9 +1684,12 @@ _cai_ssh_connect_with_retry() {
         ssh_cmd+=(-o "PasswordAuthentication=no")
         ssh_cmd+=(-o "ConnectTimeout=10")
 
-        # Add agent forwarding if SSH_AUTH_SOCK is set (user has ssh-agent running)
-        if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
-            ssh_cmd+=(-A)
+        # Set ForwardAgent explicitly based on config (overrides any global SSH config)
+        # Only enable if BOTH config allows AND SSH_AUTH_SOCK is available
+        if [[ "${_CAI_SSH_FORWARD_AGENT:-}" == "true" ]] && [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+            ssh_cmd+=(-o "ForwardAgent=yes")
+        else
+            ssh_cmd+=(-o "ForwardAgent=no")
         fi
 
         # Connect to localhost (explicit options override any host alias)
