@@ -2,17 +2,34 @@
 # Test that Docker-in-Docker is working correctly
 # Run after start-dockerd.sh has initialized the environment
 #
-# This test runs inside a sysbox system container. The inner Docker uses
-# runc (default runtime) - all DinD isolation is provided by the outer
-# sysbox container runtime.
+# This test runs inside a sysbox system container. Inner Docker uses
+# sysbox-runc as its default runtime for nested containers.
 set -euo pipefail
 
 printf '%s\n' "=== Docker Info ==="
 docker info
 
 printf '\n'
+printf '%s\n' "=== Available Runtimes ==="
+docker info --format "{{json .Runtimes}}" | jq .
+
+printf '\n'
+printf '%s\n' "=== Test: Verify sysbox-runc is default runtime ==="
+DEFAULT_RUNTIME=$(docker info --format '{{.DefaultRuntime}}')
+if [ "$DEFAULT_RUNTIME" = "sysbox-runc" ]; then
+    printf '%s\n' "[OK] Default runtime is sysbox-runc"
+else
+    printf '%s\n' "[ERROR] Default runtime is '$DEFAULT_RUNTIME' (expected: sysbox-runc)"
+    exit 1
+fi
+
+printf '\n'
 printf '%s\n' "=== Test: Run container with default runtime ==="
-docker run --rm alpine:3.20 echo "Docker run works"
+docker run --rm alpine:3.20 echo "Default runtime works"
+
+printf '\n'
+printf '%s\n' "=== Test: Run container with explicit sysbox-runc runtime ==="
+docker run --rm --runtime=sysbox-runc alpine:3.20 echo "Sysbox runtime works"
 
 printf '\n'
 printf '%s\n' "=== Test: Build simple image ==="
@@ -27,4 +44,4 @@ printf '%s\n' "[OK] All Docker-in-Docker tests passed"
 printf '%s\n' ""
 printf '%s\n' "This container is running inside a sysbox system container."
 printf '%s\n' "The host sysbox runtime provides DinD capability without --privileged."
-printf '%s\n' "Inner Docker uses runc; sysbox isolation comes from the outer container."
+printf '%s\n' "Inner Docker uses sysbox-runc as default for nested container security."

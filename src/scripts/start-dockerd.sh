@@ -2,9 +2,9 @@
 # Start Docker daemon for DinD testing
 # Used by Dockerfile.test as the container entrypoint
 #
-# This script runs inside a sysbox system container, so no sysbox installation
-# or service startup is needed - the host's sysbox runtime provides all DinD
-# capability. Inner Docker uses runc (default); isolation comes from outer sysbox.
+# This script runs inside a sysbox system container, so no manual sysbox
+# service startup is needed - the host's sysbox runtime provides coordination.
+# Inner Docker uses sysbox-runc as its default runtime.
 set -euo pipefail
 
 DOCKERD_LOG="/var/log/dockerd.log"
@@ -36,6 +36,7 @@ while ! docker info >/dev/null 2>&1; do
 done
 
 printf '%s\n' "[OK] Docker ready on /var/run/docker-test.sock"
+printf '%s\n' "[INFO] Inner Docker default runtime: $(docker info --format '{{.DefaultRuntime}}')"
 
 # Execute the command passed to the container
 exec "$@"

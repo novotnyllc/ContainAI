@@ -1,3 +1,9 @@
 {
-  "hosts": ["unix:///var/run/docker-test.sock"]
+  "hosts": ["unix:///var/run/docker-test.sock"],
+  "default-runtime": "sysbox-runc",
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "/usr/bin/sysbox-runc"
+    }
+  }
 }
