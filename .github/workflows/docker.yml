@@ -12,7 +12,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: novotnyllc/containai
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
@@ -54,6 +54,39 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build and push base image
+        uses: docker/build-push-action@v6
+        with:
+          context: src
+          file: src/Dockerfile.base
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/base:latest
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
+
+      - name: Build and push sdks image
+        uses: docker/build-push-action@v6
+        with:
+          context: src
+          file: src/Dockerfile.sdks
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/sdks:latest
+          cache-from: type=gha,scope=sdks
+          cache-to: type=gha,mode=max,scope=sdks
+
+      - name: Build and push full image
+        uses: docker/build-push-action@v6
+        with:
+          context: src
+          file: src/Dockerfile.full
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/full:latest
+          cache-from: type=gha,scope=full
+          cache-to: type=gha,mode=max,scope=full
+
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
@@ -83,5 +116,5 @@ jobs:
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ steps.image_version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=main
+          cache-to: type=gha,mode=max,scope=main

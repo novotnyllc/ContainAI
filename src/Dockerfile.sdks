@@ -56,7 +56,7 @@ RUN mkdir -p ${DOTNET_ROOT}/tools && \
 # =============================================================================
 # MAIN IMAGE
 # =============================================================================
-FROM containai/base:latest
+FROM ghcr.io/novotnyllc/containai/base:latest
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

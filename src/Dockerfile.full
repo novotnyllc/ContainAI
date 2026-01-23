@@ -12,7 +12,7 @@
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 
-FROM containai/sdks:latest
+FROM ghcr.io/novotnyllc/containai/sdks:latest
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
