@@ -18,15 +18,20 @@ Support `--name` flag for custom container names.
 - Overrides the default `containai-{hash}` naming
 - Still validates workspace match via label
 ## Acceptance
-- [ ] `--name` flag added to `cai run` and `cai shell`
-- [ ] Custom name used if provided
-- [ ] Workspace validation via label still works
-- [ ] Clear error if container exists for different workspace
-- [ ] Help text documents the flag
+- [x] `--name` flag added to `cai run` and `cai shell`
+- [x] Custom name used if provided
+- [x] Workspace validation via label still works
+- [x] Clear error if container exists for different workspace
+- [x] Help text documents the flag
 ## Done summary
-TBD
+Feature implementation completed:
+1. --name flag parsing in _containai_run_cmd (containai.sh:1257-1272) and _containai_shell_cmd (containai.sh:837-852)
+2. Custom name used if provided via _containai_start_container (container.sh:1192-1198)
+3. Workspace validation via _containai_validate_fr4_mounts for both cai run and cai shell
+4. Added workspace validation for existing containers in cai shell (containai.sh:1132-1150)
+5. Help text documents the flag for both cai run (line 173) and cai shell (line 325)
 
 ## Evidence
-- Commits:
-- Tests:
-- PRs:
+- Commits: Current branch changes
+- Tests: `cai --help` and `cai shell --help` show --name flag; FR-4 mount validation ensures workspace match
+- PRs: N/A

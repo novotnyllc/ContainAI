@@ -22,3 +22,19 @@ disable=SC1091
 # SC2317: Command appears unreachable (false positive for sourced scripts)
 # The "return 1 2>/dev/null || exit 1" pattern handles both sourced and direct execution
 disable=SC2317
+
+# SC1007: Remove space after = if trying to assign a value (intentional for clearing env vars)
+# Pattern: DOCKER_CONTEXT= DOCKER_HOST= docker ... (clears inherited env vars)
+disable=SC1007
+
+# SC2088: Tilde does not expand in quotes (intentional for pattern matching)
+# Pattern: [[ "$var" == "~/"* ]] checks if string starts with ~/
+disable=SC2088
+
+# SC2029: Note that, unescaped, this expands on the client side (intentional for SSH scripts)
+# We intentionally pass shell scripts to SSH for execution
+disable=SC2029
+
+# SC2016: Expressions don't expand in single quotes (intentional for literal strings)
+# We use single quotes when we want literal $ in scripts passed to containers
+disable=SC2016

@@ -216,23 +216,38 @@ EOF
 
 _containai_import_help() {
     cat <<'EOF'
-ContainAI Import - Sync host configs to data volume
+ContainAI Import - Sync host configs to data volume or hot-reload into running container
 
-Usage: cai import [options]
+Usage: cai import [path] [options]
+
+Hot-Reload Mode (with workspace path):
+  When a workspace path is provided, imports configs AND reloads them into
+  the running container via SSH. Container must be running.
+
+  What gets reloaded:
+  - Environment variables from .env
+  - Git config (user.name, user.email)
+  - Credentials (SSH agent keys available, tokens in data volume)
+
+Volume-Only Mode (no workspace path):
+  Syncs configs to data volume only. Does not affect running containers.
+  Use this to prepare configs before starting a container.
 
 Options:
+  <path>                Workspace path (positional) - enables hot-reload mode
+  --workspace <path>    Workspace path (alternative to positional)
   --data-volume <vol>   Data volume name (overrides config)
   --from <path>         Import source:
                         - Directory: syncs from that directory (default: $HOME)
                         - Archive (.tgz): restores archive to volume (idempotent)
   --config <path>       Config file path (overrides auto-discovery)
-  --workspace <path>    Workspace path for config resolution
   --dry-run             Preview changes without applying
   --no-excludes         Skip exclude patterns from config
   -h, --help            Show this help message
 
 Examples:
-  cai import                           Sync configs to auto-resolved volume
+  cai import /path/to/workspace        Hot-reload configs into running container
+  cai import                           Sync configs to auto-resolved volume only
   cai import --dry-run                 Preview what would be synced
   cai import --no-excludes             Sync without applying excludes
   cai import --data-volume vol         Sync to specific volume
@@ -387,6 +402,9 @@ EOF
 # ==============================================================================
 
 # Import subcommand handler
+# Supports two modes:
+# 1. Volume-only mode (no workspace path): syncs configs to data volume
+# 2. Hot-reload mode (with workspace path): syncs to volume AND reloads into running container
 _containai_import_cmd() {
     local dry_run="false"
     local no_excludes="false"
@@ -394,6 +412,7 @@ _containai_import_cmd() {
     local workspace=""
     local explicit_config=""
     local from_source=""
+    local hot_reload="false"
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -475,6 +494,7 @@ _containai_import_cmd() {
                 fi
                 workspace="$2"
                 workspace="${workspace/#\~/$HOME}"
+                hot_reload="true"
                 shift 2
                 ;;
             --workspace=*)
@@ -484,11 +504,13 @@ _containai_import_cmd() {
                     return 1
                 fi
                 workspace="${workspace/#\~/$HOME}"
+                hot_reload="true"
                 shift
                 ;;
             -w*)
                 workspace="${1#-w}"
                 workspace="${workspace/#\~/$HOME}"
+                hot_reload="true"
                 shift
                 ;;
             --help|-h)
@@ -496,9 +518,17 @@ _containai_import_cmd() {
                 return 0
                 ;;
             *)
-                echo "[ERROR] Unknown option: $1" >&2
-                echo "Use 'cai import --help' for usage" >&2
-                return 1
+                # Check if it's a directory path (positional workspace argument for hot-reload)
+                if [[ -z "$workspace" && -d "$1" ]]; then
+                    workspace="$1"
+                    workspace="${workspace/#\~/$HOME}"
+                    hot_reload="true"
+                    shift
+                else
+                    echo "[ERROR] Unknown option: $1" >&2
+                    echo "Use 'cai import --help' for usage" >&2
+                    return 1
+                fi
                 ;;
         esac
     done
@@ -542,6 +572,45 @@ _containai_import_cmd() {
         return 1
     fi
 
+    # For hot-reload mode, validate container is running before proceeding
+    local container_name=""
+    if [[ "$hot_reload" == "true" ]]; then
+        # Get container name from workspace
+        if ! container_name=$(_containai_container_name "$resolved_workspace"); then
+            echo "[ERROR] Failed to generate container name for workspace: $resolved_workspace" >&2
+            return 1
+        fi
+
+        # Build docker command with context
+        local -a docker_cmd=(docker)
+        if [[ -n "$selected_context" ]]; then
+            docker_cmd=(docker --context "$selected_context")
+        fi
+
+        # Check container exists and is running
+        local container_state
+        if ! container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$container_name" 2>/dev/null); then
+            echo "[ERROR] Container not found: $container_name" >&2
+            echo "" >&2
+            echo "To create a container for this workspace, run:" >&2
+            echo "  cai run $resolved_workspace" >&2
+            return 1
+        fi
+
+        if [[ "$container_state" != "running" ]]; then
+            echo "[ERROR] Container is not running (state: $container_state)" >&2
+            echo "" >&2
+            echo "Start the container first with:" >&2
+            echo "  cai shell $resolved_workspace" >&2
+            echo "Or use 'cai import' without a workspace path for volume-only sync." >&2
+            return 1
+        fi
+
+        if [[ "$dry_run" != "true" ]]; then
+            _cai_info "Hot-reload mode: will sync configs and reload into running container"
+        fi
+    fi
+
     # Clear restore mode flag from any previous run (avoids session pollution)
     unset _CAI_RESTORE_MODE
 
@@ -559,6 +628,16 @@ _containai_import_cmd() {
 
     # Clear restore mode flag after use
     unset _CAI_RESTORE_MODE
+
+    # Hot-reload: execute reload commands in container via SSH
+    if [[ "$hot_reload" == "true" && "$dry_run" != "true" ]]; then
+        if ! _cai_hot_reload_container "$container_name" "$selected_context"; then
+            echo "[ERROR] Hot-reload failed" >&2
+            return 1
+        fi
+    elif [[ "$hot_reload" == "true" && "$dry_run" == "true" ]]; then
+        _cai_info "[dry-run] Would reload configs into container: $container_name"
+    fi
 }
 
 # Export subcommand handler
@@ -1127,6 +1206,25 @@ _containai_shell_cmd() {
 
         if ! _containai_start_container "${create_args[@]}"; then
             echo "[ERROR] Failed to create container" >&2
+            return 1
+        fi
+    else
+        # Container exists - validate ownership and workspace match before connecting
+        # Check ownership (label or image fallback)
+        local shell_label_val shell_image_val
+        shell_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$resolved_container_name" 2>/dev/null) || shell_label_val=""
+        if [[ "$shell_label_val" != "true" ]]; then
+            shell_image_val=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$resolved_container_name" 2>/dev/null) || shell_image_val=""
+            if [[ "$shell_image_val" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                echo "[ERROR] Container '$resolved_container_name' was not created by ContainAI" >&2
+                return 15
+            fi
+        fi
+
+        # Validate workspace match via FR-4 mount validation
+        # This ensures the container's workspace mount matches the resolved workspace
+        if ! _containai_validate_fr4_mounts "$selected_context" "$resolved_container_name" "$resolved_workspace" "$resolved_volume" "true"; then
+            echo "[ERROR] Container workspace does not match. Use --fresh to recreate." >&2
             return 1
         fi
     fi

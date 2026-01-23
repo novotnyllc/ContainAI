@@ -1296,4 +1296,233 @@ _cai_import_git_config() {
     return 0
 }
 
+# ==============================================================================
+# Hot-reload: reload configs into running container via SSH
+# ==============================================================================
+
+# Reload configs into a running container via SSH
+# This reloads environment variables and git config from the data volume
+# without restarting the container.
+#
+# Arguments:
+#   $1 = container name
+#   $2 = docker context (optional)
+#
+# Returns: 0 on success, 1 on failure
+#
+# What gets reloaded:
+# - Environment variables from /mnt/agent-data/.env
+# - Git config from /mnt/agent-data/.gitconfig
+# - Credentials are already on the volume (accessed on demand)
+_cai_hot_reload_container() {
+    local container_name="$1"
+    local context="${2:-}"
+
+    _import_step "Reloading configs into running container: $container_name"
+
+    # Get SSH port from container label
+    local ssh_port
+    if ! ssh_port=$(_cai_get_container_ssh_port "$container_name" "$context"); then
+        _import_error "Container has no SSH port configured"
+        _import_error "This container may have been created before SSH support was added."
+        _import_error "Recreate the container with: cai run --fresh /path/to/workspace"
+        return 1
+    fi
+
+    # Determine StrictHostKeyChecking value based on OpenSSH version
+    local strict_host_key_checking
+    if _cai_check_ssh_accept_new_support 2>/dev/null; then
+        strict_host_key_checking="accept-new"
+    else
+        strict_host_key_checking="yes"
+    fi
+
+    # Build SSH command options
+    local -a ssh_opts=(
+        -o "HostName=localhost"
+        -o "Port=$ssh_port"
+        -o "User=agent"
+        -o "IdentityFile=$_CAI_SSH_KEY_PATH"
+        -o "IdentitiesOnly=yes"
+        -o "UserKnownHostsFile=$_CAI_KNOWN_HOSTS_FILE"
+        -o "StrictHostKeyChecking=$strict_host_key_checking"
+        -o "PreferredAuthentications=publickey"
+        -o "GSSAPIAuthentication=no"
+        -o "PasswordAuthentication=no"
+        -o "ConnectTimeout=10"
+        -o "BatchMode=yes"
+    )
+
+    # Reload script to run inside container
+    # This mirrors the logic from containai-init.sh but for hot-reload
+    local reload_script
+    reload_script=$(cat <<'RELOAD_EOF'
+set -e
+
+DATA_DIR="/mnt/agent-data"
+RELOAD_SUMMARY=""
+ENV_COUNT=0
+GIT_UPDATED=0
+
+# Helper for output
+log() { printf '%s\n' "$*"; }
+
+# ============================================================
+# Reload environment variables from .env
+# ============================================================
+reload_env() {
+    local env_file="${DATA_DIR}/.env"
+
+    if [[ -L "$env_file" ]]; then
+        log "[WARN] .env is symlink - skipping"
+        return 0
+    fi
+    if [[ ! -f "$env_file" ]]; then
+        log "[INFO] No .env file found in data volume"
+        return 0
+    fi
+    if [[ ! -r "$env_file" ]]; then
+        log "[WARN] .env unreadable - skipping"
+        return 0
+    fi
+
+    local line_num=0
+    local line key value
+    local loaded_vars=""
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_num=$((line_num + 1))
+        line="${line%$'\r'}"
+
+        # Skip comments
+        if [[ "$line" =~ ^[[:space:]]*# ]]; then continue; fi
+        # Skip blank lines
+        if [[ -z "${line//[[:space:]]/}" ]]; then continue; fi
+        # Strip optional 'export ' prefix
+        if [[ "$line" =~ ^export[[:space:]]+ ]]; then
+            line="${line#export}"
+            line="${line#"${line%%[![:space:]]*}"}"
+        fi
+        # Require = in line
+        if [[ "$line" != *=* ]]; then continue; fi
+
+        key="${line%%=*}"
+        value="${line#*=}"
+
+        # Validate key
+        if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then continue; fi
+
+        # Export the variable (this affects the current shell session)
+        export "$key=$value" 2>/dev/null || continue
+        ENV_COUNT=$((ENV_COUNT + 1))
+
+        if [[ -n "$loaded_vars" ]]; then
+            loaded_vars="$loaded_vars, $key"
+        else
+            loaded_vars="$key"
+        fi
+    done < "$env_file"
+
+    if [[ $ENV_COUNT -gt 0 ]]; then
+        log "[OK] Environment reloaded: $ENV_COUNT vars ($loaded_vars)"
+    else
+        log "[INFO] No environment variables to reload"
+    fi
+}
+
+# ============================================================
+# Reload git config from .gitconfig
+# ============================================================
+reload_git() {
+    local src="${DATA_DIR}/.gitconfig"
+    local dst="${HOME}/.gitconfig"
+
+    if [[ -L "$src" ]]; then
+        log "[WARN] Source .gitconfig is symlink - skipping"
+        return 0
+    fi
+    if [[ ! -f "$src" ]]; then
+        log "[INFO] No .gitconfig file found in data volume"
+        return 0
+    fi
+    if [[ ! -r "$src" ]]; then
+        log "[WARN] Source .gitconfig unreadable - skipping"
+        return 0
+    fi
+
+    # Skip if destination is symlink (security)
+    if [[ -L "$dst" ]]; then
+        log "[WARN] Destination .gitconfig is symlink - refusing to overwrite"
+        return 0
+    fi
+
+    # Atomic copy via temp file
+    local tmp_dst="${dst}.tmp.$$"
+    if cp "$src" "$tmp_dst" 2>/dev/null && mv "$tmp_dst" "$dst" 2>/dev/null; then
+        GIT_UPDATED=1
+        log "[OK] Git config reloaded from data volume"
+    else
+        rm -f "$tmp_dst" 2>/dev/null || true
+        log "[WARN] Failed to copy .gitconfig to \$HOME"
+    fi
+}
+
+# ============================================================
+# Main reload sequence
+# ============================================================
+log "[INFO] Hot-reload starting..."
+
+reload_env
+reload_git
+
+# Summary
+if [[ $ENV_COUNT -gt 0 || $GIT_UPDATED -eq 1 ]]; then
+    log "[OK] Hot-reload complete"
+else
+    log "[INFO] Hot-reload complete (no changes)"
+fi
+RELOAD_EOF
+)
+
+    # Execute reload script via SSH
+    local ssh_output
+    local ssh_exit_code
+    if ssh_output=$(ssh "${ssh_opts[@]}" localhost "$reload_script" 2>&1); then
+        ssh_exit_code=0
+    else
+        ssh_exit_code=$?
+    fi
+
+    # Parse and display output with proper logging
+    while IFS= read -r line; do
+        case "$line" in
+            "[OK] "*)
+                _import_success "${line#\[OK\] }"
+                ;;
+            "[WARN] "*)
+                _import_warn "${line#\[WARN\] }"
+                ;;
+            "[ERROR] "*)
+                _import_error "${line#\[ERROR\] }"
+                ;;
+            "[INFO] "*)
+                _import_info "${line#\[INFO\] }"
+                ;;
+            "-> "*)
+                _import_step "${line#-> }"
+                ;;
+            *)
+                [[ -n "$line" ]] && printf '%s\n' "$line"
+                ;;
+        esac
+    done <<< "$ssh_output"
+
+    if [[ $ssh_exit_code -ne 0 ]]; then
+        _import_error "SSH command failed (exit code: $ssh_exit_code)"
+        return 1
+    fi
+
+    return 0
+}
+
 return 0
