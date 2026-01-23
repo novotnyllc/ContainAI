@@ -1,0 +1,661 @@
+# ContainAI Setup Guide
+
+This guide covers the complete installation and configuration of ContainAI across all supported platforms. ContainAI provides isolated sandbox environments for AI coding agents using Sysbox system containers.
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [What Gets Installed](#what-gets-installed)
+- [Platform-Specific Setup](#platform-specific-setup)
+  - [WSL2 (Windows)](#wsl2-windows)
+  - [Native Linux](#native-linux)
+  - [macOS (via Lima)](#macos-via-lima)
+- [Component Details](#component-details)
+- [Verification](#verification)
+- [Troubleshooting Setup](#troubleshooting-setup)
+- [Uninstalling](#uninstalling)
+
+---
+
+## Prerequisites
+
+Before running `cai setup`, ensure you have:
+
+### All Platforms
+
+| Requirement | Version | Check Command |
+|-------------|---------|---------------|
+| Bash | 4.0+ | `bash --version` |
+| Docker CLI | Any recent | `docker --version` |
+| jq | Any | `jq --version` |
+| OpenSSH client | 7.3+ | `ssh -V` |
+
+### WSL2 (Windows)
+
+| Requirement | Version | Check Command |
+|-------------|---------|---------------|
+| WSL2 kernel | 5.5+ | `uname -r` |
+| systemd | Enabled | `ps -p 1 -o comm=` (should show `systemd`) |
+| Ubuntu/Debian | 20.04+ | `lsb_release -a` |
+
+**Enable systemd in WSL2** (if not already enabled):
+
+```bash
+# Add to /etc/wsl.conf
+sudo tee /etc/wsl.conf << 'EOF'
+[boot]
+systemd=true
+EOF
+
+# Restart WSL from PowerShell
+wsl --shutdown
+```
+
+### Native Linux
+
+| Requirement | Version | Check Command |
+|-------------|---------|---------------|
+| Kernel | 5.5+ | `uname -r` |
+| systemd | Running | `systemctl --version` |
+| Ubuntu/Debian | 20.04+ | For auto-install; manual install for others |
+
+### macOS
+
+| Requirement | Version | Check Command |
+|-------------|---------|---------------|
+| macOS | 12+ | `sw_vers` |
+| Homebrew | Any | `brew --version` |
+| Lima | Installed by setup | `limactl --version` |
+
+---
+
+## What Gets Installed
+
+The `cai setup` command installs and configures multiple components. Here's what gets installed on each platform:
+
+### Installation Summary
+
+```
++------------------------------------------------------------------+
+|                    ContainAI Installation                         |
++------------------------------------------------------------------+
+|                                                                    |
+|  Host System                                                       |
+|  +------------------------------------------------------------+   |
+|  |                                                             |   |
+|  |  Docker Installation (WSL2/Linux only)                      |   |
+|  |  +---------------------------------------------------------+|   |
+|  |  | - Socket: /var/run/docker-containai.sock (WSL2)         ||   |
+|  |  |           /var/run/docker.sock (Linux)                  ||   |
+|  |  | - Config: /etc/docker/daemon.json                       ||   |
+|  |  | - Runtime: sysbox-runc (default)                        ||   |
+|  |  +---------------------------------------------------------+|   |
+|  |                                                             |   |
+|  |  Sysbox Runtime                                             |   |
+|  |  +---------------------------------------------------------+|   |
+|  |  | - sysbox-runc: Container runtime with userns isolation  ||   |
+|  |  | - sysbox-mgr: Manager service                           ||   |
+|  |  | - sysbox-fs: Filesystem virtualization                  ||   |
+|  |  +---------------------------------------------------------+|   |
+|  |                                                             |   |
+|  |  Docker Context                                             |   |
+|  |  +---------------------------------------------------------+|   |
+|  |  | - Name: containai-secure                                ||   |
+|  |  | - Points to: appropriate socket for platform            ||   |
+|  |  +---------------------------------------------------------+|   |
+|  |                                                             |   |
+|  |  SSH Infrastructure                                         |   |
+|  |  +---------------------------------------------------------+|   |
+|  |  | - Key: ~/.config/containai/id_containai (ed25519)       ||   |
+|  |  | - Config dir: ~/.ssh/containai.d/                       ||   |
+|  |  | - Include in: ~/.ssh/config                             ||   |
+|  |  | - Known hosts: ~/.config/containai/known_hosts          ||   |
+|  |  +---------------------------------------------------------+|   |
+|  |                                                             |   |
+|  |  User Configuration                                         |   |
+|  |  +---------------------------------------------------------+|   |
+|  |  | - Config: ~/.config/containai/config.toml               ||   |
+|  |  +---------------------------------------------------------+|   |
+|  |                                                             |   |
+|  +------------------------------------------------------------+   |
++------------------------------------------------------------------+
+```
+
+### Platform Comparison
+
+| Component | WSL2 | Native Linux | macOS |
+|-----------|------|--------------|-------|
+| Docker daemon | Dedicated docker-ce | Uses existing docker | Lima VM |
+| Docker socket | `/var/run/docker-containai.sock` | `/var/run/docker.sock` | `~/.lima/containai-secure/sock/docker.sock` |
+| Docker config | `/etc/docker/daemon.json` | `/etc/docker/daemon.json` | Inside Lima VM |
+| Sysbox install | Auto (apt) | Auto (apt) on Ubuntu/Debian | Inside Lima VM |
+| Sysbox services | systemd | systemd | Lima VM systemd |
+| Context name | `containai-secure` | `containai-secure` | `containai-secure` |
+
+---
+
+## Platform-Specific Setup
+
+### WSL2 (Windows)
+
+WSL2 requires a dedicated Docker installation to avoid conflicts with Docker Desktop (which does not support Sysbox).
+
+#### What WSL2 Setup Does
+
+1. **Checks kernel version** (requires 5.5+)
+2. **Tests seccomp compatibility** (WSL 1.1.0+ may have conflicts)
+3. **Installs Sysbox** via apt (Ubuntu/Debian)
+4. **Configures daemon.json** with sysbox-runc runtime
+5. **Creates dedicated socket** at `/var/run/docker-containai.sock`
+6. **Creates systemd drop-in** for Docker socket configuration
+7. **Restarts Docker service**
+8. **Creates Docker context** `containai-secure`
+9. **Sets up SSH infrastructure**
+
+#### Run Setup
+
+```bash
+# Source ContainAI CLI
+source /path/to/containai/src/containai.sh
+
+# Run setup
+cai setup
+
+# Or with verbose output
+cai setup --verbose
+
+# If seccomp warning appears, use --force
+cai setup --force
+```
+
+#### WSL2 Component Locations
+
+| Component | Path |
+|-----------|------|
+| Docker daemon config | `/etc/docker/daemon.json` |
+| Docker socket (dedicated) | `/var/run/docker-containai.sock` |
+| Docker drop-in | `/etc/systemd/system/docker.service.d/containai-socket.conf` |
+| Sysbox binaries | `/usr/bin/sysbox-runc`, `/usr/bin/sysbox-mgr`, `/usr/bin/sysbox-fs` |
+| SSH key | `~/.config/containai/id_containai` |
+| SSH config dir | `~/.ssh/containai.d/` |
+| User config | `~/.config/containai/config.toml` |
+| Known hosts | `~/.config/containai/known_hosts` |
+
+#### WSL2 Docker Configuration
+
+The setup creates or modifies `/etc/docker/daemon.json`:
+
+```json
+{
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "/usr/bin/sysbox-runc"
+    }
+  }
+}
+```
+
+And creates a systemd drop-in to add the dedicated socket:
+
+```ini
+# /etc/systemd/system/docker.service.d/containai-socket.conf
+[Service]
+ExecStart=
+ExecStart=/usr/bin/dockerd -H fd:// -H unix:///var/run/docker-containai.sock --containerd=/run/containerd/containerd.sock
+```
+
+---
+
+### Native Linux
+
+Native Linux uses the existing Docker installation with Sysbox added as a runtime.
+
+#### What Native Linux Setup Does
+
+1. **Checks kernel version** (requires 5.5+)
+2. **Installs Sysbox** via apt (Ubuntu/Debian only)
+3. **Configures daemon.json** with sysbox-runc runtime
+4. **Restarts Docker service**
+5. **Creates Docker context** `containai-secure`
+6. **Sets up SSH infrastructure**
+
+#### Run Setup
+
+```bash
+# Source ContainAI CLI
+source /path/to/containai/src/containai.sh
+
+# Run setup
+cai setup
+
+# Or with verbose output
+cai setup --verbose
+```
+
+#### Manual Sysbox Installation (Non-Ubuntu/Debian)
+
+For distributions other than Ubuntu/Debian, install Sysbox manually:
+
+```bash
+# Download from GitHub releases
+# https://github.com/nestybox/sysbox/releases
+
+# For Fedora/RHEL:
+sudo dnf install ./sysbox-ce_*.rpm
+
+# For Arch Linux (AUR):
+yay -S sysbox-ce
+
+# Then run setup to configure Docker
+cai setup
+```
+
+#### Native Linux Component Locations
+
+| Component | Path |
+|-----------|------|
+| Docker daemon config | `/etc/docker/daemon.json` |
+| Docker socket | `/var/run/docker.sock` (default) |
+| Sysbox binaries | `/usr/bin/sysbox-runc`, `/usr/bin/sysbox-mgr`, `/usr/bin/sysbox-fs` |
+| SSH key | `~/.config/containai/id_containai` |
+| SSH config dir | `~/.ssh/containai.d/` |
+| User config | `~/.config/containai/config.toml` |
+| Known hosts | `~/.config/containai/known_hosts` |
+
+---
+
+### macOS (via Lima)
+
+macOS uses Lima to run a Linux VM with Docker and Sysbox. This provides the same isolation as native Linux.
+
+#### What macOS Setup Does
+
+1. **Installs Lima** via Homebrew (if not present)
+2. **Creates Lima VM** `containai-secure` with:
+   - Ubuntu 24.04 LTS
+   - Docker Engine
+   - Sysbox runtime
+3. **Waits for Docker socket** to be ready
+4. **Creates Docker context** `containai-secure` pointing to Lima socket
+5. **Sets up SSH infrastructure**
+
+#### Run Setup
+
+```bash
+# Source ContainAI CLI
+source /path/to/containai/src/containai.sh
+
+# Run setup (may take several minutes for Lima VM creation)
+cai setup
+
+# Or with verbose output
+cai setup --verbose
+```
+
+#### macOS Component Locations
+
+| Component | Path |
+|-----------|------|
+| Lima VM | `~/.lima/containai-secure/` |
+| Docker socket (via Lima) | `~/.lima/containai-secure/sock/docker.sock` |
+| Lima VM config | `~/.lima/containai-secure/lima.yaml` |
+| SSH key | `~/.config/containai/id_containai` |
+| SSH config dir | `~/.ssh/containai.d/` |
+| User config | `~/.config/containai/config.toml` |
+| Known hosts | `~/.config/containai/known_hosts` |
+
+#### Managing the Lima VM
+
+```bash
+# Check Lima VM status
+limactl list
+
+# Start the VM (if stopped)
+limactl start containai-secure
+
+# Stop the VM
+limactl stop containai-secure
+
+# Shell into the VM
+limactl shell containai-secure
+
+# Delete the VM (removes all data inside VM)
+limactl delete containai-secure
+```
+
+---
+
+## Component Details
+
+### Docker Context: containai-secure
+
+The `containai-secure` Docker context points to the Sysbox-enabled Docker daemon:
+
+```bash
+# List contexts
+docker context ls
+
+# Use the context explicitly
+docker --context containai-secure info
+
+# Check runtime configuration
+docker --context containai-secure info | grep -A5 Runtimes
+```
+
+Expected output shows `sysbox-runc` in the runtimes list.
+
+### SSH Infrastructure
+
+ContainAI generates a dedicated SSH key for container access:
+
+```bash
+# View the public key
+cat ~/.config/containai/id_containai.pub
+
+# Check SSH config directory
+ls -la ~/.ssh/containai.d/
+
+# Verify Include directive in ~/.ssh/config
+grep -i "containai" ~/.ssh/config
+```
+
+The Include directive in `~/.ssh/config` should look like:
+
+```
+Include ~/.ssh/containai.d/*.conf
+```
+
+### Sysbox Services
+
+On Linux/WSL2, Sysbox runs as systemd services:
+
+```bash
+# Check Sysbox services
+systemctl status sysbox-mgr
+systemctl status sysbox-fs
+
+# View Sysbox version
+sysbox-runc --version
+```
+
+---
+
+## Verification
+
+After setup, verify the installation with `cai doctor`:
+
+```bash
+cai doctor
+```
+
+### Expected Output
+
+```
+ContainAI Doctor
+================
+
+Docker:
+  Docker CLI:                           [OK] 24.0.7
+  Docker daemon:                        [OK] Running
+
+Sysbox Isolation:
+  Sysbox runtime:                       [OK] sysbox-runc available
+  containai-secure context:             [OK] Configured
+
+Platform:
+  Platform detected:                    [OK] wsl2
+  Kernel version:                       [OK] 5.15.90 (>= 5.5)
+
+ContainAI Docker:
+  Docker service:                       [OK] Running
+  Dedicated socket:                     [OK] /var/run/docker-containai.sock
+
+SSH:
+  SSH key:                              [OK] ~/.config/containai/id_containai
+  SSH config directory:                 [OK] ~/.ssh/containai.d/
+  Include directive:                    [OK] Present in ~/.ssh/config
+  OpenSSH version:                      [OK] 8.9 (>= 7.3)
+
+Resources:
+  Host memory:                          [INFO] 16 GB
+  Host CPUs:                            [INFO] 8 cores
+  Container limits:                     [INFO] 8 GB / 4 cores (50%)
+
+Summary:
+  Sysbox Isolation:                     [OK] Available
+  SSH Access:                           [OK] Configured
+  Ready:                                [OK] ContainAI is ready to use
+```
+
+### Doctor Output Interpretation
+
+| Status | Meaning |
+|--------|---------|
+| `[OK]` | Component working correctly |
+| `[WARN]` | Minor issue, may still work |
+| `[ERROR]` | Blocking issue, needs attention |
+| `[INFO]` | Informational note |
+| `[SKIP]` | Check skipped due to earlier failure |
+
+### Manual Verification Commands
+
+```bash
+# Verify Docker context works
+docker --context containai-secure info
+
+# Verify Sysbox runtime is available
+docker --context containai-secure info | grep sysbox
+
+# Test a Sysbox container
+docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "Sysbox works!"
+
+# Verify SSH key exists and has correct permissions
+ls -la ~/.config/containai/id_containai
+# Should show: -rw------- (600)
+
+# Verify SSH config directory exists
+ls -la ~/.ssh/containai.d/
+# Should show: drwx------ (700)
+
+# Verify Include directive
+grep -i "include.*containai" ~/.ssh/config
+```
+
+---
+
+## Troubleshooting Setup
+
+### WSL2: Seccomp Warning
+
+**Symptom:**
+```
++==================================================================+
+|                       *** WARNING ***                            |
++==================================================================+
+| Sysbox on WSL2 may not work due to seccomp filter conflicts.    |
+```
+
+**Solution:**
+
+1. **Proceed anyway** (Sysbox often works despite the warning):
+   ```bash
+   cai setup --force
+   ```
+
+2. **Downgrade WSL** to avoid seccomp conflicts:
+   ```powershell
+   wsl --update --web-download --version 1.0.3
+   ```
+
+### WSL2: Systemd Not Running
+
+**Symptom:**
+```
+[ERROR] Systemd is not running as PID 1 (found: init)
+```
+
+**Solution:**
+
+Enable systemd in WSL:
+
+```bash
+# Edit /etc/wsl.conf
+sudo tee /etc/wsl.conf << 'EOF'
+[boot]
+systemd=true
+EOF
+```
+
+Then restart WSL from PowerShell:
+```powershell
+wsl --shutdown
+```
+
+### Docker Socket Permission Denied
+
+**Symptom:**
+```
+[ERROR] Permission denied accessing Docker
+```
+
+**Solution:**
+
+Add your user to the docker group:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker  # Apply immediately without logout
+```
+
+### Sysbox Installation Failed
+
+**Symptom:**
+```
+[ERROR] Sysbox auto-install only supports Ubuntu/Debian
+```
+
+**Solution:**
+
+Install Sysbox manually for your distribution. See the [Sysbox installation guide](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md).
+
+### macOS: Lima VM Creation Failed
+
+**Symptom:**
+```
+[ERROR] Failed to create Lima VM
+```
+
+**Solution:**
+
+1. Check Homebrew is installed:
+   ```bash
+   brew --version
+   ```
+
+2. Install Lima manually:
+   ```bash
+   brew install lima
+   ```
+
+3. Try creating the VM manually:
+   ```bash
+   limactl create --name=containai-secure
+   limactl start containai-secure
+   ```
+
+### macOS: Docker Permission Denied in Lima
+
+**Symptom:**
+Socket exists but `docker info` fails with permission denied.
+
+**Solution:**
+
+The setup should auto-repair this. If not, manually add user to docker group:
+
+```bash
+limactl shell containai-secure sudo usermod -aG docker $USER
+limactl stop containai-secure
+limactl start containai-secure
+```
+
+### General: Kernel Too Old
+
+**Symptom:**
+```
+[ERROR] Kernel 5.4.0 is too old. Sysbox requires kernel 5.5+
+```
+
+**Solution:**
+
+- **WSL2**: Update WSL kernel:
+  ```powershell
+  wsl --update
+  wsl --shutdown
+  ```
+
+- **Linux**: Update your distribution or kernel.
+
+---
+
+## Uninstalling
+
+To remove ContainAI components:
+
+```bash
+# Remove containers (preserves volumes)
+cai uninstall
+
+# Preview what would be removed
+cai uninstall --dry-run
+
+# Also remove containers
+cai uninstall --containers
+
+# Also remove volumes
+cai uninstall --containers --volumes
+```
+
+### Manual Cleanup
+
+If `cai uninstall` is not available:
+
+**Docker Context:**
+```bash
+docker context rm containai-secure
+```
+
+**WSL2/Linux - Docker Drop-in:**
+```bash
+sudo rm /etc/systemd/system/docker.service.d/containai-socket.conf
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+
+**SSH Configuration:**
+```bash
+rm -rf ~/.ssh/containai.d/
+rm ~/.config/containai/id_containai*
+rm ~/.config/containai/known_hosts
+# Manually remove Include line from ~/.ssh/config
+```
+
+**macOS - Lima VM:**
+```bash
+limactl stop containai-secure
+limactl delete containai-secure
+```
+
+**Note:** `cai uninstall` preserves configuration and data directories by default:
+- `~/.config/containai/` (user config)
+- `/etc/containai/` (system config on Linux)
+- `/var/lib/containai-docker/` (Docker data on WSL2)
+
+---
+
+## See Also
+
+- [Architecture](architecture.md) - System container architecture and design
+- [Configuration](configuration.md) - Configuration file reference
+- [Troubleshooting](troubleshooting.md) - Comprehensive troubleshooting guide
+- [Security Comparison](security-comparison.md) - How ContainAI compares to alternatives
+- [Sysbox Documentation](https://github.com/nestybox/sysbox) - Sysbox runtime documentation

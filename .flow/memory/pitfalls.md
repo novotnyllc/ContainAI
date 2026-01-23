@@ -142,3 +142,9 @@ Alpine/BusyBox wget uses -T for timeout (not --timeout which is GNU wget only)
 
 ## 2026-01-23 manual [pitfall]
 When using docker run --pull=never for reproducibility, pre-pull the image in prerequisites to avoid false failures on fresh systems
+
+## 2026-01-23 manual [pitfall]
+Security documentation should avoid absolute claims ('zero risk', 'completely inaccessible') - qualify with 'dramatically reduces', 'for most escapes', or note exceptions (kernel bugs, mounted volumes)
+
+## 2026-01-23 manual [pitfall]
+Nested markdown code fences (triple backticks inside triple backticks) cause rendering issues - use quadruple backticks for outer fence when documenting code containing fenced blocks

@@ -183,9 +183,8 @@ Defense in Depth principle:
 - [ ] Clear "takeaway" message for each scenario
 - [ ] Integrated with or linked from security-comparison.md
 ## Done summary
-TBD
-
+Created docs/security-scenarios.md with five real-world attack scenarios (malicious package, prompt injection, CVE-2024-21626 container escape, --privileged mistake, Docker socket disaster) showing before/after comparisons of what happens without vs with Sysbox system container isolation. Added mermaid diagrams, real CVE references, and clear takeaways. Updated security-comparison.md with links to the new document and renamed "Syscall Filtering" to "Enhanced Syscall Vetting" with notes clarifying Docker Sandbox has default seccomp but no procfs virtualization.
 ## Evidence
-- Commits:
+- Commits: 106bac8, ea4821c, 452fddf, e444679
 - Tests:
 - PRs:
