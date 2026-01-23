@@ -874,6 +874,7 @@ _containai_start_container() {
     local shell_flag=false
     local quiet_flag=false
     local debug_flag=false
+    local dry_run_flag=false
     local mount_docker_socket=false
     local please_root_my_host=false
     local -a env_vars=()
@@ -998,6 +999,10 @@ _containai_start_container() {
                 ;;
             --debug|-D)
                 debug_flag=true
+                shift
+                ;;
+            --dry-run)
+                dry_run_flag=true
                 shift
                 ;;
             --image-tag)
@@ -1191,8 +1196,170 @@ _containai_start_container() {
             return 1
         fi
     fi
-    if [[ "$quiet_flag" != "true" ]]; then
+    if [[ "$quiet_flag" != "true" && "$dry_run_flag" != "true" ]]; then
         echo "Container: $container_name"
+    fi
+
+    # Handle --dry-run flag: show what would happen without executing
+    if [[ "$dry_run_flag" == "true" ]]; then
+        # Check if container already exists (use --type container to avoid matching images)
+        local dry_run_state="none"
+        local dry_run_ssh_port=""
+        if "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+            dry_run_state=$("${docker_cmd[@]}" inspect --type container --format '{{.State.Status}}' -- "$container_name" 2>/dev/null) || dry_run_state="unknown"
+            dry_run_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context") || dry_run_ssh_port=""
+        fi
+
+        # Output in machine-parseable format (key=value, one per line)
+        echo "CONTAINER_NAME=$container_name"
+        echo "CONTAINER_STATE=$dry_run_state"
+        echo "WORKSPACE=$workspace_resolved"
+        echo "DATA_VOLUME=$data_volume"
+        echo "IMAGE=$resolved_image"
+        if [[ -n "$selected_context" ]]; then
+            echo "DOCKER_CONTEXT=$selected_context"
+        else
+            echo "DOCKER_CONTEXT=default"
+        fi
+
+        # Port allocation
+        # For existing containers (not being recreated), use the allocated port
+        # For new containers or --fresh/--restart, compute what port would be allocated
+        local candidate_port=""
+        if [[ -n "$dry_run_ssh_port" && "$fresh_flag" != "true" && "$restart_flag" != "true" ]]; then
+            # Existing container, not being recreated
+            # Check for port conflict (mirrors real code behavior for stopped containers)
+            local port_conflict=false
+            local port_check_failed=false
+            if [[ "$dry_run_state" == "exited" || "$dry_run_state" == "created" ]]; then
+                local port_avail_rc
+                if _cai_is_port_available "$dry_run_ssh_port" 2>/dev/null; then
+                    port_avail_rc=0
+                else
+                    port_avail_rc=$?
+                fi
+                # rc=1 means port is in use by another process
+                # rc=2 means we can't check (ss failed) - real execution would abort
+                if [[ $port_avail_rc -eq 1 ]]; then
+                    port_conflict=true
+                elif [[ $port_avail_rc -eq 2 ]]; then
+                    port_check_failed=true
+                fi
+            fi
+
+            if [[ "$port_check_failed" == "true" ]]; then
+                # Cannot verify port availability - real execution would fail
+                echo "SSH_PORT=<unknown - cannot verify port availability>"
+                echo "SSH_PORT_CHECK_ERROR=ss command failed"
+            elif [[ "$port_conflict" == "true" ]]; then
+                # Port conflict - container would be auto-recreated with new port
+                echo "SSH_PORT_CONFLICT=$dry_run_ssh_port"
+                if candidate_port=$(_cai_find_available_port "" "" "$selected_context" "$dry_run_ssh_port" 2>/dev/null); then
+                    echo "SSH_PORT=$candidate_port"
+                else
+                    echo "SSH_PORT=<allocation failed - no ports available>"
+                fi
+            else
+                # No conflict - use current port
+                echo "SSH_PORT=$dry_run_ssh_port"
+                candidate_port="$dry_run_ssh_port"
+            fi
+        elif [[ -n "$dry_run_ssh_port" && ("$fresh_flag" == "true" || "$restart_flag" == "true") ]]; then
+            # Container exists but will be recreated with --fresh/--restart
+            # Compute port using same algorithm as creation, ignoring current container's port
+            # (since it will be removed before new allocation)
+            # Use force_ignore=true only for running containers (port is actively in use by us)
+            # For stopped containers, don't force ignore - another process may have taken the port
+            local force_ignore_port=""
+            if [[ "$dry_run_state" == "running" ]]; then
+                force_ignore_port="true"
+            fi
+            if candidate_port=$(_cai_find_available_port "" "" "$selected_context" "$dry_run_ssh_port" "$force_ignore_port" 2>/dev/null); then
+                echo "SSH_PORT=$candidate_port"
+            else
+                echo "SSH_PORT=<allocation failed - no ports available>"
+            fi
+        else
+            # New container - compute candidate port
+            if candidate_port=$(_cai_find_available_port "" "" "$selected_context" 2>/dev/null); then
+                echo "SSH_PORT=$candidate_port"
+            else
+                echo "SSH_PORT=<allocation failed - no ports available>"
+            fi
+        fi
+
+        # Mount details
+        echo "MOUNT_WORKSPACE=$workspace_resolved:/home/agent/workspace"
+        echo "MOUNT_DATA=$data_volume:/mnt/agent-data"
+
+        # Extra volumes that would be mounted (if any)
+        if [[ ${#extra_volumes[@]} -gt 0 ]]; then
+            local vol_idx=0
+            for vol in "${extra_volumes[@]}"; do
+                echo "MOUNT_EXTRA_$vol_idx=$vol"
+                vol_idx=$((vol_idx + 1))
+            done
+        fi
+
+        # Connection details - use container name (works via SSH config)
+        echo "SSH_COMMAND=ssh $container_name"
+        echo "SSH_CONFIG_HOST=$container_name"
+        # Direct SSH command with port - always use candidate_port when available
+        # (candidate_port reflects the actual port that would be used after any conflict resolution)
+        if [[ -n "${candidate_port:-}" ]]; then
+            echo "SSH_COMMAND_DIRECT=ssh -p $candidate_port agent@localhost"
+        fi
+
+        # What action would be taken
+        case "$dry_run_state" in
+            running)
+                echo "ACTION=attach"
+                echo "ACTION_DETAIL=Would attach to running container via SSH"
+                ;;
+            exited|created)
+                echo "ACTION=start"
+                echo "ACTION_DETAIL=Would start stopped container and attach via SSH"
+                ;;
+            none)
+                echo "ACTION=create"
+                echo "ACTION_DETAIL=Would create new container and attach via SSH"
+                ;;
+            *)
+                echo "ACTION=unknown"
+                echo "ACTION_DETAIL=Container in unexpected state: $dry_run_state"
+                ;;
+        esac
+
+        # Fresh/restart flag effect
+        if [[ "$fresh_flag" == "true" || "$restart_flag" == "true" ]]; then
+            if [[ "$dry_run_state" != "none" ]]; then
+                echo "FRESH_FLAG=true"
+                echo "FRESH_ACTION=Would remove existing container and recreate"
+            fi
+        fi
+
+        # Shell vs run mode
+        if [[ "$shell_flag" == "true" ]]; then
+            echo "MODE=shell"
+        else
+            echo "MODE=run"
+            if [[ ${#agent_args[@]} -gt 0 ]]; then
+                echo "COMMAND=${agent_args[*]}"
+            else
+                echo "COMMAND=$_CONTAINAI_DEFAULT_AGENT"
+            fi
+        fi
+
+        # Environment variables that would be passed
+        if [[ ${#env_vars[@]} -gt 0 ]]; then
+            local env_idx=0
+            for env_var in "${env_vars[@]}"; do
+                echo "ENV_VAR_$env_idx=$env_var"
+                env_idx=$((env_idx + 1))
+            done
+        fi
+
+        return 0
     fi
 
     # Check container state - guard for set -e safety (non-zero is valid control flow)

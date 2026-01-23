@@ -474,6 +474,8 @@ _cai_get_used_ports() {
 #   $1 = port range start (optional, uses config or default 2300)
 #   $2 = port range end (optional, uses config or default 2500)
 #   $3 = docker context (optional, for checking container labels)
+#   $4 = ignore port (optional, treat this port as available even if only reserved by container)
+#   $5 = force ignore (optional, "true" to ignore port even if actively in use - for running containers)
 # Outputs: available port number on success
 # Returns: 0=port found, 1=all ports exhausted, 2=cannot check ports
 #
@@ -485,6 +487,8 @@ _cai_find_available_port() {
     local range_start="${1:-$default_start}"
     local range_end="${2:-$default_end}"
     local context="${3:-}"
+    local ignore_port="${4:-}"
+    local force_ignore="${5:-}"
     local used_ports port
 
     # Validate range (allow single-port range where start == end)
@@ -505,10 +509,15 @@ _cai_find_available_port() {
     fi
 
     # Convert to associative array for O(1) lookup
+    # Track which ports are actively in use (from ss) vs just reserved (from container labels)
     local -A used_ports_map
+    local -A actively_used_map
     local line
     while IFS= read -r line; do
-        [[ -n "$line" ]] && used_ports_map["$line"]=1
+        if [[ -n "$line" ]]; then
+            used_ports_map["$line"]=1
+            actively_used_map["$line"]=1
+        fi
     done <<< "$used_ports"
 
     # Also collect ports reserved by container labels (including stopped containers)
@@ -516,8 +525,17 @@ _cai_find_available_port() {
     local reserved_ports
     if reserved_ports=$(_cai_get_reserved_container_ports "$context" 2>/dev/null); then
         while IFS= read -r line; do
-            [[ -n "$line" ]] && used_ports_map["$line"]=1
+            # Skip the ignore_port (for dry-run scenarios where container will be removed)
+            if [[ -n "$line" && "$line" != "$ignore_port" ]]; then
+                used_ports_map["$line"]=1
+            fi
         done <<< "$reserved_ports"
+    fi
+
+    # For ignore_port with force_ignore, also remove from used_ports_map even if actively in use
+    # This handles --fresh/--restart on running containers where port will be freed before allocation
+    if [[ -n "$ignore_port" && "$force_ignore" == "true" ]]; then
+        unset "used_ports_map[$ignore_port]"
     fi
 
     # Find first available port in range (inclusive)

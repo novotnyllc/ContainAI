@@ -36,9 +36,8 @@ Add [ssh] config section for agent forwarding and port tunneling.
 - [ ] Generated SSH config includes user settings
 - [ ] VS Code Remote-SSH can connect using containai config
 ## Done summary
-TBD
-
+Added [ssh] config section with forward_agent and local_forward settings. ForwardAgent is explicitly controlled (defaults to no for security), LocalForward entries are validated for format and port ranges. Updated both SSH host config generation and CLI SSH connection to respect these settings. Documented VS Code Remote-SSH compatibility.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 8972f20, 7afba0d, 5bbea0d
+- Tests: bash -n config.sh, bash -n ssh.sh, manual config parsing test, manual SSH config generation test
 - PRs:

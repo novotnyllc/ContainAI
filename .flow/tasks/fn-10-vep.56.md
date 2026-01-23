@@ -21,17 +21,16 @@ Add `--dry-run` flag to `cai run` and `cai shell` commands.
 - Dry-run is valuable for understanding what cai will do
 - Output should be machine-parseable (one item per line, key=value)
 ## Acceptance
-- [ ] `--dry-run` flag added to `cai run` and `cai shell`
-- [ ] Shows container name that would be used
-- [ ] Shows port that would be allocated
-- [ ] Shows volumes that would be mounted
-- [ ] Shows SSH connection command that would be run
-- [ ] No actual container created or modified
-- [ ] Output is machine-parseable
+- [x] `--dry-run` flag added to `cai run` and `cai shell`
+- [x] Shows container name that would be used
+- [x] Shows port that would be allocated
+- [x] Shows volumes that would be mounted
+- [x] Shows SSH connection command that would be run
+- [x] No actual container created or modified
+- [x] Output is machine-parseable
 ## Done summary
-TBD
-
+Added --dry-run flag to cai run and cai shell commands with machine-parseable output (key=value format, one per line)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: pending
+- Tests: bash syntax validation passed
 - PRs:

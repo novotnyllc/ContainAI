@@ -177,6 +177,7 @@ Run Options:
   --force               Skip isolation checks (for testing only)
   --detached, -d        Run in background
   --quiet, -q           Suppress verbose output
+  --dry-run             Show what would happen without executing (machine-parseable)
   -e, --env <VAR=val>   Set environment variable (repeatable)
   -- <args>             Pass arguments to agent
 
@@ -192,6 +193,7 @@ Examples:
   cai                               Start container (default)
   cai /path/to/project              Start container for specified workspace
   cai --fresh /path/to/project      Recreate container for workspace
+  cai --dry-run                     Show what would happen (machine-parseable)
   cai -- --print                    Pass --print to agent
   cai doctor                        Check system capabilities
   cai shell                         Open shell in running container
@@ -325,6 +327,7 @@ Options:
   --fresh               Remove and recreate container (preserves data volume)
   --restart             Alias for --fresh
   --force               Skip isolation checks (for testing only)
+  --dry-run             Show what would happen without executing (machine-parseable)
   -q, --quiet           Suppress verbose output
   -h, --help            Show this help message
 
@@ -348,6 +351,7 @@ Examples:
   cai shell                    Open shell in container for current directory
   cai shell /path/to/project   Open shell in container for specified workspace
   cai shell --fresh            Recreate container with fresh SSH keys
+  cai shell --dry-run          Show what would happen (machine-parseable)
   ssh <container-name>         Direct SSH access (after cai shell setup)
 EOF
 }
@@ -768,6 +772,7 @@ _containai_shell_cmd() {
     local force_flag=false
     local quiet_flag=false
     local debug_flag=false
+    local dry_run_flag=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -859,6 +864,10 @@ _containai_shell_cmd() {
                 ;;
             --debug|-D)
                 debug_flag=true
+                shift
+                ;;
+            --dry-run)
+                dry_run_flag=true
                 shift
                 ;;
             --image-tag)
@@ -980,6 +989,38 @@ _containai_shell_cmd() {
     local -a docker_cmd=(docker)
     if [[ -n "$selected_context" ]]; then
         docker_cmd=(docker --context "$selected_context")
+    fi
+
+    # Handle --dry-run flag: delegate to _containai_start_container with --shell --dry-run
+    if [[ "$dry_run_flag" == "true" ]]; then
+        local -a dry_run_args=()
+        dry_run_args+=(--data-volume "$resolved_volume")
+        dry_run_args+=(--workspace "$resolved_workspace")
+        dry_run_args+=(--shell)
+        dry_run_args+=(--dry-run)
+        if [[ -n "$container_name" ]]; then
+            dry_run_args+=(--name "$container_name")
+        fi
+        if [[ -n "$image_tag" ]]; then
+            dry_run_args+=(--image-tag "$image_tag")
+        fi
+        if [[ -n "$explicit_config" ]]; then
+            dry_run_args+=(--config "$explicit_config")
+        fi
+        if [[ "$fresh_flag" == "true" ]]; then
+            dry_run_args+=(--fresh)
+        fi
+        if [[ "$force_flag" == "true" ]]; then
+            dry_run_args+=(--force)
+        fi
+        if [[ "$debug_flag" == "true" ]]; then
+            dry_run_args+=(--debug)
+        fi
+        if [[ "$quiet_flag" == "true" ]]; then
+            dry_run_args+=(--quiet)
+        fi
+        _containai_start_container "${dry_run_args[@]}"
+        return $?
     fi
 
     # Handle --fresh flag: remove and recreate container
@@ -1122,6 +1163,7 @@ _containai_run_cmd() {
     local detached_flag=""
     local quiet_flag=""
     local debug_flag=""
+    local dry_run_flag=""
     local mount_docker_socket=""
     local please_root_my_host=""
     local -a env_vars=()
@@ -1250,6 +1292,10 @@ _containai_run_cmd() {
                 ;;
             --debug|-D)
                 debug_flag="--debug"
+                shift
+                ;;
+            --dry-run)
+                dry_run_flag="--dry-run"
                 shift
                 ;;
             --image-tag)
@@ -1395,6 +1441,9 @@ _containai_run_cmd() {
     fi
     if [[ -n "$debug_flag" ]]; then
         start_args+=("$debug_flag")
+    fi
+    if [[ -n "$dry_run_flag" ]]; then
+        start_args+=("$dry_run_flag")
     fi
     if [[ -n "$image_tag" ]]; then
         start_args+=(--image-tag "$image_tag")
