@@ -199,13 +199,15 @@ sequenceDiagram
     Docker->>Container: Create container
     Container->>Systemd: Start systemd as PID 1
 
+    Note over Container: ssh-keygen.service<br/>generates host keys
+
+    Systemd->>Container: Start containai-init.service (oneshot)
+    Note over Container: Workspace setup complete
+
     par Service Startup
         Systemd->>SSH: Start ssh.service
         Systemd->>Container: Start docker.service
-        Systemd->>Container: Start containai-init.service
     end
-
-    Note over Container: ssh-keygen.service<br/>generates host keys
 
     CLI->>CLI: Allocate port (2300-2500)
     CLI->>Container: Inject SSH public key
@@ -222,9 +224,8 @@ sequenceDiagram
     Docker->>Systemd: Graceful shutdown signal
     Systemd->>SSH: Stop ssh.service
     Systemd->>Container: Stop docker.service
-    Systemd->>Container: Stop containai-init.service
     Docker->>Container: Container stopped
-    CLI->>CLI: Clean up SSH config
+    Note over CLI: SSH config retained<br/>(cleaned on --restart/removal)
 ```
 
 ### Container Startup Sequence
@@ -232,8 +233,8 @@ sequenceDiagram
 1. **Container Creation**: `docker run --runtime=sysbox-runc` creates the system container
 2. **Systemd Boot**: systemd starts as PID 1, initializes the service manager
 3. **SSH Key Generation**: `ssh-keygen.service` generates host keys on first boot (not baked into image)
-4. **Service Startup**: sshd, dockerd, and containai-init start in parallel
-5. **Workspace Setup**: `containai-init.service` creates symlinks and loads environment
+4. **Workspace Setup**: `containai-init.service` (oneshot) runs first, creating symlinks and loading environment
+5. **Service Startup**: `ssh.service` and `docker.service` start after init completes
 6. **SSH Connection**: CLI allocates port, injects key, waits for sshd, then connects
 
 ## SSH Connection Flow
