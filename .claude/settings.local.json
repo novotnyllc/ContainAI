@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Skill(flow-next-setup)",
-      "Bash($FLOWCTL *)",
-      "Skill(flow-next-plan)"
-    ]
-  }
-}
