@@ -448,6 +448,8 @@ flowchart TB
 
 ## What This Means For You
 
+For concrete examples of these security concepts in action, see [Security Scenarios](security-scenarios.md) which walks through real-world attack patterns and how proper isolation prevents them.
+
 ### Why Docker Sandbox Alone Is Not Enough
 
 Docker Desktop's experimental `docker sandbox` command provides convenience but not enhanced security:
@@ -556,6 +558,7 @@ flowchart TD
 ### ContainAI Documentation
 
 - [Architecture](architecture.md) - System container design
+- [Security Scenarios](security-scenarios.md) - Real-world attack scenarios and how isolation helps
 - [Configuration](configuration.md) - Container configuration options
 - [Troubleshooting](troubleshooting.md) - Common issues and solutions
 - [Security Model](../SECURITY.md) - Threat model and reporting

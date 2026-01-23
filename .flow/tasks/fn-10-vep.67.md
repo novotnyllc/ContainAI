@@ -139,9 +139,8 @@ Research completed shows:
 - [ ] Mermaid diagrams for isolation layers
 - [ ] Links to source documentation for each solution
 ## Done summary
-TBD
-
+Created comprehensive security comparison documentation (docs/security-comparison.md) comparing ContainAI's Sysbox-based isolation with Docker Desktop sandbox, ECI, Anthropic SRT, gVisor, Firecracker/Kata microVMs, and other sandboxing solutions. Includes feature comparison tables with emoji legend, mermaid diagrams for isolation layers and decision flowchart, and clear explanations of why system containers matter for AI agents.
 ## Evidence
-- Commits:
+- Commits: 48c17a39b4c6a46a08bb62b4e3e6d28a3c14c8b7, 2f0dd28f7c893d7f2458c8e3b42a8f5f3e8c5b3a, 7882a956edfaf0afb8903f0768c22f04f14d7b3c
 - Tests:
 - PRs:
