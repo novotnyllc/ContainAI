@@ -9,7 +9,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-23T13:48:44.741866Z",
   "spec_path": ".flow/specs/fn-11-1an.md",
-  "status": "open",
+  "status": "done",
   "title": "Symlink relinking during import",
-  "updated_at": "2026-01-23T13:48:44.741887Z"
+  "updated_at": "2026-01-23T16:34:49.072615Z"
 }

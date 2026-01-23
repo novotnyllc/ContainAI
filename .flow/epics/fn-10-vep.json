@@ -7,7 +7,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-21T09:15:39.058163Z",
   "spec_path": ".flow/specs/fn-10-vep.md",
-  "status": "open",
+  "status": "done",
   "title": "Sysbox System Containers with SSH Access and DinD",
-  "updated_at": "2026-01-21T22:35:15.608679Z"
+  "updated_at": "2026-01-23T16:34:39.647230Z"
 }

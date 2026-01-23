@@ -87,9 +87,8 @@ docker run --rm -v "$test_vol":/data alpine sh -c '
 - [ ] All existing tests continue to pass
 
 ## Done summary
-TBD
-
+Added integration tests for symlink relinking behavior during import. Tests cover 6 scenarios: internal absolute symlinks (relinked to /mnt/agent-data/...), relative symlinks (preserved), external absolute symlinks (preserved with warning), broken symlinks (preserved as-is), circular symlinks (no hang), and directory symlink pitfall (replaces pre-existing directory). Uses .config/gh which is actually synced by _IMPORT_SYNC_MAP, includes portable timeout wrapper for macOS compatibility, and proper env var clearing for shell function compatibility.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 063d775, 0613369, 0484642, 1f06969
+- Tests: shellcheck -x tests/integration/test-sync-integration.sh, bash -n tests/integration/test-sync-integration.sh
 - PRs:
