@@ -1,30 +1,29 @@
 #!/bin/bash
-# Test that Docker + Sysbox is working correctly
+# Test that Docker-in-Docker is working correctly
 # Run after start-dockerd.sh has initialized the environment
+#
+# This test runs inside a sysbox system container, so the inner Docker
+# uses runc (not sysbox-runc). The sysbox isolation comes from the outer
+# container runtime.
 set -euo pipefail
 
-echo "=== Docker Info ==="
+printf '%s\n' "=== Docker Info ==="
 docker info
 
-echo ""
-echo "=== Available Runtimes ==="
-docker info --format "{{json .Runtimes}}" | jq .
+printf '\n'
+printf '%s\n' "=== Test: Run container with default runtime ==="
+docker run --rm alpine:3.20 echo "Docker run works"
 
-echo ""
-echo "=== Test: Run container with default runtime ==="
-docker run --rm alpine:3.20 echo "Default runtime works"
-
-echo ""
-echo "=== Test: Run container with Sysbox runtime ==="
-docker run --rm --runtime=sysbox-runc alpine:3.20 echo "Sysbox runtime works"
-
-echo ""
-echo "=== Test: Build simple image ==="
+printf '\n'
+printf '%s\n' "=== Test: Build simple image ==="
 docker build -t test-build - <<EOF
 FROM alpine:3.20
 RUN echo "Build test"
 EOF
 docker rmi test-build
 
-echo ""
-echo "[OK] All Docker + Sysbox tests passed"
+printf '\n'
+printf '%s\n' "[OK] All Docker-in-Docker tests passed"
+printf '%s\n' ""
+printf '%s\n' "This container is running inside a sysbox system container."
+printf '%s\n' "The host sysbox runtime provides DinD capability without --privileged."

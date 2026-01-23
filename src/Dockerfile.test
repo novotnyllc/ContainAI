@@ -1,15 +1,22 @@
 # syntax=docker/dockerfile:1
-# Docker Test Container for ContainAI with dockerd + Sysbox
+# Docker Test Container for ContainAI
 #
-# This Dockerfile creates a testing environment with its own dockerd and Sysbox
-# runtime. Used for CI or development testing of ContainAI images directly
-# inside a container.
+# This Dockerfile creates a lightweight testing environment for Docker-in-Docker
+# verification. It is designed to run INSIDE a sysbox system container, so it
+# does not need to install sysbox itself - the host already provides that
+# isolation.
 #
-# IMPORTANT: Uses /var/run/docker-test.sock to avoid conflicts with host Docker.
+# Architecture:
+#   Host (containai docker-ce + sysbox)
+#     └── Test Container (this Dockerfile, runs with --runtime=sysbox-runc)
+#           └── Inner Docker (uses runc for nested containers)
+#
+# IMPORTANT: This container must be run with --runtime=sysbox-runc, NOT with
+# --privileged. The sysbox runtime provides all necessary capabilities for DinD.
 #
 # Usage (from repo root):
 #   docker build -t containai-test -f src/Dockerfile.test src/
-#   docker run --privileged containai-test /usr/local/bin/test-dind.sh
+#   docker --context containai-secure run --rm --runtime=sysbox-runc containai-test
 #
 # Note: Requires BuildKit (DOCKER_BUILDKIT=1 or Docker 23.0+)
 
@@ -34,9 +41,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         curl \
         gnupg \
         lsb-release \
-        wget \
         jq \
-        git \
         iproute2 \
         iptables \
         kmod \
@@ -44,6 +49,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fuse
 
 # Install Docker daemon
+# Note: Sysbox is NOT installed here - the host's sysbox runtime provides
+# DinD capability when this container runs with --runtime=sysbox-runc
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list && \
     apt-get update && \
@@ -52,16 +59,10 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
         docker-ce-cli \
         containerd.io
 
-# Install Sysbox
-ARG SYSBOX_VERSION=0.6.7
-RUN ARCH=$(dpkg --print-architecture) && \
-    wget -q -O /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" && \
-    apt-get install -y /tmp/sysbox.deb && \
-    rm /tmp/sysbox.deb
-
-# Configure Docker with Sysbox runtime (NOT as default)
-# Use a different socket to avoid conflicts with any host Docker
-# Note: storage-driver is omitted to let dockerd auto-select (overlay2 may not work in nested environments)
+# Configure inner Docker daemon
+# - Uses a separate socket to avoid conflicts with any host Docker
+# - Storage-driver is omitted to let dockerd auto-select (overlay2 may not work in all nested environments)
+# - No sysbox-runc configuration needed - inner Docker uses runc, sysbox isolation comes from outer container
 COPY configs/daemon-test.json /etc/docker/daemon.json
 
 # Set default Docker host to test socket
@@ -78,4 +79,4 @@ RUN apt-get clean && \
 WORKDIR /workspace
 
 ENTRYPOINT ["/usr/local/bin/start-dockerd.sh"]
-CMD ["bash"]
+CMD ["/usr/local/bin/test-dind.sh"]
