@@ -3069,6 +3069,9 @@ test_missing_source_error() {
 # ==============================================================================
 # Test 46-51: Symlink relinking during import
 # ==============================================================================
+# Tests use .config/gh which is actually synced by _IMPORT_SYNC_MAP.
+# Symlink targets must live INSIDE the synced subtree for relinking to occur.
+# ==============================================================================
 test_symlink_relinking() {
     section "Tests 46-51: Symlink relinking during --from directory import"
 
@@ -3096,36 +3099,44 @@ data_volume = "'"$test_vol"'"
 
     # -------------------------------------------------------------------------
     # Setup: Create host-like source structure with various symlink types
+    # Use .config/gh which is synced by _IMPORT_SYNC_MAP
     # -------------------------------------------------------------------------
-    # Create target directories and files for internal symlinks
-    mkdir -p "$alt_source_dir/.config/nvim.d"
-    echo "vim config content" > "$alt_source_dir/.config/nvim.d/init.vim"
+    # Create target directory INSIDE the synced subtree (.config/gh)
+    mkdir -p "$alt_source_dir/.config/gh/real-target"
+    echo "hosts content" > "$alt_source_dir/.config/gh/real-target/hosts.yml"
 
-    # Test case 1: Internal absolute symlink (uses full host path)
-    # This should be relinked to /mnt/agent-data/...
-    ln -s "$alt_source_dir/.config/nvim.d" "$alt_source_dir/.config/nvim"
+    # Test case 1: Internal absolute symlink (target INSIDE synced subtree)
+    # Link points from .config/gh/link to .config/gh/real-target (both inside gh/)
+    # This should be relinked to /mnt/agent-data/config/gh/real-target
+    ln -s "$alt_source_dir/.config/gh/real-target" "$alt_source_dir/.config/gh/internal-link"
 
     # Test case 2: Relative symlink - should NOT be relinked
-    ln -s "./nvim.d" "$alt_source_dir/.config/nvim-rel"
+    ln -s "./real-target" "$alt_source_dir/.config/gh/relative-link"
 
     # Test case 3: External absolute symlink - should be preserved with warning
-    ln -s "/usr/bin/bash" "$alt_source_dir/.config/external"
+    ln -s "/usr/bin/bash" "$alt_source_dir/.config/gh/external-link"
 
-    # Test case 4: Broken symlink - symlink to nonexistent target within source
-    ln -s "$alt_source_dir/.config/does-not-exist" "$alt_source_dir/.config/broken"
+    # Test case 4: Broken symlink - symlink to nonexistent target within synced subtree
+    # Store the original target for later verification
+    local broken_target="$alt_source_dir/.config/gh/does-not-exist"
+    ln -s "$broken_target" "$alt_source_dir/.config/gh/broken-link"
 
-    # Test case 5: Circular symlinks - a -> b, b -> a
-    ln -s "$alt_source_dir/.config/link-b" "$alt_source_dir/.config/link-a"
-    ln -s "$alt_source_dir/.config/link-a" "$alt_source_dir/.config/link-b"
+    # Test case 5: Circular symlinks - a -> b, b -> a (both inside synced subtree)
+    ln -s "$alt_source_dir/.config/gh/circular-b" "$alt_source_dir/.config/gh/circular-a"
+    ln -s "$alt_source_dir/.config/gh/circular-a" "$alt_source_dir/.config/gh/circular-b"
 
     # -------------------------------------------------------------------------
     # Run import with --from pointing to alternate source
+    # Use timeout to catch circular symlink hangs (60s should be plenty)
     # -------------------------------------------------------------------------
     local import_output import_exit=0
     import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
+        timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
 
-    if [[ $import_exit -eq 0 ]]; then
+    if [[ $import_exit -eq 124 ]]; then
+        fail "Import timed out (possible infinite loop in symlink handling)"
+        return
+    elif [[ $import_exit -eq 0 ]]; then
         pass "Import with symlinks completed without hanging (circular symlink safe)"
     else
         fail "Import with symlinks failed (exit=$import_exit)"
@@ -3138,12 +3149,12 @@ data_volume = "'"$test_vol"'"
     section "Test 46: Symlink relinking - internal absolute"
 
     local target
-    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/nvim 2>/dev/null) || target=""
+    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/internal-link 2>/dev/null) || target=""
 
-    if [[ "$target" == "/mnt/agent-data/config/nvim.d" ]]; then
+    if [[ "$target" == "/mnt/agent-data/config/gh/real-target" ]]; then
         pass "Internal absolute symlink relinked correctly"
     else
-        fail "Internal absolute symlink not relinked (got: $target, expected: /mnt/agent-data/config/nvim.d)"
+        fail "Internal absolute symlink not relinked (got: $target, expected: /mnt/agent-data/config/gh/real-target)"
     fi
 
     # -------------------------------------------------------------------------
@@ -3151,12 +3162,12 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     section "Test 47: Symlink relinking - relative preserved"
 
-    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/nvim-rel 2>/dev/null) || target=""
+    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/relative-link 2>/dev/null) || target=""
 
-    if [[ "$target" == "./nvim.d" ]]; then
+    if [[ "$target" == "./real-target" ]]; then
         pass "Relative symlink preserved unchanged"
     else
-        fail "Relative symlink modified (got: $target, expected: ./nvim.d)"
+        fail "Relative symlink modified (got: $target, expected: ./real-target)"
     fi
 
     # -------------------------------------------------------------------------
@@ -3164,7 +3175,7 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     section "Test 48: Symlink relinking - external preserved with warning"
 
-    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/external 2>/dev/null) || target=""
+    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/external-link 2>/dev/null) || target=""
 
     if [[ "$target" == "/usr/bin/bash" ]]; then
         pass "External absolute symlink preserved"
@@ -3172,21 +3183,24 @@ data_volume = "'"$test_vol"'"
         fail "External absolute symlink modified (got: $target, expected: /usr/bin/bash)"
     fi
 
-    # Check for warning in output
-    if echo "$import_output" | grep -qi "external\|outside\|WARN"; then
-        pass "Warning logged for external symlink"
+    # Check for specific warning pattern about external/outside subtree
+    if echo "$import_output" | grep -q "outside entry subtree"; then
+        pass "Warning logged for external symlink (outside entry subtree)"
+    elif echo "$import_output" | grep -q "/usr/bin/bash"; then
+        pass "Warning logged for external symlink (target path mentioned)"
     else
-        info "Note: warning for external symlink may not be visible in output"
+        fail "No warning logged for external symlink pointing to /usr/bin/bash"
+        info "Output: $import_output"
     fi
 
     # -------------------------------------------------------------------------
-    # Test 49: Broken symlink preserved as-is
+    # Test 49: Broken symlink preserved as-is (target not rewritten)
     # -------------------------------------------------------------------------
     section "Test 49: Symlink relinking - broken symlink preserved"
 
     # Check symlink exists (even if broken)
     local broken_exists
-    broken_exists=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/broken && echo yes || echo no' 2>/dev/null) || broken_exists="no"
+    broken_exists=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/broken-link && echo yes || echo no' 2>/dev/null) || broken_exists="no"
 
     if [[ "$broken_exists" == "yes" ]]; then
         pass "Broken symlink preserved (not deleted)"
@@ -3194,16 +3208,30 @@ data_volume = "'"$test_vol"'"
         fail "Broken symlink was deleted"
     fi
 
+    # Verify the target was preserved as-is (original host path, not rewritten)
+    local broken_link_target
+    broken_link_target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/broken-link 2>/dev/null) || broken_link_target=""
+
+    # Broken symlink should keep original target (not be rewritten to /mnt/agent-data/...)
+    if [[ "$broken_link_target" == "$broken_target" ]]; then
+        pass "Broken symlink target preserved as-is"
+    elif [[ "$broken_link_target" == "/mnt/agent-data/"* ]]; then
+        fail "Broken symlink was incorrectly relinked (got: $broken_link_target)"
+    else
+        # Could be empty or different - still a failure
+        fail "Broken symlink target not preserved (got: $broken_link_target, expected: $broken_target)"
+    fi
+
     # -------------------------------------------------------------------------
-    # Test 50: Circular symlinks do not hang (already verified by import success)
+    # Test 50: Circular symlinks do not hang (verified by import completing)
     # -------------------------------------------------------------------------
     section "Test 50: Symlink relinking - circular symlinks handled"
 
-    # The fact that import completed proves circular symlinks didn't hang
+    # The fact that import completed (no timeout) proves circular symlinks didn't hang
     # Verify the symlinks were copied
     local circular_a circular_b
-    circular_a=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/link-a && echo yes || echo no' 2>/dev/null) || circular_a="no"
-    circular_b=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/link-b && echo yes || echo no' 2>/dev/null) || circular_b="no"
+    circular_a=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/circular-a && echo yes || echo no' 2>/dev/null) || circular_a="no"
+    circular_b=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/circular-b && echo yes || echo no' 2>/dev/null) || circular_b="no"
 
     if [[ "$circular_a" == "yes" && "$circular_b" == "yes" ]]; then
         pass "Circular symlinks imported without hanging"
@@ -3213,6 +3241,7 @@ data_volume = "'"$test_vol"'"
 
     # -------------------------------------------------------------------------
     # Test 51: Directory symlink replaces pre-existing directory (pitfall)
+    # Uses .config/gh which is synced, with symlink inside the synced subtree
     # -------------------------------------------------------------------------
     section "Test 51: Symlink relinking - directory symlink pitfall"
 
@@ -3226,14 +3255,15 @@ data_volume = "'"$test_vol"'"
 
     # Pre-populate volume with a real directory at the path where symlink will go
     docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c '
-        mkdir -p /data/config/nvim
-        echo "pre-existing content" > /data/config/nvim/existing.txt
+        mkdir -p /data/config/gh/subdir
+        echo "pre-existing content" > /data/config/gh/subdir/existing.txt
     ' 2>/dev/null
 
     # Create source with symlink at same path as existing directory
-    mkdir -p "$pitfall_source_dir/.config/nvim.d"
-    echo "new content" > "$pitfall_source_dir/.config/nvim.d/init.vim"
-    ln -s "$pitfall_source_dir/.config/nvim.d" "$pitfall_source_dir/.config/nvim"
+    # Target is inside the synced subtree (.config/gh)
+    mkdir -p "$pitfall_source_dir/.config/gh/real-subdir"
+    echo "new content" > "$pitfall_source_dir/.config/gh/real-subdir/new.txt"
+    ln -s "$pitfall_source_dir/.config/gh/real-subdir" "$pitfall_source_dir/.config/gh/subdir"
 
     # Create config for pitfall test
     local pitfall_test_dir
@@ -3243,21 +3273,29 @@ data_volume = "'"$test_vol"'"
 data_volume = "'"$pitfall_vol"'"
 '
 
-    # Run import
+    # Run import with timeout
     local pitfall_output pitfall_exit=0
     pitfall_output=$(cd -- "$pitfall_test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$pitfall_vol" "$pitfall_source_dir" 2>&1) || pitfall_exit=$?
+        timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$pitfall_vol" "$pitfall_source_dir" 2>&1) || pitfall_exit=$?
+
+    # Check import succeeded before checking filesystem
+    if [[ $pitfall_exit -ne 0 ]]; then
+        fail "Pitfall test import failed (exit=$pitfall_exit)"
+        info "Output: $pitfall_output"
+        rm -rf "$pitfall_test_dir" "$pitfall_source_dir" 2>/dev/null || true
+        return
+    fi
 
     # Check that result is a symlink, not a directory with symlink inside
     local is_symlink
-    is_symlink=$(docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -L /data/config/nvim && echo yes || echo no' 2>/dev/null) || is_symlink="no"
+    is_symlink=$(docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/subdir && echo yes || echo no' 2>/dev/null) || is_symlink="no"
 
     if [[ "$is_symlink" == "yes" ]]; then
         pass "Directory symlink replaced pre-existing directory correctly"
     else
         # Check if it's a directory (pitfall not handled)
         local is_dir
-        is_dir=$(docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -d /data/config/nvim && echo yes || echo no' 2>/dev/null) || is_dir="no"
+        is_dir=$(docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -d /data/config/gh/subdir && echo yes || echo no' 2>/dev/null) || is_dir="no"
         if [[ "$is_dir" == "yes" ]]; then
             fail "Directory symlink pitfall: symlink created INSIDE existing directory"
         else
