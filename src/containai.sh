@@ -440,14 +440,15 @@ Reports requirement levels and actionable remediation guidance.
 
 Requirements:
   Sysbox: REQUIRED - cai run requires Sysbox for container isolation
+  SSH: REQUIRED - cai shell/run use SSH for container access
 
 Options:
   --json          Output machine-parseable JSON
   -h, --help      Show this help message
 
 Exit Codes:
-  0    Sysbox available (ready to use)
-  1    Sysbox NOT available (run 'cai setup' to configure)
+  0    All checks pass (Sysbox available AND SSH configured)
+  1    Checks failed (run 'cai setup' to configure)
 
 Examples:
   cai doctor                    Run all checks, show formatted report

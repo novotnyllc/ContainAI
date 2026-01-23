@@ -50,10 +50,12 @@ The `cai doctor` command checks your system's readiness for ContainAI:
 **Key sections in doctor output:**
 
 1. **Docker** - CLI and daemon availability
-2. **Docker Desktop (ECI Path)** - Version, sandboxes feature, ECI status
-3. **Secure Engine (Sysbox Path)** - Sysbox runtime and context availability
-4. **Platform** - Platform-specific checks (WSL2 seccomp, macOS ECI)
-5. **Summary** - Overall isolation status and recommendations
+2. **Sysbox Isolation** - Sysbox runtime and context availability
+3. **Platform** - Platform-specific checks (WSL2 kernel/seccomp, macOS Lima)
+4. **ContainAI Docker** - ContainAI docker-ce installation status
+5. **SSH** - SSH key, config directory, Include directive, OpenSSH version
+6. **Resources** - Host memory/CPU and container limits
+7. **Summary** - Overall readiness status (requires both Sysbox AND SSH)
 
 ---
 

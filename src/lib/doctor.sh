@@ -18,6 +18,7 @@
 #   - Requires lib/core.sh to be sourced first for logging functions
 #   - Requires lib/platform.sh to be sourced first for platform detection
 #   - Requires lib/docker.sh to be sourced first for Docker availability checks
+#   - Requires lib/ssh.sh to be sourced first for SSH constants and version check
 #
 # Usage: source lib/doctor.sh
 # ==============================================================================
@@ -634,25 +635,35 @@ _cai_doctor() {
         printf '  %-44s %s\n' "" "(Run 'cai setup' to configure SSH)"
     fi
 
-    # SSH connectivity test for running containers
-    if [[ "$ssh_key_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]]; then
-        # Check if any ContainAI containers are running
+    # SSH connectivity test for running containers (only if containai-docker is available)
+    if [[ "$ssh_key_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]] && [[ "$containai_docker_ok" == "true" ]]; then
+        # Check if any ContainAI containers are running (with timeout to keep doctor fast)
         local running_containers
-        running_containers=$(docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-docker-containai}" ps --filter "label=containai.workspace" --format '{{.Names}}' 2>/dev/null | head -1) || running_containers=""
+        running_containers=$(_cai_timeout 5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-docker-containai}" ps --filter "label=containai.workspace" --format '{{.Names}}' 2>/dev/null | head -1) || running_containers=""
         if [[ -n "$running_containers" ]]; then
             local test_container="$running_containers"
             local ssh_port
-            ssh_port=$(docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-docker-containai}" inspect "$test_container" --format '{{index .Config.Labels "containai.ssh-port"}}' 2>/dev/null) || ssh_port=""
+            ssh_port=$(_cai_timeout 5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-docker-containai}" inspect "$test_container" --format '{{index .Config.Labels "containai.ssh-port"}}' 2>/dev/null) || ssh_port=""
             if [[ -n "$ssh_port" ]]; then
                 # Try connectivity test with BatchMode and short timeout
-                if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
-                       -o UserKnownHostsFile=/dev/null -i "$ssh_key_path" \
+                # Use same known_hosts file as cai shell/run for accurate UX reflection
+                local known_hosts_file="${_CAI_KNOWN_HOSTS_FILE:-$HOME/.config/containai/known_hosts}"
+                local known_hosts_opt="-o UserKnownHostsFile=$known_hosts_file"
+                # Use accept-new if supported, otherwise no for strict checking
+                local strict_opt="-o StrictHostKeyChecking=accept-new"
+                if ! _cai_check_ssh_accept_new_support 2>/dev/null; then
+                    strict_opt="-o StrictHostKeyChecking=no"
+                fi
+                if ssh -o BatchMode=yes -o ConnectTimeout=5 "$strict_opt" \
+                       "$known_hosts_opt" -i "$ssh_key_path" \
                        -p "$ssh_port" agent@localhost true 2>/dev/null; then
                     printf '  %-44s %s\n' "SSH connectivity ($test_container):" "[OK]"
                 else
                     printf '  %-44s %s\n' "SSH connectivity ($test_container):" "[WARN] Failed"
                     printf '  %-44s %s\n' "" "(Container may need 'cai import' or SSH restart)"
                 fi
+            else
+                printf '  %-44s %s\n' "SSH connectivity ($test_container):" "[SKIP] No SSH port label"
             fi
         fi
     fi
