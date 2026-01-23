@@ -145,6 +145,8 @@ ensure_volume_structure() {
   # tmux (SYNC_MAP uses XDG paths: config/tmux, local/share/tmux)
   ensure_dir "${DATA_DIR}/config/tmux"
   ensure_dir "${DATA_DIR}/local/share/tmux"
+  ensure_dir "${DATA_DIR}/local/share/fonts"
+  ensure_dir "${DATA_DIR}/agents"
 
   # Shell (SYNC_MAP flags: f for .bash_aliases, d for .bashrc.d)
   ensure_dir "${DATA_DIR}/shell"

@@ -65,7 +65,7 @@ ENV PATH="/home/agent/.local/bin:${PATH}"
 # Install Gemini CLI, Codex, and agent-browser via bun
 # Using --trust to allow postinstall scripts
 RUN . /home/agent/.nvm/nvm.sh && \
-    bun install -g --trust @google/gemini-cli @openai/codex agent-browser && agent-browser install \
+    bun install -g --trust @google/gemini-cli @openai/codex agent-browser skills && agent-browser install \
     # Verify installations
     gemini --version && \
     codex --version
@@ -155,7 +155,10 @@ RUN mkdir -p /home/agent/.config /home/agent/.local/share && \
     mkdir -p /mnt/agent-data/config/tmux /mnt/agent-data/local/share/tmux && \
     ln -sfn /mnt/agent-data/config/tmux /home/agent/.config/tmux && \
     ln -sfn /mnt/agent-data/local/share/tmux /home/agent/.local/share/tmux && \
-    ln -sfn /mnt/agent-data/local/share/fonts /home/agent/.local/share/fonts
+    ln -sfn /mnt/agent-data/local/share/fonts /home/agent/.local/share/fonts && \
+    # Common agents directory for shared skills, plugins, etc.
+    mkdir -p /mnt/agent-data/agents && \
+    ln -sfn /mnt/agent-data/agents /home/agent/.agents
 
 # =============================================================================
 # SHELL CONFIG SYMLINKS

@@ -367,7 +367,12 @@ _IMPORT_SYNC_MAP=(
   # --- tmux ---
   "/source/.config/tmux:/target/config/tmux:d"
   "/source/.local/share/tmux:/target/local/share/tmux:d"
+
+  # --- Fonts ---
   "/source/.local/share/fonts:/target/local/share/fonts:d"
+
+  # -- Common Agents Directory ---
+  "/source/.agents:/target/agents:d"
 
   # --- Shell ---
   "/source/.bash_aliases:/target/shell/bash_aliases:f"
