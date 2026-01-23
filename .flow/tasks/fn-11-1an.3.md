@@ -116,9 +116,8 @@ copy() {
 - [ ] No actual changes made during dry-run
 
 ## Done summary
-TBD
-
+Added preview_symlink_relinks() function to show symlink relinking preview during dry-run mode. The function scans source directory (not target, since rsync dry-run doesn't create files), outputs [RELINK] for symlinks that would be relinked, [WARN] for external/broken symlinks, and silently skips relative symlinks. Respects .system/ exclusion (x flag) and includes belt-and-suspenders validation for new_target path.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 9d5bc6ef52e5da20d17aa9f5308f7a26cc61a2cd, cc8146bdb8e904a39bab906fd3411fb26452218b
+- Tests: bash -n src/lib/import.sh, shellcheck -x src/lib/import.sh
 - PRs:

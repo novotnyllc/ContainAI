@@ -16,6 +16,7 @@
 # 11-15. Workspace volume resolution tests
 # 16-39. Env var import tests (allowlist, from_host, env_file, entrypoint, etc.)
 # 40-45. --from source tests (directory sync, tgz restore, roundtrip, idempotency, errors)
+# 46-51. Symlink relinking tests (internal, relative, external, broken, circular, pitfall)
 # ==============================================================================
 
 set -euo pipefail
@@ -3066,6 +3067,211 @@ test_missing_source_error() {
 }
 
 # ==============================================================================
+# Test 46-51: Symlink relinking during import
+# ==============================================================================
+test_symlink_relinking() {
+    section "Tests 46-51: Symlink relinking during --from directory import"
+
+    local test_dir alt_source_dir test_vol
+    test_dir=$(mktemp -d)
+    alt_source_dir=$(mktemp -d "${REAL_HOME}/.containai-symlink-test-XXXXXX")
+    test_vol="containai-test-symlink-${TEST_RUN_ID}"
+
+    # Cleanup function for symlink test fixture (best-effort)
+    cleanup_symlink_fixture() {
+        if [[ -d "$alt_source_dir" && "$alt_source_dir" == "${REAL_HOME}/.containai-symlink-test-"* ]]; then
+            rm -rf "$alt_source_dir" 2>/dev/null || true
+        fi
+    }
+    # shellcheck disable=SC2064
+    trap "rm -rf '$test_dir'; cleanup_symlink_fixture" RETURN
+
+    # Create config pointing to test volume
+    create_env_test_config "$test_dir" '
+[agent]
+data_volume = "'"$test_vol"'"
+'
+    docker volume create "$test_vol" >/dev/null
+    register_test_volume "$test_vol"
+
+    # -------------------------------------------------------------------------
+    # Setup: Create host-like source structure with various symlink types
+    # -------------------------------------------------------------------------
+    # Create target directories and files for internal symlinks
+    mkdir -p "$alt_source_dir/.config/nvim.d"
+    echo "vim config content" > "$alt_source_dir/.config/nvim.d/init.vim"
+
+    # Test case 1: Internal absolute symlink (uses full host path)
+    # This should be relinked to /mnt/agent-data/...
+    ln -s "$alt_source_dir/.config/nvim.d" "$alt_source_dir/.config/nvim"
+
+    # Test case 2: Relative symlink - should NOT be relinked
+    ln -s "./nvim.d" "$alt_source_dir/.config/nvim-rel"
+
+    # Test case 3: External absolute symlink - should be preserved with warning
+    ln -s "/usr/bin/bash" "$alt_source_dir/.config/external"
+
+    # Test case 4: Broken symlink - symlink to nonexistent target within source
+    ln -s "$alt_source_dir/.config/does-not-exist" "$alt_source_dir/.config/broken"
+
+    # Test case 5: Circular symlinks - a -> b, b -> a
+    ln -s "$alt_source_dir/.config/link-b" "$alt_source_dir/.config/link-a"
+    ln -s "$alt_source_dir/.config/link-a" "$alt_source_dir/.config/link-b"
+
+    # -------------------------------------------------------------------------
+    # Run import with --from pointing to alternate source
+    # -------------------------------------------------------------------------
+    local import_output import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -eq 0 ]]; then
+        pass "Import with symlinks completed without hanging (circular symlink safe)"
+    else
+        fail "Import with symlinks failed (exit=$import_exit)"
+        info "Output: $import_output"
+    fi
+
+    # -------------------------------------------------------------------------
+    # Test 46: Internal absolute symlink relinked correctly
+    # -------------------------------------------------------------------------
+    section "Test 46: Symlink relinking - internal absolute"
+
+    local target
+    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/nvim 2>/dev/null) || target=""
+
+    if [[ "$target" == "/mnt/agent-data/config/nvim.d" ]]; then
+        pass "Internal absolute symlink relinked correctly"
+    else
+        fail "Internal absolute symlink not relinked (got: $target, expected: /mnt/agent-data/config/nvim.d)"
+    fi
+
+    # -------------------------------------------------------------------------
+    # Test 47: Relative symlink preserved unchanged
+    # -------------------------------------------------------------------------
+    section "Test 47: Symlink relinking - relative preserved"
+
+    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/nvim-rel 2>/dev/null) || target=""
+
+    if [[ "$target" == "./nvim.d" ]]; then
+        pass "Relative symlink preserved unchanged"
+    else
+        fail "Relative symlink modified (got: $target, expected: ./nvim.d)"
+    fi
+
+    # -------------------------------------------------------------------------
+    # Test 48: External absolute symlink preserved with warning
+    # -------------------------------------------------------------------------
+    section "Test 48: Symlink relinking - external preserved with warning"
+
+    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/external 2>/dev/null) || target=""
+
+    if [[ "$target" == "/usr/bin/bash" ]]; then
+        pass "External absolute symlink preserved"
+    else
+        fail "External absolute symlink modified (got: $target, expected: /usr/bin/bash)"
+    fi
+
+    # Check for warning in output
+    if echo "$import_output" | grep -qi "external\|outside\|WARN"; then
+        pass "Warning logged for external symlink"
+    else
+        info "Note: warning for external symlink may not be visible in output"
+    fi
+
+    # -------------------------------------------------------------------------
+    # Test 49: Broken symlink preserved as-is
+    # -------------------------------------------------------------------------
+    section "Test 49: Symlink relinking - broken symlink preserved"
+
+    # Check symlink exists (even if broken)
+    local broken_exists
+    broken_exists=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/broken && echo yes || echo no' 2>/dev/null) || broken_exists="no"
+
+    if [[ "$broken_exists" == "yes" ]]; then
+        pass "Broken symlink preserved (not deleted)"
+    else
+        fail "Broken symlink was deleted"
+    fi
+
+    # -------------------------------------------------------------------------
+    # Test 50: Circular symlinks do not hang (already verified by import success)
+    # -------------------------------------------------------------------------
+    section "Test 50: Symlink relinking - circular symlinks handled"
+
+    # The fact that import completed proves circular symlinks didn't hang
+    # Verify the symlinks were copied
+    local circular_a circular_b
+    circular_a=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/link-a && echo yes || echo no' 2>/dev/null) || circular_a="no"
+    circular_b=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/link-b && echo yes || echo no' 2>/dev/null) || circular_b="no"
+
+    if [[ "$circular_a" == "yes" && "$circular_b" == "yes" ]]; then
+        pass "Circular symlinks imported without hanging"
+    else
+        fail "Circular symlinks not copied (a=$circular_a, b=$circular_b)"
+    fi
+
+    # -------------------------------------------------------------------------
+    # Test 51: Directory symlink replaces pre-existing directory (pitfall)
+    # -------------------------------------------------------------------------
+    section "Test 51: Symlink relinking - directory symlink pitfall"
+
+    # Create a fresh volume for this subtest to pre-populate it
+    local pitfall_vol pitfall_source_dir
+    pitfall_vol="containai-test-symlink-pitfall-${TEST_RUN_ID}"
+    pitfall_source_dir=$(mktemp -d "${REAL_HOME}/.containai-pitfall-test-XXXXXX")
+
+    docker volume create "$pitfall_vol" >/dev/null
+    register_test_volume "$pitfall_vol"
+
+    # Pre-populate volume with a real directory at the path where symlink will go
+    docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c '
+        mkdir -p /data/config/nvim
+        echo "pre-existing content" > /data/config/nvim/existing.txt
+    ' 2>/dev/null
+
+    # Create source with symlink at same path as existing directory
+    mkdir -p "$pitfall_source_dir/.config/nvim.d"
+    echo "new content" > "$pitfall_source_dir/.config/nvim.d/init.vim"
+    ln -s "$pitfall_source_dir/.config/nvim.d" "$pitfall_source_dir/.config/nvim"
+
+    # Create config for pitfall test
+    local pitfall_test_dir
+    pitfall_test_dir=$(mktemp -d)
+    create_env_test_config "$pitfall_test_dir" '
+[agent]
+data_volume = "'"$pitfall_vol"'"
+'
+
+    # Run import
+    local pitfall_output pitfall_exit=0
+    pitfall_output=$(cd -- "$pitfall_test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$pitfall_vol" "$pitfall_source_dir" 2>&1) || pitfall_exit=$?
+
+    # Check that result is a symlink, not a directory with symlink inside
+    local is_symlink
+    is_symlink=$(docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -L /data/config/nvim && echo yes || echo no' 2>/dev/null) || is_symlink="no"
+
+    if [[ "$is_symlink" == "yes" ]]; then
+        pass "Directory symlink replaced pre-existing directory correctly"
+    else
+        # Check if it's a directory (pitfall not handled)
+        local is_dir
+        is_dir=$(docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -d /data/config/nvim && echo yes || echo no' 2>/dev/null) || is_dir="no"
+        if [[ "$is_dir" == "yes" ]]; then
+            fail "Directory symlink pitfall: symlink created INSIDE existing directory"
+        else
+            fail "Path is neither symlink nor directory"
+        fi
+    fi
+
+    # Cleanup pitfall test fixtures
+    rm -rf "$pitfall_test_dir" "$pitfall_source_dir" 2>/dev/null || true
+
+    # Main cleanup handled by RETURN trap
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
@@ -3140,6 +3346,9 @@ main() {
     test_tgz_import_idempotent
     test_invalid_tgz_error
     test_missing_source_error
+
+    # Symlink relinking tests (Tests 46-51)
+    test_symlink_relinking
 
     # Summary
     echo ""
