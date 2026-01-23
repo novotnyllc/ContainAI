@@ -1,114 +1,87 @@
 # ContainAI
 
-**Run AI coding agents without risking your system.**
+**Secure system containers for AI coding agents.**
 
 [![Build](https://github.com/novotnyllc/containai/actions/workflows/docker.yml/badge.svg)](https://github.com/novotnyllc/containai/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-AI coding agents like Claude, Gemini, and Codex can execute arbitrary code on your machine. That's powerful—but dangerous. ContainAI puts them in a secure Docker sandbox with fail-closed defaults, so an agent can't accidentally (or maliciously) damage your system, leak credentials, or access files you didn't intend to share.
+ContainAI runs AI agents in **system containers** - VM-like Docker containers with systemd, multiple services, and Docker-in-Docker support. Unlike application containers, system containers provide full init systems and service management while maintaining strong isolation through Sysbox.
 
-## Why ContainAI?
+## Why System Containers?
 
-| Problem | ContainAI Solution |
-|---------|-------------------|
-| Agents can access your entire filesystem | Workspace mount limits access to your project directory |
-| Agents can read your SSH keys, API tokens, cloud credentials | Credential isolation keeps host secrets out by default |
-| Agents can run any command with your privileges | Sandbox runs in isolated runtime with restricted privileges |
-| Agent escapes container via Docker socket | Docker socket denied by default |
-| Misconfigured agents weaken security | Safe defaults enforced; dangerous config options are ignored |
+Traditional Docker containers run a single process. System containers run like lightweight VMs:
+
+| Capability | App Container | System Container |
+|------------|---------------|------------------|
+| Init system | No | systemd as PID 1 |
+| Multiple services | No | Yes (SSH, Docker, etc.) |
+| Docker-in-Docker | Requires `--privileged` | Works unprivileged via Sysbox |
+| User namespace isolation | Manual | Automatic |
+| SSH access | Port mapping only | VS Code Remote-SSH compatible |
+
+This makes them ideal for AI coding agents that need to build containers, run services, and access the environment via SSH.
 
 ## Quick Start
 
-### One-liner Install (Recommended)
-
 ```bash
+# Install
 curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
-```
 
-This installs `cai` to `~/.local/bin` and adds it to your PATH. Open a new terminal and run:
+# Set up isolation runtime (one-time)
+cai setup
 
-```bash
+# Run in your project
 cd /path/to/your/project
 cai
 ```
 
-### Manual Install
+First run? Authenticate inside the container with `claude login`.
 
-> **Note:** The CLI requires **bash 4.0+** (not zsh or fish). macOS ships with bash 3.2; install via `brew install bash`.
+## Key Capabilities
+
+### System Container with systemd
+
+Containers boot with systemd as PID 1, enabling real service management:
 
 ```bash
-# Clone and source the CLI (must be in bash)
-git clone https://github.com/novotnyllc/containai.git && cd containai
-source src/containai.sh
-
-# Start the sandbox in your project
-cd /path/to/your/project
-cai
+cai shell
+systemctl status  # See running services
 ```
 
-That's it. ContainAI detects your isolation runtime (Docker Desktop sandbox or Sysbox), mounts your current directory, and starts Claude. First run? Authenticate inside the container with `claude login`.
+### Docker-in-Docker Without --privileged
 
-## Features
+Sysbox enables unprivileged DinD - agents can build and run containers safely:
 
-- **Sandbox-first execution** — Containers run in Docker Desktop sandbox mode or with Sysbox runtime. Fail-closed: blocks if no isolation available.
-- **Multi-agent support** — Works with Claude, Gemini, Codex, Copilot, and OpenCode. Switch with `cai --agent gemini`.
-- **Credential isolation** — Agent credentials stay inside the container by default. Host credentials require explicit opt-in (see Security section).
-- **Workspace mounting** — Only your current project directory is mounted. Symlink traversal attacks are blocked.
-- **Auto-attach** — Reconnect to existing containers automatically. `cai --restart` for a fresh start.
-- **Persistent data volume** — Agent plugins, settings, and credentials survive container restarts.
-
-## Architecture
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
-flowchart TB
-    subgraph host["Your Host Machine"]
-        secrets["~/.ssh, ~/.aws, etc.<br/>NOT accessible to agent"]
-
-        subgraph runtime["Docker Desktop / Sysbox"]
-            subgraph sandbox["ContainAI Sandbox"]
-                workspace["/workspace<br/>Your project - read/write"]
-                data["/mnt/agent-data<br/>Persistent volume - creds"]
-                agent["AI Agent<br/>Claude/Gemini/Codex"]
-            end
-        end
-    end
-
-    secrets -.->|blocked| agent
+```bash
+# Inside the container
+docker build -t myapp .
+docker run myapp
 ```
 
-The agent sees only your project and its own data volume. Host credentials, Docker socket, and other sensitive resources are isolated by default.
+No `--privileged` flag required. Sysbox handles the isolation.
+
+### SSH Access
+
+Connect via VS Code Remote-SSH or standard SSH:
+
+```bash
+# From host
+ssh -p 2222 agent@localhost
+```
+
+Supports agent forwarding and port tunneling for development workflows.
+
+### Automatic User Namespace Isolation
+
+Sysbox maps container root to an unprivileged host user automatically. No manual UID/GID configuration required.
 
 ## Requirements
 
-| Requirement | Version | Notes |
-|-------------|---------|-------|
-| Docker | Desktop 4.50+ or Engine 24.0+ | Sandbox feature or Sysbox required |
-| Bash | 4.0+ | macOS default is 3.2; use `brew install bash` |
-| Git | Any | Recommended (for container naming) |
-
-**Isolation runtime (one required):**
-- **Docker Desktop** with sandbox feature enabled (Settings → Features in development), OR
-- **Sysbox** runtime (`cai setup` installs it on Linux/WSL2)
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Quickstart Guide](docs/quickstart.md) | Detailed setup with environment checks |
-| [Architecture](docs/architecture.md) | System design, data flow, security boundaries |
-| [Configuration](docs/configuration.md) | Config file options, volume selection |
-| [Technical README](src/README.md) | Image building, DinD, and CLI internals |
-| [Security Model](SECURITY.md) | Threat model and vulnerability reporting |
+| Requirement | Version |
+|-------------|---------|
+| Docker | Engine 24.0+ |
+| Bash | 4.0+ (macOS: `brew install bash`) |
+| Sysbox | Installed via `cai setup` |
 
 ## Common Commands
 
@@ -122,18 +95,25 @@ cai import               # Sync host dotfiles to data volume
 cai stop --all           # Stop all ContainAI containers
 ```
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Quickstart Guide](docs/quickstart.md) | Detailed setup with environment checks |
+| [Architecture](docs/architecture.md) | System design and security boundaries |
+| [Configuration](docs/configuration.md) | Config file options and volumes |
+| [Security Model](SECURITY.md) | Threat model and vulnerability reporting |
+
 ## Security
 
-ContainAI enforces safe defaults that cannot be weakened via config files:
+ContainAI enforces isolation by default:
 
 - **Credential isolation**: Host `~/.ssh`, `~/.aws`, API tokens are not accessible
-- **Docker socket denied**: No container escape via Docker socket
-- **TOCTOU protection**: Symlink traversal attacks blocked in entrypoint
-- **Fail-closed**: Blocks if sandbox unavailable or status unknown
+- **Docker socket denied**: No container escape via host Docker socket
+- **Automatic userns**: Sysbox maps container root to unprivileged host user
+- **Fail-closed**: Blocks if isolation runtime unavailable
 
-Unsafe operations require explicit CLI flags with acknowledgment:
-- `--allow-host-credentials` + `--i-understand-this-exposes-host-credentials`
-- `--allow-host-docker-socket` + `--i-understand-this-grants-root-access`
+Unsafe operations require explicit CLI flags with acknowledgment.
 
 See [SECURITY.md](SECURITY.md) for the full threat model.
 
@@ -143,4 +123,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+MIT License - see [LICENSE](LICENSE).
