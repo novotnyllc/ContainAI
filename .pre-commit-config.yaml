@@ -13,6 +13,7 @@ repos:
         args: ['--maxkb=500']
       - id: check-merge-conflict
 
+
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.9.0.6
     hooks:
@@ -21,7 +22,7 @@ repos:
         files: \.(sh|bash)$
         types: [text]
         # Include all shell scripts
-        exclude: ^(.flow/|scripts/ralph/runs/)
+        exclude: ^(.flow/|scripts/ralph/)
 
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.8.0-1
@@ -29,4 +30,4 @@ repos:
       - id: shfmt
         args: ['-i', '4', '-ci', '-bn']  # 4-space indent, case indent, binary ops at start
         files: \.(sh|bash)$
-        exclude: ^(.flow/|scripts/ralph/runs/)
+        exclude: ^(.flow/|scripts/ralph/)
