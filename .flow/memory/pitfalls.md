@@ -130,3 +130,6 @@ Systemd Wants= is advisory - unit starts even if wanted unit doesn't exist; use 
 
 ## 2026-01-22 manual [pitfall]
 When using return codes to distinguish error types (e.g., 0=ok, 1=conflict, 2=cannot-check), callers must handle all codes explicitly to avoid wrong actions on tool unavailability
+
+## 2026-01-23 manual [pitfall]
+Dry-run simulations must mirror exact runtime logic (e.g., port allocation with ignore flags for running vs stopped containers)
