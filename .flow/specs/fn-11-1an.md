@@ -6,23 +6,24 @@ When importing from a directory (`cai import --from <dir>`), symlinks that point
 
 **Example (single SYNC_MAP entry):**
 - Host: `/host/dotfiles/.config/nvim` → symlink to `/host/dotfiles/.config/nvim.d` (both within `.config` subtree)
+- Host: `/host/home/someuser/.config/foo.conf` → symlink to `/host/home/someuser/.local/share/foo.conf` (both within `/host/home/someuser` subtree)
 - After import without relinking: `/mnt/agent-data/config/nvim` → still points to `/host/dotfiles/.config/nvim.d` (wrong!)
 - After relinking: `/mnt/agent-data/config/nvim` → `/mnt/agent-data/config/nvim.d` (correct!)
 
-**Definition:** "Internal symlink" means a symlink whose target is within the **same SYNC_MAP entry's subtree** (per-entry scope, not global import scope).
+**Definition:** "Internal symlink" means a symlink whose target is within the **users home directory subtree** (per-entry scope, not global import scope).
 
 ## Scope
 
 **In scope:**
 - Symlinks within sync-mode imports (`--from <dir>`)
-- **Absolute symlinks only** whose targets are within the SYNC_MAP entry's source subtree
+- **Absolute symlinks only** whose targets are within the users home directory subtree
 - Relative symlinks are preserved unchanged (they remain relative and typically work correctly)
-- Warning/logging for symlinks pointing outside the entry's subtree
+- Warning/logging for symlinks pointing outside home directory subtree
+- Cross-SYNC_MAP symlink relinking (e.g., `.claude/` linking to `.config/`
 
 **Out of scope:**
 - Archive restore mode (tgz) - symlinks intentionally rejected for security
-- Symlinks pointing outside the SYNC_MAP entry's subtree (cannot be reliably relinked)
-- Cross-SYNC_MAP symlink relinking (e.g., `.claude/` linking to `.config/` - complex, defer to future)
+- Symlinks pointing outside the home directory subtree (cannot be reliably relinked)
 - Relinking relative symlinks (they naturally adapt to new location)
 - Default import path (no `--from` argument) - `HOST_SOURCE_ROOT` empty, relinking skipped
 
@@ -38,10 +39,10 @@ docker run --rm -v containai-data:/data alpine find /data -type l -exec ls -la {
 
 ## Acceptance
 
-- [ ] Absolute symlinks within the SYNC_MAP entry subtree are relinked to container paths
+- [ ] Absolute symlinks within the SYNC_MAP entry subtree are relinked to relative paths paths
 - [ ] Relative symlinks are preserved unchanged (no relinking)
-- [ ] Relinked absolute symlinks use `/mnt/agent-data/...` prefix (runtime container path)
-- [ ] Symlinks pointing outside entry subtree are preserved as-is with warning
+- [ ] Relinked absolute symlinks use are relative prefix (runtime container path)
+- [ ] Symlinks pointing outside home directory are preserved as-is with warning
 - [ ] Broken symlinks (target doesn't exist in source) are preserved as-is (no error, no relinking)
 - [ ] Circular symlink chains do not cause infinite loops (we only call `readlink` once per symlink, no recursive resolution)
 - [ ] `--dry-run` shows symlinks that would be relinked (by scanning source, not target)
