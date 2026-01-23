@@ -29,8 +29,17 @@ Add --image-tag parameter to _cai_find_container for debugging/advanced use.
 - [ ] Not required for normal use (optional parameter)
 - [ ] Documented as advanced/debugging feature
 ## Done summary
-TBD
+## Summary
 
+The `--image-tag` parameter for `_cai_find_container` was already fully implemented:
+
+1. **CLI parameter added**: `--image-tag` is accepted by both `cai run` and `cai shell` commands
+2. **Label storage**: When `--image-tag` is used, it's stored as the `containai.image-tag` label on the container
+3. **Container filtering**: `_cai_find_container()` accepts an optional third parameter `image_tag_filter` that filters containers by the `containai.image-tag` label
+4. **Optional usage**: The parameter is not required; when omitted, default behavior applies (one container per workspace)
+5. **Documentation**: Help text documents this as an "advanced/debugging" feature
+
+The implementation supports advanced use cases where users want to run multiple images for the same workspace, while keeping the default experience simple (one container per workspace path).
 ## Evidence
 - Commits:
 - Tests:

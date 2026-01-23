@@ -1245,13 +1245,13 @@ _containai_start_container() {
                     echo "[WARN] SSH port $existing_ssh_port is in use by another process" >&2
                     echo "Recreating container with new port allocation..."
                 fi
-                # Clean up SSH configuration before removing container
-                _cai_cleanup_container_ssh "$container_name" "$existing_ssh_port"
-                # Remove the old container (like --fresh but automatic)
+                # Remove the old container first (like --fresh but automatic)
                 if ! "${docker_cmd[@]}" rm -f "$container_name" >/dev/null 2>&1; then
                     echo "[ERROR] Failed to remove container for port reallocation" >&2
                     return 1
                 fi
+                # Clean up SSH configuration after successful container removal
+                _cai_cleanup_container_ssh "$container_name" "$existing_ssh_port"
                 container_state="none"
             fi
             # port_check_rc == 0 means port is available, continue normally
@@ -1393,8 +1393,9 @@ _containai_start_container() {
             local running_ssh_port
             running_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context") || running_ssh_port=""
             if [[ -n "$running_ssh_port" ]]; then
-                # Setup SSH without force_update (detect host key changes)
-                if ! _cai_setup_container_ssh "$container_name" "$running_ssh_port" "$selected_context"; then
+                # Setup SSH with quick_check mode (fast path for running containers)
+                # Uses single keyscan attempt to avoid 30s wait if sshd/port is broken
+                if ! _cai_setup_container_ssh "$container_name" "$running_ssh_port" "$selected_context" "" "true"; then
                     # SSH setup failure is non-fatal for running containers
                     # User can still attach via docker exec
                     _cai_warn "SSH setup failed; you can still attach via docker exec"

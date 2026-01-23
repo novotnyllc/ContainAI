@@ -1047,7 +1047,8 @@ _cai_update_known_hosts() {
     while (( retry_count < max_retries )); do
         # ssh-keyscan -p outputs keys in format: [localhost]:port ssh-type key
         # -T 5 sets connection timeout, -t rsa,ed25519 gets specific key types
-        if host_keys=$(ssh-keyscan -p "$ssh_port" -T 5 -t rsa,ed25519,ecdsa localhost 2>/dev/null); then
+        # Filter out comment lines (starting with #) and ensure valid key format (3+ fields)
+        if host_keys=$(ssh-keyscan -p "$ssh_port" -T 5 -t rsa,ed25519,ecdsa localhost 2>/dev/null | awk '$1 !~ /^#/ && NF >= 3'); then
             if [[ -n "$host_keys" ]]; then
                 break
             fi
@@ -1072,11 +1073,16 @@ _cai_update_known_hosts() {
     # Acquire lock for atomic known_hosts modification
     # This prevents concurrent cai start commands from corrupting the file
     if command -v flock >/dev/null 2>&1; then
-        exec {lock_fd}>"$lock_file"
-        if ! flock -w 10 "$lock_fd"; then
-            _cai_warn "Timeout acquiring known_hosts lock, proceeding without lock"
-            # Close the FD to avoid leak before clearing
-            exec {lock_fd}>&-
+        # Try to open lock file; if it fails (permissions/dir issues), skip locking
+        if exec {lock_fd}>"$lock_file" 2>/dev/null; then
+            if ! flock -w 10 "$lock_fd"; then
+                _cai_warn "Timeout acquiring known_hosts lock, proceeding without lock"
+                # Close the FD to avoid leak before clearing
+                exec {lock_fd}>&-
+                lock_fd=""
+            fi
+        else
+            _cai_debug "Could not open lock file, proceeding without lock"
             lock_fd=""
         fi
     fi
@@ -1141,7 +1147,8 @@ _cai_update_known_hosts() {
             [[ -z "$line" ]] && continue
             key_type=$(printf '%s' "$line" | awk '{print $2}')
             # If this key type doesn't exist in existing_keys, it's new
-            if ! printf '%s\n' "$existing_keys" | grep -q "^${host_spec} ${key_type} "; then
+            # Use awk for exact field matching (avoids regex issues with [localhost]:port)
+            if ! printf '%s\n' "$existing_keys" | awk -v h="$host_spec" -v t="$key_type" '$1 == h && $2 == t {found=1; exit} END {exit !found}'; then
                 new_keys_to_add="${new_keys_to_add}${line}"$'\n'
             fi
         done <<< "$host_keys"
@@ -1351,10 +1358,11 @@ _cai_remove_ssh_host_config() {
 #   $2 = SSH port (on host)
 #   $3 = docker context (optional)
 #   $4 = force_update (optional, "true" for --fresh/new containers)
+#   $5 = quick_check (optional, "true" for fast-path on running containers)
 # Returns: 0=success, 1=failure
 #
 # Steps:
-# 1. Wait for sshd to become ready
+# 1. Wait for sshd to become ready (quick_check uses single attempt)
 # 2. Inject public key to authorized_keys
 # 3. Update known_hosts via ssh-keyscan (detects changes unless force_update)
 # 4. Write SSH host config
@@ -1363,12 +1371,22 @@ _cai_setup_container_ssh() {
     local ssh_port="$2"
     local context="${3:-}"
     local force_update="${4:-false}"
+    local quick_check="${5:-false}"
 
     _cai_step "Configuring SSH access for container $container_name"
 
-    # Step 1: Wait for sshd
-    if ! _cai_wait_for_sshd "$container_name" "$ssh_port" "$context"; then
-        return 1
+    # Step 1: Wait for sshd (or quick check for already-running containers)
+    if [[ "$quick_check" == "true" ]]; then
+        # Fast path: single keyscan attempt for running containers
+        # Avoids 30s wait if sshd/port is broken
+        if ! _cai_timeout 3 ssh-keyscan -p "$ssh_port" -T 2 localhost >/dev/null 2>&1; then
+            _cai_debug "Quick SSH check failed for port $ssh_port"
+            return 1
+        fi
+    else
+        if ! _cai_wait_for_sshd "$container_name" "$ssh_port" "$context"; then
+            return 1
+        fi
     fi
 
     # Step 2: Inject SSH key
