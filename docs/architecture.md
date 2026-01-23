@@ -1,21 +1,104 @@
 # ContainAI Architecture
 
-This document provides a comprehensive overview of ContainAI's architecture, including system components, data flow, security boundaries, and design decisions.
+This document provides a comprehensive overview of ContainAI's architecture, including the system container model, Sysbox runtime, SSH-based access, and security boundaries.
 
 ## Table of Contents
 
-- [System Context](#system-context)
+- [System Container Overview](#system-container-overview)
+- [Why Sysbox?](#why-sysbox)
+- [Architecture Layers](#architecture-layers)
+- [Container Lifecycle](#container-lifecycle)
+- [SSH Connection Flow](#ssh-connection-flow)
+- [Systemd Service Dependencies](#systemd-service-dependencies)
+- [Docker-in-Docker Architecture](#docker-in-docker-architecture)
 - [Component Architecture](#component-architecture)
 - [Modular Library Structure](#modular-library-structure)
-- [Execution Paths](#execution-paths)
 - [Data Flow](#data-flow)
 - [Volume Architecture](#volume-architecture)
-- [Security Boundaries](#security-boundaries)
+- [Security Model](#security-model)
 - [Design Decisions](#design-decisions)
+- [References](#references)
 
-## System Context
+## System Container Overview
 
-ContainAI sits between the user's shell and Docker, providing secure sandbox orchestration for AI coding agents.
+ContainAI uses **system containers** - VM-like Docker containers that run systemd as PID 1 and can host multiple services. Unlike traditional application containers that run a single process, system containers provide:
+
+| Capability | Application Container | System Container |
+|------------|----------------------|------------------|
+| Init system | None (process as PID 1) | systemd as PID 1 |
+| Multiple services | No | Yes (sshd, dockerd, etc.) |
+| Docker-in-Docker | Requires `--privileged` | Works unprivileged via Sysbox |
+| User namespace isolation | Manual configuration | Automatic via Sysbox |
+| SSH access | Port mapping only | VS Code Remote-SSH compatible |
+| Service management | Not available | `systemctl` commands work |
+
+This makes system containers ideal for AI coding agents that need to:
+- Build and run containers (Docker-in-Docker)
+- Connect via SSH for VS Code Remote-SSH and agent forwarding
+- Run background services
+- Access a full Linux environment
+
+## Why Sysbox?
+
+[Sysbox](https://github.com/nestybox/sysbox) is a container runtime that enables system containers with enhanced isolation:
+
+### Automatic User Namespace Mapping
+
+Sysbox automatically maps container root (UID 0) to an unprivileged host user. No manual `/etc/subuid` or `/etc/subgid` configuration required.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+flowchart LR
+    subgraph Container["System Container"]
+        CRoot["root (UID 0)"]
+        CAgent["agent (UID 1000)"]
+    end
+
+    subgraph Sysbox["Sysbox Runtime"]
+        Userns["User Namespace<br/>Mapping"]
+    end
+
+    subgraph Host["Host System"]
+        HRoot["UID 100000+"]
+        HAgent["UID 101000+"]
+    end
+
+    CRoot -->|"mapped by"| Userns
+    CAgent -->|"mapped by"| Userns
+    Userns -->|"unprivileged"| HRoot
+    Userns -->|"unprivileged"| HAgent
+
+    style Container fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Sysbox fill:#0f3460,stroke:#16213e,color:#fff
+    style Host fill:#16213e,stroke:#0f3460,color:#fff
+```
+
+### Procfs/Sysfs Virtualization
+
+Sysbox virtualizes `/proc` and `/sys` so containers see only their own resources, not the host's. This enables:
+- `systemctl` commands to work correctly
+- Accurate resource reporting inside containers
+- Isolation from host process information
+
+### Secure Docker-in-Docker
+
+With Sysbox, containers can run Docker without `--privileged`:
+- The inner Docker daemon runs with its own isolated filesystem
+- No access to host Docker socket
+- No capability escalation to host
+
+## Architecture Layers
+
+ContainAI uses a dedicated Docker installation separate from Docker Desktop:
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -30,41 +113,307 @@ ContainAI sits between the user's shell and Docker, providing secure sandbox orc
 }}}%%
 flowchart TB
     subgraph Host["Host System"]
-        User["User Shell<br/>(bash)"]
-        CLI["ContainAI CLI<br/>(cai / containai)"]
-        Config["Config Files<br/>(.containai/config.toml)"]
-        Workspace["Workspace<br/>(project directory)"]
+        DD["Docker Desktop<br/>(if present, NOT used)"]
+        CAI["ContainAI docker-ce<br/>Socket: /var/run/containai-docker.sock<br/>Runtime: sysbox-runc"]
     end
 
-    subgraph DockerLayer["Docker Engine"]
-        Sysbox["Sysbox Runtime<br/>(Secure Engine)"]
+    subgraph SysContainer["System Container (sysbox-runc)"]
+        Systemd["PID 1: systemd"]
+        SSHD["sshd.service<br/>(port 22 -> 2300-2500)"]
+        Dockerd["docker.service<br/>(inner Docker)"]
+        Init["containai-init.service<br/>(workspace setup)"]
     end
 
-    subgraph Sandbox["Sandbox Container"]
-        Agent["AI Agent<br/>(Claude, Gemini, etc.)"]
-        DataVol["Data Volume<br/>(/mnt/agent-data)"]
-        WorkMount["Workspace Mount<br/>(~/workspace)"]
-        Entry["entrypoint.sh<br/>(security validation)"]
+    subgraph Inner["Inner Containers (DinD)"]
+        App1["Agent builds"]
+        App2["Agent runs"]
     end
 
-    User --> CLI
-    CLI --> Config
-    CLI --> Sysbox
-    Sysbox --> Entry
-    Workspace -.->|"workspace mount"| WorkMount
-    DataVol -.->|persist| Agent
-    Entry --> Agent
+    CAI -->|"--runtime=sysbox-runc"| SysContainer
+    Systemd --> SSHD
+    Systemd --> Dockerd
+    Systemd --> Init
+    Dockerd --> Inner
 
     style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style DockerLayer fill:#0f3460,stroke:#16213e,color:#fff
-    style Sandbox fill:#16213e,stroke:#0f3460,color:#fff
+    style SysContainer fill:#0f3460,stroke:#16213e,color:#fff
+    style Inner fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
-> **Note**: Workspace is bind-mounted from host to `/workspace` inside the container.
+### Why Separate docker-ce?
+
+1. **Docker Desktop does not support Sysbox** - Docker Desktop has its own Enhanced Container Isolation (ECI) which has different limitations
+2. **System containers need Sysbox** - For systemd, DinD without `--privileged`, and VM-like behavior
+3. **No conflicts** - ContainAI uses its own socket (`/var/run/containai-docker.sock`) and data directory
+
+### ContainAI Docker Configuration
+
+The dedicated docker-ce instance (`/etc/containai/docker/daemon.json`):
+
+```json
+{
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "/usr/bin/sysbox-runc"
+    }
+  },
+  "default-runtime": "sysbox-runc",
+  "hosts": ["unix:///var/run/containai-docker.sock"],
+  "data-root": "/var/lib/containai-docker"
+}
+```
+
+## Container Lifecycle
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'background': '#f5f5f5',
+  'actorBkg': '#1a1a2e',
+  'actorTextColor': '#ffffff',
+  'actorBorder': '#16213e',
+  'actorLineColor': '#606060',
+  'signalColor': '#606060',
+  'signalTextColor': '#1a1a2e',
+  'labelBoxBkgColor': '#0f3460',
+  'labelBoxBorderColor': '#16213e',
+  'labelTextColor': '#ffffff',
+  'loopTextColor': '#1a1a2e',
+  'noteBkgColor': '#0f3460',
+  'noteTextColor': '#ffffff',
+  'noteBorderColor': '#16213e',
+  'activationBkgColor': '#16213e',
+  'activationBorderColor': '#0f3460',
+  'sequenceNumberColor': '#1a1a2e'
+}}}%%
+sequenceDiagram
+    participant User
+    participant CLI as cai CLI
+    participant Docker as ContainAI Docker
+    participant Container as System Container
+    participant Systemd as systemd (PID 1)
+    participant SSH as sshd
+    participant Agent as AI Agent
+
+    User->>CLI: cai run /workspace
+    CLI->>Docker: docker run --runtime=sysbox-runc
+    Docker->>Container: Create container
+    Container->>Systemd: Start systemd as PID 1
+
+    par Service Startup
+        Systemd->>SSH: Start sshd.service
+        Systemd->>Container: Start docker.service
+        Systemd->>Container: Start containai-init.service
+    end
+
+    Note over Container: ssh-keygen.service<br/>generates host keys
+
+    CLI->>CLI: Allocate port (2300-2500)
+    CLI->>Container: Inject SSH public key
+    CLI->>SSH: Wait for sshd ready
+    CLI->>CLI: Update known_hosts
+    CLI->>SSH: SSH connect
+    SSH->>Agent: Run agent command
+    Agent-->>User: Interactive session
+```
+
+### Container Startup Sequence
+
+1. **Container Creation**: `docker run --runtime=sysbox-runc` creates the system container
+2. **Systemd Boot**: systemd starts as PID 1, initializes the service manager
+3. **SSH Key Generation**: `ssh-keygen.service` generates host keys on first boot (not baked into image)
+4. **Service Startup**: sshd, dockerd, and containai-init start in parallel
+5. **Workspace Setup**: `containai-init.service` creates symlinks and loads environment
+6. **SSH Connection**: CLI allocates port, injects key, waits for sshd, then connects
+
+## SSH Connection Flow
+
+All container access uses SSH instead of `docker attach` or direct execution. This enables:
+- VS Code Remote-SSH integration
+- SSH agent forwarding
+- Port tunneling for development
+- Standard SSH tooling (scp, rsync)
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'background': '#f5f5f5',
+  'actorBkg': '#1a1a2e',
+  'actorTextColor': '#ffffff',
+  'actorBorder': '#16213e',
+  'actorLineColor': '#606060',
+  'signalColor': '#606060',
+  'signalTextColor': '#1a1a2e',
+  'labelBoxBkgColor': '#0f3460',
+  'labelBoxBorderColor': '#16213e',
+  'labelTextColor': '#ffffff',
+  'loopTextColor': '#1a1a2e',
+  'noteBkgColor': '#0f3460',
+  'noteTextColor': '#ffffff',
+  'noteBorderColor': '#16213e',
+  'activationBkgColor': '#16213e',
+  'activationBorderColor': '#0f3460',
+  'sequenceNumberColor': '#1a1a2e'
+}}}%%
+sequenceDiagram
+    participant User
+    participant CLI as cai shell
+    participant SSHConfig as ~/.ssh/containai.d/
+    participant Port as Port Allocator
+    participant Container as Container:22
+    participant SSHD as sshd
+
+    User->>CLI: cai shell /workspace
+
+    CLI->>Port: Find available port (2300-2500)
+    Port-->>CLI: Port 2342
+
+    CLI->>Container: Inject public key to authorized_keys
+    CLI->>Container: Wait for sshd ready (retry with backoff)
+
+    CLI->>SSHConfig: Write containai-myproject.conf
+    Note over SSHConfig: Host containai-myproject<br/>  HostName localhost<br/>  Port 2342<br/>  User agent<br/>  IdentityFile ~/.config/containai/id_containai
+
+    CLI->>SSHD: ssh -p 2342 agent@localhost
+    SSHD-->>User: Interactive shell
+
+    Note over User: VS Code can also connect:<br/>code --remote ssh-remote+containai-myproject
+```
+
+### SSH Infrastructure Components
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| Private Key | `~/.config/containai/id_containai` | ed25519 key for authentication |
+| Public Key | `~/.config/containai/id_containai.pub` | Injected into containers |
+| Config Directory | `~/.ssh/containai.d/` | Per-container SSH configs |
+| Known Hosts | `~/.config/containai/known_hosts` | Container host key verification |
+| Port Range | 2300-2500 (configurable) | SSH port allocation range |
+
+### SSH Security
+
+- **Key-only authentication**: Password auth disabled in sshd
+- **Host key verification**: Each container generates unique host keys on first boot
+- **Automatic cleanup**: Stale known_hosts entries removed on `--fresh` restart
+- **Port isolation**: Each container gets a unique port from the configured range
+
+## Systemd Service Dependencies
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+flowchart TD
+    subgraph Targets["Systemd Targets"]
+        LocalFS["local-fs.target"]
+        Network["network.target"]
+        MultiUser["multi-user.target"]
+    end
+
+    subgraph Services["ContainAI Services"]
+        SSHKeygen["ssh-keygen.service<br/>(Type=oneshot)<br/>Generates host keys"]
+        SSH["ssh.service<br/>(Type=notify)<br/>SSH daemon"]
+        DockerSvc["docker.service<br/>(Type=notify)<br/>Docker daemon"]
+        Init["containai-init.service<br/>(Type=oneshot)<br/>Workspace setup"]
+    end
+
+    LocalFS --> Init
+    Network --> Init
+    Init --> SSH
+    Init --> DockerSvc
+    SSHKeygen --> SSH
+
+    SSH --> MultiUser
+    DockerSvc --> MultiUser
+
+    style Targets fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Services fill:#0f3460,stroke:#16213e,color:#fff
+```
+
+### Service Details
+
+| Service | Type | Purpose |
+|---------|------|---------|
+| `ssh-keygen.service` | oneshot | Generate SSH host keys if missing (security: not baked into image) |
+| `ssh.service` | notify | OpenSSH daemon for remote access |
+| `docker.service` | notify | Inner Docker daemon for DinD |
+| `containai-init.service` | oneshot | Volume structure, workspace symlinks, git config |
+
+### Service Files Location
+
+- Image: `/etc/systemd/system/` (installed from `src/services/`)
+- Drop-ins: `/etc/systemd/system/<service>.service.d/`
+
+## Docker-in-Docker Architecture
+
+Sysbox enables secure Docker-in-Docker without `--privileged`:
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+flowchart TB
+    subgraph Host["Host System"]
+        HostDocker["ContainAI docker-ce<br/>Runtime: sysbox-runc"]
+        HostSocket["containai-docker.sock"]
+    end
+
+    subgraph SysContainer["System Container"]
+        InnerDocker["docker.service<br/>Runtime: sysbox-runc"]
+        InnerSocket["/var/run/docker.sock"]
+        InnerStorage["/var/lib/docker"]
+    end
+
+    subgraph InnerContainers["Inner Containers"]
+        Build["docker build -t myapp ."]
+        Run["docker run myapp"]
+        Compose["docker compose up"]
+    end
+
+    HostDocker -->|"creates"| SysContainer
+    HostSocket -.->|"NOT mounted"| SysContainer
+    InnerDocker --> InnerContainers
+
+    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
+    style SysContainer fill:#0f3460,stroke:#16213e,color:#fff
+    style InnerContainers fill:#16213e,stroke:#0f3460,color:#fff
+```
+
+### How DinD Works with Sysbox
+
+1. **Isolated Docker Daemon**: The inner Docker runs with its own socket and storage
+2. **No Host Socket**: The host Docker socket is NOT mounted into containers
+3. **Sysbox Runtime**: Both outer and inner Docker use sysbox-runc for consistent isolation
+4. **Nested User Namespaces**: Each layer has its own UID mapping
+
+### Inner Docker Configuration
+
+Inside the system container (`/etc/docker/daemon.json`):
+
+```json
+{
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "/usr/bin/sysbox-runc"
+    }
+  },
+  "default-runtime": "sysbox-runc"
+}
+```
 
 ## Component Architecture
-
-The ContainAI system consists of three main layers.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -80,32 +429,29 @@ The ContainAI system consists of three main layers.
 flowchart LR
     subgraph CLI["CLI Layer"]
         direction TB
-        Main["src/containai.sh<br/>(entry point, sourced)"]
-        Cmds["Subcommands<br/>(run, shell, doctor, setup, etc.)"]
+        Main["src/containai.sh<br/>(entry point)"]
+        Cmds["Commands<br/>(run, shell, doctor, import)"]
     end
 
     subgraph Lib["Library Layer"]
         direction TB
         Core["core.sh<br/>(logging)"]
-        Platform["platform.sh<br/>(OS detection)"]
-        DockerLib["docker.sh<br/>(Docker helpers)"]
-        DoctorLib["doctor.sh<br/>(health checks)"]
-        ConfigLib["config.sh<br/>(TOML parsing)"]
-        ContainerLib["container.sh<br/>(container ops)"]
-        ImportLib["import.sh<br/>(dotfile sync)"]
-        ExportLib["export.sh<br/>(backup)"]
-        SetupLib["setup.sh<br/>(Sysbox install)"]
-        EnvLib["env.sh<br/>(env var handling)"]
+        SSH["ssh.sh<br/>(SSH infrastructure)"]
+        Container["container.sh<br/>(lifecycle)"]
+        Config["config.sh<br/>(TOML parsing)"]
+        Doctor["doctor.sh<br/>(health checks)"]
     end
 
     subgraph Runtime["Container Runtime"]
         direction TB
-        Entry["entrypoint.sh<br/>(startup validation)"]
-        Image["Dockerfile<br/>(container image)"]
+        Entry["entrypoint.sh"]
+        Services["systemd services"]
+        Dockerfile["Dockerfile layers"]
     end
 
-    Main --> Core
-    ContainerLib --> Entry
+    Main --> Lib
+    Container --> SSH
+    Container --> Entry
 
     style CLI fill:#1a1a2e,stroke:#16213e,color:#fff
     style Lib fill:#0f3460,stroke:#16213e,color:#fff
@@ -114,15 +460,24 @@ flowchart LR
 
 ## Modular Library Structure
 
-ContainAI uses a modular shell library design where `src/containai.sh` sources individual `src/lib/*.sh` modules. This provides:
+The CLI sources modular shell libraries from `src/lib/`:
 
-- **Separation of concerns**: Each module handles one aspect
-- **Testability**: Modules can be tested independently
-- **Maintainability**: Changes are isolated to specific modules
+| Module | Purpose | Key Functions |
+|--------|---------|---------------|
+| `core.sh` | Logging utilities | `_cai_info`, `_cai_error`, `_cai_warn`, `_cai_ok` |
+| `platform.sh` | OS/platform detection | `_cai_detect_platform`, `_cai_is_wsl` |
+| `docker.sh` | Docker helpers | `_cai_docker_available`, `_cai_docker_version` |
+| `doctor.sh` | Health checks | `_cai_doctor`, `_cai_select_context` |
+| `config.sh` | TOML config parsing | `_containai_parse_config`, `_containai_resolve_volume` |
+| `container.sh` | Container lifecycle | `_containai_start_container`, `_containai_stop_all` |
+| `ssh.sh` | SSH infrastructure | `_cai_setup_ssh_key`, `_cai_allocate_ssh_port`, `_cai_ssh_run` |
+| `import.sh` | Dotfile sync | `_containai_import` |
+| `export.sh` | Volume backup | `_containai_export` |
+| `setup.sh` | Sysbox installation | `_cai_setup` |
+| `env.sh` | Environment handling | `_containai_import_env` |
+| `resources.sh` | Resource detection | `_cai_detect_host_resources` |
 
-### Module Dependency Order
-
-The libraries must be sourced in a specific order due to dependencies. All paths below are relative to `src/`:
+### Module Dependencies
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -136,89 +491,24 @@ The libraries must be sourced in a specific order due to dependencies. All paths
   'background': '#0d1117'
 }}}%%
 flowchart TD
-    Main["containai.sh"] --> Core["lib/core.sh<br/>(logging)"]
-    Core --> Platform["lib/platform.sh<br/>(OS detection)"]
-    Platform --> Docker["lib/docker.sh<br/>(Docker helpers)"]
-    Docker --> Doctor["lib/doctor.sh<br/>(health checks)"]
-    Doctor --> Config["lib/config.sh<br/>(TOML parsing)"]
-    Config --> Container["lib/container.sh<br/>(container ops)"]
-    Container --> Import["lib/import.sh<br/>(dotfile sync)"]
-    Import --> Export["lib/export.sh<br/>(backup)"]
-    Export --> Setup["lib/setup.sh<br/>(Sysbox install)"]
-    Setup --> Env["lib/env.sh<br/>(env handling)"]
+    Main["containai.sh"] --> Core["core.sh"]
+    Core --> Platform["platform.sh"]
+    Platform --> Docker["docker.sh"]
+    Docker --> SSH["ssh.sh"]
+    SSH --> Doctor["doctor.sh"]
+    Doctor --> Config["config.sh"]
+    Config --> Container["container.sh"]
+    Container --> Import["import.sh"]
+    Import --> Resources["resources.sh"]
 
     style Main fill:#1a1a2e,stroke:#16213e,color:#fff
     style Core fill:#e94560,stroke:#16213e,color:#fff
-    style Platform fill:#e94560,stroke:#16213e,color:#fff
-    style Docker fill:#0f3460,stroke:#16213e,color:#fff
-    style Doctor fill:#0f3460,stroke:#16213e,color:#fff
-    style Config fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Container fill:#16213e,stroke:#0f3460,color:#fff
-    style Import fill:#16213e,stroke:#0f3460,color:#fff
-    style Export fill:#16213e,stroke:#0f3460,color:#fff
-    style Setup fill:#0f3460,stroke:#e94560,color:#fff
-    style Env fill:#0f3460,stroke:#e94560,color:#fff
+    style SSH fill:#0f3460,stroke:#16213e,color:#fff
 ```
-
-### Module Responsibilities
-
-All modules are located in `src/lib/`:
-
-| Module | Purpose | Example Functions |
-|--------|---------|-------------------|
-| `core.sh` | Logging and utilities | `_cai_info`, `_cai_error`, `_cai_warn`, `_cai_ok`, `_cai_debug` |
-| `platform.sh` | OS/platform detection | `_cai_detect_platform`, `_cai_is_wsl`, `_cai_is_macos` |
-| `docker.sh` | Docker availability/version | `_cai_docker_available`, `_cai_docker_version`, `_cai_timeout` |
-| `doctor.sh` | System health checks | `_cai_doctor`, `_cai_select_context`, `_cai_sysbox_available_for_context` |
-| `config.sh` | TOML config parsing | `_containai_find_config`, `_containai_parse_config`, `_containai_resolve_volume` |
-| `container.sh` | Container lifecycle | `_containai_start_container`, `_containai_stop_all`, `_containai_check_isolation` |
-| `import.sh` | Dotfile synchronization | `_containai_import` (sync host configs to data volume) |
-| `export.sh` | Volume backup | `_containai_export` (export data volume to .tgz) |
-| `setup.sh` | Sysbox installation | `_cai_setup` (install Sysbox Secure Engine) |
-| `env.sh` | Environment variables | `_containai_import_env` (allowlist-based env import) |
-
-## Execution Path
-
-ContainAI uses Sysbox for container isolation.
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
-flowchart TD
-    Start["cai run"] --> SysboxCheck{"Sysbox Available?<br/>(containai-secure context)"}
-
-    SysboxCheck -->|Yes| Sysbox["Sysbox Mode<br/>(--runtime=sysbox-runc)"]
-    SysboxCheck -->|No| Fail["ERROR: No isolation<br/>(run cai doctor)"]
-
-    Sysbox --> Container["Container Running<br/>(isolated)"]
-
-    style Start fill:#1a1a2e,stroke:#16213e,color:#fff
-    style SysboxCheck fill:#0f3460,stroke:#16213e,color:#fff
-    style Sysbox fill:#16213e,stroke:#16213e,color:#fff
-    style Fail fill:#e94560,stroke:#16213e,color:#fff
-    style Container fill:#1a1a2e,stroke:#16213e,color:#fff
-```
-
-### Sysbox Mode (WSL2/macOS)
-
-**Requirements**: Sysbox runtime installed, `containai-secure` Docker context
-
-- Uses standard `docker run` with `--runtime=sysbox-runc`
-- `cai setup` installs Sysbox on WSL2 and macOS (via Lima)
-- Creates dedicated Docker context pointing to Sysbox-enabled daemon
-- Native Linux requires manual Sysbox installation (see Sysbox docs)
 
 ## Data Flow
 
-### CLI to Container Flow
+### CLI to Container via SSH
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -245,66 +535,27 @@ sequenceDiagram
     participant CLI as containai.sh
     participant Config as config.sh
     participant Doctor as doctor.sh
+    participant SSH as ssh.sh
     participant Container as container.sh
-    participant Docker as Docker Engine
-    participant Sandbox as Container
+    participant Docker as ContainAI Docker
+    participant SSHD as Container sshd
 
     User->>CLI: cai run [options]
-    CLI->>Config: Find and parse config
-    Config-->>CLI: Volume, excludes, agent
-    CLI->>Doctor: Check isolation
-    Doctor->>Docker: docker info (check Sysbox context)
+    CLI->>Config: Parse config.toml
+    Config-->>CLI: Volume, agent, resources
+    CLI->>Doctor: Select context
+    Doctor->>Docker: docker info (verify sysbox)
     Docker-->>Doctor: Sysbox available
-    Doctor-->>CLI: Selected context (containai-secure)
-    CLI->>Container: Start container
-    Container->>Docker: docker run --runtime=sysbox-runc ...
-    Docker->>Sandbox: Create/attach container
-    Sandbox->>Sandbox: entrypoint.sh (validate mounts)
-    Sandbox-->>User: Agent interactive session
-```
-
-### Import Flow (Dotfile Sync)
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'background': '#f5f5f5',
-  'actorBkg': '#1a1a2e',
-  'actorTextColor': '#ffffff',
-  'actorBorder': '#16213e',
-  'actorLineColor': '#606060',
-  'signalColor': '#606060',
-  'signalTextColor': '#1a1a2e',
-  'labelBoxBkgColor': '#0f3460',
-  'labelBoxBorderColor': '#16213e',
-  'labelTextColor': '#ffffff',
-  'loopTextColor': '#1a1a2e',
-  'noteBkgColor': '#0f3460',
-  'noteTextColor': '#ffffff',
-  'noteBorderColor': '#16213e',
-  'activationBkgColor': '#16213e',
-  'activationBorderColor': '#0f3460',
-  'sequenceNumberColor': '#1a1a2e'
-}}}%%
-sequenceDiagram
-    participant User
-    participant CLI as cai import
-    participant Import as import.sh
-    participant Docker as Docker Engine
-    participant Volume as Data Volume
-
-    User->>CLI: cai import [--dry-run]
-    CLI->>Import: Resolve volume, excludes
-    Import->>Docker: docker run (temp container)
-    Docker->>Volume: Mount data volume
-    Import->>Volume: rsync host files -> volume
-    Note over Import,Volume: .ssh, .gitconfig, .claude.json, etc.
-    Volume-->>Import: Sync complete
-    Import-->>User: Files synced
+    CLI->>Container: Start/find container
+    Container->>Docker: docker run --runtime=sysbox-runc
+    Docker-->>Container: Container ID
+    Container->>SSH: Setup SSH (port, key, known_hosts)
+    SSH->>SSHD: Wait for ready
+    SSH->>SSHD: ssh agent@localhost -p PORT
+    SSHD-->>User: Agent session
 ```
 
 ## Volume Architecture
-
-ContainAI uses two types of volumes to separate concerns.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -327,15 +578,15 @@ flowchart LR
         DataVol["Data Volume<br/>(sandbox-agent-data)"]
     end
 
-    subgraph Container["Container"]
-        WorkMount["/home/agent/workspace<br/>(bind mount, rw)"]
+    subgraph Container["System Container"]
+        WorkMount["/home/agent/workspace<br/>(bind mount)"]
         DataMount["/mnt/agent-data<br/>(volume mount)"]
 
         subgraph DataStructure["Data Volume Contents"]
-            Claude["/claude<br/>(settings, credentials)"]
+            Claude["/claude<br/>(credentials, settings)"]
             GH["/config/gh<br/>(GitHub CLI)"]
-            VSCode["/vscode-server<br/>(extensions, settings)"]
-            Shell["/shell<br/>(bash aliases)"]
+            VSCode["/vscode-server"]
+            Shell["/shell<br/>(bash config)"]
         end
     end
 
@@ -347,67 +598,40 @@ flowchart LR
     style Host fill:#1a1a2e,stroke:#16213e,color:#fff
     style Volumes fill:#16213e,stroke:#0f3460,color:#fff
     style Container fill:#0f3460,stroke:#16213e,color:#fff
-    style DataStructure fill:#1a1a2e,stroke:#16213e,color:#fff
-    style DataVol fill:#16213e,stroke:#16213e,color:#fff
-    style Workspace fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ### Volume Types
 
-| Volume Type | Purpose | Lifecycle | Example |
-|-------------|---------|-----------|---------|
-| **Workspace Mount** | Project files | Per-session (bind mount) | `/home/agent/workspace` |
-| **Data Volume** | Agent configs, credentials | Persistent (named volume) | `sandbox-agent-data` |
+| Volume | Mount Point | Purpose | Lifecycle |
+|--------|-------------|---------|-----------|
+| Workspace | `/home/agent/workspace` | Project files | Bind mount per session |
+| Data Volume | `/mnt/agent-data` | Agent configs, credentials | Persistent named volume |
 
 ### Data Volume Structure
 
-The data volume (`/mnt/agent-data`) contains:
-
 ```
 /mnt/agent-data/
-├── claude/              # Claude Code configs
-│   ├── claude.json      # Settings (600)
-│   ├── credentials.json # Auth tokens (600)
-│   └── settings.json    # User preferences
+├── claude/              # Claude Code
+│   ├── credentials.json
+│   ├── settings.json
+│   └── plugins/
 ├── config/
-│   ├── gh/              # GitHub CLI (700)
-│   ├── opencode/        # OpenCode config
-│   └── tmux/            # tmux config
-├── gemini/              # Gemini CLI configs
-├── codex/               # Codex configs
-├── copilot/             # Copilot configs
+│   ├── gh/              # GitHub CLI
+│   ├── git/             # Git config
+│   └── tmux/
+├── gemini/              # Gemini CLI
+├── copilot/             # Copilot CLI
+├── codex/               # Codex CLI
 ├── shell/
-│   ├── .bash_aliases    # Custom aliases
 │   └── .bashrc.d/       # Shell extensions
 └── vscode-server/       # VS Code Server state
-    ├── extensions/      # Installed extensions
-    └── data/            # Settings, MCP config
 ```
 
-### Volume Selection
+## Security Model
 
-Volume selection follows this precedence (see `_containai_resolve_volume` in `src/lib/config.sh`):
+### Sysbox Isolation
 
-1. `--data-volume` CLI flag (skips config parsing)
-2. `CONTAINAI_DATA_VOLUME` env var (skips config parsing)
-3. Config file `[workspace."/path"].data_volume` (workspace match)
-4. Config file `[agent].data_volume` (global)
-5. Default: `sandbox-agent-data`
-
-Workspace-specific volumes enable isolated agent state per project.
-
-### Volume Lifecycle
-
-1. **Creation**: Data volumes are created implicitly on first `cai run` if they don't exist
-2. **Reuse**: Volumes persist across container restarts; `cai` reattaches to existing containers
-3. **Import prerequisite**: `cai import` creates the volume if it doesn't exist, then syncs files
-4. **Export**: `cai export` creates a `.tgz` backup of the volume contents
-5. **Cleanup**: Remove with `docker volume rm <volume-name>` (ensure no containers reference it)
-6. **Reset**: Use `cai stop` then `cai --restart` to recreate the container
-
-## Security Boundaries
-
-ContainAI enforces strict security boundaries between host and sandbox.
+Sysbox provides multiple isolation layers:
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -422,112 +646,112 @@ ContainAI enforces strict security boundaries between host and sandbox.
 }}}%%
 flowchart TB
     subgraph Host["Host (TRUSTED)"]
-        HostRoot["Root User"]
-        HostUser["User"]
+        HostKernel["Kernel"]
         HostDocker["Docker Daemon"]
-        HostFS["Host Filesystem"]
+        SysboxMgr["sysbox-mgr"]
+        SysboxFS["sysbox-fs"]
     end
 
-    IsolationLayer["Isolation Layer<br/>(userns, seccomp, mounts)"]
+    IsolationLayer["Sysbox Isolation Layer<br/>User Namespace + Procfs/Sysfs Virtualization"]
 
-    subgraph Sandbox["Sandbox (UNTRUSTED)"]
-        SandboxRoot["Container Root<br/>(unprivileged on host)"]
-        AgentProc["AI Agent"]
-        SandboxFS["Container Filesystem"]
+    subgraph Container["System Container (UNTRUSTED)"]
+        ContainerRoot["Container Root<br/>(unprivileged on host)"]
+        ContainerProc["/proc (virtualized)"]
+        ContainerSys["/sys (virtualized)"]
+        InnerDocker["Inner Docker"]
     end
 
+    HostKernel --> SysboxMgr
+    SysboxMgr --> SysboxFS
     HostDocker --> IsolationLayer
-    IsolationLayer --> SandboxRoot
-
-    HostFS -.->|"workspace only"| SandboxFS
-    HostUser -.->|"data volume"| SandboxFS
+    IsolationLayer --> Container
+    SysboxFS -->|"virtualizes"| ContainerProc
+    SysboxFS -->|"virtualizes"| ContainerSys
 
     style Host fill:#16213e,stroke:#16213e,color:#fff
     style IsolationLayer fill:#0f3460,stroke:#16213e,color:#fff
-    style Sandbox fill:#e94560,stroke:#16213e,color:#fff
+    style Container fill:#e94560,stroke:#16213e,color:#fff
 ```
 
 ### Security Guarantees
 
-**Always enforced hardening** (cannot be disabled):
+| Protection | Implementation |
+|------------|----------------|
+| User namespace isolation | Sysbox auto-maps UIDs (container root = unprivileged host user) |
+| Procfs virtualization | Container sees only its own processes |
+| Sysfs virtualization | Container sees only its own devices |
+| No host Docker socket | Socket is NOT mounted; inner Docker is isolated |
+| SSH key-only auth | Password authentication disabled |
+| Resource limits | cgroup limits (memory, CPU) enforced |
 
-| Protection | Implementation | Code Reference |
-|------------|----------------|----------------|
-| **Volume mount TOCTOU** | Path validation in entrypoint | `src/entrypoint.sh:verify_path_under_data_dir()` |
-| **Symlink traversal** | Reject symlinks, realpath validation | `src/entrypoint.sh:reject_symlink()` |
-| **Config refuses dangerous modes** | `credentials.mode=host` in config is never honored | `src/lib/config.sh` |
+### Resource Limits
 
-**Safe defaults** (active unless explicitly overridden via CLI):
+By default, containers receive 50% of host resources:
 
-| Default | Override Flag | Code Reference |
-|---------|--------------|----------------|
-| **Credential isolation** | N/A (always enforced with Sysbox) | `src/lib/container.sh` |
-| **Docker socket denied** | N/A (always enforced with Sysbox) | `src/lib/container.sh` |
-| **Safe .env parsing** | (always on when env imported) | `src/lib/env.sh` |
-
-### Unsafe Opt-ins
-
-| Opt-in | Risk | Required Flag |
-|--------|------|---------------|
-| `--force` | Skips isolation checks | (standalone) |
-
-> **Note**: Host credential sharing (`--allow-host-credentials`) and Docker socket access (`--allow-host-docker-socket`) are no longer supported with Sysbox isolation. Use `cai import` to copy credentials into the container instead.
+| Resource | Default | Configuration |
+|----------|---------|---------------|
+| Memory | 50% of host RAM | `[resources].memory_limit` or `--memory` |
+| CPU | 50% of host cores | `[resources].cpu_limit` or `--cpus` |
+| Memory swap | Same as memory limit | Prevents OOM via swap |
 
 ### What ContainAI Does NOT Protect Against
 
 - **Malicious container images**: Use trusted base images only
 - **Network isolation**: Containers can reach the internet by default
-- **Resource exhaustion**: No cgroup limits by default
-- **Kernel vulnerabilities**: Depends on Docker/Sysbox security
+- **Kernel vulnerabilities**: Depends on Sysbox/Docker security
+- **Supply chain attacks**: Verify agent CLI installations
 
 ## Design Decisions
 
-Key architectural decisions (see also [.flow/memory/decisions.md](../.flow/memory/decisions.md)):
+### SSH-Based Access
 
-### Safe Defaults (FR-4)
-
-**Decision**: Dangerous config options are rejected/ignored; only explicit CLI flags can enable unsafe behavior.
-
-**Rationale**: For a security tool, config files should not be able to weaken security. Unsafe operations require explicit CLI flags (some with FR-5 acknowledgment flags).
-
-**Examples**:
-- `credentials.mode=host` in config is **ignored** (host credential sharing not supported with Sysbox)
-- Config files control convenience options (volume names, agent defaults), not security boundaries
-- Use `cai import` to safely copy credentials into the container
-
-### Modular Shell Architecture
-
-**Decision**: Split CLI into sourced `src/lib/*.sh` modules rather than monolithic script.
+**Decision**: Use SSH for all container access instead of `docker attach`.
 
 **Rationale**:
-- Enables unit testing of individual functions
-- Reduces cognitive load per file
-- Allows parallel development
-- Makes dependencies explicit via source order
+- VS Code Remote-SSH compatibility
+- SSH agent forwarding for git operations
+- Port tunneling for development servers
+- Standard tooling (scp, rsync) works out of the box
+- More robust than PTY via Docker API
 
-### Sysbox Isolation
+### Dedicated Docker Installation
 
-**Decision**: Use Sysbox as the sole container isolation mechanism.
-
-**Rationale**:
-- Provides strong isolation with user namespace remapping
-- Works consistently across Linux, WSL2, and macOS (via Lima)
-- `cai setup` handles installation automatically
-- Simpler architecture with single code path
-
-### Workspace-Scoped Configuration
-
-**Decision**: Config files use workspace path keys for per-project settings.
+**Decision**: Install separate docker-ce instead of using Docker Desktop.
 
 **Rationale**:
-- Different projects may need different volumes
-- Enables isolated agent state per project
-- Config discovery stops at git root (security)
+- Docker Desktop does not support Sysbox runtime
+- Avoids conflicts with existing Docker setup
+- Full control over runtime configuration
+- Dedicated socket prevents accidental cross-usage
+
+### System Containers with systemd
+
+**Decision**: Run systemd as PID 1 in containers.
+
+**Rationale**:
+- Enables real service management
+- SSH daemon runs as proper service
+- Docker daemon managed by systemd
+- Init system handles cleanup on shutdown
+- Matches production Linux environments
+
+### Layered Dockerfile Build
+
+**Decision**: Split Dockerfile into base/sdks/full layers.
+
+**Rationale**:
+- Faster iteration during development
+- Smaller images for minimal use cases
+- Clear separation of concerns
+- Easier updates to individual layers
 
 ## References
 
-- [Quickstart Guide](quickstart.md) - Getting started
-- [Configuration Reference](configuration.md) - Full config schema
-- [Troubleshooting Guide](troubleshooting.md) - Common issues
-- [SECURITY.md](../SECURITY.md) - Security model details
-- [Technical README](../src/README.md) - Image building and internals
+- [Sysbox Documentation](https://github.com/nestybox/sysbox)
+- [Sysbox Systemd Guide](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/systemd.md)
+- [Sysbox DinD Guide](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/dind.md)
+- [SSH Include Directive](https://man.openbsd.org/ssh_config)
+- [Docker Contexts](https://docs.docker.com/engine/manage-resources/contexts/)
+- [Configuration Reference](configuration.md)
+- [Troubleshooting Guide](troubleshooting.md)
+- [Security Model](../SECURITY.md)
