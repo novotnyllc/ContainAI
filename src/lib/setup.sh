@@ -54,13 +54,10 @@ _CAI_SETUP_LOADED=1
 # Constants
 # ==============================================================================
 
-# Default socket path for containai-secure context (separate from default Docker)
-_CAI_SECURE_SOCKET="/var/run/docker-containai.sock"
+# NOTE: Docker path constants are defined in lib/docker.sh (single source of truth)
+# Use: $_CAI_CONTAINAI_DOCKER_SOCKET, $_CAI_CONTAINAI_DOCKER_CONFIG, etc.
 
-# Default daemon.json path for WSL2 (standalone Docker, not Docker Desktop)
-_CAI_WSL2_DAEMON_JSON="/etc/docker/daemon.json"
-
-# Systemd drop-in directory for Docker socket override
+# Systemd drop-in directory for Docker socket override (legacy, for cleanup)
 _CAI_DOCKER_DROPIN_DIR="/etc/systemd/system/docker.service.d"
 
 # Lima VM name for macOS Secure Engine
@@ -439,7 +436,7 @@ _cai_install_sysbox_wsl2() {
 # Returns: 0=success, 1=failure
 # Note: Does NOT set sysbox-runc as default runtime - keeps runc as default
 _cai_configure_daemon_json() {
-    local daemon_json="${1:-$_CAI_WSL2_DAEMON_JSON}"
+    local daemon_json="${1:-$_CAI_CONTAINAI_DOCKER_CONFIG}"
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
@@ -533,7 +530,7 @@ _cai_configure_daemon_json() {
 # Returns: 0=success, 1=failure
 # Note: Creates systemd drop-in to add additional socket listener
 _cai_configure_docker_socket() {
-    local socket_path="${1:-$_CAI_SECURE_SOCKET}"
+    local socket_path="${1:-$_CAI_CONTAINAI_DOCKER_SOCKET}"
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
@@ -635,7 +632,7 @@ EOF
 #            $2 = dry_run flag ("true" to simulate)
 # Returns: 0=success, 1=failure
 _cai_restart_docker_service() {
-    local socket_path="${1:-$_CAI_SECURE_SOCKET}"
+    local socket_path="${1:-$_CAI_CONTAINAI_DOCKER_SOCKET}"
     local dry_run="${2:-false}"
 
     _cai_step "Restarting Docker service"
@@ -687,7 +684,7 @@ _cai_restart_docker_service() {
 # Returns: 0=success, 1=failure
 # Note: This context points to dedicated Docker socket, NOT the default socket
 _cai_create_containai_context() {
-    local socket_path="${1:-$_CAI_SECURE_SOCKET}"
+    local socket_path="${1:-$_CAI_CONTAINAI_DOCKER_SOCKET}"
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
@@ -747,7 +744,7 @@ _cai_create_containai_context() {
 #            $3 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
 _cai_verify_sysbox_install() {
-    local socket_path="${1:-$_CAI_SECURE_SOCKET}"
+    local socket_path="${1:-$_CAI_CONTAINAI_DOCKER_SOCKET}"
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
@@ -895,27 +892,27 @@ _cai_setup_wsl2() {
     fi
 
     # Step 3: Configure daemon.json
-    if ! _cai_configure_daemon_json "$_CAI_WSL2_DAEMON_JSON" "$dry_run" "$verbose"; then
+    if ! _cai_configure_daemon_json "$_CAI_CONTAINAI_DOCKER_CONFIG" "$dry_run" "$verbose"; then
         return 1
     fi
 
     # Step 4: Configure dedicated Docker socket
-    if ! _cai_configure_docker_socket "$_CAI_SECURE_SOCKET" "$dry_run" "$verbose"; then
+    if ! _cai_configure_docker_socket "$_CAI_CONTAINAI_DOCKER_SOCKET" "$dry_run" "$verbose"; then
         return 1
     fi
 
     # Step 5: Restart Docker service (if not dry-run)
-    if ! _cai_restart_docker_service "$_CAI_SECURE_SOCKET" "$dry_run"; then
+    if ! _cai_restart_docker_service "$_CAI_CONTAINAI_DOCKER_SOCKET" "$dry_run"; then
         return 1
     fi
 
     # Step 6: Create containai-secure context
-    if ! _cai_create_containai_context "$_CAI_SECURE_SOCKET" "$dry_run" "$verbose"; then
+    if ! _cai_create_containai_context "$_CAI_CONTAINAI_DOCKER_SOCKET" "$dry_run" "$verbose"; then
         return 1
     fi
 
     # Step 7: Verify installation
-    if ! _cai_verify_sysbox_install "$_CAI_SECURE_SOCKET" "$dry_run" "$verbose"; then
+    if ! _cai_verify_sysbox_install "$_CAI_CONTAINAI_DOCKER_SOCKET" "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Sysbox verification had issues - check output above"
     fi
@@ -1939,8 +1936,8 @@ _cai_setup_linux() {
     fi
 
     # Step 3: Configure daemon.json
-    # Native Linux uses /etc/docker/daemon.json (same as WSL2)
-    if ! _cai_configure_daemon_json "$_CAI_WSL2_DAEMON_JSON" "$dry_run" "$verbose"; then
+    # Native Linux uses isolated ContainAI Docker config
+    if ! _cai_configure_daemon_json "$_CAI_CONTAINAI_DOCKER_CONFIG" "$dry_run" "$verbose"; then
         return 1
     fi
 
@@ -2249,14 +2246,14 @@ _cai_secure_engine_validate() {
     platform=$(_cai_detect_platform)
     case "$platform" in
         wsl)
-            expected_socket="unix://$_CAI_SECURE_SOCKET"
+            expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
             ;;
         macos)
             expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
             ;;
         linux)
-            # Native Linux uses the default Docker socket (not a dedicated socket like WSL2)
-            expected_socket="unix:///var/run/docker.sock"
+            # Native Linux uses the isolated ContainAI Docker socket
+            expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
             ;;
         *)
             _cai_error "Unknown platform: $platform"

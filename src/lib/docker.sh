@@ -9,7 +9,7 @@
 #   _cai_docker_version()            - Get Docker daemon version
 #   _cai_docker_desktop_version()    - Get Docker Desktop version as semver (empty if not DD)
 #   _cai_containai_docker_available() - Check if containai-docker is available
-#   _cai_containai_docker_context_exists() - Check if docker-containai context exists
+#   _cai_containai_docker_context_exists() - Check if containai-docker context exists
 #   _cai_containai_docker_default_runtime() - Get default runtime for containai-docker
 #
 # Dependencies:
@@ -303,12 +303,18 @@ _cai_docker_desktop_version() {
 # ==============================================================================
 
 # Constants for containai-docker paths
+# These are the single source of truth for all ContainAI Docker paths
 _CAI_CONTAINAI_DOCKER_SOCKET="/var/run/containai-docker.sock"
-_CAI_CONTAINAI_DOCKER_CONTEXT="docker-containai"
+_CAI_CONTAINAI_DOCKER_CONTEXT="containai-docker"
 _CAI_CONTAINAI_DOCKER_CONFIG="/etc/containai/docker/daemon.json"
 _CAI_CONTAINAI_DOCKER_DATA="/var/lib/containai-docker"
+_CAI_CONTAINAI_DOCKER_EXEC="/var/run/containai-docker"
+_CAI_CONTAINAI_DOCKER_PID="/var/run/containai-docker.pid"
+_CAI_CONTAINAI_DOCKER_BRIDGE="cai0"
+_CAI_CONTAINAI_DOCKER_SERVICE="containai-docker.service"
+_CAI_CONTAINAI_DOCKER_UNIT="/etc/systemd/system/containai-docker.service"
 
-# Check if docker-containai context exists and points to the correct socket
+# Check if containai-docker context exists and points to the correct socket
 # Returns: 0=exists with correct endpoint, 1=does not exist or wrong endpoint
 # Outputs: Sets _CAI_CONTAINAI_CONTEXT_ERROR with error details
 _cai_containai_docker_context_exists() {

@@ -272,23 +272,23 @@ _cai_sysbox_available() {
     _CAI_SYSBOX_CONTEXT_EXISTS="false"
 
     # Determine expected socket based on platform
-    # - WSL2: Uses dedicated socket at _CAI_SECURE_SOCKET
+    # - WSL2: Uses dedicated socket at _CAI_CONTAINAI_DOCKER_SOCKET
     # - macOS: Uses Lima socket at _CAI_LIMA_SOCKET_PATH
-    # - Native Linux: Uses default socket at /var/run/docker.sock
+    # - Native Linux: Uses dedicated socket at _CAI_CONTAINAI_DOCKER_SOCKET
     local socket platform
     platform=$(_cai_detect_platform)
     case "$platform" in
         wsl)
-            socket="${_CAI_SECURE_SOCKET:-/var/run/docker-containai.sock}"
+            socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/var/run/containai-docker.sock}"
             ;;
         macos)
             socket="${_CAI_LIMA_SOCKET_PATH:-$HOME/.lima/containai-secure/sock/docker.sock}"
             ;;
         linux)
-            socket="/var/run/docker.sock"
+            socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/var/run/containai-docker.sock}"
             ;;
         *)
-            socket="${_CAI_SECURE_SOCKET:-/var/run/docker-containai.sock}"
+            socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/var/run/containai-docker.sock}"
             ;;
     esac
 
