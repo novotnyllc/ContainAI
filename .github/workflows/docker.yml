@@ -85,6 +85,10 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/full:latest
           cache-from: type=gha,scope=full
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
           cache-to: type=gha,mode=max,scope=full
 
       - name: Extract metadata (tags, labels)
