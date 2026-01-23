@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# ContainAI Setup - Secure Engine Provisioning (WSL2 + macOS)
+# ContainAI Setup - Secure Engine Provisioning (Linux, WSL2, macOS)
 # ==============================================================================
 # This file must be sourced, not executed directly.
 #
 # Provides:
 #   _cai_setup()                       - Main setup entry point
+#   _cai_setup_linux()                 - Native Linux setup (isolated Docker)
 #   _cai_setup_wsl2()                  - WSL2-specific setup (isolated Docker)
 #   _cai_setup_macos()                 - macOS-specific setup (Lima VM)
 #   _cai_test_wsl2_seccomp()           - Test WSL2 seccomp compatibility
@@ -716,8 +717,9 @@ _cai_create_isolated_docker_service() {
 Description=ContainAI Docker Application Container Engine
 Documentation=https://github.com/novotnyllc/containai
 After=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
-Wants=network-online.target sysbox-mgr.service sysbox-fs.service
-Requires=containerd.service
+# Use Wants= instead of Requires= - containerd may be managed differently or named
+# differently on some systems; dockerd can spawn its own containerd if needed
+Wants=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
 
 [Service]
 Type=notify
@@ -2213,6 +2215,18 @@ _cai_install_sysbox_linux() {
         return 1
     fi
 
+    # Verify Sysbox didn't modify /etc/docker/daemon.json (spec requirement)
+    # Some Sysbox versions may auto-configure the system Docker, which we must prevent
+    if [[ -f /etc/docker/daemon.json ]]; then
+        if grep -q "sysbox-runc" /etc/docker/daemon.json 2>/dev/null; then
+            _cai_warn "Sysbox may have modified /etc/docker/daemon.json"
+            _cai_warn "  ContainAI uses an isolated daemon - system config should remain unchanged"
+            _cai_warn "  You may want to remove sysbox-runc from /etc/docker/daemon.json"
+            _cai_warn "  to keep system Docker unmodified."
+            # Not fatal - user may want sysbox available in system Docker too
+        fi
+    fi
+
     _cai_ok "Sysbox installation complete"
     return 0
 }
@@ -2360,24 +2374,37 @@ _cai_setup_linux() {
     # (Only run after distro detection succeeds to ensure unsupported distros get
     # manual instructions regardless of Docker status)
     # We need both docker CLI and dockerd for the isolated daemon
+    # In dry-run mode, degrade to warnings so users can see planned actions
     _cai_step "Preflight: Checking Docker Engine installation"
     if ! command -v docker >/dev/null 2>&1; then
-        _cai_error "Docker CLI is not installed"
-        _cai_error "  Install Docker Engine first:"
-        _cai_error "  https://docs.docker.com/engine/install/"
-        return 1
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_warn "[DRY-RUN] Docker CLI not found - would be required for actual setup"
+            _cai_warn "  Install Docker Engine first: https://docs.docker.com/engine/install/"
+        else
+            _cai_error "Docker CLI is not installed"
+            _cai_error "  Install Docker Engine first:"
+            _cai_error "  https://docs.docker.com/engine/install/"
+            return 1
+        fi
+    else
+        _cai_ok "Docker CLI available"
     fi
-    _cai_ok "Docker CLI available"
 
     # Check for dockerd (required for isolated daemon)
     if ! command -v dockerd >/dev/null 2>&1; then
-        _cai_error "Docker daemon (dockerd) is not installed"
-        _cai_error "  The isolated Docker daemon requires dockerd from Docker Engine"
-        _cai_error "  Docker Desktop alone is not sufficient - install Docker Engine:"
-        _cai_error "  https://docs.docker.com/engine/install/"
-        return 1
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_warn "[DRY-RUN] dockerd not found - would be required for actual setup"
+            _cai_warn "  Docker Desktop alone is not sufficient - install Docker Engine"
+        else
+            _cai_error "Docker daemon (dockerd) is not installed"
+            _cai_error "  The isolated Docker daemon requires dockerd from Docker Engine"
+            _cai_error "  Docker Desktop alone is not sufficient - install Docker Engine:"
+            _cai_error "  https://docs.docker.com/engine/install/"
+            return 1
+        fi
+    else
+        _cai_ok "Docker daemon (dockerd) available"
     fi
-    _cai_ok "Docker daemon (dockerd) available"
 
     # Step 1: Check for Docker Desktop coexistence
     _cai_step "Checking for Docker Desktop"
@@ -2388,6 +2415,22 @@ _cai_setup_linux() {
         _cai_info "  Docker Desktop configuration will NOT be modified"
         _cai_info "  Use --context $_CAI_CONTAINAI_DOCKER_CONTEXT to access Sysbox isolation"
         printf '\n'
+    fi
+
+    # Check for active system Docker service (potential iptables conflicts)
+    if systemctl is-active docker.service >/dev/null 2>&1; then
+        printf '\n'
+        _cai_warn "System docker.service is currently active"
+        _cai_warn "  Running two Docker daemons can cause iptables/networking conflicts"
+        _cai_warn "  ContainAI uses a separate bridge (cai0) and subnet (172.30.0.0/16)"
+        _cai_warn "  to minimize conflicts, but issues may still occur."
+        _cai_warn ""
+        _cai_warn "  Options to avoid conflicts:"
+        _cai_warn "    1. Stop system Docker while using ContainAI:"
+        _cai_warn "       sudo systemctl stop docker.service"
+        _cai_warn "    2. Or continue and monitor for networking issues"
+        printf '\n'
+        # Not a fatal error - user may want to run both carefully
     fi
 
     # Step 2: Clean up legacy paths (support upgrades from old installation)
