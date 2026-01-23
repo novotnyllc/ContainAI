@@ -1,3 +1,74 @@
+# ContainAI
+
+Sandboxed container environment for AI coding agents. Bash shell libraries with strict POSIX conventions.
+
+## Quick Commands
+
+```bash
+# Development - source the CLI
+source src/containai.sh
+
+# Verify environment
+cai doctor
+
+# Build Docker images (all layers)
+./src/build.sh
+
+# Build single layer (faster iteration)
+./src/build.sh --layer base
+
+# Run integration tests (requires Docker)
+./tests/integration/test-secure-engine.sh
+./tests/integration/test-sync-integration.sh
+./tests/integration/test-dind.sh
+
+# Lint shell scripts
+shellcheck -x src/*.sh src/lib/*.sh
+```
+
+## Project Structure
+
+```
+src/
+├── containai.sh        # Main CLI entry point (source this)
+├── lib/                # Modular shell libraries
+│   ├── core.sh         # Logging utilities
+│   ├── config.sh       # TOML config parsing
+│   ├── container.sh    # Container lifecycle
+│   ├── ssh.sh          # SSH configuration
+│   └── ...             # Other modules
+├── Dockerfile*         # Multi-layer Docker builds
+└── build.sh            # Build script
+
+tests/integration/      # Integration tests (require Docker)
+docs/                   # Architecture, config, quickstart
+.flow/                  # Flow-Next task tracking
+```
+
+## Code Conventions
+
+- **Bash 4.0+ required** (not zsh or fish)
+- Use `printf` instead of `echo` for portability
+- Use `command -v` instead of `which`
+- Use POSIX grep patterns (`[[:space:]]` not `\s`)
+- All function variables must be `local` to prevent shell pollution
+- Functions return status codes; use stdout for data, stderr for errors
+- Error handling: `set -euo pipefail` at script start
+
+See `.flow/memory/conventions.md` for discovered patterns.
+
+## Things to Avoid
+
+See `.flow/memory/pitfalls.md` for 36+ documented pitfalls including:
+- ERE grep syntax differences across platforms
+- Docker BuildKit cache mount gotchas
+- Systemd socket activation in containers
+- Git worktree state sharing issues
+
+## Security Note
+
+This is a **sandboxing tool** for AI agents. Changes to credential isolation, Docker socket handling, or SSH configuration require security review. See `SECURITY.md` for threat model.
+
 <!-- BEGIN FLOW-NEXT -->
 ## Flow-Next
 
@@ -21,28 +92,3 @@ This project uses Flow-Next for task tracking. Use `.flow/bin/flowctl` instead o
 
 **More info:** `.flow/bin/flowctl --help` or read `.flow/usage.md`
 <!-- END FLOW-NEXT -->
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds, if there is a remote
