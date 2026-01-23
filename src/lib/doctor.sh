@@ -575,6 +575,38 @@ _cai_doctor() {
 
     printf '\n'
 
+    # === Resources Section ===
+    printf '%s\n' "Resources"
+
+    # Detect host resources and configured limits
+    local resources detected_memory_gb detected_cpus container_memory container_cpus
+    resources=$(_cai_detect_resources 50 2 1)
+    detected_memory_gb=$(printf '%s' "$resources" | awk '{print $1}')
+    detected_cpus=$(printf '%s' "$resources" | awk '{print $2}')
+    container_memory=$(printf '%s' "$resources" | awk '{print $3}')
+    container_cpus=$(printf '%s' "$resources" | awk '{print $4}')
+
+    printf '  %-44s %s\n' "Host memory: ${detected_memory_gb}GB" "[OK]"
+    printf '  %-44s %s\n' "Host CPUs: $detected_cpus" "[OK]"
+
+    # Check if config overrides are set
+    local config_memory="${_CAI_CONTAINER_MEMORY:-}"
+    local config_cpus="${_CAI_CONTAINER_CPUS:-}"
+
+    if [[ -n "$config_memory" ]]; then
+        printf '  %-44s %s\n' "Container memory: $config_memory" "(configured)"
+    else
+        printf '  %-44s %s\n' "Container memory: $container_memory" "(50% of host, 2GB min)"
+    fi
+
+    if [[ -n "$config_cpus" ]]; then
+        printf '  %-44s %s\n' "Container CPUs: $config_cpus" "(configured)"
+    else
+        printf '  %-44s %s\n' "Container CPUs: $container_cpus" "(50% of host, 1 min)"
+    fi
+
+    printf '\n'
+
     # === Summary Section ===
     printf '%s\n' "Summary"
 
@@ -804,6 +836,35 @@ _cai_doctor_json() {
         fi
     else
         printf '    "warning": null\n'
+    fi
+    printf '  },\n'
+
+    # Resources section
+    local resources detected_memory_gb detected_cpus container_memory container_cpus
+    resources=$(_cai_detect_resources 50 2 1)
+    detected_memory_gb=$(printf '%s' "$resources" | awk '{print $1}')
+    detected_cpus=$(printf '%s' "$resources" | awk '{print $2}')
+    container_memory=$(printf '%s' "$resources" | awk '{print $3}')
+    container_cpus=$(printf '%s' "$resources" | awk '{print $4}')
+
+    # Check if config overrides are set
+    local json_config_memory="${_CAI_CONTAINER_MEMORY:-}"
+    local json_config_cpus="${_CAI_CONTAINER_CPUS:-}"
+
+    printf '  "resources": {\n'
+    printf '    "host_memory_gb": %s,\n' "$detected_memory_gb"
+    printf '    "host_cpus": %s,\n' "$detected_cpus"
+    printf '    "container_memory": "%s",\n' "$container_memory"
+    printf '    "container_cpus": %s,\n' "$container_cpus"
+    if [[ -n "$json_config_memory" ]]; then
+        printf '    "config_memory": "%s",\n' "$(_cai_json_escape "$json_config_memory")"
+    else
+        printf '    "config_memory": null,\n'
+    fi
+    if [[ -n "$json_config_cpus" ]]; then
+        printf '    "config_cpus": %s\n' "$json_config_cpus"
+    else
+        printf '    "config_cpus": null\n'
     fi
     printf '  },\n'
     printf '  "summary": {\n'

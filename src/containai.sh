@@ -344,6 +344,8 @@ Options:
   --workspace <path>    Workspace path (default: current directory)
   --name <name>         Container name (default: auto-generated from path hash)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
+  --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
+  --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
   --fresh               Remove and recreate container (preserves data volume)
   --restart             Alias for --fresh
   --force               Skip isolation checks (for testing only)
@@ -879,6 +881,8 @@ _containai_shell_cmd() {
     local explicit_config=""
     local container_name=""
     local image_tag=""
+    local cli_memory=""
+    local cli_cpus=""
     local fresh_flag=false
     local force_flag=false
     local quiet_flag=false
@@ -997,6 +1001,38 @@ _containai_shell_cmd() {
                 fi
                 shift
                 ;;
+            --memory)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --memory requires a value" >&2
+                    return 1
+                fi
+                cli_memory="$2"
+                shift 2
+                ;;
+            --memory=*)
+                cli_memory="${1#--memory=}"
+                if [[ -z "$cli_memory" ]]; then
+                    echo "[ERROR] --memory requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --cpus)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --cpus requires a value" >&2
+                    return 1
+                fi
+                cli_cpus="$2"
+                shift 2
+                ;;
+            --cpus=*)
+                cli_cpus="${1#--cpus=}"
+                if [[ -z "$cli_cpus" ]]; then
+                    echo "[ERROR] --cpus requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
             --help|-h)
                 _containai_shell_help
                 return 0
@@ -1080,6 +1116,10 @@ _containai_shell_cmd() {
         fi
     fi
     local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
+
+    # Set CLI resource overrides (global vars read by _containai_start_container)
+    _CAI_CLI_MEMORY="$cli_memory"
+    _CAI_CLI_CPUS="$cli_cpus"
 
     # Auto-select Docker context based on isolation availability
     local selected_context debug_mode=""

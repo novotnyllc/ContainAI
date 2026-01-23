@@ -1798,10 +1798,23 @@ _containai_start_container() {
             args+=(-p "${ssh_port}:22")  # Map allocated port to container SSH
             args+=(-d)  # Always detached - tini manages sleep infinity as child
 
-            # Cgroup resource limits (configurable via [container] config section)
-            # Default: 4g memory, 2 CPUs, 100s stop timeout for systemd graceful shutdown
-            local mem_limit="${_CAI_CONTAINER_MEMORY:-4g}"
-            local cpu_limit="${_CAI_CONTAINER_CPUS:-2}"
+            # Cgroup resource limits (configurable via [container] config section or CLI flags)
+            # Precedence: CLI flag > config > dynamic default (50% of host, 2GB/1CPU min)
+            local mem_limit cpu_limit
+            if [[ -n "${_CAI_CLI_MEMORY:-}" ]]; then
+                mem_limit="$_CAI_CLI_MEMORY"
+            elif [[ -n "${_CAI_CONTAINER_MEMORY:-}" ]]; then
+                mem_limit="$_CAI_CONTAINER_MEMORY"
+            else
+                mem_limit=$(_cai_default_container_memory)
+            fi
+            if [[ -n "${_CAI_CLI_CPUS:-}" ]]; then
+                cpu_limit="$_CAI_CLI_CPUS"
+            elif [[ -n "${_CAI_CONTAINER_CPUS:-}" ]]; then
+                cpu_limit="$_CAI_CONTAINER_CPUS"
+            else
+                cpu_limit=$(_cai_default_container_cpus)
+            fi
             args+=(--memory="$mem_limit" --memory-swap="$mem_limit")  # memory-swap=memory disables swap
             args+=(--cpus="$cpu_limit")
             args+=(--stop-timeout 100)  # Allow systemd services to shut down gracefully
