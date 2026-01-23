@@ -2301,7 +2301,7 @@ _cai_setup_linux() {
     local verbose="${3:-false}"
 
     _cai_info "Detected platform: Linux (native)"
-    _cai_info "Setting up Secure Engine with Sysbox"
+    _cai_info "Setting up Secure Engine with isolated Docker daemon"
 
     # Step 0: Check kernel version (Sysbox requires 5.5+)
     _cai_step "Checking kernel version"
@@ -2333,13 +2333,14 @@ _cai_setup_linux() {
         _cai_info ""
         _cai_info "Manual installation steps:"
         _cai_info "  1. Install Sysbox: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
-        _cai_info "  2. Configure daemon.json with sysbox-runc runtime"
-        _cai_info "  3. Restart Docker: sudo systemctl restart docker"
-        _cai_info "  4. Create context: docker context create containai-secure --docker host=unix:///var/run/docker.sock"
+        _cai_info "  2. Create isolated config: /etc/containai/docker/daemon.json"
+        _cai_info "  3. Create systemd unit: /etc/systemd/system/containai-docker.service"
+        _cai_info "  4. Start service: sudo systemctl enable --now containai-docker"
+        _cai_info "  5. Create context: docker context create containai-docker --docker host=unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
         return 1
     fi
 
-    # Preflight: Check Docker is installed and reachable before making system changes
+    # Preflight: Check Docker is installed before making system changes
     # (Only run after distro detection succeeds to ensure unsupported distros get
     # manual instructions regardless of Docker status)
     _cai_step "Preflight: Checking Docker installation"
@@ -2349,101 +2350,68 @@ _cai_setup_linux() {
         _cai_error "  https://docs.docker.com/engine/install/"
         return 1
     fi
-
-    # Check if Docker daemon is reachable at the system socket
-    # Skip this check in dry-run mode since we may not have permissions
-    if [[ "$dry_run" != "true" ]]; then
-        if [[ ! -S /var/run/docker.sock ]]; then
-            _cai_error "Docker socket not found at /var/run/docker.sock"
-            _cai_error "  Ensure Docker Engine is installed and running:"
-            _cai_error "  sudo systemctl start docker"
-            return 1
-        fi
-
-        if ! DOCKER_HOST="unix:///var/run/docker.sock" docker info >/dev/null 2>&1; then
-            _cai_error "Cannot connect to Docker daemon at /var/run/docker.sock"
-            _cai_error "  Ensure Docker Engine is running:"
-            _cai_error "  sudo systemctl start docker"
-            _cai_error "  And ensure your user has permissions (add to docker group):"
-            _cai_error "  sudo usermod -aG docker \$USER"
-            return 1
-        fi
-        _cai_ok "Docker daemon is reachable"
-    else
-        _cai_info "[DRY-RUN] Would check Docker daemon at /var/run/docker.sock"
-    fi
+    _cai_ok "Docker CLI available"
 
     # Step 1: Check for Docker Desktop coexistence
     _cai_step "Checking for Docker Desktop"
     if _cai_linux_docker_desktop_detected; then
         printf '\n'
-        _cai_warn "Docker Desktop detected on this system"
-        _cai_warn "  ContainAI will create a separate 'containai-secure' context"
-        _cai_warn "  Docker Desktop configuration will NOT be modified"
-        _cai_warn "  Use --context containai-secure to access Sysbox isolation"
+        _cai_info "Docker Desktop detected on this system"
+        _cai_info "  ContainAI creates a completely isolated Docker daemon"
+        _cai_info "  Docker Desktop configuration will NOT be modified"
+        _cai_info "  Use --context $_CAI_CONTAINAI_DOCKER_CONTEXT to access Sysbox isolation"
         printf '\n'
     fi
 
-    # Step 2: Install Sysbox
+    # Step 2: Clean up legacy paths (support upgrades from old installation)
+    if ! _cai_cleanup_legacy_paths "$dry_run" "$verbose"; then
+        _cai_warn "Legacy cleanup had issues (continuing anyway)"
+    fi
+
+    # Step 3: Install Sysbox
     if ! _cai_install_sysbox_linux "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 3: Configure daemon.json (isolated path)
-    # NOTE: This writes to isolated config; fn-14-nm0.3 will update service to use it
-    if ! _cai_configure_daemon_json "$_CAI_CONTAINAI_DOCKER_CONFIG" "$dry_run" "$verbose"; then
+    # Step 4: Create isolated Docker directories
+    if ! _cai_create_isolated_docker_dirs "$dry_run"; then
         return 1
     fi
 
-    # Step 4: Restart Docker service (if not dry-run)
-    # Native Linux uses default socket /var/run/docker.sock
-    _cai_step "Restarting Docker service"
-    if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: systemctl restart docker"
-    else
-        if ! sudo systemctl restart docker; then
-            _cai_error "Failed to restart Docker service"
-            _cai_error "  Check: sudo systemctl status docker"
-            return 1
-        fi
-
-        # Wait for Docker to be ready - explicitly target the system Docker socket
-        # to avoid false positives from Docker Desktop being reachable via default context
-        local wait_count=0
-        local max_wait=30
-        _cai_step "Waiting for Docker daemon at /var/run/docker.sock"
-        while ! DOCKER_HOST="unix:///var/run/docker.sock" docker info >/dev/null 2>&1; do
-            sleep 1
-            wait_count=$((wait_count + 1))
-            if [[ $wait_count -ge $max_wait ]]; then
-                _cai_error "Docker daemon did not start after ${max_wait}s"
-                _cai_error "  Check: sudo systemctl status docker"
-                return 1
-            fi
-        done
-        _cai_ok "Docker service restarted"
-    fi
-
-    # Step 5: Create containai-secure context
-    # On native Linux, use the default socket (unlike WSL2 which uses a dedicated socket)
-    if ! _cai_create_containai_context "/var/run/docker.sock" "$dry_run" "$verbose"; then
+    # Step 5: Create isolated daemon.json (NOT /etc/docker/daemon.json)
+    if ! _cai_create_isolated_daemon_json "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 6: Verify installation
-    # Native Linux: verification failure is fatal (unlike WSL2 which has known seccomp issues)
-    if ! _cai_verify_sysbox_install_linux "/var/run/docker.sock" "$dry_run" "$verbose"; then
-        _cai_error "Sysbox verification failed - setup did not complete successfully"
-        _cai_error "  Check the error messages above for details"
+    # Step 6: Create isolated systemd service (NOT a drop-in to docker.service)
+    if ! _cai_create_isolated_docker_service "$dry_run" "$verbose"; then
         return 1
+    fi
+
+    # Step 7: Start isolated Docker service
+    if ! _cai_start_isolated_docker_service "$dry_run"; then
+        return 1
+    fi
+
+    # Step 8: Create containai-docker context
+    if ! _cai_create_isolated_docker_context "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 9: Verify installation
+    if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
+        # Verification failure is a warning, not fatal
+        _cai_warn "Isolated Docker verification had issues - check output above"
     fi
 
     printf '\n'
     _cai_ok "Secure Engine setup complete"
     _cai_info "To use the Secure Engine:"
-    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure"
+    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=$_CAI_CONTAINAI_DOCKER_CONTEXT"
     _cai_info "  cai run --workspace /path/to/project"
-    _cai_info "Or use docker directly: docker --context containai-secure run --runtime=sysbox-runc ..."
+    _cai_info "Or use docker directly: docker --context $_CAI_CONTAINAI_DOCKER_CONTEXT ..."
+    _cai_info ""
+    _cai_info "Note: sysbox-runc is the default runtime - no need to specify --runtime"
 
     return 0
 }
@@ -2563,19 +2531,26 @@ Options:
 
 What It Does (Linux native):
   1. Detects distribution (Ubuntu/Debian supported for auto-install)
-  2. Downloads and installs Sysbox from GitHub releases
-  3. Configures daemon.json with sysbox-runc runtime
-  4. Restarts Docker daemon
-  5. Creates 'containai-secure' Docker context pointing to default socket
+  2. Cleans up any legacy ContainAI paths from previous installations
+  3. Downloads and installs Sysbox from GitHub releases
+  4. Creates isolated Docker daemon with sysbox-runc as default runtime:
+     - Config: /etc/containai/docker/daemon.json
+     - Socket: /var/run/containai-docker.sock
+     - Data:   /var/lib/containai-docker/
+     - Service: containai-docker.service
+  5. Creates 'containai-docker' Docker context pointing to isolated socket
   6. Verifies installation with test container
-  Note: Fedora/RHEL/Arch users need to install Sysbox manually.
+  Note: System Docker is NOT modified. Fedora/RHEL/Arch require manual install.
 
 What It Does (WSL2):
   1. Checks seccomp compatibility (warns if WSL 1.1.0+ filter conflict)
-  2. Downloads and installs Sysbox from GitHub releases
-  3. Configures daemon.json with sysbox-runc runtime
-  4. Configures dedicated Docker socket at /var/run/containai-docker.sock
-  5. Creates 'containai-secure' Docker context pointing to dedicated socket
+  2. Cleans up any legacy ContainAI paths from previous installations
+  3. Downloads and installs Sysbox from GitHub releases
+  4. Creates isolated Docker daemon with sysbox-runc as default runtime:
+     - Config: /etc/containai/docker/daemon.json
+     - Socket: /var/run/containai-docker.sock
+     - Service: containai-docker.service
+  5. Creates 'containai-docker' Docker context pointing to isolated socket
   6. Verifies installation
 
 What It Does (macOS):
@@ -2608,12 +2583,11 @@ Requirements (macOS):
   - Works on both Intel and Apple Silicon Macs
 
 Security Notes:
-  - Does NOT set sysbox-runc as default runtime (keeps runc default)
-  - Does NOT modify Docker Desktop or default context
-  - Docker Desktop remains the default and unchanged (CRITICAL)
-  - Creates 'containai-secure' context for explicit isolation
-  - WSL2/macOS: Uses separate socket for isolation
-  - Native Linux: Uses default socket with separate context
+  - sysbox-runc IS the default runtime for the isolated daemon
+  - Does NOT modify Docker Desktop, system Docker, or /etc/docker/
+  - Docker Desktop remains completely unchanged (CRITICAL)
+  - Creates 'containai-docker' context pointing to isolated daemon
+  - All platforms use completely separate socket for isolation
 
 Lima VM Management (macOS):
   limactl start containai-secure    Start the VM
@@ -2621,20 +2595,14 @@ Lima VM Management (macOS):
   limactl shell containai-secure    Shell into the VM
   limactl list                      Show VM status
 
-ContainAI Docker (separate docker-ce with sysbox-runc default):
-  For advanced use cases requiring sysbox-runc as the DEFAULT runtime
-  (system containers, DinD without --privileged), use:
+Isolated Docker (Linux/WSL2):
+  Socket:  /var/run/containai-docker.sock
+  Config:  /etc/containai/docker/daemon.json
+  Data:    /var/lib/containai-docker/
+  Service: containai-docker.service
+  Context: containai-docker
 
-    sudo scripts/install-containai-docker.sh
-
-  This creates an isolated docker-ce instance:
-    Socket:  /var/run/containai-docker.sock
-    Config:  /etc/containai/docker/daemon.json
-    Data:    /var/lib/containai-docker/
-    Service: containai-docker.service
-    Context: containai-docker
-
-  Usage after installation:
+  Usage after setup:
     docker --context containai-docker info
     docker --context containai-docker run hello-world
 
