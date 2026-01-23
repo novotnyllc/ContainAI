@@ -166,8 +166,10 @@ flowchart TD
 
 - Even if agent is manipulated, it only sees the **container's** filesystem
 - Container's `/etc/shadow` contains only container-local accounts (no host secrets)
-- Host filesystem is completely inaccessible
+- Host system paths (e.g., `/etc/shadow`, `~/.ssh`) are inaccessible unless explicitly mounted
 - Network egress can be additionally restricted via firewall rules
+
+**Residual risk**: The mounted workspace and any explicitly shared files (dotfiles, tokens) remain accessible. Isolation protects host system files, not everything mounted into the container.
 
 ### Side-by-Side Comparison
 
@@ -177,8 +179,8 @@ flowchart TD
 +----------------------------------+----------------------------------+
 | Agent tricked into commands      | Agent tricked into commands      |
 | Reads real host files            | Reads only container files       |
-| Sensitive data exfiltrated       | No sensitive data to exfiltrate  |
-| Attacker wins                    | Attack fails silently            |
+| Host secrets exfiltrated         | No host secrets (e.g., /etc/shadow) |
+| Attacker wins                    | Blast radius limited to workspace  |
 +----------------------------------+----------------------------------+
 ```
 
@@ -353,7 +355,7 @@ echo "ssh-rsa ATTACKER_KEY" >> /mnt/root/.ssh/authorized_keys
    - Procfs/sysfs virtualization
    - Selective capability granting
 3. Agent can build and run containers
-4. Zero risk of host compromise through privilege escalation
+4. Container root != host root (dramatically reduces blast radius)
 ```
 
 ### Side-by-Side Comparison
@@ -407,7 +409,7 @@ The Docker socket is not just "access to run containers." It is **root access to
   'background': '#0d1117'
 }}}%%
 flowchart LR
-    A["Container with<br/>socket access"] --> B["docker run -v /:/host<br/>--privileged alpine"]
+    A["Container with<br/>socket access"] --> B["docker run -v /:/host alpine"]
     B --> C["chroot /host"]
     C --> D["Root on host"]
 
@@ -420,15 +422,16 @@ flowchart LR
 Any code running inside a container with Docker socket access can execute:
 
 ```bash
-docker run -v /:/host --privileged alpine chroot /host
+docker run -v /:/host alpine chroot /host
 ```
 
 This:
 1. Creates a new container
 2. Mounts the entire host filesystem at `/host`
-3. Runs with full privileges
-4. Changes root to the host filesystem
-5. You are now root on the host
+3. Changes root to the host filesystem
+4. You are now root on the host
+
+Note: No `--privileged` flag needed - the socket itself grants the ability to start containers with arbitrary host mounts.
 
 No exploits needed. No vulnerabilities required. This is the **intended functionality** of the Docker API.
 
