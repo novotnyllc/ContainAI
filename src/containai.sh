@@ -172,6 +172,8 @@ Run Options:
   --workspace <path>    Workspace path (default: current directory)
   --name <name>         Container name (default: auto-generated from path hash)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
+  --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
+  --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
   --fresh               Remove and recreate container (preserves data volume)
   --restart             Force recreate container (alias for --fresh)
   --force               Skip isolation checks (for testing only)
@@ -845,12 +847,27 @@ _containai_sandbox_cmd() {
 # Doctor subcommand handler
 _containai_doctor_cmd() {
     local json_output="false"
+    local workspace="$PWD"
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --json)
                 json_output="true"
+                shift
+                ;;
+            --workspace|-w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="$2"
+                workspace="${workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
             --help|-h)
@@ -864,6 +881,19 @@ _containai_doctor_cmd() {
                 ;;
         esac
     done
+
+    # Resolve workspace and parse config to get configured resource limits
+    local resolved_workspace="$workspace"
+    if ! resolved_workspace=$(cd -- "$workspace" 2>/dev/null && pwd -P); then
+        resolved_workspace="$PWD"
+    fi
+
+    # Try to find and parse config for resource limit display
+    local config_file
+    config_file=$(_containai_find_config "$resolved_workspace")
+    if [[ -n "$config_file" ]]; then
+        _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
+    fi
 
     # Run doctor checks
     if [[ "$json_output" == "true" ]]; then
@@ -1321,6 +1351,8 @@ _containai_run_cmd() {
     local explicit_config=""
     local container_name=""
     local image_tag=""
+    local cli_memory=""
+    local cli_cpus=""
     local credentials=""
     local acknowledge_credential_risk=""
     local allow_host_credentials=""
@@ -1484,6 +1516,38 @@ _containai_run_cmd() {
                 fi
                 shift
                 ;;
+            --memory)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --memory requires a value" >&2
+                    return 1
+                fi
+                cli_memory="$2"
+                shift 2
+                ;;
+            --memory=*)
+                cli_memory="${1#--memory=}"
+                if [[ -z "$cli_memory" ]]; then
+                    echo "[ERROR] --memory requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --cpus)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --cpus requires a value" >&2
+                    return 1
+                fi
+                cli_cpus="$2"
+                shift 2
+                ;;
+            --cpus=*)
+                cli_cpus="${1#--cpus=}"
+                if [[ -z "$cli_cpus" ]]; then
+                    echo "[ERROR] --cpus requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
             --mount-docker-socket)
                 mount_docker_socket="--mount-docker-socket"
                 shift
@@ -1618,6 +1682,12 @@ _containai_run_cmd() {
     if [[ -n "$image_tag" ]]; then
         start_args+=(--image-tag "$image_tag")
     fi
+
+    # Set CLI resource overrides (global vars read by _containai_start_container)
+    # Clear first to prevent leakage from previous invocations in same shell
+    _CAI_CLI_MEMORY="$cli_memory"
+    _CAI_CLI_CPUS="$cli_cpus"
+
     if [[ -n "$mount_docker_socket" ]]; then
         start_args+=("$mount_docker_socket")
     fi

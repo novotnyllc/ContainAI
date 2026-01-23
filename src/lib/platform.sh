@@ -168,7 +168,7 @@ _cai_detect_cpu_count() {
 #   $1 = percentage of host resources (default: 50)
 #   $2 = minimum memory in GB (default: 2)
 #   $3 = minimum CPUs (default: 1)
-# Outputs: JSON with detected_memory_gb, detected_cpus, container_memory, container_cpus
+# Outputs: Space-separated tuple: detected_memory_gb detected_cpus container_memory container_cpus
 # Note: container_memory is in Docker format (e.g., "4g")
 _cai_detect_resources() {
     local percentage="${1:-50}"
@@ -179,11 +179,19 @@ _cai_detect_resources() {
     mem_bytes=$(_cai_detect_memory_bytes)
     cpu_count=$(_cai_detect_cpu_count)
 
-    # Convert to GB for display (integer)
+    # Convert to GB for display (integer, floor to 1 for <1GB hosts)
     local detected_memory_gb
     detected_memory_gb=$((mem_bytes / 1073741824))
+    # If detection succeeded (mem_bytes > 0) but rounds to 0 GB, floor to 1
+    # Only use fallback 8GB if detection truly failed (mem_bytes == 0)
     if [[ "$detected_memory_gb" -le 0 ]]; then
-        detected_memory_gb=8
+        if [[ "$mem_bytes" -gt 0 ]]; then
+            # Small host (<1GB) - floor to 1GB
+            detected_memory_gb=1
+        else
+            # Detection truly failed - use safe fallback
+            detected_memory_gb=8
+        fi
     fi
 
     # Calculate container limits (percentage of host)
