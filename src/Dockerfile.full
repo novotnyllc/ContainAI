@@ -53,14 +53,14 @@ RUN mkdir -p \
 # Install Claude Code via official installer
 RUN curl -fsSL https://claude.ai/install.sh | bash && \
     # Verify claude installed correctly
-    /home/agent/.claude/local/bin/claude --version
+    /home/agent/.local/bin/claude --version
 
 # Add Claude to PATH via .bashrc.d
 RUN printf '%s\n' \
-    'export PATH="/home/agent/.claude/local/bin:${PATH}"' \
+    'export PATH="/home/agent/.local/bin:${PATH}"' \
     > /home/agent/.bashrc.d/01-claude.sh
 
-ENV PATH="/home/agent/.claude/local/bin:${PATH}"
+ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # Install Gemini CLI, Codex, and agent-browser via bun
 # Using --trust to allow postinstall scripts
