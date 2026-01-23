@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2289
+# SC2289: False positive for embedded sh scripts in heredocs (find -exec sh -c)
 # ==============================================================================
 # ContainAI Import - cai import subcommand
 # ==============================================================================
@@ -725,11 +727,17 @@ _containai_import() {
         env_args+=(--env "NO_EXCLUDES=1")
     fi
 
+    # Pass HOST_SOURCE_ROOT for symlink relinking (only if --from was used with directory)
+    # When source_root != $HOME, we're importing from a custom directory and need relinking
+    if [[ "$source_root" != "$HOME" ]]; then
+        env_args+=(--env "HOST_SOURCE_ROOT=$source_root")
+    fi
+
     # Build map data and pass via heredoc inside the script
     # Note: This script runs inside eeacms/rsync with POSIX sh (not bash)
     # All code must be strictly POSIX-compliant (no arrays, no local in functions)
     local script_with_data
-    # shellcheck disable=SC2016,SC1012
+    # shellcheck disable=SC2016,SC1012,SC2289
     script_with_data='
 # ==============================================================================
 # Functions for rsync-based sync (runs inside eeacms/rsync container)
@@ -832,6 +840,16 @@ copy() {
                         fi
                     else
                         rsync "$@" "$_src/" "$_dst/"
+
+                        # Relink internal absolute symlinks after rsync (only if HOST_SOURCE_ROOT is set)
+                        if [ -n "${HOST_SOURCE_ROOT:-}" ]; then
+                            # Derive per-entry paths for symlink relinking
+                            # _src is /source/relative_path, strip /source to get relative
+                            _rel_path="${_src#/source}"
+                            _host_src_dir="${HOST_SOURCE_ROOT}${_rel_path}"
+                            _runtime_dst_dir="/mnt/agent-data${_dst#/target}"
+                            relink_internal_symlinks "$_host_src_dir" "$_runtime_dst_dir" "$_src" "$_dst"
+                        fi
                     fi
                     if [ "${DRY_RUN:-}" != "1" ]; then
                         case "$_flags" in
@@ -1062,6 +1080,100 @@ symlink_target_exists_in_source() {
         return 0
     fi
     return 1
+}
+
+# relink_internal_symlinks: Find and relink absolute symlinks within a target directory
+# Takes: host_src_dir, runtime_dst_dir, source_mount, target_dir
+# Note: Uses find -exec to handle paths with spaces safely (POSIX-compliant)
+relink_internal_symlinks() {
+    _host_src_dir="$1"
+    _runtime_dst_dir="$2"
+    _source_mount="$3"
+    _target_dir="$4"
+
+    # Skip if dry-run mode
+    if [ "${DRY_RUN:-}" = "1" ]; then
+        return 0
+    fi
+
+    # Find all symlinks and process them
+    # Using find -exec sh -c with batch processing (+ terminator)
+    find "$_target_dir" -type l -exec sh -c '
+        host_src="$1"; runtime_dst="$2"; src_mount="$3"; shift 3
+        for link do
+            target=$(readlink "$link" 2>/dev/null) || continue
+
+            # Skip relative symlinks (they remain unchanged)
+            case "$target" in
+                /*) ;; # absolute, continue processing
+                *) continue ;;
+            esac
+
+            # Normalize host_src: strip trailing slash, except for root
+            case "$host_src" in
+                /) : ;;
+                */) host_src="${host_src%/}" ;;
+            esac
+
+            # Check if internal (target starts with host_src_dir)
+            case "$target" in
+                "$host_src"/*|"$host_src")
+                    # Extract relative portion
+                    rel_target="${target#"$host_src"}"
+
+                    # SECURITY: Reject paths with .. segments to prevent escape
+                    # Check for /.. anywhere in path (covers /../, /.. at end, etc.)
+                    case "$rel_target" in
+                        */..)
+                            printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                            continue
+                            ;;
+                        */../*)
+                            printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                            continue
+                            ;;
+                    esac
+
+                    # Map host path to source mount for existence check
+                    src_target="${src_mount}${rel_target}"
+
+                    # Skip if broken (target does not exist in source)
+                    if ! test -e "$src_target" && ! test -L "$src_target"; then
+                        printf "[WARN] %s -> %s (broken, preserved)\n" "$link" "$target" >&2
+                        continue
+                    fi
+
+                    # Normalize runtime_dst: strip trailing slash, except for root
+                    case "$runtime_dst" in
+                        /) : ;;
+                        */) runtime_dst="${runtime_dst%/}" ;;
+                    esac
+
+                    # Remap to runtime path
+                    new_target="${runtime_dst}${rel_target}"
+
+                    # Security: validate stays under runtime_dst (belt-and-suspenders)
+                    case "$new_target" in
+                        "$runtime_dst"/*|"$runtime_dst") ;;
+                        *)
+                            printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
+                            continue
+                            ;;
+                    esac
+
+                    # Relink (rm first for directory symlink pitfall - ln -sfn creates inside existing dir)
+                    rm -rf "$link"
+                    ln -s "$new_target" "$link"
+                    chown -h 1000:1000 "$link"
+                    printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                    ;;
+                *)
+                    # External absolute symlink (outside entry subtree)
+                    printf "[WARN] %s -> %s (outside entry subtree, preserved)\n" "$link" "$target" >&2
+                    ;;
+            esac
+        done
+    ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_mount" {} +
 }
 
 # Process map entries from heredoc
