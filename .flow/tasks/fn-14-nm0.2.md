@@ -59,7 +59,7 @@ _cai_detect_wsl2_mirrored_mode() {
 
 **Why mirrored mode breaks us:** WSL2's init process (PID 1) installs its own restrictive seccomp filters during boot to support mirrored networking.
 
-Upstream Issue: This behavior is tracked in the WSL repository (e.g., microsoft/WSL#9783 regarding systemd and seccomp interactions). The pre-existing filters can prevent nested container runtimes from installing their own interceptors, resulting in a EBUSY error code.
+Upstream Issue: This behavior is tracked in the WSL repository https://github.com/microsoft/WSL/issues/9548. The pre-existing filters can prevent nested container runtimes from installing their own interceptors, resulting in a EBUSY error code.
 
 ### Steps 1-5: Existing isolated Docker setup (already implemented)
 
