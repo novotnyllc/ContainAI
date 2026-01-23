@@ -17,7 +17,8 @@
 
 # Use the full image as the default build target
 # This provides the complete AI agent sandbox with all tools
-FROM containai/full:latest
+ARG FULL_IMAGE=ghcr.io/novotnyllc/containai/full:latest
+FROM ${FULL_IMAGE}
 
 # Dynamic build args at end to avoid cache invalidation
 ARG BUILD_DATE=unknown

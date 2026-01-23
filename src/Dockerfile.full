@@ -12,7 +12,8 @@
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 
-FROM containai/sdks:latest
+ARG SDKS_IMAGE=ghcr.io/novotnyllc/containai/sdks:latest
+FROM ${SDKS_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -52,14 +53,14 @@ RUN mkdir -p \
 # Install Claude Code via official installer
 RUN curl -fsSL https://claude.ai/install.sh | bash && \
     # Verify claude installed correctly
-    /home/agent/.claude/local/bin/claude --version
+    /home/agent/.local/bin/claude --version
 
 # Add Claude to PATH via .bashrc.d
 RUN printf '%s\n' \
-    'export PATH="/home/agent/.claude/local/bin:${PATH}"' \
+    'export PATH="/home/agent/.local/bin:${PATH}"' \
     > /home/agent/.bashrc.d/01-claude.sh
 
-ENV PATH="/home/agent/.claude/local/bin:${PATH}"
+ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # Install Gemini CLI, Codex, and agent-browser via bun
 # Using --trust to allow postinstall scripts
@@ -77,7 +78,7 @@ RUN curl -fsSL https://gh.io/copilot-install | bash && \
 # Install OpenCode via official installer
 RUN curl -fsSL https://opencode.ai/install | bash && \
     # Verify opencode installed correctly (opencode may not have --version)
-    test -x /home/agent/.local/bin/opencode
+    test -x /home/agent/.opencode/bin/opencode
 
 # =============================================================================
 # AGENT CONFIGURATION SYMLINKS
