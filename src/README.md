@@ -253,22 +253,31 @@ For testing or CI scenarios that require running Docker inside a container, use 
 When using `Dockerfile.test`:
 
 ```
-Host
-  └── Test container (requires --privileged)
-        ├── sysbox-mgr + sysbox-fs services
+Host (containai docker-ce + sysbox)
+  └── Test container (runs with --runtime=sysbox-runc)
         └── dockerd on /var/run/docker-test.sock
-              └── Inner containers (can use --runtime=sysbox-runc)
+              └── Inner containers (use sysbox-runc by default)
 ```
 
 **Key points:**
-- `Dockerfile.test` installs and runs Sysbox services inside the container
-- The test container requires `--privileged` to run nested Docker
-- Inner containers can optionally use `--runtime=sysbox-runc` for additional isolation
+- `Dockerfile.test` installs the sysbox-runc binary but does NOT start sysbox services
+- The test container must be run with `--runtime=sysbox-runc` (NOT `--privileged`)
+- The host's sysbox runtime provides coordination and isolation
+- Inner Docker uses sysbox-runc as its default runtime for nested containers
 - The test socket (`/var/run/docker-test.sock`) avoids conflicts with host Docker
+
+**Usage:**
+```bash
+# Build the test image
+docker build -t containai-test -f src/Dockerfile.test src/
+
+# Run with sysbox runtime (NOT --privileged)
+docker --context containai-secure run --rm --runtime=sysbox-runc containai-test
+```
 
 ### Main Image DinD
 
-The main ContainAI image (`Dockerfile`) does not currently support Docker-in-Docker. If you need DinD capabilities, use `Dockerfile.test` for testing or consider running the main image with `--runtime=sysbox-runc` on a host with Sysbox installed.
+The main ContainAI image (`Dockerfile.base` and layered images) supports Docker-in-Docker when run with `--runtime=sysbox-runc`. The image includes sysbox and configures inner Docker with sysbox-runc as the default runtime for nested container security.
 
 ## Testing the Image
 

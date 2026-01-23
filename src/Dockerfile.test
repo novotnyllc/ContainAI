@@ -3,13 +3,13 @@
 #
 # This Dockerfile creates a lightweight testing environment for Docker-in-Docker
 # verification. It is designed to run INSIDE a sysbox system container, so it
-# does not need to install sysbox itself - the host already provides that
-# isolation.
+# does not need to start sysbox services (sysbox-mgr/sysbox-fs) - the host
+# already provides that coordination.
 #
 # Architecture:
 #   Host (containai docker-ce + sysbox)
 #     └── Test Container (this Dockerfile, runs with --runtime=sysbox-runc)
-#           └── Inner Docker (uses runc for nested containers)
+#           └── Inner Docker (uses sysbox-runc for nested containers)
 #
 # IMPORTANT: This container must be run with --runtime=sysbox-runc, NOT with
 # --privileged. The sysbox runtime provides all necessary capabilities for DinD.
@@ -49,8 +49,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fuse
 
 # Install Docker daemon
-# Note: Sysbox is NOT installed here - the host's sysbox runtime provides
-# DinD capability when this container runs with --runtime=sysbox-runc
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list && \
     apt-get update && \
@@ -59,10 +57,27 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
         docker-ce-cli \
         containerd.io
 
-# Configure inner Docker daemon
+# Install Sysbox CE (for sysbox-runc binary)
+# Note: We install sysbox to get the sysbox-runc binary for inner Docker.
+# The sysbox services (sysbox-mgr, sysbox-fs) are NOT started - the host's
+# sysbox runtime provides coordination when this container runs with
+# --runtime=sysbox-runc.
+ARG SYSBOX_VERSION=0.6.7
+ARG SYSBOX_SHA256_AMD64=b7ac389e5a19592cadf16e0ca30e40919516128f6e1b7f99e1cb4ff64554172e
+ARG SYSBOX_SHA256_ARM64=16d80123ba53058cf90f5a68686e297621ea97942602682e34b3352783908f91
+
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_AMD64}"; \
+    elif [ "$ARCH" = "arm64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_ARM64}"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    curl -fsSL -o /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" && \
+    echo "${EXPECTED_SHA256}  /tmp/sysbox.deb" | sha256sum -c - && \
+    apt-get install -y /tmp/sysbox.deb && \
+    rm /tmp/sysbox.deb
+
+# Configure inner Docker daemon with sysbox-runc as default runtime
 # - Uses a separate socket to avoid conflicts with any host Docker
-# - Storage-driver is omitted to let dockerd auto-select (overlay2 may not work in all nested environments)
-# - No sysbox-runc configuration needed - inner Docker uses runc, sysbox isolation comes from outer container
+# - Storage-driver is omitted to let dockerd auto-select
 COPY configs/daemon-test.json /etc/docker/daemon.json
 
 # Set default Docker host to test socket
