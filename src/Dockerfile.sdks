@@ -11,6 +11,9 @@
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 
+# Base image for the final stage (must be declared before any FROM that uses it)
+ARG BASE_IMAGE=ghcr.io/novotnyllc/containai/base:latest
+
 # =============================================================================
 # .NET SDK INSTALLER STAGE
 # Downloads .NET SDK to copy into final image
@@ -56,7 +59,6 @@ RUN mkdir -p ${DOTNET_ROOT}/tools && \
 # =============================================================================
 # MAIN IMAGE
 # =============================================================================
-ARG BASE_IMAGE=ghcr.io/novotnyllc/containai/base:latest
 FROM ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
