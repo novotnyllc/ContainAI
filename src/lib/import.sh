@@ -483,12 +483,18 @@ _containai_import() {
     # Handle --from source: detect type and route accordingly
     local source_type=""
     local source_root="$HOME"  # Default to $HOME for backward compatibility
+    local from_directory_mode="false"  # Track if --from <directory> was used (for symlink relinking)
 
     if [[ -n "$from_source" ]]; then
         # Validate path doesn't contain dangerous characters that could cause Docker mount injection
         # Comma breaks --mount option parsing, newline/carriage-return break command parsing
+        # Glob metacharacters (*?[) break shell pattern matching used for symlink relinking
         if [[ "$from_source" == *,* ]] || [[ "$from_source" == *$'\n'* ]] || [[ "$from_source" == *$'\r'* ]]; then
             _import_error "Source path contains invalid characters (comma or control characters): $from_source"
+            return 1
+        fi
+        if [[ "$from_source" == *'*'* ]] || [[ "$from_source" == *'?'* ]] || [[ "$from_source" == *'['* ]]; then
+            _import_error "Source path contains glob metacharacters (*?[) which are not supported: $from_source"
             return 1
         fi
 
@@ -604,8 +610,9 @@ _containai_import() {
                     return 1
                 fi
 
-                # Set source_root for directory sync
+                # Set source_root for directory sync and enable symlink relinking mode
                 source_root="$from_source"
+                from_directory_mode="true"
                 ;;
             unknown)
                 _import_error "Unsupported source type: must be directory or gzip-compressed tar archive"
@@ -727,9 +734,8 @@ _containai_import() {
         env_args+=(--env "NO_EXCLUDES=1")
     fi
 
-    # Pass HOST_SOURCE_ROOT for symlink relinking (only if --from was used with directory)
-    # When source_root != $HOME, we're importing from a custom directory and need relinking
-    if [[ "$source_root" != "$HOME" ]]; then
+    # Pass HOST_SOURCE_ROOT for symlink relinking (only if --from <directory> was used)
+    if [[ "$from_directory_mode" == "true" ]]; then
         env_args+=(--env "HOST_SOURCE_ROOT=$source_root")
     fi
 
@@ -846,7 +852,8 @@ copy() {
                             # Derive per-entry paths for symlink relinking
                             # _src is /source/relative_path, strip /source to get relative
                             _rel_path="${_src#/source}"
-                            _host_src_dir="${HOST_SOURCE_ROOT}${_rel_path}"
+                            # Strip trailing slash from HOST_SOURCE_ROOT to avoid // when root is /
+                            _host_src_dir="${HOST_SOURCE_ROOT%/}${_rel_path}"
                             _runtime_dst_dir="/mnt/agent-data${_dst#/target}"
                             relink_internal_symlinks "$_host_src_dir" "$_runtime_dst_dir" "$_src" "$_dst"
                         fi
@@ -1125,11 +1132,11 @@ relink_internal_symlinks() {
                     # Check for /.. anywhere in path (covers /../, /.. at end, etc.)
                     case "$rel_target" in
                         */..)
-                            printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                            printf "[WARN] %s -> %s (path escape)\n" "$link" "$target" >&2
                             continue
                             ;;
                         */../*)
-                            printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                            printf "[WARN] %s -> %s (path escape)\n" "$link" "$target" >&2
                             continue
                             ;;
                     esac
