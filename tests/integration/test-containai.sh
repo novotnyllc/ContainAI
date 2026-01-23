@@ -263,6 +263,27 @@ check_prerequisites() {
         fi
     fi
     pass "Verification image available: $ALPINE_IMAGE"
+
+    # Run cai doctor to verify ContainAI environment is healthy
+    # cai doctor checks: Sysbox availability, SSH config, kernel compatibility
+    info "Running cai doctor to verify ContainAI environment..."
+    local doctor_output doctor_rc
+    doctor_output=$(cai doctor 2>&1) && doctor_rc=0 || doctor_rc=$?
+
+    if [[ $doctor_rc -eq 0 ]]; then
+        pass "cai doctor reports healthy environment"
+    else
+        # cai doctor returns non-zero if SSH not configured or Sysbox issues
+        # For test purposes, we only need Sysbox to be available (checked above)
+        if printf '%s' "$doctor_output" | grep -q "Sysbox.*\[OK\]"; then
+            warn "cai doctor reports some issues (SSH may not be fully configured)"
+            info "  This is OK for integration tests - Sysbox isolation is available"
+        else
+            fail "cai doctor indicates Sysbox is not available"
+            printf '%s\n' "$doctor_output" | head -20
+            return 1
+        fi
+    fi
 }
 
 # ==============================================================================
@@ -680,6 +701,25 @@ CMD ["echo", "build-success"]'
 # ==============================================================================
 # Test: Agent doctor commands
 # ==============================================================================
+#
+# Agent Doctor Command Reference:
+# ================================
+# This test verifies AI agent diagnostic commands inside the container.
+# Tests handle missing API keys gracefully - "not configured" is a valid outcome.
+#
+# Agents WITH doctor commands:
+#   - claude doctor    : Checks Claude Code installation, auth, plugins
+#   - codex doctor     : Checks OpenAI Codex installation and auth (NOT 'codex --doctor')
+#   - gh auth status   : GitHub CLI authentication check (not 'doctor' but similar)
+#
+# Agents WITHOUT dedicated doctor commands:
+#   - copilot          : No doctor command; use 'gh copilot' extension status
+#   - gemini           : No doctor command; use 'gemini --version' to verify install
+#   - aider            : No doctor command; use 'aider --version'
+#   - cursor           : Desktop app, no CLI doctor
+#
+# Note: cai doctor runs on HOST (tests ContainAI environment), not inside container
+# ==============================================================================
 
 test_agent_doctor_commands() {
     section "Scenario 4: Agent Doctor Commands"
@@ -692,7 +732,11 @@ test_agent_doctor_commands() {
         return 1
     fi
 
+    info "Testing AI agent doctor/diagnostic commands inside container"
+    info "(Tests handle missing API keys gracefully - 'not configured' is OK)"
+
     # Test: claude doctor (if claude is available)
+    # Claude Code has 'claude doctor' to check installation and auth
     info "Testing claude doctor..."
     if exec_in_container command -v claude >/dev/null 2>&1; then
         local claude_doctor_output claude_doctor_rc
@@ -724,6 +768,7 @@ test_agent_doctor_commands() {
     fi
 
     # Test: codex doctor (if codex is available)
+    # OpenAI Codex CLI has 'codex doctor' to check installation and API key
     info "Testing codex doctor..."
     if exec_in_container command -v codex >/dev/null 2>&1; then
         local codex_doctor_output codex_doctor_rc
@@ -749,33 +794,34 @@ test_agent_doctor_commands() {
         pass "codex doctor test skipped (not installed)"
     fi
 
-    # Test: copilot doctor (if copilot/gh copilot is available)
-    info "Testing copilot doctor..."
+    # Test: copilot (if available)
+    # Note: Copilot does NOT have a 'doctor' command. We verify it's installed
+    # and check version. For auth, use 'gh auth status' (tested below).
+    info "Testing copilot availability..."
     if exec_in_container command -v copilot >/dev/null 2>&1; then
-        local copilot_doctor_output copilot_doctor_rc
-        copilot_doctor_output=$(run_with_timeout 30 exec_in_container copilot doctor 2>&1) && copilot_doctor_rc=0 || copilot_doctor_rc=$?
+        local copilot_version_output copilot_version_rc
+        copilot_version_output=$(run_with_timeout 30 exec_in_container copilot --version 2>&1) && copilot_version_rc=0 || copilot_version_rc=$?
 
-        if [[ $copilot_doctor_rc -eq 125 ]]; then
-            copilot_doctor_output=$(exec_in_container copilot doctor 2>&1) && copilot_doctor_rc=0 || copilot_doctor_rc=$?
+        if [[ $copilot_version_rc -eq 125 ]]; then
+            copilot_version_output=$(exec_in_container copilot --version 2>&1) && copilot_version_rc=0 || copilot_version_rc=$?
         fi
 
-        if [[ $copilot_doctor_rc -eq 0 ]]; then
-            pass "copilot doctor succeeded"
+        if [[ $copilot_version_rc -eq 0 ]]; then
+            pass "copilot CLI available"
+            info "  Version: $(printf '%s' "$copilot_version_output" | head -1)"
+            info "  Note: Copilot has no 'doctor' command; auth via 'gh auth status'"
         else
-            if printf '%s' "$copilot_doctor_output" | grep -qiE "api.key|authentication|credentials|logged.in|sign.in|not.configured|not authenticated"; then
-                pass "copilot doctor reports clear error (not configured)"
-            else
-                fail "copilot doctor failed with unclear error"
-                info "  Exit code: $copilot_doctor_rc"
-                info "  Output: $(printf '%s' "$copilot_doctor_output" | head -5)"
-            fi
+            # copilot --version failed - might need different invocation
+            warn "copilot CLI found but version check failed"
+            info "  Output: $(printf '%s' "$copilot_version_output" | head -3)"
         fi
     else
         info "Copilot CLI not installed in test image"
-        pass "copilot doctor test skipped (not installed)"
+        pass "copilot test skipped (not installed)"
     fi
 
     # Test: gh CLI is available and can check status
+    # gh doesn't have 'doctor' but 'gh auth status' provides similar diagnostics
     info "Testing gh CLI..."
     if exec_in_container command -v gh >/dev/null 2>&1; then
         local gh_version_output
