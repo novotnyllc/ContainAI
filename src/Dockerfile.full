@@ -78,7 +78,7 @@ RUN curl -fsSL https://gh.io/copilot-install | bash && \
 # Install OpenCode via official installer
 RUN curl -fsSL https://opencode.ai/install | bash && \
     # Verify opencode installed correctly (opencode may not have --version)
-    test -x /home/agent/.local/bin/opencode
+    test -x /home/agent/.opencode/bin/opencode
 
 # =============================================================================
 # AGENT CONFIGURATION SYMLINKS
