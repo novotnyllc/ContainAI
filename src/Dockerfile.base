@@ -81,7 +81,7 @@ RUN for unit in \
 RUN if id -u agent >/dev/null 2>&1; then \
         echo "agent user already exists"; \
     else \
-        existing_entry="$(awk -F: '$3==1000 {print $1\":\"$4; exit}' /etc/passwd)" && \
+        existing_entry="$(awk -F: '$3==1000 {print $1 ":" $4; exit}' /etc/passwd)" && \
         if [ -n "$existing_entry" ]; then \
             existing_user="${existing_entry%%:*}"; \
             existing_gid="${existing_entry#*:}"; \
