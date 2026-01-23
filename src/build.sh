@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
             BUILD_LAYER="$2"
             shift 2
             ;;
-        --help|-h)
+        --help | -h)
             sed -n '4,19p' "$0" | sed 's/^# //' | sed 's/^#//'
             exit 0
             ;;

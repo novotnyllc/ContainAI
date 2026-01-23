@@ -143,7 +143,8 @@ _containai_export() {
     fi
 
     # Default filename for auto-generated archives
-    local default_filename="containai-export-$(date +%Y%m%d-%H%M%S).tgz"
+    local default_filename
+    default_filename="containai-export-$(date +%Y%m%d-%H%M%S).tgz"
 
     # Expand leading tilde safely (without eval)
     if [[ "$output_path" == "~/"* ]]; then

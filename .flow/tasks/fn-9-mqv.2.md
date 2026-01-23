@@ -3,7 +3,7 @@
 ## Description
 Add helper function to detect source type (directory vs gzip archive).
 
-**Size:** S  
+**Size:** S
 **Files:** `agent-sandbox/lib/import.sh`
 
 ## Approach

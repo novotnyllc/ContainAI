@@ -30,10 +30,16 @@ fi
 
 # Color output helpers
 pass() { printf '%s\n' "[PASS] $*"; }
-fail() { printf '%s\n' "[FAIL] $*" >&2; FAILED=1; }
+fail() {
+    printf '%s\n' "[FAIL] $*" >&2
+    FAILED=1
+}
 warn() { printf '%s\n' "[WARN] $*"; }
 info() { printf '%s\n' "[INFO] $*"; }
-section() { printf '\n'; printf '%s\n' "=== $* ==="; }
+section() {
+    printf '\n'
+    printf '%s\n' "=== $* ==="
+}
 
 FAILED=0
 

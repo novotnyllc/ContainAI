@@ -117,9 +117,15 @@ register_test_volume "$DATA_VOLUME"
 
 # Color output helpers
 pass() { echo "[PASS] $*"; }
-fail() { echo "[FAIL] $*" >&2; FAILED=1; }
+fail() {
+    echo "[FAIL] $*" >&2
+    FAILED=1
+}
 info() { echo "[INFO] $*"; }
-section() { echo ""; echo "=== $* ==="; }
+section() {
+    echo ""
+    echo "=== $* ==="
+}
 
 FAILED=0
 
@@ -147,7 +153,10 @@ run_in_rsync() {
 # Returns -1 on docker failure to distinguish from "0 results"
 get_count() {
     local output
-    output=$(run_in_rsync "$1") || { echo "-1"; return 1; }
+    output=$(run_in_rsync "$1") || {
+        echo "-1"
+        return 1
+    }
     echo "$output" | awk '{print $1}' | grep -E '^[0-9]+$' | tail -1 || echo "0"
 }
 
@@ -202,40 +211,40 @@ populate_fixture() {
 
     # Claude Code files
     mkdir -p "$fixture/.claude/plugins"
-    echo '{"test": true}' > "$fixture/.claude.json"
-    echo '{"credentials": "test"}' > "$fixture/.claude/.credentials.json"
-    echo '{"settings": "test"}' > "$fixture/.claude/settings.json"
+    echo '{"test": true}' >"$fixture/.claude.json"
+    echo '{"credentials": "test"}' >"$fixture/.claude/.credentials.json"
+    echo '{"settings": "test"}' >"$fixture/.claude/settings.json"
     # Create a dummy plugin to verify plugins directory syncs
     mkdir -p "$fixture/.claude/plugins/cache/test-plugin"
-    echo '{}' > "$fixture/.claude/plugins/cache/test-plugin/plugin.json"
+    echo '{}' >"$fixture/.claude/plugins/cache/test-plugin/plugin.json"
 
     # GitHub CLI
     mkdir -p "$fixture/.config/gh"
-    echo 'github.com:' > "$fixture/.config/gh/hosts.yml"
-    echo '  oauth_token: test-token' >> "$fixture/.config/gh/hosts.yml"
+    echo 'github.com:' >"$fixture/.config/gh/hosts.yml"
+    echo '  oauth_token: test-token' >>"$fixture/.config/gh/hosts.yml"
 
     # Shell
-    echo 'alias test="echo test"' > "$fixture/.bash_aliases"
+    echo 'alias test="echo test"' >"$fixture/.bash_aliases"
 
     # Codex
     mkdir -p "$fixture/.codex"
-    echo '{"auth": "test"}' > "$fixture/.codex/auth.json"
+    echo '{"auth": "test"}' >"$fixture/.codex/auth.json"
 
     # Gemini
     mkdir -p "$fixture/.gemini"
-    echo '{"oauth": "test"}' > "$fixture/.gemini/oauth_creds.json"
+    echo '{"oauth": "test"}' >"$fixture/.gemini/oauth_creds.json"
 
     # Copilot
     mkdir -p "$fixture/.copilot"
-    echo '{"config": "test"}' > "$fixture/.copilot/config.json"
+    echo '{"config": "test"}' >"$fixture/.copilot/config.json"
 
     # tmux config
     mkdir -p "$fixture/.config/tmux"
-    echo 'set -g prefix C-a' > "$fixture/.config/tmux/tmux.conf"
+    echo 'set -g prefix C-a' >"$fixture/.config/tmux/tmux.conf"
 
     # tmux plugins (data directory)
     mkdir -p "$fixture/.local/share/tmux/plugins/tpm"
-    echo '# TPM' > "$fixture/.local/share/tmux/plugins/tpm/tpm"
+    echo '# TPM' >"$fixture/.local/share/tmux/plugins/tpm/tpm"
 }
 
 # ==============================================================================
@@ -404,8 +413,8 @@ test_dry_run() {
     local config_vol="containai-test-config-${TEST_RUN_ID}"
     config_test_dir=$(mktemp -d)
     mkdir -p "$config_test_dir/.containai"
-    echo '[agent]' > "$config_test_dir/.containai/config.toml"
-    echo "data_volume = \"$config_vol\"" >> "$config_test_dir/.containai/config.toml"
+    echo '[agent]' >"$config_test_dir/.containai/config.toml"
+    echo "data_volume = \"$config_vol\"" >>"$config_test_dir/.containai/config.toml"
     if ! docker volume create "$config_vol" >/dev/null; then
         fail "Failed to create test volume: $config_vol"
         rm -rf "$config_test_dir"
@@ -820,7 +829,7 @@ test_workspace_path_matching() {
     test_vol="test-ws-vol-$$"
 
     mkdir -p "$test_dir/subproject/.containai"
-    cat > "$test_dir/subproject/.containai/config.toml" << EOF
+    cat >"$test_dir/subproject/.containai/config.toml" <<EOF
 [agent]
 data_volume = "default-vol"
 
@@ -860,7 +869,7 @@ test_workspace_fallback_to_agent() {
     default_vol="fallback-vol-$$"
 
     mkdir -p "$test_dir/.containai"
-    cat > "$test_dir/.containai/config.toml" << EOF
+    cat >"$test_dir/.containai/config.toml" <<EOF
 [agent]
 data_volume = "$default_vol"
 
@@ -899,7 +908,7 @@ test_longest_match_wins() {
     test_dir="/tmp/test-longest-$$"
 
     mkdir -p "$test_dir/project/subdir/.containai"
-    cat > "$test_dir/project/subdir/.containai/config.toml" << EOF
+    cat >"$test_dir/project/subdir/.containai/config.toml" <<EOF
 [agent]
 data_volume = "default"
 
@@ -942,7 +951,7 @@ test_data_volume_overrides_config() {
 
     mkdir -p "$test_dir/.containai"
     # Include BOTH [agent] AND [workspace] sections to prove CLI overrides workspace config
-    cat > "$test_dir/.containai/config.toml" << EOF
+    cat >"$test_dir/.containai/config.toml" <<EOF
 [agent]
 data_volume = "agent-vol"
 
@@ -983,7 +992,7 @@ test_relative_paths_skipped() {
     # Config uses relative paths which should be SKIPPED per spec
     # "Absolute paths only in workspace sections (skip relative)"
     mkdir -p "$test_dir/.containai"
-    cat > "$test_dir/.containai/config.toml" << EOF
+    cat >"$test_dir/.containai/config.toml" <<EOF
 [agent]
 data_volume = "agent-default-vol"
 
@@ -1029,7 +1038,7 @@ create_env_test_config() {
     local dir="$1"
     local config_content="$2"
     mkdir -p "$dir/.containai"
-    printf '%s\n' "$config_content" > "$dir/.containai/config.toml"
+    printf '%s\n' "$config_content" >"$dir/.containai/config.toml"
 }
 
 # ==============================================================================
@@ -1095,7 +1104,7 @@ test_env_from_host_false() {
     test_vol="containai-test-env-nohost-${TEST_RUN_ID}"
 
     # Create a source .env file
-    echo "TEST_NOHOST_VAR=from_file" > "$test_dir/test.env"
+    echo "TEST_NOHOST_VAR=from_file" >"$test_dir/test.env"
 
     create_env_test_config "$test_dir" '
 [agent]
@@ -1139,7 +1148,7 @@ test_env_file_parsing() {
     test_vol="containai-test-env-parse-${TEST_RUN_ID}"
 
     # Create test .env file with various formats
-    cat > "$test_dir/test.env" << 'EOF'
+    cat >"$test_dir/test.env" <<'EOF'
 # Comment line
 SIMPLE_VAR=simple_value
 export EXPORT_VAR=exported_value
@@ -1197,7 +1206,7 @@ test_env_merge_precedence() {
     test_vol="containai-test-env-merge-${TEST_RUN_ID}"
 
     # Create .env file with a value that should be overridden
-    echo "PRECEDENCE_VAR=from_file" > "$test_dir/test.env"
+    echo "PRECEDENCE_VAR=from_file" >"$test_dir/test.env"
 
     create_env_test_config "$test_dir" '
 [agent]
@@ -1525,7 +1534,7 @@ test_env_values_with_spaces() {
     test_vol="containai-test-env-spaces-${TEST_RUN_ID}"
 
     # Create .env file with spaces in value
-    echo 'SPACE_VAR=value with multiple spaces' > "$test_dir/test.env"
+    echo 'SPACE_VAR=value with multiple spaces' >"$test_dir/test.env"
 
     create_env_test_config "$test_dir" '
 [agent]
@@ -1566,7 +1575,7 @@ test_env_crlf_handling() {
     test_vol="containai-test-env-crlf-${TEST_RUN_ID}"
 
     # Create .env file with CRLF endings
-    printf 'CRLF_VAR=crlf_value\r\nANOTHER_VAR=another\r\n' > "$test_dir/test.env"
+    printf 'CRLF_VAR=crlf_value\r\nANOTHER_VAR=another\r\n' >"$test_dir/test.env"
 
     create_env_test_config "$test_dir" '
 [agent]
@@ -1806,7 +1815,7 @@ test_env_symlink_source_rejected() {
     test_vol="containai-test-env-symlink-${TEST_RUN_ID}"
 
     # Create a real file and symlink to it
-    echo "SYMLINK_VAR=value" > "$test_dir/real.env"
+    echo "SYMLINK_VAR=value" >"$test_dir/real.env"
     ln -s real.env "$test_dir/link.env"
 
     create_env_test_config "$test_dir" '
@@ -2085,7 +2094,7 @@ test_env_log_hygiene() {
     test_vol="containai-test-env-hygiene-${TEST_RUN_ID}"
 
     # Create .env with a line that will cause warning (no =)
-    cat > "$test_dir/test.env" << 'EOF'
+    cat >"$test_dir/test.env" <<'EOF'
 VALID_VAR=valid_value
 this line has no equals and secret_data_here
 ANOTHER_VAR=another_value
@@ -2452,7 +2461,7 @@ test_env_file_multiline_skipped() {
     test_vol="containai-test-env-file-ml-${TEST_RUN_ID}"
 
     # Create .env with unclosed quote (multiline value indicator)
-    cat > "$test_dir/test.env" << 'EOF'
+    cat >"$test_dir/test.env" <<'EOF'
 NORMAL_VAR=normal
 MULTILINE_VAR="this starts
 SHOULD_BE_SKIPPED=this line looks like continuation
@@ -2631,11 +2640,11 @@ data_volume = "'"$test_vol"'"
     # Create alternate source directory with distinctive content
     # This mimics a different $HOME with claude configs
     mkdir -p "$alt_source_dir/.claude"
-    echo '{"test_marker": "from_alt_source_12345"}' > "$alt_source_dir/.claude/settings.json"
+    echo '{"test_marker": "from_alt_source_12345"}' >"$alt_source_dir/.claude/settings.json"
 
     # Also create a distinctive plugins directory structure
     mkdir -p "$alt_source_dir/.claude/plugins"
-    echo '{"plugins": {}}' > "$alt_source_dir/.claude/plugins/installed_plugins.json"
+    echo '{"plugins": {}}' >"$alt_source_dir/.claude/plugins/installed_plugins.json"
 
     local import_output import_exit=0
     # Run import with --from pointing to alternate source
@@ -2707,7 +2716,7 @@ from_host = true
     local archive_src
     archive_src=$(mktemp -d)
     mkdir -p "$archive_src/claude"
-    echo '{"restore_marker": "tgz_restore_test_67890"}' > "$archive_src/claude/settings.json"
+    echo '{"restore_marker": "tgz_restore_test_67890"}' >"$archive_src/claude/settings.json"
     # Create archive (relative paths from inside archive_src)
     (cd "$archive_src" && tar -czf "$archive_path" claude/)
     rm -rf "$archive_src"
@@ -2891,12 +2900,12 @@ test_tgz_import_idempotent() {
     local archive_src
     archive_src=$(mktemp -d)
     mkdir -p "$archive_src/claude/plugins" "$archive_src/config/gh"
-    echo '{"idempotent_test": "first_import_12345"}' > "$archive_src/claude/settings.json"
-    echo '{"auth": "test"}' > "$archive_src/claude/credentials.json"
-    echo 'oauth_token: idemp_test' > "$archive_src/config/gh/hosts.yml"
+    echo '{"idempotent_test": "first_import_12345"}' >"$archive_src/claude/settings.json"
+    echo '{"auth": "test"}' >"$archive_src/claude/credentials.json"
+    echo 'oauth_token: idemp_test' >"$archive_src/config/gh/hosts.yml"
     # Create nested content
     mkdir -p "$archive_src/claude/plugins/test"
-    echo '{"plugin": true}' > "$archive_src/claude/plugins/test/config.json"
+    echo '{"plugin": true}' >"$archive_src/claude/plugins/test/config.json"
     (cd "$archive_src" && tar -czf "$archive_path" .)
     rm -rf "$archive_src"
 
@@ -2996,7 +3005,7 @@ test_invalid_tgz_error() {
     register_test_volume "$test_vol"
 
     # Create an invalid "tgz" file (not a valid gzip tarball)
-    echo "This is not a valid tgz archive" > "$invalid_archive"
+    echo "This is not a valid tgz archive" >"$invalid_archive"
 
     # Attempt import with invalid archive - should fail
     local import_output import_exit=0
@@ -3023,11 +3032,11 @@ test_invalid_tgz_error() {
     local archive_src
     archive_src=$(mktemp -d)
     mkdir -p "$archive_src/test"
-    echo "test content" > "$archive_src/test/file.txt"
+    echo "test content" >"$archive_src/test/file.txt"
     (cd "$archive_src" && tar -czf "$corrupt_archive" .)
     rm -rf "$archive_src"
     # Truncate the file to corrupt it
-    head -c 50 "$corrupt_archive" > "$corrupt_archive.tmp"
+    head -c 50 "$corrupt_archive" >"$corrupt_archive.tmp"
     mv "$corrupt_archive.tmp" "$corrupt_archive"
 
     local corrupt_output corrupt_exit=0
@@ -3122,7 +3131,7 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     # Create target directory INSIDE the synced subtree (.config/gh)
     mkdir -p "$alt_source_dir/.config/gh/real-target"
-    echo "hosts content" > "$alt_source_dir/.config/gh/real-target/hosts.yml"
+    echo "hosts content" >"$alt_source_dir/.config/gh/real-target/hosts.yml"
 
     # Test case 1: Internal absolute symlink (target INSIDE synced subtree)
     # Link points from .config/gh/link to .config/gh/real-target (both inside gh/)
@@ -3282,7 +3291,7 @@ data_volume = "'"$test_vol"'"
     # Create source with symlink at same path as existing directory
     # Target is inside the synced subtree (.config/gh)
     mkdir -p "$pitfall_source_dir/.config/gh/real-subdir"
-    echo "new content" > "$pitfall_source_dir/.config/gh/real-subdir/new.txt"
+    echo "new content" >"$pitfall_source_dir/.config/gh/real-subdir/new.txt"
     ln -s "$pitfall_source_dir/.config/gh/real-subdir" "$pitfall_source_dir/.config/gh/subdir"
 
     # Create config for pitfall test

@@ -3,7 +3,7 @@
 ## Description
 Add integration tests for env var import feature covering all acceptance criteria including context handling and edge cases.
 
-**Size:** M  
+**Size:** M
 **Files:** `agent-sandbox/test-sync-integration.sh` (extend existing)
 
 ## Approach

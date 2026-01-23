@@ -257,8 +257,7 @@ _cai_install_sysbox_wsl2() {
     fi
 
     case "$distro" in
-        ubuntu|debian)
-            ;;
+        ubuntu | debian) ;;
         *)
             _cai_error "Sysbox auto-install only supports Ubuntu/Debian"
             _cai_error "  Detected distro: ${distro:-unknown}"
@@ -401,7 +400,7 @@ _cai_install_sysbox_wsl2() {
     (
         set -e
         tmpdir=$(mktemp -d)
-        trap "rm -rf '$tmpdir'" EXIT
+        trap 'rm -rf "$tmpdir"' EXIT
         deb_file="$tmpdir/sysbox-ce.deb"
 
         echo "[STEP] Downloading Sysbox from: $download_url"
@@ -508,7 +507,8 @@ _cai_configure_daemon_json() {
 
     # Backup existing config
     if [[ -f "$daemon_json" ]]; then
-        local backup_file="${daemon_json}.bak.$(date +%Y%m%d-%H%M%S)"
+        local backup_file
+        backup_file="${daemon_json}.bak.$(date +%Y%m%d-%H%M%S)"
         if ! sudo cp "$daemon_json" "$backup_file"; then
             _cai_warn "Failed to backup existing daemon.json"
         else
@@ -574,23 +574,25 @@ _cai_configure_docker_socket() {
             new_execstart="$existing_execstart -H unix://$socket_path"
             _cai_info "Appending socket to existing Docker configuration"
 
-            dropin_content=$(cat <<EOF
+            dropin_content=$(
+                cat <<EOF
 [Service]
 ExecStart=
 ExecStart=$new_execstart
 EOF
-)
+            )
         fi
     else
         # No existing ExecStart found (unusual but handle it)
         # Use minimal default that matches most distros
         _cai_warn "No existing Docker ExecStart found, using default"
-        dropin_content=$(cat <<EOF
+        dropin_content=$(
+            cat <<EOF
 [Service]
 ExecStart=
 ExecStart=/usr/bin/dockerd -H fd:// -H unix://$socket_path --containerd=/run/containerd/containerd.sock
 EOF
-)
+        )
     fi
 
     if [[ "$verbose" == "true" ]]; then
@@ -1120,8 +1122,8 @@ _cai_lima_create_vm() {
     template_file=$(mktemp "${TMPDIR:-/tmp}/containai-lima.XXXXXX.yaml")
     # Use subshell trap for cleanup to avoid affecting main shell
     (
-        trap "rm -f '$template_file'" EXIT
-        _cai_lima_template > "$template_file"
+        trap 'rm -f "$template_file"' EXIT
+        _cai_lima_template >"$template_file"
 
         if [[ "$verbose" == "true" ]]; then
             printf '%s\n' "[INFO] Lima template:"
@@ -1524,10 +1526,10 @@ _cai_linux_detect_distro() {
 
     # Check if this is a supported distribution for auto-install
     case "$_CAI_LINUX_DISTRO" in
-        ubuntu|debian)
+        ubuntu | debian)
             return 0
             ;;
-        fedora|rhel|centos|arch|manjaro)
+        fedora | rhel | centos | arch | manjaro)
             # These are recognized but not auto-install supported
             return 1
             ;;
@@ -1720,7 +1722,7 @@ _cai_install_sysbox_linux() {
     (
         set -e
         tmpdir=$(mktemp -d)
-        trap "rm -rf '$tmpdir'" EXIT
+        trap 'rm -rf "$tmpdir"' EXIT
         deb_file="$tmpdir/sysbox-ce.deb"
 
         echo "[STEP] Downloading Sysbox from: $download_url"
@@ -2014,11 +2016,11 @@ _cai_setup() {
                 dry_run="true"
                 shift
                 ;;
-            --verbose|-v)
+            --verbose | -v)
                 verbose="true"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _cai_setup_help
                 return 0
                 ;;
@@ -2218,11 +2220,11 @@ _cai_secure_engine_validate() {
     # Parse arguments (same pattern as _cai_setup)
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --verbose|-v)
+            --verbose | -v)
                 verbose="true"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _cai_validate_help
                 return 0
                 ;;

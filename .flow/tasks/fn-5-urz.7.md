@@ -25,26 +25,26 @@ containai run [--agent claude|gemini] [--workspace <path>] [-- <agent args>]
 containai_run() {
     local agent="${1:-claude}"
     local workspace="${2:-.}"
-    
+
     # Validate workspace exists
     if [[ ! -d "$workspace" ]]; then
         _cai_error "Workspace not found: $workspace"
         return 1
     fi
-    
+
     # Build command
     local cmd=(docker sandbox run)
     cmd+=(--credentials=none)
     cmd+=(--workspace "$workspace")
     cmd+=("$agent")
-    
+
     # Pass through remaining args after --
     shift 2 || true
     if [[ "$1" == "--" ]]; then
         shift
         cmd+=("$@")
     fi
-    
+
     "${cmd[@]}"
 }
 ```

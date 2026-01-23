@@ -20,7 +20,7 @@ def find_workspace(config: dict, workspace: str) -> dict | None:
     """Find workspace with longest matching path (segment boundary)."""
     workspace = Path(workspace).resolve()
     workspaces = config.get("workspace", {})
-    
+
     best_match, best_len = None, 0
     for path_str, section in workspaces.items():
         cfg_path = Path(path_str)
@@ -38,14 +38,14 @@ def main():
     if len(sys.argv) < 3:
         print("Usage: parse-toml.py <config> <workspace>", file=sys.stderr)
         sys.exit(1)
-    
+
     with open(sys.argv[1], "rb") as f:
         config = tomllib.load(f)
-    
+
     ws = find_workspace(config, sys.argv[2])
     agent = config.get("agent", {})
     default_excludes = config.get("default_excludes", [])
-    
+
     print(json.dumps({
         "data_volume": ws.get("data_volume") if ws else agent.get("data_volume", "sandbox-agent-data"),
         "excludes": list(set(default_excludes + (ws.get("excludes", []) if ws else [])))

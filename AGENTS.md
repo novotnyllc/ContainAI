@@ -48,6 +48,8 @@ docs/                   # Architecture, config, quickstart
 ## Code Conventions
 
 - **Bash 4.0+ required** (not zsh or fish)
+- Prefer `bun`/`bunx` over `npm`/`npx` for JavaScript tooling
+- Prefer `uv`/`uvx` over `pip`/`pipx` for Python tooling
 - Use `printf` instead of `echo` for portability
 - Use `command -v` instead of `which`
 - Use POSIX grep patterns (`[[:space:]]` not `\s`)

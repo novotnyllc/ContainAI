@@ -37,7 +37,7 @@ index f65569c..65578a2 100644
 @@ -81,6 +82,11 @@ if ! source "$_CAI_SCRIPT_DIR/lib/docker.sh"; then
      return 1
  fi
- 
+
 +if ! source "$_CAI_SCRIPT_DIR/lib/eci.sh"; then
 +    echo "[ERROR] Failed to source lib/eci.sh" >&2
 +    return 1

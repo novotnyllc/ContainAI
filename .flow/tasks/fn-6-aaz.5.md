@@ -3,7 +3,7 @@
 ## Description
 Update container entrypoint to safely load `.env` file with CRLF handling and `set -e` safety.
 
-**Size:** S  
+**Size:** S
 **Files:** `agent-sandbox/entrypoint.sh`
 
 ## Approach

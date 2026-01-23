@@ -48,13 +48,13 @@ ContainAI supports two mutually exclusive execution modes:
 _cai_find_config() {
     local workspace="${1:-$(pwd)}"
     local explicit_config="${2:-}"
-    
+
     # Validate workspace first
     [[ -d "$workspace" ]] || {
         echo "[ERROR] Workspace not found: $workspace" >&2
         return 2
     }
-    
+
     # 1. Explicit --config
     if [[ -n "$explicit_config" ]]; then
         [[ -f "$explicit_config" ]] || {
@@ -64,7 +64,7 @@ _cai_find_config() {
         echo "$explicit_config"
         return 0
     fi
-    
+
     # 2. CONTAINAI_CONFIG env
     if [[ -n "${CONTAINAI_CONFIG:-}" ]]; then
         [[ -f "$CONTAINAI_CONFIG" ]] || {
@@ -74,7 +74,7 @@ _cai_find_config() {
         echo "$CONTAINAI_CONFIG"
         return 0
     fi
-    
+
     # 3. Walk up to git root or / (per fn-4-vet spec)
     local dir="$workspace"
     local git_root=""
@@ -91,11 +91,11 @@ _cai_find_config() {
         [[ -n "$git_root" && "$dir" == "$git_root" ]] && break
         dir=$(dirname "$dir")
     done
-    
+
     # 4. User config (XDG)
     local user_config="${XDG_CONFIG_HOME:-$HOME/.config}/containai/config.toml"
     [[ -f "$user_config" ]] && { echo "$user_config"; return 0; }
-    
+
     return 1  # No config
 }
 ```
@@ -107,18 +107,18 @@ _cai_resolve_volume() {
     local workspace="${1:-$(pwd)}"
     local explicit_config="${2:-}"
     local data_volume="${3:-}"
-    
+
     # 1. Explicit --data-volume
     [[ -n "$data_volume" ]] && { echo "$data_volume"; return 0; }
-    
+
     # 2. CONTAINAI_DATA_VOLUME env
     [[ -n "${CONTAINAI_DATA_VOLUME:-}" ]] && { echo "$CONTAINAI_DATA_VOLUME"; return 0; }
-    
+
     # 3. Config file
     local config_path find_rc
     config_path=$(_cai_find_config "$workspace" "$explicit_config" 2>&1)
     find_rc=$?
-    
+
     case $find_rc in
         0)
             # Check Python availability and version

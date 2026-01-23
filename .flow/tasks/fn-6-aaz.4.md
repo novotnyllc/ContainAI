@@ -3,7 +3,7 @@
 ## Description
 Wire up env var import into `cai import` with full context plumbing for ALL docker commands.
 
-**Size:** M  
+**Size:** M
 **Files:** `agent-sandbox/lib/import.sh`, `agent-sandbox/containai.sh`
 
 ## Approach
@@ -67,7 +67,7 @@ Integrated env import with cai import command by:
 4. **Applied context to ALL docker operations in lib/import.sh**:
    - Volume inspect/create
    - Rsync containers
-   - Transform containers  
+   - Transform containers
    - Orphan cleanup
    - New .env helper via `_containai_import_env`
 5. **Called _containai_import_env** after dotfile sync with 5 params: ctx, volume, workspace, explicit_config, dry_run

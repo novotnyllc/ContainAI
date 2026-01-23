@@ -3,7 +3,7 @@
 ## Description
 Add `_containai_resolve_env_config()` function to `lib/config.sh` for **dedicated** env import configuration resolution, independent of volume/excludes.
 
-**Size:** S  
+**Size:** S
 **Files:** `agent-sandbox/lib/config.sh`
 
 ## Approach

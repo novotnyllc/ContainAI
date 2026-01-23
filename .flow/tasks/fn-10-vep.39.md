@@ -19,7 +19,7 @@ Implement workspace-to-container auto-mapping with clear lifecycle model: `--ini
      local path="$1"
      local normalized
      normalized=$(cd "$path" 2>/dev/null && pwd -P || printf '%s' "$path")
-     
+
      if command -v shasum >/dev/null 2>&1; then
        printf '%s' "$normalized" | shasum -a 256 | cut -c1-12
      elif command -v sha256sum >/dev/null 2>&1; then
@@ -28,7 +28,7 @@ Implement workspace-to-container auto-mapping with clear lifecycle model: `--ini
        printf '%s' "$normalized" | openssl dgst -sha256 | awk '{print substr($NF,1,12)}'
      fi
    }
-   
+
    container_name="containai-$(_cai_hash_path "$workspace_path")"
    ```
 

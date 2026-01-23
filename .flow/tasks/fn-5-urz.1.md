@@ -8,7 +8,7 @@ Validate whether `docker sandbox run` respects Docker context selection (`--cont
 ## What to Test
 
 1. Create a test Docker context pointing to an alternate endpoint (or mock)
-2. Run `docker --context <test-context> sandbox run claude` 
+2. Run `docker --context <test-context> sandbox run claude`
 3. Observe which Docker daemon receives the request
 4. Test with `DOCKER_CONTEXT=<test-context> docker sandbox run claude`
 

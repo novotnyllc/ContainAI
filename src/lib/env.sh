@@ -217,7 +217,7 @@ _env_parse_file() {
         # Output assignment (escape single quotes in value for safety)
         # Use printf %q for bash-safe quoting
         printf '%s[%s]=%q\n' "$output_var" "$key" "$value"
-    done < "$file"
+    done <"$file"
 
     return 0
 }
@@ -366,7 +366,7 @@ if ef is not None:
         if [[ -n "$line" ]]; then
             allowlist+=("$line")
         fi
-    done <<< "$import_list"
+    done <<<"$import_list"
 
     # Empty allowlist: skip with [INFO] per spec
     # This logs only when [env] section exists but import is empty/invalid

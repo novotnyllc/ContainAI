@@ -25,7 +25,7 @@ containai_run() {
     local allow_host_socket=false
     local ack_creds=false
     local ack_socket=false
-    
+
     # Parse flags
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -37,14 +37,14 @@ containai_run() {
         esac
         shift
     done
-    
+
     # Validate acknowledgements
     if $allow_host_creds && ! $ack_creds; then
         _cai_error "--allow-host-credentials requires --i-understand-this-exposes-host-credentials"
         _cai_error "This will share ~/.ssh, ~/.gitconfig with the sandbox"
         return 1
     fi
-    
+
     # Build command with unsafe options
     if $allow_host_creds; then
         cmd+=(--credentials=host)

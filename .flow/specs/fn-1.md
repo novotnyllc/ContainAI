@@ -94,7 +94,7 @@ A Docker image template for a development sandbox with .NET SDK (latest LTS), No
      ```dockerfile
      # Required workload - build fails if unavailable
      RUN dotnet workload install wasm-tools
-     
+
      # Optional workload - warn and continue if unavailable
      RUN dotnet workload install wasm-tools-net9 || echo "WARNING: wasm-tools-net9 unavailable (optional)"
      ```
@@ -230,7 +230,7 @@ A Docker image template for a development sandbox with .NET SDK (latest LTS), No
 4. **claude/sync-plugins.sh** (existing script):
    - Syncs Claude plugins and settings to volumes
    - **Does NOT sync credentials** - credentials are created by `claude login` inside container
-   - MUST use  `alpine` 
+   - MUST use  `alpine`
 ### Integration with Existing Code
 
 - Build on existing scripts in `claude/` directory

@@ -47,7 +47,7 @@ done
 - [ ] Exclude patterns passed to rsync
 - [ ] `--dry-run` shows what would sync without changes
 - [ ] `--no-excludes` ignores all exclude patterns
-- [ ] Outputs "Using data volume: <name>" 
+- [ ] Outputs "Using data volume: <name>"
 - [ ] Can be sourced with lib/config.sh
 ## Done summary
 # fn-4-vet.10 Summary

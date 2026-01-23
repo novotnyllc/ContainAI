@@ -70,16 +70,16 @@ provision:
     script: |
       #!/bin/bash
       set -eux
-      
+
       # Install Docker
       curl -fsSL https://get.docker.com | sh
       usermod -aG docker "${LIMA_CIDATA_USER}"
-      
+
       # Install Sysbox (x86_64 or arm64)
       ARCH=$(dpkg --print-architecture)
       wget -O /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v0.6.7/sysbox-ce_0.6.7-0.linux_${ARCH}.deb"
       apt-get install -y /tmp/sysbox.deb
-      
+
       # Configure Docker with Sysbox runtime (NOT as default)
       cat > /etc/docker/daemon.json << 'EOF'
       {
@@ -90,7 +90,7 @@ provision:
         }
       }
       EOF
-      
+
       systemctl restart docker
 
 portForwards:
@@ -173,10 +173,10 @@ provision:
     script: |
       # Install Docker
       curl -fsSL https://get.docker.com | sh
-      
+
       # Install Sysbox (x86_64 only for now)
       # ... sysbox installation
-      
+
       # Configure daemon
       cat > /etc/docker/daemon.json << 'EOF'
       {
@@ -184,7 +184,7 @@ provision:
         "userns-remap": "default"
       }
       EOF
-      
+
       systemctl restart docker
 ```
 

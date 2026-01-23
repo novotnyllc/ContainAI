@@ -3,7 +3,7 @@
 ## Description
 Fix the Lima VM "socket exists but docker info failed" issue. Handle both new VMs and existing VMs that need repair.
 
-**Size:** M  
+**Size:** M
 **Files:** `src/lib/setup.sh`, `src/lib/doctor.sh`
 
 ## Approach
@@ -16,7 +16,7 @@ Fix the Lima VM "socket exists but docker info failed" issue. Handle both new VM
 2. **Fix for existing VMs** in `cai setup`:
    - Detect existing containai-secure VM: `limactl list | grep containai-secure`
    - Test docker access: `limactl shell containai-secure docker info`
-   - If permission denied: 
+   - If permission denied:
      ```bash
      limactl shell containai-secure sudo usermod -aG docker $USER
      limactl stop containai-secure

@@ -66,13 +66,13 @@ detect_os() {
                 # shellcheck disable=SC1091
                 . /etc/os-release
                 case "${ID:-}" in
-                    ubuntu|debian)
+                    ubuntu | debian)
                         echo "debian"
                         ;;
-                    fedora|rhel|centos|rocky|almalinux)
+                    fedora | rhel | centos | rocky | almalinux)
                         echo "fedora"
                         ;;
-                    arch|manjaro)
+                    arch | manjaro)
                         echo "arch"
                         ;;
                     *)
@@ -245,7 +245,7 @@ install_containai() {
     # Show installed version
     if [[ -f "$INSTALL_DIR/VERSION" ]]; then
         local version
-        version=$(tr -d '[:space:]' < "$INSTALL_DIR/VERSION")
+        version=$(tr -d '[:space:]' <"$INSTALL_DIR/VERSION")
         info "Installed version: $version"
     fi
 }
@@ -259,7 +259,7 @@ setup_path() {
     # Create wrapper script (bake in INSTALL_DIR so it works without env var)
     local wrapper="$BIN_DIR/cai"
     # Note: Using unquoted heredoc so $INSTALL_DIR expands at install time
-    cat > "$wrapper" << WRAPPER_EOF
+    cat >"$wrapper" <<WRAPPER_EOF
 #!/usr/bin/env bash
 # ContainAI CLI wrapper
 # This wrapper sources containai.sh and runs the cai function
@@ -349,7 +349,7 @@ WRAPPER_EOF
                     echo ""
                     echo "# Added by ContainAI installer"
                     echo "$path_line"
-                } >> "$rc_file"
+                } >>"$rc_file"
                 success "Added $BIN_DIR to PATH in $rc_file"
                 warn "Run 'source $rc_file' or start a new terminal to use cai"
             else
@@ -360,7 +360,7 @@ WRAPPER_EOF
             {
                 echo "# Added by ContainAI installer"
                 echo "$path_line"
-            } > "$rc_file"
+            } >"$rc_file"
             success "Created $rc_file with PATH entry"
             warn "Run 'source $rc_file' or start a new terminal to use cai"
         fi

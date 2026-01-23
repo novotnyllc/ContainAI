@@ -3,13 +3,13 @@
 ## Description
 Configure security defaults for all container runs. Docker applies MaskedPaths/ReadonlyPaths by default - our job is to NOT disable them and validate they're applied.
 
-**Size:** S  
+**Size:** S
 **Files:** `src/lib/container.sh`
 
 ## Approach
 
 1. **Ensure we never disable security defaults**:
-   - NO `--security-opt systempaths=unconfined` 
+   - NO `--security-opt systempaths=unconfined`
    - NO `--privileged` flag
 
 2. **Defer aggressive hardening** (document as future work):

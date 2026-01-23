@@ -233,7 +233,7 @@ cai run /workspace [--dry-run]
 # Setup (installs containai docker-ce + sysbox)
 cai setup
 
-# Diagnostics  
+# Diagnostics
 cai doctor                 # Validates containai docker, sysbox, SSH
 cai doctor --fix           # Auto-fix common issues
 

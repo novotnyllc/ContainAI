@@ -289,7 +289,7 @@ _cai_uninstall_containers() {
     local running_count=0
     local entry cid cname cctx
     for entry in "${all_containers[@]}"; do
-        IFS=':' read -r cid cname cctx <<< "$entry"
+        IFS=':' read -r cid cname cctx <<<"$entry"
         local state
         if [[ -n "$cctx" ]]; then
             state=$(docker --context "$cctx" inspect --format '{{.State.Running}}' "$cid" 2>/dev/null || true)
@@ -310,7 +310,7 @@ _cai_uninstall_containers() {
         local entry
         for entry in "${all_containers[@]}"; do
             local cid cname cctx
-            IFS=':' read -r cid cname cctx <<< "$entry"
+            IFS=':' read -r cid cname cctx <<<"$entry"
             if [[ -n "$cctx" ]]; then
                 _cai_info "[dry-run] Would remove container: $cname ($cid) [context: $cctx]"
             else
@@ -327,7 +327,7 @@ _cai_uninstall_containers() {
     local entry removed=0 failed=0
     for entry in "${all_containers[@]}"; do
         local cid cname cctx
-        IFS=':' read -r cid cname cctx <<< "$entry"
+        IFS=':' read -r cid cname cctx <<<"$entry"
 
         local display_name="${cname:-$cid}"
         if [[ -n "$cctx" ]]; then
@@ -386,14 +386,14 @@ _cai_uninstall_volumes_from_array() {
     local -A seen_volumes
     local entry vol ctx
     for entry in "${volumes_ref[@]}"; do
-        IFS=':' read -r vol ctx <<< "$entry"
+        IFS=':' read -r vol ctx <<<"$entry"
         if [[ -n "$vol" ]]; then
             seen_volumes["$vol:$ctx"]=1
         fi
     done
 
     for key in "${!seen_volumes[@]}"; do
-        IFS=':' read -r vol ctx <<< "$key"
+        IFS=':' read -r vol ctx <<<"$key"
 
         local display_name="$vol"
         if [[ -n "$ctx" ]]; then
@@ -461,7 +461,7 @@ _cai_uninstall() {
                 force="true"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _cai_uninstall_help
                 return 0
                 ;;
@@ -524,8 +524,7 @@ _cai_uninstall() {
             return 0
         fi
         case "$response" in
-            [yY]|[yY][eE][sS])
-                ;;
+            [yY] | [yY][eE][sS]) ;;
             *)
                 printf '%s\n' "Cancelled."
                 return 0

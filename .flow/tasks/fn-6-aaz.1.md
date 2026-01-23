@@ -3,7 +3,7 @@
 ## Description
 Extend `parse-toml.py` to support the `[env]` section for env var import configuration.
 
-**Size:** S  
+**Size:** S
 **Files:** `agent-sandbox/parse-toml.py`
 
 ## Approach

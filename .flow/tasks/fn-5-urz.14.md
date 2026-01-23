@@ -28,22 +28,22 @@ containai sandbox clear-credentials [--workspace <path>] [--agent claude|gemini]
 containai_sandbox_clear_credentials() {
     local workspace="${1:-.}"
     local agent="${2:-claude}"
-    
+
     workspace=$(realpath "$workspace")
-    
+
     # Credential volume naming convention (agent-specific)
     # This may need investigation - Docker docs don't specify exact names
     local volume_name="sandbox-${agent}-credentials"
-    
+
     _cai_warn "This will remove stored credentials for $agent in $workspace"
     _cai_warn "You may need to re-authenticate after this operation"
-    
+
     # Check if volume exists
     if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
         _cai_info "No credential volume found: $volume_name"
         return 0
     fi
-    
+
     # Remove volume
     docker volume rm "$volume_name"
     _cai_info "[OK] Credential volume removed"

@@ -3,7 +3,7 @@
 ## Description
 Implement workspace symlink strategy in entrypoint.sh using environment variable (not docker inspect). Keep existing `/home/agent/workspace` mount path to minimize blast radius.
 
-**Size:** M  
+**Size:** M
 **Files:** `src/scripts/entrypoint.sh`, `src/lib/container.sh`
 
 ## Approach
@@ -12,7 +12,7 @@ Implement workspace symlink strategy in entrypoint.sh using environment variable
    ```bash
    -e CAI_HOST_WORKSPACE="$workspace_resolved"
    ```
-   
+
 2. **Keep existing mount path**: `/home/agent/workspace` (not `/workspace`)
    - This matches current codebase, CLI, docs, and tests
    - Minimizes changes needed
@@ -22,7 +22,7 @@ Implement workspace symlink strategy in entrypoint.sh using environment variable
    setup_workspace_symlink() {
      local host_path="${CAI_HOST_WORKSPACE:-}"
      local mount_path="/home/agent/workspace"
-     
+
      if [[ -n "$host_path" && "$host_path" != "$mount_path" ]]; then
        mkdir -p "$(dirname "$host_path")" 2>/dev/null || true
        ln -sfn "$mount_path" "$host_path" 2>/dev/null || true
@@ -43,7 +43,7 @@ Implement workspace symlink strategy in entrypoint.sh using environment variable
    ```bash
    -v "$workspace_resolved:/workspace:rw"
    ```
-   
+
 2. **In container.sh**: Pass original path as label:
    ```bash
    --label "containai.workspace=$workspace_resolved"

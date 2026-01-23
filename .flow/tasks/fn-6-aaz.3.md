@@ -3,7 +3,7 @@
 ## Description
 Implement core env var import logic with proper permission handling and multiline warning formats.
 
-**Size:** M  
+**Size:** M
 **Files:** `agent-sandbox/lib/env.sh` (new file)
 
 ## Approach

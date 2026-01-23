@@ -3,7 +3,7 @@
 ## Description
 Add git configuration import to the `cai import` command. This ensures git commits work inside the container with the user's identity.
 
-**Size:** S  
+**Size:** S
 **Files:** `src/lib/import.sh`, `src/scripts/entrypoint.sh`
 
 ## Approach
@@ -13,7 +13,7 @@ Add git configuration import to the `cai import` command. This ensures git commi
    git_name=$(git config --global user.name 2>/dev/null || echo "")
    git_email=$(git config --global user.email 2>/dev/null || echo "")
    ```
-   
+
 2. Write to `/mnt/agent-data/.gitconfig`:
    ```ini
    [user]

@@ -43,7 +43,7 @@ Updated SECURITY.md to use GitHub's security advisory pattern instead of email-b
 ## Acceptance Criteria Met
 
 - [x] No email-based vulnerability reporting
-- [x] Links to GitHub security advisories  
+- [x] Links to GitHub security advisories
 - [x] Responsible disclosure process documented
 - [x] Expected response time stated
 - [x] Scope clearly defined

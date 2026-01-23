@@ -130,7 +130,7 @@ readonly DATA_VOLUME
 _sync_resolve_config_volume() {
     local explicit_config="${1:-}"
     local config_file=""
-    
+
     if [[ -n "$explicit_config" ]]; then
         if [[ ! -f "$explicit_config" ]]; then
             echo "[ERROR] Config file not found: $explicit_config" >&2
@@ -140,9 +140,9 @@ _sync_resolve_config_volume() {
     else
         config_file=$(_sync_find_config)  # Walks up from $PWD
     fi
-    
+
     [[ -z "$config_file" ]] && return 0
-    
+
     if command -v python3 >/dev/null 2>&1; then
         local script_dir
         script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -240,7 +240,7 @@ readonly DATA_VOLUME
 _sync_resolve_config_volume() {
     local explicit_config="${1:-}"
     local config_file=""
-    
+
     # Explicit path?
     if [[ -n "$explicit_config" ]]; then
         if [[ ! -f "$explicit_config" ]]; then
@@ -252,11 +252,11 @@ _sync_resolve_config_volume() {
         # Walk up from $PWD
         config_file=$(_sync_find_config)
     fi
-    
+
     if [[ -z "$config_file" ]]; then
         return 0  # No config, use default
     fi
-    
+
     # Parse with Python if available
     if command -v python3 >/dev/null 2>&1; then
         local script_dir

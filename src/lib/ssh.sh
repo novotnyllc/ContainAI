@@ -190,7 +190,7 @@ _cai_setup_ssh_key() {
         # Verify public key exists too
         if [[ ! -f "$pubkey_path" ]]; then
             _cai_warn "Private key exists but public key missing, regenerating public key"
-            if ! ssh-keygen -y -f "$key_path" > "$pubkey_path" 2>/dev/null; then
+            if ! ssh-keygen -y -f "$key_path" >"$pubkey_path" 2>/dev/null; then
                 _cai_error "Failed to regenerate public key from private key"
                 return 1
             fi
@@ -259,7 +259,7 @@ _cai_check_ssh_version() {
         min_major="${_CAI_SSH_MIN_VERSION%%.*}"
         min_minor="${_CAI_SSH_MIN_VERSION#*.}"
 
-        if (( major > min_major )) || { (( major == min_major )) && (( minor >= min_minor )); }; then
+        if ((major > min_major)) || { ((major == min_major)) && ((minor >= min_minor)); }; then
             return 0
         else
             return 1
@@ -346,7 +346,7 @@ _cai_setup_ssh_config() {
     # Create ~/.ssh/config if missing
     if [[ ! -f "$ssh_config" ]]; then
         _cai_debug "Creating SSH config file: $ssh_config"
-        if ! printf '%s\n' "$include_line" > "$ssh_config"; then
+        if ! printf '%s\n' "$include_line" >"$ssh_config"; then
             _cai_error "Failed to create SSH config: $ssh_config"
             return 1
         fi
@@ -395,7 +395,7 @@ _cai_setup_ssh_config() {
                 # Remove any existing Include line for containai.d to avoid duplicates
                 # Use same case-insensitive pattern to remove all variants (tilde, $HOME, absolute path)
                 grep -vE "$include_pattern" "$ssh_config" || true
-            } > "$temp_file"; then
+            } >"$temp_file"; then
                 _cai_error "Failed to prepare SSH config update"
                 rm -f "$temp_file"
                 return 1
@@ -498,7 +498,7 @@ _cai_find_available_port() {
         _cai_error "Invalid port range: $range_start-$range_end"
         return 2
     fi
-    if (( range_start > range_end )); then
+    if ((range_start > range_end)); then
         _cai_error "Invalid port range: start ($range_start) must be <= end ($range_end)"
         return 2
     fi
@@ -520,7 +520,7 @@ _cai_find_available_port() {
             used_ports_map["$line"]=1
             actively_used_map["$line"]=1
         fi
-    done <<< "$used_ports"
+    done <<<"$used_ports"
 
     # Also collect ports reserved by container labels (including stopped containers)
     # This prevents allocating the same port to multiple containers
@@ -531,7 +531,7 @@ _cai_find_available_port() {
             if [[ -n "$line" && "$line" != "$ignore_port" ]]; then
                 used_ports_map["$line"]=1
             fi
-        done <<< "$reserved_ports"
+        done <<<"$reserved_ports"
     fi
 
     # For ignore_port with force_ignore, also remove from used_ports_map even if actively in use
@@ -541,7 +541,7 @@ _cai_find_available_port() {
     fi
 
     # Find first available port in range (inclusive)
-    for (( port = range_start; port <= range_end; port++ )); do
+    for ((port = range_start; port <= range_end; port++)); do
         if [[ -z "${used_ports_map[$port]:-}" ]]; then
             printf '%s' "$port"
             return 0
@@ -549,7 +549,7 @@ _cai_find_available_port() {
     done
 
     # All ports exhausted - provide actionable error with container list
-    local port_count=$(( range_end - range_start + 1 ))
+    local port_count=$((range_end - range_start + 1))
     _cai_error "All $port_count SSH ports in range $range_start-$range_end are in use"
     _cai_error ""
 
@@ -560,7 +560,7 @@ _cai_find_available_port() {
             _cai_error "Containers using SSH ports:"
             while IFS= read -r line; do
                 [[ -n "$line" ]] && _cai_error "  $line"
-            done <<< "$container_list"
+            done <<<"$container_list"
             _cai_error ""
         fi
     fi
@@ -600,7 +600,7 @@ _cai_list_containers_with_ports() {
         if [[ -n "$port" ]] && [[ "$port" != "<no value>" ]]; then
             printf '%s: port %s\n' "$name" "$port"
         fi
-    done <<< "$container_output"
+    done <<<"$container_output"
 }
 
 # Get all SSH ports reserved by ContainAI containers (via labels)
@@ -633,7 +633,7 @@ _cai_get_reserved_container_ports() {
         if [[ "$line" =~ ^[0-9]+$ ]]; then
             printf '%s\n' "$line"
         fi
-    done <<< "$ports_output"
+    done <<<"$ports_output"
 }
 
 # Set the SSH port label on a container
@@ -740,7 +740,7 @@ _cai_allocate_ssh_port() {
     if existing_port=$(_cai_get_container_ssh_port "$container_name" "$context"); then
         # Validate the existing port is a number and in range
         if [[ "$existing_port" =~ ^[0-9]+$ ]]; then
-            if (( existing_port >= range_start && existing_port <= range_end )); then
+            if ((existing_port >= range_start && existing_port <= range_end)); then
                 # Check if the port is still available for use
                 if ! used_ports=$(_cai_get_used_ports); then
                     # Cannot verify port availability - fail with error, not silent success
@@ -756,7 +756,7 @@ _cai_allocate_ssh_port() {
                         port_in_use=true
                         break
                     fi
-                done <<< "$used_ports"
+                done <<<"$used_ports"
 
                 # If port is not in use at all, reuse it (container is stopped)
                 if [[ "$port_in_use" == "false" ]]; then
@@ -806,7 +806,7 @@ _cai_is_port_available() {
         if [[ "$line" == "$port" ]]; then
             return 1
         fi
-    done <<< "$used_ports"
+    done <<<"$used_ports"
 
     return 0
 }
@@ -830,8 +830,8 @@ _cai_wait_for_sshd() {
     local ssh_port="$2"
     local context="${3:-}"
     local -a docker_cmd=(docker)
-    local wait_ms=100  # Start at 100ms
-    local max_interval_ms=2000  # Cap at 2 seconds between retries
+    local wait_ms=100          # Start at 100ms
+    local max_interval_ms=2000 # Cap at 2 seconds between retries
     local attempt=0
 
     # Validate port is numeric
@@ -856,7 +856,7 @@ _cai_wait_for_sshd() {
     # Track wall-clock time using SECONDS builtin
     local start_seconds=$SECONDS
 
-    while (( SECONDS - start_seconds < _CAI_SSHD_WAIT_MAX )); do
+    while ((SECONDS - start_seconds < _CAI_SSHD_WAIT_MAX)); do
         attempt=$((attempt + 1))
 
         # First check: verify container is still running (with timeout to prevent hangs)
@@ -905,7 +905,7 @@ _cai_wait_for_sshd() {
 
         # Double the wait time, capped at max interval
         wait_ms=$((wait_ms * 2))
-        if (( wait_ms > max_interval_ms )); then
+        if ((wait_ms > max_interval_ms)); then
             wait_ms=$max_interval_ms
         fi
     done
@@ -978,7 +978,8 @@ _cai_inject_ssh_key() {
     # Create .ssh directory with correct permissions (as root, then chown)
     # Use a single docker exec with a script to minimize round trips
     local inject_script
-    inject_script=$(cat <<'SCRIPT_EOF'
+    inject_script=$(
+        cat <<'SCRIPT_EOF'
 set -e
 SSH_DIR="/home/agent/.ssh"
 AUTH_KEYS="$SSH_DIR/authorized_keys"
@@ -1005,7 +1006,7 @@ if [ -n "$KEY_MATERIAL" ] && ! grep -qF "$KEY_MATERIAL" "$AUTH_KEYS" 2>/dev/null
     printf '%s\n' "$PUBKEY" >> "$AUTH_KEYS"
 fi
 SCRIPT_EOF
-)
+    )
 
     # Execute the injection script in the container
     # Pass pubkey as argument to avoid shell escaping issues
@@ -1037,7 +1038,7 @@ SCRIPT_EOF
 _cai_update_known_hosts() {
     local container_name="$1"
     local ssh_port="$2"
-    local context="${3:-}"  # Unused but kept for API compatibility
+    local context="${3:-}" # Unused but kept for API compatibility
     local force_update="${4:-false}"
     local known_hosts_file="$_CAI_KNOWN_HOSTS_FILE"
     local lock_file="$_CAI_KNOWN_HOSTS_LOCK_FILE"
@@ -1073,7 +1074,7 @@ _cai_update_known_hosts() {
 
     # Retrieve host keys with retry (ssh-keyscan can fail if sshd just started)
     # Do this BEFORE acquiring lock to minimize lock hold time
-    while (( retry_count < max_retries )); do
+    while ((retry_count < max_retries)); do
         # ssh-keyscan -p outputs keys in format: [localhost]:port ssh-type key
         # -T 5 sets connection timeout, -t rsa,ed25519 gets specific key types
         # Filter out comment lines (starting with #) and ensure valid key format (3+ fields)
@@ -1084,7 +1085,7 @@ _cai_update_known_hosts() {
         fi
 
         retry_count=$((retry_count + 1))
-        if (( retry_count < max_retries )); then
+        if ((retry_count < max_retries)); then
             _cai_debug "ssh-keyscan failed, retrying (attempt $((retry_count + 1))/$max_retries)..."
             local sleep_sec
             sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_ms / 1000}")
@@ -1160,7 +1161,7 @@ _cai_update_known_hosts() {
                 _cai_warn "Then retry the operation, or use --fresh to force recreation."
                 break
             fi
-        done <<< "$existing_keys"
+        done <<<"$existing_keys"
 
         if [[ "$key_changed" == "true" ]]; then
             # Release lock before returning
@@ -1180,11 +1181,11 @@ _cai_update_known_hosts() {
             if ! printf '%s\n' "$existing_keys" | awk -v h="$host_spec" -v t="$key_type" '$1 == h && $2 == t {found=1; exit} END {exit !found}'; then
                 new_keys_to_add="${new_keys_to_add}${line}"$'\n'
             fi
-        done <<< "$host_keys"
+        done <<<"$host_keys"
 
         if [[ -n "$new_keys_to_add" ]]; then
             # Add new key types (this is safe - not a change)
-            printf '%s' "$new_keys_to_add" >> "$known_hosts_file"
+            printf '%s' "$new_keys_to_add" >>"$known_hosts_file"
             _cai_debug "Added new key type(s) to known_hosts"
         else
             _cai_debug "Host keys unchanged for port $ssh_port"
@@ -1194,7 +1195,7 @@ _cai_update_known_hosts() {
         _cai_clean_known_hosts "$ssh_port"
 
         # Append host keys to known_hosts file
-        if ! printf '%s\n' "$host_keys" >> "$known_hosts_file"; then
+        if ! printf '%s\n' "$host_keys" >>"$known_hosts_file"; then
             _cai_error "Failed to write host keys to known_hosts file"
             if [[ -n "${lock_fd:-}" ]]; then
                 exec {lock_fd}>&-
@@ -1279,7 +1280,7 @@ _cai_check_ssh_accept_new_support() {
     min_major="${_CAI_SSH_ACCEPT_NEW_MIN_VERSION%%.*}"
     min_minor="${_CAI_SSH_ACCEPT_NEW_MIN_VERSION#*.}"
 
-    if (( major > min_major )) || { (( major == min_major )) && (( minor >= min_minor )); }; then
+    if ((major > min_major)) || { ((major == min_major)) && ((minor >= min_minor)); }; then
         return 0
     fi
     return 1
@@ -1374,7 +1375,7 @@ _cai_write_ssh_host_config() {
     # - Rejects if key changes (MITM protection)
     # - Better than StrictHostKeyChecking=no which accepts everything
     if ! {
-        cat << EOF
+        cat <<EOF
 # ContainAI SSH config for container: $container_name
 # Auto-generated - do not edit manually
 # Generated at: $(date -Iseconds 2>/dev/null || date)
@@ -1406,7 +1407,7 @@ EOF
             printf '%s\n' "    # Port forwarding (from [ssh].local_forward config)"
             printf '%s' "$local_forward_lines"
         fi
-    } > "$config_file"; then
+    } >"$config_file"; then
         _cai_error "Failed to write SSH config: $config_file"
         return 1
     fi
@@ -1652,7 +1653,7 @@ _cai_ssh_shell() {
 
     # Connect via SSH with retry logic
     if ! _cai_ssh_connect_with_retry "$container_name" "$ssh_port" "$context" "$quiet"; then
-        return $?  # Propagate specific exit code
+        return $? # Propagate specific exit code
     fi
 
     return "$_CAI_SSH_EXIT_SUCCESS"
@@ -1673,8 +1674,8 @@ _cai_ssh_connect_with_retry() {
 
     local max_retries=3
     local retry_count=0
-    local wait_ms=500  # Start at 500ms
-    local max_wait_ms=4000  # Cap at 4 seconds
+    local wait_ms=500      # Start at 500ms
+    local max_wait_ms=4000 # Cap at 4 seconds
     local ssh_exit_code
     local host_key_auto_recovered=false
 
@@ -1686,7 +1687,7 @@ _cai_ssh_connect_with_retry() {
         strict_host_key_checking="yes"
     fi
 
-    while (( retry_count < max_retries )); do
+    while ((retry_count < max_retries)); do
         # Build SSH command with explicit options (does not depend on ~/.ssh/config)
         # This makes connection robust even if Include directive is missing/broken
         local -a ssh_cmd=(ssh)
@@ -1779,7 +1780,7 @@ _cai_ssh_connect_with_retry() {
 
                 # Connection refused or timeout - these are transient, retry
                 retry_count=$((retry_count + 1))
-                if (( retry_count < max_retries )); then
+                if ((retry_count < max_retries)); then
                     if [[ "$quiet" != "true" ]]; then
                         _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
                     fi
@@ -1789,7 +1790,7 @@ _cai_ssh_connect_with_retry() {
                     sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_ms / 1000}")
                     sleep "$sleep_sec"
                     wait_ms=$((wait_ms * 2))
-                    if (( wait_ms > max_wait_ms )); then
+                    if ((wait_ms > max_wait_ms)); then
                         wait_ms=$max_wait_ms
                     fi
 
@@ -1974,8 +1975,8 @@ _cai_ssh_run_with_retry() {
 
     local max_retries=3
     local retry_count=0
-    local wait_ms=500  # Start at 500ms
-    local max_wait_ms=4000  # Cap at 4 seconds
+    local wait_ms=500      # Start at 500ms
+    local max_wait_ms=4000 # Cap at 4 seconds
     local ssh_exit_code
     local host_key_auto_recovered=false
 
@@ -1987,7 +1988,7 @@ _cai_ssh_run_with_retry() {
         strict_host_key_checking="yes"
     fi
 
-    while (( retry_count < max_retries )); do
+    while ((retry_count < max_retries)); do
         # Build SSH command with explicit options (does not depend on ~/.ssh/config)
         local -a ssh_cmd=(ssh)
         ssh_cmd+=(-o "HostName=localhost")
@@ -2136,7 +2137,7 @@ _cai_ssh_run_with_retry() {
 
                 # Connection refused or timeout - these are transient, retry
                 retry_count=$((retry_count + 1))
-                if (( retry_count < max_retries )); then
+                if ((retry_count < max_retries)); then
                     if [[ "$quiet" != "true" ]]; then
                         _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
                     fi
@@ -2146,7 +2147,7 @@ _cai_ssh_run_with_retry() {
                     sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_ms / 1000}")
                     sleep "$sleep_sec"
                     wait_ms=$((wait_ms * 2))
-                    if (( wait_ms > max_wait_ms )); then
+                    if ((wait_ms > max_wait_ms)); then
                         wait_ms=$max_wait_ms
                     fi
 

@@ -41,10 +41,17 @@ fi
 # ==============================================================================
 
 pass() { printf '%s\n' "[PASS] $*"; }
-fail() { printf '%s\n' "[FAIL] $*" >&2; FAILED=1; SCENARIO_FAILED=1; }
+fail() {
+    printf '%s\n' "[FAIL] $*" >&2
+    FAILED=1
+    SCENARIO_FAILED=1
+}
 warn() { printf '%s\n' "[WARN] $*"; }
 info() { printf '%s\n' "[INFO] $*"; }
-section() { printf '\n'; printf '%s\n' "=== $* ==="; }
+section() {
+    printf '\n'
+    printf '%s\n' "=== $* ==="
+}
 
 FAILED=0
 SCENARIO_FAILED=0
@@ -297,7 +304,7 @@ test_clean_start_without_import() {
     # Create test workspace
     mkdir -p "$TEST_WORKSPACE"
     register_dir "$TEST_WORKSPACE"
-    echo "# Test workspace" > "$TEST_WORKSPACE/README.md"
+    echo "# Test workspace" >"$TEST_WORKSPACE/README.md"
 
     # Create data volume
     if ! docker --context "$CONTEXT_NAME" volume create "$TEST_DATA_VOLUME" >/dev/null; then

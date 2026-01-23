@@ -118,7 +118,7 @@ _cai_check_kernel_for_sysbox() {
         _cai_warn "Could not parse kernel version: $kernel_version"
         # Output the raw version anyway
         printf '%s' "$kernel_version"
-        return 0  # Don't block, just warn
+        return 0 # Don't block, just warn
     fi
 
     _CAI_KERNEL_MAJOR="$major"
@@ -363,7 +363,7 @@ _cai_doctor() {
     local docker_daemon_ok="false"
     local platform
     local seccomp_status=""
-    local kernel_ok="true"  # Default to true (macOS doesn't need kernel check)
+    local kernel_ok="true" # Default to true (macOS doesn't need kernel check)
     local kernel_version=""
 
     platform=$(_cai_detect_platform)
@@ -565,7 +565,7 @@ _cai_doctor() {
             socket_not_found)
                 printf '  %-44s %s\n' "" "(Socket $_CAI_CONTAINAI_DOCKER_SOCKET not found)"
                 ;;
-            connection_refused|daemon_unavailable)
+            connection_refused | daemon_unavailable)
                 printf '  %-44s %s\n' "" "(containai-docker service not running)"
                 printf '  %-44s %s\n' "" "(Try: sudo systemctl start containai-docker)"
                 ;;
@@ -656,8 +656,8 @@ _cai_doctor() {
                     strict_opt="-o StrictHostKeyChecking=no"
                 fi
                 if ssh -o BatchMode=yes -o ConnectTimeout=5 "$strict_opt" \
-                       "$known_hosts_opt" -i "$ssh_key_path" \
-                       -p "$ssh_port" agent@localhost true 2>/dev/null; then
+                    "$known_hosts_opt" -i "$ssh_key_path" \
+                    -p "$ssh_port" agent@localhost true 2>/dev/null; then
                     printf '  %-44s %s\n' "SSH connectivity ($test_container):" "[OK]"
                 else
                     printf '  %-44s %s\n' "SSH connectivity ($test_container):" "[WARN] Failed"
@@ -670,8 +670,8 @@ _cai_doctor() {
     fi
 
     # Summary for SSH section
-    if [[ "$ssh_version_ok" == "true" ]] && [[ "$ssh_key_ok" == "true" ]] && \
-       [[ "$ssh_config_dir_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]]; then
+    if [[ "$ssh_version_ok" == "true" ]] && [[ "$ssh_key_ok" == "true" ]] \
+        && [[ "$ssh_config_dir_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]]; then
         ssh_all_ok="true"
     fi
 
@@ -849,7 +849,7 @@ _cai_doctor_fix() {
         # Regenerate public key if missing
         if [[ ! -f "$ssh_pubkey_path" ]]; then
             printf '  %-50s' "Regenerating public key"
-            if ssh-keygen -y -f "$ssh_key_path" > "$ssh_pubkey_path" 2>/dev/null; then
+            if ssh-keygen -y -f "$ssh_key_path" >"$ssh_pubkey_path" 2>/dev/null; then
                 chmod 644 "$ssh_pubkey_path"
                 printf '%s\n' "[FIXED]"
                 ((fixed_count++))
@@ -928,7 +928,7 @@ _cai_doctor_fix() {
     # Add/fix Include directive in ~/.ssh/config
     if [[ ! -f "$ssh_config" ]]; then
         printf '  %-50s' "Creating $ssh_config with Include"
-        if printf '%s\n' "$include_line" > "$ssh_config" && chmod 600 "$ssh_config"; then
+        if printf '%s\n' "$include_line" >"$ssh_config" && chmod 600 "$ssh_config"; then
             printf '%s\n' "[FIXED]"
             ((fixed_count++))
         else
@@ -958,7 +958,7 @@ _cai_doctor_fix() {
                 if {
                     printf '%s\n\n' "$include_line"
                     grep -vE "$include_pattern" "$ssh_config" 2>/dev/null || true
-                } > "$temp_file" && cp "$temp_file" "$ssh_config" && rm -f "$temp_file"; then
+                } >"$temp_file" && cp "$temp_file" "$ssh_config" && rm -f "$temp_file"; then
                     printf '%s\n' "[FIXED]"
                     ((fixed_count++))
                 else
@@ -998,8 +998,8 @@ _cai_doctor_fix() {
         local docker_reachable=false
         if _cai_timeout 5 docker info >/dev/null 2>&1; then
             docker_reachable=true
-        elif docker context inspect containai-secure >/dev/null 2>&1 && \
-             _cai_timeout 5 docker --context containai-secure info >/dev/null 2>&1; then
+        elif docker context inspect containai-secure >/dev/null 2>&1 \
+            && _cai_timeout 5 docker --context containai-secure info >/dev/null 2>&1; then
             docker_reachable=true
         fi
 
@@ -1057,7 +1057,7 @@ _cai_doctor_fix() {
                 printf '  %-50s %s\n' "Sysbox runtime not installed" "[MANUAL] Run 'cai setup'"
                 ((skip_count++))
                 ;;
-            connection_refused|daemon_unavailable)
+            connection_refused | daemon_unavailable)
                 printf '  %-50s %s\n' "Docker daemon not running" "[MANUAL] Start Docker"
                 ((skip_count++))
                 ;;
@@ -1185,7 +1185,7 @@ _cai_doctor_json() {
                 seccomp_compatible="false"
                 seccomp_warning="WSL 1.1.0+ may have seccomp conflicts"
                 ;;
-            unavailable|unknown)
+            unavailable | unknown)
                 seccomp_compatible="false"
                 ;;
         esac
@@ -1276,8 +1276,8 @@ _cai_doctor_json() {
     fi
 
     # All SSH checks pass?
-    if [[ "$ssh_version_ok" == "true" ]] && [[ "$ssh_key_ok" == "true" ]] && \
-       [[ "$ssh_config_dir_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]]; then
+    if [[ "$ssh_version_ok" == "true" ]] && [[ "$ssh_key_ok" == "true" ]] \
+        && [[ "$ssh_config_dir_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]]; then
         ssh_all_ok="true"
     fi
 

@@ -244,7 +244,7 @@ _import_restore_from_tgz() {
         fi
 
         echo "OK"
-    ' < "$archive"); then
+    ' <"$archive"); then
         _import_error "Failed to validate archive (container failed)"
         return 1
     fi
@@ -321,7 +321,7 @@ _import_restore_from_tgz() {
         -v "$volume":/data \
         -i \
         alpine:3.20 \
-        tar -xzf - -C /data < "$archive"; then
+        tar -xzf - -C /data <"$archive"; then
         _import_error "Failed to extract archive to volume"
         return 1
     fi
@@ -348,72 +348,72 @@ _import_restore_from_tgz() {
 
 # Only set default if not already defined (allows caller override)
 if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
-_IMPORT_SYNC_MAP=(
-  # --- Claude Code ---
-  # Note: target files are NOT dot-prefixed for visibility in volume
-  "/source/.claude.json:/target/claude/claude.json:fjs"
-  "/source/.claude/.credentials.json:/target/claude/credentials.json:fs"
-  "/source/.claude/settings.json:/target/claude/settings.json:fj"
-  "/source/.claude/settings.local.json:/target/claude/settings.local.json:f"
-  "/source/.claude/plugins:/target/claude/plugins:d"
-  "/source/.claude/skills:/target/claude/skills:d"
+    _IMPORT_SYNC_MAP=(
+        # --- Claude Code ---
+        # Note: target files are NOT dot-prefixed for visibility in volume
+        "/source/.claude.json:/target/claude/claude.json:fjs"
+        "/source/.claude/.credentials.json:/target/claude/credentials.json:fs"
+        "/source/.claude/settings.json:/target/claude/settings.json:fj"
+        "/source/.claude/settings.local.json:/target/claude/settings.local.json:f"
+        "/source/.claude/plugins:/target/claude/plugins:d"
+        "/source/.claude/skills:/target/claude/skills:d"
 
-  # --- GitHub CLI ---
-  "/source/.config/gh:/target/config/gh:ds"
+        # --- GitHub CLI ---
+        "/source/.config/gh:/target/config/gh:ds"
 
-  # --- OpenCode (config) ---
-  "/source/.config/opencode:/target/config/opencode:d"
+        # --- OpenCode (config) ---
+        "/source/.config/opencode:/target/config/opencode:d"
 
-  # --- tmux ---
-  "/source/.config/tmux:/target/config/tmux:d"
-  "/source/.local/share/tmux:/target/local/share/tmux:d"
+        # --- tmux ---
+        "/source/.config/tmux:/target/config/tmux:d"
+        "/source/.local/share/tmux:/target/local/share/tmux:d"
 
-  # --- Fonts ---
-  "/source/.local/share/fonts:/target/local/share/fonts:d"
+        # --- Fonts ---
+        "/source/.local/share/fonts:/target/local/share/fonts:d"
 
-  # -- Common Agents Directory ---
-  "/source/.agents:/target/agents:d"
+        # -- Common Agents Directory ---
+        "/source/.agents:/target/agents:d"
 
-  # --- Shell ---
-  "/source/.bash_aliases:/target/shell/bash_aliases:f"
-  "/source/.bashrc.d:/target/shell/bashrc.d:d"
+        # --- Shell ---
+        "/source/.bash_aliases:/target/shell/bash_aliases:f"
+        "/source/.bashrc.d:/target/shell/bashrc.d:d"
 
-  # --- VS Code Server ---
-  # Sync entire data subtrees (no overlapping entries)
-  "/source/.vscode-server/extensions:/target/vscode-server/extensions:d"
-  "/source/.vscode-server/data/Machine:/target/vscode-server/data/Machine:d"
-  "/source/.vscode-server/data/User/mcp:/target/vscode-server/data/User/mcp:d"
-  "/source/.vscode-server/data/User/prompts:/target/vscode-server/data/User/prompts:d"
+        # --- VS Code Server ---
+        # Sync entire data subtrees (no overlapping entries)
+        "/source/.vscode-server/extensions:/target/vscode-server/extensions:d"
+        "/source/.vscode-server/data/Machine:/target/vscode-server/data/Machine:d"
+        "/source/.vscode-server/data/User/mcp:/target/vscode-server/data/User/mcp:d"
+        "/source/.vscode-server/data/User/prompts:/target/vscode-server/data/User/prompts:d"
 
-  # --- VS Code Insiders ---
-  "/source/.vscode-server-insiders/extensions:/target/vscode-server-insiders/extensions:d"
-  "/source/.vscode-server-insiders/data/Machine:/target/vscode-server-insiders/data/Machine:d"
-  "/source/.vscode-server-insiders/data/User/mcp:/target/vscode-server-insiders/data/User/mcp:d"
-  "/source/.vscode-server-insiders/data/User/prompts:/target/vscode-server-insiders/data/User/prompts:d"
+        # --- VS Code Insiders ---
+        "/source/.vscode-server-insiders/extensions:/target/vscode-server-insiders/extensions:d"
+        "/source/.vscode-server-insiders/data/Machine:/target/vscode-server-insiders/data/Machine:d"
+        "/source/.vscode-server-insiders/data/User/mcp:/target/vscode-server-insiders/data/User/mcp:d"
+        "/source/.vscode-server-insiders/data/User/prompts:/target/vscode-server-insiders/data/User/prompts:d"
 
-  # --- Copilot ---
-  # Selective sync: config, mcp-config, skills (exclude logs/, command-history-state.json)
-  "/source/.copilot/config.json:/target/copilot/config.json:f"
-  "/source/.copilot/mcp-config.json:/target/copilot/mcp-config.json:f"
-  "/source/.copilot/skills:/target/copilot/skills:d"
+        # --- Copilot ---
+        # Selective sync: config, mcp-config, skills (exclude logs/, command-history-state.json)
+        "/source/.copilot/config.json:/target/copilot/config.json:f"
+        "/source/.copilot/mcp-config.json:/target/copilot/mcp-config.json:f"
+        "/source/.copilot/skills:/target/copilot/skills:d"
 
-  # --- Gemini ---
-  # Selective sync: credentials + settings + user instructions (exclude tmp/, antigravity/)
-  "/source/.gemini/google_accounts.json:/target/gemini/google_accounts.json:fs"
-  "/source/.gemini/oauth_creds.json:/target/gemini/oauth_creds.json:fs"
-  "/source/.gemini/settings.json:/target/gemini/settings.json:fj"
-  "/source/.gemini/GEMINI.md:/target/gemini/GEMINI.md:f"
+        # --- Gemini ---
+        # Selective sync: credentials + settings + user instructions (exclude tmp/, antigravity/)
+        "/source/.gemini/google_accounts.json:/target/gemini/google_accounts.json:fs"
+        "/source/.gemini/oauth_creds.json:/target/gemini/oauth_creds.json:fs"
+        "/source/.gemini/settings.json:/target/gemini/settings.json:fj"
+        "/source/.gemini/GEMINI.md:/target/gemini/GEMINI.md:f"
 
-  # --- Codex ---
-  # Selective sync: config, auth, skills (exclude history.jsonl, log/, sessions/, shell_snapshots/, tmp/)
-  "/source/.codex/config.toml:/target/codex/config.toml:f"
-  "/source/.codex/auth.json:/target/codex/auth.json:fs"
-  "/source/.codex/skills:/target/codex/skills:dx"
+        # --- Codex ---
+        # Selective sync: config, auth, skills (exclude history.jsonl, log/, sessions/, shell_snapshots/, tmp/)
+        "/source/.codex/config.toml:/target/codex/config.toml:f"
+        "/source/.codex/auth.json:/target/codex/auth.json:fs"
+        "/source/.codex/skills:/target/codex/skills:dx"
 
-  # --- OpenCode (data) ---
-  # Only need auth from data dir
-  "/source/.local/share/opencode/auth.json:/target/local/share/opencode/auth.json:fs"
-)
+        # --- OpenCode (data) ---
+        # Only need auth from data dir
+        "/source/.local/share/opencode/auth.json:/target/local/share/opencode/auth.json:fs"
+    )
 fi
 
 # ==============================================================================
@@ -488,8 +488,8 @@ _containai_import() {
 
     # Handle --from source: detect type and route accordingly
     local source_type=""
-    local source_root="$HOME"  # Default to $HOME for backward compatibility
-    local from_directory_mode="false"  # Track if --from <directory> was used (for symlink relinking)
+    local source_root="$HOME"         # Default to $HOME for backward compatibility
+    local from_directory_mode="false" # Track if --from <directory> was used (for symlink relinking)
 
     if [[ -n "$from_source" ]]; then
         # Validate path doesn't contain dangerous characters that could cause Docker mount injection
@@ -708,7 +708,7 @@ _containai_import() {
                 if [[ -n "$exclude_line" ]]; then
                     excludes+=("$exclude_line")
                 fi
-            done <<< "$exclude_output"
+            done <<<"$exclude_output"
         fi
     fi
 
@@ -1138,144 +1138,150 @@ preview_symlink_relinks() {
     # Use -path prune pattern when .system/ exclusion is active
     if [ "$_prune_system" = "1" ]; then
         find "$_source_dir" -path "$_source_dir/.system" -prune -o -type l -exec sh -c '
-            host_src="$1"; runtime_dst="$2"; src_dir="$3"; shift 3
-            for link do
-                target=$(readlink "$link" 2>/dev/null) || continue
+    host_src="$1"
+    runtime_dst="$2"
+    src_dir="$3"
+    shift 3
+    for link; do
+        target=$(readlink "$link" 2>/dev/null) || continue
 
-                # Skip relative symlinks (they remain unchanged, no output)
-                case "$target" in
-                    /*) ;; # absolute, continue processing
-                    *) continue ;;
+        # Skip relative symlinks (they remain unchanged, no output)
+        case "$target" in
+            /*) ;; # absolute, continue processing
+            *) continue ;;
+        esac
+
+        # Normalize host_src: strip trailing slash, except for root
+        case "$host_src" in
+            /) : ;;
+            */) host_src="${host_src%/}" ;;
+        esac
+
+        # Check if internal (target starts with host_src_dir)
+        case "$target" in
+            "$host_src"/* | "$host_src")
+                # Extract relative portion
+                rel_target="${target#"$host_src"}"
+
+                # SECURITY: Reject paths with .. segments to prevent escape
+                case "$rel_target" in
+                    */..)
+                        printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                        continue
+                        ;;
+                    */../*)
+                        printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                        continue
+                        ;;
                 esac
 
-                # Normalize host_src: strip trailing slash, except for root
-                case "$host_src" in
+                # Check if target exists in source (map host path to source mount)
+                src_target="${src_dir}${rel_target}"
+                if ! test -e "$src_target" && ! test -L "$src_target"; then
+                    printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
+                    continue
+                fi
+
+                # Normalize runtime_dst: strip trailing slash, except for root
+                case "$runtime_dst" in
                     /) : ;;
-                    */) host_src="${host_src%/}" ;;
+                    */) runtime_dst="${runtime_dst%/}" ;;
                 esac
 
-                # Check if internal (target starts with host_src_dir)
-                case "$target" in
-                    "$host_src"/*|"$host_src")
-                        # Extract relative portion
-                        rel_target="${target#"$host_src"}"
+                # Would be relinked
+                new_target="${runtime_dst}${rel_target}"
 
-                        # SECURITY: Reject paths with .. segments to prevent escape
-                        case "$rel_target" in
-                            */..)
-                                printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
-                                continue
-                                ;;
-                            */../*)
-                                printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
-                                continue
-                                ;;
-                        esac
-
-                        # Check if target exists in source (map host path to source mount)
-                        src_target="${src_dir}${rel_target}"
-                        if ! test -e "$src_target" && ! test -L "$src_target"; then
-                            printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
-                            continue
-                        fi
-
-                        # Normalize runtime_dst: strip trailing slash, except for root
-                        case "$runtime_dst" in
-                            /) : ;;
-                            */) runtime_dst="${runtime_dst%/}" ;;
-                        esac
-
-                        # Would be relinked
-                        new_target="${runtime_dst}${rel_target}"
-
-                        # Security: validate stays under runtime_dst (belt-and-suspenders)
-                        case "$new_target" in
-                            "$runtime_dst"/*|"$runtime_dst") ;;
-                            *)
-                                printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
-                                continue
-                                ;;
-                        esac
-
-                        printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
-                        ;;
+                # Security: validate stays under runtime_dst (belt-and-suspenders)
+                case "$new_target" in
+                    "$runtime_dst"/* | "$runtime_dst") ;;
                     *)
-                        # External absolute symlink (outside entry subtree)
-                        printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
+                        printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
+                        continue
                         ;;
                 esac
-            done
-        ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+
+                printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                ;;
+            *)
+                # External absolute symlink (outside entry subtree)
+                printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
+                ;;
+        esac
+    done
+    ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
     else
         find "$_source_dir" -type l -exec sh -c '
-            host_src="$1"; runtime_dst="$2"; src_dir="$3"; shift 3
-            for link do
-                target=$(readlink "$link" 2>/dev/null) || continue
+    host_src="$1"
+    runtime_dst="$2"
+    src_dir="$3"
+    shift 3
+    for link; do
+        target=$(readlink "$link" 2>/dev/null) || continue
 
-                # Skip relative symlinks (they remain unchanged, no output)
-                case "$target" in
-                    /*) ;; # absolute, continue processing
-                    *) continue ;;
+        # Skip relative symlinks (they remain unchanged, no output)
+        case "$target" in
+            /*) ;; # absolute, continue processing
+            *) continue ;;
+        esac
+
+        # Normalize host_src: strip trailing slash, except for root
+        case "$host_src" in
+            /) : ;;
+            */) host_src="${host_src%/}" ;;
+        esac
+
+        # Check if internal (target starts with host_src_dir)
+        case "$target" in
+            "$host_src"/* | "$host_src")
+                # Extract relative portion
+                rel_target="${target#"$host_src"}"
+
+                # SECURITY: Reject paths with .. segments to prevent escape
+                case "$rel_target" in
+                    */..)
+                        printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                        continue
+                        ;;
+                    */../*)
+                        printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                        continue
+                        ;;
                 esac
 
-                # Normalize host_src: strip trailing slash, except for root
-                case "$host_src" in
+                # Check if target exists in source (map host path to source mount)
+                src_target="${src_dir}${rel_target}"
+                if ! test -e "$src_target" && ! test -L "$src_target"; then
+                    printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
+                    continue
+                fi
+
+                # Normalize runtime_dst: strip trailing slash, except for root
+                case "$runtime_dst" in
                     /) : ;;
-                    */) host_src="${host_src%/}" ;;
+                    */) runtime_dst="${runtime_dst%/}" ;;
                 esac
 
-                # Check if internal (target starts with host_src_dir)
-                case "$target" in
-                    "$host_src"/*|"$host_src")
-                        # Extract relative portion
-                        rel_target="${target#"$host_src"}"
+                # Would be relinked
+                new_target="${runtime_dst}${rel_target}"
 
-                        # SECURITY: Reject paths with .. segments to prevent escape
-                        case "$rel_target" in
-                            */..)
-                                printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
-                                continue
-                                ;;
-                            */../*)
-                                printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
-                                continue
-                                ;;
-                        esac
-
-                        # Check if target exists in source (map host path to source mount)
-                        src_target="${src_dir}${rel_target}"
-                        if ! test -e "$src_target" && ! test -L "$src_target"; then
-                            printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
-                            continue
-                        fi
-
-                        # Normalize runtime_dst: strip trailing slash, except for root
-                        case "$runtime_dst" in
-                            /) : ;;
-                            */) runtime_dst="${runtime_dst%/}" ;;
-                        esac
-
-                        # Would be relinked
-                        new_target="${runtime_dst}${rel_target}"
-
-                        # Security: validate stays under runtime_dst (belt-and-suspenders)
-                        case "$new_target" in
-                            "$runtime_dst"/*|"$runtime_dst") ;;
-                            *)
-                                printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
-                                continue
-                                ;;
-                        esac
-
-                        printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
-                        ;;
+                # Security: validate stays under runtime_dst (belt-and-suspenders)
+                case "$new_target" in
+                    "$runtime_dst"/* | "$runtime_dst") ;;
                     *)
-                        # External absolute symlink (outside entry subtree)
-                        printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
+                        printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
+                        continue
                         ;;
                 esac
-            done
-        ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+
+                printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                ;;
+            *)
+                # External absolute symlink (outside entry subtree)
+                printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
+                ;;
+        esac
+    done
+    ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
     fi
 }
 
@@ -1296,80 +1302,83 @@ relink_internal_symlinks() {
     # Find all symlinks and process them
     # Using find -exec sh -c with batch processing (+ terminator)
     find "$_target_dir" -type l -exec sh -c '
-        host_src="$1"; runtime_dst="$2"; src_mount="$3"; shift 3
-        for link do
-            target=$(readlink "$link" 2>/dev/null) || continue
+    host_src="$1"
+    runtime_dst="$2"
+    src_mount="$3"
+    shift 3
+    for link; do
+        target=$(readlink "$link" 2>/dev/null) || continue
 
-            # Skip relative symlinks (they remain unchanged)
-            case "$target" in
-                /*) ;; # absolute, continue processing
-                *) continue ;;
-            esac
+        # Skip relative symlinks (they remain unchanged)
+        case "$target" in
+            /*) ;; # absolute, continue processing
+            *) continue ;;
+        esac
 
-            # Normalize host_src: strip trailing slash, except for root
-            case "$host_src" in
-                /) : ;;
-                */) host_src="${host_src%/}" ;;
-            esac
+        # Normalize host_src: strip trailing slash, except for root
+        case "$host_src" in
+            /) : ;;
+            */) host_src="${host_src%/}" ;;
+        esac
 
-            # Check if internal (target starts with host_src_dir)
-            case "$target" in
-                "$host_src"/*|"$host_src")
-                    # Extract relative portion
-                    rel_target="${target#"$host_src"}"
+        # Check if internal (target starts with host_src_dir)
+        case "$target" in
+            "$host_src"/* | "$host_src")
+                # Extract relative portion
+                rel_target="${target#"$host_src"}"
 
-                    # SECURITY: Reject paths with .. segments to prevent escape
-                    # Check for /.. anywhere in path (covers /../, /.. at end, etc.)
-                    case "$rel_target" in
-                        */..)
-                            printf "[WARN] %s -> %s (path escape)\n" "$link" "$target" >&2
-                            continue
-                            ;;
-                        */../*)
-                            printf "[WARN] %s -> %s (path escape)\n" "$link" "$target" >&2
-                            continue
-                            ;;
-                    esac
-
-                    # Map host path to source mount for existence check
-                    src_target="${src_mount}${rel_target}"
-
-                    # Skip if broken (target does not exist in source)
-                    if ! test -e "$src_target" && ! test -L "$src_target"; then
-                        printf "[WARN] %s -> %s (broken, preserved)\n" "$link" "$target" >&2
+                # SECURITY: Reject paths with .. segments to prevent escape
+                # Check for /.. anywhere in path (covers /../, /.. at end, etc.)
+                case "$rel_target" in
+                    */..)
+                        printf "[WARN] %s -> %s (path escape)\n" "$link" "$target" >&2
                         continue
-                    fi
+                        ;;
+                    */../*)
+                        printf "[WARN] %s -> %s (path escape)\n" "$link" "$target" >&2
+                        continue
+                        ;;
+                esac
 
-                    # Normalize runtime_dst: strip trailing slash, except for root
-                    case "$runtime_dst" in
-                        /) : ;;
-                        */) runtime_dst="${runtime_dst%/}" ;;
-                    esac
+                # Map host path to source mount for existence check
+                src_target="${src_mount}${rel_target}"
 
-                    # Remap to runtime path
-                    new_target="${runtime_dst}${rel_target}"
+                # Skip if broken (target does not exist in source)
+                if ! test -e "$src_target" && ! test -L "$src_target"; then
+                    printf "[WARN] %s -> %s (broken, preserved)\n" "$link" "$target" >&2
+                    continue
+                fi
 
-                    # Security: validate stays under runtime_dst (belt-and-suspenders)
-                    case "$new_target" in
-                        "$runtime_dst"/*|"$runtime_dst") ;;
-                        *)
-                            printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
-                            continue
-                            ;;
-                    esac
+                # Normalize runtime_dst: strip trailing slash, except for root
+                case "$runtime_dst" in
+                    /) : ;;
+                    */) runtime_dst="${runtime_dst%/}" ;;
+                esac
 
-                    # Relink (rm first for directory symlink pitfall - ln -sfn creates inside existing dir)
-                    rm -rf "$link"
-                    ln -s "$new_target" "$link"
-                    chown -h 1000:1000 "$link"
-                    printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
-                    ;;
-                *)
-                    # External absolute symlink (outside entry subtree)
-                    printf "[WARN] %s -> %s (outside entry subtree, preserved)\n" "$link" "$target" >&2
-                    ;;
-            esac
-        done
+                # Remap to runtime path
+                new_target="${runtime_dst}${rel_target}"
+
+                # Security: validate stays under runtime_dst (belt-and-suspenders)
+                case "$new_target" in
+                    "$runtime_dst"/* | "$runtime_dst") ;;
+                    *)
+                        printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
+                        continue
+                        ;;
+                esac
+
+                # Relink (rm first for directory symlink pitfall - ln -sfn creates inside existing dir)
+                rm -rf "$link"
+                ln -s "$new_target" "$link"
+                chown -h 1000:1000 "$link"
+                printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                ;;
+            *)
+                # External absolute symlink (outside entry subtree)
+                printf "[WARN] %s -> %s (outside entry subtree, preserved)\n" "$link" "$target" >&2
+                ;;
+        esac
+    done
     ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_mount" {} +
 }
 
@@ -1479,8 +1488,8 @@ _import_transform_installed_plugins() {
     # Use startswith + slicing instead of gsub to avoid regex interpretation of metacharacters
     local transformed
     if ! transformed=$(jq --arg home_prefix "$home_prefix" \
-                          --arg source_prefix "$source_prefix" \
-                          --arg container_prefix "$_IMPORT_CONTAINER_PATH_PREFIX" '
+        --arg source_prefix "$source_prefix" \
+        --arg container_prefix "$_IMPORT_CONTAINER_PATH_PREFIX" '
         # Helper function: replace prefix if string starts with it (non-regex)
         def replace_prefix(old; new):
             if startswith(old) then new + .[old | length:] else . end;
@@ -1552,8 +1561,8 @@ _import_transform_marketplaces() {
     # Use startswith + slicing instead of gsub to avoid regex interpretation of metacharacters
     local transformed
     if ! transformed=$(jq --arg home_prefix "$home_prefix" \
-                          --arg source_prefix "$source_prefix" \
-                          --arg container_prefix "$_IMPORT_CONTAINER_PATH_PREFIX" '
+        --arg source_prefix "$source_prefix" \
+        --arg container_prefix "$_IMPORT_CONTAINER_PATH_PREFIX" '
         # Helper function: replace prefix if string starts with it (non-regex)
         def replace_prefix(old; new):
             if startswith(old) then new + .[old | length:] else . end;
@@ -1790,7 +1799,8 @@ _cai_hot_reload_container() {
     # This mirrors the logic from containai-init.sh but for hot-reload
     # Key difference: env vars are made persistent via bashrc.d hook
     local reload_script
-    reload_script=$(cat <<'RELOAD_EOF'
+    reload_script=$(
+        cat <<'RELOAD_EOF'
 set -e
 
 DATA_DIR="/mnt/agent-data"
@@ -1956,7 +1966,7 @@ else
     log "[INFO] Hot-reload complete (no changes)"
 fi
 RELOAD_EOF
-)
+    )
 
     # Use _cai_ssh_run for retry logic and host-key auto-recovery
     # This ensures consistent behavior with cai shell
@@ -2037,7 +2047,7 @@ RELOAD_EOF
                 [[ -n "$line" ]] && printf '%s\n' "$line"
                 ;;
         esac
-    done <<< "$ssh_output"
+    done <<<"$ssh_output"
 
     if [[ $ssh_exit_code -ne 0 ]]; then
         _import_error "SSH command failed (exit code: $ssh_exit_code)"

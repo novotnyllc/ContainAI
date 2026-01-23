@@ -52,19 +52,19 @@ _CAI_SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check if all lib files exist
 _containai_libs_exist() {
-    [[ -f "$_CAI_SCRIPT_DIR/lib/core.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/platform.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/docker.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/doctor.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/config.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/container.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/setup.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/ssh.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/uninstall.sh" ]]
+    [[ -f "$_CAI_SCRIPT_DIR/lib/core.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/platform.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/docker.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/doctor.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/config.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/container.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/import.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/export.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/setup.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/ssh.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/uninstall.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -569,7 +569,7 @@ _containai_import_cmd() {
                 explicit_config="${explicit_config/#\~/$HOME}"
                 shift
                 ;;
-            --workspace|-w)
+            --workspace | -w)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --workspace requires a value" >&2
                     return 1
@@ -595,7 +595,7 @@ _containai_import_cmd() {
                 hot_reload="true"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _containai_import_help
                 return 0
                 ;;
@@ -687,7 +687,7 @@ _containai_import_cmd() {
             local first_container
             first_container=$(printf '%s\n' "$found_containers" | head -1)
             container_name=$("${docker_cmd[@]}" inspect --format '{{.Name}}' "$first_container" 2>/dev/null)
-            container_name="${container_name#/}"  # Remove leading /
+            container_name="${container_name#/}" # Remove leading /
         else
             # Fallback: try hash-based container name
             if ! container_name=$(_containai_container_name "$resolved_workspace"); then
@@ -760,7 +760,7 @@ _containai_export_cmd() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -o|--output)
+            -o | --output)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --output requires a value" >&2
                     return 1
@@ -821,7 +821,7 @@ _containai_export_cmd() {
                 explicit_config="${explicit_config/#\~/$HOME}"
                 shift
                 ;;
-            --workspace|-w)
+            --workspace | -w)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --workspace requires a value" >&2
                     return 1
@@ -844,7 +844,7 @@ _containai_export_cmd() {
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _containai_export_help
                 return 0
                 ;;
@@ -887,7 +887,7 @@ _containai_export_cmd() {
             if [[ -n "$exclude_line" ]]; then
                 export_excludes+=("$exclude_line")
             fi
-        done <<< "$exclude_output"
+        done <<<"$exclude_output"
     fi
 
     # Call export function - pass array name, not array
@@ -899,7 +899,7 @@ _containai_stop_cmd() {
     local arg
     for arg in "$@"; do
         case "$arg" in
-            --help|-h)
+            --help | -h)
                 _containai_stop_help
                 return 0
                 ;;
@@ -934,7 +934,7 @@ _containai_doctor_cmd() {
                 fix_mode="true"
                 shift
                 ;;
-            --workspace|-w)
+            --workspace | -w)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --workspace requires a value" >&2
                     return 1
@@ -948,7 +948,7 @@ _containai_doctor_cmd() {
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _containai_doctor_help
                 return 0
                 ;;
@@ -999,7 +999,7 @@ _containai_ssh_cmd() {
             shift
             _containai_ssh_cleanup_cmd "$@"
             ;;
-        help|-h|--help)
+        help | -h | --help)
             _containai_ssh_help
             return 0
             ;;
@@ -1022,7 +1022,7 @@ _containai_ssh_cleanup_cmd() {
                 dry_run="true"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _containai_ssh_cleanup_help
                 return 0
                 ;;
@@ -1091,7 +1091,7 @@ _containai_shell_cmd() {
                 explicit_config="${explicit_config/#\~/$HOME}"
                 shift
                 ;;
-            --workspace|-w)
+            --workspace | -w)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --workspace requires a value" >&2
                     return 1
@@ -1130,7 +1130,7 @@ _containai_shell_cmd() {
                 fi
                 shift
                 ;;
-            --restart|--fresh)
+            --restart | --fresh)
                 fresh_flag=true
                 shift
                 ;;
@@ -1138,11 +1138,11 @@ _containai_shell_cmd() {
                 force_flag=true
                 shift
                 ;;
-            --quiet|-q)
+            --quiet | -q)
                 quiet_flag=true
                 shift
                 ;;
-            --debug|-D)
+            --debug | -D)
                 debug_flag=true
                 shift
                 ;;
@@ -1198,24 +1198,24 @@ _containai_shell_cmd() {
                 fi
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _containai_shell_help
                 return 0
                 ;;
             # Legacy options that are no longer supported (provide helpful error)
-            --mount-docker-socket|--please-root-my-host|--allow-host-credentials|\
-            --i-understand-this-exposes-host-credentials|--allow-host-docker-socket|\
-            --i-understand-this-grants-root-access)
+            --mount-docker-socket | --please-root-my-host | --allow-host-credentials | \
+                --i-understand-this-exposes-host-credentials | --allow-host-docker-socket | \
+                --i-understand-this-grants-root-access)
                 echo "[ERROR] $1 is no longer supported in cai shell" >&2
                 echo "[INFO] cai shell uses SSH - host mounts are not available" >&2
                 return 1
                 ;;
-            --env|-e|--env=*|-e*)
+            --env | -e | --env=* | -e*)
                 echo "[ERROR] --env is not supported in cai shell (SSH mode)" >&2
                 echo "[INFO] Set environment variables in the container's shell directly" >&2
                 return 1
                 ;;
-            --volume|-v|--volume=*|-v*)
+            --volume | -v | --volume=* | -v*)
                 echo "[ERROR] --volume is not supported in cai shell (SSH mode)" >&2
                 echo "[INFO] Volumes must be configured at container creation time" >&2
                 return 1
@@ -1237,7 +1237,7 @@ _containai_shell_cmd() {
 
     # Resolve workspace
     local resolved_workspace="${workspace:-$PWD}"
-    local workspace_input="${workspace:-$PWD}"  # Save original for error message
+    local workspace_input="${workspace:-$PWD}" # Save original for error message
     if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
         echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
         return 1
@@ -1568,7 +1568,7 @@ _containai_run_cmd() {
                 explicit_config="${explicit_config/#\~/$HOME}"
                 shift
                 ;;
-            --workspace|-w)
+            --workspace | -w)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --workspace requires a value" >&2
                     return 1
@@ -1619,15 +1619,15 @@ _containai_run_cmd() {
                 force_flag="--force"
                 shift
                 ;;
-            --detached|-d)
+            --detached | -d)
                 detached_flag="--detached"
                 shift
                 ;;
-            --quiet|-q)
+            --quiet | -q)
                 quiet_flag="--quiet"
                 shift
                 ;;
-            --debug|-D)
+            --debug | -D)
                 debug_flag="--debug"
                 shift
                 ;;
@@ -1707,7 +1707,7 @@ _containai_run_cmd() {
                 ack_host_docker_socket="--i-understand-this-grants-root-access"
                 shift
                 ;;
-            --env|-e)
+            --env | -e)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --env requires a value" >&2
                     return 1
@@ -1723,7 +1723,7 @@ _containai_run_cmd() {
                 env_vars+=("${1#-e}")
                 shift
                 ;;
-            --volume|-v|--volume=*|-v*)
+            --volume | -v | --volume=* | -v*)
                 # FR-4: Extra volume mounts are not allowed in containai run
                 # Only workspace + named data volume are permitted
                 echo "[ERROR] --volume is not supported in containai run" >&2
@@ -1731,7 +1731,7 @@ _containai_run_cmd() {
                 echo "[INFO] Use 'containai shell' if you need extra mounts" >&2
                 return 1
                 ;;
-            --help|-h)
+            --help | -h)
                 _containai_help
                 return 0
                 ;;
@@ -1925,7 +1925,7 @@ containai() {
             shift
             _cai_uninstall "$@"
             ;;
-        help|-h|--help)
+        help | -h | --help)
             _containai_help
             ;;
         -*)

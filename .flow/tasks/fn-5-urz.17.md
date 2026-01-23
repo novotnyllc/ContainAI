@@ -47,7 +47,7 @@ Simplify tmux configuration support to only use XDG paths (`~/.config/tmux`), re
 ## Changes Made
 
 1. **entrypoint.sh**: Removed legacy tmux directory creation
-   - Removed: `ensure_dir "${DATA_DIR}/tmux"` 
+   - Removed: `ensure_dir "${DATA_DIR}/tmux"`
    - Removed: `ensure_dir "${DATA_DIR}/tmux/.tmux"`
    - Kept: `ensure_dir "${DATA_DIR}/config/tmux"`
    - Added: `ensure_dir "${DATA_DIR}/local/share/tmux"` (for XDG data)

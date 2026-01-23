@@ -54,7 +54,7 @@ _cai_get_version() {
     fi
 
     # Read and trim whitespace
-    tr -d '[:space:]' < "$version_file"
+    tr -d '[:space:]' <"$version_file"
     return 0
 }
 
@@ -85,7 +85,7 @@ _cai_version() {
                 json_output="true"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _cai_version_help
                 return 0
                 ;;
@@ -197,7 +197,7 @@ _cai_update() {
                 check_only="true"
                 shift
                 ;;
-            --help|-h)
+            --help | -h)
                 _cai_update_help
                 return 0
                 ;;
@@ -308,8 +308,7 @@ _cai_update() {
                 return 0
             fi
             case "$confirm" in
-                y|Y|yes|YES)
-                    ;;
+                y | Y | yes | YES) ;;
                 *)
                     _cai_info "Update cancelled"
                     return 0
@@ -341,8 +340,7 @@ _cai_update() {
                 return 0
             fi
             case "$confirm" in
-                y|Y|yes|YES)
-                    ;;
+                y | Y | yes | YES) ;;
                 *)
                     _cai_info "Update cancelled"
                     return 0
@@ -369,7 +367,7 @@ _cai_update() {
     # Check if local update_branch is ahead of remote (would lose commits on reset)
     # Must be done AFTER checkout so we compare the correct local branch
     local ahead_behind
-    ahead_behind=$(cd -- "$install_dir" && git rev-list --left-right --count "origin/$update_branch"..."$update_branch" 2>/dev/null)
+    ahead_behind=$(cd -- "$install_dir" && git rev-list --left-right --count "origin/${update_branch}...${update_branch}" 2>/dev/null)
     local behind ahead
     behind=$(printf '%s' "$ahead_behind" | cut -f1)
     ahead=$(printf '%s' "$ahead_behind" | cut -f2)
@@ -387,8 +385,7 @@ _cai_update() {
                 return 0
             fi
             case "$confirm" in
-                y|Y|yes|YES)
-                    ;;
+                y | Y | yes | YES) ;;
                 *)
                     _cai_info "Update cancelled"
                     return 0
@@ -412,7 +409,7 @@ _cai_update() {
 
     # Re-read version after update
     local new_version
-    new_version=$(tr -d '[:space:]' < "$install_dir/VERSION")
+    new_version=$(tr -d '[:space:]' <"$install_dir/VERSION")
 
     _cai_ok "Updated to version $new_version"
     _cai_info "Restart your shell or re-source containai.sh to use the new version"

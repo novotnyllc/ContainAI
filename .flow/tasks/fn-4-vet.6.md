@@ -39,7 +39,7 @@ test_workspace_path_matching() {
     step "Testing workspace path-based config matching"
     local test_dir="/tmp/test-workspace-match-$$"
     local test_vol="test-ws-vol-$$"
-    
+
     mkdir -p "$test_dir/subproject/.containai"
     cat > "$test_dir/subproject/.containai/config.toml" << EOF
 [agent]
@@ -48,7 +48,7 @@ data_volume = "default-vol"
 [workspace."./"]
 data_volume = "$test_vol"
 EOF
-    
+
     (cd "$test_dir/subproject" && source "$ORIG_DIR/aliases.sh" && \
      [[ "$(_containai_resolve_volume "" "$test_dir/subproject")" == "$test_vol" ]])
     pass "Workspace path matching works"
@@ -59,7 +59,7 @@ test_workspace_fallback_to_agent() {
     step "Testing fallback to [agent] when no workspace match"
     local test_dir="/tmp/test-fallback-$$"
     local default_vol="fallback-vol-$$"
-    
+
     mkdir -p "$test_dir/.containai"
     cat > "$test_dir/.containai/config.toml" << EOF
 [agent]
@@ -68,7 +68,7 @@ data_volume = "$default_vol"
 [workspace."/some/other/path"]
 data_volume = "other-vol"
 EOF
-    
+
     (cd "$test_dir" && source "$ORIG_DIR/aliases.sh" && \
      [[ "$(_containai_resolve_volume "" "$test_dir")" == "$default_vol" ]])
     pass "Falls back to [agent] when no workspace match"
@@ -78,7 +78,7 @@ EOF
 test_longest_match_wins() {
     step "Testing longest workspace path match wins"
     local test_dir="/tmp/test-longest-$$"
-    
+
     mkdir -p "$test_dir/project/subdir/.containai"
     cat > "$test_dir/project/subdir/.containai/config.toml" << EOF
 [agent]
@@ -90,7 +90,7 @@ data_volume = "project-vol"
 [workspace."/tmp/test-longest-$$/project/subdir"]
 data_volume = "subdir-vol"
 EOF
-    
+
     (cd "$test_dir/project/subdir" && source "$ORIG_DIR/aliases.sh" && \
      [[ "$(_containai_resolve_volume "" "$test_dir/project/subdir")" == "subdir-vol" ]])
     pass "Longest workspace path match wins"
@@ -100,11 +100,11 @@ EOF
 test_data_volume_overrides_config() {
     step "Testing --data-volume overrides workspace config"
     local test_dir="/tmp/test-override-$$"
-    
+
     mkdir -p "$test_dir/.containai"
     echo '[workspace."./"]
 data_volume = "config-vol"' > "$test_dir/.containai/config.toml"
-    
+
     (cd "$test_dir" && source "$ORIG_DIR/aliases.sh" && \
      [[ "$(_containai_resolve_volume "cli-vol")" == "cli-vol" ]])
     pass "--data-volume overrides workspace config"
@@ -157,7 +157,7 @@ test_config_file_volume() {
     mkdir -p "$test_dir/.containai"
     echo "[agent]
 data_volume = \"$test_vol\"" > "$test_dir/.containai/config.toml"
-    
+
     (cd "$test_dir" && source "$ORIG_DIR/aliases.sh" && \
      [[ "$(_containai_resolve_volume)" == "$test_vol" ]])
     pass "Config file discovery works"
@@ -171,7 +171,7 @@ test_workspace_config_discovery() {
     mkdir -p "$test_dir/.containai"
     echo "[agent]
 data_volume = \"$test_vol\"" > "$test_dir/.containai/config.toml"
-    
+
     # Run from different directory but with --workspace pointing to test_dir
     source "$ORIG_DIR/aliases.sh"
     local resolved
@@ -191,7 +191,7 @@ test_data_volume_overrides_config() {
     mkdir -p "$test_dir/.containai"
     echo "[agent]
 data_volume = \"config-vol\"" > "$test_dir/.containai/config.toml"
-    
+
     (cd "$test_dir" && source "$ORIG_DIR/aliases.sh" && \
      [[ "$(_containai_resolve_volume "cli-vol")" == "cli-vol" ]])
     pass "--data-volume overrides config"
@@ -260,11 +260,11 @@ test_config_file_volume() {
     mkdir -p "$test_dir/.containai"
     echo "[agent]
 data_volume = \"$test_vol\"" > "$test_dir/.containai/config.toml"
-    
+
     (cd "$test_dir" && source "$ORIG_DIR/aliases.sh" && \
      [[ "$(_containai_resolve_volume)" == "$test_vol" ]])
     pass "Config file discovery works"
-    
+
     rm -rf "$test_dir"
 }
 

@@ -288,7 +288,7 @@ _containai_parse_config() {
             if [[ "$strict" == "strict" ]]; then
                 return 1
             fi
-            return 0  # Graceful fallback in non-strict mode
+            return 0 # Graceful fallback in non-strict mode
         fi
 
         # Show any warnings from parse-toml.py
@@ -489,7 +489,7 @@ for i, item in enumerate(local_forwards):
         if [[ -n "$line" ]]; then
             _CAI_SSH_LOCAL_FORWARDS+=("$line")
         fi
-    done <<< "$ssh_local_forwards_output"
+    done <<<"$ssh_local_forwards_output"
 
     # Extract [container] section for resource limits
     local container_memory container_cpus
@@ -555,7 +555,7 @@ for item in default_excludes + ws_excludes:
         if [[ -n "$line" ]]; then
             _CAI_EXCLUDES+=("$line")
         fi
-    done <<< "$excludes_output"
+    done <<<"$excludes_output"
 
     return 0
 }

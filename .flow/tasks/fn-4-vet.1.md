@@ -183,7 +183,7 @@ python3 parse-toml.py config.toml --workspace /repo/subdir --config-dir /repo
 
 # Workspace matching - glob
 python3 parse-toml.py config.toml --workspace /home/user/project/tests --config-dir /home/user
-# Matches [workspace."*/tests"] 
+# Matches [workspace."*/tests"]
 
 # No match - falls back to [agent]
 python3 parse-toml.py config.toml --workspace /other/path --config-dir /home/user

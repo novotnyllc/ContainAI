@@ -28,17 +28,17 @@ containai sandbox reset [--workspace <path>]
 containai_sandbox_reset() {
     local workspace="${1:-.}"
     workspace=$(realpath "$workspace")
-    
+
     # Find sandbox by workspace
     local sandbox_id
     sandbox_id=$(docker sandbox ls --format '{{.ID}} {{.Workspace}}' | \
         grep " ${workspace}$" | awk '{print $1}')
-    
+
     if [[ -z "$sandbox_id" ]]; then
         _cai_info "No sandbox found for workspace: $workspace"
         return 0
     fi
-    
+
     _cai_info "Removing sandbox $sandbox_id for workspace: $workspace"
     docker sandbox rm "$sandbox_id"
     _cai_info "[OK] Sandbox removed. New config will apply on next run."

@@ -69,7 +69,7 @@ import_excludes = [".custom/path"]
 #
 # For each import_exclude pattern:
 #   If pattern == source_path → skip entire entry
-#   If pattern starts with source_path/ → 
+#   If pattern starts with source_path/ →
 #     remainder = pattern after source_path/
 #     pass --exclude remainder to rsync
 #   Else → pattern doesn't apply to this entry
@@ -78,7 +78,7 @@ _containai_translate_excludes() {
     local source_path="$1"
     shift
     local -a excludes=("$@")
-    
+
     local -a result=()
     for pattern in "${excludes[@]}"; do
         if [[ "$pattern" == "$source_path" ]]; then
@@ -89,7 +89,7 @@ _containai_translate_excludes() {
         fi
         # else: pattern doesn't apply
     done
-    
+
     printf '%s\n' "${result[@]}"
 }
 ```

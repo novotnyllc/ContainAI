@@ -387,7 +387,7 @@ _containai_validate_fr4_mounts() {
                 fi
                 volume_found=true
                 ;;
-            /etc/hosts|/etc/hostname|/etc/resolv.conf)
+            /etc/hosts | /etc/hostname | /etc/resolv.conf)
                 # Docker-managed, allowed
                 ;;
             *)
@@ -398,7 +398,7 @@ _containai_validate_fr4_mounts() {
                 return 1
                 ;;
         esac
-    done <<< "$mount_info"
+    done <<<"$mount_info"
 
     # Ensure both required mounts are present
     if [[ "$workspace_found" != "true" ]]; then
@@ -602,12 +602,12 @@ _containai_container_exists() {
 
     # Use if ! pattern for set -e safety
     if inspect_output=$(docker inspect --type container --format '{{.Id}}' "$container_name" 2>&1); then
-        return 0  # Container exists
+        return 0 # Container exists
     fi
 
     # Check if it's "no such" vs other errors
     if printf '%s' "$inspect_output" | grep -qiE "no such object|not found|error.*no such"; then
-        return 1  # Container doesn't exist
+        return 1 # Container doesn't exist
     fi
 
     # Docker error (daemon down, permission, etc.)
@@ -684,14 +684,14 @@ _containai_is_our_container() {
         exists_rc=$?
     fi
     if [[ $exists_rc -eq 1 ]]; then
-        return 1  # Doesn't exist = not ours
+        return 1 # Doesn't exist = not ours
     elif [[ $exists_rc -eq 2 ]]; then
-        return 2  # Docker error
+        return 2 # Docker error
     fi
 
     # Get label value - use if ! pattern for set -e safety
     if ! label_value=$(_containai_get_container_label "$container_name"); then
-        return 2  # Docker error
+        return 2 # Docker error
     fi
 
     # Check label
@@ -723,7 +723,7 @@ _containai_check_container_ownership() {
         exists_rc=$?
     fi
     if [[ $exists_rc -eq 1 ]]; then
-        return 2  # Container doesn't exist
+        return 2 # Container doesn't exist
     elif [[ $exists_rc -eq 2 ]]; then
         echo "[ERROR] Cannot check container ownership - Docker error" >&2
         return 3
@@ -902,7 +902,7 @@ _containai_start_container() {
                 container_name="${1#--name=}"
                 shift
                 ;;
-            --workspace|-w)
+            --workspace | -w)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --workspace requires a value" >&2
                     return 1
@@ -985,7 +985,7 @@ _containai_start_container() {
                 force_flag=true
                 shift
                 ;;
-            --detached|-d)
+            --detached | -d)
                 detached_flag=true
                 shift
                 ;;
@@ -993,11 +993,11 @@ _containai_start_container() {
                 shell_flag=true
                 shift
                 ;;
-            --quiet|-q)
+            --quiet | -q)
                 quiet_flag=true
                 shift
                 ;;
-            --debug|-D)
+            --debug | -D)
                 debug_flag=true
                 shift
                 ;;
@@ -1045,7 +1045,7 @@ _containai_start_container() {
                 ack_host_docker_socket=true
                 shift
                 ;;
-            --env|-e)
+            --env | -e)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --env requires a value" >&2
                     return 1
@@ -1061,7 +1061,7 @@ _containai_start_container() {
                 env_vars+=("${1#-e}")
                 shift
                 ;;
-            --volume|-v)
+            --volume | -v)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --volume requires a value" >&2
                     return 1
@@ -1316,7 +1316,7 @@ _containai_start_container() {
                 echo "ACTION=attach"
                 echo "ACTION_DETAIL=Would attach to running container via SSH"
                 ;;
-            exited|created)
+            exited | created)
                 echo "ACTION=start"
                 echo "ACTION_DETAIL=Would start stopped container and attach via SSH"
                 ;;
@@ -1606,7 +1606,7 @@ _containai_start_container() {
                 fi
             fi
             ;;
-        exited|created)
+        exited | created)
             # Check ownership using context-aware docker command (label or image fallback)
             local exited_label_val exited_image_fallback
             exited_label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || exited_label_val=""
@@ -1741,14 +1741,14 @@ _containai_start_container() {
             local vol vol_dest
             for vol in "${extra_volumes[@]}"; do
                 # Extract destination from volume spec (format: src:dest or src:dest:opts)
-                vol_dest="${vol#*:}"  # Remove source prefix
-                vol_dest="${vol_dest%%:*}"  # Remove options suffix
+                vol_dest="${vol#*:}"       # Remove source prefix
+                vol_dest="${vol_dest%%:*}" # Remove options suffix
                 case "$vol_dest" in
-                    /home/agent/workspace|/home/agent/workspace/*)
+                    /home/agent/workspace | /home/agent/workspace/*)
                         echo "[ERROR] FR-4: --volume cannot target /home/agent/workspace (protected path)" >&2
                         return 1
                         ;;
-                    /mnt/agent-data|/mnt/agent-data/*)
+                    /mnt/agent-data | /mnt/agent-data/*)
                         echo "[ERROR] FR-4: --volume cannot target /mnt/agent-data (protected path)" >&2
                         return 1
                         ;;
@@ -1785,7 +1785,7 @@ _containai_start_container() {
 
             args+=(run)
             args+=(--runtime=sysbox-runc)
-            args+=(--init)  # tini becomes PID 1 to properly reap zombie processes
+            args+=(--init) # tini becomes PID 1 to properly reap zombie processes
             args+=(--name "$container_name")
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
@@ -1795,8 +1795,8 @@ _containai_start_container() {
             if [[ -n "$image_tag" ]]; then
                 args+=(--label "containai.image-tag=$image_tag")
             fi
-            args+=(-p "${ssh_port}:22")  # Map allocated port to container SSH
-            args+=(-d)  # Always detached - tini manages sleep infinity as child
+            args+=(-p "${ssh_port}:22") # Map allocated port to container SSH
+            args+=(-d)                  # Always detached - tini manages sleep infinity as child
 
             # Cgroup resource limits (configurable via [container] config section or CLI flags)
             # Precedence: CLI flag > config > dynamic default (50% of host, 2GB/1CPU min)
@@ -1815,9 +1815,9 @@ _containai_start_container() {
             else
                 cpu_limit=$(_cai_default_container_cpus)
             fi
-            args+=(--memory="$mem_limit" --memory-swap="$mem_limit")  # memory-swap=memory disables swap
+            args+=(--memory="$mem_limit" --memory-swap="$mem_limit") # memory-swap=memory disables swap
             args+=(--cpus="$cpu_limit")
-            args+=(--stop-timeout 100)  # Allow systemd services to shut down gracefully
+            args+=(--stop-timeout 100) # Allow systemd services to shut down gracefully
 
             # Volume mounts
             args+=("${vol_args[@]}")
@@ -1947,7 +1947,7 @@ _containai_list_containers_for_context() {
         if [[ -n "$name" ]]; then
             printf '%s\t%s\t%s\n' "$name" "$status" "$context"
         fi
-    done <<< "$combined"
+    done <<<"$combined"
 }
 
 # Interactive container stop selection
@@ -2030,7 +2030,7 @@ _containai_stop_all() {
             display_ctx=""
         fi
         printf "  %d) %s (%s)%s\n" "$i" "$name" "$status" "$display_ctx"
-    done <<< "$all_containers"
+    done <<<"$all_containers"
 
     if [[ "$stop_all_flag" == "true" ]]; then
         echo ""

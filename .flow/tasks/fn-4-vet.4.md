@@ -27,7 +27,7 @@ _containai_main() {
     local config_flag=""
     local workspace_flag=""
     local args=()
-    
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --data-volume)
@@ -60,26 +60,26 @@ _containai_main() {
                 ;;
         esac
     done
-    
+
     # Resolve workspace (for both mounting AND config matching)
     local workspace="${workspace_flag:-$PWD}"
-    
+
     # Resolve volume for this invocation
     local volume
     volume=$(_containai_resolve_volume "$data_volume_flag" "$workspace" "$config_flag")
-    
+
     # Validate
     if ! _containai_validate_volume_name "$volume"; then
         echo "[ERROR] Invalid volume name: $volume" >&2
         return 1
     fi
-    
+
     # Ensure volume exists
     _asb_ensure_volume "$volume"
-    
+
     # Build volume mount args
     local volume_args="-v ${volume}:/mnt/agent-data"
-    
+
     # Continue with container creation...
 }
 ```
@@ -162,19 +162,19 @@ _containai_main() {
     # Signature: _containai_resolve_volume(cli_volume, workspace, explicit_config)
     local volume
     volume=$(_containai_resolve_volume "$data_volume_flag" "$workspace" "$config_flag")
-    
+
     # Validate
     if ! _containai_validate_volume_name "$volume"; then
         echo "[ERROR] Invalid volume name: $volume" >&2
         return 1
     fi
-    
+
     # Ensure volume exists
     _asb_ensure_volume "$volume"
-    
+
     # Build volume mount args
     local volume_args="-v ${volume}:/mnt/agent-data"
-    
+
     # Continue with container creation using $volume_args and "${args[@]}"
     ...
 }

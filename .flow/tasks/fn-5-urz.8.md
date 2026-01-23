@@ -22,18 +22,18 @@ else:
 _cai_select_context() {
     local eci_status
     eci_status=$(_cai_eci_status)
-    
+
     if [[ "$eci_status" == "enabled" ]]; then
         echo ""  # Empty = default context
         return 0
     fi
-    
+
     # Check for Secure Engine context
     if docker context inspect containai-secure >/dev/null 2>&1; then
         echo "containai-secure"
         return 0
     fi
-    
+
     # No isolation available
     return 1
 }
@@ -44,7 +44,7 @@ containai_run() {
         _cai_error "No isolation available. Run 'containai doctor' for setup instructions."
         return 1
     fi
-    
+
     local cmd=(docker)
     if [[ -n "$context" ]]; then
         cmd+=(--context "$context")

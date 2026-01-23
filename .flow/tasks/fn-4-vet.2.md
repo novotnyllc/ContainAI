@@ -26,22 +26,22 @@ _containai_resolve_volume() {
     local cli_volume="${1:-}"
     local workspace="${2:-$PWD}"
     local explicit_config="${3:-}"
-    
+
     # 1. CLI flag always wins - SKIP all config parsing
     if [[ -n "$cli_volume" ]]; then
         echo "$cli_volume"
         return 0
     fi
-    
+
     # 2. Environment variable always wins - SKIP all config parsing
     if [[ -n "${CONTAINAI_DATA_VOLUME:-}" ]]; then
         echo "$CONTAINAI_DATA_VOLUME"
         return 0
     fi
-    
+
     # 3. Resolve workspace to absolute path
     workspace=$(cd "$workspace" 2>/dev/null && pwd) || workspace="$PWD"
-    
+
     # 4. Find config file
     local config_file=""
     local config_dir=""
@@ -56,7 +56,7 @@ _containai_resolve_volume() {
         config_file=$(_containai_find_config "$workspace")
         [[ -n "$config_file" ]] && config_dir=$(dirname "$config_file")
     fi
-    
+
     # 5. Parse config with workspace matching
     if [[ -n "$config_file" ]]; then
         local volume
@@ -66,7 +66,7 @@ _containai_resolve_volume() {
             return 0
         fi
     fi
-    
+
     # 6. Default
     echo "sandbox-agent-data"
 }
@@ -75,12 +75,12 @@ _containai_parse_config_for_workspace() {
     local config_file="$1"
     local workspace="$2"
     local config_dir="$3"
-    
+
     if ! command -v python3 >/dev/null 2>&1; then
         echo "[WARN] Python not found, cannot parse config. Using default." >&2
         return 0
     fi
-    
+
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     python3 "$script_dir/parse-toml.py" "$config_file" --workspace "$workspace" --config-dir "$config_dir" 2>/dev/null
@@ -121,7 +121,7 @@ _containai_resolve_volume() {
     local profile="${2:-}"
     local workspace="${3:-$PWD}"
     local explicit_config="${4:-}"
-    
+
     # 1. CLI flag always wins - SKIP all config parsing
     if [[ -n "$cli_volume" ]]; then
         if [[ -n "$profile" ]]; then
@@ -130,7 +130,7 @@ _containai_resolve_volume() {
         echo "$cli_volume"
         return 0
     fi
-    
+
     # 2. Environment variable always wins - SKIP all config parsing
     if [[ -n "${CONTAINAI_DATA_VOLUME:-}" ]]; then
         if [[ -n "$profile" ]]; then
@@ -139,7 +139,7 @@ _containai_resolve_volume() {
         echo "$CONTAINAI_DATA_VOLUME"
         return 0
     fi
-    
+
     # 3. Config file resolution (only reached if no higher-priority volume)
     local config_file=""
     if [[ -n "$explicit_config" ]]; then
@@ -151,7 +151,7 @@ _containai_resolve_volume() {
     else
         config_file=$(_containai_find_config "$workspace")
     fi
-    
+
     if [[ -n "$config_file" ]]; then
         local volume
         volume=$(_containai_parse_config "$config_file" "$profile")
@@ -160,7 +160,7 @@ _containai_resolve_volume() {
             return 0
         fi
     fi
-    
+
     # 4. Default
     echo "sandbox-agent-data"
 }
@@ -173,9 +173,9 @@ _containai_parse_config() {
     local config_file="$1"
     local profile="${2:-}"
     local key="agent.data_volume"
-    
+
     [[ -n "$profile" ]] && key="profile.${profile}.data_volume"
-    
+
     if ! command -v python3 >/dev/null 2>&1; then
         if [[ -n "$profile" ]]; then
             echo "[ERROR] --profile requires Python to parse config. Install Python 3.11+ or use CONTAINAI_DATA_VOLUME." >&2
@@ -184,18 +184,18 @@ _containai_parse_config() {
         echo "[WARN] Python not found, cannot parse config. Using default." >&2
         return 0
     fi
-    
+
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local result
     result=$(python3 "$script_dir/parse-toml.py" "$config_file" "$key" 2>/dev/null)
-    
+
     # Profile fallback
     if [[ -z "$result" ]] && [[ -n "$profile" ]]; then
         echo "[WARN] Profile '$profile' not found, using [agent] defaults" >&2
         result=$(python3 "$script_dir/parse-toml.py" "$config_file" "agent.data_volume" 2>/dev/null)
     fi
-    
+
     echo "$result"
 }
 ```
@@ -235,19 +235,19 @@ _containai_resolve_volume() {
     local cli_volume="${1:-}"
     local profile="${2:-}"
     local workspace="${3:-$PWD}"
-    
+
     # 1. CLI flag always wins
     if [[ -n "$cli_volume" ]]; then
         echo "$cli_volume"
         return 0
     fi
-    
+
     # 2. Environment variable always wins over config
     if [[ -n "${CONTAINAI_DATA_VOLUME:-}" ]]; then
         echo "$CONTAINAI_DATA_VOLUME"
         return 0
     fi
-    
+
     # 3. Config file discovery (from workspace root)
     local config_file
     config_file=$(_containai_find_config "$workspace")
@@ -259,7 +259,7 @@ _containai_resolve_volume() {
             return 0
         fi
     fi
-    
+
     # 4. Default
     echo "sandbox-agent-data"
 }
@@ -272,9 +272,9 @@ _containai_parse_config() {
     local config_file="$1"
     local profile="${2:-}"
     local key="agent.data_volume"
-    
+
     [[ -n "$profile" ]] && key="profile.${profile}.data_volume"
-    
+
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
         if [[ -n "$profile" ]]; then
@@ -286,7 +286,7 @@ _containai_parse_config() {
         echo "[WARN] Python not found, cannot parse config file. Using env/CLI/default." >&2
         return 0
     fi
-    
+
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     python3 "$script_dir/parse-toml.py" "$config_file" "$key" 2>/dev/null
@@ -329,19 +329,19 @@ _containai_resolve_volume() {
     local cli_volume="${1:-}"
     local profile="${2:-}"
     local data_volume=""
-    
+
     # 1. CLI flag takes precedence
     if [[ -n "$cli_volume" ]]; then
         echo "$cli_volume"
         return 0
     fi
-    
+
     # 2. Environment variable
     if [[ -n "${CONTAINAI_DATA_VOLUME:-}" ]]; then
         echo "$CONTAINAI_DATA_VOLUME"
         return 0
     fi
-    
+
     # 3. Config file discovery
     local config_file
     config_file=$(_containai_find_config)
@@ -352,7 +352,7 @@ _containai_resolve_volume() {
             return 0
         fi
     fi
-    
+
     # 4. Default
     echo "sandbox-agent-data"
 }
@@ -364,16 +364,16 @@ _containai_parse_toml() {
     local config_file="$1"
     local profile="${2:-}"
     local key="agent.data_volume"
-    
+
     # Use profile-specific key if profile specified
     [[ -n "$profile" ]] && key="profile.${profile}.data_volume"
-    
+
     # Check if Python available
     if ! command -v python3 >/dev/null 2>&1; then
         echo "[WARN] Python not found, cannot parse config file. Using env/CLI only." >&2
         return 1
     fi
-    
+
     # Try parsing
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -414,16 +414,16 @@ Add a `_containai_load_config()` function to `aliases.sh` that discovers and loa
 
 _containai_load_config() {
     local config_file volume
-    
+
     # 1. Check environment variable first
     if [[ -n "${CONTAINAI_VOLUME:-}" ]]; then
         _CONTAINAI_VOLUME="$CONTAINAI_VOLUME"
         return 0
     fi
-    
+
     # 2. Find config file
     config_file=$(_containai_find_config)
-    
+
     # 3. Parse if found
     if [[ -n "$config_file" ]]; then
         volume=$(_containai_parse_toml "$config_file" "agent.volume")
@@ -432,7 +432,7 @@ _containai_load_config() {
             return 0
         fi
     fi
-    
+
     # 4. Default
     _CONTAINAI_VOLUME="sandbox-agent-data"
 }

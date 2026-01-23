@@ -114,7 +114,7 @@ _cai_detect_memory_bytes() {
             # macOS: sysctl hw.memsize returns bytes
             mem_bytes=$(sysctl -n hw.memsize 2>/dev/null) || mem_bytes=0
             ;;
-        wsl|linux)
+        wsl | linux)
             # Linux/WSL: /proc/meminfo MemTotal is in kB
             if [[ -f /proc/meminfo ]]; then
                 local mem_kb
@@ -145,7 +145,7 @@ _cai_detect_cpu_count() {
             # macOS: sysctl hw.ncpu
             cpu_count=$(sysctl -n hw.ncpu 2>/dev/null) || cpu_count=0
             ;;
-        wsl|linux)
+        wsl | linux)
             # Linux/WSL: nproc or /proc/cpuinfo
             if command -v nproc >/dev/null 2>&1; then
                 cpu_count=$(nproc 2>/dev/null) || cpu_count=0
