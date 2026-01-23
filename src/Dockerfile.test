@@ -57,11 +57,17 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
         docker-ce-cli \
         containerd.io
 
-# Install Sysbox CE (for sysbox-runc binary only)
-# Note: We install sysbox to get the sysbox-runc binary so inner Docker can
-# use it as default runtime. The sysbox services (sysbox-mgr, sysbox-fs) are
-# NOT started - the host's sysbox runtime provides coordination when this
-# container runs with --runtime=sysbox-runc.
+# Install Sysbox CE (for sysbox-runc binary only, services NOT started)
+#
+# DECISION: The spec has contradictory requirements:
+#   1. "Sysbox installation removed" (host provides isolation)
+#   2. "Inner Docker configured with sysbox-runc as default"
+#
+# Resolution: Install sysbox package to get the sysbox-runc BINARY, but do NOT
+# start sysbox services (sysbox-mgr, sysbox-fs). The host's sysbox runtime
+# provides coordination when this container runs with --runtime=sysbox-runc.
+# This satisfies both requirements: no redundant services, but inner Docker
+# can use sysbox-runc as default runtime.
 ARG SYSBOX_VERSION=0.6.7
 ARG SYSBOX_SHA256_AMD64=b7ac389e5a19592cadf16e0ca30e40919516128f6e1b7f99e1cb4ff64554172e
 ARG SYSBOX_SHA256_ARM64=16d80123ba53058cf90f5a68686e297621ea97942602682e34b3352783908f91
