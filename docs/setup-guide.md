@@ -36,7 +36,7 @@ Before running `cai setup`, ensure you have:
 |-------------|---------|---------------|
 | WSL2 kernel | 5.5+ | `uname -r` |
 | systemd | Enabled | `ps -p 1 -o comm=` (should show `systemd`) |
-| Ubuntu/Debian | 20.04+ | `lsb_release -a` |
+| Ubuntu/Debian | 22.04+ / 11+ | `lsb_release -a` |
 
 **Enable systemd in WSL2** (if not already enabled):
 
@@ -60,7 +60,7 @@ wsl --shutdown
 |-------------|---------|---------------|
 | Kernel | 5.5+ | `uname -r` |
 | systemd | Running | `systemctl --version` |
-| Ubuntu/Debian | 20.04+ | For auto-install; manual install for others |
+| Ubuntu/Debian | 22.04+ / 11+ | For auto-install; manual install for others |
 
 ### macOS
 
@@ -86,12 +86,12 @@ The `cai setup` command installs and configures multiple components. Here's what
 |  Host System                                                       |
 |  +------------------------------------------------------------+   |
 |  |                                                             |   |
-|  |  Docker Installation (WSL2/Linux only)                      |   |
+|  |  Docker Configuration (WSL2/Linux only)                    |   |
 |  |  +---------------------------------------------------------+|   |
 |  |  | - Socket: /var/run/docker-containai.sock (WSL2)         ||   |
 |  |  |           /var/run/docker.sock (Linux)                  ||   |
 |  |  | - Config: /etc/docker/daemon.json                       ||   |
-|  |  | - Runtime: sysbox-runc (default)                        ||   |
+|  |  | - Runtime: sysbox-runc (added, not default)             ||   |
 |  |  +---------------------------------------------------------+|   |
 |  |                                                             |   |
 |  |  Sysbox Runtime                                             |   |
@@ -413,8 +413,6 @@ SSH
   SSH config directory:                      [OK]
   Include directive:                         [OK]
   OpenSSH version:                           [OK] 8.9
-
-Ready:                                       [OK]
 ```
 
 ### Doctor Output Interpretation
