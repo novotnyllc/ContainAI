@@ -54,7 +54,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         # FUSE support (required by sysbox-fs)
         fuse \
         # Process utilities
-        procps && \
+        procps \
+        # Tool launchers
+        # Python base (required for pipx)
+        python3 \
+        python3-pip \
+        python3-venv \
+        python3-dev \
+        pipx && \
     # Disable journald kmsg reading (not available in containers)
     echo "ReadKMsg=no" >> /etc/systemd/journald.conf
 
@@ -268,6 +275,47 @@ RUN ARCH=$(dpkg --print-architecture) && \
     rm -rf /tmp/bun.zip /tmp/bun-linux-*
 
 ENV PATH="/home/agent/.bun/bin:${PATH}"
+
+# =============================================================================
+# NODE.JS (via nvm)
+# =============================================================================
+USER agent
+WORKDIR /home/agent
+
+ENV NVM_DIR=/home/agent/.nvm
+
+# Install nvm and latest LTS Node.js
+ARG NVM_VERSION=0.40.1
+RUN curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh" | bash && \
+    . "${NVM_DIR}/nvm.sh" && \
+    nvm install --lts && \
+    nvm alias default 'lts/*' && \
+    echo 'lts/*' > /home/agent/.nvmrc && \
+    # Verify installation
+    node --version && \
+    npm --version
+
+# Create .bash_env for non-interactive shell access to nvm
+# Source nvm and activate default version silently
+RUN printf '%s\n' \
+    '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh" && nvm use default --silent 2>/dev/null' \
+    > /home/agent/.bash_env
+
+ENV BASH_ENV=/home/agent/.bash_env
+
+# =============================================================================
+# PYTHON TOOLS (uv, pipx)
+# pipx is already installed via apt, just need uv
+# =============================================================================
+USER agent
+WORKDIR /home/agent
+
+# Install uv (fast Python package installer)
+RUN curl -fsSL https://astral.sh/uv/install.sh | sh && \
+    # Verify uv installed correctly
+    /home/agent/.local/bin/uv --version
+
+ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # Switch back to root for final setup
 USER root
