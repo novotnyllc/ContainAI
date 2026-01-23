@@ -3147,9 +3147,10 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     # Run import with --from pointing to alternate source
     # Use timeout to catch circular symlink hangs (60s should be plenty)
+    # Note: Clear env vars inline (env -u doesn't work with shell functions)
     # -------------------------------------------------------------------------
     local import_output import_exit=0
-    import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+    import_output=$(cd -- "$test_dir" && CONTAINAI_DATA_VOLUME= CONTAINAI_CONFIG= HOME="$FIXTURE_HOME" \
         run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
 
     if [[ $import_exit -eq 124 ]]; then
@@ -3292,9 +3293,9 @@ data_volume = "'"$test_vol"'"
 data_volume = "'"$pitfall_vol"'"
 '
 
-    # Run import with timeout
+    # Run import with timeout (clear env vars inline - env -u doesn't work with shell functions)
     local pitfall_output pitfall_exit=0
-    pitfall_output=$(cd -- "$pitfall_test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+    pitfall_output=$(cd -- "$pitfall_test_dir" && CONTAINAI_DATA_VOLUME= CONTAINAI_CONFIG= HOME="$FIXTURE_HOME" \
         run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$pitfall_vol" "$pitfall_source_dir" 2>&1) || pitfall_exit=$?
 
     # Check import succeeded before checking filesystem

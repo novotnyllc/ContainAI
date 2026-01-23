@@ -157,3 +157,6 @@ POSIX sh case patterns with variable prefixes break if the variable has trailing
 
 ## 2026-01-23 manual [pitfall]
 When stripping trailing slash with ${var%/}, root path / becomes empty - use case statement to handle root specially
+
+## 2026-01-23 manual [pitfall]
+macOS lacks the timeout command by default - use a portable wrapper that checks command -v timeout or falls back to running without timeout
