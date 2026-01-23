@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2288,SC2289
+# shellcheck disable=SC1078,SC1079,SC2026,SC2288,SC2289
+# SC1078,SC1079,SC2026: False positives for quotes in comments and heredocs
 # SC2288,SC2289: False positives for embedded sh scripts in heredocs (find -exec sh -c)
 # ==============================================================================
 # ContainAI Import - cai import subcommand
@@ -857,7 +858,7 @@ copy() {
                                 *) _host_src_dir="${HOST_SOURCE_ROOT}${_rel_path}" ;;
                             esac
                             _runtime_dst_dir="/mnt/agent-data${_dst#/target}"
-                            preview_symlink_relinks "$_host_src_dir" "$_runtime_dst_dir" "$_src"
+                            preview_symlink_relinks "$_host_src_dir" "$_runtime_dst_dir" "$_src" "$_flags"
                         fi
                     else
                         rsync "$@" "$_src/" "$_dst/"
@@ -1109,74 +1110,168 @@ symlink_target_exists_in_source() {
 }
 
 # preview_symlink_relinks: Preview symlinks that would be relinked (dry-run mode)
-# Takes: host_src_dir, runtime_dst_dir, source_dir
+# Takes: host_src_dir, runtime_dst_dir, source_dir, flags
 # Note: Scans SOURCE directory (not target, since rsync dry-run does not create files)
+# Note: Respects .system/ exclusion when flags contain x and NO_EXCLUDES != 1
 # Output: [RELINK], [WARN] messages to stderr
 preview_symlink_relinks() {
     _host_src_dir="$1"
     _runtime_dst_dir="$2"
     _source_dir="$3"
+    _flags="${4:-}"
+
+    # Build find command with optional .system/ exclusion (mirrors rsync behavior)
+    # When NO_EXCLUDES != 1 and flags contain x, prune .system/ directory
+    _prune_system=""
+    if [ "${NO_EXCLUDES:-}" != "1" ]; then
+        case "$_flags" in
+            *x*) _prune_system="1" ;;
+        esac
+    fi
 
     # Find all symlinks in source and preview what would be relinked
-    find "$_source_dir" -type l -exec sh -c '
-        host_src="$1"; runtime_dst="$2"; src_dir="$3"; shift 3
-        for link do
-            target=$(readlink "$link" 2>/dev/null) || continue
+    # Use -path prune pattern when .system/ exclusion is active
+    if [ "$_prune_system" = "1" ]; then
+        find "$_source_dir" -path "$_source_dir/.system" -prune -o -type l -exec sh -c '
+            host_src="$1"; runtime_dst="$2"; src_dir="$3"; shift 3
+            for link do
+                target=$(readlink "$link" 2>/dev/null) || continue
 
-            # Skip relative symlinks (they remain unchanged, no output)
-            case "$target" in
-                /*) ;; # absolute, continue processing
-                *) continue ;;
-            esac
+                # Skip relative symlinks (they remain unchanged, no output)
+                case "$target" in
+                    /*) ;; # absolute, continue processing
+                    *) continue ;;
+                esac
 
-            # Normalize host_src: strip trailing slash, except for root
-            case "$host_src" in
-                /) : ;;
-                */) host_src="${host_src%/}" ;;
-            esac
+                # Normalize host_src: strip trailing slash, except for root
+                case "$host_src" in
+                    /) : ;;
+                    */) host_src="${host_src%/}" ;;
+                esac
 
-            # Check if internal (target starts with host_src_dir)
-            case "$target" in
-                "$host_src"/*|"$host_src")
-                    # Extract relative portion
-                    rel_target="${target#"$host_src"}"
+                # Check if internal (target starts with host_src_dir)
+                case "$target" in
+                    "$host_src"/*|"$host_src")
+                        # Extract relative portion
+                        rel_target="${target#"$host_src"}"
 
-                    # SECURITY: Reject paths with .. segments to prevent escape
-                    case "$rel_target" in
-                        */..)
-                            printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                        # SECURITY: Reject paths with .. segments to prevent escape
+                        case "$rel_target" in
+                            */..)
+                                printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                                continue
+                                ;;
+                            */../*)
+                                printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                                continue
+                                ;;
+                        esac
+
+                        # Check if target exists in source (map host path to source mount)
+                        src_target="${src_dir}${rel_target}"
+                        if ! test -e "$src_target" && ! test -L "$src_target"; then
+                            printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
                             continue
-                            ;;
-                        */../*)
-                            printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                        fi
+
+                        # Normalize runtime_dst: strip trailing slash, except for root
+                        case "$runtime_dst" in
+                            /) : ;;
+                            */) runtime_dst="${runtime_dst%/}" ;;
+                        esac
+
+                        # Would be relinked
+                        new_target="${runtime_dst}${rel_target}"
+
+                        # Security: validate stays under runtime_dst (belt-and-suspenders)
+                        case "$new_target" in
+                            "$runtime_dst"/*|"$runtime_dst") ;;
+                            *)
+                                printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
+                                continue
+                                ;;
+                        esac
+
+                        printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                        ;;
+                    *)
+                        # External absolute symlink (outside entry subtree)
+                        printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
+                        ;;
+                esac
+            done
+        ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+    else
+        find "$_source_dir" -type l -exec sh -c '
+            host_src="$1"; runtime_dst="$2"; src_dir="$3"; shift 3
+            for link do
+                target=$(readlink "$link" 2>/dev/null) || continue
+
+                # Skip relative symlinks (they remain unchanged, no output)
+                case "$target" in
+                    /*) ;; # absolute, continue processing
+                    *) continue ;;
+                esac
+
+                # Normalize host_src: strip trailing slash, except for root
+                case "$host_src" in
+                    /) : ;;
+                    */) host_src="${host_src%/}" ;;
+                esac
+
+                # Check if internal (target starts with host_src_dir)
+                case "$target" in
+                    "$host_src"/*|"$host_src")
+                        # Extract relative portion
+                        rel_target="${target#"$host_src"}"
+
+                        # SECURITY: Reject paths with .. segments to prevent escape
+                        case "$rel_target" in
+                            */..)
+                                printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                                continue
+                                ;;
+                            */../*)
+                                printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
+                                continue
+                                ;;
+                        esac
+
+                        # Check if target exists in source (map host path to source mount)
+                        src_target="${src_dir}${rel_target}"
+                        if ! test -e "$src_target" && ! test -L "$src_target"; then
+                            printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
                             continue
-                            ;;
-                    esac
+                        fi
 
-                    # Check if target exists in source (map host path to source mount)
-                    src_target="${src_dir}${rel_target}"
-                    if ! test -e "$src_target" && ! test -L "$src_target"; then
-                        printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
-                        continue
-                    fi
+                        # Normalize runtime_dst: strip trailing slash, except for root
+                        case "$runtime_dst" in
+                            /) : ;;
+                            */) runtime_dst="${runtime_dst%/}" ;;
+                        esac
 
-                    # Normalize runtime_dst: strip trailing slash, except for root
-                    case "$runtime_dst" in
-                        /) : ;;
-                        */) runtime_dst="${runtime_dst%/}" ;;
-                    esac
+                        # Would be relinked
+                        new_target="${runtime_dst}${rel_target}"
 
-                    # Would be relinked
-                    new_target="${runtime_dst}${rel_target}"
-                    printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
-                    ;;
-                *)
-                    # External absolute symlink (outside entry subtree)
-                    printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
-                    ;;
-            esac
-        done
-    ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+                        # Security: validate stays under runtime_dst (belt-and-suspenders)
+                        case "$new_target" in
+                            "$runtime_dst"/*|"$runtime_dst") ;;
+                            *)
+                                printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
+                                continue
+                                ;;
+                        esac
+
+                        printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                        ;;
+                    *)
+                        # External absolute symlink (outside entry subtree)
+                        printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
+                        ;;
+                esac
+            done
+        ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+    fi
 }
 
 # relink_internal_symlinks: Find and relink absolute symlinks within a target directory
