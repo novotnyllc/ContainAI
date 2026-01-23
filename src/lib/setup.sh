@@ -704,7 +704,7 @@ _cai_create_isolated_docker_service() {
     service_content=$(cat <<EOF
 [Unit]
 Description=ContainAI Docker Application Container Engine
-Documentation=https://github.com/containai/containai
+Documentation=https://github.com/novotnyllc/containai
 After=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
 Wants=network-online.target sysbox-mgr.service sysbox-fs.service
 Requires=containerd.service
