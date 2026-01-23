@@ -52,9 +52,24 @@ The README should explain what makes ContainAI different:
 - [ ] NO changelog or version history
 - [ ] Reads as if this is the first and only version
 ## Done summary
-TBD
+## Summary
 
+Completely rewrote README.md to focus on the "system container" value proposition:
+
+1. **New hero section**: "Secure system containers for AI coding agents" with explanation of what system containers are (VM-like Docker containers with systemd, DinD, SSH)
+
+2. **Why System Containers comparison table**: Shows the differences between app containers and system containers (init system, multiple services, DinD, userns isolation, SSH access)
+
+3. **Streamlined quick start**: Three commands - install, setup, run
+
+4. **Key Capabilities section** with subsections:
+   - System Container with systemd
+   - Docker-in-Docker Without --privileged
+   - SSH Access
+   - Automatic User Namespace Isolation
+
+5. **Clean slate**: No legacy references, migration notes, or version history - reads as the first and only version
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 53e9177fb02443df13e5443a84161f0c1b79ca8c
+- Tests: shellcheck: pre-existing warnings only, no new issues
 - PRs:
