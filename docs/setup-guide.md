@@ -46,8 +46,11 @@ sudo tee /etc/wsl.conf << 'EOF'
 [boot]
 systemd=true
 EOF
+```
 
-# Restart WSL from PowerShell
+Then restart WSL from PowerShell:
+
+```powershell
 wsl --shutdown
 ```
 
@@ -125,10 +128,10 @@ The `cai setup` command installs and configures multiple components. Here's what
 
 | Component | WSL2 | Native Linux | macOS |
 |-----------|------|--------------|-------|
-| Docker daemon | Dedicated docker-ce | Uses existing docker | Lima VM |
-| Docker socket | `/var/run/docker-containai.sock` | `/var/run/docker.sock` | `~/.lima/containai-secure/sock/docker.sock` |
+| Docker daemon | Existing Docker Engine (not Desktop) | Uses existing Docker Engine | Lima VM |
+| Docker socket | `/var/run/docker-containai.sock` (dedicated) | `/var/run/docker.sock` | `~/.lima/containai-secure/sock/docker.sock` |
 | Docker config | `/etc/docker/daemon.json` | `/etc/docker/daemon.json` | Inside Lima VM |
-| Sysbox install | Auto (apt) | Auto (apt) on Ubuntu/Debian | Inside Lima VM |
+| Sysbox install | GitHub releases (Ubuntu/Debian) | GitHub releases (Ubuntu/Debian) | Inside Lima VM |
 | Sysbox services | systemd | systemd | Lima VM systemd |
 | Context name | `containai-secure` | `containai-secure` | `containai-secure` |
 
@@ -138,13 +141,13 @@ The `cai setup` command installs and configures multiple components. Here's what
 
 ### WSL2 (Windows)
 
-WSL2 requires a dedicated Docker installation to avoid conflicts with Docker Desktop (which does not support Sysbox).
+WSL2 must run Docker Engine inside WSL (not Docker Desktop integration mode), as Docker Desktop does not support the Sysbox runtime. The setup configures an existing Docker Engine and adds a dedicated socket for ContainAI.
 
 #### What WSL2 Setup Does
 
 1. **Checks kernel version** (requires 5.5+)
 2. **Tests seccomp compatibility** (WSL 1.1.0+ may have conflicts)
-3. **Installs Sysbox** via apt (Ubuntu/Debian)
+3. **Downloads and installs Sysbox** from GitHub releases (Ubuntu/Debian)
 4. **Configures daemon.json** with sysbox-runc runtime
 5. **Creates dedicated socket** at `/var/run/docker-containai.sock`
 6. **Creates systemd drop-in** for Docker socket configuration
@@ -213,7 +216,7 @@ Native Linux uses the existing Docker installation with Sysbox added as a runtim
 #### What Native Linux Setup Does
 
 1. **Checks kernel version** (requires 5.5+)
-2. **Installs Sysbox** via apt (Ubuntu/Debian only)
+2. **Downloads and installs Sysbox** from GitHub releases (Ubuntu/Debian only)
 3. **Configures daemon.json** with sysbox-runc runtime
 4. **Restarts Docker service**
 5. **Creates Docker context** `containai-secure`
@@ -234,17 +237,13 @@ cai setup --verbose
 
 #### Manual Sysbox Installation (Non-Ubuntu/Debian)
 
-For distributions other than Ubuntu/Debian, install Sysbox manually:
+For distributions other than Ubuntu/Debian, install Sysbox manually following the [official Sysbox installation guide](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md).
 
 ```bash
-# Download from GitHub releases
+# Download the appropriate package from GitHub releases:
 # https://github.com/nestybox/sysbox/releases
 
-# For Fedora/RHEL:
-sudo dnf install ./sysbox-ce_*.rpm
-
-# For Arch Linux (AUR):
-yay -S sysbox-ce
+# Install the downloaded package for your distribution
 
 # Then run setup to configure Docker
 cai setup
@@ -390,41 +389,32 @@ cai doctor
 
 ### Expected Output
 
+The output varies by platform, but key sections to look for:
+
 ```
 ContainAI Doctor
 ================
 
-Docker:
-  Docker CLI:                           [OK] 24.0.7
-  Docker daemon:                        [OK] Running
+Docker
+  Docker CLI:                                [OK]
+  Docker daemon:                             [OK]
 
-Sysbox Isolation:
-  Sysbox runtime:                       [OK] sysbox-runc available
-  containai-secure context:             [OK] Configured
+Sysbox Isolation
+  Sysbox available:                          [OK]
+  Runtime: sysbox-runc                       [OK]
+  Context 'containai-secure':                [OK] Configured
 
-Platform:
-  Platform detected:                    [OK] wsl2
-  Kernel version:                       [OK] 5.15.90 (>= 5.5)
+Platform: WSL2
+  Kernel version: 5.15                       [OK]
+  Seccomp compatibility: ok                  [OK]
 
-ContainAI Docker:
-  Docker service:                       [OK] Running
-  Dedicated socket:                     [OK] /var/run/docker-containai.sock
+SSH
+  SSH key exists:                            [OK]
+  SSH config directory:                      [OK]
+  Include directive:                         [OK]
+  OpenSSH version:                           [OK] 8.9
 
-SSH:
-  SSH key:                              [OK] ~/.config/containai/id_containai
-  SSH config directory:                 [OK] ~/.ssh/containai.d/
-  Include directive:                    [OK] Present in ~/.ssh/config
-  OpenSSH version:                      [OK] 8.9 (>= 7.3)
-
-Resources:
-  Host memory:                          [INFO] 16 GB
-  Host CPUs:                            [INFO] 8 cores
-  Container limits:                     [INFO] 8 GB / 4 cores (50%)
-
-Summary:
-  Sysbox Isolation:                     [OK] Available
-  SSH Access:                           [OK] Configured
-  Ready:                                [OK] ContainAI is ready to use
+Ready:                                       [OK]
 ```
 
 ### Doctor Output Interpretation
@@ -507,6 +497,7 @@ EOF
 ```
 
 Then restart WSL from PowerShell:
+
 ```powershell
 wsl --shutdown
 ```
@@ -599,56 +590,50 @@ limactl start containai-secure
 
 ## Uninstalling
 
-To remove ContainAI components:
+To remove ContainAI components, follow the manual cleanup steps below for your platform.
 
-```bash
-# Remove containers (preserves volumes)
-cai uninstall
+### Remove Docker Context
 
-# Preview what would be removed
-cai uninstall --dry-run
-
-# Also remove containers
-cai uninstall --containers
-
-# Also remove volumes
-cai uninstall --containers --volumes
-```
-
-### Manual Cleanup
-
-If `cai uninstall` is not available:
-
-**Docker Context:**
 ```bash
 docker context rm containai-secure
 ```
 
-**WSL2/Linux - Docker Drop-in:**
+### WSL2/Linux - Remove Docker Drop-in
+
 ```bash
-sudo rm /etc/systemd/system/docker.service.d/containai-socket.conf
+sudo rm -f /etc/systemd/system/docker.service.d/containai-socket.conf
 sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
-**SSH Configuration:**
+### Remove SSH Configuration
+
 ```bash
 rm -rf ~/.ssh/containai.d/
-rm ~/.config/containai/id_containai*
-rm ~/.config/containai/known_hosts
-# Manually remove Include line from ~/.ssh/config
+rm -f ~/.config/containai/id_containai*
+rm -f ~/.config/containai/known_hosts
 ```
 
-**macOS - Lima VM:**
+Manually remove the Include line from `~/.ssh/config`:
+
+```bash
+# Edit ~/.ssh/config and remove this line:
+# Include ~/.ssh/containai.d/*.conf
+```
+
+### macOS - Remove Lima VM
+
 ```bash
 limactl stop containai-secure
 limactl delete containai-secure
 ```
 
-**Note:** `cai uninstall` preserves configuration and data directories by default:
-- `~/.config/containai/` (user config)
-- `/etc/containai/` (system config on Linux)
-- `/var/lib/containai-docker/` (Docker data on WSL2)
+### What is Preserved
+
+The cleanup steps above do not remove:
+- `~/.config/containai/config.toml` (user configuration)
+- Docker images and volumes (remove with `docker image prune` / `docker volume prune`)
+- Sysbox installation (remove with your package manager if desired)
 
 ---
 

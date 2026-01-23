@@ -69,9 +69,8 @@ Users can understand:
 - [ ] Copy-paste commands where helpful
 
 ## Done summary
-TBD
-
+Created comprehensive setup documentation (docs/setup-guide.md) covering WSL2, native Linux, and macOS platforms with prerequisites, component locations, verification steps, and troubleshooting guidance.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 038dd613c716efc897183fe8c03b02277a9229f6
+- Tests: Verified documentation against acceptance criteria, Manual review of all platform sections
 - PRs:
