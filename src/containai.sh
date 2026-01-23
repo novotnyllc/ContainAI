@@ -443,6 +443,7 @@ Requirements:
   SSH: REQUIRED - cai shell/run use SSH for container access
 
 Options:
+  --fix           Auto-fix issues that can be remediated automatically
   --json          Output machine-parseable JSON
   -h, --help      Show this help message
 
@@ -450,8 +451,22 @@ Exit Codes:
   0    All checks pass (Sysbox available AND SSH configured)
   1    Checks failed (run 'cai setup' to configure)
 
+What --fix can remediate:
+  - Missing SSH key (regenerates)
+  - Missing SSH config directory (creates)
+  - Missing Include directive (adds to ~/.ssh/config)
+  - Stale SSH configs (removes orphaned container configs)
+  - Wrong file permissions (fixes to 700/600 as appropriate)
+
+What --fix cannot remediate (requires manual action):
+  - Sysbox not installed (use 'cai setup')
+  - Docker context not configured (use 'cai setup')
+  - Kernel version incompatible
+  - Docker daemon not running
+
 Examples:
   cai doctor                    Run all checks, show formatted report
+  cai doctor --fix              Auto-fix issues and show report
   cai doctor --json             Output JSON for scripts/automation
 EOF
 }
@@ -897,6 +912,7 @@ _containai_sandbox_cmd() {
 # Doctor subcommand handler
 _containai_doctor_cmd() {
     local json_output="false"
+    local fix_mode="false"
     local workspace="$PWD"
 
     # Parse arguments
@@ -904,6 +920,10 @@ _containai_doctor_cmd() {
         case "$1" in
             --json)
                 json_output="true"
+                shift
+                ;;
+            --fix)
+                fix_mode="true"
                 shift
                 ;;
             --workspace|-w)
@@ -946,7 +966,9 @@ _containai_doctor_cmd() {
     fi
 
     # Run doctor checks
-    if [[ "$json_output" == "true" ]]; then
+    if [[ "$fix_mode" == "true" ]]; then
+        _cai_doctor_fix
+    elif [[ "$json_output" == "true" ]]; then
         _cai_doctor_json
     else
         _cai_doctor

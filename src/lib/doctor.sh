@@ -7,6 +7,7 @@
 # Provides:
 #   _cai_doctor()              - Run all checks and output formatted report
 #   _cai_doctor_json()         - Run all checks and output JSON report
+#   _cai_doctor_fix()          - Auto-remediate fixable issues and output report
 #   _cai_check_wsl_seccomp()   - Check WSL2 seccomp compatibility status
 #   _cai_check_kernel_for_sysbox() - Check kernel version for Sysbox compatibility
 #   _cai_select_context()      - Auto-select Docker context based on Sysbox availability
@@ -754,6 +755,353 @@ _cai_doctor() {
         return 0
     else
         return 1
+    fi
+}
+
+# ==============================================================================
+# Doctor Fix Mode
+# ==============================================================================
+
+# Run doctor with auto-remediation for fixable issues
+# Returns: 0 if all issues fixed, 1 if unfixable issues remain
+# Outputs: Formatted report showing what was fixed, skipped, or failed
+_cai_doctor_fix() {
+    local fixed_count=0
+    local skip_count=0
+    local fail_count=0
+    local platform
+
+    platform=$(_cai_detect_platform)
+
+    printf '%s\n' "ContainAI Doctor (Fix Mode)"
+    printf '%s\n' "==========================="
+    printf '\n'
+
+    # === SSH Key Fix ===
+    local ssh_key_path="$_CAI_SSH_KEY_PATH"
+    local ssh_pubkey_path="$_CAI_SSH_PUBKEY_PATH"
+    local config_dir="$_CAI_CONFIG_DIR"
+
+    printf '%s\n' "SSH Key"
+
+    # Create config directory if missing
+    if [[ ! -d "$config_dir" ]]; then
+        printf '  %-50s' "Creating $config_dir"
+        if mkdir -p "$config_dir" && chmod 700 "$config_dir"; then
+            printf '%s\n' "[FIXED]"
+            ((fixed_count++))
+        else
+            printf '%s\n' "[FAIL]"
+            ((fail_count++))
+        fi
+    else
+        # Check/fix config directory permissions
+        local dir_perms
+        dir_perms=$(stat -c "%a" "$config_dir" 2>/dev/null || stat -f "%OLp" "$config_dir" 2>/dev/null)
+        if [[ "$dir_perms" != "700" ]]; then
+            printf '  %-50s' "Fixing permissions on $config_dir"
+            if chmod 700 "$config_dir"; then
+                printf '%s\n' "[FIXED]"
+                ((fixed_count++))
+            else
+                printf '%s\n' "[FAIL]"
+                ((fail_count++))
+            fi
+        else
+            printf '  %-50s %s\n' "Config directory permissions" "[OK]"
+        fi
+    fi
+
+    # Generate SSH key if missing
+    if [[ ! -f "$ssh_key_path" ]]; then
+        printf '  %-50s' "Generating SSH key"
+        if command -v ssh-keygen >/dev/null 2>&1; then
+            if ssh-keygen -t ed25519 -f "$ssh_key_path" -N "" -C "containai" >/dev/null 2>&1; then
+                chmod 600 "$ssh_key_path"
+                chmod 644 "$ssh_pubkey_path"
+                printf '%s\n' "[FIXED]"
+                ((fixed_count++))
+            else
+                printf '%s\n' "[FAIL]"
+                ((fail_count++))
+            fi
+        else
+            printf '%s\n' "[FAIL] ssh-keygen not found"
+            ((fail_count++))
+        fi
+    else
+        # Check/fix private key permissions
+        local key_perms
+        key_perms=$(stat -c "%a" "$ssh_key_path" 2>/dev/null || stat -f "%OLp" "$ssh_key_path" 2>/dev/null)
+        if [[ "$key_perms" != "600" ]]; then
+            printf '  %-50s' "Fixing permissions on SSH key"
+            if chmod 600 "$ssh_key_path"; then
+                printf '%s\n' "[FIXED]"
+                ((fixed_count++))
+            else
+                printf '%s\n' "[FAIL]"
+                ((fail_count++))
+            fi
+        else
+            printf '  %-50s %s\n' "SSH key exists" "[OK]"
+        fi
+
+        # Regenerate public key if missing
+        if [[ ! -f "$ssh_pubkey_path" ]]; then
+            printf '  %-50s' "Regenerating public key"
+            if ssh-keygen -y -f "$ssh_key_path" > "$ssh_pubkey_path" 2>/dev/null; then
+                chmod 644 "$ssh_pubkey_path"
+                printf '%s\n' "[FIXED]"
+                ((fixed_count++))
+            else
+                printf '%s\n' "[FAIL]"
+                ((fail_count++))
+            fi
+        fi
+    fi
+
+    printf '\n'
+
+    # === SSH Config Fix ===
+    local ssh_dir="$HOME/.ssh"
+    local ssh_config_dir="$_CAI_SSH_CONFIG_DIR"
+    local ssh_config="$ssh_dir/config"
+    local include_line="Include ~/.ssh/containai.d/*.conf"
+    local include_pattern='^[[:space:]]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]]+[^#]*containai\.d/\*\.conf'
+
+    printf '%s\n' "SSH Config"
+
+    # Create ~/.ssh/ directory if missing
+    if [[ ! -d "$ssh_dir" ]]; then
+        printf '  %-50s' "Creating $ssh_dir"
+        if mkdir -p "$ssh_dir" && chmod 700 "$ssh_dir"; then
+            printf '%s\n' "[FIXED]"
+            ((fixed_count++))
+        else
+            printf '%s\n' "[FAIL]"
+            ((fail_count++))
+        fi
+    else
+        # Check/fix .ssh directory permissions
+        local ssh_dir_perms
+        ssh_dir_perms=$(stat -c "%a" "$ssh_dir" 2>/dev/null || stat -f "%OLp" "$ssh_dir" 2>/dev/null)
+        if [[ "$ssh_dir_perms" != "700" ]]; then
+            printf '  %-50s' "Fixing permissions on $ssh_dir"
+            if chmod 700 "$ssh_dir"; then
+                printf '%s\n' "[FIXED]"
+                ((fixed_count++))
+            else
+                printf '%s\n' "[FAIL]"
+                ((fail_count++))
+            fi
+        fi
+    fi
+
+    # Create ~/.ssh/containai.d/ directory if missing
+    if [[ ! -d "$ssh_config_dir" ]]; then
+        printf '  %-50s' "Creating $ssh_config_dir"
+        if mkdir -p "$ssh_config_dir" && chmod 700 "$ssh_config_dir"; then
+            printf '%s\n' "[FIXED]"
+            ((fixed_count++))
+        else
+            printf '%s\n' "[FAIL]"
+            ((fail_count++))
+        fi
+    else
+        # Check/fix containai.d directory permissions
+        local config_dir_perms
+        config_dir_perms=$(stat -c "%a" "$ssh_config_dir" 2>/dev/null || stat -f "%OLp" "$ssh_config_dir" 2>/dev/null)
+        if [[ "$config_dir_perms" != "700" ]]; then
+            printf '  %-50s' "Fixing permissions on $ssh_config_dir"
+            if chmod 700 "$ssh_config_dir"; then
+                printf '%s\n' "[FIXED]"
+                ((fixed_count++))
+            else
+                printf '%s\n' "[FAIL]"
+                ((fail_count++))
+            fi
+        else
+            printf '  %-50s %s\n' "SSH config directory" "[OK]"
+        fi
+    fi
+
+    # Add/fix Include directive in ~/.ssh/config
+    if [[ ! -f "$ssh_config" ]]; then
+        printf '  %-50s' "Creating $ssh_config with Include"
+        if printf '%s\n' "$include_line" > "$ssh_config" && chmod 600 "$ssh_config"; then
+            printf '%s\n' "[FIXED]"
+            ((fixed_count++))
+        else
+            printf '%s\n' "[FAIL]"
+            ((fail_count++))
+        fi
+    else
+        # Check if Include directive exists and is at top
+        local include_present=false
+        local include_at_top=false
+
+        if grep -qE "$include_pattern" "$ssh_config" 2>/dev/null; then
+            include_present=true
+            local first_effective_line
+            first_effective_line=$(grep -v '^[[:space:]]*$' "$ssh_config" | grep -v '^[[:space:]]*#' | head -1)
+            if printf '%s' "$first_effective_line" | grep -qE "$include_pattern"; then
+                include_at_top=true
+            fi
+        fi
+
+        if [[ "$include_present" == "true" ]] && [[ "$include_at_top" == "true" ]]; then
+            printf '  %-50s %s\n' "Include directive" "[OK]"
+        else
+            printf '  %-50s' "Adding Include directive to top of config"
+            local temp_file
+            if temp_file=$(mktemp 2>/dev/null); then
+                if {
+                    printf '%s\n\n' "$include_line"
+                    grep -vE "$include_pattern" "$ssh_config" 2>/dev/null || true
+                } > "$temp_file" && cp "$temp_file" "$ssh_config" && rm -f "$temp_file"; then
+                    printf '%s\n' "[FIXED]"
+                    ((fixed_count++))
+                else
+                    rm -f "$temp_file" 2>/dev/null || true
+                    printf '%s\n' "[FAIL]"
+                    ((fail_count++))
+                fi
+            else
+                printf '%s\n' "[FAIL]"
+                ((fail_count++))
+            fi
+        fi
+
+        # Check/fix ssh config file permissions
+        local ssh_config_perms
+        ssh_config_perms=$(stat -c "%a" "$ssh_config" 2>/dev/null || stat -f "%OLp" "$ssh_config" 2>/dev/null)
+        if [[ "$ssh_config_perms" != "600" && "$ssh_config_perms" != "644" ]]; then
+            printf '  %-50s' "Fixing permissions on $ssh_config"
+            if chmod 600 "$ssh_config"; then
+                printf '%s\n' "[FIXED]"
+                ((fixed_count++))
+            else
+                printf '%s\n' "[FAIL]"
+                ((fail_count++))
+            fi
+        fi
+    fi
+
+    printf '\n'
+
+    # === Stale SSH Config Cleanup ===
+    printf '%s\n' "Stale SSH Configs"
+
+    # Only attempt cleanup if Docker is available and at least one daemon is reachable
+    if command -v docker >/dev/null 2>&1; then
+        # Check if any Docker context is reachable
+        local docker_reachable=false
+        if _cai_timeout 5 docker info >/dev/null 2>&1; then
+            docker_reachable=true
+        elif docker context inspect containai-secure >/dev/null 2>&1 && \
+             _cai_timeout 5 docker --context containai-secure info >/dev/null 2>&1; then
+            docker_reachable=true
+        fi
+
+        if [[ "$docker_reachable" == "true" ]]; then
+            # Run cleanup silently and capture result
+            local cleanup_output
+            if cleanup_output=$(_cai_ssh_cleanup "false" 2>&1); then
+                # Parse cleanup output for what was cleaned
+                local cleaned
+                cleaned=$(printf '%s' "$cleanup_output" | grep -c '\[CLEANED\]' || true)
+                if [[ "$cleaned" -gt 0 ]]; then
+                    printf '  %-50s %s\n' "Cleaned $cleaned stale config(s)" "[FIXED]"
+                    ((fixed_count += cleaned))
+                else
+                    printf '  %-50s %s\n' "No stale configs found" "[OK]"
+                fi
+            else
+                printf '  %-50s %s\n' "Cleanup" "[SKIP] Docker unreachable"
+                ((skip_count++))
+            fi
+        else
+            printf '  %-50s %s\n' "Cleanup" "[SKIP] Docker daemon not reachable"
+            ((skip_count++))
+        fi
+    else
+        printf '  %-50s %s\n' "Cleanup" "[SKIP] Docker not installed"
+        ((skip_count++))
+    fi
+
+    printf '\n'
+
+    # === Unfixable Issues (informational) ===
+    printf '%s\n' "Cannot Auto-Fix"
+
+    # Sysbox availability
+    local sysbox_context_name="containai-secure"
+    local config_context
+    config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
+    if [[ -n "$config_context" ]]; then
+        sysbox_context_name="$config_context"
+    fi
+
+    if ! _cai_sysbox_available_for_context "$sysbox_context_name" 2>/dev/null; then
+        local sysbox_error="${_CAI_SYSBOX_CONTEXT_ERROR:-unknown}"
+        case "$sysbox_error" in
+            socket_not_found)
+                printf '  %-50s %s\n' "Sysbox socket not found" "[MANUAL] Run 'cai setup'"
+                ((skip_count++))
+                ;;
+            context_not_found)
+                printf '  %-50s %s\n' "Docker context not configured" "[MANUAL] Run 'cai setup'"
+                ((skip_count++))
+                ;;
+            runtime_not_found)
+                printf '  %-50s %s\n' "Sysbox runtime not installed" "[MANUAL] Run 'cai setup'"
+                ((skip_count++))
+                ;;
+            connection_refused|daemon_unavailable)
+                printf '  %-50s %s\n' "Docker daemon not running" "[MANUAL] Start Docker"
+                ((skip_count++))
+                ;;
+            permission_denied)
+                printf '  %-50s %s\n' "Permission denied" "[MANUAL] Check docker group"
+                ((skip_count++))
+                ;;
+            *)
+                printf '  %-50s %s\n' "Sysbox not available" "[MANUAL] Run 'cai setup'"
+                ((skip_count++))
+                ;;
+        esac
+    else
+        printf '  %-50s %s\n' "Sysbox" "[OK] Already configured"
+    fi
+
+    # Kernel compatibility check (WSL2 and Linux only)
+    if [[ "$platform" == "wsl" ]] || [[ "$platform" == "linux" ]]; then
+        if ! _cai_check_kernel_for_sysbox >/dev/null 2>&1; then
+            printf '  %-50s %s\n' "Kernel version" "[MANUAL] Upgrade to 5.5+"
+            ((skip_count++))
+        fi
+    fi
+
+    printf '\n'
+
+    # === Summary ===
+    printf '%s\n' "Summary"
+    printf '  %-50s %s\n' "Fixed:" "$fixed_count"
+    printf '  %-50s %s\n' "Skipped (manual action required):" "$skip_count"
+    printf '  %-50s %s\n' "Failed:" "$fail_count"
+
+    printf '\n'
+
+    # Final status
+    if [[ $fail_count -gt 0 ]]; then
+        printf '%s\n' "Some fixes failed. Check output above for details."
+        return 1
+    elif [[ $skip_count -gt 0 ]]; then
+        printf '%s\n' "Some issues require manual action. Run 'cai setup' for full setup."
+        return 1
+    else
+        printf '%s\n' "All fixable issues resolved."
+        return 0
     fi
 }
 

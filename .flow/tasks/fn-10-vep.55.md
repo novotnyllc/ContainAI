@@ -37,9 +37,8 @@ Update `cai doctor` to validate SSH setup and connectivity.
 - [ ] `cai doctor` exits 0 when all checks pass
 - [ ] `cai doctor` exits non-zero with details when checks fail
 ## Done summary
-TBD
-
+Added SSH setup and connectivity validation to cai doctor command. Checks OpenSSH version (7.3+), SSH key existence, config directory, Include directive, and optionally tests SSH connectivity to running containers with proper timeouts and known_hosts handling.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 9960249, bfc2328
+- Tests: shellcheck -x src/lib/doctor.sh src/containai.sh, bash -c 'source src/containai.sh && cai doctor', bash -c 'source src/containai.sh && cai doctor --json', bash -c 'source src/containai.sh && cai doctor --help'
 - PRs:
