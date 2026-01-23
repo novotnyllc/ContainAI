@@ -1743,4 +1743,418 @@ _cai_ssh_connect_with_retry() {
     return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
 }
 
+# ==============================================================================
+# SSH Command Execution
+# ==============================================================================
+
+# Run a command in container via SSH
+# This is the main entry point for SSH-based command execution (used by cai run)
+#
+# Arguments:
+#   $1 = container name
+#   $2 = docker context (optional)
+#   $3 = force_update (optional, "true" for --fresh containers)
+#   $4 = quiet (optional, "true" to suppress verbose output)
+#   $5 = detached (optional, "true" for background execution)
+#   $6 = allocate_tty (optional, "true" for interactive TTY)
+#   $7+ = command and arguments to run
+#
+# Environment variables (array, passed by name):
+#   env_vars_name = name of array containing VAR=value pairs
+#
+# Returns:
+#   Exit code from the remote command, or error codes (10-15) on failure
+#
+# Features:
+#   - Env vars passed as VAR=value prefix to command
+#   - TTY allocation for interactive commands (-t flag)
+#   - Detached mode via nohup (background execution)
+#   - Proper argument quoting/escaping
+#   - Retry on transient failures
+#   - Clear error messages with remediation steps
+_cai_ssh_run() {
+    local container_name="$1"
+    local context="${2:-}"
+    local force_update="${3:-false}"
+    local quiet="${4:-false}"
+    local detached="${5:-false}"
+    local allocate_tty="${6:-false}"
+    shift 6
+
+    local -a cmd_args=("$@")
+
+    local -a docker_cmd=(docker)
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    # Get container state
+    local container_state
+    if ! container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$container_name" 2>/dev/null); then
+        _cai_error "Container not found: $container_name"
+        _cai_error ""
+        _cai_error "To create a container for this workspace, run:"
+        _cai_error "  cai run /path/to/workspace"
+        return $_CAI_SSH_EXIT_CONTAINER_NOT_FOUND
+    fi
+
+    # Check ownership - verify this is a ContainAI container
+    local label_val
+    label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || label_val=""
+    if [[ "$label_val" != "true" ]]; then
+        # Fallback: check if image is from our repo (for legacy containers without label)
+        local image_name
+        image_name=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
+        if [[ "$image_name" != "${_CONTAINAI_DEFAULT_REPO:-agent-sandbox}:"* ]]; then
+            _cai_error "Container '$container_name' exists but was not created by ContainAI"
+            _cai_error ""
+            _cai_error "This is a name collision with a container not managed by ContainAI."
+            _cai_error "Use a different workspace path or remove the conflicting container."
+            return $_CAI_SSH_EXIT_CONTAINER_FOREIGN
+        fi
+    fi
+
+    # Start container if not running
+    if [[ "$container_state" != "running" ]]; then
+        if [[ "$quiet" != "true" ]]; then
+            _cai_info "Starting container $container_name..."
+        fi
+        if ! "${docker_cmd[@]}" start "$container_name" >/dev/null 2>&1; then
+            _cai_error "Failed to start container: $container_name"
+            _cai_error ""
+            _cai_error "Check container logs for details:"
+            _cai_error "  docker logs $container_name"
+            return $_CAI_SSH_EXIT_CONTAINER_START_FAILED
+        fi
+
+        # Wait for container to be running
+        local wait_count=0
+        local max_wait=30
+        while [[ $wait_count -lt $max_wait ]]; do
+            local state
+            state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$container_name" 2>/dev/null) || state=""
+            if [[ "$state" == "running" ]]; then
+                break
+            fi
+            sleep 0.5
+            ((wait_count++))
+        done
+        if [[ $wait_count -ge $max_wait ]]; then
+            _cai_error "Container failed to start within ${max_wait} attempts"
+            return $_CAI_SSH_EXIT_CONTAINER_START_FAILED
+        fi
+    fi
+
+    # Get SSH port from container label
+    local ssh_port
+    if ! ssh_port=$(_cai_get_container_ssh_port "$container_name" "$context"); then
+        _cai_error "Container has no SSH port configured"
+        _cai_error ""
+        _cai_error "This container may have been created before SSH support was added."
+        _cai_error "Recreate the container with: cai run --fresh /path/to/workspace"
+        return $_CAI_SSH_EXIT_SSH_SETUP_FAILED
+    fi
+
+    # Check if SSH config exists, regenerate if missing
+    local config_file="$_CAI_SSH_CONFIG_DIR/${container_name}.conf"
+    if [[ ! -f "$config_file" ]] || [[ "$force_update" == "true" ]]; then
+        if [[ "$quiet" != "true" ]]; then
+            _cai_info "Setting up SSH configuration..."
+        fi
+
+        # Full SSH setup (wait for sshd, inject key, update known_hosts, write config)
+        if ! _cai_setup_container_ssh "$container_name" "$ssh_port" "$context" "$force_update"; then
+            _cai_error "SSH setup failed for container $container_name"
+            _cai_error ""
+            _cai_error "Troubleshooting:"
+            _cai_error "  1. Check container logs: docker logs $container_name"
+            _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
+            _cai_error "  3. Try recreating: cai run --fresh /path/to/workspace"
+            return $_CAI_SSH_EXIT_SSH_SETUP_FAILED
+        fi
+    fi
+
+    # Run command via SSH
+    _cai_ssh_run_with_retry "$container_name" "$ssh_port" "$context" "$quiet" "$detached" "$allocate_tty" "${cmd_args[@]}"
+}
+
+# Run a command via SSH with retry and auto-recovery
+# Arguments:
+#   $1 = container name
+#   $2 = SSH port
+#   $3 = docker context (optional)
+#   $4 = quiet (optional)
+#   $5 = detached (optional, "true" for background execution)
+#   $6 = allocate_tty (optional, "true" for interactive TTY)
+#   $7+ = command and arguments
+# Returns: exit code from SSH or specific error codes
+_cai_ssh_run_with_retry() {
+    local container_name="$1"
+    local ssh_port="$2"
+    local context="${3:-}"
+    local quiet="${4:-false}"
+    local detached="${5:-false}"
+    local allocate_tty="${6:-false}"
+    shift 6
+
+    local -a cmd_args=("$@")
+
+    local max_retries=3
+    local retry_count=0
+    local wait_ms=500  # Start at 500ms
+    local max_wait_ms=4000  # Cap at 4 seconds
+    local ssh_exit_code
+    local host_key_auto_recovered=false
+
+    # Determine StrictHostKeyChecking value based on OpenSSH version
+    local strict_host_key_checking
+    if _cai_check_ssh_accept_new_support; then
+        strict_host_key_checking="accept-new"
+    else
+        strict_host_key_checking="yes"
+    fi
+
+    while (( retry_count < max_retries )); do
+        # Build SSH command with explicit options (does not depend on ~/.ssh/config)
+        local -a ssh_cmd=(ssh)
+        ssh_cmd+=(-o "HostName=localhost")
+        ssh_cmd+=(-o "Port=$ssh_port")
+        ssh_cmd+=(-o "User=agent")
+        ssh_cmd+=(-o "IdentityFile=$_CAI_SSH_KEY_PATH")
+        ssh_cmd+=(-o "IdentitiesOnly=yes")
+        ssh_cmd+=(-o "UserKnownHostsFile=$_CAI_KNOWN_HOSTS_FILE")
+        ssh_cmd+=(-o "StrictHostKeyChecking=$strict_host_key_checking")
+        ssh_cmd+=(-o "PreferredAuthentications=publickey")
+        ssh_cmd+=(-o "GSSAPIAuthentication=no")
+        ssh_cmd+=(-o "PasswordAuthentication=no")
+        ssh_cmd+=(-o "ConnectTimeout=10")
+
+        # Add agent forwarding if SSH_AUTH_SOCK is set (user has ssh-agent running)
+        if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+            ssh_cmd+=(-A)
+        fi
+
+        # Allocate TTY for interactive commands
+        if [[ "$allocate_tty" == "true" ]]; then
+            ssh_cmd+=(-t)
+        fi
+
+        # Connect to localhost (explicit options override any host alias)
+        ssh_cmd+=(localhost)
+
+        # Build the remote command string
+        # For detached mode, wrap with nohup and redirect output
+        local remote_cmd=""
+        if [[ ${#cmd_args[@]} -gt 0 ]]; then
+            # Separate env vars (VAR=value) from actual command arguments
+            local -a env_prefix_parts=()
+            local -a actual_cmd_parts=()
+            local arg
+            local in_command=false
+
+            for arg in "${cmd_args[@]}"; do
+                if [[ "$in_command" == "false" && "$arg" =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]]; then
+                    # This is an environment variable assignment
+                    local var_name="${arg%%=*}"
+                    local var_value="${arg#*=}"
+                    local quoted_value
+                    quoted_value=$(printf '%q' "$var_value")
+                    env_prefix_parts+=("${var_name}=${quoted_value}")
+                else
+                    # This is a command or command argument
+                    in_command=true
+                    local quoted_arg
+                    quoted_arg=$(printf '%q' "$arg")
+                    actual_cmd_parts+=("$quoted_arg")
+                fi
+            done
+
+            # Build the full command string with env prefix
+            local env_prefix=""
+            if [[ ${#env_prefix_parts[@]} -gt 0 ]]; then
+                env_prefix="${env_prefix_parts[*]} "
+            fi
+
+            local quoted_args=""
+            if [[ ${#actual_cmd_parts[@]} -gt 0 ]]; then
+                quoted_args="${actual_cmd_parts[*]}"
+            fi
+
+            if [[ "$detached" == "true" ]]; then
+                # Run in background with nohup, redirect output to /dev/null
+                # Use disown pattern: nohup cmd </dev/null >/dev/null 2>&1 &
+                remote_cmd="cd /home/agent/workspace && nohup ${env_prefix}${quoted_args} </dev/null >/dev/null 2>&1 &"
+            else
+                # Run in foreground
+                remote_cmd="cd /home/agent/workspace && ${env_prefix}${quoted_args}"
+            fi
+            ssh_cmd+=("$remote_cmd")
+        fi
+
+        if [[ "$quiet" != "true" && $retry_count -eq 0 ]]; then
+            if [[ "$detached" == "true" ]]; then
+                _cai_info "Running command in background via SSH..."
+            elif [[ ${#cmd_args[@]} -gt 0 ]]; then
+                _cai_info "Running command via SSH..."
+            else
+                _cai_info "Connecting to container via SSH..."
+            fi
+        fi
+
+        # Execute SSH and capture exit code + stderr for diagnostics
+        local ssh_stderr_file
+        ssh_stderr_file=$(mktemp)
+        if "${ssh_cmd[@]}" 2>"$ssh_stderr_file"; then
+            ssh_exit_code=0
+        else
+            ssh_exit_code=$?
+        fi
+        local ssh_stderr
+        ssh_stderr=$(cat "$ssh_stderr_file" 2>/dev/null || true)
+        rm -f "$ssh_stderr_file"
+
+        # Check exit code and decide whether to retry
+        case $ssh_exit_code in
+            0)
+                # Success
+                if [[ "$host_key_auto_recovered" == "true" && "$quiet" != "true" ]]; then
+                    _cai_info "Auto-recovered from stale host key"
+                fi
+                return 0
+                ;;
+            255)
+                # SSH error - analyze stderr to determine cause
+                # Check for host key mismatch
+                if printf '%s' "$ssh_stderr" | grep -qiE "host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED"; then
+                    # Auto-recover: clean stale keys and retry (once)
+                    if [[ "$host_key_auto_recovered" != "true" ]]; then
+                        if [[ "$quiet" != "true" ]]; then
+                            _cai_warn "SSH host key changed, auto-recovering..."
+                        fi
+                        _cai_clean_known_hosts "$ssh_port"
+                        _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "true" 2>/dev/null || true
+                        host_key_auto_recovered=true
+                        # Don't count this as a retry - it's auto-recovery
+                        continue
+                    fi
+                    # Already tried auto-recovery, fail with guidance
+                    _cai_error "SSH host key mismatch could not be auto-recovered"
+                    _cai_error ""
+                    _cai_error "Try recreating the container: cai run --fresh /path/to/workspace"
+                    return $_CAI_SSH_EXIT_HOST_KEY_MISMATCH
+                fi
+
+                # Check for non-transient errors that should not retry
+                if printf '%s' "$ssh_stderr" | grep -qiE "permission denied|no such identity|could not resolve hostname|bad configuration|no route to host"; then
+                    # Non-transient error - fail fast with clear message
+                    _cai_error "SSH connection failed: non-transient error"
+                    _cai_error ""
+                    printf '%s\n' "$ssh_stderr" | while IFS= read -r line; do
+                        [[ -n "$line" ]] && _cai_error "  $line"
+                    done
+                    _cai_error ""
+                    _cai_error "Troubleshooting:"
+                    if printf '%s' "$ssh_stderr" | grep -qiE "permission denied|no such identity"; then
+                        _cai_error "  SSH key issue. Verify key exists: ls -la $_CAI_SSH_KEY_PATH"
+                        _cai_error "  Or regenerate with: cai setup"
+                    fi
+                    return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+                fi
+
+                # Connection refused or timeout - these are transient, retry
+                retry_count=$((retry_count + 1))
+                if (( retry_count < max_retries )); then
+                    if [[ "$quiet" != "true" ]]; then
+                        _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
+                    fi
+
+                    # Exponential backoff
+                    local sleep_sec
+                    sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_ms / 1000}")
+                    sleep "$sleep_sec"
+                    wait_ms=$((wait_ms * 2))
+                    if (( wait_ms > max_wait_ms )); then
+                        wait_ms=$max_wait_ms
+                    fi
+
+                    # On retry, ensure SSH is set up (sshd might have been slow to start)
+                    _cai_setup_container_ssh "$container_name" "$ssh_port" "$context" "" "true" 2>/dev/null || true
+                    continue
+                fi
+
+                # All retries exhausted
+                _cai_error "SSH connection failed after $max_retries retries"
+                _cai_error ""
+                _cai_error "Troubleshooting:"
+                _cai_error "  1. Check container is running: docker ps | grep $container_name"
+                _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
+                _cai_error "  3. Check port mapping: docker port $container_name 22"
+                _cai_error "  4. Test SSH manually: ssh -v -p $ssh_port agent@localhost"
+                return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+                ;;
+            *)
+                # Other exit codes are from the remote command
+                # Pass them through as-is (propagate exit code)
+                return $ssh_exit_code
+                ;;
+        esac
+    done
+
+    return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+}
+
+# Build SSH command with environment variables prepended
+# Arguments:
+#   $1 = name of env vars array (array of VAR=value strings)
+#   $2+ = command and arguments
+# Outputs: the full command string with env vars prepended
+# Example: _cai_build_ssh_cmd_with_env env_vars claude --print
+#   -> "FOO=bar BAZ=qux claude --print"
+_cai_build_ssh_cmd_with_env() {
+    local env_array_name="$1"
+    shift
+    local -a cmd_args=("$@")
+
+    # Build env var prefix
+    local env_prefix=""
+    local -n env_ref="$env_array_name" 2>/dev/null || true
+
+    if [[ -n "${env_ref+x}" ]]; then
+        local env_var
+        for env_var in "${env_ref[@]}"; do
+            # Validate env var format (VAR=value)
+            if [[ "$env_var" =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]]; then
+                # Quote the value properly for shell
+                local var_name="${env_var%%=*}"
+                local var_value="${env_var#*=}"
+                local quoted_value
+                quoted_value=$(printf '%q' "$var_value")
+                if [[ -z "$env_prefix" ]]; then
+                    env_prefix="${var_name}=${quoted_value}"
+                else
+                    env_prefix="$env_prefix ${var_name}=${quoted_value}"
+                fi
+            fi
+        done
+    fi
+
+    # Build command string
+    local cmd_str=""
+    local arg
+    for arg in "${cmd_args[@]}"; do
+        if [[ -z "$cmd_str" ]]; then
+            cmd_str=$(printf '%q' "$arg")
+        else
+            cmd_str="$cmd_str $(printf '%q' "$arg")"
+        fi
+    done
+
+    # Combine env prefix and command
+    if [[ -n "$env_prefix" ]]; then
+        printf '%s %s' "$env_prefix" "$cmd_str"
+    else
+        printf '%s' "$cmd_str"
+    fi
+}
+
 return 0

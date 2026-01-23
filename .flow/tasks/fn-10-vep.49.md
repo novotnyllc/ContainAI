@@ -74,9 +74,8 @@ Update `cai shell` to use SSH with bulletproof connection handling. The command 
 - [ ] Agent forwarding works if configured
 - [ ] Exit codes indicate specific failure types
 ## Done summary
-TBD
-
+Updated `cai shell` to use SSH instead of `docker exec` for container shell access. The implementation uses explicit SSH options for robustness, auto-recovers from host key mismatches, auto-generates SSH keys if missing, and retries only on transient failures with exponential backoff.
 ## Evidence
-- Commits:
+- Commits: 637cb5c5ea2be8ee5ca52fa1b3ff26f2e3d77c56, 05108fce9781128aabda4945433fe086b67b44b5
 - Tests:
 - PRs:
