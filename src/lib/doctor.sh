@@ -151,39 +151,55 @@ _cai_select_context() {
     local config_context_name="${1:-}"
     local debug_flag="${2:-}"
 
-    # Use config override if provided, otherwise default to containai-secure
-    local context_name="${config_context_name:-containai-secure}"
-    local default_context="containai-secure"
+    # Try contexts in order:
+    # 1. Config override (if provided)
+    # 2. containai-docker (new isolated daemon, Linux/WSL2)
+    # 3. containai-secure (legacy/macOS Lima)
+    local context_name="${config_context_name:-}"
+    local primary_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"  # containai-docker
+    local fallback_context="containai-secure"
 
-    # Verify context exists AND has sysbox-runc runtime (not just context inspect)
-    # This catches cases where context exists but daemon is down or sysbox not installed
-    if _cai_sysbox_available_for_context "$context_name"; then
-        if [[ "$debug_flag" == "debug" ]]; then
-            printf '%s\n' "[DEBUG] Context selection: Using context '$context_name' with Sysbox" >&2
+    # If config specified a context, try it first
+    if [[ -n "$context_name" ]]; then
+        if _cai_sysbox_available_for_context "$context_name"; then
+            if [[ "$debug_flag" == "debug" ]]; then
+                printf '%s\n' "[DEBUG] Context selection: Using config context '$context_name' with Sysbox" >&2
+            fi
+            printf '%s' "$context_name"
+            return 0
         fi
-        printf '%s' "$context_name"
+        if [[ "$debug_flag" == "debug" ]]; then
+            printf '%s\n' "[DEBUG] Context selection: Config context '$context_name' not available" >&2
+        fi
+    fi
+
+    # Try primary context (containai-docker) - the new isolated daemon
+    if _cai_sysbox_available_for_context "$primary_context"; then
+        if [[ "$debug_flag" == "debug" ]]; then
+            printf '%s\n' "[DEBUG] Context selection: Using primary context '$primary_context' with Sysbox" >&2
+        fi
+        if [[ -n "$config_context_name" ]]; then
+            echo "[WARN] Config context '$config_context_name' not available, using '$primary_context'" >&2
+        fi
+        printf '%s' "$primary_context"
         return 0
     fi
 
-    # Config-specified context failed - try default containai-secure as fallback
-    # (unless config already specified containai-secure, which we just tried)
-    if [[ -n "$config_context_name" ]] && [[ "$config_context_name" != "$default_context" ]]; then
+    # Try fallback context (containai-secure) - legacy or macOS
+    if _cai_sysbox_available_for_context "$fallback_context"; then
         if [[ "$debug_flag" == "debug" ]]; then
-            printf '%s\n' "[DEBUG] Context selection: Config context '$config_context_name' not available, trying default '$default_context'" >&2
+            printf '%s\n' "[DEBUG] Context selection: Using fallback context '$fallback_context' with Sysbox" >&2
         fi
-        if _cai_sysbox_available_for_context "$default_context"; then
-            if [[ "$debug_flag" == "debug" ]]; then
-                printf '%s\n' "[DEBUG] Context selection: Using fallback context '$default_context' with Sysbox" >&2
-            fi
-            echo "[WARN] Config context '$config_context_name' not available, using default '$default_context'" >&2
-            printf '%s' "$default_context"
-            return 0
+        if [[ -n "$config_context_name" ]]; then
+            echo "[WARN] Config context '$config_context_name' not available, using '$fallback_context'" >&2
         fi
+        printf '%s' "$fallback_context"
+        return 0
     fi
 
     # No isolation available
     if [[ "$debug_flag" == "debug" ]]; then
-        printf '%s\n' "[DEBUG] Context selection: No isolation available (context '$context_name' not ready)" >&2
+        printf '%s\n' "[DEBUG] Context selection: No isolation available (tried: $primary_context, $fallback_context)" >&2
     fi
     return 1
 }

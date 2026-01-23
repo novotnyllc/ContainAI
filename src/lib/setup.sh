@@ -201,18 +201,19 @@ _cai_show_seccomp_warning() {
     printf '%s\n' "+==================================================================+"
     printf '%s\n' "|                       *** WARNING ***                            |"
     printf '%s\n' "+==================================================================+"
-    printf '%s\n' "| Sysbox on WSL2 may not work due to seccomp filter conflicts.    |"
+    printf '%s\n' "| Sysbox on WSL2 may not work due to seccomp filter conflicts with |"
+    printf '%s\n' "| networking set to mirrored mode. Set to nat to avoid conflicts.  |"
     printf '%s\n' "|                                                                  |"
-    printf '%s\n' "| Your WSL version (1.1.0+) has a seccomp filter on PID 1 that    |"
-    printf '%s\n' "| conflicts with Sysbox's seccomp-notify mechanism.               |"
+    printf '%s\n' "| Your WSL version (1.1.0+) has a seccomp filter on PID 1 that     |"
+    printf '%s\n' "| conflicts with Sysbox's seccomp-notify mechanism.                |"
     printf '%s\n' "|                                                                  |"
-    printf '%s\n' "| Docker Sandbox will still work (this is the hard requirement).  |"
-    printf '%s\n' "| Sysbox provides additional isolation but is optional.           |"
+    printf '%s\n' "| Docker Sandbox will still work (this is the hard requirement).   |"
+    printf '%s\n' "| Sysbox provides additional isolation but is optional.            |"
     printf '%s\n' "|                                                                  |"
     printf '%s\n' "| Options:                                                         |"
-    printf '%s\n' "|   1. Proceed anyway: cai setup --force                          |"
-    printf '%s\n' "|   2. Downgrade WSL:  wsl --update --web-download --version 1.0.3|"
-    printf '%s\n' "|   3. Skip Sysbox:    Use Docker Sandbox without Sysbox          |"
+    printf '%s\n' "|   1. Proceed anyway: cai setup --force                           |"
+    printf '%s\n' "|   2. Downgrade WSL:  wsl --update --web-download --version 1.0.3 |"
+    printf '%s\n' "|   3. Skip Sysbox:    Use Docker Sandbox without Sysbox           |"
     printf '%s\n' "+==================================================================+"
     printf '%s\n' ""
 }
@@ -551,8 +552,8 @@ _cai_cleanup_legacy_paths() {
 
     _cai_step "Checking for legacy ContainAI paths"
 
-    # Clean up old socket
-    if [[ -S "$_CAI_LEGACY_SOCKET" ]]; then
+    # Clean up old socket (use -e to catch any file type, not just sockets)
+    if [[ -e "$_CAI_LEGACY_SOCKET" ]]; then
         if [[ "$dry_run" == "true" ]]; then
             _cai_info "[DRY-RUN] Would remove legacy socket: $_CAI_LEGACY_SOCKET"
         else
@@ -567,13 +568,19 @@ _cai_cleanup_legacy_paths() {
         _cai_info "No legacy socket found at $_CAI_LEGACY_SOCKET"
     fi
 
-    # Clean up old context
+    # Clean up old context (use -f to avoid prompts in non-interactive mode)
     if docker context inspect "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
         if [[ "$dry_run" == "true" ]]; then
             _cai_info "[DRY-RUN] Would remove legacy context: $_CAI_LEGACY_CONTEXT"
         else
             _cai_info "Removing legacy context: $_CAI_LEGACY_CONTEXT"
-            if docker context rm "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
+            # Switch to default context first if legacy context is active
+            local current_context
+            current_context=$(docker context show 2>/dev/null || true)
+            if [[ "$current_context" == "$_CAI_LEGACY_CONTEXT" ]]; then
+                docker context use default >/dev/null 2>&1 || true
+            fi
+            if docker context rm -f "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
                 cleaned_any=true
             else
                 _cai_warn "Failed to remove legacy context (continuing anyway)"
@@ -643,6 +650,7 @@ _cai_create_isolated_daemon_json() {
     # Build isolated daemon configuration
     # PITFALL: Do NOT set "hosts" in both daemon.json AND use -H flag in service
     # We set hosts here, so service uses --config-file only
+    # Use separate subnet (172.30.0.0/16) to avoid IP conflicts with system Docker
     local config
     config=$(cat <<EOF
 {
@@ -656,7 +664,9 @@ _cai_create_isolated_daemon_json() {
   "data-root": "$_CAI_CONTAINAI_DOCKER_DATA",
   "exec-root": "$_CAI_CONTAINAI_DOCKER_EXEC",
   "pidfile": "$_CAI_CONTAINAI_DOCKER_PID",
-  "bridge": "$_CAI_CONTAINAI_DOCKER_BRIDGE"
+  "bridge": "$_CAI_CONTAINAI_DOCKER_BRIDGE",
+  "bip": "172.30.0.1/16",
+  "fixed-cidr": "172.30.0.0/17"
 }
 EOF
     )
@@ -719,6 +729,12 @@ ExecReload=/bin/kill -s HUP \$MAINPID
 TimeoutStartSec=0
 RestartSec=2
 Restart=always
+
+# Ensure runtime directories exist on tmpfs (/var/run is tmpfs on most systems)
+# RuntimeDirectory creates /run/containai-docker with proper permissions
+RuntimeDirectory=containai-docker
+# Remove stale pidfile before starting (avoids "pidfile exists" errors after crash)
+ExecStartPre=-/bin/rm -f $_CAI_CONTAINAI_DOCKER_PID
 
 # Limit container and network namespace
 LimitNOFILE=infinity
@@ -2628,11 +2644,12 @@ _CAI_VALIDATE_TIMEOUT=30
 #
 # Validation checks:
 # 1. Context exists and endpoint matches expected socket
-# 2. Engine reachable: docker --context containai-secure info
+# 2. Engine reachable: docker --context <context> info
 # 3. sysbox-runc is available: Check .Runtimes contains sysbox-runc
-#    (Note: sysbox-runc is NOT set as default runtime, by design)
-# 4. User namespace enabled: Run container with --runtime=sysbox-runc and check uid_map
-# 5. Test container starts: docker run --runtime=sysbox-runc alpine:3.20 echo "..."
+#    Note: On Linux/WSL2, sysbox-runc IS the default runtime (isolated daemon)
+#          On macOS, sysbox-runc is NOT default (Lima VM setup)
+# 4. User namespace enabled: Run container and check uid_map
+# 5. Test container starts: docker run alpine:3.20 echo "..."
 _cai_secure_engine_validate() {
     local verbose="false"
 
@@ -2656,26 +2673,31 @@ _cai_secure_engine_validate() {
     done
 
     local failed=0
-    local context_name="containai-secure"
 
     printf '\n'
     _cai_info "Secure Engine Validation"
     _cai_info "========================"
     printf '\n'
 
-    # Detect platform for expected socket path
-    local platform expected_socket
+    # Detect platform for expected context and socket path
+    # Linux/WSL2 use isolated daemon (containai-docker), macOS uses Lima VM (containai-secure)
+    local platform context_name expected_socket sysbox_is_default
     platform=$(_cai_detect_platform)
     case "$platform" in
         wsl)
+            context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
             expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
-            ;;
-        macos)
-            expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
+            sysbox_is_default="true"
             ;;
         linux)
-            # Native Linux currently uses the default Docker socket (will be migrated in fn-14-nm0.3)
-            expected_socket="unix:///var/run/docker.sock"
+            context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+            expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+            sysbox_is_default="true"
+            ;;
+        macos)
+            context_name="containai-secure"
+            expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
+            sysbox_is_default="false"
             ;;
         *)
             _cai_error "Unknown platform: $platform"
