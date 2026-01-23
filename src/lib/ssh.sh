@@ -1432,4 +1432,259 @@ _cai_cleanup_container_ssh() {
     return 0
 }
 
+# ==============================================================================
+# SSH Shell Connection
+# ==============================================================================
+
+# Exit codes for SSH shell connection
+_CAI_SSH_EXIT_SUCCESS=0
+_CAI_SSH_EXIT_CONTAINER_NOT_FOUND=10
+_CAI_SSH_EXIT_CONTAINER_START_FAILED=11
+_CAI_SSH_EXIT_SSH_SETUP_FAILED=12
+_CAI_SSH_EXIT_SSH_CONNECT_FAILED=13
+_CAI_SSH_EXIT_HOST_KEY_MISMATCH=14
+_CAI_SSH_EXIT_CONTAINER_FOREIGN=15
+
+# Connect to container via SSH with bulletproof connection handling
+# This is the main entry point for SSH-based shell access
+#
+# Arguments:
+#   $1 = container name
+#   $2 = docker context (optional)
+#   $3 = force_update (optional, "true" for --fresh containers)
+#   $4 = quiet (optional, "true" to suppress verbose output)
+#
+# Returns:
+#   0 = success (SSH session completed)
+#   10 = container not found
+#   11 = container start failed
+#   12 = SSH setup failed
+#   13 = SSH connection failed after retries
+#   14 = host key mismatch (manual intervention required)
+#   15 = container exists but not owned by ContainAI
+#
+# Features:
+# - Retry on transient failures (connection refused, timeout)
+# - Max 3 retries with exponential backoff
+# - Auto-recover from stale host keys (when force_update=true)
+# - Auto-regenerate missing SSH config
+# - Clear error messages with remediation steps
+# - Agent forwarding works if configured in host SSH
+_cai_ssh_shell() {
+    local container_name="$1"
+    local context="${2:-}"
+    local force_update="${3:-false}"
+    local quiet="${4:-false}"
+
+    local -a docker_cmd=(docker)
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    # Get container state
+    local container_state
+    if ! container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$container_name" 2>/dev/null); then
+        _cai_error "Container not found: $container_name"
+        _cai_error ""
+        _cai_error "To create a container for this workspace, run:"
+        _cai_error "  cai run /path/to/workspace"
+        return $_CAI_SSH_EXIT_CONTAINER_NOT_FOUND
+    fi
+
+    # Check ownership - verify this is a ContainAI container
+    local label_val
+    label_val=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || label_val=""
+    if [[ "$label_val" != "true" ]]; then
+        # Fallback: check if image is from our repo (for legacy containers without label)
+        local image_name
+        image_name=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
+        if [[ "$image_name" != "${_CONTAINAI_DEFAULT_REPO:-agent-sandbox}:"* ]]; then
+            _cai_error "Container '$container_name' exists but was not created by ContainAI"
+            _cai_error ""
+            _cai_error "This is a name collision with a container not managed by ContainAI."
+            _cai_error "Use a different workspace path or remove the conflicting container."
+            return $_CAI_SSH_EXIT_CONTAINER_FOREIGN
+        fi
+    fi
+
+    # Start container if not running
+    if [[ "$container_state" != "running" ]]; then
+        if [[ "$quiet" != "true" ]]; then
+            _cai_info "Starting container $container_name..."
+        fi
+        if ! "${docker_cmd[@]}" start "$container_name" >/dev/null 2>&1; then
+            _cai_error "Failed to start container: $container_name"
+            _cai_error ""
+            _cai_error "Check container logs for details:"
+            _cai_error "  docker logs $container_name"
+            return $_CAI_SSH_EXIT_CONTAINER_START_FAILED
+        fi
+
+        # Wait for container to be running
+        local wait_count=0
+        local max_wait=30
+        while [[ $wait_count -lt $max_wait ]]; do
+            local state
+            state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$container_name" 2>/dev/null) || state=""
+            if [[ "$state" == "running" ]]; then
+                break
+            fi
+            sleep 0.5
+            ((wait_count++))
+        done
+        if [[ $wait_count -ge $max_wait ]]; then
+            _cai_error "Container failed to start within ${max_wait} attempts"
+            return $_CAI_SSH_EXIT_CONTAINER_START_FAILED
+        fi
+    fi
+
+    # Get SSH port from container label
+    local ssh_port
+    if ! ssh_port=$(_cai_get_container_ssh_port "$container_name" "$context"); then
+        _cai_error "Container has no SSH port configured"
+        _cai_error ""
+        _cai_error "This container may have been created before SSH support was added."
+        _cai_error "Recreate the container with: cai shell --fresh /path/to/workspace"
+        return $_CAI_SSH_EXIT_SSH_SETUP_FAILED
+    fi
+
+    # Check if SSH config exists, regenerate if missing
+    local config_file="$_CAI_SSH_CONFIG_DIR/${container_name}.conf"
+    if [[ ! -f "$config_file" ]] || [[ "$force_update" == "true" ]]; then
+        if [[ "$quiet" != "true" ]]; then
+            _cai_info "Setting up SSH configuration..."
+        fi
+
+        # Full SSH setup (wait for sshd, inject key, update known_hosts, write config)
+        if ! _cai_setup_container_ssh "$container_name" "$ssh_port" "$context" "$force_update"; then
+            _cai_error "SSH setup failed for container $container_name"
+            _cai_error ""
+            _cai_error "Troubleshooting:"
+            _cai_error "  1. Check container logs: docker logs $container_name"
+            _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
+            _cai_error "  3. Try recreating: cai shell --fresh /path/to/workspace"
+            return $_CAI_SSH_EXIT_SSH_SETUP_FAILED
+        fi
+    fi
+
+    # Connect via SSH with retry logic
+    if ! _cai_ssh_connect_with_retry "$container_name" "$ssh_port" "$context" "$quiet"; then
+        return $?  # Propagate specific exit code
+    fi
+
+    return $_CAI_SSH_EXIT_SUCCESS
+}
+
+# Connect to container via SSH with retry and auto-recovery
+# Arguments:
+#   $1 = container name
+#   $2 = SSH port
+#   $3 = docker context (optional)
+#   $4 = quiet (optional)
+# Returns: exit code from SSH or specific error codes
+_cai_ssh_connect_with_retry() {
+    local container_name="$1"
+    local ssh_port="$2"
+    local context="${3:-}"
+    local quiet="${4:-false}"
+
+    local max_retries=3
+    local retry_count=0
+    local wait_ms=500  # Start at 500ms
+    local max_wait_ms=4000  # Cap at 4 seconds
+    local ssh_exit_code
+
+    while (( retry_count <= max_retries )); do
+        # Build SSH command
+        # Uses the host config from ~/.ssh/containai.d/<container>.conf
+        # The config file specifies: Host, Port, User, IdentityFile, UserKnownHostsFile
+        local -a ssh_cmd=(ssh)
+
+        # Add agent forwarding if SSH_AUTH_SOCK is set (user has ssh-agent running)
+        if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+            ssh_cmd+=(-A)
+        fi
+
+        # Connect using the container name as the SSH host alias
+        # The ~/.ssh/containai.d/*.conf file defines this alias
+        ssh_cmd+=("$container_name")
+
+        if [[ "$quiet" != "true" && $retry_count -eq 0 ]]; then
+            _cai_info "Connecting to container via SSH..."
+        fi
+
+        # Execute SSH and capture exit code
+        # Use if/else pattern for set -e safety
+        if "${ssh_cmd[@]}"; then
+            ssh_exit_code=0
+        else
+            ssh_exit_code=$?
+        fi
+
+        # Check exit code and decide whether to retry
+        case $ssh_exit_code in
+            0)
+                # Success
+                return $_CAI_SSH_EXIT_SUCCESS
+                ;;
+            255)
+                # SSH error (connection refused, host key issue, etc.)
+                # Check if it's a host key mismatch
+                local ssh_test_output
+                ssh_test_output=$(ssh -o BatchMode=yes -o ConnectTimeout=2 "$container_name" exit 2>&1) || true
+
+                if printf '%s' "$ssh_test_output" | grep -qiE "host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED"; then
+                    # Host key mismatch - provide clear remediation
+                    _cai_error "SSH host key has changed for container $container_name"
+                    _cai_error ""
+                    _cai_error "This usually happens when a container is recreated."
+                    _cai_error ""
+                    _cai_error "To resolve, either:"
+                    _cai_error "  1. Clean stale keys: ssh-keygen -R \"[localhost]:${ssh_port}\" -f \"$_CAI_KNOWN_HOSTS_FILE\""
+                    _cai_error "  2. Recreate container: cai shell --fresh /path/to/workspace"
+                    return $_CAI_SSH_EXIT_HOST_KEY_MISMATCH
+                fi
+
+                # Connection refused or timeout - retry
+                if (( retry_count < max_retries )); then
+                    retry_count=$((retry_count + 1))
+                    if [[ "$quiet" != "true" ]]; then
+                        _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
+                    fi
+
+                    # Exponential backoff
+                    local sleep_sec
+                    sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_ms / 1000}")
+                    sleep "$sleep_sec"
+                    wait_ms=$((wait_ms * 2))
+                    if (( wait_ms > max_wait_ms )); then
+                        wait_ms=$max_wait_ms
+                    fi
+
+                    # On retry, ensure SSH is set up (sshd might have been slow to start)
+                    _cai_setup_container_ssh "$container_name" "$ssh_port" "$context" "" "true" 2>/dev/null || true
+                    continue
+                fi
+
+                # All retries exhausted
+                _cai_error "SSH connection failed after $max_retries retries"
+                _cai_error ""
+                _cai_error "Troubleshooting:"
+                _cai_error "  1. Check container is running: docker ps | grep $container_name"
+                _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
+                _cai_error "  3. Check port mapping: docker port $container_name 22"
+                _cai_error "  4. Test SSH manually: ssh -v $container_name"
+                return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+                ;;
+            *)
+                # Other exit codes are from the remote shell session
+                # Pass them through as-is (user's command exit code)
+                return $ssh_exit_code
+                ;;
+        esac
+    done
+
+    return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+}
+
 return 0
