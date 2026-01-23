@@ -910,6 +910,7 @@ _cai_wait_for_sshd() {
 # Returns: 0=success, 1=failure
 #
 # Behavior:
+# - Auto-generates SSH key if missing (transparent setup)
 # - Reads pubkey from ~/.config/containai/id_containai.pub
 # - Creates /home/agent/.ssh/ with 700 permissions via docker exec
 # - Appends key to /home/agent/.ssh/authorized_keys (idempotent)
@@ -926,10 +927,18 @@ _cai_inject_ssh_key() {
         docker_cmd=(docker --context "$context")
     fi
 
-    # Read public key
+    # Auto-generate SSH key if missing (transparent setup)
     if [[ ! -f "$pubkey_path" ]]; then
-        _cai_error "SSH public key not found: $pubkey_path"
-        _cai_error "Run 'cai setup' to generate SSH keys"
+        _cai_debug "SSH key not found, auto-generating..."
+        if ! _cai_setup_ssh_key; then
+            _cai_error "Failed to auto-generate SSH key"
+            return 1
+        fi
+    fi
+
+    # Read public key (should exist now)
+    if [[ ! -f "$pubkey_path" ]]; then
+        _cai_error "SSH public key not found after generation: $pubkey_path"
         return 1
     fi
 
@@ -1278,12 +1287,13 @@ _cai_write_ssh_host_config() {
     local config_file="$config_dir/${container_name}.conf"
     local strict_host_key_checking
 
-    # Ensure config directory exists
-    if [[ ! -d "$config_dir" ]]; then
-        _cai_debug "SSH config directory not found, running setup..."
-        if ! _cai_setup_ssh_config; then
-            return 1
-        fi
+    # Always run SSH config setup to ensure:
+    # 1. Config directory exists
+    # 2. Include directive is present in ~/.ssh/config
+    # This handles cases where user deleted ~/.ssh/containai.d/ or removed the Include line
+    if ! _cai_setup_ssh_config; then
+        _cai_error "Failed to set up SSH config directory"
+        return 1
     fi
 
     # Determine StrictHostKeyChecking value based on OpenSSH version
@@ -1593,61 +1603,107 @@ _cai_ssh_connect_with_retry() {
     local wait_ms=500  # Start at 500ms
     local max_wait_ms=4000  # Cap at 4 seconds
     local ssh_exit_code
+    local host_key_auto_recovered=false
 
-    while (( retry_count <= max_retries )); do
-        # Build SSH command
-        # Uses the host config from ~/.ssh/containai.d/<container>.conf
-        # The config file specifies: Host, Port, User, IdentityFile, UserKnownHostsFile
+    # Determine StrictHostKeyChecking value based on OpenSSH version
+    local strict_host_key_checking
+    if _cai_check_ssh_accept_new_support; then
+        strict_host_key_checking="accept-new"
+    else
+        strict_host_key_checking="yes"
+    fi
+
+    while (( retry_count < max_retries )); do
+        # Build SSH command with explicit options (does not depend on ~/.ssh/config)
+        # This makes connection robust even if Include directive is missing/broken
         local -a ssh_cmd=(ssh)
+        ssh_cmd+=(-o "HostName=localhost")
+        ssh_cmd+=(-o "Port=$ssh_port")
+        ssh_cmd+=(-o "User=agent")
+        ssh_cmd+=(-o "IdentityFile=$_CAI_SSH_KEY_PATH")
+        ssh_cmd+=(-o "IdentitiesOnly=yes")
+        ssh_cmd+=(-o "UserKnownHostsFile=$_CAI_KNOWN_HOSTS_FILE")
+        ssh_cmd+=(-o "StrictHostKeyChecking=$strict_host_key_checking")
+        ssh_cmd+=(-o "PreferredAuthentications=publickey")
+        ssh_cmd+=(-o "GSSAPIAuthentication=no")
+        ssh_cmd+=(-o "PasswordAuthentication=no")
+        ssh_cmd+=(-o "ConnectTimeout=10")
 
         # Add agent forwarding if SSH_AUTH_SOCK is set (user has ssh-agent running)
         if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
             ssh_cmd+=(-A)
         fi
 
-        # Connect using the container name as the SSH host alias
-        # The ~/.ssh/containai.d/*.conf file defines this alias
-        ssh_cmd+=("$container_name")
+        # Connect to localhost (explicit options override any host alias)
+        ssh_cmd+=(localhost)
 
         if [[ "$quiet" != "true" && $retry_count -eq 0 ]]; then
             _cai_info "Connecting to container via SSH..."
         fi
 
-        # Execute SSH and capture exit code
-        # Use if/else pattern for set -e safety
-        if "${ssh_cmd[@]}"; then
+        # Execute SSH and capture exit code + stderr for diagnostics
+        local ssh_stderr_file
+        ssh_stderr_file=$(mktemp)
+        if "${ssh_cmd[@]}" 2>"$ssh_stderr_file"; then
             ssh_exit_code=0
         else
             ssh_exit_code=$?
         fi
+        local ssh_stderr
+        ssh_stderr=$(cat "$ssh_stderr_file" 2>/dev/null || true)
+        rm -f "$ssh_stderr_file"
 
         # Check exit code and decide whether to retry
         case $ssh_exit_code in
             0)
                 # Success
+                if [[ "$host_key_auto_recovered" == "true" && "$quiet" != "true" ]]; then
+                    _cai_info "Auto-recovered from stale host key"
+                fi
                 return $_CAI_SSH_EXIT_SUCCESS
                 ;;
             255)
-                # SSH error (connection refused, host key issue, etc.)
-                # Check if it's a host key mismatch
-                local ssh_test_output
-                ssh_test_output=$(ssh -o BatchMode=yes -o ConnectTimeout=2 "$container_name" exit 2>&1) || true
-
-                if printf '%s' "$ssh_test_output" | grep -qiE "host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED"; then
-                    # Host key mismatch - provide clear remediation
-                    _cai_error "SSH host key has changed for container $container_name"
+                # SSH error - analyze stderr to determine cause
+                # Check for host key mismatch
+                if printf '%s' "$ssh_stderr" | grep -qiE "host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED"; then
+                    # Auto-recover: clean stale keys and retry (once)
+                    if [[ "$host_key_auto_recovered" != "true" ]]; then
+                        if [[ "$quiet" != "true" ]]; then
+                            _cai_warn "SSH host key changed, auto-recovering..."
+                        fi
+                        _cai_clean_known_hosts "$ssh_port"
+                        _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "true" 2>/dev/null || true
+                        host_key_auto_recovered=true
+                        # Don't count this as a retry - it's auto-recovery
+                        continue
+                    fi
+                    # Already tried auto-recovery, fail with guidance
+                    _cai_error "SSH host key mismatch could not be auto-recovered"
                     _cai_error ""
-                    _cai_error "This usually happens when a container is recreated."
-                    _cai_error ""
-                    _cai_error "To resolve, either:"
-                    _cai_error "  1. Clean stale keys: ssh-keygen -R \"[localhost]:${ssh_port}\" -f \"$_CAI_KNOWN_HOSTS_FILE\""
-                    _cai_error "  2. Recreate container: cai shell --fresh /path/to/workspace"
+                    _cai_error "Try recreating the container: cai shell --fresh /path/to/workspace"
                     return $_CAI_SSH_EXIT_HOST_KEY_MISMATCH
                 fi
 
-                # Connection refused or timeout - retry
+                # Check for non-transient errors that should not retry
+                if printf '%s' "$ssh_stderr" | grep -qiE "permission denied|no such identity|could not resolve hostname|bad configuration|no route to host"; then
+                    # Non-transient error - fail fast with clear message
+                    _cai_error "SSH connection failed: non-transient error"
+                    _cai_error ""
+                    printf '%s\n' "$ssh_stderr" | while IFS= read -r line; do
+                        [[ -n "$line" ]] && _cai_error "  $line"
+                    done
+                    _cai_error ""
+                    _cai_error "Troubleshooting:"
+                    if printf '%s' "$ssh_stderr" | grep -qiE "permission denied|no such identity"; then
+                        _cai_error "  SSH key issue. Verify key exists: ls -la $_CAI_SSH_KEY_PATH"
+                        _cai_error "  Or regenerate with: cai setup"
+                    fi
+                    return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+                fi
+
+                # Connection refused or timeout - these are transient, retry
+                retry_count=$((retry_count + 1))
                 if (( retry_count < max_retries )); then
-                    retry_count=$((retry_count + 1))
                     if [[ "$quiet" != "true" ]]; then
                         _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
                     fi
@@ -1673,7 +1729,7 @@ _cai_ssh_connect_with_retry() {
                 _cai_error "  1. Check container is running: docker ps | grep $container_name"
                 _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
                 _cai_error "  3. Check port mapping: docker port $container_name 22"
-                _cai_error "  4. Test SSH manually: ssh -v $container_name"
+                _cai_error "  4. Test SSH manually: ssh -v -p $ssh_port agent@localhost"
                 return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
                 ;;
             *)

@@ -336,12 +336,13 @@ Connection Handling:
 
 Exit Codes:
   0    Success (SSH session completed normally)
-  10   Container not found (and could not be created)
+  1    Container creation failed (run 'cai doctor' to check setup)
   11   Container failed to start
   12   SSH setup failed
   13   SSH connection failed after retries
-  14   Host key mismatch (run --fresh to resolve)
+  14   Host key mismatch could not be auto-recovered
   15   Container exists but not owned by ContainAI
+  *    Other codes: exit status from remote shell command
 
 Examples:
   cai shell                    Open shell in container for current directory
