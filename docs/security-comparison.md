@@ -80,29 +80,27 @@ flowchart TB
 |-------|-------------|----------------|
 | **Process Isolation** | Hides host filesystem and processes | Basic containment, easily escaped if root |
 | **User Namespace Isolation** | Maps container root to unprivileged host user | Container root cannot affect host even if container escapes |
-| **Syscall Filtering** | Blocks or virtualizes dangerous system calls | Prevents kernel exploits, enables safe DinD |
+| **Syscall Filtering** | Blocks or virtualizes dangerous system calls | Reduces attack surface, helps mitigate classes of kernel exploits |
 | **Kernel-Level Isolation** | Separate kernel or full VM | Strongest isolation, immune to most kernel bugs |
 
 ## Solution Comparison Table
 
-| Feature | Docker Sandbox | Docker ECI | ContainAI | SRT | Bubblewrap | gVisor | microVMs |
-|---------|---------------|------------|-----------|-----|------------|--------|----------|
-| **Isolation Type** | Container | System Container | System Container | Process | Process | Container | VM |
-| **User Namespaces** | No | Yes | Yes | No | Optional | Yes | Yes |
-| **Syscall Filtering** | No | Yes | Yes | No | Optional | Yes (intercepts all) | N/A (full kernel) |
-| **Docker-in-Docker** | Yes | Yes | Yes | No | No | Partial | Yes |
-| **systemd Support** | No | Yes | Yes | No | No | Limited | Yes |
-| **Procfs Virtualization** | No | Yes | Yes | No | No | Yes | N/A |
-| **Startup Time** | ~1s | ~1s | ~1s | Instant | Instant | ~100ms | ~125ms |
-| **I/O Overhead** | None | Minimal | Minimal | None | None | 2-5x slower | Minimal |
-| **Cost** | Free | Business ($) | Free | Free | Free | Free | Varies |
-| **Complexity** | Low | Low | Medium | Low | High | Medium | High |
+| Feature | Docker Sandbox | Docker ECI | ContainAI | SRT | gVisor | microVMs |
+|---------|---------------|------------|-----------|-----|--------|----------|
+| **User Namespaces** | :x: | :white_check_mark: | :white_check_mark: | :x: | :white_check_mark: | :white_check_mark: |
+| **Syscall Filtering** | :x: | :white_check_mark: | :white_check_mark: | :x: | :white_check_mark: :white_check_mark: | :white_check_mark: |
+| **Docker-in-Docker** | :warning: | :white_check_mark: | :white_check_mark: | :x: | :warning: | :white_check_mark: |
+| **systemd Support** | :x: | :white_check_mark: | :white_check_mark: | :x: | :warning: | :white_check_mark: |
+| **Cost** | Free | Business tier | Free | Free | Free | Varies |
+| **Startup Time** | Fast | Fast | Fast | Instant | ~100ms | ~125ms |
 
-**Legend**:
-- Yes = Full support
-- Partial = Works with limitations
-- No = Not supported
-- N/A = Not applicable
+**Legend**: :white_check_mark: = Full support | :warning: = Partial/Limited | :x: = No support
+
+**Notes on Docker-in-Docker**:
+- **Docker Sandbox** (:warning:): Includes Docker CLI that talks to the host Docker daemon (not a nested daemon)
+- **gVisor** (:warning:): Requires special configuration flags and has compatibility limitations
+
+**Building block tools** (Bubblewrap, nsjail, Firejail) are not included in the main comparison as they are low-level components rather than complete solutions. See their dedicated sections below.
 
 ## Detailed Solution Analysis
 
@@ -143,11 +141,11 @@ flowchart LR
 | **Runtime** | Standard `runc` (NOT sysbox-runc) |
 | **User Namespaces** | Not enabled by default |
 | **Isolation Level** | Basic container isolation only |
-| **Docker-in-Docker** | Yes (Docker CLI included in template) |
+| **Docker-in-Docker** | Docker CLI only (talks to host daemon, not a nested `dockerd`) |
 | **Agent Privileges** | Has sudo access inside container |
 | **Status** | Experimental - commands may change |
 
-**What this means for you**: If the container escapes, you have host root. The "sandbox" name is misleading - it provides convenience, not enhanced security. Fine for development, not for untrusted code.
+**What this means for you**: If the container escapes on a native Linux host, you have host root. On macOS/Windows, the immediate "host" is Docker Desktop's Linux VM, not your actual machine - but the VM still has access to mounted workspaces, credentials, and network. The "sandbox" name is misleading - it provides convenience, not enhanced security. Fine for development, not for untrusted code.
 
 **Source**: [Docker Desktop 4.50 Release Notes](https://docs.docker.com/desktop/release-notes/#4500)
 
@@ -196,7 +194,8 @@ flowchart LR
 | **Procfs/Sysfs Virtualization** | Yes |
 | **Docker-in-Docker** | Yes, securely |
 | **systemd Support** | Yes |
-| **Cost** | Docker Business subscription (~$24/user/month) |
+| **Cost** | Docker Business subscription (requires paid tier) |
+| **Platform** | Linux containers only (no Windows containers) |
 
 **What this means for you**: Same excellent isolation as ContainAI, but requires a paid subscription. If you're already on Docker Business, enable ECI in Settings > General > Enhanced Container Isolation.
 
@@ -369,16 +368,16 @@ flowchart TB
 
 | Aspect | Details |
 |--------|---------|
-| **Isolation** | Intercepts ALL syscalls |
-| **Syscall Coverage** | ~70-80% of Linux syscalls |
-| **I/O Performance** | 2-5x slower than native |
+| **Isolation** | Intercepts all application syscalls via user-space kernel |
+| **Syscall Compatibility** | Implements a subset of Linux syscalls; some applications may not work |
+| **I/O Performance** | Measurable overhead on I/O-intensive workloads (varies by use case) |
 | **Docker-in-Docker** | Partial (requires special flags) |
 | **systemd** | Limited compatibility |
 | **Startup** | ~100ms |
 
-**What this means for you**: gVisor provides the strongest syscall isolation short of a VM, but at significant performance cost and reduced compatibility. Good for running untrusted code that doesn't need Docker or complex Linux features.
+**What this means for you**: gVisor provides strong syscall isolation by intercepting all application syscalls in user-space, reducing the kernel attack surface. However, it has measurable performance overhead and compatibility limitations. Good for running untrusted code that doesn't need Docker or complex Linux features.
 
-**Source**: [gVisor Documentation](https://gvisor.dev/docs/)
+**Source**: [gVisor Documentation](https://gvisor.dev/docs/) - See [Compatibility](https://gvisor.dev/docs/user_guide/compatibility/) and [Performance](https://gvisor.dev/docs/architecture_guide/performance/) for details.
 
 ---
 
@@ -454,8 +453,8 @@ flowchart TB
 Docker Desktop's experimental `docker sandbox` command provides convenience but not enhanced security:
 
 1. **Uses standard runc** - No user namespace isolation by default
-2. **Agent has sudo** - Root inside = root on host if escaped
-3. **No syscall filtering** - All host syscalls available
+2. **Agent has sudo** - Root inside = root on host if escaped (on native Linux)
+3. **No enhanced syscall vetting** - Only standard container controls (Docker's default seccomp profile), no sysbox-style virtualization
 4. **Experimental status** - Commands may change without notice
 
 **Bottom line**: Use it for quick development, but don't trust it with untrusted code.
@@ -464,9 +463,10 @@ Docker Desktop's experimental `docker sandbox` command provides convenience but 
 
 Docker ECI provides the same Sysbox isolation as ContainAI, but:
 
-1. **Subscription required** - Docker Business at ~$24/user/month
+1. **Subscription required** - Docker Business tier (paid)
 2. **Docker Desktop only** - Not available with docker-ce
-3. **Same technology** - Docker acquired Nestybox (Sysbox) in 2022
+3. **Linux containers only** - No Windows container support
+4. **Same technology** - Docker acquired Nestybox (Sysbox) in 2022
 
 **Bottom line**: If you're already on Docker Business, enable ECI. Otherwise, ContainAI gives you the same isolation for free.
 
