@@ -20,6 +20,7 @@ cai doctor
 # Run integration tests (requires Docker)
 ./tests/integration/test-secure-engine.sh
 ./tests/integration/test-sync-integration.sh
+./tests/integration/test-dind.sh
 
 # Lint shell scripts
 shellcheck -x src/*.sh src/lib/*.sh

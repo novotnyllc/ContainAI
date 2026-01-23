@@ -49,3 +49,4 @@ jobs:
           # Ensure test scripts are syntactically valid
           bash -n ./tests/integration/test-secure-engine.sh
           bash -n ./tests/integration/test-sync-integration.sh
+          bash -n ./tests/integration/test-dind.sh
