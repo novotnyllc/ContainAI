@@ -41,11 +41,13 @@ Ralph verifies receipts match this exact schema. Missing id = verification fails
 scripts/ralph/flowctl validate --epic $(echo {{TASK_ID}} | sed 's/\.[0-9]*$//') --json
 ```
 
-**Step 5: On hard failure** → output `<promise>FAIL</promise>` and stop.
+**Step 5: On success** → Simply stop (no promise tag). Ralph will pick the next task.
+
+**Step 6: On hard failure** → output `<promise>FAIL</promise>` and stop.
 
 ## Rules
 - Must run `flowctl done` and verify task status is `done` before commit.
 - Must `git add -A` (never list files).
 - Do NOT use TodoWrite.
 
-Do NOT output `<promise>COMPLETE</promise>` in this prompt.
+**CRITICAL:** Do NOT output `<promise>COMPLETE</promise>` - that's reserved for when ALL tasks are done. After finishing ONE task, just stop with no promise tag.
