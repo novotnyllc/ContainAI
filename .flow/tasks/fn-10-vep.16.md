@@ -37,14 +37,19 @@ Current Dockerfile.test issues:
 - Pattern: Follow `agent-sandbox/Dockerfile` for COPY-based script handling
 
 ## Acceptance
-- [ ] Sysbox installation removed from Dockerfile.test (not needed)
+- [ ] Sysbox services NOT started in Dockerfile.test (sysbox-mgr/sysbox-fs removed from entrypoint)
+- [ ] Sysbox binary installed for inner Docker to use sysbox-runc as default runtime
 - [ ] Scripts extracted to separate files
 - [ ] --privileged NOT required (sysbox handles this)
 - [ ] Inner Docker configured with sysbox-runc as default
-- [ ] Entrypoint starts dockerd for DinD
+- [ ] Entrypoint starts dockerd for DinD (no sysbox services)
 - [ ] `docker build -f Dockerfile.test` succeeds
 - [ ] Test container can run nested containers
 - [ ] DinD verification tests pass
+
+**Note:** Original acceptance said "Sysbox installation removed" but this conflicts with
+"Inner Docker configured with sysbox-runc as default" (requires the binary). Resolution:
+install sysbox for the binary, but do NOT start sysbox services. See decisions.md.
 ## Done summary
 TBD
 
