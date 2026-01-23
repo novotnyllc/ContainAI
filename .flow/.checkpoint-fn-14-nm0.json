@@ -1,0 +1,147 @@
+{
+  "created_at": "2026-01-23T22:07:44.457906Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-14-nm0",
+      "created_at": "2026-01-23T22:05:32.344663Z",
+      "depends_on_epics": [],
+      "id": "fn-14-nm0",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-14-nm0.md",
+      "status": "open",
+      "title": "Fix cai setup Docker isolation",
+      "updated_at": "2026-01-23T22:05:55.939901Z"
+    },
+    "spec": "# Fix cai setup Docker Isolation\n\n## Overview\n\n`cai setup` currently modifies the system's default Docker configuration (`/etc/docker/daemon.json`) and uses system Docker paths. This violates the principle that ContainAI should be completely isolated from the user's existing Docker installation.\n\n**The Problem:**\n- Native Linux setup modifies `/etc/docker/daemon.json` (system Docker)\n- WSL2 setup also modifies system daemon.json for Sysbox runtime\n- Path constants are inconsistent across `setup.sh`, `docker.sh`, and `install-containai-docker.sh`\n- Socket naming inconsistent: `docker-containai.sock` vs `containai-docker.sock`\n- No `cai --version` flag (only `cai version` subcommand)\n\n**The Solution:**\n- Run a completely separate `dockerd` instance for ContainAI\n- Use dedicated paths that never conflict with system Docker\n- Unify all path constants under a single naming convention\n- Add `--version` flag to CLI\n\n## Scope\n\n**In scope:**\n- Unify path constants to `containai-docker` naming convention\n- Create dedicated systemd service `containai-docker.service`\n- Use `/etc/containai/docker/daemon.json` (never touch `/etc/docker/`)\n- Use `/var/lib/containai-docker/` for data root\n- Use `/var/run/containai-docker.sock` for socket\n- Add `cai --version` flag\n- Update `cai doctor` to check isolated Docker\n\n**Out of scope:**\n- macOS Lima VM changes (already isolated)\n- Migration tooling for existing users (future epic)\n- Merging `install-containai-docker.sh` into setup (fn-12-css.11)\n\n## Approach\n\n### Canonical Paths (standardize everywhere)\n\n| Component | Path |\n|-----------|------|\n| Socket | `/var/run/containai-docker.sock` |\n| Config | `/etc/containai/docker/daemon.json` |\n| Data root | `/var/lib/containai-docker` |\n| Exec root | `/var/run/containai-docker` |\n| PID file | `/var/run/containai-docker.pid` |\n| Bridge | `cai0` |\n| Context | `containai-docker` |\n| Service | `containai-docker.service` |\n\n### Architecture Change\n\n```\nBefore: cai setup -> modifies /etc/docker/daemon.json -> uses system dockerd\nAfter:  cai setup -> creates /etc/containai/docker/daemon.json -> runs containai-docker.service\n```\n\n## Quick commands\n\n```bash\n# Test the isolated Docker setup\nsource src/containai.sh\ncai setup --dry-run\n\n# Verify isolation\ncai doctor\n\n# Check version flag works\ncai --version\n```\n\n## Acceptance\n\n- [ ] `cai setup` never modifies `/etc/docker/daemon.json`\n- [ ] `cai setup` never modifies `/var/lib/docker/`\n- [ ] Isolated Docker uses `/var/lib/containai-docker/` for storage\n- [ ] Isolated Docker uses `/var/run/containai-docker.sock` for socket\n- [ ] `cai --version` prints version information\n- [ ] `cai doctor` validates the isolated Docker instance\n- [ ] All path constants unified across codebase\n- [ ] Integration tests pass\n\n## Risks\n\n| Risk | Mitigation |\n|------|------------|\n| Existing users have old paths | Document migration in release notes; old paths still work |\n| Sysbox requires system Docker modification | Configure sysbox-runc in isolated daemon.json only |\n| IP conflicts between Docker bridges | Use separate subnet `172.30.0.0/16` for cai0 |\n\n## Dependencies\n\n- Coordinate with fn-12-css.11 (Merge install-containai-docker.sh into cai setup)\n\n## References\n\n- Current setup: `src/lib/setup.sh:1847-1998` (native Linux flow)\n- Isolated install script: `scripts/install-containai-docker.sh`\n- Docker constants: `src/lib/docker.sh:306-309`\n- Best practices: Multiple Docker daemons require unique data-root, exec-root, pidfile, socket\n"
+  },
+  "epic_id": "fn-14-nm0",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T22:06:01.197908Z",
+        "depends_on": [],
+        "epic": "fn-14-nm0",
+        "id": "fn-14-nm0.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-14-nm0.1.md",
+        "status": "todo",
+        "title": "Unify Docker path constants",
+        "updated_at": "2026-01-23T22:06:19.699244Z"
+      },
+      "id": "fn-14-nm0.1",
+      "runtime": null,
+      "spec": "# fn-14-nm0.1 Unify Docker path constants\n\n## Description\nConsolidate all Docker path constants into a single authoritative location and standardize on the `containai-docker` naming convention.\n\n**Size:** S\n**Files:** `src/lib/docker.sh`, `src/lib/setup.sh`\n\n## Current State\n\nConstants are scattered and inconsistent:\n- `setup.sh:58`: `_CAI_SECURE_SOCKET=\"/var/run/docker-containai.sock\"`\n- `setup.sh:61`: `_CAI_WSL2_DAEMON_JSON=\"/etc/docker/daemon.json\"` (points to system!)\n- `docker.sh:306-309`: `_CAI_CONTAINAI_DOCKER_*` constants (correct naming)\n- `scripts/install-containai-docker.sh:20-30`: Local `CAI_DOCKER_*` constants\n\n## Approach\n\n1. Keep constants in `src/lib/docker.sh:306-309` as the single source of truth\n2. Remove duplicate constants from `setup.sh`\n3. Update all references to use the docker.sh constants\n4. Ensure docker.sh is sourced before setup.sh in containai.sh\n\n**Pattern to follow:** `src/lib/docker.sh:306-309` already has the right structure:\n```bash\n_CAI_CONTAINAI_DOCKER_SOCKET=\"/var/run/containai-docker.sock\"\n_CAI_CONTAINAI_DOCKER_CONTEXT=\"docker-containai\"\n_CAI_CONTAINAI_DOCKER_CONFIG=\"/etc/containai/docker/daemon.json\"\n_CAI_CONTAINAI_DOCKER_DATA=\"/var/lib/containai-docker\"\n```\n\nAdd missing constants:\n```bash\n_CAI_CONTAINAI_DOCKER_EXEC=\"/var/run/containai-docker\"\n_CAI_CONTAINAI_DOCKER_PID=\"/var/run/containai-docker.pid\"\n_CAI_CONTAINAI_DOCKER_BRIDGE=\"cai0\"\n_CAI_CONTAINAI_DOCKER_SERVICE=\"containai-docker\"\n```\n\n## Key Context\n\n- **Pitfall**: The `_CAI_WSL2_DAEMON_JSON=\"/etc/docker/daemon.json\"` constant is THE BUG - it points to system Docker config\n- Remove `_CAI_SECURE_SOCKET` and `_CAI_WSL2_DAEMON_JSON` from setup.sh entirely\n## Acceptance\n- [ ] All Docker path constants defined in `src/lib/docker.sh` only\n- [ ] No Docker path constants in `src/lib/setup.sh`\n- [ ] Constants follow `_CAI_CONTAINAI_DOCKER_*` naming pattern\n- [ ] All constants point to ContainAI-isolated paths (never `/etc/docker/`, never `/var/lib/docker/`)\n- [ ] `grep -r \"etc/docker/daemon.json\" src/` returns no results\n- [ ] `shellcheck -x src/lib/docker.sh` passes\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T22:06:01.267084Z",
+        "depends_on": [
+          "fn-14-nm0.1"
+        ],
+        "epic": "fn-14-nm0",
+        "id": "fn-14-nm0.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-14-nm0.2.md",
+        "status": "todo",
+        "title": "Refactor WSL2 setup for isolated Docker",
+        "updated_at": "2026-01-23T22:07:20.827713Z"
+      },
+      "id": "fn-14-nm0.2",
+      "runtime": null,
+      "spec": "# fn-14-nm0.2 Refactor WSL2 setup for isolated Docker\n\n## Description\nRefactor `_cai_setup_wsl2()` to use a completely isolated Docker daemon instead of modifying the system's `/etc/docker/daemon.json`.\n\n**Size:** M\n**Files:** `src/lib/setup.sh`\n\n## Current State\n\nWSL2 setup (`setup.sh:844-931`) currently:\n1. Installs Sysbox\n2. Modifies `/etc/docker/daemon.json` to add sysbox-runc runtime\n3. Creates a systemd drop-in to add a second socket listener\n4. Creates `containai-secure` context\n\nThis still touches system Docker config.\n\n## Approach\n\n1. Create `/etc/containai/docker/daemon.json` with sysbox-runc runtime configured\n2. Create `containai-docker.service` systemd unit (not a drop-in to docker.service)\n3. Start the isolated daemon on `/var/run/containai-docker.sock`\n4. Create `containai-docker` context pointing to isolated socket\n5. Remove all modifications to system Docker\n\n**Pattern to follow:** `scripts/install-containai-docker.sh:66-108` has the systemd unit template\n\n**Reuse:** \n- `_cai_install_sysbox()` - still needed for sysbox binaries\n- `_cai_create_containai_context()` - update to use new socket/context name\n\n## Key Context\n\n- **Pitfall (from memory)**: \"daemon.json + -H flag conflict\" - don't set `hosts` in both daemon.json AND `-H` flag\n- **Pitfall (from memory)**: \"Systemd drop-in ExecStart= clears then replaces\" - but we're creating a new service, not a drop-in\n- WSL2 systemd is quirky - use `Wants=` not `Requires=` for docker.socket dependency\n## Acceptance\n- [ ] `_cai_setup_wsl2()` creates `/etc/containai/docker/daemon.json`\n- [ ] `_cai_setup_wsl2()` creates `containai-docker.service` (new service, not drop-in)\n- [ ] `_cai_setup_wsl2()` never modifies `/etc/docker/daemon.json`\n- [ ] `_cai_setup_wsl2()` never modifies `docker.service` or its drop-ins\n- [ ] Isolated Docker uses socket at `$_CAI_CONTAINAI_DOCKER_SOCKET`\n- [ ] Context created as `$_CAI_CONTAINAI_DOCKER_CONTEXT`\n- [ ] `cai setup --dry-run` on WSL2 shows isolated paths only\n- [ ] Integration test verifies isolation\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T22:06:01.333475Z",
+        "depends_on": [
+          "fn-14-nm0.1"
+        ],
+        "epic": "fn-14-nm0",
+        "id": "fn-14-nm0.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-14-nm0.3.md",
+        "status": "todo",
+        "title": "Refactor Native Linux setup for isolated Docker",
+        "updated_at": "2026-01-23T22:07:20.890352Z"
+      },
+      "id": "fn-14-nm0.3",
+      "runtime": null,
+      "spec": "# fn-14-nm0.3 Refactor Native Linux setup for isolated Docker\n\n## Description\nRefactor `_cai_setup_linux()` to use a completely isolated Docker daemon instead of modifying the system Docker.\n\n**Size:** M\n**Files:** `src/lib/setup.sh`\n\n## Current State\n\nNative Linux setup (`setup.sh:1847-1998`) currently:\n1. Installs Sysbox\n2. Calls `_cai_configure_daemon_json \"$_CAI_WSL2_DAEMON_JSON\"` - modifies `/etc/docker/daemon.json`\n3. Uses `/var/run/docker.sock` (system socket)\n4. Creates `containai-secure` context pointing to system socket\n\nThis completely pollutes the system Docker.\n\n## Approach\n\n1. Create `/etc/containai/docker/daemon.json` with full isolated config\n2. Create `containai-docker.service` systemd unit\n3. Start isolated daemon with unique data-root, exec-root, pidfile, socket\n4. Create `containai-docker` context\n5. Remove all calls to `_cai_configure_daemon_json` for system paths\n\n**Pattern to follow:** `scripts/install-containai-docker.sh` - this script already does the right thing, adapt its logic\n\n**Reuse:**\n- Factor out shared systemd unit creation into `_cai_create_isolated_docker_service()`\n- Share with WSL2 task (fn-14-nm0.2)\n\n## Key Context\n\n- **From practice-scout**: Use separate subnet for bridge (`172.30.0.0/16`) to avoid IP conflicts\n- **From memory**: Sysbox should be configured with `configure_docker_daemon=false` during install\n- The existing `install-containai-docker.sh` is the reference implementation\n## Acceptance\n- [ ] `_cai_setup_linux()` creates `/etc/containai/docker/daemon.json`\n- [ ] `_cai_setup_linux()` creates `containai-docker.service`\n- [ ] `_cai_setup_linux()` never calls `_cai_configure_daemon_json` with system paths\n- [ ] `_cai_setup_linux()` never touches `/etc/docker/daemon.json`\n- [ ] Isolated Docker uses data-root at `$_CAI_CONTAINAI_DOCKER_DATA`\n- [ ] Isolated Docker uses socket at `$_CAI_CONTAINAI_DOCKER_SOCKET`\n- [ ] Bridge network uses non-conflicting subnet\n- [ ] `cai setup --dry-run` on Linux shows isolated paths only\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T22:06:01.400062Z",
+        "depends_on": [],
+        "epic": "fn-14-nm0",
+        "id": "fn-14-nm0.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-14-nm0.4.md",
+        "status": "todo",
+        "title": "Add cai --version flag",
+        "updated_at": "2026-01-23T22:06:53.679472Z"
+      },
+      "id": "fn-14-nm0.4",
+      "runtime": null,
+      "spec": "# fn-14-nm0.4 Add cai --version flag\n\n## Description\nAdd `--version` flag handling to the main `containai()` function so users can run `cai --version`.\n\n**Size:** S\n**Files:** `src/containai.sh`\n\n## Current State\n\nOnly `cai version` subcommand works (`containai.sh:1917-1919`). The `--version` flag is not handled.\n\n## Approach\n\nAdd flag parsing before the subcommand case statement in `containai()` function (around line 1868).\n\n**Pattern to follow:** Standard bash flag handling:\n```bash\n# At start of containai() function, before case statement\nwhile [[ $# -gt 0 ]]; do\n    case \"$1\" in\n        --version|-v)\n            _cai_version\n            return 0\n            ;;\n        -*)\n            # Unknown flag, let subcommand handle it\n            break\n            ;;\n        *)\n            # Not a flag, proceed to subcommand\n            break\n            ;;\n    esac\ndone\n```\n\n**Reuse:** `_cai_version()` in `src/lib/version.sh:43-139` - already implemented\n## Acceptance\n- [ ] `cai --version` prints version info and exits 0\n- [ ] `cai -v` also works (short flag)\n- [ ] `cai version` still works (subcommand)\n- [ ] `shellcheck -x src/containai.sh` passes\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T22:06:01.467464Z",
+        "depends_on": [
+          "fn-14-nm0.2",
+          "fn-14-nm0.3"
+        ],
+        "epic": "fn-14-nm0",
+        "id": "fn-14-nm0.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-14-nm0.5.md",
+        "status": "todo",
+        "title": "Update cai doctor for isolated Docker",
+        "updated_at": "2026-01-23T22:07:21.020939Z"
+      },
+      "id": "fn-14-nm0.5",
+      "runtime": null,
+      "spec": "# fn-14-nm0.5 Update cai doctor for isolated Docker\n\n## Description\nUpdate `cai doctor` to check the isolated ContainAI Docker instance instead of (or in addition to) system Docker.\n\n**Size:** M\n**Files:** `src/lib/doctor.sh`\n\n## Current State\n\n`cai doctor` (`doctor.sh:274-293`) checks Docker but may be checking system Docker paths. Need to verify it checks the isolated instance.\n\n## Approach\n\n1. Check that `containai-docker.service` is running (not `docker.service`)\n2. Verify socket exists at `$_CAI_CONTAINAI_DOCKER_SOCKET`\n3. Verify context `$_CAI_CONTAINAI_DOCKER_CONTEXT` exists and points to correct socket\n4. Test Docker connectivity via isolated socket\n5. Verify Sysbox runtime available in isolated daemon\n\n**Pattern to follow:** Existing doctor checks in `doctor.sh`, extend for isolated Docker\n\n**Reuse:**\n- `_cai_ok`, `_cai_warn`, `_cai_error` logging functions\n- Existing Docker check structure\n## Acceptance\n- [ ] `cai doctor` checks `containai-docker.service` status\n- [ ] `cai doctor` verifies socket at `$_CAI_CONTAINAI_DOCKER_SOCKET`\n- [ ] `cai doctor` verifies context `$_CAI_CONTAINAI_DOCKER_CONTEXT`\n- [ ] `cai doctor` tests Docker API via isolated socket\n- [ ] `cai doctor` verifies sysbox-runc runtime in isolated daemon\n- [ ] Clear error messages when isolation is misconfigured\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-23T22:06:01.533925Z",
+        "depends_on": [
+          "fn-14-nm0.2",
+          "fn-14-nm0.3"
+        ],
+        "epic": "fn-14-nm0",
+        "id": "fn-14-nm0.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-14-nm0.6.md",
+        "status": "todo",
+        "title": "Update documentation for new paths",
+        "updated_at": "2026-01-23T22:07:21.157182Z"
+      },
+      "id": "fn-14-nm0.6",
+      "runtime": null,
+      "spec": "# fn-14-nm0.6 Update documentation for new paths\n\n## Description\nUpdate all documentation to reflect the new isolated Docker paths and remove references to system Docker modification.\n\n**Size:** M\n**Files:** `docs/setup-guide.md`, `docs/architecture.md`, `docs/troubleshooting.md`, `CHANGELOG.md`\n\n## Current State\n\nDocumentation has inconsistent socket naming and references to system Docker paths:\n- `setup-guide.md`: References `/var/run/docker-containai.sock` (8+ places)\n- `architecture.md`: References `/var/run/containai-docker.sock` (inconsistent)\n- `troubleshooting.md`: Mixed socket references\n\n## Approach\n\n1. Standardize all socket references to `/var/run/containai-docker.sock`\n2. Update \"Component Locations\" tables in setup-guide.md\n3. Update architecture diagram showing isolated Docker\n4. Update troubleshooting for isolated Docker checks\n5. Add CHANGELOG entry for the isolation fix\n\n**Files to update:**\n- `docs/setup-guide.md:174-209, 252-263, 454-570` - Component locations and troubleshooting\n- `docs/architecture.md:117, 143-164` - Diagrams and config examples\n- `docs/troubleshooting.md:320-350, 719` - Socket permission sections\n- `CHANGELOG.md` - Add \"Fixed\" entry\n\n## Key Context\n\n- Use Keep-a-changelog format for CHANGELOG\n- All paths should use inline code backticks\n- Tables follow existing format in setup-guide.md\n## Acceptance\n- [ ] All docs reference `/var/run/containai-docker.sock` (unified naming)\n- [ ] No docs reference `/etc/docker/daemon.json` as being modified\n- [ ] Component Locations tables updated for WSL2 and Native Linux\n- [ ] Architecture diagram shows isolated Docker flow\n- [ ] CHANGELOG.md has entry under \"Fixed\" section\n- [ ] `grep -r \"etc/docker/daemon.json\" docs/` shows only \"not modified\" context\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

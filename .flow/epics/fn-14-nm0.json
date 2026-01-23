@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-14-nm0",
+  "created_at": "2026-01-23T22:05:32.344663Z",
+  "depends_on_epics": [],
+  "id": "fn-14-nm0",
+  "next_task": 1,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-23T22:11:19.535714Z",
+  "spec_path": ".flow/specs/fn-14-nm0.md",
+  "status": "open",
+  "title": "Fix cai setup Docker isolation",
+  "updated_at": "2026-01-23T22:18:14.896320Z"
+}
