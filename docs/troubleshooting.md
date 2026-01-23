@@ -2,10 +2,27 @@
 
 This guide helps you diagnose and resolve common issues with ContainAI. Scenarios are organized by the symptom you observe (error messages, behaviors) rather than by underlying cause.
 
+## Quick Reference
+
+Most common issues and their one-line fixes:
+
+| Issue | Quick Fix |
+|-------|-----------|
+| SSH connection refused | `cai doctor --fix` then retry |
+| Host key verification failed | `cai ssh cleanup` then retry |
+| Permission denied (publickey) | `cai import` then retry |
+| Port already in use | Stop unused containers or adjust port range in config |
+| Container won't start | Check logs with `docker logs <container>` |
+| sshd not ready | Wait or check `docker exec <container> systemctl status ssh` |
+
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
+- [SSH Connection Issues](#ssh-connection-issues)
+- [Container Startup Issues](#container-startup-issues)
+- [Permission Issues](#permission-issues)
+- [Port Conflicts](#port-conflicts)
+- [Host Key Verification Failed](#host-key-verification-failed)
 - [Installation Issues](#installation-issues)
-- [Docker Desktop Issues](#docker-desktop-issues)
 - [Sysbox/Secure Engine Issues](#sysboxsecure-engine-issues)
 - [Container Issues](#container-issues)
 - [Configuration Issues](#configuration-issues)
@@ -20,19 +37,17 @@ This guide helps you diagnose and resolve common issues with ContainAI. Scenario
 Before diving into specific issues, run these commands to gather diagnostic information:
 
 ```bash
-# Full system health check
+# Full system health check (checks SSH, Docker, Sysbox)
 cai doctor
+
+# Auto-fix common issues (SSH keys, config, permissions)
+cai doctor --fix
 
 # JSON output for scripting/debugging
 cai doctor --json
 
-# Check Docker version and context
-docker version
-docker context ls
-docker info
-
-# Check active context
-echo $DOCKER_CONTEXT $DOCKER_HOST
+# Clean up stale SSH configurations
+cai ssh cleanup
 ```
 
 ### Understanding `cai doctor` Output
@@ -53,9 +68,441 @@ The `cai doctor` command checks your system's readiness for ContainAI:
 2. **Sysbox Isolation** - Sysbox runtime and context availability
 3. **Platform** - Platform-specific checks (WSL2 kernel/seccomp, macOS Lima)
 4. **ContainAI Docker** - ContainAI docker-ce installation status
-5. **SSH** - SSH key, config directory, Include directive, OpenSSH version
+5. **SSH** - SSH key, config directory, Include directive, OpenSSH version, connectivity
 6. **Resources** - Host memory/CPU and container limits
 7. **Summary** - Overall readiness status (requires both Sysbox AND SSH)
+
+---
+
+## SSH Connection Issues
+
+### "SSH connection refused"
+
+**Symptom:**
+```
+ssh: connect to host localhost port 2301: Connection refused
+```
+or
+```
+[ERROR] SSH connection refused
+```
+
+**Diagnosis:**
+```bash
+# Check if container is running
+docker --context docker-containai ps
+
+# Check if sshd is running inside container
+docker exec <container-name> systemctl status ssh
+
+# Check if port is listening
+docker exec <container-name> ss -tlnp | grep :22
+
+# Check port mapping
+docker port <container-name> 22
+```
+
+**Likely causes:**
+1. sshd service not running in container
+2. Container not fully started
+3. Port not exposed/mapped
+4. Firewall blocking the port
+
+**Solutions:**
+
+1. **Wait for sshd to start** (containers need a few seconds after boot):
+   ```bash
+   # Retry in a few seconds
+   cai shell /path/to/workspace
+   ```
+
+2. **Restart sshd in the container:**
+   ```bash
+   docker exec <container-name> systemctl restart ssh
+   ```
+
+3. **Check if container started properly:**
+   ```bash
+   docker logs <container-name>
+   ```
+
+4. **Recreate the container if sshd is broken:**
+   ```bash
+   cai run /path/to/workspace --fresh
+   ```
+
+### "Permission denied (publickey)"
+
+**Symptom:**
+```
+agent@localhost: Permission denied (publickey).
+```
+
+**Diagnosis:**
+```bash
+# Verbose SSH to see what's happening
+ssh -vv -p 2301 agent@localhost
+
+# Check if SSH key exists
+ls -la ~/.config/containai/id_containai
+
+# Check if public key is in container
+docker exec <container-name> cat /home/agent/.ssh/authorized_keys
+```
+
+**Likely causes:**
+1. SSH key not generated yet
+2. Public key not injected into container
+3. Wrong permissions on authorized_keys
+
+**Solutions:**
+
+1. **Run doctor fix to ensure SSH keys exist:**
+   ```bash
+   cai doctor --fix
+   ```
+
+2. **Re-import credentials (injects SSH key):**
+   ```bash
+   cai import
+   ```
+
+3. **Manually inject the key:**
+   ```bash
+   # Get your public key
+   cat ~/.config/containai/id_containai.pub
+
+   # Add to container (as root)
+   docker exec <container-name> bash -c 'mkdir -p /home/agent/.ssh && chmod 700 /home/agent/.ssh'
+   docker exec <container-name> bash -c 'cat >> /home/agent/.ssh/authorized_keys' < ~/.config/containai/id_containai.pub
+   docker exec <container-name> chown -R agent:agent /home/agent/.ssh
+   docker exec <container-name> chmod 600 /home/agent/.ssh/authorized_keys
+   ```
+
+### "SSH connection timed out"
+
+**Symptom:**
+```
+ssh: connect to host localhost port 2301: Connection timed out
+```
+or
+```
+[ERROR] sshd did not become ready within 30 seconds
+```
+
+**Diagnosis:**
+```bash
+# Check container state
+docker inspect <container-name> --format '{{.State.Status}}'
+
+# Check systemd boot progress
+docker logs <container-name> 2>&1 | tail -50
+
+# Check if port is correct
+docker inspect <container-name> --format '{{index .Config.Labels "containai.ssh-port"}}'
+```
+
+**Likely causes:**
+1. Container systemd boot taking too long
+2. Resource constraints (low memory/CPU)
+3. Wrong port being used
+
+**Solutions:**
+
+1. **Wait longer and retry:**
+   ```bash
+   sleep 30
+   cai shell /path/to/workspace
+   ```
+
+2. **Increase container resources in config:**
+   ```toml
+   # ~/.config/containai/config.toml
+   [resources]
+   memory = "8g"
+   cpus = 4
+   ```
+
+3. **Check container logs for boot issues:**
+   ```bash
+   docker logs <container-name>
+   ```
+
+---
+
+## Container Startup Issues
+
+### "Container won't start"
+
+**Symptom:**
+Container exits immediately or fails to start.
+
+**Diagnosis:**
+```bash
+# Check container state
+docker --context docker-containai ps -a --filter "name=<container-name>"
+
+# Check exit code and logs
+docker logs <container-name>
+
+# Inspect container for issues
+docker inspect <container-name> --format '{{.State.ExitCode}} {{.State.Error}}'
+```
+
+**Common causes and solutions:**
+
+1. **OOM (Out of Memory):**
+   ```bash
+   # Increase memory limit
+   # In ~/.config/containai/config.toml:
+   [resources]
+   memory = "8g"
+   ```
+
+2. **Sysbox runtime not found:**
+   ```bash
+   # Check Sysbox is installed
+   docker info | grep sysbox-runc
+
+   # If missing, run setup
+   cai setup
+   ```
+
+3. **Port conflict:**
+   ```bash
+   # Check if port is in use
+   ss -tlnp | grep 2300
+
+   # Find available port
+   cai doctor
+   ```
+
+### "systemd failed to start"
+
+**Symptom:**
+Container logs show systemd errors or container exits with code 1.
+
+**Diagnosis:**
+```bash
+# Check systemd boot logs
+docker logs <container-name> 2>&1 | grep -i systemd
+
+# Check for failed units
+docker exec <container-name> systemctl --failed
+```
+
+**Solutions:**
+
+1. **Ensure Sysbox runtime is being used:**
+   ```bash
+   docker inspect <container-name> --format '{{.HostConfig.Runtime}}'
+   # Should show "sysbox-runc"
+   ```
+
+2. **Check container was created with correct context:**
+   ```bash
+   docker --context docker-containai ps
+   ```
+
+3. **Recreate with fresh state:**
+   ```bash
+   cai run /path/to/workspace --fresh
+   ```
+
+---
+
+## Permission Issues
+
+### "Permission denied accessing Docker"
+
+**Symptom:**
+```
+[ERROR] Permission denied accessing Docker
+```
+or
+```
+Got permission denied while trying to connect to the Docker daemon socket
+```
+
+**Diagnosis:**
+```bash
+# Check docker group membership
+groups
+
+# Check socket permissions
+ls -la /var/run/containai-docker.sock
+```
+
+**Solutions:**
+
+1. **Add user to docker group:**
+   ```bash
+   sudo usermod -aG docker $USER
+   newgrp docker  # Apply immediately
+   # or log out and back in
+   ```
+
+2. **Fix socket permissions:**
+   ```bash
+   sudo chmod 660 /var/run/containai-docker.sock
+   sudo chgrp docker /var/run/containai-docker.sock
+   ```
+
+### "Permission denied inside container"
+
+**Symptom:**
+Commands inside container fail with permission errors.
+
+**Diagnosis:**
+```bash
+# Check user inside container
+docker exec <container-name> id
+
+# Check file ownership
+docker exec <container-name> ls -la /home/agent/workspace
+```
+
+**Solutions:**
+
+1. **Files should be owned by agent user:**
+   ```bash
+   docker exec <container-name> chown -R agent:agent /home/agent/workspace
+   ```
+
+2. **Volume mount permissions issue** - ensure host directory is readable:
+   ```bash
+   ls -la /path/to/workspace
+   ```
+
+---
+
+## Port Conflicts
+
+### "Port already in use"
+
+**Symptom:**
+```
+[ERROR] All 201 SSH ports in range 2300-2500 are in use
+```
+or
+```
+Bind for 0.0.0.0:2301 failed: port is already allocated
+```
+
+**Diagnosis:**
+```bash
+# See what's using ContainAI ports
+ss -tlnp | grep -E ':2[3-4][0-9]{2}|:2500'
+
+# List ContainAI containers and their ports
+docker --context docker-containai ps --filter "label=containai.managed=true" \
+  --format '{{.Names}}: {{index .Labels "containai.ssh-port"}}'
+
+# Check for orphaned containers
+docker --context docker-containai ps -a --filter "label=containai.managed=true"
+```
+
+**Solutions:**
+
+1. **Stop unused containers:**
+   ```bash
+   # List all ContainAI containers
+   docker --context docker-containai ps -a --filter "label=containai.managed=true"
+
+   # Stop specific container
+   docker --context docker-containai stop <container-name>
+
+   # Remove container (preserves data volume)
+   docker --context docker-containai rm <container-name>
+   ```
+
+2. **Clean up stale SSH configs:**
+   ```bash
+   cai ssh cleanup
+   ```
+
+3. **Expand port range in config:**
+   ```toml
+   # ~/.config/containai/config.toml
+   [ssh]
+   port_range_start = 2300
+   port_range_end = 3000
+   ```
+
+4. **Check for non-ContainAI processes using ports:**
+   ```bash
+   # Find what's using a specific port
+   sudo lsof -i :2301
+   ```
+
+---
+
+## Host Key Verification Failed
+
+### "Host key verification failed"
+
+**Symptom:**
+```
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+Host key verification failed.
+```
+or
+```
+[WARN] SSH host key has changed for container <name>
+```
+
+**Diagnosis:**
+```bash
+# Check the known_hosts file
+cat ~/.config/containai/known_hosts
+
+# Check container's current host keys
+docker exec <container-name> cat /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+**Expected behavior:** This happens when a container is recreated (with `--fresh`) because new containers generate new SSH host keys.
+
+**Solutions:**
+
+1. **Use --fresh to force clean state (recommended):**
+   ```bash
+   cai run /path/to/workspace --fresh
+   ```
+
+2. **Manually clean the old key:**
+   ```bash
+   ssh-keygen -R "[localhost]:2301" -f ~/.config/containai/known_hosts
+   ```
+
+3. **Clean all stale entries:**
+   ```bash
+   cai ssh cleanup
+   ```
+
+4. **If you suspect a security issue** (man-in-the-middle attack):
+   - Don't connect
+   - Verify container identity through Docker
+   - Check container logs for suspicious activity
+
+### "Known hosts file has wrong permissions"
+
+**Symptom:**
+```
+Permissions for '/home/user/.config/containai/known_hosts' are too open.
+```
+
+**Solution:**
+```bash
+chmod 600 ~/.config/containai/known_hosts
+chmod 700 ~/.config/containai
+```
+
+Or run:
+```bash
+cai doctor --fix
+```
 
 ---
 
@@ -146,183 +593,33 @@ sudo apt install jq  # Ubuntu/Debian
 sudo dnf install jq  # Fedora
 ```
 
----
-
-## Docker Desktop Issues
-
-### "Docker Desktop is not running"
+### "OpenSSH version too old"
 
 **Symptom:**
 ```
-[ERROR] Docker Desktop is not running
-```
-or
-```
-Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+[ERROR] OpenSSH version: 7.2
+(OpenSSH 7.3+ required for Include directive)
 ```
 
 **Diagnosis:**
 ```bash
-docker info
-pgrep -f "Docker Desktop" || pgrep dockerd
+ssh -V
 ```
 
 **Solution:**
 
-1. **macOS:** Open Docker Desktop from Applications
-2. **Windows/WSL2:** Start Docker Desktop from the Start menu
-3. **Linux:**
-   ```bash
-   # If using Docker Desktop
-   systemctl --user start docker-desktop
+Update OpenSSH. On most systems:
 
-   # If using Docker Engine
-   sudo systemctl start docker
-   ```
-
-4. Wait for Docker to fully start (whale icon stops animating)
-
-### "Docker Desktop 4.50+ required"
-
-**Symptom:**
-```
-[ERROR] Docker Desktop 4.50+ required (found: 4.35.1)
-```
-
-**Diagnosis:**
+**Ubuntu/Debian:**
 ```bash
-docker version --format '{{.Server.Version}}'
-# Or get full platform info including version
-docker version --format '{{.Server.Platform.Name}}'
+sudo apt update && sudo apt upgrade openssh-client
 ```
 
-**Solution:**
-
-1. Open Docker Desktop
-2. Click the gear icon (Settings)
-3. Go to "Software updates"
-4. Click "Check for updates"
-5. Install the update and restart Docker Desktop
-
-Alternatively, download the latest version from:
-https://www.docker.com/products/docker-desktop/
-
-### "docker sandbox command not found"
-
-**Symptom:**
-```
-[ERROR] docker sandbox command not found - enable experimental features
-```
-
-**Diagnosis:**
+**macOS:**
+macOS 10.13+ includes a sufficiently new OpenSSH. If using an older version:
 ```bash
-docker sandbox version
-docker --help | grep sandbox
+brew install openssh
 ```
-
-**Solution:**
-
-1. Open Docker Desktop
-2. Go to Settings > Features in development
-3. Enable "Beta features" or "Experimental features"
-4. Click "Apply & Restart"
-
-See: https://docs.docker.com/ai/sandboxes/troubleshooting/
-
-### "Docker Sandboxes feature is not enabled"
-
-**Symptom:**
-```
-[ERROR] Docker Sandboxes feature is not enabled
-```
-
-**Diagnosis:**
-```bash
-docker sandbox ls
-```
-
-**Solution:**
-
-1. Open Docker Desktop Settings
-2. Go to "Features in development"
-3. Enable "Docker sandboxes" or "AI sandbox" feature
-4. Click "Apply & Restart"
-
-### "Sandboxes disabled by administrator policy"
-
-**Symptom:**
-```
-[ERROR] Sandboxes disabled by administrator policy
-```
-
-**Diagnosis:**
-```bash
-docker sandbox ls 2>&1 | head -5
-```
-
-**Solution:**
-
-Your organization's Docker Desktop administrator has disabled sandbox features. Contact your IT administrator to:
-
-1. Enable beta features in Settings Management policy
-2. Or provide an exception for your user
-
-See: https://docs.docker.com/desktop/settings-and-maintenance/settings/
-
-### "ECI available but not enabled"
-
-**Symptom:**
-```
-ECI (Enhanced Container Isolation):     [WARN] Available but not enabled
-```
-
-**Diagnosis:**
-```bash
-cai doctor --json | jq '.docker_desktop.eci_enabled'
-```
-
-**Solution:**
-
-ECI requires Docker Business subscription. To enable:
-
-1. Open Docker Desktop Settings
-2. Go to Security
-3. Enable "Enhanced Container Isolation"
-4. Click "Apply & Restart"
-
-Note: ECI is not strictly required if you have Sysbox configured as an alternative.
-
-### "Docker command timed out"
-
-**Symptom:**
-```
-[ERROR] Docker command timed out
-```
-
-**Diagnosis:**
-```bash
-# Check if daemon is responsive
-docker info
-
-# Check system resources
-docker system df
-```
-
-**Solution:**
-
-1. Restart Docker Desktop
-2. If problem persists, check system resources (CPU, memory, disk)
-3. If disk space is low, carefully clear unused resources:
-   ```bash
-   # First, check what would be removed (non-destructive)
-   docker system df
-
-   # Remove stopped containers and dangling images only (safer)
-   docker system prune
-
-   # CAUTION: This removes ALL unused images (may require large re-downloads)
-   # docker system prune -a
-   ```
 
 ---
 
@@ -409,25 +706,23 @@ sudo dockerd --host unix:///var/run/docker-containai.sock &
 limactl start containai-secure
 ```
 
-### "Socket not found"
+### "containai-docker service not running"
 
 **Symptom:**
 ```
-(Run 'cai setup' to install Sysbox)
+[ERROR] containai-docker service not running
 ```
 
 **Diagnosis:**
 ```bash
-# Check expected socket location
-ls -la /var/run/docker-containai.sock  # WSL2
-ls -la ~/.lima/containai-secure/sock/docker.sock  # macOS
+systemctl status containai-docker
+ls -la /var/run/containai-docker.sock
 ```
 
 **Solution:**
-
-Run setup to create the socket and daemon configuration:
 ```bash
-cai setup
+sudo systemctl start containai-docker
+sudo systemctl enable containai-docker  # Auto-start on boot
 ```
 
 ---
@@ -438,24 +733,19 @@ cai setup
 
 **Symptom:**
 ```
-[ERROR] Image not found: docker/sandbox-templates:claude-code
+[ERROR] Image not found: ghcr.io/containai/full:latest
 ```
 
 **Diagnosis:**
 ```bash
-docker images | grep sandbox-templates
+docker --context docker-containai images | grep containai
 ```
 
 **Solution:**
 
 Pull the required image:
 ```bash
-docker pull docker/sandbox-templates:claude-code
-```
-
-For Sysbox mode, pull to the correct context:
-```bash
-docker --context containai-secure pull docker/sandbox-templates:claude-code
+docker --context docker-containai pull ghcr.io/containai/full:latest
 ```
 
 ### "Container exists but was not created by ContainAI"
@@ -464,8 +754,8 @@ docker --context containai-secure pull docker/sandbox-templates:claude-code
 ```
 [ERROR] Container 'myproject-main' exists but was not created by ContainAI
 
-  Expected label 'containai.sandbox': containai
-  Actual label 'containai.sandbox':   <not set>
+  Expected label 'containai.managed': true
+  Actual label 'containai.managed':   <not set>
 ```
 
 **Diagnosis:**
@@ -479,74 +769,12 @@ docker inspect myproject-main --format '{{.Config.Labels}}'
 
 Option 1: Use a different container name:
 ```bash
-cai run --name my-unique-name
+cai run /workspace --name my-unique-name
 ```
 
 Option 2: Remove the conflicting container:
 ```bash
 docker rm -f myproject-main
-```
-
-Option 3: Recreate as ContainAI-managed:
-```bash
-cai run --restart
-```
-
-### "Image mismatch prevents attachment"
-
-**Symptom:**
-```
-[WARN] Container image mismatch:
-  Running:   docker/sandbox-templates:gemini-cli
-  Requested: docker/sandbox-templates:claude-code
-[ERROR] Image mismatch prevents attachment.
-```
-
-**Diagnosis:**
-```bash
-docker inspect <container-name> --format '{{.Config.Image}}'
-```
-
-**Cause:** Container was created with a different agent/image than requested.
-
-**Solution:**
-
-Recreate the container with the correct image:
-```bash
-cai run --restart
-```
-
-Or specify a different container name:
-```bash
-cai run --name claude-sandbox --agent claude
-```
-
-### "Volume mismatch prevents attachment"
-
-**Symptom:**
-```
-[WARN] Data volume mismatch:
-  Running:   project-a-data
-  Requested: project-b-data
-```
-
-**Diagnosis:**
-```bash
-docker inspect <container-name> --format '{{.Mounts}}'
-```
-
-**Cause:** Container was created with a different data volume.
-
-**Solution:**
-
-Recreate the container:
-```bash
-cai run --restart
-```
-
-Or use a different container name:
-```bash
-cai run --name project-b-sandbox
 ```
 
 ### "Failed to create volume"
@@ -570,51 +798,6 @@ docker volume inspect sandbox-agent-data
    ```bash
    docker volume create sandbox-agent-data
    ```
-
-### "Invalid volume name"
-
-**Symptom:**
-```
-[ERROR] Invalid volume name: my volume
-```
-
-**Diagnosis:**
-```bash
-echo "my volume" | grep -E '^[a-zA-Z0-9][a-zA-Z0-9_.-]*$' || echo "Invalid"
-```
-
-**Cause:** Volume names must start with alphanumeric and contain only `[a-zA-Z0-9_.-]`.
-
-**Solution:**
-
-Use a valid volume name:
-```bash
-cai run --data-volume my-volume  # Valid
-cai run --data-volume my_volume  # Valid
-cai run --data-volume my.volume  # Valid
-```
-
-### "Unexpected container state"
-
-**Symptom:**
-```
-[ERROR] Unexpected container state: paused
-```
-
-**Diagnosis:**
-```bash
-docker inspect <container-name> --format '{{.State.Status}}'
-```
-
-**Solution:**
-
-Unpause or remove the container:
-```bash
-docker unpause <container-name>
-# or
-docker rm -f <container-name>
-cai run
-```
 
 ---
 
@@ -677,76 +860,14 @@ Fix the TOML syntax. Example valid config:
 data_volume = "my-project-data"
 default = "claude"
 
-[workspace."/home/user/projects/myproject"]
-data_volume = "myproject-data"
-excludes = ["*.log", "node_modules/"]
-```
+[ssh]
+port_range_start = 2300
+port_range_end = 2500
+forward_agent = false
 
-### "Python required to parse config"
-
-**Symptom:**
-```
-[ERROR] Python required to parse config: .containai/config.toml
-```
-
-**Diagnosis:**
-```bash
-which python3
-python3 --version
-```
-
-**Solution:**
-
-Install Python 3:
-
-**macOS:**
-```bash
-brew install python
-# Homebrew's python formula installs Python 3 and creates python3 symlink
-```
-
-**Linux:**
-```bash
-sudo apt install python3
-```
-
-### "Invalid workspace path"
-
-**Symptom:**
-```
-[WARN] Invalid workspace path, using $PWD: /nonexistent/path
-```
-
-**Diagnosis:**
-```bash
-ls -la /nonexistent/path
-```
-
-**Solution:**
-
-Ensure the workspace path exists:
-```bash
-mkdir -p /path/to/workspace
-cai run --workspace /path/to/workspace
-```
-
-### "Workspace path does not exist"
-
-**Symptom:**
-```
-[ERROR] Workspace path does not exist: /path/to/workspace
-```
-
-**Diagnosis:**
-```bash
-ls -la /path/to/workspace
-```
-
-**Solution:**
-
-Create the directory or use an existing path:
-```bash
-mkdir -p /path/to/workspace
+[resources]
+memory = "8g"
+cpus = 4
 ```
 
 ---
@@ -776,71 +897,8 @@ docker run --rm -v sandbox-agent-data:/data alpine ls -la /data/config/gh/
 
 **Solution:**
 
-Clear credentials from the data volume and re-import:
+Re-import fresh credentials from host:
 ```bash
-# Clear all credentials from the volume (interactive confirmation)
-cai sandbox clear-credentials
-
-# Clear credentials for specific agent
-cai sandbox clear-credentials --agent claude
-
-# Skip confirmation prompt
-cai sandbox clear-credentials -y
-
-# Then re-import fresh credentials from host
-cai import
-```
-
-### "--credentials=host requires acknowledgement"
-
-**Symptom:**
-```
-[ERROR] --credentials=host requires --acknowledge-credential-risk
-```
-
-**Diagnosis:**
-```bash
-# Check current credential mode
-cai run --help | grep -A2 credentials
-```
-
-**Cause:** Host credential sharing requires explicit acknowledgement.
-
-**Solution:**
-
-Add the acknowledgement flag:
-```bash
-cai run --credentials host --acknowledge-credential-risk
-```
-
-Or use the new explicit flags:
-```bash
-cai run --allow-host-credentials --i-understand-this-exposes-host-credentials
-```
-
-**Warning:** This shares your `~/.ssh`, `~/.gitconfig`, and other credentials with the sandbox.
-
-### "--credentials=host only supported in ECI mode"
-
-**Symptom:**
-```
-[ERROR] --credentials=host / --allow-host-credentials is only supported in ECI mode (Docker Desktop)
-
-Current mode: Sysbox (context: containai-secure)
-```
-
-**Diagnosis:**
-```bash
-cai doctor | grep -E "ECI|Sysbox"
-```
-
-**Cause:** Host credential sharing is a Docker Desktop sandbox feature, not available with Sysbox.
-
-**Solution:**
-
-Use ECI mode (Docker Desktop) for credential sharing, or manage credentials manually in Sysbox mode:
-```bash
-# Use cai import to copy credentials to the volume
 cai import
 ```
 
@@ -868,50 +926,6 @@ docker volume inspect sandbox-agent-data
    docker pull eeacms/rsync
    ```
 3. Check disk space: `docker system df`
-
-### "Source not found, skipping"
-
-**Symptom:**
-```
-[WARN] Source not found, skipping: /source/.claude.json
-```
-
-**Diagnosis:**
-```bash
-ls -la ~/.claude.json
-ls -la ~/.claude/
-```
-
-**Cause:** The source file doesn't exist on your host.
-
-**Solution:**
-
-This is often normal for first-time setup. Run the agent once to create initial files:
-```bash
-claude  # Run Claude on host first to create config files
-cai import  # Then import to volume
-```
-
-### "jq transformation failed"
-
-**Symptom:**
-```
-[ERROR] jq transformation failed for installed_plugins.json
-```
-
-**Diagnosis:**
-```bash
-# Validate the source file
-jq '.' ~/.claude/plugins/installed_plugins.json
-```
-
-**Solution:**
-
-If the file is corrupted, remove and reimport:
-```bash
-rm ~/.claude/plugins/installed_plugins.json
-cai import
-```
 
 ---
 
@@ -941,7 +955,6 @@ grep Seccomp /proc/self/status
    ```bash
    cai setup --force
    ```
-3. **Use Docker Desktop ECI** instead of Sysbox (recommended for WSL2)
 
 ### WSL2: "Docker context issue"
 
@@ -962,58 +975,6 @@ Reset to default context:
 ```bash
 unset DOCKER_CONTEXT DOCKER_HOST
 docker context use default
-```
-
-Or explicitly specify context:
-```bash
-cai run  # Uses auto-selection
-# or
-CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure cai run
-```
-
-### macOS: "ECI not available"
-
-**Symptom:**
-```
-ECI (Enhanced Container Isolation): not available    [WARN]
-```
-
-**Diagnosis:**
-```bash
-cai doctor --json | jq '.docker_desktop'
-docker info
-```
-
-**Cause:** Docker Desktop for macOS may require Business subscription for ECI.
-
-**Solution:**
-
-1. **Check subscription**: ECI requires Docker Business
-2. **Use Lima with Sysbox** as alternative:
-   ```bash
-   brew install lima
-   limactl start --name=containai-secure template://docker-sysbox
-   ```
-
-### macOS: Missing Alpine image
-
-**Symptom:**
-```
-[ERROR] Image not found: alpine:3.20
-Pull alpine:3.20: docker pull alpine:3.20
-```
-
-**Diagnosis:**
-```bash
-docker images alpine
-docker images | grep alpine
-```
-
-**Cause:** ECI detection requires the Alpine image for uid_map checks.
-
-**Solution:**
-```bash
-docker pull alpine:3.20
 ```
 
 ### Linux: Permission denied
@@ -1040,186 +1001,40 @@ newgrp docker  # Apply immediately
 
 ---
 
-## Security-Related Issues
+## SSH Debugging Commands
 
-### "--mount-docker-socket requires acknowledgement"
+When troubleshooting SSH issues, these commands provide detailed diagnostic information:
 
-**Symptom:**
-```
-[ERROR] --mount-docker-socket requires --please-root-my-host acknowledgement
-```
-
-**Diagnosis:**
 ```bash
-cai run --help | grep -A2 docker-socket
-```
+# Verbose SSH connection (shows handshake details)
+ssh -vv -p 2301 agent@localhost
 
-**Cause:** Docker socket mounting is extremely dangerous.
+# Check what keys SSH is offering
+ssh-add -l
 
-**Solution:**
+# Test SSH connection with specific key
+ssh -i ~/.config/containai/id_containai -p 2301 agent@localhost
 
-Only if you understand the risks:
-```bash
-cai run --mount-docker-socket --please-root-my-host
-```
+# Scan container's SSH host keys
+ssh-keyscan -p 2301 localhost
 
-Or use the new explicit flags:
-```bash
-cai run --allow-host-docker-socket --i-understand-this-grants-root-access
-```
+# Check SSH config file parsing
+ssh -G <container-name>
 
-**WARNING:** This grants FULL ROOT ACCESS to your host. Avoid unless absolutely necessary.
+# Check sshd status inside container
+docker exec <container> systemctl status ssh
 
-### "No isolation available"
+# Check sshd logs inside container
+docker exec <container> journalctl -u ssh -n 50
 
-**Symptom:**
-```
-Status:                                  [ERROR] No isolation available
-Recommended: Install Docker Desktop 4.50+ with ECI, or run 'cai setup'
-```
+# Check listening ports inside container
+docker exec <container> ss -tlnp
 
-**Diagnosis:**
-```bash
-cai doctor
-```
+# Check authorized_keys inside container
+docker exec <container> cat /home/agent/.ssh/authorized_keys
 
-**Cause:** Neither Docker Desktop sandboxes nor Sysbox are available.
-
-**Solution:**
-
-Option 1 (Recommended): Install/update Docker Desktop 4.50+
-- https://www.docker.com/products/docker-desktop/
-- Enable ECI in Settings > Security
-
-Option 2: Set up Sysbox:
-```bash
-cai setup
-```
-
-Option 3 (Not recommended): Force run without isolation:
-```bash
-cai run --force
-```
-
-### "Container isolation required but not detected"
-
-**Symptom:**
-```
-[ERROR] Container isolation required but not detected. Use --force to bypass.
-```
-
-**Diagnosis:**
-```bash
-echo $CONTAINAI_REQUIRE_ISOLATION
-cai doctor
-```
-
-**Cause:** `CONTAINAI_REQUIRE_ISOLATION=1` is set but isolation isn't available.
-
-**Solution:**
-
-1. Run `cai doctor` to diagnose
-2. Fix the underlying isolation issue
-3. Or bypass (not recommended):
-   ```bash
-   CONTAINAI_REQUIRE_ISOLATION=0 cai run
-   ```
-
----
-
-## Startup/Entrypoint Issues
-
-### "Could not discover mirrored workspace mount"
-
-**Symptom:**
-```
-ERROR: Could not discover mirrored workspace mount via findmnt.
-Diagnostics:
-{...findmnt output...}
-```
-
-**Diagnosis:**
-```bash
-# From inside the container (if you can access it)
-findmnt --real --json
-```
-
-**Cause:** Docker sandbox didn't properly mount the workspace.
-
-**Solution:**
-
-1. Ensure workspace path exists on host
-2. Restart Docker Desktop
-3. Recreate the container:
-   ```bash
-   cai run --restart
-   ```
-
-### "Refusing suspicious workspace candidate"
-
-**Symptom:**
-```
-ERROR: Refusing suspicious workspace candidate: /etc
-```
-
-**Diagnosis:**
-```bash
-echo $PWD
-ls -la /etc  # Verify you're not accidentally in a system directory
-```
-
-**Cause:** Workspace resolved to a system directory.
-
-**Solution:**
-
-Specify a valid workspace:
-```bash
-cai run --workspace ~/projects/myproject
-```
-
-### "Workspace is a mountpoint"
-
-**Symptom:**
-```
-ERROR: /home/agent/workspace is a mountpoint. Refusing to delete.
-```
-
-**Diagnosis:**
-```bash
-docker inspect <container-name> --format '{{.Mounts}}'
-```
-
-**Cause:** Internal container error during workspace setup.
-
-**Solution:**
-
-Remove and recreate the container:
-```bash
-docker rm -f <container-name>
-cai run
-```
-
-### "Path escapes data directory"
-
-**Symptom:**
-```
-ERROR: Path escapes data directory: /mnt/agent-data/../../../etc/passwd -> /etc/passwd
-```
-
-**Diagnosis:**
-```bash
-# Inspect the volume for symlinks
-docker run --rm -v sandbox-agent-data:/data alpine find /data -type l -ls
-```
-
-**Cause:** Symlink traversal attack detected in the data volume.
-
-**Solution:**
-
-This is a security protection. The data volume contains a symlink trying to escape. Inspect and fix:
-```bash
-docker run --rm -it -v sandbox-agent-data:/data alpine sh
-# Inside container: find /data -type l -ls
+# Check SSH host keys inside container
+docker exec <container> ls -la /etc/ssh/ssh_host_*
 ```
 
 ---
@@ -1242,7 +1057,12 @@ env | grep -E 'DOCKER|CONTAINAI' | tee env-output.txt
 
 # Versions
 docker version 2>&1 | tee versions.txt
+ssh -V 2>&1 >> versions.txt
 echo "cai version: $(cai --version 2>/dev/null || echo 'unknown')" >> versions.txt
+
+# SSH config status
+ls -la ~/.ssh/containai.d/ 2>&1 | tee ssh-config.txt
+cat ~/.config/containai/known_hosts 2>&1 | tee known-hosts.txt
 ```
 
 ### 2. Check GitHub Issues
@@ -1259,6 +1079,7 @@ If your issue isn't documented, open a GitHub issue with:
 3. **Steps to reproduce**
 4. **Platform** (macOS/Linux/WSL2)
 5. **Docker version** (`docker version`)
+6. **SSH version** (`ssh -V`)
 
 ### 4. Community Support
 
@@ -1273,46 +1094,30 @@ Quick reference of error messages and their section in this guide:
 
 | Error Message | Section |
 |---------------|---------|
-| "Docker is not installed" | [Installation Issues](#installation-issues) |
-| "No timeout command available" | [Installation Issues](#installation-issues) |
-| "jq is not installed" | [Installation Issues](#installation-issues) |
-| "Docker Desktop is not running" | [Docker Desktop Issues](#docker-desktop-issues) |
-| "Docker Desktop 4.50+ required" | [Docker Desktop Issues](#docker-desktop-issues) |
-| "docker sandbox command not found" | [Docker Desktop Issues](#docker-desktop-issues) |
-| "Docker Sandboxes feature is not enabled" | [Docker Desktop Issues](#docker-desktop-issues) |
-| "Sandboxes disabled by administrator" | [Docker Desktop Issues](#docker-desktop-issues) |
-| "ECI available but not enabled" | [Docker Desktop Issues](#docker-desktop-issues) |
-| "Docker command timed out" | [Docker Desktop Issues](#docker-desktop-issues) |
-| "containai-secure context not found" | [Sysbox Issues](#sysboxsecure-engine-issues) |
-| "Sysbox runtime not found" | [Sysbox Issues](#sysboxsecure-engine-issues) |
-| "Docker daemon for 'containai-secure' not running" | [Sysbox Issues](#sysboxsecure-engine-issues) |
-| "Socket not found" | [Sysbox Issues](#sysboxsecure-engine-issues) |
-| "Image not found" | [Container Issues](#container-issues) |
-| "Container exists but was not created by ContainAI" | [Container Issues](#container-issues) |
-| "Image mismatch" | [Container Issues](#container-issues) |
-| "Volume mismatch" | [Container Issues](#container-issues) |
-| "Failed to create volume" | [Container Issues](#container-issues) |
-| "Invalid volume name" | [Container Issues](#container-issues) |
-| "Unexpected container state" | [Container Issues](#container-issues) |
-| "Config file not found" | [Configuration Issues](#configuration-issues) |
-| "Failed to parse config file" | [Configuration Issues](#configuration-issues) |
-| "Python required to parse config" | [Configuration Issues](#configuration-issues) |
-| "Invalid workspace path" | [Configuration Issues](#configuration-issues) |
-| "Workspace path does not exist" | [Configuration Issues](#configuration-issues) |
+| "SSH connection refused" | [SSH Connection Issues](#ssh-connection-refused) |
+| "Permission denied (publickey)" | [SSH Connection Issues](#permission-denied-publickey) |
+| "SSH connection timed out" | [SSH Connection Issues](#ssh-connection-timed-out) |
+| "Host key verification failed" | [Host Key Verification Failed](#host-key-verification-failed) |
+| "sshd did not become ready" | [SSH Connection Issues](#ssh-connection-timed-out) |
+| "Port already in use" | [Port Conflicts](#port-already-in-use) |
+| "All SSH ports in range are in use" | [Port Conflicts](#port-already-in-use) |
+| "Container won't start" | [Container Startup Issues](#container-wont-start) |
+| "systemd failed to start" | [Container Startup Issues](#systemd-failed-to-start) |
+| "Docker is not installed" | [Installation Issues](#docker-is-not-installed-or-not-in-path) |
+| "No timeout command available" | [Installation Issues](#no-timeout-command-available) |
+| "jq is not installed" | [Installation Issues](#jq-is-not-installed) |
+| "OpenSSH version too old" | [Installation Issues](#openssh-version-too-old) |
+| "containai-secure context not found" | [Sysbox Issues](#containai-secure-context-not-found) |
+| "Sysbox runtime not found" | [Sysbox Issues](#sysbox-runtime-not-found) |
+| "Docker daemon not running" | [Sysbox Issues](#docker-daemon-for-containai-secure-not-running) |
+| "containai-docker service not running" | [Sysbox Issues](#containai-docker-service-not-running) |
+| "Image not found" | [Container Issues](#image-not-found) |
+| "Container exists but was not created by ContainAI" | [Container Issues](#container-exists-but-was-not-created-by-containai) |
+| "Failed to create volume" | [Container Issues](#failed-to-create-volume) |
+| "Config file not found" | [Configuration Issues](#config-file-not-found) |
+| "Failed to parse config file" | [Configuration Issues](#failed-to-parse-config-file) |
 | "Authentication failed" / "Invalid credentials" | [Credential Issues](#stale-or-corrupted-credentials-in-sandbox) |
-| "--credentials=host requires acknowledgement" | [Credential Issues](#credentialimport-issues) |
-| "--credentials=host only supported in ECI mode" | [Credential Issues](#credentialimport-issues) |
-| "Rsync sync failed" | [Credential Issues](#credentialimport-issues) |
-| "Source not found, skipping" | [Credential Issues](#credentialimport-issues) |
-| "jq transformation failed" | [Credential Issues](#credentialimport-issues) |
-| "Seccomp compatibility: warning" | [WSL2 Issues](#platform-specific-issues) |
-| "Docker context issue" | [WSL2 Issues](#platform-specific-issues) |
-| "ECI not available" | [macOS Issues](#platform-specific-issues) |
-| "Permission denied" | [Linux Issues](#platform-specific-issues) |
-| "--mount-docker-socket requires acknowledgement" | [Security Issues](#security-related-issues) |
-| "No isolation available" | [Security Issues](#security-related-issues) |
-| "Container isolation required but not detected" | [Security Issues](#security-related-issues) |
-| "Could not discover mirrored workspace mount" | [Startup Issues](#startupentrypoint-issues) |
-| "Refusing suspicious workspace candidate" | [Startup Issues](#startupentrypoint-issues) |
-| "Workspace is a mountpoint" | [Startup Issues](#startupentrypoint-issues) |
-| "Path escapes data directory" | [Startup Issues](#startupentrypoint-issues) |
+| "Rsync sync failed" | [Credential Issues](#rsync-sync-failed) |
+| "Seccomp compatibility: warning" | [WSL2 Issues](#wsl2-seccomp-compatibility-warning) |
+| "Docker context issue" | [WSL2 Issues](#wsl2-docker-context-issue) |
+| "Permission denied" | [Permission Issues](#permission-issues) |
