@@ -436,7 +436,7 @@ _cai_install_sysbox_wsl2() {
 # Returns: 0=success, 1=failure
 # Note: Does NOT set sysbox-runc as default runtime - keeps runc as default
 _cai_configure_daemon_json() {
-    local daemon_json="${1:-$_CAI_CONTAINAI_DOCKER_CONFIG}"
+    local daemon_json="$1"  # Required - caller must specify path
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
@@ -530,7 +530,7 @@ _cai_configure_daemon_json() {
 # Returns: 0=success, 1=failure
 # Note: Creates systemd drop-in to add additional socket listener
 _cai_configure_docker_socket() {
-    local socket_path="${1:-$_CAI_CONTAINAI_DOCKER_SOCKET}"
+    local socket_path="$1"  # Required - caller must specify path
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
@@ -632,7 +632,7 @@ EOF
 #            $2 = dry_run flag ("true" to simulate)
 # Returns: 0=success, 1=failure
 _cai_restart_docker_service() {
-    local socket_path="${1:-$_CAI_CONTAINAI_DOCKER_SOCKET}"
+    local socket_path="$1"  # Required - caller must specify path
     local dry_run="${2:-false}"
 
     _cai_step "Restarting Docker service"
@@ -684,7 +684,7 @@ _cai_restart_docker_service() {
 # Returns: 0=success, 1=failure
 # Note: This context points to dedicated Docker socket, NOT the default socket
 _cai_create_containai_context() {
-    local socket_path="${1:-$_CAI_CONTAINAI_DOCKER_SOCKET}"
+    local socket_path="$1"  # Required - caller must specify path
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
@@ -744,7 +744,7 @@ _cai_create_containai_context() {
 #            $3 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
 _cai_verify_sysbox_install() {
-    local socket_path="${1:-$_CAI_CONTAINAI_DOCKER_SOCKET}"
+    local socket_path="$1"  # Required - caller must specify path
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
@@ -891,7 +891,8 @@ _cai_setup_wsl2() {
         return 1
     fi
 
-    # Step 3: Configure daemon.json
+    # Step 3: Configure daemon.json (isolated path)
+    # NOTE: This writes to isolated config; fn-14-nm0.2 will update service to use it
     if ! _cai_configure_daemon_json "$_CAI_CONTAINAI_DOCKER_CONFIG" "$dry_run" "$verbose"; then
         return 1
     fi
@@ -1881,8 +1882,8 @@ _cai_setup_linux() {
         _cai_info "Manual installation steps:"
         _cai_info "  1. Install Sysbox: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
         _cai_info "  2. Configure daemon.json with sysbox-runc runtime"
-        _cai_info "  3. Start the containai-docker service"
-        _cai_info "  4. Create context: docker context create containai-docker --docker host=unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+        _cai_info "  3. Restart Docker: sudo systemctl restart docker"
+        _cai_info "  4. Create context: docker context create containai-secure --docker host=unix:///var/run/docker.sock"
         return 1
     fi
 
@@ -1936,8 +1937,8 @@ _cai_setup_linux() {
         return 1
     fi
 
-    # Step 3: Configure daemon.json
-    # Native Linux uses isolated ContainAI Docker config
+    # Step 3: Configure daemon.json (isolated path)
+    # NOTE: This writes to isolated config; fn-14-nm0.3 will update service to use it
     if ! _cai_configure_daemon_json "$_CAI_CONTAINAI_DOCKER_CONFIG" "$dry_run" "$verbose"; then
         return 1
     fi
@@ -2111,18 +2112,18 @@ Options:
 What It Does (Linux native):
   1. Detects distribution (Ubuntu/Debian supported for auto-install)
   2. Downloads and installs Sysbox from GitHub releases
-  3. Configures isolated daemon.json with sysbox-runc runtime
-  4. Starts containai-docker service
-  5. Creates 'containai-docker' Docker context pointing to isolated socket
+  3. Configures daemon.json with sysbox-runc runtime
+  4. Restarts Docker daemon
+  5. Creates 'containai-secure' Docker context pointing to default socket
   6. Verifies installation with test container
   Note: Fedora/RHEL/Arch users need to install Sysbox manually.
 
 What It Does (WSL2):
   1. Checks seccomp compatibility (warns if WSL 1.1.0+ filter conflict)
   2. Downloads and installs Sysbox from GitHub releases
-  3. Configures isolated daemon.json with sysbox-runc runtime
+  3. Configures daemon.json with sysbox-runc runtime
   4. Configures dedicated Docker socket at /var/run/containai-docker.sock
-  5. Creates 'containai-docker' Docker context pointing to dedicated socket
+  5. Creates 'containai-secure' Docker context pointing to dedicated socket
   6. Verifies installation
 
 What It Does (macOS):
@@ -2179,11 +2180,11 @@ ContainAI Docker (separate docker-ce with sysbox-runc default):
     Config:  /etc/containai/docker/daemon.json
     Data:    /var/lib/containai-docker/
     Service: containai-docker.service
-    Context: docker-containai
+    Context: containai-docker
 
   Usage after installation:
-    docker --context docker-containai info
-    docker --context docker-containai run hello-world
+    docker --context containai-docker info
+    docker --context containai-docker run hello-world
 
 Examples:
   cai setup                    Install Sysbox (auto-detects platform)
