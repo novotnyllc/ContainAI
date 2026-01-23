@@ -13,23 +13,79 @@ Follow existing test patterns in `test-sync-integration.sh`:
 - Use hermetic test volumes with `TEST_RUN_ID` (line 72-73)
 - Use `run_in_rsync()` helper (line 126-143)
 
-Add test cases:
-1. Basic relinking - symlink within same dir, target also imported
-2. Relative symlink - stays relative after relink
-3. Absolute symlink - becomes container-absolute
-4. External symlink - preserved with warning
-5. Broken symlink - preserved as-is
-6. Circular symlink - no infinite loop
-7. Directory symlink - handled correctly
+### Test cases
+
+1. **Internal absolute symlink** - relinked correctly
+   - Create: `/source/.config/nvim` → absolute symlink to `/host/dotfiles/.config/nvim.d`
+   - Where `/host/dotfiles/.config/nvim.d` is the host path for the same directory
+   - Verify after import: symlink points to `/mnt/agent-data/config/nvim.d`
+
+2. **Relative symlink** - NOT relinked (preserved as-is)
+   - Create: `/source/.config/link` → `./target` (relative)
+   - Verify after import: symlink still points to `./target` (unchanged)
+
+3. **External absolute symlink** - preserved with warning
+   - Create: symlink to `/usr/bin/bash` (outside import tree)
+   - Verify: symlink preserved, warning logged
+
+4. **Broken symlink** - preserved as-is
+   - Create: symlink to nonexistent target within host_src_dir
+   - Verify: symlink preserved (not relinked), no error
+
+5. **Circular symlinks** - no hang
+   - Create: `a` → `b`, `b` → `a`
+   - Verify: import completes without hanging
+
+6. **Directory symlink pitfall** - handled correctly
+   - Pre-populate volume: create real directory at `/data/config/nvim`
+   - Import: symlink at same path
+   - Verify: result is a symlink (not symlink inside directory)
+   - This tests the `rm -rf` before `ln -s` pattern
+
+### Test fixture setup
+
+```sh
+# Create host-like source structure with symlinks
+alt_source_dir=$(mktemp -d "${REAL_HOME}/.containai-symlink-test-XXXXXX")
+mkdir -p "$alt_source_dir/.config/nvim.d"
+echo "content" > "$alt_source_dir/.config/nvim.d/init.vim"
+
+# Internal absolute symlink (uses full host path)
+ln -s "$alt_source_dir/.config/nvim.d" "$alt_source_dir/.config/nvim"
+
+# Relative symlink
+ln -s "./nvim.d" "$alt_source_dir/.config/nvim-rel"
+
+# External symlink
+ln -s "/usr/bin/bash" "$alt_source_dir/.config/external"
+```
+
+### Verification
+
+```sh
+# Check symlink targets in volume
+docker run --rm -v "$test_vol":/data alpine sh -c '
+    readlink /data/config/nvim       # Should be /mnt/agent-data/config/nvim.d
+    readlink /data/config/nvim-rel   # Should be ./nvim.d (unchanged)
+    readlink /data/config/external   # Should be /usr/bin/bash (unchanged)
+'
+```
+
+## Key context
+
+- Symlink test fixtures must use **host paths** for internal absolute symlinks
+- The `HOST_SRC_DIR` is the host path, not `/source` mount path
+- Directory symlink test must pre-populate volume to trigger the pitfall
+
 ## Acceptance
-- [ ] Test: symlink within import tree is relinked correctly
-- [ ] Test: relative symlink remains relative
-- [ ] Test: absolute symlink converted to container path
-- [ ] Test: external symlink preserved (not relinked)
-- [ ] Test: broken symlink does not cause error
+- [ ] Test: internal absolute symlink relinked to `/mnt/agent-data/...` path
+- [ ] Test: relative symlink preserved unchanged (not relinked)
+- [ ] Test: external absolute symlink preserved (not relinked), warning logged
+- [ ] Test: broken symlink does not cause error, preserved as-is
 - [ ] Test: circular symlinks do not hang
-- [ ] Test: directory symlinks work (ln -sfn pitfall handled)
+- [ ] Test: directory symlink replaces pre-existing directory (pitfall handled)
 - [ ] All existing tests continue to pass
+
 ## Done summary
 TBD
 

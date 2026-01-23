@@ -729,7 +729,7 @@ _containai_import() {
     # Note: This script runs inside eeacms/rsync with POSIX sh (not bash)
     # All code must be strictly POSIX-compliant (no arrays, no local in functions)
     local script_with_data
-    # shellcheck disable=SC2016
+    # shellcheck disable=SC2016,SC1012
     script_with_data='
 # ==============================================================================
 # Functions for rsync-based sync (runs inside eeacms/rsync container)
@@ -905,6 +905,163 @@ copy() {
             esac
         fi
     fi
+}
+
+# ==============================================================================
+# Symlink helper functions for relinking absolute symlinks after rsync
+# ==============================================================================
+
+# is_internal_absolute_symlink: Check if absolute symlink target is within host_src_dir
+# Takes: host_src_dir, link_path
+# Returns: 0 (true) if symlink is absolute AND target is within host_src_dir
+#          1 (false) if symlink is relative OR target is outside host_src_dir
+is_internal_absolute_symlink() {
+    _host_src_dir="$1"
+    _link_path="$2"
+
+    # Normalize host_src_dir: strip trailing slash, except for root
+    case "$_host_src_dir" in
+        /) : ;;  # Keep root as-is
+        */) _host_src_dir="${_host_src_dir%/}" ;;
+    esac
+
+    # Get symlink target (immediate, not resolved)
+    _target=$(readlink "$_link_path") || return 1
+
+    # Check if absolute (starts with /)
+    case "$_target" in
+        /*)
+            # Absolute symlink - check if within host_src_dir
+            case "$_target" in
+                "${_host_src_dir}"/*|"${_host_src_dir}")
+                    return 0
+                    ;;
+                *)
+                    return 1
+                    ;;
+            esac
+            ;;
+        *)
+            # Relative symlink - we do not relink these
+            return 1
+            ;;
+    esac
+}
+
+# remap_absolute_symlink: Calculate new container-absolute target path
+# Takes: host_src_dir, runtime_dst_dir, link_path
+# Outputs: new target path to stdout
+# Returns: 0 on success, 1 on failure (e.g., path escape attempt or external symlink)
+# PRECONDITION: Caller should verify symlink is internal via is_internal_absolute_symlink first
+remap_absolute_symlink() {
+    _host_src_dir="$1"
+    _runtime_dst_dir="$2"
+    _link_path="$3"
+
+    # Normalize host_src_dir: strip trailing slash, except for root
+    case "$_host_src_dir" in
+        /) : ;;  # Keep root as-is
+        */) _host_src_dir="${_host_src_dir%/}" ;;
+    esac
+
+    # Normalize runtime_dst_dir: strip trailing slash, except for root
+    case "$_runtime_dst_dir" in
+        /) : ;;  # Keep root as-is
+        */) _runtime_dst_dir="${_runtime_dst_dir%/}" ;;
+    esac
+
+    # Get symlink target
+    _target=$(readlink "$_link_path") || return 1
+
+    # Verify target is absolute and starts with host_src_dir (defense-in-depth)
+    case "$_target" in
+        "${_host_src_dir}"/*|"${_host_src_dir}")
+            : # Valid internal absolute symlink
+            ;;
+        *)
+            # External or relative symlink - refuse to remap
+            return 1
+            ;;
+    esac
+
+    # Strip host_src_dir prefix to get relative portion
+    _rel_target="${_target#"$_host_src_dir"}"
+
+    # Security: reject if rel_target contains path traversal
+    case "$_rel_target" in
+        */../*|*/..|/../*|/..)
+            return 1
+            ;;
+    esac
+
+    # Build new target path
+    _new_target="${_runtime_dst_dir}${_rel_target}"
+
+    # Belt-and-suspenders: validate result starts with runtime_dst_dir
+    case "$_new_target" in
+        "${_runtime_dst_dir}"/*|"${_runtime_dst_dir}")
+            printf '%s\n' "$_new_target"
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# symlink_target_exists_in_source: Check if symlink target exists in mounted source
+# Takes: host_src_dir, source_mount, link_path
+# Returns: 0 if target exists (regular file, dir, or even symlink), 1 if broken
+# PRECONDITION: Caller should verify symlink is internal via is_internal_absolute_symlink first
+symlink_target_exists_in_source() {
+    _host_src_dir="$1"
+    _source_mount="$2"
+    _link_path="$3"
+
+    # Normalize host_src_dir: strip trailing slash, except for root
+    case "$_host_src_dir" in
+        /) : ;;  # Keep root as-is
+        */) _host_src_dir="${_host_src_dir%/}" ;;
+    esac
+
+    # Normalize source_mount: strip trailing slash, except for root
+    case "$_source_mount" in
+        /) : ;;  # Keep root as-is
+        */) _source_mount="${_source_mount%/}" ;;
+    esac
+
+    # Get symlink target
+    _target=$(readlink "$_link_path") || return 1
+
+    # Verify target is absolute and starts with host_src_dir (defense-in-depth)
+    case "$_target" in
+        "${_host_src_dir}"/*|"${_host_src_dir}")
+            : # Valid internal absolute symlink
+            ;;
+        *)
+            # External or relative symlink - cannot check existence
+            return 1
+            ;;
+    esac
+
+    # Map host path to source mount path
+    # e.g., /host/dotfiles/.config/foo -> /source/foo (if host_src_dir=/host/dotfiles/.config)
+    _rel_target="${_target#"$_host_src_dir"}"
+
+    # Security: reject if rel_target contains path traversal
+    case "$_rel_target" in
+        */../*|*/..|/../*|/..)
+            return 1
+            ;;
+    esac
+
+    _src_target="${_source_mount}${_rel_target}"
+
+    # Test if target exists (file, dir, or symlink itself)
+    if [ -e "$_src_target" ] || [ -L "$_src_target" ]; then
+        return 0
+    fi
+    return 1
 }
 
 # Process map entries from heredoc

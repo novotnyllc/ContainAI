@@ -81,8 +81,45 @@ Implement `cai uninstall` command that cleanly removes ContainAI's system-level 
 - [ ] Clean exit with summary of what was removed
 
 ## Done summary
-TBD
+## Summary
 
+Implemented `cai uninstall` command for clean removal of ContainAI's system-level installation components while preserving user configuration and data.
+
+### Changes
+
+1. **Created `src/lib/uninstall.sh`** - New library implementing:
+   - `_cai_uninstall()` - Main entry point with CLI argument parsing
+   - `_cai_uninstall_systemd_service()` - Stops, disables, removes systemd unit, reloads daemon
+   - `_cai_uninstall_docker_context()` - Removes containai-secure and docker-containai contexts
+   - `_cai_uninstall_containers()` - Removes containers with containai.* labels
+   - `_cai_uninstall_volumes_list()` - Removes associated container volumes
+   - `_cai_uninstall_help()` - Comprehensive help text
+
+2. **Updated `src/containai.sh`**:
+   - Added uninstall to subcommand documentation header
+   - Added uninstall.sh to library existence check
+   - Added source statement for lib/uninstall.sh
+   - Added "uninstall" to help text subcommand list
+   - Added uninstall case in main CLI router
+
+### Features Implemented
+
+- `--dry-run`: Shows what would be removed without removing
+- `--containers`: Stops and removes containai containers
+- `--volumes`: Removes container volumes (requires --containers)
+- `--force`: Skips confirmation prompts
+- Confirmation prompt for interactive terminals
+- Proper uninstall order: containers → volumes → context → systemd
+- Follows systemd best practices: stop → disable → remove file → daemon-reload
+
+### What Gets Preserved (by design)
+
+- `~/.config/containai/` - SSH keys, config.toml
+- `~/.ssh/containai.d/` - SSH host configs
+- `/etc/containai/docker/` - daemon.json
+- `/var/lib/containai-docker/` - Docker data
+- Sysbox packages remain installed
+- Lima VM (macOS) preserved
 ## Evidence
 - Commits:
 - Tests:

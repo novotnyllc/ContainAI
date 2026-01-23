@@ -24,3 +24,6 @@ Hot-reload env vars into containers via bashrc.d hook script that sources .env, 
 
 ## 2026-01-23 manual [convention]
 Reuse existing SSH infrastructure (_cai_ssh_run) for retry logic and host-key recovery instead of reimplementing SSH options
+
+## 2026-01-23 manual [convention]
+Documentation must reference actual implementation behavior - run grep/read on source files to verify claims about commands, outputs, and paths

@@ -148,3 +148,9 @@ Security documentation should avoid absolute claims ('zero risk', 'completely in
 
 ## 2026-01-23 manual [pitfall]
 Nested markdown code fences (triple backticks inside triple backticks) cause rendering issues - use quadruple backticks for outer fence when documenting code containing fenced blocks
+
+## 2026-01-23 manual [pitfall]
+String prefix checks (case "$path" in "$prefix"*) don't prevent ../ path escapes - must explicitly reject paths containing /../ or /.. segments
+
+## 2026-01-23 manual [pitfall]
+POSIX sh case patterns with variable prefixes break if the variable has trailing slash - normalize paths by stripping trailing slash (except root) before pattern matching

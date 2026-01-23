@@ -1,0 +1,107 @@
+{
+  "created_at": "2026-01-23T13:32:23.412904Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-11-1an",
+      "created_at": "2026-01-22T05:40:42.664251Z",
+      "depends_on_epics": [
+        "fn-9-mqv"
+      ],
+      "id": "fn-11-1an",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-11-1an.md",
+      "status": "open",
+      "title": "Symlink relinking during import",
+      "updated_at": "2026-01-22T05:41:14.886763Z"
+    },
+    "spec": "# Symlink Relinking During Import\n\n## Overview\n\nWhen importing from a directory (`cai import --from <dir>`), symlinks that point to locations within the import source are preserved as-is by rsync. This means symlinks end up pointing to the original host paths instead of the new container paths, resulting in broken or incorrectly-targeted symlinks.\n\n**Example:**\n- Host: `/host/dotfiles/nvim` (directory)\n- Host: `/host/dotfiles/.config/nvim` \u2192 symlink to `/host/dotfiles/nvim`\n- After import: `/mnt/agent-data/config/nvim` \u2192 still points to `/host/dotfiles/nvim` (wrong!)\n- Should be: `/mnt/agent-data/config/nvim` \u2192 `/mnt/agent-data/nvim`\n\n## Scope\n\n**In scope:**\n- Symlinks within sync-mode imports (`--from <dir>`)\n- Both relative and absolute symlinks whose targets are within the import tree\n- Warning/logging for symlinks pointing outside the import tree\n\n**Out of scope:**\n- Archive restore mode (tgz) - symlinks intentionally rejected for security\n- Symlinks pointing outside the import tree (cannot be relinked)\n- Cross-SYNC_MAP symlink relinking (complex, defer to future)\n\n## Quick commands\n\n```bash\n# Run integration tests for import\n./tests/integration/test-sync-integration.sh\n\n# Check symlinks in volume\ndocker run --rm -v containai-data:/data alpine find /data -type l -exec ls -la {} \\;\n```\n\n## Acceptance\n\n- [ ] Symlinks within the import source tree are relinked to point to correct container paths\n- [ ] Relative symlinks remain relative after relinking\n- [ ] Absolute symlinks are converted to container-absolute paths\n- [ ] Symlinks pointing outside import tree are preserved as-is with warning\n- [ ] Broken symlinks on host are preserved as-is (no error)\n- [ ] Circular symlink chains do not cause infinite loops\n- [ ] `--dry-run` shows symlinks that would be relinked\n- [ ] Existing integration tests continue to pass\n- [ ] New integration test validates symlink relinking\n\n## Security\n\n- Relinked symlinks MUST resolve under `/mnt/agent-data/` only (no escape)\n- Use `realpath -m` to validate final target before creating symlink\n- Archive restore symlink rejection (`_import_restore_from_tgz`) remains unchanged\n\n## References\n\n- Import implementation: `src/lib/import.sh:464-967`\n- SYNC_MAP entries: `src/lib/import.sh:348-408`\n- POSIX sh copy script: `src/lib/import.sh:731-936`\n- Symlink pitfall: `.flow/memory/pitfalls.md:26` (`ln -sfn` directory gotcha)\n- Archive symlink rejection: `src/lib/import.sh:133-328`\n- fn-9-mqv symlink limitation: `.flow/specs/fn-9-mqv.md:162-179`\n"
+  },
+  "epic_id": "fn-11-1an",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-22T05:41:20.797418Z",
+        "depends_on": [],
+        "epic": "fn-11-1an",
+        "id": "fn-11-1an.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-11-1an.1.md",
+        "status": "todo",
+        "title": "Add symlink detection and path mapping helper",
+        "updated_at": "2026-01-22T05:41:57.878928Z"
+      },
+      "id": "fn-11-1an.1",
+      "runtime": null,
+      "spec": "# fn-11-1an.1 Add symlink detection and path mapping helper\n\n## Description\nAdd POSIX-compliant helper functions for symlink detection and path mapping within the rsync container script.\n\n**Size:** S\n**Files:** `src/lib/import.sh` (within POSIX sh script block, lines 731-936)\n\n## Approach\n\nAdd these functions inside the existing POSIX sh script heredoc:\n\n1. `is_internal_symlink()` - Check if symlink target is within source root\n   - Use `readlink` to get target\n   - Compare with source root prefix\n   - Handle both relative and absolute symlinks\n\n2. `remap_symlink_target()` - Calculate new target path\n   - Take source root, target root, and symlink target as inputs\n   - Return transformed path with source prefix replaced by target prefix\n\n## Key context\n\n- Script runs as POSIX sh, not bash - no arrays, no `local` in older sh\n- `readlink` and `realpath` are available in eeacms/rsync container\n- For relative symlinks: resolve to absolute first, remap, then convert back to relative\n## Acceptance\n- [ ] `is_internal_symlink()` correctly identifies symlinks pointing within source tree\n- [ ] `is_internal_symlink()` returns false for symlinks pointing outside source tree\n- [ ] `remap_symlink_target()` correctly transforms absolute symlink targets\n- [ ] `remap_symlink_target()` correctly transforms relative symlink targets\n- [ ] Functions are POSIX sh compliant (no bashisms)\n- [ ] Functions handle edge cases: broken symlinks, circular refs (return early, don't loop)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-22T05:41:26.065853Z",
+        "depends_on": [
+          "fn-11-1an.1"
+        ],
+        "epic": "fn-11-1an",
+        "id": "fn-11-1an.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-11-1an.2.md",
+        "status": "todo",
+        "title": "Implement symlink relinking in rsync copy script",
+        "updated_at": "2026-01-22T05:42:11.170218Z"
+      },
+      "id": "fn-11-1an.2",
+      "runtime": null,
+      "spec": "# fn-11-1an.2 Implement symlink relinking in rsync copy script\n\n## Description\nIntegrate symlink relinking into the rsync copy script's post-sync phase.\n\n**Size:** M\n**Files:** `src/lib/import.sh` (lines 731-936, POSIX sh script block)\n\n## Approach\n\nAfter rsync completes copying files, add a symlink fixup pass:\n\n1. Add `relink_symlinks()` function that:\n   - Uses `find \"$target_dir\" -type l` to locate all symlinks\n   - For each symlink, calls `is_internal_symlink()` from task 1\n   - If internal: relinks using `remap_symlink_target()` and `ln -sfn`\n   - If external: logs warning, preserves as-is\n\n2. Call `relink_symlinks()` after each rsync in the `copy()` function\n   - Pass source_dir and target_dir from the copy context\n\n## Key context\n\n- Pitfall at `.flow/memory/pitfalls.md:26`: `ln -sfn` to directories needs `rm -rf` first\n- Must be POSIX sh compliant\n- Log relinked symlinks for visibility\n- Security: validate relinked target stays under target_dir\n## Acceptance\n- [ ] Symlinks pointing within import tree are relinked after rsync\n- [ ] Absolute symlinks are converted to container-absolute paths\n- [ ] Relative symlinks remain relative after relinking\n- [ ] Symlinks pointing outside import tree are preserved with warning log\n- [ ] Directory symlinks handled correctly (rm -rf before ln -sfn if needed)\n- [ ] Relinked symlinks resolve under target volume only (security check)\n- [ ] No infinite loops on circular symlinks\n- [ ] Broken symlinks preserved as-is\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-22T05:41:31.121945Z",
+        "depends_on": [
+          "fn-11-1an.2"
+        ],
+        "epic": "fn-11-1an",
+        "id": "fn-11-1an.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-11-1an.3.md",
+        "status": "todo",
+        "title": "Add symlink relinking to dry-run output",
+        "updated_at": "2026-01-22T05:42:19.799949Z"
+      },
+      "id": "fn-11-1an.3",
+      "runtime": null,
+      "spec": "# fn-11-1an.3 Add symlink relinking to dry-run output\n\n## Description\nAdd symlink relinking preview to `--dry-run` output so users can see what symlinks will be relinked.\n\n**Size:** S\n**Files:** `src/lib/import.sh` (dry-run handling, lines ~500-600)\n\n## Approach\n\n1. In dry-run mode, after listing files that would sync, add symlink analysis:\n   - Detect symlinks in source directories\n   - For each, show: `[RELINK] /source/link -> /target/new_target`\n   - For external symlinks: `[WARN] /source/link -> /external/path (outside import tree)`\n\n2. Follow existing dry-run output pattern at `src/lib/import.sh:579-614`\n## Acceptance\n- [ ] `--dry-run` shows symlinks that would be relinked\n- [ ] `--dry-run` shows warnings for external symlinks\n- [ ] Output format matches existing dry-run style\n- [ ] No actual changes made during dry-run\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-22T05:41:38.200009Z",
+        "depends_on": [
+          "fn-11-1an.2"
+        ],
+        "epic": "fn-11-1an",
+        "id": "fn-11-1an.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-11-1an.4.md",
+        "status": "todo",
+        "title": "Add integration tests for symlink relinking",
+        "updated_at": "2026-01-22T05:42:30.249260Z"
+      },
+      "id": "fn-11-1an.4",
+      "runtime": null,
+      "spec": "# fn-11-1an.4 Add integration tests for symlink relinking\n\n## Description\nAdd integration tests validating symlink relinking behavior during import.\n\n**Size:** M\n**Files:** `tests/integration/test-sync-integration.sh`\n\n## Approach\n\nFollow existing test patterns in `test-sync-integration.sh`:\n- Use `populate_fixture()` pattern (line 180)\n- Use hermetic test volumes with `TEST_RUN_ID` (line 72-73)\n- Use `run_in_rsync()` helper (line 126-143)\n\nAdd test cases:\n1. Basic relinking - symlink within same dir, target also imported\n2. Relative symlink - stays relative after relink\n3. Absolute symlink - becomes container-absolute\n4. External symlink - preserved with warning\n5. Broken symlink - preserved as-is\n6. Circular symlink - no infinite loop\n7. Directory symlink - handled correctly\n## Acceptance\n- [ ] Test: symlink within import tree is relinked correctly\n- [ ] Test: relative symlink remains relative\n- [ ] Test: absolute symlink converted to container path\n- [ ] Test: external symlink preserved (not relinked)\n- [ ] Test: broken symlink does not cause error\n- [ ] Test: circular symlinks do not hang\n- [ ] Test: directory symlinks work (ln -sfn pitfall handled)\n- [ ] All existing tests continue to pass\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

@@ -19,6 +19,7 @@
 #   stop         Stop ContainAI containers
 #   version      Show current version
 #   update       Update ContainAI installation
+#   uninstall    Clean removal of system-level components
 #   help         Show help message
 #
 # ==============================================================================
@@ -62,7 +63,8 @@ _containai_libs_exist() {
     [[ -f "$_CAI_SCRIPT_DIR/lib/setup.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/ssh.sh" ]] && \
     [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]] && \
-    [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]]
+    [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]] && \
+    [[ -f "$_CAI_SCRIPT_DIR/lib/uninstall.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -137,6 +139,11 @@ if ! source "$_CAI_SCRIPT_DIR/lib/version.sh"; then
     return 1
 fi
 
+if ! source "$_CAI_SCRIPT_DIR/lib/uninstall.sh"; then
+    echo "[ERROR] Failed to source lib/uninstall.sh" >&2
+    return 1
+fi
+
 # Mark libraries as loaded
 _CONTAINAI_LIB_LOADED="1"
 
@@ -164,6 +171,7 @@ Subcommands:
   ssh           Manage SSH configuration (cleanup stale configs)
   version       Show current version
   update        Update ContainAI installation
+  uninstall     Clean removal of system-level components
   help          Show this help message
 
 Run Options:
@@ -1912,6 +1920,10 @@ containai() {
         update)
             shift
             _cai_update "$@"
+            ;;
+        uninstall)
+            shift
+            _cai_uninstall "$@"
             ;;
         help|-h|--help)
             _containai_help
