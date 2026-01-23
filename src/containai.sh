@@ -161,6 +161,7 @@ Subcommands:
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
+  ssh           Manage SSH configuration (cleanup stale configs)
   version       Show current version
   update        Update ContainAI installation
   help          Show this help message
@@ -377,6 +378,50 @@ Examples:
   cai shell --fresh            Recreate container with fresh SSH keys
   cai shell --dry-run          Show what would happen (machine-parseable)
   ssh <container-name>         Direct SSH access (after cai shell setup)
+EOF
+}
+
+_containai_ssh_help() {
+    cat <<'EOF'
+ContainAI SSH - Manage SSH configuration for containers
+
+Usage: cai ssh <subcommand> [options]
+
+Subcommands:
+  cleanup       Remove stale SSH configs for non-existent containers
+
+Options:
+  -h, --help    Show this help message
+
+Examples:
+  cai ssh cleanup              Remove stale SSH configs
+  cai ssh cleanup --dry-run    Show what would be cleaned without doing it
+EOF
+}
+
+_containai_ssh_cleanup_help() {
+    cat <<'EOF'
+ContainAI SSH Cleanup - Remove stale SSH configurations
+
+Usage: cai ssh cleanup [options]
+
+Scans ~/.ssh/containai.d/ for SSH configs and removes those for containers
+that no longer exist. Also cleans corresponding known_hosts entries.
+
+Options:
+  --dry-run     Show what would be cleaned without doing it
+  -h, --help    Show this help message
+
+What gets cleaned:
+  - SSH host config files in ~/.ssh/containai.d/*.conf
+  - Corresponding known_hosts entries in ~/.config/containai/known_hosts
+
+Examples:
+  cai ssh cleanup              Remove stale SSH configs
+  cai ssh cleanup --dry-run    Preview what would be removed
+
+Note: This command is safe to run - it only removes configs for containers
+that have been deleted. Active container configs are preserved.
 EOF
 }
 
@@ -901,6 +946,61 @@ _containai_doctor_cmd() {
     else
         _cai_doctor
     fi
+}
+
+# SSH subcommand handler - manage SSH configurations
+# Supports subcommands: cleanup
+_containai_ssh_cmd() {
+    local ssh_subcommand="${1:-}"
+
+    # Handle empty or help first
+    if [[ -z "$ssh_subcommand" ]]; then
+        _containai_ssh_help
+        return 0
+    fi
+
+    case "$ssh_subcommand" in
+        cleanup)
+            shift
+            _containai_ssh_cleanup_cmd "$@"
+            ;;
+        help|-h|--help)
+            _containai_ssh_help
+            return 0
+            ;;
+        *)
+            echo "[ERROR] Unknown ssh subcommand: $ssh_subcommand" >&2
+            echo "Use 'cai ssh --help' for usage" >&2
+            return 1
+            ;;
+    esac
+}
+
+# SSH cleanup subcommand handler
+_containai_ssh_cleanup_cmd() {
+    local dry_run="false"
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)
+                dry_run="true"
+                shift
+                ;;
+            --help|-h)
+                _containai_ssh_cleanup_help
+                return 0
+                ;;
+            *)
+                echo "[ERROR] Unknown option: $1" >&2
+                echo "Use 'cai ssh cleanup --help' for usage" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    # Call the cleanup function from ssh.sh
+    _cai_ssh_cleanup "$dry_run"
 }
 
 # Shell subcommand handler - connects to container via SSH
@@ -1769,6 +1869,10 @@ containai() {
         stop)
             shift
             _containai_stop_cmd "$@"
+            ;;
+        ssh)
+            shift
+            _containai_ssh_cmd "$@"
             ;;
         sandbox)
             shift

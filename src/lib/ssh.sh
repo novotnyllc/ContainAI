@@ -28,6 +28,7 @@
 #   _cai_remove_ssh_host_config() - Remove SSH host config for a container
 #   _cai_setup_container_ssh()   - Complete SSH setup for a container
 #   _cai_cleanup_container_ssh() - Clean up SSH configuration for container removal
+#   _cai_ssh_cleanup()           - Remove stale SSH configs for non-existent containers
 #
 # Port range is configurable via [ssh] section in config.toml:
 #   [ssh]
@@ -1371,7 +1372,7 @@ _cai_write_ssh_host_config() {
     # - Accepts new keys on first connection
     # - Rejects if key changes (MITM protection)
     # - Better than StrictHostKeyChecking=no which accepts everything
-    {
+    if ! {
         cat << EOF
 # ContainAI SSH config for container: $container_name
 # Auto-generated - do not edit manually
@@ -1404,9 +1405,7 @@ EOF
             printf '%s\n' "    # Port forwarding (from [ssh].local_forward config)"
             printf '%s' "$local_forward_lines"
         fi
-    } > "$config_file"
-
-    if [[ $? -ne 0 ]]; then
+    } > "$config_file"; then
         _cai_error "Failed to write SSH config: $config_file"
         return 1
     fi
@@ -1571,7 +1570,7 @@ _cai_ssh_shell() {
         _cai_error ""
         _cai_error "To create a container for this workspace, run:"
         _cai_error "  cai run /path/to/workspace"
-        return $_CAI_SSH_EXIT_CONTAINER_NOT_FOUND
+        return "$_CAI_SSH_EXIT_CONTAINER_NOT_FOUND"
     fi
 
     # Check ownership - verify this is a ContainAI container
@@ -1586,7 +1585,7 @@ _cai_ssh_shell() {
             _cai_error ""
             _cai_error "This is a name collision with a container not managed by ContainAI."
             _cai_error "Use a different workspace path or remove the conflicting container."
-            return $_CAI_SSH_EXIT_CONTAINER_FOREIGN
+            return "$_CAI_SSH_EXIT_CONTAINER_FOREIGN"
         fi
     fi
 
@@ -1600,7 +1599,7 @@ _cai_ssh_shell() {
             _cai_error ""
             _cai_error "Check container logs for details:"
             _cai_error "  docker logs $container_name"
-            return $_CAI_SSH_EXIT_CONTAINER_START_FAILED
+            return "$_CAI_SSH_EXIT_CONTAINER_START_FAILED"
         fi
 
         # Wait for container to be running
@@ -1617,7 +1616,7 @@ _cai_ssh_shell() {
         done
         if [[ $wait_count -ge $max_wait ]]; then
             _cai_error "Container failed to start within ${max_wait} attempts"
-            return $_CAI_SSH_EXIT_CONTAINER_START_FAILED
+            return "$_CAI_SSH_EXIT_CONTAINER_START_FAILED"
         fi
     fi
 
@@ -1628,7 +1627,7 @@ _cai_ssh_shell() {
         _cai_error ""
         _cai_error "This container may have been created before SSH support was added."
         _cai_error "Recreate the container with: cai shell --fresh /path/to/workspace"
-        return $_CAI_SSH_EXIT_SSH_SETUP_FAILED
+        return "$_CAI_SSH_EXIT_SSH_SETUP_FAILED"
     fi
 
     # Check if SSH config exists, regenerate if missing
@@ -1646,7 +1645,7 @@ _cai_ssh_shell() {
             _cai_error "  1. Check container logs: docker logs $container_name"
             _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
             _cai_error "  3. Try recreating: cai shell --fresh /path/to/workspace"
-            return $_CAI_SSH_EXIT_SSH_SETUP_FAILED
+            return "$_CAI_SSH_EXIT_SSH_SETUP_FAILED"
         fi
     fi
 
@@ -1655,7 +1654,7 @@ _cai_ssh_shell() {
         return $?  # Propagate specific exit code
     fi
 
-    return $_CAI_SSH_EXIT_SUCCESS
+    return "$_CAI_SSH_EXIT_SUCCESS"
 }
 
 # Connect to container via SSH with retry and auto-recovery
@@ -1736,7 +1735,7 @@ _cai_ssh_connect_with_retry() {
                 if [[ "$host_key_auto_recovered" == "true" && "$quiet" != "true" ]]; then
                     _cai_info "Auto-recovered from stale host key"
                 fi
-                return $_CAI_SSH_EXIT_SUCCESS
+                return "$_CAI_SSH_EXIT_SUCCESS"
                 ;;
             255)
                 # SSH error - analyze stderr to determine cause
@@ -1757,7 +1756,7 @@ _cai_ssh_connect_with_retry() {
                     _cai_error "SSH host key mismatch could not be auto-recovered"
                     _cai_error ""
                     _cai_error "Try recreating the container: cai shell --fresh /path/to/workspace"
-                    return $_CAI_SSH_EXIT_HOST_KEY_MISMATCH
+                    return "$_CAI_SSH_EXIT_HOST_KEY_MISMATCH"
                 fi
 
                 # Check for non-transient errors that should not retry
@@ -1774,7 +1773,7 @@ _cai_ssh_connect_with_retry() {
                         _cai_error "  SSH key issue. Verify key exists: ls -la $_CAI_SSH_KEY_PATH"
                         _cai_error "  Or regenerate with: cai setup"
                     fi
-                    return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+                    return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
                 fi
 
                 # Connection refused or timeout - these are transient, retry
@@ -1806,7 +1805,7 @@ _cai_ssh_connect_with_retry() {
                 _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
                 _cai_error "  3. Check port mapping: docker port $container_name 22"
                 _cai_error "  4. Test SSH manually: ssh -v -p $ssh_port agent@localhost"
-                return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+                return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
                 ;;
             *)
                 # Other exit codes are from the remote shell session
@@ -1816,7 +1815,7 @@ _cai_ssh_connect_with_retry() {
         esac
     done
 
-    return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+    return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
 }
 
 # ==============================================================================
@@ -1868,7 +1867,7 @@ _cai_ssh_run() {
         _cai_error ""
         _cai_error "To create a container for this workspace, run:"
         _cai_error "  cai run /path/to/workspace"
-        return $_CAI_SSH_EXIT_CONTAINER_NOT_FOUND
+        return "$_CAI_SSH_EXIT_CONTAINER_NOT_FOUND"
     fi
 
     # Check ownership - verify this is a ContainAI container
@@ -1883,7 +1882,7 @@ _cai_ssh_run() {
             _cai_error ""
             _cai_error "This is a name collision with a container not managed by ContainAI."
             _cai_error "Use a different workspace path or remove the conflicting container."
-            return $_CAI_SSH_EXIT_CONTAINER_FOREIGN
+            return "$_CAI_SSH_EXIT_CONTAINER_FOREIGN"
         fi
     fi
 
@@ -1897,7 +1896,7 @@ _cai_ssh_run() {
             _cai_error ""
             _cai_error "Check container logs for details:"
             _cai_error "  docker logs $container_name"
-            return $_CAI_SSH_EXIT_CONTAINER_START_FAILED
+            return "$_CAI_SSH_EXIT_CONTAINER_START_FAILED"
         fi
 
         # Wait for container to be running
@@ -1914,7 +1913,7 @@ _cai_ssh_run() {
         done
         if [[ $wait_count -ge $max_wait ]]; then
             _cai_error "Container failed to start within ${max_wait} attempts"
-            return $_CAI_SSH_EXIT_CONTAINER_START_FAILED
+            return "$_CAI_SSH_EXIT_CONTAINER_START_FAILED"
         fi
     fi
 
@@ -1925,7 +1924,7 @@ _cai_ssh_run() {
         _cai_error ""
         _cai_error "This container may have been created before SSH support was added."
         _cai_error "Recreate the container with: cai run --fresh /path/to/workspace"
-        return $_CAI_SSH_EXIT_SSH_SETUP_FAILED
+        return "$_CAI_SSH_EXIT_SSH_SETUP_FAILED"
     fi
 
     # Check if SSH config exists, regenerate if missing
@@ -1943,7 +1942,7 @@ _cai_ssh_run() {
             _cai_error "  1. Check container logs: docker logs $container_name"
             _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
             _cai_error "  3. Try recreating: cai run --fresh /path/to/workspace"
-            return $_CAI_SSH_EXIT_SSH_SETUP_FAILED
+            return "$_CAI_SSH_EXIT_SSH_SETUP_FAILED"
         fi
     fi
 
@@ -2114,7 +2113,7 @@ _cai_ssh_run_with_retry() {
                     _cai_error "SSH host key mismatch could not be auto-recovered"
                     _cai_error ""
                     _cai_error "Try recreating the container: cai run --fresh /path/to/workspace"
-                    return $_CAI_SSH_EXIT_HOST_KEY_MISMATCH
+                    return "$_CAI_SSH_EXIT_HOST_KEY_MISMATCH"
                 fi
 
                 # Check for non-transient errors that should not retry
@@ -2131,7 +2130,7 @@ _cai_ssh_run_with_retry() {
                         _cai_error "  SSH key issue. Verify key exists: ls -la $_CAI_SSH_KEY_PATH"
                         _cai_error "  Or regenerate with: cai setup"
                     fi
-                    return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+                    return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
                 fi
 
                 # Connection refused or timeout - these are transient, retry
@@ -2163,7 +2162,7 @@ _cai_ssh_run_with_retry() {
                 _cai_error "  2. Check sshd status: docker exec $container_name systemctl status ssh"
                 _cai_error "  3. Check port mapping: docker port $container_name 22"
                 _cai_error "  4. Test SSH manually: ssh -v -p $ssh_port agent@localhost"
-                return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+                return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
                 ;;
             *)
                 # Other exit codes are from the remote command
@@ -2173,7 +2172,7 @@ _cai_ssh_run_with_retry() {
         esac
     done
 
-    return $_CAI_SSH_EXIT_SSH_CONNECT_FAILED
+    return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
 }
 
 # Build SSH command with environment variables prepended
@@ -2228,6 +2227,182 @@ _cai_build_ssh_cmd_with_env() {
     else
         printf '%s' "$cmd_str"
     fi
+}
+
+# ==============================================================================
+# SSH Cleanup
+# ==============================================================================
+
+# Clean up stale SSH configurations for containers that no longer exist
+# Scans ~/.ssh/containai.d/*.conf and removes configs for non-existent containers
+#
+# Arguments:
+#   $1 = dry_run (optional, "true" to show what would be cleaned without doing it)
+#
+# Returns: 0 on success
+#
+# Behavior:
+# - Scans all *.conf files in ~/.ssh/containai.d/
+# - Extracts container name from filename (containai-*.conf -> containai-*)
+# - Checks if corresponding container exists in any known Docker context
+# - Removes config file and known_hosts entries for non-existent containers
+# - Reports what was cleaned (or would be cleaned in dry-run mode)
+# - Returns 0 even if nothing to clean (idempotent)
+_cai_ssh_cleanup() {
+    local dry_run="${1:-false}"
+    local config_dir="$_CAI_SSH_CONFIG_DIR"
+    local known_hosts_file="$_CAI_KNOWN_HOSTS_FILE"
+
+    local cleaned_count=0
+    local skipped_count=0
+    local -a cleaned_configs=()
+    local -a cleaned_ports=()
+
+    # Check if config directory exists
+    if [[ ! -d "$config_dir" ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[dry-run] SSH config directory does not exist: $config_dir"
+        else
+            _cai_info "SSH config directory does not exist: $config_dir"
+        fi
+        _cai_info "Nothing to clean."
+        return 0
+    fi
+
+    # Get list of config files
+    local -a config_files=()
+    local config_file
+    for config_file in "$config_dir"/*.conf; do
+        # Skip if glob didn't match anything (bash returns the literal glob pattern)
+        if [[ ! -f "$config_file" ]]; then
+            continue
+        fi
+        config_files+=("$config_file")
+    done
+
+    if [[ ${#config_files[@]} -eq 0 ]]; then
+        _cai_info "No SSH configs found in $config_dir"
+        _cai_info "Nothing to clean."
+        return 0
+    fi
+
+    # Determine which Docker contexts to check
+    # Check both default context and containai-secure context
+    local -a contexts_to_check=("")  # Empty string = default context
+    local default_secure_context="containai-secure"
+
+    # Add containai-secure if it exists
+    if docker context inspect "$default_secure_context" >/dev/null 2>&1; then
+        contexts_to_check+=("$default_secure_context")
+    fi
+
+    # Also check configured context if different
+    local configured_context
+    configured_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || configured_context=""
+    if [[ -n "$configured_context" && "$configured_context" != "$default_secure_context" ]]; then
+        if docker context inspect "$configured_context" >/dev/null 2>&1; then
+            contexts_to_check+=("$configured_context")
+        fi
+    fi
+
+    _cai_step "Scanning SSH configs for stale entries"
+    _cai_info "Found ${#config_files[@]} SSH config(s) in $config_dir"
+
+    # Process each config file
+    local basename container_name ssh_port container_exists ctx
+    for config_file in "${config_files[@]}"; do
+        # Extract container name from filename
+        # Filename format: <container-name>.conf
+        basename=$(basename "$config_file")
+        container_name="${basename%.conf}"
+
+        # Extract SSH port from config file (Port line)
+        ssh_port=""
+        if [[ -f "$config_file" ]]; then
+            ssh_port=$(grep -E '^[[:space:]]*Port[[:space:]]+' "$config_file" 2>/dev/null | awk '{print $2}' | head -1) || ssh_port=""
+        fi
+
+        # Check if container exists in any context
+        container_exists=false
+        for ctx in "${contexts_to_check[@]}"; do
+            local -a docker_cmd=(docker)
+            if [[ -n "$ctx" ]]; then
+                docker_cmd=(docker --context "$ctx")
+            fi
+
+            # Check if container exists (running or stopped)
+            if "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+                container_exists=true
+                break
+            fi
+        done
+
+        if [[ "$container_exists" == "true" ]]; then
+            _cai_debug "Container exists: $container_name (keeping config)"
+            ((skipped_count++))
+        else
+            # Container doesn't exist - mark for cleanup
+            cleaned_configs+=("$config_file")
+            if [[ -n "$ssh_port" ]]; then
+                cleaned_ports+=("$ssh_port")
+            fi
+            ((cleaned_count++))
+        fi
+    done
+
+    # Report and perform cleanup
+    if [[ $cleaned_count -eq 0 ]]; then
+        _cai_info "All ${#config_files[@]} SSH config(s) have existing containers."
+        _cai_info "Nothing to clean."
+        return 0
+    fi
+
+    _cai_info ""
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[dry-run] Would remove $cleaned_count stale SSH config(s):"
+    else
+        _cai_info "Removing $cleaned_count stale SSH config(s):"
+    fi
+
+    local i
+    for i in "${!cleaned_configs[@]}"; do
+        config_file="${cleaned_configs[$i]}"
+        basename=$(basename "$config_file")
+        container_name="${basename%.conf}"
+        ssh_port="${cleaned_ports[$i]:-}"
+
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "  [dry-run] Would remove: $container_name"
+            if [[ -n "$ssh_port" ]]; then
+                _cai_info "            Config: $config_file"
+                _cai_info "            Port: $ssh_port (would clean known_hosts)"
+            fi
+        else
+            _cai_info "  Removing: $container_name"
+
+            # Remove config file
+            if ! rm -f "$config_file"; then
+                _cai_warn "    Failed to remove config: $config_file"
+            else
+                _cai_debug "    Removed config: $config_file"
+            fi
+
+            # Clean known_hosts entries for this port
+            if [[ -n "$ssh_port" ]]; then
+                _cai_clean_known_hosts "$ssh_port"
+                _cai_debug "    Cleaned known_hosts for port $ssh_port"
+            fi
+        fi
+    done
+
+    _cai_info ""
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[dry-run] Summary: Would remove $cleaned_count config(s), keep $skipped_count config(s)"
+    else
+        _cai_ok "Cleaned $cleaned_count stale SSH config(s), kept $skipped_count active config(s)"
+    fi
+
+    return 0
 }
 
 return 0
