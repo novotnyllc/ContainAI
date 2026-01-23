@@ -26,6 +26,8 @@
 #   _CAI_SECURE_ENGINE_CONTEXT - Secure engine context name override
 #   _CAI_SSH_PORT_RANGE_START - SSH port range start (from [ssh] section)
 #   _CAI_SSH_PORT_RANGE_END   - SSH port range end (from [ssh] section)
+#   _CAI_SSH_FORWARD_AGENT    - ForwardAgent setting (from [ssh] section, "true" or empty)
+#   _CAI_SSH_LOCAL_FORWARDS   - Bash array of LocalForward entries (from [ssh] section)
 #   _CAI_CONTAINER_MEMORY     - Memory limit (from [container] section, e.g., "4g")
 #   _CAI_CONTAINER_CPUS       - CPU limit (from [container] section, e.g., 2)
 #
@@ -63,6 +65,8 @@ _CAI_DANGER_ALLOW_HOST_CREDENTIALS=""
 _CAI_DANGER_ALLOW_HOST_DOCKER_SOCKET=""
 _CAI_SSH_PORT_RANGE_START=""
 _CAI_SSH_PORT_RANGE_END=""
+_CAI_SSH_FORWARD_AGENT=""
+_CAI_SSH_LOCAL_FORWARDS=()
 _CAI_CONTAINER_MEMORY=""
 _CAI_CONTAINER_CPUS=""
 
@@ -234,6 +238,8 @@ _containai_parse_config() {
     _CAI_DANGER_ALLOW_HOST_DOCKER_SOCKET=""
     _CAI_SSH_PORT_RANGE_START=""
     _CAI_SSH_PORT_RANGE_END=""
+    _CAI_SSH_FORWARD_AGENT=""
+    _CAI_SSH_LOCAL_FORWARDS=()
     _CAI_CONTAINER_MEMORY=""
     _CAI_CONTAINER_CPUS=""
 
@@ -419,6 +425,61 @@ if isinstance(ssh, dict):
 ")
     _CAI_SSH_PORT_RANGE_START="$ssh_port_start"
     _CAI_SSH_PORT_RANGE_END="$ssh_port_end"
+
+    # Extract [ssh] section for agent forwarding and local port forwards
+    local ssh_forward_agent ssh_local_forwards_output
+    ssh_forward_agent=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+ssh = config.get('ssh', {})
+if isinstance(ssh, dict):
+    val = ssh.get('forward_agent', False)
+    if val is True or (isinstance(val, str) and val.lower() == 'true'):
+        print('true')
+")
+    _CAI_SSH_FORWARD_AGENT="$ssh_forward_agent"
+
+    # Extract local_forward array from [ssh] section
+    # Format: 'localport:remotehost:remoteport' (e.g., '8080:localhost:8080')
+    # Security: validates format, rejects multi-line values, sanitizes for SSH config
+    ssh_local_forwards_output=$(printf '%s' "$config_json" | python3 -c "
+import json, sys, re
+config = json.load(sys.stdin)
+ssh = config.get('ssh', {})
+if not isinstance(ssh, dict):
+    sys.exit(0)
+
+local_forwards = ssh.get('local_forward', [])
+if not isinstance(local_forwards, list):
+    print('[WARN] [ssh].local_forward must be a list, ignoring', file=sys.stderr)
+    sys.exit(0)
+
+# Pattern for LocalForward: port:host:port or bind_address:port:host:port
+# Conservative pattern: allow digits, letters, dots, colons
+# Format: localport:remotehost:remoteport
+pattern = re.compile(r'^[0-9]+:[a-zA-Z0-9._-]+:[0-9]+$')
+
+for i, item in enumerate(local_forwards):
+    if not isinstance(item, str):
+        print(f'[WARN] [ssh].local_forward[{i}] must be a string, skipping', file=sys.stderr)
+        continue
+    # Reject multi-line values (security)
+    if '\n' in item or '\r' in item:
+        print(f'[WARN] [ssh].local_forward[{i}] contains newlines, skipping', file=sys.stderr)
+        continue
+    # Validate format
+    if not pattern.match(item):
+        print(f'[WARN] [ssh].local_forward[{i}] invalid format \"{item}\", expected localport:host:port, skipping', file=sys.stderr)
+        continue
+    print(item)
+")
+    # Parse local_forward entries into array
+    local line
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            _CAI_SSH_LOCAL_FORWARDS+=("$line")
+        fi
+    done <<< "$ssh_local_forwards_output"
 
     # Extract [container] section for resource limits
     local container_memory container_cpus

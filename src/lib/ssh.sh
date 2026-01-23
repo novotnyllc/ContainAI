@@ -1278,6 +1278,16 @@ _cai_check_ssh_accept_new_support() {
 # - ContainAI known_hosts file
 # - StrictHostKeyChecking=accept-new (secure but allows first connection)
 #   Falls back to 'yes' on older OpenSSH versions
+# - ForwardAgent (if enabled in config) - allows SSH agent forwarding
+# - LocalForward entries (from config) - enables port tunneling
+#
+# Config options (from [ssh] section):
+# - forward_agent = true    -> ForwardAgent yes
+# - local_forward = [...]   -> LocalForward entries
+#
+# SECURITY NOTE: ForwardAgent has security implications - an attacker with
+# root access on the container could hijack the forwarded agent. Only enable
+# if you trust the container environment.
 _cai_write_ssh_host_config() {
     local container_name="$1"
     local ssh_port="$2"
@@ -1308,15 +1318,44 @@ _cai_write_ssh_host_config() {
 
     _cai_debug "Writing SSH host config for $container_name to $config_file"
 
+    # Build ForwardAgent directive if enabled in config
+    # SECURITY: ForwardAgent allows the container to use your SSH agent for
+    # authentication to other hosts. Only enable if you trust the container.
+    local forward_agent_line=""
+    if [[ "${_CAI_SSH_FORWARD_AGENT:-}" == "true" ]]; then
+        forward_agent_line="    ForwardAgent yes"
+        _cai_debug "ForwardAgent enabled via config"
+    fi
+
+    # Build LocalForward directives from config
+    # Format in config: "localport:remotehost:remoteport"
+    # Format in SSH config: "LocalForward localport remotehost:remoteport"
+    local local_forward_lines=""
+    local forward_entry local_port remote_part
+    for forward_entry in "${_CAI_SSH_LOCAL_FORWARDS[@]:-}"; do
+        if [[ -n "$forward_entry" ]]; then
+            # Parse "8080:localhost:8080" -> "8080" and "localhost:8080"
+            local_port="${forward_entry%%:*}"
+            remote_part="${forward_entry#*:}"
+            local_forward_lines="${local_forward_lines}    LocalForward ${local_port} ${remote_part}
+"
+            _cai_debug "LocalForward: $local_port -> $remote_part"
+        fi
+    done
+
     # Write the config file
     # Use StrictHostKeyChecking=accept-new which:
     # - Accepts new keys on first connection
     # - Rejects if key changes (MITM protection)
     # - Better than StrictHostKeyChecking=no which accepts everything
-    cat > "$config_file" << EOF
+    {
+        cat << EOF
 # ContainAI SSH config for container: $container_name
 # Auto-generated - do not edit manually
 # Generated at: $(date -Iseconds 2>/dev/null || date)
+#
+# VS Code Remote-SSH: Use this Host name in Remote-SSH extension to connect.
+# Example: Remote-SSH: Connect to Host... -> $container_name
 
 Host $container_name
     HostName localhost
@@ -1332,6 +1371,19 @@ Host $container_name
     GSSAPIAuthentication no
     PasswordAuthentication no
 EOF
+
+        # Add ForwardAgent if enabled
+        if [[ -n "$forward_agent_line" ]]; then
+            printf '%s\n' "    # SSH agent forwarding (from [ssh].forward_agent config)"
+            printf '%s\n' "$forward_agent_line"
+        fi
+
+        # Add LocalForward entries if configured
+        if [[ -n "$local_forward_lines" ]]; then
+            printf '%s\n' "    # Port forwarding (from [ssh].local_forward config)"
+            printf '%s' "$local_forward_lines"
+        fi
+    } > "$config_file"
 
     if [[ $? -ne 0 ]]; then
         _cai_error "Failed to write SSH config: $config_file"

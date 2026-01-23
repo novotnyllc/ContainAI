@@ -100,6 +100,46 @@ context_name = "desktop-linux"
 
 **Environment override:** `CONTAINAI_SECURE_ENGINE_CONTEXT`
 
+### `[ssh]` Section
+
+SSH connection configuration for containers. Controls port allocation, agent forwarding, and port tunneling.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `port_range_start` | integer | `2300` | Start of SSH port range for container allocation |
+| `port_range_end` | integer | `2500` | End of SSH port range for container allocation |
+| `forward_agent` | boolean | `false` | Enable SSH agent forwarding to container |
+| `local_forward` | array of strings | `[]` | Local port forwarding entries |
+
+```toml
+[ssh]
+port_range_start = 2300
+port_range_end = 2500
+forward_agent = true
+local_forward = ["8080:localhost:8080", "3000:localhost:3000"]
+```
+
+**Port range rules:**
+- Values must be between 1024 and 65535
+- Range should be large enough for concurrent containers
+- Ports are allocated dynamically on container start
+
+**Forward agent:**
+- When `true`, adds `ForwardAgent yes` to SSH config
+- Allows the container to use your local SSH agent for authentication
+- **SECURITY WARNING:** An attacker with root access on the container could hijack the forwarded agent to authenticate to other hosts. Only enable if you trust the container environment.
+
+**Local forward format:**
+- Each entry: `"localport:remotehost:remoteport"`
+- Example: `"8080:localhost:8080"` forwards local port 8080 to container's localhost:8080
+- Useful for accessing web servers or databases running in the container
+- Invalid entries are skipped with a warning
+
+**VS Code Remote-SSH compatibility:**
+- The generated SSH config is fully compatible with VS Code Remote-SSH extension
+- Use the container name (e.g., `containai-myproject`) as the SSH host in VS Code
+- Port forwarding configured here will be available in VS Code sessions
+
 ### `[env]` Section
 
 Environment variable import configuration. This section is **global-only** (no workspace overrides).
