@@ -5,21 +5,28 @@
 # This file must be sourced, not executed directly.
 #
 # Provides:
-#   _cai_setup()                   - Main setup entry point
-#   _cai_setup_wsl2()              - WSL2-specific setup
-#   _cai_setup_macos()             - macOS-specific setup (Lima VM)
-#   _cai_test_wsl2_seccomp()       - Test WSL2 seccomp compatibility
-#   _cai_show_seccomp_warning()    - Display seccomp warning
-#   _cai_install_sysbox_wsl2()     - Install Sysbox on WSL2
-#   _cai_configure_daemon_json()   - Configure Docker daemon.json
-#   _cai_configure_docker_socket() - Configure dedicated Docker socket
-#   _cai_create_containai_context()- Create containai-secure Docker context
-#   _cai_verify_sysbox_install()   - Verify Sysbox installation
-#   _cai_lima_template()           - Generate Lima VM template YAML
-#   _cai_lima_install()            - Install Lima via Homebrew
-#   _cai_lima_create_vm()          - Create Lima VM with Docker + Sysbox
-#   _cai_lima_create_context()     - Create containai-secure context for Lima
-#   _cai_lima_verify_install()     - Verify Lima + Sysbox installation
+#   _cai_setup()                       - Main setup entry point
+#   _cai_setup_wsl2()                  - WSL2-specific setup (isolated Docker)
+#   _cai_setup_macos()                 - macOS-specific setup (Lima VM)
+#   _cai_test_wsl2_seccomp()           - Test WSL2 seccomp compatibility
+#   _cai_show_seccomp_warning()        - Display seccomp warning
+#   _cai_install_sysbox_wsl2()         - Install Sysbox on WSL2
+#   _cai_configure_daemon_json()       - Configure Docker daemon.json (legacy)
+#   _cai_configure_docker_socket()     - Configure dedicated Docker socket (legacy)
+#   _cai_create_containai_context()    - Create containai-secure context (legacy)
+#   _cai_verify_sysbox_install()       - Verify Sysbox installation (legacy)
+#   _cai_cleanup_legacy_paths()        - Clean up legacy ContainAI paths
+#   _cai_create_isolated_daemon_json() - Create isolated daemon.json
+#   _cai_create_isolated_docker_service() - Create isolated systemd service
+#   _cai_create_isolated_docker_dirs() - Create isolated Docker directories
+#   _cai_start_isolated_docker_service() - Start isolated Docker service
+#   _cai_create_isolated_docker_context() - Create containai-docker context
+#   _cai_verify_isolated_docker()      - Verify isolated Docker installation
+#   _cai_lima_template()               - Generate Lima VM template YAML
+#   _cai_lima_install()                - Install Lima via Homebrew
+#   _cai_lima_create_vm()              - Create Lima VM with Docker + Sysbox
+#   _cai_lima_create_context()         - Create containai-secure context for Lima
+#   _cai_lima_verify_install()         - Verify Lima + Sysbox installation
 #
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
@@ -59,6 +66,11 @@ _CAI_SETUP_LOADED=1
 
 # Systemd drop-in directory for Docker socket override (legacy, for cleanup)
 _CAI_DOCKER_DROPIN_DIR="/etc/systemd/system/docker.service.d"
+
+# Legacy paths (for cleanup during upgrade)
+_CAI_LEGACY_SOCKET="/var/run/docker-containai.sock"
+_CAI_LEGACY_CONTEXT="containai-secure"
+_CAI_LEGACY_DROPIN="/etc/systemd/system/docker.service.d/containai-socket.conf"
 
 # Lima VM name for macOS Secure Engine
 _CAI_LIMA_VM_NAME="containai-secure"
@@ -523,6 +535,434 @@ _cai_configure_daemon_json() {
     return 0
 }
 
+# ==============================================================================
+# Legacy Cleanup Functions (shared between WSL2 and Linux)
+# ==============================================================================
+
+# Clean up legacy paths from previous ContainAI installations
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success (cleanup complete or nothing to clean)
+# Note: This supports upgrades from earlier ContainAI versions
+_cai_cleanup_legacy_paths() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+    local cleaned_any=false
+
+    _cai_step "Checking for legacy ContainAI paths"
+
+    # Clean up old socket
+    if [[ -S "$_CAI_LEGACY_SOCKET" ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[DRY-RUN] Would remove legacy socket: $_CAI_LEGACY_SOCKET"
+        else
+            _cai_info "Removing legacy socket: $_CAI_LEGACY_SOCKET"
+            if sudo rm -f "$_CAI_LEGACY_SOCKET"; then
+                cleaned_any=true
+            else
+                _cai_warn "Failed to remove legacy socket (continuing anyway)"
+            fi
+        fi
+    elif [[ "$verbose" == "true" ]]; then
+        _cai_info "No legacy socket found at $_CAI_LEGACY_SOCKET"
+    fi
+
+    # Clean up old context
+    if docker context inspect "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[DRY-RUN] Would remove legacy context: $_CAI_LEGACY_CONTEXT"
+        else
+            _cai_info "Removing legacy context: $_CAI_LEGACY_CONTEXT"
+            if docker context rm "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
+                cleaned_any=true
+            else
+                _cai_warn "Failed to remove legacy context (continuing anyway)"
+            fi
+        fi
+    elif [[ "$verbose" == "true" ]]; then
+        _cai_info "No legacy context found: $_CAI_LEGACY_CONTEXT"
+    fi
+
+    # Clean up old drop-in
+    if [[ -f "$_CAI_LEGACY_DROPIN" ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[DRY-RUN] Would remove legacy drop-in: $_CAI_LEGACY_DROPIN"
+            _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
+        else
+            _cai_info "Removing legacy drop-in: $_CAI_LEGACY_DROPIN"
+            if sudo rm -f "$_CAI_LEGACY_DROPIN"; then
+                cleaned_any=true
+                # Reload systemd after removing drop-in
+                sudo systemctl daemon-reload || true
+            else
+                _cai_warn "Failed to remove legacy drop-in (continuing anyway)"
+            fi
+        fi
+    elif [[ "$verbose" == "true" ]]; then
+        _cai_info "No legacy drop-in found at $_CAI_LEGACY_DROPIN"
+    fi
+
+    if [[ "$cleaned_any" == "true" ]] || [[ "$dry_run" == "true" ]]; then
+        _cai_ok "Legacy path cleanup complete"
+    else
+        _cai_info "No legacy paths to clean up"
+    fi
+
+    return 0
+}
+
+# ==============================================================================
+# Isolated Docker Daemon Functions
+# ==============================================================================
+
+# Create daemon.json for isolated ContainAI Docker instance
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+# Note: This creates a complete isolated daemon.json with all paths specified
+#       Unlike _cai_configure_daemon_json which only adds sysbox runtime
+_cai_create_isolated_daemon_json() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    _cai_step "Creating isolated daemon.json: $_CAI_CONTAINAI_DOCKER_CONFIG"
+
+    # Determine sysbox-runc path dynamically
+    local sysbox_path
+    sysbox_path=$(command -v sysbox-runc 2>/dev/null || true)
+    if [[ -z "$sysbox_path" ]]; then
+        # Fall back to standard path if not in PATH yet
+        sysbox_path="/usr/bin/sysbox-runc"
+        _cai_warn "sysbox-runc not in PATH, using default: $sysbox_path"
+    fi
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Found sysbox-runc at: $sysbox_path"
+    fi
+
+    # Build isolated daemon configuration
+    # PITFALL: Do NOT set "hosts" in both daemon.json AND use -H flag in service
+    # We set hosts here, so service uses --config-file only
+    local config
+    config=$(cat <<EOF
+{
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "$sysbox_path"
+    }
+  },
+  "default-runtime": "sysbox-runc",
+  "hosts": ["unix://$_CAI_CONTAINAI_DOCKER_SOCKET"],
+  "data-root": "$_CAI_CONTAINAI_DOCKER_DATA",
+  "exec-root": "$_CAI_CONTAINAI_DOCKER_EXEC",
+  "pidfile": "$_CAI_CONTAINAI_DOCKER_PID",
+  "bridge": "$_CAI_CONTAINAI_DOCKER_BRIDGE"
+}
+EOF
+    )
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "daemon.json content:"
+        printf '%s\n' "$config"
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would create directory: $(dirname "$_CAI_CONTAINAI_DOCKER_CONFIG")"
+        _cai_info "[DRY-RUN] Would write: $_CAI_CONTAINAI_DOCKER_CONFIG"
+        return 0
+    fi
+
+    # Create config directory
+    if ! sudo mkdir -p "$(dirname "$_CAI_CONTAINAI_DOCKER_CONFIG")"; then
+        _cai_error "Failed to create config directory"
+        return 1
+    fi
+
+    # Write daemon.json
+    if ! printf '%s\n' "$config" | sudo tee "$_CAI_CONTAINAI_DOCKER_CONFIG" >/dev/null; then
+        _cai_error "Failed to write daemon.json"
+        return 1
+    fi
+
+    _cai_ok "Isolated daemon.json created"
+    return 0
+}
+
+# Create systemd service for isolated ContainAI Docker
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+# Note: Creates a separate service, NOT a drop-in to docker.service
+_cai_create_isolated_docker_service() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    _cai_step "Creating isolated Docker service: $_CAI_CONTAINAI_DOCKER_SERVICE"
+
+    # WSL2 systemd is quirky - use Wants= not Requires= for sysbox services
+    local service_content
+    service_content=$(cat <<EOF
+[Unit]
+Description=ContainAI Docker Application Container Engine
+Documentation=https://github.com/containai/containai
+After=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
+Wants=network-online.target sysbox-mgr.service sysbox-fs.service
+Requires=containerd.service
+
+[Service]
+Type=notify
+# dockerd reads config from daemon.json which includes:
+# - isolated socket, data-root, exec-root, pidfile
+# - separate bridge (cai0) with separate network to avoid conflicts
+ExecStart=/usr/bin/dockerd --config-file=$_CAI_CONTAINAI_DOCKER_CONFIG
+ExecReload=/bin/kill -s HUP \$MAINPID
+TimeoutStartSec=0
+RestartSec=2
+Restart=always
+
+# Limit container and network namespace
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+
+# Set delegate for cgroup management
+Delegate=yes
+
+# Kill only the main process, not the containers
+KillMode=process
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    )
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Service file content:"
+        printf '%s\n' "$service_content"
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would write: $_CAI_CONTAINAI_DOCKER_UNIT"
+        _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
+        return 0
+    fi
+
+    # Write service file
+    if ! printf '%s\n' "$service_content" | sudo tee "$_CAI_CONTAINAI_DOCKER_UNIT" >/dev/null; then
+        _cai_error "Failed to write service file"
+        return 1
+    fi
+
+    # Reload systemd
+    if ! sudo systemctl daemon-reload; then
+        _cai_error "Failed to reload systemd daemon"
+        return 1
+    fi
+
+    _cai_ok "Isolated Docker service created"
+    return 0
+}
+
+# Create data directories for isolated Docker
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=success, 1=failure
+_cai_create_isolated_docker_dirs() {
+    local dry_run="${1:-false}"
+
+    _cai_step "Creating isolated Docker directories"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would create: $_CAI_CONTAINAI_DOCKER_DATA"
+        _cai_info "[DRY-RUN] Would create: $_CAI_CONTAINAI_DOCKER_EXEC"
+        return 0
+    fi
+
+    if ! sudo mkdir -p "$_CAI_CONTAINAI_DOCKER_DATA"; then
+        _cai_error "Failed to create data directory: $_CAI_CONTAINAI_DOCKER_DATA"
+        return 1
+    fi
+
+    if ! sudo mkdir -p "$_CAI_CONTAINAI_DOCKER_EXEC"; then
+        _cai_error "Failed to create exec-root directory: $_CAI_CONTAINAI_DOCKER_EXEC"
+        return 1
+    fi
+
+    _cai_ok "Isolated Docker directories created"
+    return 0
+}
+
+# Start and enable isolated Docker service
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=success, 1=failure
+_cai_start_isolated_docker_service() {
+    local dry_run="${1:-false}"
+
+    _cai_step "Starting isolated Docker service: $_CAI_CONTAINAI_DOCKER_SERVICE"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would enable and start $_CAI_CONTAINAI_DOCKER_SERVICE"
+        _cai_info "[DRY-RUN] Would wait for socket: $_CAI_CONTAINAI_DOCKER_SOCKET"
+        return 0
+    fi
+
+    # Enable service for auto-start
+    if ! sudo systemctl enable "$_CAI_CONTAINAI_DOCKER_SERVICE" 2>/dev/null; then
+        _cai_warn "Failed to enable service (may already be enabled)"
+    fi
+
+    # Start or restart service
+    if sudo systemctl is-active --quiet "$_CAI_CONTAINAI_DOCKER_SERVICE" 2>/dev/null; then
+        _cai_info "Service already running, restarting..."
+        if ! sudo systemctl restart "$_CAI_CONTAINAI_DOCKER_SERVICE"; then
+            _cai_error "Failed to restart $_CAI_CONTAINAI_DOCKER_SERVICE"
+            _cai_error "  Check: sudo systemctl status $_CAI_CONTAINAI_DOCKER_SERVICE"
+            return 1
+        fi
+    else
+        if ! sudo systemctl start "$_CAI_CONTAINAI_DOCKER_SERVICE"; then
+            _cai_error "Failed to start $_CAI_CONTAINAI_DOCKER_SERVICE"
+            _cai_error "  Check: sudo systemctl status $_CAI_CONTAINAI_DOCKER_SERVICE"
+            return 1
+        fi
+    fi
+
+    # Wait for socket to appear
+    local wait_count=0
+    local max_wait=30
+    _cai_step "Waiting for socket: $_CAI_CONTAINAI_DOCKER_SOCKET"
+    while [[ ! -S "$_CAI_CONTAINAI_DOCKER_SOCKET" ]]; do
+        sleep 1
+        wait_count=$((wait_count + 1))
+        if [[ $wait_count -ge $max_wait ]]; then
+            _cai_error "Socket did not appear after ${max_wait}s: $_CAI_CONTAINAI_DOCKER_SOCKET"
+            _cai_error "  Check: sudo systemctl status $_CAI_CONTAINAI_DOCKER_SERVICE"
+            return 1
+        fi
+    done
+
+    # Verify daemon is accessible
+    if ! DOCKER_HOST="unix://$_CAI_CONTAINAI_DOCKER_SOCKET" docker info >/dev/null 2>&1; then
+        _cai_error "Docker daemon not accessible via socket: $_CAI_CONTAINAI_DOCKER_SOCKET"
+        return 1
+    fi
+
+    _cai_ok "Isolated Docker service started and socket ready"
+    return 0
+}
+
+# Create Docker context for isolated ContainAI Docker
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+# Note: Creates context with name from $_CAI_CONTAINAI_DOCKER_CONTEXT
+_cai_create_isolated_docker_context() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    _cai_step "Creating Docker context: $_CAI_CONTAINAI_DOCKER_CONTEXT"
+
+    local expected_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Expected endpoint: $expected_host"
+    fi
+
+    # Check if context already exists
+    if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        local existing_host
+        existing_host=$(docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+
+        if [[ "$existing_host" == "$expected_host" ]]; then
+            _cai_info "Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' already exists with correct endpoint"
+            return 0
+        else
+            _cai_warn "Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' exists but points to: $existing_host"
+            _cai_warn "  Expected: $expected_host"
+
+            if [[ "$dry_run" == "true" ]]; then
+                _cai_info "[DRY-RUN] Would remove and recreate context"
+            else
+                _cai_step "Removing misconfigured context"
+                if ! docker context rm "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                    _cai_error "Failed to remove existing context"
+                    return 1
+                fi
+            fi
+        fi
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would run: docker context create $_CAI_CONTAINAI_DOCKER_CONTEXT --docker host=$expected_host"
+    else
+        if ! docker context create "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$expected_host"; then
+            _cai_error "Failed to create Docker context '$_CAI_CONTAINAI_DOCKER_CONTEXT'"
+            return 1
+        fi
+    fi
+
+    _cai_ok "Docker context '$_CAI_CONTAINAI_DOCKER_CONTEXT' created"
+    return 0
+}
+
+# Verify isolated Docker installation
+# Arguments: $1 = dry_run flag ("true" to skip actual verification)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+_cai_verify_isolated_docker() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    _cai_step "Verifying isolated Docker installation"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would verify sysbox-runc is default runtime"
+        _cai_info "[DRY-RUN] Would verify Docker context: $_CAI_CONTAINAI_DOCKER_CONTEXT"
+        _cai_info "[DRY-RUN] Would run test container"
+        return 0
+    fi
+
+    # Check docker info via the context
+    local docker_info
+    docker_info=$(docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" info 2>&1) || {
+        _cai_error "Cannot connect to isolated Docker daemon"
+        return 1
+    }
+
+    # Check sysbox-runc is available
+    if ! printf '%s' "$docker_info" | grep -q "sysbox-runc"; then
+        _cai_error "sysbox-runc not found in docker info"
+        return 1
+    fi
+
+    # Check sysbox-runc is the default runtime
+    local default_runtime
+    default_runtime=$(docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
+    if [[ "$default_runtime" != "sysbox-runc" ]]; then
+        _cai_error "Default runtime is not sysbox-runc (got: $default_runtime)"
+        return 1
+    fi
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Default runtime: $default_runtime"
+    fi
+
+    # Run test container
+    _cai_step "Testing with minimal container"
+    local test_output test_rc
+    test_output=$(docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" run --rm alpine echo "containai-docker-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+
+    if [[ $test_rc -ne 0 ]]; then
+        _cai_warn "Test container failed: $test_output"
+        _cai_warn "This may be expected - sysbox may still work for real containers"
+    elif [[ "$test_output" == *"containai-docker-test-ok"* ]]; then
+        _cai_ok "Test container succeeded with sysbox-runc default runtime"
+    fi
+
+    _cai_ok "Isolated Docker installation verified"
+    return 0
+}
+
 # Configure dedicated Docker socket for containai-secure context
 # Arguments: $1 = socket path
 #            $2 = dry_run flag ("true" to simulate)
@@ -838,13 +1278,14 @@ _cai_verify_sysbox_install() {
 #            $2 = dry_run flag ("true" to simulate)
 #            $3 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
+# Note: Uses isolated Docker daemon - never modifies /etc/docker/daemon.json
 _cai_setup_wsl2() {
     local force="${1:-false}"
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
 
     _cai_info "Detected platform: WSL2"
-    _cai_info "Setting up Secure Engine with Sysbox"
+    _cai_info "Setting up Secure Engine with isolated Docker daemon"
 
     # Step 0: Check kernel version (Sysbox requires 5.5+)
     _cai_step "Checking kernel version"
@@ -886,44 +1327,55 @@ _cai_setup_wsl2() {
             ;;
     esac
 
-    # Step 2: Install Sysbox
+    # Step 2: Clean up legacy paths (support upgrades)
+    if ! _cai_cleanup_legacy_paths "$dry_run" "$verbose"; then
+        _cai_warn "Legacy cleanup had issues (continuing anyway)"
+    fi
+
+    # Step 3: Install Sysbox
     if ! _cai_install_sysbox_wsl2 "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 3: Configure daemon.json (isolated path)
-    # NOTE: This writes to isolated config; fn-14-nm0.2 will update service to use it
-    if ! _cai_configure_daemon_json "$_CAI_CONTAINAI_DOCKER_CONFIG" "$dry_run" "$verbose"; then
+    # Step 4: Create isolated Docker directories
+    if ! _cai_create_isolated_docker_dirs "$dry_run"; then
         return 1
     fi
 
-    # Step 4: Configure dedicated Docker socket
-    if ! _cai_configure_docker_socket "$_CAI_CONTAINAI_DOCKER_SOCKET" "$dry_run" "$verbose"; then
+    # Step 5: Create isolated daemon.json (NOT /etc/docker/daemon.json)
+    if ! _cai_create_isolated_daemon_json "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 5: Restart Docker service (if not dry-run)
-    if ! _cai_restart_docker_service "$_CAI_CONTAINAI_DOCKER_SOCKET" "$dry_run"; then
+    # Step 6: Create isolated systemd service (NOT a drop-in to docker.service)
+    if ! _cai_create_isolated_docker_service "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 6: Create containai-secure context
-    if ! _cai_create_containai_context "$_CAI_CONTAINAI_DOCKER_SOCKET" "$dry_run" "$verbose"; then
+    # Step 7: Start isolated Docker service
+    if ! _cai_start_isolated_docker_service "$dry_run"; then
         return 1
     fi
 
-    # Step 7: Verify installation
-    if ! _cai_verify_sysbox_install "$_CAI_CONTAINAI_DOCKER_SOCKET" "$dry_run" "$verbose"; then
+    # Step 8: Create containai-docker context
+    if ! _cai_create_isolated_docker_context "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 9: Verify installation
+    if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
-        _cai_warn "Sysbox verification had issues - check output above"
+        _cai_warn "Isolated Docker verification had issues - check output above"
     fi
 
     printf '\n'
     _cai_ok "Secure Engine setup complete"
     _cai_info "To use the Secure Engine:"
-    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure"
+    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=$_CAI_CONTAINAI_DOCKER_CONTEXT"
     _cai_info "  cai run --workspace /path/to/project"
-    _cai_info "Or use docker directly: docker --context containai-secure --runtime=sysbox-runc ..."
+    _cai_info "Or use docker directly: docker --context $_CAI_CONTAINAI_DOCKER_CONTEXT ..."
+    _cai_info ""
+    _cai_info "Note: sysbox-runc is the default runtime - no need to specify --runtime"
 
     return 0
 }

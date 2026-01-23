@@ -59,11 +59,8 @@ _CAI_CONTAINAI_DOCKER_UNIT="/etc/systemd/system/containai-docker.service"
 - [ ] `shellcheck -x src/lib/docker.sh` passes
 
 ## Done summary
-
-TBD
-
+Unified all Docker path constants into src/lib/docker.sh as single source of truth. Added 5 new constants (EXEC, PID, BRIDGE, SERVICE, UNIT). Changed context name from docker-containai to containai-docker. Removed _CAI_SECURE_SOCKET and _CAI_WSL2_DAEMON_JSON from setup.sh. Updated all references to use docker.sh constants.
 ## Evidence
-
-- Commits:
-- Tests:
+- Commits: c96274c, a8b249b, dbc15fb
+- Tests: shellcheck -x src/lib/docker.sh
 - PRs:
