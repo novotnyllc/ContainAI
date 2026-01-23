@@ -1046,7 +1046,8 @@ Violations break automation and leave the user with incomplete work. Be precise,
   fi
   append_progress "$verdict" "$promise" "$plan_review_status" "$task_status"
 
-  if echo "$claude_text" | grep -q "<promise>COMPLETE</promise>"; then
+  # Only honor COMPLETE promise if we're not forcing a retry (e.g., NEEDS_WORK verdict)
+  if [[ "$force_retry" != "1" ]] && echo "$claude_text" | grep -q "<promise>COMPLETE</promise>"; then
     ui_complete
     write_completion_marker "DONE"
     exit 0

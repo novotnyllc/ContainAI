@@ -4282,10 +4282,10 @@ def cmd_rp_builder(args: argparse.Namespace) -> None:
     summary = args.summary
     response_type = getattr(args, "response_type", None)
 
-    # Build builder command with optional response-type
+    # Build builder command with optional --type flag (shorthand for response_type)
     builder_expr = f"builder {json.dumps(summary)}"
     if response_type:
-        builder_expr += f" --response-type {response_type}"
+        builder_expr += f" --type {response_type}"
 
     cmd = [
         "-w",
@@ -4481,10 +4481,10 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
     state_file = Path(f"/tmp/.ralph-pick-window-{repo_hash}")
     state_file.write_text(f"{win_id}\n{repo_root}\n")
 
-    # Step 2: builder (with optional response-type for RP 1.6.0+)
+    # Step 2: builder (with optional --type flag for RP 1.6.0+)
     builder_expr = f"builder {json.dumps(summary)}"
     if response_type:
-        builder_expr += f" --response-type {response_type}"
+        builder_expr += f" --type {response_type}"
 
     builder_cmd = [
         "-w",
@@ -5597,7 +5597,7 @@ def main() -> None:
     p_rp_builder.add_argument(
         "--response-type",
         dest="response_type",
-        choices=["review", "plan", "question"],
+        choices=["review", "plan", "question", "clarify"],
         help="Builder response type (requires RP 1.6.0+)",
     )
     p_rp_builder.add_argument("--json", action="store_true", help="JSON output")
