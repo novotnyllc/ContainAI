@@ -28,6 +28,7 @@
 #   _cai_remove_ssh_host_config() - Remove SSH host config for a container
 #   _cai_setup_container_ssh()   - Complete SSH setup for a container
 #   _cai_cleanup_container_ssh() - Clean up SSH configuration for container removal
+#   _cai_is_containai_ssh_config() - Check if a file is a ContainAI SSH config
 #   _cai_ssh_cleanup()           - Remove stale SSH configs for non-existent containers
 #
 # Port range is configurable via [ssh] section in config.toml:
@@ -2233,30 +2234,57 @@ _cai_build_ssh_cmd_with_env() {
 # SSH Cleanup
 # ==============================================================================
 
+# Check if a file is a ContainAI SSH config by validating its content markers
+# Arguments:
+#   $1 = config file path
+# Returns: 0 if ContainAI config, 1 otherwise
+_cai_is_containai_ssh_config() {
+    local config_file="$1"
+
+    # Check for ContainAI marker comment at the start of the file
+    if head -1 "$config_file" 2>/dev/null | grep -qF "# ContainAI SSH config"; then
+        return 0
+    fi
+
+    # Also check for IdentityFile pointing to our key as a secondary marker
+    if grep -qF "$_CAI_SSH_KEY_PATH" "$config_file" 2>/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Clean up stale SSH configurations for containers that no longer exist
 # Scans ~/.ssh/containai.d/*.conf and removes configs for non-existent containers
 #
 # Arguments:
 #   $1 = dry_run (optional, "true" to show what would be cleaned without doing it)
 #
-# Returns: 0 on success
+# Returns: 0 on success, 1 on Docker unavailability
 #
 # Behavior:
+# - Requires Docker to be available (aborts if not)
 # - Scans all *.conf files in ~/.ssh/containai.d/
-# - Extracts container name from filename (containai-*.conf -> containai-*)
+# - Validates each file is a ContainAI config (checks content markers)
+# - Extracts container name from filename (<container-name>.conf)
 # - Checks if corresponding container exists in any known Docker context
 # - Removes config file and known_hosts entries for non-existent containers
 # - Reports what was cleaned (or would be cleaned in dry-run mode)
+# - Tracks actual successful removals vs. discovery count
 # - Returns 0 even if nothing to clean (idempotent)
 _cai_ssh_cleanup() {
     local dry_run="${1:-false}"
     local config_dir="$_CAI_SSH_CONFIG_DIR"
-    local known_hosts_file="$_CAI_KNOWN_HOSTS_FILE"
 
-    local cleaned_count=0
+    local to_clean_count=0
     local skipped_count=0
-    local -a cleaned_configs=()
-    local -a cleaned_ports=()
+    local foreign_count=0
+    local success_count=0
+    local fail_count=0
+
+    # Use associative array for 1:1 mapping of config -> port
+    # This prevents index mismatch when ports are missing
+    declare -A config_to_port
 
     # Check if config directory exists
     if [[ ! -d "$config_dir" ]]; then
@@ -2286,6 +2314,22 @@ _cai_ssh_cleanup() {
         return 0
     fi
 
+    # CRITICAL: Verify Docker is available before proceeding
+    # If Docker is unavailable, all inspect calls would fail and we'd incorrectly
+    # delete ALL configs thinking containers don't exist
+    if ! command -v docker >/dev/null 2>&1; then
+        _cai_error "Docker is not installed or not in PATH"
+        _cai_error "Cannot verify container existence - aborting cleanup to prevent data loss"
+        return 1
+    fi
+
+    # Try a simple docker command to verify daemon is reachable
+    if ! docker info >/dev/null 2>&1; then
+        _cai_error "Docker daemon is not running or not accessible"
+        _cai_error "Cannot verify container existence - aborting cleanup to prevent data loss"
+        return 1
+    fi
+
     # Determine which Docker contexts to check
     # Check both default context and containai-secure context
     local -a contexts_to_check=("")  # Empty string = default context
@@ -2308,19 +2352,24 @@ _cai_ssh_cleanup() {
     _cai_step "Scanning SSH configs for stale entries"
     _cai_info "Found ${#config_files[@]} SSH config(s) in $config_dir"
 
-    # Process each config file
+    # Build list of configs to clean
+    local -a configs_to_clean=()
     local basename container_name ssh_port container_exists ctx
+
     for config_file in "${config_files[@]}"; do
-        # Extract container name from filename
-        # Filename format: <container-name>.conf
         basename=$(basename "$config_file")
         container_name="${basename%.conf}"
 
-        # Extract SSH port from config file (Port line)
-        ssh_port=""
-        if [[ -f "$config_file" ]]; then
-            ssh_port=$(grep -E '^[[:space:]]*Port[[:space:]]+' "$config_file" 2>/dev/null | awk '{print $2}' | head -1) || ssh_port=""
+        # Validate this is a ContainAI config (not a foreign file)
+        if ! _cai_is_containai_ssh_config "$config_file"; then
+            _cai_debug "Skipping non-ContainAI config: $config_file"
+            ((foreign_count++))
+            continue
         fi
+
+        # Extract SSH port from config file (Port line)
+        # Store empty string if not found - associative array handles this correctly
+        ssh_port=$(grep -E '^[[:space:]]*Port[[:space:]]+' "$config_file" 2>/dev/null | awk '{print $2}' | head -1) || ssh_port=""
 
         # Check if container exists in any context
         container_exists=false
@@ -2342,64 +2391,76 @@ _cai_ssh_cleanup() {
             ((skipped_count++))
         else
             # Container doesn't exist - mark for cleanup
-            cleaned_configs+=("$config_file")
-            if [[ -n "$ssh_port" ]]; then
-                cleaned_ports+=("$ssh_port")
-            fi
-            ((cleaned_count++))
+            configs_to_clean+=("$config_file")
+            config_to_port["$config_file"]="$ssh_port"
+            ((to_clean_count++))
         fi
     done
 
     # Report and perform cleanup
-    if [[ $cleaned_count -eq 0 ]]; then
-        _cai_info "All ${#config_files[@]} SSH config(s) have existing containers."
+    if [[ $to_clean_count -eq 0 ]]; then
+        local total_checked=$((skipped_count + foreign_count))
+        _cai_info "All $skipped_count ContainAI SSH config(s) have existing containers."
+        if [[ $foreign_count -gt 0 ]]; then
+            _cai_info "($foreign_count non-ContainAI config(s) skipped)"
+        fi
         _cai_info "Nothing to clean."
         return 0
     fi
 
     _cai_info ""
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[dry-run] Would remove $cleaned_count stale SSH config(s):"
+        _cai_info "[dry-run] Would remove $to_clean_count stale SSH config(s):"
     else
-        _cai_info "Removing $cleaned_count stale SSH config(s):"
+        _cai_info "Removing $to_clean_count stale SSH config(s):"
     fi
 
-    local i
-    for i in "${!cleaned_configs[@]}"; do
-        config_file="${cleaned_configs[$i]}"
+    for config_file in "${configs_to_clean[@]}"; do
         basename=$(basename "$config_file")
         container_name="${basename%.conf}"
-        ssh_port="${cleaned_ports[$i]:-}"
+        ssh_port="${config_to_port[$config_file]:-}"
 
         if [[ "$dry_run" == "true" ]]; then
             _cai_info "  [dry-run] Would remove: $container_name"
+            _cai_info "            Config: $config_file"
             if [[ -n "$ssh_port" ]]; then
-                _cai_info "            Config: $config_file"
                 _cai_info "            Port: $ssh_port (would clean known_hosts)"
             fi
         else
             _cai_info "  Removing: $container_name"
 
-            # Remove config file
-            if ! rm -f "$config_file"; then
-                _cai_warn "    Failed to remove config: $config_file"
-            else
+            # Remove config file and track success/failure
+            if rm -f "$config_file" 2>/dev/null; then
                 _cai_debug "    Removed config: $config_file"
-            fi
+                ((success_count++))
 
-            # Clean known_hosts entries for this port
-            if [[ -n "$ssh_port" ]]; then
-                _cai_clean_known_hosts "$ssh_port"
-                _cai_debug "    Cleaned known_hosts for port $ssh_port"
+                # Clean known_hosts entries for this port (only if config removal succeeded)
+                if [[ -n "$ssh_port" ]]; then
+                    _cai_clean_known_hosts "$ssh_port"
+                    _cai_debug "    Cleaned known_hosts for port $ssh_port"
+                fi
+            else
+                _cai_warn "    Failed to remove config: $config_file"
+                ((fail_count++))
             fi
         fi
     done
 
     _cai_info ""
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[dry-run] Summary: Would remove $cleaned_count config(s), keep $skipped_count config(s)"
+        _cai_info "[dry-run] Summary: Would remove $to_clean_count config(s), keep $skipped_count config(s)"
+        if [[ $foreign_count -gt 0 ]]; then
+            _cai_info "          ($foreign_count non-ContainAI config(s) ignored)"
+        fi
     else
-        _cai_ok "Cleaned $cleaned_count stale SSH config(s), kept $skipped_count active config(s)"
+        if [[ $fail_count -gt 0 ]]; then
+            _cai_warn "Cleaned $success_count stale SSH config(s), $fail_count failed, kept $skipped_count active config(s)"
+        else
+            _cai_ok "Cleaned $success_count stale SSH config(s), kept $skipped_count active config(s)"
+        fi
+        if [[ $foreign_count -gt 0 ]]; then
+            _cai_info "($foreign_count non-ContainAI config(s) ignored)"
+        fi
     fi
 
     return 0
