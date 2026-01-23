@@ -1757,16 +1757,13 @@ _cai_ssh_connect_with_retry() {
 #   $4 = quiet (optional, "true" to suppress verbose output)
 #   $5 = detached (optional, "true" for background execution)
 #   $6 = allocate_tty (optional, "true" for interactive TTY)
-#   $7+ = command and arguments to run
-#
-# Environment variables (array, passed by name):
-#   env_vars_name = name of array containing VAR=value pairs
+#   $7+ = command and arguments to run (env vars can be passed as leading VAR=value args)
 #
 # Returns:
 #   Exit code from the remote command, or error codes (10-15) on failure
 #
 # Features:
-#   - Env vars passed as VAR=value prefix to command
+#   - Env vars: pass as leading VAR=value args before command (e.g., FOO=bar cmd args)
 #   - TTY allocation for interactive commands (-t flag)
 #   - Detached mode via nohup (background execution)
 #   - Proper argument quoting/escaping
@@ -1929,10 +1926,10 @@ _cai_ssh_run_with_retry() {
         ssh_cmd+=(-o "PasswordAuthentication=no")
         ssh_cmd+=(-o "ConnectTimeout=10")
 
-        # Add agent forwarding if SSH_AUTH_SOCK is set (user has ssh-agent running)
-        if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
-            ssh_cmd+=(-A)
-        fi
+        # Note: SSH agent forwarding (-A) is intentionally NOT enabled by default.
+        # Enabling it would grant the container access to the user's SSH keys,
+        # which is a significant security expansion. If needed, users can manually
+        # SSH into the container with: ssh -A <container-name>
 
         # Allocate TTY for interactive commands
         if [[ "$allocate_tty" == "true" ]]; then

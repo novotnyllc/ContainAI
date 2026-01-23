@@ -1396,13 +1396,15 @@ _containai_start_container() {
                 # Setup SSH with quick_check mode (fast path for running containers)
                 # Uses single keyscan attempt to avoid 30s wait if sshd/port is broken
                 if ! _cai_setup_container_ssh "$container_name" "$running_ssh_port" "$selected_context" "" "true"; then
-                    # SSH setup failure is non-fatal for running containers
-                    # User can still attach via docker exec
-                    _cai_warn "SSH setup failed; you can still attach via docker exec"
+                    # SSH setup failure - command will fail, give user manual options
+                    _cai_warn "SSH setup failed. For manual access:"
+                    _cai_warn "  docker exec -it $container_name bash"
+                    _cai_warn "  Or recreate: cai run --fresh /path/to/workspace"
                 fi
             fi
 
-            # Execute agent command (with args if provided) or shell if in shell mode via SSH
+            # Execute command via SSH (container stays running after exit)
+            # Behavior: -- <cmd> runs <cmd>, no -- runs default agent
             if [[ "$shell_flag" == "true" ]]; then
                 # Shell mode uses the SSH shell function
                 local quiet_arg=""
@@ -1410,15 +1412,15 @@ _containai_start_container() {
                     quiet_arg="true"
                 fi
                 _cai_ssh_shell "$container_name" "$selected_context" "" "$quiet_arg"
-            elif [[ "$detached_flag" == "true" ]]; then
-                # Detached mode - build command with env vars and run in background
+            else
+                # Build command: env vars + (custom command OR default agent)
                 local -a run_cmd=()
                 # Add env vars as VAR=value prefix
                 local env_var
                 for env_var in "${env_vars[@]}"; do
                     run_cmd+=("$env_var")
                 done
-                # Add agent or custom command
+                # If -- <cmd> provided, run that command; otherwise run default agent
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     run_cmd+=("${agent_args[@]}")
                 else
@@ -1428,26 +1430,13 @@ _containai_start_container() {
                 if [[ "$quiet_flag" == "true" ]]; then
                     quiet_arg="true"
                 fi
-                _cai_ssh_run "$container_name" "$selected_context" "" "$quiet_arg" "true" "false" "${run_cmd[@]}"
-            else
-                # Interactive mode - run agent via SSH with TTY
-                local -a run_cmd=()
-                # Add env vars as VAR=value prefix
-                local env_var
-                for env_var in "${env_vars[@]}"; do
-                    run_cmd+=("$env_var")
-                done
-                # Add agent with any provided arguments
-                run_cmd+=("$_CONTAINAI_DEFAULT_AGENT")
-                if [[ ${#agent_args[@]} -gt 0 ]]; then
-                    run_cmd+=("${agent_args[@]}")
+                if [[ "$detached_flag" == "true" ]]; then
+                    # Detached mode - run in background
+                    _cai_ssh_run "$container_name" "$selected_context" "" "$quiet_arg" "true" "false" "${run_cmd[@]}"
+                else
+                    # Interactive mode - allocate TTY
+                    _cai_ssh_run "$container_name" "$selected_context" "" "$quiet_arg" "false" "true" "${run_cmd[@]}"
                 fi
-                local quiet_arg=""
-                if [[ "$quiet_flag" == "true" ]]; then
-                    quiet_arg="true"
-                fi
-                # Allocate TTY for interactive agent session
-                _cai_ssh_run "$container_name" "$selected_context" "" "$quiet_arg" "false" "true" "${run_cmd[@]}"
             fi
             ;;
         exited|created)
@@ -1524,7 +1513,8 @@ _containai_start_container() {
                 fi
             fi
 
-            # Execute agent session via SSH (container stays running after exec exits)
+            # Execute command via SSH (container stays running after exit)
+            # Behavior: -- <cmd> runs <cmd>, no -- runs default agent
             if [[ "$shell_flag" == "true" ]]; then
                 # Shell mode uses the SSH shell function
                 local quiet_arg=""
@@ -1532,15 +1522,15 @@ _containai_start_container() {
                     quiet_arg="true"
                 fi
                 _cai_ssh_shell "$container_name" "$selected_context" "" "$quiet_arg"
-            elif [[ "$detached_flag" == "true" ]]; then
-                # Detached mode - build command with env vars and run in background
+            else
+                # Build command: env vars + (custom command OR default agent)
                 local -a run_cmd=()
                 # Add env vars as VAR=value prefix
                 local env_var
                 for env_var in "${env_vars[@]}"; do
                     run_cmd+=("$env_var")
                 done
-                # Add agent or custom command
+                # If -- <cmd> provided, run that command; otherwise run default agent
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     run_cmd+=("${agent_args[@]}")
                 else
@@ -1550,26 +1540,13 @@ _containai_start_container() {
                 if [[ "$quiet_flag" == "true" ]]; then
                     quiet_arg="true"
                 fi
-                _cai_ssh_run "$container_name" "$selected_context" "" "$quiet_arg" "true" "false" "${run_cmd[@]}"
-            else
-                # Interactive mode - run agent via SSH with TTY
-                local -a run_cmd=()
-                # Add env vars as VAR=value prefix
-                local env_var
-                for env_var in "${env_vars[@]}"; do
-                    run_cmd+=("$env_var")
-                done
-                # Add agent with any provided arguments
-                run_cmd+=("$_CONTAINAI_DEFAULT_AGENT")
-                if [[ ${#agent_args[@]} -gt 0 ]]; then
-                    run_cmd+=("${agent_args[@]}")
+                if [[ "$detached_flag" == "true" ]]; then
+                    # Detached mode - run in background
+                    _cai_ssh_run "$container_name" "$selected_context" "" "$quiet_arg" "true" "false" "${run_cmd[@]}"
+                else
+                    # Interactive mode - allocate TTY
+                    _cai_ssh_run "$container_name" "$selected_context" "" "$quiet_arg" "false" "true" "${run_cmd[@]}"
                 fi
-                local quiet_arg=""
-                if [[ "$quiet_flag" == "true" ]]; then
-                    quiet_arg="true"
-                fi
-                # Allocate TTY for interactive agent session
-                _cai_ssh_run "$container_name" "$selected_context" "" "$quiet_arg" "false" "true" "${run_cmd[@]}"
             fi
             ;;
         none)
@@ -1718,7 +1695,8 @@ _containai_start_container() {
                 return 1
             fi
 
-            # Execute agent session via SSH (container stays running after exec exits)
+            # Execute command via SSH (container stays running after exit)
+            # Behavior: -- <cmd> runs <cmd>, no -- runs default agent
             if [[ "$shell_flag" == "true" ]]; then
                 # Shell mode uses the SSH shell function
                 local quiet_arg=""
@@ -1727,15 +1705,15 @@ _containai_start_container() {
                 fi
                 # Force SSH config update for new containers
                 _cai_ssh_shell "$container_name" "$selected_context" "true" "$quiet_arg"
-            elif [[ "$detached_flag" == "true" ]]; then
-                # Detached mode - build command with env vars and run in background
+            else
+                # Build command: env vars + (custom command OR default agent)
                 local -a run_cmd=()
                 # Add env vars as VAR=value prefix
                 local env_var
                 for env_var in "${env_vars[@]}"; do
                     run_cmd+=("$env_var")
                 done
-                # Add agent or custom command
+                # If -- <cmd> provided, run that command; otherwise run default agent
                 if [[ ${#agent_args[@]} -gt 0 ]]; then
                     run_cmd+=("${agent_args[@]}")
                 else
@@ -1745,26 +1723,13 @@ _containai_start_container() {
                 if [[ "$quiet_flag" == "true" ]]; then
                     quiet_arg="true"
                 fi
-                _cai_ssh_run "$container_name" "$selected_context" "true" "$quiet_arg" "true" "false" "${run_cmd[@]}"
-            else
-                # Interactive mode - run agent via SSH with TTY
-                local -a run_cmd=()
-                # Add env vars as VAR=value prefix
-                local env_var
-                for env_var in "${env_vars[@]}"; do
-                    run_cmd+=("$env_var")
-                done
-                # Add agent with any provided arguments
-                run_cmd+=("$_CONTAINAI_DEFAULT_AGENT")
-                if [[ ${#agent_args[@]} -gt 0 ]]; then
-                    run_cmd+=("${agent_args[@]}")
+                if [[ "$detached_flag" == "true" ]]; then
+                    # Detached mode - run in background, force SSH config update for new containers
+                    _cai_ssh_run "$container_name" "$selected_context" "true" "$quiet_arg" "true" "false" "${run_cmd[@]}"
+                else
+                    # Interactive mode - allocate TTY, force SSH config update for new containers
+                    _cai_ssh_run "$container_name" "$selected_context" "true" "$quiet_arg" "false" "true" "${run_cmd[@]}"
                 fi
-                local quiet_arg=""
-                if [[ "$quiet_flag" == "true" ]]; then
-                    quiet_arg="true"
-                fi
-                # Allocate TTY for interactive agent session, force SSH config update for new containers
-                _cai_ssh_run "$container_name" "$selected_context" "true" "$quiet_arg" "false" "true" "${run_cmd[@]}"
             fi
             ;;
         *)
