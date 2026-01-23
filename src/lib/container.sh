@@ -850,9 +850,9 @@ _containai_check_volume_match() {
 #   --quiet              Suppress verbose output
 #   --debug              Enable debug logging
 #   --image-tag <tag>    Image tag for container (advanced/debugging, stored as label)
-#   -e, --env <VAR=val>  Environment variable (repeatable)
+#   -e, --env <VAR=val>  Environment variable (repeatable, passed to command via SSH)
 #   -v, --volume <spec>  Extra volume mount (repeatable)
-#   -- <agent_args>      Arguments to pass to agent
+#   -- <cmd>             Command to run (default: agent); e.g., -- bash runs bash
 # Returns: 0 on success, 1 on failure
 _containai_start_container() {
     local container_name=""
@@ -1648,7 +1648,7 @@ _containai_start_container() {
             done
 
             # Environment variables - only stable non-secret vars at container creation
-            # User-provided --env values are passed via docker exec to avoid persisting secrets
+            # User-provided --env values are passed via SSH as VAR=value command prefix
             args+=(-e "CAI_HOST_WORKSPACE=$workspace_resolved")
 
             # Working directory
