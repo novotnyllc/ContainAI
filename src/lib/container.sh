@@ -1953,16 +1953,22 @@ _containai_list_containers_for_context() {
 # Interactive container stop selection
 # Finds all ContainAI containers (by label or ancestor image) and prompts user
 # Checks both default context and secure engine context (containai-secure)
-# Arguments: --all to stop all without prompting (non-interactive mode)
+# Arguments:
+#   --all    Stop all containers without prompting (non-interactive mode)
+#   --remove Also remove containers (not just stop) and clean SSH configs
 # Returns: 0 on success, 1 on error (non-interactive without --all, or docker unavailable)
 _containai_stop_all() {
     local stop_all_flag=false
+    local remove_flag=false
     local arg
 
     for arg in "$@"; do
         case "$arg" in
             --all)
                 stop_all_flag=true
+                ;;
+            --remove)
+                remove_flag=true
                 ;;
         esac
     done
@@ -2028,16 +2034,40 @@ _containai_stop_all() {
 
     if [[ "$stop_all_flag" == "true" ]]; then
         echo ""
-        echo "Stopping all containers (--all flag)..."
-        local idx container_to_stop ctx_to_use
+        if [[ "$remove_flag" == "true" ]]; then
+            echo "Removing all containers (--all --remove flags)..."
+        else
+            echo "Stopping all containers (--all flag)..."
+        fi
+        local idx container_to_stop ctx_to_use ssh_port
         for idx in "${!names[@]}"; do
             container_to_stop="${names[$idx]}"
             ctx_to_use="${contexts[$idx]}"
-            echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
-            if [[ -n "$ctx_to_use" ]]; then
-                docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1 || true
+
+            # Get SSH port before stopping/removing (for cleanup)
+            ssh_port=""
+            if [[ "$remove_flag" == "true" ]]; then
+                ssh_port=$(_cai_get_container_ssh_port "$container_to_stop" "$ctx_to_use" 2>/dev/null) || ssh_port=""
+            fi
+
+            if [[ "$remove_flag" == "true" ]]; then
+                echo "Removing: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+                if [[ -n "$ctx_to_use" ]]; then
+                    docker --context "$ctx_to_use" rm -f "$container_to_stop" >/dev/null 2>&1 || true
+                else
+                    docker rm -f "$container_to_stop" >/dev/null 2>&1 || true
+                fi
+                # Clean up SSH config after removal
+                if [[ -n "$ssh_port" ]]; then
+                    _cai_cleanup_container_ssh "$container_to_stop" "$ssh_port"
+                fi
             else
-                docker stop "$container_to_stop" >/dev/null 2>&1 || true
+                echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+                if [[ -n "$ctx_to_use" ]]; then
+                    docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1 || true
+                else
+                    docker stop "$container_to_stop" >/dev/null 2>&1 || true
+                fi
             fi
         done
         echo "Done."
@@ -2090,15 +2120,35 @@ _containai_stop_all() {
     fi
 
     echo ""
-    local idx container_to_stop ctx_to_use
+    local idx container_to_stop ctx_to_use ssh_port
     for idx in "${to_stop_idx[@]}"; do
         container_to_stop="${names[$idx]}"
         ctx_to_use="${contexts[$idx]}"
-        echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
-        if [[ -n "$ctx_to_use" ]]; then
-            docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1 || true
+
+        # Get SSH port before stopping/removing (for cleanup)
+        ssh_port=""
+        if [[ "$remove_flag" == "true" ]]; then
+            ssh_port=$(_cai_get_container_ssh_port "$container_to_stop" "$ctx_to_use" 2>/dev/null) || ssh_port=""
+        fi
+
+        if [[ "$remove_flag" == "true" ]]; then
+            echo "Removing: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+            if [[ -n "$ctx_to_use" ]]; then
+                docker --context "$ctx_to_use" rm -f "$container_to_stop" >/dev/null 2>&1 || true
+            else
+                docker rm -f "$container_to_stop" >/dev/null 2>&1 || true
+            fi
+            # Clean up SSH config after removal
+            if [[ -n "$ssh_port" ]]; then
+                _cai_cleanup_container_ssh "$container_to_stop" "$ssh_port"
+            fi
         else
-            docker stop "$container_to_stop" >/dev/null 2>&1 || true
+            echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+            if [[ -n "$ctx_to_use" ]]; then
+                docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1 || true
+            else
+                docker stop "$container_to_stop" >/dev/null 2>&1 || true
+            fi
         fi
     done
 

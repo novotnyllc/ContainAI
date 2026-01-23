@@ -299,11 +299,15 @@ Usage: cai stop [options]
 
 Options:
   --all         Stop all containers without prompting
+  --remove      Also remove containers (not just stop them)
+                When used with --remove, SSH configs are automatically cleaned
   -h, --help    Show this help message
 
 Examples:
-  cai stop        Interactive selection to stop containers
-  cai stop --all  Stop all ContainAI containers
+  cai stop              Interactive selection to stop containers
+  cai stop --all        Stop all ContainAI containers
+  cai stop --remove     Remove containers (cleans up SSH configs)
+  cai stop --all --remove  Remove all ContainAI containers
 EOF
 }
 

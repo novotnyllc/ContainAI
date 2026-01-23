@@ -2314,26 +2314,22 @@ _cai_ssh_cleanup() {
         return 0
     fi
 
-    # CRITICAL: Verify Docker is available before proceeding
-    # If Docker is unavailable, all inspect calls would fail and we'd incorrectly
-    # delete ALL configs thinking containers don't exist
+    # CRITICAL: Verify Docker CLI is available before proceeding
     if ! command -v docker >/dev/null 2>&1; then
         _cai_error "Docker is not installed or not in PATH"
         _cai_error "Cannot verify container existence - aborting cleanup to prevent data loss"
         return 1
     fi
 
-    # Try a simple docker command to verify daemon is reachable
-    if ! docker info >/dev/null 2>&1; then
-        _cai_error "Docker daemon is not running or not accessible"
-        _cai_error "Cannot verify container existence - aborting cleanup to prevent data loss"
-        return 1
-    fi
-
-    # Determine which Docker contexts to check
-    # Check both default context and containai-secure context
-    local -a contexts_to_check=("")  # Empty string = default context
+    # Build list of contexts to check and verify at least one is reachable
+    # We check per-context reachability rather than requiring default context
+    local -a contexts_to_check=()
+    local -a reachable_contexts=()
     local default_secure_context="containai-secure"
+    local ctx
+
+    # Always try default context
+    contexts_to_check+=("")
 
     # Add containai-secure if it exists
     if docker context inspect "$default_secure_context" >/dev/null 2>&1; then
@@ -2348,6 +2344,38 @@ _cai_ssh_cleanup() {
             contexts_to_check+=("$configured_context")
         fi
     fi
+
+    # Check which contexts are actually reachable (with timeout to avoid hangs)
+    for ctx in "${contexts_to_check[@]}"; do
+        local -a docker_cmd=(docker)
+        if [[ -n "$ctx" ]]; then
+            docker_cmd=(docker --context "$ctx")
+        fi
+
+        # Use timeout wrapper to avoid hanging on wedged/remote daemons
+        if _cai_timeout 5 "${docker_cmd[@]}" info >/dev/null 2>&1; then
+            reachable_contexts+=("$ctx")
+            _cai_debug "Docker context reachable: ${ctx:-default}"
+        else
+            _cai_debug "Docker context unreachable: ${ctx:-default}"
+        fi
+    done
+
+    # CRITICAL: Abort if NO contexts are reachable
+    # If we can't reach any Docker daemon, all inspect calls would fail and
+    # we'd incorrectly delete ALL configs thinking containers don't exist
+    if [[ ${#reachable_contexts[@]} -eq 0 ]]; then
+        _cai_error "No Docker daemon is reachable"
+        _cai_error "Cannot verify container existence - aborting cleanup to prevent data loss"
+        _cai_error ""
+        _cai_error "Troubleshooting:"
+        _cai_error "  1. Check Docker is running: docker info"
+        _cai_error "  2. Check containai-secure context: docker --context containai-secure info"
+        return 1
+    fi
+
+    # Use only reachable contexts for container checks
+    contexts_to_check=("${reachable_contexts[@]}")
 
     _cai_step "Scanning SSH configs for stale entries"
     _cai_info "Found ${#config_files[@]} SSH config(s) in $config_dir"
