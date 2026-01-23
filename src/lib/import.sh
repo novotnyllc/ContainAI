@@ -523,9 +523,13 @@ _containai_import() {
             return 1
         fi
 
-        # Re-validate after normalization (cd && pwd could theoretically produce different path)
+        # Re-validate after normalization (symlinks could resolve to paths with dangerous chars)
         if [[ "$from_source" == *,* ]] || [[ "$from_source" == *$'\n'* ]] || [[ "$from_source" == *$'\r'* ]]; then
             _import_error "Resolved source path contains invalid characters: $from_source"
+            return 1
+        fi
+        if [[ "$from_source" == *'*'* ]] || [[ "$from_source" == *'?'* ]] || [[ "$from_source" == *'['* ]]; then
+            _import_error "Resolved source path contains glob metacharacters (*?[) which are not supported: $from_source"
             return 1
         fi
 
@@ -852,8 +856,12 @@ copy() {
                             # Derive per-entry paths for symlink relinking
                             # _src is /source/relative_path, strip /source to get relative
                             _rel_path="${_src#/source}"
-                            # Strip trailing slash from HOST_SOURCE_ROOT to avoid // when root is /
-                            _host_src_dir="${HOST_SOURCE_ROOT%/}${_rel_path}"
+                            # Normalize HOST_SOURCE_ROOT: strip trailing slash, except for root /
+                            case "$HOST_SOURCE_ROOT" in
+                                /) _host_src_dir="/${_rel_path#/}" ;;
+                                */) _host_src_dir="${HOST_SOURCE_ROOT%/}${_rel_path}" ;;
+                                *) _host_src_dir="${HOST_SOURCE_ROOT}${_rel_path}" ;;
+                            esac
                             _runtime_dst_dir="/mnt/agent-data${_dst#/target}"
                             relink_internal_symlinks "$_host_src_dir" "$_runtime_dst_dir" "$_src" "$_dst"
                         fi
