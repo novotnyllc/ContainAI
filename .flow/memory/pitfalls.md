@@ -139,3 +139,6 @@ Never use 'source' or 'eval' on .env files - use safe line-by-line KEY=VALUE par
 
 ## 2026-01-23 manual [pitfall]
 Alpine/BusyBox wget uses -T for timeout (not --timeout which is GNU wget only)
+
+## 2026-01-23 manual [pitfall]
+When using docker run --pull=never for reproducibility, pre-pull the image in prerequisites to avoid false failures on fresh systems

@@ -62,9 +62,8 @@ Create a comprehensive test suite that verifies ContainAI works correctly in all
 - [ ] Tests are idempotent (can run multiple times)
 - [ ] Clear output showing what passed/failed
 ## Done summary
-TBD
-
+Created comprehensive integration test suite (tests/integration/test-containai.sh) with 5 scenarios: clean start without import, clean start with import, DinD operations, agent doctor commands, and idempotency. Added test fixtures directory with sample configs for claude, gh, codex, and shell.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: ee41953, c8caf22, 4ffc5eb
+- Tests: shellcheck -x tests/integration/test-containai.sh
 - PRs:
