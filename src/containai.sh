@@ -588,25 +588,28 @@ _containai_import_cmd() {
 
         # Try to find container by workspace label first (handles --name containers)
         # Label format: containai.workspace=/absolute/path
+        # Use -a to include stopped containers for proper error messages
         local label_filter="containai.workspace=$resolved_workspace"
         local found_containers
-        found_containers=$("${docker_cmd[@]}" ps -q --filter "label=$label_filter" 2>/dev/null | head -2)
+        found_containers=$("${docker_cmd[@]}" ps -aq --filter "label=$label_filter" 2>/dev/null | head -2)
 
         if [[ -n "$found_containers" ]]; then
-            # Count matches
+            # Count matches (filter to first line to handle empty case)
             local match_count
-            match_count=$(echo "$found_containers" | wc -l)
+            match_count=$(printf '%s\n' "$found_containers" | grep -c . || echo 0)
             if [[ "$match_count" -gt 1 ]]; then
                 echo "[ERROR] Multiple containers found for workspace: $resolved_workspace" >&2
                 echo "" >&2
                 echo "Containers:" >&2
-                "${docker_cmd[@]}" ps --filter "label=$label_filter" --format "  {{.Names}} ({{.Status}})" >&2
+                "${docker_cmd[@]}" ps -a --filter "label=$label_filter" --format "  {{.Names}} ({{.Status}})" >&2
                 echo "" >&2
-                echo "Stop extra containers or use a unique workspace path." >&2
+                echo "Remove extra containers or use a unique workspace path." >&2
                 return 1
             fi
-            # Get container name from ID
-            container_name=$("${docker_cmd[@]}" inspect --format '{{.Name}}' "$found_containers" 2>/dev/null)
+            # Get container name from ID (take first line only)
+            local first_container
+            first_container=$(printf '%s\n' "$found_containers" | head -1)
+            container_name=$("${docker_cmd[@]}" inspect --format '{{.Name}}' "$first_container" 2>/dev/null)
             container_name="${container_name#/}"  # Remove leading /
         else
             # Fallback: try hash-based container name

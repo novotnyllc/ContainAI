@@ -133,3 +133,6 @@ When using return codes to distinguish error types (e.g., 0=ok, 1=conflict, 2=ca
 
 ## 2026-01-23 manual [pitfall]
 Dry-run simulations must mirror exact runtime logic (e.g., port allocation with ignore flags for running vs stopped containers)
+
+## 2026-01-23 manual [pitfall]
+Never use 'source' or 'eval' on .env files - use safe line-by-line KEY=VALUE parsing to prevent command injection
