@@ -243,6 +243,26 @@ check_prerequisites() {
         fi
     fi
     pass "Test image available: $TEST_IMAGE"
+
+    # Pre-pull alpine image for volume verification (allows --pull=never later)
+    if ! docker --context "$CONTEXT_NAME" image inspect "$ALPINE_IMAGE" >/dev/null 2>&1; then
+        info "Pulling verification image: $ALPINE_IMAGE"
+        local alpine_pull_rc
+        alpine_pull_rc=0
+        run_with_timeout 60 docker --context "$CONTEXT_NAME" pull "$ALPINE_IMAGE" || alpine_pull_rc=$?
+
+        # Handle no timeout mechanism (rc=125)
+        if [[ $alpine_pull_rc -eq 125 ]]; then
+            warn "No timeout mechanism available, pulling without timeout"
+            docker --context "$CONTEXT_NAME" pull "$ALPINE_IMAGE" || alpine_pull_rc=$?
+        fi
+
+        if [[ $alpine_pull_rc -ne 0 ]]; then
+            fail "Failed to pull verification image: $ALPINE_IMAGE"
+            return 1
+        fi
+    fi
+    pass "Verification image available: $ALPINE_IMAGE"
 }
 
 # ==============================================================================
