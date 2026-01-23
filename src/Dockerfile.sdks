@@ -128,7 +128,7 @@ ENV PATH="/home/agent/.cargo/bin:${PATH}"
 # =============================================================================
 ARG GO_VERSION=1.23.5
 ARG GO_SHA256_AMD64=cbcad4a6482107c7c7926df1608106c189417163428200ce357695cc7e01d091
-ARG GO_SHA256_ARM64=47c84d332172c1cbd4c2db7d2a610b494ae0c9c030f5f598e00c47cc747b33f1
+ARG GO_SHA256_ARM64=47c84d332123883653b70da2db7dd57d2a865921ba4724efcdf56b5da7021db0
 
 USER root
 RUN ARCH=$(dpkg --print-architecture) && \

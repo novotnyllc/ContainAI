@@ -17,6 +17,12 @@ cai doctor
 # Build single layer (faster iteration)
 ./src/build.sh --layer base
 
+# Build with buildx setup (installs binfmt + builder if needed)
+./src/build.sh --build-setup
+
+# CI-style multi-arch build (amd64 + arm64)
+./src/build.sh --platforms linux/amd64,linux/arm64 --push --build-setup
+
 # Run integration tests (requires Docker)
 ./tests/integration/test-secure-engine.sh
 ./tests/integration/test-sync-integration.sh
@@ -56,6 +62,7 @@ docs/                   # Architecture, config, quickstart
 - All function variables must be `local` to prevent shell pollution
 - Functions return status codes; use stdout for data, stderr for errors
 - Error handling: `set -euo pipefail` at script start
+- Build images use buildx by default; platform defaults to `linux/<host-arch>`. Use `--platforms` for CI multi-arch and `--build-setup` to configure buildx/binfmt.
 
 See `.flow/memory/conventions.md` for discovered patterns.
 

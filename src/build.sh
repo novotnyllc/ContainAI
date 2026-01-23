@@ -4,10 +4,17 @@ set -euo pipefail
 # ==============================================================================
 # Build ContainAI Docker images (layered build)
 # ==============================================================================
-# Usage: ./build.sh [options] [docker build options]
+# Usage: ./build.sh [options] [docker buildx options]
 #   --dotnet-channel CHANNEL  .NET SDK channel (default: 10.0)
 #   --layer LAYER             Build only specific layer (base|sdks|full|all)
+#   --platforms PLATFORMS     Build with buildx for platforms (e.g., linux/amd64,linux/arm64)
+#   --builder NAME            Use a specific buildx builder
+#   --build-setup             Configure buildx builder + binfmt if required
+#   --push                    Push images (buildx only)
+#   --load                    Load image into local docker (buildx only; single-platform)
 #   --help                    Show this help
+#
+# Defaults: buildx is preferred; platform defaults to linux/<host-arch>
 #
 # Build order: base -> sdks -> full -> containai (alias)
 #
@@ -15,7 +22,9 @@ set -euo pipefail
 #   ./build.sh                          # Build all layers
 #   ./build.sh --layer base             # Build only base layer
 #   ./build.sh --dotnet-channel lts     # Use latest LTS for .NET
-#   ./build.sh --no-cache               # Pass option to docker build
+#   ./build.sh --no-cache               # Pass option to docker build/buildx
+#   ./build.sh --platforms linux/amd64  # Cross-build single platform with buildx
+#   ./build.sh --platforms linux/amd64,linux/arm64 --push
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +33,14 @@ DATE_TAG="$(date +%Y-%m-%d)"
 # Defaults
 DOTNET_CHANNEL="10.0"
 BUILD_LAYER="all"
+PLATFORMS=""
+BUILDX_BUILDER=""
+BUILDX_PUSH=0
+BUILDX_LOAD=0
+USE_BUILDX=1
+BUILD_SETUP=0
+BUILDX_REQUESTED=0
+HAS_OUTPUT=0
 
 # Parse options
 DOCKER_ARGS=()
@@ -45,9 +62,60 @@ while [[ $# -gt 0 ]]; do
             BUILD_LAYER="$2"
             shift 2
             ;;
+        --platforms|--platform)
+            if [[ -z "${2-}" ]]; then
+                echo "ERROR: --platforms requires a value (e.g., linux/amd64,linux/arm64)" >&2
+                exit 1
+            fi
+            PLATFORMS="$2"
+            BUILDX_REQUESTED=1
+            shift 2
+            ;;
+        --builder)
+            if [[ -z "${2-}" ]]; then
+                echo "ERROR: --builder requires a value" >&2
+                exit 1
+            fi
+            BUILDX_BUILDER="$2"
+            BUILDX_REQUESTED=1
+            shift 2
+            ;;
+        --build-setup)
+            BUILD_SETUP=1
+            BUILDX_REQUESTED=1
+            shift
+            ;;
+        --push)
+            BUILDX_PUSH=1
+            BUILDX_REQUESTED=1
+            shift
+            ;;
+        --load)
+            BUILDX_LOAD=1
+            BUILDX_REQUESTED=1
+            shift
+            ;;
         --help | -h)
-            sed -n '4,19p' "$0" | sed 's/^# //' | sed 's/^#//'
+            sed -n '4,26p' "$0" | sed 's/^# //' | sed 's/^#//'
             exit 0
+            ;;
+        --platforms=*|--platform=*)
+            PLATFORMS="${1#*=}"
+            if [[ -z "$PLATFORMS" ]]; then
+                echo "ERROR: --platforms requires a value (e.g., linux/amd64,linux/arm64)" >&2
+                exit 1
+            fi
+            BUILDX_REQUESTED=1
+            shift
+            ;;
+        --builder=*)
+            BUILDX_BUILDER="${1#*=}"
+            if [[ -z "$BUILDX_BUILDER" ]]; then
+                echo "ERROR: --builder requires a value" >&2
+                exit 1
+            fi
+            BUILDX_REQUESTED=1
+            shift
             ;;
         *)
             DOCKER_ARGS+=("$1")
@@ -59,6 +127,177 @@ done
 # Enable BuildKit
 export DOCKER_BUILDKIT=1
 
+# Buildx helpers
+detect_host_arch() {
+    local arch
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64|amd64)
+            printf '%s' "amd64"
+            ;;
+        aarch64|arm64)
+            printf '%s' "arm64"
+            ;;
+        *)
+            printf 'ERROR: Unsupported host architecture: %s\n' "$arch" >&2
+            return 1
+            ;;
+    esac
+}
+
+normalize_platforms() {
+    local raw="$1"
+    local out=""
+    local p
+    local parts=()
+    IFS=',' read -r -a parts <<< "$raw"
+    for p in "${parts[@]}"; do
+        p="${p//[[:space:]]/}"
+        if [[ -z "$p" ]]; then
+            continue
+        fi
+        case "$p" in
+            linux/amd64|linux/arm64)
+                ;;
+            *)
+                printf 'ERROR: Unsupported platform "%s". Supported: linux/amd64, linux/arm64.\n' "$p" >&2
+                return 1
+                ;;
+        esac
+        if [[ -n "$out" ]]; then
+            out+=",${p}"
+        else
+            out="$p"
+        fi
+    done
+    if [[ -z "$out" ]]; then
+        printf 'ERROR: --platforms must include at least one platform.\n' >&2
+        return 1
+    fi
+    printf '%s' "$out"
+}
+
+buildx_inspect() {
+    local builder="$1"
+    if [[ -n "$builder" ]]; then
+        docker buildx inspect "$builder" --bootstrap 2>/dev/null
+    else
+        docker buildx inspect --bootstrap 2>/dev/null
+    fi
+}
+
+buildx_driver() {
+    local builder="$1"
+    local output
+    output="$(buildx_inspect "$builder")" || return 1
+    printf '%s\n' "$output" | awk -F': ' '/Driver:/ {print $2; exit}'
+}
+
+buildx_platforms() {
+    local builder="$1"
+    local output
+    output="$(buildx_inspect "$builder")" || return 1
+    printf '%s\n' "$output" | awk -F': ' '/Platforms:/ {print $2; exit}'
+}
+
+buildx_setup() {
+    local builder="$1"
+    local driver
+
+    if ! docker buildx inspect "$builder" >/dev/null 2>&1; then
+        printf 'Creating buildx builder "%s"...\n' "$builder"
+        docker buildx create --name "$builder" --driver docker-container --use >/dev/null
+    else
+        docker buildx use "$builder" >/dev/null
+    fi
+
+    driver="$(buildx_driver "$builder")" || return 1
+    if [[ "$driver" != "docker-container" ]]; then
+        printf 'ERROR: buildx builder "%s" uses driver "%s"; expected "docker-container".\n' "$builder" "$driver" >&2
+        return 1
+    fi
+
+    printf 'Ensuring binfmt is installed for amd64 and arm64...\n'
+    docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64 >/dev/null
+    docker buildx inspect "$builder" --bootstrap >/dev/null
+}
+
+buildx_check_platforms() {
+    local builder="$1"
+    local required="$2"
+    local available
+    local p
+    local parts=()
+
+    available="$(buildx_platforms "$builder")" || return 1
+    available="${available//[[:space:]]/}"
+    IFS=',' read -r -a parts <<< "$required"
+    for p in "${parts[@]}"; do
+        if [[ ",${available}," != *",${p},"* ]]; then
+            printf 'Missing platform in buildx builder: %s\n' "$p" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Buildx validation/setup
+if [[ "$USE_BUILDX" -eq 1 ]]; then
+    HAS_OUTPUT=0
+    if [[ " ${DOCKER_ARGS[*]-} " =~ [[:space:]]--output([[:space:]]|=) ]]; then
+        HAS_OUTPUT=1
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        printf 'ERROR: docker is not installed or not in PATH.\n' >&2
+        exit 1
+    fi
+    if ! docker buildx version >/dev/null 2>&1; then
+        if [[ "$BUILDX_REQUESTED" -eq 1 ]]; then
+            printf 'ERROR: docker buildx is not available. Install the buildx plugin.\n' >&2
+        else
+            printf 'ERROR: docker buildx is not available. Install the buildx plugin to match CI builds.\n' >&2
+        fi
+        exit 1
+    fi
+    if [[ -z "$PLATFORMS" ]]; then
+        PLATFORMS="linux/$(detect_host_arch)"
+    else
+        PLATFORMS="$(normalize_platforms "$PLATFORMS")"
+    fi
+    if [[ "$BUILDX_PUSH" -eq 1 && "$BUILDX_LOAD" -eq 1 ]]; then
+        printf 'ERROR: --push and --load cannot be used together\n' >&2
+        exit 1
+    fi
+    if [[ "$PLATFORMS" == *","* && "$BUILDX_LOAD" -eq 1 ]]; then
+        printf 'ERROR: --load only supports a single platform\n' >&2
+        exit 1
+    fi
+    if [[ "$PLATFORMS" == *","* && "$BUILDX_PUSH" -eq 0 && "$HAS_OUTPUT" -eq 0 ]]; then
+        printf 'ERROR: multi-platform buildx requires --push or --output\n' >&2
+        exit 1
+    fi
+    if [[ "$BUILDX_PUSH" -eq 0 && "$HAS_OUTPUT" -eq 0 && "$BUILDX_LOAD" -eq 0 ]]; then
+        if [[ "$PLATFORMS" != *","* ]]; then
+            BUILDX_LOAD=1
+        fi
+    fi
+
+    if ! buildx_check_platforms "$BUILDX_BUILDER" "$PLATFORMS"; then
+        if [[ "$BUILD_SETUP" -eq 1 ]]; then
+            if [[ -z "$BUILDX_BUILDER" ]]; then
+                BUILDX_BUILDER="containai"
+            fi
+            buildx_setup "$BUILDX_BUILDER" || exit 1
+            buildx_check_platforms "$BUILDX_BUILDER" "$PLATFORMS" || exit 1
+        else
+            printf 'ERROR: buildx builder does not support required platforms: %s\n' "$PLATFORMS" >&2
+            printf 'Hint: re-run with --build-setup to configure buildx + binfmt.\n' >&2
+            exit 1
+        fi
+    fi
+fi
+
 # Generate OCI label values
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 VCS_REF="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
@@ -68,12 +307,28 @@ build_layer() {
     local name="$1"
     local dockerfile="$2"
     local extra_args=("${@:3}")
+    local build_cmd=(docker build)
 
     echo ""
     echo "=== Building containai/${name} ==="
     echo ""
 
-    docker build \
+    if [[ "$USE_BUILDX" -eq 1 ]]; then
+        build_cmd=(docker buildx build)
+        if [[ -n "$BUILDX_BUILDER" ]]; then
+            build_cmd+=(--builder "$BUILDX_BUILDER")
+        fi
+        if [[ -n "$PLATFORMS" ]]; then
+            build_cmd+=(--platform "$PLATFORMS")
+        fi
+        if [[ "$BUILDX_PUSH" -eq 1 ]]; then
+            build_cmd+=(--push)
+        elif [[ "$BUILDX_LOAD" -eq 1 ]]; then
+            build_cmd+=(--load)
+        fi
+    fi
+
+    "${build_cmd[@]}" \
         -t "containai/${name}:latest" \
         -t "containai/${name}:${DATE_TAG}" \
         --build-arg BUILD_DATE="$BUILD_DATE" \
@@ -110,7 +365,22 @@ case "$BUILD_LAYER" in
         echo ""
         echo "=== Building containai (final image) ==="
         echo ""
-        docker build \
+        final_cmd=(docker build)
+        if [[ "$USE_BUILDX" -eq 1 ]]; then
+            final_cmd=(docker buildx build)
+            if [[ -n "$BUILDX_BUILDER" ]]; then
+                final_cmd+=(--builder "$BUILDX_BUILDER")
+            fi
+            if [[ -n "$PLATFORMS" ]]; then
+                final_cmd+=(--platform "$PLATFORMS")
+            fi
+            if [[ "$BUILDX_PUSH" -eq 1 ]]; then
+                final_cmd+=(--push)
+            elif [[ "$BUILDX_LOAD" -eq 1 ]]; then
+                final_cmd+=(--load)
+            fi
+        fi
+        "${final_cmd[@]}" \
             -t "containai:latest" \
             -t "containai:${DATE_TAG}" \
             --build-arg BUILD_DATE="$BUILD_DATE" \
@@ -129,4 +399,8 @@ esac
 echo ""
 echo "Build complete!"
 echo ""
-docker images "containai*" --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | head -20
+if [[ "$USE_BUILDX" -eq 1 && "$BUILDX_LOAD" -eq 0 && ( "$BUILDX_PUSH" -eq 1 || "$HAS_OUTPUT" -eq 1 ) ]]; then
+    printf 'Images were pushed or exported; no local images loaded.\n'
+else
+    docker images "containai*" --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | head -20
+fi

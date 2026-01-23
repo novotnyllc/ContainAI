@@ -56,6 +56,21 @@ source src/containai.sh
 cai doctor
 ```
 
+### Building Images (Buildx Preferred)
+
+ContainAI builds use Docker buildx by default to match CI behavior. The default platform is `linux/<host-arch>` even on macOS (builds run inside Lima). Use `--build-setup` to configure a buildx builder and binfmt if required.
+
+```bash
+# Build all layers for the current host arch (buildx + --load)
+./src/build.sh
+
+# Configure buildx builder/binfmt (first-time setup)
+./src/build.sh --build-setup
+
+# Multi-arch build (CI style) - requires --push or --output
+./src/build.sh --platforms linux/amd64,linux/arm64 --push --build-setup
+```
+
 ### Project Structure
 
 ```
