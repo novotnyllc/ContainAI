@@ -2064,11 +2064,18 @@ _containai_stop_all() {
                 fi
                 # Only clean up SSH config after SUCCESSFUL removal
                 if [[ "$rm_success" == "true" ]]; then
-                    # Clean by port if known, otherwise just remove config file by name
+                    # Clean by port if known, otherwise try to get port from config file
+                    if [[ -z "$ssh_port" ]]; then
+                        # Legacy container - try to get port from config file before removing it
+                        local config_file="$_CAI_SSH_CONFIG_DIR/${container_to_stop}.conf"
+                        if [[ -f "$config_file" ]]; then
+                            ssh_port=$(grep -E '^[[:space:]]*Port[[:space:]]+' "$config_file" 2>/dev/null | awk '{print $2}' | head -1) || ssh_port=""
+                        fi
+                    fi
                     if [[ -n "$ssh_port" ]]; then
                         _cai_cleanup_container_ssh "$container_to_stop" "$ssh_port"
                     else
-                        # Legacy container without port label - still clean config file
+                        # No port found anywhere - just remove config file
                         _cai_remove_ssh_host_config "$container_to_stop"
                     fi
                 else
@@ -2158,11 +2165,18 @@ _containai_stop_all() {
             fi
             # Only clean up SSH config after SUCCESSFUL removal
             if [[ "$rm_success" == "true" ]]; then
-                # Clean by port if known, otherwise just remove config file by name
+                # Clean by port if known, otherwise try to get port from config file
+                if [[ -z "$ssh_port" ]]; then
+                    # Legacy container - try to get port from config file before removing it
+                    local config_file="$_CAI_SSH_CONFIG_DIR/${container_to_stop}.conf"
+                    if [[ -f "$config_file" ]]; then
+                        ssh_port=$(grep -E '^[[:space:]]*Port[[:space:]]+' "$config_file" 2>/dev/null | awk '{print $2}' | head -1) || ssh_port=""
+                    fi
+                fi
                 if [[ -n "$ssh_port" ]]; then
                     _cai_cleanup_container_ssh "$container_to_stop" "$ssh_port"
                 else
-                    # Legacy container without port label - still clean config file
+                    # No port found anywhere - just remove config file
                     _cai_remove_ssh_host_config "$container_to_stop"
                 fi
             else
