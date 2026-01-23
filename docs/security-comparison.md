@@ -33,7 +33,7 @@ AI coding agents need sandboxing to prevent malicious or mistaken commands from 
 
 | Solution | User Namespaces | Docker-in-Docker | systemd | Cost |
 |----------|----------------|------------------|---------|------|
-| Docker sandbox | No | Yes | No | Free |
+| Docker sandbox | No | CLI only | No | Free |
 | Docker ECI | Yes | Yes | Yes | Business tier |
 | **ContainAI** | **Yes** | **Yes** | **Yes** | **Free** |
 | Anthropic SRT | No | No | No | Free |
@@ -130,7 +130,7 @@ flowchart LR
     end
 
     DD -->|"standard runc"| Sandbox
-    DD -.->|"NO user namespaces"| Sandbox
+    DD -.->|"userns off by default"| Sandbox
 
     style Host fill:#1a1a2e,stroke:#16213e,color:#fff
     style Sandbox fill:#e94560,stroke:#16213e,color:#fff
