@@ -47,21 +47,37 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine build strategy
+        id: build_strategy
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "platforms=linux/amd64" >> $GITHUB_OUTPUT
+            echo "push=true" >> $GITHUB_OUTPUT
+            echo "tag_suffix=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
+            echo "push=true" >> $GITHUB_OUTPUT
+            echo "tag_suffix=latest" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push base image
         uses: docker/build-push-action@v6
         with:
           context: src
           file: src/Dockerfile.base
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/base:latest
+          platforms: ${{ steps.build_strategy.outputs.platforms }}
+          push: ${{ steps.build_strategy.outputs.push }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/base:${{ steps.build_strategy.outputs.tag_suffix }}
+          build-args: |
+            BUILD_DATE=${{ github.run_started_at }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.image_version.outputs.version }}
           cache-from: type=gha,scope=base
           cache-to: type=gha,mode=max,scope=base
 
@@ -70,10 +86,11 @@ jobs:
         with:
           context: src
           file: src/Dockerfile.sdks
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/sdks:latest
+          platforms: ${{ steps.build_strategy.outputs.platforms }}
+          push: ${{ steps.build_strategy.outputs.push }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/sdks:${{ steps.build_strategy.outputs.tag_suffix }}
           build-args: |
+            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/base:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ steps.image_version.outputs.version }}
@@ -85,14 +102,15 @@ jobs:
         with:
           context: src
           file: src/Dockerfile.full
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/full:latest
-          cache-from: type=gha,scope=full
+          platforms: ${{ steps.build_strategy.outputs.platforms }}
+          push: ${{ steps.build_strategy.outputs.push }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/full:${{ steps.build_strategy.outputs.tag_suffix }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            SDKS_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/sdks:${{ steps.build_strategy.outputs.tag_suffix }}
+            BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.image_version.outputs.version }}
+          cache-from: type=gha,scope=full
           cache-to: type=gha,mode=max,scope=full
 
       - name: Extract metadata (tags, labels)
@@ -117,10 +135,11 @@ jobs:
         with:
           context: src
           file: src/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          platforms: ${{ steps.build_strategy.outputs.platforms }}
+          push: ${{ steps.build_strategy.outputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
+            FULL_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/full:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ steps.image_version.outputs.version }}
