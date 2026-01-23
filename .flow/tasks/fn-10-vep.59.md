@@ -10,10 +10,10 @@ Implement `cai import` for hot-reload of config into running container.
 
 1. `cai import /path/to/workspace` reloads config into running container
 2. Hot-reload targets:
-   - Environment variables from .env
-   - Credentials (SSH keys, API tokens)
+   - Environment variables from .env (persistent via bashrc.d hook)
+   - Credentials: API tokens synced to volume, SSH via agent forwarding
    - Git config
-3. Uses SSH to inject changes (not docker exec)
+3. Uses SSH to inject changes (not docker exec), with retry and host-key recovery
 4. Does NOT restart container
 
 ## Key context
@@ -22,13 +22,14 @@ Implement `cai import` for hot-reload of config into running container.
 - Re-runs credential sync that normally happens at container start
 - Validates container is running first
 ## Acceptance
-- [ ] `cai import /path/to/workspace` command works
-- [ ] Reloads .env variables into container
-- [ ] Reloads credentials (SSH agent keys, tokens)
-- [ ] Reloads git config
-- [ ] Uses SSH (not docker exec)
-- [ ] Clear output showing what was imported
-- [ ] Errors if container not running
+- [x] `cai import /path/to/workspace` command works
+- [x] Reloads .env variables into container (via bashrc.d hook for persistence)
+- [x] Reloads credentials: API tokens synced to volume, SSH via agent forwarding
+      (SSH keys stay on host for security - use `ssh -A` or config `forward_agent = true`)
+- [x] Reloads git config (copies from data volume to agent home)
+- [x] Uses SSH (not docker exec) with retry and host-key recovery
+- [x] Clear output showing what was imported
+- [x] Errors if container not running
 ## Done summary
 Implemented hot-reload for `cai import` command. When a workspace path is provided (positional or via --workspace), configs are synced to the data volume AND reloaded into the running container via SSH without restarting. The command validates the container is running before proceeding and shows clear output of what was reloaded (env vars and git config).
 ## Evidence
