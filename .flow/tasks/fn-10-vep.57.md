@@ -24,9 +24,8 @@ Support `--data-volume` flag for custom data volume names.
 - [ ] Existing containers with different volume error without `--fresh`
 - [ ] Help text documents the flag
 ## Done summary
-TBD
-
+Added `containai.data-volume` label to container creation. The `--data-volume` flag was already implemented in `cai run` and `cai shell` commands with proper precedence (CLI > config.toml > default). Volume mismatch checking was already implemented to error when existing containers have different volumes unless `--fresh` is used.
 ## Evidence
 - Commits:
-- Tests:
+- Tests: bash -n src/lib/container.sh, shellcheck -x src/lib/container.sh
 - PRs:

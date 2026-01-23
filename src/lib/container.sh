@@ -1790,6 +1790,7 @@ _containai_start_container() {
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
             args+=(--label "containai.ssh-port=$ssh_port")
+            args+=(--label "containai.data-volume=$data_volume")
             # Store image-tag label when explicitly specified (advanced/debugging feature)
             if [[ -n "$image_tag" ]]; then
                 args+=(--label "containai.image-tag=$image_tag")

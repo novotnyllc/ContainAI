@@ -18,3 +18,7 @@ disable=SC1091
 # SC2155: Declare and assign separately (allowed for simple cases)
 # Uncomment if you want to allow: local foo=$(cmd)
 # disable=SC2155
+
+# SC2317: Command appears unreachable (false positive for sourced scripts)
+# The "return 1 2>/dev/null || exit 1" pattern handles both sourced and direct execution
+disable=SC2317
