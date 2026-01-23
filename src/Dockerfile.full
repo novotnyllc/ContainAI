@@ -65,7 +65,7 @@ ENV PATH="/home/agent/.local/bin:${PATH}"
 # Install Gemini CLI, Codex, and agent-browser via bun
 # Using --trust to allow postinstall scripts
 RUN . /home/agent/.nvm/nvm.sh && \
-    bun install -g --trust @google/gemini-cli @openai/codex agent-browser && \
+    bun install -g --trust @google/gemini-cli @openai/codex agent-browser && agent-browser install \
     # Verify installations
     gemini --version && \
     codex --version
@@ -216,7 +216,7 @@ LABEL org.opencontainers.image.title="ContainAI Full" \
       org.opencontainers.image.url="https://github.com/novotnyllc/containai" \
       org.opencontainers.image.source="https://github.com/novotnyllc/containai" \
       org.opencontainers.image.documentation="https://github.com/novotnyllc/containai#readme" \
-      org.opencontainers.image.vendor="Novotny LLC" \
+      org.opencontainers.image.vendor="Claire Novotny LLC" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \

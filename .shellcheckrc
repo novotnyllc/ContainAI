@@ -1,0 +1,20 @@
+# ShellCheck configuration for ContainAI
+# https://www.shellcheck.net/wiki/
+
+# Default shell dialect
+shell=bash
+
+# Enable external sourcing (for source ./lib/*.sh patterns)
+external-sources=true
+
+# Disable specific warnings that conflict with project conventions:
+
+# SC2034: Variable appears unused (false positives with sourced files)
+disable=SC2034
+
+# SC1091: Not following sourced files (we use external-sources instead)
+disable=SC1091
+
+# SC2155: Declare and assign separately (allowed for simple cases)
+# Uncomment if you want to allow: local foo=$(cmd)
+# disable=SC2155

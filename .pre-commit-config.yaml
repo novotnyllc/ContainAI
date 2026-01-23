@@ -1,0 +1,32 @@
+# Pre-commit hooks for ContainAI
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        args: ['-x']  # Follow sourced files
+        files: \.(sh|bash)$
+        types: [text]
+        # Include all shell scripts
+        exclude: ^(.flow/|scripts/ralph/runs/)
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.8.0-1
+    hooks:
+      - id: shfmt
+        args: ['-i', '4', '-ci', '-bn']  # 4-space indent, case indent, binary ops at start
+        files: \.(sh|bash)$
+        exclude: ^(.flow/|scripts/ralph/runs/)

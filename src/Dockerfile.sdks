@@ -89,7 +89,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         python3-pip \
         python3-venv \
         python3-dev \
-        pipx
+        pipx \
+        # Additional dev tools
+        shellcheck \
+        shfmt
 
 # Copy .NET SDK from installer stage
 ENV DOTNET_ROOT=/home/agent/.dotnet
@@ -114,11 +117,10 @@ ENV DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
 USER agent
 WORKDIR /home/agent
 
-# Install Rust with minimal profile (no docs, clippy, rustfmt by default)
-# These can be added later with: rustup component add clippy rustfmt
+# Install Rust via rustup
 ARG RUST_VERSION=stable
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --default-toolchain ${RUST_VERSION} --profile minimal && \
+    sh -s -- -y --default-toolchain ${RUST_VERSION} && \
     # Source cargo env and verify installation
     . /home/agent/.cargo/env && \
     rustc --version && \
@@ -209,7 +211,7 @@ LABEL org.opencontainers.image.title="ContainAI SDKs" \
       org.opencontainers.image.url="https://github.com/novotnyllc/containai" \
       org.opencontainers.image.source="https://github.com/novotnyllc/containai" \
       org.opencontainers.image.documentation="https://github.com/novotnyllc/containai#readme" \
-      org.opencontainers.image.vendor="Novotny LLC" \
+      org.opencontainers.image.vendor="Claire Novotny LLC" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
