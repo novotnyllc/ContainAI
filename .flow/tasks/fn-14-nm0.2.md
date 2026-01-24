@@ -101,11 +101,8 @@ Upstream Issue: This behavior is tracked in the WSL repository https://github.co
 - [ ] **Running `cai setup` twice is idempotent**
 
 ## Done summary
-
-TBD
-
+Implemented WSL2 mirrored networking mode detection and blocking as Step 0 in _cai_setup_wsl2(). Added _cai_detect_wsl2_mirrored_mode() to parse .wslconfig [wsl2] section using awk with IGNORECASE, and _cai_handle_wsl2_mirrored_mode() to offer interactive fix with proper error handling. Returns code 75 for WSL restart required, 1 for declined/error, 2 for unknown detection state.
 ## Evidence
-
-- Commits:
-- Tests:
+- Commits: 2e72a3e411ea243c831eba07be95d33e9ced340e
+- Tests: shellcheck -x src/lib/setup.sh
 - PRs:
