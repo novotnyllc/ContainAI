@@ -124,11 +124,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: src
-          file: src/Dockerfile.full
+          file: src/Dockerfile.agents
           platforms: ${{ steps.build_strategy.outputs.platforms }}
           push: ${{ steps.build_strategy.outputs.push }}
           load: ${{ steps.build_strategy.outputs.load }}
-          tags: ${{ steps.build_strategy.outputs.image_prefix }}/full:${{ steps.build_strategy.outputs.tag_suffix }}
+          tags: ${{ steps.build_strategy.outputs.image_prefix }}/agents:${{ steps.build_strategy.outputs.tag_suffix }}
           build-args: |
             SDKS_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/sdks:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
@@ -166,7 +166,7 @@ jobs:
           load: ${{ steps.build_strategy.outputs.load }}
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
-            FULL_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/full:${{ steps.build_strategy.outputs.tag_suffix }}
+            AGENTS_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/agents:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ steps.image_version.outputs.version }}

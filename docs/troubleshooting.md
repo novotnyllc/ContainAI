@@ -731,7 +731,7 @@ sudo systemctl enable containai-docker  # Auto-start on boot
 
 **Symptom:**
 ```
-[ERROR] Image not found: ghcr.io/novotnyllc/containai/full:latest
+[ERROR] Image not found: ghcr.io/novotnyllc/containai/agents:latest
 ```
 
 **Diagnosis:**
@@ -743,7 +743,7 @@ docker --context containai-docker images | grep containai
 
 Pull the required image:
 ```bash
-docker --context containai-docker pull ghcr.io/novotnyllc/containai/full:latest
+docker --context containai-docker pull ghcr.io/novotnyllc/containai/agents:latest
 ```
 
 ### "Container exists but was not created by ContainAI"

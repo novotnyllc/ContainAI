@@ -2,12 +2,12 @@
 # ContainAI - AI Agent Sandbox
 #
 # This is the default build target that creates the full image with all AI agents.
-# For layer-specific builds, use Dockerfile.base, Dockerfile.sdks, or Dockerfile.full.
+# For layer-specific builds, use Dockerfile.base, Dockerfile.sdks, or Dockerfile.agents.
 #
 # Build order (if building from scratch):
 #   docker build -t containai/base -f src/Dockerfile.base src/
 #   docker build -t containai/sdks -f src/Dockerfile.sdks src/
-#   docker build -t containai/full -f src/Dockerfile.full src/
+#   docker build -t containai/full -f src/Dockerfile.agents src/
 #   docker build -t containai -f src/Dockerfile src/
 #
 # Quick build (uses pre-built layers):
@@ -17,8 +17,8 @@
 
 # Use the full image as the default build target
 # This provides the complete AI agent sandbox with all tools
-ARG FULL_IMAGE=ghcr.io/novotnyllc/containai/full:latest
-FROM ${FULL_IMAGE}
+ARG AGENTS_IMAGE=ghcr.io/novotnyllc/containai/agents:latest
+FROM ${AGENTS_IMAGE}
 
 # Dynamic build args at end to avoid cache invalidation
 ARG BUILD_DATE=unknown

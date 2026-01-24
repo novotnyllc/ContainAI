@@ -4,7 +4,7 @@
 # Includes: Claude Code, Gemini CLI, Copilot, Codex, OpenCode, agent-browser, gh CLI
 #
 # Usage (from repo root, requires BuildKit):
-#   docker build -t containai/full -f src/Dockerfile.full src/
+#   docker build -t containai/full -f src/Dockerfile.agents src/
 #
 # Requires containai/sdks:latest to be built first:
 #   docker build -t containai/base -f src/Dockerfile.base src/

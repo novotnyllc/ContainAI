@@ -392,7 +392,7 @@ case "$BUILD_LAYER" in
             --build-arg BASE_IMAGE="${IMAGE_BASE}:latest"
         ;;
     full)
-        build_layer "full" "Dockerfile.full" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
+        build_layer "full" "Dockerfile.agents" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
         ;;
     all)
         echo "Building all ContainAI layers..."
@@ -403,7 +403,7 @@ case "$BUILD_LAYER" in
         build_layer "sdks" "Dockerfile.sdks" \
             --build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL" \
             --build-arg BASE_IMAGE="${IMAGE_BASE}:latest"
-        build_layer "full" "Dockerfile.full" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
+        build_layer "full" "Dockerfile.agents" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
 
         # Build final alias image
         echo ""
@@ -429,7 +429,7 @@ case "$BUILD_LAYER" in
             -t "${IMAGE_MAIN}:${DATE_TAG}" \
             --build-arg BUILD_DATE="$BUILD_DATE" \
             --build-arg VCS_REF="$VCS_REF" \
-            --build-arg FULL_IMAGE="${IMAGE_FULL}:latest" \
+            --build-arg AGENTS_IMAGE="${IMAGE_FULL}:latest" \
             ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
             -f "${SCRIPT_DIR}/Dockerfile" \
             "$SCRIPT_DIR"

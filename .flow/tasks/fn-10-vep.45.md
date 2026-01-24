@@ -4,7 +4,7 @@
 Create the full Dockerfile layer with AI agents and gh CLI.
 
 **Size:** M
-**Files:** src/Dockerfile.full (new), src/Dockerfile (update to multi-stage)
+**Files:** src/Dockerfile.agents (new), src/Dockerfile (update to multi-stage)
 
 ## Approach
 
@@ -23,7 +23,7 @@ Create the full Dockerfile layer with AI agents and gh CLI.
 - Keep exact install commands from current src/Dockerfile
 - gh CLI: `curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg`
 ## Acceptance
-- [ ] `src/Dockerfile.full` created
+- [ ] `src/Dockerfile.agents` created
 - [ ] Builds from `containai/sdks:latest`
 - [ ] All AI agents installed (claude, gemini, copilot, codex, opencode)
 - [ ] gh CLI installed and `gh --version` works

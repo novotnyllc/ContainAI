@@ -308,7 +308,7 @@ docker --context docker-containai run -d \
   --label "containai.ssh-port=$ssh_port" \
   --stop-timeout 100 \
   --name "${container_name}" \
-  ghcr.io/containai/full:latest
+  ghcr.io/containai/agents:latest
 ```
 
 ## References
