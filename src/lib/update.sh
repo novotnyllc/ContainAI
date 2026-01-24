@@ -72,6 +72,7 @@ to their latest versions. Safe to run multiple times (idempotent).
 Options:
   --dry-run         Show what would be done without making changes
   --force           Skip confirmation prompts (e.g., VM recreation on macOS)
+  --lima-recreate   Force Lima VM recreation (macOS only; currently always recreates)
   --verbose, -v     Show verbose output
   -h, --help        Show this help message
 
@@ -97,6 +98,7 @@ Examples:
   cai update                    Update installation
   cai update --dry-run          Preview what would be updated
   cai update --force            Update without confirmation prompts
+  cai update --lima-recreate    Force VM recreation (macOS)
 EOF
 }
 
@@ -537,6 +539,7 @@ _cai_update_macos() {
 _cai_update() {
     local dry_run="false"
     local force="false"
+    local lima_recreate="false"
     local verbose="false"
 
     # Parse arguments
@@ -548,6 +551,12 @@ _cai_update() {
                 ;;
             --force)
                 force="true"
+                shift
+                ;;
+            --lima-recreate)
+                # Currently a no-op since we always recreate the VM
+                # Reserved for future "currentness" check implementation
+                lima_recreate="true"
                 shift
                 ;;
             --verbose | -v)
@@ -565,6 +574,10 @@ _cai_update() {
                 ;;
         esac
     done
+
+    # Suppress shellcheck warning for reserved variable
+    # shellcheck disable=SC2034
+    : "${lima_recreate}"  # Reserved for future use
 
     # Header
     printf '%s\n' ""
