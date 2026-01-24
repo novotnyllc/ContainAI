@@ -740,8 +740,13 @@ _cai_cleanup_legacy_paths() {
 
     # Clean up old context (use -f to avoid prompts in non-interactive mode)
     # Guard with command -v docker to avoid noisy errors if Docker isn't installed
+    # NOTE: On macOS, defer context removal to _cai_cleanup_legacy_lima_vm() to ensure
+    #       users keep a working context if the new VM setup fails midway.
     if command -v docker >/dev/null 2>&1 && docker context inspect "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
-        if [[ "$dry_run" == "true" ]]; then
+        if _cai_is_macos; then
+            # On macOS, legacy context cleanup is deferred to after VM verification
+            [[ "$verbose" == "true" ]] && _cai_info "Legacy context cleanup deferred until after VM verification (macOS)"
+        elif [[ "$dry_run" == "true" ]]; then
             _cai_info "[DRY-RUN] Would remove legacy context: $_CAI_LEGACY_CONTEXT"
         else
             _cai_info "Removing legacy context: $_CAI_LEGACY_CONTEXT"
@@ -793,48 +798,77 @@ _cai_cleanup_legacy_paths() {
     return 0
 }
 
-# Clean up legacy Lima VM (containai-secure -> containai-docker rename)
+# Clean up legacy Lima VM and context (containai-secure -> containai-docker rename)
 # Arguments: $1 = dry_run flag ("true" to simulate)
 #            $2 = verbose flag ("true" for verbose output)
 # Returns: 0=success (cleanup complete or nothing to clean)
 # Note: This is called AFTER the new Lima VM is verified working, to avoid
 #       leaving users without a working VM if setup fails midway.
 #       Only runs on macOS - Lima is macOS-specific for ContainAI.
+#       Also cleans up the legacy Docker context (deferred from _cai_cleanup_legacy_paths).
 _cai_cleanup_legacy_lima_vm() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
+    local has_legacy_vm=false
+    local has_legacy_context=false
 
-    # Skip if not macOS or Lima not installed
+    # Skip if not macOS
     if ! _cai_is_macos; then
         return 0
     fi
-    if ! command -v limactl >/dev/null 2>&1; then
+
+    # Check what legacy resources exist
+    if command -v limactl >/dev/null 2>&1 && _cai_lima_vm_exists "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
+        has_legacy_vm=true
+    fi
+    if command -v docker >/dev/null 2>&1 && docker context inspect "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
+        has_legacy_context=true
+    fi
+
+    # Nothing to clean up
+    if [[ "$has_legacy_vm" == "false" ]] && [[ "$has_legacy_context" == "false" ]]; then
+        [[ "$verbose" == "true" ]] && _cai_info "No legacy Lima VM or context to clean up"
         return 0
     fi
 
-    # Check if legacy VM exists
-    if ! _cai_lima_vm_exists "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
-        [[ "$verbose" == "true" ]] && _cai_info "No legacy Lima VM to clean up"
-        return 0
-    fi
-
-    _cai_step "Cleaning up legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+    _cai_step "Cleaning up legacy macOS resources"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+        [[ "$has_legacy_vm" == "true" ]] && _cai_info "[DRY-RUN] Would delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+        [[ "$has_legacy_context" == "true" ]] && _cai_info "[DRY-RUN] Would remove legacy context: $_CAI_LEGACY_CONTEXT"
         _cai_info "[DRY-RUN] (Safe to delete: new VM '$_CAI_LIMA_VM_NAME' is verified working)"
         return 0
     fi
 
-    _cai_info "New VM '$_CAI_LIMA_VM_NAME' is working, removing legacy VM"
-    _cai_info "  (Legacy VM was ContainAI-dedicated with no user data)"
+    _cai_info "New VM '$_CAI_LIMA_VM_NAME' is working, cleaning up legacy resources"
 
-    # Stop the VM first if running
-    limactl stop "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null || true
-    if limactl delete -f "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
-        _cai_ok "Legacy Lima VM deleted"
-    else
-        _cai_warn "Failed to delete legacy Lima VM (not critical, continuing)"
+    # Clean up legacy context first (doesn't depend on VM)
+    if [[ "$has_legacy_context" == "true" ]]; then
+        _cai_info "Removing legacy context: $_CAI_LEGACY_CONTEXT"
+        # Switch to default context first if legacy context is active
+        local current_context
+        current_context=$(docker context show 2>/dev/null || true)
+        if [[ "$current_context" == "$_CAI_LEGACY_CONTEXT" ]]; then
+            docker context use default >/dev/null 2>&1 || true
+        fi
+        if docker context rm -f "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
+            _cai_ok "Legacy context removed"
+        else
+            _cai_warn "Failed to remove legacy context (not critical)"
+        fi
+    fi
+
+    # Clean up legacy VM
+    if [[ "$has_legacy_vm" == "true" ]]; then
+        _cai_info "Removing legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+        _cai_info "  (VM was ContainAI-dedicated with no user data)"
+        # Stop the VM first if running
+        limactl stop "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null || true
+        if limactl delete -f "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
+            _cai_ok "Legacy Lima VM deleted"
+        else
+            _cai_warn "Failed to delete legacy Lima VM (not critical)"
+        fi
     fi
 
     return 0
@@ -2136,7 +2170,7 @@ _cai_lima_verify_install() {
 
     # Test Sysbox by running minimal container
     _cai_step "Testing sysbox-runc with minimal container"
-    local test_output test_rc test_passed=false
+    local test_output test_rc
     test_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
     if [[ $test_rc -ne 0 ]]; then
@@ -2146,7 +2180,6 @@ _cai_lima_verify_install() {
         return 1
     elif [[ "$test_output" == *"sysbox-test-ok"* ]]; then
         _cai_ok "Sysbox test container succeeded"
-        test_passed=true
     else
         _cai_error "Sysbox test container did not produce expected output"
         _cai_error "  Output: $test_output"
@@ -2193,8 +2226,8 @@ _cai_setup_macos() {
     _cai_info "  - Use --context $_CAI_CONTAINAI_DOCKER_CONTEXT to access Sysbox"
     printf '\n'
 
-    # Step 0: Clean up legacy paths (including old Lima VM if present)
-    # This is called explicitly for macOS since we have Lima-specific cleanup
+    # Step 0: Clean up legacy paths (sockets, contexts, drop-ins)
+    # Note: Lima VM cleanup happens AFTER new VM is verified (Step 6)
     if ! _cai_cleanup_legacy_paths "$dry_run" "$verbose"; then
         _cai_warn "Legacy path cleanup had issues - continuing anyway"
     fi
@@ -2220,13 +2253,25 @@ _cai_setup_macos() {
     fi
 
     # Step 5: Verify installation
+    local verify_ok=true
     if ! _cai_lima_verify_install "$dry_run" "$verbose"; then
         _cai_warn "Lima + Sysbox verification had issues - check output above"
+        verify_ok=false
     fi
 
-    # Step 6: Clean up legacy Lima VM (only now that new VM is verified working)
-    # This ensures users aren't left without a working VM if setup fails midway
-    _cai_cleanup_legacy_lima_vm "$dry_run" "$verbose"
+    # Step 6: Clean up legacy Lima VM (only if new VM is verified working)
+    # This ensures users aren't left without a working VM if setup fails
+    if [[ "$verify_ok" == "true" ]]; then
+        _cai_cleanup_legacy_lima_vm "$dry_run" "$verbose"
+    else
+        # Don't delete legacy VM if new VM has issues - user may need fallback
+        if _cai_is_macos && _cai_lima_vm_exists "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
+            _cai_warn "Legacy Lima VM '$_CAI_LEGACY_LIMA_VM_NAME' preserved (new VM had issues)"
+            _cai_info "To manually migrate after fixing issues:"
+            _cai_info "  limactl stop $_CAI_LEGACY_LIMA_VM_NAME"
+            _cai_info "  limactl delete $_CAI_LEGACY_LIMA_VM_NAME"
+        fi
+    fi
 
     printf '\n'
     _cai_ok "Secure Engine setup complete (macOS/Lima)"
