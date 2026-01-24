@@ -13,7 +13,7 @@
 #
 # What gets removed (system-level installation):
 #   - containai-docker.service - systemd unit file
-#   - Docker context: containai-secure / docker-containai
+#   - Docker context: containai-docker, containai-secure (legacy)
 #   - With --containers: containers with containai.managed=true label
 #   - With --volumes: associated container volumes
 #
@@ -61,7 +61,9 @@ _CAI_UNINSTALL_SERVICE="containai-docker"
 _CAI_UNINSTALL_SERVICE_FILE="/etc/systemd/system/containai-docker.service"
 
 # Docker contexts that may be created by ContainAI
-_CAI_UNINSTALL_CONTEXTS=("containai-secure" "docker-containai")
+# Uses $_CAI_CONTAINAI_DOCKER_CONTEXT from docker.sh (sourced before this file)
+# Legacy contexts are kept for cleanup of older installations
+_CAI_UNINSTALL_CONTEXTS=("$_CAI_CONTAINAI_DOCKER_CONTEXT" "containai-secure" "docker-containai")
 
 # ==============================================================================
 # Systemd Service Removal
@@ -257,7 +259,7 @@ _cai_uninstall_containers() {
         fi
     done < <(docker ps -aq --filter "label=containai.managed=true" 2>/dev/null || true)
 
-    # Check containai-secure context
+    # Check all ContainAI-related contexts for containers
     for ctx in "${_CAI_UNINSTALL_CONTEXTS[@]}"; do
         if docker context inspect "$ctx" >/dev/null 2>&1; then
             while IFS= read -r container_id; do
@@ -486,7 +488,7 @@ _cai_uninstall() {
     printf '%s\n' ""
     printf '%s\n' "The following will be REMOVED:"
     printf '%s\n' "  - containai-docker.service (systemd unit)"
-    printf '%s\n' "  - Docker contexts: containai-secure, docker-containai"
+    printf '%s\n' "  - Docker contexts: containai-docker, containai-secure, docker-containai (legacy)"
     if [[ "$remove_containers" == "true" ]]; then
         printf '%s\n' "  - All ContainAI containers (--containers)"
         if [[ "$remove_volumes" == "true" ]]; then
@@ -594,7 +596,7 @@ Options:
 
 What Gets Removed:
   - containai-docker.service (systemd unit)
-  - Docker contexts: containai-secure, docker-containai
+  - Docker contexts: containai-docker, containai-secure, docker-containai (legacy)
 
 What Gets Removed with --containers:
   - All containers with containai.managed=true label

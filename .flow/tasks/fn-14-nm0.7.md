@@ -43,9 +43,22 @@ _CAI_UNINSTALL_CONTEXTS=("$_CAI_CONTAINAI_DOCKER_CONTEXT" "containai-secure" "do
 - [ ] Help text lists `containai-docker` as context that will be removed
 - [ ] `shellcheck -x src/lib/uninstall.sh` passes
 ## Done summary
-TBD
+## Summary
 
+Updated `cai uninstall` to properly remove the `containai-docker` context that is actually created during setup.
+
+### Changes Made
+
+1. **Updated `_CAI_UNINSTALL_CONTEXTS` array** (line 66): Now uses the `$_CAI_CONTAINAI_DOCKER_CONTEXT` constant from `docker.sh` instead of hardcoding, with legacy contexts for backward compatibility.
+
+2. **Updated header comment** (line 16): Reflects the current context name being removed.
+
+3. **Updated dry-run/info output** (line 491): Shows `containai-docker, containai-secure (legacy)` instead of the old context names.
+
+4. **Updated help text** (line 599): Lists the correct context names in the "What Gets Removed" section.
+
+All changes pass shellcheck and the dry-run output correctly shows the `containai-docker` context.
 ## Evidence
 - Commits:
-- Tests:
+- Tests: shellcheck -x src/lib/uninstall.sh, cai uninstall --dry-run, cai uninstall --help
 - PRs:
