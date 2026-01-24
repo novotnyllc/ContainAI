@@ -552,10 +552,18 @@ _cai_doctor() {
     printf '%s\n' "ContainAI Docker"
 
     # Check containai docker availability
+    # Socket path display is platform-dependent
+    local display_socket
+    if _cai_is_macos; then
+        display_socket="$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock"
+    else
+        display_socket="$_CAI_CONTAINAI_DOCKER_SOCKET"
+    fi
+
     if _cai_containai_docker_available; then
         containai_docker_ok="true"
         printf '  %-44s %s\n' "Context '$_CAI_CONTAINAI_DOCKER_CONTEXT':" "[OK]"
-        printf '  %-44s %s\n' "Socket: $_CAI_CONTAINAI_DOCKER_SOCKET" "[OK]"
+        printf '  %-44s %s\n' "Socket: $display_socket" "[OK]"
 
         # Check if sysbox-runc is available and default
         if _cai_containai_docker_has_sysbox; then
@@ -582,24 +590,39 @@ _cai_doctor() {
                 ;;
             wrong_endpoint)
                 printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' points to wrong socket)"
-                printf '  %-44s %s\n' "" "(Expected: unix://$_CAI_CONTAINAI_DOCKER_SOCKET)"
+                printf '  %-44s %s\n' "" "(Expected: unix://$display_socket)"
                 printf '  %-44s %s\n' "" "(Run 'cai setup' to reconfigure)"
                 ;;
             socket_not_found)
-                printf '  %-44s %s\n' "" "(Socket $_CAI_CONTAINAI_DOCKER_SOCKET not found)"
-                printf '  %-44s %s\n' "" "(Run 'cai setup' or start service: sudo systemctl start containai-docker)"
+                printf '  %-44s %s\n' "" "(Socket $display_socket not found)"
+                if _cai_is_macos; then
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' or start Lima VM: limactl start $_CAI_CONTAINAI_DOCKER_CONTEXT)"
+                else
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' or start service: sudo systemctl start containai-docker)"
+                fi
                 ;;
             connection_refused | daemon_unavailable)
-                printf '  %-44s %s\n' "" "(containai-docker service not running)"
-                printf '  %-44s %s\n' "" "(Try: sudo systemctl start containai-docker)"
+                if _cai_is_macos; then
+                    printf '  %-44s %s\n' "" "(Lima VM '$_CAI_CONTAINAI_DOCKER_CONTEXT' not running)"
+                    printf '  %-44s %s\n' "" "(Try: limactl start $_CAI_CONTAINAI_DOCKER_CONTEXT)"
+                else
+                    printf '  %-44s %s\n' "" "(containai-docker service not running)"
+                    printf '  %-44s %s\n' "" "(Try: sudo systemctl start containai-docker)"
+                fi
                 ;;
             permission_denied)
                 printf '  %-44s %s\n' "" "(Permission denied accessing Docker socket)"
-                printf '  %-44s %s\n' "" "(Add user to docker group: sudo usermod -aG docker \$USER)"
+                if ! _cai_is_macos; then
+                    printf '  %-44s %s\n' "" "(Add user to docker group: sudo usermod -aG docker \$USER)"
+                fi
                 ;;
             timeout)
                 printf '  %-44s %s\n' "" "(Docker command timed out)"
-                printf '  %-44s %s\n' "" "(Check if daemon is responsive: sudo systemctl status containai-docker)"
+                if _cai_is_macos; then
+                    printf '  %-44s %s\n' "" "(Check Lima VM status: limactl list)"
+                else
+                    printf '  %-44s %s\n' "" "(Check if daemon is responsive: sudo systemctl status containai-docker)"
+                fi
                 ;;
             no_timeout)
                 printf '  %-44s %s\n' "" "(No timeout command available)"

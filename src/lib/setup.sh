@@ -780,9 +780,9 @@ _cai_cleanup_legacy_paths() {
     fi
 
     # Clean up legacy Lima VM on macOS (containai-secure -> containai-docker rename)
-    # Note: Only attempt if limactl is available (macOS with Lima installed)
+    # Note: Only runs on macOS - Lima is macOS-specific for ContainAI
     # Uses _cai_lima_vm_exists for consistent detection across Lima versions
-    if command -v limactl >/dev/null 2>&1; then
+    if _cai_is_macos && command -v limactl >/dev/null 2>&1; then
         # Check if legacy VM exists using the same function as _cai_lima_create_vm
         if _cai_lima_vm_exists "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
             if [[ "$dry_run" == "true" ]]; then
@@ -1755,11 +1755,13 @@ _cai_lima_vm_exists() {
     local vm_name="${1:-$_CAI_LIMA_VM_NAME}"
     # Use limactl list with format flag for reliable detection
     # Falls back to grep-based check if format flag not available
-    if limactl list --format '{{.Name}}' 2>/dev/null | grep -qx "$vm_name"; then
+    # Use -Fx for literal fixed-string exact match (safer than regex)
+    if limactl list --format '{{.Name}}' 2>/dev/null | grep -Fqx "$vm_name"; then
         return 0
     fi
     # Fallback: JSON parsing (less reliable but works with older Lima)
-    limactl list --json 2>/dev/null | grep -q "\"name\":\"$vm_name\"" || limactl list --json 2>/dev/null | grep -q "\"name\": \"$vm_name\""
+    # Use -F for literal fixed-string match
+    limactl list --json 2>/dev/null | grep -Fq "\"name\":\"$vm_name\"" || limactl list --json 2>/dev/null | grep -Fq "\"name\": \"$vm_name\""
 }
 
 # Get Lima VM status

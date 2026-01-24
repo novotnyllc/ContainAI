@@ -94,6 +94,6 @@ All platforms now consistently use `containai-docker` as the Docker context name
 
 Old macOS installs with `containai-secure` VM will be migrated on next `cai setup`.
 ## Evidence
-- Commits: 0592fdb, 13ce372, 44f661e
-- Tests: shellcheck -x src/lib/setup.sh (passes), shellcheck -x src/lib/doctor.sh (passes), source src/containai.sh && echo $_CAI_LIMA_VM_NAME (containai-docker)
+- Commits:
+- Tests:
 - PRs:

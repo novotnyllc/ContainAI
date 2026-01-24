@@ -317,6 +317,9 @@ _CAI_CONTAINAI_DOCKER_UNIT="/etc/systemd/system/containai-docker.service"
 # Check if containai-docker context exists and points to the correct socket
 # Returns: 0=exists with correct endpoint, 1=does not exist or wrong endpoint
 # Outputs: Sets _CAI_CONTAINAI_CONTEXT_ERROR with error details
+# Note: Expected socket path is platform-dependent:
+#   - Linux/WSL2: /var/run/containai-docker.sock
+#   - macOS: ~/.lima/containai-docker/sock/docker.sock
 _cai_containai_docker_context_exists() {
     _CAI_CONTAINAI_CONTEXT_ERROR=""
 
@@ -330,8 +333,15 @@ _cai_containai_docker_context_exists() {
         return 1
     fi
 
-    # Verify the context points to the expected socket
-    local expected_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+    # Verify the context points to the expected socket (platform-dependent)
+    local expected_host
+    if _cai_is_macos; then
+        # macOS uses Lima VM socket
+        expected_host="unix://$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock"
+    else
+        # Linux/WSL2 uses isolated daemon socket
+        expected_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+    fi
     local actual_host
     actual_host=$(docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
 
@@ -345,8 +355,13 @@ _cai_containai_docker_context_exists() {
 
 # Check if containai-docker socket exists
 # Returns: 0=socket exists, 1=socket does not exist
+# Note: Socket path is platform-dependent (Linux/WSL2 vs macOS Lima)
 _cai_containai_docker_socket_exists() {
-    [[ -S "$_CAI_CONTAINAI_DOCKER_SOCKET" ]]
+    if _cai_is_macos; then
+        [[ -S "$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock" ]]
+    else
+        [[ -S "$_CAI_CONTAINAI_DOCKER_SOCKET" ]]
+    fi
 }
 
 # Check if containai-docker daemon is accessible
