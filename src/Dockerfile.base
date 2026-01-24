@@ -276,6 +276,9 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 ENV PATH="/home/agent/.bun/bin:${PATH}"
 
+# Install pnpm (Node.js package manager)
+RUN wget -qO- https://get.pnpm.io/install.sh | ENV="$HOME/.bashrc" SHELL="$(which bash)" bash -
+
 # =============================================================================
 # NODE.JS (via nvm)
 # =============================================================================

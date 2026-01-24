@@ -64,8 +64,10 @@ ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # Install Gemini CLI, Codex, and agent-browser via bun
 # Using --trust to allow postinstall scripts
-RUN . /home/agent/.nvm/nvm.sh && \
-    bun install -g --trust @google/gemini-cli @openai/codex agent-browser skills && agent-browser install --with-deps \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    . /home/agent/.nvm/nvm.sh && \
+    bun install -g --trust @google/gemini-cli @openai/codex playwright agent-browser skills && agent-browser install --with-deps \
     # Verify installations
     gemini --version && \
     codex --version
