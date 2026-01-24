@@ -3,7 +3,7 @@
 # Integration tests for ContainAI Secure Engine
 # ==============================================================================
 # Verifies:
-# 1. containai-secure Docker context exists with correct endpoint
+# 1. containai-docker Docker context exists with correct endpoint
 # 2. Engine is reachable via context
 # 3. sysbox-runc runtime is available (NOT default - by design)
 # 4. User namespace isolation works with --runtime=sysbox-runc
@@ -43,8 +43,8 @@ section() {
 
 FAILED=0
 
-# Context name constant
-CONTEXT_NAME="containai-secure"
+# Context name constant - use from lib/docker.sh (sourced via containai.sh)
+CONTEXT_NAME="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
 
 # Default timeout for docker commands (seconds)
 TEST_TIMEOUT=30
@@ -67,17 +67,13 @@ test_context_exists() {
     section "Test 1: Context exists with correct endpoint"
 
     # Determine expected socket based on platform
-    # - WSL2: Uses dedicated socket at _CAI_SECURE_SOCKET
+    # - Linux/WSL2: Uses isolated socket at _CAI_CONTAINAI_DOCKER_SOCKET
     # - macOS: Uses Lima socket at _CAI_LIMA_SOCKET_PATH
-    # - Native Linux: Uses default socket at /var/run/docker.sock
     local platform expected_socket
     platform=$(_cai_detect_platform)
     case "$platform" in
-        wsl)
-            expected_socket="unix://$_CAI_SECURE_SOCKET"
-            ;;
-        linux)
-            expected_socket="unix:///var/run/docker.sock"
+        wsl | linux)
+            expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
             ;;
         macos)
             expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
@@ -285,7 +281,7 @@ test_wsl_specific() {
     info "Running WSL-specific tests"
 
     # Check socket path exists
-    local socket_path="$_CAI_SECURE_SOCKET"
+    local socket_path="$_CAI_CONTAINAI_DOCKER_SOCKET"
     if [[ -S "$socket_path" ]]; then
         pass "WSL socket exists: $socket_path"
     else
@@ -373,13 +369,13 @@ test_macos_specific() {
     # Verify Docker Desktop is still default context (safety check)
     local current_context
     current_context=$(docker context show 2>/dev/null || true)
-    if [[ "$current_context" == "containai-secure" ]]; then
-        warn "containai-secure is the active context - Docker Desktop should be default"
+    if [[ "$current_context" == "$CONTEXT_NAME" ]]; then
+        warn "$CONTEXT_NAME is the active context - Docker Desktop should be default"
         info "  Switch back: docker context use default"
     elif [[ "$current_context" == "default" ]] || [[ "$current_context" == "desktop-linux" ]]; then
         pass "Docker Desktop remains the active context: $current_context"
     else
-        info "Current context: $current_context (not containai-secure - acceptable)"
+        info "Current context: $current_context (not $CONTEXT_NAME - acceptable)"
     fi
 }
 
@@ -388,13 +384,13 @@ test_linux_specific() {
     info "Running Linux-specific tests"
 
     # Check socket path
-    local socket_path="$_CAI_SECURE_SOCKET"
+    local socket_path="$_CAI_CONTAINAI_DOCKER_SOCKET"
     if [[ -S "$socket_path" ]]; then
         pass "Linux socket exists: $socket_path"
     else
         # Socket might be at default location if setup not run
         warn "Dedicated socket not found: $socket_path"
-        info "  Note: Native Linux Sysbox setup may use different configuration"
+        info "  Note: Run 'cai setup' to create isolated Docker daemon"
     fi
 
     # Check sysbox binaries

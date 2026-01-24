@@ -88,7 +88,7 @@ The `cai setup` command installs and configures multiple components. Here's what
 |  |                                                             |   |
 |  |  Docker Configuration (WSL2/Linux only)                    |   |
 |  |  +---------------------------------------------------------+|   |
-|  |  | - Socket: /var/run/docker-containai.sock (WSL2)         ||   |
+|  |  | - Socket: /var/run/containai-docker.sock (WSL2)         ||   |
 |  |  |           /var/run/docker.sock (Linux)                  ||   |
 |  |  | - Config: /etc/docker/daemon.json                       ||   |
 |  |  | - Runtime: sysbox-runc (added, not default)             ||   |
@@ -103,7 +103,7 @@ The `cai setup` command installs and configures multiple components. Here's what
 |  |                                                             |   |
 |  |  Docker Context                                             |   |
 |  |  +---------------------------------------------------------+|   |
-|  |  | - Name: containai-secure                                ||   |
+|  |  | - Name: containai-docker                                ||   |
 |  |  | - Points to: appropriate socket for platform            ||   |
 |  |  +---------------------------------------------------------+|   |
 |  |                                                             |   |
@@ -129,11 +129,11 @@ The `cai setup` command installs and configures multiple components. Here's what
 | Component | WSL2 | Native Linux | macOS |
 |-----------|------|--------------|-------|
 | Docker daemon | Existing Docker Engine (not Desktop) | Uses existing Docker Engine | Lima VM |
-| Docker socket | `/var/run/docker-containai.sock` (dedicated) | `/var/run/docker.sock` | `~/.lima/containai-secure/sock/docker.sock` |
+| Docker socket | `/var/run/containai-docker.sock` (dedicated) | `/var/run/docker.sock` | `~/.lima/containai-docker/sock/docker.sock` |
 | Docker config | `/etc/docker/daemon.json` | `/etc/docker/daemon.json` | Inside Lima VM |
 | Sysbox install | GitHub releases (Ubuntu/Debian) | GitHub releases (Ubuntu/Debian) | Inside Lima VM |
 | Sysbox services | systemd | systemd | Lima VM systemd |
-| Context name | `containai-secure` | `containai-secure` | `containai-secure` |
+| Context name | `containai-docker` | `containai-docker` | `containai-docker` |
 
 ---
 
@@ -149,10 +149,10 @@ WSL2 must run Docker Engine inside WSL (not Docker Desktop integration mode), as
 2. **Tests seccomp compatibility** (WSL 1.1.0+ may have conflicts)
 3. **Downloads and installs Sysbox** from GitHub releases (Ubuntu/Debian)
 4. **Configures daemon.json** with sysbox-runc runtime
-5. **Creates dedicated socket** at `/var/run/docker-containai.sock`
+5. **Creates dedicated socket** at `/var/run/containai-docker.sock`
 6. **Creates systemd drop-in** for Docker socket configuration
 7. **Restarts Docker service**
-8. **Creates Docker context** `containai-secure`
+8. **Creates Docker context** `containai-docker`
 9. **Sets up SSH infrastructure**
 
 #### Run Setup
@@ -176,7 +176,7 @@ cai setup --force
 | Component | Path |
 |-----------|------|
 | Docker daemon config | `/etc/docker/daemon.json` |
-| Docker socket (dedicated) | `/var/run/docker-containai.sock` |
+| Docker socket (dedicated) | `/var/run/containai-docker.sock` |
 | Docker drop-in | `/etc/systemd/system/docker.service.d/containai-socket.conf` |
 | Sysbox binaries | `/usr/bin/sysbox-runc`, `/usr/bin/sysbox-mgr`, `/usr/bin/sysbox-fs` |
 | SSH key | `~/.config/containai/id_containai` |
@@ -204,7 +204,7 @@ And creates a systemd drop-in to add the dedicated socket:
 # /etc/systemd/system/docker.service.d/containai-socket.conf
 [Service]
 ExecStart=
-ExecStart=/usr/bin/dockerd -H fd:// -H unix:///var/run/docker-containai.sock --containerd=/run/containerd/containerd.sock
+ExecStart=/usr/bin/dockerd -H fd:// -H unix:///var/run/containai-docker.sock --containerd=/run/containerd/containerd.sock
 ```
 
 ---
@@ -219,7 +219,7 @@ Native Linux uses the existing Docker installation with Sysbox added as a runtim
 2. **Downloads and installs Sysbox** from GitHub releases (Ubuntu/Debian only)
 3. **Configures daemon.json** with sysbox-runc runtime
 4. **Restarts Docker service**
-5. **Creates Docker context** `containai-secure`
+5. **Creates Docker context** `containai-docker`
 6. **Sets up SSH infrastructure**
 
 #### Run Setup
@@ -270,12 +270,12 @@ macOS uses Lima to run a Linux VM with Docker and Sysbox. This provides the same
 #### What macOS Setup Does
 
 1. **Installs Lima** via Homebrew (if not present)
-2. **Creates Lima VM** `containai-secure` with:
+2. **Creates Lima VM** `containai-docker` with:
    - Ubuntu 24.04 LTS
    - Docker Engine
    - Sysbox runtime
 3. **Waits for Docker socket** to be ready
-4. **Creates Docker context** `containai-secure` pointing to Lima socket
+4. **Creates Docker context** `containai-docker` pointing to Lima socket
 5. **Sets up SSH infrastructure**
 
 #### Run Setup
@@ -295,9 +295,9 @@ cai setup --verbose
 
 | Component | Path |
 |-----------|------|
-| Lima VM | `~/.lima/containai-secure/` |
-| Docker socket (via Lima) | `~/.lima/containai-secure/sock/docker.sock` |
-| Lima VM config | `~/.lima/containai-secure/lima.yaml` |
+| Lima VM | `~/.lima/containai-docker/` |
+| Docker socket (via Lima) | `~/.lima/containai-docker/sock/docker.sock` |
+| Lima VM config | `~/.lima/containai-docker/lima.yaml` |
 | SSH key | `~/.config/containai/id_containai` |
 | SSH config dir | `~/.ssh/containai.d/` |
 | User config | `~/.config/containai/config.toml` |
@@ -310,35 +310,35 @@ cai setup --verbose
 limactl list
 
 # Start the VM (if stopped)
-limactl start containai-secure
+limactl start containai-docker
 
 # Stop the VM
-limactl stop containai-secure
+limactl stop containai-docker
 
 # Shell into the VM
-limactl shell containai-secure
+limactl shell containai-docker
 
 # Delete the VM (removes all data inside VM)
-limactl delete containai-secure
+limactl delete containai-docker
 ```
 
 ---
 
 ## Component Details
 
-### Docker Context: containai-secure
+### Docker Context: containai-docker
 
-The `containai-secure` Docker context points to the Sysbox-enabled Docker daemon:
+The `containai-docker` Docker context points to the Sysbox-enabled Docker daemon:
 
 ```bash
 # List contexts
 docker context ls
 
 # Use the context explicitly
-docker --context containai-secure info
+docker --context containai-docker info
 
 # Check runtime configuration
-docker --context containai-secure info | grep -A5 Runtimes
+docker --context containai-docker info | grep -A5 Runtimes
 ```
 
 Expected output shows `sysbox-runc` in the runtimes list.
@@ -402,7 +402,7 @@ Docker
 Sysbox Isolation
   Sysbox available:                          [OK]
   Runtime: sysbox-runc                       [OK]
-  Context 'containai-secure':                [OK] Configured
+  Context 'containai-docker':                [OK] Configured
 
 Platform: WSL2
   Kernel version: 5.15                       [OK]
@@ -429,13 +429,13 @@ SSH
 
 ```bash
 # Verify Docker context works
-docker --context containai-secure info
+docker --context containai-docker info
 
 # Verify Sysbox runtime is available
-docker --context containai-secure info | grep sysbox
+docker --context containai-docker info | grep sysbox
 
 # Test a Sysbox container
-docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "Sysbox works!"
+docker --context containai-docker run --rm --runtime=sysbox-runc alpine echo "Sysbox works!"
 
 # Verify SSH key exists and has correct permissions
 ls -la ~/.config/containai/id_containai
@@ -548,8 +548,8 @@ Install Sysbox manually for your distribution. See the [Sysbox installation guid
 
 3. Try creating the VM manually:
    ```bash
-   limactl create --name=containai-secure
-   limactl start containai-secure
+   limactl create --name=containai-docker
+   limactl start containai-docker
    ```
 
 ### macOS: Docker Permission Denied in Lima
@@ -562,9 +562,9 @@ Socket exists but `docker info` fails with permission denied.
 The setup should auto-repair this. If not, manually add user to docker group:
 
 ```bash
-limactl shell containai-secure sudo usermod -aG docker $USER
-limactl stop containai-secure
-limactl start containai-secure
+limactl shell containai-docker sudo usermod -aG docker $USER
+limactl stop containai-docker
+limactl start containai-docker
 ```
 
 ### General: Kernel Too Old
@@ -593,7 +593,7 @@ To remove ContainAI components, follow the manual cleanup steps below for your p
 ### Remove Docker Context
 
 ```bash
-docker context rm containai-secure
+docker context rm containai-docker
 ```
 
 ### WSL2/Linux - Remove Docker Drop-in
@@ -622,8 +622,8 @@ Manually remove the Include line from `~/.ssh/config`:
 ### macOS - Remove Lima VM
 
 ```bash
-limactl stop containai-secure
-limactl delete containai-secure
+limactl stop containai-docker
+limactl delete containai-docker
 ```
 
 ### What is Preserved

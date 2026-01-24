@@ -74,8 +74,8 @@ _CAI_LEGACY_CONTEXT="containai-secure"
 _CAI_LEGACY_DROPIN="/etc/systemd/system/docker.service.d/containai-socket.conf"
 
 # Lima VM name for macOS Secure Engine (uses same name as Linux/WSL2 context)
-# NOTE: Uses $_CAI_CONTAINAI_DOCKER_CONTEXT from lib/docker.sh
-_CAI_LIMA_VM_NAME="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+# NOTE: Uses $_CAI_CONTAINAI_DOCKER_CONTEXT from lib/docker.sh with defensive fallback
+_CAI_LIMA_VM_NAME="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
 
 # Lima socket path (uses VM name from above)
 _CAI_LIMA_SOCKET_PATH="$HOME/.lima/$_CAI_LIMA_VM_NAME/sock/docker.sock"
