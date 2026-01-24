@@ -695,10 +695,8 @@ docker --context containai-docker info
 
 **WSL2:**
 ```bash
-# Start the dedicated dockerd
+# Start the isolated Docker daemon
 sudo systemctl start containai-docker
-# or
-sudo dockerd --host unix:///var/run/containai-docker.sock &
 ```
 
 **Lima (macOS):**
