@@ -49,6 +49,7 @@ Linux/WSL2 uses:
 - [ ] `cai doctor` on macOS finds the `containai-docker` context
 - [ ] `shellcheck -x src/lib/setup.sh` passes
 ## Done summary
+Renamed macOS Lima VM and Docker context from containai-secure to containai-docker to unify naming across all platforms. Added legacy VM/context cleanup that runs only after new VM verification succeeds.
 ## Summary
 
 Renamed macOS Lima VM and Docker context from `containai-secure` to `containai-docker` to unify naming across all platforms (Linux, WSL2, macOS).
@@ -94,6 +95,6 @@ All platforms now consistently use `containai-docker` as the Docker context name
 
 Old macOS installs with `containai-secure` VM will be migrated on next `cai setup`.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 9ea25d1, 4509406, e3bf5c8, b961196, 1029222, 44f661e, 13ce372, 0592fdb
+- Tests: shellcheck -x src/lib/setup.sh, shellcheck -x src/lib/docker.sh, shellcheck -x src/lib/doctor.sh
 - PRs:
