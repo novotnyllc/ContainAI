@@ -111,6 +111,170 @@ _cai_is_wsl2() {
 }
 
 # ==============================================================================
+# WSL2 Mirrored Networking Mode Detection
+# ==============================================================================
+
+# Detect if WSL2 is running in mirrored networking mode
+# Returns: 0=mirrored mode detected (BLOCKS SETUP), 1=not mirrored (OK), 2=cannot detect (unknown)
+# Note: Mirrored networking mode is incompatible with ContainAI's isolated Docker setup.
+#       WSL2's init process (PID 1) installs its own restrictive seccomp filters during
+#       boot to support mirrored networking. This behavior is tracked in
+#       https://github.com/microsoft/WSL/issues/9548 - the pre-existing filters can
+#       prevent nested container runtimes from installing their own interceptors,
+#       resulting in an EBUSY error code.
+_cai_detect_wsl2_mirrored_mode() {
+    # Get Windows user profile path via cmd.exe
+    local win_userprofile
+    win_userprofile=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r') || win_userprofile=""
+    [[ -z "$win_userprofile" ]] && return 2  # Can't detect
+
+    # Convert Windows path to WSL path
+    local wsl_userprofile
+    wsl_userprofile=$(wslpath "$win_userprofile" 2>/dev/null) || wsl_userprofile=""
+    [[ -z "$wsl_userprofile" ]] && return 2  # Can't convert
+
+    local wslconfig="${wsl_userprofile}/.wslconfig"
+    [[ ! -f "$wslconfig" ]] && return 1  # No config file, default is NAT (OK)
+
+    # Parse for networkingMode=mirrored ONLY under [wsl2] section
+    # Must handle variations: networkingMode=mirrored, networkingMode = mirrored, etc.
+    # Use awk state machine to only check within [wsl2] section
+    # Use IGNORECASE=1 for case-insensitivity (POSIX awk doesn't support /regex/i)
+    local in_wsl2_section awk_rc
+    in_wsl2_section=$(awk '
+        BEGIN { IGNORECASE = 1; in_section = 0 }
+        /^\[wsl2\]/ { in_section = 1; next }
+        /^\[/ { in_section = 0 }
+        in_section && /^[[:space:]]*networkingMode[[:space:]]*=[[:space:]]*mirrored/ { print "yes"; exit }
+    ' "$wslconfig" 2>/dev/null) && awk_rc=0 || awk_rc=$?
+
+    # If awk failed, return unknown (2)
+    if [[ $awk_rc -ne 0 ]]; then
+        return 2  # Cannot parse config
+    fi
+
+    if [[ "$in_wsl2_section" == "yes" ]]; then
+        return 0  # Mirrored mode detected in [wsl2] section
+    fi
+    return 1  # Not mirrored
+}
+
+# Display mirrored networking mode warning and offer to fix
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 1=user declined or error, 75=WSL restart required (user accepted fix)
+# Note: Never returns 0 - always blocks setup when mirrored mode detected
+_cai_handle_wsl2_mirrored_mode() {
+    local dry_run="${1:-false}"
+
+    # Display clear error message
+    printf '%s\n' ""
+    printf '%s\n' "+==================================================================+"
+    printf '%s\n' "|                       *** ERROR ***                              |"
+    printf '%s\n' "+==================================================================+"
+    printf '%s\n' "| WSL2 mirrored networking mode detected.                          |"
+    printf '%s\n' "|                                                                  |"
+    printf '%s\n' "| This is INCOMPATIBLE with ContainAI's isolated Docker setup.     |"
+    printf '%s\n' "|                                                                  |"
+    printf '%s\n' "| WSL2's mirrored networking mode installs restrictive seccomp     |"
+    printf '%s\n' "| filters on PID 1 that prevent Sysbox from installing its own     |"
+    printf '%s\n' "| interceptors, causing EBUSY errors.                              |"
+    printf '%s\n' "|                                                                  |"
+    printf '%s\n' "| Upstream issue: https://github.com/microsoft/WSL/issues/9548     |"
+    printf '%s\n' "+==================================================================+"
+    printf '%s\n' ""
+
+    # In dry-run mode, just show what would happen
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would prompt to disable mirrored networking"
+        _cai_info "[DRY-RUN] Would modify .wslconfig to set networkingMode=nat"
+        _cai_info "[DRY-RUN] Would run: wsl.exe --shutdown"
+        return 75
+    fi
+
+    # Prompt user for action
+    printf '%s' "Would you like to disable mirrored networking? This requires WSL to restart. (y/n): "
+    local response
+    if ! read -r response; then
+        # EOF on stdin (non-interactive)
+        _cai_error "Cannot continue setup with mirrored networking mode."
+        _cai_error "Please manually edit your .wslconfig file:"
+        _cai_error "  1. Open %USERPROFILE%\\.wslconfig in a text editor"
+        _cai_error "  2. Change networkingMode=mirrored to networkingMode=nat"
+        _cai_error "  3. Run: wsl.exe --shutdown"
+        _cai_error "  4. Restart your terminal and re-run: cai setup"
+        return 1
+    fi
+
+    case "$response" in
+        [Yy]|[Yy][Ee][Ss])
+            # User agreed - modify .wslconfig
+            # Re-acquire paths with guards (same pattern as detection function)
+            local win_userprofile wsl_userprofile wslconfig
+            win_userprofile=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r') || win_userprofile=""
+            if [[ -z "$win_userprofile" ]]; then
+                _cai_error "Failed to get Windows user profile path"
+                _cai_error "Please manually edit your .wslconfig file"
+                return 1
+            fi
+            wsl_userprofile=$(wslpath "$win_userprofile" 2>/dev/null) || wsl_userprofile=""
+            if [[ -z "$wsl_userprofile" ]]; then
+                _cai_error "Failed to convert Windows path to WSL path"
+                _cai_error "Please manually edit your .wslconfig file"
+                return 1
+            fi
+            wslconfig="${wsl_userprofile}/.wslconfig"
+
+            if [[ ! -f "$wslconfig" ]]; then
+                _cai_error "Cannot find .wslconfig at: $wslconfig"
+                return 1
+            fi
+
+            _cai_info "Modifying $wslconfig to disable mirrored networking..."
+
+            # Create backup
+            cp "$wslconfig" "${wslconfig}.bak" || {
+                _cai_error "Failed to create backup of .wslconfig"
+                return 1
+            }
+            _cai_info "Backup created: ${wslconfig}.bak"
+
+            # Modify the file - change networkingMode=mirrored to networkingMode=nat
+            # Use sed with case-insensitive matching and whitespace variations
+            if sed -i 's/^\([[:space:]]*networkingMode[[:space:]]*=[[:space:]]*\)mirrored/\1nat/i' "$wslconfig" 2>/dev/null; then
+                _cai_ok "Updated .wslconfig to use NAT networking"
+            else
+                _cai_error "Failed to modify .wslconfig"
+                _cai_error "Please manually change networkingMode=mirrored to networkingMode=nat"
+                return 1
+            fi
+
+            _cai_info "Shutting down WSL..."
+            wsl.exe --shutdown || {
+                _cai_warn "wsl.exe --shutdown may have failed - please restart WSL manually"
+            }
+
+            printf '%s\n' ""
+            _cai_ok "WSL has been shut down."
+            _cai_info "Please restart your terminal and re-run: cai setup"
+            printf '%s\n' ""
+
+            # Return special exit code indicating WSL restart required
+            return 75
+            ;;
+        *)
+            # User declined
+            _cai_error "Cannot continue setup with mirrored networking mode."
+            _cai_error "Please disable it manually and re-run setup:"
+            _cai_error "  1. Open %USERPROFILE%\\.wslconfig in a text editor"
+            _cai_error "  2. Change networkingMode=mirrored to networkingMode=nat"
+            _cai_error "  3. Run: wsl.exe --shutdown"
+            _cai_error "  4. Restart your terminal and re-run: cai setup"
+            return 1
+            ;;
+    esac
+}
+
+# ==============================================================================
 # Seccomp Compatibility Testing
 # ==============================================================================
 
@@ -1295,8 +1459,9 @@ _cai_verify_sysbox_install() {
 # Arguments: $1 = force flag ("true" to bypass seccomp warning)
 #            $2 = dry_run flag ("true" to simulate)
 #            $3 = verbose flag ("true" for verbose output)
-# Returns: 0=success, 1=failure
+# Returns: 0=success, 1=failure, 75=WSL restart required (mirrored mode was disabled)
 # Note: Uses isolated Docker daemon - never modifies /etc/docker/daemon.json
+#       Detects and blocks mirrored networking mode which is incompatible
 _cai_setup_wsl2() {
     local force="${1:-false}"
     local dry_run="${2:-false}"
@@ -1305,7 +1470,28 @@ _cai_setup_wsl2() {
     _cai_info "Detected platform: WSL2"
     _cai_info "Setting up Secure Engine with isolated Docker daemon"
 
-    # Step 0: Check kernel version (Sysbox requires 5.5+)
+    # Step 0: Check for mirrored networking mode (BLOCKING - must be first)
+    _cai_step "Checking for mirrored networking mode"
+    local mirrored_rc
+    _cai_detect_wsl2_mirrored_mode && mirrored_rc=0 || mirrored_rc=$?
+    case $mirrored_rc in
+        0)
+            # Mirrored mode detected - this is a hard blocker
+            # Handler returns 1 (declined) or 75 (restart required), never 0
+            _cai_handle_wsl2_mirrored_mode "$dry_run"
+            return $?
+            ;;
+        1)
+            # Not mirrored - OK to proceed
+            _cai_ok "Networking mode: NAT (OK)"
+            ;;
+        2)
+            # Cannot detect - warn and proceed
+            _cai_warn "Could not detect networking mode (proceeding)"
+            ;;
+    esac
+
+    # Step 1: Check kernel version (Sysbox requires 5.5+)
     _cai_step "Checking kernel version"
     local kernel_version kernel_ok
     kernel_version=$(_cai_check_kernel_for_sysbox) && kernel_ok="true" || kernel_ok="false"
@@ -1320,7 +1506,7 @@ _cai_setup_wsl2() {
         return 1
     fi
 
-    # Step 1: Test seccomp compatibility
+    # Step 2: Test seccomp compatibility
     _cai_step "Checking seccomp compatibility"
     local seccomp_rc
     _cai_test_wsl2_seccomp && seccomp_rc=0 || seccomp_rc=$?
@@ -1345,42 +1531,42 @@ _cai_setup_wsl2() {
             ;;
     esac
 
-    # Step 2: Clean up legacy paths (support upgrades)
+    # Step 3: Clean up legacy paths (support upgrades)
     if ! _cai_cleanup_legacy_paths "$dry_run" "$verbose"; then
         _cai_warn "Legacy cleanup had issues (continuing anyway)"
     fi
 
-    # Step 3: Install Sysbox
+    # Step 4: Install Sysbox
     if ! _cai_install_sysbox_wsl2 "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 4: Create isolated Docker directories
+    # Step 5: Create isolated Docker directories
     if ! _cai_create_isolated_docker_dirs "$dry_run"; then
         return 1
     fi
 
-    # Step 5: Create isolated daemon.json (NOT /etc/docker/daemon.json)
+    # Step 6: Create isolated daemon.json (NOT /etc/docker/daemon.json)
     if ! _cai_create_isolated_daemon_json "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 6: Create isolated systemd service (NOT a drop-in to docker.service)
+    # Step 7: Create isolated systemd service (NOT a drop-in to docker.service)
     if ! _cai_create_isolated_docker_service "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 7: Start isolated Docker service
+    # Step 8: Start isolated Docker service
     if ! _cai_start_isolated_docker_service "$dry_run"; then
         return 1
     fi
 
-    # Step 8: Create containai-docker context
+    # Step 9: Create containai-docker context
     if ! _cai_create_isolated_docker_context "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 9: Verify installation
+    # Step 10: Verify installation
     if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Isolated Docker verification had issues - check output above"

@@ -160,3 +160,6 @@ When stripping trailing slash with ${var%/}, root path / becomes empty - use cas
 
 ## 2026-01-23 manual [pitfall]
 macOS lacks the timeout command by default - use a portable wrapper that checks command -v timeout or falls back to running without timeout
+
+## 2026-01-24 manual [pitfall]
+POSIX awk doesn't support /regex/i case-insensitive flag; use IGNORECASE=1 in BEGIN block instead
