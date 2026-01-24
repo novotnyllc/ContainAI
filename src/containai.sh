@@ -1913,10 +1913,6 @@ containai() {
             shift
             _containai_sandbox_cmd "$@"
             ;;
-        version)
-            shift
-            _cai_version "$@"
-            ;;
         update)
             shift
             _cai_update "$@"
@@ -1927,6 +1923,10 @@ containai() {
             ;;
         help | -h | --help)
             _containai_help
+            ;;
+        version | --version | -v)
+            shift
+            _cai_version "$@"
             ;;
         -*)
             # Flags without subcommand go to default run
