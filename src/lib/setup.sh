@@ -14,7 +14,7 @@
 #   _cai_install_sysbox_wsl2()         - Install Sysbox on WSL2
 #   _cai_configure_daemon_json()       - Configure Docker daemon.json (legacy)
 #   _cai_configure_docker_socket()     - Configure dedicated Docker socket (legacy)
-#   _cai_create_containai_context()    - Create containai-secure context (legacy)
+#   _cai_create_containai_context()    - Create containai-docker context (legacy)
 #   _cai_verify_sysbox_install()       - Verify Sysbox installation (legacy)
 #   _cai_cleanup_legacy_paths()        - Clean up legacy ContainAI paths
 #   _cai_create_isolated_daemon_json() - Create isolated daemon.json
@@ -26,7 +26,7 @@
 #   _cai_lima_template()               - Generate Lima VM template YAML
 #   _cai_lima_install()                - Install Lima via Homebrew
 #   _cai_lima_create_vm()              - Create Lima VM with Docker + Sysbox
-#   _cai_lima_create_context()         - Create containai-secure context for Lima
+#   _cai_lima_create_context()         - Create containai-docker context for Lima
 #   _cai_lima_verify_install()         - Verify Lima + Sysbox installation
 #
 # Dependencies:
@@ -73,11 +73,15 @@ _CAI_LEGACY_SOCKET="/var/run/docker-containai.sock"
 _CAI_LEGACY_CONTEXT="containai-secure"
 _CAI_LEGACY_DROPIN="/etc/systemd/system/docker.service.d/containai-socket.conf"
 
-# Lima VM name for macOS Secure Engine
-_CAI_LIMA_VM_NAME="containai-secure"
+# Lima VM name for macOS Secure Engine (uses same name as Linux/WSL2 context)
+# NOTE: Uses $_CAI_CONTAINAI_DOCKER_CONTEXT from lib/docker.sh
+_CAI_LIMA_VM_NAME="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
-# Lima socket path pattern (expands {{.Dir}} at runtime)
-_CAI_LIMA_SOCKET_PATH="$HOME/.lima/containai-secure/sock/docker.sock"
+# Lima socket path (uses VM name from above)
+_CAI_LIMA_SOCKET_PATH="$HOME/.lima/$_CAI_LIMA_VM_NAME/sock/docker.sock"
+
+# Legacy Lima VM name (for migration from old installs)
+_CAI_LEGACY_LIMA_VM_NAME="containai-secure"
 
 # ==============================================================================
 # WSL2 Detection
@@ -775,6 +779,31 @@ _cai_cleanup_legacy_paths() {
         _cai_info "No legacy drop-in found at $_CAI_LEGACY_DROPIN"
     fi
 
+    # Clean up legacy Lima VM on macOS (containai-secure -> containai-docker rename)
+    # Note: Only attempt if limactl is available (macOS with Lima installed)
+    if command -v limactl >/dev/null 2>&1; then
+        if limactl list --format '{{.Name}}' 2>/dev/null | grep -qx "$_CAI_LEGACY_LIMA_VM_NAME"; then
+            if [[ "$dry_run" == "true" ]]; then
+                _cai_info "[DRY-RUN] Would delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+                _cai_info "[DRY-RUN] Note: New VM '$_CAI_LIMA_VM_NAME' will be created during setup"
+            else
+                _cai_info "Deleting legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+                # Stop the VM first if running
+                limactl stop "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null || true
+                if limactl delete -f "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
+                    cleaned_any=true
+                    _cai_info "  New VM '$_CAI_LIMA_VM_NAME' will be created during setup"
+                else
+                    _cai_warn "Failed to delete legacy Lima VM (continuing anyway)"
+                fi
+            fi
+        elif [[ "$verbose" == "true" ]]; then
+            _cai_info "No legacy Lima VM found: $_CAI_LEGACY_LIMA_VM_NAME"
+        fi
+    elif [[ "$verbose" == "true" ]]; then
+        _cai_info "Lima not installed, skipping Lima VM cleanup"
+    fi
+
     if [[ "$cleaned_any" == "true" ]] || [[ "$dry_run" == "true" ]]; then
         _cai_ok "Legacy path cleanup complete"
     else
@@ -1152,7 +1181,7 @@ _cai_verify_isolated_docker() {
     return 0
 }
 
-# Configure dedicated Docker socket for containai-secure context
+# Configure dedicated Docker socket for containai-docker context (legacy)
 # Arguments: $1 = socket path
 #            $2 = dry_run flag ("true" to simulate)
 #            $3 = verbose flag ("true" for verbose output)
@@ -1306,7 +1335,7 @@ _cai_restart_docker_service() {
 # Docker Context Creation
 # ==============================================================================
 
-# Create containai-secure Docker context
+# Create containai-docker Docker context (legacy function - kept for API compatibility)
 # Arguments: $1 = socket path
 #            $2 = dry_run flag ("true" to simulate)
 #            $3 = verbose flag ("true" for verbose output)
@@ -1316,8 +1345,9 @@ _cai_create_containai_context() {
     local socket_path="$1"  # Required - caller must specify path
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
+    local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
-    _cai_step "Creating containai-secure Docker context"
+    _cai_step "Creating $context_name Docker context"
 
     local expected_host="unix://$socket_path"
 
@@ -1326,23 +1356,23 @@ _cai_create_containai_context() {
     fi
 
     # Check if context already exists
-    if docker context inspect containai-secure >/dev/null 2>&1; then
+    if docker context inspect "$context_name" >/dev/null 2>&1; then
         # Verify it points to the expected socket
         local existing_host
-        existing_host=$(docker context inspect containai-secure --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+        existing_host=$(docker context inspect "$context_name" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
 
         if [[ "$existing_host" == "$expected_host" ]]; then
-            _cai_info "Context 'containai-secure' already exists with correct endpoint"
+            _cai_info "Context '$context_name' already exists with correct endpoint"
             return 0
         else
-            _cai_warn "Context 'containai-secure' exists but points to: $existing_host"
+            _cai_warn "Context '$context_name' exists but points to: $existing_host"
             _cai_warn "  Expected: $expected_host"
 
             if [[ "$dry_run" == "true" ]]; then
                 _cai_info "[DRY-RUN] Would remove and recreate context"
             else
                 _cai_step "Removing misconfigured context"
-                if ! docker context rm containai-secure >/dev/null 2>&1; then
+                if ! docker context rm "$context_name" >/dev/null 2>&1; then
                     _cai_error "Failed to remove existing context"
                     return 1
                 fi
@@ -1351,15 +1381,15 @@ _cai_create_containai_context() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: docker context create containai-secure --docker host=$expected_host"
+        _cai_info "[DRY-RUN] Would run: docker context create $context_name --docker host=$expected_host"
     else
-        if ! docker context create containai-secure --docker "host=$expected_host"; then
-            _cai_error "Failed to create Docker context 'containai-secure'"
+        if ! docker context create "$context_name" --docker "host=$expected_host"; then
+            _cai_error "Failed to create Docker context '$context_name'"
             return 1
         fi
     fi
 
-    _cai_ok "Docker context 'containai-secure' created"
+    _cai_ok "Docker context '$context_name' created"
     return 0
 }
 
@@ -1367,7 +1397,7 @@ _cai_create_containai_context() {
 # Installation Verification
 # ==============================================================================
 
-# Verify Sysbox installation
+# Verify Sysbox installation (legacy function - kept for API compatibility)
 # Arguments: $1 = socket path for verification
 #            $2 = dry_run flag ("true" to skip actual verification)
 #            $3 = verbose flag ("true" for verbose output)
@@ -1376,13 +1406,14 @@ _cai_verify_sysbox_install() {
     local socket_path="$1"  # Required - caller must specify path
     local dry_run="${2:-false}"
     local verbose="${3:-false}"
+    local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
     _cai_step "Verifying Sysbox installation"
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would verify sysbox-runc and sysbox-mgr"
         _cai_info "[DRY-RUN] Would verify Docker runtime configuration via socket: $socket_path"
-        _cai_info "[DRY-RUN] Would verify containai-secure context"
+        _cai_info "[DRY-RUN] Would verify $context_name context"
         return 0
     fi
 
@@ -1426,16 +1457,16 @@ _cai_verify_sysbox_install() {
         _cai_info "Docker runtimes: $docker_runtimes"
     fi
 
-    # Check containai-secure context
-    if ! docker context inspect containai-secure >/dev/null 2>&1; then
-        _cai_error "containai-secure context not found"
+    # Check containai-docker context
+    if ! docker context inspect "$context_name" >/dev/null 2>&1; then
+        _cai_error "$context_name context not found"
         return 1
     fi
 
     # Verify sysbox-runc works by running a minimal container via the context
     _cai_step "Testing sysbox-runc with minimal container"
     local test_output test_rc test_passed=false
-    test_output=$(docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+    test_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
     if [[ $test_rc -ne 0 ]]; then
         _cai_warn "Sysbox test container failed (this may be expected on some WSL2 configurations)"
@@ -1956,7 +1987,7 @@ _cai_lima_wait_socket() {
     return 0
 }
 
-# Create containai-secure Docker context for Lima (macOS)
+# Create containai-docker Docker context for Lima (macOS)
 # Arguments: $1 = dry_run flag ("true" to simulate)
 #            $2 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
@@ -1964,8 +1995,9 @@ _cai_lima_create_context() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
     local socket_path="$_CAI_LIMA_SOCKET_PATH"
+    local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
-    _cai_step "Creating containai-secure Docker context (macOS/Lima)"
+    _cai_step "Creating $context_name Docker context (macOS/Lima)"
 
     local expected_host="unix://$socket_path"
 
@@ -1974,22 +2006,22 @@ _cai_lima_create_context() {
     fi
 
     # Check if context already exists
-    if docker context inspect containai-secure >/dev/null 2>&1; then
+    if docker context inspect "$context_name" >/dev/null 2>&1; then
         local existing_host
-        existing_host=$(docker context inspect containai-secure --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+        existing_host=$(docker context inspect "$context_name" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
 
         if [[ "$existing_host" == "$expected_host" ]]; then
-            _cai_info "Context 'containai-secure' already exists with correct endpoint"
+            _cai_info "Context '$context_name' already exists with correct endpoint"
             return 0
         else
-            _cai_warn "Context 'containai-secure' exists but points to: $existing_host"
+            _cai_warn "Context '$context_name' exists but points to: $existing_host"
             _cai_warn "  Expected: $expected_host"
 
             if [[ "$dry_run" == "true" ]]; then
                 _cai_info "[DRY-RUN] Would remove and recreate context"
             else
                 _cai_step "Removing misconfigured context"
-                if ! docker context rm containai-secure >/dev/null 2>&1; then
+                if ! docker context rm "$context_name" >/dev/null 2>&1; then
                     _cai_error "Failed to remove existing context"
                     return 1
                 fi
@@ -1998,15 +2030,15 @@ _cai_lima_create_context() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: docker context create containai-secure --docker host=$expected_host"
+        _cai_info "[DRY-RUN] Would run: docker context create $context_name --docker host=$expected_host"
     else
-        if ! docker context create containai-secure --docker "host=$expected_host"; then
-            _cai_error "Failed to create Docker context 'containai-secure'"
+        if ! docker context create "$context_name" --docker "host=$expected_host"; then
+            _cai_error "Failed to create Docker context '$context_name'"
             return 1
         fi
     fi
 
-    _cai_ok "Docker context 'containai-secure' created"
+    _cai_ok "Docker context '$context_name' created"
     return 0
 }
 
@@ -2018,13 +2050,14 @@ _cai_lima_verify_install() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
     local socket_path="$_CAI_LIMA_SOCKET_PATH"
+    local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
     _cai_step "Verifying Lima + Sysbox installation"
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would verify Lima VM status"
         _cai_info "[DRY-RUN] Would verify Sysbox in VM"
-        _cai_info "[DRY-RUN] Would verify containai-secure context"
+        _cai_info "[DRY-RUN] Would verify $context_name context"
         return 0
     fi
 
@@ -2059,16 +2092,16 @@ _cai_lima_verify_install() {
         _cai_info "Docker runtimes: $docker_runtimes"
     fi
 
-    # Check containai-secure context exists
-    if ! docker context inspect containai-secure >/dev/null 2>&1; then
-        _cai_error "containai-secure context not found"
+    # Check containai-docker context exists
+    if ! docker context inspect "$context_name" >/dev/null 2>&1; then
+        _cai_error "$context_name context not found"
         return 1
     fi
 
     # Test Sysbox by running minimal container
     _cai_step "Testing sysbox-runc with minimal container"
     local test_output test_rc test_passed=false
-    test_output=$(docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+    test_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
     if [[ $test_rc -ne 0 ]]; then
         _cai_error "Sysbox test container failed (exit code: $test_rc)"
@@ -2089,14 +2122,14 @@ _cai_lima_verify_install() {
     local current_context
     current_context=$(docker context show 2>/dev/null || true)
     # Per spec: Docker Desktop should be default or desktop-linux
-    if [[ "$current_context" == "containai-secure" ]]; then
-        _cai_warn "containai-secure is currently the active context"
+    if [[ "$current_context" == "$context_name" ]]; then
+        _cai_warn "$context_name is currently the active context"
         _cai_warn "  Docker Desktop should remain default for safety"
         _cai_warn "  Switch back: docker context use default"
     elif [[ "$current_context" == "default" ]] || [[ "$current_context" == "desktop-linux" ]]; then
         _cai_ok "Docker Desktop remains the active context: $current_context"
     else
-        _cai_info "Current Docker context: $current_context (not containai-secure - acceptable)"
+        _cai_info "Current Docker context: $current_context (not $context_name - acceptable)"
     fi
 
     _cai_ok "Lima + Sysbox installation verified"
@@ -2121,7 +2154,7 @@ _cai_setup_macos() {
     _cai_info "IMPORTANT: This setup does NOT modify Docker Desktop"
     _cai_info "  - Docker Desktop remains the default context"
     _cai_info "  - A separate Lima VM provides Sysbox isolation"
-    _cai_info "  - Use --context containai-secure to access Sysbox"
+    _cai_info "  - Use --context $_CAI_CONTAINAI_DOCKER_CONTEXT to access Sysbox"
     printf '\n'
 
     # Step 1: Install Lima (via Homebrew)
@@ -2139,7 +2172,7 @@ _cai_setup_macos() {
         return 1
     fi
 
-    # Step 4: Create containai-secure context
+    # Step 4: Create containai-docker context
     if ! _cai_lima_create_context "$dry_run" "$verbose"; then
         return 1
     fi
@@ -2152,9 +2185,9 @@ _cai_setup_macos() {
     printf '\n'
     _cai_ok "Secure Engine setup complete (macOS/Lima)"
     _cai_info "To use the Secure Engine:"
-    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=containai-secure"
+    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=$_CAI_CONTAINAI_DOCKER_CONTEXT"
     _cai_info "  cai run --workspace /path/to/project"
-    _cai_info "Or use docker directly: docker --context containai-secure --runtime=sysbox-runc ..."
+    _cai_info "Or use docker directly: docker --context $_CAI_CONTAINAI_DOCKER_CONTEXT --runtime=sysbox-runc ..."
     printf '\n'
     _cai_info "Lima VM management:"
     _cai_info "  Start:  limactl start $_CAI_LIMA_VM_NAME"
@@ -2436,10 +2469,12 @@ _cai_verify_sysbox_install_linux() {
 
     _cai_step "Verifying Sysbox installation"
 
+    local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would verify sysbox-runc and sysbox-mgr"
         _cai_info "[DRY-RUN] Would verify Docker runtime configuration via socket: $socket_path"
-        _cai_info "[DRY-RUN] Would verify containai-secure context"
+        _cai_info "[DRY-RUN] Would verify $context_name context"
         return 0
     fi
 
@@ -2483,16 +2518,16 @@ _cai_verify_sysbox_install_linux() {
         _cai_info "Docker runtimes: $docker_runtimes"
     fi
 
-    # Check containai-secure context
-    if ! docker context inspect containai-secure >/dev/null 2>&1; then
-        _cai_error "containai-secure context not found"
+    # Check containai-docker context
+    if ! docker context inspect "$context_name" >/dev/null 2>&1; then
+        _cai_error "$context_name context not found"
         return 1
     fi
 
     # Verify sysbox-runc works by running a minimal container via the context
     _cai_step "Testing sysbox-runc with minimal container"
     local test_output test_rc test_passed=false
-    test_output=$(docker --context containai-secure run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
+    test_output=$(docker --context "$context_name" run --rm --runtime=sysbox-runc alpine echo "sysbox-test-ok" 2>&1) && test_rc=0 || test_rc=$?
 
     if [[ $test_rc -ne 0 ]]; then
         _cai_error "Sysbox test container failed (exit code: $test_rc)"
@@ -2818,10 +2853,10 @@ What It Does (WSL2):
 
 What It Does (macOS):
   1. Installs Lima via Homebrew (if not present)
-  2. Creates Lima VM 'containai-secure' with Ubuntu 24.04
+  2. Creates Lima VM 'containai-docker' with Ubuntu 24.04
   3. Installs Docker Engine and Sysbox inside the VM
   4. Exposes Docker socket to macOS host via Lima port forwarding
-  5. Creates 'containai-secure' Docker context pointing to Lima socket
+  5. Creates 'containai-docker' Docker context pointing to Lima socket
   6. Verifies installation
 
 Requirements (Linux native):
@@ -2853,9 +2888,9 @@ Security Notes:
   - All platforms use completely separate socket for isolation
 
 Lima VM Management (macOS):
-  limactl start containai-secure    Start the VM
-  limactl stop containai-secure     Stop the VM
-  limactl shell containai-secure    Shell into the VM
+  limactl start containai-docker    Start the VM
+  limactl stop containai-docker     Stop the VM
+  limactl shell containai-docker    Shell into the VM
   limactl list                      Show VM status
 
 Isolated Docker (Linux/WSL2):
@@ -2927,7 +2962,7 @@ _cai_secure_engine_validate() {
     printf '\n'
 
     # Detect platform for expected context and socket path
-    # Linux/WSL2 use isolated daemon (containai-docker), macOS uses Lima VM (containai-secure)
+    # All platforms now use containai-docker context (Linux/WSL2 use isolated daemon, macOS uses Lima VM)
     local platform context_name expected_socket sysbox_is_default
     platform=$(_cai_detect_platform)
     case "$platform" in
@@ -2942,7 +2977,7 @@ _cai_secure_engine_validate() {
             sysbox_is_default="true"
             ;;
         macos)
-            context_name="containai-secure"
+            context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
             expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
             sysbox_is_default="false"
             ;;
