@@ -42,9 +42,8 @@ done
 - [ ] `cai version` still works (subcommand)
 - [ ] `shellcheck -x src/containai.sh` passes
 ## Done summary
-TBD
-
+Added --version and -v flag handling to the main containai() function, consolidated with the existing version subcommand into a single pattern match.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 2978c0e056bb444e2c29756a1c0023480518513b
+- Tests: cai --version, cai -v, cai version, shellcheck -x src/containai.sh
 - PRs:
