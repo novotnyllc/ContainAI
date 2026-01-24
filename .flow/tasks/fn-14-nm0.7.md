@@ -59,6 +59,7 @@ Updated `cai uninstall` to properly remove the `containai-docker` context that i
 
 All changes pass shellcheck and the dry-run output correctly shows the `containai-docker` context.
 ## Evidence
-- Commits:
+- Commits: a19c4ef
 - Tests: shellcheck -x src/lib/uninstall.sh, cai uninstall --dry-run, cai uninstall --help
 - PRs:
+- Review: SHIP via flowctl codex impl-review
