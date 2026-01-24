@@ -560,6 +560,55 @@ _cai_doctor() {
         display_socket="$_CAI_CONTAINAI_DOCKER_SOCKET"
     fi
 
+    # On Linux/WSL2, check systemd service status first
+    if ! _cai_is_macos; then
+        if _cai_containai_docker_service_active; then
+            printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[OK] active"
+        else
+            local service_state="${_CAI_CONTAINAI_SERVICE_STATE:-unknown}"
+            case "$service_state" in
+                no_systemd)
+                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[SKIP] systemd not available"
+                    ;;
+                systemd_not_running)
+                    # Check if unit file exists even if systemd isn't running
+                    if _cai_containai_docker_service_exists; then
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] installed but systemd not running"
+                    else
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[SKIP] systemd not running"
+                    fi
+                    ;;
+                inactive)
+                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] inactive"
+                    printf '  %-44s %s\n' "" "(Start with: sudo systemctl start containai-docker)"
+                    ;;
+                failed)
+                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] failed"
+                    printf '  %-44s %s\n' "" "(Check logs: journalctl -u containai-docker)"
+                    ;;
+                activating)
+                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] activating..."
+                    ;;
+                deactivating)
+                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] deactivating..."
+                    ;;
+                unknown)
+                    # State is unknown - check if service exists
+                    if _cai_containai_docker_service_exists; then
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] unknown state"
+                    else
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[NOT INSTALLED]"
+                        printf '  %-44s %s\n' "" "(Run 'cai setup' to install)"
+                    fi
+                    ;;
+                *)
+                    # Any other state (reloading, maintenance, etc.)
+                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] $service_state"
+                    ;;
+            esac
+        fi
+    fi
+
     if _cai_containai_docker_available; then
         containai_docker_ok="true"
         printf '  %-44s %s\n' "Context '$_CAI_CONTAINAI_DOCKER_CONTEXT':" "[OK]"
@@ -1299,6 +1348,20 @@ _cai_doctor_json() {
     local containai_docker_error=""
     local containai_docker_sysbox_default="false"
     local containai_docker_default_runtime=""
+    local containai_docker_service_active="false"
+    local containai_docker_service_state=""
+    local containai_docker_service_exists="false"
+
+    # Check systemd service status (Linux/WSL2 only)
+    if [[ "$platform" != "macos" ]]; then
+        if _cai_containai_docker_service_exists; then
+            containai_docker_service_exists="true"
+        fi
+        if _cai_containai_docker_service_active; then
+            containai_docker_service_active="true"
+        fi
+        containai_docker_service_state="${_CAI_CONTAINAI_SERVICE_STATE:-unknown}"
+    fi
 
     if _cai_containai_docker_available; then
         containai_docker_ok="true"
@@ -1367,6 +1430,17 @@ _cai_doctor_json() {
     printf '    "available": %s,\n' "$containai_docker_ok"
     printf '    "context_name": "%s",\n' "$_CAI_CONTAINAI_DOCKER_CONTEXT"
     printf '    "socket": "%s",\n' "$_CAI_CONTAINAI_DOCKER_SOCKET"
+    # Service status (Linux/WSL2 only)
+    if [[ "$platform" != "macos" ]]; then
+        printf '    "service_name": "%s",\n' "$_CAI_CONTAINAI_DOCKER_SERVICE"
+        printf '    "service_exists": %s,\n' "$containai_docker_service_exists"
+        printf '    "service_active": %s,\n' "$containai_docker_service_active"
+        if [[ -n "$containai_docker_service_state" ]]; then
+            printf '    "service_state": "%s",\n' "$(_cai_json_escape "$containai_docker_service_state")"
+        else
+            printf '    "service_state": null,\n'
+        fi
+    fi
     if [[ -n "$containai_docker_default_runtime" ]]; then
         printf '    "default_runtime": "%s",\n' "$(_cai_json_escape "$containai_docker_default_runtime")"
     else

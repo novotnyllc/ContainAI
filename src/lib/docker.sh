@@ -484,4 +484,74 @@ _cai_containai_docker_sysbox_is_default() {
     [[ "$runtime" == "sysbox-runc" ]]
 }
 
+# Check if containai-docker.service systemd unit is active
+# Returns: 0=active, 1=not active or systemd not available
+# Outputs: Sets _CAI_CONTAINAI_SERVICE_STATE with systemd state (active, inactive, failed, etc.)
+# Note: Only applicable on Linux/WSL2 with systemd; macOS uses Lima VM instead
+_cai_containai_docker_service_active() {
+    _CAI_CONTAINAI_SERVICE_STATE=""
+
+    # systemd not available (macOS, non-systemd Linux)
+    if ! command -v systemctl >/dev/null 2>&1; then
+        _CAI_CONTAINAI_SERVICE_STATE="no_systemd"
+        return 1
+    fi
+
+    # Check if systemd is actually running (not just installed)
+    # /run/systemd/system exists only when systemd is PID 1
+    # This works in WSL2 where systemctl may exist but systemd isn't running
+    if [[ ! -d /run/systemd/system ]]; then
+        _CAI_CONTAINAI_SERVICE_STATE="systemd_not_running"
+        return 1
+    fi
+
+    # Get service state - use || true to preserve output for non-zero exit codes
+    # systemctl is-active returns non-zero for inactive/failed states but still
+    # outputs the state to stdout (e.g., "inactive", "failed", "activating")
+    local state
+    state=$(systemctl is-active "$_CAI_CONTAINAI_DOCKER_SERVICE" 2>/dev/null || true)
+
+    # If state is empty, the unit likely doesn't exist
+    if [[ -z "$state" ]]; then
+        _CAI_CONTAINAI_SERVICE_STATE="unknown"
+        return 1
+    fi
+
+    _CAI_CONTAINAI_SERVICE_STATE="$state"
+
+    [[ "$state" == "active" ]]
+}
+
+# Check if containai-docker.service systemd unit exists (is installed)
+# Returns: 0=exists, 1=not found or systemd not available
+# Outputs: Sets _CAI_CONTAINAI_SERVICE_EXISTS_ERROR with reason on failure
+# Note: Only applicable on Linux/WSL2 with systemd
+_cai_containai_docker_service_exists() {
+    _CAI_CONTAINAI_SERVICE_EXISTS_ERROR=""
+
+    # systemd not available
+    if ! command -v systemctl >/dev/null 2>&1; then
+        _CAI_CONTAINAI_SERVICE_EXISTS_ERROR="no_systemd"
+        return 1
+    fi
+
+    # If systemd isn't running, check unit file directly
+    if [[ ! -d /run/systemd/system ]]; then
+        # Fall back to checking unit file path directly
+        if [[ -f "$_CAI_CONTAINAI_DOCKER_UNIT" ]]; then
+            return 0
+        fi
+        _CAI_CONTAINAI_SERVICE_EXISTS_ERROR="systemd_not_running"
+        return 1
+    fi
+
+    # Use systemctl cat to check if unit exists (requires running systemd)
+    if systemctl cat "$_CAI_CONTAINAI_DOCKER_SERVICE" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    _CAI_CONTAINAI_SERVICE_EXISTS_ERROR="not_found"
+    return 1
+}
+
 return 0

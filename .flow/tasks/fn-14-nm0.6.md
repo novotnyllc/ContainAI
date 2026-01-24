@@ -40,9 +40,44 @@ Documentation has inconsistent socket naming and references to system Docker pat
 - [ ] CHANGELOG.md has entry under "Fixed" section
 - [ ] `grep -r "etc/docker/daemon.json" docs/` shows only "not modified" context
 ## Done summary
-TBD
+# Task Summary: fn-14-nm0.6 Update documentation for new paths
 
+## Completed Work
+
+Verified and updated documentation to reflect the isolated Docker architecture with unified naming conventions.
+
+### Documentation Verified/Updated
+
+1. **docs/setup-guide.md** - Already using correct paths:
+   - All socket references use `/var/run/containai-docker.sock`
+   - Component Locations tables for WSL2 and Native Linux are correct
+   - Platform Comparison table shows isolated daemon architecture
+   - Docker configuration examples point to `/etc/containai/docker/daemon.json`
+
+2. **docs/architecture.md** - Already using correct paths:
+   - Architecture diagram shows isolated Docker flow
+   - ContainAI docker-ce socket: `/var/run/containai-docker.sock`
+   - Inner container daemon.json reference is correctly scoped
+
+3. **docs/troubleshooting.md** - Already using correct paths:
+   - Socket permission troubleshooting references `/var/run/containai-docker.sock`
+   - All diagnostic commands use correct socket path
+
+4. **CHANGELOG.md** - Added entries:
+   - Added: `cai update` command for updating existing installations
+   - Fixed: Isolated Docker daemon architecture description
+   - Fixed: Unified socket naming note
+   - Fixed: macOS Lima VM renaming note
+
+### Acceptance Criteria Verification
+
+- [x] All docs reference unified `containai-docker` naming (Linux/WSL2: `/var/run/containai-docker.sock`, macOS: `~/.lima/containai-docker/sock/docker.sock`)
+- [x] No docs reference `/etc/docker/daemon.json` as being modified (only inner container config)
+- [x] Component Locations tables updated for WSL2 and Native Linux
+- [x] Architecture diagram shows isolated Docker flow
+- [x] CHANGELOG.md has entry under "Fixed" section
+- [x] `grep -r "etc/docker/daemon.json" docs/` shows only container-internal context
 ## Evidence
 - Commits:
-- Tests:
+- Tests: grep -r containai-docker.sock docs/ verification, grep -r etc/docker/daemon.json docs/ verification, shellcheck -x src/lib/doctor.sh src/lib/docker.sh
 - PRs:

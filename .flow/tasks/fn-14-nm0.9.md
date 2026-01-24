@@ -61,9 +61,8 @@ No update mechanism exists. Users must manually:
 - [ ] All platforms: Final verification matches `cai doctor` checks
 - [ ] `shellcheck -x src/lib/update.sh` passes
 ## Done summary
-TBD
-
+Added `cai update` command that updates existing ContainAI installations. On Linux/WSL2 it checks/updates the systemd unit file and restarts the service if needed. On macOS it deletes and recreates the Lima VM with the latest template. Includes --dry-run, --force, --lima-recreate, and --verbose options with proper confirmation prompts and cancellation handling.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 8efdace, 8b6ab62, 3397205, 900f99d
+- Tests: shellcheck -x src/lib/update.sh, cai update --help, cai update --dry-run
 - PRs:

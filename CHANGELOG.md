@@ -8,10 +8,13 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 ## [Unreleased]
 
 ### Added
+- `cai update` command for updating existing installations to new isolated Docker architecture
 
 ### Changed
 
 ### Fixed
+- Isolated Docker daemon architecture: ContainAI now runs a completely separate Docker instance that never modifies system Docker configuration at `/etc/docker/daemon.json` (Linux/WSL2: `containai-docker.service` systemd unit; macOS: `containai-docker` Lima VM)
+- Unified naming convention: All platforms now use `containai-docker` as the Docker context name; socket paths are `/var/run/containai-docker.sock` (Linux/WSL2) and `~/.lima/containai-docker/sock/docker.sock` (macOS)
 
 ### Security
 
