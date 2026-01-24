@@ -987,16 +987,20 @@ docker context use default
 **Diagnosis:**
 ```bash
 groups
-ls -l /var/run/docker.sock
+ls -l /var/run/containai-docker.sock
+sudo systemctl status containai-docker
 ```
 
 **Solution:**
 
-Add user to docker group:
+Add user to docker group and ensure the ContainAI Docker service is running:
 ```bash
 sudo usermod -aG docker $USER
 newgrp docker  # Apply immediately
 # or log out and back in
+
+# Ensure the isolated Docker service is running
+sudo systemctl start containai-docker
 ```
 
 ---

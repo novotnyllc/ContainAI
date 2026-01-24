@@ -88,10 +88,10 @@ The `cai setup` command installs and configures multiple components. Here's what
 |  |                                                             |   |
 |  |  Docker Configuration (WSL2/Linux only)                    |   |
 |  |  +---------------------------------------------------------+|   |
-|  |  | - Socket: /var/run/containai-docker.sock (WSL2)         ||   |
-|  |  |           /var/run/docker.sock (Linux)                  ||   |
-|  |  | - Config: /etc/docker/daemon.json                       ||   |
-|  |  | - Runtime: sysbox-runc (added, not default)             ||   |
+|  |  | - Socket: /var/run/containai-docker.sock (isolated)     ||   |
+|  |  | - Config: /etc/containai/docker/daemon.json             ||   |
+|  |  | - Service: containai-docker.service (dedicated)         ||   |
+|  |  | - Runtime: sysbox-runc (default for isolated daemon)    ||   |
 |  |  +---------------------------------------------------------+|   |
 |  |                                                             |   |
 |  |  Sysbox Runtime                                             |   |
@@ -128,9 +128,9 @@ The `cai setup` command installs and configures multiple components. Here's what
 
 | Component | WSL2 | Native Linux | macOS |
 |-----------|------|--------------|-------|
-| Docker daemon | Existing Docker Engine (not Desktop) | Uses existing Docker Engine | Lima VM |
-| Docker socket | `/var/run/containai-docker.sock` (dedicated) | `/var/run/docker.sock` | `~/.lima/containai-docker/sock/docker.sock` |
-| Docker config | `/etc/docker/daemon.json` | `/etc/docker/daemon.json` | Inside Lima VM |
+| Docker daemon | Isolated `containai-docker.service` | Isolated `containai-docker.service` | Lima VM |
+| Docker socket | `/var/run/containai-docker.sock` | `/var/run/containai-docker.sock` | `~/.lima/containai-docker/sock/docker.sock` |
+| Docker config | `/etc/containai/docker/daemon.json` | `/etc/containai/docker/daemon.json` | Inside Lima VM |
 | Sysbox install | GitHub releases (Ubuntu/Debian) | GitHub releases (Ubuntu/Debian) | Inside Lima VM |
 | Sysbox services | systemd | systemd | Lima VM systemd |
 | Context name | `containai-docker` | `containai-docker` | `containai-docker` |
@@ -175,9 +175,9 @@ cai setup --force
 
 | Component | Path |
 |-----------|------|
-| Docker daemon config | `/etc/docker/daemon.json` |
-| Docker socket (dedicated) | `/var/run/containai-docker.sock` |
-| Docker drop-in | `/etc/systemd/system/docker.service.d/containai-socket.conf` |
+| Docker daemon config | `/etc/containai/docker/daemon.json` |
+| Docker socket | `/var/run/containai-docker.sock` |
+| Systemd service | `/etc/systemd/system/containai-docker.service` |
 | Sysbox binaries | `/usr/bin/sysbox-runc`, `/usr/bin/sysbox-mgr`, `/usr/bin/sysbox-fs` |
 | SSH key | `~/.config/containai/id_containai` |
 | SSH config dir | `~/.ssh/containai.d/` |
@@ -186,41 +186,55 @@ cai setup --force
 
 #### WSL2 Docker Configuration
 
-The setup creates or modifies `/etc/docker/daemon.json`:
+The setup creates an **isolated Docker daemon** that never touches system Docker. The configuration is stored at `/etc/containai/docker/daemon.json`:
 
 ```json
 {
+  "default-runtime": "sysbox-runc",
   "runtimes": {
     "sysbox-runc": {
       "path": "/usr/bin/sysbox-runc"
     }
-  }
+  },
+  "data-root": "/var/lib/containai-docker",
+  "exec-root": "/var/run/containai-docker",
+  "pidfile": "/var/run/containai-docker.pid",
+  "bridge": "cai0",
+  "bip": "172.30.0.1/16"
 }
 ```
 
-And creates a systemd drop-in to add the dedicated socket:
+The systemd service `/etc/systemd/system/containai-docker.service` runs a dedicated Docker daemon:
 
 ```ini
-# /etc/systemd/system/docker.service.d/containai-socket.conf
+[Unit]
+Description=ContainAI Docker Daemon (isolated)
+After=network.target containerd.service sysbox.service
+
 [Service]
-ExecStart=
-ExecStart=/usr/bin/dockerd -H fd:// -H unix:///var/run/containai-docker.sock --containerd=/run/containerd/containerd.sock
+ExecStart=/usr/bin/dockerd --config-file=/etc/containai/docker/daemon.json -H unix:///var/run/containai-docker.sock
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ---
 
 ### Native Linux
 
-Native Linux uses the existing Docker installation with Sysbox added as a runtime.
+Native Linux runs a completely **isolated Docker daemon** that never touches your system Docker installation.
 
 #### What Native Linux Setup Does
 
 1. **Checks kernel version** (requires 5.5+)
 2. **Downloads and installs Sysbox** from GitHub releases (Ubuntu/Debian only)
-3. **Configures daemon.json** with sysbox-runc runtime
-4. **Restarts Docker service**
-5. **Creates Docker context** `containai-docker`
+3. **Creates isolated daemon config** at `/etc/containai/docker/daemon.json`
+4. **Creates dedicated systemd service** `containai-docker.service`
+5. **Creates Docker context** `containai-docker` pointing to isolated socket
 6. **Sets up SSH infrastructure**
+
+**Note:** Your system Docker at `/var/run/docker.sock` and `/etc/docker/` is never touched.
 
 #### Run Setup
 
@@ -253,8 +267,9 @@ cai setup
 
 | Component | Path |
 |-----------|------|
-| Docker daemon config | `/etc/docker/daemon.json` |
-| Docker socket | `/var/run/docker.sock` (default) |
+| Docker daemon config | `/etc/containai/docker/daemon.json` |
+| Docker socket | `/var/run/containai-docker.sock` |
+| Systemd service | `/etc/systemd/system/containai-docker.service` |
 | Sysbox binaries | `/usr/bin/sysbox-runc`, `/usr/bin/sysbox-mgr`, `/usr/bin/sysbox-fs` |
 | SSH key | `~/.config/containai/id_containai` |
 | SSH config dir | `~/.ssh/containai.d/` |

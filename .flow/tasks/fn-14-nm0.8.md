@@ -95,6 +95,6 @@ All platforms now consistently use `containai-docker` as the Docker context name
 
 Old macOS installs with `containai-secure` VM will be migrated on next `cai setup`.
 ## Evidence
-- Commits: 9ea25d1, 4509406, e3bf5c8, b961196, 1029222, 44f661e, 13ce372, 0592fdb
-- Tests: shellcheck -x src/lib/setup.sh, shellcheck -x src/lib/docker.sh, shellcheck -x src/lib/doctor.sh
+- Commits: 9ea25d1, 4509406, e3bf5c8, b961196, 7d6b2d4
+- Tests: shellcheck -x src/lib/setup.sh
 - PRs:
