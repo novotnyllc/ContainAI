@@ -14,6 +14,7 @@
 #
 # Dependencies:
 #   - Requires lib/core.sh to be sourced first for logging functions
+#   - Requires lib/platform.sh for platform detection (_cai_is_macos)
 #
 # Usage: source lib/docker.sh
 # ==============================================================================

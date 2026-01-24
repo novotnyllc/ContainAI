@@ -625,12 +625,12 @@ brew install openssh
 
 ## Sysbox/Secure Engine Issues
 
-### "containai-secure context not found"
+### "containai-docker context not found"
 
 **Symptom:**
 ```
 Sysbox available:                       [INFO] Not configured
-(Run 'cai setup' to configure 'containai-secure' context)
+(Run 'cai setup' to configure 'containai-docker' context)
 ```
 
 **Diagnosis:**
@@ -645,7 +645,7 @@ Run the setup command to configure Sysbox:
 cai setup
 ```
 
-This creates the `containai-secure` Docker context pointing to a Sysbox-enabled daemon.
+This creates the `containai-docker` Docker context pointing to a Sysbox-enabled daemon.
 
 ### "Sysbox runtime not found"
 
@@ -679,16 +679,16 @@ cai setup
 **macOS:**
 Sysbox is not natively supported on macOS. Use Docker Desktop with ECI instead, or configure a Lima VM with Sysbox.
 
-### "Docker daemon for 'containai-secure' not running"
+### "Docker daemon for 'containai-docker' not running"
 
 **Symptom:**
 ```
-(Docker daemon for 'containai-secure' not running)
+(Docker daemon for 'containai-docker' not running)
 ```
 
 **Diagnosis:**
 ```bash
-docker --context containai-secure info
+docker --context containai-docker info
 ```
 
 **Solution:**
@@ -703,7 +703,7 @@ sudo dockerd --host unix:///var/run/containai-docker.sock &
 
 **Lima (macOS):**
 ```bash
-limactl start containai-secure
+limactl start containai-docker
 ```
 
 ### "containai-docker service not running"
@@ -1107,9 +1107,9 @@ Quick reference of error messages and their section in this guide:
 | "No timeout command available" | [Installation Issues](#no-timeout-command-available) |
 | "jq is not installed" | [Installation Issues](#jq-is-not-installed) |
 | "OpenSSH version too old" | [Installation Issues](#openssh-version-too-old) |
-| "containai-secure context not found" | [Sysbox Issues](#containai-secure-context-not-found) |
+| "containai-docker context not found" | [Sysbox Issues](#containai-docker-context-not-found) |
 | "Sysbox runtime not found" | [Sysbox Issues](#sysbox-runtime-not-found) |
-| "Docker daemon not running" | [Sysbox Issues](#docker-daemon-for-containai-secure-not-running) |
+| "Docker daemon not running" | [Sysbox Issues](#docker-daemon-for-containai-docker-not-running) |
 | "containai-docker service not running" | [Sysbox Issues](#containai-docker-service-not-running) |
 | "Image not found" | [Container Issues](#image-not-found) |
 | "Container exists but was not created by ContainAI" | [Container Issues](#container-exists-but-was-not-created-by-containai) |

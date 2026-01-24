@@ -596,15 +596,15 @@ _cai_doctor() {
             socket_not_found)
                 printf '  %-44s %s\n' "" "(Socket $display_socket not found)"
                 if _cai_is_macos; then
-                    printf '  %-44s %s\n' "" "(Run 'cai setup' or start Lima VM: limactl start $_CAI_CONTAINAI_DOCKER_CONTEXT)"
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' or start Lima VM: limactl start $_CAI_LIMA_VM_NAME)"
                 else
                     printf '  %-44s %s\n' "" "(Run 'cai setup' or start service: sudo systemctl start containai-docker)"
                 fi
                 ;;
             connection_refused | daemon_unavailable)
                 if _cai_is_macos; then
-                    printf '  %-44s %s\n' "" "(Lima VM '$_CAI_CONTAINAI_DOCKER_CONTEXT' not running)"
-                    printf '  %-44s %s\n' "" "(Try: limactl start $_CAI_CONTAINAI_DOCKER_CONTEXT)"
+                    printf '  %-44s %s\n' "" "(Lima VM '$_CAI_LIMA_VM_NAME' not running)"
+                    printf '  %-44s %s\n' "" "(Try: limactl start $_CAI_LIMA_VM_NAME)"
                 else
                     printf '  %-44s %s\n' "" "(containai-docker service not running)"
                     printf '  %-44s %s\n' "" "(Try: sudo systemctl start containai-docker)"
