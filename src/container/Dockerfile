@@ -5,13 +5,13 @@
 # For layer-specific builds, use Dockerfile.base, Dockerfile.sdks, or Dockerfile.agents.
 #
 # Build order (if building from scratch):
-#   docker build -t containai/base -f src/Dockerfile.base src/
-#   docker build -t containai/sdks -f src/Dockerfile.sdks src/
-#   docker build -t containai/full -f src/Dockerfile.agents src/
-#   docker build -t containai -f src/Dockerfile src/
+#   docker build -t containai/base -f src/container/Dockerfile.base src/
+#   docker build -t containai/sdks -f src/container/Dockerfile.sdks src/
+#   docker build -t containai/full -f src/container/Dockerfile.agents src/
+#   docker build -t containai -f src/container/Dockerfile src/
 #
 # Quick build (uses pre-built layers):
-#   docker build -t containai -f src/Dockerfile src/
+#   docker build -t containai -f src/container/Dockerfile src/
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 

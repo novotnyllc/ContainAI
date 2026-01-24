@@ -89,7 +89,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: src
-          file: src/Dockerfile.base
+          file: src/container/Dockerfile.base
           platforms: ${{ steps.build_strategy.outputs.platforms }}
           push: ${{ steps.build_strategy.outputs.push }}
           load: ${{ steps.build_strategy.outputs.load }}
@@ -106,7 +106,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: src
-          file: src/Dockerfile.sdks
+          file: src/container/Dockerfile.sdks
           platforms: ${{ steps.build_strategy.outputs.platforms }}
           push: ${{ steps.build_strategy.outputs.push }}
           load: ${{ steps.build_strategy.outputs.load }}
@@ -124,7 +124,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: src
-          file: src/Dockerfile.agents
+          file: src/container/Dockerfile.agents
           platforms: ${{ steps.build_strategy.outputs.platforms }}
           push: ${{ steps.build_strategy.outputs.push }}
           load: ${{ steps.build_strategy.outputs.load }}
@@ -160,7 +160,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: src
-          file: src/Dockerfile
+          file: src/container/Dockerfile
           platforms: ${{ steps.build_strategy.outputs.platforms }}
           push: ${{ steps.build_strategy.outputs.push }}
           load: ${{ steps.build_strategy.outputs.load }}

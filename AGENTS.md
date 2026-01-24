@@ -46,7 +46,13 @@ src/
 │   ├── container.sh    # Container lifecycle
 │   ├── ssh.sh          # SSH configuration
 │   └── ...             # Other modules
-├── Dockerfile*         # Multi-layer Docker builds
+├── container/          # Container-specific content
+│   ├── containai-init.sh  # Container init script
+│   ├── entrypoint.sh      # Docker entrypoint
+│   ├── Dockerfile.base    # Base image
+│   ├── Dockerfile.sdks    # SDK layer
+│   ├── Dockerfile.agents  # Agent layer
+│   └── Dockerfile         # Final image
 └── build.sh            # Build script
 
 tests/integration/      # Integration tests (require Docker)

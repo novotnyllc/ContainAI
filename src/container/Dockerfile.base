@@ -7,7 +7,7 @@
 # - dockerd for Docker-in-Docker (via sysbox-runc)
 #
 # Usage (from repo root, requires BuildKit):
-#   docker build -t containai/base -f src/Dockerfile.base src/
+#   docker build -t containai/base -f src/container/Dockerfile.base src/
 #
 # Run with sysbox-runc runtime:
 #   docker run --runtime=sysbox-runc -d containai/base

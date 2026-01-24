@@ -15,7 +15,7 @@
 # --privileged. The sysbox runtime provides all necessary capabilities for DinD.
 #
 # Usage (from repo root):
-#   docker build -t containai-test -f src/Dockerfile.test src/
+#   docker build -t containai-test -f src/container/Dockerfile.test src/
 #   docker --context containai-secure run --rm --runtime=sysbox-runc containai-test
 #
 # Note: Requires BuildKit (DOCKER_BUILDKIT=1 or Docker 23.0+)

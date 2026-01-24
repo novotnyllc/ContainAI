@@ -4,10 +4,10 @@
 # Includes: .NET SDK, Rust, Go
 #
 # Usage (from repo root, requires BuildKit):
-#   docker build -t containai/sdks -f src/Dockerfile.sdks src/
+#   docker build -t containai/sdks -f src/container/Dockerfile.sdks src/
 #
 # Requires containai/base:latest to be built first:
-#   docker build -t containai/base -f src/Dockerfile.base src/
+#   docker build -t containai/base -f src/container/Dockerfile.base src/
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 

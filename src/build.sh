@@ -375,7 +375,7 @@ build_layer() {
         --build-arg VCS_REF="$VCS_REF" \
         ${extra_args[@]+"${extra_args[@]}"} \
         ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
-        -f "${SCRIPT_DIR}/${dockerfile}" \
+        -f "${SCRIPT_DIR}/container/${dockerfile}" \
         "$SCRIPT_DIR"
 
     echo "  Tagged: ${repo}:latest, ${repo}:${DATE_TAG}"
@@ -431,7 +431,7 @@ case "$BUILD_LAYER" in
             --build-arg VCS_REF="$VCS_REF" \
             --build-arg AGENTS_IMAGE="${IMAGE_FULL}:latest" \
             ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
-            -f "${SCRIPT_DIR}/Dockerfile" \
+            -f "${SCRIPT_DIR}/container/Dockerfile" \
             "$SCRIPT_DIR"
         echo "  Tagged: ${IMAGE_MAIN}:latest, ${IMAGE_MAIN}:${DATE_TAG}"
         ;;

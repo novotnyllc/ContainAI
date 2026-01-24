@@ -4,11 +4,11 @@
 # Includes: Claude Code, Gemini CLI, Copilot, Codex, OpenCode, agent-browser, gh CLI
 #
 # Usage (from repo root, requires BuildKit):
-#   docker build -t containai/full -f src/Dockerfile.agents src/
+#   docker build -t containai/full -f src/container/Dockerfile.agents src/
 #
 # Requires containai/sdks:latest to be built first:
-#   docker build -t containai/base -f src/Dockerfile.base src/
-#   docker build -t containai/sdks -f src/Dockerfile.sdks src/
+#   docker build -t containai/base -f src/container/Dockerfile.base src/
+#   docker build -t containai/sdks -f src/container/Dockerfile.sdks src/
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 
@@ -197,7 +197,7 @@ RUN printf '%s\n' \
 # =============================================================================
 USER root
 
-COPY containai-init.sh /usr/local/lib/containai/init.sh
+COPY container/containai-init.sh /usr/local/lib/containai/init.sh
 COPY services/containai-init.service /etc/systemd/system/containai-init.service
 RUN chmod +x /usr/local/lib/containai/init.sh && \
     # Enable the service via symlink (systemctl requires systemd as PID 1)

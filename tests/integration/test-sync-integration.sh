@@ -2429,7 +2429,7 @@ test_entrypoint_loads_after_ownership() {
     # Function definitions look like: "function_name() {" or "_function_name() {"
     # Call sites look like: "ensure_volume_structure" or "_load_env_file" (just the name)
     local entrypoint_content
-    entrypoint_content=$(cat "$SRC_DIR/entrypoint.sh" 2>/dev/null || echo "")
+    entrypoint_content=$(cat "$SRC_DIR/container/entrypoint.sh" 2>/dev/null || echo "")
 
     # Find CALL sites (lines that are just the function name, not definitions with parentheses)
     # ensure_volume_structure call is a bare line, _load_env_file call is a bare line

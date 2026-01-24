@@ -43,9 +43,9 @@ ContainAI enforces the following security measures:
 |------------|----------|-------------|
 | Isolation availability check | `src/lib/doctor.sh` | Verifies ECI sandbox or Sysbox runtime is available before starting containers |
 | Fail-closed on unknown errors | `src/lib/container.sh` | Blocks execution rather than proceeding with unknown status |
-| Symlink traversal defense | `src/entrypoint.sh` | `reject_symlink()` and `verify_path_under_data_dir()` prevent path escape |
-| Volume mount TOCTOU protection | `src/entrypoint.sh` | Validates paths before and after resolution |
-| Safe .env parsing | `src/entrypoint.sh` | CRLF handling, key validation, no shell eval |
+| Symlink traversal defense | `src/container/entrypoint.sh` | `reject_symlink()` and `verify_path_under_data_dir()` prevent path escape |
+| Volume mount TOCTOU protection | `src/container/entrypoint.sh` | Validates paths before and after resolution |
+| Safe .env parsing | `src/container/entrypoint.sh` | CRLF handling, key validation, no shell eval |
 | Credential isolation | `src/lib/container.sh` | Credentials stay inside container by default |
 | Docker socket access denied | `src/lib/container.sh` | Host Docker socket not mounted by default |
 
@@ -134,4 +134,4 @@ For detailed technical information about ContainAI's security implementation, se
 - [`src/lib/eci.sh`](src/lib/eci.sh) - ECI detection implementation
 - [`src/lib/docker.sh`](src/lib/docker.sh) - Docker sandbox detection
 - [`src/lib/container.sh`](src/lib/container.sh) - Container start with isolation checks
-- [`src/entrypoint.sh`](src/entrypoint.sh) - Volume mount security and .env parsing
+- [`src/container/entrypoint.sh`](src/container/entrypoint.sh) - Volume mount security and .env parsing

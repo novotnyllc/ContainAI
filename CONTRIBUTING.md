@@ -92,8 +92,9 @@ containai/
 │   │   ├── export.sh        # Volume backup
 │   │   ├── setup.sh         # Sysbox installation
 │   │   └── env.sh           # Environment handling
-│   ├── entrypoint.sh        # Container entrypoint (security validation)
-│   └── Dockerfile           # Container image definition
+│   └── container/           # Container-specific content
+│       ├── entrypoint.sh    # Container entrypoint (security validation)
+│       └── Dockerfile*      # Container image definitions
 ├── tests/                   # Test suites
 │   ├── unit/                # Unit tests (portable)
 │   └── integration/         # Integration tests (require Docker)
