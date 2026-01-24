@@ -1,9 +1,7 @@
 {
   "branch_name": "fn-17-axl",
   "created_at": "2026-01-24T22:07:50.990373Z",
-  "depends_on_epics": [
-    "fn-16-4c9"
-  ],
+  "depends_on_epics": [ ],
   "id": "fn-17-axl",
   "next_task": 1,
   "plan_review_status": "unknown",
