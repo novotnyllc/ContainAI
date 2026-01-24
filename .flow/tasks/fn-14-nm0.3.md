@@ -63,7 +63,14 @@ This completely pollutes the system Docker.
 
 ## Done summary
 Refactored `_cai_setup_linux()` to use completely isolated Docker daemon. The function now creates `/etc/containai/docker/daemon.json` with isolated paths (data-root, exec-root, socket) and a separate subnet (172.30.0.1/16). Creates a standalone systemd unit `containai-docker.service` instead of modifying system Docker. Cleans up legacy paths (old socket, context, drop-in) on upgrade. The `scripts/install-containai-docker.sh` script has been deleted with its logic merged into setup.sh.
+
+Additional fixes from codex impl-review:
+- Fixed `_cai_create_isolated_docker_context()` to switch away from active context before removing
+- Fixed `_cai_cleanup_legacy_paths()` to guard docker commands when Docker not installed
+- Fixed `cai doctor` to use platform-aware context selection (containai-docker on Linux/WSL2)
+- Fixed SSH config cleanup to also check containai-docker context
+
 ## Evidence
-- Commits: 53aa3a188b6e9e2057d21b266c5c9afac09f5d02
-- Tests: shellcheck -x src/lib/setup.sh, grep verification of acceptance criteria
+- Commits: 53aa3a188b6e9e2057d21b266c5c9afac09f5d02, 9ee3b5a
+- Tests: shellcheck -x src/lib/setup.sh src/lib/doctor.sh, codex impl-review SHIP
 - PRs:
