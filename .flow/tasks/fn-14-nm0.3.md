@@ -62,11 +62,8 @@ This completely pollutes the system Docker.
 - [ ] **Running `cai setup` twice is idempotent**
 
 ## Done summary
-
-TBD
-
+Refactored `_cai_setup_linux()` to use completely isolated Docker daemon. The function now creates `/etc/containai/docker/daemon.json` with isolated paths (data-root, exec-root, socket) and a separate subnet (172.30.0.1/16). Creates a standalone systemd unit `containai-docker.service` instead of modifying system Docker. Cleans up legacy paths (old socket, context, drop-in) on upgrade. The `scripts/install-containai-docker.sh` script has been deleted with its logic merged into setup.sh.
 ## Evidence
-
-- Commits:
-- Tests:
+- Commits: 53aa3a188b6e9e2057d21b266c5c9afac09f5d02
+- Tests: shellcheck -x src/lib/setup.sh, grep verification of acceptance criteria
 - PRs:

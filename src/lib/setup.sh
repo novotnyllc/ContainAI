@@ -734,7 +734,8 @@ _cai_cleanup_legacy_paths() {
     fi
 
     # Clean up old context (use -f to avoid prompts in non-interactive mode)
-    if docker context inspect "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
+    # Guard with command -v docker to avoid noisy errors if Docker isn't installed
+    if command -v docker >/dev/null 2>&1 && docker context inspect "$_CAI_LEGACY_CONTEXT" >/dev/null 2>&1; then
         if [[ "$dry_run" == "true" ]]; then
             _cai_info "[DRY-RUN] Would remove legacy context: $_CAI_LEGACY_CONTEXT"
         else
@@ -1066,7 +1067,13 @@ _cai_create_isolated_docker_context() {
                 _cai_info "[DRY-RUN] Would remove and recreate context"
             else
                 _cai_step "Removing misconfigured context"
-                if ! docker context rm "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                # Switch away if this context is currently active
+                local current_context
+                current_context=$(docker context show 2>/dev/null || true)
+                if [[ "$current_context" == "$_CAI_CONTAINAI_DOCKER_CONTEXT" ]]; then
+                    docker context use default >/dev/null 2>&1 || true
+                fi
+                if ! docker context rm -f "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
                     _cai_error "Failed to remove existing context"
                     return 1
                 fi

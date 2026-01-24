@@ -428,16 +428,15 @@ _cai_doctor() {
     # === Sysbox / Secure Engine Section ===
     printf '%s\n' "Sysbox Isolation"
 
-    # Resolve configured context name (env/config), default to containai-secure
-    local sysbox_context_name="containai-secure"
+    # Resolve context: use _cai_select_context which tries config override,
+    # then containai-docker (Linux/WSL2), then containai-secure (macOS/legacy)
+    local sysbox_context_name=""
     local config_context
     config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
-    if [[ -n "$config_context" ]]; then
-        sysbox_context_name="$config_context"
-    fi
+    sysbox_context_name=$(_cai_select_context "$config_context" 2>/dev/null) || sysbox_context_name=""
 
     # Check Sysbox availability with resolved context name
-    if _cai_sysbox_available_for_context "$sysbox_context_name"; then
+    if [[ -n "$sysbox_context_name" ]] && _cai_sysbox_available_for_context "$sysbox_context_name"; then
         sysbox_ok="true"
         printf '  %-44s %s\n' "Sysbox available:" "[OK]"
         printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK]"
@@ -445,6 +444,8 @@ _cai_doctor() {
     else
         printf '  %-44s %s\n' "Sysbox available:" "[ERROR] Not configured"
         local sysbox_error="${_CAI_SYSBOX_CONTEXT_ERROR:-${_CAI_SYSBOX_ERROR:-}}"
+        # Default context name for error messages if none was selected
+        local display_context="${sysbox_context_name:-containai-docker}"
         case "$sysbox_error" in
             socket_not_found)
                 if [[ "$platform" == "macos" ]]; then
@@ -454,8 +455,8 @@ _cai_doctor() {
                     printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox)"
                 fi
                 ;;
-            context_not_found)
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to configure '$sysbox_context_name' context)"
+            context_not_found|"")
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to configure '$display_context' context)"
                 ;;
             permission_denied)
                 if [[ "$platform" == "macos" ]]; then
@@ -1028,9 +1029,12 @@ _cai_doctor_fix() {
 
     # Only attempt cleanup if Docker is available and at least one daemon is reachable
     if command -v docker >/dev/null 2>&1; then
-        # Check if any Docker context is reachable
+        # Check if any Docker context is reachable (default, containai-docker, or containai-secure)
         local docker_reachable=false
         if _cai_timeout 5 docker info >/dev/null 2>&1; then
+            docker_reachable=true
+        elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1 \
+            && _cai_timeout 5 docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" info >/dev/null 2>&1; then
             docker_reachable=true
         elif docker context inspect containai-secure >/dev/null 2>&1 \
             && _cai_timeout 5 docker --context containai-secure info >/dev/null 2>&1; then
@@ -1182,14 +1186,17 @@ _cai_doctor_json() {
         platform_json="$platform"
     fi
 
-    # Try to get configured context name (if available)
+    # Resolve context: use _cai_select_context which tries config override,
+    # then containai-docker (Linux/WSL2), then containai-secure (macOS/legacy)
     local config_context
     config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
-    if [[ -n "$config_context" ]]; then
-        sysbox_context_name="$config_context"
+    sysbox_context_name=$(_cai_select_context "$config_context" 2>/dev/null) || sysbox_context_name=""
+    # Default for error reporting if no context available
+    if [[ -z "$sysbox_context_name" ]]; then
+        sysbox_context_name="containai-docker"
     fi
 
-    # Check Sysbox with configured context name
+    # Check Sysbox with resolved context name
     local sysbox_error=""
     if _cai_sysbox_available_for_context "$sysbox_context_name"; then
         sysbox_ok="true"
