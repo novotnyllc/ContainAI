@@ -640,7 +640,7 @@ _containai_import_cmd() {
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix for shell function call (pitfall: env -u only works with external commands)
     local selected_context=""
     if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
-        : # success - selected_context is "containai-secure" (Sysbox)
+        : # success - selected_context is isolated context (Sysbox)
     else
         # No isolation available - fallback to default context with warning
         echo "[WARN] No isolation available, using default Docker context" >&2

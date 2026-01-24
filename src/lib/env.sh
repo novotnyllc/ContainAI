@@ -12,7 +12,7 @@
 #   _containai_import_env "$context" "$volume" "$workspace" "$explicit_config" "$dry_run"
 #
 # Arguments:
-#   $1 = Docker context ("" for default, "containai-secure" for Sysbox)
+#   $1 = Docker context ("" for default, "containai-docker" for Sysbox)
 #   $2 = Data volume name (required)
 #   $3 = Workspace path (for config resolution)
 #   $4 = Explicit config path (optional)
@@ -269,7 +269,7 @@ _env_read_host() {
 
 # Import env vars to data volume via stdin streaming
 # Arguments:
-#   $1 = Docker context ("" for default, "containai-secure" for Sysbox)
+#   $1 = Docker context ("" for default, "containai-docker" for Sysbox)
 #   $2 = Data volume name (required)
 #   $3 = Workspace path (for config resolution)
 #   $4 = Explicit config path (optional)

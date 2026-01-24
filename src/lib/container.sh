@@ -1952,7 +1952,7 @@ _containai_list_containers_for_context() {
 
 # Interactive container stop selection
 # Finds all ContainAI containers (by label or ancestor image) and prompts user
-# Checks both default context and secure engine context (containai-secure)
+# Checks both default context and secure engine context (containai-docker)
 # Arguments:
 #   --all    Stop all containers without prompting (non-interactive mode)
 #   --remove Also remove containers (not just stop) and clean SSH configs
@@ -1983,13 +1983,13 @@ _containai_stop_all() {
     default_containers=$(_containai_list_containers_for_context "")
 
     # Determine which secure engine contexts to check
-    # Check both configured context (if different) and default containai-secure
-    local configured_context default_secure_context="containai-secure"
+    # Check both configured context (if different) and default containai-docker
+    local configured_context default_secure_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     configured_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || configured_context=""
 
     secure_containers=""
 
-    # Check default containai-secure context
+    # Check default containai-docker context
     if docker context inspect "$default_secure_context" >/dev/null 2>&1; then
         secure_containers=$(_containai_list_containers_for_context "$default_secure_context")
     fi

@@ -141,8 +141,8 @@ _cai_check_kernel_for_sysbox() {
 
 # Auto-select Docker context based on Sysbox availability
 # Returns context name via stdout:
-#   - "containai-docker" for isolated daemon (Linux/WSL2)
-#   - "containai-secure" for Lima VM (macOS) or legacy installs
+#   - "containai-docker" for isolated daemon (all platforms)
+#   - Legacy "containai-secure" as fallback for old installs
 #   - Config override if specified and available
 #   - Nothing (return 1) if no isolation available
 # Arguments: $1 = config override for context name (optional)
@@ -155,11 +155,11 @@ _cai_select_context() {
 
     # Try contexts in order:
     # 1. Config override (if provided)
-    # 2. containai-docker (new isolated daemon, Linux/WSL2)
-    # 3. containai-secure (legacy/macOS Lima)
+    # 2. containai-docker (isolated daemon on Linux/WSL2, Lima VM on macOS)
+    # 3. containai-secure (legacy fallback for old installs)
     local context_name="${config_context_name:-}"
     local primary_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"  # containai-docker
-    local fallback_context="containai-secure"
+    local fallback_context="${_CAI_LEGACY_CONTEXT:-containai-secure}"
 
     # If config specified a context, try it first
     if [[ -n "$context_name" ]]; then
@@ -175,7 +175,7 @@ _cai_select_context() {
         fi
     fi
 
-    # Try primary context (containai-docker) - the new isolated daemon
+    # Try primary context (containai-docker) - the isolated daemon (all platforms)
     if _cai_sysbox_available_for_context "$primary_context"; then
         if [[ "$debug_flag" == "debug" ]]; then
             printf '%s\n' "[DEBUG] Context selection: Using primary context '$primary_context' with Sysbox" >&2
@@ -187,7 +187,7 @@ _cai_select_context() {
         return 0
     fi
 
-    # Try fallback context (containai-secure) - legacy or macOS
+    # Try fallback context (containai-secure) - legacy installs only
     if _cai_sysbox_available_for_context "$fallback_context"; then
         if [[ "$debug_flag" == "debug" ]]; then
             printf '%s\n' "[DEBUG] Context selection: Using fallback context '$fallback_context' with Sysbox" >&2
@@ -219,7 +219,7 @@ _cai_select_context() {
 #   daemon_unavailable - Generic daemon error
 #   runtime_not_found - Sysbox runtime not registered
 _cai_sysbox_available_for_context() {
-    local context_name="${1:-containai-secure}"
+    local context_name="${1:-$_CAI_CONTAINAI_DOCKER_CONTEXT}"
     _CAI_SYSBOX_CONTEXT_ERROR=""
 
     # Check if context exists
@@ -273,7 +273,7 @@ _cai_sysbox_available_for_context() {
 # Sysbox Detection
 # ==============================================================================
 
-# Check if Sysbox is available on the containai-secure context
+# Check if Sysbox is available on the containai-docker context
 # Returns: 0=available, 1=not available
 # Outputs: Sets _CAI_SYSBOX_ERROR with reason on failure
 #          Sets _CAI_SYSBOX_CONTEXT_EXISTS with true/false
@@ -288,6 +288,7 @@ _cai_sysbox_available_for_context() {
 _cai_sysbox_available() {
     _CAI_SYSBOX_ERROR=""
     _CAI_SYSBOX_CONTEXT_EXISTS="false"
+    local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
     # Determine expected socket based on platform
     # - WSL2: Uses dedicated socket at _CAI_CONTAINAI_DOCKER_SOCKET
@@ -300,7 +301,7 @@ _cai_sysbox_available() {
             socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/var/run/containai-docker.sock}"
             ;;
         macos)
-            socket="${_CAI_LIMA_SOCKET_PATH:-$HOME/.lima/containai-secure/sock/docker.sock}"
+            socket="${_CAI_LIMA_SOCKET_PATH:-$HOME/.lima/containai-docker/sock/docker.sock}"
             ;;
         linux)
             # Native Linux currently uses default socket (will be migrated in fn-14-nm0.3)
@@ -318,7 +319,7 @@ _cai_sysbox_available() {
     fi
 
     # Check if context exists
-    if docker context inspect containai-secure >/dev/null 2>&1; then
+    if docker context inspect "$context_name" >/dev/null 2>&1; then
         _CAI_SYSBOX_CONTEXT_EXISTS="true"
     else
         _CAI_SYSBOX_ERROR="context_not_found"
@@ -327,7 +328,7 @@ _cai_sysbox_available() {
 
     # Check if we can connect to the daemon
     local info_output rc
-    info_output=$(_cai_timeout 10 docker --context containai-secure info 2>&1) && rc=0 || rc=$?
+    info_output=$(_cai_timeout 10 docker --context "$context_name" info 2>&1) && rc=0 || rc=$?
 
     if [[ $rc -eq 124 ]]; then
         _CAI_SYSBOX_ERROR="timeout"
@@ -429,7 +430,7 @@ _cai_doctor() {
     printf '%s\n' "Sysbox Isolation"
 
     # Resolve context: use _cai_select_context which tries config override,
-    # then containai-docker (Linux/WSL2), then containai-secure (macOS/legacy)
+    # then containai-docker, then legacy fallback for old installs
     local sysbox_context_name=""
     local config_context
     config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
@@ -450,7 +451,7 @@ _cai_doctor() {
             socket_not_found)
                 if [[ "$platform" == "macos" ]]; then
                     printf '  %-44s %s\n' "" "(Lima VM not running or not provisioned)"
-                    printf '  %-44s %s\n' "" "(Run 'cai setup' or 'limactl start containai-secure')"
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' or 'limactl start $_CAI_LIMA_VM_NAME')"
                 else
                     printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox)"
                 fi
@@ -469,7 +470,7 @@ _cai_doctor() {
             connection_refused)
                 if [[ "$platform" == "macos" ]]; then
                     printf '  %-44s %s\n' "" "(Docker daemon not running inside Lima VM)"
-                    printf '  %-44s %s\n' "" "(Try: limactl shell containai-secure sudo systemctl start docker)"
+                    printf '  %-44s %s\n' "" "(Try: limactl shell $_CAI_LIMA_VM_NAME sudo systemctl start docker)"
                 else
                     printf '  %-44s %s\n' "" "(Docker daemon not running)"
                 fi
@@ -1029,15 +1030,15 @@ _cai_doctor_fix() {
 
     # Only attempt cleanup if Docker is available and at least one daemon is reachable
     if command -v docker >/dev/null 2>&1; then
-        # Check if any Docker context is reachable (default, containai-docker, or containai-secure)
+        # Check if any Docker context is reachable (default, containai-docker, or legacy fallback)
         local docker_reachable=false
         if _cai_timeout 5 docker info >/dev/null 2>&1; then
             docker_reachable=true
         elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1 \
             && _cai_timeout 5 docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" info >/dev/null 2>&1; then
             docker_reachable=true
-        elif docker context inspect containai-secure >/dev/null 2>&1 \
-            && _cai_timeout 5 docker --context containai-secure info >/dev/null 2>&1; then
+        elif docker context inspect "${_CAI_LEGACY_CONTEXT:-containai-secure}" >/dev/null 2>&1 \
+            && _cai_timeout 5 docker --context "${_CAI_LEGACY_CONTEXT:-containai-secure}" info >/dev/null 2>&1; then
             docker_reachable=true
         fi
 
@@ -1073,7 +1074,7 @@ _cai_doctor_fix() {
     printf '%s\n' "Cannot Auto-Fix"
 
     # Sysbox availability
-    local sysbox_context_name="containai-secure"
+    local sysbox_context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     local config_context
     config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
     if [[ -n "$config_context" ]]; then
@@ -1173,7 +1174,7 @@ _cai_doctor_json() {
     local seccomp_warning=""
     local sysbox_runtime=""
     local sysbox_context_exists="false"
-    local sysbox_context_name="containai-secure"
+    local sysbox_context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     local recommended_action="setup_required"
     local kernel_version=""
     local kernel_compatible="true"
@@ -1187,13 +1188,13 @@ _cai_doctor_json() {
     fi
 
     # Resolve context: use _cai_select_context which tries config override,
-    # then containai-docker (Linux/WSL2), then containai-secure (macOS/legacy)
+    # then containai-docker, then legacy fallback for old installs
     local config_context
     config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
     sysbox_context_name=$(_cai_select_context "$config_context" 2>/dev/null) || sysbox_context_name=""
     # Default for error reporting if no context available
     if [[ -z "$sysbox_context_name" ]]; then
-        sysbox_context_name="containai-docker"
+        sysbox_context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     fi
 
     # Check Sysbox with resolved context name

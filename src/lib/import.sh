@@ -16,7 +16,7 @@
 #   _containai_import "" "volume-name" "false" "false" "$PWD" "" ""
 #
 # Arguments:
-#   $1 = Docker context ("" for default, "containai-secure" for Sysbox)
+#   $1 = Docker context ("" for default, "containai-docker" for Sysbox)
 #   $2 = volume name (required)
 #   $3 = dry_run flag ("true" or "false", default: "false")
 #   $4 = no_excludes flag ("true" or "false", default: "false")
@@ -461,7 +461,7 @@ _import_step() {
 
 # Import host configs to data volume via rsync container
 # Arguments:
-#   $1 = Docker context ("" for default, "containai-secure" for Sysbox)
+#   $1 = Docker context ("" for default, "containai-docker" for Sysbox)
 #   $2 = volume name (required)
 #   $3 = dry_run flag ("true" or "false", default: "false")
 #   $4 = no_excludes flag ("true" or "false", default: "false")

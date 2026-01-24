@@ -2326,13 +2326,13 @@ _cai_ssh_cleanup() {
     # We check per-context reachability rather than requiring default context
     local -a contexts_to_check=()
     local -a reachable_contexts=()
-    local default_secure_context="containai-secure"
+    local default_secure_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     local ctx
 
     # Always try default context
     contexts_to_check+=("")
 
-    # Add containai-secure if it exists
+    # Add containai-docker context if it exists
     if docker context inspect "$default_secure_context" >/dev/null 2>&1; then
         contexts_to_check+=("$default_secure_context")
     fi
@@ -2371,7 +2371,7 @@ _cai_ssh_cleanup() {
         _cai_error ""
         _cai_error "Troubleshooting:"
         _cai_error "  1. Check Docker is running: docker info"
-        _cai_error "  2. Check containai-secure context: docker --context containai-secure info"
+        _cai_error "  2. Check containai-docker context: docker --context $_CAI_CONTAINAI_DOCKER_CONTEXT info"
         return 1
     fi
 
