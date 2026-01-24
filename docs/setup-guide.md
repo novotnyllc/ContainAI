@@ -141,19 +141,20 @@ The `cai setup` command installs and configures multiple components. Here's what
 
 ### WSL2 (Windows)
 
-WSL2 must run Docker Engine inside WSL (not Docker Desktop integration mode), as Docker Desktop does not support the Sysbox runtime. The setup configures an existing Docker Engine and adds a dedicated socket for ContainAI.
+WSL2 must have Docker Engine available inside WSL (not Docker Desktop integration mode), as Docker Desktop does not support the Sysbox runtime. The setup creates a completely isolated Docker daemon that never touches your system Docker.
 
 #### What WSL2 Setup Does
 
 1. **Checks kernel version** (requires 5.5+)
 2. **Tests seccomp compatibility** (WSL 1.1.0+ may have conflicts)
 3. **Downloads and installs Sysbox** from GitHub releases (Ubuntu/Debian)
-4. **Configures daemon.json** with sysbox-runc runtime
-5. **Creates dedicated socket** at `/var/run/containai-docker.sock`
-6. **Creates systemd drop-in** for Docker socket configuration
-7. **Restarts Docker service**
-8. **Creates Docker context** `containai-docker`
-9. **Sets up SSH infrastructure**
+4. **Creates isolated daemon config** at `/etc/containai/docker/daemon.json`
+5. **Creates dedicated systemd service** `containai-docker.service`
+6. **Starts isolated Docker daemon** at `/var/run/containai-docker.sock`
+7. **Creates Docker context** `containai-docker`
+8. **Sets up SSH infrastructure**
+
+**Note:** Your system Docker at `/var/run/docker.sock` is never touched.
 
 #### Run Setup
 
@@ -611,12 +612,16 @@ To remove ContainAI components, follow the manual cleanup steps below for your p
 docker context rm containai-docker
 ```
 
-### WSL2/Linux - Remove Docker Drop-in
+### WSL2/Linux - Remove Isolated Docker Service
 
 ```bash
-sudo rm -f /etc/systemd/system/docker.service.d/containai-socket.conf
+sudo systemctl stop containai-docker
+sudo systemctl disable containai-docker
+sudo rm -f /etc/systemd/system/containai-docker.service
+sudo rm -rf /etc/containai/docker/
+sudo rm -rf /var/lib/containai-docker/
+sudo rm -f /var/run/containai-docker.sock
 sudo systemctl daemon-reload
-sudo systemctl restart docker
 ```
 
 ### Remove SSH Configuration

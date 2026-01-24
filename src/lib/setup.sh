@@ -801,14 +801,17 @@ _cai_cleanup_legacy_paths() {
 # Clean up legacy Lima VM and context (containai-secure -> containai-docker rename)
 # Arguments: $1 = dry_run flag ("true" to simulate)
 #            $2 = verbose flag ("true" for verbose output)
+#            $3 = force flag ("true" to auto-delete without confirmation)
 # Returns: 0=success (cleanup complete or nothing to clean)
 # Note: This is called AFTER the new Lima VM is verified working, to avoid
 #       leaving users without a working VM if setup fails midway.
 #       Only runs on macOS - Lima is macOS-specific for ContainAI.
 #       Also cleans up the legacy Docker context (deferred from _cai_cleanup_legacy_paths).
+#       Without --force, prints manual cleanup instructions instead of auto-deleting VM.
 _cai_cleanup_legacy_lima_vm() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
+    local force="${3:-false}"
     local has_legacy_vm=false
     local has_legacy_context=false
 
@@ -831,18 +834,18 @@ _cai_cleanup_legacy_lima_vm() {
         return 0
     fi
 
-    _cai_step "Cleaning up legacy macOS resources"
+    _cai_step "Legacy macOS resources detected"
 
     if [[ "$dry_run" == "true" ]]; then
-        [[ "$has_legacy_vm" == "true" ]] && _cai_info "[DRY-RUN] Would delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+        [[ "$has_legacy_vm" == "true" ]] && _cai_info "[DRY-RUN] Would offer to delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
         [[ "$has_legacy_context" == "true" ]] && _cai_info "[DRY-RUN] Would remove legacy context: $_CAI_LEGACY_CONTEXT"
         _cai_info "[DRY-RUN] (Safe to delete: new VM '$_CAI_LIMA_VM_NAME' is verified working)"
         return 0
     fi
 
-    _cai_info "New VM '$_CAI_LIMA_VM_NAME' is working, cleaning up legacy resources"
+    _cai_info "New VM '$_CAI_LIMA_VM_NAME' is working"
 
-    # Clean up legacy context first (doesn't depend on VM)
+    # Clean up legacy context first (doesn't depend on VM, safe to auto-remove)
     if [[ "$has_legacy_context" == "true" ]]; then
         _cai_info "Removing legacy context: $_CAI_LEGACY_CONTEXT"
         # Switch to default context first if legacy context is active
@@ -858,16 +861,26 @@ _cai_cleanup_legacy_lima_vm() {
         fi
     fi
 
-    # Clean up legacy VM
+    # Clean up legacy VM - requires --force or manual action
     if [[ "$has_legacy_vm" == "true" ]]; then
-        _cai_info "Removing legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
-        _cai_info "  (VM was ContainAI-dedicated with no user data)"
-        # Stop the VM first if running
-        limactl stop "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null || true
-        if limactl delete -f "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
-            _cai_ok "Legacy Lima VM deleted"
+        if [[ "$force" == "true" ]]; then
+            _cai_info "Removing legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME (--force)"
+            _cai_info "  (VM was ContainAI-dedicated with no user data)"
+            # Stop the VM first if running
+            limactl stop "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null || true
+            if limactl delete -f "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
+                _cai_ok "Legacy Lima VM deleted"
+            else
+                _cai_warn "Failed to delete legacy Lima VM (not critical)"
+            fi
         else
-            _cai_warn "Failed to delete legacy Lima VM (not critical)"
+            # Without --force, offer manual cleanup instructions
+            _cai_info "Legacy Lima VM '$_CAI_LEGACY_LIMA_VM_NAME' still exists"
+            _cai_info "  This VM is no longer needed (new VM '$_CAI_LIMA_VM_NAME' is working)"
+            _cai_info "  To remove it manually:"
+            _cai_info "    limactl stop $_CAI_LEGACY_LIMA_VM_NAME"
+            _cai_info "    limactl delete $_CAI_LEGACY_LIMA_VM_NAME"
+            _cai_info "  Or run: cai setup --force (to auto-delete legacy resources)"
         fi
     fi
 
@@ -2206,7 +2219,7 @@ _cai_lima_verify_install() {
 }
 
 # macOS-specific setup using Lima VM
-# Arguments: $1 = force flag (unused for macOS, kept for API consistency)
+# Arguments: $1 = force flag ("true" to auto-delete legacy VM without prompting)
 #            $2 = dry_run flag ("true" to simulate)
 #            $3 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
@@ -2261,8 +2274,9 @@ _cai_setup_macos() {
 
     # Step 6: Clean up legacy Lima VM (only if new VM is verified working)
     # This ensures users aren't left without a working VM if setup fails
+    # Pass force flag to allow auto-deletion with --force, otherwise shows manual instructions
     if [[ "$verify_ok" == "true" ]]; then
-        _cai_cleanup_legacy_lima_vm "$dry_run" "$verbose"
+        _cai_cleanup_legacy_lima_vm "$dry_run" "$verbose" "$force"
     else
         # Don't delete legacy VM if new VM has issues - user may need fallback
         if _cai_is_macos && _cai_lima_vm_exists "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
