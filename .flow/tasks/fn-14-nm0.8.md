@@ -49,9 +49,51 @@ Linux/WSL2 uses:
 - [ ] `cai doctor` on macOS finds the `containai-docker` context
 - [ ] `shellcheck -x src/lib/setup.sh` passes
 ## Done summary
-TBD
+## Summary
 
+Renamed macOS Lima VM and Docker context from `containai-secure` to `containai-docker` to unify naming across all platforms (Linux, WSL2, macOS).
+
+### Changes Made
+
+1. **Updated Lima constants in setup.sh**:
+   - `_CAI_LIMA_VM_NAME` now uses `$_CAI_CONTAINAI_DOCKER_CONTEXT` (evaluates to `containai-docker`)
+   - `_CAI_LIMA_SOCKET_PATH` updated to use new VM name: `~/.lima/containai-docker/sock/docker.sock`
+   - Added `_CAI_LEGACY_LIMA_VM_NAME="containai-secure"` for migration
+
+2. **Added Lima migration to `_cai_cleanup_legacy_paths()`**:
+   - Detects old `containai-secure` Lima VM
+   - Stops and deletes the legacy VM during cleanup
+   - Works silently if Lima is not installed
+
+3. **Updated `_cai_lima_create_context()`**:
+   - Uses `$_CAI_CONTAINAI_DOCKER_CONTEXT` constant instead of hardcoded name
+   - Creates `containai-docker` context on macOS
+
+4. **Updated `_cai_lima_verify_install()`**:
+   - Uses context name variable for all checks
+   - Properly warns if `containai-docker` (not `containai-secure`) is active
+
+5. **Updated `_cai_setup_macos()` output messages**:
+   - All user-facing messages now reference `containai-docker`
+
+6. **Updated doctor validation (`_cai_validate_secure_engine_common`)**:
+   - macOS now expects `containai-docker` context like Linux/WSL2
+
+7. **Updated help text**:
+   - All Lima VM management examples use `containai-docker`
+
+8. **Updated legacy functions for consistency**:
+   - `_cai_create_containai_context()`, `_cai_verify_sysbox_install()`, and `_cai_verify_sysbox_install_linux()` now use the constant
+
+### Result
+
+All platforms now consistently use `containai-docker` as the Docker context name:
+- Linux: Uses isolated daemon at `/var/run/containai-docker.sock`
+- WSL2: Uses isolated daemon at `/var/run/containai-docker.sock`
+- macOS: Uses Lima VM at `~/.lima/containai-docker/sock/docker.sock`
+
+Old macOS installs with `containai-secure` VM will be migrated on next `cai setup`.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 0592fdb
+- Tests: shellcheck -x src/lib/setup.sh (passes), source src/containai.sh && echo $_CAI_LIMA_VM_NAME (containai-docker)
 - PRs:

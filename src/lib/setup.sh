@@ -781,13 +781,16 @@ _cai_cleanup_legacy_paths() {
 
     # Clean up legacy Lima VM on macOS (containai-secure -> containai-docker rename)
     # Note: Only attempt if limactl is available (macOS with Lima installed)
+    # Uses _cai_lima_vm_exists for consistent detection across Lima versions
     if command -v limactl >/dev/null 2>&1; then
-        if limactl list --format '{{.Name}}' 2>/dev/null | grep -qx "$_CAI_LEGACY_LIMA_VM_NAME"; then
+        # Check if legacy VM exists using the same function as _cai_lima_create_vm
+        if _cai_lima_vm_exists "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
             if [[ "$dry_run" == "true" ]]; then
                 _cai_info "[DRY-RUN] Would delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
                 _cai_info "[DRY-RUN] Note: New VM '$_CAI_LIMA_VM_NAME' will be created during setup"
             else
-                _cai_info "Deleting legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+                _cai_info "Found legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+                _cai_info "Deleting legacy VM to migrate to new name '$_CAI_LIMA_VM_NAME'"
                 # Stop the VM first if running
                 limactl stop "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null || true
                 if limactl delete -f "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
@@ -2021,7 +2024,14 @@ _cai_lima_create_context() {
                 _cai_info "[DRY-RUN] Would remove and recreate context"
             else
                 _cai_step "Removing misconfigured context"
-                if ! docker context rm "$context_name" >/dev/null 2>&1; then
+                # Switch away from context if it's currently active
+                local current_context
+                current_context=$(docker context show 2>/dev/null || true)
+                if [[ "$current_context" == "$context_name" ]]; then
+                    docker context use default >/dev/null 2>&1 || true
+                fi
+                # Force remove to avoid interactive prompts
+                if ! docker context rm -f "$context_name" >/dev/null 2>&1; then
                     _cai_error "Failed to remove existing context"
                     return 1
                 fi
@@ -2156,6 +2166,12 @@ _cai_setup_macos() {
     _cai_info "  - A separate Lima VM provides Sysbox isolation"
     _cai_info "  - Use --context $_CAI_CONTAINAI_DOCKER_CONTEXT to access Sysbox"
     printf '\n'
+
+    # Step 0: Clean up legacy paths (including old Lima VM if present)
+    # This is called explicitly for macOS since we have Lima-specific cleanup
+    if ! _cai_cleanup_legacy_paths "$dry_run" "$verbose"; then
+        _cai_warn "Legacy path cleanup had issues - continuing anyway"
+    fi
 
     # Step 1: Install Lima (via Homebrew)
     if ! _cai_lima_install "$dry_run"; then
