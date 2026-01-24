@@ -71,8 +71,7 @@ to their latest versions. Safe to run multiple times (idempotent).
 
 Options:
   --dry-run         Show what would be done without making changes
-  --force           Skip confirmation prompts
-  --lima-recreate   Force Lima VM recreation even if current (macOS only)
+  --force           Skip confirmation prompts (e.g., VM recreation on macOS)
   --verbose, -v     Show verbose output
   -h, --help        Show this help message
 
@@ -97,8 +96,7 @@ Notes:
 Examples:
   cai update                    Update installation
   cai update --dry-run          Preview what would be updated
-  cai update --force            Update without confirmation
-  cai update --lima-recreate    Force VM recreation (macOS)
+  cai update --force            Update without confirmation prompts
 EOF
 }
 
@@ -410,13 +408,11 @@ _cai_update_linux_wsl2() {
 # Arguments: $1 = dry_run ("true" to simulate)
 #            $2 = verbose ("true" for verbose output)
 #            $3 = force ("true" to skip confirmation)
-#            $4 = force_recreate ("true" to force VM recreation)
 # Returns: 0=success, 1=failure, 130=cancelled by user
 _cai_update_macos() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
     local force="${3:-false}"
-    local force_recreate="${4:-false}"
     local overall_status=0
 
     _cai_info "Updating macOS Lima installation"
@@ -541,7 +537,6 @@ _cai_update_macos() {
 _cai_update() {
     local dry_run="false"
     local force="false"
-    local lima_recreate="false"
     local verbose="false"
 
     # Parse arguments
@@ -553,10 +548,6 @@ _cai_update() {
                 ;;
             --force)
                 force="true"
-                shift
-                ;;
-            --lima-recreate)
-                lima_recreate="true"
                 shift
                 ;;
             --verbose | -v)
@@ -590,7 +581,7 @@ _cai_update() {
     local overall_status=0
 
     if _cai_is_macos; then
-        _cai_update_macos "$dry_run" "$verbose" "$force" "$lima_recreate"
+        _cai_update_macos "$dry_run" "$verbose" "$force"
         overall_status=$?
     else
         # Linux or WSL2
