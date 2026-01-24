@@ -41,8 +41,8 @@ section() {
 
 FAILED=0
 
-# Context name for sysbox containers
-CONTEXT_NAME="containai-secure"
+# Context name for sysbox containers - use from lib/docker.sh (sourced via containai.sh)
+CONTEXT_NAME="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
 
 # Timeouts
 DOCKERD_WAIT_TIMEOUT=60

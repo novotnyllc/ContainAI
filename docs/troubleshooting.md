@@ -90,16 +90,16 @@ or
 **Diagnosis:**
 ```bash
 # Check if container is running
-docker --context docker-containai ps
+docker --context containai-docker ps
 
 # Check if sshd is running inside container
-docker --context docker-containai exec <container-name> systemctl status ssh
+docker --context containai-docker exec <container-name> systemctl status ssh
 
 # Check if port is listening
-docker --context docker-containai exec <container-name> ss -tlnp | grep :22
+docker --context containai-docker exec <container-name> ss -tlnp | grep :22
 
 # Check port mapping
-docker --context docker-containai port <container-name> 22
+docker --context containai-docker port <container-name> 22
 ```
 
 **Likely causes:**
@@ -118,12 +118,12 @@ docker --context docker-containai port <container-name> 22
 
 2. **Restart sshd in the container:**
    ```bash
-   docker --context docker-containai exec <container-name> systemctl restart ssh
+   docker --context containai-docker exec <container-name> systemctl restart ssh
    ```
 
 3. **Check if container started properly:**
    ```bash
-   docker --context docker-containai logs <container-name>
+   docker --context containai-docker logs <container-name>
    ```
 
 4. **Recreate the container if sshd is broken:**
@@ -147,7 +147,7 @@ ssh -vv -p 2301 agent@localhost
 ls -la ~/.config/containai/id_containai
 
 # Check if public key is in container
-docker --context docker-containai exec <container-name> cat /home/agent/.ssh/authorized_keys
+docker --context containai-docker exec <container-name> cat /home/agent/.ssh/authorized_keys
 ```
 
 **Likely causes:**
@@ -173,10 +173,10 @@ docker --context docker-containai exec <container-name> cat /home/agent/.ssh/aut
    cat ~/.config/containai/id_containai.pub
 
    # Add to container (as root)
-   docker --context docker-containai exec <container-name> bash -c 'mkdir -p /home/agent/.ssh && chmod 700 /home/agent/.ssh'
-   docker --context docker-containai exec <container-name> bash -c 'cat >> /home/agent/.ssh/authorized_keys' < ~/.config/containai/id_containai.pub
-   docker --context docker-containai exec <container-name> chown -R agent:agent /home/agent/.ssh
-   docker --context docker-containai exec <container-name> chmod 600 /home/agent/.ssh/authorized_keys
+   docker --context containai-docker exec <container-name> bash -c 'mkdir -p /home/agent/.ssh && chmod 700 /home/agent/.ssh'
+   docker --context containai-docker exec <container-name> bash -c 'cat >> /home/agent/.ssh/authorized_keys' < ~/.config/containai/id_containai.pub
+   docker --context containai-docker exec <container-name> chown -R agent:agent /home/agent/.ssh
+   docker --context containai-docker exec <container-name> chmod 600 /home/agent/.ssh/authorized_keys
    ```
 
 ### "SSH connection timed out"
@@ -193,13 +193,13 @@ or
 **Diagnosis:**
 ```bash
 # Check container state
-docker --context docker-containai inspect <container-name> --format '{{.State.Status}}'
+docker --context containai-docker inspect <container-name> --format '{{.State.Status}}'
 
 # Check systemd boot progress
-docker --context docker-containai logs <container-name> 2>&1 | tail -50
+docker --context containai-docker logs <container-name> 2>&1 | tail -50
 
 # Check if port is correct
-docker --context docker-containai inspect <container-name> --format '{{index .Config.Labels "containai.ssh-port"}}'
+docker --context containai-docker inspect <container-name> --format '{{index .Config.Labels "containai.ssh-port"}}'
 ```
 
 **Likely causes:**
@@ -225,7 +225,7 @@ docker --context docker-containai inspect <container-name> --format '{{index .Co
 
 3. **Check container logs for boot issues:**
    ```bash
-   docker --context docker-containai logs <container-name>
+   docker --context containai-docker logs <container-name>
    ```
 
 ---
@@ -240,13 +240,13 @@ Container exits immediately or fails to start.
 **Diagnosis:**
 ```bash
 # Check container state
-docker --context docker-containai ps -a --filter "name=<container-name>"
+docker --context containai-docker ps -a --filter "name=<container-name>"
 
 # Check exit code and logs
-docker --context docker-containai logs <container-name>
+docker --context containai-docker logs <container-name>
 
 # Inspect container for issues
-docker --context docker-containai inspect <container-name> --format '{{.State.ExitCode}} {{.State.Error}}'
+docker --context containai-docker inspect <container-name> --format '{{.State.ExitCode}} {{.State.Error}}'
 ```
 
 **Common causes and solutions:**
@@ -285,23 +285,23 @@ Container logs show systemd errors or container exits with code 1.
 **Diagnosis:**
 ```bash
 # Check systemd boot logs
-docker --context docker-containai logs <container-name> 2>&1 | grep -i systemd
+docker --context containai-docker logs <container-name> 2>&1 | grep -i systemd
 
 # Check for failed units
-docker --context docker-containai exec <container-name> systemctl --failed
+docker --context containai-docker exec <container-name> systemctl --failed
 ```
 
 **Solutions:**
 
 1. **Ensure Sysbox runtime is being used:**
    ```bash
-   docker --context docker-containai inspect <container-name> --format '{{.HostConfig.Runtime}}'
+   docker --context containai-docker inspect <container-name> --format '{{.HostConfig.Runtime}}'
    # Should show "sysbox-runc"
    ```
 
 2. **Check container was created with correct context:**
    ```bash
-   docker --context docker-containai ps
+   docker --context containai-docker ps
    ```
 
 3. **Recreate with fresh state:**
@@ -356,17 +356,17 @@ Commands inside container fail with permission errors.
 **Diagnosis:**
 ```bash
 # Check user inside container
-docker --context docker-containai exec <container-name> id
+docker --context containai-docker exec <container-name> id
 
 # Check file ownership
-docker --context docker-containai exec <container-name> ls -la /home/agent/workspace
+docker --context containai-docker exec <container-name> ls -la /home/agent/workspace
 ```
 
 **Solutions:**
 
 1. **Files should be owned by agent user:**
    ```bash
-   docker --context docker-containai exec <container-name> chown -R agent:agent /home/agent/workspace
+   docker --context containai-docker exec <container-name> chown -R agent:agent /home/agent/workspace
    ```
 
 2. **Volume mount permissions issue** - ensure host directory is readable:
@@ -395,11 +395,11 @@ Bind for 0.0.0.0:2301 failed: port is already allocated
 ss -tlnp | grep -E ':2[3-4][0-9]{2}|:2500'
 
 # List ContainAI containers and their ports
-docker --context docker-containai ps --filter "label=containai.managed=true" \
+docker --context containai-docker ps --filter "label=containai.managed=true" \
   --format '{{.Names}}: {{index .Labels "containai.ssh-port"}}'
 
 # Check for orphaned containers
-docker --context docker-containai ps -a --filter "label=containai.managed=true"
+docker --context containai-docker ps -a --filter "label=containai.managed=true"
 ```
 
 **Solutions:**
@@ -407,13 +407,13 @@ docker --context docker-containai ps -a --filter "label=containai.managed=true"
 1. **Stop unused containers:**
    ```bash
    # List all ContainAI containers
-   docker --context docker-containai ps -a --filter "label=containai.managed=true"
+   docker --context containai-docker ps -a --filter "label=containai.managed=true"
 
    # Stop specific container
-   docker --context docker-containai stop <container-name>
+   docker --context containai-docker stop <container-name>
 
    # Remove container (preserves data volume)
-   docker --context docker-containai rm <container-name>
+   docker --context containai-docker rm <container-name>
    ```
 
 2. **Clean up stale SSH configs:**
@@ -459,7 +459,7 @@ or
 cat ~/.config/containai/known_hosts
 
 # Check container's current host keys
-docker --context docker-containai exec <container-name> cat /etc/ssh/ssh_host_ed25519_key.pub
+docker --context containai-docker exec <container-name> cat /etc/ssh/ssh_host_ed25519_key.pub
 ```
 
 **Expected behavior:** This happens when a container is recreated (with `--fresh`) because new containers generate new SSH host keys.
@@ -696,9 +696,9 @@ docker --context containai-secure info
 **WSL2:**
 ```bash
 # Start the dedicated dockerd
-sudo systemctl start docker-containai
+sudo systemctl start containai-docker
 # or
-sudo dockerd --host unix:///var/run/docker-containai.sock &
+sudo dockerd --host unix:///var/run/containai-docker.sock &
 ```
 
 **Lima (macOS):**
@@ -738,14 +738,14 @@ sudo systemctl enable containai-docker  # Auto-start on boot
 
 **Diagnosis:**
 ```bash
-docker --context docker-containai images | grep containai
+docker --context containai-docker images | grep containai
 ```
 
 **Solution:**
 
 Pull the required image:
 ```bash
-docker --context docker-containai pull ghcr.io/novotnyllc/containai/full:latest
+docker --context containai-docker pull ghcr.io/novotnyllc/containai/full:latest
 ```
 
 ### "Container exists but was not created by ContainAI"
@@ -760,7 +760,7 @@ docker --context docker-containai pull ghcr.io/novotnyllc/containai/full:latest
 
 **Diagnosis:**
 ```bash
-docker --context docker-containai inspect myproject-main --format '{{.Config.Labels}}'
+docker --context containai-docker inspect myproject-main --format '{{.Config.Labels}}'
 ```
 
 **Cause:** A container with the same name already exists but wasn't created by ContainAI.
@@ -774,7 +774,7 @@ cai run /workspace --name my-unique-name
 
 Option 2: Remove the conflicting container:
 ```bash
-docker --context docker-containai rm -f myproject-main
+docker --context containai-docker rm -f myproject-main
 ```
 
 ### "Failed to create volume"
@@ -786,17 +786,17 @@ docker --context docker-containai rm -f myproject-main
 
 **Diagnosis:**
 ```bash
-docker --context docker-containai volume ls
-docker --context docker-containai volume inspect sandbox-agent-data
+docker --context containai-docker volume ls
+docker --context containai-docker volume inspect sandbox-agent-data
 ```
 
 **Solution:**
 
 1. Check Docker daemon is running
-2. Check disk space: `docker --context docker-containai system df`
+2. Check disk space: `docker --context containai-docker system df`
 3. Try creating manually:
    ```bash
-   docker --context docker-containai volume create sandbox-agent-data
+   docker --context containai-docker volume create sandbox-agent-data
    ```
 
 ---
@@ -891,8 +891,8 @@ or agent cannot access GitHub, APIs, or other services that previously worked.
 **Diagnosis:**
 ```bash
 # Check volume contents for credential files
-docker --context docker-containai run --rm -v sandbox-agent-data:/data alpine ls -la /data/claude/
-docker --context docker-containai run --rm -v sandbox-agent-data:/data alpine ls -la /data/config/gh/
+docker --context containai-docker run --rm -v sandbox-agent-data:/data alpine ls -la /data/claude/
+docker --context containai-docker run --rm -v sandbox-agent-data:/data alpine ls -la /data/config/gh/
 ```
 
 **Solution:**
@@ -912,10 +912,10 @@ cai import
 **Diagnosis:**
 ```bash
 # Check if rsync image is available
-docker --context docker-containai pull eeacms/rsync
+docker --context containai-docker pull eeacms/rsync
 
 # Check volume status
-docker --context docker-containai volume inspect sandbox-agent-data
+docker --context containai-docker volume inspect sandbox-agent-data
 ```
 
 **Solution:**
@@ -923,9 +923,9 @@ docker --context docker-containai volume inspect sandbox-agent-data
 1. Ensure Docker daemon is running
 2. Pull the rsync image:
    ```bash
-   docker --context docker-containai pull eeacms/rsync
+   docker --context containai-docker pull eeacms/rsync
    ```
-3. Check disk space: `docker --context docker-containai system df`
+3. Check disk space: `docker --context containai-docker system df`
 
 ---
 
@@ -1022,19 +1022,19 @@ ssh-keyscan -p 2301 localhost
 ssh -G <container-name>
 
 # Check sshd status inside container
-docker --context docker-containai exec <container> systemctl status ssh
+docker --context containai-docker exec <container> systemctl status ssh
 
 # Check sshd logs inside container
-docker --context docker-containai exec <container> journalctl -u ssh -n 50
+docker --context containai-docker exec <container> journalctl -u ssh -n 50
 
 # Check listening ports inside container
-docker --context docker-containai exec <container> ss -tlnp
+docker --context containai-docker exec <container> ss -tlnp
 
 # Check authorized_keys inside container
-docker --context docker-containai exec <container> cat /home/agent/.ssh/authorized_keys
+docker --context containai-docker exec <container> cat /home/agent/.ssh/authorized_keys
 
 # Check SSH host keys inside container
-docker --context docker-containai exec <container> ls -la /etc/ssh/ssh_host_*
+docker --context containai-docker exec <container> ls -la /etc/ssh/ssh_host_*
 ```
 
 ---

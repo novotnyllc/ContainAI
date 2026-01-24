@@ -10,7 +10,7 @@
 #
 # Prerequisites:
 # - Docker daemon running
-# - Sysbox installed and containai-secure context available
+# - Sysbox installed and containai-docker context available
 # - containai.sh sourced
 # - jq installed on host (for JSON validation)
 #
@@ -56,8 +56,8 @@ section() {
 FAILED=0
 SCENARIO_FAILED=0
 
-# Context name for sysbox containers
-CONTEXT_NAME="containai-secure"
+# Context name for sysbox containers - use from lib/docker.sh (sourced via containai.sh)
+CONTEXT_NAME="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
 
 # Pinned alpine image for verification containers (avoids flakiness)
 ALPINE_IMAGE="alpine:3.20"
@@ -205,7 +205,7 @@ check_prerequisites() {
     fi
     pass "jq available on host"
 
-    # Check containai-secure context exists
+    # Check containai-docker context exists
     if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
         printf '%s\n' "[ERROR] Context '$CONTEXT_NAME' not found" >&2
         printf '%s\n' "[INFO] Run 'cai setup' first to configure Sysbox" >&2

@@ -781,21 +781,24 @@ _cai_cleanup_legacy_paths() {
 
     # Clean up legacy Lima VM on macOS (containai-secure -> containai-docker rename)
     # Note: Only runs on macOS - Lima is macOS-specific for ContainAI
+    # Note: The Lima VM is dedicated to ContainAI and contains no user data,
+    #       so it's safe to delete and recreate with the new name.
     # Uses _cai_lima_vm_exists for consistent detection across Lima versions
     if _cai_is_macos && command -v limactl >/dev/null 2>&1; then
         # Check if legacy VM exists using the same function as _cai_lima_create_vm
         if _cai_lima_vm_exists "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Would delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
-                _cai_info "[DRY-RUN] Note: New VM '$_CAI_LIMA_VM_NAME' will be created during setup"
+                _cai_info "[DRY-RUN] Would migrate legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME -> $_CAI_LIMA_VM_NAME"
+                _cai_info "[DRY-RUN] This will delete the old VM (ContainAI-dedicated, no user data)"
             else
                 _cai_info "Found legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
-                _cai_info "Deleting legacy VM to migrate to new name '$_CAI_LIMA_VM_NAME'"
+                _cai_info "Migrating to new name: $_CAI_LIMA_VM_NAME"
+                _cai_info "  (This VM is dedicated to ContainAI and will be recreated)"
                 # Stop the VM first if running
                 limactl stop "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null || true
                 if limactl delete -f "$_CAI_LEGACY_LIMA_VM_NAME" 2>/dev/null; then
                     cleaned_any=true
-                    _cai_info "  New VM '$_CAI_LIMA_VM_NAME' will be created during setup"
+                    _cai_ok "Legacy VM deleted. New VM will be created during setup."
                 else
                     _cai_warn "Failed to delete legacy Lima VM (continuing anyway)"
                 fi
