@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:08:31.974389Z",
+  "depends_on": [
+    "fn-17-axl.1"
+  ],
+  "epic": "fn-17-axl",
+  "id": "fn-17-axl.7",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-17-axl.7.md",
+  "status": "todo",
+  "title": "Absolute-to-relative symlink conversion",
+  "updated_at": "2026-01-24T22:08:42.652160Z"
+}

@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:07:35.995168Z",
+  "depends_on": [],
+  "epic": "fn-16-4c9",
+  "id": "fn-16-4c9.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-16-4c9.1.md",
+  "status": "todo",
+  "title": "Project reorganization: move container content to src/container/",
+  "updated_at": "2026-01-24T22:07:35.995194Z"
+}

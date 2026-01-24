@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:08:31.770662Z",
+  "depends_on": [
+    "fn-17-axl.1"
+  ],
+  "epic": "fn-17-axl",
+  "id": "fn-17-axl.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-17-axl.4.md",
+  "status": "todo",
+  "title": "Agent credential sync with --no-credentials opt-out",
+  "updated_at": "2026-01-24T22:08:42.437357Z"
+}

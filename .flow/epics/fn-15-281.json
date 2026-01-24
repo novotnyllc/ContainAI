@@ -1,0 +1,15 @@
+{
+  "branch_name": "fn-15-281",
+  "created_at": "2026-01-24T20:22:42.322518Z",
+  "depends_on_epics": [
+    "fn-16-4c9"
+  ],
+  "id": "fn-15-281",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-15-281.md",
+  "status": "open",
+  "title": "ContainAI-managed dockerd bundle + update checks",
+  "updated_at": "2026-01-24T22:45:34.858042Z"
+}

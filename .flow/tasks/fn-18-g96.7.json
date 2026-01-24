@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:09:13.764705Z",
+  "depends_on": [],
+  "epic": "fn-18-g96",
+  "id": "fn-18-g96.7",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-18-g96.7.md",
+  "status": "todo",
+  "title": "Remove cai sandbox command",
+  "updated_at": "2026-01-24T22:09:13.764727Z"
+}

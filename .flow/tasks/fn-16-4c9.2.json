@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:07:36.064001Z",
+  "depends_on": [
+    "fn-16-4c9.1"
+  ],
+  "epic": "fn-16-4c9",
+  "id": "fn-16-4c9.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-16-4c9.2.md",
+  "status": "todo",
+  "title": "macOS bash auto-install via Homebrew",
+  "updated_at": "2026-01-24T22:07:45.485665Z"
+}

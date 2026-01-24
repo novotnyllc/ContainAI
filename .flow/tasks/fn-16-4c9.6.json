@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:07:36.349366Z",
+  "depends_on": [
+    "fn-16-4c9.1"
+  ],
+  "epic": "fn-16-4c9",
+  "id": "fn-16-4c9.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-16-4c9.6.md",
+  "status": "todo",
+  "title": "Setup consolidation: merge install-containai-docker.sh",
+  "updated_at": "2026-01-24T22:07:45.761626Z"
+}

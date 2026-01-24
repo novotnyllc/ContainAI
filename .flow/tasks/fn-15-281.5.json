@@ -1,0 +1,18 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T20:23:36.668022Z",
+  "depends_on": [
+    "fn-15-281.2",
+    "fn-15-281.3",
+    "fn-15-281.4"
+  ],
+  "epic": "fn-15-281",
+  "id": "fn-15-281.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-15-281.5.md",
+  "status": "todo",
+  "title": "Update documentation for managed dockerd bundle",
+  "updated_at": "2026-01-24T20:31:56.394219Z"
+}

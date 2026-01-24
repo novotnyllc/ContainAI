@@ -1,0 +1,15 @@
+{
+  "branch_name": "fn-18-g96",
+  "created_at": "2026-01-24T22:08:43.161649Z",
+  "depends_on_epics": [
+    "fn-17-axl"
+  ],
+  "id": "fn-18-g96",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-18-g96.md",
+  "status": "open",
+  "title": "Container UX & Templates",
+  "updated_at": "2026-01-24T22:45:35.241506Z"
+}

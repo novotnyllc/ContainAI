@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:08:31.906844Z",
+  "depends_on": [
+    "fn-17-axl.1"
+  ],
+  "epic": "fn-17-axl",
+  "id": "fn-17-axl.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-17-axl.6.md",
+  "status": "todo",
+  "title": "Import overrides mechanism",
+  "updated_at": "2026-01-24T22:08:42.581467Z"
+}

@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:07:36.277455Z",
+  "depends_on": [
+    "fn-16-4c9.1"
+  ],
+  "epic": "fn-16-4c9",
+  "id": "fn-16-4c9.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-16-4c9.5.md",
+  "status": "todo",
+  "title": "Fix cai setup description and help text",
+  "updated_at": "2026-01-24T22:07:45.694698Z"
+}

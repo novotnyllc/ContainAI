@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:09:13.688464Z",
+  "depends_on": [
+    "fn-18-g96.4"
+  ],
+  "epic": "fn-18-g96",
+  "id": "fn-18-g96.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-18-g96.6.md",
+  "status": "todo",
+  "title": "Shell completion for template names",
+  "updated_at": "2026-01-24T22:09:21.636459Z"
+}

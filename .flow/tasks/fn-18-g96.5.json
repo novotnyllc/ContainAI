@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-24T22:09:13.613884Z",
+  "depends_on": [
+    "fn-18-g96.2"
+  ],
+  "epic": "fn-18-g96",
+  "id": "fn-18-g96.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-18-g96.5.md",
+  "status": "todo",
+  "title": "Shell completion for container names",
+  "updated_at": "2026-01-24T22:09:21.562818Z"
+}
