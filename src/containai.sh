@@ -64,7 +64,8 @@ _containai_libs_exist() {
         && [[ -f "$_CAI_SCRIPT_DIR/lib/ssh.sh" ]] \
         && [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]] \
         && [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]] \
-        && [[ -f "$_CAI_SCRIPT_DIR/lib/uninstall.sh" ]]
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/uninstall.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/update.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -141,6 +142,11 @@ fi
 
 if ! source "$_CAI_SCRIPT_DIR/lib/uninstall.sh"; then
     echo "[ERROR] Failed to source lib/uninstall.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/update.sh"; then
+    echo "[ERROR] Failed to source lib/update.sh" >&2
     return 1
 fi
 
