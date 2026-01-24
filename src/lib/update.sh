@@ -73,6 +73,7 @@ Options:
   --dry-run         Show what would be done without making changes
   --force           Skip confirmation prompts
   --lima-recreate   Force Lima VM recreation even if current (macOS only)
+  --verbose, -v     Show verbose output
   -h, --help        Show this help message
 
 What Gets Updated:
@@ -181,6 +182,22 @@ _cai_update_systemd_unit() {
 
     _cai_step "Checking systemd unit file"
 
+    # Check if systemd is running (required for service management)
+    # /run/systemd/system exists only when systemd is PID 1
+    if [[ ! -d /run/systemd/system ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_warn "[DRY-RUN] systemd is not running (required for actual update)"
+            _cai_info "[DRY-RUN] Would require systemd to be running"
+        else
+            _cai_error "systemd is not running (or not the init system)"
+            _cai_error "  ContainAI requires systemd on Linux/WSL2"
+            _cai_error "  On WSL2, enable systemd in /etc/wsl.conf:"
+            _cai_error "    [boot]"
+            _cai_error "    systemd=true"
+            return 1
+        fi
+    fi
+
     local unit_status
     if _cai_update_unit_needs_update; then
         unit_status=0  # needs update
@@ -194,9 +211,9 @@ _cai_update_systemd_unit() {
             _cai_info "Systemd unit file needs update"
 
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[dry-run] Would update: $_CAI_CONTAINAI_DOCKER_UNIT"
-                _cai_info "[dry-run] Would run: systemctl daemon-reload"
-                _cai_info "[dry-run] Would restart: $_CAI_CONTAINAI_DOCKER_SERVICE"
+                _cai_info "[DRY-RUN] Would update: $_CAI_CONTAINAI_DOCKER_UNIT"
+                _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
+                _cai_info "[DRY-RUN] Would restart: $_CAI_CONTAINAI_DOCKER_SERVICE"
                 return 0
             fi
 
@@ -264,6 +281,13 @@ _cai_update_docker_context() {
 
     _cai_step "Checking Docker context"
 
+    # Check if Docker CLI is available
+    if ! command -v docker >/dev/null 2>&1; then
+        _cai_error "Docker CLI not found"
+        _cai_error "  Install Docker: https://docs.docker.com/get-docker/"
+        return 1
+    fi
+
     local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
     # Determine expected socket based on platform
@@ -279,8 +303,8 @@ _cai_update_docker_context() {
         _cai_info "Context '$context_name' not found - will create"
 
         if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[dry-run] Would create context: $context_name"
-            _cai_info "[dry-run] Would set endpoint: $expected_host"
+            _cai_info "[DRY-RUN] Would create context: $context_name"
+            _cai_info "[DRY-RUN] Would set endpoint: $expected_host"
             return 0
         fi
 
@@ -308,7 +332,7 @@ _cai_update_docker_context() {
     _cai_info "  Expected: $expected_host"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[dry-run] Would remove and recreate context"
+        _cai_info "[DRY-RUN] Would remove and recreate context"
         return 0
     fi
 
@@ -372,7 +396,7 @@ _cai_update_linux_wsl2() {
             overall_status=1
         fi
     else
-        _cai_info "[dry-run] Would verify installation"
+        _cai_info "[DRY-RUN] Would verify installation"
     fi
 
     return $overall_status
@@ -387,7 +411,7 @@ _cai_update_linux_wsl2() {
 #            $2 = verbose ("true" for verbose output)
 #            $3 = force ("true" to skip confirmation)
 #            $4 = force_recreate ("true" to force VM recreation)
-# Returns: 0=success, 1=failure
+# Returns: 0=success, 1=failure, 130=cancelled by user
 _cai_update_macos() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
@@ -410,100 +434,76 @@ _cai_update_macos() {
     fi
 
     # Step 1: Clean up legacy paths (sockets, contexts, drop-ins)
+    # NOTE: VM cleanup happens AFTER verification (Step 6) to preserve fallback
     if ! _cai_cleanup_legacy_paths "$dry_run" "$verbose"; then
         _cai_warn "Legacy cleanup had issues (continuing anyway)"
     fi
 
     # Step 2: Handle VM recreation
-    if [[ "$force_recreate" == "true" ]]; then
-        _cai_step "Forcing Lima VM recreation"
+    # Per spec: macOS update deletes and recreates VM with latest config by default
+    # --lima-recreate forces recreation even if we add "currentness" checks later
+    _cai_step "Recreating Lima VM with latest template"
 
-        # Warn about container loss
-        if [[ "$dry_run" != "true" ]]; then
-            printf '\n'
-            _cai_warn "This will DELETE the Lima VM and recreate it."
-            _cai_warn "All running containers in the VM will be LOST."
-            printf '\n'
+    # Warn about container loss
+    if [[ "$dry_run" != "true" ]]; then
+        printf '\n'
+        _cai_warn "This will DELETE the Lima VM and recreate it."
+        _cai_warn "All running containers in the VM will be LOST."
+        printf '\n'
 
-            if [[ "$force" != "true" ]]; then
-                printf '%s' "Continue with VM recreation? [y/N] "
-                local response
-                if ! read -r response; then
+        if [[ "$force" != "true" ]]; then
+            printf '%s' "Continue with VM recreation? [y/N] "
+            local response
+            if ! read -r response; then
+                printf '%s\n' "Cancelled."
+                return 130  # Signal cancellation
+            fi
+            case "$response" in
+                [yY] | [yY][eE][sS]) ;;
+                *)
                     printf '%s\n' "Cancelled."
-                    return 0
-                fi
-                case "$response" in
-                    [yY] | [yY][eE][sS]) ;;
-                    *)
-                        printf '%s\n' "Cancelled."
-                        return 0
-                        ;;
-                esac
-            fi
+                    return 130  # Signal cancellation
+                    ;;
+            esac
         fi
+    fi
 
-        if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[dry-run] Would stop Lima VM: $_CAI_LIMA_VM_NAME"
-            _cai_info "[dry-run] Would delete Lima VM: $_CAI_LIMA_VM_NAME"
-            _cai_info "[dry-run] Would recreate Lima VM with latest template"
-        else
-            # Stop VM if running
-            local status
-            status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME")
-            if [[ "$status" == "Running" ]]; then
-                _cai_step "Stopping Lima VM"
-                if ! limactl stop "$_CAI_LIMA_VM_NAME"; then
-                    _cai_error "Failed to stop Lima VM"
-                    return 1
-                fi
-            fi
-
-            # Delete VM
-            _cai_step "Deleting Lima VM"
-            if ! limactl delete "$_CAI_LIMA_VM_NAME" --force; then
-                _cai_error "Failed to delete Lima VM"
-                return 1
-            fi
-
-            # Recreate VM
-            if ! _cai_lima_create_vm "false" "$verbose"; then
-                _cai_error "Failed to recreate Lima VM"
-                return 1
-            fi
-
-            # Wait for socket
-            if ! _cai_lima_wait_socket 120 "false"; then
-                _cai_error "Lima socket did not become available"
-                return 1
-            fi
-
-            _cai_ok "Lima VM recreated"
-        fi
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would stop Lima VM: $_CAI_LIMA_VM_NAME"
+        _cai_info "[DRY-RUN] Would delete Lima VM: $_CAI_LIMA_VM_NAME"
+        _cai_info "[DRY-RUN] Would recreate Lima VM with latest template"
     else
-        # Not forcing recreation - just ensure VM is running
+        # Stop VM if running
         local status
         status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME")
-
-        if [[ "$status" != "Running" ]]; then
-            _cai_step "Starting Lima VM"
-
-            if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[dry-run] Would start Lima VM: $_CAI_LIMA_VM_NAME"
-            else
-                if ! limactl start "$_CAI_LIMA_VM_NAME"; then
-                    _cai_error "Failed to start Lima VM"
-                    return 1
-                fi
-
-                # Wait for socket
-                if ! _cai_lima_wait_socket 120 "false"; then
-                    _cai_error "Lima socket did not become available"
-                    return 1
-                fi
+        if [[ "$status" == "Running" ]]; then
+            _cai_step "Stopping Lima VM"
+            if ! limactl stop "$_CAI_LIMA_VM_NAME"; then
+                _cai_error "Failed to stop Lima VM"
+                return 1
             fi
-        else
-            _cai_info "Lima VM is running"
         fi
+
+        # Delete VM
+        _cai_step "Deleting Lima VM"
+        if ! limactl delete "$_CAI_LIMA_VM_NAME" --force; then
+            _cai_error "Failed to delete Lima VM"
+            return 1
+        fi
+
+        # Recreate VM
+        if ! _cai_lima_create_vm "false" "$verbose"; then
+            _cai_error "Failed to recreate Lima VM"
+            return 1
+        fi
+
+        # Wait for socket
+        if ! _cai_lima_wait_socket 120 "false"; then
+            _cai_error "Lima socket did not become available"
+            return 1
+        fi
+
+        _cai_ok "Lima VM recreated"
     fi
 
     # Step 3: Check/update Docker context
@@ -511,12 +511,8 @@ _cai_update_macos() {
         overall_status=1
     fi
 
-    # Step 4: Clean up legacy Lima VM (if exists and new VM verified)
-    if [[ "$dry_run" != "true" ]]; then
-        _cai_cleanup_legacy_lima_vm "false" "$verbose" "$force"
-    fi
-
-    # Step 5: Verify installation
+    # Step 4: Verify installation BEFORE legacy cleanup
+    # This ensures we don't remove fallback VM before confirming new VM works
     if [[ "$dry_run" != "true" ]]; then
         _cai_step "Verifying installation"
         if ! _cai_lima_verify_install "false" "$verbose"; then
@@ -524,7 +520,12 @@ _cai_update_macos() {
             overall_status=1
         fi
     else
-        _cai_info "[dry-run] Would verify installation"
+        _cai_info "[DRY-RUN] Would verify installation"
+    fi
+
+    # Step 5: Clean up legacy Lima VM (only if verification passed)
+    if [[ "$dry_run" != "true" ]] && [[ $overall_status -eq 0 ]]; then
+        _cai_cleanup_legacy_lima_vm "false" "$verbose" "$force"
     fi
 
     return $overall_status
@@ -536,7 +537,7 @@ _cai_update_macos() {
 
 # Main update entry point
 # Arguments: parsed from command line
-# Returns: 0=success, 1=failure
+# Returns: 0=success, 1=failure, 130=cancelled
 _cai_update() {
     local dry_run="false"
     local force="false"
@@ -589,19 +590,21 @@ _cai_update() {
     local overall_status=0
 
     if _cai_is_macos; then
-        if ! _cai_update_macos "$dry_run" "$verbose" "$force" "$lima_recreate"; then
-            overall_status=1
-        fi
+        _cai_update_macos "$dry_run" "$verbose" "$force" "$lima_recreate"
+        overall_status=$?
     else
         # Linux or WSL2
-        if ! _cai_update_linux_wsl2 "$dry_run" "$verbose"; then
-            overall_status=1
-        fi
+        _cai_update_linux_wsl2 "$dry_run" "$verbose"
+        overall_status=$?
     fi
 
     # Summary
     printf '%s\n' ""
-    if [[ "$dry_run" == "true" ]]; then
+    if [[ $overall_status -eq 130 ]]; then
+        # User cancelled
+        _cai_info "Update cancelled by user"
+        return 130
+    elif [[ "$dry_run" == "true" ]]; then
         _cai_ok "Dry-run complete - no changes were made"
     elif [[ $overall_status -eq 0 ]]; then
         _cai_ok "Update complete"
