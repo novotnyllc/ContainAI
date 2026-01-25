@@ -803,6 +803,75 @@ _import_discover_ssh_keys() {
 # Import overrides
 # ==============================================================================
 
+# Map an override path (HOME structure) to volume target path using sync map
+# Override paths mirror HOME: .claude/settings.json, .config/starship.toml
+# Target paths follow sync map: claude/settings.json, config/starship.toml
+# Arguments:
+#   $1 = override path (relative to override dir, e.g. ".claude/settings.json")
+# Returns via stdout: target path (relative to /target, e.g. "claude/settings.json")
+#   Empty string if no mapping found
+# Exit code: 0=found, 1=not found
+_import_map_override_path() {
+    local override_path="$1"
+    local source_path="/source/$override_path"
+    local entry src_part tgt_part flags
+
+    # First pass: exact file match
+    for entry in "${_IMPORT_SYNC_MAP[@]}"; do
+        src_part="${entry%%:*}"
+        if [[ "$src_part" == "$source_path" ]]; then
+            # Exact match - extract target path (strip /target/ prefix)
+            tgt_part="${entry#*:}"
+            tgt_part="${tgt_part%%:*}"
+            tgt_part="${tgt_part#/target/}"
+            printf '%s\n' "$tgt_part"
+            return 0
+        fi
+    done
+
+    # Second pass: directory prefix match (for files inside synced directories)
+    # Use longest-prefix matching for correct results
+    local best_match="" best_src="" best_tgt="" best_len=0
+    for entry in "${_IMPORT_SYNC_MAP[@]}"; do
+        src_part="${entry%%:*}"
+        tgt_part="${entry#*:}"
+        flags="${tgt_part##*:}"
+        tgt_part="${tgt_part%%:*}"
+        tgt_part="${tgt_part#/target/}"
+
+        # Only check directory entries (have 'd' flag)
+        [[ "$flags" != *d* ]] && continue
+
+        # Check if override path starts with this source directory
+        local src_dir="${src_part#/source/}"
+        if [[ "$override_path" == "$src_dir/"* ]]; then
+            # Match found - check if this is the longest match
+            local len=${#src_dir}
+            if [[ $len -gt $best_len ]]; then
+                best_len=$len
+                best_src="$src_dir"
+                best_tgt="$tgt_part"
+            fi
+        fi
+    done
+
+    if [[ -n "$best_src" ]]; then
+        # Rewrite path: replace source prefix with target prefix
+        local remainder="${override_path#"$best_src"/}"
+        printf '%s\n' "$best_tgt/$remainder"
+        return 0
+    fi
+
+    # Special case: .gitconfig is handled by _cai_import_git_config, target is .gitconfig
+    if [[ "$override_path" == ".gitconfig" ]]; then
+        printf '%s\n' ".gitconfig"
+        return 0
+    fi
+
+    # No mapping found
+    return 1
+}
+
 # Apply user overrides from ~/.config/containai/import-overrides/
 # Files in this directory replace (not merge) imported files.
 # Arguments:
@@ -828,6 +897,12 @@ _import_apply_overrides() {
         return 0
     fi
 
+    # Security: reject if override directory is a symlink (prevents bypass)
+    if [[ -L "$override_dir" ]]; then
+        _import_warn "Override directory is a symlink, skipping for security"
+        return 0
+    fi
+
     # Build docker command with context
     local -a docker_cmd=(docker)
     if [[ -n "$ctx" ]]; then
@@ -840,6 +915,7 @@ _import_apply_overrides() {
     local override_count=0
     local skipped_count=0
     local error_count=0
+    local unmapped_count=0
 
     # Find all files and directories in the override tree
     # Use find with -mindepth 1 to skip root, -print0 for safe filename handling
@@ -893,13 +969,14 @@ _import_apply_overrides() {
             continue
         fi
 
-        # This is a regular file - apply the override
-        # Override path maps directly to volume target (1:1 mapping):
-        #   ~/.config/containai/import-overrides/.gitconfig -> /target/.gitconfig
-        #   ~/.config/containai/import-overrides/.claude/settings.json -> /target/.claude/settings.json
-        #   ~/.config/containai/import-overrides/.config/starship.toml -> /target/.config/starship.toml
-        # Note: Override paths match VOLUME structure (check sync map for target paths)
-        target_path="$rel_path"
+        # Map override path (HOME structure) to volume target path using sync map
+        # Override paths mirror HOME: .claude/settings.json, .config/starship.toml
+        # Target paths follow sync map: claude/settings.json, config/starship.toml
+        if ! target_path=$(_import_map_override_path "$rel_path"); then
+            _import_warn "Override path not in sync map, skipping: $rel_path"
+            unmapped_count=$((unmapped_count + 1))
+            continue
+        fi
 
         if [[ "$dry_run" == "true" ]]; then
             echo "[DRY-RUN] Would apply override: $rel_path -> /target/$target_path"
@@ -960,6 +1037,10 @@ _import_apply_overrides() {
 
     if [[ "$skipped_count" -gt 0 ]]; then
         _import_warn "Skipped $skipped_count item(s) (symlinks or special files)"
+    fi
+
+    if [[ "$unmapped_count" -gt 0 ]]; then
+        _import_warn "Skipped $unmapped_count item(s) not in sync map"
     fi
 
     return 0
