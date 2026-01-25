@@ -193,3 +193,6 @@ Relative path computation must use common-prefix algorithm (not just walk up to 
 
 ## 2026-01-25 manual [pitfall]
 User-provided paths in colon-delimited formats (src:dst:flags) must reject colons to prevent injection attacks
+
+## 2026-01-25 manual [pitfall]
+Bash -d and -f tests follow symlinks; check -L FIRST to detect symlinks before other file type tests

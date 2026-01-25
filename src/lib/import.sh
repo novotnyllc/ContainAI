@@ -842,8 +842,14 @@ _import_generate_additional_entries() {
         home_path="${HOME:-}"
         [[ -z "$home_path" ]] && continue
 
+        # Normalize HOME to remove trailing slash (handle HOME="/home/user/" edge case)
+        # But preserve "/" if HOME is root (edge case for testing)
+        if [[ "$home_path" != "/" ]]; then
+            home_path="${home_path%/}"
+        fi
+
         # Compute home-relative path (absolute path was already validated to be under HOME)
-        # Remove HOME prefix (with or without trailing slash)
+        # Remove HOME prefix
         if [[ "$abs_path" == "$home_path" ]]; then
             # Path is HOME itself - skip (too broad)
             echo "[WARN] Skipping additional_path: $abs_path (cannot sync entire HOME)" >&2

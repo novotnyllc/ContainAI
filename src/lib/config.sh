@@ -1190,6 +1190,9 @@ home_normalized = os.path.normpath(os.path.abspath(home))
 
 import_section = config.get('import', {})
 if not isinstance(import_section, dict):
+    # [import] exists but is not a table - warn and treat as empty
+    if 'import' in config:
+        print('[WARN] [import] section must be a table, treating as empty', file=sys.stderr)
     sys.exit(0)
 
 additional_paths = import_section.get('additional_paths', [])
