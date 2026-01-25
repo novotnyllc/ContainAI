@@ -1173,18 +1173,20 @@ _containai_resolve_import_additional_paths() {
 
     # Extract and validate additional_paths using Python
     # Pass HOME for tilde expansion and validation
+    # SECURITY: Do NOT use Path.resolve() as it follows symlinks
+    # Use os.path.abspath + normpath for lexical normalization only
     if ! paths_output=$(printf '%s' "$config_json" | python3 -c "
 import json
 import sys
 import os
-from pathlib import Path
 
 config = json.load(sys.stdin)
 home = os.environ.get('HOME', '')
 if not home:
     sys.exit(0)
 
-home_path = Path(home).resolve()
+# Normalize HOME without following symlinks
+home_normalized = os.path.normpath(os.path.abspath(home))
 
 import_section = config.get('import', {})
 if not isinstance(import_section, dict):
@@ -1210,37 +1212,58 @@ for i, path_str in enumerate(additional_paths):
         print(f'[WARN] [import].additional_paths[{i}] contains newlines, skipping', file=sys.stderr)
         continue
 
-    # Expand ~ to HOME
+    # SECURITY: Reject colons - they corrupt the sync map format (src:dst:flags)
+    if ':' in path_str:
+        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" contains colon (invalid for sync map), skipping', file=sys.stderr)
+        continue
+
+    # SECURITY: Reject null bytes
+    if '\0' in path_str:
+        print(f'[WARN] [import].additional_paths[{i}] contains null byte, skipping', file=sys.stderr)
+        continue
+
+    # Paths must start with ~/ or be absolute
     if path_str.startswith('~/'):
+        # Expand ~ to HOME
         expanded = home + path_str[1:]
     elif path_str.startswith('~'):
         # Reject ~user syntax (other users' homes)
         print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" references another user home, skipping', file=sys.stderr)
         continue
-    else:
+    elif path_str.startswith('/'):
+        # Absolute path - allowed if under HOME
         expanded = path_str
-
-    # Check for path traversal BEFORE resolving (reject explicit /../ or /..)
-    if '/../' in expanded or expanded.endswith('/..') or expanded == '..':
-        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" contains path traversal, skipping', file=sys.stderr)
+    else:
+        # Reject relative paths (spec requires ~/ or absolute under HOME)
+        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" is relative (must start with ~/ or be absolute), skipping', file=sys.stderr)
         continue
 
-    # Resolve to absolute path
+    # Normalize path WITHOUT following symlinks (use abspath + normpath, NOT realpath/resolve)
+    # This does lexical normalization only
     try:
-        resolved = Path(expanded).resolve()
+        normalized = os.path.normpath(os.path.abspath(expanded))
     except (OSError, ValueError) as e:
-        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" cannot be resolved: {e}, skipping', file=sys.stderr)
+        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" cannot be normalized: {e}, skipping', file=sys.stderr)
         continue
 
-    # Validate path is under HOME
+    # Check for path traversal AFTER normalization (reject any remaining .. segments)
+    # normpath should collapse valid .., but we reject any remaining for safety
+    path_parts = normalized.split(os.sep)
+    if '..' in path_parts:
+        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" contains path traversal after normalization, skipping', file=sys.stderr)
+        continue
+
+    # Validate path is under HOME using commonpath (lexical check, no symlink following)
     try:
-        resolved.relative_to(home_path)
+        common = os.path.commonpath([home_normalized, normalized])
+        if common != home_normalized:
+            raise ValueError('not under HOME')
     except ValueError:
         print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" is not under HOME, skipping', file=sys.stderr)
         continue
 
-    # Output the validated absolute path
-    print(str(resolved))
+    # Output the validated absolute path (normalized, no symlink resolution)
+    print(normalized)
 "); then
         # Python script failed
         if [[ -n "$explicit_config" ]]; then

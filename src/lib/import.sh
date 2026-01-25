@@ -859,6 +859,11 @@ _import_generate_additional_entries() {
         # Skip empty home_rel (defensive)
         [[ -z "$home_rel" ]] && continue
 
+        # Compute source path for rsync (relative to source_root)
+        # Use /source/ prefix for compatibility with rsync container mount
+        # home_rel is the path relative to HOME (e.g., ".my-tool/config.json" or "my-tool/config.json")
+        source_rel="/source/$home_rel"
+
         # Compute target path: strip leading dot if present for visibility
         # ~/.my-tool -> /target/my-tool (not /target/.my-tool)
         if [[ "$home_rel" == .* ]]; then
@@ -867,12 +872,9 @@ _import_generate_additional_entries() {
             target_rel="$home_rel"
         fi
 
-        # Compute source path for rsync (relative to source_root)
-        # Use /source/ prefix for compatibility with rsync container mount
-        source_rel="/source/.$target_rel"
-
         # Determine if path is file or directory
-        local actual_path="$source_root/.$target_rel"
+        # Use source_root + home_rel to find the actual path on the host
+        local actual_path="$source_root/$home_rel"
         if [[ -d "$actual_path" ]]; then
             # Directory - add 'd' flag, ensure trailing slash consistency
             # Remove trailing slash from paths for consistent formatting
@@ -883,7 +885,8 @@ _import_generate_additional_entries() {
             # File - add 'f' flag
             flags="f"
         elif [[ -L "$actual_path" ]]; then
-            # Symlink - treat as file (rsync follows by default)
+            # Symlink - rsync -a preserves symlinks (does not dereference by default)
+            # Treat as file for sync map purposes
             flags="f"
         else
             # Path doesn't exist in source - skip silently (may not exist on this system)
