@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Unit tests for _import_rewrite_excludes function
+#
+# Note: These tests use `base64 -d` for decoding which works on Linux (GNU coreutils).
+# On macOS, `base64 -D` is used instead. These tests are designed to run in CI (Linux).
+# For local macOS testing, either install GNU coreutils or create a wrapper.
 set -euo pipefail
 
 # Get script directory and repo root
@@ -158,6 +162,42 @@ if [[ -z "$output" ]] || ! echo "$output" | grep -q "^/source/.claude/plugins:";
     test_pass
 else
     test_fail "Expected entry to be skipped for exact path match"
+fi
+
+# ==============================================================================
+# Test: _import_rewrite_excludes - Trailing slash handling
+# ==============================================================================
+
+test_start "rewrite_excludes - trailing slash pattern exact match skips entry"
+excludes="claude/plugins/"
+entries="/source/.claude/plugins:/target/claude/plugins:d"
+output=$(_import_rewrite_excludes "$excludes" "$entries" 2>/dev/null)
+# Entry should be skipped (exact match after trailing slash normalization)
+if [[ -z "$output" ]] || ! echo "$output" | grep -q "^/source/.claude/plugins:"; then
+    test_pass
+else
+    test_fail "Expected entry to be skipped for trailing slash pattern"
+fi
+
+test_start "rewrite_excludes - trailing slash in child pattern rewrites correctly"
+excludes="claude/plugins/.system/"
+entries="/source/.claude/plugins:/target/claude/plugins:d"
+output=$(_import_rewrite_excludes "$excludes" "$entries" 2>/dev/null)
+# Entry should have .system in its excludes (normalized from .system/)
+if echo "$output" | grep -q "^/source/.claude/plugins:/target/claude/plugins:d:"; then
+    excludes_b64=$(echo "$output" | cut -d: -f4)
+    if [[ -n "$excludes_b64" ]]; then
+        decoded=$(echo "$excludes_b64" | base64 -d)
+        if echo "$decoded" | grep -q "^\.system$"; then
+            test_pass
+        else
+            test_fail "Expected .system (normalized), got: $decoded"
+        fi
+    else
+        test_fail "Expected non-empty excludes_b64"
+    fi
+else
+    test_fail "Expected entry in output"
 fi
 
 # ==============================================================================

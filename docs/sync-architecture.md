@@ -171,7 +171,7 @@ Directories and files created on first boot:
 
 ### Missing from containai-init.sh (symlinked but not created)
 
-1. **`/mnt/agent-data/agents`** - Symlinked in Dockerfile but not created in init.sh
+None - all symlinked paths are now created in containai-init.sh.
 
 ### Naming Inconsistencies
 
@@ -179,17 +179,9 @@ Directories and files created on first boot:
 
 ## Exclude Pattern Behavior
 
-### Current Implementation
+### Implementation
 
-Excludes are currently applied globally via `EXCLUDE_DATA_B64` environment variable to each rsync invocation. This is problematic because each entry has a different source root.
-
-For example, if the exclude pattern is `claude/plugins/.system`:
-- For entry `/source/.claude/plugins:/target/claude/plugins`, rsync sees source as `/source/.claude/plugins/` so the pattern should be just `.system/`
-- The global exclude would try to match `claude/plugins/.system` which doesn't match the rsync-relative path
-
-### New Approach (v2 Design)
-
-Excludes will be evaluated relative to the **destination path** and transported per-entry in MAP_DATA:
+Excludes are evaluated relative to the **destination path** and transported per-entry in MAP_DATA:
 
 ```
 source:target:flags:excludes_b64

@@ -581,6 +581,11 @@ _import_rewrite_excludes() {
         for pattern in "${path_patterns[@]}"; do
             # Strip leading / for processing
             p="${pattern#/}"
+            # Normalize: strip trailing slash (except for root which won't happen here)
+            p="${p%/}"
+
+            # Skip if pattern became empty after stripping
+            [[ -z "$p" ]] && continue
 
             # Case 1: Pattern matches destination exactly -> skip entry
             if [[ "$p" == "$dst_rel" ]]; then
@@ -602,8 +607,11 @@ _import_rewrite_excludes() {
             case "$p" in
                 "${dst_rel}/"*)
                     local remainder="${p#"${dst_rel}/"}"
-                    entry_excludes+=("$remainder")
-                    pattern_matched["$pattern"]=1
+                    # Only add non-empty remainders
+                    if [[ -n "$remainder" ]]; then
+                        entry_excludes+=("$remainder")
+                        pattern_matched["$pattern"]=1
+                    fi
                     ;;
             esac
         done
@@ -628,12 +636,7 @@ _import_rewrite_excludes() {
         printf '%s:%s:%s:%s\n' "$source" "$target" "$flags" "$excludes_b64"
     done <<<"$entries_input"
 
-    # Warn about unmatched patterns (excluding global globs which always match)
-    for pattern in "${!pattern_matched[@]}"; do
-        : # Pattern was matched, skip
-    done
-
-    # Check for unmatched patterns
+    # Check for unmatched patterns (global globs are pre-marked as matched)
     while IFS= read -r pattern; do
         [[ -z "$pattern" ]] && continue
         if [[ -z "${pattern_matched[$pattern]:-}" ]]; then
