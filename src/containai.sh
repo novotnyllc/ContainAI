@@ -280,7 +280,7 @@ Secret files skipped by --no-secrets (examples):
   - ~/.codex/auth.json (Codex API key)
   - ~/.gemini/google_accounts.json, oauth_creds.json (Gemini OAuth)
   - ~/.local/share/opencode/auth.json (OpenCode auth)
-  - ~/.config/gh/ (GitHub CLI directory, contains OAuth tokens in hosts.yml)
+  - ~/.config/gh/hosts.yml (GitHub CLI OAuth tokens)
   - ~/.ssh/id_* (SSH private keys, dynamically discovered at sync time)
   - ~/.aider.conf.yml, ~/.aider.model.settings.yml (may contain API keys)
   - ~/.continue/config.yaml, config.json (may contain API keys)

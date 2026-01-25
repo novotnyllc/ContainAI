@@ -365,9 +365,10 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.claude/CLAUDE.md:/target/claude/CLAUDE.md:f"
 
         # --- GitHub CLI ---
-        # Directory contains hosts.yml (OAuth tokens) - marked as secret
-        # With --no-secrets, entire directory is skipped (consistent with container symlink)
-        "/source/.config/gh:/target/config/gh:ds"
+        # hosts.yml contains OAuth tokens (secret)
+        # Other files (config.yml, etc.) are not secrets
+        "/source/.config/gh/hosts.yml:/target/config/gh/hosts.yml:fs"
+        "/source/.config/gh/config.yml:/target/config/gh/config.yml:f"
 
         # --- SSH ---
         # Static entries: config, known_hosts (not secrets)
@@ -1741,17 +1742,20 @@ done <<'"'"'MAP_DATA'"'"'
     # Convert SYNC_MAP to newline-delimited string for exclude processing
     # Filter out entries with 's' flag when --no-secrets is set
     local sync_map_entries=""
-    local entry entry_flags
+    local entry entry_flags entry_path_display
     for entry in "${_IMPORT_SYNC_MAP[@]}"; do
         # Extract flags (3rd field, colon-delimited)
         entry_flags="${entry##*:}"
         # Skip entries with 's' flag when no_secrets=true
         if [[ "$no_secrets" == "true" && "$entry_flags" == *s* ]]; then
+            # Convert /source/.xxx to ~/.xxx for user-friendly display
+            entry_path_display="${entry%%:*}"
+            entry_path_display="~${entry_path_display#/source}"
             # Show skip message in dry-run mode, otherwise info
             if [[ "$dry_run" == "true" ]]; then
-                echo "[DRY-RUN] Skipping secret entry: ${entry%%:*} (--no-secrets)"
+                echo "[DRY-RUN] Skipping secret entry: $entry_path_display (--no-secrets)"
             else
-                _import_info "Skipping secret entry: ${entry%%:*} (--no-secrets)"
+                _import_info "Skipping secret entry: $entry_path_display (--no-secrets)"
             fi
             continue
         fi
@@ -1768,10 +1772,13 @@ done <<'"'"'MAP_DATA'"'"'
         entry_flags="${ssh_key_entry##*:}"
         # Skip entries with 's' flag when no_secrets=true
         if [[ "$no_secrets" == "true" && "$entry_flags" == *s* ]]; then
+            # Convert /source/.xxx to ~/.xxx for user-friendly display
+            entry_path_display="${ssh_key_entry%%:*}"
+            entry_path_display="~${entry_path_display#/source}"
             if [[ "$dry_run" == "true" ]]; then
-                echo "[DRY-RUN] Skipping secret entry: ${ssh_key_entry%%:*} (--no-secrets)"
+                echo "[DRY-RUN] Skipping secret entry: $entry_path_display (--no-secrets)"
             else
-                _import_info "Skipping secret entry: ${ssh_key_entry%%:*} (--no-secrets)"
+                _import_info "Skipping secret entry: $entry_path_display (--no-secrets)"
             fi
             continue
         fi
