@@ -85,29 +85,14 @@ RUN for unit in \
 # Note: NOPASSWD sudo is intentional - this is a sandboxed AI agent environment
 # where sysbox provides isolation. SSH key auth implies full container access.
 # =============================================================================
-RUN if id -u agent >/dev/null 2>&1; then \
-        echo "agent user already exists"; \
-    else \
-        existing_entry="$(awk -F: '$3==1000 {print $1 ":" $4; exit}' /etc/passwd)" && \
-        if [ -n "$existing_entry" ]; then \
-            existing_user="${existing_entry%%:*}"; \
-            existing_gid="${existing_entry#*:}"; \
-            existing_group="$(awk -F: -v gid="$existing_gid" '$3==gid {print $1; exit}' /etc/group)"; \
-            if [ "$existing_group" != "agent" ]; then \
-                if [ -n "$existing_group" ]; then \
-                    groupmod -n agent "$existing_group"; \
-                else \
-                    groupadd -g "$existing_gid" agent; \
-                fi; \
-            fi; \
-            usermod -l agent "$existing_user"; \
-            usermod -d /home/agent -m agent; \
-        else \
-            useradd --create-home --shell /bin/bash --uid 1000 agent; \
-        fi; \
+RUN if ! id -u agent >/dev/null 2>&1; then \
+        useradd --create-home --shell /bin/bash agent; \
     fi && \
     # Set random password so account is unlocked for SSH key auth
-    agent_pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)" && \
+    set +o pipefail; \
+    agent_pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"; \
+    set -o pipefail; \
+    if [ -z "$agent_pw" ]; then echo "failed to generate agent password" >&2; exit 1; fi && \
     printf 'agent:%s\n' "$agent_pw" | chpasswd && \
     unset agent_pw && \
     echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \

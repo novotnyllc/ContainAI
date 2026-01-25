@@ -317,11 +317,41 @@ _CAI_CONTAINAI_DOCKER_PID="/var/run/containai-docker.pid"
 _CAI_CONTAINAI_DOCKER_BRIDGE="cai0"
 _CAI_CONTAINAI_DOCKER_SERVICE="containai-docker.service"
 _CAI_CONTAINAI_DOCKER_UNIT="/etc/systemd/system/containai-docker.service"
+_CAI_CONTAINAI_DOCKER_SSH_HOST="containai-docker-daemon"
+_CAI_CONTAINAI_DOCKER_SSH_PORT_DEFAULT=2222
+
+# Return the shared Windows Docker config path when running in WSL2
+# Outputs: WSL path to %USERPROFILE%\.docker
+# Returns: 0=success, 1=not WSL2 or cannot resolve
+_cai_wsl_shared_docker_config_path() {
+    if ! _cai_is_wsl2; then
+        return 1
+    fi
+
+    local win_userprofile=""
+    win_userprofile=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r') || win_userprofile=""
+    if [[ -z "$win_userprofile" ]]; then
+        return 1
+    fi
+
+    local win_docker_config=""
+    win_docker_config="${win_userprofile}\\.docker"
+
+    local wsl_docker_config=""
+    wsl_docker_config=$(wslpath -u "$win_docker_config" 2>/dev/null) || return 1
+
+    # Ensure the shared config directory exists
+    mkdir -p "$wsl_docker_config" 2>/dev/null || true
+
+    printf '%s' "$wsl_docker_config"
+    return 0
+}
 
 # Expected Docker host endpoint for the ContainAI context.
 # - macOS: Lima socket
 # - container (nested): inner Docker socket
-# - Linux/WSL2 host: isolated containai-docker socket
+# - Linux host: isolated containai-docker socket
+# - WSL2 host: SSH to localhost on a dedicated port
 _cai_expected_docker_host() {
     if _cai_is_macos; then
         printf '%s' "unix://$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock"
@@ -329,6 +359,10 @@ _cai_expected_docker_host() {
     fi
     if _cai_is_container; then
         printf '%s' "unix:///var/run/docker.sock"
+        return 0
+    fi
+    if _cai_is_wsl2; then
+        printf '%s' "ssh://$_CAI_CONTAINAI_DOCKER_SSH_HOST$_CAI_CONTAINAI_DOCKER_SOCKET"
         return 0
     fi
     printf '%s' "unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
@@ -339,7 +373,14 @@ _cai_expected_docker_host() {
 _cai_expected_docker_socket_path() {
     local host
     host=$(_cai_expected_docker_host)
-    printf '%s' "${host#unix://}"
+    case "$host" in
+        unix://*)
+            printf '%s' "${host#unix://}"
+            ;;
+        *)
+            printf '%s' ""
+            ;;
+    esac
 }
 
 # Constants for ContainAI-managed dockerd bundle paths (Linux/WSL2 only)
@@ -488,9 +529,32 @@ _cai_containai_docker_context_exists() {
 # Returns: 0=socket exists, 1=socket does not exist
 # Note: Socket path is platform-dependent (Linux/WSL2 vs macOS Lima)
 _cai_containai_docker_socket_exists() {
-    local socket_path
-    socket_path=$(_cai_expected_docker_socket_path)
-    [[ -S "$socket_path" ]]
+    local host
+    host=$(_cai_expected_docker_host)
+
+    case "$host" in
+        unix://*)
+            local socket_path
+            socket_path="${host#unix://}"
+            [[ -S "$socket_path" ]]
+            ;;
+        tcp://*)
+            local host_port tcp_host tcp_port
+            host_port="${host#tcp://}"
+            tcp_host="${host_port%%:*}"
+            tcp_port="${host_port##*:}"
+            _cai_timeout 2 bash -c "exec 3<>/dev/tcp/${tcp_host}/${tcp_port}" >/dev/null 2>&1
+            ;;
+        ssh://*)
+            local ssh_target
+            ssh_target="${host#ssh://}"
+            ssh_target="${ssh_target%%/*}"
+            _cai_timeout 5 ssh -o BatchMode=yes -o ConnectTimeout=5 -T "$ssh_target" true >/dev/null 2>&1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 # Check if containai-docker daemon is accessible

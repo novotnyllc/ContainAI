@@ -1839,7 +1839,7 @@ _cai_verify_sysbox_install() {
 }
 
 # ==============================================================================
-# WSL2 Windows Integration (named pipe bridge)
+# WSL2 Windows Integration (TLS/TCP)
 # ==============================================================================
 
 # Find a Windows executable from WSL and return its WSL path
@@ -1857,7 +1857,7 @@ _cai_wsl_find_windows_exe() {
     wslpath -u "$win_path" 2>/dev/null || return 1
 }
 
-# Setup Windows named-pipe bridge for containai-docker in WSL2
+# Configure Docker-over-SSH integration for containai-docker on WSL2
 # Arguments: $1 = dry_run flag ("true" to simulate)
 #            $2 = verbose flag ("true" for verbose output)
 # Returns: 0=success (or skipped), 1=failure
@@ -1865,135 +1865,232 @@ _cai_setup_wsl2_windows_npipe_bridge() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
 
-    _cai_step "Configuring Windows named-pipe bridge (containai-docker)"
+    _cai_step "Configuring Docker-over-SSH (containai-docker)"
 
-    # Locate npiperelay.exe in Windows PATH (install via winget.exe if missing)
-    local npiperelay_path=""
-    if ! npiperelay_path=$(_cai_wsl_find_windows_exe "npiperelay.exe"); then
-        local winget_path=""
-        if winget_path=$(_cai_wsl_find_windows_exe "winget.exe"); then
-            if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Would install npiperelay via winget.exe"
-            else
-                _cai_info "Installing npiperelay via winget.exe"
-                if ! "$winget_path" install --id jstarks.npiperelay --exact --accept-source-agreements --accept-package-agreements >/dev/null 2>&1; then
-                    _cai_warn "winget.exe failed to install jstarks.npiperelay"
-                fi
-                npiperelay_path=$(_cai_wsl_find_windows_exe "npiperelay.exe") || npiperelay_path=""
-            fi
-        else
-            _cai_warn "winget.exe not found in Windows PATH"
-        fi
+    local host_alias="$_CAI_CONTAINAI_DOCKER_SSH_HOST"
+    local legacy_alias="containai-docker-host"
+    local ssh_port="${CAI_WSL_SSH_PORT:-$_CAI_CONTAINAI_DOCKER_SSH_PORT_DEFAULT}"
+    local user_name
+    user_name=$(id -un)
+    local key_name="containai-docker-daemon"
+    local wsl_key="$HOME/.ssh/$key_name"
+    local wsl_key_pub="$HOME/.ssh/$key_name.pub"
+    local wsl_ssh_config="$HOME/.ssh/config"
+    local wsl_known_hosts="$HOME/.ssh/known_hosts"
+
+    local win_userprofile=""
+    local win_username=""
+    if pushd /mnt/c >/dev/null 2>&1; then
+        win_userprofile=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r') || win_userprofile=""
+        win_username=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r') || win_username=""
+        popd >/dev/null 2>&1 || true
+    else
+        win_userprofile=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r') || win_userprofile=""
+        win_username=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r') || win_username=""
     fi
-    if [[ -z "$npiperelay_path" ]]; then
-        _cai_warn "npiperelay.exe not found in Windows PATH"
-        _cai_warn "  Skipping Windows named-pipe bridge setup"
+    if [[ -z "$win_userprofile" ]]; then
+        _cai_warn "Could not determine Windows user profile; SSH integration may be incomplete"
+    fi
+
+    local win_ssh_dir=""
+    local win_ssh_config=""
+    local win_known_hosts=""
+    local win_key=""
+    local win_key_pub=""
+    if [[ -n "$win_userprofile" ]]; then
+        win_ssh_dir=$(wslpath -u "${win_userprofile}\\.ssh" 2>/dev/null || true)
+        win_ssh_config="${win_ssh_dir}/config"
+        win_known_hosts="${win_ssh_dir}/known_hosts"
+        win_key="${win_ssh_dir}/${key_name}"
+        win_key_pub="${win_key}.pub"
+    fi
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "SSH host alias: $host_alias"
+        _cai_info "SSH port: $ssh_port"
+        _cai_info "SSH user: $user_name"
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would disable containai-npipe-bridge.service if present"
+        _cai_info "[DRY-RUN] Would configure sshd for key-only auth on port $ssh_port"
+        _cai_info "[DRY-RUN] Would create dedicated SSH key: $wsl_key"
+        _cai_info "[DRY-RUN] Would add host entry: $host_alias"
+        _cai_info "[DRY-RUN] Would update docker contexts to: $(_cai_expected_docker_host)"
         return 0
     fi
 
-    # Locate wsl.exe (should exist, but resolve via Windows PATH when possible)
-    local wsl_exe_path=""
-    if ! wsl_exe_path=$(_cai_wsl_find_windows_exe "wsl.exe"); then
-        wsl_exe_path="/mnt/c/Windows/System32/wsl.exe"
+    # Disable old TCP bridge service if it exists
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^containai-npipe-bridge.service"; then
+            sudo systemctl disable --now containai-npipe-bridge.service >/dev/null 2>&1 || _cai_warn "Failed to disable containai-npipe-bridge.service"
+            sudo rm -f /usr/local/bin/containai-npipe-bridge /etc/systemd/system/containai-npipe-bridge.service >/dev/null 2>&1 || true
+            sudo systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
     fi
 
-    # Determine distro name for wsl.exe (fallback to Ubuntu)
-    local distro="${WSL_DISTRO_NAME:-}"
-    if [[ -z "$distro" ]]; then
-        distro="Ubuntu"
+    # Harden sshd configuration for key-only auth on the dedicated port
+    local sshd_snippet="/etc/ssh/sshd_config.d/containai.conf"
+    local sshd_content=""
+    sshd_content=$(cat <<EOF
+Port $ssh_port
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitEmptyPasswords no
+PubkeyAuthentication yes
+EOF
+)
+    if ! printf '%s\n' "$sshd_content" | sudo tee "$sshd_snippet" >/dev/null; then
+        _cai_error "Failed to write sshd hardening config: $sshd_snippet"
+        return 1
+    fi
+    sudo systemctl restart ssh >/dev/null 2>&1 || _cai_warn "Failed to restart ssh.service"
+
+    # Ensure SSH directories exist
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh" 2>/dev/null || true
+    touch "$wsl_ssh_config" "$wsl_known_hosts"
+    chmod 600 "$wsl_ssh_config" "$wsl_known_hosts" 2>/dev/null || true
+    if [[ -n "$win_ssh_dir" ]]; then
+        mkdir -p "$win_ssh_dir"
+        touch "$win_ssh_config" "$win_known_hosts"
     fi
 
-    # Ensure socat is installed (required for bridging to UNIX socket)
-    if ! command -v socat >/dev/null 2>&1; then
-        if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would install socat (required for Windows pipe bridge)"
-        else
-            _cai_info "Installing socat (required for Windows pipe bridge)"
-            sudo apt-get update >/dev/null 2>&1 || _cai_warn "apt-get update failed (continuing)"
-            if ! sudo apt-get install -y socat >/dev/null 2>&1; then
-                _cai_warn "Failed to install socat; skipping Windows named-pipe bridge"
-                return 0
+    # Ensure the key exists on WSL (single source of truth)
+    if [[ ! -f "$wsl_key" || ! -f "$wsl_key_pub" ]]; then
+        ssh-keygen -t ed25519 -f "$wsl_key" -N "" -C "$key_name" >/dev/null 2>&1 || {
+            _cai_error "Failed to generate SSH key: $wsl_key"
+            return 1
+        }
+    fi
+    chmod 600 "$wsl_key" 2>/dev/null || true
+
+    # Mirror the key to Windows and lock down ACLs for ssh.exe
+    if [[ -n "$win_key" ]] && [[ -f "$wsl_key" ]]; then
+        cp "$wsl_key" "$win_key"
+        cp "$wsl_key_pub" "$win_key_pub" 2>/dev/null || true
+        if command -v icacls.exe >/dev/null 2>&1 && [[ -n "$win_username" ]]; then
+            local win_key_winpath=""
+            win_key_winpath=$(wslpath -w "$win_key" 2>/dev/null || true)
+            if [[ -n "$win_key_winpath" ]]; then
+                icacls.exe "$win_key_winpath" /inheritance:r /grant:r "${win_username}:(F)" /c >/dev/null 2>&1 || true
+                icacls.exe "${win_key_winpath}.pub" /inheritance:r /grant:r "${win_username}:(R)" /c >/dev/null 2>&1 || true
             fi
         fi
     fi
 
-    local bridge_script="/usr/local/bin/containai-npipe-bridge"
-    local service_file="/etc/systemd/system/containai-npipe-bridge.service"
-    local pipe_name="//./pipe/containai-docker"
-    local socket_path="$_CAI_CONTAINAI_DOCKER_SOCKET"
+    # Ensure authorized_keys contains the dedicated key
+    if [[ -f "$wsl_key_pub" ]]; then
+        touch "$HOME/.ssh/authorized_keys"
+        chmod 600 "$HOME/.ssh/authorized_keys"
+        local pubkey_line=""
+        pubkey_line=$(cat "$wsl_key_pub")
+        if ! rg -F -x -q -- "$pubkey_line" "$HOME/.ssh/authorized_keys"; then
+            printf '%s\n' "$pubkey_line" >>"$HOME/.ssh/authorized_keys"
+        fi
+    fi
 
-    if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would write: $bridge_script"
-        _cai_info "[DRY-RUN] Would write: $service_file"
-        _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
-        _cai_info "[DRY-RUN] Would enable/start containai-npipe-bridge.service"
+    # Refresh known_hosts on both sides for the dedicated port
+    local kh=""
+    for kh in "$wsl_known_hosts" "$win_known_hosts"; do
+        [[ -z "$kh" ]] && continue
+        ssh-keygen -f "$kh" -R "[127.0.0.1]:${ssh_port}" >/dev/null 2>&1 || true
+        ssh-keyscan -p "$ssh_port" 127.0.0.1 >>"$kh" 2>/dev/null || true
+    done
+
+    # Build SSH host blocks (Windows OpenSSH has issues with ControlMaster)
+    local host_block_common=""
+    host_block_common=$(cat <<EOF
+Host $host_alias
+    HostName 127.0.0.1
+    Port $ssh_port
+    User $user_name
+    IdentityFile ~/.ssh/$key_name
+    IdentitiesOnly yes
+    IdentityAgent none
+    HostKeyAlias [127.0.0.1]:$ssh_port
+    StrictHostKeyChecking yes
+EOF
+)
+    local host_block_wsl=""
+    host_block_wsl=$(cat <<EOF
+$host_block_common
+    ControlMaster auto
+    ControlPath ~/.ssh/control-%C
+    ControlPersist yes
+EOF
+)
+    local host_block_win="$host_block_common"
+
+    # Upsert host block, removing legacy entries first
+    upsert_host_block() {
+        local config_file="$1"
+        local host_block_content="$2"
+        local tmp_file=""
+        tmp_file=$(mktemp)
+        awk -v host="$host_alias" -v legacy="$legacy_alias" '
+            BEGIN {skip=0}
+            /^[Hh]ost[[:space:]]+/ {
+                skip=0
+                n=split($0, parts, /[[:space:]]+/)
+                for (i=2; i<=n; i++) {
+                    if (parts[i]==host || parts[i]==legacy) {
+                        skip=1
+                    }
+                }
+            }
+            skip==0 {print}
+        ' "$config_file" >"$tmp_file"
+        printf '\n%s\n' "$host_block_content" >>"$tmp_file"
+        mv "$tmp_file" "$config_file"
+    }
+
+    upsert_host_block "$wsl_ssh_config" "$host_block_wsl"
+    chmod 600 "$wsl_ssh_config" 2>/dev/null || true
+    if [[ -n "$win_ssh_config" ]]; then
+        upsert_host_block "$win_ssh_config" "$host_block_win"
+    fi
+
+    # Update Docker context on WSL
+    local expected_host=""
+    expected_host=$(_cai_expected_docker_host)
+    if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        docker context update "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$expected_host" >/dev/null 2>&1 || \
+            _cai_warn "Failed to update Docker context on WSL"
     else
-        # Bridge script (runs Windows npiperelay to forward to WSL unix socket)
-        local script_content
-        script_content=$(cat <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-
-NPIPERELAY_PATH="$npiperelay_path"
-WSL_EXE_PATH="$wsl_exe_path"
-WSL_DISTRO_NAME="$distro"
-PIPE_NAME="$pipe_name"
-SOCKET_PATH="$socket_path"
-
-exec "\$NPIPERELAY_PATH" -ep -s "\$PIPE_NAME" "\$WSL_EXE_PATH" -d "\$WSL_DISTRO_NAME" -u root -- socat -t 0.5 - "UNIX-CONNECT:\$SOCKET_PATH"
-EOF
-)
-        if ! printf '%s\n' "$script_content" | sudo tee "$bridge_script" >/dev/null; then
-            _cai_warn "Failed to write bridge script; skipping Windows named-pipe bridge"
-            return 0
-        fi
-        sudo chmod 0755 "$bridge_script" || _cai_warn "Failed to set permissions on $bridge_script"
-
-        # systemd service
-        local service_content
-        service_content=$(cat <<EOF
-[Unit]
-Description=ContainAI Windows named-pipe bridge (containai-docker)
-After=network.target containai-docker.service
-Requires=containai-docker.service
-
-[Service]
-Type=simple
-ExecStart=$bridge_script
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-EOF
-)
-        if ! printf '%s\n' "$service_content" | sudo tee "$service_file" >/dev/null; then
-            _cai_warn "Failed to write bridge service file; skipping Windows named-pipe bridge"
-            return 0
-        fi
-
-        sudo systemctl daemon-reload || _cai_warn "Failed to reload systemd (bridge service may not be active yet)"
-        sudo systemctl enable containai-npipe-bridge.service >/dev/null 2>&1 || _cai_warn "Failed to enable containai-npipe-bridge.service"
-        sudo systemctl restart containai-npipe-bridge.service >/dev/null 2>&1 || _cai_warn "Failed to start containai-npipe-bridge.service"
+        docker context create "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$expected_host" >/dev/null 2>&1 || \
+            _cai_warn "Failed to create Docker context on WSL"
     fi
 
-    # Configure Windows Docker context (if docker.exe is available)
+    # Update Docker context on Windows
     _cai_step "Configuring Windows Docker context (containai-docker)"
-    local win_context_host="npipe:////./pipe/containai-docker"
     if command -v docker.exe >/dev/null 2>&1; then
-        if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would run: docker.exe context create/update $_CAI_CONTAINAI_DOCKER_CONTEXT"
+        local win_docker_config=""
+        if [[ -n "$win_userprofile" ]]; then
+            win_docker_config="${win_userprofile}\\.docker"
+        fi
+        if [[ -z "$win_docker_config" ]]; then
+            _cai_warn "Could not determine Windows DOCKER_CONFIG path; skipping Windows context update"
+            return 0
+        fi
+        local -a win_docker_env=("DOCKER_CONFIG=$win_docker_config" "HOME=$win_userprofile")
+        if env "${win_docker_env[@]}" docker.exe context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+            env "${win_docker_env[@]}" docker.exe context update "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$expected_host" >/dev/null 2>&1 || \
+                _cai_warn "Failed to update Windows Docker context"
         else
-            if docker.exe context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
-                docker.exe context update "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$win_context_host" >/dev/null 2>&1 || \
-                    _cai_warn "Failed to update Windows Docker context"
-            else
-                docker.exe context create "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$win_context_host" >/dev/null 2>&1 || \
-                    _cai_warn "Failed to create Windows Docker context"
-            fi
+            env "${win_docker_env[@]}" docker.exe context create "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$expected_host" >/dev/null 2>&1 || \
+                _cai_warn "Failed to create Windows Docker context"
         fi
     else
         _cai_warn "docker.exe not found in PATH; configure Windows context manually"
+    fi
+
+    # Smoke test SSH connectivity (key-only, no agent)
+    if command -v ssh.exe >/dev/null 2>&1; then
+        ssh.exe -o BatchMode=yes -o IdentityAgent=none "$host_alias" echo ok >/dev/null 2>&1 || \
+            _cai_warn "Windows SSH test failed; check ~/.ssh/$key_name and authorized_keys"
     fi
 
     return 0
