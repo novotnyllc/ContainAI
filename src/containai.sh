@@ -446,6 +446,9 @@ EOF
 }
 
 _containai_doctor_help() {
+    local platform
+    platform=$(_cai_detect_platform)
+
     cat <<'EOF'
 ContainAI Doctor - Check system capabilities and diagnostics
 
@@ -461,6 +464,16 @@ Requirements:
 Options:
   --fix           Auto-fix issues that can be remediated automatically
   --json          Output machine-parseable JSON
+EOF
+
+    # Show --reset-lima option only on macOS
+    if [[ "$platform" == "macos" ]]; then
+        cat <<'EOF'
+  --reset-lima    Delete Lima VM and Docker context (requires confirmation)
+EOF
+    fi
+
+    cat <<'EOF'
   -h, --help      Show this help message
 
 Exit Codes:
@@ -928,6 +941,7 @@ _containai_sandbox_cmd() {
 _containai_doctor_cmd() {
     local json_output="false"
     local fix_mode="false"
+    local reset_lima="false"
     local workspace="$PWD"
 
     # Parse arguments
@@ -939,6 +953,10 @@ _containai_doctor_cmd() {
                 ;;
             --fix)
                 fix_mode="true"
+                shift
+                ;;
+            --reset-lima)
+                reset_lima="true"
                 shift
                 ;;
             --workspace | -w)
@@ -966,6 +984,12 @@ _containai_doctor_cmd() {
                 ;;
         esac
     done
+
+    # Handle --reset-lima (macOS only)
+    if [[ "$reset_lima" == "true" ]]; then
+        _cai_doctor_reset_lima
+        return $?
+    fi
 
     # Resolve workspace and parse config to get configured resource limits
     local resolved_workspace="$workspace"

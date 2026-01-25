@@ -1668,4 +1668,55 @@ _cai_doctor_json() {
     fi
 }
 
+# ==============================================================================
+# Reset Lima (macOS only)
+# ==============================================================================
+
+# Reset the Lima VM and Docker context
+# Deletes VM, removes Docker context, clears template hash
+# Uses _cai_prompt_confirm() for confirmation (supports CAI_YES=1)
+# Returns: 0 on success, 1 on error
+_cai_doctor_reset_lima() {
+    local platform
+    platform=$(_cai_detect_platform)
+
+    # Only available on macOS
+    if [[ "$platform" != "macos" ]]; then
+        _cai_error "--reset-lima is only available on macOS"
+        return 1
+    fi
+
+    _cai_warn "This will delete the ContainAI Lima VM ($_CAI_LIMA_VM_NAME) and Docker context."
+    _cai_warn "Workspace data on the host is preserved."
+
+    if ! _cai_prompt_confirm "Continue?" false; then
+        _cai_info "Reset cancelled"
+        return 0
+    fi
+
+    # Stop VM if running
+    if limactl list "$_CAI_LIMA_VM_NAME" 2>/dev/null | grep -q Running; then
+        _cai_info "Stopping VM..."
+        limactl stop "$_CAI_LIMA_VM_NAME"
+    fi
+
+    # Delete VM if it exists
+    if _cai_lima_vm_exists "$_CAI_LIMA_VM_NAME"; then
+        _cai_info "Deleting VM..."
+        limactl delete "$_CAI_LIMA_VM_NAME" --force
+    fi
+
+    # Remove Docker context
+    if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        _cai_info "Removing Docker context..."
+        docker context rm "$_CAI_CONTAINAI_DOCKER_CONTEXT" 2>/dev/null || true
+    fi
+
+    # Remove template hash
+    rm -f ~/.config/containai/lima-template.hash
+
+    _cai_ok "Lima VM reset complete"
+    _cai_info "Run 'cai setup' to recreate the VM"
+}
+
 return 0
