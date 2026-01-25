@@ -55,4 +55,6 @@ Ralph mode rules (must follow):
 
 7) On hard failure, output `<promise>FAIL</promise>` and stop.
 
-Do NOT output `<promise>COMPLETE</promise>` in this prompt.
+## ⛔ FORBIDDEN OUTPUT
+**NEVER output `<promise>COMPLETE</promise>`** — this prompt handles ONE epic only.
+Ralph detects all-work-complete automatically via the selector. Outputting COMPLETE here is INVALID and will be ignored.
