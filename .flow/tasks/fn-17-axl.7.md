@@ -193,9 +193,8 @@ Result: dotfiles/gitconfig
 - [ ] Test: overlapping entries resolve to longest match
 
 ## Done summary
-TBD
-
+Implemented absolute-to-relative symlink conversion during import using manifest-based lookup with longest-prefix matching and minimal relative path computation (common prefix algorithm).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 991f925, f547e5e, c7f1331, 01a9e34, 2db2835
+- Tests: shellcheck -x src/lib/import.sh, shellcheck -x tests/integration/test-sync-integration.sh
 - PRs:

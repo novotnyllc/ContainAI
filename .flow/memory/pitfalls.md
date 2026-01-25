@@ -187,3 +187,6 @@ trap RETURN fires on EVERY function return including nested calls - use explicit
 
 ## 2026-01-25 manual [pitfall]
 test -e returns false for broken symlinks; use test -L to check if a symlink exists regardless of target validity
+
+## 2026-01-25 manual [pitfall]
+Relative path computation must use common-prefix algorithm (not just walk up to root) to get minimal paths between two absolute paths
