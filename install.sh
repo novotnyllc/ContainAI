@@ -743,10 +743,15 @@ show_setup_instructions() {
                 echo "  - Installs Docker Engine and Sysbox inside the VM"
                 echo "  - Configures secure container isolation"
                 ;;
-            *)
+            debian)
                 echo "  - Installs Sysbox for secure container isolation"
                 echo "  - Creates an isolated Docker daemon (containai-docker)"
                 echo "  - Does NOT modify your system Docker"
+                ;;
+            *)
+                echo "  - Configures secure container isolation"
+                echo "  - Ubuntu/Debian: auto-installs Sysbox"
+                echo "  - Other distros: requires manual Sysbox install"
                 ;;
         esac
         echo ""
