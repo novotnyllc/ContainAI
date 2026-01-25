@@ -365,7 +365,9 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.claude/CLAUDE.md:/target/claude/CLAUDE.md:f"
 
         # --- GitHub CLI ---
-        "/source/.config/gh:/target/config/gh:ds"
+        # Only hosts.yml is secret (contains OAuth tokens)
+        "/source/.config/gh/hosts.yml:/target/config/gh/hosts.yml:fs"
+        "/source/.config/gh/config.yml:/target/config/gh/config.yml:f"
 
         # --- SSH ---
         # Non-secret files: config, known_hosts (no s flag)
@@ -748,7 +750,16 @@ _import_discover_ssh_keys() {
     while IFS= read -r -d '' filename; do
         basename="${filename##*/}"
 
-        # Skip non-regular files (directories, symlinks, etc.)
+        # Skip directories
+        [[ -d "$filename" ]] && continue
+
+        # Warn about symlinked keys (they're skipped to avoid complexity)
+        if [[ -L "$filename" ]]; then
+            echo "[WARN] Skipping symlinked SSH key: $filename (symlinks not supported)" >&2
+            continue
+        fi
+
+        # Skip non-regular files
         [[ ! -f "$filename" ]] && continue
 
         # Skip known non-key files

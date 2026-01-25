@@ -268,19 +268,22 @@ Options:
   --dry-run             Preview changes without applying
   --no-excludes         Skip exclude patterns from config
   --no-secrets          Skip syncing agent secret files (OAuth tokens, API keys,
-                        SSH private keys). Does NOT affect --credentials flag.
+                        SSH private keys). Skips entries with 's' flag in the
+                        sync manifest. Does NOT affect --credentials flag.
+                        Note: Has no effect with --from archive.tgz (restores bypass sync).
   -h, --help            Show this help message
 
-Secret files skipped by --no-secrets:
-  - ~/.claude/.credentials.json (Claude OAuth tokens)
+Secret files skipped by --no-secrets (examples):
+  - ~/.claude/.credentials.json, ~/.claude.json (Claude OAuth)
   - ~/.codex/auth.json (Codex API key)
   - ~/.gemini/google_accounts.json, oauth_creds.json (Gemini OAuth)
   - ~/.local/share/opencode/auth.json (OpenCode auth)
-  - ~/.config/gh/ (GitHub CLI tokens)
-  - ~/.ssh/id_* (SSH private keys)
-  - ~/.aider.conf.yml (may contain API keys)
-  - ~/.continue/config.* (may contain API keys)
+  - ~/.config/gh/hosts.yml (GitHub CLI tokens)
+  - ~/.ssh/id_* (SSH private keys, dynamically discovered)
+  - ~/.aider.conf.yml, ~/.aider.model.settings.yml (may contain API keys)
+  - ~/.continue/config.yaml, config.json (may contain API keys)
   - ~/.cursor/mcp.json, ~/.config/opencode/opencode.json (may contain tokens)
+  See src/sync-manifest.toml for complete list (entries with 's' flag).
 
 Examples:
   cai import /path/to/workspace        Hot-reload configs into running container

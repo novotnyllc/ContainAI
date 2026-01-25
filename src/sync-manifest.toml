@@ -88,13 +88,21 @@ flags = "f"  # file
 
 # =============================================================================
 # GITHUB CLI
+# Only hosts.yml is secret (contains OAuth tokens)
+# Other GH config files (config.yml, etc.) are not secrets
 # =============================================================================
 
 [[entries]]
-source = ".config/gh"
-target = "config/gh"
-container_link = ".config/gh"
-flags = "ds"  # directory, secret
+source = ".config/gh/hosts.yml"
+target = "config/gh/hosts.yml"
+container_link = ".config/gh/hosts.yml"
+flags = "fs"  # file, secret (contains OAuth tokens)
+
+[[entries]]
+source = ".config/gh/config.yml"
+target = "config/gh/config.yml"
+container_link = ".config/gh/config.yml"
+flags = "f"  # file (not secret - user preferences only)
 
 # =============================================================================
 # SSH
