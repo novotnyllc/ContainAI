@@ -165,16 +165,11 @@ find_homebrew_bash() {
 }
 
 # Check if stdin is interactive (can prompt user)
+# For piped installs (stdin not a TTY), we NEVER prompt - this is per spec
 can_prompt() {
-    # If stdin is a TTY, we can prompt
-    if [[ -t 0 ]]; then
-        return 0
-    fi
-    # If stdin is piped but /dev/tty exists, we can prompt via tty
-    if [[ -e /dev/tty ]]; then
-        return 0
-    fi
-    return 1
+    # Only allow prompting if stdin is a TTY
+    # Do NOT use /dev/tty fallback - piped installs must not prompt
+    [[ -t 0 ]]
 }
 
 # Prompt for confirmation (respects YES_FLAG)
@@ -192,13 +187,8 @@ prompt_confirm() {
     fi
 
     local response
-    if [[ -t 0 ]]; then
-        printf '%s [y/N]: ' "$message"
-        read -r response
-    else
-        printf '%s [y/N]: ' "$message" >/dev/tty
-        read -r response </dev/tty
-    fi
+    printf '%s [y/N]: ' "$message"
+    read -r response
 
     case "$response" in
         [yY]|[yY][eE][sS]) return 0 ;;
@@ -211,6 +201,12 @@ install_homebrew() {
     info "Homebrew is required to install bash 4+ on macOS"
 
     if [[ -n "$YES_FLAG" ]]; then
+        # In piped mode with --yes, Homebrew's installer may still prompt
+        # (e.g., for password or RETURN key). Warn user and proceed.
+        if ! can_prompt; then
+            warn "Note: Homebrew's installer may require interactive input."
+            warn "If this hangs, re-run interactively or pre-install Homebrew."
+        fi
         info "Installing Homebrew (--yes mode)..."
     elif can_prompt; then
         if ! prompt_confirm "Install Homebrew?"; then
@@ -223,7 +219,7 @@ install_homebrew() {
         return 1
     fi
 
-    # Install Homebrew
+    # Install Homebrew (uses /dev/tty for its prompts if needed)
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
     # Verify installation
@@ -429,16 +425,9 @@ check_git() {
 check_prerequisites() {
     info "Checking prerequisites..."
     local failed=0
-    local major_version
-    major_version="${BASH_VERSION%%.*}"
 
-    # bash check (warn only, don't fail)
+    # bash check (warn only, don't fail) - check_bash_version handles its own output
     check_bash_version
-    if [[ "$major_version" -lt 4 ]]; then
-        warn "bash ${BASH_VERSION} (4.0+ needed for cai CLI)"
-    else
-        success "bash ${BASH_VERSION}"
-    fi
 
     if ! check_git; then
         failed=1
