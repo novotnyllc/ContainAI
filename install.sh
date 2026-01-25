@@ -503,7 +503,8 @@ install_containai() {
         # Existing installation - update
         IS_FRESH_INSTALL="false"
         # Check if cai wrapper also exists (proper re-run vs corrupted state)
-        if [[ -x "$BIN_DIR/cai" ]]; then
+        # Use -f (file exists) not -x (executable) since wrapper is invoked via bash
+        if [[ -f "$BIN_DIR/cai" ]]; then
             IS_RERUN="true"
         fi
         info "Existing installation found, updating..."
@@ -801,7 +802,8 @@ run_auto_update() {
     # Run cai update with CAI_YES if auto-confirm is enabled
     # Use explicit path to cai wrapper
     local cai_wrapper="$BIN_DIR/cai"
-    if [[ -x "$cai_wrapper" ]]; then
+    # Use -f (file exists) not -x (executable) since wrapper is invoked via bash
+    if [[ -f "$cai_wrapper" ]]; then
         # Capture exit code without triggering set -e
         # cai update may return non-zero for expected reasons
         local rc=0
@@ -836,7 +838,7 @@ post_install() {
     # Determine whether to auto-run setup/update
     # Skip if --no-setup was passed
     if [[ "$NO_SETUP" == "true" ]]; then
-        info "Skipping setup (--no-setup flag)"
+        info "Skipping automatic configuration (--no-setup flag)"
         if [[ "$IS_RERUN" == "true" ]]; then
             show_setup_instructions "update"
         else
