@@ -169,3 +169,6 @@ When sudo mv moves files from user-owned temp dir to root locations, ownership i
 
 ## 2026-01-25 manual [pitfall]
 Version comparison must use semver logic (sort -V) not string equality - checking != instead of > causes false positives on downgrades
+
+## 2026-01-25 manual [pitfall]
+apt-get upgrade -y can still prompt (dpkg conffile/needrestart); use DEBIAN_FRONTEND=noninteractive and -o Dpkg::Options::=--force-confdef/confold for truly non-interactive updates

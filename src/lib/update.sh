@@ -876,8 +876,11 @@ _cai_update_macos_packages() {
     # Ensure VM is running before running apt commands
     local status
     status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME")
-    if [[ "$status" == "Stopped" ]]; then
-        _cai_step "Starting stopped Lima VM"
+    if [[ -z "$status" ]]; then
+        _cai_error "Cannot determine Lima VM status"
+        return 1
+    elif [[ "$status" != "Running" ]]; then
+        _cai_step "Starting Lima VM (status: $status)"
         if ! limactl start "$_CAI_LIMA_VM_NAME"; then
             _cai_error "Failed to start Lima VM"
             return 1
@@ -891,9 +894,9 @@ _cai_update_macos_packages() {
         return 1
     fi
 
-    # Run apt upgrade
+    # Run apt upgrade (non-interactive to avoid dpkg conffile prompts)
     _cai_step "Running apt upgrade in VM"
-    if ! limactl shell "$_CAI_LIMA_VM_NAME" -- sudo apt-get upgrade -y; then
+    if ! limactl shell "$_CAI_LIMA_VM_NAME" -- sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold; then
         _cai_error "apt upgrade failed in VM"
         return 1
     fi
@@ -928,9 +931,9 @@ _cai_update_macos_recreate_vm() {
         fi
     fi
 
-    # Delete VM
+    # Delete VM (flags before positional args for compatibility)
     _cai_step "Deleting Lima VM"
-    if ! limactl delete "$_CAI_LIMA_VM_NAME" --force; then
+    if ! limactl delete --force "$_CAI_LIMA_VM_NAME"; then
         _cai_error "Failed to delete Lima VM"
         return 1
     fi
@@ -956,7 +959,7 @@ _cai_update_macos_recreate_vm() {
 #            $2 = verbose ("true" for verbose output)
 #            $3 = force ("true" to skip confirmation)
 #            $4 = lima_recreate ("true" to force VM recreation)
-# Returns: 0=success, 1=failure, 130=cancelled by user
+# Returns: 0=success (or user declined recreation), 1=failure
 _cai_update_macos() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
@@ -1040,7 +1043,7 @@ _cai_update_macos() {
             if [[ "$force" != "true" ]]; then
                 if ! _cai_prompt_confirm "Recreate Lima VM?"; then
                     _cai_info "Update cancelled"
-                    return 130  # Signal cancellation
+                    return 0  # User chose not to recreate - not an error
                 fi
             fi
         fi
