@@ -229,12 +229,6 @@ install_homebrew() {
     info "Homebrew is required to install bash 4+ on macOS"
 
     if [[ -n "$YES_FLAG" ]]; then
-        # In piped mode with --yes, Homebrew's installer may still prompt
-        # (e.g., for password or RETURN key). Warn user and proceed.
-        if ! can_prompt; then
-            warn "Note: Homebrew's installer may require interactive input."
-            warn "If this hangs, re-run interactively or pre-install Homebrew."
-        fi
         info "Installing Homebrew (--yes mode)..."
     elif can_prompt; then
         if ! prompt_confirm "Install Homebrew?"; then
@@ -247,8 +241,13 @@ install_homebrew() {
         return 1
     fi
 
-    # Install Homebrew (uses /dev/tty for its prompts if needed)
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    # Install Homebrew
+    # NONINTERACTIVE=1 prevents prompts (Homebrew's official non-interactive mode)
+    if [[ -n "$YES_FLAG" ]]; then
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    else
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
 
     # Verify installation
     local brew_path
@@ -495,8 +494,8 @@ install_containai() {
         (
             cd -- "$INSTALL_DIR"
             git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
-            git reset --hard "origin/$BRANCH"
+            # Use -B to create/reset local branch tracking remote (handles missing local branch)
+            git checkout -B "$BRANCH" "origin/$BRANCH"
         )
         success "Updated to latest version"
     else
@@ -747,6 +746,17 @@ post_install() {
     # Auto-setup is only for fresh installs
     if [[ "$IS_FRESH_INSTALL" != "true" ]]; then
         info "Re-run detected. Run 'cai update' to update your environment."
+        show_setup_instructions
+        return
+    fi
+
+    # On macOS, require bash 4+ to run setup (cai CLI needs it)
+    local os
+    os="$(detect_os)"
+    if [[ "$os" == "macos" ]] && [[ -z "$BASH4_PATH" ]]; then
+        warn "Cannot run setup: bash 4+ is required but not installed."
+        warn "Install bash via Homebrew: brew install bash"
+        warn "Then run: cai setup"
         show_setup_instructions
         return
     fi

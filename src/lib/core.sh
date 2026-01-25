@@ -163,14 +163,16 @@ _cai_prompt_confirm() {
     confirm="${confirm//[[:space:]]/}"  # strip whitespace
 
     # Evaluate response based on default
+    # Only accept explicit y/yes/n/no/empty - reject ambiguous input like "maybe"
     if [[ "$default_yes" == "true" ]]; then
-        # Default Y: n/no denies, empty or y/yes confirms
+        # Default Y: empty/y/yes confirms, n/no denies, other input denies (safe default)
         case "$confirm" in
-            n|no) return 1 ;;
-            *)    return 0 ;;
+            ""|y|yes) return 0 ;;
+            n|no)     return 1 ;;
+            *)        return 1 ;;  # Ambiguous input defaults to deny for safety
         esac
     else
-        # Default N: y/yes confirms, empty or n/no denies
+        # Default N: y/yes confirms, empty/n/no/other denies
         case "$confirm" in
             y|yes) return 0 ;;
             *)     return 1 ;;
