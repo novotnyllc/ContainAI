@@ -1985,43 +1985,56 @@ preview_symlink_relinks() {
                 fi
 
                 # Compute relative path from link directory to destination
-                # Get link path in destination (map source path to destination path)
+                # Algorithm: find common prefix, count dirs up, append remainder
                 link_rel="${link#"$src_dir"}"
                 link_in_dst="${link_dst}${link_rel}"
                 link_dir="${link_in_dst%/*}"
 
-                # Strip /target prefix to get target-relative directory
-                link_dir_rel="${link_dir#/target}"
+                # Find longest common directory prefix between link_dir and dest_target
+                common=""
+                check_dir="$link_dir"
+                while [ -n "$check_dir" ]; do
+                    case "$dest_target" in
+                        "$check_dir"/*|"$check_dir")
+                            common="$check_dir"
+                            break
+                            ;;
+                    esac
+                    check_dir="${check_dir%/*}"
+                done
 
-                # Count depth (number of path components from /target/ to link dir)
-                depth=0
-                if [ -n "$link_dir_rel" ] && [ "$link_dir_rel" != "/" ]; then
-                    link_dir_rel="${link_dir_rel#/}"
-                    # Count slashes + 1 for depth
-                    remaining="$link_dir_rel"
-                    depth=1
-                    while [ "${remaining#*/}" != "$remaining" ]; do
-                        depth=$((depth + 1))
-                        remaining="${remaining#*/}"
-                    done
-                fi
+                # Count directories to go up from link_dir to common
+                up_count=0
+                remaining_link="$link_dir"
+                while [ "$remaining_link" != "$common" ] && [ -n "$remaining_link" ]; do
+                    up_count=$((up_count + 1))
+                    remaining_link="${remaining_link%/*}"
+                done
 
-                # Build relative prefix (../ repeated depth times)
+                # Build ../ prefix
                 rel_prefix=""
                 i=0
-                while [ "$i" -lt "$depth" ]; do
+                while [ "$i" -lt "$up_count" ]; do
                     rel_prefix="../$rel_prefix"
                     i=$((i + 1))
                 done
 
-                # Strip /target/ from dest_target to get target-relative path
-                dest_target_rel="${dest_target#/target/}"
+                # Get remainder of dest_target after common prefix
+                if [ "$dest_target" = "$common" ]; then
+                    dest_remainder=""
+                else
+                    dest_remainder="${dest_target#"$common"/}"
+                fi
 
                 # Final relative target
-                if [ -z "$rel_prefix" ]; then
-                    final_target="$dest_target_rel"
+                if [ -z "$rel_prefix" ] && [ -z "$dest_remainder" ]; then
+                    final_target="."
+                elif [ -z "$rel_prefix" ]; then
+                    final_target="$dest_remainder"
+                elif [ -z "$dest_remainder" ]; then
+                    final_target="${rel_prefix%/}"
                 else
-                    final_target="${rel_prefix}${dest_target_rel}"
+                    final_target="${rel_prefix}${dest_remainder}"
                 fi
 
                 printf "[RELINK] %s -> %s (relative)\n" "$link_in_dst" "$final_target" >&2
@@ -2121,43 +2134,56 @@ preview_symlink_relinks() {
                 fi
 
                 # Compute relative path from link directory to destination
-                # Get link path in destination (map source path to destination path)
+                # Algorithm: find common prefix, count dirs up, append remainder
                 link_rel="${link#"$src_dir"}"
                 link_in_dst="${link_dst}${link_rel}"
                 link_dir="${link_in_dst%/*}"
 
-                # Strip /target prefix to get target-relative directory
-                link_dir_rel="${link_dir#/target}"
+                # Find longest common directory prefix between link_dir and dest_target
+                common=""
+                check_dir="$link_dir"
+                while [ -n "$check_dir" ]; do
+                    case "$dest_target" in
+                        "$check_dir"/*|"$check_dir")
+                            common="$check_dir"
+                            break
+                            ;;
+                    esac
+                    check_dir="${check_dir%/*}"
+                done
 
-                # Count depth (number of path components from /target/ to link dir)
-                depth=0
-                if [ -n "$link_dir_rel" ] && [ "$link_dir_rel" != "/" ]; then
-                    link_dir_rel="${link_dir_rel#/}"
-                    # Count slashes + 1 for depth
-                    remaining="$link_dir_rel"
-                    depth=1
-                    while [ "${remaining#*/}" != "$remaining" ]; do
-                        depth=$((depth + 1))
-                        remaining="${remaining#*/}"
-                    done
-                fi
+                # Count directories to go up from link_dir to common
+                up_count=0
+                remaining_link="$link_dir"
+                while [ "$remaining_link" != "$common" ] && [ -n "$remaining_link" ]; do
+                    up_count=$((up_count + 1))
+                    remaining_link="${remaining_link%/*}"
+                done
 
-                # Build relative prefix (../ repeated depth times)
+                # Build ../ prefix
                 rel_prefix=""
                 i=0
-                while [ "$i" -lt "$depth" ]; do
+                while [ "$i" -lt "$up_count" ]; do
                     rel_prefix="../$rel_prefix"
                     i=$((i + 1))
                 done
 
-                # Strip /target/ from dest_target to get target-relative path
-                dest_target_rel="${dest_target#/target/}"
+                # Get remainder of dest_target after common prefix
+                if [ "$dest_target" = "$common" ]; then
+                    dest_remainder=""
+                else
+                    dest_remainder="${dest_target#"$common"/}"
+                fi
 
                 # Final relative target
-                if [ -z "$rel_prefix" ]; then
-                    final_target="$dest_target_rel"
+                if [ -z "$rel_prefix" ] && [ -z "$dest_remainder" ]; then
+                    final_target="."
+                elif [ -z "$rel_prefix" ]; then
+                    final_target="$dest_remainder"
+                elif [ -z "$dest_remainder" ]; then
+                    final_target="${rel_prefix%/}"
                 else
-                    final_target="${rel_prefix}${dest_target_rel}"
+                    final_target="${rel_prefix}${dest_remainder}"
                 fi
 
                 printf "[RELINK] %s -> %s (relative)\n" "$link_in_dst" "$final_target" >&2
@@ -2270,40 +2296,59 @@ relink_internal_symlinks() {
                 fi
 
                 # Compute relative path from link directory to destination
+                # Algorithm: find common prefix, count dirs up, append remainder
                 link_dir="${link%/*}"
 
-                # Strip /target prefix to get target-relative directory
-                link_dir_rel="${link_dir#/target}"
+                # Find longest common directory prefix between link_dir and dest_target
+                # Start with link_dir and shorten until it matches dest_target prefix
+                common=""
+                check_dir="$link_dir"
+                while [ -n "$check_dir" ]; do
+                    case "$dest_target" in
+                        "$check_dir"/*|"$check_dir")
+                            common="$check_dir"
+                            break
+                            ;;
+                    esac
+                    # Go up one directory
+                    check_dir="${check_dir%/*}"
+                done
 
-                # Count depth (number of path components from /target/ to link dir)
-                depth=0
-                if [ -n "$link_dir_rel" ] && [ "$link_dir_rel" != "/" ]; then
-                    link_dir_rel="${link_dir_rel#/}"
-                    # Count slashes + 1 for depth
-                    remaining="$link_dir_rel"
-                    depth=1
-                    while [ "${remaining#*/}" != "$remaining" ]; do
-                        depth=$((depth + 1))
-                        remaining="${remaining#*/}"
-                    done
-                fi
+                # Count directories to go up from link_dir to common
+                up_count=0
+                remaining_link="$link_dir"
+                while [ "$remaining_link" != "$common" ] && [ -n "$remaining_link" ]; do
+                    up_count=$((up_count + 1))
+                    remaining_link="${remaining_link%/*}"
+                done
 
-                # Build relative prefix (../ repeated depth times)
+                # Build ../ prefix
                 rel_prefix=""
                 i=0
-                while [ "$i" -lt "$depth" ]; do
+                while [ "$i" -lt "$up_count" ]; do
                     rel_prefix="../$rel_prefix"
                     i=$((i + 1))
                 done
 
-                # Strip /target/ from dest_target to get target-relative path
-                dest_target_rel="${dest_target#/target/}"
+                # Get remainder of dest_target after common prefix
+                if [ "$dest_target" = "$common" ]; then
+                    # dest_target IS the common prefix (link points to parent dir)
+                    dest_remainder=""
+                else
+                    dest_remainder="${dest_target#"$common"/}"
+                fi
 
                 # Final relative target
-                if [ -z "$rel_prefix" ]; then
-                    final_target="$dest_target_rel"
+                if [ -z "$rel_prefix" ] && [ -z "$dest_remainder" ]; then
+                    # Same directory - should not happen (link = target)
+                    final_target="."
+                elif [ -z "$rel_prefix" ]; then
+                    final_target="$dest_remainder"
+                elif [ -z "$dest_remainder" ]; then
+                    # Going up only, remove trailing /
+                    final_target="${rel_prefix%/}"
                 else
-                    final_target="${rel_prefix}${dest_target_rel}"
+                    final_target="${rel_prefix}${dest_remainder}"
                 fi
 
                 # Relink (rm first for directory symlink pitfall - ln -sfn creates inside existing dir)
