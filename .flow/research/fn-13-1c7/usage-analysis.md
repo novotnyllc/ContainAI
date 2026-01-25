@@ -9,8 +9,10 @@ Analysis of real-world devcontainer.json configurations to understand usage patt
 **Sample strategy:**
 - Stratified by ecosystem: JavaScript/TypeScript, Python, Go, Rust, Java
 - Stratified by popularity: High stars (>10k), medium stars (1k-10k), and DevContainer tooling repos
-- Max 2-3 repos per organization to avoid bias (e.g., max 2 Microsoft repos per category)
+- Org caps: max 2-3 repos per org for most orgs; Microsoft/devcontainers allowed higher counts as reference implementations
 - Monorepo handling: Each `.devcontainer/devcontainer.json` counted once per repo
+
+**Note on analysis baseline:** 51 repos were sampled; 1 failed parsing (JetBrains/devcontainers-examples). All frequency statistics use N=50 (successfully parsed configs).
 
 **Sources:**
 - GitHub code search API: `filename:devcontainer.json`
@@ -168,7 +170,7 @@ January 2026
 
 ### Key Finding: initializeCommand
 
-**`initializeCommand` was NOT used in any of the 51 sampled repositories.**
+**`initializeCommand` was NOT used in any of the 50 successfully parsed repositories.**
 
 This is significant because:
 1. `initializeCommand` is the most dangerous property (runs on host before container creation)
@@ -326,6 +328,7 @@ A devcontainer configuration is considered "safe" for ContainAI if it:
 | No `initializeCommand` | 0 blocked | 50/50 (100%) |
 | No `privileged` property | 3 blocked | 47/50 (94%) |
 | No `--privileged` runArgs | 4 blocked | 46/50 (92%) |
+| No `--cap-add` runArgs | 4 blocked | 46/50 (92%) |
 | No dangerous mounts | 3 blocked (docker.sock) | 47/50 (94%) |
 
 ### Estimated Compatibility
@@ -460,9 +463,10 @@ gh api "search/code?q=filename:devcontainer.json+org:ORG&per_page=50"
 # Fetch file content
 gh api "repos/OWNER/REPO/contents/.devcontainer/devcontainer.json" --jq '.content' | base64 -d
 
-# JSONC parsing (Python)
+# JSONC parsing (Python - illustrative, not production)
 import re, json
-text = re.sub(r'(?<![:\"])//.*?(?=\n|$)', '', text)  # strip comments
-text = re.sub(r',(\s*[}\]])', r'\1', text)  # trailing commas
+text = re.sub(r'/\*[\s\S]*?\*/', '', text)           # strip block comments
+text = re.sub(r'(?<![:\"])//.*?(?=\n|$)', '', text)  # strip line comments (preserve URLs)
+text = re.sub(r',(\s*[}\]])', r'\1', text)           # remove trailing commas
 data = json.loads(text)
 ```
