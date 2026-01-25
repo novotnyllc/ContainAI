@@ -10,11 +10,12 @@
 #   f = file
 #   d = directory
 #   j = json-init (create {} if empty)
-#   s = secret (600 for files, 700 for dirs)
+#   s = secret (600 for files, 700 for dirs; skipped with --no-secrets)
 #   m = mirror mode (--delete to remove files not in source)
 #   x = exclude .system/ subdirectory
 #   g = git-filter (strip credential.helper) - for future use
 #   R = remove existing path first (rm -rf before ln -sfn)
+#   G = glob/dynamic pattern (not synced directly; discovered at runtime by import.sh)
 #
 # Fields:
 #   source = path relative to $HOME (includes leading dot, e.g., ".claude.json")
@@ -121,6 +122,7 @@ flags = "f"  # file (not secret - host keys are public)
 # These are discovered at runtime by _import_discover_ssh_keys() in import.sh
 # because the set of keys varies per user (id_rsa, id_ed25519, id_ed25519_sk, etc.)
 # This entry documents the pattern; actual sync happens via dynamic discovery.
+# NOTE: Symlinked keys are excluded (security: prevents following symlinks outside .ssh)
 [[entries]]
 source = ".ssh/id_*"
 target = "ssh/"
@@ -129,6 +131,7 @@ flags = "Gs"  # G=glob/dynamic pattern, s=secret (private keys)
 # Note: 'G' flag marks this as a pattern entry handled specially by import.sh
 # Private keys (id_* without .pub) get 's' flag at discovery time
 # Public keys (id_*.pub) do not get 's' flag
+# Symlinked keys are skipped with a warning (use regular files)
 
 # =============================================================================
 # OPENCODE

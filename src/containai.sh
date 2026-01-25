@@ -251,7 +251,8 @@ Hot-Reload Mode (with workspace path):
   What gets activated in container:
   - Git config is copied to agent's home directory
   - Env vars loaded via shell init hook for future sessions
-  - SSH: use ssh -A for agent forwarding (keys stay on host)
+  - SSH: agent forwarding (ssh -A) preferred; keys also synced to volume
+    unless --no-secrets is used
 
 Volume-Only Mode (no workspace path):
   Syncs configs to data volume only. Does not affect running containers.
