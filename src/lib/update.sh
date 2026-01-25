@@ -11,6 +11,8 @@
 #   _cai_update_macos()               - Update macOS Lima installation
 #   _cai_update_systemd_unit()        - Update systemd unit if template changed
 #   _cai_update_docker_context()      - Update Docker context if socket changed
+#   _cai_update_check()               - Rate-limited check for dockerd bundle updates
+#   _cai_update_dockerd_bundle()      - Update dockerd bundle to latest version
 #
 # Purpose:
 #   Ensures existing installation is in required state and updates dependencies
@@ -33,6 +35,7 @@
 #   - Requires lib/platform.sh for platform detection
 #   - Requires lib/docker.sh for Docker constants and checks
 #   - Requires lib/setup.sh for setup helper functions
+#   - Requires lib/config.sh for _containai_find_config
 #
 # Usage: source lib/update.sh
 # ==============================================================================
@@ -82,6 +85,7 @@ What Gets Updated:
     - Systemd unit file (if template changed)
     - Docker service restart
     - Docker context verification
+    - Dockerd bundle version (with prompts unless --force)
     - Legacy path cleanup
 
   macOS Lima:
@@ -319,16 +323,447 @@ _cai_update_docker_context() {
 }
 
 # ==============================================================================
+# Dockerd Bundle Update Check
+# ==============================================================================
+
+# State file for rate-limiting update checks
+_CAI_UPDATE_CHECK_STATE_FILE="${HOME}/.cache/containai/update-check"
+
+# Default check interval
+_CAI_UPDATE_CHECK_DEFAULT_INTERVAL="daily"
+
+# Convert interval string to seconds
+# Arguments: $1 = interval (hourly, daily, weekly, never)
+# Outputs: seconds (0 for never)
+# Returns: 0
+_cai_update_check_interval_seconds() {
+    local interval="${1:-daily}"
+    case "$interval" in
+        hourly) printf '%s' "3600" ;;
+        daily)  printf '%s' "86400" ;;
+        weekly) printf '%s' "604800" ;;
+        never)  printf '%s' "0" ;;
+        *)      printf '%s' "86400" ;;  # Default to daily for invalid values
+    esac
+}
+
+# Get the configured update check interval
+# Reads from config file or env var, returns interval string
+# Returns: 0=success
+# Outputs: interval string (hourly, daily, weekly, never)
+_cai_update_check_get_interval() {
+    # 1. Env var override takes precedence
+    if [[ -n "${CAI_UPDATE_CHECK_INTERVAL:-}" ]]; then
+        printf '%s' "$CAI_UPDATE_CHECK_INTERVAL"
+        return 0
+    fi
+
+    # 2. Try to read from config file
+    # Use _containai_find_config with PWD, fallback to XDG config
+    local config_file script_dir
+    config_file=$(_containai_find_config "$PWD") || config_file=""
+
+    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
+        # Check if Python is available for TOML parsing
+        if command -v python3 >/dev/null 2>&1; then
+            # Determine script directory (where parse-toml.py lives)
+            if script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"; then
+                local interval
+                # Parse update.check_interval from config
+                interval=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --key "update.check_interval" 2>/dev/null) || interval=""
+                if [[ -n "$interval" ]]; then
+                    printf '%s' "$interval"
+                    return 0
+                fi
+            fi
+        fi
+    fi
+
+    # 3. Default to daily
+    printf '%s' "$_CAI_UPDATE_CHECK_DEFAULT_INTERVAL"
+}
+
+# Check if update check should run based on rate limiting
+# Uses file mtime for rate limiting
+# Returns: 0=should check, 1=skip (interval not elapsed)
+_cai_update_check_should_run() {
+    local interval interval_secs
+    interval=$(_cai_update_check_get_interval)
+    interval_secs=$(_cai_update_check_interval_seconds "$interval")
+
+    # never = skip all checks
+    if [[ "$interval_secs" -eq 0 ]]; then
+        return 1
+    fi
+
+    # Create cache dir if needed
+    local cache_dir
+    cache_dir=$(dirname "$_CAI_UPDATE_CHECK_STATE_FILE")
+    if [[ ! -d "$cache_dir" ]]; then
+        mkdir -p "$cache_dir" 2>/dev/null || return 1
+    fi
+
+    # If state file doesn't exist, should check
+    if [[ ! -f "$_CAI_UPDATE_CHECK_STATE_FILE" ]]; then
+        return 0
+    fi
+
+    # Compare mtime to current time
+    local file_mtime current_time elapsed
+    file_mtime=$(stat -c %Y "$_CAI_UPDATE_CHECK_STATE_FILE" 2>/dev/null) || file_mtime=0
+    current_time=$(date +%s)
+    elapsed=$((current_time - file_mtime))
+
+    if [[ $elapsed -ge $interval_secs ]]; then
+        return 0  # Interval elapsed, should check
+    fi
+
+    return 1  # Interval not elapsed, skip
+}
+
+# Touch state file and optionally write status
+# Arguments: $1 = status (ok, network_error, parse_error)
+_cai_update_check_touch_state() {
+    local status="${1:-ok}"
+    local cache_dir
+    cache_dir=$(dirname "$_CAI_UPDATE_CHECK_STATE_FILE")
+
+    # Create cache dir if needed
+    mkdir -p "$cache_dir" 2>/dev/null || return 0
+
+    # Write status atomically
+    printf '%s' "$status" > "${_CAI_UPDATE_CHECK_STATE_FILE}.tmp" 2>/dev/null
+    mv -f "${_CAI_UPDATE_CHECK_STATE_FILE}.tmp" "$_CAI_UPDATE_CHECK_STATE_FILE" 2>/dev/null || true
+}
+
+# Get latest Docker version from the download index
+# Arguments: $1 = architecture (x86_64, aarch64)
+# Outputs: version string (e.g., "27.4.0") on stdout
+# Returns: 0=success, 1=network error, 2=parse error
+_cai_update_check_get_latest_version() {
+    local arch="${1:-x86_64}"
+    local index_url="https://download.docker.com/linux/static/stable/${arch}/"
+    local index_html latest_version
+
+    # Fetch index with short timeout (5s connect, 10s total - non-blocking)
+    if ! index_html=$(_cai_timeout 10 wget -qO- --connect-timeout=5 "$index_url" 2>/dev/null); then
+        return 1  # Network error
+    fi
+
+    # Parse HTML for docker-X.Y.Z.tgz links and extract latest version
+    latest_version=$(printf '%s' "$index_html" | \
+        grep -oE 'href="docker-[0-9]+\.[0-9]+\.[0-9]+\.tgz"' | \
+        grep -v rootless | \
+        sed 's/href="docker-//; s/\.tgz"//' | \
+        sort -t. -k1,1n -k2,2n -k3,3n | \
+        tail -1)
+
+    if [[ -z "$latest_version" ]]; then
+        return 2  # Parse error
+    fi
+
+    printf '%s' "$latest_version"
+    return 0
+}
+
+# Rate-limited update check for dockerd bundle
+# Called before every cai command (when wired in)
+# Non-blocking: short timeouts, doesn't fail the command
+# Arguments: none
+# Returns: 0 always (never blocks command execution)
+# Side effects: May print yellow warning if update available
+_cai_update_check() {
+    # Platform guard: skip on macOS (uses Lima VM)
+    if _cai_is_macos; then
+        return 0
+    fi
+
+    # Skip if bundle not installed
+    if ! _cai_dockerd_bundle_installed; then
+        return 0
+    fi
+
+    # Rate limit check
+    if ! _cai_update_check_should_run; then
+        return 0
+    fi
+
+    # Get architecture
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)  arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        *)       return 0 ;;  # Unsupported architecture, skip
+    esac
+
+    # Get latest version (non-blocking)
+    local latest_version rc
+    latest_version=$(_cai_update_check_get_latest_version "$arch") && rc=0 || rc=$?
+
+    case $rc in
+        0)
+            # Success - compare versions
+            local installed_version
+            installed_version=$(_cai_dockerd_bundle_version) || installed_version=""
+
+            if [[ -n "$installed_version" ]] && [[ "$installed_version" != "$latest_version" ]]; then
+                # Update available - print yellow warning
+                printf '\033[33m[WARN] Dockerd bundle update available: %s -> %s\033[0m\n' "$installed_version" "$latest_version" >&2
+                printf '\033[33m       Updating will stop running containers.\033[0m\n' >&2
+                printf '\033[33m       Run: cai update\033[0m\n' >&2
+            fi
+
+            _cai_update_check_touch_state "ok"
+            ;;
+        1)
+            # Network error - touch state to avoid immediate re-check
+            _cai_update_check_touch_state "network_error"
+            ;;
+        2)
+            # Parse error
+            _cai_update_check_touch_state "parse_error"
+            ;;
+    esac
+
+    return 0  # Never fail the command
+}
+
+# Update dockerd bundle to latest version
+# Arguments: $1 = force flag ("true" to skip confirmation)
+#            $2 = dry_run flag ("true" to simulate)
+#            $3 = verbose flag ("true" for verbose output)
+# Returns: 0=success (updated or already current), 1=failure
+_cai_update_dockerd_bundle() {
+    local force="${1:-false}"
+    local dry_run="${2:-false}"
+    local verbose="${3:-false}"
+
+    # Platform guard: skip on macOS (uses Lima VM)
+    if _cai_is_macos; then
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Skipping dockerd bundle update on macOS (uses Lima VM)"
+        fi
+        return 0
+    fi
+
+    # Skip if bundle not installed (user should run setup first)
+    if ! _cai_dockerd_bundle_installed; then
+        _cai_info "Dockerd bundle not installed - run 'cai setup' first"
+        return 0
+    fi
+
+    _cai_step "Checking for dockerd bundle updates"
+
+    # Get architecture
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)  arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        *)
+            _cai_error "Unsupported architecture: $arch"
+            return 1
+            ;;
+    esac
+
+    # Get latest version
+    local latest_version rc
+    latest_version=$(_cai_update_check_get_latest_version "$arch") && rc=0 || rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+        _cai_error "Failed to check for latest Docker version"
+        if [[ $rc -eq 1 ]]; then
+            _cai_error "  Network error - check connectivity"
+        else
+            _cai_error "  Could not parse Docker download index"
+        fi
+        return 1
+    fi
+
+    # Compare to installed version
+    local installed_version
+    installed_version=$(_cai_dockerd_bundle_version) || installed_version=""
+
+    if [[ "$installed_version" == "$latest_version" ]]; then
+        _cai_info "Dockerd bundle is current: $installed_version"
+        return 0
+    fi
+
+    _cai_info "Update available: $installed_version -> $latest_version"
+
+    # Dry-run handling
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would download docker-${latest_version}.tgz"
+        _cai_info "[DRY-RUN] Would extract to $_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
+        _cai_info "[DRY-RUN] Would update symlinks in $_CAI_DOCKERD_BIN_DIR/"
+        _cai_info "[DRY-RUN] Would restart $_CAI_CONTAINAI_DOCKER_SERVICE"
+        _cai_info "[DRY-RUN] Would cleanup old versions (keeping current + previous)"
+        return 0
+    fi
+
+    # Prompt for confirmation (unless --force)
+    if [[ "$force" != "true" ]]; then
+        printf '\n'
+        _cai_warn "Updating dockerd will stop running containers."
+        printf '%s' "Continue? [y/N] "
+        local response
+        if ! read -r response; then
+            printf '%s\n' "Cancelled."
+            return 0
+        fi
+        case "$response" in
+            [yY] | [yY][eE][sS]) ;;
+            *)
+                printf '%s\n' "Cancelled."
+                return 0
+                ;;
+        esac
+    fi
+
+    # Download and install
+    local download_url="https://download.docker.com/linux/static/stable/${arch}/docker-${latest_version}.tgz"
+    local install_rc
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Download URL: $download_url"
+    fi
+
+    # Perform download and installation in subshell for cleanup
+    (
+        set -e
+        tmpdir=$(mktemp -d)
+        trap 'rm -rf "$tmpdir"' EXIT
+
+        printf '%s\n' "[STEP] Downloading Docker $latest_version"
+        if ! wget -q --show-progress --connect-timeout=5 --timeout=120 -O "$tmpdir/docker.tgz" "$download_url"; then
+            printf '%s\n' "[ERROR] Failed to download Docker bundle" >&2
+            exit 1
+        fi
+
+        printf '%s\n' "[STEP] Extracting Docker bundle"
+        if ! tar -xzf "$tmpdir/docker.tgz" -C "$tmpdir"; then
+            printf '%s\n' "[ERROR] Failed to extract Docker bundle" >&2
+            exit 1
+        fi
+
+        # Verify extraction produced expected files
+        if [[ ! -f "$tmpdir/docker/dockerd" ]]; then
+            printf '%s\n' "[ERROR] Extracted archive missing dockerd binary" >&2
+            exit 1
+        fi
+
+        printf '%s\n' "[STEP] Installing to $_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
+
+        # Create target directory
+        sudo mkdir -p "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version"
+
+        # Move binaries from docker/ subdir to versioned directory
+        sudo mv "$tmpdir/docker/"* "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
+
+        # SECURITY: Set proper ownership and permissions
+        printf '%s\n' "[STEP] Setting secure ownership and permissions"
+        sudo chown -R root:root "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version"
+        sudo chmod -R u+rx,go+rx,go-w "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version"
+
+        printf '%s\n' "[STEP] Validating required binaries"
+
+        # Required binaries must all be present
+        local bin missing_binaries=""
+        for bin in $_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES; do
+            if [[ ! -f "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/$bin" ]]; then
+                missing_binaries="$missing_binaries $bin"
+            fi
+        done
+
+        if [[ -n "$missing_binaries" ]]; then
+            printf '%s\n' "[ERROR] Docker bundle missing required binaries:$missing_binaries" >&2
+            exit 1
+        fi
+
+        printf '%s\n' "[STEP] Updating symlinks in $_CAI_DOCKERD_BIN_DIR/"
+
+        # Update symlinks atomically using ln -sfn
+        for bin in $_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES; do
+            sudo ln -sfn "../docker/$latest_version/$bin" "$_CAI_DOCKERD_BIN_DIR/$bin"
+        done
+
+        # Write version file atomically
+        printf '%s\n' "[STEP] Writing version to $_CAI_DOCKERD_VERSION_FILE"
+        local version_tmp="${_CAI_DOCKERD_VERSION_FILE}.tmp"
+        printf '%s' "$latest_version" | sudo tee "$version_tmp" >/dev/null
+        sudo mv -f "$version_tmp" "$_CAI_DOCKERD_VERSION_FILE"
+
+        exit 0
+    ) && install_rc=0 || install_rc=$?
+
+    if [[ $install_rc -ne 0 ]]; then
+        _cai_error "Failed to install Docker bundle"
+        return 1
+    fi
+
+    # Restart service
+    _cai_step "Restarting $_CAI_CONTAINAI_DOCKER_SERVICE"
+    if ! sudo systemctl restart "$_CAI_CONTAINAI_DOCKER_SERVICE"; then
+        _cai_error "Failed to restart service"
+        _cai_error "  Check: sudo systemctl status $_CAI_CONTAINAI_DOCKER_SERVICE"
+        return 1
+    fi
+
+    # Wait for socket
+    local wait_count=0
+    local max_wait=30
+    _cai_step "Waiting for socket: $_CAI_CONTAINAI_DOCKER_SOCKET"
+    while [[ ! -S "$_CAI_CONTAINAI_DOCKER_SOCKET" ]]; do
+        sleep 1
+        wait_count=$((wait_count + 1))
+        if [[ $wait_count -ge $max_wait ]]; then
+            _cai_error "Socket did not appear after ${max_wait}s"
+            return 1
+        fi
+    done
+
+    _cai_ok "Dockerd bundle updated: $installed_version -> $latest_version"
+
+    # Cleanup old versions (keep current + previous only)
+    _cai_step "Cleaning up old versions"
+    local version_dirs version_count
+    # shellcheck disable=SC2012 # ls is fine here - version dirs are always alphanumeric
+    version_dirs=$(ls -1d "$_CAI_DOCKERD_BUNDLE_DIR"/*/ 2>/dev/null | sort -V) || version_dirs=""
+    version_count=$(printf '%s\n' "$version_dirs" | grep -c .) || version_count=0
+
+    if [[ $version_count -gt 2 ]]; then
+        # Remove all but the last 2 versions
+        local to_remove
+        to_remove=$(printf '%s\n' "$version_dirs" | head -n $((version_count - 2)))
+        local dir
+        while IFS= read -r dir; do
+            if [[ -n "$dir" ]] && [[ -d "$dir" ]]; then
+                if [[ "$verbose" == "true" ]]; then
+                    _cai_info "Removing old version: $dir"
+                fi
+                sudo rm -rf "$dir"
+            fi
+        done <<< "$to_remove"
+        _cai_info "Cleaned up $((version_count - 2)) old version(s)"
+    fi
+
+    return 0
+}
+
+# ==============================================================================
 # Linux/WSL2 Update
 # ==============================================================================
 
 # Update Linux/WSL2 installation
 # Arguments: $1 = dry_run ("true" to simulate)
 #            $2 = verbose ("true" for verbose output)
+#            $3 = force ("true" to skip confirmation prompts)
 # Returns: 0=success, 1=failure
 _cai_update_linux_wsl2() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
+    local force="${3:-false}"
     local overall_status=0
 
     _cai_info "Updating Linux/WSL2 installation"
@@ -338,15 +773,18 @@ _cai_update_linux_wsl2() {
         _cai_warn "Legacy cleanup had issues (continuing anyway)"
     fi
 
-    # Step 2: Install/update dockerd bundle (required before unit update)
+    # Step 2: Check dockerd bundle exists (required for unit update)
     # The systemd unit uses /opt/containai/bin/dockerd, so bundle must exist
-    # Always call - function handles version check and upgrades internally
+    # If not installed, user needs to run 'cai setup' first
+    # Upgrades are handled in Step 5 after context/unit updates
     _cai_step "Checking dockerd bundle"
-    if ! _cai_install_dockerd_bundle "$dry_run" "$verbose"; then
-        _cai_error "Failed to install/update dockerd bundle"
+    if ! _cai_dockerd_bundle_installed; then
+        _cai_error "Dockerd bundle not installed"
         _cai_error "  The systemd unit requires /opt/containai/bin/dockerd"
+        _cai_error "  Run 'cai setup' to install ContainAI"
         return 1
     fi
+    _cai_info "Dockerd bundle installed"
 
     # Step 3: Check/update systemd unit
     if ! _cai_update_systemd_unit "$dry_run" "$verbose"; then
@@ -358,7 +796,14 @@ _cai_update_linux_wsl2() {
         overall_status=1
     fi
 
-    # Step 5: Verify installation
+    # Step 5: Check/update dockerd bundle version (with prompts)
+    # This is called after context/unit updates per spec
+    if ! _cai_update_dockerd_bundle "$force" "$dry_run" "$verbose"; then
+        _cai_warn "Dockerd bundle update had issues (continuing anyway)"
+        # Don't fail overall - bundle might already be at latest version
+    fi
+
+    # Step 6: Verify installation
     if [[ "$dry_run" != "true" ]]; then
         _cai_step "Verifying installation"
         if ! _cai_verify_isolated_docker "false" "$verbose"; then
@@ -568,7 +1013,7 @@ _cai_update() {
         overall_status=$?
     else
         # Linux or WSL2
-        _cai_update_linux_wsl2 "$dry_run" "$verbose"
+        _cai_update_linux_wsl2 "$dry_run" "$verbose" "$force"
         overall_status=$?
     fi
 
