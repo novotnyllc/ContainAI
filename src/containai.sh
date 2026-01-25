@@ -1982,6 +1982,16 @@ _containai_run_cmd() {
 containai() {
     local subcommand="${1:-}"
 
+    # Run rate-limited update check before command dispatch
+    # Skip in CI environments to avoid noise/delays in automated pipelines
+    # Skip for help/version commands (informational, no side effects)
+    if [[ -z "${CI:-}" ]] && [[ -z "${GITHUB_ACTIONS:-}" ]] && [[ -z "${JENKINS_URL:-}" ]]; then
+        case "$subcommand" in
+            help|-h|--help|version|--version|-v) ;;
+            *) _cai_update_check ;;
+        esac
+    fi
+
     # Handle empty or help first
     if [[ -z "$subcommand" ]]; then
         _containai_run_cmd
