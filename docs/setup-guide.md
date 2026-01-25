@@ -31,6 +31,8 @@ Before running `cai setup`, ensure you have:
 | ripgrep (rg) | Any | `rg --version` |
 | OpenSSH client | 7.3+ | `ssh -V` |
 
+**Note on Docker:** Only the Docker CLI is required. On Linux/WSL2, ContainAI installs and manages its own dockerd bundle - you do not need Docker Engine or Docker Desktop installed. On macOS, ContainAI uses a Lima VM.
+
 ### WSL2 (Windows)
 
 | Requirement | Version | Check Command |
@@ -190,20 +192,21 @@ Updates are applied atomically by swapping symlinks and restarting the `containa
 
 ### WSL2 (Windows)
 
-WSL2 must have Docker Engine available inside WSL (not Docker Desktop integration mode), as Docker Desktop does not support the Sysbox runtime. The setup creates a completely isolated Docker daemon that never touches your system Docker.
+ContainAI installs and manages its own dockerd bundle on WSL2 - you do not need Docker Engine or Docker Desktop installed. The setup creates a completely isolated Docker daemon. Note that Docker Desktop integration mode is not supported (Sysbox requires a native Linux Docker daemon).
 
 #### What WSL2 Setup Does
 
 1. **Checks kernel version** (requires 5.5+)
 2. **Tests seccomp compatibility** (WSL 1.1.0+ may have conflicts)
 3. **Downloads and installs Sysbox** from GitHub releases (Ubuntu/Debian)
-4. **Creates isolated daemon config** at `/etc/containai/docker/daemon.json`
-5. **Creates dedicated systemd service** `containai-docker.service`
-6. **Starts isolated Docker daemon** at `/var/run/containai-docker.sock`
-7. **Creates Docker context** `containai-docker`
-8. **Sets up SSH infrastructure**
+4. **Downloads and installs dockerd bundle** to `/opt/containai/docker/<version>/`
+5. **Creates isolated daemon config** at `/etc/containai/docker/daemon.json`
+6. **Creates dedicated systemd service** `containai-docker.service`
+7. **Starts isolated Docker daemon** at `/var/run/containai-docker.sock`
+8. **Creates Docker context** `containai-docker`
+9. **Sets up SSH infrastructure**
 
-**Note:** Your system Docker at `/var/run/docker.sock` is never touched.
+**Note:** Your system Docker at `/var/run/docker.sock` is never touched (if present).
 
 #### Run Setup
 
@@ -292,18 +295,19 @@ The named pipe endpoint is `npipe:////./pipe/containai-docker`.
 
 ### Native Linux
 
-Native Linux runs a completely **isolated Docker daemon** that never touches your system Docker installation.
+ContainAI installs and manages its own dockerd bundle on Linux - you do not need Docker Engine installed. The setup creates a completely **isolated Docker daemon** that never touches your system Docker installation (if present).
 
 #### What Native Linux Setup Does
 
 1. **Checks kernel version** (requires 5.5+)
 2. **Downloads and installs Sysbox** from GitHub releases (Ubuntu/Debian only)
-3. **Creates isolated daemon config** at `/etc/containai/docker/daemon.json`
-4. **Creates dedicated systemd service** `containai-docker.service`
-5. **Creates Docker context** `containai-docker` pointing to isolated socket
-6. **Sets up SSH infrastructure**
+3. **Downloads and installs dockerd bundle** to `/opt/containai/docker/<version>/`
+4. **Creates isolated daemon config** at `/etc/containai/docker/daemon.json`
+5. **Creates dedicated systemd service** `containai-docker.service`
+6. **Creates Docker context** `containai-docker` pointing to isolated socket
+7. **Sets up SSH infrastructure**
 
-**Note:** Your system Docker at `/var/run/docker.sock` and `/etc/docker/` is never touched.
+**Note:** Your system Docker at `/var/run/docker.sock` and `/etc/docker/` is never touched (if present).
 
 #### Run Setup
 

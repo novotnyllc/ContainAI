@@ -1075,8 +1075,9 @@ docker --context containai-docker exec <container> ls -la /etc/ssh/ssh_host_*
 
 **Symptom:**
 ```
-[WARN] Updates available: dockerd bundle 27.3.1 -> 27.4.0
-       Run 'cai update' to apply (will restart containers)
+[WARN] Dockerd bundle update available: 27.3.1 -> 27.4.0
+       Updating will stop running containers.
+       Run: cai update
 ```
 
 **Explanation:**
@@ -1122,31 +1123,11 @@ check_interval = "never"
 **Network errors:**
 
 If the update check fails due to network issues, ContainAI will:
-- Not display any warning
+- Not display any warning (fails silently)
 - Not block the current command
 - Retry on the next interval
 
-The check uses a 5-second connect timeout to avoid delays.
-
-### "Failed to check for updates"
-
-**Symptom:**
-```
-[WARN] Failed to check for updates: network error
-```
-
-**Cause:** Network connectivity issue when checking for updates.
-
-**Solution:**
-
-This warning is informational. The command will continue normally. To resolve:
-
-1. Check your network connection
-2. If behind a proxy, ensure it allows access to `download.docker.com`
-3. To suppress the warning, disable update checks:
-   ```bash
-   CAI_UPDATE_CHECK_INTERVAL=never cai doctor
-   ```
+The check uses a 5-second connect timeout to avoid delays. If you're behind a proxy that blocks access to `download.docker.com`, the update check will simply be skipped.
 
 ---
 
@@ -1233,5 +1214,4 @@ Quick reference of error messages and their section in this guide:
 | "Seccomp compatibility: warning" | [WSL2 Issues](#wsl2-seccomp-compatibility-warning) |
 | "Docker context issue" | [WSL2 Issues](#wsl2-docker-context-issue) |
 | "Permission denied" | [Permission Issues](#permission-issues) |
-| "Updates available" | [Updates Available Warning](#updates-available-message) |
-| "Failed to check for updates" | [Updates Available Warning](#failed-to-check-for-updates) |
+| "Dockerd bundle update available" | [Updates Available Warning](#updates-available-message) |

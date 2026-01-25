@@ -201,7 +201,7 @@ The `[danger]` config keys do not enable or bypass safety gates - CLI flags are 
 
 ### `[update]` Section
 
-Configuration for automatic update checks.
+Configuration for dockerd bundle update checks. These checks warn you when a newer version of the managed dockerd bundle is available (Linux/WSL2 only).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
