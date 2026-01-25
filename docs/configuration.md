@@ -211,6 +211,8 @@ additional_paths = [
 - Files and directories are detected automatically
 - Works with workspace-specific config (`.containai/config.toml`) and user config (`~/.config/containai/config.toml`)
 
+**Note on `--no-secrets`:** The `--no-secrets` flag only affects built-in sync entries (like OAuth tokens and SSH keys). User-specified `additional_paths` are always synced regardless of `--no-secrets`, since users explicitly choose to include these paths. If you need to skip sensitive additional paths, remove them from the config.
+
 **Viewing what will be synced:**
 ```bash
 cai import --dry-run   # Shows additional paths from config

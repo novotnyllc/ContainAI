@@ -16,6 +16,7 @@
 #   _containai_resolve_credentials - Resolve credentials mode from config
 #   _containai_resolve_secure_engine_context - Resolve secure engine context from config
 #   _containai_resolve_env_config - Resolve env config for allowlist-based env var import
+#   _containai_resolve_import_additional_paths - Resolve [import].additional_paths from config
 #   _containai_validate_volume_name - Validate Docker volume name
 #
 # Global variables set by _containai_parse_config:
