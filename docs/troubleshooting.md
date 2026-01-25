@@ -14,6 +14,7 @@ Most common issues and their one-line fixes:
 | Port already in use | Stop unused containers or adjust port range in config |
 | Container won't start | Check logs with `docker logs <container>` |
 | sshd not ready | Wait or check `docker exec <container> systemctl status ssh` |
+| Updates available warning | Run `cai update` or set `CAI_UPDATE_CHECK_INTERVAL=never` |
 
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
@@ -28,6 +29,7 @@ Most common issues and their one-line fixes:
 - [Configuration Issues](#configuration-issues)
 - [Credential/Import Issues](#credentialimport-issues)
 - [Platform-Specific Issues](#platform-specific-issues)
+- [Updates Available Warning](#updates-available-warning)
 - [Still Stuck?](#still-stuck)
 
 ---
@@ -1067,6 +1069,87 @@ docker --context containai-docker exec <container> ls -la /etc/ssh/ssh_host_*
 
 ---
 
+## Updates Available Warning
+
+### "Updates available" message
+
+**Symptom:**
+```
+[WARN] Updates available: dockerd bundle 27.3.1 -> 27.4.0
+       Run 'cai update' to apply (will restart containers)
+```
+
+**Explanation:**
+
+ContainAI periodically checks for newer versions of the managed dockerd bundle. This warning indicates a new version is available.
+
+**What this means:**
+- A newer version of the Docker daemon bundle is available
+- Your current installation will continue to work normally
+- The warning is informational and does not block any commands
+
+**How to apply updates:**
+
+```bash
+cai update
+```
+
+**Important:** Updating the dockerd bundle will restart the `containai-docker` service. This means:
+- All running containers will be stopped
+- Containers will restart after the update completes
+- Any unsaved work in containers may be lost
+
+The update process:
+1. Downloads the new dockerd bundle
+2. Prompts for confirmation (unless `--force` is used)
+3. Atomically swaps symlinks to the new version
+4. Restarts the `containai-docker` service
+
+**How to disable update checks:**
+
+If you prefer not to see update warnings:
+
+```bash
+# Disable for current session
+CAI_UPDATE_CHECK_INTERVAL=never cai doctor
+
+# Disable permanently in config
+# Add to ~/.config/containai/config.toml:
+[update]
+check_interval = "never"
+```
+
+**Network errors:**
+
+If the update check fails due to network issues, ContainAI will:
+- Not display any warning
+- Not block the current command
+- Retry on the next interval
+
+The check uses a 5-second connect timeout to avoid delays.
+
+### "Failed to check for updates"
+
+**Symptom:**
+```
+[WARN] Failed to check for updates: network error
+```
+
+**Cause:** Network connectivity issue when checking for updates.
+
+**Solution:**
+
+This warning is informational. The command will continue normally. To resolve:
+
+1. Check your network connection
+2. If behind a proxy, ensure it allows access to `download.docker.com`
+3. To suppress the warning, disable update checks:
+   ```bash
+   CAI_UPDATE_CHECK_INTERVAL=never cai doctor
+   ```
+
+---
+
 ## Still Stuck?
 
 If you've tried the solutions above and are still experiencing issues:
@@ -1150,3 +1233,5 @@ Quick reference of error messages and their section in this guide:
 | "Seccomp compatibility: warning" | [WSL2 Issues](#wsl2-seccomp-compatibility-warning) |
 | "Docker context issue" | [WSL2 Issues](#wsl2-docker-context-issue) |
 | "Permission denied" | [Permission Issues](#permission-issues) |
+| "Updates available" | [Updates Available Warning](#updates-available-message) |
+| "Failed to check for updates" | [Updates Available Warning](#failed-to-check-for-updates) |

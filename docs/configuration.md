@@ -199,6 +199,44 @@ allow_host_docker_socket = true
 
 The `[danger]` config keys do not enable or bypass safety gates - CLI flags are still required. These keys are parsed and available for audit purposes but currently have no effect on runtime behavior. See `cai --help` for CLI flag details.
 
+### `[update]` Section
+
+Configuration for automatic update checks.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `check_interval` | string | `"daily"` | How often to check for updates: `hourly`, `daily`, `weekly`, or `never` |
+
+```toml
+[update]
+check_interval = "daily"
+```
+
+**Valid intervals:**
+- `hourly` - Check at most once per hour
+- `daily` - Check at most once per day (default)
+- `weekly` - Check at most once per week
+- `never` - Disable update checks entirely
+
+**Environment override:** `CAI_UPDATE_CHECK_INTERVAL`
+
+The environment variable takes precedence over the config file setting. For example:
+```bash
+# Disable update checks for this session
+CAI_UPDATE_CHECK_INTERVAL=never cai doctor
+
+# Force hourly checks
+CAI_UPDATE_CHECK_INTERVAL=hourly cai shell /workspace
+```
+
+**Rate-limit state:**
+
+Update check state is stored in `~/.cache/containai/update-check`. This file tracks when the last check occurred (via file mtime) to enforce the rate limit. The file content stores the result of the last check.
+
+**Platform notes:**
+- Update checks only run on Linux/WSL2 where the managed dockerd bundle is installed
+- On macOS, update checks are skipped (Lima VM manages its own Docker)
+
 ### `default_excludes` (Top-level)
 
 Global list of patterns to exclude from import and export operations.
@@ -397,6 +435,7 @@ These environment variables override config file values:
 | `CONTAINAI_AGENT` | `agent.default` | `CONTAINAI_AGENT=gemini` |
 | `CONTAINAI_CREDENTIALS` | `credentials.mode` | `CONTAINAI_CREDENTIALS=none` |
 | `CONTAINAI_SECURE_ENGINE_CONTEXT` | `secure_engine.context_name` | `CONTAINAI_SECURE_ENGINE_CONTEXT=desktop-linux` |
+| `CAI_UPDATE_CHECK_INTERVAL` | `update.check_interval` | `CAI_UPDATE_CHECK_INTERVAL=never` |
 
 ## Error Handling
 

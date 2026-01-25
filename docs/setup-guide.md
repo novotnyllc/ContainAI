@@ -138,6 +138,54 @@ The `cai setup` command installs and configures multiple components. Here's what
 
 ---
 
+## ContainAI-managed dockerd bundle
+
+On Linux and WSL2, ContainAI installs and manages its own Docker daemon bundle. This ensures consistent behavior across installations and enables atomic updates.
+
+### How it works
+
+- **Installed automatically**: The dockerd bundle is installed during `cai setup` on Linux/WSL2
+- **No system Docker required**: You do not need Docker Engine or Docker Desktop installed on your system
+- **Versioned structure**: Binaries are installed to `/opt/containai/docker/<version>/`
+- **Stable symlinks**: The systemd service uses `/opt/containai/bin/` symlinks
+- **Atomic updates**: Updates swap symlinks atomically via `cai update`
+
+### Directory structure
+
+```
+/opt/containai/
+├── docker/
+│   ├── 27.3.1/              # Previous version (kept for rollback)
+│   │   ├── dockerd
+│   │   ├── docker
+│   │   ├── containerd
+│   │   └── ...
+│   └── 27.4.0/              # Current version
+│       ├── dockerd
+│       ├── docker
+│       ├── containerd
+│       └── ...
+├── bin/                     # Stable symlinks (systemd uses these)
+│   ├── dockerd -> ../docker/27.4.0/dockerd
+│   ├── docker -> ../docker/27.4.0/docker
+│   └── ...
+└── VERSION                  # Contains current version string
+```
+
+### Updating the bundle
+
+To check for and apply updates:
+
+```bash
+cai update
+```
+
+Updates are applied atomically by swapping symlinks and restarting the `containai-docker` service.
+
+**Note:** On macOS, ContainAI uses a Lima VM with its own Docker installation. The dockerd bundle is not used on macOS.
+
+---
+
 ## Platform-Specific Setup
 
 ### WSL2 (Windows)
