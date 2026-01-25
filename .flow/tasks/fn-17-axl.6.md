@@ -47,9 +47,8 @@ Allow users to override any imported file by placing files in `~/.config/contain
 - [ ] Missing override dir is not an error (just skipped)
 
 ## Done summary
-TBD
-
+Added integration tests (52-58) for the import overrides mechanism. Tests cover basic override application, file replacement (not merge), nested directory structures, symlink skipping with proper test -L checks, path traversal defense-in-depth documentation, dry-run output verification, and missing override directory handling.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: e1ea4e60c791c52d80479447d21b7836a76cce27, 8adcc8ed662e60611a39efaba7985a4296a92687
+- Tests: shellcheck -x tests/integration/test-sync-integration.sh
 - PRs:

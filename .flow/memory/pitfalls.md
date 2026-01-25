@@ -184,3 +184,6 @@ Git config values can span multiple lines via trailing backslash - when filterin
 
 ## 2026-01-25 manual [pitfall]
 trap RETURN fires on EVERY function return including nested calls - use explicit cleanup instead
+
+## 2026-01-25 manual [pitfall]
+test -e returns false for broken symlinks; use test -L to check if a symlink exists regardless of target validity

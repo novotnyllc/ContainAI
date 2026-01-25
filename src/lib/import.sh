@@ -1490,6 +1490,35 @@ _containai_import() {
         env_args+=(--env "HOST_SOURCE_ROOT=$source_root")
     fi
 
+    # Build MANIFEST_DATA for symlink target lookup (relative source -> target mapping)
+    # Format: home_rel_source:target (e.g., ".config/gh:/target/config/gh")
+    # This enables manifest-based symlink conversion with longest-prefix matching
+    local manifest_data=""
+    for entry in "${_IMPORT_SYNC_MAP[@]}"; do
+        # Extract source and target (skip flags)
+        local src_part="${entry%%:*}"
+        local rest="${entry#*:}"
+        local tgt_part="${rest%%:*}"
+        # Convert /source/.xxx to .xxx (home-relative, preserve dot)
+        local src_home_rel="${src_part#/source/}"
+        manifest_data+="${src_home_rel}:${tgt_part}"$'\n'
+    done
+    # Also include dynamically discovered SSH keys
+    local ssh_manifest_entries
+    ssh_manifest_entries=$(_import_discover_ssh_keys "$source_root")
+    while IFS= read -r ssh_entry; do
+        [[ -z "$ssh_entry" ]] && continue
+        local ssh_src="${ssh_entry%%:*}"
+        local ssh_rest="${ssh_entry#*:}"
+        local ssh_tgt="${ssh_rest%%:*}"
+        local ssh_src_rel="${ssh_src#/source/}"
+        manifest_data+="${ssh_src_rel}:${ssh_tgt}"$'\n'
+    done <<<"$ssh_manifest_entries"
+    # Pass manifest data as environment variable (base64 encoded for safe transport)
+    local manifest_data_b64
+    manifest_data_b64=$(printf '%s' "$manifest_data" | base64 | tr -d '\n')
+    env_args+=(--env "MANIFEST_DATA_B64=$manifest_data_b64")
+
     # Build map data and pass via heredoc inside the script
     # Note: This script runs inside eeacms/rsync with POSIX sh (not bash)
     # All code must be strictly POSIX-compliant (no arrays, no local in functions)
@@ -1602,32 +1631,17 @@ copy() {
                             echo "[DRY-RUN] Note: $_dst does not exist yet (will be created on actual sync)"
                         fi
                         # Preview symlink relinks (scan source since dry-run does not create files)
-                        if [ -n "${HOST_SOURCE_ROOT:-}" ]; then
-                            _rel_path="${_src#/source}"
-                            case "$HOST_SOURCE_ROOT" in
-                                /) _host_src_dir="/${_rel_path#/}" ;;
-                                */) _host_src_dir="${HOST_SOURCE_ROOT%/}${_rel_path}" ;;
-                                *) _host_src_dir="${HOST_SOURCE_ROOT}${_rel_path}" ;;
-                            esac
-                            _runtime_dst_dir="/mnt/agent-data${_dst#/target}"
-                            preview_symlink_relinks "$_host_src_dir" "$_runtime_dst_dir" "$_src" "$_flags"
+                        # Uses HOST_SOURCE_ROOT and MANIFEST_DATA_B64 from environment
+                        if [ -n "${HOST_SOURCE_ROOT:-}" ] && [ -n "${MANIFEST_DATA_B64:-}" ]; then
+                            preview_symlink_relinks "$_dst" "$_src" "$_flags"
                         fi
                     else
                         rsync "$@" "$_src/" "$_dst/"
 
-                        # Relink internal absolute symlinks after rsync (only if HOST_SOURCE_ROOT is set)
-                        if [ -n "${HOST_SOURCE_ROOT:-}" ]; then
-                            # Derive per-entry paths for symlink relinking
-                            # _src is /source/relative_path, strip /source to get relative
-                            _rel_path="${_src#/source}"
-                            # Normalize HOST_SOURCE_ROOT: strip trailing slash, except for root /
-                            case "$HOST_SOURCE_ROOT" in
-                                /) _host_src_dir="/${_rel_path#/}" ;;
-                                */) _host_src_dir="${HOST_SOURCE_ROOT%/}${_rel_path}" ;;
-                                *) _host_src_dir="${HOST_SOURCE_ROOT}${_rel_path}" ;;
-                            esac
-                            _runtime_dst_dir="/mnt/agent-data${_dst#/target}"
-                            relink_internal_symlinks "$_host_src_dir" "$_runtime_dst_dir" "$_src" "$_dst"
+                        # Relink internal absolute symlinks after rsync
+                        # Uses HOST_SOURCE_ROOT and MANIFEST_DATA_B64 from environment
+                        if [ -n "${HOST_SOURCE_ROOT:-}" ] && [ -n "${MANIFEST_DATA_B64:-}" ]; then
+                            relink_internal_symlinks "$_dst"
                         fi
                     fi
                     if [ "${DRY_RUN:-}" != "1" ]; then
@@ -1861,16 +1875,16 @@ symlink_target_exists_in_source() {
     return 1
 }
 
-# preview_symlink_relinks: Preview symlinks that would be relinked (dry-run mode)
-# Takes: host_src_dir, runtime_dst_dir, source_dir, flags
+# preview_symlink_relinks: Preview symlinks that would be converted to relative (dry-run mode)
+# Takes: link_dst_dir, source_dir, flags
+# Uses: HOST_SOURCE_ROOT (env), MANIFEST_DATA_B64 (env)
 # Note: Scans SOURCE directory (not target, since rsync dry-run does not create files)
 # Note: Respects .system/ exclusion when flags contain x and NO_EXCLUDES != 1
 # Output: [RELINK], [WARN] messages to stderr
 preview_symlink_relinks() {
-    _host_src_dir="$1"
-    _runtime_dst_dir="$2"
-    _source_dir="$3"
-    _flags="${4:-}"
+    _link_dst_dir="$1"
+    _source_dir="$2"
+    _flags="${3:-}"
 
     # Build find command with optional .system/ exclusion (mirrors rsync behavior)
     # When NO_EXCLUDES != 1 and flags contain x, prune .system/ directory
@@ -1885,10 +1899,18 @@ preview_symlink_relinks() {
     # Use -path prune pattern when .system/ exclusion is active
     if [ "$_prune_system" = "1" ]; then
         find "$_source_dir" -path "$_source_dir/.system" -prune -o -type l -exec sh -c '"'"'
-    host_src="$1"
-    runtime_dst="$2"
-    src_dir="$3"
-    shift 3
+    host_src_root="${HOST_SOURCE_ROOT:-}"
+    manifest_b64="${MANIFEST_DATA_B64:-}"
+    link_dst="$1"
+    src_dir="$2"
+    shift 2
+
+    # Decode manifest once (POSIX-compatible)
+    manifest=""
+    if [ -n "$manifest_b64" ]; then
+        manifest=$(printf "%s" "$manifest_b64" | base64 -d)
+    fi
+
     for link; do
         target=$(readlink "$link" 2>/dev/null) || continue
 
@@ -1898,70 +1920,133 @@ preview_symlink_relinks() {
             *) continue ;;
         esac
 
-        # Normalize host_src: strip trailing slash, except for root
-        case "$host_src" in
+        # Normalize host_src_root: strip trailing slash, except for root
+        case "$host_src_root" in
             /) : ;;
-            */) host_src="${host_src%/}" ;;
+            */) host_src_root="${host_src_root%/}" ;;
         esac
 
-        # Check if internal (target starts with host_src_dir)
+        # Check if target is inside HOST_SOURCE_ROOT
         case "$target" in
-            "$host_src"/* | "$host_src")
-                # Extract relative portion
-                rel_target="${target#"$host_src"}"
+            "$host_src_root"/* | "$host_src_root")
+                # Extract home-relative portion (preserve leading dot)
+                home_rel_target="${target#"$host_src_root"/}"
 
                 # SECURITY: Reject paths with .. segments to prevent escape
-                case "$rel_target" in
-                    */..)
-                        printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
-                        continue
-                        ;;
-                    */../*)
+                case "$home_rel_target" in
+                    */..|*/../*)
                         printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
                         continue
                         ;;
                 esac
 
                 # Check if target exists in source (map host path to source mount)
-                src_target="${src_dir}${rel_target}"
+                src_target="/source/${home_rel_target}"
                 if ! test -e "$src_target" && ! test -L "$src_target"; then
                     printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
                     continue
                 fi
 
-                # Normalize runtime_dst: strip trailing slash, except for root
-                case "$runtime_dst" in
-                    /) : ;;
-                    */) runtime_dst="${runtime_dst%/}" ;;
-                esac
+                # Look up target in manifest using longest-prefix match
+                dest_target=""
+                best_match_len=0
+                old_ifs="$IFS"
+                IFS="
+"
+                for entry in $manifest; do
+                    [ -z "$entry" ] && continue
+                    src_rel="${entry%%:*}"
+                    dst="${entry#*:}"
 
-                # Would be relinked
-                new_target="${runtime_dst}${rel_target}"
+                    # Check if symlink target starts with this source (or equals it)
+                    case "$home_rel_target" in
+                        "${src_rel}"|"${src_rel}"/*)
+                            # This entry matches - check if it is longer than previous best
+                            match_len=${#src_rel}
+                            if [ "$match_len" -gt "$best_match_len" ]; then
+                                best_match_len=$match_len
+                                # Compute destination path
+                                if [ "$home_rel_target" = "$src_rel" ]; then
+                                    dest_target="$dst"
+                                else
+                                    remainder="${home_rel_target#"$src_rel"/}"
+                                    dest_target="$dst/$remainder"
+                                fi
+                            fi
+                            ;;
+                    esac
+                done
+                IFS="$old_ifs"
 
-                # Security: validate stays under runtime_dst (belt-and-suspenders)
-                case "$new_target" in
-                    "$runtime_dst"/* | "$runtime_dst") ;;
-                    *)
-                        printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
-                        continue
-                        ;;
-                esac
+                if [ -z "$dest_target" ]; then
+                    # Target not in manifest - preserve with warning
+                    printf "[WARN] %s -> %s (not in manifest, would be preserved)\n" "$link" "$target" >&2
+                    continue
+                fi
 
-                printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                # Compute relative path from link directory to destination
+                # Get link path in destination (map source path to destination path)
+                link_rel="${link#"$src_dir"}"
+                link_in_dst="${link_dst}${link_rel}"
+                link_dir="${link_in_dst%/*}"
+
+                # Strip /target prefix to get target-relative directory
+                link_dir_rel="${link_dir#/target}"
+
+                # Count depth (number of path components from /target/ to link dir)
+                depth=0
+                if [ -n "$link_dir_rel" ] && [ "$link_dir_rel" != "/" ]; then
+                    link_dir_rel="${link_dir_rel#/}"
+                    # Count slashes + 1 for depth
+                    remaining="$link_dir_rel"
+                    depth=1
+                    while [ "${remaining#*/}" != "$remaining" ]; do
+                        depth=$((depth + 1))
+                        remaining="${remaining#*/}"
+                    done
+                fi
+
+                # Build relative prefix (../ repeated depth times)
+                rel_prefix=""
+                i=0
+                while [ "$i" -lt "$depth" ]; do
+                    rel_prefix="../$rel_prefix"
+                    i=$((i + 1))
+                done
+
+                # Strip /target/ from dest_target to get target-relative path
+                dest_target_rel="${dest_target#/target/}"
+
+                # Final relative target
+                if [ -z "$rel_prefix" ]; then
+                    final_target="$dest_target_rel"
+                else
+                    final_target="${rel_prefix}${dest_target_rel}"
+                fi
+
+                printf "[RELINK] %s -> %s (relative)\n" "$link_in_dst" "$final_target" >&2
                 ;;
             *)
-                # External absolute symlink (outside entry subtree)
-                printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
+                # External absolute symlink (outside HOST_SOURCE_ROOT)
+                printf "[WARN] %s -> %s (outside HOME, would be preserved)\n" "$link" "$target" >&2
                 ;;
         esac
     done
-    '"'"' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+    '"'"' sh "$_link_dst_dir" "$_source_dir" {} +
     else
         find "$_source_dir" -type l -exec sh -c '"'"'
-    host_src="$1"
-    runtime_dst="$2"
-    src_dir="$3"
-    shift 3
+    host_src_root="${HOST_SOURCE_ROOT:-}"
+    manifest_b64="${MANIFEST_DATA_B64:-}"
+    link_dst="$1"
+    src_dir="$2"
+    shift 2
+
+    # Decode manifest once (POSIX-compatible)
+    manifest=""
+    if [ -n "$manifest_b64" ]; then
+        manifest=$(printf "%s" "$manifest_b64" | base64 -d)
+    fi
+
     for link; do
         target=$(readlink "$link" 2>/dev/null) || continue
 
@@ -1971,75 +2056,128 @@ preview_symlink_relinks() {
             *) continue ;;
         esac
 
-        # Normalize host_src: strip trailing slash, except for root
-        case "$host_src" in
+        # Normalize host_src_root: strip trailing slash, except for root
+        case "$host_src_root" in
             /) : ;;
-            */) host_src="${host_src%/}" ;;
+            */) host_src_root="${host_src_root%/}" ;;
         esac
 
-        # Check if internal (target starts with host_src_dir)
+        # Check if target is inside HOST_SOURCE_ROOT
         case "$target" in
-            "$host_src"/* | "$host_src")
-                # Extract relative portion
-                rel_target="${target#"$host_src"}"
+            "$host_src_root"/* | "$host_src_root")
+                # Extract home-relative portion (preserve leading dot)
+                home_rel_target="${target#"$host_src_root"/}"
 
                 # SECURITY: Reject paths with .. segments to prevent escape
-                case "$rel_target" in
-                    */..)
-                        printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
-                        continue
-                        ;;
-                    */../*)
+                case "$home_rel_target" in
+                    */..|*/../*)
                         printf "[WARN] %s -> %s (path escape attempt, skipped)\n" "$link" "$target" >&2
                         continue
                         ;;
                 esac
 
                 # Check if target exists in source (map host path to source mount)
-                src_target="${src_dir}${rel_target}"
+                src_target="/source/${home_rel_target}"
                 if ! test -e "$src_target" && ! test -L "$src_target"; then
                     printf "[WARN] %s -> %s (broken, would be preserved)\n" "$link" "$target" >&2
                     continue
                 fi
 
-                # Normalize runtime_dst: strip trailing slash, except for root
-                case "$runtime_dst" in
-                    /) : ;;
-                    */) runtime_dst="${runtime_dst%/}" ;;
-                esac
+                # Look up target in manifest using longest-prefix match
+                dest_target=""
+                best_match_len=0
+                old_ifs="$IFS"
+                IFS="
+"
+                for entry in $manifest; do
+                    [ -z "$entry" ] && continue
+                    src_rel="${entry%%:*}"
+                    dst="${entry#*:}"
 
-                # Would be relinked
-                new_target="${runtime_dst}${rel_target}"
+                    # Check if symlink target starts with this source (or equals it)
+                    case "$home_rel_target" in
+                        "${src_rel}"|"${src_rel}"/*)
+                            # This entry matches - check if it is longer than previous best
+                            match_len=${#src_rel}
+                            if [ "$match_len" -gt "$best_match_len" ]; then
+                                best_match_len=$match_len
+                                # Compute destination path
+                                if [ "$home_rel_target" = "$src_rel" ]; then
+                                    dest_target="$dst"
+                                else
+                                    remainder="${home_rel_target#"$src_rel"/}"
+                                    dest_target="$dst/$remainder"
+                                fi
+                            fi
+                            ;;
+                    esac
+                done
+                IFS="$old_ifs"
 
-                # Security: validate stays under runtime_dst (belt-and-suspenders)
-                case "$new_target" in
-                    "$runtime_dst"/* | "$runtime_dst") ;;
-                    *)
-                        printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
-                        continue
-                        ;;
-                esac
+                if [ -z "$dest_target" ]; then
+                    # Target not in manifest - preserve with warning
+                    printf "[WARN] %s -> %s (not in manifest, would be preserved)\n" "$link" "$target" >&2
+                    continue
+                fi
 
-                printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                # Compute relative path from link directory to destination
+                # Get link path in destination (map source path to destination path)
+                link_rel="${link#"$src_dir"}"
+                link_in_dst="${link_dst}${link_rel}"
+                link_dir="${link_in_dst%/*}"
+
+                # Strip /target prefix to get target-relative directory
+                link_dir_rel="${link_dir#/target}"
+
+                # Count depth (number of path components from /target/ to link dir)
+                depth=0
+                if [ -n "$link_dir_rel" ] && [ "$link_dir_rel" != "/" ]; then
+                    link_dir_rel="${link_dir_rel#/}"
+                    # Count slashes + 1 for depth
+                    remaining="$link_dir_rel"
+                    depth=1
+                    while [ "${remaining#*/}" != "$remaining" ]; do
+                        depth=$((depth + 1))
+                        remaining="${remaining#*/}"
+                    done
+                fi
+
+                # Build relative prefix (../ repeated depth times)
+                rel_prefix=""
+                i=0
+                while [ "$i" -lt "$depth" ]; do
+                    rel_prefix="../$rel_prefix"
+                    i=$((i + 1))
+                done
+
+                # Strip /target/ from dest_target to get target-relative path
+                dest_target_rel="${dest_target#/target/}"
+
+                # Final relative target
+                if [ -z "$rel_prefix" ]; then
+                    final_target="$dest_target_rel"
+                else
+                    final_target="${rel_prefix}${dest_target_rel}"
+                fi
+
+                printf "[RELINK] %s -> %s (relative)\n" "$link_in_dst" "$final_target" >&2
                 ;;
             *)
-                # External absolute symlink (outside entry subtree)
-                printf "[WARN] %s -> %s (outside entry subtree, would be preserved)\n" "$link" "$target" >&2
+                # External absolute symlink (outside HOST_SOURCE_ROOT)
+                printf "[WARN] %s -> %s (outside HOME, would be preserved)\n" "$link" "$target" >&2
                 ;;
         esac
     done
-    '"'"' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+    '"'"' sh "$_link_dst_dir" "$_source_dir" {} +
     fi
 }
 
-# relink_internal_symlinks: Find and relink absolute symlinks within a target directory
-# Takes: host_src_dir, runtime_dst_dir, source_mount, target_dir
+# relink_internal_symlinks: Convert absolute symlinks to relative using manifest lookup
+# Takes: target_dir
+# Uses: HOST_SOURCE_ROOT (env), MANIFEST_DATA_B64 (env)
 # Note: Uses find -exec to handle paths with spaces safely (POSIX-compliant)
 relink_internal_symlinks() {
-    _host_src_dir="$1"
-    _runtime_dst_dir="$2"
-    _source_mount="$3"
-    _target_dir="$4"
+    _target_dir="$1"
 
     # Skip if dry-run mode
     if [ "${DRY_RUN:-}" = "1" ]; then
@@ -2049,10 +2187,15 @@ relink_internal_symlinks() {
     # Find all symlinks and process them
     # Using find -exec sh -c with batch processing (+ terminator)
     find "$_target_dir" -type l -exec sh -c '"'"'
-    host_src="$1"
-    runtime_dst="$2"
-    src_mount="$3"
-    shift 3
+    host_src_root="${HOST_SOURCE_ROOT:-}"
+    manifest_b64="${MANIFEST_DATA_B64:-}"
+
+    # Decode manifest once (POSIX-compatible)
+    manifest=""
+    if [ -n "$manifest_b64" ]; then
+        manifest=$(printf "%s" "$manifest_b64" | base64 -d)
+    fi
+
     for link; do
         target=$(readlink "$link" 2>/dev/null) || continue
 
@@ -2062,71 +2205,120 @@ relink_internal_symlinks() {
             *) continue ;;
         esac
 
-        # Normalize host_src: strip trailing slash, except for root
-        case "$host_src" in
+        # Normalize host_src_root: strip trailing slash, except for root
+        case "$host_src_root" in
             /) : ;;
-            */) host_src="${host_src%/}" ;;
+            */) host_src_root="${host_src_root%/}" ;;
         esac
 
-        # Check if internal (target starts with host_src_dir)
+        # Check if target is inside HOST_SOURCE_ROOT
         case "$target" in
-            "$host_src"/* | "$host_src")
-                # Extract relative portion
-                rel_target="${target#"$host_src"}"
+            "$host_src_root"/* | "$host_src_root")
+                # Extract home-relative portion (preserve leading dot)
+                home_rel_target="${target#"$host_src_root"/}"
 
                 # SECURITY: Reject paths with .. segments to prevent escape
-                # Check for /.. anywhere in path (covers /../, /.. at end, etc.)
-                case "$rel_target" in
-                    */..)
-                        printf "[WARN] %s -> %s (path escape)\n" "$link" "$target" >&2
-                        continue
-                        ;;
-                    */../*)
+                case "$home_rel_target" in
+                    */..|*/../*)
                         printf "[WARN] %s -> %s (path escape)\n" "$link" "$target" >&2
                         continue
                         ;;
                 esac
 
-                # Map host path to source mount for existence check
-                src_target="${src_mount}${rel_target}"
-
-                # Skip if broken (target does not exist in source)
+                # Check if target exists in source mount
+                src_target="/source/${home_rel_target}"
                 if ! test -e "$src_target" && ! test -L "$src_target"; then
                     printf "[WARN] %s -> %s (broken, preserved)\n" "$link" "$target" >&2
                     continue
                 fi
 
-                # Normalize runtime_dst: strip trailing slash, except for root
-                case "$runtime_dst" in
-                    /) : ;;
-                    */) runtime_dst="${runtime_dst%/}" ;;
-                esac
+                # Look up target in manifest using longest-prefix match
+                dest_target=""
+                best_match_len=0
+                old_ifs="$IFS"
+                IFS="
+"
+                for entry in $manifest; do
+                    [ -z "$entry" ] && continue
+                    src_rel="${entry%%:*}"
+                    dst="${entry#*:}"
 
-                # Remap to runtime path
-                new_target="${runtime_dst}${rel_target}"
+                    # Check if symlink target starts with this source (or equals it)
+                    case "$home_rel_target" in
+                        "${src_rel}"|"${src_rel}"/*)
+                            # This entry matches - check if it is longer than previous best
+                            match_len=${#src_rel}
+                            if [ "$match_len" -gt "$best_match_len" ]; then
+                                best_match_len=$match_len
+                                # Compute destination path
+                                if [ "$home_rel_target" = "$src_rel" ]; then
+                                    dest_target="$dst"
+                                else
+                                    remainder="${home_rel_target#"$src_rel"/}"
+                                    dest_target="$dst/$remainder"
+                                fi
+                            fi
+                            ;;
+                    esac
+                done
+                IFS="$old_ifs"
 
-                # Security: validate stays under runtime_dst (belt-and-suspenders)
-                case "$new_target" in
-                    "$runtime_dst"/* | "$runtime_dst") ;;
-                    *)
-                        printf "[WARN] %s -> %s (escape attempt, skipped)\n" "$link" "$new_target" >&2
-                        continue
-                        ;;
-                esac
+                if [ -z "$dest_target" ]; then
+                    # Target not in manifest - preserve with warning
+                    printf "[WARN] %s -> %s (not in manifest, preserved)\n" "$link" "$target" >&2
+                    continue
+                fi
+
+                # Compute relative path from link directory to destination
+                link_dir="${link%/*}"
+
+                # Strip /target prefix to get target-relative directory
+                link_dir_rel="${link_dir#/target}"
+
+                # Count depth (number of path components from /target/ to link dir)
+                depth=0
+                if [ -n "$link_dir_rel" ] && [ "$link_dir_rel" != "/" ]; then
+                    link_dir_rel="${link_dir_rel#/}"
+                    # Count slashes + 1 for depth
+                    remaining="$link_dir_rel"
+                    depth=1
+                    while [ "${remaining#*/}" != "$remaining" ]; do
+                        depth=$((depth + 1))
+                        remaining="${remaining#*/}"
+                    done
+                fi
+
+                # Build relative prefix (../ repeated depth times)
+                rel_prefix=""
+                i=0
+                while [ "$i" -lt "$depth" ]; do
+                    rel_prefix="../$rel_prefix"
+                    i=$((i + 1))
+                done
+
+                # Strip /target/ from dest_target to get target-relative path
+                dest_target_rel="${dest_target#/target/}"
+
+                # Final relative target
+                if [ -z "$rel_prefix" ]; then
+                    final_target="$dest_target_rel"
+                else
+                    final_target="${rel_prefix}${dest_target_rel}"
+                fi
 
                 # Relink (rm first for directory symlink pitfall - ln -sfn creates inside existing dir)
                 rm -rf "$link"
-                ln -s "$new_target" "$link"
+                ln -s "$final_target" "$link"
                 chown -h 1000:1000 "$link"
-                printf "[RELINK] %s -> %s\n" "$link" "$new_target" >&2
+                printf "[RELINK] %s -> %s (relative)\n" "$link" "$final_target" >&2
                 ;;
             *)
-                # External absolute symlink (outside entry subtree)
-                printf "[WARN] %s -> %s (outside entry subtree, preserved)\n" "$link" "$target" >&2
+                # External absolute symlink (outside HOST_SOURCE_ROOT)
+                printf "[WARN] %s -> %s (outside HOME, preserved)\n" "$link" "$target" >&2
                 ;;
         esac
     done
-    '"'"' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_mount" {} +
+    '"'"' sh {} +
 }
 
 # Process map entries from heredoc
