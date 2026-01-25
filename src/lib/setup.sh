@@ -754,13 +754,19 @@ _cai_install_dockerd_bundle() {
         # Move binaries from docker/ subdir to versioned directory
         sudo mv "$tmpdir/docker/"* "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
 
+        # SECURITY: Set proper ownership and permissions
+        # Binaries are moved with user ownership from temp dir; dockerd runs as root
+        # so we must ensure binaries are root-owned and not user-writable
+        echo "[STEP] Setting secure ownership and permissions"
+        sudo chown -R root:root "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version"
+        sudo chmod -R u+rx,go+rx,go-w "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version"
+
         echo "[STEP] Validating required binaries"
 
         # Required binaries must all be present - fail if any are missing
-        # Uses same list as _cai_dockerd_bundle_installed() for consistency
-        local required_binaries="dockerd docker containerd containerd-shim-runc-v2 runc"
+        # Uses $_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES from docker.sh
         local bin missing_binaries=""
-        for bin in $required_binaries; do
+        for bin in $_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES; do
             if [[ ! -f "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/$bin" ]]; then
                 missing_binaries="$missing_binaries $bin"
             fi
@@ -775,17 +781,9 @@ _cai_install_dockerd_bundle() {
 
         # Create symlinks for all bundle binaries using relative paths
         # Use ln -sfn for atomic symlink replacement
-        # Required binaries first (must succeed), then optional ones
-        for bin in $required_binaries; do
+        # All required binaries from $_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES
+        for bin in $_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES; do
             sudo ln -sfn "../docker/$latest_version/$bin" "$_CAI_DOCKERD_BIN_DIR/$bin"
-        done
-
-        # Optional binaries (create symlink if present, skip if not)
-        local optional_binaries="docker-init docker-proxy ctr"
-        for bin in $optional_binaries; do
-            if [[ -f "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/$bin" ]]; then
-                sudo ln -sfn "../docker/$latest_version/$bin" "$_CAI_DOCKERD_BIN_DIR/$bin"
-            fi
         done
 
         # Write version file
@@ -2862,19 +2860,23 @@ _cai_setup_linux() {
         _cai_info ""
         _cai_info "Manual installation steps:"
         _cai_info "  1. Install Sysbox: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
-        _cai_info "  2. Create isolated config: /etc/containai/docker/daemon.json"
-        _cai_info "  3. Create systemd unit: /etc/systemd/system/containai-docker.service"
-        _cai_info "  4. Start service: sudo systemctl enable --now containai-docker"
-        _cai_info "  5. Create context: docker context create containai-docker --docker host=unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+        _cai_info "  2. Download Docker static binaries from https://download.docker.com/linux/static/stable/"
+        _cai_info "     Extract to /opt/containai/docker/<version>/ and create symlinks in /opt/containai/bin/"
+        _cai_info "  3. Create isolated config: /etc/containai/docker/daemon.json"
+        _cai_info "  4. Create systemd unit: /etc/systemd/system/containai-docker.service"
+        _cai_info "     ExecStart=/opt/containai/bin/dockerd --config-file=/etc/containai/docker/daemon.json"
+        _cai_info "     Environment=PATH=/opt/containai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        _cai_info "  5. Start service: sudo systemctl enable --now containai-docker"
+        _cai_info "  6. Create context: docker context create containai-docker --docker host=unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
         return 1
     fi
 
-    # Preflight: Check Docker Engine is installed before making system changes
+    # Preflight: Check Docker CLI is available
     # (Only run after distro detection succeeds to ensure unsupported distros get
     # manual instructions regardless of Docker status)
-    # We need both docker CLI and dockerd for the isolated daemon
+    # We need docker CLI for context creation; dockerd comes from our bundle
     # In dry-run mode, degrade to warnings so users can see planned actions
-    _cai_step "Preflight: Checking Docker Engine installation"
+    _cai_step "Preflight: Checking Docker CLI"
     if ! command -v docker >/dev/null 2>&1; then
         if [[ "$dry_run" == "true" ]]; then
             _cai_warn "[DRY-RUN] Docker CLI not found - would be required for actual setup"

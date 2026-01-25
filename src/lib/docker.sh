@@ -328,7 +328,8 @@ _CAI_DOCKERD_VERSION_FILE="$_CAI_CONTAINAI_DIR/VERSION"
 
 # Required binaries in the Docker bundle
 # All of these must be present for a valid installation
-_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES="dockerd docker containerd containerd-shim-runc-v2 runc"
+# Per spec: dockerd, docker, containerd, containerd-shim-runc-v2, docker-init, docker-proxy, runc, ctr
+_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES="dockerd docker containerd containerd-shim-runc-v2 docker-init docker-proxy runc ctr"
 
 # Check if ContainAI-managed dockerd bundle is installed
 # Returns: 0=installed (all required symlinks exist and point to valid targets), 1=not installed
