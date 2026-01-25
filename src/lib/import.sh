@@ -1491,7 +1491,7 @@ _containai_import() {
     fi
 
     # Build map data and pass via heredoc inside the script
-    # NOTE: MANIFEST_DATA_B64 is built later from sync_map_entries (after --no-secrets filtering)
+    # NOTE: MANIFEST_DATA_B64 is built later from rewritten_entries (after --no-secrets and excludes filtering)
     # Note: This script runs inside eeacms/rsync with POSIX sh (not bash)
     # All code must be strictly POSIX-compliant (no arrays, no local in functions)
     local script_with_data

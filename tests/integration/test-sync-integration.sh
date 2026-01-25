@@ -3328,23 +3328,33 @@ data_volume = "'"$cross_vol"'"
         fail "Cross-directory symlink test import failed (exit=$cross_exit)"
         info "Output: $cross_output"
     else
-        # Check the symlink target - should be relative with ../ prefix
-        # /data/config/nvim -> ../editors/vim/nvim-config
-        # (.config/nvim is depth=1 from /target, vim is in editors/vim)
-        local cross_target
-        cross_target=$("${DOCKER_CMD[@]}" run --rm -v "$cross_vol":/data alpine:3.19 readlink /data/config/nvim 2>/dev/null) || cross_target=""
+        # First verify the symlink exists
+        local cross_exists
+        cross_exists=$("${DOCKER_CMD[@]}" run --rm -v "$cross_vol":/data alpine:3.19 sh -c 'test -L /data/config/nvim && echo yes || echo no' 2>/dev/null) || cross_exists="no"
 
-        if [[ "$cross_target" == "../editors/vim/nvim-config" ]]; then
-            pass "Cross-directory symlink converted with correct depth (../)"
-        elif [[ "$cross_target" == *"../"* ]]; then
-            # Has ../ but different path - still validates depth calculation works
-            pass "Cross-directory symlink has relative ../ prefix (got: $cross_target)"
-        elif [[ "$cross_target" == "/"* ]]; then
-            fail "Cross-directory symlink still absolute (got: $cross_target)"
+        if [[ "$cross_exists" != "yes" ]]; then
+            fail "Cross-directory symlink was not created at /data/config/nvim"
         else
-            # Could be relative but without ../ if structure changed
-            info "Cross-directory symlink target: $cross_target"
-            pass "Cross-directory symlink is relative"
+            # Check the symlink target - should be relative with ../ prefix
+            # /data/config/nvim -> ../editors/vim/nvim-config
+            # (.config/nvim is depth=1 from /target, vim is in editors/vim)
+            local cross_target
+            cross_target=$("${DOCKER_CMD[@]}" run --rm -v "$cross_vol":/data alpine:3.19 readlink /data/config/nvim 2>/dev/null) || cross_target=""
+
+            if [[ -z "$cross_target" ]]; then
+                fail "Cross-directory symlink exists but readlink failed"
+            elif [[ "$cross_target" == "../editors/vim/nvim-config" ]]; then
+                pass "Cross-directory symlink converted with correct depth (../)"
+            elif [[ "$cross_target" == *"../"* ]]; then
+                # Has ../ but different path - still validates depth calculation works
+                pass "Cross-directory symlink has relative ../ prefix (got: $cross_target)"
+            elif [[ "$cross_target" == "/"* ]]; then
+                fail "Cross-directory symlink still absolute (got: $cross_target)"
+            else
+                # Could be relative but without ../ if structure changed
+                info "Cross-directory symlink target: $cross_target"
+                pass "Cross-directory symlink is relative"
+            fi
         fi
     fi
 
