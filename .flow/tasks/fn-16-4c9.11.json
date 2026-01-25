@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-25T04:41:37.248787Z",
+  "depends_on": [
+    "fn-16-4c9.6"
+  ],
+  "epic": "fn-16-4c9",
+  "id": "fn-16-4c9.11",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-16-4c9.11.md",
+  "status": "todo",
+  "title": "Add VS Code Docker context status bar setting to setup",
+  "updated_at": "2026-01-25T04:41:37.248840Z"
+}
