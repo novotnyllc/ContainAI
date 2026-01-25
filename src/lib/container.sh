@@ -270,14 +270,10 @@ _cai_hash_path() {
     local path="$1"
     local normalized hash
 
-    # Normalize path: resolve symlinks and canonicalize
-    # cd + pwd -P is most portable; fallback to path as-is if it doesn't exist yet
-    if normalized=$(cd -- "$path" 2>/dev/null && pwd -P); then
-        : # success
-    else
-        # Path doesn't exist or isn't a directory - use as-is
-        normalized="$path"
-    fi
+    # Normalize path using platform-aware helper
+    # macOS: preserves symlinks for Lima mount compatibility
+    # Linux/WSL: resolves symlinks for consistency
+    normalized=$(_cai_normalize_path "$path")
 
     # Hash with most available tool (all output same format for same input)
     if command -v sha256sum >/dev/null 2>&1; then
@@ -1205,12 +1201,13 @@ _containai_start_container() {
         return 1
     fi
 
-    # Resolve workspace
-    local workspace_resolved
-    workspace_resolved="${workspace:-$PWD}"
-    # Use pwd -P to resolve symlinks consistently (matches _cai_hash_path normalization)
-    if ! workspace_resolved=$(cd -- "$workspace_resolved" 2>/dev/null && pwd -P); then
-        echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
+    # Resolve workspace using platform-aware normalization
+    local workspace_resolved workspace_input
+    workspace_input="${workspace:-$PWD}"
+    workspace_resolved=$(_cai_normalize_path "$workspace_input")
+    # Check if path exists (normalize_path returns as-is for non-existent paths)
+    if [[ ! -d "$workspace_resolved" ]]; then
+        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
         return 1
     fi
 

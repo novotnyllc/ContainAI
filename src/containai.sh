@@ -636,10 +636,13 @@ _containai_import_cmd() {
         esac
     done
 
-    # Resolve workspace
-    local resolved_workspace="${workspace:-$PWD}"
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
-        echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
+    # Resolve workspace using platform-aware normalization
+    local resolved_workspace workspace_input
+    workspace_input="${workspace:-$PWD}"
+    resolved_workspace=$(_cai_normalize_path "$workspace_input")
+    # Check if path exists (normalize_path returns as-is for non-existent paths)
+    if [[ ! -d "$resolved_workspace" ]]; then
+        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
         return 1
     fi
 
@@ -876,10 +879,13 @@ _containai_export_cmd() {
         esac
     done
 
-    # Resolve workspace
-    local resolved_workspace="${workspace:-$PWD}"
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
-        echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
+    # Resolve workspace using platform-aware normalization
+    local resolved_workspace workspace_input
+    workspace_input="${workspace:-$PWD}"
+    resolved_workspace=$(_cai_normalize_path "$workspace_input")
+    # Check if path exists (normalize_path returns as-is for non-existent paths)
+    if [[ ! -d "$resolved_workspace" ]]; then
+        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
         return 1
     fi
 
@@ -997,8 +1003,11 @@ _containai_doctor_cmd() {
     fi
 
     # Resolve workspace and parse config to get configured resource limits
-    local resolved_workspace="$workspace"
-    if ! resolved_workspace=$(cd -- "$workspace" 2>/dev/null && pwd -P); then
+    # Use platform-aware normalization for consistency
+    local resolved_workspace
+    resolved_workspace=$(_cai_normalize_path "$workspace")
+    # Check if path exists; fall back to PWD if not
+    if [[ ! -d "$resolved_workspace" ]]; then
         resolved_workspace="$PWD"
     fi
 
@@ -1374,10 +1383,12 @@ _containai_shell_cmd() {
         esac
     done
 
-    # Resolve workspace
-    local resolved_workspace="${workspace:-$PWD}"
-    local workspace_input="${workspace:-$PWD}" # Save original for error message
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
+    # Resolve workspace using platform-aware normalization
+    local resolved_workspace workspace_input
+    workspace_input="${workspace:-$PWD}"
+    resolved_workspace=$(_cai_normalize_path "$workspace_input")
+    # Check if path exists (normalize_path returns as-is for non-existent paths)
+    if [[ ! -d "$resolved_workspace" ]]; then
         echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
         return 1
     fi
@@ -1896,10 +1907,13 @@ _containai_run_cmd() {
         esac
     done
 
-    # Resolve workspace
-    local resolved_workspace="${workspace:-$PWD}"
-    if ! resolved_workspace=$(cd -- "$resolved_workspace" 2>/dev/null && pwd -P); then
-        echo "[ERROR] Workspace path does not exist: ${workspace:-$PWD}" >&2
+    # Resolve workspace using platform-aware normalization
+    local resolved_workspace workspace_input
+    workspace_input="${workspace:-$PWD}"
+    resolved_workspace=$(_cai_normalize_path "$workspace_input")
+    # Check if path exists (normalize_path returns as-is for non-existent paths)
+    if [[ ! -d "$resolved_workspace" ]]; then
+        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
         return 1
     fi
 

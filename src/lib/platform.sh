@@ -158,6 +158,42 @@ _cai_is_sysbox_container() {
 }
 
 # ==============================================================================
+# Path normalization
+# ==============================================================================
+
+# Normalize path with platform-appropriate symlink handling
+# macOS: preserve symlinks (pwd -L) for Lima mount compatibility
+# Linux/WSL: resolve symlinks (pwd -P) for consistency
+# Arguments: $1 = path to normalize
+# Returns: normalized path via stdout
+_cai_normalize_path() {
+    local path="$1"
+    local normalized
+
+    if [[ "$(_cai_detect_platform)" == "macos" ]]; then
+        # macOS: preserve symlinks for Lima mount compatibility
+        # Lima mounts use logical paths (e.g., /var/folders), not physical
+        # paths (e.g., /private/var/folders)
+        if normalized=$(cd -- "$path" 2>/dev/null && pwd -L); then
+            : # success
+        else
+            # Path doesn't exist or isn't a directory - use as-is
+            normalized="$path"
+        fi
+    else
+        # Linux/WSL: resolve symlinks for consistency
+        if normalized=$(cd -- "$path" 2>/dev/null && pwd -P); then
+            : # success
+        else
+            # Path doesn't exist or isn't a directory - use as-is
+            normalized="$path"
+        fi
+    fi
+
+    printf '%s' "$normalized"
+}
+
+# ==============================================================================
 # Host resource detection
 # ==============================================================================
 
