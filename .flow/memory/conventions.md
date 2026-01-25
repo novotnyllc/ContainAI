@@ -27,3 +27,6 @@ Reuse existing SSH infrastructure (_cai_ssh_run) for retry logic and host-key re
 
 ## 2026-01-23 manual [convention]
 Documentation must reference actual implementation behavior - run grep/read on source files to verify claims about commands, outputs, and paths
+
+## 2026-01-25 manual [convention]
+Write config/version files atomically: write to .tmp then mv -f to prevent truncated files on interruption
