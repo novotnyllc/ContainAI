@@ -152,13 +152,23 @@ _cai_prompt_confirm() {
         return 1
     fi
 
+    # Normalize input: trim whitespace, lowercase
+    confirm="${confirm,,}"     # lowercase (bash 4+)
+    confirm="${confirm//[[:space:]]/}"  # strip whitespace
+
     # Evaluate response based on default
     if [[ "$default_yes" == "true" ]]; then
-        # Default Y: only N/n denies
-        [[ ! "$confirm" =~ ^[Nn]$ ]]
+        # Default Y: n/no denies, empty or y/yes confirms
+        case "$confirm" in
+            n|no) return 1 ;;
+            *)    return 0 ;;
+        esac
     else
-        # Default N: only Y/y confirms
-        [[ "$confirm" =~ ^[Yy]$ ]]
+        # Default N: y/yes confirms, empty or n/no denies
+        case "$confirm" in
+            y|yes) return 0 ;;
+            *)     return 1 ;;
+        esac
     fi
 }
 

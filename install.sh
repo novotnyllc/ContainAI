@@ -197,19 +197,25 @@ prompt_confirm() {
     fi
 
     printf '%s %s: ' "$message" "$prompt_suffix"
-    read -r response
+    if ! read -r response; then
+        # EOF (Ctrl-D) - treat as decline/cancel
+        return 1
+    fi
+
+    # Normalize: lowercase for consistent matching (bash 3.2 compatible)
+    response=$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')
 
     # Evaluate response based on default
     if [[ "$default_yes" == "true" ]]; then
-        # Default Y: only N/n denies
+        # Default Y: n/no denies, empty or y/yes confirms
         case "$response" in
-            [nN]|[nN][oO]) return 1 ;;
+            n|no) return 1 ;;
             *) return 0 ;;
         esac
     else
-        # Default N: only Y/y confirms
+        # Default N: y/yes confirms, empty or n/no denies
         case "$response" in
-            [yY]|[yY][eE][sS]) return 0 ;;
+            y|yes) return 0 ;;
             *) return 1 ;;
         esac
     fi
