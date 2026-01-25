@@ -27,6 +27,8 @@
 #   _cai_create_isolated_docker_context() - Create containai-docker context
 #   _cai_verify_isolated_docker()      - Verify isolated Docker installation
 #   _cai_lima_template()               - Generate Lima VM template YAML
+#   _cai_lima_template_hash()          - Compute hash of Lima template for change detection
+#   _cai_lima_save_template_hash()     - Save Lima template hash after VM creation
 #   _cai_lima_install()                - Install Lima via Homebrew
 #   _cai_lima_create_vm()              - Create Lima VM with Docker + Sysbox
 #   _cai_lima_create_context()         - Create containai-docker context for Lima
@@ -2360,6 +2362,65 @@ portForwards:
 LIMA_YAML
 }
 
+# Compute hash of Lima template for change detection
+# Uses portable SHA-256 (sha256sum/shasum/openssl)
+# Returns: 12-character hex hash via stdout, or 1 on error
+_cai_lima_template_hash() {
+    local template hash
+
+    template=$(_cai_lima_template)
+
+    # Portable SHA-256 (same pattern as _cai_hash_path in container.sh)
+    if command -v sha256sum >/dev/null 2>&1; then
+        hash=$(printf '%s' "$template" | sha256sum | cut -c1-12)
+    elif command -v shasum >/dev/null 2>&1; then
+        hash=$(printf '%s' "$template" | shasum -a 256 | cut -c1-12)
+    elif command -v openssl >/dev/null 2>&1; then
+        hash=$(printf '%s' "$template" | openssl dgst -sha256 | awk '{print substr($NF,1,12)}')
+    else
+        _cai_error "No SHA-256 tool available"
+        return 1
+    fi
+
+    printf '%s' "$hash"
+}
+
+# Save Lima template hash after VM creation
+# Called only when VM is actually created (not when it already exists)
+# Returns: 0=success, 1=failure
+_cai_lima_save_template_hash() {
+    local hash_file="$HOME/.config/containai/lima-template.hash"
+    local hash_dir hash_tmp
+
+    hash_dir=$(dirname "$hash_file")
+    if [[ ! -d "$hash_dir" ]]; then
+        mkdir -p "$hash_dir" || {
+            _cai_error "Failed to create config directory: $hash_dir"
+            return 1
+        }
+    fi
+
+    local hash
+    if ! hash=$(_cai_lima_template_hash); then
+        _cai_error "Failed to compute template hash"
+        return 1
+    fi
+
+    # Write atomically per convention
+    hash_tmp="${hash_file}.tmp"
+    printf '%s' "$hash" > "$hash_tmp" || {
+        _cai_error "Failed to write template hash"
+        return 1
+    }
+    mv -f "$hash_tmp" "$hash_file" || {
+        _cai_error "Failed to save template hash"
+        rm -f "$hash_tmp"
+        return 1
+    }
+
+    return 0
+}
+
 # Check if Lima is installed
 # Returns: 0=installed, 1=not installed
 _cai_lima_check() {
@@ -2441,9 +2502,11 @@ _cai_lima_vm_status() {
 # Arguments: $1 = dry_run flag ("true" to simulate)
 #            $2 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
+# Note: Saves template hash ONLY when VM is actually created (not when it already exists)
 _cai_lima_create_vm() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
+    local vm_created="false"
 
     _cai_step "Creating Lima VM: $_CAI_LIMA_VM_NAME"
 
@@ -2466,8 +2529,12 @@ _cai_lima_create_vm() {
                 _cai_ok "Lima VM started"
             fi
         fi
+        # VM already existed - do NOT save hash (hash is only saved on actual creation)
         return 0
     fi
+
+    # VM does not exist - will be created
+    vm_created="true"
 
     # Generate template to temporary file
     # Use portable mktemp syntax that works on both GNU and BSD (macOS)
@@ -2510,6 +2577,14 @@ _cai_lima_create_vm() {
     )
     local rc=$?
     rm -f "$template_file" 2>/dev/null || true
+
+    # Save template hash ONLY after successful VM creation (not dry-run)
+    if [[ $rc -eq 0 ]] && [[ "$vm_created" == "true" ]] && [[ "$dry_run" != "true" ]]; then
+        _cai_lima_save_template_hash || {
+            _cai_warn "Failed to save template hash (VM created successfully)"
+        }
+    fi
+
     return $rc
 }
 

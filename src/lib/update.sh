@@ -9,6 +9,8 @@
 #   _cai_update_help()                - Show update command help
 #   _cai_update_linux_wsl2()          - Update Linux/WSL2 installation
 #   _cai_update_macos()               - Update macOS Lima installation
+#   _cai_update_macos_packages()      - Run apt update/upgrade in Lima VM
+#   _cai_update_macos_recreate_vm()   - Recreate Lima VM (delete and create fresh)
 #   _cai_update_systemd_unit()        - Update systemd unit if template changed
 #   _cai_update_docker_context()      - Update Docker context if socket changed
 #   _cai_update_check()               - Rate-limited check for dockerd bundle updates
@@ -75,7 +77,7 @@ to their latest versions. Safe to run multiple times (idempotent).
 Options:
   --dry-run         Show what would be done without making changes
   --force           Skip confirmation prompts (e.g., VM recreation on macOS)
-  --lima-recreate   Force Lima VM recreation (macOS only; currently always recreates)
+  --lima-recreate   Force Lima VM recreation (macOS only; bypasses hash check)
   --verbose, -v     Show verbose output
   -h, --help        Show this help message
 
@@ -89,13 +91,17 @@ What Gets Updated:
     - Legacy path cleanup
 
   macOS Lima:
-    - Lima VM deletion and recreation with latest template
-    - Docker context recreation
+    - If template unchanged: apt update/upgrade in VM (non-destructive)
+    - If template changed: VM deletion and recreation (with confirmation)
+    - Docker context verification
     - Installation verification
 
 Notes:
-  - Lima VM recreation will stop all running containers in the VM
+  - Template changes are detected by comparing SHA-256 hashes
+  - VM recreation only occurs when template changes or --lima-recreate is used
+  - VM recreation will stop all running containers in the VM
   - User is warned before destructive VM operations (unless --force)
+  - CAI_YES=1 auto-confirms prompts for scripted usage
   - Use 'cai doctor' after update to verify installation
 
 Examples:
@@ -847,15 +853,101 @@ _cai_update_linux_wsl2() {
 # macOS Lima Update
 # ==============================================================================
 
+# Run package updates in Lima VM (apt update/upgrade)
+# This is the non-destructive update path when template hasn't changed
+# Arguments: $1 = dry_run ("true" to simulate)
+#            $2 = verbose ("true" for verbose output)
+# Returns: 0=success, 1=failure
+_cai_update_macos_packages() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    _cai_step "Updating packages in Lima VM"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo apt-get update"
+        _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo apt-get upgrade -y"
+        return 0
+    fi
+
+    # Run apt update
+    _cai_step "Running apt update in VM"
+    if ! limactl shell "$_CAI_LIMA_VM_NAME" -- sudo apt-get update; then
+        _cai_error "apt update failed in VM"
+        return 1
+    fi
+
+    # Run apt upgrade
+    _cai_step "Running apt upgrade in VM"
+    if ! limactl shell "$_CAI_LIMA_VM_NAME" -- sudo apt-get upgrade -y; then
+        _cai_error "apt upgrade failed in VM"
+        return 1
+    fi
+
+    _cai_ok "Packages updated in Lima VM"
+    return 0
+}
+
+# Recreate Lima VM (delete and create fresh)
+# Internal helper for _cai_update_macos
+# Arguments: $1 = dry_run, $2 = verbose
+# Returns: 0=success, 1=failure
+_cai_update_macos_recreate_vm() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would stop Lima VM: $_CAI_LIMA_VM_NAME"
+        _cai_info "[DRY-RUN] Would delete Lima VM: $_CAI_LIMA_VM_NAME"
+        _cai_info "[DRY-RUN] Would recreate Lima VM with latest template"
+        return 0
+    fi
+
+    # Stop VM if running
+    local status
+    status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME")
+    if [[ "$status" == "Running" ]]; then
+        _cai_step "Stopping Lima VM"
+        if ! limactl stop "$_CAI_LIMA_VM_NAME"; then
+            _cai_error "Failed to stop Lima VM"
+            return 1
+        fi
+    fi
+
+    # Delete VM
+    _cai_step "Deleting Lima VM"
+    if ! limactl delete "$_CAI_LIMA_VM_NAME" --force; then
+        _cai_error "Failed to delete Lima VM"
+        return 1
+    fi
+
+    # Recreate VM (this also saves the hash after successful creation)
+    if ! _cai_lima_create_vm "false" "$verbose"; then
+        _cai_error "Failed to recreate Lima VM"
+        return 1
+    fi
+
+    # Wait for socket
+    if ! _cai_lima_wait_socket 120 "false"; then
+        _cai_error "Lima socket did not become available"
+        return 1
+    fi
+
+    _cai_ok "Lima VM recreated"
+    return 0
+}
+
 # Update macOS Lima installation
 # Arguments: $1 = dry_run ("true" to simulate)
 #            $2 = verbose ("true" for verbose output)
 #            $3 = force ("true" to skip confirmation)
+#            $4 = lima_recreate ("true" to force VM recreation)
 # Returns: 0=success, 1=failure, 130=cancelled by user
 _cai_update_macos() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
     local force="${3:-false}"
+    local lima_recreate="${4:-false}"
     local overall_status=0
 
     _cai_info "Updating macOS Lima installation"
@@ -878,70 +970,74 @@ _cai_update_macos() {
         _cai_warn "Legacy cleanup had issues (continuing anyway)"
     fi
 
-    # Step 2: Handle VM recreation
-    # Per spec: macOS update deletes and recreates VM with latest config by default
-    # --lima-recreate forces recreation even if we add "currentness" checks later
-    _cai_step "Recreating Lima VM with latest template"
+    # Step 2: Determine if VM needs recreation (hash-based change detection)
+    local current_hash stored_hash hash_file need_recreate="false"
+    hash_file="$HOME/.config/containai/lima-template.hash"
 
-    # Warn about container loss (use shared helper with CAI_YES support)
-    if [[ "$dry_run" != "true" ]]; then
-        printf '\n'
-        _cai_warn "This will DELETE the Lima VM and recreate it."
-        _cai_warn "All running containers in the VM will be LOST."
-        printf '\n'
-
-        if [[ "$force" != "true" ]]; then
-            if ! _cai_prompt_confirm "Continue with VM recreation?"; then
-                printf '%s\n' "Cancelled."
-                return 130  # Signal cancellation
-            fi
-        fi
+    # Get current template hash
+    if ! current_hash=$(_cai_lima_template_hash); then
+        _cai_error "Failed to compute template hash"
+        return 1
     fi
 
-    if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would stop Lima VM: $_CAI_LIMA_VM_NAME"
-        _cai_info "[DRY-RUN] Would delete Lima VM: $_CAI_LIMA_VM_NAME"
-        _cai_info "[DRY-RUN] Would recreate Lima VM with latest template"
+    # Get stored hash (if exists)
+    stored_hash=$(cat "$hash_file" 2>/dev/null || echo "")
+
+    # Decision: recreate or just update packages?
+    # - --lima-recreate flag forces recreation
+    # - Different hash -> prompt for recreation
+    # - Missing hash file -> prompt for recreation (first update after migration)
+    # - Same hash -> just update packages
+    if [[ "$lima_recreate" == "true" ]]; then
+        _cai_info "Force recreate requested (--lima-recreate)"
+        need_recreate="true"
+    elif [[ "$current_hash" == "$stored_hash" ]]; then
+        _cai_info "Lima template unchanged, updating packages..."
+        if ! _cai_update_macos_packages "$dry_run" "$verbose"; then
+            _cai_warn "Package update had issues"
+            overall_status=1
+        fi
+        need_recreate="false"
     else
-        # Stop VM if running
-        local status
-        status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME")
-        if [[ "$status" == "Running" ]]; then
-            _cai_step "Stopping Lima VM"
-            if ! limactl stop "$_CAI_LIMA_VM_NAME"; then
-                _cai_error "Failed to stop Lima VM"
-                return 1
+        # Template changed or no stored hash
+        if [[ -z "$stored_hash" ]]; then
+            _cai_warn "Lima template hash not found (first update after install)"
+        else
+            _cai_warn "Lima template changed (was: $stored_hash, now: $current_hash)"
+        fi
+        need_recreate="true"
+    fi
+
+    # Step 3: Handle VM recreation if needed
+    if [[ "$need_recreate" == "true" ]]; then
+        _cai_step "Recreating Lima VM with latest template"
+
+        # Warn about container loss (use shared helper with CAI_YES support)
+        if [[ "$dry_run" != "true" ]]; then
+            printf '\n'
+            _cai_warn "This will DELETE the Lima VM and recreate it."
+            _cai_warn "All running containers in the VM will be LOST."
+            printf '\n'
+
+            if [[ "$force" != "true" ]]; then
+                if ! _cai_prompt_confirm "Recreate Lima VM?"; then
+                    _cai_info "Update cancelled"
+                    return 0
+                fi
             fi
         fi
 
-        # Delete VM
-        _cai_step "Deleting Lima VM"
-        if ! limactl delete "$_CAI_LIMA_VM_NAME" --force; then
-            _cai_error "Failed to delete Lima VM"
+        if ! _cai_update_macos_recreate_vm "$dry_run" "$verbose"; then
             return 1
         fi
-
-        # Recreate VM
-        if ! _cai_lima_create_vm "false" "$verbose"; then
-            _cai_error "Failed to recreate Lima VM"
-            return 1
-        fi
-
-        # Wait for socket
-        if ! _cai_lima_wait_socket 120 "false"; then
-            _cai_error "Lima socket did not become available"
-            return 1
-        fi
-
-        _cai_ok "Lima VM recreated"
     fi
 
-    # Step 3: Check/update Docker context
+    # Step 4: Check/update Docker context
     if ! _cai_update_docker_context "$dry_run"; then
         overall_status=1
     fi
 
-    # Step 4: Verify installation BEFORE legacy cleanup
+    # Step 5: Verify installation BEFORE legacy cleanup
     # This ensures we don't remove fallback VM before confirming new VM works
     if [[ "$dry_run" != "true" ]]; then
         _cai_step "Verifying installation"
@@ -953,7 +1049,7 @@ _cai_update_macos() {
         _cai_info "[DRY-RUN] Would verify installation"
     fi
 
-    # Step 5: Clean up legacy Lima VM (only if verification passed)
+    # Step 6: Clean up legacy Lima VM (only if verification passed)
     if [[ "$dry_run" != "true" ]] && [[ $overall_status -eq 0 ]]; then
         _cai_cleanup_legacy_lima_vm "false" "$verbose" "$force"
     fi
@@ -986,8 +1082,7 @@ _cai_update() {
                 shift
                 ;;
             --lima-recreate)
-                # Currently a no-op since we always recreate the VM
-                # Reserved for future "currentness" check implementation
+                # Force Lima VM recreation even if template hasn't changed
                 lima_recreate="true"
                 shift
                 ;;
@@ -1007,10 +1102,6 @@ _cai_update() {
         esac
     done
 
-    # Suppress shellcheck warning for reserved variable
-    # shellcheck disable=SC2034
-    : "${lima_recreate}"  # Reserved for future use
-
     # Header
     printf '%s\n' ""
     printf '%s\n' "ContainAI Update"
@@ -1026,7 +1117,7 @@ _cai_update() {
     local overall_status=0
 
     if _cai_is_macos; then
-        _cai_update_macos "$dry_run" "$verbose" "$force"
+        _cai_update_macos "$dry_run" "$verbose" "$force" "$lima_recreate"
         overall_status=$?
     else
         # Linux or WSL2
