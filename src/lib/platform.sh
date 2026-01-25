@@ -106,6 +106,57 @@ _cai_is_container() {
     [[ -n "${container:-}" ]] || [[ -f "/.dockerenv" ]] || [[ -f "/run/.containerenv" ]]
 }
 
+# Check if the current container is running with user-namespace remapping.
+# Sysbox system containers always run with a remapped uid_map.
+# Returns: 0=yes (remapped), 1=no/unknown
+_cai_container_userns_remapped() {
+    if ! _cai_is_container; then
+        return 1
+    fi
+    if [[ ! -r /proc/self/uid_map ]]; then
+        return 1
+    fi
+
+    local map_line container_id host_id map_range rest
+    map_line=$(awk 'NR==1 {print $1" "$2" "$3}' /proc/self/uid_map 2>/dev/null) || map_line=""
+    if [[ -z "$map_line" ]]; then
+        return 1
+    fi
+
+    container_id="${map_line%% *}"
+    rest="${map_line#* }"
+    host_id="${rest%% *}"
+    map_range="${map_line##* }"
+
+    # A remapped userns will not have the canonical "0 0 4294967295" mapping.
+    if [[ "$host_id" != "0" ]]; then
+        return 0
+    fi
+    if [[ "$map_range" != "4294967295" ]]; then
+        return 0
+    fi
+    # container_id is usually 0; we don't gate on it to keep detection simple.
+    return 1
+}
+
+# Check if we are already inside a Sysbox system container.
+# In this case, outer isolation is already provided and nested Sysbox is unsupported.
+# Returns: 0=yes, 1=no
+_cai_is_sysbox_container() {
+    if ! _cai_container_userns_remapped; then
+        return 1
+    fi
+    if [[ ! -r /proc/self/mountinfo ]]; then
+        return 1
+    fi
+
+    # Sysbox system containers mount sysboxfs for proc/sys virtualization.
+    if grep -q "sysboxfs" /proc/self/mountinfo 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
 # ==============================================================================
 # Host resource detection
 # ==============================================================================

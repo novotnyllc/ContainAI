@@ -152,6 +152,10 @@ _cai_check_kernel_for_sysbox() {
 _cai_select_context() {
     local config_context_name="${1:-}"
     local debug_flag="${2:-}"
+    local in_sysbox_container="false"
+    if _cai_is_sysbox_container; then
+        in_sysbox_container="true"
+    fi
 
     # Try contexts in order:
     # 1. Config override (if provided)
@@ -166,7 +170,11 @@ _cai_select_context() {
         local default_context="default"
         if _cai_sysbox_available_for_context "$default_context"; then
             if [[ "$debug_flag" == "debug" ]]; then
-                printf '%s\n' "[DEBUG] Context selection: Using default context inside container" >&2
+                if [[ "$in_sysbox_container" == "true" ]]; then
+                    printf '%s\n' "[DEBUG] Context selection: Using default context inside Sysbox container" >&2
+                else
+                    printf '%s\n' "[DEBUG] Context selection: Using default context inside container" >&2
+                fi
             fi
             printf '%s' "$default_context"
             return 0
@@ -236,7 +244,11 @@ _cai_select_context() {
 #   runtime_not_found - Sysbox runtime not registered
 _cai_sysbox_available_for_context() {
     local context_name="${1:-$_CAI_CONTAINAI_DOCKER_CONTEXT}"
+    local skip_runtime_check="false"
     _CAI_SYSBOX_CONTEXT_ERROR=""
+    if _cai_is_sysbox_container; then
+        skip_runtime_check="true"
+    fi
 
     # Check if context exists
     if ! docker context inspect "$context_name" >/dev/null 2>&1; then
@@ -274,6 +286,12 @@ _cai_sysbox_available_for_context() {
             _CAI_SYSBOX_CONTEXT_ERROR="daemon_unavailable"
         fi
         return 1
+    fi
+
+    # Nested Sysbox is unsupported; treat outer Sysbox isolation as sufficient
+    # and skip runtime verification when already inside a Sysbox container.
+    if [[ "$skip_runtime_check" == "true" ]]; then
+        return 0
     fi
 
     # Check for sysbox-runc runtime
@@ -402,10 +420,14 @@ _cai_doctor() {
     local kernel_ok="true" # Default to true (macOS doesn't need kernel check)
     local kernel_version=""
     local in_container="false"
+    local in_sysbox_container="false"
 
     platform=$(_cai_detect_platform)
     if _cai_is_container; then
         in_container="true"
+    fi
+    if _cai_is_sysbox_container; then
+        in_sysbox_container="true"
     fi
 
     printf '%s\n' "ContainAI Doctor"
@@ -453,61 +475,66 @@ _cai_doctor() {
     # then containai-docker, then legacy fallback for old installs
     local sysbox_context_name=""
     local config_context
-    config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
-    sysbox_context_name=$(_cai_select_context "$config_context" 2>/dev/null) || sysbox_context_name=""
-
-    # Check Sysbox availability with resolved context name
-    if [[ -n "$sysbox_context_name" ]] && _cai_sysbox_available_for_context "$sysbox_context_name"; then
+    if [[ "$in_sysbox_container" == "true" ]]; then
         sysbox_ok="true"
-        printf '  %-44s %s\n' "Sysbox available:" "[OK]"
-        printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK]"
-        printf '  %-44s %s\n' "Context '$sysbox_context_name':" "[OK] Configured"
+        printf '  %-44s %s\n' "Outer Sysbox container:" "[OK] Detected"
     else
-        printf '  %-44s %s\n' "Sysbox available:" "[ERROR] Not configured"
-        local sysbox_error="${_CAI_SYSBOX_CONTEXT_ERROR:-${_CAI_SYSBOX_ERROR:-}}"
-        # Default context name for error messages if none was selected
-        local display_context="${sysbox_context_name:-containai-docker}"
-        case "$sysbox_error" in
-            socket_not_found)
-                if [[ "$platform" == "macos" ]]; then
-                    printf '  %-44s %s\n' "" "(Lima VM not running or not provisioned)"
-                    printf '  %-44s %s\n' "" "(Run 'cai setup' or 'limactl start $_CAI_LIMA_VM_NAME')"
-                else
-                    printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox)"
-                fi
-                ;;
-            context_not_found|"")
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to configure '$display_context' context)"
-                ;;
-            permission_denied)
-                if [[ "$platform" == "macos" ]]; then
-                    printf '  %-44s %s\n' "" "(User not in docker group inside Lima VM)"
-                    printf '  %-44s %s\n' "" "(Run 'cai setup' to repair, or restart Lima VM)"
-                else
-                    printf '  %-44s %s\n' "" "(Permission denied - check docker group membership)"
-                fi
-                ;;
-            connection_refused)
-                if [[ "$platform" == "macos" ]]; then
-                    printf '  %-44s %s\n' "" "(Docker daemon not running inside Lima VM)"
-                    printf '  %-44s %s\n' "" "(Try: limactl shell $_CAI_LIMA_VM_NAME sudo systemctl start docker)"
-                else
-                    printf '  %-44s %s\n' "" "(Docker daemon not running)"
-                fi
-                ;;
-            daemon_unavailable)
-                printf '  %-44s %s\n' "" "(Docker daemon for '$sysbox_context_name' not running)"
-                ;;
-            runtime_not_found)
-                printf '  %-44s %s\n' "" "(Sysbox runtime not found - run 'cai setup')"
-                ;;
-            timeout)
-                printf '  %-44s %s\n' "" "(Docker daemon for '$sysbox_context_name' timed out)"
-                ;;
-            *)
-                printf '  %-44s %s\n' "" "(Run 'cai setup' for Sysbox isolation)"
-                ;;
-        esac
+        config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
+        sysbox_context_name=$(_cai_select_context "$config_context" 2>/dev/null) || sysbox_context_name=""
+
+        # Check Sysbox availability with resolved context name
+        if [[ -n "$sysbox_context_name" ]] && _cai_sysbox_available_for_context "$sysbox_context_name"; then
+            sysbox_ok="true"
+            printf '  %-44s %s\n' "Sysbox available:" "[OK]"
+            printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK]"
+            printf '  %-44s %s\n' "Context '$sysbox_context_name':" "[OK] Configured"
+        else
+            printf '  %-44s %s\n' "Sysbox available:" "[ERROR] Not configured"
+            local sysbox_error="${_CAI_SYSBOX_CONTEXT_ERROR:-${_CAI_SYSBOX_ERROR:-}}"
+            # Default context name for error messages if none was selected
+            local display_context="${sysbox_context_name:-containai-docker}"
+            case "$sysbox_error" in
+                socket_not_found)
+                    if [[ "$platform" == "macos" ]]; then
+                        printf '  %-44s %s\n' "" "(Lima VM not running or not provisioned)"
+                        printf '  %-44s %s\n' "" "(Run 'cai setup' or 'limactl start $_CAI_LIMA_VM_NAME')"
+                    else
+                        printf '  %-44s %s\n' "" "(Run 'cai setup' to install Sysbox)"
+                    fi
+                    ;;
+                context_not_found|"")
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' to configure '$display_context' context)"
+                    ;;
+                permission_denied)
+                    if [[ "$platform" == "macos" ]]; then
+                        printf '  %-44s %s\n' "" "(User not in docker group inside Lima VM)"
+                        printf '  %-44s %s\n' "" "(Run 'cai setup' to repair, or restart Lima VM)"
+                    else
+                        printf '  %-44s %s\n' "" "(Permission denied - check docker group membership)"
+                    fi
+                    ;;
+                connection_refused)
+                    if [[ "$platform" == "macos" ]]; then
+                        printf '  %-44s %s\n' "" "(Docker daemon not running inside Lima VM)"
+                        printf '  %-44s %s\n' "" "(Try: limactl shell $_CAI_LIMA_VM_NAME sudo systemctl start docker)"
+                    else
+                        printf '  %-44s %s\n' "" "(Docker daemon not running)"
+                    fi
+                    ;;
+                daemon_unavailable)
+                    printf '  %-44s %s\n' "" "(Docker daemon for '$sysbox_context_name' not running)"
+                    ;;
+                runtime_not_found)
+                    printf '  %-44s %s\n' "" "(Sysbox runtime not found - run 'cai setup')"
+                    ;;
+                timeout)
+                    printf '  %-44s %s\n' "" "(Docker daemon for '$sysbox_context_name' timed out)"
+                    ;;
+                *)
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' for Sysbox isolation)"
+                    ;;
+            esac
+        fi
     fi
 
     printf '\n'
@@ -581,22 +608,30 @@ _cai_doctor() {
             containai_docker_ok="true"
             printf '  %-44s %s\n' "Context 'default':" "[OK]"
             printf '  %-44s %s\n' "Socket: $display_socket" "[OK]"
-
-            local runtimes actual_default
-            runtimes=$(env DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
-            if printf '%s' "$runtimes" | grep -q "sysbox-runc"; then
-                printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK] Available"
-            else
-                printf '  %-44s %s\n' "Runtime: sysbox-runc" "[ERROR] Not found"
+            local actual_default
+            actual_default=$(env DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
+            if [[ -z "$actual_default" ]]; then
+                actual_default="unknown"
             fi
 
-            actual_default=$(env DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
-            if [[ "$actual_default" == "sysbox-runc" ]]; then
-                containai_docker_sysbox_default="true"
-                printf '  %-44s %s\n' "Default runtime: sysbox-runc" "[OK]"
+            if [[ "$in_sysbox_container" == "true" ]]; then
+                printf '  %-44s %s\n' "Default runtime: $actual_default" "[OK]"
             else
-                printf '  %-44s %s\n' "Default runtime: ${actual_default:-unknown}" "[WARN]"
-                printf '  %-44s %s\n' "" "(Expected sysbox-runc as default)"
+                local runtimes
+                runtimes=$(env DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
+                if printf '%s' "$runtimes" | grep -q "sysbox-runc"; then
+                    printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK] Available"
+                else
+                    printf '  %-44s %s\n' "Runtime: sysbox-runc" "[ERROR] Not found"
+                fi
+
+                if [[ "$actual_default" == "sysbox-runc" ]]; then
+                    containai_docker_sysbox_default="true"
+                    printf '  %-44s %s\n' "Default runtime: sysbox-runc" "[OK]"
+                else
+                    printf '  %-44s %s\n' "Default runtime: ${actual_default:-unknown}" "[WARN]"
+                    printf '  %-44s %s\n' "" "(Expected sysbox-runc as default)"
+                fi
             fi
         else
             printf '  %-44s %s\n' "ContainAI Docker:" "[ERROR] Not accessible"
@@ -895,7 +930,13 @@ _cai_doctor() {
     fi
 
     # ContainAI Docker summary
-    if [[ "$containai_docker_ok" == "true" ]] && [[ "$containai_docker_sysbox_default" == "true" ]]; then
+    if [[ "$in_sysbox_container" == "true" ]]; then
+        if [[ "$containai_docker_ok" == "true" ]]; then
+            printf '  %-44s %s\n' "ContainAI Docker:" "[OK] Nested Sysbox mode"
+        else
+            printf '  %-44s %s\n' "ContainAI Docker:" "[ERROR] Not accessible"
+        fi
+    elif [[ "$containai_docker_ok" == "true" ]] && [[ "$containai_docker_sysbox_default" == "true" ]]; then
         printf '  %-44s %s\n' "ContainAI Docker:" "[OK] sysbox-runc default"
     elif [[ "$containai_docker_ok" == "true" ]]; then
         printf '  %-44s %s\n' "ContainAI Docker:" "[WARN] sysbox-runc not default"
@@ -1304,10 +1345,14 @@ _cai_doctor_json() {
     local kernel_version=""
     local kernel_compatible="true"
     local in_container="false"
+    local in_sysbox_container="false"
 
     platform=$(_cai_detect_platform)
     if _cai_is_container; then
         in_container="true"
+    fi
+    if _cai_is_sysbox_container; then
+        in_sysbox_container="true"
     fi
     # Normalize platform type for JSON (wsl -> wsl2 per spec)
     if [[ "$platform" == "wsl" ]]; then
@@ -1333,7 +1378,11 @@ _cai_doctor_json() {
 
     # Check Sysbox with resolved context name
     local sysbox_error=""
-    if _cai_sysbox_available_for_context "$sysbox_context_name"; then
+    if [[ "$in_sysbox_container" == "true" ]]; then
+        sysbox_ok="true"
+        sysbox_runtime="sysbox-runc"
+        sysbox_context_exists="true"
+    elif _cai_sysbox_available_for_context "$sysbox_context_name"; then
         sysbox_ok="true"
         sysbox_runtime="sysbox-runc"
         sysbox_context_exists="true"
@@ -1369,7 +1418,10 @@ _cai_doctor_json() {
 
     # Isolation requires Sysbox available AND compatible kernel
     local isolation_available="false"
-    if [[ "$sysbox_ok" == "true" ]] && [[ "$kernel_compatible" == "true" ]]; then
+    if [[ "$in_sysbox_container" == "true" ]]; then
+        isolation_available="true"
+        recommended_action="ready"
+    elif [[ "$sysbox_ok" == "true" ]] && [[ "$kernel_compatible" == "true" ]]; then
         isolation_available="true"
         recommended_action="ready"
     elif [[ "$sysbox_ok" == "true" ]] && [[ "$kernel_compatible" == "false" ]]; then

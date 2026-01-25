@@ -519,6 +519,12 @@ _containai_validate_masked_paths() {
 _containai_check_isolation() {
     local runtime rootless userns
 
+    # If we are already inside a Sysbox system container, outer isolation exists.
+    # Nested Sysbox is unsupported, so treat this as isolated for preflight.
+    if _cai_is_sysbox_container; then
+        return 0
+    fi
+
     # Guard: check docker availability
     if ! command -v docker >/dev/null 2>&1; then
         echo "[WARN] Unable to determine isolation status (docker not found)" >&2
@@ -576,6 +582,12 @@ _containai_check_isolation() {
 _containai_preflight_checks() {
     local force_flag="$1"
     local isolation_rc
+
+    # Nested Sysbox is unsupported. When already inside a Sysbox container,
+    # skip isolation checks silently and proceed with the default context.
+    if _cai_is_sysbox_container; then
+        return 0
+    fi
 
     if [[ "$force_flag" == "true" ]]; then
         echo "[WARN] Skipping isolation check (--force)" >&2
@@ -1865,7 +1877,12 @@ _containai_start_container() {
             _cai_debug "Allocated SSH port $ssh_port for container $container_name"
 
             args+=(run)
-            args+=(--runtime=sysbox-runc)
+            local runtime="sysbox-runc"
+            if _cai_is_sysbox_container; then
+                # Nested Sysbox is unsupported; force runc to avoid sysbox-mgr dependency.
+                runtime="runc"
+            fi
+            args+=(--runtime="$runtime")
             args+=(--name "$container_name")
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")

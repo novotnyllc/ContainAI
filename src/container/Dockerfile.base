@@ -140,7 +140,7 @@ EXPOSE 22
 
 # =============================================================================
 # DOCKER CE INSTALLATION
-# For Docker-in-Docker support via Sysbox
+# For Docker-in-Docker support -- works when we're in a sysbox-runc container
 # =============================================================================
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -165,48 +165,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ln -sf /lib/systemd/system/docker.service /etc/systemd/system/multi-user.target.wants/docker.service && \
     ln -sf /lib/systemd/system/containerd.service /etc/systemd/system/multi-user.target.wants/containerd.service
 
-# =============================================================================
-# SYSBOX CE INSTALLATION
-# Enables secure Docker-in-Docker without --privileged
-# Inner Docker also uses sysbox-runc by default for security consistency
-# =============================================================================
-# Checksums from https://github.com/nestybox/sysbox/releases/tag/v0.6.7
-ARG SYSBOX_VERSION=0.6.7
-ARG SYSBOX_SHA256_AMD64=b7ac389e5a19592cadf16e0ca30e40919516128f6e1b7f99e1cb4ff64554172e
-ARG SYSBOX_SHA256_ARM64=16d80123ba53058cf90f5a68686e297621ea97942602682e34b3352783908f91
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && \
-    ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_AMD64}"; \
-    elif [ "$ARCH" = "arm64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_ARM64}"; \
-    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
-    wget -q -O /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" && \
-    echo "${EXPECTED_SHA256}  /tmp/sysbox.deb" | sha256sum -c - && \
-    apt-get install -y --no-install-recommends /tmp/sysbox.deb && \
-    rm /tmp/sysbox.deb
-
-# Enable sysbox services inside the container (required for sysbox-runc)
-RUN mkdir -p /etc/systemd/system/multi-user.target.wants && \
-    ln -sf /lib/systemd/system/sysbox-mgr.service /etc/systemd/system/multi-user.target.wants/sysbox-mgr.service && \
-    ln -sf /lib/systemd/system/sysbox-fs.service /etc/systemd/system/multi-user.target.wants/sysbox-fs.service
-
 # Copy Docker service drop-in for container awareness and sysbox dependency
 COPY services/docker.service.d/ /etc/systemd/system/docker.service.d/
-
-# Configure inner Docker daemon with sysbox-runc as default runtime
-# This provides security consistency for nested containers
-RUN mkdir -p /etc/docker && \
-    printf '%s\n' \
-        '{' \
-        '  "default-runtime": "sysbox-runc",' \
-        '  "runtimes": {' \
-        '    "sysbox-runc": {' \
-        '      "path": "/usr/bin/sysbox-runc"' \
-        '    }' \
-        '  }' \
-        '}' > /etc/docker/daemon.json
 
 # =============================================================================
 # ESSENTIAL TOOLS
