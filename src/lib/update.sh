@@ -436,6 +436,33 @@ _cai_update_check_touch_state() {
     mv -f "${_CAI_UPDATE_CHECK_STATE_FILE}.tmp" "$_CAI_UPDATE_CHECK_STATE_FILE" 2>/dev/null || true
 }
 
+# Compare two semver versions
+# Arguments: $1 = version A, $2 = version B
+# Returns: 0 if A > B, 1 if A <= B
+# Note: Uses sort -V which is available on Linux coreutils
+_cai_version_is_greater() {
+    local ver_a="${1:-}"
+    local ver_b="${2:-}"
+
+    # If either is empty, cannot compare
+    if [[ -z "$ver_a" ]] || [[ -z "$ver_b" ]]; then
+        return 1
+    fi
+
+    # If equal, A is not greater
+    if [[ "$ver_a" == "$ver_b" ]]; then
+        return 1
+    fi
+
+    # Use sort -V: if ver_a comes last when sorted, it's the greater version
+    local highest
+    highest=$(printf '%s\n%s\n' "$ver_a" "$ver_b" | sort -V | tail -1)
+    if [[ "$highest" == "$ver_a" ]]; then
+        return 0  # A > B
+    fi
+    return 1  # A <= B
+}
+
 # Get latest Docker version from the download index
 # Arguments: $1 = architecture (x86_64, aarch64)
 # Outputs: version string (e.g., "27.4.0") on stdout
@@ -507,7 +534,8 @@ _cai_update_check() {
             local installed_version
             installed_version=$(_cai_dockerd_bundle_version) || installed_version=""
 
-            if [[ -n "$installed_version" ]] && [[ "$installed_version" != "$latest_version" ]]; then
+            # Only warn if latest is strictly greater than installed (not for downgrades)
+            if [[ -n "$installed_version" ]] && _cai_version_is_greater "$latest_version" "$installed_version"; then
                 # Update available - print yellow warning
                 printf '\033[33m[WARN] Dockerd bundle update available: %s -> %s\033[0m\n' "$installed_version" "$latest_version" >&2
                 printf '\033[33m       Updating will stop running containers.\033[0m\n' >&2
@@ -587,6 +615,13 @@ _cai_update_dockerd_bundle() {
 
     if [[ "$installed_version" == "$latest_version" ]]; then
         _cai_info "Dockerd bundle is current: $installed_version"
+        return 0
+    fi
+
+    # Only update if latest is strictly greater than installed (not downgrades)
+    if ! _cai_version_is_greater "$latest_version" "$installed_version"; then
+        _cai_info "Installed version ($installed_version) is newer than index ($latest_version)"
+        _cai_info "Skipping update (no downgrade)"
         return 0
     fi
 
