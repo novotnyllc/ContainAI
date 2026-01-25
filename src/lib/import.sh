@@ -1682,8 +1682,8 @@ _import_remove_orphan_markers() {
 # Git config import
 # ==============================================================================
 
-# Import git user config from host to data volume
-# Writes a .gitconfig file with user identity and safe.directory settings
+# Import git config from host to data volume
+# Strips credential helper and ensures safe.directory for the mounted workspace
 # Arguments: $1 = context, $2 = volume
 # Returns: 0 on success (including graceful skip), 1 on failure
 _cai_import_git_config() {
@@ -1698,36 +1698,56 @@ _cai_import_git_config() {
 
     _import_step "Importing git config..."
 
-    # Check if git is installed on host
-    if ! command -v git >/dev/null 2>&1; then
-        _import_warn "Git not installed on host, skipping git config import"
-        return 0
+    # Resolve host git config path (avoid invoking git)
+    local host_gitconfig=""
+    if [[ -n "${GIT_CONFIG_GLOBAL:-}" && -f "${GIT_CONFIG_GLOBAL}" ]]; then
+        host_gitconfig="${GIT_CONFIG_GLOBAL}"
+    elif [[ -n "${XDG_CONFIG_HOME:-}" && -f "${XDG_CONFIG_HOME%/}/git/config" ]]; then
+        host_gitconfig="${XDG_CONFIG_HOME%/}/git/config"
+    elif [[ -f "${HOME}/.gitconfig" ]]; then
+        host_gitconfig="${HOME}/.gitconfig"
+    elif [[ -f "${HOME}/.config/git/config" ]]; then
+        host_gitconfig="${HOME}/.config/git/config"
     fi
 
-    # Extract git user.name and user.email from host
-    # Use git config --global to get user-level settings
-    # Note: These commands return non-zero if config is not set, which is fine
-    local git_name git_email
-    git_name=$(git config --global user.name 2>/dev/null || printf '%s\n' "")
-    git_email=$(git config --global user.email 2>/dev/null || printf '%s\n' "")
+    # Build .gitconfig locally without invoking git
+    local tmp_gitconfig
+    tmp_gitconfig=$(mktemp 2>/dev/null) || {
+        _import_error "Failed to create temp file for git config"
+        return 1
+    }
 
-    # Check if we have at least name or email
-    if [[ -z "$git_name" && -z "$git_email" ]]; then
-        _import_warn "No git user.name or user.email configured on host, skipping git config import"
-        return 0
+    : > "$tmp_gitconfig"
+
+    if [[ -n "$host_gitconfig" ]]; then
+        if ! awk '
+            BEGIN { in_cred=0 }
+            /^[[:space:]]*\[credential([[:space:]]+"[^"]+")?\][[:space:]]*$/ { in_cred=1; print; next }
+            /^[[:space:]]*\[/ { in_cred=0 }
+            /^[[:space:]]*credential\.helper[[:space:]]*=/ { next }
+            in_cred && /^[[:space:]]*helper[[:space:]]*=/ { next }
+            { print }
+        ' "$host_gitconfig" >> "$tmp_gitconfig"; then
+            rm -f "$tmp_gitconfig"
+            _import_error "Failed to sanitize host git config"
+            return 1
+        fi
+    else
+        _import_info "No host git config found; creating minimal safe.directory config"
     fi
 
-    # Use git config -f to safely write values (avoids injection via newlines/control chars)
-    # Run as root (volume root may be root-owned), then chown to 1000:1000
-    # Use alpine image with git installed for git config command
-    # Pass values via environment variables to avoid shell escaping issues
+    # Always add safe.directory entry for mounted workspace
+    {
+        printf '%s\n' "[safe]"
+        printf '\tdirectory = %s\n' "/home/agent/workspace"
+    } >> "$tmp_gitconfig"
+
+    # Copy into volume using a minimal container (no git required)
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
         -v "$volume":/target \
-        -e "GIT_NAME=${git_name}" \
-        -e "GIT_EMAIL=${git_email}" \
-        --entrypoint sh \
-        alpine/git:latest -c '
+        -v "$tmp_gitconfig":/source/.gitconfig:ro \
+        alpine sh -c '
             # Refuse if target exists and is symlink or non-regular file
             if [ -L /target/.gitconfig ]; then
                 echo "ERROR: /target/.gitconfig is a symlink - refusing to write" >&2
@@ -1738,38 +1758,17 @@ _cai_import_git_config() {
                 exit 1
             fi
 
-            # Remove existing file to start fresh (git config -f appends)
-            rm -f /target/.gitconfig
-
-            # Use git config -f for safe value escaping (prevents injection)
-            if [ -n "$GIT_NAME" ]; then
-                git config -f /target/.gitconfig user.name "$GIT_NAME"
-            fi
-            if [ -n "$GIT_EMAIL" ]; then
-                git config -f /target/.gitconfig user.email "$GIT_EMAIL"
-            fi
-
-            # Add safe.directory entries (critical for mounted workspaces)
-            git config -f /target/.gitconfig --add safe.directory /workspace
-            git config -f /target/.gitconfig --add safe.directory /home/agent/workspace
-
-            # Fix ownership for agent user
+            cp /source/.gitconfig /target/.gitconfig
             chown 1000:1000 /target/.gitconfig
         '; then
+        rm -f "$tmp_gitconfig"
         _import_error "Failed to write .gitconfig to volume"
         return 1
     fi
 
-    # Build success message (avoid logging PII - just indicate what was set)
-    local success_msg="Git config imported"
-    if [[ -n "$git_name" && -n "$git_email" ]]; then
-        success_msg="Git config imported (user.name + user.email)"
-    elif [[ -n "$git_name" ]]; then
-        success_msg="Git config imported (user.name)"
-    elif [[ -n "$git_email" ]]; then
-        success_msg="Git config imported (user.email)"
-    fi
-    _import_success "$success_msg"
+    rm -f "$tmp_gitconfig"
+
+    _import_success "Git config imported (safe.directory ensured)"
     return 0
 }
 
