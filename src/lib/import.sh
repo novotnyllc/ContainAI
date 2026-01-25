@@ -772,6 +772,13 @@ _import_discover_ssh_keys() {
         # Only process id_* files
         case "$basename" in
             id_*)
+                # Security: reject filenames containing delimiter chars that would corrupt map format
+                # Colon breaks field parsing, newline/CR break line parsing
+                if [[ "$basename" == *:* ]] || [[ "$basename" == *$'\n'* ]] || [[ "$basename" == *$'\r'* ]]; then
+                    echo "[WARN] Skipping SSH key with unsafe filename (contains : or control chars): $basename" >&2
+                    continue
+                fi
+
                 # Determine if this is a public key (.pub) or private key
                 if [[ "$basename" == *.pub ]]; then
                     # Public key - no secret flag
