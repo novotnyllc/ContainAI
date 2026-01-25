@@ -166,6 +166,7 @@ RUN mkdir -p /home/agent/.config /home/agent/.local/share && \
     ln -sfn /mnt/agent-data/config/starship.toml /home/agent/.config/starship.toml && \
     # Oh-My-Posh prompt themes (matches import.sh: /target/config/oh-my-posh)
     mkdir -p /mnt/agent-data/config/oh-my-posh && \
+    rm -rf /home/agent/.config/oh-my-posh && \
     ln -sfn /mnt/agent-data/config/oh-my-posh /home/agent/.config/oh-my-posh && \
     # Common agents directory for shared skills, plugins, etc.
     mkdir -p /mnt/agent-data/agents && \

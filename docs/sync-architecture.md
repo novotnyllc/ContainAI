@@ -25,7 +25,8 @@ The `_IMPORT_SYNC_MAP` array defines what gets synced from host `$HOME` to the d
 | `/source/.claude/skills` | `/target/claude/skills` | `d` | Claude skills (directory) |
 | `/source/.config/gh` | `/target/config/gh` | `ds` | GitHub CLI config (directory, secret) |
 | `/source/.config/opencode` | `/target/config/opencode` | `d` | OpenCode config (directory) |
-| `/source/.config/tmux` | `/target/config/tmux` | `d` | tmux config (directory) |
+| `/source/.tmux.conf` | `/target/config/tmux/tmux.conf` | `f` | tmux legacy config (fallback) |
+| `/source/.config/tmux` | `/target/config/tmux` | `d` | tmux XDG config (preferred) |
 | `/source/.local/share/tmux` | `/target/local/share/tmux` | `d` | tmux data (directory) |
 | `/source/.local/share/fonts` | `/target/local/share/fonts` | `d` | User fonts (directory) |
 | `/source/.agents` | `/target/agents` | `d` | Common agents directory (directory) |
@@ -209,11 +210,14 @@ None - all symlinked paths are now created in containai-init.sh.
 
 For tools that support both legacy and XDG config locations, ContainAI prefers the XDG location:
 
-| Tool | Legacy Location | XDG Location | Synced |
-|------|-----------------|--------------|--------|
-| tmux | `~/.tmux.conf` | `~/.config/tmux/` | XDG only |
+| Tool | Legacy Location | XDG Location | Behavior |
+|------|-----------------|--------------|----------|
+| tmux | `~/.tmux.conf` | `~/.config/tmux/` | Both synced; XDG preferred |
 
-If you use the legacy `~/.tmux.conf` location, move your config to `~/.config/tmux/tmux.conf` for it to be synced.
+**tmux precedence:** The legacy `~/.tmux.conf` is synced first to `/target/config/tmux/tmux.conf`, then the XDG `~/.config/tmux/` directory is synced over it. This ensures:
+- If only legacy exists: it becomes available at the XDG location in the container
+- If only XDG exists: it is used directly
+- If both exist: XDG wins (overwrites the legacy file)
 
 ## Exclude Pattern Behavior
 

@@ -365,6 +365,9 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.config/opencode:/target/config/opencode:d"
 
         # --- tmux ---
+        # XDG precedence: legacy ~/.tmux.conf syncs first, then XDG ~/.config/tmux/ overwrites
+        # This ensures XDG wins when both exist, while legacy still works as fallback
+        "/source/.tmux.conf:/target/config/tmux/tmux.conf:f"
         "/source/.config/tmux:/target/config/tmux:d"
         "/source/.local/share/tmux:/target/local/share/tmux:d"
 

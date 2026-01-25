@@ -513,6 +513,22 @@ Key functions:
 - `_containai_resolve_credentials()` - Credentials with security block
 - `_containai_resolve_env_config()` - Environment variable config
 
+## Dev Tool Config Sync
+
+ContainAI automatically syncs common development tool configurations from your host to the container via `cai import`. This includes shell configs (bash, zsh), editor configs (vim, neovim), and prompt themes (starship, oh-my-posh).
+
+### XDG Precedence
+
+For tools that support both legacy and XDG config locations, ContainAI prefers the XDG location:
+
+| Tool | Legacy Location | XDG Location | Behavior |
+|------|-----------------|--------------|----------|
+| tmux | `~/.tmux.conf` | `~/.config/tmux/` | XDG preferred; legacy used as fallback |
+
+If both locations exist, the XDG configuration takes precedence. If only the legacy location exists, it will be synced to the XDG target path in the container.
+
+For full details on synced paths, see [Sync Architecture](sync-architecture.md).
+
 ## See Also
 
 - [Quickstart Guide](quickstart.md) - Getting started with ContainAI
