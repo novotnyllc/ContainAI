@@ -1985,8 +1985,12 @@ containai() {
     # Run rate-limited update check before command dispatch
     # Skip in CI environments to avoid noise/delays in automated pipelines
     # Per spec: CI=true (explicit), GITHUB_ACTIONS (presence), JENKINS_URL (presence)
+    # Skip for help/version to avoid latency on informational commands
     if [[ "${CI:-}" != "true" ]] && [[ -z "${GITHUB_ACTIONS:-}" ]] && [[ -z "${JENKINS_URL:-}" ]]; then
-        _cai_update_check
+        case "$subcommand" in
+            help|-h|--help|version|--version|-v) ;;
+            *) _cai_update_check ;;
+        esac
     fi
 
     # Handle empty or help first
