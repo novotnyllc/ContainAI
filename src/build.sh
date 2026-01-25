@@ -371,6 +371,62 @@ fi
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 VCS_REF="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 
+# ==============================================================================
+# Run manifest-driven generators for full/all layer builds
+# ==============================================================================
+generate_container_files() {
+    local manifest="${SCRIPT_DIR}/sync-manifest.toml"
+    local gen_dir="${SCRIPT_DIR}/container/generated"
+    local scripts_dir="${SCRIPT_DIR}/scripts"
+
+    if [[ ! -f "$manifest" ]]; then
+        printf 'ERROR: sync-manifest.toml not found: %s\n' "$manifest" >&2
+        return 1
+    fi
+
+    echo ""
+    echo "=== Generating container files from manifest ==="
+    echo ""
+
+    mkdir -p "$gen_dir"
+
+    # Generate Dockerfile symlinks fragment
+    if ! "${scripts_dir}/gen-dockerfile-symlinks.sh" "$manifest" "${gen_dir}/symlinks.dockerfile"; then
+        printf 'ERROR: Failed to generate symlinks.dockerfile\n' >&2
+        return 1
+    fi
+
+    # Generate init-dirs script
+    if ! "${scripts_dir}/gen-init-dirs.sh" "$manifest" "${gen_dir}/init-dirs.sh"; then
+        printf 'ERROR: Failed to generate init-dirs.sh\n' >&2
+        return 1
+    fi
+
+    # Generate link-spec.json
+    if ! "${scripts_dir}/gen-container-link-spec.sh" "$manifest" "${gen_dir}/link-spec.json"; then
+        printf 'ERROR: Failed to generate link-spec.json\n' >&2
+        return 1
+    fi
+
+    # Copy link-repair.sh to generated dir so it gets included in build context
+    cp "${SCRIPT_DIR}/container/link-repair.sh" "${gen_dir}/link-repair.sh"
+
+    # Verify generated files are newer than manifest (staleness check)
+    local manifest_mtime gen_file_mtime
+    manifest_mtime=$(stat -c %Y "$manifest" 2>/dev/null || stat -f %m "$manifest" 2>/dev/null)
+    for gen_file in "${gen_dir}/symlinks.dockerfile" "${gen_dir}/init-dirs.sh" "${gen_dir}/link-spec.json"; do
+        gen_file_mtime=$(stat -c %Y "$gen_file" 2>/dev/null || stat -f %m "$gen_file" 2>/dev/null)
+        if [[ "$gen_file_mtime" -lt "$manifest_mtime" ]]; then
+            printf 'ERROR: Generated file is stale: %s\n' "$gen_file" >&2
+            return 1
+        fi
+    done
+
+    echo "  Generated files:"
+    ls -la "${gen_dir}"
+    echo ""
+}
+
 # Build function for a single layer
 build_layer() {
     local name="$1"
@@ -422,11 +478,15 @@ case "$BUILD_LAYER" in
             --build-arg BASE_IMAGE="${IMAGE_BASE}:latest"
         ;;
     full)
+        generate_container_files || exit 1
         build_layer "full" "Dockerfile.agents" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
         ;;
     all)
         echo "Building all ContainAI layers..."
         echo "  .NET channel: $DOTNET_CHANNEL"
+
+        # Generate container files from manifest before full layer
+        generate_container_files || exit 1
 
         # Build in dependency order
         build_layer "base" "Dockerfile.base"

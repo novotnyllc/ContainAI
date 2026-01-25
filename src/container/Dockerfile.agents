@@ -291,6 +291,14 @@ RUN chmod +x /usr/local/lib/containai/init.sh && \
     ln -sf /etc/systemd/system/containai-init.service /etc/systemd/system/multi-user.target.wants/containai-init.service
 
 # =============================================================================
+# LINK SPEC AND REPAIR TOOLS
+# Generated from sync-manifest.toml for runtime link verification/repair
+# =============================================================================
+COPY container/generated/link-spec.json /usr/local/lib/containai/link-spec.json
+COPY container/generated/link-repair.sh /usr/local/lib/containai/link-repair.sh
+RUN chmod +x /usr/local/lib/containai/link-repair.sh
+
+# =============================================================================
 # FINAL CONFIGURATION
 # =============================================================================
 

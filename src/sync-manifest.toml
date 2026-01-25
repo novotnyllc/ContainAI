@@ -55,31 +55,31 @@ flags = "f"  # file
 source = ".claude/plugins"
 target = "claude/plugins"
 container_link = ".claude/plugins"
-flags = "d"  # directory
+flags = "dR"  # directory, remove existing first
 
 [[entries]]
 source = ".claude/skills"
 target = "claude/skills"
 container_link = ".claude/skills"
-flags = "d"  # directory
+flags = "dR"  # directory, remove existing first
 
 [[entries]]
 source = ".claude/commands"
 target = "claude/commands"
 container_link = ".claude/commands"
-flags = "d"  # directory
+flags = "dR"  # directory, remove existing first
 
 [[entries]]
 source = ".claude/agents"
 target = "claude/agents"
 container_link = ".claude/agents"
-flags = "d"  # directory
+flags = "dR"  # directory, remove existing first
 
 [[entries]]
 source = ".claude/hooks"
 target = "claude/hooks"
 container_link = ".claude/hooks"
-flags = "d"  # directory
+flags = "dR"  # directory, remove existing first
 
 [[entries]]
 source = ".claude/CLAUDE.md"
@@ -336,7 +336,7 @@ flags = "f"  # file
 source = ".config/oh-my-posh"
 target = "config/oh-my-posh"
 container_link = ".config/oh-my-posh"
-flags = "d"  # directory
+flags = "dR"  # directory, remove existing first
 
 # =============================================================================
 # VS CODE SERVER (STABLE)
@@ -518,13 +518,13 @@ flags = "fjs"  # file, JSON init, secret
 source = ".cursor/rules"
 target = "cursor/rules"
 container_link = ".cursor/rules"
-flags = "d"  # directory
+flags = "dR"  # directory, remove existing first
 
 [[entries]]
 source = ".cursor/extensions"
 target = "cursor/extensions"
 container_link = ".cursor/extensions"
-flags = "d"  # directory
+flags = "dR"  # directory, remove existing first
 
 # =============================================================================
 # ADDITIONAL SYMLINKS (container-only, no host import)

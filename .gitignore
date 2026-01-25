@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Generated container files (manifest-driven)
+src/container/generated/
+
 # User-specific files
 *.rsuser
 *.suo
