@@ -209,17 +209,19 @@ prompt_confirm() {
     response=$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')
 
     # Evaluate response based on default
+    # Only accept explicit y/yes/n/no/empty - reject ambiguous input like "maybe"
     if [[ "$default_yes" == "true" ]]; then
-        # Default Y: n/no denies, empty or y/yes confirms
+        # Default Y: empty/y/yes confirms, n/no denies, other input denies (safe default)
         case "$response" in
-            n|no) return 1 ;;
-            *) return 0 ;;
+            ""|y|yes) return 0 ;;
+            n|no)     return 1 ;;
+            *)        return 1 ;;  # Ambiguous input defaults to deny for safety
         esac
     else
-        # Default N: y/yes confirms, empty or n/no denies
+        # Default N: y/yes confirms, empty/n/no/other denies
         case "$response" in
             y|yes) return 0 ;;
-            *) return 1 ;;
+            *)     return 1 ;;
         esac
     fi
 }
@@ -583,22 +585,31 @@ if [[ "$major_version" -lt 4 ]]; then
 fi
 
 # Default install directory (baked in at install time)
-# Escape single quotes in the path by replacing ' with '\''
-_CAI_DEFAULT_INSTALL_DIR='
-WRAPPER_PART1
-
-    # Part 2: Append the install directory with proper single-quote escaping
-    # Replace ' with '\'' for safe embedding in single quotes
-    local escaped_dir
-    escaped_dir="${INSTALL_DIR//\'/\'\\\'\'}"
-    printf '%s' "$escaped_dir" >> "$wrapper"
-
-    # Part 3: Rest of the script (quoted heredoc - no expansion)
-    cat >>"$wrapper" <<'WRAPPER_PART2'
-'
+# __CAI_ESCAPED_INSTALL_DIR__ is replaced during installation
+_CAI_DEFAULT_INSTALL_DIR="__CAI_ESCAPED_INSTALL_DIR__"
 
 # Allow override via environment variable
 CAI_INSTALL_DIR="${CAI_INSTALL_DIR:-$_CAI_DEFAULT_INSTALL_DIR}"
+WRAPPER_PART1
+
+    # Part 2: Replace placeholder with properly escaped install directory
+    # Escape for double-quoted context: \, ", `, $
+    local escaped_dir
+    escaped_dir="$INSTALL_DIR"
+    escaped_dir="${escaped_dir//\\/\\\\}"  # \ -> \\
+    escaped_dir="${escaped_dir//\"/\\\"}"  # " -> \"
+    escaped_dir="${escaped_dir//\`/\\\`}"  # ` -> \`
+    escaped_dir="${escaped_dir//\$/\\\$}"  # $ -> \$
+
+    # Use a unique delimiter that won't appear in typical paths
+    # Write to temp file and mv to avoid BSD/GNU sed -i incompatibility
+    local tmp_wrapper
+    tmp_wrapper=$(mktemp)
+    sed "s|__CAI_ESCAPED_INSTALL_DIR__|$escaped_dir|g" "$wrapper" > "$tmp_wrapper"
+    mv "$tmp_wrapper" "$wrapper"
+
+    # Part 3: Rest of the script (quoted heredoc - no expansion)
+    cat >>"$wrapper" <<'WRAPPER_PART2'
 
 # Source the main script
 if [[ ! -f "$CAI_INSTALL_DIR/src/containai.sh" ]]; then
@@ -811,19 +822,21 @@ post_install() {
     fi
 
     # Determine CAI_YES_VALUE for auto-confirm
+    # Only pass CAI_YES=1 when --yes flag was explicitly passed
+    # Interactive confirmation does NOT auto-confirm downstream prompts
     local cai_yes_value=""
 
     if [[ -n "$YES_FLAG" ]]; then
-        # --yes flag passed: auto-confirm everything
+        # --yes flag passed: auto-confirm everything including downstream prompts
         cai_yes_value="1"
         run_auto_setup "$cai_yes_value"
     elif can_prompt; then
         # Interactive mode: prompt user (default Y for first-time install)
         echo ""
         if prompt_confirm "Would you like to run 'cai setup' now to configure your environment?" "true"; then
-            # User confirmed interactively: set CAI_YES=1 so internal prompts auto-confirm
-            cai_yes_value="1"
-            run_auto_setup "$cai_yes_value"
+            # User confirmed interactively: let them see/confirm each setup prompt
+            # Do NOT set CAI_YES - user should approve each destructive action
+            run_auto_setup ""
         else
             info "Skipping setup."
             show_setup_instructions
