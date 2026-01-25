@@ -487,13 +487,20 @@ install_containai() {
     # Create parent directory
     mkdir -p "$(dirname "$INSTALL_DIR")"
 
+    # Validate branch name (reject empty or option-like values)
+    if [[ -z "$BRANCH" ]] || [[ "$BRANCH" == -* ]]; then
+        error "Invalid branch name: '$BRANCH'"
+        return 1
+    fi
+
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         # Existing installation - update
         IS_FRESH_INSTALL="false"
         info "Existing installation found, updating..."
         (
             cd -- "$INSTALL_DIR"
-            git fetch origin "$BRANCH"
+            # Use refspec to avoid branch name being parsed as option
+            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
             # Use -B to create/reset local branch tracking remote (handles missing local branch)
             git checkout -B "$BRANCH" "origin/$BRANCH"
         )
@@ -506,7 +513,8 @@ install_containai() {
             warn "Removing and re-cloning..."
             rm -rf "$INSTALL_DIR"
         fi
-        git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
+        # Clone with explicit refspec to avoid branch name being parsed as option
+        git clone --branch "$BRANCH" --depth 1 -- "$REPO_URL" "$INSTALL_DIR"
         success "Cloned ContainAI repository"
     fi
 
@@ -526,11 +534,14 @@ setup_path() {
 
     # Create wrapper script (bake in INSTALL_DIR so it works without env var)
     local wrapper="$BIN_DIR/cai"
-    # Safely escape INSTALL_DIR to prevent command injection via user-controlled paths
-    local escaped_install_dir
-    escaped_install_dir=$(printf '%q' "$INSTALL_DIR")
-    # Using quoted heredoc ('WRAPPER_EOF') so NO expansion happens, then inject escaped path
-    cat >"$wrapper" <<'WRAPPER_EOF'
+
+    # Write wrapper in two parts:
+    # 1. First part: single-quoted heredoc (no expansion)
+    # 2. Install dir: written separately with proper escaping
+    # 3. Second part: rest of the script
+
+    # Part 1: Script header and bash version check (quoted heredoc - no expansion)
+    cat >"$wrapper" <<'WRAPPER_PART1'
 #!/usr/bin/env bash
 # ContainAI CLI wrapper
 # This wrapper sources containai.sh and runs the cai function
@@ -571,9 +582,23 @@ if [[ "$major_version" -lt 4 ]]; then
     fi
 fi
 
-# Install directory (baked in at install time, can override with env var)
-# __CAI_DEFAULT_INSTALL_DIR__ is replaced during installation
-CAI_INSTALL_DIR="${CAI_INSTALL_DIR:-__CAI_DEFAULT_INSTALL_DIR__}"
+# Default install directory (baked in at install time)
+# Escape single quotes in the path by replacing ' with '\''
+_CAI_DEFAULT_INSTALL_DIR='
+WRAPPER_PART1
+
+    # Part 2: Append the install directory with proper single-quote escaping
+    # Replace ' with '\'' for safe embedding in single quotes
+    local escaped_dir
+    escaped_dir="${INSTALL_DIR//\'/\'\\\'\'}"
+    printf '%s' "$escaped_dir" >> "$wrapper"
+
+    # Part 3: Rest of the script (quoted heredoc - no expansion)
+    cat >>"$wrapper" <<'WRAPPER_PART2'
+'
+
+# Allow override via environment variable
+CAI_INSTALL_DIR="${CAI_INSTALL_DIR:-$_CAI_DEFAULT_INSTALL_DIR}"
 
 # Source the main script
 if [[ ! -f "$CAI_INSTALL_DIR/src/containai.sh" ]]; then
@@ -587,9 +612,7 @@ source "$CAI_INSTALL_DIR/src/containai.sh"
 
 # Run cai with all arguments
 cai "$@"
-WRAPPER_EOF
-    # Replace placeholder with properly escaped install directory
-    sed -i "s|__CAI_DEFAULT_INSTALL_DIR__|$escaped_install_dir|g" "$wrapper"
+WRAPPER_PART2
 
     chmod +x "$wrapper"
     success "Created cai wrapper at $wrapper"
