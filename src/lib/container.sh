@@ -195,6 +195,69 @@ _containai_check_docker() {
 }
 
 # ==============================================================================
+# Container log capture
+# ==============================================================================
+
+# Write docker logs for a container to ~/.config/containai/logs/ with a smart name
+# Arguments:
+#   $1 = container name
+#   $2 = docker context (optional)
+#   $3 = reason tag (optional, e.g., "start-timeout")
+# Outputs: log file path on stdout
+# Returns: 0 on success, 1 on failure
+_cai_write_container_logs() {
+    local container_name="$1"
+    local context="${2:-}"
+    local reason="${3:-startup}"
+    local log_dir="$HOME/.config/containai/logs"
+    local ts=""
+    local ctx_label="${context:-default}"
+    local safe_container=""
+    local safe_context=""
+    local safe_reason=""
+    local log_file=""
+    local -a docker_cmd=(docker)
+
+    if ! mkdir -p "$log_dir" 2>/dev/null; then
+        _cai_warn "Failed to create log directory: $log_dir"
+        return 1
+    fi
+
+    ts=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null)
+    if [[ -z "$ts" ]]; then
+        ts=$(date +%Y%m%dT%H%M%SZ 2>/dev/null)
+    fi
+    if [[ -z "$ts" ]]; then
+        ts="unknown-time"
+    fi
+
+    safe_container="${container_name//[^a-zA-Z0-9_.-]/_}"
+    safe_context="${ctx_label//[^a-zA-Z0-9_.-]/_}"
+    safe_reason="${reason//[^a-zA-Z0-9_.-]/_}"
+    log_file="$log_dir/docker-${safe_container}-${safe_context}-${safe_reason}-${ts}.log"
+
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    {
+        printf '%s\n' "# ContainAI docker logs"
+        printf '%s\n' "timestamp=$ts"
+        printf '%s\n' "container=$container_name"
+        printf '%s\n' "context=$ctx_label"
+        printf '%s\n' "reason=$reason"
+        printf '\n'
+        "${docker_cmd[@]}" logs "$container_name" 2>&1 || printf '%s\n' "[ERROR] docker logs failed"
+    } >"$log_file" || {
+        _cai_warn "Failed to write container logs: $log_file"
+        return 1
+    }
+
+    printf '%s' "$log_file"
+    return 0
+}
+
+# ==============================================================================
 # Container naming
 # ==============================================================================
 
@@ -1643,13 +1706,19 @@ _containai_start_container() {
             # Note: SSH port conflict check is handled earlier in the function (before case statement)
             # If we reach here, the port is available
 
-            # Start stopped container (tini is PID 1 managing sleep infinity)
+            # Start stopped container (systemd is PID 1)
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "Starting stopped container..."
             fi
             local start_output
             if ! start_output=$("${docker_cmd[@]}" start "$container_name" 2>&1); then
-                echo "[ERROR] Failed to start container: $start_output" >&2
+                local log_file=""
+                log_file=$(_cai_write_container_logs "$container_name" "$selected_context" "start-failed") || log_file=""
+                if [[ -n "$log_file" ]]; then
+                    echo "[ERROR] Failed to start container: $start_output (logs: $log_file)" >&2
+                else
+                    echo "[ERROR] Failed to start container: $start_output" >&2
+                fi
                 return 1
             fi
             # Wait for container to be running (poll with bounded timeout)
@@ -1665,7 +1734,13 @@ _containai_start_container() {
                 ((wait_count++))
             done
             if [[ $wait_count -ge $max_wait ]]; then
-                echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
+                local log_file=""
+                log_file=$(_cai_write_container_logs "$container_name" "$selected_context" "start-timeout") || log_file=""
+                if [[ -n "$log_file" ]]; then
+                    echo "[ERROR] Container failed to start within ${max_wait} attempts (logs: $log_file)" >&2
+                else
+                    echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
+                fi
                 return 1
             fi
 
@@ -1727,7 +1802,7 @@ _containai_start_container() {
             local -a vol_args=()
             vol_args+=("-v" "$data_volume:/mnt/agent-data")
 
-            # Create new container with sleep infinity as PID 1 (long-lived init)
+            # Create new container (systemd is PID 1)
             # Agent sessions use docker exec; container stays running between sessions
             if [[ "$quiet_flag" != "true" ]]; then
                 if [[ -n "$selected_context" ]]; then
@@ -1785,7 +1860,6 @@ _containai_start_container() {
 
             args+=(run)
             args+=(--runtime=sysbox-runc)
-            args+=(--init) # tini becomes PID 1 to properly reap zombie processes
             args+=(--name "$container_name")
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
@@ -1796,7 +1870,7 @@ _containai_start_container() {
                 args+=(--label "containai.image-tag=$image_tag")
             fi
             args+=(-p "${ssh_port}:22") # Map allocated port to container SSH
-            args+=(-d)                  # Always detached - tini manages sleep infinity as child
+            args+=(-d)                  # Always detached - systemd manages services
 
             # Cgroup resource limits (configurable via [container] config section or CLI flags)
             # Precedence: CLI flag > config > dynamic default (50% of host, 2GB/1CPU min)
@@ -1838,8 +1912,7 @@ _containai_start_container() {
             # Image
             args+=("$resolved_image")
 
-            # Command: sleep infinity (runs as child of tini, container stays running between sessions)
-            args+=(sleep infinity)
+            # No command: entrypoint runs systemd as PID 1
 
             # Create the container (inside lock to reserve the port)
             local create_output
@@ -1865,7 +1938,13 @@ _containai_start_container() {
                 ((wait_count++))
             done
             if [[ $wait_count -ge $max_wait ]]; then
-                echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
+                local log_file=""
+                log_file=$(_cai_write_container_logs "$container_name" "$selected_context" "start-timeout") || log_file=""
+                if [[ -n "$log_file" ]]; then
+                    echo "[ERROR] Container failed to start within ${max_wait} attempts (logs: $log_file)" >&2
+                else
+                    echo "[ERROR] Container failed to start within ${max_wait} attempts" >&2
+                fi
                 return 1
             fi
 
