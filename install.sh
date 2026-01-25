@@ -5,15 +5,23 @@
 # One-liner installation:
 #   curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
 #
+# With auto-confirmation (no prompts):
+#   curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash -s -- --yes
+#
 # This script:
 #   1. Detects OS (macOS, Linux)
-#   2. Checks prerequisites (Docker, git)
-#   3. Clones/updates the repo to ~/.local/share/containai
-#   4. Creates wrapper script in ~/.local/bin/cai
-#   5. Adds bin directory to PATH if needed
+#   2. On macOS: bootstraps bash 4+ via Homebrew if needed
+#   3. Checks prerequisites (Docker, git)
+#   4. Clones/updates the repo to ~/.local/share/containai
+#   5. Creates wrapper script in ~/.local/bin/cai
+#   6. Adds bin directory to PATH if needed
 #
 # Note: The installer runs on bash 3.2+, but the cai CLI requires bash 4.0+.
-# On macOS, install bash 4+ with: brew install bash
+# On macOS, the installer can auto-install bash 4+ via Homebrew.
+#
+# Flags:
+#   --yes       Auto-confirm all prompts (required for non-interactive install)
+#   --no-setup  Skip post-install setup (cai setup/update)
 #
 # Environment variables:
 #   CAI_INSTALL_DIR  - Installation directory (default: ~/.local/share/containai)
@@ -22,6 +30,20 @@
 #
 # ==============================================================================
 set -euo pipefail
+
+# ==============================================================================
+# Flag Parsing (MUST be at TOP - before bash bootstrap)
+# These variables are used by this task AND fn-16-4c9.3/4
+# ==============================================================================
+YES_FLAG=""
+NO_SETUP=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --yes) YES_FLAG="1"; shift ;;
+        --no-setup) NO_SETUP="true"; shift ;;
+        *) shift ;;
+    esac
+done
 
 # Colors for output (disabled if not a terminal)
 if [[ -t 1 ]]; then
@@ -49,6 +71,9 @@ REPO_URL="https://github.com/novotnyllc/containai.git"
 INSTALL_DIR="${CAI_INSTALL_DIR:-$HOME/.local/share/containai}"
 BIN_DIR="${CAI_BIN_DIR:-$HOME/.local/bin}"
 BRANCH="${CAI_BRANCH:-main}"
+
+# Path to bash 4+ (set by bootstrap_bash if needed)
+BASH4_PATH=""
 
 # ==============================================================================
 # OS Detection
@@ -91,28 +116,253 @@ detect_os() {
 }
 
 # ==============================================================================
+# Bash Bootstrap (macOS)
+# ==============================================================================
+# Detect Homebrew installation path (Apple Silicon vs Intel)
+get_brew_path() {
+    # Check Apple Silicon location first
+    if [[ -x "/opt/homebrew/bin/brew" ]]; then
+        echo "/opt/homebrew/bin/brew"
+    # Then Intel location
+    elif [[ -x "/usr/local/bin/brew" ]]; then
+        echo "/usr/local/bin/brew"
+    else
+        echo ""
+    fi
+}
+
+# Check for existing Homebrew bash
+find_homebrew_bash() {
+    local brew_path
+    brew_path="$(get_brew_path)"
+
+    if [[ -z "$brew_path" ]]; then
+        echo ""
+        return
+    fi
+
+    # Get Homebrew prefix directly
+    local brew_prefix
+    brew_prefix="$("$brew_path" --prefix 2>/dev/null)" || {
+        echo ""
+        return
+    }
+
+    local bash_path="${brew_prefix}/bin/bash"
+    if [[ -x "$bash_path" ]]; then
+        # Verify it's bash 4+
+        local version
+        version="$("$bash_path" -c 'echo "${BASH_VERSION%%.*}"' 2>/dev/null)" || {
+            echo ""
+            return
+        }
+        if [[ "$version" -ge 4 ]]; then
+            echo "$bash_path"
+            return
+        fi
+    fi
+    echo ""
+}
+
+# Check if stdin is interactive (can prompt user)
+can_prompt() {
+    # If stdin is a TTY, we can prompt
+    if [[ -t 0 ]]; then
+        return 0
+    fi
+    # If stdin is piped but /dev/tty exists, we can prompt via tty
+    if [[ -e /dev/tty ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Prompt for confirmation (respects YES_FLAG)
+prompt_confirm() {
+    local message="$1"
+
+    # Auto-confirm if --yes flag
+    if [[ -n "$YES_FLAG" ]]; then
+        return 0
+    fi
+
+    # Can't prompt in non-interactive mode without --yes
+    if ! can_prompt; then
+        return 1
+    fi
+
+    local response
+    if [[ -t 0 ]]; then
+        printf '%s [y/N]: ' "$message"
+        read -r response
+    else
+        printf '%s [y/N]: ' "$message" >/dev/tty
+        read -r response </dev/tty
+    fi
+
+    case "$response" in
+        [yY]|[yY][eE][sS]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Install Homebrew (macOS only)
+install_homebrew() {
+    info "Homebrew is required to install bash 4+ on macOS"
+
+    if [[ -n "$YES_FLAG" ]]; then
+        info "Installing Homebrew (--yes mode)..."
+    elif can_prompt; then
+        if ! prompt_confirm "Install Homebrew?"; then
+            return 1
+        fi
+    else
+        # Non-interactive without --yes: show instructions only
+        warn "Homebrew not found. Install it with:"
+        warn '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        return 1
+    fi
+
+    # Install Homebrew
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+    # Verify installation
+    local brew_path
+    brew_path="$(get_brew_path)"
+    if [[ -z "$brew_path" ]]; then
+        error "Homebrew installation failed"
+        return 1
+    fi
+
+    success "Homebrew installed"
+    return 0
+}
+
+# Install bash via Homebrew (macOS only)
+install_bash_homebrew() {
+    local brew_path="$1"
+
+    info "bash 4+ is required for the cai CLI"
+
+    if [[ -n "$YES_FLAG" ]]; then
+        info "Installing bash via Homebrew (--yes mode)..."
+    elif can_prompt; then
+        if ! prompt_confirm "Install bash 4+ via Homebrew?"; then
+            return 1
+        fi
+    else
+        # Non-interactive without --yes: show instructions only
+        local brew_prefix
+        brew_prefix="$("$brew_path" --prefix 2>/dev/null)" || brew_prefix="/opt/homebrew"
+        warn "bash 4+ required. Install it with:"
+        warn "  $brew_path install bash"
+        warn "Then run cai with: ${brew_prefix}/bin/bash cai"
+        return 1
+    fi
+
+    # Install bash
+    "$brew_path" install bash
+
+    # Verify installation
+    local bash_path
+    bash_path="$(find_homebrew_bash)"
+    if [[ -z "$bash_path" ]]; then
+        error "bash installation failed"
+        return 1
+    fi
+
+    success "bash 4+ installed at $bash_path"
+    BASH4_PATH="$bash_path"
+    return 0
+}
+
+# Bootstrap bash 4+ on macOS
+# Sets BASH4_PATH if bash 4+ is available/installed
+bootstrap_bash_macos() {
+    local major_version
+    major_version="${BASH_VERSION%%.*}"
+
+    # Already running bash 4+, no bootstrap needed
+    if [[ "$major_version" -ge 4 ]]; then
+        BASH4_PATH="$BASH"
+        return 0
+    fi
+
+    info "macOS ships with bash $BASH_VERSION (cai requires bash 4.0+)"
+
+    # Check for existing Homebrew bash first
+    local existing_bash
+    existing_bash="$(find_homebrew_bash)"
+    if [[ -n "$existing_bash" ]]; then
+        success "Found Homebrew bash at $existing_bash"
+        BASH4_PATH="$existing_bash"
+        return 0
+    fi
+
+    # Check for Homebrew
+    local brew_path
+    brew_path="$(get_brew_path)"
+
+    if [[ -z "$brew_path" ]]; then
+        # Need to install Homebrew first
+        if ! install_homebrew; then
+            # Couldn't install Homebrew, BASH4_PATH remains empty
+            return 0
+        fi
+        brew_path="$(get_brew_path)"
+    fi
+
+    # Install bash via Homebrew
+    if ! install_bash_homebrew "$brew_path"; then
+        # Couldn't install bash, BASH4_PATH remains empty
+        return 0
+    fi
+
+    return 0
+}
+
+# Main bash bootstrap function
+# Called early in install.sh, BEFORE creating the cai wrapper
+bootstrap_bash() {
+    local os
+    os="$(detect_os)"
+
+    if [[ "$os" == "macos" ]]; then
+        bootstrap_bash_macos
+    else
+        # Linux typically has bash 4+ in standard packages
+        local major_version
+        major_version="${BASH_VERSION%%.*}"
+        if [[ "$major_version" -ge 4 ]]; then
+            BASH4_PATH="$BASH"
+        else
+            warn "bash $BASH_VERSION detected, cai requires bash 4.0+"
+            warn "Please install bash 4.0 or later"
+            # Continue without BASH4_PATH - wrapper will handle it
+        fi
+    fi
+}
+
+# ==============================================================================
 # Prerequisite Checks
 # ==============================================================================
 check_bash_version() {
     # Check for bash 4.0+ (required by cai CLI, not installer)
+    # This is now just a status display, bootstrap_bash handles installation
     local major_version
     major_version="${BASH_VERSION%%.*}"
 
     if [[ "$major_version" -lt 4 ]]; then
-        warn "bash version $BASH_VERSION detected"
-        warn "The cai CLI requires bash 4.0+ (installer works on bash 3.2+)"
-        local os
-        os="$(detect_os)"
-        if [[ "$os" == "macos" ]]; then
-            warn "macOS ships with bash 3.2. After installation, install bash 4+ with:"
-            warn "  brew install bash"
-            warn "Then run cai with: /opt/homebrew/bin/bash cai (Apple Silicon)"
-            warn "                or: /usr/local/bin/bash cai (Intel)"
+        if [[ -n "$BASH4_PATH" ]]; then
+            # bash 4+ was installed/found during bootstrap
+            local bash4_version
+            bash4_version="$("$BASH4_PATH" -c 'echo "$BASH_VERSION"' 2>/dev/null)" || bash4_version="4.x"
+            success "bash $bash4_version (Homebrew)"
         else
-            warn "Please install bash 4.0 or later to use the cai CLI"
+            warn "bash ${BASH_VERSION} (4.0+ needed for cai CLI)"
         fi
-        # Return success - installer can proceed, CLI will check at runtime
-        return 0
+    else
+        success "bash ${BASH_VERSION}"
     fi
     return 0
 }
@@ -271,16 +521,33 @@ if [ -z "\${BASH_VERSION:-}" ]; then
     exit 1
 fi
 
-# Check bash version
+# Check bash version - re-exec with Homebrew bash on macOS if needed
 major_version="\${BASH_VERSION%%.*}"
 if [[ "\$major_version" -lt 4 ]]; then
-    echo "[ERROR] cai requires bash 4.0 or later (found \$BASH_VERSION)" >&2
+    # On macOS, try to re-exec with Homebrew bash
     if [[ "\$(uname -s)" == "Darwin" ]]; then
+        # Prevent infinite re-exec loop
+        if [[ -z "\${_CAI_REEXEC:-}" ]]; then
+            # Check for Homebrew bash (Apple Silicon then Intel)
+            for brew_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+                if [[ -x "\$brew_bash" ]]; then
+                    # Verify it's bash 4+
+                    brew_major="\$("\$brew_bash" -c 'echo "\${BASH_VERSION%%.*}"' 2>/dev/null)" || continue
+                    if [[ "\$brew_major" -ge 4 ]]; then
+                        export _CAI_REEXEC=1
+                        exec "\$brew_bash" "\$0" "\$@"
+                    fi
+                fi
+            done
+        fi
+        echo "[ERROR] cai requires bash 4.0 or later (found \$BASH_VERSION)" >&2
         echo "  Install with: brew install bash" >&2
-        echo "  Then run: /opt/homebrew/bin/bash \\\$(which cai) (Apple Silicon)" >&2
-        echo "         or: /usr/local/bin/bash \\\$(which cai) (Intel)" >&2
+        exit 1
+    else
+        echo "[ERROR] cai requires bash 4.0 or later (found \$BASH_VERSION)" >&2
+        echo "  Please install bash 4.0 or later" >&2
+        exit 1
     fi
-    exit 1
 fi
 
 # Install directory (baked in at install time, can override with env var)
@@ -409,6 +676,11 @@ main() {
     local os
     os="$(detect_os)"
     info "Detected OS: $os"
+    echo ""
+
+    # Bootstrap bash 4+ on macOS BEFORE creating wrapper
+    # This sets BASH4_PATH if bash 4+ is available/installed
+    bootstrap_bash
     echo ""
 
     check_prerequisites
