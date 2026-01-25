@@ -13,6 +13,7 @@
 #   doctor       Check system capabilities and show diagnostics
 #   setup        Install Sysbox Secure Engine (WSL2/macOS)
 #   validate     Validate Secure Engine configuration
+#   docker       Run docker with ContainAI context (defaults to containai-docker if present)
 #   sandbox      (Deprecated - use 'cai stop && cai --restart')
 #   import       Sync host configs to data volume
 #   export       Export data volume to .tgz archive
@@ -170,6 +171,7 @@ Subcommands:
   doctor        Check system capabilities and show diagnostics
   setup         Install Sysbox Secure Engine (WSL2/macOS)
   validate      Validate Secure Engine configuration
+  docker        Run docker with ContainAI context (defaults to containai-docker if present)
   sandbox       (Deprecated - use 'cai stop && cai --restart')
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
@@ -1044,6 +1046,40 @@ _containai_ssh_cleanup_cmd() {
     _cai_ssh_cleanup "$dry_run"
 }
 
+# ==============================================================================
+# Docker pass-through subcommand
+# ==============================================================================
+
+_containai_docker_cmd() {
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "[ERROR] Docker is not installed or not in PATH" >&2
+        return 1
+    fi
+
+    local context=""
+    if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    else
+        context=$(docker context show 2>/dev/null || true)
+    fi
+
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --context|--context=*)
+                docker "$@"
+                return $?
+                ;;
+        esac
+    done
+
+    if [[ -n "$context" ]]; then
+        docker --context "$context" "$@"
+    else
+        docker "$@"
+    fi
+}
+
 # Shell subcommand handler - connects to container via SSH
 # Uses SSH instead of docker exec for real terminal experience
 _containai_shell_cmd() {
@@ -1898,6 +1934,10 @@ containai() {
         validate)
             shift
             _cai_secure_engine_validate "$@"
+            ;;
+        docker)
+            shift
+            _containai_docker_cmd "$@"
             ;;
         import)
             shift

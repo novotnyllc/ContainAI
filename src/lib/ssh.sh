@@ -1582,7 +1582,7 @@ _cai_ssh_shell() {
         # Fallback: check if image is from our repo (for legacy containers without label)
         local image_name
         image_name=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
-        if [[ "$image_name" != "${_CONTAINAI_DEFAULT_REPO:-agent-sandbox}:"* ]]; then
+        if ! _containai_is_our_image "$image_name"; then
             _cai_error "Container '$container_name' exists but was not created by ContainAI"
             _cai_error ""
             _cai_error "This is a name collision with a container not managed by ContainAI."
@@ -1879,7 +1879,7 @@ _cai_ssh_run() {
         # Fallback: check if image is from our repo (for legacy containers without label)
         local image_name
         image_name=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
-        if [[ "$image_name" != "${_CONTAINAI_DEFAULT_REPO:-agent-sandbox}:"* ]]; then
+        if ! _containai_is_our_image "$image_name"; then
             _cai_error "Container '$container_name' exists but was not created by ContainAI"
             _cai_error ""
             _cai_error "This is a name collision with a container not managed by ContainAI."

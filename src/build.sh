@@ -13,6 +13,7 @@ set -euo pipefail
 #   --build-setup             Configure buildx builder + binfmt if required
 #   --push                    Push images (buildx only)
 #   --load                    Load image into local docker (buildx only; single-platform)
+#   --context NAME            Docker context (default: containai-docker if present)
 #   --help                    Show this help
 #
 # Defaults: buildx is preferred; platform defaults to linux/<host-arch>
@@ -44,6 +45,8 @@ USE_BUILDX=1
 BUILD_SETUP=0
 BUILDX_REQUESTED=0
 HAS_OUTPUT=0
+DOCKER_CONTEXT=""
+DOCKER_CMD=(docker)
 
 # Parse options
 DOCKER_ARGS=()
@@ -126,6 +129,22 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             BUILDX_REQUESTED=1
+            shift
+            ;;
+        --context)
+            if [[ -z "${2-}" ]]; then
+                echo "ERROR: --context requires a value" >&2
+                exit 1
+            fi
+            DOCKER_CONTEXT="$2"
+            shift 2
+            ;;
+        --context=*)
+            DOCKER_CONTEXT="${1#*=}"
+            if [[ -z "$DOCKER_CONTEXT" ]]; then
+                echo "ERROR: --context requires a value" >&2
+                exit 1
+            fi
             shift
             ;;
         --image-prefix=*)
@@ -213,9 +232,9 @@ normalize_platforms() {
 buildx_inspect() {
     local builder="$1"
     if [[ -n "$builder" ]]; then
-        docker buildx inspect "$builder" --bootstrap 2>/dev/null
+        "${DOCKER_CMD[@]}" buildx inspect "$builder" --bootstrap 2>/dev/null
     else
-        docker buildx inspect --bootstrap 2>/dev/null
+        "${DOCKER_CMD[@]}" buildx inspect --bootstrap 2>/dev/null
     fi
 }
 
@@ -237,11 +256,11 @@ buildx_setup() {
     local builder="$1"
     local driver
 
-    if ! docker buildx inspect "$builder" >/dev/null 2>&1; then
+    if ! "${DOCKER_CMD[@]}" buildx inspect "$builder" >/dev/null 2>&1; then
         printf 'Creating buildx builder "%s"...\n' "$builder"
-        docker buildx create --name "$builder" --driver docker-container --use >/dev/null
+        "${DOCKER_CMD[@]}" buildx create --name "$builder" --driver docker-container --use >/dev/null
     else
-        docker buildx use "$builder" >/dev/null
+        "${DOCKER_CMD[@]}" buildx use "$builder" >/dev/null
     fi
 
     driver="$(buildx_driver "$builder")" || return 1
@@ -251,8 +270,8 @@ buildx_setup() {
     fi
 
     printf 'Ensuring binfmt is installed for amd64 and arm64...\n'
-    docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64 >/dev/null
-    docker buildx inspect "$builder" --bootstrap >/dev/null
+    "${DOCKER_CMD[@]}" run --privileged --rm tonistiigi/binfmt --install amd64,arm64 >/dev/null
+    "${DOCKER_CMD[@]}" buildx inspect "$builder" --bootstrap >/dev/null
 }
 
 buildx_check_platforms() {
@@ -291,7 +310,18 @@ if [[ "$USE_BUILDX" -eq 1 ]]; then
         printf 'ERROR: docker is not installed or not in PATH.\n' >&2
         exit 1
     fi
-    if ! docker buildx version >/dev/null 2>&1; then
+    if [[ -n "$DOCKER_CONTEXT" ]]; then
+        if ! docker context inspect "$DOCKER_CONTEXT" >/dev/null 2>&1; then
+            printf 'ERROR: docker context "%s" not found.\n' "$DOCKER_CONTEXT" >&2
+            exit 1
+        fi
+        DOCKER_CMD=(docker --context "$DOCKER_CONTEXT")
+    else
+        if docker context inspect containai-docker >/dev/null 2>&1; then
+            DOCKER_CMD=(docker --context containai-docker)
+        fi
+    fi
+    if ! "${DOCKER_CMD[@]}" buildx version >/dev/null 2>&1; then
         if [[ "$BUILDX_REQUESTED" -eq 1 ]]; then
             printf 'ERROR: docker buildx is not available. Install the buildx plugin.\n' >&2
         else
@@ -347,14 +377,14 @@ build_layer() {
     local dockerfile="$2"
     local extra_args=("${@:3}")
     local repo="${IMAGE_PREFIX}/${name}"
-    local build_cmd=(docker build)
+    local build_cmd=("${DOCKER_CMD[@]}" build)
 
     echo ""
     echo "=== Building containai/${name} ==="
     echo ""
 
     if [[ "$USE_BUILDX" -eq 1 ]]; then
-        build_cmd=(docker buildx build)
+        build_cmd=("${DOCKER_CMD[@]}" buildx build)
         if [[ -n "$BUILDX_BUILDER" ]]; then
             build_cmd+=(--builder "$BUILDX_BUILDER")
         fi
@@ -409,9 +439,9 @@ case "$BUILD_LAYER" in
         echo ""
         echo "=== Building containai (final image) ==="
         echo ""
-        final_cmd=(docker build)
+        final_cmd=("${DOCKER_CMD[@]}" build)
         if [[ "$USE_BUILDX" -eq 1 ]]; then
-            final_cmd=(docker buildx build)
+            final_cmd=("${DOCKER_CMD[@]}" buildx build)
             if [[ -n "$BUILDX_BUILDER" ]]; then
                 final_cmd+=(--builder "$BUILDX_BUILDER")
             fi
@@ -447,5 +477,5 @@ echo ""
 if [[ "$USE_BUILDX" -eq 1 && "$BUILDX_LOAD" -eq 0 && ( "$BUILDX_PUSH" -eq 1 || "$HAS_OUTPUT" -eq 1 ) ]]; then
     printf 'Images were pushed or exported; no local images loaded.\n'
 else
-    docker images "${IMAGE_PREFIX}*" --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | head -20
+    "${DOCKER_CMD[@]}" images "${IMAGE_PREFIX}*" --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}" | head -20
 fi

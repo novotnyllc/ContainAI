@@ -80,7 +80,7 @@ fi
 #
 # See: https://docs.docker.com/engine/security/seccomp/
 # ==============================================================================
-: "${_CONTAINAI_DEFAULT_REPO:=agent-sandbox}"
+: "${_CONTAINAI_DEFAULT_REPO:=containai}"
 : "${_CONTAINAI_DEFAULT_AGENT:=claude}"
 : "${_CONTAINAI_DEFAULT_CREDENTIALS:=none}"
 
@@ -88,8 +88,8 @@ fi
 # Format: agent -> tag
 declare -A _CONTAINAI_AGENT_TAGS 2>/dev/null || true
 _CONTAINAI_AGENT_TAGS=(
-    [claude]="claude-code"
-    [gemini]="gemini-cli"
+    [claude]="latest"
+    [gemini]="latest"
 )
 
 # ==============================================================================
@@ -1402,7 +1402,7 @@ _containai_start_container() {
                 if [[ "$port_conflict_label" != "true" ]]; then
                     # Check image fallback for legacy containers
                     port_conflict_image=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || port_conflict_image=""
-                    if [[ "$port_conflict_image" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                    if ! _containai_is_our_image "$port_conflict_image"; then
                         echo "[ERROR] Cannot recreate container - '$container_name' was not created by ContainAI" >&2
                         echo "[ERROR] SSH port $existing_ssh_port is in use. Remove the container manually or use a different name." >&2
                         return 1
@@ -1434,7 +1434,7 @@ _containai_start_container() {
         if [[ "$fresh_label_val" != "true" ]]; then
             # Fallback: check if image is from our repo (for legacy containers without label)
             fresh_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || fresh_image_fallback=""
-            if [[ "$fresh_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+            if ! _containai_is_our_image "$fresh_image_fallback"; then
                 echo "[ERROR] Cannot use --fresh - container '$container_name' was not created by ContainAI" >&2
                 echo "Remove the conflicting container manually if needed: docker rm -f '$container_name'" >&2
                 return 1
@@ -1476,7 +1476,7 @@ _containai_start_container() {
         if [[ "$label_val" != "true" ]]; then
             # Fallback: check if image is from our repo (for legacy containers without label)
             restart_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || restart_image_fallback=""
-            if [[ "$restart_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+            if ! _containai_is_our_image "$restart_image_fallback"; then
                 echo "[ERROR] Cannot restart - container '$container_name' was not created by ContainAI" >&2
                 echo "Remove the conflicting container manually if needed: docker rm -f '$container_name'" >&2
                 return 1
@@ -1528,7 +1528,7 @@ _containai_start_container() {
             if [[ "$running_label_val" != "true" ]]; then
                 # Fallback: check if image is from our repo (for legacy containers without label)
                 running_image_val=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || running_image_val=""
-                if [[ "$running_image_val" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                if ! _containai_is_our_image "$running_image_val"; then
                     echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
                     return 1
                 fi
@@ -1613,7 +1613,7 @@ _containai_start_container() {
             if [[ "$exited_label_val" != "true" ]]; then
                 # Fallback: check if image is from our repo (for legacy containers without label)
                 exited_image_fallback=$("${docker_cmd[@]}" inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null) || exited_image_fallback=""
-                if [[ "$exited_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                if ! _containai_is_our_image "$exited_image_fallback"; then
                     echo "[ERROR] Container '$container_name' was not created by ContainAI" >&2
                     return 1
                 fi
@@ -1935,10 +1935,13 @@ _containai_list_containers_for_context() {
     fi
 
     local labeled ancestor_claude ancestor_gemini line
+    local claude_tag gemini_tag
+    claude_tag="${_CONTAINAI_AGENT_TAGS[claude]:-latest}"
+    gemini_tag="${_CONTAINAI_AGENT_TAGS[gemini]:-latest}"
     # Use || true for set -e safety - empty result is valid
     labeled=$("${docker_cmd[@]}" ps -a --filter "label=$_CONTAINAI_LABEL" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || labeled=""
-    ancestor_claude=$("${docker_cmd[@]}" ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:claude-code" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_claude=""
-    ancestor_gemini=$("${docker_cmd[@]}" ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:gemini-cli" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_gemini=""
+    ancestor_claude=$("${docker_cmd[@]}" ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:${claude_tag}" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_claude=""
+    ancestor_gemini=$("${docker_cmd[@]}" ps -a --filter "ancestor=${_CONTAINAI_DEFAULT_REPO}:${gemini_tag}" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || ancestor_gemini=""
 
     # Combine and dedupe, adding context as third column
     local combined

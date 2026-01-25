@@ -34,8 +34,21 @@ if ! command -v docker &>/dev/null; then
     exit 0
 fi
 
+# Prefer containai-docker context when available; otherwise use current default context
+DOCKER_CONTEXT=""
+if docker context inspect containai-docker >/dev/null 2>&1; then
+    DOCKER_CONTEXT="containai-docker"
+else
+    DOCKER_CONTEXT=$(docker context show 2>/dev/null || true)
+fi
+
+DOCKER_CMD=(docker)
+if [[ -n "$DOCKER_CONTEXT" ]]; then
+    DOCKER_CMD=(docker --context "$DOCKER_CONTEXT")
+fi
+
 # Check docker daemon is running (don't hide regressions)
-if ! docker info &>/dev/null; then
+if ! "${DOCKER_CMD[@]}" info &>/dev/null; then
     echo "[WARN] docker daemon not running (docker info failed)" >&2
     echo "[FAIL] Cannot run integration tests without docker daemon" >&2
     exit 1
@@ -73,7 +86,7 @@ cleanup_fixture() {
 TEST_RUN_ID="test-$(date +%s)-$$"
 DATA_VOLUME="containai-test-${TEST_RUN_ID}"
 
-IMAGE_NAME="agent-sandbox-test:latest"
+IMAGE_NAME="containai-test:latest"
 
 # Track all test volumes created by THIS run for safe cleanup
 # (avoids deleting volumes from parallel test runs)
@@ -91,17 +104,17 @@ cleanup_test_volumes() {
     local vol
     # First pass: explicitly registered volumes
     for vol in "${TEST_VOLUMES_CREATED[@]}"; do
-        docker volume rm "$vol" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$vol" 2>/dev/null || true
     done
     # Second pass: catch any volumes containing this run's ID that weren't registered
     # Note: containai-test-env-${TEST_RUN_ID}, containai-test-cli-${TEST_RUN_ID}, etc.
     # all contain $TEST_RUN_ID as a substring, so filter by run ID directly
     local run_volumes
-    run_volumes=$(docker volume ls --filter "name=${TEST_RUN_ID}" -q 2>/dev/null || true)
+    run_volumes=$("${DOCKER_CMD[@]}" volume ls --filter "name=${TEST_RUN_ID}" -q 2>/dev/null || true)
     if [[ -n "$run_volumes" ]]; then
         # Avoid xargs -r for portability (BSD/macOS doesn't support -r)
         # The non-empty check above guards against empty input
-        echo "$run_volumes" | xargs docker volume rm 2>/dev/null || true
+        echo "$run_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
     fi
 }
 
@@ -135,7 +148,7 @@ FAILED=0
 # Uses sed instead of grep -v to avoid failure on empty output (pipefail-safe)
 run_in_rsync() {
     local output exit_code
-    output=$(docker run --rm -v "$DATA_VOLUME":/data eeacms/rsync sh -c "$1" 2>&1) || exit_code=$?
+    output=$("${DOCKER_CMD[@]}" run --rm -v "$DATA_VOLUME":/data eeacms/rsync sh -c "$1" 2>&1) || exit_code=$?
     if [[ ${exit_code:-0} -ne 0 && ${exit_code:-0} -ne 1 ]]; then
         echo "docker_run_failed:$exit_code"
         return 1
@@ -162,7 +175,7 @@ get_count() {
 
 # Helper to run in test image - bypassing entrypoint for symlink checks only
 run_in_image_no_entrypoint() {
-    if ! docker run --rm --entrypoint /bin/bash -v "$DATA_VOLUME":/mnt/agent-data "$IMAGE_NAME" -c "$1" 2>/dev/null; then
+    if ! "${DOCKER_CMD[@]}" run --rm --entrypoint /bin/bash -v "$DATA_VOLUME":/mnt/agent-data "$IMAGE_NAME" -c "$1" 2>/dev/null; then
         echo "docker_error"
     fi
 }
@@ -323,9 +336,9 @@ test_dry_run() {
     section "Test 2: Dry-run makes no volume changes"
 
     # Ensure volume exists before test (test setup, not mutation from dry-run)
-    if ! docker volume inspect "$DATA_VOLUME" &>/dev/null; then
+    if ! "${DOCKER_CMD[@]}" volume inspect "$DATA_VOLUME" &>/dev/null; then
         info "Creating test volume (test setup, not dry-run mutation)"
-        docker volume create "$DATA_VOLUME" >/dev/null
+        "${DOCKER_CMD[@]}" volume create "$DATA_VOLUME" >/dev/null
     fi
 
     # Capture volume snapshot before dry-run using stat (BusyBox compatible)
@@ -356,11 +369,11 @@ test_dry_run() {
     # Create test volumes for precedence tests (use unique run-scoped names)
     local env_vol="containai-test-env-${TEST_RUN_ID}"
     local cli_vol="containai-test-cli-${TEST_RUN_ID}"
-    if ! docker volume create "$env_vol" >/dev/null; then
+    if ! "${DOCKER_CMD[@]}" volume create "$env_vol" >/dev/null; then
         fail "Failed to create test volume: $env_vol"
         return
     fi
-    if ! docker volume create "$cli_vol" >/dev/null; then
+    if ! "${DOCKER_CMD[@]}" volume create "$cli_vol" >/dev/null; then
         fail "Failed to create test volume: $cli_vol"
         return
     fi
@@ -415,7 +428,7 @@ test_dry_run() {
     mkdir -p "$config_test_dir/.containai"
     echo '[agent]' >"$config_test_dir/.containai/config.toml"
     echo "data_volume = \"$config_vol\"" >>"$config_test_dir/.containai/config.toml"
-    if ! docker volume create "$config_vol" >/dev/null; then
+    if ! "${DOCKER_CMD[@]}" volume create "$config_vol" >/dev/null; then
         fail "Failed to create test volume: $config_vol"
         rm -rf "$config_test_dir"
         return
@@ -1030,7 +1043,7 @@ EOF
 run_in_alpine() {
     local vol="$1"
     shift
-    docker run --rm -v "$vol":/data alpine sh -c "$*" 2>&1
+    "${DOCKER_CMD[@]}" run --rm -v "$vol":/data alpine sh -c "$*" 2>&1
 }
 
 # Helper to create test config with env section
@@ -1059,7 +1072,7 @@ data_volume = "'"$test_vol"'"
 import = ["TEST_IMPORT_VAR1", "TEST_IMPORT_VAR2"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Run import with hermetic env and fixture HOME
@@ -1115,7 +1128,7 @@ import = ["TEST_NOHOST_VAR"]
 from_host = false
 env_file = "test.env"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Run import with host var set (should NOT be used since from_host=false)
@@ -1164,7 +1177,7 @@ import = ["SIMPLE_VAR", "EXPORT_VAR", "KEY_WITH_EQUALS"]
 from_host = false
 env_file = "test.env"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output
@@ -1217,7 +1230,7 @@ import = ["PRECEDENCE_VAR"]
 from_host = true
 env_file = "test.env"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Host env should take precedence
@@ -1257,7 +1270,7 @@ data_volume = "'"$test_vol"'"
 import = ["EXISTING_VAR", "NONEXISTENT_VAR_12345"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
@@ -1299,7 +1312,7 @@ data_volume = "'"$test_vol"'"
 import = ["MULTILINE_VAR", "NORMAL_VAR"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Export multiline var (newline embedded) - hermetic with fixture HOME
@@ -1353,7 +1366,7 @@ data_volume = "'"$test_vol"'"
 import = []
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
@@ -1402,7 +1415,7 @@ data_volume = "'"$test_vol"'"
 import = ["PERM_TEST_VAR"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output
@@ -1448,7 +1461,7 @@ data_volume = "'"$test_vol"'"
 import = ["VALID_VAR", "123INVALID", "ALSO-INVALID", "_VALID_UNDERSCORE"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Hermetic with fixture HOME
@@ -1499,7 +1512,7 @@ data_volume = "'"$test_vol"'"
 import = ["DUP_VAR", "DUP_VAR", "OTHER_VAR", "DUP_VAR"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Hermetic with fixture HOME
@@ -1545,7 +1558,7 @@ import = ["SPACE_VAR"]
 from_host = false
 env_file = "test.env"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output
@@ -1586,7 +1599,7 @@ import = ["CRLF_VAR", "ANOTHER_VAR"]
 from_host = false
 env_file = "test.env"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output
@@ -1623,11 +1636,11 @@ test_entrypoint_no_override() {
     local test_vol
     test_vol="containai-test-entrypoint-${TEST_RUN_ID}"
 
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Pre-populate .env in volume
-    docker run --rm -v "$test_vol":/data alpine sh -c '
+    "${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine sh -c '
         echo "PRE_SET_VAR=from_env_file" > /data/.env
         echo "NEW_VAR=from_file" >> /data/.env
         chown 1000:1000 /data/.env
@@ -1637,7 +1650,7 @@ test_entrypoint_no_override() {
     # Run container with PRE_SET_VAR already set via -e
     # Test the "only set if not present" semantics that _load_env_file implements
     local result
-    result=$(docker run --rm \
+    result=$("${DOCKER_CMD[@]}" run --rm \
         -v "$test_vol":/mnt/agent-data \
         -e PRE_SET_VAR=from_runtime \
         --entrypoint /bin/bash \
@@ -1688,11 +1701,11 @@ test_entrypoint_empty_string_present() {
     local test_vol
     test_vol="containai-test-entrypoint-empty-${TEST_RUN_ID}"
 
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Pre-populate .env with a value
-    docker run --rm -v "$test_vol":/data alpine sh -c '
+    "${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine sh -c '
         echo "EMPTY_VAR=from_file" > /data/.env
         chown 1000:1000 /data/.env
         chmod 600 /data/.env
@@ -1700,7 +1713,7 @@ test_entrypoint_empty_string_present() {
 
     # Run with EMPTY_VAR="" - empty string counts as "present"
     local result
-    result=$(docker run --rm \
+    result=$("${DOCKER_CMD[@]}" run --rm \
         -v "$test_vol":/mnt/agent-data \
         -e EMPTY_VAR= \
         --entrypoint /bin/bash \
@@ -1754,7 +1767,7 @@ data_volume = "'"$test_vol"'"
 import = ["DRYRUN_VAR1", "DRYRUN_VAR2"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Hermetic with fixture HOME
@@ -1827,7 +1840,7 @@ import = ["SYMLINK_VAR"]
 from_host = false
 env_file = "link.env"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
@@ -1862,12 +1875,12 @@ data_volume = "'"$test_vol"'"
 import = ["TOCTOU_VAR"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Pre-create a symlink .env on the volume (simulating TOCTOU attack)
     # The attacker creates /data/.env -> /etc/passwd before import runs
-    docker run --rm -v "$test_vol":/data alpine sh -c '
+    "${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine sh -c '
         echo "MALICIOUS=payload" > /data/malicious.txt
         ln -sf /etc/passwd /data/.env
     '
@@ -1885,7 +1898,7 @@ from_host = true
 
     # Verify /etc/passwd was NOT overwritten (symlink still points there)
     local check_result
-    check_result=$(docker run --rm -v "$test_vol":/data alpine sh -c '
+    check_result=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine sh -c '
         if [[ -L /data/.env ]]; then
             echo "SYMLINK_PRESERVED"
         else
@@ -1931,13 +1944,13 @@ data_volume = "'"$test_vol"'"
 import = ["MOUNT_TEST_VAR"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Test 1: Run the guard logic in isolation with a simulated symlink
     # This tests the SAME guard code that exists in env.sh helper
     local guard_test
-    guard_test=$(docker run --rm alpine sh -c '
+    guard_test=$("${DOCKER_CMD[@]}" run --rm alpine sh -c '
         # Create a symlink to simulate what the guard checks for
         mkdir -p /tmp/real_data
         ln -s /tmp/real_data /tmp/symlink_data
@@ -2023,7 +2036,7 @@ test_env_toctou_temp_symlink() {
 
     # Test 1: Run the guard logic in isolation with a simulated symlink temp file
     local guard_test
-    guard_test=$(docker run --rm alpine sh -c '
+    guard_test=$("${DOCKER_CMD[@]}" run --rm alpine sh -c '
         mkdir -p /tmp/data
         # Create a symlink to simulate a TOCTOU-replaced temp file
         touch /tmp/real_temp
@@ -2109,7 +2122,7 @@ import = ["VALID_VAR", "ANOTHER_VAR"]
 from_host = false
 env_file = "test.env"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output
@@ -2153,7 +2166,7 @@ import = ["SOME_VAR"]
 from_host = false
 env_file = "/etc/passwd"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
@@ -2188,7 +2201,7 @@ import = ["SOME_VAR"]
 from_host = false
 env_file = "../../../etc/passwd"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
@@ -2215,11 +2228,11 @@ test_entrypoint_symlink_rejected() {
     local test_vol
     test_vol="containai-test-entrypoint-symlink-${TEST_RUN_ID}"
 
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Create a symlink .env in volume pointing to a real file
-    docker run --rm -v "$test_vol":/data alpine sh -c '
+    "${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine sh -c '
         echo "SYMLINK_VAR=should_not_load" > /data/real.env
         ln -s real.env /data/.env
     '
@@ -2228,7 +2241,7 @@ test_entrypoint_symlink_rejected() {
     # 1. Symlink is detected
     # 2. Value is NOT exported (guard condition works)
     local result stderr_capture
-    result=$(docker run --rm \
+    result=$("${DOCKER_CMD[@]}" run --rm \
         -v "$test_vol":/mnt/agent-data \
         --entrypoint /bin/bash \
         "$IMAGE_NAME" -c '
@@ -2285,11 +2298,11 @@ test_entrypoint_unreadable_env() {
     local test_vol
     test_vol="containai-test-entrypoint-unread-${TEST_RUN_ID}"
 
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Create .env with no read permission for user 1000
-    docker run --rm -v "$test_vol":/data alpine sh -c '
+    "${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine sh -c '
         echo "UNREAD_VAR=secret_value" > /data/.env
         chmod 000 /data/.env
     '
@@ -2300,7 +2313,7 @@ test_entrypoint_unreadable_env() {
     # 2. Warning is logged
     # 3. Execution continues to a final command
     local result
-    result=$(docker run --rm \
+    result=$("${DOCKER_CMD[@]}" run --rm \
         -v "$test_vol":/mnt/agent-data \
         --user 1000:1000 \
         --entrypoint /bin/bash \
@@ -2368,12 +2381,12 @@ test_entrypoint_loads_after_ownership() {
     local test_vol
     test_vol="containai-test-entrypoint-order-${TEST_RUN_ID}"
 
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Create .env as root (simulating initial volume state before ownership fix)
     # The entrypoint should fix ownership THEN load .env
-    docker run --rm -v "$test_vol":/data alpine sh -c '
+    "${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine sh -c '
         echo "OWNERSHIP_TEST_VAR=after_fix" > /data/.env
         chown root:root /data/.env
         chmod 644 /data/.env
@@ -2381,7 +2394,7 @@ test_entrypoint_loads_after_ownership() {
 
     # Verify .env is initially root-owned
     local initial_owner
-    initial_owner=$(docker run --rm -v "$test_vol":/data alpine stat -c "%u:%g" /data/.env)
+    initial_owner=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine stat -c "%u:%g" /data/.env)
     if [[ "$initial_owner" == "0:0" ]]; then
         pass "Initial .env is root-owned (test setup correct)"
     else
@@ -2392,7 +2405,7 @@ test_entrypoint_loads_after_ownership() {
     # then calls _load_env_file(). Test that the env loading semantics work
     # after ownership would be fixed.
     local result
-    result=$(docker run --rm \
+    result=$("${DOCKER_CMD[@]}" run --rm \
         -v "$test_vol":/mnt/agent-data \
         --user 1000:1000 \
         --entrypoint /bin/bash \
@@ -2477,7 +2490,7 @@ import = ["NORMAL_VAR", "MULTILINE_VAR", "AFTER_MULTILINE"]
 from_host = false
 env_file = "test.env"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output
@@ -2532,7 +2545,7 @@ test_env_missing_section_silent() {
 [agent]
 data_volume = "'"$test_vol"'"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
@@ -2573,7 +2586,7 @@ data_volume = "'"$test_vol"'"
 import = ["HERMETIC_TEST_VAR"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Set a var in outer shell that should NOT leak through if env is hermetic
@@ -2634,7 +2647,7 @@ test_from_directory() {
 [agent]
 data_volume = "'"$test_vol"'"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Create alternate source directory with distinctive content
@@ -2661,7 +2674,7 @@ data_volume = "'"$test_vol"'"
     # Verify the content came from alternate source (check for marker)
     # Note: Use direct docker command with test_vol, not run_in_rsync (which uses DATA_VOLUME)
     local settings_content
-    settings_content=$(docker run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || settings_content=""
+    settings_content=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || settings_content=""
 
     if echo "$settings_content" | grep -q "from_alt_source_12345"; then
         pass "Volume contains content from --from directory (marker found)"
@@ -2709,7 +2722,7 @@ data_volume = "'"$test_vol"'"
 import = ["RESTORE_MODE_TEST_VAR"]
 from_host = true
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Create a minimal test archive with distinctive content
@@ -2738,7 +2751,7 @@ from_host = true
     # Verify the content came from archive (check for marker)
     # Note: Use direct docker command with test_vol, not run_in_rsync (which uses DATA_VOLUME)
     local settings_content
-    settings_content=$(docker run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || settings_content=""
+    settings_content=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || settings_content=""
 
     if echo "$settings_content" | grep -q "tgz_restore_test_67890"; then
         pass "Volume contains content from tgz archive (marker found)"
@@ -2757,7 +2770,7 @@ from_host = true
     # Verify env import was skipped (no .env file should exist, or if it does, var not there)
     # Note: Use direct docker command with test_vol and grep full file (not just last line)
     local env_content
-    env_content=$(docker run --rm -v "$test_vol":/data alpine:3.19 cat /data/.env 2>/dev/null) || env_content=""
+    env_content=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 cat /data/.env 2>/dev/null) || env_content=""
 
     if [[ -z "$env_content" ]] || ! echo "$env_content" | grep -q "RESTORE_MODE_TEST_VAR"; then
         pass "Env import skipped in restore mode (no .env or var not present)"
@@ -2786,13 +2799,13 @@ test_export_import_roundtrip() {
     trap "rm -rf '$test_dir'" RETURN
 
     # Create and register volumes
-    docker volume create "$source_vol" >/dev/null
-    docker volume create "$target_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$source_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$target_vol" >/dev/null
     register_test_volume "$source_vol"
     register_test_volume "$target_vol"
 
     # Populate source volume with distinctive test content
-    docker run --rm -v "$source_vol":/data alpine:3.19 sh -c '
+    "${DOCKER_CMD[@]}" run --rm -v "$source_vol":/data alpine:3.19 sh -c '
         mkdir -p /data/claude /data/config/gh /data/shell
         echo "{\"roundtrip_test\": \"marker_98765\"}" > /data/claude/settings.json
         echo "oauth_token: roundtrip_test" > /data/config/gh/hosts.yml
@@ -2842,10 +2855,10 @@ test_export_import_roundtrip() {
     # Compare checksums of key files between source and target
     # Using md5sum in alpine container (busybox md5sum)
     local source_checksums target_checksums
-    source_checksums=$(docker run --rm -v "$source_vol":/data alpine:3.19 sh -c '
+    source_checksums=$("${DOCKER_CMD[@]}" run --rm -v "$source_vol":/data alpine:3.19 sh -c '
         find /data -type f -exec md5sum {} \; 2>/dev/null | sort
     ') || source_checksums=""
-    target_checksums=$(docker run --rm -v "$target_vol":/data alpine:3.19 sh -c '
+    target_checksums=$("${DOCKER_CMD[@]}" run --rm -v "$target_vol":/data alpine:3.19 sh -c '
         find /data -type f -exec md5sum {} \; 2>/dev/null | sort
     ') || target_checksums=""
 
@@ -2865,7 +2878,7 @@ test_export_import_roundtrip() {
 
     # Verify distinctive content exists in target
     local target_content
-    target_content=$(docker run --rm -v "$target_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || target_content=""
+    target_content=$("${DOCKER_CMD[@]}" run --rm -v "$target_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || target_content=""
 
     if echo "$target_content" | grep -q "marker_98765"; then
         pass "Target volume contains roundtrip marker"
@@ -2893,7 +2906,7 @@ test_tgz_import_idempotent() {
     trap "rm -rf '$test_dir'" RETURN
 
     # Create and register volume
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Create a test archive with known content
@@ -2926,10 +2939,10 @@ test_tgz_import_idempotent() {
 
     # Capture state after first import
     local checksums_after_first state_after_first
-    checksums_after_first=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+    checksums_after_first=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
         find /data -type f -exec md5sum {} \; 2>/dev/null | sort
     ') || checksums_after_first=""
-    state_after_first=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+    state_after_first=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
         find /data -type f -exec stat -c "%a %s %n" {} \; 2>/dev/null | sort
     ') || state_after_first=""
 
@@ -2948,10 +2961,10 @@ test_tgz_import_idempotent() {
 
     # Capture state after second import
     local checksums_after_second state_after_second
-    checksums_after_second=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+    checksums_after_second=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
         find /data -type f -exec md5sum {} \; 2>/dev/null | sort
     ') || checksums_after_second=""
-    state_after_second=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+    state_after_second=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
         find /data -type f -exec stat -c "%a %s %n" {} \; 2>/dev/null | sort
     ') || state_after_second=""
 
@@ -2973,7 +2986,7 @@ test_tgz_import_idempotent() {
 
     # Verify content is correct
     local content
-    content=$(docker run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || content=""
+    content=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || content=""
 
     if echo "$content" | grep -q "first_import_12345"; then
         pass "Volume contains expected content after idempotent imports"
@@ -3001,7 +3014,7 @@ test_invalid_tgz_error() {
     trap "rm -rf '$test_dir'" RETURN
 
     # Create and register volume
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Create an invalid "tgz" file (not a valid gzip tarball)
@@ -3060,7 +3073,7 @@ test_missing_source_error() {
     test_vol="containai-test-missing-${TEST_RUN_ID}"
 
     # Create and register volume
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # Test with non-existent file path
@@ -3122,7 +3135,7 @@ test_symlink_relinking() {
 [agent]
 data_volume = "'"$test_vol"'"
 '
-    docker volume create "$test_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$test_vol" >/dev/null
     register_test_volume "$test_vol"
 
     # -------------------------------------------------------------------------
@@ -3178,7 +3191,7 @@ data_volume = "'"$test_vol"'"
     section "Test 46: Symlink relinking - internal absolute"
 
     local target
-    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/internal-link 2>/dev/null) || target=""
+    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/internal-link 2>/dev/null) || target=""
 
     if [[ "$target" == "/mnt/agent-data/config/gh/real-target" ]]; then
         pass "Internal absolute symlink relinked correctly"
@@ -3191,7 +3204,7 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     section "Test 47: Symlink relinking - relative preserved"
 
-    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/relative-link 2>/dev/null) || target=""
+    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/relative-link 2>/dev/null) || target=""
 
     if [[ "$target" == "./real-target" ]]; then
         pass "Relative symlink preserved unchanged"
@@ -3204,7 +3217,7 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     section "Test 48: Symlink relinking - external preserved with warning"
 
-    target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/external-link 2>/dev/null) || target=""
+    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/external-link 2>/dev/null) || target=""
 
     if [[ "$target" == "/usr/bin/bash" ]]; then
         pass "External absolute symlink preserved"
@@ -3229,7 +3242,7 @@ data_volume = "'"$test_vol"'"
 
     # Check symlink exists (even if broken)
     local broken_exists
-    broken_exists=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/broken-link && echo yes || echo no' 2>/dev/null) || broken_exists="no"
+    broken_exists=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/broken-link && echo yes || echo no' 2>/dev/null) || broken_exists="no"
 
     if [[ "$broken_exists" == "yes" ]]; then
         pass "Broken symlink preserved (not deleted)"
@@ -3239,7 +3252,7 @@ data_volume = "'"$test_vol"'"
 
     # Verify the target was preserved as-is (original host path, not rewritten)
     local broken_link_target
-    broken_link_target=$(docker run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/broken-link 2>/dev/null) || broken_link_target=""
+    broken_link_target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/broken-link 2>/dev/null) || broken_link_target=""
 
     # Broken symlink should keep original target (not be rewritten to /mnt/agent-data/...)
     if [[ "$broken_link_target" == "$broken_target" ]]; then
@@ -3259,8 +3272,8 @@ data_volume = "'"$test_vol"'"
     # The fact that import completed (no timeout) proves circular symlinks didn't hang
     # Verify the symlinks were copied
     local circular_a circular_b
-    circular_a=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/circular-a && echo yes || echo no' 2>/dev/null) || circular_a="no"
-    circular_b=$(docker run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/circular-b && echo yes || echo no' 2>/dev/null) || circular_b="no"
+    circular_a=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/circular-a && echo yes || echo no' 2>/dev/null) || circular_a="no"
+    circular_b=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/circular-b && echo yes || echo no' 2>/dev/null) || circular_b="no"
 
     if [[ "$circular_a" == "yes" && "$circular_b" == "yes" ]]; then
         pass "Circular symlinks imported without hanging"
@@ -3279,11 +3292,11 @@ data_volume = "'"$test_vol"'"
     pitfall_vol="containai-test-symlink-pitfall-${TEST_RUN_ID}"
     pitfall_source_dir=$(mktemp -d "${REAL_HOME}/.containai-pitfall-test-XXXXXX")
 
-    docker volume create "$pitfall_vol" >/dev/null
+    "${DOCKER_CMD[@]}" volume create "$pitfall_vol" >/dev/null
     register_test_volume "$pitfall_vol"
 
     # Pre-populate volume with a real directory at the path where symlink will go
-    docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c '
+    "${DOCKER_CMD[@]}" run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c '
         mkdir -p /data/config/gh/subdir
         echo "pre-existing content" > /data/config/gh/subdir/existing.txt
     ' 2>/dev/null
@@ -3317,14 +3330,14 @@ data_volume = "'"$pitfall_vol"'"
 
     # Check that result is a symlink, not a directory with symlink inside
     local is_symlink
-    is_symlink=$(docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/subdir && echo yes || echo no' 2>/dev/null) || is_symlink="no"
+    is_symlink=$("${DOCKER_CMD[@]}" run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/subdir && echo yes || echo no' 2>/dev/null) || is_symlink="no"
 
     if [[ "$is_symlink" == "yes" ]]; then
         pass "Directory symlink replaced pre-existing directory correctly"
     else
         # Check if it's a directory (pitfall not handled)
         local is_dir
-        is_dir=$(docker run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -d /data/config/gh/subdir && echo yes || echo no' 2>/dev/null) || is_dir="no"
+        is_dir=$("${DOCKER_CMD[@]}" run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -d /data/config/gh/subdir && echo yes || echo no' 2>/dev/null) || is_dir="no"
         if [[ "$is_dir" == "yes" ]]; then
             fail "Directory symlink pitfall: symlink created INSIDE existing directory"
         else
@@ -3351,9 +3364,9 @@ main() {
     info "Using hermetic fixture at: $FIXTURE_HOME"
 
     # Check if image exists (build if needed)
-    if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
+    if ! "${DOCKER_CMD[@]}" image inspect "$IMAGE_NAME" &>/dev/null; then
         info "Building test image..."
-        if ! docker build -t "$IMAGE_NAME" "$SRC_DIR" >/dev/null 2>&1; then
+        if ! "${DOCKER_CMD[@]}" build -t "$IMAGE_NAME" "$SRC_DIR" >/dev/null 2>&1; then
             echo "ERROR: Failed to build test image" >&2
             exit 1
         fi

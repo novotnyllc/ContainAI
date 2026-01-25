@@ -191,13 +191,6 @@ check_prerequisites() {
     fi
     pass "Docker binary found"
 
-    # Check docker daemon is running
-    if ! docker info >/dev/null 2>&1; then
-        printf '%s\n' "[ERROR] Docker daemon not running" >&2
-        exit 1
-    fi
-    pass "Docker daemon running"
-
     # Check jq is available on host (needed for JSON validation)
     if ! command -v jq >/dev/null 2>&1; then
         printf '%s\n' "[ERROR] jq not found (required for JSON validation)" >&2
@@ -212,6 +205,13 @@ check_prerequisites() {
         exit 1
     fi
     pass "Context '$CONTEXT_NAME' exists"
+
+    # Check docker daemon is running (using containai-docker context)
+    if ! docker --context "$CONTEXT_NAME" info >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] Docker daemon not running (context: $CONTEXT_NAME)" >&2
+        exit 1
+    fi
+    pass "Docker daemon running (context: $CONTEXT_NAME)"
 
     # Check sysbox-runc runtime is available
     local runtimes_json

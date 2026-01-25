@@ -167,7 +167,7 @@ Port 5000 is exposed for web development. Access WASM apps at:
 http://localhost:5000
 ```
 
-Note: Port publishing requires `docker sandbox run` to support `-p`. If not supported, ports are not published (you'll see a message). Additional ports can be exposed by rebuilding or using `docker run` directly.
+Note: Port publishing requires `docker sandbox run` to support `-p`. If not supported, ports are not published (you'll see a message). Additional ports can be exposed by rebuilding or using `docker --context containai-docker run` directly.
 
 ## Security
 
@@ -181,7 +181,7 @@ Docker sandbox provides security isolation through:
 
 **No manual security configuration required.** The `cai` command enforces sandbox usage with fail-closed behavior: blocks when sandbox is unavailable or status cannot be verified.
 
-Plain `docker run` is allowed for CI/smoke tests (see Testing below).
+Plain `docker --context containai-docker run` is allowed for CI/smoke tests (see Testing below).
 
 ### Sandbox Detection
 
@@ -197,7 +197,7 @@ Use `cai --force` to bypass sandbox detection if needed (not recommended).
 
 Isolation detection is best-effort. The `cai` command:
 - For ECI: runs ephemeral containers to check uid_map (user namespace) and runtime (sysbox-runc)
-- For Sysbox: checks `docker info` for sysbox-runc runtime availability
+- For Sysbox: checks `docker --context containai-docker info` for sysbox-runc runtime availability
 - **Warns** if isolation is not detected or status is unknown
 - **Proceeds anyway** - isolation detection does not block container start
 
@@ -226,10 +226,10 @@ cai-stop-all                    # Interactive selection
 cai sandbox reset               # Remove sandbox for current workspace
 
 # Remove the volume
-docker volume rm sandbox-agent-data
+docker --context containai-docker volume rm sandbox-agent-data
 
 # Or with a custom volume name
-docker volume rm <your-volume-name>
+docker --context containai-docker volume rm <your-volume-name>
 ```
 
 The volume will be recreated on the next `cai` run. Use `cai import` again to re-sync your settings.
@@ -268,7 +268,7 @@ Host (containai docker-ce + sysbox)
 **Usage:**
 ```bash
 # Build the test image
-docker build -t containai-test -f src/container/Dockerfile.test src/
+docker --context containai-docker build -t containai-test -f src/container/Dockerfile.test src/
 
 # Run with sysbox runtime (NOT --privileged)
 docker --context containai-secure run --rm --runtime=sysbox-runc containai-test
@@ -286,19 +286,19 @@ The main ContainAI image (`container/Dockerfile.base` and layered images) suppor
 cai
 ```
 
-### CI/Smoke Tests (plain docker run)
+### CI/Smoke Tests (plain docker --context containai-docker run)
 
 ```bash
 # .NET SDK
-docker run --rm -u agent agent-sandbox:latest dotnet --list-sdks
-docker run --rm -u agent agent-sandbox:latest dotnet workload list
+docker --context containai-docker run --rm -u agent containai:latest dotnet --list-sdks
+docker --context containai-docker run --rm -u agent containai:latest dotnet workload list
 
 # PowerShell
-docker run --rm -u agent agent-sandbox:latest pwsh --version
+docker --context containai-docker run --rm -u agent containai:latest pwsh --version
 
 # Node.js (requires login shell for nvm)
-docker run --rm -u agent agent-sandbox:latest bash -lc "node --version"
-docker run --rm -u agent agent-sandbox:latest bash -lc "nvm --version"
+docker --context containai-docker run --rm -u agent containai:latest bash -lc "node --version"
+docker --context containai-docker run --rm -u agent containai:latest bash -lc "nvm --version"
 ```
 
 ## Build Options
@@ -308,7 +308,7 @@ docker run --rm -u agent agent-sandbox:latest bash -lc "nvm --version"
 ./build.sh --no-cache         # Force rebuild all layers
 ```
 
-The build script tags the image as both `agent-sandbox:latest` and `agent-sandbox:<YYYY-MM-DD>` for reproducibility.
+The build script tags the image as both `containai:latest` and `containai:<YYYY-MM-DD>` for reproducibility.
 
 ## Testing with Dockerfile.test
 
@@ -327,11 +327,11 @@ Note: Sysbox services (sysbox-mgr, sysbox-fs) are NOT started - the host's sysbo
 
 ```bash
 # Build the test image (from repo root)
-docker build -t containai-test -f src/container/Dockerfile.test src/
+docker --context containai-docker build -t containai-test -f src/container/Dockerfile.test src/
 
 # Or build from the src directory
 cd src
-docker build -t containai-test -f container/Dockerfile.test .
+docker --context containai-docker build -t containai-test -f container/Dockerfile.test .
 
 # Run the built-in verification tests (use --runtime=sysbox-runc, NOT --privileged)
 docker --context containai-secure run --rm --runtime=sysbox-runc containai-test
