@@ -78,6 +78,10 @@ BASH4_PATH=""
 # Track if this is a fresh install or update (set by install_containai)
 IS_FRESH_INSTALL=""
 
+# Track if this is a proper re-run (.git exists AND cai wrapper exists)
+# Used to decide whether to run update vs setup in post_install
+IS_RERUN=""
+
 # ==============================================================================
 # OS Detection
 # ==============================================================================
@@ -498,6 +502,10 @@ install_containai() {
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         # Existing installation - update
         IS_FRESH_INSTALL="false"
+        # Check if cai wrapper also exists (proper re-run vs corrupted state)
+        if [[ -x "$BIN_DIR/cai" ]]; then
+            IS_RERUN="true"
+        fi
         info "Existing installation found, updating..."
         (
             cd -- "$INSTALL_DIR"
@@ -735,7 +743,7 @@ run_auto_setup() {
     local cai_yes_value="$1"
 
     echo ""
-    info "Running cai setup to configure your environment..."
+    info "Running initial setup..."
     echo ""
 
     # Determine bash path to use
@@ -773,6 +781,50 @@ run_auto_setup() {
     fi
 }
 
+# Run cai update automatically (for re-runs)
+# Arguments: $1 = CAI_YES_VALUE (1 for auto-confirm, empty otherwise)
+run_auto_update() {
+    local cai_yes_value="$1"
+
+    echo ""
+    info "Updating existing installation..."
+    echo ""
+
+    # Determine bash path to use
+    local bash_cmd
+    if [[ -n "$BASH4_PATH" ]]; then
+        bash_cmd="$BASH4_PATH"
+    else
+        bash_cmd="bash"
+    fi
+
+    # Run cai update with CAI_YES if auto-confirm is enabled
+    # Use explicit path to cai wrapper
+    local cai_wrapper="$BIN_DIR/cai"
+    if [[ -x "$cai_wrapper" ]]; then
+        # Capture exit code without triggering set -e
+        # cai update may return non-zero for expected reasons
+        local rc=0
+        if [[ "$cai_yes_value" == "1" ]]; then
+            CAI_YES=1 "$bash_cmd" "$cai_wrapper" update || rc=$?
+        else
+            "$bash_cmd" "$cai_wrapper" update || rc=$?
+        fi
+        if [[ $rc -eq 0 ]]; then
+            success "Update completed successfully!"
+        elif [[ $rc -eq 75 ]]; then
+            # Special exit code: WSL restart required
+            info "Please restart your terminal and run 'cai update' again."
+        else
+            warn "Update had some issues (exit code: $rc)"
+            warn "You can re-run 'cai update' later to complete configuration."
+        fi
+    else
+        warn "Could not find cai wrapper at $cai_wrapper"
+        show_setup_instructions "update"
+    fi
+}
+
 post_install() {
     echo ""
     if [[ "$IS_FRESH_INSTALL" == "true" ]]; then
@@ -781,24 +833,20 @@ post_install() {
         success "ContainAI updated successfully!"
     fi
 
-    # Determine whether to auto-run setup
+    # Determine whether to auto-run setup/update
     # Skip if --no-setup was passed
     if [[ "$NO_SETUP" == "true" ]]; then
         info "Skipping setup (--no-setup flag)"
-        show_setup_instructions
+        if [[ "$IS_RERUN" == "true" ]]; then
+            show_setup_instructions "update"
+        else
+            show_setup_instructions
+        fi
         return
     fi
 
-    # On re-runs, skip auto-setup (user should run 'cai update' manually)
-    # Auto-setup is only for fresh installs
-    if [[ "$IS_FRESH_INSTALL" != "true" ]]; then
-        info "Re-run detected. Run 'cai update' to update your environment."
-        show_setup_instructions "update"
-        return
-    fi
-
-    # Require bash 4+ to run setup (cai CLI needs it)
-    # Check the bash_cmd we'll use for auto-setup
+    # Require bash 4+ to run setup/update (cai CLI needs it)
+    # Check the bash_cmd we'll use for auto-setup/update
     local bash_cmd bash_major
     if [[ -n "$BASH4_PATH" ]]; then
         bash_cmd="$BASH4_PATH"
@@ -816,8 +864,13 @@ post_install() {
         else
             warn "Please install bash 4.0 or later"
         fi
-        warn "Then run: cai setup"
-        show_setup_instructions
+        if [[ "$IS_RERUN" == "true" ]]; then
+            warn "Then run: cai update"
+            show_setup_instructions "update"
+        else
+            warn "Then run: cai setup"
+            show_setup_instructions
+        fi
         return
     fi
 
@@ -826,27 +879,53 @@ post_install() {
     # This auto-confirms downstream prompts in cai setup/update
     local cai_yes_value=""
 
-    if [[ -n "$YES_FLAG" ]]; then
-        # --yes flag passed: auto-confirm everything including downstream prompts
-        cai_yes_value="1"
-        run_auto_setup "$cai_yes_value"
-    elif can_prompt; then
-        # Interactive mode: prompt user (default Y for first-time install)
-        echo ""
-        if prompt_confirm "Would you like to run 'cai setup' now to configure your environment?" "true"; then
-            # User confirmed interactively: auto-confirm downstream prompts too
-            # Per spec: set CAI_YES_VALUE=1 when user confirms interactively
+    # Determine which action to run: setup (fresh) or update (re-run)
+    if [[ "$IS_RERUN" == "true" ]]; then
+        # Re-run: call cai update instead of setup
+        if [[ -n "$YES_FLAG" ]]; then
+            # --yes flag passed: auto-confirm everything including downstream prompts
             cai_yes_value="1"
-            run_auto_setup "$cai_yes_value"
+            run_auto_update "$cai_yes_value"
+        elif can_prompt; then
+            # Interactive mode: prompt user (default Y for updates)
+            echo ""
+            if prompt_confirm "Would you like to run 'cai update' now to update your environment?" "true"; then
+                # User confirmed interactively: auto-confirm downstream prompts too
+                cai_yes_value="1"
+                run_auto_update "$cai_yes_value"
+            else
+                info "Skipping update."
+                show_setup_instructions "update"
+            fi
         else
-            info "Skipping setup."
-            show_setup_instructions
+            # Non-interactive without --yes: show instructions only
+            info "Non-interactive install detected. Skipping automatic update."
+            info "To auto-run update, use: curl ... | bash -s -- --yes"
+            show_setup_instructions "update"
         fi
     else
-        # Non-interactive without --yes: show instructions only
-        info "Non-interactive install detected. Skipping automatic setup."
-        info "To auto-run setup, use: curl ... | bash -s -- --yes"
-        show_setup_instructions
+        # Fresh install: call cai setup
+        if [[ -n "$YES_FLAG" ]]; then
+            # --yes flag passed: auto-confirm everything including downstream prompts
+            cai_yes_value="1"
+            run_auto_setup "$cai_yes_value"
+        elif can_prompt; then
+            # Interactive mode: prompt user (default Y for first-time install)
+            echo ""
+            if prompt_confirm "Would you like to run 'cai setup' now to configure your environment?" "true"; then
+                # User confirmed interactively: auto-confirm downstream prompts too
+                cai_yes_value="1"
+                run_auto_setup "$cai_yes_value"
+            else
+                info "Skipping setup."
+                show_setup_instructions
+            fi
+        else
+            # Non-interactive without --yes: show instructions only
+            info "Non-interactive install detected. Skipping automatic setup."
+            info "To auto-run setup, use: curl ... | bash -s -- --yes"
+            show_setup_instructions
+        fi
     fi
 }
 
