@@ -858,18 +858,16 @@ _cai_update_linux_wsl2() {
 # Run package updates in Lima VM (apt update/upgrade)
 # This is the non-destructive update path when template hasn't changed
 # Arguments: $1 = dry_run ("true" to simulate)
-#            $2 = verbose ("true" for verbose output)
 # Returns: 0=success, 1=failure
 _cai_update_macos_packages() {
     local dry_run="${1:-false}"
-    local verbose="${2:-false}"
 
     _cai_step "Updating packages in Lima VM"
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would ensure Lima VM is running"
         _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo apt-get update"
-        _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo apt-get upgrade -y"
+        _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y (with dpkg options)"
         return 0
     fi
 
@@ -895,8 +893,9 @@ _cai_update_macos_packages() {
     fi
 
     # Run apt upgrade (non-interactive to avoid dpkg conffile prompts)
+    # Use env wrapper so DEBIAN_FRONTEND is set in the sudo environment
     _cai_step "Running apt upgrade in VM"
-    if ! limactl shell "$_CAI_LIMA_VM_NAME" -- sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold; then
+    if ! limactl shell "$_CAI_LIMA_VM_NAME" -- sudo env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold; then
         _cai_error "apt upgrade failed in VM"
         return 1
     fi
@@ -959,7 +958,7 @@ _cai_update_macos_recreate_vm() {
 #            $2 = verbose ("true" for verbose output)
 #            $3 = force ("true" to skip confirmation)
 #            $4 = lima_recreate ("true" to force VM recreation)
-# Returns: 0=success (or user declined recreation), 1=failure
+# Returns: 0=success, 1=failure, 130=cancelled by user
 _cai_update_macos() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
@@ -1042,8 +1041,7 @@ _cai_update_macos() {
 
             if [[ "$force" != "true" ]]; then
                 if ! _cai_prompt_confirm "Recreate Lima VM?"; then
-                    _cai_info "Update cancelled"
-                    return 0  # User chose not to recreate - not an error
+                    return 130  # Signal cancellation
                 fi
             fi
         fi

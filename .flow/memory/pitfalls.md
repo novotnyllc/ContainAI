@@ -172,3 +172,6 @@ Version comparison must use semver logic (sort -V) not string equality - checkin
 
 ## 2026-01-25 manual [pitfall]
 apt-get upgrade -y can still prompt (dpkg conffile/needrestart); use DEBIAN_FRONTEND=noninteractive and -o Dpkg::Options::=--force-confdef/confold for truly non-interactive updates
+
+## 2026-01-25 manual [pitfall]
+sudo VAR=value cmd does not pass VAR to cmd; use sudo env VAR=value cmd instead
