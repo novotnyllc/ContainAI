@@ -559,16 +559,15 @@ _import_rewrite_excludes() {
 
     # Parse excludes into categories
     # Patterns prefixed with @silent: won't warn if unmatched (for built-in excludes)
-    local pattern p is_silent
+    local pattern p raw_pattern
     while IFS= read -r pattern; do
         [[ -z "$pattern" ]] && continue
 
-        # Check for @silent: prefix
-        is_silent=""
-        if [[ "$pattern" == "@silent:"* ]]; then
-            is_silent=1
-            pattern="${pattern#@silent:}"
-        fi
+        # Save raw pattern for later reference
+        raw_pattern="$pattern"
+
+        # Strip @silent: prefix if present (silent patterns skip warning check)
+        pattern="${pattern#@silent:}"
 
         # Strip leading / for anchored patterns
         p="${pattern#/}"
@@ -578,7 +577,7 @@ _import_rewrite_excludes() {
             if _import_has_glob_metachar "$p"; then
                 # Global glob - applies to all entries
                 global_globs+=("$p")
-                pattern_matched["$pattern"]=1
+                pattern_matched["$raw_pattern"]=1
             else
                 # Root prefix - skips matching entries
                 root_prefixes+=("$p")
@@ -586,11 +585,6 @@ _import_rewrite_excludes() {
         else
             # Path pattern
             path_patterns+=("$pattern")
-        fi
-
-        # Pre-mark silent patterns as matched to suppress warnings
-        if [[ -n "$is_silent" ]]; then
-            pattern_matched["$pattern"]=1
         fi
     done <<<"$excludes_input"
 
@@ -709,8 +703,11 @@ _import_rewrite_excludes() {
     done <<<"$entries_input"
 
     # Check for unmatched patterns (global globs are pre-marked as matched)
+    # Skip @silent: prefixed patterns - they're intentionally silent if unmatched
     while IFS= read -r pattern; do
         [[ -z "$pattern" ]] && continue
+        # Skip silent patterns (built-in excludes that may not match with selective sync)
+        [[ "$pattern" == "@silent:"* ]] && continue
         if [[ -z "${pattern_matched[$pattern]:-}" ]]; then
             echo "[WARN] Unmatched exclude pattern (dropped): $pattern" >&2
         fi

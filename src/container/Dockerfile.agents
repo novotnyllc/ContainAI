@@ -90,7 +90,7 @@ RUN curl -fsSL https://opencode.ai/install | bash && \
 # =============================================================================
 
 # Claude configuration symlinks
-# Remove existing directories before symlinking to prevent ln creating links inside them
+# Note: rm -rf before ln -sfn for directories to prevent ln creating links inside existing dirs
 RUN mkdir -p /mnt/agent-data/claude/skills /mnt/agent-data/claude/plugins \
              /mnt/agent-data/claude/commands /mnt/agent-data/claude/agents /mnt/agent-data/claude/hooks && \
     # Move default claude.json to agent-data location
