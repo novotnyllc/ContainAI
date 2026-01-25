@@ -11,7 +11,7 @@
 #   run          Start/attach to sandbox container (default if omitted)
 #   shell        Open interactive shell in running container
 #   doctor       Check system capabilities and show diagnostics
-#   setup        Install Sysbox Secure Engine (WSL2/macOS)
+#   setup        Configure secure container isolation (Linux/WSL2/macOS)
 #   validate     Validate Secure Engine configuration
 #   docker       Run docker with ContainAI context (defaults to containai-docker if present)
 #   sandbox      (Deprecated - use 'cai stop && cai --restart')
@@ -169,7 +169,7 @@ Subcommands:
   run           Start/attach to sandbox container (default if omitted)
   shell         Open interactive shell in running container
   doctor        Check system capabilities and show diagnostics
-  setup         Install Sysbox Secure Engine (WSL2/macOS)
+  setup         Configure secure container isolation (Linux/WSL2/macOS)
   validate      Validate Secure Engine configuration
   docker        Run docker with ContainAI context (defaults to containai-docker if present)
   sandbox       (Deprecated - use 'cai stop && cai --restart')

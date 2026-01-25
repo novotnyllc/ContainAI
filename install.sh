@@ -715,6 +715,8 @@ WRAPPER_PART2
 # Arguments: $1 = "update" for update-specific instructions, otherwise setup
 show_setup_instructions() {
     local mode="${1:-setup}"
+    local os
+    os="$(detect_os)"
 
     echo ""
     info "Quick start:"
@@ -731,6 +733,25 @@ show_setup_instructions() {
     echo "  3. Navigate to your project: cd /path/to/your/project"
     echo "  4. Start the sandbox: cai"
     echo ""
+
+    # Platform-specific setup information
+    if [[ "$mode" != "update" ]]; then
+        info "What 'cai setup' does:"
+        case "$os" in
+            macos)
+                echo "  - Creates a lightweight Linux VM using Lima"
+                echo "  - Installs Docker Engine and Sysbox inside the VM"
+                echo "  - Configures secure container isolation"
+                ;;
+            *)
+                echo "  - Installs Sysbox for secure container isolation"
+                echo "  - Creates an isolated Docker daemon (containai-docker)"
+                echo "  - Does NOT modify your system Docker"
+                ;;
+        esac
+        echo ""
+    fi
+
     info "Other commands:"
     echo "  cai doctor     - Check system capabilities"
     echo "  cai --help     - Show all options"

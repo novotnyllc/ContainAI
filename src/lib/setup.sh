@@ -3823,8 +3823,11 @@ ContainAI Setup - Secure Engine Provisioning
 
 Usage: cai setup [options]
 
-Installs and configures Sysbox for enhanced container isolation.
-Supports native Linux (Ubuntu/Debian), WSL2 (with systemd), and macOS (via Lima VM).
+Configures secure container isolation with Sysbox runtime.
+
+Platform behavior:
+  - Linux/WSL2: Installs Sysbox and creates an isolated Docker daemon
+  - macOS: Creates a lightweight Linux VM (Lima) running Docker + Sysbox
 
 Options:
   --force       Bypass seccomp compatibility warning and proceed (WSL2 only)
@@ -3911,7 +3914,7 @@ Isolated Docker (Linux/WSL2):
     docker --context containai-docker run hello-world
 
 Examples:
-  cai setup                    Install Sysbox (auto-detects platform)
+  cai setup                    Configure isolation (auto-detects platform)
   cai setup --dry-run          Preview changes without installing
   cai setup --force            Bypass seccomp warning (WSL2)
   cai setup --verbose          Show detailed progress
