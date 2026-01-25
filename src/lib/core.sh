@@ -139,9 +139,10 @@ _cai_prompt_confirm() {
     fi
 
     # Try /dev/tty for piped stdin (curl|bash installs)
-    if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
+    # Test /dev/tty is usable before relying on it (cron/CI may not have a controlling TTY)
+    if [[ ! -t 0 ]] && [[ -e /dev/tty ]] && : < /dev/tty 2>/dev/null; then
         # Write prompt to /dev/tty too, so it's visible even if stdout is redirected
-        printf '%s %s ' "$message" "$prompt_suffix" > /dev/tty
+        printf '%s %s ' "$message" "$prompt_suffix" > /dev/tty 2>/dev/null || true
         if ! read -r confirm < /dev/tty; then
             # EOF on /dev/tty
             return 1

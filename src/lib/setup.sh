@@ -199,7 +199,8 @@ _cai_handle_wsl2_mirrored_mode() {
     fi
 
     # Prompt user for action (use shared helper with CAI_YES support)
-    if ! _cai_prompt_confirm "Would you like to disable mirrored networking? This requires WSL to restart."; then
+    # Default to Y since mirrored mode is a hard blocker and this is the remediation path
+    if ! _cai_prompt_confirm "Would you like to disable mirrored networking? This requires WSL to restart." "true"; then
         # User declined or cannot prompt
         _cai_error "Cannot continue setup with mirrored networking mode."
         _cai_error "Please manually edit your .wslconfig file:"
