@@ -822,8 +822,8 @@ post_install() {
     fi
 
     # Determine CAI_YES_VALUE for auto-confirm
-    # Only pass CAI_YES=1 when --yes flag was explicitly passed
-    # Interactive confirmation does NOT auto-confirm downstream prompts
+    # Set CAI_YES=1 when EITHER --yes flag is passed OR user confirms interactively
+    # This auto-confirms downstream prompts in cai setup/update
     local cai_yes_value=""
 
     if [[ -n "$YES_FLAG" ]]; then
@@ -834,9 +834,10 @@ post_install() {
         # Interactive mode: prompt user (default Y for first-time install)
         echo ""
         if prompt_confirm "Would you like to run 'cai setup' now to configure your environment?" "true"; then
-            # User confirmed interactively: let them see/confirm each setup prompt
-            # Do NOT set CAI_YES - user should approve each destructive action
-            run_auto_setup ""
+            # User confirmed interactively: auto-confirm downstream prompts too
+            # Per spec: set CAI_YES_VALUE=1 when user confirms interactively
+            cai_yes_value="1"
+            run_auto_setup "$cai_yes_value"
         else
             info "Skipping setup."
             show_setup_instructions
