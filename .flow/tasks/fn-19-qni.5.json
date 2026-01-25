@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-25T12:07:04.057897Z",
+  "depends_on": [],
+  "epic": "fn-19-qni",
+  "id": "fn-19-qni.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-19-qni.5.md",
+  "status": "todo",
+  "title": "Write agent sandboxing comparison doc",
+  "updated_at": "2026-01-25T12:08:15.624882Z"
+}

@@ -1,7 +1,9 @@
 {
   "branch_name": "fn-19-qni",
   "created_at": "2026-01-25T12:06:14.461753Z",
-  "depends_on_epics": [],
+  "depends_on_epics": [
+    "fn-15-281"
+  ],
   "id": "fn-19-qni",
   "next_task": 1,
   "plan_review_status": "unknown",
@@ -9,5 +11,5 @@
   "spec_path": ".flow/specs/fn-19-qni.md",
   "status": "open",
   "title": "Container Lifecycle & Cleanup",
-  "updated_at": "2026-01-25T12:06:19.509197Z"
+  "updated_at": "2026-01-25T12:08:21.706687Z"
 }
