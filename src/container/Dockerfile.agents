@@ -90,6 +90,7 @@ RUN curl -fsSL https://opencode.ai/install | bash && \
 # =============================================================================
 
 # Claude configuration symlinks
+# Remove existing directories before symlinking to prevent ln creating links inside them
 RUN mkdir -p /mnt/agent-data/claude/skills /mnt/agent-data/claude/plugins \
              /mnt/agent-data/claude/commands /mnt/agent-data/claude/agents /mnt/agent-data/claude/hooks && \
     # Move default claude.json to agent-data location
@@ -98,10 +99,15 @@ RUN mkdir -p /mnt/agent-data/claude/skills /mnt/agent-data/claude/plugins \
     ln -sfn /mnt/agent-data/claude/claude.json /home/agent/.claude.json && \
     ln -sfn /mnt/agent-data/claude/settings.json /home/agent/.claude/settings.json && \
     ln -sfn /mnt/agent-data/claude/settings.local.json /home/agent/.claude/settings.local.json && \
+    rm -rf /home/agent/.claude/plugins && \
     ln -sfn /mnt/agent-data/claude/plugins /home/agent/.claude/plugins && \
+    rm -rf /home/agent/.claude/skills && \
     ln -sfn /mnt/agent-data/claude/skills /home/agent/.claude/skills && \
+    rm -rf /home/agent/.claude/commands && \
     ln -sfn /mnt/agent-data/claude/commands /home/agent/.claude/commands && \
+    rm -rf /home/agent/.claude/agents && \
     ln -sfn /mnt/agent-data/claude/agents /home/agent/.claude/agents && \
+    rm -rf /home/agent/.claude/hooks && \
     ln -sfn /mnt/agent-data/claude/hooks /home/agent/.claude/hooks && \
     ln -sfn /mnt/agent-data/claude/CLAUDE.md /home/agent/.claude/CLAUDE.md
 

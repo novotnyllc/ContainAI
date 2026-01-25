@@ -558,9 +558,17 @@ _import_rewrite_excludes() {
     local -a path_patterns=()
 
     # Parse excludes into categories
-    local pattern p
+    # Patterns prefixed with @silent: won't warn if unmatched (for built-in excludes)
+    local pattern p is_silent
     while IFS= read -r pattern; do
         [[ -z "$pattern" ]] && continue
+
+        # Check for @silent: prefix
+        is_silent=""
+        if [[ "$pattern" == "@silent:"* ]]; then
+            is_silent=1
+            pattern="${pattern#@silent:}"
+        fi
 
         # Strip leading / for anchored patterns
         p="${pattern#/}"
@@ -578,6 +586,11 @@ _import_rewrite_excludes() {
         else
             # Path pattern
             path_patterns+=("$pattern")
+        fi
+
+        # Pre-mark silent patterns as matched to suppress warnings
+        if [[ -n "$is_silent" ]]; then
+            pattern_matched["$pattern"]=1
         fi
     done <<<"$excludes_input"
 
@@ -962,18 +975,19 @@ _containai_import() {
             done <<<"$exclude_output"
         fi
 
-        # Built-in excludes for AI agent directories:
-        # The following paths are excluded from sync by design:
-        #   - claude/projects   (project workspace data)
-        #   - claude/statsig    (telemetry)
-        #   - claude/todos      (todo state)
-        #   - continue/sessions (session data)
-        #   - continue/index    (index caches)
-        #
-        # IMPLEMENTATION: Rather than adding explicit excludes (which would trigger
-        # "unmatched exclude pattern" warnings), we achieve exclusion via SELECTIVE SYNC:
-        # the _IMPORT_SYNC_MAP only includes specific files/subdirs, not entire agent
-        # directories. This approach is cleaner and achieves the same result.
+        # Built-in excludes for AI agent directories (destination-relative)
+        # These paths should never be synced regardless of user config.
+        # Prefixed with @silent: to suppress "unmatched" warnings since we use
+        # selective sync (these won't match unless someone adds full-dir entries).
+        excludes+=(
+            # Claude: skip project workspace, telemetry, and todo state
+            "@silent:claude/projects"
+            "@silent:claude/statsig"
+            "@silent:claude/todos"
+            # Continue: skip session data and index caches
+            "@silent:continue/sessions"
+            "@silent:continue/index"
+        )
     fi
 
     # Note: Excludes are now processed via _import_rewrite_excludes() and passed
