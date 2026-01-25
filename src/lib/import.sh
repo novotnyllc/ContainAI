@@ -370,6 +370,11 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.config/gh/hosts.yml:/target/config/gh/hosts.yml:fs"
         "/source/.config/gh/config.yml:/target/config/gh/config.yml:f"
 
+        # --- Git ---
+        # Note: .gitconfig is handled separately by _cai_import_git_config() to filter credential.helper
+        # and add safe.directory. Only .gitignore_global is synced via rsync.
+        "/source/.gitignore_global:/target/git/gitignore_global:f"
+
         # --- SSH ---
         # Static entries: config, known_hosts (not secrets)
         # Dynamic entries: id_* private keys - discovered by _import_discover_ssh_keys()
@@ -1857,7 +1862,7 @@ done <<'"'"'MAP_DATA'"'"'
         _import_step "[dry-run] Would transform known_marketplaces.json"
         _import_step "[dry-run] Would merge enabledPlugins into sandbox settings"
         _import_step "[dry-run] Would remove orphan markers"
-        _import_step "[dry-run] Would import git config (user identity + safe.directory)"
+        _import_step "[dry-run] Would import git config (user identity + safe.directory, credential.helper filtered)"
     fi
 
     return 0
@@ -2135,13 +2140,43 @@ _cai_import_git_config() {
     : > "$tmp_gitconfig"
 
     if [[ -n "$host_gitconfig" ]]; then
+        # Filter gitconfig: remove credential.helper lines and empty [credential] sections
+        # Two-pass approach: first pass strips helper lines, second pass removes empty sections
         if ! awk '
-            BEGIN { in_cred=0 }
-            /^[[:space:]]*\[credential([[:space:]]+"[^"]+")?\][[:space:]]*$/ { in_cred=1; print; next }
-            /^[[:space:]]*\[/ { in_cred=0 }
+            BEGIN { in_cred=0; cred_header=""; cred_content="" }
+            # Match [credential] or [credential "remote"] section headers
+            /^[[:space:]]*\[credential([[:space:]]+"[^"]+")?\][[:space:]]*$/ {
+                # Flush previous credential section if it had content
+                if (cred_header != "" && cred_content != "") {
+                    printf "%s", cred_header cred_content
+                }
+                cred_header = $0 "\n"
+                cred_content = ""
+                in_cred = 1
+                next
+            }
+            # New section starts - flush credential section if not empty
+            /^[[:space:]]*\[/ {
+                if (cred_header != "" && cred_content != "") {
+                    printf "%s", cred_header cred_content
+                }
+                cred_header = ""
+                cred_content = ""
+                in_cred = 0
+            }
+            # Skip top-level credential.helper = ... lines
             /^[[:space:]]*credential\.helper[[:space:]]*=/ { next }
+            # Inside [credential] section: skip helper = ... lines, buffer rest
             in_cred && /^[[:space:]]*helper[[:space:]]*=/ { next }
+            in_cred { cred_content = cred_content $0 "\n"; next }
+            # Normal lines: print immediately
             { print }
+            END {
+                # Flush final credential section if it had content
+                if (cred_header != "" && cred_content != "") {
+                    printf "%s", cred_header cred_content
+                }
+            }
         ' "$host_gitconfig" >> "$tmp_gitconfig"; then
             rm -f "$tmp_gitconfig"
             _import_error "Failed to sanitize host git config"

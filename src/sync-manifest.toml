@@ -13,7 +13,7 @@
 #   s = secret (600 for files, 700 for dirs; skipped with --no-secrets)
 #   m = mirror mode (--delete to remove files not in source)
 #   x = exclude .system/ subdirectory
-#   g = git-filter (strip credential.helper) - for future use
+#   g = git-filter (strip credential.helper from .gitconfig)
 #   R = remove existing path first (rm -rf before ln -sfn)
 #   G = glob/dynamic pattern (not synced directly; discovered at runtime by import.sh)
 #
@@ -107,6 +107,26 @@ flags = "f"  # file (user preferences, not secret)
 
 # Note: Container Dockerfile symlinks entire .config/gh directory.
 # The individual file entries here ensure --no-secrets only skips hosts.yml.
+
+# =============================================================================
+# GIT
+# .gitconfig: filtered to strip credential.helper (g flag)
+# .gitignore_global: synced as-is (no filtering)
+# Note: git config is copied at container startup, not symlinked
+# =============================================================================
+
+[[entries]]
+source = ".gitconfig"
+target = ".gitconfig"
+container_link = ""  # Copied at container startup, not symlinked (not via manifest)
+flags = "fg"  # file, git-filter (strip credential.helper)
+# Note: Imported via _cai_import_git_config() post-sync, not rsync
+
+[[entries]]
+source = ".gitignore_global"
+target = "git/gitignore_global"
+container_link = ".gitignore_global"
+flags = "f"  # file
 
 # =============================================================================
 # SSH

@@ -256,6 +256,16 @@ RUN mkdir -p /mnt/agent-data/editors/vim && \
     ln -sfn /mnt/agent-data/editors/vim /home/agent/.vim
 
 # =============================================================================
+# GIT CONFIG SYMLINKS
+# Note: .gitconfig is copied (not symlinked) at container startup by init script
+# because git may not handle symlinked config files well on all systems
+# Only .gitignore_global is symlinked here
+# =============================================================================
+RUN mkdir -p /mnt/agent-data/git && \
+    # Global gitignore (matches import.sh: /target/git/gitignore_global)
+    ln -sfn /mnt/agent-data/git/gitignore_global /home/agent/.gitignore_global
+
+# =============================================================================
 # AGENT ALIASES
 # Convenience aliases for running agents in autonomous mode
 # =============================================================================
