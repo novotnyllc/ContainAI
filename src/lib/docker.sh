@@ -326,20 +326,33 @@ _CAI_DOCKERD_BIN_DIR="$_CAI_CONTAINAI_DIR/bin"
 _CAI_DOCKERD_BIN="$_CAI_DOCKERD_BIN_DIR/dockerd"
 _CAI_DOCKERD_VERSION_FILE="$_CAI_CONTAINAI_DIR/VERSION"
 
+# Required binaries in the Docker bundle
+# All of these must be present for a valid installation
+_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES="dockerd docker containerd containerd-shim-runc-v2 runc"
+
 # Check if ContainAI-managed dockerd bundle is installed
-# Returns: 0=installed (symlink exists and points to valid target), 1=not installed
+# Returns: 0=installed (all required symlinks exist and point to valid targets), 1=not installed
 _cai_dockerd_bundle_installed() {
     # Bundle is only used on Linux/WSL2, not macOS
     if _cai_is_macos; then
         return 1
     fi
 
-    # Check if the dockerd symlink exists, points to a regular file, and is executable
-    if [[ -L "$_CAI_DOCKERD_BIN" ]] && [[ -f "$_CAI_DOCKERD_BIN" ]] && [[ -x "$_CAI_DOCKERD_BIN" ]]; then
-        return 0
+    # Check VERSION file exists
+    if [[ ! -f "$_CAI_DOCKERD_VERSION_FILE" ]]; then
+        return 1
     fi
 
-    return 1
+    # Check all required binaries exist as valid executable symlinks
+    local bin
+    for bin in $_CAI_DOCKERD_BUNDLE_REQUIRED_BINARIES; do
+        local bin_path="$_CAI_DOCKERD_BIN_DIR/$bin"
+        if [[ ! -L "$bin_path" ]] || [[ ! -f "$bin_path" ]] || [[ ! -x "$bin_path" ]]; then
+            return 1
+        fi
+    done
+
+    return 0
 }
 
 # Get the installed dockerd bundle version

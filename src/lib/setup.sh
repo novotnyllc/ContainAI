@@ -726,7 +726,8 @@ _cai_install_dockerd_bundle() {
         trap 'rm -rf "$tmpdir"' EXIT
 
         echo "[STEP] Downloading Docker $latest_version"
-        if ! wget -q --show-progress -O "$tmpdir/docker.tgz" "$download_url"; then
+        # Use timeouts per spec: --connect-timeout=5 --timeout=120
+        if ! wget -q --show-progress --connect-timeout=5 --timeout=120 -O "$tmpdir/docker.tgz" "$download_url"; then
             echo "[ERROR] Failed to download Docker bundle" >&2
             exit 1
         fi
@@ -753,13 +754,35 @@ _cai_install_dockerd_bundle() {
         # Move binaries from docker/ subdir to versioned directory
         sudo mv "$tmpdir/docker/"* "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
 
+        echo "[STEP] Validating required binaries"
+
+        # Required binaries must all be present - fail if any are missing
+        # Uses same list as _cai_dockerd_bundle_installed() for consistency
+        local required_binaries="dockerd docker containerd containerd-shim-runc-v2 runc"
+        local bin missing_binaries=""
+        for bin in $required_binaries; do
+            if [[ ! -f "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/$bin" ]]; then
+                missing_binaries="$missing_binaries $bin"
+            fi
+        done
+
+        if [[ -n "$missing_binaries" ]]; then
+            echo "[ERROR] Docker bundle missing required binaries:$missing_binaries" >&2
+            exit 1
+        fi
+
         echo "[STEP] Creating symlinks in $_CAI_DOCKERD_BIN_DIR/"
 
         # Create symlinks for all bundle binaries using relative paths
         # Use ln -sfn for atomic symlink replacement
-        local binaries="dockerd docker containerd containerd-shim-runc-v2 docker-init docker-proxy runc ctr"
-        local bin
-        for bin in $binaries; do
+        # Required binaries first (must succeed), then optional ones
+        for bin in $required_binaries; do
+            sudo ln -sfn "../docker/$latest_version/$bin" "$_CAI_DOCKERD_BIN_DIR/$bin"
+        done
+
+        # Optional binaries (create symlink if present, skip if not)
+        local optional_binaries="docker-init docker-proxy ctr"
+        for bin in $optional_binaries; do
             if [[ -f "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/$bin" ]]; then
                 sudo ln -sfn "../docker/$latest_version/$bin" "$_CAI_DOCKERD_BIN_DIR/$bin"
             fi
