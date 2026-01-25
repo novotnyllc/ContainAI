@@ -1675,6 +1675,7 @@ _cai_doctor_json() {
 # Reset the Lima VM and Docker context
 # Deletes VM, removes Docker context, clears template hash
 # Uses _cai_prompt_confirm() for confirmation (supports CAI_YES=1)
+# Depends on: _cai_lima_vm_exists, _cai_lima_vm_status from lib/setup.sh
 # Returns: 0 on success, 1 on error
 _cai_doctor_reset_lima() {
     local platform
@@ -1686,6 +1687,12 @@ _cai_doctor_reset_lima() {
         return 1
     fi
 
+    # Verify limactl is available
+    if ! command -v limactl >/dev/null 2>&1; then
+        _cai_error "limactl is not installed"
+        return 1
+    fi
+
     _cai_warn "This will delete the ContainAI Lima VM ($_CAI_LIMA_VM_NAME) and Docker context."
     _cai_warn "Workspace data on the host is preserved."
 
@@ -1694,20 +1701,30 @@ _cai_doctor_reset_lima() {
         return 0
     fi
 
-    # Stop VM if running
-    if limactl list "$_CAI_LIMA_VM_NAME" 2>/dev/null | grep -q Running; then
+    local had_error="false"
+
+    # Stop VM if running (use _cai_lima_vm_status helper)
+    local vm_status
+    vm_status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME" 2>/dev/null || true)
+    if [[ "$vm_status" == "Running" ]]; then
         _cai_info "Stopping VM..."
-        limactl stop "$_CAI_LIMA_VM_NAME"
+        if ! limactl stop "$_CAI_LIMA_VM_NAME"; then
+            _cai_error "Failed to stop VM '$_CAI_LIMA_VM_NAME'"
+            had_error="true"
+        fi
     fi
 
     # Delete VM if it exists
     if _cai_lima_vm_exists "$_CAI_LIMA_VM_NAME"; then
         _cai_info "Deleting VM..."
-        limactl delete --force "$_CAI_LIMA_VM_NAME"
+        if ! limactl delete --force "$_CAI_LIMA_VM_NAME"; then
+            _cai_error "Failed to delete VM '$_CAI_LIMA_VM_NAME'"
+            had_error="true"
+        fi
     fi
 
     # Remove Docker context (switch away if active, then force remove)
-    if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+    if command -v docker >/dev/null 2>&1 && docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
         _cai_info "Removing Docker context..."
         # Switch away if this context is currently active
         local current_context
@@ -1722,6 +1739,11 @@ _cai_doctor_reset_lima() {
 
     # Remove template hash
     rm -f "$HOME/.config/containai/lima-template.hash"
+
+    if [[ "$had_error" == "true" ]]; then
+        _cai_error "Lima VM reset completed with errors"
+        return 1
+    fi
 
     _cai_ok "Lima VM reset complete"
     _cai_info "Run 'cai setup' to recreate the VM"
