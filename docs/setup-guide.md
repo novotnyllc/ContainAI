@@ -28,6 +28,7 @@ Before running `cai setup`, ensure you have:
 | Bash | 4.0+ | `bash --version` |
 | Docker CLI | Any recent | `docker --version` |
 | jq | Any | `jq --version` |
+| ripgrep (rg) | Any | `rg --version` |
 | OpenSSH client | 7.3+ | `ssh -V` |
 
 ### WSL2 (Windows)

@@ -406,6 +406,11 @@ _cai_check_setup_deps_info() {
         missing="${missing}jq "
     fi
 
+    # Check for ripgrep (rg) used for reliable line matching
+    if ! command -v rg >/dev/null 2>&1; then
+        missing="${missing}ripgrep "
+    fi
+
     # Check for wget (used for downloads)
     if ! command -v wget >/dev/null 2>&1; then
         missing="${missing}wget "
@@ -415,6 +420,50 @@ _cai_check_setup_deps_info() {
         _cai_info "Will install missing dependencies: $missing"
     fi
 
+    return 0
+}
+
+# Ensure jq and ripgrep are available on macOS hosts via Homebrew
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=success, 1=failure
+_cai_macos_ensure_host_tools() {
+    local dry_run="${1:-false}"
+    local -a missing_pkgs=()
+
+    if ! command -v jq >/dev/null 2>&1; then
+        missing_pkgs+=(jq)
+    fi
+    if ! command -v rg >/dev/null 2>&1; then
+        missing_pkgs+=(ripgrep)
+    fi
+
+    if ((${#missing_pkgs[@]} == 0)); then
+        _cai_ok "Required host tools available (jq, rg)"
+        return 0
+    fi
+
+    if ! command -v brew >/dev/null 2>&1; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_warn "[DRY-RUN] Homebrew not found; cannot install: ${missing_pkgs[*]}"
+            return 0
+        fi
+        _cai_error "Homebrew is required to install missing tools: ${missing_pkgs[*]}"
+        _cai_error "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        return 1
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would install via brew: ${missing_pkgs[*]}"
+        return 0
+    fi
+
+    _cai_info "Installing missing host tools: ${missing_pkgs[*]}"
+    if ! brew install "${missing_pkgs[@]}"; then
+        _cai_error "Failed to install host tools via Homebrew: ${missing_pkgs[*]}"
+        return 1
+    fi
+
+    _cai_ok "Host tools installed: ${missing_pkgs[*]}"
     return 0
 }
 
@@ -484,11 +533,14 @@ _cai_install_sysbox_wsl2() {
     # Do this BEFORE checking for Sysbox to ensure jq is available for configure step
     _cai_step "Ensuring required tools are installed"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would ensure jq and wget are installed"
+        _cai_info "[DRY-RUN] Would ensure jq, ripgrep, and wget are installed"
     else
         local missing_pkgs=()
         if ! command -v jq >/dev/null 2>&1; then
             missing_pkgs+=("jq")
+        fi
+        if ! command -v rg >/dev/null 2>&1; then
+            missing_pkgs+=("ripgrep")
         fi
         if ! command -v wget >/dev/null 2>&1; then
             missing_pkgs+=("wget")
@@ -520,14 +572,14 @@ _cai_install_sysbox_wsl2() {
     _cai_step "Installing Sysbox dependencies"
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would run: apt-get update"
-        _cai_info "[DRY-RUN] Would run: apt-get install -y jq wget"
+        _cai_info "[DRY-RUN] Would run: apt-get install -y jq ripgrep wget"
     else
         if ! sudo apt-get update; then
             _cai_error "Failed to run apt-get update"
             return 1
         fi
-        if ! sudo apt-get install -y jq wget; then
-            _cai_error "Failed to install dependencies (jq, wget)"
+        if ! sudo apt-get install -y jq ripgrep wget; then
+            _cai_error "Failed to install dependencies (jq, ripgrep, wget)"
             return 1
         fi
     fi
@@ -2787,39 +2839,45 @@ _cai_setup_macos() {
     printf '\n'
 
     # Step 0: Clean up legacy paths (sockets, contexts, drop-ins)
-    # Note: Lima VM cleanup happens AFTER new VM is verified (Step 6)
+    # Note: Lima VM cleanup happens AFTER new VM is verified (Step 7)
     if ! _cai_cleanup_legacy_paths "$dry_run" "$verbose"; then
         _cai_warn "Legacy path cleanup had issues - continuing anyway"
     fi
 
-    # Step 1: Install Lima (via Homebrew)
+    # Step 1: Ensure required host tools (jq, rg)
+    _cai_step "Ensuring required host tools are installed"
+    if ! _cai_macos_ensure_host_tools "$dry_run"; then
+        return 1
+    fi
+
+    # Step 2: Install Lima (via Homebrew)
     if ! _cai_lima_install "$dry_run"; then
         return 1
     fi
 
-    # Step 2: Create Lima VM with Docker + Sysbox
+    # Step 3: Create Lima VM with Docker + Sysbox
     if ! _cai_lima_create_vm "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 3: Wait for Lima Docker socket
+    # Step 4: Wait for Lima Docker socket
     if ! _cai_lima_wait_socket 120 "$dry_run"; then
         return 1
     fi
 
-    # Step 4: Create containai-docker context
+    # Step 5: Create containai-docker context
     if ! _cai_lima_create_context "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 5: Verify installation
+    # Step 6: Verify installation
     local verify_ok=true
     if ! _cai_lima_verify_install "$dry_run" "$verbose"; then
         _cai_warn "Lima + Sysbox verification had issues - check output above"
         verify_ok=false
     fi
 
-    # Step 6: Clean up legacy Lima VM (only if new VM is verified working)
+    # Step 7: Clean up legacy Lima VM (only if new VM is verified working)
     # This ensures users aren't left without a working VM if setup fails
     # Pass force flag to allow auto-deletion with --force, otherwise shows manual instructions
     if [[ "$verify_ok" == "true" ]]; then
@@ -2948,14 +3006,17 @@ _cai_install_sysbox_linux() {
         fi
     fi
 
-    # Ensure jq (daemon.json merge) and wget (GitHub API fetch) are available
+    # Ensure jq (daemon.json merge), ripgrep (rg), and wget are available
     _cai_step "Ensuring required tools are installed"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would ensure jq and wget are installed"
+        _cai_info "[DRY-RUN] Would ensure jq, ripgrep, and wget are installed"
     else
         local -a missing_tools=()
         if ! command -v jq >/dev/null 2>&1; then
             missing_tools+=(jq)
+        fi
+        if ! command -v rg >/dev/null 2>&1; then
+            missing_tools+=(ripgrep)
         fi
         if ! command -v wget >/dev/null 2>&1; then
             missing_tools+=(wget)
@@ -3082,14 +3143,14 @@ _cai_install_sysbox_linux() {
     fi
 
     _cai_step "Installing Sysbox dependencies"
-    if ! command -v jq >/dev/null 2>&1 || ! command -v wget >/dev/null 2>&1; then
-        _cai_info "Installing missing dependencies: jq wget"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v rg >/dev/null 2>&1 || ! command -v wget >/dev/null 2>&1; then
+        _cai_info "Installing missing dependencies: jq ripgrep wget"
         if ! sudo apt-get update; then
             _cai_error "Failed to run apt-get update"
             return 1
         fi
-        if ! sudo apt-get install -y jq wget; then
-            _cai_error "Failed to install dependencies (jq, wget)"
+        if ! sudo apt-get install -y jq ripgrep wget; then
+            _cai_error "Failed to install dependencies (jq, ripgrep, wget)"
             return 1
         fi
     fi
@@ -3625,11 +3686,20 @@ _cai_setup_nested() {
 
     _cai_step "Ensuring docker defaults to sysbox-runc"
 
-    if ! command -v jq >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
-        _cai_info "Installing jq for daemon.json updates"
-        sudo apt-get update -qq >/dev/null 2>&1 || _cai_warn "apt-get update failed (continuing)"
-        if ! sudo apt-get install -y jq >/dev/null 2>&1; then
-            _cai_warn "Failed to install jq; daemon.json merge may be limited"
+    if command -v apt-get >/dev/null 2>&1; then
+        local -a missing_tools=()
+        if ! command -v jq >/dev/null 2>&1; then
+            missing_tools+=(jq)
+        fi
+        if ! command -v rg >/dev/null 2>&1; then
+            missing_tools+=(ripgrep)
+        fi
+        if ((${#missing_tools[@]} > 0)); then
+            _cai_info "Installing required tools: ${missing_tools[*]}"
+            sudo apt-get update -qq >/dev/null 2>&1 || _cai_warn "apt-get update failed (continuing)"
+            if ! sudo apt-get install -y "${missing_tools[@]}" >/dev/null 2>&1; then
+                _cai_warn "Failed to install required tools: ${missing_tools[*]}"
+            fi
         fi
     fi
 
@@ -3815,14 +3885,14 @@ Requirements (Linux native):
   - systemd-based init system
   - Docker Engine installed
   - Internet access to download Sysbox
-  - jq and wget installed (will install if missing)
+  - jq, ripgrep (rg), and wget installed (will install if missing)
 
 Requirements (WSL2):
   - Ubuntu or Debian WSL2 distribution (WSL1 not supported)
   - systemd enabled ([boot] systemd=true in /etc/wsl.conf)
   - Docker Engine installed (standalone, not Docker Desktop integration)
   - Internet access to download Sysbox
-  - jq and wget installed (will install if missing)
+  - jq, ripgrep (rg), and wget installed (will install if missing)
 
 Requirements (macOS):
   - Homebrew installed

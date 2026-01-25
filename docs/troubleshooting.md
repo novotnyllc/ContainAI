@@ -593,6 +593,32 @@ sudo apt install jq  # Ubuntu/Debian
 sudo dnf install jq  # Fedora
 ```
 
+### "ripgrep (rg) is not installed"
+
+**Symptom:**
+```
+rg: command not found
+```
+
+**Diagnosis:**
+```bash
+command -v rg
+rg --version
+```
+
+**Solution:**
+
+**macOS:**
+```bash
+brew install ripgrep
+```
+
+**Linux:**
+```bash
+sudo apt install ripgrep  # Ubuntu/Debian
+sudo dnf install ripgrep  # Fedora
+```
+
 ### "OpenSSH version too old"
 
 **Symptom:**
@@ -1108,6 +1134,7 @@ Quick reference of error messages and their section in this guide:
 | "Docker is not installed" | [Installation Issues](#docker-is-not-installed-or-not-in-path) |
 | "No timeout command available" | [Installation Issues](#no-timeout-command-available) |
 | "jq is not installed" | [Installation Issues](#jq-is-not-installed) |
+| "ripgrep (rg) is not installed" | [Installation Issues](#ripgrep-rg-is-not-installed) |
 | "OpenSSH version too old" | [Installation Issues](#openssh-version-too-old) |
 | "containai-docker context not found" | [Sysbox Issues](#containai-docker-context-not-found) |
 | "Sysbox runtime not found" | [Sysbox Issues](#sysbox-runtime-not-found) |

@@ -12,7 +12,7 @@
 # - Docker daemon running
 # - Sysbox installed and containai-docker context available
 # - containai.sh sourced
-# - jq installed on host (for JSON validation)
+# - jq and ripgrep (rg) installed on host (for JSON validation and setup helpers)
 #
 # Usage:
 #   ./tests/integration/test-containai.sh
@@ -197,6 +197,13 @@ check_prerequisites() {
         exit 1
     fi
     pass "jq available on host"
+
+    # Check ripgrep is available on host (setup uses rg for idempotent key injection)
+    if ! command -v rg >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] rg not found (ripgrep required; run 'cai setup')" >&2
+        exit 1
+    fi
+    pass "ripgrep (rg) available on host"
 
     # Check containai-docker context exists
     if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
