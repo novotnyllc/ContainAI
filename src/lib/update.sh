@@ -338,18 +338,14 @@ _cai_update_linux_wsl2() {
         _cai_warn "Legacy cleanup had issues (continuing anyway)"
     fi
 
-    # Step 2: Ensure dockerd bundle is installed (required before unit update)
-    # The systemd unit now uses /opt/containai/bin/dockerd, so bundle must exist
+    # Step 2: Install/update dockerd bundle (required before unit update)
+    # The systemd unit uses /opt/containai/bin/dockerd, so bundle must exist
+    # Always call - function handles version check and upgrades internally
     _cai_step "Checking dockerd bundle"
-    if ! _cai_dockerd_bundle_installed; then
-        _cai_info "Dockerd bundle not installed - installing now"
-        if ! _cai_install_dockerd_bundle "$dry_run" "$verbose"; then
-            _cai_error "Failed to install dockerd bundle"
-            _cai_error "  The systemd unit requires /opt/containai/bin/dockerd"
-            return 1
-        fi
-    else
-        _cai_info "Dockerd bundle is installed"
+    if ! _cai_install_dockerd_bundle "$dry_run" "$verbose"; then
+        _cai_error "Failed to install/update dockerd bundle"
+        _cai_error "  The systemd unit requires /opt/containai/bin/dockerd"
+        return 1
     fi
 
     # Step 3: Check/update systemd unit

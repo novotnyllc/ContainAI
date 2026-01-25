@@ -635,6 +635,34 @@ _cai_install_dockerd_bundle() {
 
     _cai_step "Installing ContainAI-managed Docker bundle"
 
+    # Preflight: Check required tools (wget may not be installed if Sysbox was pre-installed)
+    local missing_tools=""
+    if ! command -v wget >/dev/null 2>&1; then
+        missing_tools="$missing_tools wget"
+    fi
+    if ! command -v tar >/dev/null 2>&1; then
+        missing_tools="$missing_tools tar"
+    fi
+
+    if [[ -n "$missing_tools" ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_warn "[DRY-RUN] Missing required tools:$missing_tools"
+            _cai_info "[DRY-RUN] Would install with: sudo apt-get install -y$missing_tools"
+        else
+            _cai_info "Installing required tools:$missing_tools"
+            if ! sudo apt-get update -qq; then
+                _cai_error "Failed to update package list"
+                return 1
+            fi
+            # shellcheck disable=SC2086
+            if ! sudo apt-get install -y$missing_tools; then
+                _cai_error "Failed to install required tools:$missing_tools"
+                _cai_error "  Install manually: sudo apt-get install$missing_tools"
+                return 1
+            fi
+        fi
+    fi
+
     # Determine architecture (Docker uses x86_64/aarch64 naming)
     local arch
     arch=$(uname -m)
@@ -786,9 +814,11 @@ _cai_install_dockerd_bundle() {
             sudo ln -sfn "../docker/$latest_version/$bin" "$_CAI_DOCKERD_BIN_DIR/$bin"
         done
 
-        # Write version file
+        # Write version file atomically (write to temp, then mv)
         echo "[STEP] Writing version to $_CAI_DOCKERD_VERSION_FILE"
-        printf '%s' "$latest_version" | sudo tee "$_CAI_DOCKERD_VERSION_FILE" >/dev/null
+        local version_tmp="${_CAI_DOCKERD_VERSION_FILE}.tmp"
+        printf '%s' "$latest_version" | sudo tee "$version_tmp" >/dev/null
+        sudo mv -f "$version_tmp" "$_CAI_DOCKERD_VERSION_FILE"
 
         exit 0
     ) && install_rc=0 || install_rc=$?
