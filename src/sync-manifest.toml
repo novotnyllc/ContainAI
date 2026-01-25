@@ -1,0 +1,298 @@
+# ContainAI Sync Manifest
+# Single source of truth for config sync between host and container
+#
+# This manifest defines:
+# - What gets synced from host $HOME to the data volume
+# - What symlinks are created in the container image
+# - What directory structure is initialized on first boot
+#
+# Flags:
+#   f = file
+#   d = directory
+#   j = json-init (create {} if empty)
+#   s = secret (600 for files, 700 for dirs)
+#   m = mirror mode (--delete to remove files not in source)
+#   x = exclude .system/ subdirectory
+#   g = git-filter (strip credential.helper) - for future use
+#   R = remove existing path first (rm -rf before ln -sfn)
+#
+# Fields:
+#   source = path relative to $HOME (without leading dot for config files)
+#   target = path relative to /mnt/agent-data (volume)
+#   container_link = path relative to ~ where symlink is created (optional)
+#   flags = combination of flags above
+
+# =============================================================================
+# CLAUDE CODE
+# =============================================================================
+
+[[entries]]
+source = ".claude.json"
+target = "claude/claude.json"
+container_link = ".claude.json"
+flags = "fjs"  # file, json-init, secret
+
+[[entries]]
+source = ".claude/.credentials.json"
+target = "claude/credentials.json"
+container_link = ".claude/.credentials.json"
+flags = "fs"  # file, secret
+
+[[entries]]
+source = ".claude/settings.json"
+target = "claude/settings.json"
+container_link = ".claude/settings.json"
+flags = "fj"  # file, json-init
+
+[[entries]]
+source = ".claude/settings.local.json"
+target = "claude/settings.local.json"
+container_link = ""  # No symlink in container (TODO: should add?)
+flags = "f"  # file
+
+[[entries]]
+source = ".claude/plugins"
+target = "claude/plugins"
+container_link = ".claude/plugins"
+flags = "d"  # directory
+
+[[entries]]
+source = ".claude/skills"
+target = "claude/skills"
+container_link = ".claude/skills"
+flags = "d"  # directory
+
+# =============================================================================
+# GITHUB CLI
+# =============================================================================
+
+[[entries]]
+source = ".config/gh"
+target = "config/gh"
+container_link = ".config/gh"
+flags = "ds"  # directory, secret
+
+# =============================================================================
+# OPENCODE
+# =============================================================================
+
+[[entries]]
+source = ".config/opencode"
+target = "config/opencode"
+container_link = ".config/opencode"
+flags = "d"  # directory
+
+[[entries]]
+source = ".local/share/opencode/auth.json"
+target = "local/share/opencode/auth.json"
+container_link = ".local/share/opencode/auth.json"
+flags = "fs"  # file, secret
+
+# =============================================================================
+# TMUX
+# =============================================================================
+
+[[entries]]
+source = ".config/tmux"
+target = "config/tmux"
+container_link = ".config/tmux"
+flags = "d"  # directory
+
+[[entries]]
+source = ".local/share/tmux"
+target = "local/share/tmux"
+container_link = ".local/share/tmux"
+flags = "d"  # directory
+
+# =============================================================================
+# FONTS
+# =============================================================================
+
+[[entries]]
+source = ".local/share/fonts"
+target = "local/share/fonts"
+container_link = ".local/share/fonts"
+flags = "d"  # directory
+
+# =============================================================================
+# COMMON AGENTS DIRECTORY
+# =============================================================================
+
+[[entries]]
+source = ".agents"
+target = "agents"
+container_link = ".agents"
+flags = "d"  # directory
+
+# =============================================================================
+# SHELL
+# =============================================================================
+
+[[entries]]
+source = ".bash_aliases"
+target = "shell/bash_aliases"
+container_link = ".bash_aliases_imported"  # Different name to preserve user's original
+flags = "f"  # file
+
+[[entries]]
+source = ".bashrc.d"
+target = "shell/bashrc.d"
+container_link = ""  # Sourced via .bashrc hook, not directly symlinked
+flags = "d"  # directory
+
+# =============================================================================
+# VS CODE SERVER (STABLE)
+# =============================================================================
+
+[[entries]]
+source = ".vscode-server/extensions"
+target = "vscode-server/extensions"
+container_link = ".vscode-server/extensions"
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server/data/Machine"
+target = "vscode-server/data/Machine"
+container_link = ""  # Only settings.json is symlinked, not the whole dir
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server/data/User/mcp"
+target = "vscode-server/data/User/mcp"
+container_link = ".vscode-server/data/User/mcp"
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server/data/User/prompts"
+target = "vscode-server/data/User/prompts"
+container_link = ".vscode-server/data/User/prompts"
+flags = "d"  # directory
+
+# =============================================================================
+# VS CODE SERVER (INSIDERS)
+# =============================================================================
+
+[[entries]]
+source = ".vscode-server-insiders/extensions"
+target = "vscode-server-insiders/extensions"
+container_link = ".vscode-server-insiders/extensions"
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server-insiders/data/Machine"
+target = "vscode-server-insiders/data/Machine"
+container_link = ""  # Only settings.json is symlinked, not the whole dir
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server-insiders/data/User/mcp"
+target = "vscode-server-insiders/data/User/mcp"
+container_link = ".vscode-server-insiders/data/User/mcp"
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server-insiders/data/User/prompts"
+target = "vscode-server-insiders/data/User/prompts"
+container_link = ".vscode-server-insiders/data/User/prompts"
+flags = "d"  # directory
+
+# =============================================================================
+# COPILOT
+# =============================================================================
+
+[[entries]]
+source = ".copilot/config.json"
+target = "copilot/config.json"
+container_link = ".copilot/config.json"
+flags = "f"  # file
+
+[[entries]]
+source = ".copilot/mcp-config.json"
+target = "copilot/mcp-config.json"
+container_link = ".copilot/mcp-config.json"
+flags = "f"  # file
+
+[[entries]]
+source = ".copilot/skills"
+target = "copilot/skills"
+container_link = ".copilot/skills"
+flags = "dR"  # directory, remove existing first
+
+# =============================================================================
+# GEMINI
+# =============================================================================
+
+[[entries]]
+source = ".gemini/google_accounts.json"
+target = "gemini/google_accounts.json"
+container_link = ".gemini/google_accounts.json"
+flags = "fs"  # file, secret
+
+[[entries]]
+source = ".gemini/oauth_creds.json"
+target = "gemini/oauth_creds.json"
+container_link = ".gemini/oauth_creds.json"
+flags = "fs"  # file, secret
+
+[[entries]]
+source = ".gemini/settings.json"
+target = "gemini/settings.json"
+container_link = ".gemini/settings.json"
+flags = "fj"  # file, json-init
+
+[[entries]]
+source = ".gemini/GEMINI.md"
+target = "gemini/GEMINI.md"
+container_link = ".gemini/GEMINI.md"
+flags = "f"  # file
+
+# =============================================================================
+# CODEX
+# =============================================================================
+
+[[entries]]
+source = ".codex/config.toml"
+target = "codex/config.toml"
+container_link = ".codex/config.toml"
+flags = "f"  # file
+
+[[entries]]
+source = ".codex/auth.json"
+target = "codex/auth.json"
+container_link = ".codex/auth.json"
+flags = "fs"  # file, secret
+
+[[entries]]
+source = ".codex/skills"
+target = "codex/skills"
+container_link = ".codex/skills"
+flags = "dxR"  # directory, exclude .system/, remove existing first
+
+# =============================================================================
+# ADDITIONAL SYMLINKS (container-only, no host import)
+# These are created in the Dockerfile but have no corresponding import entry
+# =============================================================================
+
+# VS Code Machine settings.json symlinks (the directory is imported, but
+# only the settings.json file is symlinked individually)
+# container_link_only entries have empty source
+
+[[container_symlinks]]
+target = "vscode-server/data/Machine/settings.json"
+container_link = ".vscode-server/data/Machine/settings.json"
+flags = "fj"
+
+[[container_symlinks]]
+target = "vscode-server/data/User/mcp.json"
+container_link = ".vscode-server/data/User/mcp.json"
+flags = "fj"
+
+[[container_symlinks]]
+target = "vscode-server-insiders/data/Machine/settings.json"
+container_link = ".vscode-server-insiders/data/Machine/settings.json"
+flags = "fj"
+
+[[container_symlinks]]
+target = "vscode-server-insiders/data/User/mcp.json"
+container_link = ".vscode-server-insiders/data/User/mcp.json"
+flags = "fj"

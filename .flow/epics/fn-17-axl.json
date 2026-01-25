@@ -1,13 +1,13 @@
 {
   "branch_name": "fn-17-axl",
   "created_at": "2026-01-24T22:07:50.990373Z",
-  "depends_on_epics": [ ],
+  "depends_on_epics": [],
   "id": "fn-17-axl",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-25T17:11:48.688914Z",
   "spec_path": ".flow/specs/fn-17-axl.md",
   "status": "open",
   "title": "Config Sync v2",
-  "updated_at": "2026-01-24T22:45:35.056262Z"
+  "updated_at": "2026-01-25T17:11:48.688925Z"
 }

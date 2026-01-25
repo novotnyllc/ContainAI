@@ -130,6 +130,9 @@ ensure_volume_structure() {
     ensure_dir "${DATA_DIR}/local/share/tmux"
     ensure_dir "${DATA_DIR}/local/share/fonts"
 
+    # Common agents directory (shared skills, plugins, etc.)
+    ensure_dir "${DATA_DIR}/agents"
+
     # Shell (paths match import.sh: shell/bash_aliases, shell/bashrc.d - no dots)
     ensure_dir "${DATA_DIR}/shell"
     ensure_file "${DATA_DIR}/shell/bash_aliases"

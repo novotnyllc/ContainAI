@@ -1,0 +1,273 @@
+{
+  "created_at": "2026-01-25T16:24:17.875259Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-17-axl",
+      "created_at": "2026-01-24T22:07:50.990373Z",
+      "depends_on_epics": [],
+      "id": "fn-17-axl",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-17-axl.md",
+      "status": "open",
+      "title": "Config Sync v2",
+      "updated_at": "2026-01-24T22:45:35.056262Z"
+    },
+    "spec": "# Config Sync v2\n\n## Overview\n\nComprehensive overhaul of the import/sync system to support AI agent configurations, dev tools, selective syncing, import overrides, and intelligent symlink handling. Agent credentials are synced by default (opt-out available).\n\n## Scope\n\n**In scope:**\n- Selective sync of AI agent folders (not entire dirs)\n- XDG config discovery (~/.config/tmux, nvim, etc.)\n- Agent credential syncing (Claude, etc.) - default ON, opt-out available\n- Gitconfig filtering (strip credential.helper)\n- Import overrides mechanism\n- Absolute\u2192relative symlink conversion\n- User-specified additional files\n- Container symlinks to data volume\n- Link check/fix command\n- Timestamp-based auto-fix watcher\n\n**Out of scope:**\n- Cloud CLI credentials (use .env sync instead)\n- Session history, caches, analytics dirs\n\n## What to Sync\n\n### AI Agent Configs (Selective)\n\n| Source | Sync | Skip |\n|--------|------|------|\n| **~/.claude/** | `settings.json`, `commands/`, `skills/`, `agents/`, `plugins/`, `hooks/`, `CLAUDE.md`, `.credentials.json` | `projects/`, `statsig/` |\n| **~/.config/opencode/** | `opencode.json`, `agents/`, `commands/`, `skills/`, `modes/`, `plugins/`, `instructions.md` | caches |\n| **~/.aider.conf.yml** | sync | \u2014 |\n| **~/.aider.model.settings.yml** | sync | \u2014 |\n| **~/.continue/** | `config.yaml`, `config.json` | `sessions/`, `index/` |\n| **~/.cursor/** | `mcp.json`, `rules`, `extensions/` | \u2014 |\n| **~/.copilot/** | `config.json`, `mcp-config.json` | \u2014 |\n\n### Shell & Terminal\n\n| Source | Sync |\n|--------|------|\n| `~/.bashrc`, `~/.bash_profile`, `~/.bash_aliases` | yes |\n| `~/.zshrc`, `~/.zprofile` | yes |\n| `~/.inputrc` | yes |\n| `~/.tmux.conf` OR `~/.config/tmux/` | yes (XDG preferred) |\n| `~/.config/starship.toml` | yes |\n| `~/.config/oh-my-posh/` | yes |\n| `~/.oh-my-zsh/custom/` | yes (custom only) |\n\n### Git & SSH\n\n| Source | Sync | Notes |\n|--------|------|-------|\n| `~/.gitconfig` | yes | **Strip `credential.helper` line** |\n| `~/.gitignore_global` | yes | \u2014 |\n| `~/.ssh/config` | yes | \u2014 |\n| `~/.ssh/known_hosts` | yes | \u2014 |\n| `~/.ssh/id_*` | with creds flag | Agent credentials only |\n\n### Editors\n\n| Source | Sync |\n|--------|------|\n| `~/.vimrc`, `~/.vim/` | yes |\n| `~/.config/nvim/` | yes |\n\n## Import Overrides\n\nUsers can override any imported file by placing it in:\n```\n~/.config/containai/import-overrides/\n```\n\nStructure maps to home directory:\n```\n~/.config/containai/import-overrides/\n\u251c\u2500\u2500 .gitconfig              # Overrides ~/.gitconfig\n\u251c\u2500\u2500 .claude/\n\u2502   \u2514\u2500\u2500 settings.json       # Overrides ~/.claude/settings.json\n\u2514\u2500\u2500 .config/\n    \u2514\u2500\u2500 starship.toml       # Overrides ~/.config/starship.toml\n```\n\n**Priority:** Override file wins over source file.\n\n## Symlink Handling\n\n### Absolute \u2192 Relative Conversion\n- If source file is an absolute symlink pointing inside $HOME\n- Convert to relative symlink in destination\n- Do NOT modify source files\n\nExample:\n```\nSource: ~/.config/nvim -> /home/user/dotfiles/nvim  (absolute)\nImport: ~/.config/nvim -> ../../dotfiles/nvim       (relative)\n```\n\n### Container Symlinks\n- Create symlinks in container pointing to data volume paths\n- `cai links check` - verify all links are valid\n- `cai links fix` - recreate broken links\n\n### Timestamp Watcher\n- Import writes timestamp to data volume root\n- Lightweight watcher in container checks timestamp\n- If import newer than last fix \u2192 auto-run link fix\n\n## Quick commands\n\n```bash\n# Test import\ncai import --dry-run\n\n# Check links in container\ncai links check\n\n# Fix broken links\ncai links fix\n\n# Import without credentials\ncai import --no-credentials\n```\n\n## Acceptance\n\n- [ ] Selective sync of ~/.claude/ (excludes projects/, statsig/)\n- [ ] Selective sync of ~/.config/opencode/ (excludes caches)\n- [ ] plugins/ and extensions/ directories included\n- [ ] XDG configs discovered (~/.config/tmux/, nvim/, etc.)\n- [ ] Agent credentials synced by default\n- [ ] --no-credentials flag skips credential files\n- [ ] .gitconfig synced with credential.helper stripped\n- [ ] Import overrides work from ~/.config/containai/import-overrides/\n- [ ] Absolute symlinks converted to relative (if inside $HOME)\n- [ ] User-specified files configurable\n- [ ] Container symlinks point to data volume\n- [ ] `cai links check` reports link status\n- [ ] `cai links fix` repairs broken links\n- [ ] Timestamp watcher triggers auto-fix\n\n## References\n\n- Current import: `src/lib/sync.sh`\n- Config parsing: `src/lib/config.sh`\n- XDG spec: https://wiki.archlinux.org/title/XDG_Base_Directory\n- Claude Code settings: https://docs.anthropic.com/en/docs/claude-code\n\n## Dependencies\n\n- **fn-16-4c9.1**: Project reorg (should complete first for clean paths)\n"
+  },
+  "epic_id": "fn-17-axl",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:31.570502Z",
+        "depends_on": [],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.1.md",
+        "status": "todo",
+        "title": "Re-validate and clean up current import config",
+        "updated_at": "2026-01-24T22:08:31.570534Z"
+      },
+      "id": "fn-17-axl.1",
+      "runtime": null,
+      "spec": "# fn-17-axl.1 Re-validate and clean up current import config\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:32.181837Z",
+        "depends_on": [
+          "fn-17-axl.9"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.10",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.10.md",
+        "status": "todo",
+        "title": "Add cai links check and cai links fix commands",
+        "updated_at": "2026-01-24T22:08:43.013734Z"
+      },
+      "id": "fn-17-axl.10",
+      "runtime": null,
+      "spec": "# fn-17-axl.10 Add cai links check and cai links fix commands\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:32.254467Z",
+        "depends_on": [
+          "fn-17-axl.10"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.11",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.11.md",
+        "status": "todo",
+        "title": "Timestamp-based auto-fix watcher",
+        "updated_at": "2026-01-24T22:08:43.087601Z"
+      },
+      "id": "fn-17-axl.11",
+      "runtime": null,
+      "spec": "# fn-17-axl.11 Timestamp-based auto-fix watcher\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-25T04:41:43.648773Z",
+        "depends_on": [],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.12",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.12.md",
+        "status": "todo",
+        "title": "Investigate Claude OAuth token expiration on import",
+        "updated_at": "2026-01-25T04:41:43.648788Z"
+      },
+      "id": "fn-17-axl.12",
+      "runtime": null,
+      "spec": "# fn-17-axl.12 Investigate Claude OAuth token expiration on import\n\n## Description\n\n**Priority: Low** - Investigate why Claude's OAuth token expires after import, even though the credentials file is imported correctly.\n\n**Symptoms observed:**\n- Claude credentials (`.credentials.json`) are imported to the container\n- The token in the file has a valid `expiresAt` timestamp in the future\n- Claude CLI still reports the token as expired or invalid\n- May require re-authentication inside the container\n\n**Possible causes to investigate:**\n1. **Timestamp format mismatch**: Is `expiresAt` in milliseconds vs seconds?\n2. **Clock skew**: Is the container's clock significantly different from host?\n3. **File permissions**: Is `.credentials.json` readable by the agent user?\n4. **Token scope mismatch**: Are the scopes in the imported token correct for Claude Code?\n5. **Symlink issues**: If credentials are symlinked, is Claude following the symlink?\n6. **Config path differences**: Is Claude looking for credentials in a different location?\n7. **Session binding**: Is the token bound to a specific machine/session ID? There may be additional files in ~/.claude we need to import.\n\n**Investigation steps:**\n1. Compare `.credentials.json` on host vs container (byte-for-byte)\n2. Check file permissions and ownership in container\n3. Check container time vs host time (`date` command)\n4. Run `claude --version` and check for config path output\n5. Check Claude's debug logs for auth errors\n6. Test with fresh authentication in container\n\n**Note:** This is investigation only - may not result in a code fix if the issue is inherent to Claude's auth model.\n\n## Acceptance\n- [ ] Root cause identified and documented\n- [ ] If fixable: solution implemented and tested\n- [ ] If not fixable: documented as known limitation with workaround\n- [ ] Investigation findings added to docs/troubleshooting.md if relevant\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:31.638183Z",
+        "depends_on": [
+          "fn-17-axl.1"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.2.md",
+        "status": "todo",
+        "title": "XDG config discovery for dev tools",
+        "updated_at": "2026-01-24T22:08:42.286018Z"
+      },
+      "id": "fn-17-axl.2",
+      "runtime": null,
+      "spec": "# fn-17-axl.2 XDG config discovery for dev tools\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:31.705221Z",
+        "depends_on": [
+          "fn-17-axl.1"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.3.md",
+        "status": "todo",
+        "title": "Selective AI agent folder sync",
+        "updated_at": "2026-01-24T22:08:42.360325Z"
+      },
+      "id": "fn-17-axl.3",
+      "runtime": null,
+      "spec": "# fn-17-axl.3 Selective AI agent folder sync\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:31.770662Z",
+        "depends_on": [
+          "fn-17-axl.1"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.4.md",
+        "status": "todo",
+        "title": "Agent credential sync with --no-credentials opt-out",
+        "updated_at": "2026-01-24T22:08:42.437357Z"
+      },
+      "id": "fn-17-axl.4",
+      "runtime": null,
+      "spec": "# fn-17-axl.4 Agent credential sync with --no-credentials opt-out\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:31.836749Z",
+        "depends_on": [
+          "fn-17-axl.1"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.5.md",
+        "status": "todo",
+        "title": "Gitconfig filtering: strip credential.helper",
+        "updated_at": "2026-01-24T22:08:42.509993Z"
+      },
+      "id": "fn-17-axl.5",
+      "runtime": null,
+      "spec": "# fn-17-axl.5 Gitconfig filtering: strip credential.helper\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:31.906844Z",
+        "depends_on": [
+          "fn-17-axl.1"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.6.md",
+        "status": "todo",
+        "title": "Import overrides mechanism",
+        "updated_at": "2026-01-24T22:08:42.581467Z"
+      },
+      "id": "fn-17-axl.6",
+      "runtime": null,
+      "spec": "# fn-17-axl.6 Import overrides mechanism\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:31.974389Z",
+        "depends_on": [
+          "fn-17-axl.1"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.7",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.7.md",
+        "status": "todo",
+        "title": "Absolute-to-relative symlink conversion",
+        "updated_at": "2026-01-24T22:08:42.652160Z"
+      },
+      "id": "fn-17-axl.7",
+      "runtime": null,
+      "spec": "# fn-17-axl.7 Absolute-to-relative symlink conversion\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:32.043337Z",
+        "depends_on": [
+          "fn-17-axl.1"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.8",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.8.md",
+        "status": "todo",
+        "title": "User-specified additional files config",
+        "updated_at": "2026-01-24T22:08:42.724439Z"
+      },
+      "id": "fn-17-axl.8",
+      "runtime": null,
+      "spec": "# fn-17-axl.8 User-specified additional files config\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:08:32.112013Z",
+        "depends_on": [
+          "fn-17-axl.3",
+          "fn-17-axl.6",
+          "fn-17-axl.7"
+        ],
+        "epic": "fn-17-axl",
+        "id": "fn-17-axl.9",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-17-axl.9.md",
+        "status": "todo",
+        "title": "Container symlinks to data volume",
+        "updated_at": "2026-01-24T22:08:42.940709Z"
+      },
+      "id": "fn-17-axl.9",
+      "runtime": null,
+      "spec": "# fn-17-axl.9 Container symlinks to data volume\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

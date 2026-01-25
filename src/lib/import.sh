@@ -456,6 +456,195 @@ _import_step() {
 }
 
 # ==============================================================================
+# Destination-relative exclude handling
+# ==============================================================================
+
+# Check if a pattern contains glob metacharacters
+# Arguments: $1 = pattern
+# Returns: 0 if has glob metacharacters, 1 otherwise
+_import_has_glob_metachar() {
+    local pattern="$1"
+    case "$pattern" in
+        *'*'*|*'?'*|*'['*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Rewrite excludes to be destination-relative and compute per-entry excludes
+# This function processes exclude patterns and determines which patterns apply
+# to each SYNC_MAP entry based on destination path matching.
+#
+# Pattern Classification:
+# 1. No-slash WITH glob metacharacters (*.log, *.tmp): Global globs, apply to all entries
+# 2. No-slash WITHOUT glob metacharacters (claude, config): Root prefixes, skip matching entries
+# 3. Path patterns (claude/plugins/.system): Bidirectional parent/child matching
+#
+# Arguments:
+#   $1 = newline-delimited exclude patterns
+#   $2 = newline-delimited SYNC_MAP entries (source:target:flags format)
+#
+# Output (stdout): newline-delimited entries in format:
+#   source:target:flags:excludes_b64
+#
+# Where excludes_b64 is base64-encoded newline-delimited excludes for that entry,
+# or empty string if no excludes apply or entry should be skipped.
+#
+# Output (stderr):
+#   [SKIP] messages for entries excluded by parent patterns
+#   [WARN] messages for unmatched patterns
+#
+# Returns: 0 on success
+_import_rewrite_excludes() {
+    local excludes_input="$1"
+    local entries_input="$2"
+
+    # Track which patterns have been matched
+    # Using associative array: pattern -> "1" if matched
+    local -A pattern_matched=()
+
+    # Collect global globs (patterns that apply to all entries)
+    local -a global_globs=()
+
+    # Collect root prefixes (no-slash non-glob patterns)
+    local -a root_prefixes=()
+
+    # Collect path patterns (patterns with /)
+    local -a path_patterns=()
+
+    # Parse excludes into categories
+    local pattern p
+    while IFS= read -r pattern; do
+        [[ -z "$pattern" ]] && continue
+
+        # Strip leading / for anchored patterns
+        p="${pattern#/}"
+
+        if [[ "$p" != */* ]]; then
+            # No-slash pattern
+            if _import_has_glob_metachar "$p"; then
+                # Global glob - applies to all entries
+                global_globs+=("$p")
+                pattern_matched["$pattern"]=1
+            else
+                # Root prefix - skips matching entries
+                root_prefixes+=("$p")
+            fi
+        else
+            # Path pattern
+            path_patterns+=("$pattern")
+        fi
+    done <<<"$excludes_input"
+
+    # Process each entry
+    local entry source target flags dst_rel
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+
+        # Parse entry (source:target:flags)
+        IFS=':' read -r source target flags <<<"$entry"
+
+        # Compute destination-relative path (strip /target/ prefix)
+        dst_rel="${target#/target/}"
+        if [[ "$dst_rel" == "/target" ]]; then
+            dst_rel=""
+        fi
+
+        # Check if entry should be skipped due to root prefix
+        local skip_entry=""
+        local prefix
+        for prefix in "${root_prefixes[@]}"; do
+            # Root prefix matches if dst_rel starts with prefix/ or equals prefix
+            case "$dst_rel" in
+                "${prefix}"|"${prefix}/"*)
+                    skip_entry=1
+                    pattern_matched["$prefix"]=1
+                    pattern_matched["/${prefix}"]=1
+                    ;;
+            esac
+        done
+
+        if [[ -n "$skip_entry" ]]; then
+            echo "[SKIP] $source -> $target (excluded by root prefix)" >&2
+            continue
+        fi
+
+        # Build per-entry excludes
+        local -a entry_excludes=()
+
+        # Add global globs
+        local glob
+        for glob in "${global_globs[@]}"; do
+            entry_excludes+=("$glob")
+        done
+
+        # Process path patterns for this entry
+        for pattern in "${path_patterns[@]}"; do
+            # Strip leading / for processing
+            p="${pattern#/}"
+
+            # Case 1: Pattern matches destination exactly -> skip entry
+            if [[ "$p" == "$dst_rel" ]]; then
+                skip_entry=1
+                pattern_matched["$pattern"]=1
+                break
+            fi
+
+            # Case 2: Pattern is PARENT of destination -> skip entry
+            case "$dst_rel" in
+                "${p}/"*)
+                    skip_entry=1
+                    pattern_matched["$pattern"]=1
+                    break
+                    ;;
+            esac
+
+            # Case 3: Pattern is CHILD of destination -> rewrite to relative
+            case "$p" in
+                "${dst_rel}/"*)
+                    local remainder="${p#"${dst_rel}/"}"
+                    entry_excludes+=("$remainder")
+                    pattern_matched["$pattern"]=1
+                    ;;
+            esac
+        done
+
+        if [[ -n "$skip_entry" ]]; then
+            echo "[SKIP] $source -> $target (excluded by path pattern)" >&2
+            continue
+        fi
+
+        # Encode per-entry excludes as base64
+        local excludes_b64=""
+        if [[ ${#entry_excludes[@]} -gt 0 ]]; then
+            local exclude_data=""
+            local exc
+            for exc in "${entry_excludes[@]}"; do
+                exclude_data+="$exc"$'\n'
+            done
+            excludes_b64=$(printf '%s' "$exclude_data" | base64 | tr -d '\n')
+        fi
+
+        # Output entry with per-entry excludes
+        printf '%s:%s:%s:%s\n' "$source" "$target" "$flags" "$excludes_b64"
+    done <<<"$entries_input"
+
+    # Warn about unmatched patterns (excluding global globs which always match)
+    for pattern in "${!pattern_matched[@]}"; do
+        : # Pattern was matched, skip
+    done
+
+    # Check for unmatched patterns
+    while IFS= read -r pattern; do
+        [[ -z "$pattern" ]] && continue
+        if [[ -z "${pattern_matched[$pattern]:-}" ]]; then
+            echo "[WARN] Unmatched exclude pattern (dropped): $pattern" >&2
+        fi
+    done <<<"$excludes_input"
+
+    return 0
+}
+
+# ==============================================================================
 # Main import function
 # ==============================================================================
 
@@ -712,21 +901,8 @@ _containai_import() {
         fi
     fi
 
-    # Build excludes as base64-encoded newline-delimited data for safe passing to container
-    # Base64 encoding avoids issues with special characters in env vars and shell escaping
-    local exclude_data_b64=""
-    if [[ ${#excludes[@]} -gt 0 ]]; then
-        local pattern exclude_data_raw=""
-        for pattern in "${excludes[@]}"; do
-            exclude_data_raw+="$pattern"$'\n'
-        done
-        # Base64 encode to safely pass through docker --env
-        # Use portable encoding: pipe through tr to remove newlines (works on BSD/macOS/Linux)
-        if ! exclude_data_b64=$(printf '%s' "$exclude_data_raw" | base64 | tr -d '\n'); then
-            _import_error "Failed to encode exclude patterns"
-            return 1
-        fi
-    fi
+    # Note: Excludes are now processed via _import_rewrite_excludes() and passed
+    # as per-entry base64-encoded data in the MAP_DATA format, not as a global env var
 
     if [[ "$dry_run" == "true" ]]; then
         _import_warn "DRY RUN MODE - No changes will be made"
@@ -801,11 +977,17 @@ ensure() {
     esac
 }
 
-# copy: Rsync source to target with appropriate flags
+# copy: Rsync source to target with appropriate flags and per-entry excludes
+# Arguments:
+#   $1 = source path
+#   $2 = destination path
+#   $3 = flags
+#   $4 = per-entry excludes (base64-encoded, optional)
 copy() {
     _src="$1"
     _dst="$2"
     _flags="$3"
+    _entry_excludes_b64="${4:-}"
 
     set -- -a --chown=1000:1000
 
@@ -820,11 +1002,11 @@ copy() {
         esac
     fi
 
-    # Add workspace excludes from EXCLUDE_DATA_B64 (unless NO_EXCLUDES is set)
-    # EXCLUDE_DATA_B64 is base64-encoded to avoid shell escaping issues
-    if [ "${NO_EXCLUDES:-}" != "1" ] && [ -n "${EXCLUDE_DATA_B64:-}" ]; then
+    # Add per-entry excludes (passed via 4th argument, base64-encoded)
+    # This replaces the global EXCLUDE_DATA_B64 approach with per-entry excludes
+    if [ "${NO_EXCLUDES:-}" != "1" ] && [ -n "$_entry_excludes_b64" ]; then
         # Decode base64 to get newline-delimited excludes
-        _exclude_decoded=$(printf "%s" "$EXCLUDE_DATA_B64" | base64 -d)
+        _exclude_decoded=$(printf "%s" "$_entry_excludes_b64" | base64 -d)
         # Disable globbing to prevent pattern expansion (e.g., *.log becoming actual files)
         set -f
         _old_ifs="$IFS"
@@ -1383,23 +1565,50 @@ relink_internal_symlinks() {
 }
 
 # Process map entries from heredoc
-while IFS=: read -r _map_src _map_dst _map_flags; do
+# Format: source:target:flags:excludes_b64 (4th field is per-entry excludes)
+while IFS=: read -r _map_src _map_dst _map_flags _map_excludes; do
     [ -z "$_map_src" ] && continue
-    copy "$_map_src" "$_map_dst" "$_map_flags"
+    copy "$_map_src" "$_map_dst" "$_map_flags" "$_map_excludes"
 done <<'"'"'MAP_DATA'"'"'
 '
 
-    # Append SYNC_MAP entries as heredoc data
+    # Convert SYNC_MAP to newline-delimited string for exclude processing
+    local sync_map_entries=""
     local entry
     for entry in "${_IMPORT_SYNC_MAP[@]}"; do
-        script_with_data+="$entry"$'\n'
+        sync_map_entries+="$entry"$'\n'
     done
+
+    # If we have excludes, use destination-relative rewriting
+    # Otherwise, just pass entries as-is (with empty 4th field for excludes)
+    local rewritten_entries
+    if [[ ${#excludes[@]} -gt 0 ]]; then
+        # Build excludes as newline-delimited string
+        local exclude_data_raw=""
+        local pattern
+        for pattern in "${excludes[@]}"; do
+            exclude_data_raw+="$pattern"$'\n'
+        done
+
+        # Rewrite excludes to be destination-relative
+        # This outputs entries in format: source:target:flags:excludes_b64
+        # stderr gets [SKIP] and [WARN] messages
+        rewritten_entries=$(_import_rewrite_excludes "$exclude_data_raw" "$sync_map_entries")
+    else
+        # No excludes - just pass entries with empty 4th field
+        rewritten_entries=""
+        while IFS= read -r entry; do
+            [[ -z "$entry" ]] && continue
+            # Add empty 4th field (no excludes)
+            rewritten_entries+="$entry:"$'\n'
+        done <<<"$sync_map_entries"
+    fi
+
+    # Append rewritten entries to script heredoc
+    script_with_data+="$rewritten_entries"
     script_with_data+=$'MAP_DATA\n'
 
-    # Pass excludes via environment variable (base64-encoded for safe transport)
-    if [[ -n "$exclude_data_b64" ]]; then
-        env_args+=(--env "EXCLUDE_DATA_B64=$exclude_data_b64")
-    fi
+    # Note: EXCLUDE_DATA_B64 env var is no longer used - excludes are now per-entry
 
     # Run container with map data embedded in script via heredoc
     # Use source_root (defaults to $HOME, or custom directory from --from)
