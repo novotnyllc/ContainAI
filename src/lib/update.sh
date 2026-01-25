@@ -28,8 +28,10 @@
 #     - Clean up legacy paths
 #     - Verify final state
 #   macOS Lima:
-#     - Delete and recreate VM with latest template
-#     - Recreate Docker context
+#     - Compare template hash to detect changes
+#     - If unchanged: apt update/upgrade in VM (non-destructive)
+#     - If changed: delete and recreate VM (with confirmation)
+#     - Verify Docker context
 #     - Verify installation
 #
 # Dependencies:
@@ -865,9 +867,21 @@ _cai_update_macos_packages() {
     _cai_step "Updating packages in Lima VM"
 
     if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would ensure Lima VM is running"
         _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo apt-get update"
         _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo apt-get upgrade -y"
         return 0
+    fi
+
+    # Ensure VM is running before running apt commands
+    local status
+    status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME")
+    if [[ "$status" == "Stopped" ]]; then
+        _cai_step "Starting stopped Lima VM"
+        if ! limactl start "$_CAI_LIMA_VM_NAME"; then
+            _cai_error "Failed to start Lima VM"
+            return 1
+        fi
     fi
 
     # Run apt update
@@ -981,7 +995,11 @@ _cai_update_macos() {
     fi
 
     # Get stored hash (if exists)
-    stored_hash=$(cat "$hash_file" 2>/dev/null || echo "")
+    if [[ -f "$hash_file" ]]; then
+        stored_hash=$(cat "$hash_file" 2>/dev/null) || stored_hash=""
+    else
+        stored_hash=""
+    fi
 
     # Decision: recreate or just update packages?
     # - --lima-recreate flag forces recreation
@@ -1022,7 +1040,7 @@ _cai_update_macos() {
             if [[ "$force" != "true" ]]; then
                 if ! _cai_prompt_confirm "Recreate Lima VM?"; then
                     _cai_info "Update cancelled"
-                    return 0
+                    return 130  # Signal cancellation
                 fi
             fi
         fi
