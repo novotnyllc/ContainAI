@@ -947,7 +947,10 @@ _import_apply_overrides() {
     # Capture find output to a temp file to check exit status
     # Note: stderr goes to /dev/null to avoid mixing text with NUL-delimited paths
     local find_output find_status
-    find_output=$(mktemp)
+    if ! find_output=$(mktemp); then
+        _import_error "Failed to create temp file for override enumeration"
+        return 1
+    fi
 
     find "$override_dir" -mindepth 1 -print0 > "$find_output" 2>/dev/null
     find_status=$?
@@ -1038,16 +1041,33 @@ _import_apply_overrides() {
             _import_step "[dry-run] Would apply override: $rel_path -> /target/$target_path"
             override_count=$((override_count + 1))
         else
-            # Safety check for ALL targets: reject if target exists as symlink or non-regular file
+            # Safety check for ALL targets: reject if target or any parent component is a symlink
             # This prevents overrides from writing through symlinks or to unexpected file types
             # Fail-closed: if check fails, reject the override
             # shellcheck disable=SC2016
             if ! target_check=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
                 --mount "type=volume,src=$volume,dst=/target" \
                 alpine sh -c '
-                    if [ -L "/target/$1" ]; then
+                    # Check each path component for symlinks (POSIX-compatible)
+                    target_file="$1"
+                    prefix="/target"
+                    # Save and restore IFS
+                    oldifs="$IFS"
+                    IFS="/"
+                    set -- $target_file
+                    IFS="$oldifs"
+                    for part do
+                        [ -z "$part" ] && continue
+                        prefix="$prefix/$part"
+                        if [ -L "$prefix" ]; then
+                            echo "symlink_in_path"
+                            exit 0
+                        fi
+                    done
+                    # Check final target
+                    if [ -L "/target/$target_file" ]; then
                         echo "symlink"
-                    elif [ -e "/target/$1" ] && [ ! -f "/target/$1" ]; then
+                    elif [ -e "/target/$target_file" ] && [ ! -f "/target/$target_file" ]; then
                         echo "nonregular"
                     else
                         echo "ok"
@@ -1058,6 +1078,11 @@ _import_apply_overrides() {
                 continue
             fi
             case "$target_check" in
+                symlink_in_path)
+                    _import_error "Override target path contains symlink component, rejected for safety: $target_path"
+                    error_count=$((error_count + 1))
+                    continue
+                    ;;
                 symlink)
                     _import_error "Override target exists as symlink, rejected for safety: $target_path"
                     error_count=$((error_count + 1))
@@ -1279,6 +1304,13 @@ _containai_import() {
 
                 # Restore from archive
                 if ! _import_restore_from_tgz "$ctx" "$volume" "$from_source"; then
+                    return 1
+                fi
+
+                # Apply import overrides after tgz restore (same as normal import)
+                # Note: dry_run is always false for tgz restore (checked earlier)
+                if ! _import_apply_overrides "$ctx" "$volume" "false" "$no_secrets"; then
+                    _import_error "Failed to apply import overrides"
                     return 1
                 fi
 

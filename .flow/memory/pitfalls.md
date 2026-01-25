@@ -181,3 +181,6 @@ ln -sfn creates symlinks INSIDE existing directories; always rm -rf target dir b
 
 ## 2026-01-25 manual [pitfall]
 Git config values can span multiple lines via trailing backslash - when filtering config entries, must track and skip continuation lines until a line without trailing backslash
+
+## 2026-01-25 manual [pitfall]
+trap RETURN fires on EVERY function return including nested calls - use explicit cleanup instead
