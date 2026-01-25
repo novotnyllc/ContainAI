@@ -945,18 +945,17 @@ _import_apply_overrides() {
     # Find all files and directories in the override tree
     # Use find with -mindepth 1 to skip root, -print0 for safe filename handling
     # Capture find output to a temp file to check exit status
+    # Note: stderr goes to /dev/null to avoid mixing text with NUL-delimited paths
     local find_output find_status
     find_output=$(mktemp)
-    # shellcheck disable=SC2064
-    trap "rm -f '$find_output'" RETURN
 
-    find "$override_dir" -mindepth 1 -print0 > "$find_output" 2>&1
+    find "$override_dir" -mindepth 1 -print0 > "$find_output" 2>/dev/null
     find_status=$?
     if [[ $find_status -ne 0 ]]; then
         _import_warn "Find encountered errors traversing override directory (exit $find_status)"
     fi
 
-    local item rel_path target_path target_dir basename map_result entry_flags gitconfig_check
+    local item rel_path target_path target_dir basename map_result entry_flags target_check
     while IFS= read -r -d '' item; do
         # Get relative path from override_dir
         rel_path="${item#"$override_dir"/}"
@@ -1039,62 +1038,57 @@ _import_apply_overrides() {
             _import_step "[dry-run] Would apply override: $rel_path -> /target/$target_path"
             override_count=$((override_count + 1))
         else
-            # Safety check for .gitconfig: reject if target exists as symlink or non-regular file
-            # This mirrors the checks in _cai_import_git_config
+            # Safety check for ALL targets: reject if target exists as symlink or non-regular file
+            # This prevents overrides from writing through symlinks or to unexpected file types
             # Fail-closed: if check fails, reject the override
-            if [[ "$target_path" == ".gitconfig" ]]; then
-                # shellcheck disable=SC2016
-                if ! gitconfig_check=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
-                    --mount "type=volume,src=$volume,dst=/target" \
-                    alpine sh -c '
-                        if [ -L /target/.gitconfig ]; then
-                            echo "symlink"
-                        elif [ -e /target/.gitconfig ] && [ ! -f /target/.gitconfig ]; then
-                            echo "nonregular"
-                        else
-                            echo "ok"
-                        fi
-                    '); then
-                    _import_error "Failed to check .gitconfig target state, rejecting override for safety"
+            # shellcheck disable=SC2016
+            if ! target_check=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
+                --mount "type=volume,src=$volume,dst=/target" \
+                alpine sh -c '
+                    if [ -L "/target/$1" ]; then
+                        echo "symlink"
+                    elif [ -e "/target/$1" ] && [ ! -f "/target/$1" ]; then
+                        echo "nonregular"
+                    else
+                        echo "ok"
+                    fi
+                ' _ "$target_path"); then
+                _import_error "Failed to check target state, rejecting override for safety: $rel_path"
+                error_count=$((error_count + 1))
+                continue
+            fi
+            case "$target_check" in
+                symlink)
+                    _import_error "Override target exists as symlink, rejected for safety: $target_path"
                     error_count=$((error_count + 1))
                     continue
-                fi
-                case "$gitconfig_check" in
-                    symlink)
-                        _import_error "Override target .gitconfig exists as symlink, rejected for safety"
-                        error_count=$((error_count + 1))
-                        continue
-                        ;;
-                    nonregular)
-                        _import_error "Override target .gitconfig exists as non-regular file, rejected for safety"
-                        error_count=$((error_count + 1))
-                        continue
-                        ;;
-                    ok)
-                        # Safe to proceed
-                        ;;
-                    *)
-                        # Unexpected output - fail closed
-                        _import_error "Unexpected .gitconfig check result, rejecting override for safety"
-                        error_count=$((error_count + 1))
-                        continue
-                        ;;
-                esac
-            fi
+                    ;;
+                nonregular)
+                    _import_error "Override target exists as non-regular file, rejected for safety: $target_path"
+                    error_count=$((error_count + 1))
+                    continue
+                    ;;
+                ok)
+                    # Safe to proceed
+                    ;;
+                *)
+                    # Unexpected output - fail closed
+                    _import_error "Unexpected target check result, rejecting override for safety: $rel_path"
+                    error_count=$((error_count + 1))
+                    continue
+                    ;;
+            esac
 
             # Create parent directory and fix ownership before rsync
             # This avoids --mkpath (not in rsync < 3.2.0) and ensures correct ownership
-            # Use find to chown all directories created by mkdir -p (not just the deepest)
+            # Use chown -R for portability (BusyBox find has limited options)
             target_dir="${target_path%/*}"
             if [[ "$target_dir" != "$target_path" ]] && [[ -n "$target_dir" ]]; then
-                # Has parent directory - create it and chown all created dirs
+                # Has parent directory - create it and chown recursively
                 # shellcheck disable=SC2016
                 if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
                     --mount "type=volume,src=$volume,dst=/target" \
-                    alpine sh -c '
-                        mkdir -p -- "/target/$1" && \
-                        find "/target/$1" -type d ! -user 1000 -exec chown 1000:1000 {} +
-                    ' _ "$target_dir"; then
+                    alpine sh -c 'mkdir -p -- "/target/$1" && chown -R 1000:1000 -- "/target/$1"' _ "$target_dir"; then
                     _import_error "Failed to create parent dir for override: $rel_path"
                     error_count=$((error_count + 1))
                     continue
@@ -1138,6 +1132,7 @@ _import_apply_overrides() {
     # Report summary
     if [[ "$error_count" -gt 0 ]]; then
         _import_error "Override application failed: $error_count errors"
+        rm -f "$find_output"
         return 1
     fi
 
@@ -1158,6 +1153,9 @@ _import_apply_overrides() {
     if [[ "$unmapped_count" -gt 0 ]]; then
         _import_warn "Skipped $unmapped_count item(s) not in sync map"
     fi
+
+    # Cleanup temp file
+    rm -f "$find_output"
 
     return 0
 }
