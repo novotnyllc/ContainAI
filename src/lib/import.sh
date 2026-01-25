@@ -1137,7 +1137,7 @@ preview_symlink_relinks() {
     # Find all symlinks in source and preview what would be relinked
     # Use -path prune pattern when .system/ exclusion is active
     if [ "$_prune_system" = "1" ]; then
-        find "$_source_dir" -path "$_source_dir/.system" -prune -o -type l -exec sh -c '
+        find "$_source_dir" -path "$_source_dir/.system" -prune -o -type l -exec sh -c '"'"'
     host_src="$1"
     runtime_dst="$2"
     src_dir="$3"
@@ -1208,9 +1208,9 @@ preview_symlink_relinks() {
                 ;;
         esac
     done
-    ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+    '"'"' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
     else
-        find "$_source_dir" -type l -exec sh -c '
+        find "$_source_dir" -type l -exec sh -c '"'"'
     host_src="$1"
     runtime_dst="$2"
     src_dir="$3"
@@ -1281,7 +1281,7 @@ preview_symlink_relinks() {
                 ;;
         esac
     done
-    ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
+    '"'"' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_dir" {} +
     fi
 }
 
@@ -1301,7 +1301,7 @@ relink_internal_symlinks() {
 
     # Find all symlinks and process them
     # Using find -exec sh -c with batch processing (+ terminator)
-    find "$_target_dir" -type l -exec sh -c '
+    find "$_target_dir" -type l -exec sh -c '"'"'
     host_src="$1"
     runtime_dst="$2"
     src_mount="$3"
@@ -1379,7 +1379,7 @@ relink_internal_symlinks() {
                 ;;
         esac
     done
-    ' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_mount" {} +
+    '"'"' sh "$_host_src_dir" "$_runtime_dst_dir" "$_source_mount" {} +
 }
 
 # Process map entries from heredoc
@@ -1405,10 +1405,11 @@ done <<'"'"'MAP_DATA'"'"'
     # Use source_root (defaults to $HOME, or custom directory from --from)
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
+        --entrypoint sh \
         --mount type=bind,src="$source_root",dst=/source,readonly \
         --mount type=volume,src="$volume",dst=/target \
         "${env_args[@]}" \
-        eeacms/rsync sh -e -c "$script_with_data"; then
+        eeacms/rsync -e -c "$script_with_data"; then
         _import_error "Rsync sync failed"
         return 1
     fi

@@ -1964,7 +1964,6 @@ _cai_setup_wsl2() {
     printf '\n'
     _cai_ok "Secure Engine setup complete"
     _cai_info "To use the Secure Engine:"
-    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=$_CAI_CONTAINAI_DOCKER_CONTEXT"
     _cai_info "  cai run --workspace /path/to/project"
     _cai_info "Or use docker directly: docker --context $_CAI_CONTAINAI_DOCKER_CONTEXT ..."
     _cai_info ""
@@ -2567,7 +2566,6 @@ _cai_setup_macos() {
     printf '\n'
     _cai_ok "Secure Engine setup complete (macOS/Lima)"
     _cai_info "To use the Secure Engine:"
-    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=$_CAI_CONTAINAI_DOCKER_CONTEXT"
     _cai_info "  cai run --workspace /path/to/project"
     _cai_info "Or use docker directly: docker --context $_CAI_CONTAINAI_DOCKER_CONTEXT --runtime=sysbox-runc ..."
     printf '\n'
@@ -3088,7 +3086,6 @@ _cai_setup_linux() {
     printf '\n'
     _cai_ok "Secure Engine setup complete"
     _cai_info "To use the Secure Engine:"
-    _cai_info "  export CONTAINAI_SECURE_ENGINE_CONTEXT=$_CAI_CONTAINAI_DOCKER_CONTEXT"
     _cai_info "  cai run --workspace /path/to/project"
     _cai_info "Or use docker directly: docker --context $_CAI_CONTAINAI_DOCKER_CONTEXT ..."
     _cai_info ""
