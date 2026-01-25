@@ -365,15 +365,16 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.claude/CLAUDE.md:/target/claude/CLAUDE.md:f"
 
         # --- GitHub CLI ---
-        # Only hosts.yml is secret (contains OAuth tokens)
-        "/source/.config/gh/hosts.yml:/target/config/gh/hosts.yml:fs"
-        "/source/.config/gh/config.yml:/target/config/gh/config.yml:f"
+        # Directory contains hosts.yml (OAuth tokens) - marked as secret
+        # With --no-secrets, entire directory is skipped (consistent with container symlink)
+        "/source/.config/gh:/target/config/gh:ds"
 
         # --- SSH ---
-        # Non-secret files: config, known_hosts (no s flag)
-        # Private keys (id_*) are discovered dynamically - see _import_discover_ssh_keys()
+        # Static entries: config, known_hosts (not secrets)
+        # Dynamic entries: id_* private keys - discovered by _import_discover_ssh_keys()
         "/source/.ssh/config:/target/ssh/config:f"
         "/source/.ssh/known_hosts:/target/ssh/known_hosts:f"
+        # Note: id_* keys added dynamically at sync time (see _import_discover_ssh_keys)
 
         # --- OpenCode (config) ---
         # Selective sync: config files only, skip caches

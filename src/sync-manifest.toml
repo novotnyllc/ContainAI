@@ -88,27 +88,21 @@ flags = "f"  # file
 
 # =============================================================================
 # GITHUB CLI
-# Only hosts.yml is secret (contains OAuth tokens)
-# Other GH config files (config.yml, etc.) are not secrets
+# Directory contains hosts.yml (OAuth tokens) - marked as secret
+# With --no-secrets, entire directory is skipped (consistent with container symlink)
 # =============================================================================
 
 [[entries]]
-source = ".config/gh/hosts.yml"
-target = "config/gh/hosts.yml"
-container_link = ".config/gh/hosts.yml"
-flags = "fs"  # file, secret (contains OAuth tokens)
-
-[[entries]]
-source = ".config/gh/config.yml"
-target = "config/gh/config.yml"
-container_link = ".config/gh/config.yml"
-flags = "f"  # file (not secret - user preferences only)
+source = ".config/gh"
+target = "config/gh"
+container_link = ".config/gh"
+flags = "ds"  # directory, secret (hosts.yml contains OAuth tokens)
 
 # =============================================================================
 # SSH
-# Non-secret files: config, known_hosts (static entries)
-# Secret files: private keys (id_*) - discovered dynamically at import time
-# See _import_discover_ssh_keys() in import.sh for dynamic key discovery
+# Static entries: config, known_hosts (not secrets)
+# Dynamic entries: id_* private keys (secrets) - discovered at import time
+# See _import_discover_ssh_keys() in import.sh for dynamic discovery
 # =============================================================================
 
 [[entries]]
@@ -123,11 +117,18 @@ target = "ssh/known_hosts"
 container_link = ".ssh/known_hosts"
 flags = "f"  # file (not secret - host keys are public)
 
-# Note: SSH private keys (id_*) and their .pub counterparts are discovered
-# dynamically at import time. This allows syncing any key naming pattern
-# (id_rsa, id_ed25519, id_ed25519_sk, id_rsa_work, etc.)
-# Private keys (files without .pub extension matching id_*) get 's' flag.
-# Public keys (*.pub) do not get 's' flag.
+# SSH private keys (id_*) - DYNAMIC PATTERN ENTRY
+# These are discovered at runtime by _import_discover_ssh_keys() in import.sh
+# because the set of keys varies per user (id_rsa, id_ed25519, id_ed25519_sk, etc.)
+# This entry documents the pattern; actual sync happens via dynamic discovery.
+[[entries]]
+source = ".ssh/id_*"
+target = "ssh/"
+container_link = ".ssh/"
+flags = "Gs"  # G=glob/dynamic pattern, s=secret (private keys)
+# Note: 'G' flag marks this as a pattern entry handled specially by import.sh
+# Private keys (id_* without .pub) get 's' flag at discovery time
+# Public keys (id_*.pub) do not get 's' flag
 
 # =============================================================================
 # OPENCODE
