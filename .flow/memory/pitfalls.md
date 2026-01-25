@@ -178,3 +178,6 @@ sudo VAR=value cmd does not pass VAR to cmd; use sudo env VAR=value cmd instead
 
 ## 2026-01-25 manual [pitfall]
 ln -sfn creates symlinks INSIDE existing directories; always rm -rf target dir before ln -sfn for directory symlinks
+
+## 2026-01-25 manual [pitfall]
+Git config values can span multiple lines via trailing backslash - when filtering config entries, must track and skip continuation lines until a line without trailing backslash

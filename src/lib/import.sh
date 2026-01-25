@@ -800,6 +800,145 @@ _import_discover_ssh_keys() {
 }
 
 # ==============================================================================
+# Import overrides
+# ==============================================================================
+
+# Apply user overrides from ~/.config/containai/import-overrides/
+# Files in this directory replace (not merge) imported files.
+# Arguments:
+#   $1 = Docker context ("" for default)
+#   $2 = volume name (required)
+#   $3 = dry_run flag ("true" or "false", default: "false")
+# Returns: 0 on success (including when override dir is missing), 1 on failure
+#
+# Security rules:
+#   - Only regular files and directories allowed
+#   - Symlinks are NOT followed (skipped with warning)
+#   - Path traversal (..) is rejected with error
+#   - Each file is validated before copy
+_import_apply_overrides() {
+    local ctx="${1:-}"
+    local volume="${2:-}"
+    local dry_run="${3:-false}"
+
+    local override_dir="${HOME}/.config/containai/import-overrides"
+
+    # Skip if override directory doesn't exist (not an error)
+    if [[ ! -d "$override_dir" ]]; then
+        return 0
+    fi
+
+    # Build docker command with context
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
+
+    _import_step "Applying import overrides from $override_dir..."
+
+    # Track if any files were processed
+    local override_count=0
+    local skipped_count=0
+    local error_count=0
+
+    # Find all files and directories in the override tree
+    # Use find with -print0 for safe filename handling
+    local item rel_path target_path
+    while IFS= read -r -d '' item; do
+        # Get relative path from override_dir
+        rel_path="${item#"$override_dir"/}"
+
+        # Skip the root directory itself
+        [[ -z "$rel_path" ]] && continue
+
+        # Security: reject path traversal (.. anywhere in path)
+        # Check for standalone .. or .. at start/end of path segment
+        if [[ "$rel_path" == ".." ]] || \
+           [[ "$rel_path" == *"/.."* ]] || \
+           [[ "$rel_path" == "../"* ]] || \
+           [[ "$rel_path" == *"/.." ]]; then
+            _import_error "Override path contains '..' traversal, rejected: $rel_path"
+            error_count=$((error_count + 1))
+            continue
+        fi
+
+        # Skip symlinks with warning (security: don't follow symlinks)
+        if [[ -L "$item" ]]; then
+            _import_warn "Skipping symlink in override dir: $rel_path"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        # Skip non-regular files and non-directories (devices, sockets, etc.)
+        if [[ ! -f "$item" ]] && [[ ! -d "$item" ]]; then
+            _import_warn "Skipping non-regular file in override dir: $rel_path"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        # Only process regular files (directories are implicitly created via --mkpath)
+        if [[ -d "$item" ]]; then
+            continue
+        fi
+
+        # This is a regular file - apply the override
+        # Override path maps directly to volume target (1:1 mapping):
+        #   ~/.config/containai/import-overrides/.gitconfig -> /target/.gitconfig
+        #   ~/.config/containai/import-overrides/claude/settings.json -> /target/claude/settings.json
+        #   ~/.config/containai/import-overrides/config/starship.toml -> /target/config/starship.toml
+        # Note: Override paths match VOLUME structure, not HOME structure
+        # To find the right override path, check what sync map puts in /target/
+        target_path="$rel_path"
+
+        if [[ "$dry_run" == "true" ]]; then
+            echo "[DRY-RUN] Would apply override: $rel_path -> /target/$target_path"
+            override_count=$((override_count + 1))
+        else
+            # Use rsync to copy the file with --mkpath to create parent directories
+            # Run via Docker to write to volume
+            # shellcheck disable=SC2016
+            if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
+                --mount "type=bind,src=$override_dir,dst=/overrides,readonly" \
+                --mount "type=volume,src=$volume,dst=/target" \
+                eeacms/rsync rsync -a --mkpath "/overrides/$rel_path" "/target/$target_path"; then
+                _import_error "Failed to apply override: $rel_path"
+                error_count=$((error_count + 1))
+                continue
+            fi
+            # Fix ownership to agent user (1000:1000)
+            if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
+                --mount "type=volume,src=$volume,dst=/target" \
+                alpine chown 1000:1000 "/target/$target_path"; then
+                _import_warn "Failed to fix ownership for override: $target_path"
+            fi
+            override_count=$((override_count + 1))
+        fi
+    done < <(find "$override_dir" -print0 2>/dev/null)
+
+    # Report summary
+    if [[ "$error_count" -gt 0 ]]; then
+        _import_error "Override application failed: $error_count errors"
+        return 1
+    fi
+
+    if [[ "$override_count" -gt 0 ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+            _import_success "[dry-run] Would apply $override_count override(s)"
+        else
+            _import_success "Applied $override_count override(s)"
+        fi
+    else
+        _import_info "No overrides to apply"
+    fi
+
+    if [[ "$skipped_count" -gt 0 ]]; then
+        _import_warn "Skipped $skipped_count item(s) (symlinks or special files)"
+    fi
+
+    return 0
+}
+
+# ==============================================================================
 # Main import function
 # ==============================================================================
 
@@ -1838,6 +1977,12 @@ done <<'"'"'MAP_DATA'"'"'
         _import_success "[dry-run] Rsync sync simulation complete"
     else
         _import_success "Configs synced via rsync"
+    fi
+
+    # Apply import overrides (after main sync, before transformations)
+    # Overrides replace (not merge) any imported files
+    if ! _import_apply_overrides "$ctx" "$volume" "$dry_run"; then
+        _import_warn "Failed to apply import overrides"
     fi
 
     # Post-sync transformations (only in non-dry-run mode)

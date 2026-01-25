@@ -36,9 +36,8 @@ Implement `--no-secrets` flag for `cai import` to optionally skip syncing agent 
 - [ ] Secret files have 600 permissions when synced
 
 ## Done summary
-TBD
-
+Implemented --no-secrets flag for cai import to skip syncing agent secret files (OAuth tokens, API keys, SSH private keys). Secret entries are identified by 's' flag in sync manifest; SSH keys discovered dynamically. Help text documents the flag and clarifies it does not affect --credentials bind-mount flag.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 055b3fc, 19f96d4, 431fb72
+- Tests: cai import --help
 - PRs:

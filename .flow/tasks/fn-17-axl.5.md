@@ -32,9 +32,8 @@ When importing `~/.gitconfig`, strip all `credential.helper` configuration lines
 - [ ] Container git commands work without credential.helper errors
 
 ## Done summary
-TBD
-
+Added gitconfig filtering to strip credential.helper lines (including multi-line values) and remove empty [credential] sections. Also added .gitignore_global sync via rsync and container symlink.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 6c98c1915d1b510e44394e349c4a40337ef41c32, 2a962e1a5cc0a135294260a9ead567252aa248f9
+- Tests: shellcheck -x src/lib/import.sh, manual awk filter tests with multi-line gitconfig values
 - PRs:
