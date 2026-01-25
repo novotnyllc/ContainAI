@@ -31,6 +31,15 @@ The `_IMPORT_SYNC_MAP` array defines what gets synced from host `$HOME` to the d
 | `/source/.agents` | `/target/agents` | `d` | Common agents directory (directory) |
 | `/source/.bash_aliases` | `/target/shell/bash_aliases` | `f` | Bash aliases (file) |
 | `/source/.bashrc.d` | `/target/shell/bashrc.d` | `d` | Bash startup scripts (directory) |
+| `/source/.zshrc` | `/target/shell/zshrc` | `f` | Zsh config (file) |
+| `/source/.zprofile` | `/target/shell/zprofile` | `f` | Zsh profile (file) |
+| `/source/.inputrc` | `/target/shell/inputrc` | `f` | Readline config (file) |
+| `/source/.oh-my-zsh/custom` | `/target/shell/oh-my-zsh-custom` | `d` | Oh-My-Zsh custom plugins/themes (directory) |
+| `/source/.vimrc` | `/target/editors/vimrc` | `f` | Vim config (file) |
+| `/source/.vim` | `/target/editors/vim` | `d` | Vim directory (directory) |
+| `/source/.config/nvim` | `/target/config/nvim` | `d` | Neovim config (directory) |
+| `/source/.config/starship.toml` | `/target/config/starship.toml` | `f` | Starship prompt config (file) |
+| `/source/.config/oh-my-posh` | `/target/config/oh-my-posh` | `d` | Oh-My-Posh themes (directory) |
 | `/source/.vscode-server/extensions` | `/target/vscode-server/extensions` | `d` | VS Code extensions (directory) |
 | `/source/.vscode-server/data/Machine` | `/target/vscode-server/data/Machine` | `d` | VS Code machine settings (directory) |
 | `/source/.vscode-server/data/User/mcp` | `/target/vscode-server/data/User/mcp` | `d` | VS Code MCP config (directory) |
@@ -98,6 +107,15 @@ Symlinks created in the container image pointing to `/mnt/agent-data`:
 | `~/.local/share/fonts` | `/mnt/agent-data/local/share/fonts` | Directory symlink |
 | `~/.agents` | `/mnt/agent-data/agents` | Directory symlink |
 | `~/.bash_aliases_imported` | `/mnt/agent-data/shell/bash_aliases` | Note: different name |
+| `~/.zshrc` | `/mnt/agent-data/shell/zshrc` | Zsh config |
+| `~/.zprofile` | `/mnt/agent-data/shell/zprofile` | Zsh profile |
+| `~/.inputrc` | `/mnt/agent-data/shell/inputrc` | Readline config |
+| `~/.oh-my-zsh/custom` | `/mnt/agent-data/shell/oh-my-zsh-custom` | Uses rm -rf first |
+| `~/.vimrc` | `/mnt/agent-data/editors/vimrc` | Vim config |
+| `~/.vim` | `/mnt/agent-data/editors/vim` | Uses rm -rf first |
+| `~/.config/nvim` | `/mnt/agent-data/config/nvim` | Uses rm -rf first |
+| `~/.config/starship.toml` | `/mnt/agent-data/config/starship.toml` | Starship prompt |
+| `~/.config/oh-my-posh` | `/mnt/agent-data/config/oh-my-posh` | Oh-My-Posh themes |
 
 ### 3. containai-init.sh Directory Structure
 
@@ -110,10 +128,15 @@ Directories and files created on first boot:
 - `/mnt/agent-data/config/gh`
 - `/mnt/agent-data/config/opencode`
 - `/mnt/agent-data/config/tmux`
+- `/mnt/agent-data/config/nvim`
+- `/mnt/agent-data/config/oh-my-posh`
 - `/mnt/agent-data/local/share/tmux`
 - `/mnt/agent-data/local/share/fonts`
 - `/mnt/agent-data/shell`
 - `/mnt/agent-data/shell/bashrc.d`
+- `/mnt/agent-data/shell/oh-my-zsh-custom`
+- `/mnt/agent-data/editors`
+- `/mnt/agent-data/editors/vim`
 - `/mnt/agent-data/vscode-server/extensions`
 - `/mnt/agent-data/vscode-server/data/Machine`
 - `/mnt/agent-data/vscode-server/data/User/mcp`
@@ -140,6 +163,11 @@ Directories and files created on first boot:
 **Files (plain):**
 - `/mnt/agent-data/claude/settings.local.json`
 - `/mnt/agent-data/shell/bash_aliases`
+- `/mnt/agent-data/shell/zshrc`
+- `/mnt/agent-data/shell/zprofile`
+- `/mnt/agent-data/shell/inputrc`
+- `/mnt/agent-data/config/starship.toml`
+- `/mnt/agent-data/editors/vimrc`
 - `/mnt/agent-data/copilot/config.json`
 - `/mnt/agent-data/copilot/mcp-config.json`
 - `/mnt/agent-data/gemini/google_accounts.json`
@@ -176,6 +204,16 @@ None - all symlinked paths are now created in containai-init.sh.
 ### Naming Inconsistencies
 
 1. **bash_aliases** - Import uses `shell/bash_aliases`, symlink points to `~/.bash_aliases_imported` (intentional: keeps user's original `.bash_aliases` intact)
+
+## XDG Config Preference
+
+For tools that support both legacy and XDG config locations, ContainAI prefers the XDG location:
+
+| Tool | Legacy Location | XDG Location | Synced |
+|------|-----------------|--------------|--------|
+| tmux | `~/.tmux.conf` | `~/.config/tmux/` | XDG only |
+
+If you use the legacy `~/.tmux.conf` location, move your config to `~/.config/tmux/tmux.conf` for it to be synced.
 
 ## Exclude Pattern Behavior
 

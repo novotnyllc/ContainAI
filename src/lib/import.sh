@@ -377,6 +377,19 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         # --- Shell ---
         "/source/.bash_aliases:/target/shell/bash_aliases:f"
         "/source/.bashrc.d:/target/shell/bashrc.d:d"
+        "/source/.zshrc:/target/shell/zshrc:f"
+        "/source/.zprofile:/target/shell/zprofile:f"
+        "/source/.inputrc:/target/shell/inputrc:f"
+        "/source/.oh-my-zsh/custom:/target/shell/oh-my-zsh-custom:d"
+
+        # --- Editors (vim/neovim) ---
+        "/source/.vimrc:/target/editors/vimrc:f"
+        "/source/.vim:/target/editors/vim:d"
+        "/source/.config/nvim:/target/config/nvim:d"
+
+        # --- Prompt Customization ---
+        "/source/.config/starship.toml:/target/config/starship.toml:f"
+        "/source/.config/oh-my-posh:/target/config/oh-my-posh:d"
 
         # --- VS Code Server ---
         # Sync entire data subtrees (no overlapping entries)

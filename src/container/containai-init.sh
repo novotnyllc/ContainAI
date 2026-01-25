@@ -137,6 +137,20 @@ ensure_volume_structure() {
     ensure_dir "${DATA_DIR}/shell"
     ensure_file "${DATA_DIR}/shell/bash_aliases"
     ensure_dir "${DATA_DIR}/shell/bashrc.d"
+    ensure_file "${DATA_DIR}/shell/zshrc"
+    ensure_file "${DATA_DIR}/shell/zprofile"
+    ensure_file "${DATA_DIR}/shell/inputrc"
+    ensure_dir "${DATA_DIR}/shell/oh-my-zsh-custom"
+
+    # Editors (vim/neovim)
+    ensure_dir "${DATA_DIR}/editors"
+    ensure_file "${DATA_DIR}/editors/vimrc"
+    ensure_dir "${DATA_DIR}/editors/vim"
+    ensure_dir "${DATA_DIR}/config/nvim"
+
+    # Prompt customization (starship, oh-my-posh)
+    ensure_file "${DATA_DIR}/config/starship.toml"
+    ensure_dir "${DATA_DIR}/config/oh-my-posh"
 
     # VS Code Server
     ensure_dir "${DATA_DIR}/vscode-server/extensions"

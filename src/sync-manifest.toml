@@ -140,6 +140,68 @@ target = "shell/bashrc.d"
 container_link = ""  # Sourced via .bashrc hook, not directly symlinked
 flags = "d"  # directory
 
+[[entries]]
+source = ".zshrc"
+target = "shell/zshrc"
+container_link = ".zshrc"
+flags = "f"  # file
+
+[[entries]]
+source = ".zprofile"
+target = "shell/zprofile"
+container_link = ".zprofile"
+flags = "f"  # file
+
+[[entries]]
+source = ".inputrc"
+target = "shell/inputrc"
+container_link = ".inputrc"
+flags = "f"  # file
+
+[[entries]]
+source = ".oh-my-zsh/custom"
+target = "shell/oh-my-zsh-custom"
+container_link = ".oh-my-zsh/custom"
+flags = "dR"  # directory, remove existing first (may be pre-populated)
+
+# =============================================================================
+# EDITORS (VIM / NEOVIM)
+# =============================================================================
+
+[[entries]]
+source = ".vimrc"
+target = "editors/vimrc"
+container_link = ".vimrc"
+flags = "f"  # file
+
+[[entries]]
+source = ".vim"
+target = "editors/vim"
+container_link = ".vim"
+flags = "dR"  # directory, remove existing first
+
+[[entries]]
+source = ".config/nvim"
+target = "config/nvim"
+container_link = ".config/nvim"
+flags = "dR"  # directory, remove existing first
+
+# =============================================================================
+# PROMPT CUSTOMIZATION
+# =============================================================================
+
+[[entries]]
+source = ".config/starship.toml"
+target = "config/starship.toml"
+container_link = ".config/starship.toml"
+flags = "f"  # file
+
+[[entries]]
+source = ".config/oh-my-posh"
+target = "config/oh-my-posh"
+container_link = ".config/oh-my-posh"
+flags = "d"  # directory
+
 # =============================================================================
 # VS CODE SERVER (STABLE)
 # =============================================================================
