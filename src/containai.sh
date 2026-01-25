@@ -958,7 +958,7 @@ _containai_doctor_cmd() {
             --reset-lima)
                 # Only accept on macOS; return clear error on other platforms
                 if [[ "$(_cai_detect_platform)" != "macos" ]]; then
-                    echo "[ERROR] --reset-lima is only available on macOS" >&2
+                    _cai_error "--reset-lima is only available on macOS"
                     return 1
                 fi
                 reset_lima="true"

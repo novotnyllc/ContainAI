@@ -1687,11 +1687,11 @@ _cai_doctor_reset_lima() {
         return 1
     fi
 
-    local has_limactl="false"
-    if command -v limactl >/dev/null 2>&1; then
-        has_limactl="true"
-    else
-        _cai_warn "limactl is not installed - will skip VM operations"
+    # Require limactl - this is a Lima VM reset command
+    if ! command -v limactl >/dev/null 2>&1; then
+        _cai_error "limactl is not installed"
+        _cai_info "Install Lima first: brew install lima"
+        return 1
     fi
 
     _cai_warn "This will delete the ContainAI Lima VM ($_CAI_LIMA_VM_NAME) and Docker context."
@@ -1704,28 +1704,27 @@ _cai_doctor_reset_lima() {
 
     local had_error="false"
 
-    # Stop and delete VM if limactl is available
-    if [[ "$has_limactl" == "true" ]]; then
-        # Stop VM if running (use _cai_lima_vm_status helper)
-        local vm_status
-        vm_status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME" 2>/dev/null || true)
-        if [[ "$vm_status" == "Running" ]]; then
-            _cai_info "Stopping VM..."
-            if ! limactl stop "$_CAI_LIMA_VM_NAME"; then
-                _cai_error "Failed to stop VM '$_CAI_LIMA_VM_NAME'"
-                had_error="true"
-            fi
-        fi
-
-        # Delete VM if it exists
-        if _cai_lima_vm_exists "$_CAI_LIMA_VM_NAME"; then
-            _cai_info "Deleting VM..."
-            if ! limactl delete --force "$_CAI_LIMA_VM_NAME"; then
-                _cai_error "Failed to delete VM '$_CAI_LIMA_VM_NAME'"
-                had_error="true"
-            fi
+    # Best-effort stop - ignore "not found" errors
+    _cai_info "Stopping VM (if running)..."
+    if ! limactl stop "$_CAI_LIMA_VM_NAME" 2>/dev/null; then
+        # Only error if VM exists but stop failed for other reasons
+        if limactl list "$_CAI_LIMA_VM_NAME" 2>/dev/null | grep -q "$_CAI_LIMA_VM_NAME"; then
+            _cai_warn "Failed to stop VM '$_CAI_LIMA_VM_NAME' (may already be stopped)"
         fi
     fi
+
+    # Attempt delete unconditionally - "not found" is non-fatal
+    _cai_info "Deleting VM..."
+    local delete_output
+    delete_output=$(limactl delete --force "$_CAI_LIMA_VM_NAME" 2>&1) || {
+        # Check if error is "not found" (non-fatal) vs actual failure
+        if [[ "$delete_output" == *"not found"* ]] || [[ "$delete_output" == *"does not exist"* ]]; then
+            _cai_info "VM '$_CAI_LIMA_VM_NAME' does not exist (already deleted)"
+        else
+            _cai_error "Failed to delete VM '$_CAI_LIMA_VM_NAME': $delete_output"
+            had_error="true"
+        fi
+    }
 
     # Remove Docker context (switch away if active, then force remove)
     if command -v docker >/dev/null 2>&1 && docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
@@ -1752,6 +1751,7 @@ _cai_doctor_reset_lima() {
 
     _cai_ok "Lima VM reset complete"
     _cai_info "Run 'cai setup' to recreate the VM"
+    return 0
 }
 
 return 0
