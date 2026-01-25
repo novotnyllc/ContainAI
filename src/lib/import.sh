@@ -811,14 +811,14 @@ _import_discover_ssh_keys() {
 #   $3 = explicit config path (optional)
 # Output (stdout): newline-delimited entries in format:
 #   /source/.my-tool/config.json:/target/my-tool/config.json:f (files)
-#   /source/.my-tool/:/target/my-tool/:d (directories)
+#   /source/.my-tool:/target/my-tool:d (directories, no trailing slash)
 #
 # Target path mapping per spec:
 #   ~/.my-tool/config.json -> /target/my-tool/config.json
-#   ~/.my-other-tool/ -> /target/my-other-tool/
+#   ~/.my-other-tool/ -> /target/my-other-tool
 #
-# Note: This function is "best effort" - config parsing failures result in no
-# additional entries rather than import failure (graceful degradation)
+# Returns: 0 on success, 1 on explicit config failure (fail-fast)
+# Note: For discovered config, failures return 0 with empty output (graceful)
 _import_generate_additional_entries() {
     local source_root="$1"
     local workspace="${2:-$PWD}"
@@ -2530,8 +2530,16 @@ done <<'"'"'MAP_DATA'"'"'
 
     # Dynamically discover user-specified additional paths from config
     # These are added to sync_map_entries just like SSH keys
+    # Propagate failures for explicit config (fail-fast behavior)
     local additional_entries additional_entry
-    additional_entries=$(_import_generate_additional_entries "$source_root" "$workspace" "$explicit_config")
+    if ! additional_entries=$(_import_generate_additional_entries "$source_root" "$workspace" "$explicit_config"); then
+        if [[ -n "$explicit_config" ]]; then
+            _import_error "Failed to resolve additional paths from config"
+            return 1
+        fi
+        # For discovered config, continue with empty entries
+        additional_entries=""
+    fi
     while IFS= read -r additional_entry; do
         [[ -z "$additional_entry" ]] && continue
         # Additional paths don't have secret flag by default

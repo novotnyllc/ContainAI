@@ -1163,14 +1163,20 @@ _containai_resolve_import_additional_paths() {
 
     # Call parse-toml.py --json to get full config, then extract and validate [import].additional_paths
     # Python handles validation: must be under $HOME, no traversal
-    local config_json
-    if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>/dev/null); then
-        if [[ -n "$explicit_config" ]]; then
+    # Let stderr through for explicit config (useful diagnostics), suppress for discovered
+    local config_json parse_stderr
+    if [[ -n "$explicit_config" ]]; then
+        # Explicit config: let parse errors through to stderr
+        if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json); then
             printf '%s\n' "[ERROR] Failed to parse config file: $config_file" >&2
             return 1
         fi
-        printf '%s\n' "[WARN] Failed to parse config file: $config_file" >&2
-        return 0
+    else
+        # Discovered config: suppress stderr, warn on failure
+        if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>/dev/null); then
+            printf '%s\n' "[WARN] Failed to parse config file: $config_file" >&2
+            return 0
+        fi
     fi
 
     # Extract and validate additional_paths using Python
