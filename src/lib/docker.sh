@@ -11,6 +11,9 @@
 #   _cai_containai_docker_available() - Check if containai-docker is available
 #   _cai_containai_docker_context_exists() - Check if containai-docker context exists
 #   _cai_containai_docker_default_runtime() - Get default runtime for containai-docker
+#   _cai_dockerd_bundle_installed()  - Check if ContainAI-managed dockerd bundle is installed
+#   _cai_dockerd_bundle_version()    - Get the installed dockerd bundle version
+#   _cai_dockerd_unit_content()      - Generate systemd unit content (shared by setup/update)
 #
 # Dependencies:
 #   - Requires lib/core.sh to be sourced first for logging functions
@@ -314,6 +317,101 @@ _CAI_CONTAINAI_DOCKER_PID="/var/run/containai-docker.pid"
 _CAI_CONTAINAI_DOCKER_BRIDGE="cai0"
 _CAI_CONTAINAI_DOCKER_SERVICE="containai-docker.service"
 _CAI_CONTAINAI_DOCKER_UNIT="/etc/systemd/system/containai-docker.service"
+
+# Constants for ContainAI-managed dockerd bundle paths (Linux/WSL2 only)
+# Uses versioned directories with stable symlinks for atomic updates
+_CAI_CONTAINAI_DIR="/opt/containai"
+_CAI_DOCKERD_BUNDLE_DIR="$_CAI_CONTAINAI_DIR/docker"
+_CAI_DOCKERD_BIN_DIR="$_CAI_CONTAINAI_DIR/bin"
+_CAI_DOCKERD_BIN="$_CAI_DOCKERD_BIN_DIR/dockerd"
+_CAI_DOCKERD_VERSION_FILE="$_CAI_CONTAINAI_DIR/VERSION"
+
+# Check if ContainAI-managed dockerd bundle is installed
+# Returns: 0=installed (symlink exists and points to valid target), 1=not installed
+_cai_dockerd_bundle_installed() {
+    # Bundle is only used on Linux/WSL2, not macOS
+    if _cai_is_macos; then
+        return 1
+    fi
+
+    # Check if the dockerd symlink exists, points to a regular file, and is executable
+    if [[ -L "$_CAI_DOCKERD_BIN" ]] && [[ -f "$_CAI_DOCKERD_BIN" ]] && [[ -x "$_CAI_DOCKERD_BIN" ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Get the installed dockerd bundle version
+# Outputs: Version string (e.g., "27.4.0") on stdout
+# Returns: 0=success, 1=bundle not installed or version file missing
+_cai_dockerd_bundle_version() {
+    if ! _cai_dockerd_bundle_installed; then
+        return 1
+    fi
+
+    if [[ ! -f "$_CAI_DOCKERD_VERSION_FILE" ]]; then
+        return 1
+    fi
+
+    local version
+    version=$(<"$_CAI_DOCKERD_VERSION_FILE") || return 1
+    printf '%s' "$version"
+    return 0
+}
+
+# Generate systemd unit content for containai-docker.service
+# Outputs: Unit file content via stdout
+# Returns: 0=success
+# Note: This is the single source of truth for unit content.
+#       Both setup.sh and update.sh MUST use this function.
+#       Uses bundled dockerd path ($_CAI_DOCKERD_BIN) with PATH env to ensure
+#       bundled containerd/runc are used by dockerd.
+_cai_dockerd_unit_content() {
+    cat <<EOF
+[Unit]
+Description=ContainAI Docker Application Container Engine
+Documentation=https://github.com/novotnyllc/containai
+After=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
+# Use Wants= instead of Requires= - containerd may be managed differently or named
+# differently on some systems; dockerd can spawn its own containerd if needed
+Wants=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
+
+[Service]
+Type=notify
+# dockerd reads config from daemon.json which includes:
+# - isolated socket, data-root, exec-root, pidfile
+# - separate bridge (cai0) with separate network to avoid conflicts
+# PATH ensures bundled containerd/runc are used by dockerd
+Environment=PATH=$_CAI_DOCKERD_BIN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=$_CAI_DOCKERD_BIN --config-file=$_CAI_CONTAINAI_DOCKER_CONFIG
+ExecReload=/bin/kill -s HUP \$MAINPID
+TimeoutStartSec=0
+RestartSec=2
+Restart=always
+
+# Ensure runtime directories exist on tmpfs (/var/run is tmpfs on most systems)
+# RuntimeDirectory creates /run/containai-docker with proper permissions
+RuntimeDirectory=containai-docker
+# Remove stale pidfile before starting (avoids "pidfile exists" errors after crash)
+ExecStartPre=-/bin/rm -f $_CAI_CONTAINAI_DOCKER_PID
+
+# Limit container and network namespace
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+
+# Set delegate for cgroup management
+Delegate=yes
+
+# Kill only the main process, not the containers
+KillMode=process
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
 
 # Check if containai-docker context exists and points to the correct socket
 # Returns: 0=exists with correct endpoint, 1=does not exist or wrong endpoint

@@ -12,6 +12,7 @@
 #   _cai_test_wsl2_seccomp()           - Test WSL2 seccomp compatibility
 #   _cai_show_seccomp_warning()        - Display seccomp warning
 #   _cai_install_sysbox_wsl2()         - Install Sysbox on WSL2
+#   _cai_install_dockerd_bundle()      - Install ContainAI-managed dockerd bundle
 #   _cai_configure_daemon_json()       - Configure Docker daemon.json (legacy)
 #   _cai_configure_docker_socket()     - Configure dedicated Docker socket (legacy)
 #   _cai_create_containai_context()    - Create containai-docker context (legacy)
@@ -609,6 +610,183 @@ _cai_install_sysbox_wsl2() {
 }
 
 # ==============================================================================
+# Docker Bundle Installation
+# ==============================================================================
+
+# Install ContainAI-managed dockerd bundle (Linux/WSL2 only)
+# Downloads Docker static binaries and installs to /opt/containai/docker/<version>/
+# with symlinks from /opt/containai/bin/ for atomic updates.
+#
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+# Note: Docker does NOT provide checksums - trusting HTTPS only
+_cai_install_dockerd_bundle() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    # Skip on macOS - uses Lima VM instead
+    if _cai_is_macos; then
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Skipping dockerd bundle on macOS (uses Lima VM)"
+        fi
+        return 0
+    fi
+
+    _cai_step "Installing ContainAI-managed Docker bundle"
+
+    # Determine architecture (Docker uses x86_64/aarch64 naming)
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)
+            # Docker uses x86_64 (not amd64)
+            arch="x86_64"
+            ;;
+        aarch64)
+            # Docker uses aarch64 (not arm64)
+            arch="aarch64"
+            ;;
+        *)
+            _cai_error "Unsupported architecture: $arch"
+            return 1
+            ;;
+    esac
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Architecture: $arch"
+    fi
+
+    # Docker static binaries index URL
+    local index_url="https://download.docker.com/linux/static/stable/${arch}/"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would fetch latest version from: $index_url"
+        _cai_info "[DRY-RUN] Would download docker-<version>.tgz"
+        _cai_info "[DRY-RUN] Would extract to: $_CAI_DOCKERD_BUNDLE_DIR/<version>/"
+        _cai_info "[DRY-RUN] Would create symlinks in: $_CAI_DOCKERD_BIN_DIR/"
+        _cai_info "[DRY-RUN] Would write version to: $_CAI_DOCKERD_VERSION_FILE"
+        _cai_ok "Docker bundle installation (dry-run) complete"
+        return 0
+    fi
+
+    # Fetch index and parse for latest version
+    # Docker files are named: docker-X.Y.Z.tgz
+    # We grep for links, extract versions, sort numerically, take the last one
+    _cai_step "Resolving latest Docker version"
+    local index_html latest_version
+
+    # Use wget with timeout (wget is already ensured for Sysbox install)
+    if ! index_html=$(_cai_timeout 30 wget -qO- "$index_url" 2>/dev/null); then
+        _cai_error "Failed to fetch Docker index from: $index_url"
+        _cai_error "  Check network connectivity"
+        return 1
+    fi
+
+    # Parse HTML for docker-X.Y.Z.tgz links and extract latest version
+    # Pattern: href="docker-X.Y.Z.tgz" - we extract X.Y.Z
+    # Exclude rootless-extras packages
+    latest_version=$(printf '%s' "$index_html" | \
+        grep -oE 'href="docker-[0-9]+\.[0-9]+\.[0-9]+\.tgz"' | \
+        grep -v rootless | \
+        sed 's/href="docker-//; s/\.tgz"//' | \
+        sort -t. -k1,1n -k2,2n -k3,3n | \
+        tail -1)
+
+    if [[ -z "$latest_version" ]]; then
+        _cai_error "Could not determine latest Docker version from index"
+        return 1
+    fi
+
+    _cai_info "Latest Docker version: $latest_version"
+
+    # Check if already installed at this version
+    if _cai_dockerd_bundle_installed; then
+        local installed_version
+        installed_version=$(_cai_dockerd_bundle_version) || installed_version=""
+        if [[ "$installed_version" == "$latest_version" ]]; then
+            _cai_info "Docker bundle already at version $latest_version"
+            _cai_ok "Docker bundle is current"
+            return 0
+        fi
+        _cai_info "Upgrading from $installed_version to $latest_version"
+    fi
+
+    # Download and install in subshell to contain cleanup trap
+    local download_url="https://download.docker.com/linux/static/stable/${arch}/docker-${latest_version}.tgz"
+    local install_rc
+
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Download URL: $download_url"
+    fi
+
+    (
+        set -e
+        tmpdir=$(mktemp -d)
+        trap 'rm -rf "$tmpdir"' EXIT
+
+        echo "[STEP] Downloading Docker $latest_version"
+        if ! wget -q --show-progress -O "$tmpdir/docker.tgz" "$download_url"; then
+            echo "[ERROR] Failed to download Docker bundle" >&2
+            exit 1
+        fi
+
+        echo "[STEP] Extracting Docker bundle"
+        # Docker tarball extracts to docker/ subdirectory
+        if ! tar -xzf "$tmpdir/docker.tgz" -C "$tmpdir"; then
+            echo "[ERROR] Failed to extract Docker bundle" >&2
+            exit 1
+        fi
+
+        # Verify extraction produced expected files
+        if [[ ! -f "$tmpdir/docker/dockerd" ]]; then
+            echo "[ERROR] Extracted archive missing dockerd binary" >&2
+            exit 1
+        fi
+
+        echo "[STEP] Installing to $_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
+
+        # Create target directories
+        sudo mkdir -p "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version"
+        sudo mkdir -p "$_CAI_DOCKERD_BIN_DIR"
+
+        # Move binaries from docker/ subdir to versioned directory
+        sudo mv "$tmpdir/docker/"* "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
+
+        echo "[STEP] Creating symlinks in $_CAI_DOCKERD_BIN_DIR/"
+
+        # Create symlinks for all bundle binaries using relative paths
+        # Use ln -sfn for atomic symlink replacement
+        local binaries="dockerd docker containerd containerd-shim-runc-v2 docker-init docker-proxy runc ctr"
+        local bin
+        for bin in $binaries; do
+            if [[ -f "$_CAI_DOCKERD_BUNDLE_DIR/$latest_version/$bin" ]]; then
+                sudo ln -sfn "../docker/$latest_version/$bin" "$_CAI_DOCKERD_BIN_DIR/$bin"
+            fi
+        done
+
+        # Write version file
+        echo "[STEP] Writing version to $_CAI_DOCKERD_VERSION_FILE"
+        printf '%s' "$latest_version" | sudo tee "$_CAI_DOCKERD_VERSION_FILE" >/dev/null
+
+        exit 0
+    ) && install_rc=0 || install_rc=$?
+
+    if [[ $install_rc -ne 0 ]]; then
+        return 1
+    fi
+
+    # Verify installation
+    if ! _cai_dockerd_bundle_installed; then
+        _cai_error "Bundle installation verification failed"
+        return 1
+    fi
+
+    _cai_ok "Docker bundle $latest_version installed"
+    return 0
+}
+
+# ==============================================================================
 # Docker Configuration
 # ==============================================================================
 
@@ -972,56 +1150,16 @@ EOF
 #            $2 = verbose flag ("true" for verbose output)
 # Returns: 0=success, 1=failure
 # Note: Creates a separate service, NOT a drop-in to docker.service
+#       Uses _cai_dockerd_unit_content() from docker.sh for single source of truth
 _cai_create_isolated_docker_service() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
 
     _cai_step "Creating isolated Docker service: $_CAI_CONTAINAI_DOCKER_SERVICE"
 
-    # WSL2 systemd is quirky - use Wants= not Requires= for sysbox services
+    # Use shared unit content from docker.sh
     local service_content
-    service_content=$(cat <<EOF
-[Unit]
-Description=ContainAI Docker Application Container Engine
-Documentation=https://github.com/novotnyllc/containai
-After=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
-# Use Wants= instead of Requires= - containerd may be managed differently or named
-# differently on some systems; dockerd can spawn its own containerd if needed
-Wants=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
-
-[Service]
-Type=notify
-# dockerd reads config from daemon.json which includes:
-# - isolated socket, data-root, exec-root, pidfile
-# - separate bridge (cai0) with separate network to avoid conflicts
-ExecStart=/usr/bin/dockerd --config-file=$_CAI_CONTAINAI_DOCKER_CONFIG
-ExecReload=/bin/kill -s HUP \$MAINPID
-TimeoutStartSec=0
-RestartSec=2
-Restart=always
-
-# Ensure runtime directories exist on tmpfs (/var/run is tmpfs on most systems)
-# RuntimeDirectory creates /run/containai-docker with proper permissions
-RuntimeDirectory=containai-docker
-# Remove stale pidfile before starting (avoids "pidfile exists" errors after crash)
-ExecStartPre=-/bin/rm -f $_CAI_CONTAINAI_DOCKER_PID
-
-# Limit container and network namespace
-LimitNOFILE=infinity
-LimitNPROC=infinity
-LimitCORE=infinity
-
-# Set delegate for cgroup management
-Delegate=yes
-
-# Kill only the main process, not the containers
-KillMode=process
-OOMScoreAdjust=-500
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    )
+    service_content=$(_cai_dockerd_unit_content)
 
     if [[ "$verbose" == "true" ]]; then
         _cai_info "Service file content:"
@@ -1653,32 +1791,37 @@ _cai_setup_wsl2() {
         return 1
     fi
 
-    # Step 5: Create isolated Docker directories
+    # Step 5: Install ContainAI-managed dockerd bundle
+    if ! _cai_install_dockerd_bundle "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 6: Create isolated Docker directories
     if ! _cai_create_isolated_docker_dirs "$dry_run"; then
         return 1
     fi
 
-    # Step 6: Create isolated daemon.json (NOT /etc/docker/daemon.json)
+    # Step 7: Create isolated daemon.json (NOT /etc/docker/daemon.json)
     if ! _cai_create_isolated_daemon_json "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 7: Create isolated systemd service (NOT a drop-in to docker.service)
+    # Step 8: Create isolated systemd service (NOT a drop-in to docker.service)
     if ! _cai_create_isolated_docker_service "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 8: Start isolated Docker service
+    # Step 9: Start isolated Docker service
     if ! _cai_start_isolated_docker_service "$dry_run"; then
         return 1
     fi
 
-    # Step 9: Create containai-docker context
+    # Step 10: Create containai-docker context
     if ! _cai_create_isolated_docker_context "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 10: Verify installation
+    # Step 11: Verify installation
     if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Isolated Docker verification had issues - check output above"
@@ -2723,21 +2866,8 @@ _cai_setup_linux() {
         _cai_ok "Docker CLI available"
     fi
 
-    # Check for dockerd (required for isolated daemon)
-    if ! command -v dockerd >/dev/null 2>&1; then
-        if [[ "$dry_run" == "true" ]]; then
-            _cai_warn "[DRY-RUN] dockerd not found - would be required for actual setup"
-            _cai_warn "  Docker Desktop alone is not sufficient - install Docker Engine"
-        else
-            _cai_error "Docker daemon (dockerd) is not installed"
-            _cai_error "  The isolated Docker daemon requires dockerd from Docker Engine"
-            _cai_error "  Docker Desktop alone is not sufficient - install Docker Engine:"
-            _cai_error "  https://docs.docker.com/engine/install/"
-            return 1
-        fi
-    else
-        _cai_ok "Docker daemon (dockerd) available"
-    fi
+    # Note: We no longer require system dockerd - the bundle provides it
+    # The bundle installs dockerd to /opt/containai/bin/dockerd
 
     # Step 1: Check for Docker Desktop coexistence
     _cai_step "Checking for Docker Desktop"
@@ -2776,32 +2906,37 @@ _cai_setup_linux() {
         return 1
     fi
 
-    # Step 4: Create isolated Docker directories
+    # Step 4: Install ContainAI-managed dockerd bundle
+    if ! _cai_install_dockerd_bundle "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 5: Create isolated Docker directories
     if ! _cai_create_isolated_docker_dirs "$dry_run"; then
         return 1
     fi
 
-    # Step 5: Create isolated daemon.json (NOT /etc/docker/daemon.json)
+    # Step 6: Create isolated daemon.json (NOT /etc/docker/daemon.json)
     if ! _cai_create_isolated_daemon_json "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 6: Create isolated systemd service (NOT a drop-in to docker.service)
+    # Step 7: Create isolated systemd service (NOT a drop-in to docker.service)
     if ! _cai_create_isolated_docker_service "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 7: Start isolated Docker service
+    # Step 8: Start isolated Docker service
     if ! _cai_start_isolated_docker_service "$dry_run"; then
         return 1
     fi
 
-    # Step 8: Create containai-docker context
+    # Step 9: Create containai-docker context
     if ! _cai_create_isolated_docker_context "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 9: Verify installation
+    # Step 10: Verify installation
     if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Isolated Docker verification had issues - check output above"

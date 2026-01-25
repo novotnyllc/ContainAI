@@ -108,49 +108,9 @@ EOF
 
 # Generate expected systemd unit content
 # Returns: unit content via stdout
-# Note: Must match _cai_create_isolated_docker_service() in setup.sh
+# Note: Delegates to _cai_dockerd_unit_content() in docker.sh for single source of truth
 _cai_update_expected_unit_content() {
-    cat <<EOF
-[Unit]
-Description=ContainAI Docker Application Container Engine
-Documentation=https://github.com/novotnyllc/containai
-After=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
-# Use Wants= instead of Requires= - containerd may be managed differently or named
-# differently on some systems; dockerd can spawn its own containerd if needed
-Wants=network-online.target containerd.service sysbox-mgr.service sysbox-fs.service
-
-[Service]
-Type=notify
-# dockerd reads config from daemon.json which includes:
-# - isolated socket, data-root, exec-root, pidfile
-# - separate bridge (cai0) with separate network to avoid conflicts
-ExecStart=/usr/bin/dockerd --config-file=$_CAI_CONTAINAI_DOCKER_CONFIG
-ExecReload=/bin/kill -s HUP \$MAINPID
-TimeoutStartSec=0
-RestartSec=2
-Restart=always
-
-# Ensure runtime directories exist on tmpfs (/var/run is tmpfs on most systems)
-# RuntimeDirectory creates /run/containai-docker with proper permissions
-RuntimeDirectory=containai-docker
-# Remove stale pidfile before starting (avoids "pidfile exists" errors after crash)
-ExecStartPre=-/bin/rm -f $_CAI_CONTAINAI_DOCKER_PID
-
-# Limit container and network namespace
-LimitNOFILE=infinity
-LimitNPROC=infinity
-LimitCORE=infinity
-
-# Set delegate for cgroup management
-Delegate=yes
-
-# Kill only the main process, not the containers
-KillMode=process
-OOMScoreAdjust=-500
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    _cai_dockerd_unit_content
 }
 
 # Check if systemd unit needs update
