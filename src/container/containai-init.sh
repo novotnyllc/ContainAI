@@ -128,7 +128,7 @@ ensure_volume_structure() {
 
     # OpenCode config (selective sync - specific subdirs only)
     ensure_dir "${DATA_DIR}/config/opencode"
-    ensure_file "${DATA_DIR}/config/opencode/opencode.json"
+    ensure_file "${DATA_DIR}/config/opencode/opencode.json" true
     ensure_dir "${DATA_DIR}/config/opencode/agents"
     ensure_dir "${DATA_DIR}/config/opencode/commands"
     ensure_dir "${DATA_DIR}/config/opencode/skills"
@@ -208,11 +208,11 @@ ensure_volume_structure() {
     # Continue (selective sync: config files only)
     ensure_dir "${DATA_DIR}/continue"
     ensure_file "${DATA_DIR}/continue/config.yaml"
-    ensure_file "${DATA_DIR}/continue/config.json"
+    ensure_file "${DATA_DIR}/continue/config.json" true
 
     # Cursor (selective sync: mcp.json, rules, extensions)
     ensure_dir "${DATA_DIR}/cursor"
-    ensure_file "${DATA_DIR}/cursor/mcp.json"
+    ensure_file "${DATA_DIR}/cursor/mcp.json" true
     ensure_dir "${DATA_DIR}/cursor/rules"
     ensure_dir "${DATA_DIR}/cursor/extensions"
 
@@ -223,6 +223,7 @@ ensure_volume_structure() {
     safe_chmod 600 "${DATA_DIR}/gemini/oauth_creds.json"
     safe_chmod 600 "${DATA_DIR}/codex/auth.json"
     safe_chmod 600 "${DATA_DIR}/local/share/opencode/auth.json"
+    safe_chmod 600 "${DATA_DIR}/config/opencode/opencode.json"
     safe_chmod 600 "${DATA_DIR}/aider/aider.conf.yml"
     safe_chmod 600 "${DATA_DIR}/aider/aider.model.settings.yml"
     safe_chmod 600 "${DATA_DIR}/continue/config.yaml"

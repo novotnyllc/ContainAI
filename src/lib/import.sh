@@ -367,7 +367,8 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
 
         # --- OpenCode (config) ---
         # Selective sync: config files only, skip caches
-        "/source/.config/opencode/opencode.json:/target/config/opencode/opencode.json:f"
+        # opencode.json may contain API keys/tokens
+        "/source/.config/opencode/opencode.json:/target/config/opencode/opencode.json:fjs"
         "/source/.config/opencode/agents:/target/config/opencode/agents:d"
         "/source/.config/opencode/commands:/target/config/opencode/commands:d"
         "/source/.config/opencode/skills:/target/config/opencode/skills:d"
@@ -961,10 +962,18 @@ _containai_import() {
             done <<<"$exclude_output"
         fi
 
-        # Note: Built-in excludes for AI agent directories (claude/projects, claude/statsig,
-        # claude/todos, continue/sessions, continue/index) are NOT needed because we use
-        # selective sync - we only import specific files/subdirs, not entire agent directories.
-        # This avoids "unmatched exclude pattern" warnings while achieving the same effect.
+        # Built-in excludes for AI agent directories:
+        # The following paths are excluded from sync by design:
+        #   - claude/projects   (project workspace data)
+        #   - claude/statsig    (telemetry)
+        #   - claude/todos      (todo state)
+        #   - continue/sessions (session data)
+        #   - continue/index    (index caches)
+        #
+        # IMPLEMENTATION: Rather than adding explicit excludes (which would trigger
+        # "unmatched exclude pattern" warnings), we achieve exclusion via SELECTIVE SYNC:
+        # the _IMPORT_SYNC_MAP only includes specific files/subdirs, not entire agent
+        # directories. This approach is cleaner and achieves the same result.
     fi
 
     # Note: Excludes are now processed via _import_rewrite_excludes() and passed
