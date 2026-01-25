@@ -2140,10 +2140,19 @@ _cai_import_git_config() {
     : > "$tmp_gitconfig"
 
     if [[ -n "$host_gitconfig" ]]; then
-        # Filter gitconfig: remove credential.helper lines and empty [credential] sections
-        # Two-pass approach: first pass strips helper lines, second pass removes empty sections
+        # Filter gitconfig: remove credential.helper lines (including multi-line)
+        # and empty [credential] sections
+        # Multi-line values use trailing backslash for continuation
         if ! awk '
-            BEGIN { in_cred=0; cred_header=""; cred_content="" }
+            BEGIN { in_cred=0; cred_header=""; cred_content=""; skip_continuation=0 }
+            # If we are skipping continuation lines from a multi-line helper value
+            skip_continuation {
+                # Check if this line continues (ends with backslash)
+                if (/\\[[:space:]]*$/) { next }
+                # This is the last continuation line - skip it too, then stop
+                skip_continuation = 0
+                next
+            }
             # Match [credential] or [credential "remote"] section headers
             /^[[:space:]]*\[credential([[:space:]]+"[^"]+")?\][[:space:]]*$/ {
                 # Flush previous credential section if it had content
@@ -2164,10 +2173,18 @@ _cai_import_git_config() {
                 cred_content = ""
                 in_cred = 0
             }
-            # Skip top-level credential.helper = ... lines
-            /^[[:space:]]*credential\.helper[[:space:]]*=/ { next }
+            # Skip top-level credential.helper = ... lines (including multi-line)
+            /^[[:space:]]*credential\.helper[[:space:]]*=/ {
+                # Check if multi-line (ends with backslash)
+                if (/\\[[:space:]]*$/) { skip_continuation = 1 }
+                next
+            }
             # Inside [credential] section: skip helper = ... lines, buffer rest
-            in_cred && /^[[:space:]]*helper[[:space:]]*=/ { next }
+            in_cred && /^[[:space:]]*helper[[:space:]]*=/ {
+                # Check if multi-line (ends with backslash)
+                if (/\\[[:space:]]*$/) { skip_continuation = 1 }
+                next
+            }
             in_cred { cred_content = cred_content $0 "\n"; next }
             # Normal lines: print immediately
             { print }
