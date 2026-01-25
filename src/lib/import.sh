@@ -13,7 +13,7 @@
 # Usage:
 #   source lib/config.sh
 #   source lib/import.sh
-#   _containai_import "" "volume-name" "false" "false" "$PWD" "" ""
+#   _containai_import "" "volume-name" "false" "false" "$PWD" "" "" "false"
 #
 # Arguments:
 #   $1 = Docker context ("" for default, "containai-docker" for Sysbox)
@@ -25,6 +25,8 @@
 #   $7 = from_source path (optional, tgz file or directory; default: "" means $HOME)
 #        - If tgz archive: restores directly to volume (bypasses sync/transforms)
 #        - If directory: syncs from that directory instead of $HOME
+#   $8 = no_secrets flag ("true" or "false", default: "false")
+#        - When true, skips entries with 's' flag (OAuth tokens, API keys, SSH keys)
 #
 # Dependencies:
 #   - docker (for rsync container)
@@ -364,6 +366,20 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
 
         # --- GitHub CLI ---
         "/source/.config/gh:/target/config/gh:ds"
+
+        # --- SSH ---
+        # Non-secret files: config, known_hosts (no s flag)
+        # Secret files: private keys (s flag - skipped with --no-secrets)
+        "/source/.ssh/config:/target/ssh/config:f"
+        "/source/.ssh/known_hosts:/target/ssh/known_hosts:f"
+        "/source/.ssh/id_rsa:/target/ssh/id_rsa:fs"
+        "/source/.ssh/id_rsa.pub:/target/ssh/id_rsa.pub:f"
+        "/source/.ssh/id_ed25519:/target/ssh/id_ed25519:fs"
+        "/source/.ssh/id_ed25519.pub:/target/ssh/id_ed25519.pub:f"
+        "/source/.ssh/id_ecdsa:/target/ssh/id_ecdsa:fs"
+        "/source/.ssh/id_ecdsa.pub:/target/ssh/id_ecdsa.pub:f"
+        "/source/.ssh/id_dsa:/target/ssh/id_dsa:fs"
+        "/source/.ssh/id_dsa.pub:/target/ssh/id_dsa.pub:f"
 
         # --- OpenCode (config) ---
         # Selective sync: config files only, skip caches
@@ -730,6 +746,8 @@ _import_rewrite_excludes() {
 #   $5 = workspace path (optional, for exclude resolution, default: $PWD)
 #   $6 = explicit config path (optional, for exclude resolution)
 #   $7 = from_source path (optional, tgz file or directory; default: "" means $HOME)
+#   $8 = no_secrets flag ("true" or "false", default: "false")
+#        When true, skips syncing entries with 's' flag (OAuth tokens, API keys, SSH keys)
 # Returns: 0 on success, 1 on failure
 _containai_import() {
     local ctx="${1:-}"
@@ -739,6 +757,7 @@ _containai_import() {
     local workspace="${5:-$PWD}"
     local explicit_config="${6:-}"
     local from_source="${7:-}"
+    local no_secrets="${8:-false}"
 
     # Build docker command prefix based on context (needed early for source validation)
     # All docker calls in this function MUST use docker_cmd and neutralize DOCKER_CONTEXT/DOCKER_HOST
@@ -1659,9 +1678,22 @@ done <<'"'"'MAP_DATA'"'"'
 '
 
     # Convert SYNC_MAP to newline-delimited string for exclude processing
+    # Filter out entries with 's' flag when --no-secrets is set
     local sync_map_entries=""
-    local entry
+    local entry entry_flags
     for entry in "${_IMPORT_SYNC_MAP[@]}"; do
+        # Extract flags (3rd field, colon-delimited)
+        entry_flags="${entry##*:}"
+        # Skip entries with 's' flag when no_secrets=true
+        if [[ "$no_secrets" == "true" && "$entry_flags" == *s* ]]; then
+            # Show skip message in dry-run mode, otherwise info
+            if [[ "$dry_run" == "true" ]]; then
+                echo "[DRY-RUN] Skipping secret entry: ${entry%%:*} (--no-secrets)"
+            else
+                _import_info "Skipping secret entry: ${entry%%:*} (--no-secrets)"
+            fi
+            continue
+        fi
         sync_map_entries+="$entry"$'\n'
     done
 

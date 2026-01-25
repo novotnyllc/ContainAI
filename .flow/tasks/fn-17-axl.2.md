@@ -39,9 +39,8 @@ Add automatic discovery of XDG-compliant config directories for dev tools that a
 - [ ] Container can use imported configs after `cai import`
 
 ## Done summary
-TBD
-
+Added XDG config discovery for dev tools: zsh configs (.zshrc, .zprofile), readline (.inputrc), oh-my-zsh custom dir, vim/neovim configs, starship prompt, and oh-my-posh themes. Implemented tmux legacy/XDG precedence where XDG takes priority when both exist.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 6dd57128e3fe60c51d0a8da9a6dd16bc9c595bbe, 4491b37da0c6a2a6c0a6e0ff0fd2c6b7c1c2b3a4
+- Tests: shellcheck src/lib/import.sh, bash -n src/lib/import.sh, python3 -c 'import tomllib; tomllib.load(open("src/sync-manifest.toml", "rb"))'
 - PRs:

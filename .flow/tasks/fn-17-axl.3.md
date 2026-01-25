@@ -37,9 +37,8 @@ Implement selective syncing for AI agent config directories - sync only needed f
 - [ ] Agent configs work in container after import
 
 ## Done summary
-TBD
-
+Added selective sync support for AI agent configs: Claude (commands/, agents/, hooks/, CLAUDE.md), OpenCode (selective subdirs), Aider (.aider.conf.yml, .aider.model.settings.yml), Continue (config.yaml, config.json), and Cursor (mcp.json, rules/, extensions/). Implemented @silent: prefix mechanism for built-in excludes, updated containai-init.sh volume structure, and fixed ln -sfn directory symlink pitfall.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 6e9c95b, 942355f, 0c0431a, 400c0f5, a59598f, 9620fd8, 53507a2
+- Tests: shellcheck -x src/lib/import.sh src/container/containai-init.sh, docker build --check -f src/container/Dockerfile.agents
 - PRs:

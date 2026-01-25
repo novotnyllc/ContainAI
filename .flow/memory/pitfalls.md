@@ -175,3 +175,6 @@ apt-get upgrade -y can still prompt (dpkg conffile/needrestart); use DEBIAN_FRON
 
 ## 2026-01-25 manual [pitfall]
 sudo VAR=value cmd does not pass VAR to cmd; use sudo env VAR=value cmd instead
+
+## 2026-01-25 manual [pitfall]
+ln -sfn creates symlinks INSIDE existing directories; always rm -rf target dir before ln -sfn for directory symlinks

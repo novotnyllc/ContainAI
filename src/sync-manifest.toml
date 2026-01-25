@@ -97,6 +97,72 @@ container_link = ".config/gh"
 flags = "ds"  # directory, secret
 
 # =============================================================================
+# SSH
+# Non-secret files: config, known_hosts
+# Secret files: private keys (id_*)
+# =============================================================================
+
+[[entries]]
+source = ".ssh/config"
+target = "ssh/config"
+container_link = ".ssh/config"
+flags = "f"  # file (not secret - SSH config is public)
+
+[[entries]]
+source = ".ssh/known_hosts"
+target = "ssh/known_hosts"
+container_link = ".ssh/known_hosts"
+flags = "f"  # file (not secret - host keys are public)
+
+[[entries]]
+source = ".ssh/id_rsa"
+target = "ssh/id_rsa"
+container_link = ".ssh/id_rsa"
+flags = "fs"  # file, secret (private key)
+
+[[entries]]
+source = ".ssh/id_rsa.pub"
+target = "ssh/id_rsa.pub"
+container_link = ".ssh/id_rsa.pub"
+flags = "f"  # file (not secret - public key)
+
+[[entries]]
+source = ".ssh/id_ed25519"
+target = "ssh/id_ed25519"
+container_link = ".ssh/id_ed25519"
+flags = "fs"  # file, secret (private key)
+
+[[entries]]
+source = ".ssh/id_ed25519.pub"
+target = "ssh/id_ed25519.pub"
+container_link = ".ssh/id_ed25519.pub"
+flags = "f"  # file (not secret - public key)
+
+[[entries]]
+source = ".ssh/id_ecdsa"
+target = "ssh/id_ecdsa"
+container_link = ".ssh/id_ecdsa"
+flags = "fs"  # file, secret (private key)
+
+[[entries]]
+source = ".ssh/id_ecdsa.pub"
+target = "ssh/id_ecdsa.pub"
+container_link = ".ssh/id_ecdsa.pub"
+flags = "f"  # file (not secret - public key)
+
+[[entries]]
+source = ".ssh/id_dsa"
+target = "ssh/id_dsa"
+container_link = ".ssh/id_dsa"
+flags = "fs"  # file, secret (private key)
+
+[[entries]]
+source = ".ssh/id_dsa.pub"
+target = "ssh/id_dsa.pub"
+container_link = ".ssh/id_dsa.pub"
+flags = "f"  # file (not secret - public key)
+
+# =============================================================================
 # OPENCODE
 # Selective sync: config files only, skip caches
 # opencode.json may contain API keys/tokens

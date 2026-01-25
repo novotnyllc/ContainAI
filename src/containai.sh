@@ -267,13 +267,28 @@ Options:
   --config <path>       Config file path (overrides auto-discovery)
   --dry-run             Preview changes without applying
   --no-excludes         Skip exclude patterns from config
+  --no-secrets          Skip syncing agent secret files (OAuth tokens, API keys,
+                        SSH private keys). Does NOT affect --credentials flag.
   -h, --help            Show this help message
+
+Secret files skipped by --no-secrets:
+  - ~/.claude/.credentials.json (Claude OAuth tokens)
+  - ~/.codex/auth.json (Codex API key)
+  - ~/.gemini/google_accounts.json, oauth_creds.json (Gemini OAuth)
+  - ~/.local/share/opencode/auth.json (OpenCode auth)
+  - ~/.config/gh/ (GitHub CLI tokens)
+  - ~/.ssh/id_* (SSH private keys)
+  - ~/.aider.conf.yml (may contain API keys)
+  - ~/.continue/config.* (may contain API keys)
+  - ~/.cursor/mcp.json, ~/.config/opencode/opencode.json (may contain tokens)
 
 Examples:
   cai import /path/to/workspace        Hot-reload configs into running container
   cai import                           Sync configs to auto-resolved volume only
   cai import --dry-run                 Preview what would be synced
   cai import --no-excludes             Sync without applying excludes
+  cai import --no-secrets              Sync without agent secrets (tokens, keys)
+  cai import --dry-run --no-secrets    Preview which secrets would be skipped
   cai import --data-volume vol         Sync to specific volume
   cai import --from ~/other-configs/   Sync from different directory
   cai import --from backup.tgz         Restore volume from archive
@@ -511,6 +526,7 @@ EOF
 _containai_import_cmd() {
     local dry_run="false"
     local no_excludes="false"
+    local no_secrets="false"
     local cli_volume=""
     local workspace=""
     local explicit_config=""
@@ -526,6 +542,10 @@ _containai_import_cmd() {
                 ;;
             --no-excludes)
                 no_excludes="true"
+                shift
+                ;;
+            --no-secrets)
+                no_secrets="true"
                 shift
                 ;;
             --data-volume)
@@ -747,7 +767,7 @@ _containai_import_cmd() {
     unset _CAI_RESTORE_MODE
 
     # Call import function with context
-    if ! _containai_import "$selected_context" "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config" "$from_source"; then
+    if ! _containai_import "$selected_context" "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config" "$from_source" "$no_secrets"; then
         unset _CAI_RESTORE_MODE
         return 1
     fi
