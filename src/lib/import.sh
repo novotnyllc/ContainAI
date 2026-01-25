@@ -859,6 +859,29 @@ _import_generate_additional_entries() {
         # Skip empty home_rel (defensive)
         [[ -z "$home_rel" ]] && continue
 
+        # SECURITY: Check for symlink components in the path
+        # This prevents symlink traversal outside HOME (spec: "No symlink following for validation")
+        # Check each component of the path, not just the final target
+        local actual_path="$source_root/$home_rel"
+        local check_path="$source_root"
+        local path_component
+        local has_symlink_component="false"
+
+        # Split home_rel by / and check each component
+        while IFS= read -r path_component; do
+            [[ -z "$path_component" ]] && continue
+            check_path="$check_path/$path_component"
+            if [[ -L "$check_path" ]]; then
+                has_symlink_component="true"
+                break
+            fi
+        done < <(printf '%s\n' "$home_rel" | tr '/' '\n')
+
+        if [[ "$has_symlink_component" == "true" ]]; then
+            echo "[WARN] Skipping additional_path: ~/$home_rel (contains symlink component)" >&2
+            continue
+        fi
+
         # Compute source path for rsync (relative to source_root)
         # Use /source/ prefix for compatibility with rsync container mount
         # home_rel is the path relative to HOME (e.g., ".my-tool/config.json" or "my-tool/config.json")
@@ -873,9 +896,13 @@ _import_generate_additional_entries() {
         fi
 
         # Determine if path is file or directory
-        # Use source_root + home_rel to find the actual path on the host
-        local actual_path="$source_root/$home_rel"
-        if [[ -d "$actual_path" ]]; then
+        # SECURITY: Check -L first to reject final symlinks before -d/-f (which follow symlinks)
+        if [[ -L "$actual_path" ]]; then
+            # Final path is a symlink - reject to prevent traversal outside HOME
+            # (Even if symlink target is within HOME, following could be exploited)
+            echo "[WARN] Skipping additional_path: ~/$home_rel (is a symlink)" >&2
+            continue
+        elif [[ -d "$actual_path" ]]; then
             # Directory - add 'd' flag, ensure trailing slash consistency
             # Remove trailing slash from paths for consistent formatting
             target_rel="${target_rel%/}"
@@ -883,10 +910,6 @@ _import_generate_additional_entries() {
             flags="d"
         elif [[ -f "$actual_path" ]]; then
             # File - add 'f' flag
-            flags="f"
-        elif [[ -L "$actual_path" ]]; then
-            # Symlink - rsync -a preserves symlinks (does not dereference by default)
-            # Treat as file for sync map purposes
             flags="f"
         else
             # Path doesn't exist in source - skip silently (may not exist on this system)

@@ -194,8 +194,10 @@ additional_paths = [
 **Path rules:**
 - Must start with `~/` (tilde expansion) or be an absolute path under `$HOME`
 - Cannot reference other users' home directories (`~user/` is rejected)
-- No path traversal allowed (`/../` or `/..` segments are rejected)
-- Paths are validated to be under `$HOME` after resolution
+- Must not escape `$HOME` after path normalization (e.g., `~/../etc` is rejected)
+- Cannot contain colons (reserved for sync map format)
+- Symlinks are rejected (both symlink components in path and symlink targets)
+- Paths are validated to be under `$HOME` after lexical normalization (no symlink following)
 
 **Target path mapping:**
 - Leading dots are stripped for visibility in the volume
