@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 # Flow-Next
 !.flow/bin/
 .flow/tmp/
+
+# Docker buildx local state (machine-specific)
+.docker/buildx/

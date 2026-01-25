@@ -369,17 +369,9 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
 
         # --- SSH ---
         # Non-secret files: config, known_hosts (no s flag)
-        # Secret files: private keys (s flag - skipped with --no-secrets)
+        # Private keys (id_*) are discovered dynamically - see _import_discover_ssh_keys()
         "/source/.ssh/config:/target/ssh/config:f"
         "/source/.ssh/known_hosts:/target/ssh/known_hosts:f"
-        "/source/.ssh/id_rsa:/target/ssh/id_rsa:fs"
-        "/source/.ssh/id_rsa.pub:/target/ssh/id_rsa.pub:f"
-        "/source/.ssh/id_ed25519:/target/ssh/id_ed25519:fs"
-        "/source/.ssh/id_ed25519.pub:/target/ssh/id_ed25519.pub:f"
-        "/source/.ssh/id_ecdsa:/target/ssh/id_ecdsa:fs"
-        "/source/.ssh/id_ecdsa.pub:/target/ssh/id_ecdsa.pub:f"
-        "/source/.ssh/id_dsa:/target/ssh/id_dsa:fs"
-        "/source/.ssh/id_dsa.pub:/target/ssh/id_dsa.pub:f"
 
         # --- OpenCode (config) ---
         # Selective sync: config files only, skip caches
@@ -730,6 +722,56 @@ _import_rewrite_excludes() {
     done <<<"$excludes_input"
 
     return 0
+}
+
+# ==============================================================================
+# Dynamic SSH key discovery
+# ==============================================================================
+
+# Discover SSH keys dynamically from source directory
+# Returns newline-delimited sync map entries for id_* files
+# Arguments:
+#   $1 = source directory (e.g., $HOME or custom --from path)
+# Output (stdout): newline-delimited entries in format:
+#   /source/.ssh/id_xxx:/target/ssh/id_xxx:fs (private keys)
+#   /source/.ssh/id_xxx.pub:/target/ssh/id_xxx.pub:f (public keys)
+_import_discover_ssh_keys() {
+    local source_root="$1"
+    local ssh_dir="$source_root/.ssh"
+
+    # Skip if .ssh directory doesn't exist
+    [[ ! -d "$ssh_dir" ]] && return 0
+
+    # Find all id_* files (but not config, known_hosts, or directories)
+    # Use a while loop with find to handle spaces in filenames
+    local filename basename
+    while IFS= read -r -d '' filename; do
+        basename="${filename##*/}"
+
+        # Skip non-regular files (directories, symlinks, etc.)
+        [[ ! -f "$filename" ]] && continue
+
+        # Skip known non-key files
+        case "$basename" in
+            config|known_hosts|authorized_keys|*.sock)
+                continue
+                ;;
+        esac
+
+        # Only process id_* files
+        case "$basename" in
+            id_*)
+                # Determine if this is a public key (.pub) or private key
+                if [[ "$basename" == *.pub ]]; then
+                    # Public key - no secret flag
+                    printf '%s\n' "/source/.ssh/${basename}:/target/ssh/${basename}:f"
+                else
+                    # Private key - secret flag
+                    printf '%s\n' "/source/.ssh/${basename}:/target/ssh/${basename}:fs"
+                fi
+                ;;
+        esac
+    done < <(find "$ssh_dir" -maxdepth 1 -name 'id_*' -print0 2>/dev/null)
 }
 
 # ==============================================================================
@@ -1696,6 +1738,26 @@ done <<'"'"'MAP_DATA'"'"'
         fi
         sync_map_entries+="$entry"$'\n'
     done
+
+    # Dynamically discover SSH keys from source directory
+    # This finds all id_* files (private keys with 's' flag, public keys without)
+    local ssh_key_entries ssh_key_entry
+    ssh_key_entries=$(_import_discover_ssh_keys "$source_root")
+    while IFS= read -r ssh_key_entry; do
+        [[ -z "$ssh_key_entry" ]] && continue
+        # Extract flags (3rd field, colon-delimited)
+        entry_flags="${ssh_key_entry##*:}"
+        # Skip entries with 's' flag when no_secrets=true
+        if [[ "$no_secrets" == "true" && "$entry_flags" == *s* ]]; then
+            if [[ "$dry_run" == "true" ]]; then
+                echo "[DRY-RUN] Skipping secret entry: ${ssh_key_entry%%:*} (--no-secrets)"
+            else
+                _import_info "Skipping secret entry: ${ssh_key_entry%%:*} (--no-secrets)"
+            fi
+            continue
+        fi
+        sync_map_entries+="$ssh_key_entry"$'\n'
+    done <<<"$ssh_key_entries"
 
     # If we have excludes, use destination-relative rewriting
     # Otherwise, just pass entries as-is (with empty 4th field for excludes)
