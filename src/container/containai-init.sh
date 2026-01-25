@@ -269,6 +269,12 @@ _setup_git_config() {
     fi
 }
 
+update_agent_pw() {
+    local agent_pw
+    agent_pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
+    run_as_root usermod -p "${agent_pw}" agent
+}
+
 # Setup workspace symlink from original host path to mount point
 setup_workspace_symlink() {
     local host_path="${CAI_HOST_WORKSPACE:-}"
@@ -315,6 +321,7 @@ setup_workspace_symlink() {
 main() {
     log "[INFO] ContainAI initialization starting..."
 
+    update_agent_pw
     ensure_volume_structure
     _load_env_file
     _setup_git_config

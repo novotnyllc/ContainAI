@@ -85,18 +85,24 @@ RUN for unit in \
 # Note: NOPASSWD sudo is intentional - this is a sandboxed AI agent environment
 # where sysbox provides isolation. SSH key auth implies full container access.
 # =============================================================================
-RUN if ! id -u agent >/dev/null 2>&1; then \
-        useradd --create-home --shell /bin/bash agent; \
-    fi && \
-    # Set random password so account is unlocked for SSH key auth
-    set +o pipefail; \
-    agent_pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"; \
-    set -o pipefail; \
-    if [ -z "$agent_pw" ]; then echo "failed to generate agent password" >&2; exit 1; fi && \
-    printf 'agent:%s\n' "$agent_pw" | chpasswd && \
-    unset agent_pw && \
-    echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \
-    chmod 0440 /etc/sudoers.d/agent
+RUN <<EOF
+
+# Remove base image user
+userdel -r ubuntu || true
+
+# Create non-root user
+useradd --create-home --uid 1000 --shell /bin/bash agent
+groupadd -f docker
+usermod -aG sudo agent
+usermod -aG docker agent
+
+# Configure sudoers
+mkdir /etc/sudoers.d
+chmod 0755 /etc/sudoers.d
+echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
+echo "Defaults:%sudo env_keep += \"http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY SSL_CERT_FILE NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE\"" > /etc/sudoers.d/proxyconfig
+
+EOF
 
 # =============================================================================
 # SSHD INSTALLATION AND HARDENING
