@@ -900,6 +900,8 @@ _import_map_override_path() {
 #   $1 = Docker context ("" for default)
 #   $2 = volume name (required)
 #   $3 = dry_run flag ("true" or "false", default: "false")
+#   $4 = no_secrets flag ("true" or "false", default: "false")
+#        When true, skips syncing entries with 's' flag (matches main import behavior)
 # Returns: 0 on success (including when override dir is missing), 1 on failure
 #
 # Security rules:
@@ -911,6 +913,7 @@ _import_apply_overrides() {
     local ctx="${1:-}"
     local volume="${2:-}"
     local dry_run="${3:-false}"
+    local no_secrets="${4:-false}"
 
     local override_dir="${HOME}/.config/containai/import-overrides"
 
@@ -941,6 +944,18 @@ _import_apply_overrides() {
 
     # Find all files and directories in the override tree
     # Use find with -mindepth 1 to skip root, -print0 for safe filename handling
+    # Capture find output to a temp file to check exit status
+    local find_output find_status
+    find_output=$(mktemp)
+    # shellcheck disable=SC2064
+    trap "rm -f '$find_output'" RETURN
+
+    find "$override_dir" -mindepth 1 -print0 > "$find_output" 2>&1
+    find_status=$?
+    if [[ $find_status -ne 0 ]]; then
+        _import_warn "Find encountered errors traversing override directory (exit $find_status)"
+    fi
+
     local item rel_path target_path target_dir basename map_result entry_flags gitconfig_check
     while IFS= read -r -d '' item; do
         # Get relative path from override_dir
@@ -972,10 +987,11 @@ _import_apply_overrides() {
             continue
         fi
 
-        # Security: reject filenames containing : or control chars (breaks target_path:flags encoding)
+        # Security: reject paths containing : or control chars (breaks target_path:flags encoding)
+        # Check entire rel_path, not just basename, to prevent issues in directory names
         # This mirrors the SSH key safety check
-        if [[ "$basename" == *:* ]] || [[ "$basename" == *$'\n'* ]] || [[ "$basename" == *$'\r'* ]]; then
-            _import_error "Override filename contains unsafe chars (: or control chars), rejected: $rel_path"
+        if [[ "$rel_path" == *:* ]] || [[ "$rel_path" == *$'\n'* ]] || [[ "$rel_path" == *$'\r'* ]]; then
+            _import_error "Override path contains unsafe chars (: or control chars), rejected: $rel_path"
             error_count=$((error_count + 1))
             continue
         fi
@@ -1011,6 +1027,13 @@ _import_apply_overrides() {
         # Parse result: target_path:flags
         target_path="${map_result%%:*}"
         entry_flags="${map_result##*:}"
+
+        # Skip secret entries when --no-secrets is set (matches main import behavior)
+        if [[ "$no_secrets" == "true" ]] && [[ "$entry_flags" == *s* ]]; then
+            _import_info "Skipping secret override (--no-secrets): $rel_path"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
 
         if [[ "$dry_run" == "true" ]]; then
             _import_step "[dry-run] Would apply override: $rel_path -> /target/$target_path"
@@ -1061,13 +1084,17 @@ _import_apply_overrides() {
 
             # Create parent directory and fix ownership before rsync
             # This avoids --mkpath (not in rsync < 3.2.0) and ensures correct ownership
+            # Use find to chown all directories created by mkdir -p (not just the deepest)
             target_dir="${target_path%/*}"
             if [[ "$target_dir" != "$target_path" ]] && [[ -n "$target_dir" ]]; then
-                # Has parent directory - create it with correct ownership (non-recursive)
+                # Has parent directory - create it and chown all created dirs
                 # shellcheck disable=SC2016
                 if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
                     --mount "type=volume,src=$volume,dst=/target" \
-                    alpine sh -c 'mkdir -p -- "/target/$1" && chown 1000:1000 -- "/target/$1"' _ "$target_dir"; then
+                    alpine sh -c '
+                        mkdir -p -- "/target/$1" && \
+                        find "/target/$1" -type d ! -user 1000 -exec chown 1000:1000 {} +
+                    ' _ "$target_dir"; then
                     _import_error "Failed to create parent dir for override: $rel_path"
                     error_count=$((error_count + 1))
                     continue
@@ -1106,7 +1133,7 @@ _import_apply_overrides() {
             fi
             override_count=$((override_count + 1))
         fi
-    done < <(find "$override_dir" -mindepth 1 -print0 2>/dev/null)
+    done < "$find_output"
 
     # Report summary
     if [[ "$error_count" -gt 0 ]]; then
@@ -2203,7 +2230,8 @@ done <<'"'"'MAP_DATA'"'"'
 
     # Apply import overrides (AFTER all transformations for correct precedence)
     # Overrides replace (not merge) any imported/transformed files
-    if ! _import_apply_overrides "$ctx" "$volume" "$dry_run"; then
+    # Pass no_secrets to skip secret overrides when --no-secrets is set
+    if ! _import_apply_overrides "$ctx" "$volume" "$dry_run" "$no_secrets"; then
         # Override failures are fatal - user's explicit overrides must be applied
         _import_error "Failed to apply import overrides"
         return 1
