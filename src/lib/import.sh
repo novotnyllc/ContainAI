@@ -808,30 +808,31 @@ _import_discover_ssh_keys() {
 # Target paths follow sync map: claude/settings.json, config/starship.toml
 # Arguments:
 #   $1 = override path (relative to override dir, e.g. ".claude/settings.json")
-# Returns via stdout: target path (relative to /target, e.g. "claude/settings.json")
-#   Empty string if no mapping found
+# Returns via stdout: "target_path:flags" (e.g. "claude/settings.json:fj")
+#   Flags from sync map entry (s=secret, f=file, d=dir, etc.)
 # Exit code: 0=found, 1=not found
 _import_map_override_path() {
     local override_path="$1"
     local source_path="/source/$override_path"
     local entry src_part tgt_part flags
 
-    # First pass: exact file match
+    # First pass: exact file match in static sync map
     for entry in "${_IMPORT_SYNC_MAP[@]}"; do
         src_part="${entry%%:*}"
         if [[ "$src_part" == "$source_path" ]]; then
-            # Exact match - extract target path (strip /target/ prefix)
+            # Exact match - extract target path and flags
             tgt_part="${entry#*:}"
+            flags="${tgt_part##*:}"
             tgt_part="${tgt_part%%:*}"
             tgt_part="${tgt_part#/target/}"
-            printf '%s\n' "$tgt_part"
+            printf '%s:%s\n' "$tgt_part" "$flags"
             return 0
         fi
     done
 
     # Second pass: directory prefix match (for files inside synced directories)
     # Use longest-prefix matching for correct results
-    local best_match="" best_src="" best_tgt="" best_len=0
+    local best_src="" best_tgt="" best_flags="" best_len=0
     for entry in "${_IMPORT_SYNC_MAP[@]}"; do
         src_part="${entry%%:*}"
         tgt_part="${entry#*:}"
@@ -844,29 +845,50 @@ _import_map_override_path() {
 
         # Check if override path starts with this source directory
         local src_dir="${src_part#/source/}"
-        if [[ "$override_path" == "$src_dir/"* ]]; then
-            # Match found - check if this is the longest match
-            local len=${#src_dir}
-            if [[ $len -gt $best_len ]]; then
-                best_len=$len
-                best_src="$src_dir"
-                best_tgt="$tgt_part"
-            fi
-        fi
+        # Use case for prefix matching to avoid glob metacharacter issues
+        case "$override_path" in
+            "$src_dir"/*)
+                # Match found - check if this is the longest match
+                local len=${#src_dir}
+                if [[ $len -gt $best_len ]]; then
+                    best_len=$len
+                    best_src="$src_dir"
+                    best_tgt="$tgt_part"
+                    best_flags="$flags"
+                fi
+                ;;
+        esac
     done
 
     if [[ -n "$best_src" ]]; then
         # Rewrite path: replace source prefix with target prefix
         local remainder="${override_path#"$best_src"/}"
-        printf '%s\n' "$best_tgt/$remainder"
+        printf '%s:%s\n' "$best_tgt/$remainder" "$best_flags"
         return 0
     fi
 
     # Special case: .gitconfig is handled by _cai_import_git_config, target is .gitconfig
+    # No secret flag - gitconfig is filtered but not a secret file
     if [[ "$override_path" == ".gitconfig" ]]; then
-        printf '%s\n' ".gitconfig"
+        printf '%s:%s\n' ".gitconfig" "f"
         return 0
     fi
+
+    # Special case: SSH id_* keys (dynamically discovered by _import_discover_ssh_keys)
+    # These are not in static sync map but are valid override targets
+    case "$override_path" in
+        .ssh/id_*)
+            local basename="${override_path##*/}"
+            if [[ "$basename" == *.pub ]]; then
+                # Public key - no secret flag
+                printf '%s:%s\n' "ssh/$basename" "f"
+            else
+                # Private key - secret flag
+                printf '%s:%s\n' "ssh/$basename" "fs"
+            fi
+            return 0
+            ;;
+    esac
 
     # No mapping found
     return 1
@@ -919,7 +941,7 @@ _import_apply_overrides() {
 
     # Find all files and directories in the override tree
     # Use find with -mindepth 1 to skip root, -print0 for safe filename handling
-    local item rel_path target_path target_dir basename
+    local item rel_path target_path target_dir basename map_result entry_flags gitconfig_check
     while IFS= read -r -d '' item; do
         # Get relative path from override_dir
         rel_path="${item#"$override_dir"/}"
@@ -972,25 +994,58 @@ _import_apply_overrides() {
         # Map override path (HOME structure) to volume target path using sync map
         # Override paths mirror HOME: .claude/settings.json, .config/starship.toml
         # Target paths follow sync map: claude/settings.json, config/starship.toml
-        if ! target_path=$(_import_map_override_path "$rel_path"); then
+        # Returns "target_path:flags" format
+        if ! map_result=$(_import_map_override_path "$rel_path"); then
             _import_warn "Override path not in sync map, skipping: $rel_path"
             unmapped_count=$((unmapped_count + 1))
             continue
         fi
+        # Parse result: target_path:flags
+        target_path="${map_result%%:*}"
+        entry_flags="${map_result##*:}"
 
         if [[ "$dry_run" == "true" ]]; then
             echo "[DRY-RUN] Would apply override: $rel_path -> /target/$target_path"
             override_count=$((override_count + 1))
         else
+            # Safety check for .gitconfig: reject if target exists as symlink or non-regular file
+            # This mirrors the checks in _cai_import_git_config
+            if [[ "$target_path" == ".gitconfig" ]]; then
+                # shellcheck disable=SC2016
+                gitconfig_check=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
+                    --mount "type=volume,src=$volume,dst=/target" \
+                    alpine sh -c '
+                        if [ -L /target/.gitconfig ]; then
+                            echo "symlink"
+                        elif [ -e /target/.gitconfig ] && [ ! -f /target/.gitconfig ]; then
+                            echo "nonregular"
+                        else
+                            echo "ok"
+                        fi
+                    ' 2>/dev/null)
+                case "$gitconfig_check" in
+                    symlink)
+                        _import_error "Override target .gitconfig exists as symlink, rejected for safety"
+                        error_count=$((error_count + 1))
+                        continue
+                        ;;
+                    nonregular)
+                        _import_error "Override target .gitconfig exists as non-regular file, rejected for safety"
+                        error_count=$((error_count + 1))
+                        continue
+                        ;;
+                esac
+            fi
+
             # Create parent directory and fix ownership before rsync
             # This avoids --mkpath (not in rsync < 3.2.0) and ensures correct ownership
             target_dir="${target_path%/*}"
             if [[ "$target_dir" != "$target_path" ]] && [[ -n "$target_dir" ]]; then
-                # Has parent directory - create it with correct ownership
+                # Has parent directory - create it with correct ownership (non-recursive)
                 # shellcheck disable=SC2016
                 if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
                     --mount "type=volume,src=$volume,dst=/target" \
-                    alpine sh -c 'mkdir -p -- "/target/$1" && chown -R 1000:1000 -- "/target/$1"' _ "$target_dir"; then
+                    alpine sh -c 'mkdir -p -- "/target/$1" && chown 1000:1000 -- "/target/$1"' _ "$target_dir"; then
                     _import_error "Failed to create parent dir for override: $rel_path"
                     error_count=$((error_count + 1))
                     continue
@@ -1008,12 +1063,24 @@ _import_apply_overrides() {
                 error_count=$((error_count + 1))
                 continue
             fi
-            # Fix ownership to agent user (1000:1000)
-            # Use -- to prevent option injection
-            if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
-                --mount "type=volume,src=$volume,dst=/target" \
-                alpine chown 1000:1000 -- "/target/$target_path"; then
-                _import_warn "Failed to fix ownership for override: $target_path"
+
+            # Fix ownership and permissions
+            # For secret files (s flag), apply 600 permissions to match main import
+            # shellcheck disable=SC2016
+            if [[ "$entry_flags" == *s* ]]; then
+                # Secret file: chown + chmod 600
+                if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
+                    --mount "type=volume,src=$volume,dst=/target" \
+                    alpine sh -c 'chown 1000:1000 -- "/target/$1" && chmod 600 -- "/target/$1"' _ "$target_path"; then
+                    _import_warn "Failed to fix ownership/permissions for secret override: $target_path"
+                fi
+            else
+                # Regular file: just chown
+                if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
+                    --mount "type=volume,src=$volume,dst=/target" \
+                    alpine chown 1000:1000 -- "/target/$target_path"; then
+                    _import_warn "Failed to fix ownership for override: $target_path"
+                fi
             fi
             override_count=$((override_count + 1))
         fi
