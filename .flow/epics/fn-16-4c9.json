@@ -4,10 +4,10 @@
   "depends_on_epics": [],
   "id": "fn-16-4c9",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-25T13:19:51.256048Z",
   "spec_path": ".flow/specs/fn-16-4c9.md",
   "status": "open",
   "title": "Platform Setup & Bootstrap",
-  "updated_at": "2026-01-24T22:07:26.873155Z"
+  "updated_at": "2026-01-25T13:19:51.256059Z"
 }

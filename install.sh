@@ -173,8 +173,11 @@ can_prompt() {
 }
 
 # Prompt for confirmation (respects YES_FLAG)
+# Arguments: $1 = message
+#            $2 = default_yes ("true" for default Y, otherwise default N)
 prompt_confirm() {
     local message="$1"
+    local default_yes="${2:-false}"
 
     # Auto-confirm if --yes flag
     if [[ -n "$YES_FLAG" ]]; then
@@ -186,14 +189,30 @@ prompt_confirm() {
         return 1
     fi
 
-    local response
-    printf '%s [y/N]: ' "$message"
+    local prompt_suffix response
+    if [[ "$default_yes" == "true" ]]; then
+        prompt_suffix="[Y/n]"
+    else
+        prompt_suffix="[y/N]"
+    fi
+
+    printf '%s %s: ' "$message" "$prompt_suffix"
     read -r response
 
-    case "$response" in
-        [yY]|[yY][eE][sS]) return 0 ;;
-        *) return 1 ;;
-    esac
+    # Evaluate response based on default
+    if [[ "$default_yes" == "true" ]]; then
+        # Default Y: only N/n denies
+        case "$response" in
+            [nN]|[nN][oO]) return 1 ;;
+            *) return 0 ;;
+        esac
+    else
+        # Default N: only Y/y confirms
+        case "$response" in
+            [yY]|[yY][eE][sS]) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
 }
 
 # Install Homebrew (macOS only)
@@ -632,9 +651,9 @@ WRAPPER_EOF
 # ==============================================================================
 # Post-installation
 # ==============================================================================
-post_install() {
-    echo ""
-    success "ContainAI installed successfully!"
+
+# Show manual setup instructions (when auto-setup is skipped)
+show_setup_instructions() {
     echo ""
     info "Quick start:"
     if [[ -n "${_CAI_RC_FILE:-}" ]]; then
@@ -642,15 +661,95 @@ post_install() {
     else
         echo "  1. Open a new terminal"
     fi
-    echo "  2. Navigate to your project: cd /path/to/your/project"
-    echo "  3. Start the sandbox: cai"
+    echo "  2. Run: cai setup"
+    echo "  3. Navigate to your project: cd /path/to/your/project"
+    echo "  4. Start the sandbox: cai"
     echo ""
     info "Other commands:"
     echo "  cai doctor     - Check system capabilities"
-    echo "  cai setup      - Install Sysbox (Linux/WSL2)"
     echo "  cai --help     - Show all options"
     echo ""
     info "Documentation: https://github.com/novotnyllc/containai#readme"
+}
+
+# Run cai setup automatically
+# Arguments: $1 = CAI_YES_VALUE (1 for auto-confirm, empty otherwise)
+run_auto_setup() {
+    local cai_yes_value="$1"
+
+    echo ""
+    info "Running cai setup to configure your environment..."
+    echo ""
+
+    # Determine bash path to use
+    local bash_cmd
+    if [[ -n "$BASH4_PATH" ]]; then
+        bash_cmd="$BASH4_PATH"
+    else
+        bash_cmd="bash"
+    fi
+
+    # Run cai setup with CAI_YES if auto-confirm is enabled
+    # Use explicit path to cai wrapper we just created
+    local cai_wrapper="$BIN_DIR/cai"
+    if [[ -x "$cai_wrapper" ]]; then
+        if [[ "$cai_yes_value" == "1" ]]; then
+            CAI_YES=1 "$bash_cmd" "$cai_wrapper" setup
+        else
+            "$bash_cmd" "$cai_wrapper" setup
+        fi
+        local rc=$?
+        if [[ $rc -eq 0 ]]; then
+            success "Setup completed successfully!"
+        elif [[ $rc -eq 75 ]]; then
+            # Special exit code: WSL restart required
+            info "Please restart your terminal and run 'cai setup' again."
+        else
+            warn "Setup had some issues (exit code: $rc)"
+            warn "You can re-run 'cai setup' later to complete configuration."
+        fi
+    else
+        warn "Could not find cai wrapper at $cai_wrapper"
+        show_setup_instructions
+    fi
+}
+
+post_install() {
+    echo ""
+    success "ContainAI installed successfully!"
+
+    # Determine whether to auto-run setup
+    # Skip if --no-setup was passed
+    if [[ "$NO_SETUP" == "true" ]]; then
+        info "Skipping setup (--no-setup flag)"
+        show_setup_instructions
+        return
+    fi
+
+    # Determine CAI_YES_VALUE for auto-confirm
+    local cai_yes_value=""
+
+    if [[ -n "$YES_FLAG" ]]; then
+        # --yes flag passed: auto-confirm everything
+        cai_yes_value="1"
+        run_auto_setup "$cai_yes_value"
+    elif can_prompt; then
+        # Interactive mode: prompt user (default Y for first-time install)
+        echo ""
+        if prompt_confirm "Would you like to run 'cai setup' now to configure your environment?" "true"; then
+            # User confirmed interactively: set CAI_YES=1 so internal prompts auto-confirm
+            cai_yes_value="1"
+            run_auto_setup "$cai_yes_value"
+        else
+            info "Skipping setup."
+            show_setup_instructions
+        fi
+    else
+        # Non-interactive without --yes: show instructions only
+        info "Non-interactive install detected. Skipping automatic setup."
+        info "To auto-run setup, use: curl ... | bash -s -- --yes"
+        show_setup_instructions
+    fi
 }
 
 # ==============================================================================

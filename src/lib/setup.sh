@@ -198,11 +198,9 @@ _cai_handle_wsl2_mirrored_mode() {
         return 75
     fi
 
-    # Prompt user for action
-    printf '%s' "Would you like to disable mirrored networking? This requires WSL to restart. (y/n): "
-    local response
-    if ! read -r response; then
-        # EOF on stdin (non-interactive)
+    # Prompt user for action (use shared helper with CAI_YES support)
+    if ! _cai_prompt_confirm "Would you like to disable mirrored networking? This requires WSL to restart."; then
+        # User declined or cannot prompt
         _cai_error "Cannot continue setup with mirrored networking mode."
         _cai_error "Please manually edit your .wslconfig file:"
         _cai_error "  1. Open %USERPROFILE%\\.wslconfig in a text editor"
@@ -212,73 +210,59 @@ _cai_handle_wsl2_mirrored_mode() {
         return 1
     fi
 
-    case "$response" in
-        [Yy]|[Yy][Ee][Ss])
-            # User agreed - modify .wslconfig
-            # Re-acquire paths with guards (same pattern as detection function)
-            local win_userprofile wsl_userprofile wslconfig
-            win_userprofile=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r') || win_userprofile=""
-            if [[ -z "$win_userprofile" ]]; then
-                _cai_error "Failed to get Windows user profile path"
-                _cai_error "Please manually edit your .wslconfig file"
-                return 1
-            fi
-            wsl_userprofile=$(wslpath "$win_userprofile" 2>/dev/null) || wsl_userprofile=""
-            if [[ -z "$wsl_userprofile" ]]; then
-                _cai_error "Failed to convert Windows path to WSL path"
-                _cai_error "Please manually edit your .wslconfig file"
-                return 1
-            fi
-            wslconfig="${wsl_userprofile}/.wslconfig"
+    # User agreed - modify .wslconfig
+    # Re-acquire paths with guards (same pattern as detection function)
+    local win_userprofile wsl_userprofile wslconfig
+    win_userprofile=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r') || win_userprofile=""
+    if [[ -z "$win_userprofile" ]]; then
+        _cai_error "Failed to get Windows user profile path"
+        _cai_error "Please manually edit your .wslconfig file"
+        return 1
+    fi
+    wsl_userprofile=$(wslpath "$win_userprofile" 2>/dev/null) || wsl_userprofile=""
+    if [[ -z "$wsl_userprofile" ]]; then
+        _cai_error "Failed to convert Windows path to WSL path"
+        _cai_error "Please manually edit your .wslconfig file"
+        return 1
+    fi
+    wslconfig="${wsl_userprofile}/.wslconfig"
 
-            if [[ ! -f "$wslconfig" ]]; then
-                _cai_error "Cannot find .wslconfig at: $wslconfig"
-                return 1
-            fi
+    if [[ ! -f "$wslconfig" ]]; then
+        _cai_error "Cannot find .wslconfig at: $wslconfig"
+        return 1
+    fi
 
-            _cai_info "Modifying $wslconfig to disable mirrored networking..."
+    _cai_info "Modifying $wslconfig to disable mirrored networking..."
 
-            # Create backup
-            cp "$wslconfig" "${wslconfig}.bak" || {
-                _cai_error "Failed to create backup of .wslconfig"
-                return 1
-            }
-            _cai_info "Backup created: ${wslconfig}.bak"
+    # Create backup
+    cp "$wslconfig" "${wslconfig}.bak" || {
+        _cai_error "Failed to create backup of .wslconfig"
+        return 1
+    }
+    _cai_info "Backup created: ${wslconfig}.bak"
 
-            # Modify the file - change networkingMode=mirrored to networkingMode=nat
-            # Use sed with case-insensitive matching and whitespace variations
-            if sed -i 's/^\([[:space:]]*networkingMode[[:space:]]*=[[:space:]]*\)mirrored/\1nat/i' "$wslconfig" 2>/dev/null; then
-                _cai_ok "Updated .wslconfig to use NAT networking"
-            else
-                _cai_error "Failed to modify .wslconfig"
-                _cai_error "Please manually change networkingMode=mirrored to networkingMode=nat"
-                return 1
-            fi
+    # Modify the file - change networkingMode=mirrored to networkingMode=nat
+    # Use sed with case-insensitive matching and whitespace variations
+    if sed -i 's/^\([[:space:]]*networkingMode[[:space:]]*=[[:space:]]*\)mirrored/\1nat/i' "$wslconfig" 2>/dev/null; then
+        _cai_ok "Updated .wslconfig to use NAT networking"
+    else
+        _cai_error "Failed to modify .wslconfig"
+        _cai_error "Please manually change networkingMode=mirrored to networkingMode=nat"
+        return 1
+    fi
 
-            _cai_info "Shutting down WSL..."
-            wsl.exe --shutdown || {
-                _cai_warn "wsl.exe --shutdown may have failed - please restart WSL manually"
-            }
+    _cai_info "Shutting down WSL..."
+    wsl.exe --shutdown || {
+        _cai_warn "wsl.exe --shutdown may have failed - please restart WSL manually"
+    }
 
-            printf '%s\n' ""
-            _cai_ok "WSL has been shut down."
-            _cai_info "Please restart your terminal and re-run: cai setup"
-            printf '%s\n' ""
+    printf '%s\n' ""
+    _cai_ok "WSL has been shut down."
+    _cai_info "Please restart your terminal and re-run: cai setup"
+    printf '%s\n' ""
 
-            # Return special exit code indicating WSL restart required
-            return 75
-            ;;
-        *)
-            # User declined
-            _cai_error "Cannot continue setup with mirrored networking mode."
-            _cai_error "Please disable it manually and re-run setup:"
-            _cai_error "  1. Open %USERPROFILE%\\.wslconfig in a text editor"
-            _cai_error "  2. Change networkingMode=mirrored to networkingMode=nat"
-            _cai_error "  3. Run: wsl.exe --shutdown"
-            _cai_error "  4. Restart your terminal and re-run: cai setup"
-            return 1
-            ;;
-    esac
+    # Return special exit code indicating WSL restart required
+    return 75
 }
 
 # ==============================================================================

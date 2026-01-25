@@ -1,0 +1,271 @@
+{
+  "created_at": "2026-01-25T12:39:09.645064Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-16-4c9",
+      "created_at": "2026-01-24T22:07:08.030329Z",
+      "depends_on_epics": [],
+      "id": "fn-16-4c9",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-16-4c9.md",
+      "status": "open",
+      "title": "Platform Setup & Bootstrap",
+      "updated_at": "2026-01-24T22:07:26.873155Z"
+    },
+    "spec": "# Platform Setup & Bootstrap\n\n## Overview\n\nConsolidate and improve the ContainAI setup experience across platforms. Project reorganization comes first, followed by macOS bootstrap improvements, install flow enhancements, and Lima VM optimizations.\n\n**Absorbs:** fn-12-css.13 (setup consolidation)\n\n## Scope\n\n**In scope:**\n- Project reorganization (containai-init.sh, Dockerfiles \u2192 subdir)\n- macOS bash auto-install via Homebrew (with consent)\n- install.sh auto-calls cai setup (with opt-out)\n- install.sh re-run calls cai update\n- Fix cai setup description (document Lima on macOS)\n- Setup consolidation (merge install-containai-docker.sh)\n- Lima VM: only recreate if template changes\n- Lima VM: apt update/upgrade for component updates\n- cai doctor --reset-lima (macOS only)\n- Fix macOS mirrored volume path\n\n**Out of scope:**\n- Dockerd bundle management (fn-15-281)\n- Workspace state persistence (fn-12-css)\n- Config sync improvements (separate epic)\n\n## Architecture\n\n### Project Structure (After Reorg)\n```\nsrc/\n\u251c\u2500\u2500 containai.sh           # Main CLI entry point\n\u251c\u2500\u2500 lib/                   # Shell libraries\n\u251c\u2500\u2500 container/             # Container-specific content (NEW)\n\u2502   \u251c\u2500\u2500 containai-init.sh  # Container init script\n\u2502   \u251c\u2500\u2500 Dockerfile.base    # Base image\n\u2502   \u251c\u2500\u2500 Dockerfile.sdks    # SDK layer\n\u2502   \u2514\u2500\u2500 Dockerfile.agents  # Agent layer\n\u2514\u2500\u2500 build.sh               # Build script (updated paths)\n```\n\n### Lima VM Update Flow\n```\ncai update (macOS)\n    \u2502\n    \u251c\u2500 Compare current template hash vs installed\n    \u2502\n    \u251c\u2500 If same \u2192 apt update/upgrade in VM only\n    \u2502\n    \u2514\u2500 If different \u2192 recreate VM (with warning)\n```\n\n## Quick commands\n\n```bash\n# Lint\nshellcheck -x src/*.sh src/lib/*.sh\n\n# Build images\n./src/build.sh\n\n# Test setup on Linux\ncai setup --dry-run\n```\n\n## Acceptance\n\n- [ ] containai-init.sh and Dockerfiles moved to src/container/\n- [ ] build.sh updated for new paths\n- [ ] macOS: auto-installs bash via Homebrew (with user consent)\n- [ ] macOS: prompts to install Homebrew if missing (with consent)\n- [ ] install.sh calls cai setup automatically\n- [ ] install.sh --no-setup skips setup\n- [ ] install.sh re-run calls cai update\n- [ ] cai setup --help mentions Lima on macOS\n- [ ] install-containai-docker.sh merged into lib/setup.sh\n- [ ] Lima VM only recreated when template changes\n- [ ] Lima VM gets apt update/upgrade on cai update\n- [ ] cai doctor --reset-lima works (macOS only)\n- [ ] cai doctor --reset-lima hidden on non-macOS\n- [ ] macOS mirrored volume path is correct\n\n## References\n\n- Current setup: `src/lib/setup.sh`\n- Install script: `scripts/install-containai-docker.sh`\n- Lima template: `src/containai.yaml`\n- fn-12-css.13: Setup consolidation task\n\n## Dependencies\n\n- **fn-15-281**: Dockerd bundle (parallel work, no conflict)\n"
+  },
+  "epic_id": "fn-16-4c9",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:35.995168Z",
+        "depends_on": [],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.1.md",
+        "status": "todo",
+        "title": "Project reorganization: move container content to src/container/",
+        "updated_at": "2026-01-24T22:07:35.995194Z"
+      },
+      "id": "fn-16-4c9.1",
+      "runtime": {
+        "assignee": "claire@novotny.org",
+        "claim_note": "",
+        "claimed_at": "2026-01-24T22:52:34.605633Z",
+        "evidence": {
+          "commits": [
+            "1d435bbb743f305489aedc0b755ee1f179d4673c"
+          ],
+          "prs": [],
+          "tests": [
+            "shellcheck -x src/*.sh src/lib/*.sh tests/integration/*.sh"
+          ]
+        },
+        "status": "done",
+        "updated_at": "2026-01-24T23:10:36.629799Z"
+      },
+      "spec": "# fn-16-4c9.1 Project reorganization: move container content to src/container/\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nMoved container-specific files (Dockerfiles, containai-init.sh, entrypoint.sh) to src/container/ directory. Updated build.sh, GitHub workflows, and all documentation to reference new paths.\n## Evidence\n- Commits: 1d435bbb743f305489aedc0b755ee1f179d4673c\n- Tests: shellcheck -x src/*.sh src/lib/*.sh tests/integration/*.sh\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.643647Z",
+        "depends_on": [
+          "fn-16-4c9.1"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.10",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.10.md",
+        "status": "todo",
+        "title": "Fix macOS mirrored volume path",
+        "updated_at": "2026-01-24T22:07:46.040495Z"
+      },
+      "id": "fn-16-4c9.10",
+      "runtime": null,
+      "spec": "# fn-16-4c9.10 Fix macOS mirrored volume path\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-25T04:41:37.248787Z",
+        "depends_on": [
+          "fn-16-4c9.6"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.11",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.11.md",
+        "status": "todo",
+        "title": "Add VS Code Docker context status bar setting to setup",
+        "updated_at": "2026-01-25T04:41:37.248840Z"
+      },
+      "id": "fn-16-4c9.11",
+      "runtime": null,
+      "spec": "# fn-16-4c9.11 Add VS Code Docker context status bar setting to setup\n\n## Description\n\nDuring `cai setup`, optionally configure VS Code's Docker extension to show the containai-docker context in the status bar. This makes it easy for users to see which Docker context they're using.\n\n**What to do:**\n1. After creating the containai-docker context in setup, prompt the user:\n   - \"Configure VS Code to show Docker context in status bar? [y/N]\"\n2. If yes, update VS Code Machine settings files:\n   - `~/.vscode-server/data/Machine/settings.json`\n   - `~/.vscode-server-insiders/data/Machine/settings.json`\n3. Setting to add: `\"containers.contexts.showInStatusBar\": true`\n4. Merge with existing settings (don't overwrite the file)\n5. Create parent directories if they don't exist\n6. Skip quietly if VS Code server directories don't exist\n\n**Implementation notes:**\n- Use `jq` for JSON manipulation (already available)\n- Handle symlinks (current files are symlinked to /mnt/agent-data)\n- Be careful with file permissions (600 or 644)\n\n## Acceptance\n- [ ] Prompt during cai setup asks about VS Code Docker context status bar\n- [ ] If user says yes, settings.json files are created/updated\n- [ ] Existing settings are preserved (merged, not overwritten)\n- [ ] Works for both .vscode-server and .vscode-server-insiders\n- [ ] No error if VS Code server directories don't exist (skip quietly)\n- [ ] Handles symlinked settings.json correctly\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.064001Z",
+        "depends_on": [
+          "fn-16-4c9.1"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.2.md",
+        "status": "todo",
+        "title": "macOS bash auto-install via Homebrew",
+        "updated_at": "2026-01-24T22:07:45.485665Z"
+      },
+      "id": "fn-16-4c9.2",
+      "runtime": null,
+      "spec": "# fn-16-4c9.2 macOS bash auto-install via Homebrew\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.130608Z",
+        "depends_on": [
+          "fn-16-4c9.1"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.3.md",
+        "status": "todo",
+        "title": "install.sh auto-calls cai setup with opt-out",
+        "updated_at": "2026-01-24T22:07:45.557153Z"
+      },
+      "id": "fn-16-4c9.3",
+      "runtime": null,
+      "spec": "# fn-16-4c9.3 install.sh auto-calls cai setup with opt-out\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.203420Z",
+        "depends_on": [
+          "fn-16-4c9.1",
+          "fn-16-4c9.3"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.4.md",
+        "status": "todo",
+        "title": "install.sh re-run calls cai update",
+        "updated_at": "2026-01-24T22:07:46.108392Z"
+      },
+      "id": "fn-16-4c9.4",
+      "runtime": null,
+      "spec": "# fn-16-4c9.4 install.sh re-run calls cai update\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.277455Z",
+        "depends_on": [
+          "fn-16-4c9.1"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.5.md",
+        "status": "todo",
+        "title": "Fix cai setup description and help text",
+        "updated_at": "2026-01-24T22:07:45.694698Z"
+      },
+      "id": "fn-16-4c9.5",
+      "runtime": null,
+      "spec": "# fn-16-4c9.5 Fix cai setup description and help text\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.349366Z",
+        "depends_on": [
+          "fn-16-4c9.1"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.6.md",
+        "status": "todo",
+        "title": "Setup consolidation: merge install-containai-docker.sh",
+        "updated_at": "2026-01-24T22:07:45.761626Z"
+      },
+      "id": "fn-16-4c9.6",
+      "runtime": null,
+      "spec": "# fn-16-4c9.6 Setup consolidation: merge install-containai-docker.sh\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.420401Z",
+        "depends_on": [
+          "fn-16-4c9.1",
+          "fn-16-4c9.6"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.7",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.7.md",
+        "status": "todo",
+        "title": "Lima VM: only recreate when template changes",
+        "updated_at": "2026-01-24T22:07:46.175232Z"
+      },
+      "id": "fn-16-4c9.7",
+      "runtime": null,
+      "spec": "# fn-16-4c9.7 Lima VM: only recreate when template changes\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.493609Z",
+        "depends_on": [
+          "fn-16-4c9.1",
+          "fn-16-4c9.7"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.8",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.8.md",
+        "status": "todo",
+        "title": "Lima VM: apt update/upgrade on cai update",
+        "updated_at": "2026-01-24T22:07:46.242418Z"
+      },
+      "id": "fn-16-4c9.8",
+      "runtime": null,
+      "spec": "# fn-16-4c9.8 Lima VM: apt update/upgrade on cai update\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:07:36.569727Z",
+        "depends_on": [
+          "fn-16-4c9.1",
+          "fn-16-4c9.6"
+        ],
+        "epic": "fn-16-4c9",
+        "id": "fn-16-4c9.9",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-16-4c9.9.md",
+        "status": "todo",
+        "title": "Add cai doctor --reset-lima (macOS only)",
+        "updated_at": "2026-01-24T22:07:46.315103Z"
+      },
+      "id": "fn-16-4c9.9",
+      "runtime": null,
+      "spec": "# fn-16-4c9.9 Add cai doctor --reset-lima (macOS only)\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

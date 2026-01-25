@@ -637,23 +637,14 @@ _cai_update_dockerd_bundle() {
         return 0
     fi
 
-    # Prompt for confirmation (unless --force)
+    # Prompt for confirmation (unless --force, use shared helper with CAI_YES support)
     if [[ "$force" != "true" ]]; then
         printf '\n'
         _cai_warn "Updating dockerd will stop running containers."
-        printf '%s' "Continue? [y/N] "
-        local response
-        if ! read -r response; then
+        if ! _cai_prompt_confirm "Continue?"; then
             printf '%s\n' "Cancelled."
             return 0
         fi
-        case "$response" in
-            [yY] | [yY][eE][sS]) ;;
-            *)
-                printf '%s\n' "Cancelled."
-                return 0
-                ;;
-        esac
     fi
 
     # Download and install
@@ -892,7 +883,7 @@ _cai_update_macos() {
     # --lima-recreate forces recreation even if we add "currentness" checks later
     _cai_step "Recreating Lima VM with latest template"
 
-    # Warn about container loss
+    # Warn about container loss (use shared helper with CAI_YES support)
     if [[ "$dry_run" != "true" ]]; then
         printf '\n'
         _cai_warn "This will DELETE the Lima VM and recreate it."
@@ -900,19 +891,10 @@ _cai_update_macos() {
         printf '\n'
 
         if [[ "$force" != "true" ]]; then
-            printf '%s' "Continue with VM recreation? [y/N] "
-            local response
-            if ! read -r response; then
+            if ! _cai_prompt_confirm "Continue with VM recreation?"; then
                 printf '%s\n' "Cancelled."
                 return 130  # Signal cancellation
             fi
-            case "$response" in
-                [yY] | [yY][eE][sS]) ;;
-                *)
-                    printf '%s\n' "Cancelled."
-                    return 130  # Signal cancellation
-                    ;;
-            esac
         fi
     fi
 

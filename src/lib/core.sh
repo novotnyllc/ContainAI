@@ -11,6 +11,7 @@
 #   _cai_debug()    - Debug message (stderr, only when CONTAINAI_DEBUG=1)
 #   _cai_ok()       - Success message (stdout)
 #   _cai_step()     - Step progress message (stdout)
+#   _cai_prompt_confirm() - Prompt for user confirmation with CAI_YES support
 #
 # Output format:
 #   [INFO] message   - Informational
@@ -105,6 +106,60 @@ _cai_require_command() {
         return 1
     fi
     return 0
+}
+
+# ==============================================================================
+# User Interaction
+# ==============================================================================
+
+# Prompt user for confirmation with CAI_YES support
+# Arguments: $1 = message
+#            $2 = default_yes ("true" for default Y, otherwise default N)
+# Returns: 0 if confirmed, 1 if denied
+# Honors CAI_YES=1 for non-interactive mode
+# Reads from /dev/tty when stdin is a pipe (for curl|bash installs)
+_cai_prompt_confirm() {
+    local message="$1"
+    local default_yes="${2:-false}"
+    local prompt_suffix confirm
+
+    # Auto-confirm if CAI_YES=1
+    if [[ "${CAI_YES:-}" == "1" ]]; then
+        return 0
+    fi
+
+    if [[ "$default_yes" == "true" ]]; then
+        prompt_suffix="[Y/n]"
+    else
+        prompt_suffix="[y/N]"
+    fi
+
+    # Try /dev/tty for piped stdin (curl|bash installs)
+    if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
+        printf '%s %s ' "$message" "$prompt_suffix"
+        if ! read -r confirm < /dev/tty; then
+            # EOF on /dev/tty
+            return 1
+        fi
+    elif [[ -t 0 ]]; then
+        printf '%s %s ' "$message" "$prompt_suffix"
+        if ! read -r confirm; then
+            # EOF on stdin
+            return 1
+        fi
+    else
+        # No TTY available, can't prompt
+        return 1
+    fi
+
+    # Evaluate response based on default
+    if [[ "$default_yes" == "true" ]]; then
+        # Default Y: only N/n denies
+        [[ ! "$confirm" =~ ^[Nn]$ ]]
+    else
+        # Default N: only Y/y confirms
+        [[ "$confirm" =~ ^[Yy]$ ]]
+    fi
 }
 
 return 0
