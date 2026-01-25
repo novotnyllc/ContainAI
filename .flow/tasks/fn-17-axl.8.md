@@ -45,9 +45,8 @@ additional_paths = [
 - [ ] Documented in docs/configuration.md
 
 ## Done summary
-TBD
-
+Implemented [import].additional_paths config option for user-specified files/directories to sync via cai import. Includes comprehensive security validation: rejects colons, relative paths, symlinks (both components and final targets), and paths outside HOME. Uses lexical normalization (no symlink following) per spec.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: cd93a4530c8fbe1dcb05aba35feb59f12b0c7459, c04e4367c2a03f26ac8dbf61e4c1a4e8f39cae0e, 02405ec1447b9c3e0b4ea15adb6b2f2a36af59b7, b5e5a21bc15897c73e55ea1d46df5cfc1fb4a9cb, b1b80e67952126adc4f067047a9761f58af10427
+- Tests: bash tests/unit/test-exclude-rewrite.sh, shellcheck -x src/lib/config.sh src/lib/import.sh
 - PRs:

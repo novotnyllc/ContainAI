@@ -831,8 +831,16 @@ _import_generate_additional_entries() {
     fi
 
     # Resolve additional paths from config
+    # Propagate failures for explicit config (fail-fast behavior)
     local additional_paths
-    additional_paths=$(_containai_resolve_import_additional_paths "$workspace" "$explicit_config")
+    if ! additional_paths=$(_containai_resolve_import_additional_paths "$workspace" "$explicit_config"); then
+        # Explicit config errors are fatal, discovered config errors return empty
+        if [[ -n "$explicit_config" ]]; then
+            return 1
+        fi
+        # For discovered config, resolver already warned; continue with empty paths
+        additional_paths=""
+    fi
 
     # Process each path
     local abs_path home_path home_rel target_rel source_rel flags

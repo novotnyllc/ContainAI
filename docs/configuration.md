@@ -206,12 +206,15 @@ additional_paths = [
 
 **Behavior:**
 - If `[import]` section is missing, no additional paths are synced (silent)
-- If `additional_paths` is missing or invalid, treated as empty list with a warning
+- If `additional_paths` is missing, treated as empty list (silent)
+- If `additional_paths` has invalid type or entries, treated as empty with a warning
 - Paths that don't exist on the host are silently skipped
 - Files and directories are detected automatically
 - Works with workspace-specific config (`.containai/config.toml`) and user config (`~/.config/containai/config.toml`)
 
 **Note on `--no-secrets`:** The `--no-secrets` flag only affects built-in sync entries (like OAuth tokens and SSH keys). User-specified `additional_paths` are always synced regardless of `--no-secrets`, since users explicitly choose to include these paths. If you need to skip sensitive additional paths, remove them from the config.
+
+**Security note:** When using workspace-specific config (`.containai/config.toml`), review `additional_paths` before syncing - a malicious repository could add sensitive paths. Use `cai import --dry-run` to preview what will be synced.
 
 **Viewing what will be synced:**
 ```bash

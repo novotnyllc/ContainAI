@@ -1101,9 +1101,10 @@ print(json.dumps(result, separators=(',', ':')))
 # - Paths are resolved to absolute form for output
 #
 # Behavior:
-# - Missing [import] section: returns empty (no additional paths)
-# - Missing or invalid additional_paths: returns empty with [WARN]
-# - Invalid paths: skipped with [WARN]
+# - Missing [import] section: returns empty (silent)
+# - Missing additional_paths key: returns empty (silent)
+# - Invalid additional_paths type: returns empty with [WARN]
+# - Invalid path entries: skipped with [WARN]
 # - Python unavailable (discovered config): returns empty with [WARN]
 # - Python unavailable (explicit config): return 1 (fail fast)
 _containai_resolve_import_additional_paths() {
