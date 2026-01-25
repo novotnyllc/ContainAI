@@ -50,7 +50,7 @@ Sysbox provides strong compatibility with most devcontainer patterns. Its key st
 Each pattern includes per-row evidence classification:
 - **doc-link**: Explicitly stated in Sysbox documentation (with citation)
 - **inferred**: Reasonable expectation based on related documented behavior
-- **empirical**: Would require testing to confirm (not performed for this research)
+- **empirical-test**: Would require testing to confirm (not performed for this research)
 
 ### Pattern 1: Docker-in-Docker Feature
 
@@ -283,7 +283,7 @@ Usage frequencies from [usage-analysis.md](usage-analysis.md):
 | Docker-in-Docker | 22% | EXCELLENT | Native support |
 | Basic image + commands | 64% | FULL | Pass through |
 | Custom user (remoteUser) | 36% | FULL | Map to agent user |
-| Privileged mode | 6% | MITIGATED | Warn (DinD works without it) |
+| Privileged mode | 14% | MITIGATED | Warn (DinD works without it) |
 | Volume mounts | 18% | GOOD | Filter host /var/lib/docker |
 | runArgs capabilities | 8% | ENHANCED | Allow (contained by userns) |
 | Lifecycle commands | 64% | FULL | Block initializeCommand only |
@@ -367,12 +367,12 @@ mount | grep idmapped   # Should show idmapped mounts
 
 Per Sysbox documentation:
 
-| Feature | Minimum Kernel | Source |
-|---------|---------------|--------|
-| Basic Sysbox | Linux 5.0+ | [install-package.md](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md) (inferred from supported distros) |
-| ID-mapped mounts | 5.12+ | [design.md#id-mapped-mounts](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/design.md#id-mapped-mounts--v050-) |
-| Full ID-mapped mount support | 5.19+ | [design.md#shiftfs-module](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/design.md#shiftfs-module) ("as of kernel 5.19+, ID-mapped mounts provide an almost full replacement for shiftfs") |
-| Namespaced binfmt_misc | 6.7+ | [dind.md#inner-docker-multi-arch-builds](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/dind.md#inner-docker-multi-arch-builds--v067-) |
+| Feature | Minimum Kernel | Evidence |
+|---------|---------------|----------|
+| Basic Sysbox | Linux 5.0+ | inferred (from supported distros in install docs) |
+| ID-mapped mounts | 5.12+ | [doc-link: design.md#id-mapped-mounts](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/design.md#id-mapped-mounts--v050-) |
+| Full ID-mapped mount support | 5.19+ | [doc-link: design.md#shiftfs-module](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/design.md#shiftfs-module) ("as of kernel 5.19+, ID-mapped mounts provide an almost full replacement for shiftfs") |
+| Namespaced binfmt_misc | 6.7+ | [doc-link: dind.md#inner-docker-multi-arch-builds](https://github.com/nestybox/sysbox/blob/master/docs/user-guide/dind.md#inner-docker-multi-arch-builds--v067-) |
 
 **ContainAI deployment note:** Target kernel 5.19+ for best compatibility with devcontainer patterns.
 
