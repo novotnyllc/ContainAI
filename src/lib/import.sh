@@ -842,22 +842,34 @@ _import_apply_overrides() {
     local error_count=0
 
     # Find all files and directories in the override tree
-    # Use find with -print0 for safe filename handling
-    local item rel_path target_path
+    # Use find with -mindepth 1 to skip root, -print0 for safe filename handling
+    local item rel_path target_path target_dir basename
     while IFS= read -r -d '' item; do
         # Get relative path from override_dir
         rel_path="${item#"$override_dir"/}"
 
-        # Skip the root directory itself
+        # Skip empty paths (shouldn't happen with -mindepth 1, but be safe)
         [[ -z "$rel_path" ]] && continue
 
-        # Security: reject path traversal (.. anywhere in path)
-        # Check for standalone .. or .. at start/end of path segment
-        if [[ "$rel_path" == ".." ]] || \
-           [[ "$rel_path" == *"/.."* ]] || \
-           [[ "$rel_path" == "../"* ]] || \
-           [[ "$rel_path" == *"/.." ]]; then
+        # Security: reject absolute paths (shouldn't happen, but verify)
+        if [[ "$rel_path" == /* ]]; then
+            _import_error "Override path is absolute, rejected: $rel_path"
+            error_count=$((error_count + 1))
+            continue
+        fi
+
+        # Security: reject path traversal using segment-aware check
+        # Match ".." as a standalone path segment (not as part of filename like "foo..bar")
+        if [[ "$rel_path" =~ (^|/)\.\.(/|$) ]]; then
             _import_error "Override path contains '..' traversal, rejected: $rel_path"
+            error_count=$((error_count + 1))
+            continue
+        fi
+
+        # Security: reject filenames starting with - to prevent option injection
+        basename="${rel_path##*/}"
+        if [[ "$basename" == -* ]]; then
+            _import_error "Override filename starts with '-', rejected: $rel_path"
             error_count=$((error_count + 1))
             continue
         fi
@@ -876,7 +888,7 @@ _import_apply_overrides() {
             continue
         fi
 
-        # Only process regular files (directories are implicitly created via --mkpath)
+        # Only process regular files (directories are created explicitly before rsync)
         if [[ -d "$item" ]]; then
             continue
         fi
@@ -884,36 +896,51 @@ _import_apply_overrides() {
         # This is a regular file - apply the override
         # Override path maps directly to volume target (1:1 mapping):
         #   ~/.config/containai/import-overrides/.gitconfig -> /target/.gitconfig
-        #   ~/.config/containai/import-overrides/claude/settings.json -> /target/claude/settings.json
-        #   ~/.config/containai/import-overrides/config/starship.toml -> /target/config/starship.toml
-        # Note: Override paths match VOLUME structure, not HOME structure
-        # To find the right override path, check what sync map puts in /target/
+        #   ~/.config/containai/import-overrides/.claude/settings.json -> /target/.claude/settings.json
+        #   ~/.config/containai/import-overrides/.config/starship.toml -> /target/.config/starship.toml
+        # Note: Override paths match VOLUME structure (check sync map for target paths)
         target_path="$rel_path"
 
         if [[ "$dry_run" == "true" ]]; then
             echo "[DRY-RUN] Would apply override: $rel_path -> /target/$target_path"
             override_count=$((override_count + 1))
         else
-            # Use rsync to copy the file with --mkpath to create parent directories
-            # Run via Docker to write to volume
+            # Create parent directory and fix ownership before rsync
+            # This avoids --mkpath (not in rsync < 3.2.0) and ensures correct ownership
+            target_dir="${target_path%/*}"
+            if [[ "$target_dir" != "$target_path" ]] && [[ -n "$target_dir" ]]; then
+                # Has parent directory - create it with correct ownership
+                # shellcheck disable=SC2016
+                if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
+                    --mount "type=volume,src=$volume,dst=/target" \
+                    alpine sh -c 'mkdir -p -- "/target/$1" && chown -R 1000:1000 -- "/target/$1"' _ "$target_dir"; then
+                    _import_error "Failed to create parent dir for override: $rel_path"
+                    error_count=$((error_count + 1))
+                    continue
+                fi
+            fi
+
+            # Use rsync to copy the file (no --mkpath needed, parent already exists)
+            # Use -- to prevent option injection from filenames
             # shellcheck disable=SC2016
             if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
                 --mount "type=bind,src=$override_dir,dst=/overrides,readonly" \
                 --mount "type=volume,src=$volume,dst=/target" \
-                eeacms/rsync rsync -a --mkpath "/overrides/$rel_path" "/target/$target_path"; then
+                eeacms/rsync rsync -a -- "/overrides/$rel_path" "/target/$target_path"; then
                 _import_error "Failed to apply override: $rel_path"
                 error_count=$((error_count + 1))
                 continue
             fi
             # Fix ownership to agent user (1000:1000)
+            # Use -- to prevent option injection
             if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
                 --mount "type=volume,src=$volume,dst=/target" \
-                alpine chown 1000:1000 "/target/$target_path"; then
+                alpine chown 1000:1000 -- "/target/$target_path"; then
                 _import_warn "Failed to fix ownership for override: $target_path"
             fi
             override_count=$((override_count + 1))
         fi
-    done < <(find "$override_dir" -print0 2>/dev/null)
+    done < <(find "$override_dir" -mindepth 1 -print0 2>/dev/null)
 
     # Report summary
     if [[ "$error_count" -gt 0 ]]; then
@@ -1979,12 +2006,6 @@ done <<'"'"'MAP_DATA'"'"'
         _import_success "Configs synced via rsync"
     fi
 
-    # Apply import overrides (after main sync, before transformations)
-    # Overrides replace (not merge) any imported files
-    if ! _import_apply_overrides "$ctx" "$volume" "$dry_run"; then
-        _import_warn "Failed to apply import overrides"
-    fi
-
     # Post-sync transformations (only in non-dry-run mode)
     # Pass context, volume, and source_root to transformation functions
     if [[ "$dry_run" != "true" ]]; then
@@ -2008,6 +2029,14 @@ done <<'"'"'MAP_DATA'"'"'
         _import_step "[dry-run] Would merge enabledPlugins into sandbox settings"
         _import_step "[dry-run] Would remove orphan markers"
         _import_step "[dry-run] Would import git config (user identity + safe.directory, credential.helper filtered)"
+    fi
+
+    # Apply import overrides (AFTER all transformations for correct precedence)
+    # Overrides replace (not merge) any imported/transformed files
+    if ! _import_apply_overrides "$ctx" "$volume" "$dry_run"; then
+        # Override failures are fatal - user's explicit overrides must be applied
+        _import_error "Failed to apply import overrides"
+        return 1
     fi
 
     return 0
