@@ -166,3 +166,6 @@ POSIX awk doesn't support /regex/i case-insensitive flag; use IGNORECASE=1 in BE
 
 ## 2026-01-25 manual [pitfall]
 When sudo mv moves files from user-owned temp dir to root locations, ownership is preserved - must chown/chmod after to prevent privilege escalation
+
+## 2026-01-25 manual [pitfall]
+Version comparison must use semver logic (sort -V) not string equality - checking != instead of > causes false positives on downgrades

@@ -950,7 +950,7 @@ copy() {
                     ensure "$_dst" "$_flags"
                     ;;
                 *)
-                    echo "[WARN] Source not found, skipping: $_src" >&2
+                    echo "[INFO] Source not found, skipping: $_src"
                     ;;
             esac
         fi
@@ -1726,7 +1726,8 @@ _cai_import_git_config() {
         -v "$volume":/target \
         -e "GIT_NAME=${git_name}" \
         -e "GIT_EMAIL=${git_email}" \
-        alpine/git:latest sh -c '
+        --entrypoint sh \
+        alpine/git:latest -c '
             # Refuse if target exists and is symlink or non-regular file
             if [ -L /target/.gitconfig ]; then
                 echo "ERROR: /target/.gitconfig is a symlink - refusing to write" >&2
