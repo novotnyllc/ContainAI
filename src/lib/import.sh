@@ -1490,36 +1490,8 @@ _containai_import() {
         env_args+=(--env "HOST_SOURCE_ROOT=$source_root")
     fi
 
-    # Build MANIFEST_DATA for symlink target lookup (relative source -> target mapping)
-    # Format: home_rel_source:target (e.g., ".config/gh:/target/config/gh")
-    # This enables manifest-based symlink conversion with longest-prefix matching
-    local manifest_data=""
-    for entry in "${_IMPORT_SYNC_MAP[@]}"; do
-        # Extract source and target (skip flags)
-        local src_part="${entry%%:*}"
-        local rest="${entry#*:}"
-        local tgt_part="${rest%%:*}"
-        # Convert /source/.xxx to .xxx (home-relative, preserve dot)
-        local src_home_rel="${src_part#/source/}"
-        manifest_data+="${src_home_rel}:${tgt_part}"$'\n'
-    done
-    # Also include dynamically discovered SSH keys
-    local ssh_manifest_entries
-    ssh_manifest_entries=$(_import_discover_ssh_keys "$source_root")
-    while IFS= read -r ssh_entry; do
-        [[ -z "$ssh_entry" ]] && continue
-        local ssh_src="${ssh_entry%%:*}"
-        local ssh_rest="${ssh_entry#*:}"
-        local ssh_tgt="${ssh_rest%%:*}"
-        local ssh_src_rel="${ssh_src#/source/}"
-        manifest_data+="${ssh_src_rel}:${ssh_tgt}"$'\n'
-    done <<<"$ssh_manifest_entries"
-    # Pass manifest data as environment variable (base64 encoded for safe transport)
-    local manifest_data_b64
-    manifest_data_b64=$(printf '%s' "$manifest_data" | base64 | tr -d '\n')
-    env_args+=(--env "MANIFEST_DATA_B64=$manifest_data_b64")
-
     # Build map data and pass via heredoc inside the script
+    # NOTE: MANIFEST_DATA_B64 is built later from sync_map_entries (after --no-secrets filtering)
     # Note: This script runs inside eeacms/rsync with POSIX sh (not bash)
     # All code must be strictly POSIX-compliant (no arrays, no local in functions)
     local script_with_data
@@ -2419,6 +2391,27 @@ done <<'"'"'MAP_DATA'"'"'
         fi
         sync_map_entries+="$ssh_key_entry"$'\n'
     done <<<"$ssh_key_entries"
+
+    # Build MANIFEST_DATA for symlink target lookup (relative source -> target mapping)
+    # Format: home_rel_source:target (e.g., ".config/gh:/target/config/gh")
+    # This enables manifest-based symlink conversion with longest-prefix matching
+    # Built from sync_map_entries (post --no-secrets filtering) so symlinks only
+    # resolve to entries that were actually imported
+    local manifest_data=""
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+        # Extract source and target (skip flags)
+        local src_part="${entry%%:*}"
+        local rest="${entry#*:}"
+        local tgt_part="${rest%%:*}"
+        # Convert /source/.xxx to .xxx (home-relative, preserve dot)
+        local src_home_rel="${src_part#/source/}"
+        manifest_data+="${src_home_rel}:${tgt_part}"$'\n'
+    done <<<"$sync_map_entries"
+    # Pass manifest data as environment variable (base64 encoded for safe transport)
+    local manifest_data_b64
+    manifest_data_b64=$(printf '%s' "$manifest_data" | base64 | tr -d '\n')
+    env_args+=(--env "MANIFEST_DATA_B64=$manifest_data_b64")
 
     # If we have excludes, use destination-relative rewriting
     # Otherwise, just pass entries as-is (with empty 4th field for excludes)
