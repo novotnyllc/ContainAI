@@ -451,12 +451,12 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         # Selective sync: config files only (skip sessions/, index/)
         # May contain API keys/tokens
         "/source/.continue/config.yaml:/target/continue/config.yaml:fs"
-        "/source/.continue/config.json:/target/continue/config.json:fs"
+        "/source/.continue/config.json:/target/continue/config.json:fjs"
 
         # --- Cursor ---
         # Selective sync: mcp.json, rules, extensions
         # mcp.json may contain API keys/tokens
-        "/source/.cursor/mcp.json:/target/cursor/mcp.json:fs"
+        "/source/.cursor/mcp.json:/target/cursor/mcp.json:fjs"
         "/source/.cursor/rules:/target/cursor/rules:d"
         "/source/.cursor/extensions:/target/cursor/extensions:d"
     )

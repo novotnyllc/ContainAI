@@ -127,24 +127,21 @@ RUN mkdir -p /mnt/agent-data/codex/skills && \
 
 # OpenCode configuration symlinks (XDG config + data)
 # Selective sync: config files only (not entire directory)
+# Remove existing opencode config to ensure clean state (no stale caches from installer)
 RUN mkdir -p /mnt/agent-data/local/share/opencode \
              /mnt/agent-data/config/opencode/agents \
              /mnt/agent-data/config/opencode/commands \
              /mnt/agent-data/config/opencode/skills \
              /mnt/agent-data/config/opencode/modes \
-             /mnt/agent-data/config/opencode/plugins \
-             /home/agent/.config/opencode && \
+             /mnt/agent-data/config/opencode/plugins && \
+    rm -rf /home/agent/.config/opencode && \
+    mkdir -p /home/agent/.config/opencode && \
     ln -sfn /mnt/agent-data/local/share/opencode/auth.json /home/agent/.local/share/opencode/auth.json && \
     ln -sfn /mnt/agent-data/config/opencode/opencode.json /home/agent/.config/opencode/opencode.json && \
-    rm -rf /home/agent/.config/opencode/agents && \
     ln -sfn /mnt/agent-data/config/opencode/agents /home/agent/.config/opencode/agents && \
-    rm -rf /home/agent/.config/opencode/commands && \
     ln -sfn /mnt/agent-data/config/opencode/commands /home/agent/.config/opencode/commands && \
-    rm -rf /home/agent/.config/opencode/skills && \
     ln -sfn /mnt/agent-data/config/opencode/skills /home/agent/.config/opencode/skills && \
-    rm -rf /home/agent/.config/opencode/modes && \
     ln -sfn /mnt/agent-data/config/opencode/modes /home/agent/.config/opencode/modes && \
-    rm -rf /home/agent/.config/opencode/plugins && \
     ln -sfn /mnt/agent-data/config/opencode/plugins /home/agent/.config/opencode/plugins && \
     ln -sfn /mnt/agent-data/config/opencode/instructions.md /home/agent/.config/opencode/instructions.md
 

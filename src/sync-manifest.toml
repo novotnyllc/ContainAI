@@ -434,7 +434,7 @@ flags = "fs"  # file, secret
 source = ".continue/config.json"
 target = "continue/config.json"
 container_link = ".continue/config.json"
-flags = "fs"  # file, secret
+flags = "fjs"  # file, JSON init, secret
 
 # =============================================================================
 # CURSOR
@@ -446,7 +446,7 @@ flags = "fs"  # file, secret
 source = ".cursor/mcp.json"
 target = "cursor/mcp.json"
 container_link = ".cursor/mcp.json"
-flags = "fs"  # file, secret
+flags = "fjs"  # file, JSON init, secret
 
 [[entries]]
 source = ".cursor/rules"
