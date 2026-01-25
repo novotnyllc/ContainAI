@@ -484,16 +484,23 @@ _cai_install_sysbox_wsl2() {
     # Do this BEFORE checking for Sysbox to ensure jq is available for configure step
     _cai_step "Ensuring required tools are installed"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would ensure jq is installed"
+        _cai_info "[DRY-RUN] Would ensure jq and wget are installed"
     else
+        local missing_pkgs=()
         if ! command -v jq >/dev/null 2>&1; then
-            _cai_info "Installing jq (required for daemon.json configuration)"
+            missing_pkgs+=("jq")
+        fi
+        if ! command -v wget >/dev/null 2>&1; then
+            missing_pkgs+=("wget")
+        fi
+        if [[ ${#missing_pkgs[@]} -gt 0 ]]; then
+            _cai_info "Installing required tools: ${missing_pkgs[*]}"
             if ! sudo apt-get update -qq; then
                 _cai_error "Failed to run apt-get update"
                 return 1
             fi
-            if ! sudo apt-get install -y jq; then
-                _cai_error "Failed to install jq"
+            if ! sudo apt-get install -y "${missing_pkgs[@]}"; then
+                _cai_error "Failed to install required tools: ${missing_pkgs[*]}"
                 return 1
             fi
         fi
@@ -1415,7 +1422,8 @@ _cai_create_isolated_docker_context() {
 
     _cai_step "Creating Docker context: $_CAI_CONTAINAI_DOCKER_CONTEXT"
 
-    local expected_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+    local expected_host
+    expected_host=$(_cai_expected_docker_host)
 
     if [[ "$verbose" == "true" ]]; then
         _cai_info "Expected endpoint: $expected_host"
@@ -1831,6 +1839,167 @@ _cai_verify_sysbox_install() {
 }
 
 # ==============================================================================
+# WSL2 Windows Integration (named pipe bridge)
+# ==============================================================================
+
+# Find a Windows executable from WSL and return its WSL path
+# Arguments: $1 = exe name (e.g., "npiperelay.exe")
+# Returns: 0=found (prints WSL path), 1=not found
+_cai_wsl_find_windows_exe() {
+    local exe_name="$1"
+    local win_path=""
+
+    win_path=$(cmd.exe /c "where $exe_name" 2>/dev/null | head -1 | tr -d '\r') || win_path=""
+    if [[ -z "$win_path" ]]; then
+        return 1
+    fi
+
+    wslpath -u "$win_path" 2>/dev/null || return 1
+}
+
+# Setup Windows named-pipe bridge for containai-docker in WSL2
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success (or skipped), 1=failure
+_cai_setup_wsl2_windows_npipe_bridge() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    _cai_step "Configuring Windows named-pipe bridge (containai-docker)"
+
+    # Locate npiperelay.exe in Windows PATH (install via winget.exe if missing)
+    local npiperelay_path=""
+    if ! npiperelay_path=$(_cai_wsl_find_windows_exe "npiperelay.exe"); then
+        local winget_path=""
+        if winget_path=$(_cai_wsl_find_windows_exe "winget.exe"); then
+            if [[ "$dry_run" == "true" ]]; then
+                _cai_info "[DRY-RUN] Would install npiperelay via winget.exe"
+            else
+                _cai_info "Installing npiperelay via winget.exe"
+                if ! "$winget_path" install --id jstarks.npiperelay --exact --accept-source-agreements --accept-package-agreements >/dev/null 2>&1; then
+                    _cai_warn "winget.exe failed to install jstarks.npiperelay"
+                fi
+                npiperelay_path=$(_cai_wsl_find_windows_exe "npiperelay.exe") || npiperelay_path=""
+            fi
+        else
+            _cai_warn "winget.exe not found in Windows PATH"
+        fi
+    fi
+    if [[ -z "$npiperelay_path" ]]; then
+        _cai_warn "npiperelay.exe not found in Windows PATH"
+        _cai_warn "  Skipping Windows named-pipe bridge setup"
+        return 0
+    fi
+
+    # Locate wsl.exe (should exist, but resolve via Windows PATH when possible)
+    local wsl_exe_path=""
+    if ! wsl_exe_path=$(_cai_wsl_find_windows_exe "wsl.exe"); then
+        wsl_exe_path="/mnt/c/Windows/System32/wsl.exe"
+    fi
+
+    # Determine distro name for wsl.exe (fallback to Ubuntu)
+    local distro="${WSL_DISTRO_NAME:-}"
+    if [[ -z "$distro" ]]; then
+        distro="Ubuntu"
+    fi
+
+    # Ensure socat is installed (required for bridging to UNIX socket)
+    if ! command -v socat >/dev/null 2>&1; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[DRY-RUN] Would install socat (required for Windows pipe bridge)"
+        else
+            _cai_info "Installing socat (required for Windows pipe bridge)"
+            sudo apt-get update >/dev/null 2>&1 || _cai_warn "apt-get update failed (continuing)"
+            if ! sudo apt-get install -y socat >/dev/null 2>&1; then
+                _cai_warn "Failed to install socat; skipping Windows named-pipe bridge"
+                return 0
+            fi
+        fi
+    fi
+
+    local bridge_script="/usr/local/bin/containai-npipe-bridge"
+    local service_file="/etc/systemd/system/containai-npipe-bridge.service"
+    local pipe_name="//./pipe/containai-docker"
+    local socket_path="$_CAI_CONTAINAI_DOCKER_SOCKET"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would write: $bridge_script"
+        _cai_info "[DRY-RUN] Would write: $service_file"
+        _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
+        _cai_info "[DRY-RUN] Would enable/start containai-npipe-bridge.service"
+    else
+        # Bridge script (runs Windows npiperelay to forward to WSL unix socket)
+        local script_content
+        script_content=$(cat <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+NPIPERELAY_PATH="$npiperelay_path"
+WSL_EXE_PATH="$wsl_exe_path"
+WSL_DISTRO_NAME="$distro"
+PIPE_NAME="$pipe_name"
+SOCKET_PATH="$socket_path"
+
+exec "\$NPIPERELAY_PATH" -ep -s "\$PIPE_NAME" "\$WSL_EXE_PATH" -d "\$WSL_DISTRO_NAME" -u root -- socat -t 0.5 - "UNIX-CONNECT:\$SOCKET_PATH"
+EOF
+)
+        if ! printf '%s\n' "$script_content" | sudo tee "$bridge_script" >/dev/null; then
+            _cai_warn "Failed to write bridge script; skipping Windows named-pipe bridge"
+            return 0
+        fi
+        sudo chmod 0755 "$bridge_script" || _cai_warn "Failed to set permissions on $bridge_script"
+
+        # systemd service
+        local service_content
+        service_content=$(cat <<EOF
+[Unit]
+Description=ContainAI Windows named-pipe bridge (containai-docker)
+After=network.target containai-docker.service
+Requires=containai-docker.service
+
+[Service]
+Type=simple
+ExecStart=$bridge_script
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+)
+        if ! printf '%s\n' "$service_content" | sudo tee "$service_file" >/dev/null; then
+            _cai_warn "Failed to write bridge service file; skipping Windows named-pipe bridge"
+            return 0
+        fi
+
+        sudo systemctl daemon-reload || _cai_warn "Failed to reload systemd (bridge service may not be active yet)"
+        sudo systemctl enable containai-npipe-bridge.service >/dev/null 2>&1 || _cai_warn "Failed to enable containai-npipe-bridge.service"
+        sudo systemctl restart containai-npipe-bridge.service >/dev/null 2>&1 || _cai_warn "Failed to start containai-npipe-bridge.service"
+    fi
+
+    # Configure Windows Docker context (if docker.exe is available)
+    _cai_step "Configuring Windows Docker context (containai-docker)"
+    local win_context_host="npipe:////./pipe/containai-docker"
+    if command -v docker.exe >/dev/null 2>&1; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[DRY-RUN] Would run: docker.exe context create/update $_CAI_CONTAINAI_DOCKER_CONTEXT"
+        else
+            if docker.exe context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                docker.exe context update "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$win_context_host" >/dev/null 2>&1 || \
+                    _cai_warn "Failed to update Windows Docker context"
+            else
+                docker.exe context create "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$win_context_host" >/dev/null 2>&1 || \
+                    _cai_warn "Failed to create Windows Docker context"
+            fi
+        fi
+    else
+        _cai_warn "docker.exe not found in PATH; configure Windows context manually"
+    fi
+
+    return 0
+}
+
+# ==============================================================================
 # Main Setup Functions
 # ==============================================================================
 
@@ -1955,7 +2124,12 @@ _cai_setup_wsl2() {
         return 1
     fi
 
-    # Step 12: Verify installation
+    # Step 12: Configure Windows named-pipe bridge (WSL2 only)
+    if ! _cai_setup_wsl2_windows_npipe_bridge "$dry_run" "$verbose"; then
+        _cai_warn "Windows named-pipe bridge setup had issues (continuing)"
+    fi
+
+    # Step 13: Verify installation
     if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Isolated Docker verification had issues - check output above"
@@ -2633,11 +2807,13 @@ _cai_linux_docker_desktop_detected() {
 # Install Sysbox on native Linux (Ubuntu/Debian)
 # Arguments: $1 = dry_run flag ("true" to simulate)
 #            $2 = verbose flag ("true" for verbose output)
+#            $3 = force_install flag ("true" to reinstall even if present)
 # Returns: 0=success, 1=failure
 # Note: Similar to WSL2 but without WSL-specific checks (systemd PID 1, seccomp)
 _cai_install_sysbox_linux() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
+    local force_install="${3:-false}"
 
     # Detect distro
     if ! _cai_linux_detect_distro; then
@@ -2675,44 +2851,42 @@ _cai_install_sysbox_linux() {
         fi
     fi
 
-    # Always check and install required tools (jq needed for daemon.json config)
+    # Ensure jq (daemon.json merge) and wget (GitHub API fetch) are available
     _cai_step "Ensuring required tools are installed"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would ensure jq is installed"
+        _cai_info "[DRY-RUN] Would ensure jq and wget are installed"
     else
+        local -a missing_tools=()
         if ! command -v jq >/dev/null 2>&1; then
-            _cai_info "Installing jq (required for daemon.json configuration)"
+            missing_tools+=(jq)
+        fi
+        if ! command -v wget >/dev/null 2>&1; then
+            missing_tools+=(wget)
+        fi
+        if ((${#missing_tools[@]} > 0)); then
+            _cai_info "Installing required tools: ${missing_tools[*]}"
             if ! sudo apt-get update -qq; then
                 _cai_error "Failed to run apt-get update"
                 return 1
             fi
-            if ! sudo apt-get install -y jq; then
-                _cai_error "Failed to install jq"
+            if ! sudo apt-get install -y "${missing_tools[@]}"; then
+                _cai_error "Failed to install required tools: ${missing_tools[*]}"
                 return 1
             fi
         fi
     fi
 
     _cai_step "Checking for existing Sysbox installation"
+    local installed_version_line=""
+    local installed_version_semver=""
+    local sysbox_present="false"
     if command -v sysbox-runc >/dev/null 2>&1; then
-        local existing_version
-        existing_version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
-        _cai_info "Sysbox already installed: $existing_version"
-        return 0
-    fi
-
-    _cai_step "Installing Sysbox dependencies"
-    if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: apt-get update"
-        _cai_info "[DRY-RUN] Would run: apt-get install -y jq wget"
-    else
-        if ! sudo apt-get update; then
-            _cai_error "Failed to run apt-get update"
-            return 1
-        fi
-        if ! sudo apt-get install -y jq wget; then
-            _cai_error "Failed to install dependencies (jq, wget)"
-            return 1
+        sysbox_present="true"
+        installed_version_line=$(sysbox-runc --version 2>/dev/null | head -1 || true)
+        installed_version_semver=$(printf '%s' "$installed_version_line" | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
+        _cai_info "Sysbox already installed: ${installed_version_line:-unknown version}"
+        if [[ -n "$installed_version_semver" ]] && [[ "$verbose" == "true" ]]; then
+            _cai_info "Parsed installed version: $installed_version_semver"
         fi
     fi
 
@@ -2734,34 +2908,34 @@ _cai_install_sysbox_linux() {
             ;;
     esac
 
-    # Get Sysbox release URL from GitHub
+    # Resolve target Sysbox version and download URL from GitHub
     # Support CAI_SYSBOX_VERSION override for pinning or rate limit workaround
-    local sysbox_version="${CAI_SYSBOX_VERSION:-}"
-    local release_url download_url
+    local sysbox_version_override="${CAI_SYSBOX_VERSION:-}"
+    local release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
+    local download_url=""
+    local latest_version=""
+    local release_json=""
 
-    if [[ -n "$sysbox_version" ]]; then
-        # Use pinned version - construct URL directly (avoids API rate limits)
-        _cai_info "Using pinned Sysbox version: $sysbox_version"
-        download_url="https://github.com/nestybox/sysbox/releases/download/v${sysbox_version}/sysbox-ce_${sysbox_version}-0.linux_${arch}.deb"
-    else
-        release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
+    if [[ -n "$sysbox_version_override" ]]; then
+        latest_version="$sysbox_version_override"
+        _cai_info "Using pinned Sysbox version: $latest_version"
+        download_url="https://github.com/nestybox/sysbox/releases/download/v${latest_version}/sysbox-ce_${latest_version}-0.linux_${arch}.deb"
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        if [[ -n "$sysbox_version" ]]; then
-            _cai_info "[DRY-RUN] Would download Sysbox $sysbox_version for architecture: $arch"
+        if [[ -n "$sysbox_version_override" ]]; then
+            _cai_info "[DRY-RUN] Would ensure Sysbox version: $latest_version"
         else
             _cai_info "[DRY-RUN] Would fetch latest release from: $release_url"
-            _cai_info "[DRY-RUN] Would download Sysbox .deb for architecture: $arch"
         fi
+        _cai_info "[DRY-RUN] Would download Sysbox .deb for architecture: $arch"
         _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
         _cai_ok "Sysbox installation (dry-run) complete"
         return 0
     fi
 
     # Fetch release info from GitHub API if not using pinned version
-    if [[ -z "$sysbox_version" ]]; then
-        local release_json
+    if [[ -z "$sysbox_version_override" ]]; then
         release_json=$(wget -qO- "$release_url" 2>&1) || {
             _cai_error "Failed to fetch Sysbox release info from GitHub"
             _cai_error "  This may be due to GitHub API rate limiting or network issues"
@@ -2779,8 +2953,48 @@ _cai_install_sysbox_linux() {
             return 1
         fi
 
+        local latest_tag
+        latest_tag=$(printf '%s' "$release_json" | jq -r '.tag_name // empty' | head -1)
+        latest_version="${latest_tag#v}"
+        if [[ -z "$latest_version" ]]; then
+            _cai_error "Could not determine latest Sysbox version from GitHub"
+            return 1
+        fi
+
         # Extract .deb download URL for this architecture
         download_url=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
+    fi
+
+    if [[ -n "$latest_version" ]]; then
+        _cai_info "Target Sysbox version: $latest_version"
+    fi
+
+    # Determine if installation or upgrade is needed
+    if [[ "$force_install" != "true" && "$sysbox_present" == "true" ]]; then
+        if [[ -n "$installed_version_semver" ]] && [[ -n "$latest_version" ]]; then
+            local highest_version
+            highest_version=$(printf '%s\n%s\n' "$installed_version_semver" "$latest_version" | sort -V | tail -1)
+            if [[ "$highest_version" == "$installed_version_semver" ]]; then
+                _cai_ok "Sysbox already up to date ($installed_version_semver)"
+                return 0
+            fi
+            _cai_info "Upgrading Sysbox from $installed_version_semver to $latest_version"
+        else
+            _cai_warn "Could not compare installed Sysbox version to target; proceeding with upgrade"
+        fi
+    fi
+
+    _cai_step "Installing Sysbox dependencies"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v wget >/dev/null 2>&1; then
+        _cai_info "Installing missing dependencies: jq wget"
+        if ! sudo apt-get update; then
+            _cai_error "Failed to run apt-get update"
+            return 1
+        fi
+        if ! sudo apt-get install -y jq wget; then
+            _cai_error "Failed to install dependencies (jq, wget)"
+            return 1
+        fi
     fi
 
     if [[ -z "$download_url" ]] || [[ "$download_url" == "null" ]]; then
@@ -3160,6 +3374,11 @@ _cai_setup() {
         printf '\n'
     fi
 
+    if _cai_is_container; then
+        _cai_setup_nested "$dry_run" "$verbose"
+        return $?
+    fi
+
     # Detect platform - must be WSL2 specifically
     local platform
     platform=$(_cai_detect_platform)
@@ -3189,6 +3408,260 @@ _cai_setup() {
             return 1
             ;;
     esac
+}
+
+# Nested setup (running inside a container)
+# Use the default Docker daemon inside the container (no isolated containai-docker
+# daemon). This avoids conflicting bridges and keeps Docker-in-Docker self-contained.
+_cai_setup_nested() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+
+    _cai_info "Detected container environment (nested setup)"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would stop containai-docker.service if running"
+        _cai_info "[DRY-RUN] Would remove bridge $_CAI_CONTAINAI_DOCKER_BRIDGE if present"
+        _cai_info "[DRY-RUN] Would ensure sysbox-runc is installed and up to date"
+        _cai_info "[DRY-RUN] Would start sysbox-mgr/sysbox-fs if available"
+        _cai_info "[DRY-RUN] Would ensure docker defaults to sysbox-runc"
+        _cai_info "[DRY-RUN] Would ensure docker data-root is /var/lib/docker"
+        _cai_info "[DRY-RUN] Would restart docker.service if configuration changes"
+        _cai_info "[DRY-RUN] Would ensure docker.service is running"
+        _cai_info "[DRY-RUN] Would verify Docker daemon via default context"
+        _cai_info "[DRY-RUN] Would verify DockerRootDir is /var/lib/docker"
+        _cai_info "[DRY-RUN] Would verify default runtime is sysbox-runc"
+        return 0
+    fi
+
+    # If an inner containai-docker service is running, stop it to avoid network conflicts
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${_CAI_CONTAINAI_DOCKER_SERVICE}"; then
+            if systemctl is-active --quiet "$_CAI_CONTAINAI_DOCKER_SERVICE" 2>/dev/null; then
+                _cai_warn "containai-docker.service is running inside the container; stopping to avoid network conflicts"
+                if ! sudo systemctl stop "$_CAI_CONTAINAI_DOCKER_SERVICE" 2>/dev/null; then
+                    _cai_warn "Failed to stop $_CAI_CONTAINAI_DOCKER_SERVICE (continuing)"
+                fi
+            fi
+            if systemctl is-enabled --quiet "$_CAI_CONTAINAI_DOCKER_SERVICE" 2>/dev/null; then
+                if ! sudo systemctl disable "$_CAI_CONTAINAI_DOCKER_SERVICE" 2>/dev/null; then
+                    _cai_warn "Failed to disable $_CAI_CONTAINAI_DOCKER_SERVICE (continuing)"
+                fi
+            fi
+        fi
+    fi
+
+    # Remove leftover containai bridge if present (created by inner containai-docker)
+    if command -v ip >/dev/null 2>&1; then
+        if ip link show "$_CAI_CONTAINAI_DOCKER_BRIDGE" >/dev/null 2>&1; then
+            _cai_warn "Found leftover bridge $_CAI_CONTAINAI_DOCKER_BRIDGE; removing to avoid conflicts"
+            if ! sudo ip link delete "$_CAI_CONTAINAI_DOCKER_BRIDGE" 2>/dev/null; then
+                _cai_warn "Failed to remove bridge $_CAI_CONTAINAI_DOCKER_BRIDGE (continuing)"
+            fi
+        fi
+    fi
+
+    local sysbox_missing_before="false"
+    local sysbox_version_before=""
+    if command -v sysbox-runc >/dev/null 2>&1; then
+        sysbox_version_before=$(sysbox-runc --version 2>/dev/null | head -1 | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
+    else
+        sysbox_missing_before="true"
+    fi
+    if ! _cai_install_sysbox_linux "false" "$verbose"; then
+        _cai_error "Failed to install sysbox-runc inside the container"
+        return 1
+    fi
+    local sysbox_version_after=""
+    if command -v sysbox-runc >/dev/null 2>&1; then
+        sysbox_version_after=$(sysbox-runc --version 2>/dev/null | head -1 | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
+    else
+        _cai_error "sysbox-runc is still not available after installation"
+        return 1
+    fi
+    local sysbox_installed="false"
+    if [[ "$sysbox_missing_before" == "true" ]]; then
+        sysbox_installed="true"
+    elif [[ -n "$sysbox_version_before" ]] && [[ -n "$sysbox_version_after" ]] && [[ "$sysbox_version_before" != "$sysbox_version_after" ]]; then
+        sysbox_installed="true"
+    elif [[ -z "$sysbox_version_before" ]] && [[ -n "$sysbox_version_after" ]]; then
+        sysbox_installed="true"
+    fi
+
+    # Start sysbox services if available (required for sysbox-runc)
+    if command -v systemctl >/dev/null 2>&1; then
+        local svc sysbox_services_ok="true"
+        for svc in sysbox-mgr.service sysbox-fs.service; do
+            if ! systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${svc}"; then
+                _cai_error "$svc not found (sysbox installation incomplete)"
+                sysbox_services_ok="false"
+                continue
+            fi
+            if ! systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+                _cai_info "Enabling $svc"
+                if ! sudo systemctl enable "$svc" >/dev/null 2>&1; then
+                    _cai_warn "Failed to enable $svc"
+                fi
+            fi
+            if ! systemctl is-active --quiet "$svc" 2>/dev/null; then
+                _cai_info "Starting $svc"
+                if ! sudo systemctl start "$svc" 2>/dev/null; then
+                    _cai_warn "Failed to start $svc"
+                fi
+            fi
+            if ! systemctl is-active --quiet "$svc" 2>/dev/null; then
+                _cai_error "$svc is not running"
+                sysbox_services_ok="false"
+            fi
+        done
+        if [[ "$sysbox_services_ok" != "true" ]]; then
+            _cai_error "Sysbox services must be running before Docker can start"
+            return 1
+        fi
+    fi
+
+    local runtime_config_updated="false"
+    local docker_restart_needed="false"
+    local daemon_json="/etc/docker/daemon.json"
+    local desired_runtime_path="/usr/bin/sysbox-runc"
+    local desired_data_root="/var/lib/docker"
+
+    _cai_step "Ensuring docker defaults to sysbox-runc"
+
+    if ! command -v jq >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+        _cai_info "Installing jq for daemon.json updates"
+        sudo apt-get update -qq >/dev/null 2>&1 || _cai_warn "apt-get update failed (continuing)"
+        if ! sudo apt-get install -y jq >/dev/null 2>&1; then
+            _cai_warn "Failed to install jq; daemon.json merge may be limited"
+        fi
+    fi
+
+    if command -v jq >/dev/null 2>&1 && [[ -f "$daemon_json" ]]; then
+        local configured_data_root=""
+        configured_data_root=$(jq -r '."data-root" // empty' "$daemon_json" 2>/dev/null || true)
+        if [[ -n "$configured_data_root" ]] && [[ "$configured_data_root" != "$desired_data_root" ]]; then
+            _cai_warn "Docker data-root is '$configured_data_root'; sysbox expects '$desired_data_root'"
+        fi
+    fi
+
+    local new_config=""
+    if command -v jq >/dev/null 2>&1 && [[ -f "$daemon_json" ]]; then
+        new_config=$(jq --arg path "$desired_runtime_path" --arg data_root "$desired_data_root" '
+            if type != "object" then {} else . end
+            | .["data-root"] = $data_root
+            | .runtimes = (.runtimes // {})
+            | .runtimes["sysbox-runc"] = { "path": $path }
+            | .["default-runtime"] = "sysbox-runc"
+        ' "$daemon_json" 2>/dev/null || true)
+    fi
+    if [[ -z "$new_config" ]]; then
+        new_config=$(cat <<EOF
+{
+  "data-root": "$desired_data_root",
+  "default-runtime": "sysbox-runc",
+  "runtimes": {
+    "sysbox-runc": {
+      "path": "$desired_runtime_path"
+    }
+  }
+}
+EOF
+)
+    fi
+
+    local current_config=""
+    current_config=$(cat "$daemon_json" 2>/dev/null || true)
+
+    local configs_match="false"
+    if command -v jq >/dev/null 2>&1 && [[ -n "$current_config" ]]; then
+        local current_canon new_canon
+        current_canon=$(jq -S '.' "$daemon_json" 2>/dev/null || true)
+        new_canon=$(printf '%s\n' "$new_config" | jq -S '.' 2>/dev/null || true)
+        if [[ -n "$current_canon" && -n "$new_canon" && "$current_canon" == "$new_canon" ]]; then
+            configs_match="true"
+        fi
+    fi
+    if [[ "$configs_match" != "true" && "$current_config" == "$new_config" ]]; then
+        configs_match="true"
+    fi
+
+    if [[ "$configs_match" != "true" ]]; then
+        if ! printf '%s\n' "$new_config" | sudo tee "$daemon_json" >/dev/null; then
+            _cai_error "Failed to write $daemon_json"
+            return 1
+        fi
+        runtime_config_updated="true"
+    fi
+
+    if [[ "$sysbox_installed" == "true" || "$runtime_config_updated" == "true" ]]; then
+        docker_restart_needed="true"
+    fi
+    if [[ "$docker_restart_needed" == "true" ]]; then
+        if command -v systemctl >/dev/null 2>&1; then
+            _cai_info "Restarting docker.service to apply sysbox runtime changes"
+            if ! sudo systemctl restart docker >/dev/null 2>&1; then
+                _cai_error "Failed to restart docker.service inside container"
+                return 1
+            fi
+        else
+            _cai_error "systemctl not available inside container"
+            return 1
+        fi
+    fi
+
+    _cai_step "Checking inner Docker daemon"
+    if ! DOCKER_CONTEXT= DOCKER_HOST= docker info >/dev/null 2>&1; then
+        _cai_warn "Inner Docker not reachable, attempting to start docker.service"
+        if command -v systemctl >/dev/null 2>&1; then
+            if ! sudo systemctl start docker 2>/dev/null; then
+                _cai_error "Failed to start docker.service inside container"
+                return 1
+            fi
+        else
+            _cai_error "systemctl not available inside container"
+            return 1
+        fi
+        if ! DOCKER_CONTEXT= DOCKER_HOST= docker info >/dev/null 2>&1; then
+            _cai_error "Inner Docker still not reachable"
+            return 1
+        fi
+    fi
+    _cai_ok "Inner Docker is reachable"
+
+    # Check Docker root dir (sysbox expects /var/lib/docker)
+    local docker_root
+    docker_root=$(DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)
+    if [[ "$docker_root" == "/var/lib/docker" ]]; then
+        _cai_ok "DockerRootDir: /var/lib/docker"
+    else
+        _cai_warn "DockerRootDir is '$docker_root' (expected /var/lib/docker for sysbox)"
+    fi
+
+    # Check runtimes and default runtime
+    local runtimes_json=""
+    runtimes_json=$(DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
+    if printf '%s' "$runtimes_json" | grep -q "sysbox-runc"; then
+        _cai_ok "sysbox-runc runtime available in inner Docker"
+    else
+        _cai_error "sysbox-runc runtime not found in inner Docker"
+        _cai_error "  Run 'cai setup' again after ensuring sysbox services are healthy"
+        return 1
+    fi
+
+    local default_runtime=""
+    default_runtime=$(DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
+    if [[ "$default_runtime" == "sysbox-runc" ]]; then
+        _cai_ok "Default runtime: sysbox-runc"
+    else
+        _cai_error "Default runtime: ${default_runtime:-unknown} (expected sysbox-runc)"
+        _cai_error "  Check /etc/docker/daemon.json and restart docker.service"
+        return 1
+    fi
+
+    printf '\n'
+    _cai_ok "Nested setup complete"
+    _cai_info "Using default Docker context inside the container"
+    return 0
 }
 
 # Setup help text
@@ -3265,7 +3738,8 @@ Security Notes:
   - Does NOT modify Docker Desktop, system Docker, or /etc/docker/
   - Docker Desktop remains completely unchanged (CRITICAL)
   - Creates 'containai-docker' context pointing to isolated daemon
-  - All platforms use completely separate socket for isolation
+  - All platforms use completely separate socket for isolation (host)
+  - Inside a ContainAI container, setup uses the default Docker daemon (no inner containai-docker daemon)
 
 Lima VM Management (macOS):
   limactl start containai-docker    Start the VM
@@ -3344,28 +3818,36 @@ _cai_secure_engine_validate() {
     # Detect platform for expected context and socket path
     # All platforms now use containai-docker context (Linux/WSL2 use isolated daemon, macOS uses Lima VM)
     local platform context_name expected_socket sysbox_is_default
+    local in_container="false"
     platform=$(_cai_detect_platform)
-    case "$platform" in
-        wsl)
-            context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
-            expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
-            sysbox_is_default="true"
-            ;;
-        linux)
-            context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
-            expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
-            sysbox_is_default="true"
-            ;;
-        macos)
-            context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
-            expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
-            sysbox_is_default="false"
-            ;;
-        *)
-            _cai_error "Unknown platform: $platform"
-            return 1
-            ;;
-    esac
+    if _cai_is_container; then
+        in_container="true"
+        context_name="default"
+        expected_socket=""
+        sysbox_is_default="true"
+    else
+        case "$platform" in
+            wsl)
+                context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+                sysbox_is_default="true"
+                ;;
+            linux)
+                context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                expected_socket="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+                sysbox_is_default="true"
+                ;;
+            macos)
+                context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
+                sysbox_is_default="false"
+                ;;
+            *)
+                _cai_error "Unknown platform: $platform"
+                return 1
+                ;;
+        esac
+    fi
 
     # Validation 1: Context exists AND endpoint matches expected socket
     _cai_step "Check 1: Context exists with correct endpoint"
@@ -3376,17 +3858,39 @@ _cai_secure_engine_validate() {
         failed=1
     else
         actual_endpoint=$(docker context inspect "$context_name" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
-        if [[ "$actual_endpoint" == "$expected_socket" ]]; then
-            printf '%s\n' "[PASS] Context '$context_name' exists with correct endpoint"
-            if [[ "$verbose" == "true" ]]; then
-                _cai_info "  Endpoint: $actual_endpoint"
+        if [[ "$in_container" == "true" ]]; then
+            if [[ "$actual_endpoint" == unix://* ]]; then
+                local socket_path="${actual_endpoint#unix://}"
+                if [[ -S "$socket_path" ]]; then
+                    printf '%s\n' "[PASS] Context '$context_name' exists with valid Unix socket"
+                    if [[ "$verbose" == "true" ]]; then
+                        _cai_info "  Endpoint: $actual_endpoint"
+                    fi
+                else
+                    printf '%s\n' "[FAIL] Context '$context_name' socket not found"
+                    _cai_error "  Endpoint: $actual_endpoint"
+                    _cai_error "  Remediation: Ensure Docker daemon is running inside the container"
+                    failed=1
+                fi
+            else
+                printf '%s\n' "[FAIL] Context '$context_name' is not a Unix socket"
+                _cai_error "  Endpoint: $actual_endpoint"
+                _cai_error "  Remediation: Use the default Docker daemon inside the container"
+                failed=1
             fi
         else
-            printf '%s\n' "[FAIL] Context '$context_name' has wrong endpoint"
-            _cai_error "  Expected: $expected_socket"
-            _cai_error "  Actual: $actual_endpoint"
-            _cai_error "  Remediation: Run 'cai setup' to reconfigure the context"
-            failed=1
+            if [[ "$actual_endpoint" == "$expected_socket" ]]; then
+                printf '%s\n' "[PASS] Context '$context_name' exists with correct endpoint"
+                if [[ "$verbose" == "true" ]]; then
+                    _cai_info "  Endpoint: $actual_endpoint"
+                fi
+            else
+                printf '%s\n' "[FAIL] Context '$context_name' has wrong endpoint"
+                _cai_error "  Expected: $expected_socket"
+                _cai_error "  Actual: $actual_endpoint"
+                _cai_error "  Remediation: Run 'cai setup' to reconfigure the context"
+                failed=1
+            fi
         fi
     fi
 

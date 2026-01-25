@@ -161,6 +161,22 @@ _cai_select_context() {
     local primary_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"  # containai-docker
     local fallback_context="${_CAI_LEGACY_CONTEXT:-containai-secure}"
 
+    # Inside a container, always use the default context (self-contained daemon)
+    if _cai_is_container; then
+        local default_context="default"
+        if _cai_sysbox_available_for_context "$default_context"; then
+            if [[ "$debug_flag" == "debug" ]]; then
+                printf '%s\n' "[DEBUG] Context selection: Using default context inside container" >&2
+            fi
+            printf '%s' "$default_context"
+            return 0
+        fi
+        if [[ "$debug_flag" == "debug" ]]; then
+            printf '%s\n' "[DEBUG] Context selection: Default context not available inside container" >&2
+        fi
+        return 1
+    fi
+
     # If config specified a context, try it first
     if [[ -n "$context_name" ]]; then
         if _cai_sysbox_available_for_context "$context_name"; then
@@ -385,8 +401,12 @@ _cai_doctor() {
     local seccomp_status=""
     local kernel_ok="true" # Default to true (macOS doesn't need kernel check)
     local kernel_version=""
+    local in_container="false"
 
     platform=$(_cai_detect_platform)
+    if _cai_is_container; then
+        in_container="true"
+    fi
 
     printf '%s\n' "ContainAI Doctor"
     printf '%s\n' "================"
@@ -548,139 +568,172 @@ _cai_doctor() {
     # === ContainAI Docker Section ===
     local containai_docker_ok="false"
     local containai_docker_sysbox_default="false"
+    local docker_context_for_checks="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
     printf '%s\n' "ContainAI Docker"
 
-    # Check containai docker availability
-    # Socket path display is platform-dependent
-    local display_socket
-    if _cai_is_macos; then
-        display_socket="$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock"
-    else
-        display_socket="$_CAI_CONTAINAI_DOCKER_SOCKET"
-    fi
+    if [[ "$in_container" == "true" ]]; then
+        docker_context_for_checks="default"
+        local display_socket="/var/run/docker.sock"
+        local info_output info_rc
+        info_output=$(_cai_timeout 5 env DOCKER_CONTEXT= DOCKER_HOST= docker info 2>&1) && info_rc=0 || info_rc=$?
+        if [[ $info_rc -eq 0 ]]; then
+            containai_docker_ok="true"
+            printf '  %-44s %s\n' "Context 'default':" "[OK]"
+            printf '  %-44s %s\n' "Socket: $display_socket" "[OK]"
 
-    # On Linux/WSL2, check systemd service status first
-    if ! _cai_is_macos; then
-        if _cai_containai_docker_service_active; then
-            printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[OK] active"
-        else
-            local service_state="${_CAI_CONTAINAI_SERVICE_STATE:-unknown}"
-            case "$service_state" in
-                no_systemd)
-                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[SKIP] systemd not available"
-                    ;;
-                systemd_not_running)
-                    # Check if unit file exists even if systemd isn't running
-                    if _cai_containai_docker_service_exists; then
-                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] installed but systemd not running"
-                    else
-                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[SKIP] systemd not running"
-                    fi
-                    ;;
-                inactive)
-                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] inactive"
-                    printf '  %-44s %s\n' "" "(Start with: sudo systemctl start containai-docker)"
-                    ;;
-                failed)
-                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] failed"
-                    printf '  %-44s %s\n' "" "(Check logs: journalctl -u containai-docker)"
-                    ;;
-                activating)
-                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] activating..."
-                    ;;
-                deactivating)
-                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] deactivating..."
-                    ;;
-                unknown)
-                    # State is unknown - check if service exists
-                    if _cai_containai_docker_service_exists; then
-                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] unknown state"
-                    else
-                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[NOT INSTALLED]"
-                        printf '  %-44s %s\n' "" "(Run 'cai setup' to install)"
-                    fi
-                    ;;
-                *)
-                    # Any other state (reloading, maintenance, etc.)
-                    printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] $service_state"
-                    ;;
-            esac
-        fi
-    fi
+            local runtimes actual_default
+            runtimes=$(env DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
+            if printf '%s' "$runtimes" | grep -q "sysbox-runc"; then
+                printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK] Available"
+            else
+                printf '  %-44s %s\n' "Runtime: sysbox-runc" "[ERROR] Not found"
+            fi
 
-    if _cai_containai_docker_available; then
-        containai_docker_ok="true"
-        printf '  %-44s %s\n' "Context '$_CAI_CONTAINAI_DOCKER_CONTEXT':" "[OK]"
-        printf '  %-44s %s\n' "Socket: $display_socket" "[OK]"
-
-        # Check if sysbox-runc is available and default
-        if _cai_containai_docker_has_sysbox; then
-            printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK] Available"
-
-            if _cai_containai_docker_sysbox_is_default; then
+            actual_default=$(env DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
+            if [[ "$actual_default" == "sysbox-runc" ]]; then
                 containai_docker_sysbox_default="true"
                 printf '  %-44s %s\n' "Default runtime: sysbox-runc" "[OK]"
             else
-                local actual_default
-                actual_default=$(_cai_containai_docker_default_runtime) || actual_default="unknown"
-                printf '  %-44s %s\n' "Default runtime: $actual_default" "[WARN]"
+                printf '  %-44s %s\n' "Default runtime: ${actual_default:-unknown}" "[WARN]"
                 printf '  %-44s %s\n' "" "(Expected sysbox-runc as default)"
             fi
         else
-            printf '  %-44s %s\n' "Runtime: sysbox-runc" "[ERROR] Not found"
+            printf '  %-44s %s\n' "ContainAI Docker:" "[ERROR] Not accessible"
+            printf '  %-44s %s\n' "" "(Default Docker daemon not reachable inside container)"
         fi
     else
-        printf '  %-44s %s\n' "ContainAI Docker:" "[NOT INSTALLED]"
-        case "${_CAI_CONTAINAI_ERROR:-}" in
-            context_not_found)
-                printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' not configured)"
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to create isolated Docker daemon)"
-                ;;
-            wrong_endpoint)
-                printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' points to wrong socket)"
-                printf '  %-44s %s\n' "" "(Expected: unix://$display_socket)"
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to reconfigure)"
-                ;;
-            socket_not_found)
-                printf '  %-44s %s\n' "" "(Socket $display_socket not found)"
-                if _cai_is_macos; then
-                    printf '  %-44s %s\n' "" "(Run 'cai setup' or start Lima VM: limactl start $_CAI_LIMA_VM_NAME)"
+        # Check containai docker availability
+        # Socket path display is platform-dependent
+        local display_socket
+        if _cai_is_macos; then
+            display_socket="$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock"
+        else
+            display_socket="$_CAI_CONTAINAI_DOCKER_SOCKET"
+        fi
+
+        # On Linux/WSL2, check systemd service status first
+        if ! _cai_is_macos; then
+            if _cai_containai_docker_service_active; then
+                printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[OK] active"
+            else
+                local service_state="${_CAI_CONTAINAI_SERVICE_STATE:-unknown}"
+                case "$service_state" in
+                    no_systemd)
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[SKIP] systemd not available"
+                        ;;
+                    systemd_not_running)
+                        # Check if unit file exists even if systemd isn't running
+                        if _cai_containai_docker_service_exists; then
+                            printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] installed but systemd not running"
+                        else
+                            printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[SKIP] systemd not running"
+                        fi
+                        ;;
+                    inactive)
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] inactive"
+                        printf '  %-44s %s\n' "" "(Start with: sudo systemctl start containai-docker)"
+                        ;;
+                    failed)
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] failed"
+                        printf '  %-44s %s\n' "" "(Check logs: journalctl -u containai-docker)"
+                        ;;
+                    activating)
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] activating..."
+                        ;;
+                    deactivating)
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] deactivating..."
+                        ;;
+                    unknown)
+                        # State is unknown - check if service exists
+                        if _cai_containai_docker_service_exists; then
+                            printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[ERROR] unknown state"
+                        else
+                            printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[NOT INSTALLED]"
+                            printf '  %-44s %s\n' "" "(Run 'cai setup' to install)"
+                        fi
+                        ;;
+                    *)
+                        # Any other state (reloading, maintenance, etc.)
+                        printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] $service_state"
+                        ;;
+                esac
+            fi
+        fi
+
+        if _cai_containai_docker_available; then
+            containai_docker_ok="true"
+            printf '  %-44s %s\n' "Context '$_CAI_CONTAINAI_DOCKER_CONTEXT':" "[OK]"
+            printf '  %-44s %s\n' "Socket: $display_socket" "[OK]"
+
+            # Check if sysbox-runc is available and default
+            if _cai_containai_docker_has_sysbox; then
+                printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK] Available"
+
+                if _cai_containai_docker_sysbox_is_default; then
+                    containai_docker_sysbox_default="true"
+                    printf '  %-44s %s\n' "Default runtime: sysbox-runc" "[OK]"
                 else
-                    printf '  %-44s %s\n' "" "(Run 'cai setup' or start service: sudo systemctl start containai-docker)"
+                    local actual_default
+                    actual_default=$(_cai_containai_docker_default_runtime) || actual_default="unknown"
+                    printf '  %-44s %s\n' "Default runtime: $actual_default" "[WARN]"
+                    printf '  %-44s %s\n' "" "(Expected sysbox-runc as default)"
                 fi
-                ;;
-            connection_refused | daemon_unavailable)
-                if _cai_is_macos; then
-                    printf '  %-44s %s\n' "" "(Lima VM '$_CAI_LIMA_VM_NAME' not running)"
-                    printf '  %-44s %s\n' "" "(Try: limactl start $_CAI_LIMA_VM_NAME)"
-                else
-                    printf '  %-44s %s\n' "" "(containai-docker service not running)"
-                    printf '  %-44s %s\n' "" "(Try: sudo systemctl start containai-docker)"
-                fi
-                ;;
-            permission_denied)
-                printf '  %-44s %s\n' "" "(Permission denied accessing Docker socket)"
-                if ! _cai_is_macos; then
-                    printf '  %-44s %s\n' "" "(Add user to docker group: sudo usermod -aG docker \$USER)"
-                fi
-                ;;
-            timeout)
-                printf '  %-44s %s\n' "" "(Docker command timed out)"
-                if _cai_is_macos; then
-                    printf '  %-44s %s\n' "" "(Check Lima VM status: limactl list)"
-                else
-                    printf '  %-44s %s\n' "" "(Check if daemon is responsive: sudo systemctl status containai-docker)"
-                fi
-                ;;
-            no_timeout)
-                printf '  %-44s %s\n' "" "(No timeout command available)"
-                printf '  %-44s %s\n' "" "(Install coreutils: apt install coreutils)"
-                ;;
-            *)
-                printf '  %-44s %s\n' "" "(Run 'cai setup' to install isolated Docker daemon)"
-                ;;
-        esac
+            else
+                printf '  %-44s %s\n' "Runtime: sysbox-runc" "[ERROR] Not found"
+            fi
+        else
+            printf '  %-44s %s\n' "ContainAI Docker:" "[NOT INSTALLED]"
+            case "${_CAI_CONTAINAI_ERROR:-}" in
+                context_not_found)
+                    printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' not configured)"
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' to create isolated Docker daemon)"
+                    ;;
+                wrong_endpoint)
+                    printf '  %-44s %s\n' "" "(Context '$_CAI_CONTAINAI_DOCKER_CONTEXT' points to wrong socket)"
+                    printf '  %-44s %s\n' "" "(Expected: unix://$display_socket)"
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' to reconfigure)"
+                    ;;
+                socket_not_found)
+                    printf '  %-44s %s\n' "" "(Socket $display_socket not found)"
+                    if _cai_is_macos; then
+                        printf '  %-44s %s\n' "" "(Run 'cai setup' or start Lima VM: limactl start $_CAI_LIMA_VM_NAME)"
+                    else
+                        printf '  %-44s %s\n' "" "(Run 'cai setup' or start service: sudo systemctl start containai-docker)"
+                    fi
+                    ;;
+                connection_refused | daemon_unavailable)
+                    if _cai_is_macos; then
+                        printf '  %-44s %s\n' "" "(Lima VM '$_CAI_LIMA_VM_NAME' not running)"
+                        printf '  %-44s %s\n' "" "(Try: limactl start $_CAI_LIMA_VM_NAME)"
+                    else
+                        printf '  %-44s %s\n' "" "(containai-docker service not running)"
+                        printf '  %-44s %s\n' "" "(Try: sudo systemctl start containai-docker)"
+                    fi
+                    ;;
+                permission_denied)
+                    printf '  %-44s %s\n' "" "(Permission denied accessing Docker socket)"
+                    if ! _cai_is_macos; then
+                        printf '  %-44s %s\n' "" "(Add user to docker group: sudo usermod -aG docker \$USER)"
+                    fi
+                    ;;
+                timeout)
+                    printf '  %-44s %s\n' "" "(Docker command timed out)"
+                    if _cai_is_macos; then
+                        printf '  %-44s %s\n' "" "(Check Lima VM status: limactl list)"
+                    else
+                        printf '  %-44s %s\n' "" "(Check if daemon is responsive: sudo systemctl status containai-docker)"
+                    fi
+                    ;;
+                no_timeout)
+                    printf '  %-44s %s\n' "" "(No timeout command available)"
+                    printf '  %-44s %s\n' "" "(Install coreutils: apt install coreutils)"
+                    ;;
+                *)
+                    printf '  %-44s %s\n' "" "(Run 'cai setup' to install isolated Docker daemon)"
+                    ;;
+            esac
+        fi
     fi
 
     printf '\n'
@@ -748,11 +801,11 @@ _cai_doctor() {
     if [[ "$ssh_key_ok" == "true" ]] && [[ "$ssh_include_ok" == "true" ]] && [[ "$containai_docker_ok" == "true" ]]; then
         # Check if any ContainAI containers are running (with timeout to keep doctor fast)
         local running_containers
-        running_containers=$(_cai_timeout 5 docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" ps --filter "label=containai.workspace" --format '{{.Names}}' 2>/dev/null | head -1) || running_containers=""
+        running_containers=$(_cai_timeout 5 docker --context "$docker_context_for_checks" ps --filter "label=containai.workspace" --format '{{.Names}}' 2>/dev/null | head -1) || running_containers=""
         if [[ -n "$running_containers" ]]; then
             local test_container="$running_containers"
             local ssh_port
-            ssh_port=$(_cai_timeout 5 docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" inspect "$test_container" --format '{{index .Config.Labels "containai.ssh-port"}}' 2>/dev/null) || ssh_port=""
+            ssh_port=$(_cai_timeout 5 docker --context "$docker_context_for_checks" inspect "$test_container" --format '{{index .Config.Labels "containai.ssh-port"}}' 2>/dev/null) || ssh_port=""
             if [[ -n "$ssh_port" ]]; then
                 # Try connectivity test with BatchMode and short timeout
                 # Use same known_hosts file as cai shell/run for accurate UX reflection
@@ -1250,8 +1303,12 @@ _cai_doctor_json() {
     local recommended_action="setup_required"
     local kernel_version=""
     local kernel_compatible="true"
+    local in_container="false"
 
     platform=$(_cai_detect_platform)
+    if _cai_is_container; then
+        in_container="true"
+    fi
     # Normalize platform type for JSON (wsl -> wsl2 per spec)
     if [[ "$platform" == "wsl" ]]; then
         platform_json="wsl2"
@@ -1260,13 +1317,18 @@ _cai_doctor_json() {
     fi
 
     # Resolve context: use _cai_select_context which tries config override,
-    # then containai-docker, then legacy fallback for old installs
-    local config_context
-    config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
-    sysbox_context_name=$(_cai_select_context "$config_context" 2>/dev/null) || sysbox_context_name=""
-    # Default for error reporting if no context available
-    if [[ -z "$sysbox_context_name" ]]; then
-        sysbox_context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    # then containai-docker, then legacy fallback for old installs.
+    # Inside a container, always use default context.
+    if [[ "$in_container" == "true" ]]; then
+        sysbox_context_name="default"
+    else
+        local config_context
+        config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
+        sysbox_context_name=$(_cai_select_context "$config_context" 2>/dev/null) || sysbox_context_name=""
+        # Default for error reporting if no context available
+        if [[ -z "$sysbox_context_name" ]]; then
+            sysbox_context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+        fi
     fi
 
     # Check Sysbox with resolved context name
@@ -1351,26 +1413,50 @@ _cai_doctor_json() {
     local containai_docker_service_active="false"
     local containai_docker_service_state=""
     local containai_docker_service_exists="false"
+    local containai_context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    local containai_socket="$_CAI_CONTAINAI_DOCKER_SOCKET"
 
-    # Check systemd service status (Linux/WSL2 only)
-    if [[ "$platform" != "macos" ]]; then
-        if _cai_containai_docker_service_exists; then
-            containai_docker_service_exists="true"
-        fi
-        if _cai_containai_docker_service_active; then
-            containai_docker_service_active="true"
-        fi
-        containai_docker_service_state="${_CAI_CONTAINAI_SERVICE_STATE:-unknown}"
-    fi
-
-    if _cai_containai_docker_available; then
-        containai_docker_ok="true"
-        containai_docker_default_runtime=$(_cai_containai_docker_default_runtime) || containai_docker_default_runtime=""
-        if _cai_containai_docker_sysbox_is_default; then
-            containai_docker_sysbox_default="true"
+    if [[ "$in_container" == "true" ]]; then
+        containai_context_name="default"
+        containai_socket="/var/run/docker.sock"
+        local info_output info_rc
+        info_output=$(_cai_timeout 10 env DOCKER_CONTEXT= DOCKER_HOST= docker info 2>&1) && info_rc=0 || info_rc=$?
+        if [[ $info_rc -eq 0 ]]; then
+            containai_docker_ok="true"
+            containai_docker_default_runtime=$(env DOCKER_CONTEXT= DOCKER_HOST= docker info --format '{{.DefaultRuntime}}' 2>/dev/null || true)
+            if [[ "$containai_docker_default_runtime" == "sysbox-runc" ]]; then
+                containai_docker_sysbox_default="true"
+            fi
+        else
+            if printf '%s' "$info_output" | grep -qi "permission denied"; then
+                containai_docker_error="permission_denied"
+            elif printf '%s' "$info_output" | grep -qi "connection refused"; then
+                containai_docker_error="connection_refused"
+            else
+                containai_docker_error="daemon_unavailable"
+            fi
         fi
     else
-        containai_docker_error="${_CAI_CONTAINAI_ERROR:-unknown}"
+        # Check systemd service status (Linux/WSL2 only)
+        if [[ "$platform" != "macos" ]]; then
+            if _cai_containai_docker_service_exists; then
+                containai_docker_service_exists="true"
+            fi
+            if _cai_containai_docker_service_active; then
+                containai_docker_service_active="true"
+            fi
+            containai_docker_service_state="${_CAI_CONTAINAI_SERVICE_STATE:-unknown}"
+        fi
+
+        if _cai_containai_docker_available; then
+            containai_docker_ok="true"
+            containai_docker_default_runtime=$(_cai_containai_docker_default_runtime) || containai_docker_default_runtime=""
+            if _cai_containai_docker_sysbox_is_default; then
+                containai_docker_sysbox_default="true"
+            fi
+        else
+            containai_docker_error="${_CAI_CONTAINAI_ERROR:-unknown}"
+        fi
     fi
 
     # Check SSH setup
@@ -1428,10 +1514,10 @@ _cai_doctor_json() {
     printf '  },\n'
     printf '  "containai_docker": {\n'
     printf '    "available": %s,\n' "$containai_docker_ok"
-    printf '    "context_name": "%s",\n' "$_CAI_CONTAINAI_DOCKER_CONTEXT"
-    printf '    "socket": "%s",\n' "$_CAI_CONTAINAI_DOCKER_SOCKET"
+    printf '    "context_name": "%s",\n' "$containai_context_name"
+    printf '    "socket": "%s",\n' "$containai_socket"
     # Service status (Linux/WSL2 only)
-    if [[ "$platform" != "macos" ]]; then
+    if [[ "$platform" != "macos" ]] && [[ "$in_container" != "true" ]]; then
         printf '    "service_name": "%s",\n' "$_CAI_CONTAINAI_DOCKER_SERVICE"
         printf '    "service_exists": %s,\n' "$containai_docker_service_exists"
         printf '    "service_active": %s,\n' "$containai_docker_service_active"

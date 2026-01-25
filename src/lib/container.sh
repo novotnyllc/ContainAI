@@ -1234,10 +1234,16 @@ _containai_start_container() {
     fi
     if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
         if [[ "$force_flag" == "true" ]]; then
-            echo "[WARN] No Sysbox context available but --force specified." >&2
+            echo "[WARN] Sysbox context check failed; attempting to use an existing context without validation." >&2
             echo "[WARN] Container creation will still require sysbox-runc runtime." >&2
-            echo "[WARN] This may fail if Sysbox is not installed on the default Docker host." >&2
-            selected_context=""
+            if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                selected_context="$config_context_override"
+            elif _cai_containai_docker_context_exists; then
+                selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+            else
+                _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                return 1
+            fi
         else
             _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
             _cai_error "Use --force to bypass context selection (Sysbox runtime still required)"

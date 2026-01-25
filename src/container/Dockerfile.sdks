@@ -146,10 +146,6 @@ ENV GOROOT=/usr/local/go
 ENV GOPATH=/home/agent/go
 ENV PATH="${GOPATH}/bin:${GOROOT}/bin:${PATH}"
 
-# Create Go workspace directories for agent user
-USER agent
-RUN mkdir -p /home/agent/go/bin /home/agent/go/src /home/agent/go/pkg
-
 # =============================================================================
 # FINAL CONFIGURATION
 # =============================================================================

@@ -318,6 +318,30 @@ _CAI_CONTAINAI_DOCKER_BRIDGE="cai0"
 _CAI_CONTAINAI_DOCKER_SERVICE="containai-docker.service"
 _CAI_CONTAINAI_DOCKER_UNIT="/etc/systemd/system/containai-docker.service"
 
+# Expected Docker host endpoint for the ContainAI context.
+# - macOS: Lima socket
+# - container (nested): inner Docker socket
+# - Linux/WSL2 host: isolated containai-docker socket
+_cai_expected_docker_host() {
+    if _cai_is_macos; then
+        printf '%s' "unix://$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock"
+        return 0
+    fi
+    if _cai_is_container; then
+        printf '%s' "unix:///var/run/docker.sock"
+        return 0
+    fi
+    printf '%s' "unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+    return 0
+}
+
+# Expected Docker socket path (no unix:// prefix)
+_cai_expected_docker_socket_path() {
+    local host
+    host=$(_cai_expected_docker_host)
+    printf '%s' "${host#unix://}"
+}
+
 # Constants for ContainAI-managed dockerd bundle paths (Linux/WSL2 only)
 # Uses versioned directories with stable symlinks for atomic updates
 _CAI_CONTAINAI_DIR="/opt/containai"
@@ -446,15 +470,9 @@ _cai_containai_docker_context_exists() {
         return 1
     fi
 
-    # Verify the context points to the expected socket (platform-dependent)
+    # Verify the context points to the expected socket (platform/container-dependent)
     local expected_host
-    if _cai_is_macos; then
-        # macOS uses Lima VM socket
-        expected_host="unix://$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock"
-    else
-        # Linux/WSL2 uses isolated daemon socket
-        expected_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
-    fi
+    expected_host=$(_cai_expected_docker_host)
     local actual_host
     actual_host=$(docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
 
@@ -470,11 +488,9 @@ _cai_containai_docker_context_exists() {
 # Returns: 0=socket exists, 1=socket does not exist
 # Note: Socket path is platform-dependent (Linux/WSL2 vs macOS Lima)
 _cai_containai_docker_socket_exists() {
-    if _cai_is_macos; then
-        [[ -S "$HOME/.lima/$_CAI_CONTAINAI_DOCKER_CONTEXT/sock/docker.sock" ]]
-    else
-        [[ -S "$_CAI_CONTAINAI_DOCKER_SOCKET" ]]
-    fi
+    local socket_path
+    socket_path=$(_cai_expected_docker_socket_path)
+    [[ -S "$socket_path" ]]
 }
 
 # Check if containai-docker daemon is accessible

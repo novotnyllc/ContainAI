@@ -9,6 +9,7 @@
 #   _cai_is_wsl()             - Check if running under WSL
 #   _cai_is_macos()           - Check if running on macOS
 #   _cai_is_linux()           - Check if running on Linux (non-WSL)
+#   _cai_is_container()       - Check if running inside a container
 #
 # Resource detection:
 #   _cai_detect_memory_bytes()     - Detect host memory in bytes
@@ -97,6 +98,12 @@ _cai_is_macos() {
 # Returns: 0=yes, 1=no
 _cai_is_linux() {
     [[ "$(_cai_detect_platform)" == "linux" ]]
+}
+
+# Check if running inside a container (Docker/Podman/Systemd-nspawn)
+# Returns: 0=yes, 1=no
+_cai_is_container() {
+    [[ -n "${container:-}" ]] || [[ -f "/.dockerenv" ]] || [[ -f "/run/.containerenv" ]]
 }
 
 # ==============================================================================

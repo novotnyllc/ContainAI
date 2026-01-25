@@ -650,9 +650,8 @@ _containai_import_cmd() {
     if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
         : # success - selected_context is isolated context (Sysbox)
     else
-        # No isolation available - fallback to default context with warning
-        echo "[WARN] No isolation available, using default Docker context" >&2
-        selected_context=""
+        echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+        return 1
     fi
 
     # Resolve volume
@@ -1057,10 +1056,13 @@ _containai_docker_cmd() {
     fi
 
     local context=""
-    if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+    if _cai_is_container; then
+        context=""
+    elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
         context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     else
-        context=$(docker context show 2>/dev/null || true)
+        echo "[ERROR] ContainAI Docker context not found. Run 'cai setup'." >&2
+        return 1
     fi
 
     local arg
@@ -1073,11 +1075,77 @@ _containai_docker_cmd() {
         esac
     done
 
+    local -a docker_base=(docker)
     if [[ -n "$context" ]]; then
-        docker --context "$context" "$@"
-    else
-        docker "$@"
+        docker_base+=(--context "$context")
     fi
+
+    local -a args=("$@")
+
+    # Ensure docker exec defaults to the agent user for ContainAI-managed containers
+    if [[ "${args[0]:-}" == "exec" ]]; then
+        local has_user="false"
+        local container_name=""
+        local i=1 token=""
+        local args_len=${#args[@]}
+
+        while ((i < args_len)); do
+            token="${args[i]}"
+            case "$token" in
+                -u|--user)
+                    has_user="true"
+                    i=$((i + 2))
+                    continue
+                    ;;
+                -u=*|--user=*)
+                    has_user="true"
+                    i=$((i + 1))
+                    continue
+                    ;;
+                --env=*|--env-file=*|--workdir=*|--detach-keys=*)
+                    i=$((i + 1))
+                    continue
+                    ;;
+                -e|--env|--env-file|-w|--workdir|--detach-keys)
+                    i=$((i + 2))
+                    continue
+                    ;;
+                --)
+                    if ((i + 1 < args_len)); then
+                        container_name="${args[i + 1]}"
+                    fi
+                    break
+                    ;;
+                -*)
+                    i=$((i + 1))
+                    continue
+                    ;;
+                *)
+                    container_name="$token"
+                    break
+                    ;;
+            esac
+        done
+
+        if [[ "$has_user" != "true" && -n "$container_name" ]]; then
+            local managed_label image_name is_containai="false"
+            managed_label=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || managed_label=""
+            if [[ "$managed_label" == "true" ]]; then
+                is_containai="true"
+            else
+                image_name=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
+                if [[ "$image_name" == "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                    is_containai="true"
+                fi
+            fi
+
+            if [[ "$is_containai" == "true" ]]; then
+                args=(exec -u agent "${args[@]:1}")
+            fi
+        fi
+    fi
+
+    DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" "${args[@]}"
 }
 
 # Shell subcommand handler - connects to container via SSH
@@ -1335,8 +1403,15 @@ _containai_shell_cmd() {
     fi
     if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
         if [[ "$force_flag" == "true" ]]; then
-            _cai_warn "No Sysbox context available but --force specified."
-            selected_context=""
+            _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
+            if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                selected_context="$config_context_override"
+            elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+            else
+                _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                return 1
+            fi
         else
             _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
             return 1

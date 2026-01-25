@@ -223,6 +223,22 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
+#### Windows Docker CLI (named pipe)
+
+ContainAI can expose the isolated daemon to Windows via a named pipe. If `npiperelay.exe` is available in the Windows PATH, `cai setup` will:
+
+If `npiperelay.exe` is missing, `cai setup` attempts to install it via `winget.exe install jstarks.npiperelay`.
+
+1. Install `socat` in WSL (if needed)
+2. Create and start the systemd service `containai-npipe-bridge.service`
+3. Configure the Windows Docker context `containai-docker` to use the named pipe:
+
+```powershell
+docker --context containai-docker info
+```
+
+The named pipe endpoint is `npipe:////./pipe/containai-docker`.
+
 ---
 
 ### Native Linux
