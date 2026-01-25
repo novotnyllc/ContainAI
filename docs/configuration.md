@@ -175,6 +175,45 @@ env_file = ".env.local"
 - If `[env]` section is missing, no environment variables are imported (silent)
 - If `import` is missing or invalid, treated as empty list with a warning
 
+### `[import]` Section
+
+Configuration for additional files and directories to sync via `cai import`. This allows users to specify custom dotfiles or tool configurations beyond the built-in sync map.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `additional_paths` | array of strings | `[]` | Additional files/directories to sync from host |
+
+```toml
+[import]
+additional_paths = [
+    "~/.my-tool/config.json",
+    "~/.my-other-tool/",
+]
+```
+
+**Path rules:**
+- Must start with `~/` (tilde expansion) or be an absolute path under `$HOME`
+- Cannot reference other users' home directories (`~user/` is rejected)
+- No path traversal allowed (`/../` or `/..` segments are rejected)
+- Paths are validated to be under `$HOME` after resolution
+
+**Target path mapping:**
+- Leading dots are stripped for visibility in the volume
+- `~/.my-tool/config.json` becomes `/target/my-tool/config.json`
+- `~/.my-other-tool/` becomes `/target/my-other-tool/`
+
+**Behavior:**
+- If `[import]` section is missing, no additional paths are synced (silent)
+- If `additional_paths` is missing or invalid, treated as empty list with a warning
+- Paths that don't exist on the host are silently skipped
+- Files and directories are detected automatically
+- Works with workspace-specific config (`.containai/config.toml`) and user config (`~/.config/containai/config.toml`)
+
+**Viewing what will be synced:**
+```bash
+cai import --dry-run   # Shows additional paths from config
+```
+
 ### `[danger]` Section
 
 Optional audit trail for dangerous features. **This section is informational only - CLI flags are the actual gates.**

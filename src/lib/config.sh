@@ -1083,6 +1083,180 @@ print(json.dumps(result, separators=(',', ':')))
 }
 
 # ==============================================================================
+# Import config resolution (for additional_paths)
+# ==============================================================================
+
+# Resolve [import].additional_paths from config
+# Validates paths and outputs newline-delimited list of validated paths
+#
+# Arguments: $1 = workspace path (default: $PWD)
+#            $2 = explicit config path (optional)
+# Outputs: Validated paths (newline-separated), each as absolute path under $HOME
+# Returns: 0 on success, 1 on fatal error (explicit config missing or strict parse error)
+#
+# Path validation rules (per spec):
+# - Must start with ~/ or be absolute under $HOME
+# - No path traversal (/../ or /.. segments)
+# - Paths are resolved to absolute form for output
+#
+# Behavior:
+# - Missing [import] section: returns empty (no additional paths)
+# - Missing or invalid additional_paths: returns empty with [WARN]
+# - Invalid paths: skipped with [WARN]
+# - Python unavailable (discovered config): returns empty with [WARN]
+# - Python unavailable (explicit config): return 1 (fail fast)
+_containai_resolve_import_additional_paths() {
+    local workspace="${1:-$PWD}"
+    local explicit_config="${2:-}"
+    local config_file script_dir paths_output
+
+    # Resolve workspace to absolute path (preserve original for warning message)
+    local workspace_input="$workspace"
+    if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
+        printf '%s\n' "[WARN] Invalid workspace path, using \$PWD: $workspace_input" >&2
+        workspace="$PWD"
+    fi
+
+    # Find config file
+    if [[ -n "$explicit_config" ]]; then
+        # Explicit config: must exist
+        if [[ ! -f "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Config file not found: $explicit_config" >&2
+            return 1
+        fi
+        config_file="$explicit_config"
+    else
+        config_file=$(_containai_find_config "$workspace")
+    fi
+
+    # If no config found, return empty (no additional paths)
+    if [[ -z "$config_file" ]]; then
+        return 0
+    fi
+
+    # Check if config file exists (for discovered config)
+    if [[ ! -f "$config_file" ]]; then
+        return 0
+    fi
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        if [[ -n "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Python required to parse config: $config_file" >&2
+            return 1
+        fi
+        printf '%s\n' "[WARN] Python not found, cannot parse config. Skipping additional paths." >&2
+        return 0
+    fi
+
+    # Determine script directory (where parse-toml.py lives)
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        if [[ -n "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Failed to determine script directory" >&2
+            return 1
+        fi
+        printf '%s\n' "[WARN] Failed to determine script directory. Skipping additional paths." >&2
+        return 0
+    fi
+
+    # Call parse-toml.py --json to get full config, then extract and validate [import].additional_paths
+    # Python handles validation: must be under $HOME, no traversal
+    local config_json
+    if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>/dev/null); then
+        if [[ -n "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Failed to parse config file: $config_file" >&2
+            return 1
+        fi
+        printf '%s\n' "[WARN] Failed to parse config file: $config_file" >&2
+        return 0
+    fi
+
+    # Extract and validate additional_paths using Python
+    # Pass HOME for tilde expansion and validation
+    if ! paths_output=$(printf '%s' "$config_json" | python3 -c "
+import json
+import sys
+import os
+from pathlib import Path
+
+config = json.load(sys.stdin)
+home = os.environ.get('HOME', '')
+if not home:
+    sys.exit(0)
+
+home_path = Path(home).resolve()
+
+import_section = config.get('import', {})
+if not isinstance(import_section, dict):
+    sys.exit(0)
+
+additional_paths = import_section.get('additional_paths', [])
+if not isinstance(additional_paths, list):
+    print('[WARN] [import].additional_paths must be a list, skipping', file=sys.stderr)
+    sys.exit(0)
+
+for i, path_str in enumerate(additional_paths):
+    if not isinstance(path_str, str):
+        print(f'[WARN] [import].additional_paths[{i}] must be a string, skipping', file=sys.stderr)
+        continue
+
+    # Skip empty paths
+    if not path_str.strip():
+        print(f'[WARN] [import].additional_paths[{i}] is empty, skipping', file=sys.stderr)
+        continue
+
+    # Reject multi-line values (security)
+    if '\n' in path_str or '\r' in path_str:
+        print(f'[WARN] [import].additional_paths[{i}] contains newlines, skipping', file=sys.stderr)
+        continue
+
+    # Expand ~ to HOME
+    if path_str.startswith('~/'):
+        expanded = home + path_str[1:]
+    elif path_str.startswith('~'):
+        # Reject ~user syntax (other users' homes)
+        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" references another user home, skipping', file=sys.stderr)
+        continue
+    else:
+        expanded = path_str
+
+    # Check for path traversal BEFORE resolving (reject explicit /../ or /..)
+    if '/../' in expanded or expanded.endswith('/..') or expanded == '..':
+        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" contains path traversal, skipping', file=sys.stderr)
+        continue
+
+    # Resolve to absolute path
+    try:
+        resolved = Path(expanded).resolve()
+    except (OSError, ValueError) as e:
+        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" cannot be resolved: {e}, skipping', file=sys.stderr)
+        continue
+
+    # Validate path is under HOME
+    try:
+        resolved.relative_to(home_path)
+    except ValueError:
+        print(f'[WARN] [import].additional_paths[{i}] \"{path_str}\" is not under HOME, skipping', file=sys.stderr)
+        continue
+
+    # Output the validated absolute path
+    print(str(resolved))
+"); then
+        # Python script failed
+        if [[ -n "$explicit_config" ]]; then
+            printf '%s\n' "[ERROR] Failed to extract additional_paths from config" >&2
+            return 1
+        fi
+        printf '%s\n' "[WARN] Failed to extract additional_paths from config" >&2
+        return 0
+    fi
+
+    # Output validated paths
+    printf '%s' "$paths_output"
+    return 0
+}
+
+# ==============================================================================
 # Danger section resolution
 # ==============================================================================
 

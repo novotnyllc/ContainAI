@@ -800,6 +800,102 @@ _import_discover_ssh_keys() {
 }
 
 # ==============================================================================
+# User-specified additional paths
+# ==============================================================================
+
+# Generate sync map entries for user-specified additional paths from config
+# Reads [import].additional_paths from config and generates entries
+# Arguments:
+#   $1 = source directory (e.g., $HOME or custom --from path)
+#   $2 = workspace path (for config discovery)
+#   $3 = explicit config path (optional)
+# Output (stdout): newline-delimited entries in format:
+#   /source/.my-tool/config.json:/target/my-tool/config.json:f (files)
+#   /source/.my-tool/:/target/my-tool/:d (directories)
+#
+# Target path mapping per spec:
+#   ~/.my-tool/config.json -> /target/my-tool/config.json
+#   ~/.my-other-tool/ -> /target/my-other-tool/
+#
+# Note: This function is "best effort" - config parsing failures result in no
+# additional entries rather than import failure (graceful degradation)
+_import_generate_additional_entries() {
+    local source_root="$1"
+    local workspace="${2:-$PWD}"
+    local explicit_config="${3:-}"
+
+    # Check if _containai_resolve_import_additional_paths is available (from config.sh)
+    if ! declare -f _containai_resolve_import_additional_paths >/dev/null 2>&1; then
+        # config.sh not sourced - no additional paths
+        return 0
+    fi
+
+    # Resolve additional paths from config
+    local additional_paths
+    additional_paths=$(_containai_resolve_import_additional_paths "$workspace" "$explicit_config")
+
+    # Process each path
+    local abs_path home_path home_rel target_rel source_rel flags
+    while IFS= read -r abs_path; do
+        [[ -z "$abs_path" ]] && continue
+
+        home_path="${HOME:-}"
+        [[ -z "$home_path" ]] && continue
+
+        # Compute home-relative path (absolute path was already validated to be under HOME)
+        # Remove HOME prefix (with or without trailing slash)
+        if [[ "$abs_path" == "$home_path" ]]; then
+            # Path is HOME itself - skip (too broad)
+            echo "[WARN] Skipping additional_path: $abs_path (cannot sync entire HOME)" >&2
+            continue
+        elif [[ "$abs_path" == "$home_path/"* ]]; then
+            home_rel="${abs_path#"$home_path"/}"
+        else
+            # Should not happen (validation already done), but handle gracefully
+            echo "[WARN] Skipping additional_path: $abs_path (not under HOME)" >&2
+            continue
+        fi
+
+        # Skip empty home_rel (defensive)
+        [[ -z "$home_rel" ]] && continue
+
+        # Compute target path: strip leading dot if present for visibility
+        # ~/.my-tool -> /target/my-tool (not /target/.my-tool)
+        if [[ "$home_rel" == .* ]]; then
+            target_rel="${home_rel#.}"
+        else
+            target_rel="$home_rel"
+        fi
+
+        # Compute source path for rsync (relative to source_root)
+        # Use /source/ prefix for compatibility with rsync container mount
+        source_rel="/source/.$target_rel"
+
+        # Determine if path is file or directory
+        local actual_path="$source_root/.$target_rel"
+        if [[ -d "$actual_path" ]]; then
+            # Directory - add 'd' flag, ensure trailing slash consistency
+            # Remove trailing slash from paths for consistent formatting
+            target_rel="${target_rel%/}"
+            source_rel="${source_rel%/}"
+            flags="d"
+        elif [[ -f "$actual_path" ]]; then
+            # File - add 'f' flag
+            flags="f"
+        elif [[ -L "$actual_path" ]]; then
+            # Symlink - treat as file (rsync follows by default)
+            flags="f"
+        else
+            # Path doesn't exist in source - skip silently (may not exist on this system)
+            continue
+        fi
+
+        # Output the entry
+        printf '%s:/target/%s:%s\n' "$source_rel" "$target_rel" "$flags"
+    done <<<"$additional_paths"
+}
+
+# ==============================================================================
 # Import overrides
 # ==============================================================================
 
@@ -2391,6 +2487,23 @@ done <<'"'"'MAP_DATA'"'"'
         fi
         sync_map_entries+="$ssh_key_entry"$'\n'
     done <<<"$ssh_key_entries"
+
+    # Dynamically discover user-specified additional paths from config
+    # These are added to sync_map_entries just like SSH keys
+    local additional_entries additional_entry
+    additional_entries=$(_import_generate_additional_entries "$source_root" "$workspace" "$explicit_config")
+    while IFS= read -r additional_entry; do
+        [[ -z "$additional_entry" ]] && continue
+        # Additional paths don't have secret flag by default
+        # User can add secret files but they're not automatically marked
+        # Show in dry-run mode
+        if [[ "$dry_run" == "true" ]]; then
+            entry_path_display="${additional_entry%%:*}"
+            entry_path_display="~${entry_path_display#/source}"
+            echo "[DRY-RUN] Additional path from config: $entry_path_display"
+        fi
+        sync_map_entries+="$additional_entry"$'\n'
+    done <<<"$additional_entries"
 
     # If we have excludes, use destination-relative rewriting
     # Otherwise, just pass entries as-is (with empty 4th field for excludes)
