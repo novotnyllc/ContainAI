@@ -118,12 +118,23 @@ ensure_volume_structure() {
     ensure_file "${DATA_DIR}/claude/settings.local.json"
     ensure_dir "${DATA_DIR}/claude/plugins"
     ensure_dir "${DATA_DIR}/claude/skills"
+    ensure_dir "${DATA_DIR}/claude/commands"
+    ensure_dir "${DATA_DIR}/claude/agents"
+    ensure_dir "${DATA_DIR}/claude/hooks"
+    ensure_file "${DATA_DIR}/claude/CLAUDE.md"
 
     # GitHub CLI
     ensure_dir "${DATA_DIR}/config/gh"
 
-    # OpenCode config
+    # OpenCode config (selective sync - specific subdirs only)
     ensure_dir "${DATA_DIR}/config/opencode"
+    ensure_file "${DATA_DIR}/config/opencode/opencode.json"
+    ensure_dir "${DATA_DIR}/config/opencode/agents"
+    ensure_dir "${DATA_DIR}/config/opencode/commands"
+    ensure_dir "${DATA_DIR}/config/opencode/skills"
+    ensure_dir "${DATA_DIR}/config/opencode/modes"
+    ensure_dir "${DATA_DIR}/config/opencode/plugins"
+    ensure_file "${DATA_DIR}/config/opencode/instructions.md"
 
     # tmux and fonts
     ensure_dir "${DATA_DIR}/config/tmux"
@@ -189,6 +200,22 @@ ensure_volume_structure() {
     ensure_dir "${DATA_DIR}/local/share/opencode"
     ensure_file "${DATA_DIR}/local/share/opencode/auth.json"
 
+    # Aider (may contain API keys)
+    ensure_dir "${DATA_DIR}/aider"
+    ensure_file "${DATA_DIR}/aider/aider.conf.yml"
+    ensure_file "${DATA_DIR}/aider/aider.model.settings.yml"
+
+    # Continue (selective sync: config files only)
+    ensure_dir "${DATA_DIR}/continue"
+    ensure_file "${DATA_DIR}/continue/config.yaml"
+    ensure_file "${DATA_DIR}/continue/config.json"
+
+    # Cursor (selective sync: mcp.json, rules, extensions)
+    ensure_dir "${DATA_DIR}/cursor"
+    ensure_file "${DATA_DIR}/cursor/mcp.json"
+    ensure_dir "${DATA_DIR}/cursor/rules"
+    ensure_dir "${DATA_DIR}/cursor/extensions"
+
     # Secret permissions
     safe_chmod 600 "${DATA_DIR}/claude/claude.json"
     safe_chmod 600 "${DATA_DIR}/claude/credentials.json"
@@ -196,6 +223,11 @@ ensure_volume_structure() {
     safe_chmod 600 "${DATA_DIR}/gemini/oauth_creds.json"
     safe_chmod 600 "${DATA_DIR}/codex/auth.json"
     safe_chmod 600 "${DATA_DIR}/local/share/opencode/auth.json"
+    safe_chmod 600 "${DATA_DIR}/aider/aider.conf.yml"
+    safe_chmod 600 "${DATA_DIR}/aider/aider.model.settings.yml"
+    safe_chmod 600 "${DATA_DIR}/continue/config.yaml"
+    safe_chmod 600 "${DATA_DIR}/continue/config.json"
+    safe_chmod 600 "${DATA_DIR}/cursor/mcp.json"
     safe_chmod 700 "${DATA_DIR}/config/gh"
 
     run_as_root chown -R --no-dereference 1000:1000 "${DATA_DIR}"
