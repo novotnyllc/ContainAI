@@ -751,7 +751,7 @@ show_setup_instructions() {
             *)
                 echo "  - Configures secure container isolation"
                 echo "  - Ubuntu/Debian: auto-installs Sysbox"
-                echo "  - Other distros: requires manual Sysbox install"
+                echo "  - Other distros: manual setup required (see docs)"
                 ;;
         esac
         echo ""

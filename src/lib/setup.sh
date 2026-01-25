@@ -3827,7 +3827,7 @@ Configures secure container isolation with Sysbox runtime.
 
 Platform behavior:
   - Linux (Ubuntu/Debian) / WSL2: Installs Sysbox, creates isolated Docker daemon
-  - Linux (other distros): Requires manual Sysbox install, then creates daemon
+  - Linux (other distros): Manual setup required (see docs/setup-guide.md)
   - macOS: Creates a lightweight Linux VM (Lima) running Docker + Sysbox
 
 Options:
