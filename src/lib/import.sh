@@ -357,12 +357,23 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.claude/settings.local.json:/target/claude/settings.local.json:f"
         "/source/.claude/plugins:/target/claude/plugins:d"
         "/source/.claude/skills:/target/claude/skills:d"
+        "/source/.claude/commands:/target/claude/commands:d"
+        "/source/.claude/agents:/target/claude/agents:d"
+        "/source/.claude/hooks:/target/claude/hooks:d"
+        "/source/.claude/CLAUDE.md:/target/claude/CLAUDE.md:f"
 
         # --- GitHub CLI ---
         "/source/.config/gh:/target/config/gh:ds"
 
         # --- OpenCode (config) ---
-        "/source/.config/opencode:/target/config/opencode:d"
+        # Selective sync: config files only, skip caches
+        "/source/.config/opencode/opencode.json:/target/config/opencode/opencode.json:f"
+        "/source/.config/opencode/agents:/target/config/opencode/agents:d"
+        "/source/.config/opencode/commands:/target/config/opencode/commands:d"
+        "/source/.config/opencode/skills:/target/config/opencode/skills:d"
+        "/source/.config/opencode/modes:/target/config/opencode/modes:d"
+        "/source/.config/opencode/plugins:/target/config/opencode/plugins:d"
+        "/source/.config/opencode/instructions.md:/target/config/opencode/instructions.md:f"
 
         # --- tmux ---
         # XDG precedence: legacy ~/.tmux.conf syncs first, then XDG ~/.config/tmux/ overwrites
@@ -429,6 +440,21 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         # --- OpenCode (data) ---
         # Only need auth from data dir
         "/source/.local/share/opencode/auth.json:/target/local/share/opencode/auth.json:fs"
+
+        # --- Aider ---
+        "/source/.aider.conf.yml:/target/aider/aider.conf.yml:f"
+        "/source/.aider.model.settings.yml:/target/aider/aider.model.settings.yml:f"
+
+        # --- Continue ---
+        # Selective sync: config files only (skip sessions/, index/)
+        "/source/.continue/config.yaml:/target/continue/config.yaml:f"
+        "/source/.continue/config.json:/target/continue/config.json:f"
+
+        # --- Cursor ---
+        # Selective sync: mcp.json, rules, extensions
+        "/source/.cursor/mcp.json:/target/cursor/mcp.json:f"
+        "/source/.cursor/rules:/target/cursor/rules:d"
+        "/source/.cursor/extensions:/target/cursor/extensions:d"
     )
 fi
 
@@ -931,6 +957,19 @@ _containai_import() {
                 fi
             done <<<"$exclude_output"
         fi
+
+        # Add built-in excludes for AI agent directories
+        # These are always skipped regardless of user config
+        # Format: destination-relative paths (per fn-17-axl.1 spec)
+        excludes+=(
+            # Claude: skip project workspace, telemetry, and todo state
+            "claude/projects"
+            "claude/statsig"
+            "claude/todos"
+            # Continue: skip session data and index caches
+            "continue/sessions"
+            "continue/index"
+        )
     fi
 
     # Note: Excludes are now processed via _import_rewrite_excludes() and passed

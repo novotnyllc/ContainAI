@@ -62,6 +62,30 @@ target = "claude/skills"
 container_link = ".claude/skills"
 flags = "d"  # directory
 
+[[entries]]
+source = ".claude/commands"
+target = "claude/commands"
+container_link = ".claude/commands"
+flags = "d"  # directory
+
+[[entries]]
+source = ".claude/agents"
+target = "claude/agents"
+container_link = ".claude/agents"
+flags = "d"  # directory
+
+[[entries]]
+source = ".claude/hooks"
+target = "claude/hooks"
+container_link = ".claude/hooks"
+flags = "d"  # directory
+
+[[entries]]
+source = ".claude/CLAUDE.md"
+target = "claude/CLAUDE.md"
+container_link = ".claude/CLAUDE.md"
+flags = "f"  # file
+
 # =============================================================================
 # GITHUB CLI
 # =============================================================================
@@ -74,13 +98,50 @@ flags = "ds"  # directory, secret
 
 # =============================================================================
 # OPENCODE
+# Selective sync: config files only, skip caches
 # =============================================================================
 
 [[entries]]
-source = ".config/opencode"
-target = "config/opencode"
-container_link = ".config/opencode"
+source = ".config/opencode/opencode.json"
+target = "config/opencode/opencode.json"
+container_link = ".config/opencode/opencode.json"
+flags = "f"  # file
+
+[[entries]]
+source = ".config/opencode/agents"
+target = "config/opencode/agents"
+container_link = ".config/opencode/agents"
 flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/commands"
+target = "config/opencode/commands"
+container_link = ".config/opencode/commands"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/skills"
+target = "config/opencode/skills"
+container_link = ".config/opencode/skills"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/modes"
+target = "config/opencode/modes"
+container_link = ".config/opencode/modes"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/plugins"
+target = "config/opencode/plugins"
+container_link = ".config/opencode/plugins"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/instructions.md"
+target = "config/opencode/instructions.md"
+container_link = ".config/opencode/instructions.md"
+flags = "f"  # file
 
 [[entries]]
 source = ".local/share/opencode/auth.json"
@@ -337,6 +398,63 @@ source = ".codex/skills"
 target = "codex/skills"
 container_link = ".codex/skills"
 flags = "dxR"  # directory, exclude .system/, remove existing first
+
+# =============================================================================
+# AIDER
+# Simple config files (no directory structure)
+# =============================================================================
+
+[[entries]]
+source = ".aider.conf.yml"
+target = "aider/aider.conf.yml"
+container_link = ".aider.conf.yml"
+flags = "f"  # file
+
+[[entries]]
+source = ".aider.model.settings.yml"
+target = "aider/aider.model.settings.yml"
+container_link = ".aider.model.settings.yml"
+flags = "f"  # file
+
+# =============================================================================
+# CONTINUE
+# Selective sync: config files only, skip sessions/index
+# =============================================================================
+
+[[entries]]
+source = ".continue/config.yaml"
+target = "continue/config.yaml"
+container_link = ".continue/config.yaml"
+flags = "f"  # file
+
+[[entries]]
+source = ".continue/config.json"
+target = "continue/config.json"
+container_link = ".continue/config.json"
+flags = "f"  # file
+
+# =============================================================================
+# CURSOR
+# Selective sync: mcp.json, rules, extensions
+# =============================================================================
+
+[[entries]]
+source = ".cursor/mcp.json"
+target = "cursor/mcp.json"
+container_link = ".cursor/mcp.json"
+flags = "f"  # file
+
+[[entries]]
+source = ".cursor/rules"
+target = "cursor/rules"
+container_link = ".cursor/rules"
+flags = "d"  # directory
+
+[[entries]]
+source = ".cursor/extensions"
+target = "cursor/extensions"
+container_link = ".cursor/extensions"
+flags = "d"  # directory
 
 # =============================================================================
 # ADDITIONAL SYMLINKS (container-only, no host import)
