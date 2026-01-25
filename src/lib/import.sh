@@ -972,6 +972,14 @@ _import_apply_overrides() {
             continue
         fi
 
+        # Security: reject filenames containing : or control chars (breaks target_path:flags encoding)
+        # This mirrors the SSH key safety check
+        if [[ "$basename" == *:* ]] || [[ "$basename" == *$'\n'* ]] || [[ "$basename" == *$'\r'* ]]; then
+            _import_error "Override filename contains unsafe chars (: or control chars), rejected: $rel_path"
+            error_count=$((error_count + 1))
+            continue
+        fi
+
         # Skip symlinks with warning (security: don't follow symlinks)
         if [[ -L "$item" ]]; then
             _import_warn "Skipping symlink in override dir: $rel_path"
@@ -1005,14 +1013,15 @@ _import_apply_overrides() {
         entry_flags="${map_result##*:}"
 
         if [[ "$dry_run" == "true" ]]; then
-            echo "[DRY-RUN] Would apply override: $rel_path -> /target/$target_path"
+            _import_step "[dry-run] Would apply override: $rel_path -> /target/$target_path"
             override_count=$((override_count + 1))
         else
             # Safety check for .gitconfig: reject if target exists as symlink or non-regular file
             # This mirrors the checks in _cai_import_git_config
+            # Fail-closed: if check fails, reject the override
             if [[ "$target_path" == ".gitconfig" ]]; then
                 # shellcheck disable=SC2016
-                gitconfig_check=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
+                if ! gitconfig_check=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
                     --mount "type=volume,src=$volume,dst=/target" \
                     alpine sh -c '
                         if [ -L /target/.gitconfig ]; then
@@ -1022,7 +1031,11 @@ _import_apply_overrides() {
                         else
                             echo "ok"
                         fi
-                    ' 2>/dev/null)
+                    '); then
+                    _import_error "Failed to check .gitconfig target state, rejecting override for safety"
+                    error_count=$((error_count + 1))
+                    continue
+                fi
                 case "$gitconfig_check" in
                     symlink)
                         _import_error "Override target .gitconfig exists as symlink, rejected for safety"
@@ -1031,6 +1044,15 @@ _import_apply_overrides() {
                         ;;
                     nonregular)
                         _import_error "Override target .gitconfig exists as non-regular file, rejected for safety"
+                        error_count=$((error_count + 1))
+                        continue
+                        ;;
+                    ok)
+                        # Safe to proceed
+                        ;;
+                    *)
+                        # Unexpected output - fail closed
+                        _import_error "Unexpected .gitconfig check result, rejecting override for safety"
                         error_count=$((error_count + 1))
                         continue
                         ;;
