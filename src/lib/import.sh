@@ -442,17 +442,20 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.local/share/opencode/auth.json:/target/local/share/opencode/auth.json:fs"
 
         # --- Aider ---
-        "/source/.aider.conf.yml:/target/aider/aider.conf.yml:f"
-        "/source/.aider.model.settings.yml:/target/aider/aider.model.settings.yml:f"
+        # May contain API keys (openai-api-key, etc.)
+        "/source/.aider.conf.yml:/target/aider/aider.conf.yml:fs"
+        "/source/.aider.model.settings.yml:/target/aider/aider.model.settings.yml:fs"
 
         # --- Continue ---
         # Selective sync: config files only (skip sessions/, index/)
-        "/source/.continue/config.yaml:/target/continue/config.yaml:f"
-        "/source/.continue/config.json:/target/continue/config.json:f"
+        # May contain API keys/tokens
+        "/source/.continue/config.yaml:/target/continue/config.yaml:fs"
+        "/source/.continue/config.json:/target/continue/config.json:fs"
 
         # --- Cursor ---
         # Selective sync: mcp.json, rules, extensions
-        "/source/.cursor/mcp.json:/target/cursor/mcp.json:f"
+        # mcp.json may contain API keys/tokens
+        "/source/.cursor/mcp.json:/target/cursor/mcp.json:fs"
         "/source/.cursor/rules:/target/cursor/rules:d"
         "/source/.cursor/extensions:/target/cursor/extensions:d"
     )
@@ -958,18 +961,10 @@ _containai_import() {
             done <<<"$exclude_output"
         fi
 
-        # Add built-in excludes for AI agent directories
-        # These are always skipped regardless of user config
-        # Format: destination-relative paths (per fn-17-axl.1 spec)
-        excludes+=(
-            # Claude: skip project workspace, telemetry, and todo state
-            "claude/projects"
-            "claude/statsig"
-            "claude/todos"
-            # Continue: skip session data and index caches
-            "continue/sessions"
-            "continue/index"
-        )
+        # Note: Built-in excludes for AI agent directories (claude/projects, claude/statsig,
+        # claude/todos, continue/sessions, continue/index) are NOT needed because we use
+        # selective sync - we only import specific files/subdirs, not entire agent directories.
+        # This avoids "unmatched exclude pattern" warnings while achieving the same effect.
     fi
 
     # Note: Excludes are now processed via _import_rewrite_excludes() and passed

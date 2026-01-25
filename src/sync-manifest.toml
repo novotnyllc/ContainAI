@@ -402,47 +402,50 @@ flags = "dxR"  # directory, exclude .system/, remove existing first
 # =============================================================================
 # AIDER
 # Simple config files (no directory structure)
+# May contain API keys (openai-api-key, etc.)
 # =============================================================================
 
 [[entries]]
 source = ".aider.conf.yml"
 target = "aider/aider.conf.yml"
 container_link = ".aider.conf.yml"
-flags = "f"  # file
+flags = "fs"  # file, secret
 
 [[entries]]
 source = ".aider.model.settings.yml"
 target = "aider/aider.model.settings.yml"
 container_link = ".aider.model.settings.yml"
-flags = "f"  # file
+flags = "fs"  # file, secret
 
 # =============================================================================
 # CONTINUE
 # Selective sync: config files only, skip sessions/index
+# May contain API keys/tokens
 # =============================================================================
 
 [[entries]]
 source = ".continue/config.yaml"
 target = "continue/config.yaml"
 container_link = ".continue/config.yaml"
-flags = "f"  # file
+flags = "fs"  # file, secret
 
 [[entries]]
 source = ".continue/config.json"
 target = "continue/config.json"
 container_link = ".continue/config.json"
-flags = "f"  # file
+flags = "fs"  # file, secret
 
 # =============================================================================
 # CURSOR
 # Selective sync: mcp.json, rules, extensions
+# mcp.json may contain API keys/tokens
 # =============================================================================
 
 [[entries]]
 source = ".cursor/mcp.json"
 target = "cursor/mcp.json"
 container_link = ".cursor/mcp.json"
-flags = "f"  # file
+flags = "fs"  # file, secret
 
 [[entries]]
 source = ".cursor/rules"
