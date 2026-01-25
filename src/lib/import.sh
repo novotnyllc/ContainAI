@@ -551,12 +551,14 @@ _import_rewrite_excludes() {
 
         # Check if entry should be skipped due to root prefix
         local skip_entry=""
+        local matched_prefix=""
         local prefix
         for prefix in "${root_prefixes[@]}"; do
             # Root prefix matches if dst_rel starts with prefix/ or equals prefix
             case "$dst_rel" in
                 "${prefix}"|"${prefix}/"*)
                     skip_entry=1
+                    matched_prefix="$prefix"
                     pattern_matched["$prefix"]=1
                     pattern_matched["/${prefix}"]=1
                     ;;
@@ -564,6 +566,17 @@ _import_rewrite_excludes() {
         done
 
         if [[ -n "$skip_entry" ]]; then
+            # Mark descendant path patterns as matched to avoid spurious warnings
+            # e.g., if "claude" skips entry, don't warn about "claude/plugins/.system"
+            for pattern in "${path_patterns[@]}"; do
+                local p_norm="${pattern#/}"
+                p_norm="${p_norm%/}"
+                case "$p_norm" in
+                    "${matched_prefix}"|"${matched_prefix}/"*)
+                        pattern_matched["$pattern"]=1
+                        ;;
+                esac
+            done
             echo "[SKIP] $source -> $target (excluded by root prefix)" >&2
             continue
         fi
@@ -1024,9 +1037,9 @@ copy() {
 
     if [ "${DRY_RUN:-}" = "1" ]; then
         set -- "$@" --dry-run --itemize-changes
-    else
-        set -- "$@" --mkpath
     fi
+    # Note: --mkpath was removed for rsync < 3.2.0 compatibility
+    # Destination dirs/files are created by ensure() before rsync runs
 
     if [ -e "$_src" ]; then
         case "$_flags" in

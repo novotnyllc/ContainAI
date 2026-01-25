@@ -255,23 +255,48 @@ default_excludes = [
 
 **What these patterns affect:**
 
-- **`cai import`** - Patterns are passed to `rsync --exclude` when syncing host configs to the data volume. Patterns are relative to each sync source root.
+- **`cai import`** - Patterns control what gets synced from host to the data volume. Patterns are evaluated relative to the destination path in the volume.
 - **`cai export`** - Patterns are passed to `tar --exclude` when archiving the data volume. Patterns are relative to the volume root (`/mnt/agent-data`).
 
-**Pattern syntax:**
+**Pattern syntax for `cai import`:**
 
-- Patterns are passed through to rsync/tar; semantics depend on the underlying tool
+Patterns are classified into three types based on their structure:
+
+1. **No-slash patterns WITH glob metacharacters** (`*.log`, `*.tmp`, `[Tt]emp`):
+   - Applied globally to all sync entries as rsync exclude patterns
+   - Match files/directories at any depth within each synced directory
+
+2. **No-slash patterns WITHOUT glob metacharacters** (`claude`, `config`, `skills`):
+   - Treated as root prefixes that skip entire sync entries
+   - `skills` skips any sync entry whose destination starts with `skills/`
+   - This is different from export behavior (see note below)
+
+3. **Path patterns** (patterns containing `/`, e.g., `claude/plugins/.system`):
+   - If pattern equals or is parent of destination: skip the sync entry
+   - If pattern is child of destination: rewrite to relative and pass to rsync
+   - Example: `claude/plugins/.system` on entry `claude/plugins` becomes `--exclude=.system`
+
+**Important:** Import and export have different semantics for no-slash non-glob patterns:
+- Import: `skills` skips all entries under `skills/` prefix (entry-level skip)
+- Export: `skills` is passed directly to tar (matches `skills` at any depth)
+
+**Pattern syntax for `cai export`:**
+
+- Patterns are passed directly to `tar --exclude`
 - Patterns without `/` match any path component: `skills` matches at any depth
 - Glob patterns (`*`, `?`) are supported
+
+**Common to both:**
+
 - No multi-line values allowed (dropped silently for security)
 - Patterns from `default_excludes` and workspace-specific `excludes` are merged (deduplicated)
 
 **Examples:**
 ```toml
 default_excludes = [
-    "claude/skills",           # Exclude Claude skills directory
-    "vscode-server/extensions", # Exclude VS Code extensions
-    "*.log",                   # Exclude all log files
+    "claude/skills",           # Skip Claude skills sync entry (import) / exclude dir (export)
+    "vscode-server/extensions", # Skip VS Code extensions
+    "*.log",                   # Exclude all log files (global glob)
 ]
 ```
 

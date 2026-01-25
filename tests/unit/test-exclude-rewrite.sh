@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 # Unit tests for _import_rewrite_excludes function
-#
-# Note: These tests use `base64 -d` for decoding which works on Linux (GNU coreutils).
-# On macOS, `base64 -D` is used instead. These tests are designed to run in CI (Linux).
-# For local macOS testing, either install GNU coreutils or create a wrapper.
 set -euo pipefail
 
 # Get script directory and repo root
@@ -13,6 +9,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Source the import library
 # shellcheck source=../../src/lib/import.sh
 source "$REPO_ROOT/src/lib/import.sh"
+
+# Cross-platform base64 decode helper (GNU uses -d, macOS uses -D)
+b64decode() {
+    if base64 --help 2>&1 | grep -q -- '-d'; then
+        base64 -d
+    else
+        base64 -D
+    fi
+}
 
 # Test counters
 TESTS_RUN=0
@@ -88,7 +93,7 @@ if echo "$output" | grep -q "^/source/.claude/plugins:/target/claude/plugins:d:"
    echo "$output" | grep -q "^/source/.codex/skills:/target/codex/skills:dx:"; then
     # Verify the base64-encoded excludes contain *.log
     first_excludes=$(echo "$output" | head -1 | cut -d: -f4)
-    if [[ -n "$first_excludes" ]] && echo "$first_excludes" | base64 -d | grep -q '^\*\.log$'; then
+    if [[ -n "$first_excludes" ]] && echo "$first_excludes" | b64decode | grep -q '^\*\.log$'; then
         test_pass
     else
         test_fail "Global glob *.log not found in per-entry excludes"
@@ -136,7 +141,7 @@ output=$(_import_rewrite_excludes "$excludes" "$entries" 2>/dev/null)
 if echo "$output" | grep -q "^/source/.claude/plugins:/target/claude/plugins:d:"; then
     excludes_b64=$(echo "$output" | cut -d: -f4)
     if [[ -n "$excludes_b64" ]]; then
-        decoded=$(echo "$excludes_b64" | base64 -d)
+        decoded=$(echo "$excludes_b64" | b64decode)
         if echo "$decoded" | grep -q "^\.system$"; then
             test_pass
         else
@@ -187,7 +192,7 @@ output=$(_import_rewrite_excludes "$excludes" "$entries" 2>/dev/null)
 if echo "$output" | grep -q "^/source/.claude/plugins:/target/claude/plugins:d:"; then
     excludes_b64=$(echo "$output" | cut -d: -f4)
     if [[ -n "$excludes_b64" ]]; then
-        decoded=$(echo "$excludes_b64" | base64 -d)
+        decoded=$(echo "$excludes_b64" | b64decode)
         if echo "$decoded" | grep -q "^\.system$"; then
             test_pass
         else
@@ -246,12 +251,12 @@ if echo "$output" | grep -q "^/source/.claude/plugins:" && \
     # Claude entry should have *.log and *.tmp
     claude_excludes=$(echo "$output" | grep "^/source/.claude/plugins:" | cut -d: -f4)
     if [[ -n "$claude_excludes" ]]; then
-        decoded=$(echo "$claude_excludes" | base64 -d)
+        decoded=$(echo "$claude_excludes" | b64decode)
         if echo "$decoded" | grep -q '^\*\.log$' && echo "$decoded" | grep -q '^\*\.tmp$'; then
             # Codex entry should have *.log, *.tmp, and .system
             codex_excludes=$(echo "$output" | grep "^/source/.codex/skills:" | cut -d: -f4)
             if [[ -n "$codex_excludes" ]]; then
-                decoded_codex=$(echo "$codex_excludes" | base64 -d)
+                decoded_codex=$(echo "$codex_excludes" | b64decode)
                 if echo "$decoded_codex" | grep -q '^\*\.log$' && \
                    echo "$decoded_codex" | grep -q '^\*\.tmp$' && \
                    echo "$decoded_codex" | grep -q '^\.system$'; then

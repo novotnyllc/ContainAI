@@ -17,7 +17,7 @@
 #   R = remove existing path first (rm -rf before ln -sfn)
 #
 # Fields:
-#   source = path relative to $HOME (without leading dot for config files)
+#   source = path relative to $HOME (includes leading dot, e.g., ".claude.json")
 #   target = path relative to /mnt/agent-data (volume)
 #   container_link = path relative to ~ where symlink is created (optional)
 #   flags = combination of flags above
