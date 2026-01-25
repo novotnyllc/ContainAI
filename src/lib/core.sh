@@ -23,9 +23,13 @@
 # Usage: source lib/core.sh
 # ==============================================================================
 
-# Require bash first (before using BASH_SOURCE)
+# Require bash 4+ (before using BASH_SOURCE and bash 4 features like ${var,,})
 if [[ -z "${BASH_VERSION:-}" ]]; then
     echo "[ERROR] lib/core.sh requires bash" >&2
+    return 1 2>/dev/null || exit 1
+fi
+if [[ "${BASH_VERSION%%.*}" -lt 4 ]]; then
+    echo "[ERROR] lib/core.sh requires bash 4.0 or later (found $BASH_VERSION)" >&2
     return 1 2>/dev/null || exit 1
 fi
 
@@ -136,7 +140,8 @@ _cai_prompt_confirm() {
 
     # Try /dev/tty for piped stdin (curl|bash installs)
     if [[ ! -t 0 ]] && [[ -e /dev/tty ]]; then
-        printf '%s %s ' "$message" "$prompt_suffix"
+        # Write prompt to /dev/tty too, so it's visible even if stdout is redirected
+        printf '%s %s ' "$message" "$prompt_suffix" > /dev/tty
         if ! read -r confirm < /dev/tty; then
             # EOF on /dev/tty
             return 1

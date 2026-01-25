@@ -75,6 +75,9 @@ BRANCH="${CAI_BRANCH:-main}"
 # Path to bash 4+ (set by bootstrap_bash if needed)
 BASH4_PATH=""
 
+# Track if this is a fresh install or update (set by install_containai)
+IS_FRESH_INSTALL=""
+
 # ==============================================================================
 # OS Detection
 # ==============================================================================
@@ -487,6 +490,7 @@ install_containai() {
 
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         # Existing installation - update
+        IS_FRESH_INSTALL="false"
         info "Existing installation found, updating..."
         (
             cd -- "$INSTALL_DIR"
@@ -497,6 +501,7 @@ install_containai() {
         success "Updated to latest version"
     else
         # Fresh installation
+        IS_FRESH_INSTALL="true"
         if [[ -d "$INSTALL_DIR" ]]; then
             warn "Directory exists but is not a git repository: $INSTALL_DIR"
             warn "Removing and re-cloning..."
@@ -699,12 +704,14 @@ run_auto_setup() {
     # Use explicit path to cai wrapper we just created
     local cai_wrapper="$BIN_DIR/cai"
     if [[ -x "$cai_wrapper" ]]; then
+        # Capture exit code without triggering set -e
+        # cai setup may return non-zero for expected reasons (e.g., 75 = WSL restart)
+        local rc=0
         if [[ "$cai_yes_value" == "1" ]]; then
-            CAI_YES=1 "$bash_cmd" "$cai_wrapper" setup
+            CAI_YES=1 "$bash_cmd" "$cai_wrapper" setup || rc=$?
         else
-            "$bash_cmd" "$cai_wrapper" setup
+            "$bash_cmd" "$cai_wrapper" setup || rc=$?
         fi
-        local rc=$?
         if [[ $rc -eq 0 ]]; then
             success "Setup completed successfully!"
         elif [[ $rc -eq 75 ]]; then
@@ -722,12 +729,24 @@ run_auto_setup() {
 
 post_install() {
     echo ""
-    success "ContainAI installed successfully!"
+    if [[ "$IS_FRESH_INSTALL" == "true" ]]; then
+        success "ContainAI installed successfully!"
+    else
+        success "ContainAI updated successfully!"
+    fi
 
     # Determine whether to auto-run setup
     # Skip if --no-setup was passed
     if [[ "$NO_SETUP" == "true" ]]; then
         info "Skipping setup (--no-setup flag)"
+        show_setup_instructions
+        return
+    fi
+
+    # On re-runs, skip auto-setup (user should run 'cai update' manually)
+    # Auto-setup is only for fresh installs
+    if [[ "$IS_FRESH_INSTALL" != "true" ]]; then
+        info "Re-run detected. Run 'cai update' to update your environment."
         show_setup_instructions
         return
     fi
