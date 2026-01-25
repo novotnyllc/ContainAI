@@ -19,6 +19,7 @@
 #   _cai_verify_sysbox_install()       - Verify Sysbox installation (legacy)
 #   _cai_cleanup_legacy_paths()        - Clean up legacy ContainAI paths
 #   _cai_cleanup_legacy_lima_vm()      - Clean up legacy Lima VM (after new VM verified)
+#   _cai_ensure_isolated_bridge()      - Ensure isolated bridge (cai0) exists
 #   _cai_create_isolated_daemon_json() - Create isolated daemon.json
 #   _cai_create_isolated_docker_service() - Create isolated systemd service
 #   _cai_create_isolated_docker_dirs() - Create isolated Docker directories
@@ -1148,7 +1149,8 @@ _cai_create_isolated_daemon_json() {
     # Build isolated daemon configuration
     # PITFALL: Do NOT set "hosts" in both daemon.json AND use -H flag in service
     # We set hosts here, so service uses --config-file only
-    # Use separate subnet (172.30.0.0/16) to avoid IP conflicts with system Docker
+    # Note: "bridge" and "bip" are mutually exclusive in dockerd config
+    # The bridge subnet is configured in _cai_ensure_isolated_bridge()
     local config
     config=$(cat <<EOF
 {
@@ -1162,9 +1164,7 @@ _cai_create_isolated_daemon_json() {
   "data-root": "$_CAI_CONTAINAI_DOCKER_DATA",
   "exec-root": "$_CAI_CONTAINAI_DOCKER_EXEC",
   "pidfile": "$_CAI_CONTAINAI_DOCKER_PID",
-  "bridge": "$_CAI_CONTAINAI_DOCKER_BRIDGE",
-  "bip": "172.30.0.1/16",
-  "fixed-cidr": "172.30.0.0/17"
+  "bridge": "$_CAI_CONTAINAI_DOCKER_BRIDGE"
 }
 EOF
     )
@@ -1264,6 +1264,84 @@ _cai_create_isolated_docker_dirs() {
     fi
 
     _cai_ok "Isolated Docker directories created"
+    return 0
+}
+
+# Ensure isolated Docker bridge exists with expected subnet
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = verbose flag ("true" for verbose output)
+# Returns: 0=success, 1=failure
+_cai_ensure_isolated_bridge() {
+    local dry_run="${1:-false}"
+    local verbose="${2:-false}"
+    local bridge="$_CAI_CONTAINAI_DOCKER_BRIDGE"
+    local bridge_addr="172.30.0.1/16"
+
+    _cai_step "Ensuring isolated Docker bridge: $bridge"
+
+    if ! command -v ip >/dev/null 2>&1; then
+        _cai_warn "ip command not found; cannot configure $bridge"
+        _cai_warn "  Install iproute2 and re-run setup to ensure isolated subnet"
+        return 0
+    fi
+
+    local bridge_exists="false"
+    if ip link show "$bridge" >/dev/null 2>&1; then
+        bridge_exists="true"
+    fi
+
+    if [[ "$bridge_exists" == "false" ]]; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_info "[DRY-RUN] Would create bridge: $bridge"
+        else
+            if ! sudo ip link add name "$bridge" type bridge; then
+                _cai_error "Failed to create bridge: $bridge"
+                return 1
+            fi
+            bridge_exists="true"
+        fi
+    else
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Bridge $bridge already exists"
+        fi
+    fi
+
+    if [[ "$dry_run" == "true" && "$bridge_exists" == "false" ]]; then
+        _cai_info "[DRY-RUN] Would assign $bridge_addr to $bridge"
+        _cai_info "[DRY-RUN] Would bring up bridge: $bridge"
+        return 0
+    fi
+
+    if ip -4 addr show dev "$bridge" | grep -q "$bridge_addr"; then
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Bridge $bridge already has address $bridge_addr"
+        fi
+    else
+        if ip -4 addr show dev "$bridge" | grep -q "inet "; then
+            _cai_warn "Bridge $bridge has an IPv4 address not matching $bridge_addr"
+            _cai_warn "  Leaving existing address as-is"
+        else
+            if [[ "$dry_run" == "true" ]]; then
+                _cai_info "[DRY-RUN] Would assign $bridge_addr to $bridge"
+            else
+                if ! sudo ip addr add "$bridge_addr" dev "$bridge"; then
+                    _cai_error "Failed to assign $bridge_addr to $bridge"
+                    return 1
+                fi
+            fi
+        fi
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would bring up bridge: $bridge"
+    else
+        if ! sudo ip link set "$bridge" up; then
+            _cai_error "Failed to bring up bridge: $bridge"
+            return 1
+        fi
+    fi
+
+    _cai_ok "Isolated bridge ready: $bridge"
     return 0
 }
 
@@ -1852,27 +1930,32 @@ _cai_setup_wsl2() {
         return 1
     fi
 
-    # Step 7: Create isolated daemon.json (NOT /etc/docker/daemon.json)
+    # Step 7: Ensure isolated bridge exists (cai0)
+    if ! _cai_ensure_isolated_bridge "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 8: Create isolated daemon.json (NOT /etc/docker/daemon.json)
     if ! _cai_create_isolated_daemon_json "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 8: Create isolated systemd service (NOT a drop-in to docker.service)
+    # Step 9: Create isolated systemd service (NOT a drop-in to docker.service)
     if ! _cai_create_isolated_docker_service "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 9: Start isolated Docker service
+    # Step 10: Start isolated Docker service
     if ! _cai_start_isolated_docker_service "$dry_run"; then
         return 1
     fi
 
-    # Step 10: Create containai-docker context
+    # Step 11: Create containai-docker context
     if ! _cai_create_isolated_docker_context "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 11: Verify installation
+    # Step 12: Verify installation
     if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Isolated Docker verification had issues - check output above"
@@ -2971,27 +3054,32 @@ _cai_setup_linux() {
         return 1
     fi
 
-    # Step 6: Create isolated daemon.json (NOT /etc/docker/daemon.json)
+    # Step 6: Ensure isolated bridge exists (cai0)
+    if ! _cai_ensure_isolated_bridge "$dry_run" "$verbose"; then
+        return 1
+    fi
+
+    # Step 7: Create isolated daemon.json (NOT /etc/docker/daemon.json)
     if ! _cai_create_isolated_daemon_json "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 7: Create isolated systemd service (NOT a drop-in to docker.service)
+    # Step 8: Create isolated systemd service (NOT a drop-in to docker.service)
     if ! _cai_create_isolated_docker_service "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 8: Start isolated Docker service
+    # Step 9: Start isolated Docker service
     if ! _cai_start_isolated_docker_service "$dry_run"; then
         return 1
     fi
 
-    # Step 9: Create containai-docker context
+    # Step 10: Create containai-docker context
     if ! _cai_create_isolated_docker_context "$dry_run" "$verbose"; then
         return 1
     fi
 
-    # Step 10: Verify installation
+    # Step 11: Verify installation
     if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Isolated Docker verification had issues - check output above"

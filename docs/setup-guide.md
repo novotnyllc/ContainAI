@@ -197,13 +197,16 @@ The setup creates an **isolated Docker daemon** that never touches system Docker
       "path": "/usr/bin/sysbox-runc"
     }
   },
+  "hosts": ["unix:///var/run/containai-docker.sock"],
   "data-root": "/var/lib/containai-docker",
   "exec-root": "/var/run/containai-docker",
   "pidfile": "/var/run/containai-docker.pid",
-  "bridge": "cai0",
-  "bip": "172.30.0.1/16"
+  "bridge": "cai0"
 }
 ```
+
+During setup, the `cai0` bridge is created and assigned `172.30.0.1/16` to avoid
+subnet conflicts with system Docker.
 
 The systemd service `/etc/systemd/system/containai-docker.service` runs a dedicated Docker daemon:
 
@@ -213,7 +216,7 @@ Description=ContainAI Docker Daemon (isolated)
 After=network.target containerd.service sysbox.service
 
 [Service]
-ExecStart=/usr/bin/dockerd --config-file=/etc/containai/docker/daemon.json -H unix:///var/run/containai-docker.sock
+ExecStart=/opt/containai/bin/dockerd --config-file=/etc/containai/docker/daemon.json
 Restart=on-failure
 
 [Install]
