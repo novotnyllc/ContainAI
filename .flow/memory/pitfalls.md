@@ -208,3 +208,6 @@ When passing user-controlled names to docker commands (stop/rm/inspect), always 
 
 ## 2026-01-26 manual [pitfall]
 When using docker --context, also clear DOCKER_CONTEXT and DOCKER_HOST env vars to prevent override (use DOCKER_CONTEXT= DOCKER_HOST= prefix)
+
+## 2026-01-26 manual [pitfall]
+Piping to tee without 'set -o pipefail' masks upstream command failures - add pipefail or check PIPESTATUS

@@ -64,13 +64,15 @@ jobs:
 
       - name: Determine version suffix
         id: version
+        env:
+          INPUT_SUFFIX: ${{ inputs.version_suffix }}
         run: |
-          if [[ -n "${{ inputs.version_suffix }}" ]]; then
-            suffix="${{ inputs.version_suffix }}"
+          if [[ -n "$INPUT_SUFFIX" ]]; then
+            suffix="$INPUT_SUFFIX"
           else
             suffix="+containai.$(date +%Y%m%d)"
           fi
-          echo "suffix=$suffix" >> $GITHUB_OUTPUT
+          printf 'suffix=%s\n' "$suffix" >> "$GITHUB_OUTPUT"
           echo "Version suffix: $suffix"
 
       - name: Clone sysbox repository
@@ -92,10 +94,14 @@ jobs:
       - name: Verify openat2 fix is present
         run: |
           echo "Checking for openat2 fix in sysbox-fs..."
-          if grep -rq "openat2" sysbox/sysbox-fs/; then
+          # The fix intercepts openat2 syscall - look for the handler
+          if grep -rq "openat2" sysbox/sysbox-fs/handler/implementations/; then
             echo "openat2 fix detected in sysbox-fs"
           else
-            echo "::warning::openat2 fix may not be present in this version"
+            echo "::error::openat2 fix NOT found in sysbox-fs"
+            echo "The whole purpose of this build is to include the openat2 fix."
+            echo "If upstream has changed, update the detection or build from a known-good commit."
+            exit 1
           fi
 
       - name: Patch version
@@ -112,6 +118,7 @@ jobs:
 
       - name: Build sysbox-ce deb package
         run: |
+          set -o pipefail
           cd sysbox/sysbox-pkgr
           export EDITION=ce
           # Set target architecture for cross-compilation
@@ -203,8 +210,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "push" ]]; then
             tag="${{ github.ref_name }}"
           else
-            # For manual dispatch, create a tag based on date
-            tag="sysbox-build-$(date +%Y%m%d)"
+            # For manual dispatch, include run_number to ensure uniqueness
+            tag="sysbox-build-$(date +%Y%m%d)-${{ github.run_number }}"
           fi
           echo "tag=$tag" >> $GITHUB_OUTPUT
           echo "Release tag: $tag"

@@ -239,13 +239,16 @@ clone_sysbox() {
         exit 1
     fi
 
-    # Verify the openat2 fix is present in sysbox-fs
+    # Verify the openat2 fix is present in sysbox-fs (this is the whole point of this build)
     log_info "Verifying openat2 fix is present..."
-    if ! grep -rq "openat2" "$sysbox_dir/sysbox-fs/"; then
-        log_warn "openat2 fix may not be present in this version"
-        log_warn "Expected fix commit: 1302a6f in sysbox-fs"
-    else
+    if grep -rq "openat2" "$sysbox_dir/sysbox-fs/handler/implementations/"; then
         log_ok "openat2 fix detected in sysbox-fs"
+    else
+        log_error "openat2 fix NOT found in sysbox-fs"
+        log_error "The whole purpose of this build is to include the openat2 fix for runc 1.3.3+"
+        log_error "Expected fix commit: 1302a6f in sysbox-fs"
+        log_error "If upstream has changed, update detection or build from a known-good commit"
+        exit 1
     fi
 
     # Get version from VERSION file
