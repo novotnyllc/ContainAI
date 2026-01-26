@@ -10,7 +10,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-26T17:18:29.972996Z",
   "spec_path": ".flow/specs/fn-23-glf.md",
-  "status": "open",
+  "status": "done",
   "title": "Simplify sysbox CI: native arch builds",
-  "updated_at": "2026-01-26T17:18:29.973010Z"
+  "updated_at": "2026-01-26T17:57:23.827295Z"
 }

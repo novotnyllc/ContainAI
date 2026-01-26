@@ -103,9 +103,8 @@ And change cache scopes from `full` to `full-v2`.
 - [ ] CI regenerates and uses generated files (doesn't require them to be up-to-date in git)
 
 ## Done summary
-TBD
-
+Added deterministic logging to symlinks.sh for debugging build failures: converted from sh to bash with run_cmd wrapper that logs each command before execution and shows id, ls -ld /mnt/agent-data, and ls -ld of all failing path arguments on failure. Updated docker.yml to regenerate container files before building and changed cache scope to full-v2 to bust stale cache.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: ddc8a249ba7abe0db36807dfc84f87db2bc9ef5f, 950f4ed5c4efb6ec059a10f326a6a8f9e8fdb9d9, 4c3dc3a327a911be96bbfcc5c1bc661b4d57c8f7
+- Tests: shellcheck src/scripts/gen-dockerfile-symlinks.sh, shellcheck src/container/generated/symlinks.sh
 - PRs:
