@@ -84,9 +84,8 @@ The sync manifest already includes all necessary files:
 Note: `statsig/` directory is NOT synced because it contains session-specific analytics that could cause conflicts.
 
 ## Done summary
-Investigated Claude OAuth token expiration. Root cause: OAuth refresh token rotation prevents credential sharing between host and container (by design). Documented as known limitation with workarounds in docs/troubleshooting.md.
-
+Investigated Claude OAuth token expiration after import. Root cause: OAuth refresh token rotation prevents credential sharing between host and container (this is by design in OAuth 2.0, not a bug). Documented as known limitation with workarounds in docs/troubleshooting.md.
 ## Evidence
-- Commits: (documentation only)
-- Tests: N/A (investigation task)
+- Commits: e1d3ef9fd01235c80ffa404606ca1623fa227f40
+- Tests: codex impl-review (SHIP)
 - PRs:
