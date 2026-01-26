@@ -1164,10 +1164,12 @@ _containai_export_cmd() {
 _containai_stop_cmd() {
     local container_name=""
     local remove_flag=false
+    local all_flag=false
     local arg
     # Preserve original args for passing to _containai_stop_all
     local -a orig_args=("$@")
 
+    # Pass 1: Check for help early
     for arg in "$@"; do
         case "$arg" in
             --help | -h)
@@ -1177,75 +1179,62 @@ _containai_stop_cmd() {
         esac
     done
 
-    # Parse arguments (without consuming original args for _containai_stop_all)
-    local all_flag=false
-    for arg in "$@"; do
-        case "$arg" in
+    # Pass 2: Parse all arguments using standard while loop
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
             --name | --name=*)
                 # --name is no longer supported on stop - use --container instead
                 echo "[ERROR] --name is no longer supported. Use --container instead." >&2
                 return 1
                 ;;
             --container)
-                # Value is next arg - need to find it
-                local found_container=false
-                local prev="" a
-                for a in "$@"; do
-                    if [[ "$prev" == "--container" ]]; then
-                        # Reject values that look like flags
-                        if [[ "$a" == -* ]]; then
-                            echo "[ERROR] --container requires a value (got '$a')" >&2
-                            return 1
-                        fi
-                        container_name="$a"
-                        found_container=true
-                        break
-                    fi
-                    prev="$a"
-                done
-                if [[ "$found_container" != "true" ]] || [[ -z "$container_name" ]]; then
+                if [[ -z "${2-}" ]] || [[ "$2" == -* ]]; then
                     echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
+                container_name="$2"
+                shift 2
                 ;;
             --container=*)
-                container_name="${arg#--container=}"
+                container_name="${1#--container=}"
                 if [[ -z "$container_name" ]]; then
                     echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
-                # Reject values that look like flags
-                if [[ "$container_name" == -* ]]; then
-                    echo "[ERROR] --container requires a value (got '$container_name')" >&2
-                    return 1
-                fi
+                shift
                 ;;
             --remove)
                 remove_flag=true
+                shift
                 ;;
             --all)
                 all_flag=true
+                shift
                 ;;
             --help | -h)
-                # Already handled earlier
+                # Already handled in pass 1
+                shift
                 ;;
             -*)
-                # Only error on unknown flags if --container mode
-                # (for backward compat, unknown flags without --container go to _containai_stop_all)
-                if [[ -n "$container_name" ]]; then
-                    echo "[ERROR] Unknown option: $arg" >&2
+                # Unknown flag - delegate to _containai_stop_all for backward compat
+                # (unless we're in explicit --container or --all mode)
+                if [[ -n "$container_name" ]] || [[ "$all_flag" == "true" ]]; then
+                    echo "[ERROR] Unknown option: $1" >&2
                     echo "Use 'cai stop --help' for usage" >&2
                     return 1
                 fi
+                # Keep for delegation to stop_all
+                shift
                 ;;
             *)
-                # Bare word (positional argument) - reject if --container mode
-                # Skip the value of --container (already captured)
-                if [[ -n "$container_name" ]] && [[ "$arg" != "$container_name" ]]; then
-                    echo "[ERROR] Unexpected argument: $arg" >&2
+                # Positional argument - not allowed with --container or --all
+                if [[ -n "$container_name" ]] || [[ "$all_flag" == "true" ]]; then
+                    echo "[ERROR] Unexpected argument: $1" >&2
                     echo "Use 'cai stop --help' for usage" >&2
                     return 1
                 fi
+                # Keep for delegation to stop_all
+                shift
                 ;;
         esac
     done
@@ -2710,9 +2699,9 @@ _containai_run_cmd() {
         # Use multi-context lookup to check all contexts where container might exist
         # This prevents accidentally creating a container with a colliding name in another context
         # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
-        local collision_rc collision_ctx
+        local collision_rc
         # Suppress stderr - we emit our own error messages for both collision and ambiguity cases
-        if collision_ctx=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>/dev/null); then
+        if _cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" >/dev/null 2>&1; then
             echo "[ERROR] Container $container_name already exists" >&2
             return 1
         else
