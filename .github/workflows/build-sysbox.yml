@@ -1,0 +1,268 @@
+# ==============================================================================
+# ContainAI Sysbox Build Workflow
+# ==============================================================================
+# Builds sysbox-ce deb packages from master branch with the openat2 fix for
+# runc 1.3.3+ compatibility. Publishes to GitHub releases.
+#
+# Triggers:
+#   - Manual dispatch (workflow_dispatch)
+#   - Tag push matching 'sysbox-v*' pattern
+#
+# The built packages are published to GitHub releases with:
+#   - DEB packages for amd64 and arm64
+#   - SHA256 checksums for verification
+#   - Release notes documenting the build
+# ==============================================================================
+
+name: Build Sysbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_suffix:
+        description: 'Version suffix (default: +containai.YYYYMMDD)'
+        required: false
+        type: string
+      create_release:
+        description: 'Create GitHub release'
+        required: false
+        type: boolean
+        default: true
+
+  push:
+    tags:
+      - 'sysbox-v*'
+
+env:
+  # Sysbox repository to build from
+  SYSBOX_REPO: https://github.com/nestybox/sysbox.git
+  SYSBOX_BRANCH: master
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+
+    steps:
+      - name: Checkout ContainAI
+        uses: actions/checkout@v4
+
+      - name: Set up build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Determine version suffix
+        id: version
+        run: |
+          if [[ -n "${{ inputs.version_suffix }}" ]]; then
+            suffix="${{ inputs.version_suffix }}"
+          else
+            suffix="+containai.$(date +%Y%m%d)"
+          fi
+          echo "suffix=$suffix" >> $GITHUB_OUTPUT
+          echo "Version suffix: $suffix"
+
+      - name: Clone sysbox repository
+        run: |
+          echo "Cloning sysbox from ${{ env.SYSBOX_BRANCH }} branch..."
+          git clone --recursive --depth 1 --branch ${{ env.SYSBOX_BRANCH }} \
+            ${{ env.SYSBOX_REPO }} sysbox
+
+      - name: Get sysbox version
+        id: sysbox_version
+        run: |
+          version=$(cat sysbox/VERSION | tr -d '[:space:]')
+          full_version="${version}${{ steps.version.outputs.suffix }}"
+          echo "base_version=$version" >> $GITHUB_OUTPUT
+          echo "full_version=$full_version" >> $GITHUB_OUTPUT
+          echo "Sysbox base version: $version"
+          echo "Full version: $full_version"
+
+      - name: Verify openat2 fix is present
+        run: |
+          echo "Checking for openat2 fix in sysbox-fs..."
+          if grep -rq "openat2" sysbox/sysbox-fs/; then
+            echo "openat2 fix detected in sysbox-fs"
+          else
+            echo "::warning::openat2 fix may not be present in this version"
+          fi
+
+      - name: Patch version
+        run: |
+          echo "${{ steps.sysbox_version.outputs.full_version }}" > sysbox/VERSION
+          echo "Patched VERSION file:"
+          cat sysbox/VERSION
+
+      - name: Set up sysbox-pkgr
+        run: |
+          cd sysbox/sysbox-pkgr
+          mkdir -p sources
+          ln -sfn "$(pwd)/../" sources/sysbox
+
+      - name: Build sysbox-ce deb package
+        run: |
+          cd sysbox/sysbox-pkgr
+          export EDITION=ce
+
+          echo "Building sysbox-ce deb package for ${{ matrix.arch }}..."
+          echo "This may take 15-30 minutes..."
+
+          make -C deb generic EDITION=ce 2>&1 | tee build.log
+
+          echo "Build completed"
+
+      - name: Locate built package
+        id: package
+        run: |
+          deb_path=$(find sysbox/sysbox-pkgr/deb/build -name "sysbox-ce*.deb" -type f | head -1)
+          if [[ -z "$deb_path" ]]; then
+            echo "::error::Built deb package not found"
+            find sysbox/sysbox-pkgr/deb/build -type f || true
+            exit 1
+          fi
+          echo "Found package: $deb_path"
+          echo "path=$deb_path" >> $GITHUB_OUTPUT
+
+      - name: Prepare artifacts
+        id: artifacts
+        run: |
+          mkdir -p dist
+
+          version="${{ steps.sysbox_version.outputs.full_version }}"
+          arch="${{ matrix.arch }}"
+          final_name="sysbox-ce_${version}.linux_${arch}.deb"
+
+          cp "${{ steps.package.outputs.path }}" "dist/${final_name}"
+
+          cd dist
+          sha256sum "${final_name}" > "${final_name}.sha256"
+
+          echo "Artifacts:"
+          ls -la
+          echo ""
+          echo "SHA256:"
+          cat "${final_name}.sha256"
+
+          echo "deb_name=${final_name}" >> $GITHUB_OUTPUT
+          echo "checksum_name=${final_name}.sha256" >> $GITHUB_OUTPUT
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysbox-ce-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.sha256
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.create_release)
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        id: release_assets
+        run: |
+          mkdir -p release
+
+          # Move all deb and checksum files to release directory
+          find artifacts -name "*.deb" -exec mv {} release/ \;
+          find artifacts -name "*.sha256" -exec mv {} release/ \;
+
+          echo "Release assets:"
+          ls -la release/
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="${{ github.ref_name }}"
+          else
+            # For manual dispatch, create a tag based on date
+            tag="sysbox-build-$(date +%Y%m%d)"
+          fi
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+          echo "Release tag: $tag"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## ContainAI Sysbox Build
+
+          Custom sysbox-ce build from master branch with the **openat2 fix** for runc 1.3.3+ compatibility.
+
+          ### What's included
+
+          This build includes the fix for the Docker-in-Docker compatibility issue with runc 1.3.3+:
+          - sysbox-fs commit `1302a6f`: "Trap openat2 system call to allow access to sysbox-fs mounts under /proc and /sys"
+          - Follow-up improvements and hardening commits
+
+          The fix uses seccomp syscall interception to trap `openat2()` calls and strip problematic flags (`RESOLVE_NO_XDEV`, `RESOLVE_NO_MAGICLINKS`, `RESOLVE_NO_SYMLINKS`, `RESOLVE_BENEATH`) when accessing sysbox-fs mounts.
+
+          ### Installation
+
+          ```bash
+          # Download the appropriate package for your architecture
+          wget <deb-url>
+
+          # Install (may need to fix dependencies)
+          sudo dpkg -i sysbox-ce_*.deb
+          sudo apt-get install -f -y
+
+          # Verify installation
+          sysbox-runc --version
+          ```
+
+          ### Checksums
+
+          EOF
+
+          echo '```' >> release_notes.md
+          cat release/*.sha256 >> release_notes.md
+          echo '```' >> release_notes.md
+
+          cat >> release_notes.md << 'EOF'
+
+          ### References
+
+          - [sysbox#973](https://github.com/nestybox/sysbox/issues/973) - Docker 28.5.2 breaks DinD on Sysbox
+          - [runc v1.3.3](https://github.com/opencontainers/runc/releases/tag/v1.3.3) - Release with security patches
+
+          ---
+
+          Built by ContainAI CI
+          EOF
+
+          echo "Release notes:"
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Sysbox Build ${{ steps.tag.outputs.tag }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: true
+          files: release/*

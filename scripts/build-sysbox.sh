@@ -1,0 +1,407 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# ContainAI Sysbox Build Script
+# ==============================================================================
+# Builds sysbox-ce deb packages from the master branch, which includes the
+# openat2 fix for runc 1.3.3+ compatibility (commit 1302a6f in sysbox-fs).
+#
+# This script is designed to be run locally or in GitHub Actions to produce
+# custom sysbox builds with the fix that hasn't been released upstream yet.
+#
+# Usage:
+#   ./scripts/build-sysbox.sh [OPTIONS]
+#
+# Options:
+#   --arch ARCH       Target architecture: amd64 or arm64 (default: host arch)
+#   --output DIR      Output directory for deb and checksums (default: ./dist)
+#   --version-suffix  Custom suffix (default: +containai.YYYYMMDD)
+#   --dry-run         Show commands without executing
+#   --verbose         Enable verbose output
+#   --help            Show this help message
+#
+# Requirements:
+#   - Docker (with privileged mode support)
+#   - git
+#   - At least 10GB free disk space
+#   - Kernel headers (for native builds)
+#
+# Output:
+#   - sysbox-ce_<version><suffix>.linux_<arch>.deb
+#   - sysbox-ce_<version><suffix>.linux_<arch>.deb.sha256
+#
+# The version is taken from sysbox's VERSION file, with the suffix appended
+# to indicate this is a custom ContainAI build from master.
+#
+# Example:
+#   ./scripts/build-sysbox.sh --arch amd64 --output ./dist
+#   # Produces: dist/sysbox-ce_0.6.7+containai.20260126.linux_amd64.deb
+#
+# ==============================================================================
+
+set -euo pipefail
+
+# Script directory for relative paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Defaults
+ARCH=""
+OUTPUT_DIR="$PROJECT_ROOT/dist"
+VERSION_SUFFIX=""
+DRY_RUN="false"
+VERBOSE="false"
+
+# Sysbox repository
+SYSBOX_REPO="https://github.com/nestybox/sysbox.git"
+SYSBOX_BRANCH="master"
+
+# Logging functions - all output goes to stderr to avoid polluting stdout
+# (stdout is reserved for function return values via printf)
+log_info() {
+    printf '[INFO] %s\n' "$*" >&2
+}
+
+log_step() {
+    printf '\n[STEP] %s\n' "$*" >&2
+}
+
+log_ok() {
+    printf '[OK] %s\n' "$*" >&2
+}
+
+log_warn() {
+    printf '[WARN] %s\n' "$*" >&2
+}
+
+log_error() {
+    printf '[ERROR] %s\n' "$*" >&2
+}
+
+# Show usage
+show_help() {
+    sed -n '/^# Usage:/,/^# ==/p' "$0" | grep -v '^# ==' | sed 's/^# \?//'
+    exit 0
+}
+
+# Parse arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --arch)
+                ARCH="$2"
+                shift 2
+                ;;
+            --output)
+                OUTPUT_DIR="$2"
+                shift 2
+                ;;
+            --version-suffix)
+                VERSION_SUFFIX="$2"
+                shift 2
+                ;;
+            --dry-run)
+                DRY_RUN="true"
+                shift
+                ;;
+            --verbose)
+                VERBOSE="true"
+                shift
+                ;;
+            --help|-h)
+                show_help
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_help
+                ;;
+        esac
+    done
+
+    # Determine architecture if not specified
+    if [[ -z "$ARCH" ]]; then
+        local host_arch
+        host_arch=$(uname -m)
+        case "$host_arch" in
+            x86_64)
+                ARCH="amd64"
+                ;;
+            aarch64)
+                ARCH="arm64"
+                ;;
+            *)
+                log_error "Unsupported host architecture: $host_arch"
+                exit 1
+                ;;
+        esac
+        log_info "Auto-detected architecture: $ARCH"
+    fi
+
+    # Validate architecture
+    case "$ARCH" in
+        amd64|arm64) ;;
+        *)
+            log_error "Unsupported architecture: $ARCH (must be amd64 or arm64)"
+            exit 1
+            ;;
+    esac
+
+    # Set default version suffix with current date
+    if [[ -z "$VERSION_SUFFIX" ]]; then
+        VERSION_SUFFIX="+containai.$(date +%Y%m%d)"
+    fi
+}
+
+# Check prerequisites
+check_prerequisites() {
+    log_step "Checking prerequisites"
+
+    local missing=()
+
+    if ! command -v docker >/dev/null 2>&1; then
+        missing+=("docker")
+    fi
+
+    if ! command -v git >/dev/null 2>&1; then
+        missing+=("git")
+    fi
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log_error "Missing required tools: ${missing[*]}"
+        exit 1
+    fi
+
+    # Check Docker is running
+    if ! docker info >/dev/null 2>&1; then
+        log_error "Docker is not running or not accessible"
+        exit 1
+    fi
+
+    # Check for privileged mode support (needed for sysbox build)
+    if [[ "$DRY_RUN" != "true" ]]; then
+        if ! docker run --rm --privileged alpine:latest true 2>/dev/null; then
+            log_error "Docker privileged mode is not available (required for sysbox build)"
+            exit 1
+        fi
+    fi
+
+    log_ok "Prerequisites satisfied"
+}
+
+# Clone sysbox repository
+clone_sysbox() {
+    log_step "Cloning sysbox repository (branch: $SYSBOX_BRANCH)"
+
+    local build_dir="$PROJECT_ROOT/.build-sysbox"
+    local sysbox_dir="$build_dir/sysbox"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would clone $SYSBOX_REPO to $sysbox_dir"
+        log_info "[DRY-RUN] Would checkout branch: $SYSBOX_BRANCH"
+        log_info "[DRY-RUN] Would update submodules recursively"
+        return 0
+    fi
+
+    # Clean previous build directory if it exists
+    if [[ -d "$build_dir" ]]; then
+        log_info "Removing previous build directory"
+        rm -rf "$build_dir"
+    fi
+
+    mkdir -p "$build_dir"
+
+    # Clone with submodules
+    log_info "Cloning sysbox repository..."
+    if ! git clone --recursive --depth 1 --branch "$SYSBOX_BRANCH" "$SYSBOX_REPO" "$sysbox_dir"; then
+        log_error "Failed to clone sysbox repository"
+        exit 1
+    fi
+
+    # Verify the openat2 fix is present in sysbox-fs
+    log_info "Verifying openat2 fix is present..."
+    if ! grep -rq "openat2" "$sysbox_dir/sysbox-fs/"; then
+        log_warn "openat2 fix may not be present in this version"
+        log_warn "Expected fix commit: 1302a6f in sysbox-fs"
+    else
+        log_ok "openat2 fix detected in sysbox-fs"
+    fi
+
+    # Get version from VERSION file
+    local version
+    version=$(tr -d '[:space:]' < "$sysbox_dir/VERSION")
+    log_info "Sysbox version: $version"
+
+    # Export for later use
+    printf '%s' "$sysbox_dir"
+}
+
+# Build sysbox deb package
+build_sysbox_deb() {
+    local sysbox_dir="$1"
+    local version
+    local full_version
+
+    log_step "Building sysbox-ce deb package"
+    log_info "Architecture: $ARCH"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Version: <from sysbox VERSION file>${VERSION_SUFFIX}"
+        log_info "[DRY-RUN] Would build sysbox-ce deb package"
+        log_info "[DRY-RUN] Would run: make -C sysbox-pkgr sysbox-ce-deb generic"
+        return 0
+    fi
+
+    version=$(tr -d '[:space:]' < "$sysbox_dir/VERSION")
+    full_version="${version}${VERSION_SUFFIX}"
+    log_info "Version: $full_version"
+
+    local pkgr_dir="$sysbox_dir/sysbox-pkgr"
+
+    # Verify sysbox-pkgr exists
+    if [[ ! -d "$pkgr_dir" ]]; then
+        log_error "sysbox-pkgr directory not found at $pkgr_dir"
+        exit 1
+    fi
+
+    # Set up environment for the build
+    export EDITION=ce
+
+    # The sysbox-pkgr needs sources/sysbox to point to the sysbox repo
+    # Since we're building from within the repo, we need to set up the symlink
+    log_info "Setting up sysbox-pkgr sources..."
+    mkdir -p "$pkgr_dir/sources"
+    ln -sfn "$sysbox_dir" "$pkgr_dir/sources/sysbox"
+
+    # Patch the VERSION file to include our suffix
+    log_info "Patching version to: $full_version"
+    printf '%s' "$full_version" > "$sysbox_dir/VERSION"
+
+    # Build the generic deb package (ubuntu-jammy based, works across distros)
+    log_info "Building deb package (this may take 10-20 minutes)..."
+    cd -- "$pkgr_dir"
+
+    # Run the build with proper environment
+    # The build uses Docker internally, so we need to ensure it has access
+    if ! make -C deb generic EDITION=ce; then
+        log_error "Failed to build sysbox-ce deb package"
+        exit 1
+    fi
+
+    # Find the built package
+    local deb_path
+    deb_path=$(find "$pkgr_dir/deb/build" -name "sysbox-ce*.deb" -type f | head -1)
+
+    if [[ -z "$deb_path" ]] || [[ ! -f "$deb_path" ]]; then
+        log_error "Built deb package not found"
+        log_info "Searched in: $pkgr_dir/deb/build"
+        exit 1
+    fi
+
+    log_ok "Built package: $deb_path"
+
+    # Export the path for later use
+    printf '%s' "$deb_path"
+}
+
+# Copy artifacts and generate checksums
+finalize_artifacts() {
+    local deb_path="$1"
+    local version
+    local sysbox_dir="$PROJECT_ROOT/.build-sysbox/sysbox"
+
+    if [[ -f "$sysbox_dir/VERSION" ]]; then
+        version=$(tr -d '[:space:]' < "$sysbox_dir/VERSION")
+    else
+        version="unknown"
+    fi
+
+    log_step "Finalizing artifacts"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would create output directory: $OUTPUT_DIR"
+        log_info "[DRY-RUN] Would copy deb package to output"
+        log_info "[DRY-RUN] Would generate SHA256 checksum"
+        return 0
+    fi
+
+    # Create output directory
+    mkdir -p "$OUTPUT_DIR"
+
+    # Determine final filename
+    local final_name="sysbox-ce_${version}.linux_${ARCH}.deb"
+    local final_path="$OUTPUT_DIR/$final_name"
+
+    # Copy the deb package
+    log_info "Copying package to: $final_path"
+    cp -- "$deb_path" "$final_path"
+
+    # Generate SHA256 checksum
+    log_info "Generating SHA256 checksum..."
+    cd -- "$OUTPUT_DIR"
+    sha256sum "$final_name" > "${final_name}.sha256"
+
+    log_ok "Artifacts created in: $OUTPUT_DIR"
+    log_info "  - $final_name"
+    log_info "  - ${final_name}.sha256"
+
+    # Print checksum
+    log_info "SHA256: $(cat "${final_name}.sha256")"
+}
+
+# Cleanup build directory
+cleanup() {
+    local build_dir="$PROJECT_ROOT/.build-sysbox"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would clean up build directory: $build_dir"
+        return 0
+    fi
+
+    if [[ -d "$build_dir" ]]; then
+        log_info "Cleaning up build directory..."
+        rm -rf "$build_dir"
+    fi
+}
+
+# Main entry point
+main() {
+    parse_args "$@"
+
+    log_info "ContainAI Sysbox Build"
+    log_info "======================"
+    log_info "Architecture: $ARCH"
+    log_info "Output: $OUTPUT_DIR"
+    log_info "Version suffix: $VERSION_SUFFIX"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "Mode: DRY-RUN"
+    fi
+
+    check_prerequisites
+
+    # Clone and build
+    local sysbox_dir
+    sysbox_dir=$(clone_sysbox)
+
+    if [[ "$DRY_RUN" != "true" ]]; then
+        local deb_path
+        deb_path=$(build_sysbox_deb "$sysbox_dir")
+        finalize_artifacts "$deb_path"
+    else
+        build_sysbox_deb "$PROJECT_ROOT/.build-sysbox/sysbox"
+        finalize_artifacts ""
+    fi
+
+    # Cleanup is optional - uncomment to auto-clean after build
+    # cleanup
+
+    log_step "Build complete"
+    log_ok "Sysbox deb package built successfully"
+
+    if [[ "$DRY_RUN" != "true" ]]; then
+        log_info ""
+        log_info "To install the package:"
+        log_info "  sudo dpkg -i $OUTPUT_DIR/sysbox-ce_*.deb"
+        log_info "  sudo apt-get install -f  # if there are dependency issues"
+    fi
+}
+
+main "$@"
