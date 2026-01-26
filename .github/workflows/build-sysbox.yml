@@ -411,7 +411,7 @@ jobs:
 
           echo "Starting sysbox container: $CONTAINER_NAME"
           docker run --runtime=sysbox-runc -d --name="$CONTAINER_NAME" \
-            nestybox/ubuntu-focal-systemd-docker:latest
+            docker:dind
 
           # Wait for inner dockerd to be ready (up to 60s)
           echo "Waiting for inner dockerd to start..."
@@ -517,7 +517,7 @@ jobs:
 
           echo "Starting sysbox container: $CONTAINER_NAME"
           docker run --runtime=sysbox-runc -d --name="$CONTAINER_NAME" \
-            nestybox/ubuntu-focal-systemd-docker:latest
+           docker:dind
 
           # Wait for inner dockerd to be ready (up to 60s)
           echo "Waiting for inner dockerd to start..."
