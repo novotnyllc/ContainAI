@@ -8,7 +8,7 @@
 #
 # The build script runs generators first to create src/container/generated/ files.
 # Manual docker build requires running generators first:
-#   ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml src/container/generated/symlinks.dockerfile
+#   ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml src/container/generated/symlinks.sh
 #   ./src/scripts/gen-init-dirs.sh src/sync-manifest.toml src/container/generated/init-dirs.sh
 #   ./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml src/container/generated/link-spec.json
 #   cp src/container/link-repair.sh src/container/generated/link-repair.sh
