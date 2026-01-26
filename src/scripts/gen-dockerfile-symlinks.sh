@@ -83,17 +83,40 @@ for dir in "${mkdir_targets[@]}"; do
     fi
 done
 
-# Write output as executable shell script
+# Write output as executable bash script with logging
 {
-    printf '#!/bin/sh\n'
+    printf '#!/usr/bin/env bash\n'
     printf '# Generated from %s - DO NOT EDIT\n' "$(basename "$MANIFEST_FILE")"
     printf '# Regenerate with: src/scripts/gen-dockerfile-symlinks.sh\n'
     printf '# This script is COPY'"'"'d into the container and RUN during build\n'
-    printf 'set -e\n\n'
+    printf 'set -euo pipefail\n\n'
+
+    # Logging helper function
+    printf '# Logging helper - prints command and executes it\n'
+    printf 'run_cmd() {\n'
+    printf '    printf '"'"'+ %%s\\n'"'"' "$*"\n'
+    printf '    if ! "$@"; then\n'
+    printf '        printf '"'"'ERROR: Command failed: %%s\\n'"'"' "$*" >&2\n'
+    printf '        printf '"'"'  id: %%s\\n'"'"' "$(id)" >&2\n'
+    printf '        printf '"'"'  ls -ld /mnt/agent-data:\\n'"'"' >&2\n'
+    printf '        # shellcheck disable=SC2012\n'
+    printf '        ls -ld /mnt/agent-data 2>&1 | sed '"'"'s/^/    /'"'"' >&2 || printf '"'"'    (not found)\\n'"'"' >&2\n'
+    printf '        exit 1\n'
+    printf '    fi\n'
+    printf '}\n\n'
+
+    # Verify /mnt/agent-data is writable
+    printf '# Verify /mnt/agent-data is writable\n'
+    printf 'if ! touch /mnt/agent-data/.write-test 2>/dev/null; then\n'
+    printf '    printf '"'"'ERROR: /mnt/agent-data is not writable by %%s\\n'"'"' "$(id)" >&2\n'
+    printf '    ls -la /mnt/agent-data 2>&1 || printf '"'"'/mnt/agent-data does not exist\\n'"'"' >&2\n'
+    printf '    exit 1\n'
+    printf 'fi\n'
+    printf 'rm -f /mnt/agent-data/.write-test\n\n'
 
     # mkdir commands first
     if [[ ${#unique_mkdir_targets[@]} -gt 0 ]]; then
-        printf 'mkdir -p \\\n'
+        printf 'run_cmd mkdir -p \\\n'
         for i in "${!unique_mkdir_targets[@]}"; do
             if [[ $i -eq $((${#unique_mkdir_targets[@]} - 1)) ]]; then
                 printf '    %s\n' "${unique_mkdir_targets[$i]}"
@@ -104,9 +127,14 @@ done
         printf '\n'
     fi
 
-    # Symlink commands
+    # Symlink commands - wrap each in run_cmd
     for cmd in "${symlink_cmds[@]}"; do
-        printf '%s\n' "$cmd"
+        # Handle compound commands (rm && ln) by wrapping in bash -c
+        if [[ "$cmd" == *" && "* ]]; then
+            printf 'run_cmd bash -c '"'"'%s'"'"'\n' "$cmd"
+        else
+            printf 'run_cmd %s\n' "$cmd"
+        fi
     done
 } > "$OUTPUT_FILE"
 

@@ -119,6 +119,15 @@ jobs:
           cache-from: type=gha,scope=sdks
           cache-to: type=gha,mode=max,scope=sdks
 
+      - name: Generate container files
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p src/container/generated
+          ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml src/container/generated/symlinks.sh
+          ./src/scripts/gen-init-dirs.sh src/sync-manifest.toml src/container/generated/init-dirs.sh
+          ./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml src/container/generated/link-spec.json
+          cp src/container/link-repair.sh src/container/generated/link-repair.sh
+
       - name: Build and push full image
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
@@ -134,8 +143,8 @@ jobs:
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ steps.image_version.outputs.version }}
-          cache-from: type=gha,scope=full
-          cache-to: type=gha,mode=max,scope=full
+          cache-from: type=gha,scope=full-v2
+          cache-to: type=gha,mode=max,scope=full-v2
 
       - name: Extract metadata (tags, labels)
         id: meta

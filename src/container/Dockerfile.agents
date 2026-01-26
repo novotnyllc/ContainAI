@@ -112,9 +112,10 @@ USER root
 RUN mkdir -p /mnt/agent-data && chown agent:agent /mnt/agent-data
 
 # Run generated symlink script (created from sync-manifest.toml)
+# Uses bash explicitly since symlinks.sh uses bash features for error logging
 USER agent
 COPY container/generated/symlinks.sh /tmp/symlinks.sh
-RUN chmod +x /tmp/symlinks.sh && /tmp/symlinks.sh && rm /tmp/symlinks.sh
+RUN bash /tmp/symlinks.sh && rm /tmp/symlinks.sh
 
 # =============================================================================
 # POST-SYMLINK SETUP
