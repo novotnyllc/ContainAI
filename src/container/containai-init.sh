@@ -105,131 +105,30 @@ safe_chmod() {
     chmod "$mode" "$path"
 }
 
+# Generated init-dirs script location
+readonly INIT_DIRS_SCRIPT="/usr/local/lib/containai/init-dirs.sh"
+
 # Ensure all volume structure exists for symlinks to work
+# Sources the generated init-dirs.sh script from sync-manifest.toml
 ensure_volume_structure() {
     run_as_root mkdir -p "${DATA_DIR}"
     run_as_root chown -R --no-dereference 1000:1000 "${DATA_DIR}"
 
-    # Claude Code
-    ensure_dir "${DATA_DIR}/claude"
-    ensure_file "${DATA_DIR}/claude/claude.json" true
-    ensure_file "${DATA_DIR}/claude/credentials.json" true
-    ensure_file "${DATA_DIR}/claude/settings.json" true
-    ensure_file "${DATA_DIR}/claude/settings.local.json"
-    ensure_dir "${DATA_DIR}/claude/plugins"
-    ensure_dir "${DATA_DIR}/claude/skills"
-    ensure_dir "${DATA_DIR}/claude/commands"
-    ensure_dir "${DATA_DIR}/claude/agents"
-    ensure_dir "${DATA_DIR}/claude/hooks"
-    ensure_file "${DATA_DIR}/claude/CLAUDE.md"
-
-    # GitHub CLI
-    ensure_dir "${DATA_DIR}/config/gh"
-
-    # OpenCode config (selective sync - specific subdirs only)
-    ensure_dir "${DATA_DIR}/config/opencode"
-    ensure_file "${DATA_DIR}/config/opencode/opencode.json" true
-    ensure_dir "${DATA_DIR}/config/opencode/agents"
-    ensure_dir "${DATA_DIR}/config/opencode/commands"
-    ensure_dir "${DATA_DIR}/config/opencode/skills"
-    ensure_dir "${DATA_DIR}/config/opencode/modes"
-    ensure_dir "${DATA_DIR}/config/opencode/plugins"
-    ensure_file "${DATA_DIR}/config/opencode/instructions.md"
-
-    # tmux and fonts
-    ensure_dir "${DATA_DIR}/config/tmux"
-    ensure_dir "${DATA_DIR}/local/share/tmux"
-    ensure_dir "${DATA_DIR}/local/share/fonts"
-
-    # Common agents directory (shared skills, plugins, etc.)
-    ensure_dir "${DATA_DIR}/agents"
-
-    # Shell (paths match import.sh: shell/bash_aliases, shell/bashrc.d - no dots)
-    ensure_dir "${DATA_DIR}/shell"
-    ensure_file "${DATA_DIR}/shell/bash_aliases"
-    ensure_dir "${DATA_DIR}/shell/bashrc.d"
-    ensure_file "${DATA_DIR}/shell/zshrc"
-    ensure_file "${DATA_DIR}/shell/zprofile"
-    ensure_file "${DATA_DIR}/shell/inputrc"
-    ensure_dir "${DATA_DIR}/shell/oh-my-zsh-custom"
-
-    # Editors (vim/neovim)
-    ensure_dir "${DATA_DIR}/editors"
-    ensure_file "${DATA_DIR}/editors/vimrc"
-    ensure_dir "${DATA_DIR}/editors/vim"
-    ensure_dir "${DATA_DIR}/config/nvim"
-
-    # Prompt customization (starship, oh-my-posh)
-    ensure_file "${DATA_DIR}/config/starship.toml"
-    ensure_dir "${DATA_DIR}/config/oh-my-posh"
-
-    # VS Code Server
-    ensure_dir "${DATA_DIR}/vscode-server/extensions"
-    ensure_dir "${DATA_DIR}/vscode-server/data/Machine"
-    ensure_dir "${DATA_DIR}/vscode-server/data/User/mcp"
-    ensure_dir "${DATA_DIR}/vscode-server/data/User/prompts"
-    ensure_file "${DATA_DIR}/vscode-server/data/Machine/settings.json" true
-    ensure_file "${DATA_DIR}/vscode-server/data/User/mcp.json" true
-
-    # VS Code Insiders
-    ensure_dir "${DATA_DIR}/vscode-server-insiders/extensions"
-    ensure_dir "${DATA_DIR}/vscode-server-insiders/data/Machine"
-    ensure_dir "${DATA_DIR}/vscode-server-insiders/data/User/mcp"
-    ensure_dir "${DATA_DIR}/vscode-server-insiders/data/User/prompts"
-    ensure_file "${DATA_DIR}/vscode-server-insiders/data/Machine/settings.json" true
-    ensure_file "${DATA_DIR}/vscode-server-insiders/data/User/mcp.json" true
-
-    # Copilot
-    ensure_dir "${DATA_DIR}/copilot/skills"
-    ensure_file "${DATA_DIR}/copilot/config.json"
-    ensure_file "${DATA_DIR}/copilot/mcp-config.json"
-
-    # Gemini
-    ensure_dir "${DATA_DIR}/gemini"
-    ensure_file "${DATA_DIR}/gemini/google_accounts.json"
-    ensure_file "${DATA_DIR}/gemini/oauth_creds.json"
-    ensure_file "${DATA_DIR}/gemini/GEMINI.md"
-    ensure_file "${DATA_DIR}/gemini/settings.json" true
-
-    # Codex
-    ensure_dir "${DATA_DIR}/codex/skills"
-    ensure_file "${DATA_DIR}/codex/config.toml"
-    ensure_file "${DATA_DIR}/codex/auth.json"
-
-    # OpenCode auth
-    ensure_dir "${DATA_DIR}/local/share/opencode"
-    ensure_file "${DATA_DIR}/local/share/opencode/auth.json"
-
-    # Aider (may contain API keys)
-    ensure_dir "${DATA_DIR}/aider"
-    ensure_file "${DATA_DIR}/aider/aider.conf.yml"
-    ensure_file "${DATA_DIR}/aider/aider.model.settings.yml"
-
-    # Continue (selective sync: config files only)
-    ensure_dir "${DATA_DIR}/continue"
-    ensure_file "${DATA_DIR}/continue/config.yaml"
-    ensure_file "${DATA_DIR}/continue/config.json" true
-
-    # Cursor (selective sync: mcp.json, rules, extensions)
-    ensure_dir "${DATA_DIR}/cursor"
-    ensure_file "${DATA_DIR}/cursor/mcp.json" true
-    ensure_dir "${DATA_DIR}/cursor/rules"
-    ensure_dir "${DATA_DIR}/cursor/extensions"
-
-    # Secret permissions
-    safe_chmod 600 "${DATA_DIR}/claude/claude.json"
-    safe_chmod 600 "${DATA_DIR}/claude/credentials.json"
-    safe_chmod 600 "${DATA_DIR}/gemini/google_accounts.json"
-    safe_chmod 600 "${DATA_DIR}/gemini/oauth_creds.json"
-    safe_chmod 600 "${DATA_DIR}/codex/auth.json"
-    safe_chmod 600 "${DATA_DIR}/local/share/opencode/auth.json"
-    safe_chmod 600 "${DATA_DIR}/config/opencode/opencode.json"
-    safe_chmod 600 "${DATA_DIR}/aider/aider.conf.yml"
-    safe_chmod 600 "${DATA_DIR}/aider/aider.model.settings.yml"
-    safe_chmod 600 "${DATA_DIR}/continue/config.yaml"
-    safe_chmod 600 "${DATA_DIR}/continue/config.json"
-    safe_chmod 600 "${DATA_DIR}/cursor/mcp.json"
-    safe_chmod 700 "${DATA_DIR}/config/gh"
+    # Source generated init script if available
+    # The script uses ensure_dir, ensure_file, and safe_chmod helpers defined above
+    if [[ -f "$INIT_DIRS_SCRIPT" ]]; then
+        log "[INFO] Sourcing generated init-dirs.sh"
+        # shellcheck source=/dev/null
+        source "$INIT_DIRS_SCRIPT"
+    else
+        log "[WARN] Generated init-dirs.sh not found, using fallback"
+        # Minimal fallback for essential directories
+        ensure_dir "${DATA_DIR}/claude"
+        ensure_dir "${DATA_DIR}/config/gh"
+        ensure_dir "${DATA_DIR}/shell"
+        ensure_dir "${DATA_DIR}/editors"
+        ensure_dir "${DATA_DIR}/config"
+    fi
 
     run_as_root chown -R --no-dereference 1000:1000 "${DATA_DIR}"
 }

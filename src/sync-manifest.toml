@@ -268,7 +268,7 @@ flags = "d"  # directory
 source = ".bash_aliases"
 target = "shell/bash_aliases"
 container_link = ".bash_aliases_imported"  # Different name to preserve user's original
-flags = "f"  # file
+flags = "fR"  # file, remove existing first (Dockerfile uses rm -rf before ln)
 
 [[entries]]
 source = ".bashrc.d"

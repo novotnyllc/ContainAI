@@ -93,6 +93,11 @@ RUN curl -fsSL https://opencode.ai/install | bash && \
 # =============================================================================
 # AGENT CONFIGURATION SYMLINKS
 # Symlink config files to /mnt/agent-data for persistence across container restarts
+#
+# NOTE: The canonical symlink spec is generated in container/generated/symlinks.dockerfile
+# from sync-manifest.toml. The hardcoded commands below include agent-specific setup
+# (e.g., moving installer-created files) that the generator doesn't handle.
+# The generated link-spec.json is used for runtime verification via link-repair.sh.
 # =============================================================================
 
 # Claude configuration symlinks
@@ -302,7 +307,8 @@ RUN chmod +x /usr/local/lib/containai/init.sh && \
 # =============================================================================
 COPY container/generated/link-spec.json /usr/local/lib/containai/link-spec.json
 COPY container/generated/link-repair.sh /usr/local/lib/containai/link-repair.sh
-RUN chmod +x /usr/local/lib/containai/link-repair.sh
+COPY container/generated/init-dirs.sh /usr/local/lib/containai/init-dirs.sh
+RUN chmod +x /usr/local/lib/containai/link-repair.sh /usr/local/lib/containai/init-dirs.sh
 
 # =============================================================================
 # FINAL CONFIGURATION
