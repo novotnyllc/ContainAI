@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # ContainAI link repair script
 # Verifies and repairs symlinks in the container based on link-spec.json
-# Usage: link-repair.sh [--check|--fix] [--quiet]
-#   --check  Verify symlinks without making changes (default)
-#   --fix    Repair broken or missing symlinks
-#   --quiet  Suppress output for cron/watcher use
+# Usage: link-repair.sh [--check|--fix|--dry-run] [--quiet]
+#   --check    Verify symlinks without making changes (default)
+#   --fix      Repair broken or missing symlinks
+#   --dry-run  Show what would be fixed without making changes
+#   --quiet    Suppress output for cron/watcher use
+#
+# Exit codes:
+#   0 = Success (all OK in check mode, or fix completed)
+#   1 = Issues found (check mode) or errors occurred
 set -euo pipefail
 
 : "${HOME:=/home/agent}"
@@ -24,6 +29,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --fix)
             MODE="fix"
+            shift
+            ;;
+        --dry-run)
+            MODE="dry-run"
             shift
             ;;
         --quiet)
@@ -104,15 +113,19 @@ for i in $(seq 0 $((links_count - 1))); do
         ((missing++))
     fi
 
-    # Fix mode
-    if [[ "$MODE" == "fix" ]]; then
+    # Fix mode (or dry-run)
+    if [[ "$MODE" == "fix" || "$MODE" == "dry-run" ]]; then
         # Create parent directory if needed
         parent=$(dirname "$link")
         if [[ ! -d "$parent" ]]; then
-            if ! mkdir -p "$parent"; then
-                log_err "ERROR: Failed to create parent: $parent"
-                ((errors++))
-                continue
+            if [[ "$MODE" == "dry-run" ]]; then
+                log "[WOULD] Create parent directory: $parent"
+            else
+                if ! mkdir -p "$parent"; then
+                    log_err "ERROR: Failed to create parent: $parent"
+                    ((errors++))
+                    continue
+                fi
             fi
         fi
 
@@ -128,10 +141,14 @@ for i in $(seq 0 $((links_count - 1))); do
                 can_remove=1
             fi
             if [[ $can_remove -eq 1 ]]; then
-                if ! rm -rf "$link"; then
-                    log_err "ERROR: Failed to remove: $link"
-                    ((errors++))
-                    continue
+                if [[ "$MODE" == "dry-run" ]]; then
+                    log "[WOULD] Remove existing: $link"
+                else
+                    if ! rm -rf "$link"; then
+                        log_err "ERROR: Failed to remove: $link"
+                        ((errors++))
+                        continue
+                    fi
                 fi
             else
                 log_err "ERROR: Cannot fix - exists without R flag: $link"
@@ -141,18 +158,24 @@ for i in $(seq 0 $((links_count - 1))); do
         fi
 
         # Create symlink
-        if ln -sfn "$target" "$link"; then
-            log "[FIXED] $link -> $target"
+        if [[ "$MODE" == "dry-run" ]]; then
+            log "[WOULD] Create symlink: $link -> $target"
             ((fixed++))
         else
-            log_err "ERROR: Failed to create symlink: $link -> $target"
-            ((errors++))
+            if ln -sfn "$target" "$link"; then
+                log "[FIXED] $link -> $target"
+                ((fixed++))
+            else
+                log_err "ERROR: Failed to create symlink: $link -> $target"
+                ((errors++))
+            fi
         fi
     fi
 done
 
-# Update checked-at timestamp after any successful run (fix mode)
-if [[ "$MODE" == "fix" ]]; then
+# Update checked-at timestamp after any successful run (fix mode only, not dry-run)
+# Per spec: updated on ALL successful runs (even if no changes made)
+if [[ "$MODE" == "fix" && $errors -eq 0 ]]; then
     # Write atomically
     tmp_file="${CHECKED_AT_FILE}.tmp.$$"
     if date -u +%Y-%m-%dT%H:%M:%SZ > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$CHECKED_AT_FILE" 2>/dev/null; then
@@ -165,19 +188,27 @@ fi
 
 # Summary
 log ""
-log "=== Link Status Summary ==="
+if [[ "$MODE" == "dry-run" ]]; then
+    log "=== Dry-Run Summary ==="
+else
+    log "=== Link Status Summary ==="
+fi
 log "  OK:      $ok"
 log "  Broken:  $broken"
 log "  Missing: $missing"
 if [[ "$MODE" == "fix" ]]; then
     log "  Fixed:   $fixed"
+elif [[ "$MODE" == "dry-run" ]]; then
+    log "  Would fix: $fixed"
 fi
 log "  Errors:  $errors"
 
-# Exit code
+# Exit code per spec:
+#   0 = Success (all OK in check mode, fix completed, or dry-run completed)
+#   1 = Issues found (check mode) or errors occurred
 if [[ $errors -gt 0 ]]; then
     exit 1
 elif [[ "$MODE" == "check" && $((broken + missing)) -gt 0 ]]; then
-    exit 2
+    exit 1
 fi
 exit 0

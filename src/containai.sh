@@ -66,7 +66,8 @@ _containai_libs_exist() {
         && [[ -f "$_CAI_SCRIPT_DIR/lib/env.sh" ]] \
         && [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]] \
         && [[ -f "$_CAI_SCRIPT_DIR/lib/uninstall.sh" ]] \
-        && [[ -f "$_CAI_SCRIPT_DIR/lib/update.sh" ]]
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/update.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/links.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -151,6 +152,11 @@ if ! source "$_CAI_SCRIPT_DIR/lib/update.sh"; then
     return 1
 fi
 
+if ! source "$_CAI_SCRIPT_DIR/lib/links.sh"; then
+    echo "[ERROR] Failed to source lib/links.sh" >&2
+    return 1
+fi
+
 # Mark libraries as loaded
 _CONTAINAI_LIB_LOADED="1"
 
@@ -177,6 +183,7 @@ Subcommands:
   export        Export data volume to .tgz archive
   stop          Stop ContainAI containers
   ssh           Manage SSH configuration (cleanup stale configs)
+  links         Verify and repair container symlinks
   version       Show current version
   update        Update ContainAI installation
   uninstall     Clean removal of system-level components
@@ -516,6 +523,46 @@ Examples:
   cai doctor                    Run all checks, show formatted report
   cai doctor --fix              Auto-fix issues and show report
   cai doctor --json             Output JSON for scripts/automation
+EOF
+}
+
+_containai_links_help() {
+    cat <<'EOF'
+ContainAI Links - Verify and repair container symlinks
+
+Usage: cai links <subcommand> [options]
+
+Subcommands:
+  check         Verify symlinks match link-spec.json
+  fix           Repair broken or missing symlinks
+
+Options:
+  <path>                Workspace path (positional, alternative to --workspace)
+  --workspace <path>    Workspace path (default: current directory)
+  --name <name>         Container name (overrides workspace-based lookup)
+  --config <path>       Config file path (overrides auto-discovery)
+  --quiet, -q           Suppress verbose output
+  --dry-run             Show what would be fixed without making changes (fix only)
+  -h, --help            Show this help message
+
+How it works:
+  Links are verified/repaired inside the container via SSH. The container
+  must be running (or will be started for fix operations).
+
+  The link-spec.json is shipped in the container image and defines all
+  symlinks that should exist from the container filesystem to the data
+  volume at /mnt/agent-data.
+
+Exit Codes:
+  0    Success (all links OK, or fix completed)
+  1    Issues found (check mode) or errors occurred
+
+Examples:
+  cai links check                    Verify symlinks in default container
+  cai links check /path/to/project   Verify symlinks for specific workspace
+  cai links fix                      Repair broken symlinks
+  cai links fix --dry-run            Preview what would be fixed
+  cai links fix --name my-container  Repair links in named container
 EOF
 }
 
@@ -1105,6 +1152,301 @@ _containai_ssh_cleanup_cmd() {
 
     # Call the cleanup function from ssh.sh
     _cai_ssh_cleanup "$dry_run"
+}
+
+# ==============================================================================
+# Links subcommand handlers
+# ==============================================================================
+
+# Links subcommand handler - verify and repair container symlinks
+# Supports subcommands: check, fix
+_containai_links_cmd() {
+    local links_subcommand="${1:-}"
+
+    # Handle empty or help first
+    if [[ -z "$links_subcommand" ]]; then
+        _containai_links_help
+        return 0
+    fi
+
+    case "$links_subcommand" in
+        check)
+            shift
+            _containai_links_check_cmd "$@"
+            ;;
+        fix)
+            shift
+            _containai_links_fix_cmd "$@"
+            ;;
+        help | -h | --help)
+            _containai_links_help
+            return 0
+            ;;
+        *)
+            echo "[ERROR] Unknown links subcommand: $links_subcommand" >&2
+            echo "Use 'cai links --help' for usage" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Links check subcommand handler
+_containai_links_check_cmd() {
+    local workspace=""
+    local explicit_config=""
+    local container_name=""
+    local quiet_flag="false"
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --workspace | -w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="$2"
+                workspace="${workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                if [[ -z "$workspace" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            -w*)
+                workspace="${1#-w}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            --name)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --name requires a value" >&2
+                    return 1
+                fi
+                container_name="$2"
+                shift 2
+                ;;
+            --name=*)
+                container_name="${1#--name=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --name requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --config)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                explicit_config="$2"
+                explicit_config="${explicit_config/#\~/$HOME}"
+                shift 2
+                ;;
+            --config=*)
+                explicit_config="${1#--config=}"
+                if [[ -z "$explicit_config" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                explicit_config="${explicit_config/#\~/$HOME}"
+                shift
+                ;;
+            --quiet | -q)
+                quiet_flag="true"
+                shift
+                ;;
+            --help | -h)
+                _containai_links_help
+                return 0
+                ;;
+            *)
+                # Check if it's a directory path (positional workspace argument)
+                if [[ -z "$workspace" && -d "$1" ]]; then
+                    workspace="$1"
+                    workspace="${workspace/#\~/$HOME}"
+                    shift
+                else
+                    echo "[ERROR] Unknown option: $1" >&2
+                    echo "Use 'cai links check --help' for usage" >&2
+                    return 1
+                fi
+                ;;
+        esac
+    done
+
+    # Resolve workspace using platform-aware normalization
+    local resolved_workspace workspace_input
+    workspace_input="${workspace:-$PWD}"
+    resolved_workspace=$(_cai_normalize_path "$workspace_input")
+    if [[ ! -d "$resolved_workspace" ]]; then
+        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+        return 1
+    fi
+
+    # Resolve context from config
+    local config_context_override=""
+    if [[ -n "$explicit_config" ]]; then
+        if ! config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config"); then
+            echo "[ERROR] Failed to parse config: $explicit_config" >&2
+            return 1
+        fi
+    else
+        config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
+    fi
+
+    # Auto-select Docker context
+    local selected_context=""
+    if ! selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
+        echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+        return 1
+    fi
+
+    # Resolve container name
+    local resolved_container_name
+    if ! resolved_container_name=$(_links_resolve_container "$container_name" "$resolved_workspace" "$selected_context"); then
+        return 1
+    fi
+
+    # Run check
+    _containai_links_check "$resolved_container_name" "$selected_context" "$quiet_flag"
+}
+
+# Links fix subcommand handler
+_containai_links_fix_cmd() {
+    local workspace=""
+    local explicit_config=""
+    local container_name=""
+    local quiet_flag="false"
+    local dry_run_flag="false"
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --workspace | -w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="$2"
+                workspace="${workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                if [[ -z "$workspace" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            -w*)
+                workspace="${1#-w}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            --name)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --name requires a value" >&2
+                    return 1
+                fi
+                container_name="$2"
+                shift 2
+                ;;
+            --name=*)
+                container_name="${1#--name=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --name requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --config)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                explicit_config="$2"
+                explicit_config="${explicit_config/#\~/$HOME}"
+                shift 2
+                ;;
+            --config=*)
+                explicit_config="${1#--config=}"
+                if [[ -z "$explicit_config" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                explicit_config="${explicit_config/#\~/$HOME}"
+                shift
+                ;;
+            --quiet | -q)
+                quiet_flag="true"
+                shift
+                ;;
+            --dry-run)
+                dry_run_flag="true"
+                shift
+                ;;
+            --help | -h)
+                _containai_links_help
+                return 0
+                ;;
+            *)
+                # Check if it's a directory path (positional workspace argument)
+                if [[ -z "$workspace" && -d "$1" ]]; then
+                    workspace="$1"
+                    workspace="${workspace/#\~/$HOME}"
+                    shift
+                else
+                    echo "[ERROR] Unknown option: $1" >&2
+                    echo "Use 'cai links fix --help' for usage" >&2
+                    return 1
+                fi
+                ;;
+        esac
+    done
+
+    # Resolve workspace using platform-aware normalization
+    local resolved_workspace workspace_input
+    workspace_input="${workspace:-$PWD}"
+    resolved_workspace=$(_cai_normalize_path "$workspace_input")
+    if [[ ! -d "$resolved_workspace" ]]; then
+        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+        return 1
+    fi
+
+    # Resolve context from config
+    local config_context_override=""
+    if [[ -n "$explicit_config" ]]; then
+        if ! config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config"); then
+            echo "[ERROR] Failed to parse config: $explicit_config" >&2
+            return 1
+        fi
+    else
+        config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
+    fi
+
+    # Auto-select Docker context
+    local selected_context=""
+    if ! selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
+        echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+        return 1
+    fi
+
+    # Resolve container name
+    local resolved_container_name
+    if ! resolved_container_name=$(_links_resolve_container "$container_name" "$resolved_workspace" "$selected_context"); then
+        return 1
+    fi
+
+    # Run fix
+    _containai_links_fix "$resolved_container_name" "$selected_context" "$quiet_flag" "$dry_run_flag"
 }
 
 # ==============================================================================
@@ -2107,6 +2449,10 @@ containai() {
         ssh)
             shift
             _containai_ssh_cmd "$@"
+            ;;
+        links)
+            shift
+            _containai_links_cmd "$@"
             ;;
         sandbox)
             shift
