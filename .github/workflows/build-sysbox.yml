@@ -202,17 +202,11 @@ jobs:
           name: sysbox-ce-amd64
           path: dist
 
-      - name: Install kernel headers (best-effort)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y linux-headers-$(uname -r) || \
-            sudo apt-get install -y linux-headers-azure || \
-            echo "::warning::Kernel headers unavailable, some sysbox features may not work"
-
       - name: Install sysbox deb
         run: |
           echo "Installing sysbox deb package..."
           ls -la dist/*.deb
+          sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive dpkg -i dist/sysbox-ce*.deb || true
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y
 
@@ -267,7 +261,7 @@ jobs:
 
           echo "Starting sysbox container: $CONTAINER_NAME"
           docker run --runtime=sysbox-runc -d --name="$CONTAINER_NAME" \
-            nestybox/ubuntu-focal-systemd-docker:20240618
+            nestybox/ubuntu-focal-systemd-docker:latest
 
           # Wait for inner dockerd to be ready (up to 60s)
           echo "Waiting for inner dockerd to start..."
@@ -314,17 +308,11 @@ jobs:
           name: sysbox-ce-arm64
           path: dist
 
-      - name: Install kernel headers (best-effort)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y linux-headers-$(uname -r) || \
-            sudo apt-get install -y linux-headers-azure || \
-            echo "::warning::Kernel headers unavailable, some sysbox features may not work"
-
       - name: Install sysbox deb
         run: |
           echo "Installing sysbox deb package..."
           ls -la dist/*.deb
+          sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive dpkg -i dist/sysbox-ce*.deb || true
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y
 
@@ -379,7 +367,7 @@ jobs:
 
           echo "Starting sysbox container: $CONTAINER_NAME"
           docker run --runtime=sysbox-runc -d --name="$CONTAINER_NAME" \
-            nestybox/ubuntu-focal-systemd-docker:20240618
+            nestybox/ubuntu-focal-systemd-docker:latest
 
           # Wait for inner dockerd to be ready (up to 60s)
           echo "Waiting for inner dockerd to start..."
