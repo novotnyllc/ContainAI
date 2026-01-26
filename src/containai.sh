@@ -2711,7 +2711,7 @@ _containai_run_cmd() {
         # This prevents accidentally creating a container with a colliding name in another context
         # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
         local collision_rc collision_ctx
-        # Don't suppress stderr - ambiguity error is useful context
+        # Suppress stderr - we emit our own error messages for both collision and ambiguity cases
         if collision_ctx=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>/dev/null); then
             echo "[ERROR] Container $container_name already exists" >&2
             return 1
