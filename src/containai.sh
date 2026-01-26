@@ -194,7 +194,7 @@ Run Options:
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
-  --container <name>    Container name (default: auto-generated from workspace)
+  --container <name>    Container name for creation (errors if already exists)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -346,8 +346,8 @@ ContainAI Stop - Stop ContainAI containers
 Usage: cai stop [options]
 
 Options:
-  --container <name>  Stop specific container by name
-  --all               Stop all containers without prompting
+  --container <name>  Stop specific container by name (mutually exclusive with --all)
+  --all               Stop all containers without prompting (mutually exclusive with --container)
   --remove            Also remove containers (not just stop them)
                       When used with --remove, SSH configs are automatically cleaned
   -h, --help          Show this help message
@@ -1194,6 +1194,7 @@ _containai_stop_cmd() {
     done
 
     # Parse arguments (without consuming original args for _containai_stop_all)
+    local all_flag=false
     for arg in "$@"; do
         case "$arg" in
             --container)
@@ -1202,6 +1203,11 @@ _containai_stop_cmd() {
                 local prev=""
                 for a in "$@"; do
                     if [[ "$prev" == "--container" ]]; then
+                        # Reject values that look like flags
+                        if [[ "$a" == -* ]]; then
+                            echo "[ERROR] --container requires a value (got '$a')" >&2
+                            return 1
+                        fi
                         container_name="$a"
                         found_container=true
                         break
@@ -1219,12 +1225,20 @@ _containai_stop_cmd() {
                     echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
+                # Reject values that look like flags
+                if [[ "$container_name" == -* ]]; then
+                    echo "[ERROR] --container requires a value (got '$container_name')" >&2
+                    return 1
+                fi
                 ;;
             --remove)
                 remove_flag=true
                 ;;
-            --all | --help | -h)
-                # Valid flags handled by _containai_stop_all or earlier
+            --all)
+                all_flag=true
+                ;;
+            --help | -h)
+                # Already handled earlier
                 ;;
             -*)
                 # Only error on unknown flags if --container mode
@@ -1238,29 +1252,10 @@ _containai_stop_cmd() {
         esac
     done
 
-    # Validate flag combinations when --container is used
-    if [[ -n "$container_name" ]]; then
-        # Check for unknown flags that were not caught above (non-flag args that aren't --container value)
-        local prev_was_container=false
-        for arg in "$@"; do
-            if [[ "$prev_was_container" == "true" ]]; then
-                prev_was_container=false
-                continue
-            fi
-            if [[ "$arg" == "--container" ]]; then
-                prev_was_container=true
-                continue
-            fi
-            case "$arg" in
-                --container=* | --remove | --all | --help | -h)
-                    ;;
-                -*)
-                    echo "[ERROR] Unknown option: $arg" >&2
-                    echo "Use 'cai stop --help' for usage" >&2
-                    return 1
-                    ;;
-            esac
-        done
+    # Check mutual exclusivity of --container and --all
+    if [[ -n "$container_name" ]] && [[ "$all_flag" == "true" ]]; then
+        echo "[ERROR] --container and --all are mutually exclusive" >&2
+        return 1
     fi
 
     # If --container specified, stop that specific container
