@@ -390,9 +390,9 @@ generate_container_files() {
 
     mkdir -p "$gen_dir"
 
-    # Generate Dockerfile symlinks fragment
-    if ! "${scripts_dir}/gen-dockerfile-symlinks.sh" "$manifest" "${gen_dir}/symlinks.dockerfile"; then
-        printf 'ERROR: Failed to generate symlinks.dockerfile\n' >&2
+    # Generate symlinks shell script (COPY'd and RUN in Dockerfile)
+    if ! "${scripts_dir}/gen-dockerfile-symlinks.sh" "$manifest" "${gen_dir}/symlinks.sh"; then
+        printf 'ERROR: Failed to generate symlinks.sh\n' >&2
         return 1
     fi
 
@@ -411,18 +411,10 @@ generate_container_files() {
     # Copy link-repair.sh to generated dir so it gets included in build context
     cp "${SCRIPT_DIR}/container/link-repair.sh" "${gen_dir}/link-repair.sh"
 
-    # Validate Dockerfile symlinks match manifest
-    echo "  Validating Dockerfile symlinks against manifest..."
-    if ! "${scripts_dir}/validate-dockerfile-symlinks.sh" "$manifest" "${SCRIPT_DIR}/container/Dockerfile.agents"; then
-        printf 'WARNING: Dockerfile symlinks may be out of sync with manifest\n' >&2
-        printf 'Review generated/symlinks.dockerfile and update Dockerfile.agents\n' >&2
-        # Don't fail the build, just warn - Dockerfile may have valid agent-specific setup
-    fi
-
     # Verify generated files are newer than manifest (staleness check)
     local manifest_mtime gen_file_mtime
     manifest_mtime=$(stat -c %Y "$manifest" 2>/dev/null || stat -f %m "$manifest" 2>/dev/null)
-    for gen_file in "${gen_dir}/symlinks.dockerfile" "${gen_dir}/init-dirs.sh" "${gen_dir}/link-spec.json"; do
+    for gen_file in "${gen_dir}/symlinks.sh" "${gen_dir}/init-dirs.sh" "${gen_dir}/link-spec.json"; do
         gen_file_mtime=$(stat -c %Y "$gen_file" 2>/dev/null || stat -f %m "$gen_file" 2>/dev/null)
         if [[ "$gen_file_mtime" -lt "$manifest_mtime" ]]; then
             printf 'ERROR: Generated file is stale: %s\n' "$gen_file" >&2

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Generate Dockerfile RUN commands for container symlinks from manifest
+# Generate shell script for container symlinks from manifest
 # Usage: gen-dockerfile-symlinks.sh <manifest_path> <output_path>
-# Reads sync-manifest.toml and outputs Dockerfile fragment with symlink commands
+# Reads sync-manifest.toml and outputs executable shell script for symlink creation
+# The script is COPY'd into the container and RUN during build
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,35 +83,32 @@ for dir in "${mkdir_targets[@]}"; do
     fi
 done
 
-# Write output
+# Write output as executable shell script
 {
+    printf '#!/bin/sh\n'
     printf '# Generated from %s - DO NOT EDIT\n' "$(basename "$MANIFEST_FILE")"
-    printf '# Regenerate with: src/scripts/gen-dockerfile-symlinks.sh\n\n'
-    printf 'RUN \\\n'
+    printf '# Regenerate with: src/scripts/gen-dockerfile-symlinks.sh\n'
+    printf '# This script is COPY'"'"'d into the container and RUN during build\n'
+    printf 'set -e\n\n'
 
     # mkdir commands first
     if [[ ${#unique_mkdir_targets[@]} -gt 0 ]]; then
-        printf '    mkdir -p \\\n'
+        printf 'mkdir -p \\\n'
         for i in "${!unique_mkdir_targets[@]}"; do
             if [[ $i -eq $((${#unique_mkdir_targets[@]} - 1)) ]]; then
-                printf '        %s && \\\n' "${unique_mkdir_targets[$i]}"
+                printf '    %s\n' "${unique_mkdir_targets[$i]}"
             else
-                printf '        %s \\\n' "${unique_mkdir_targets[$i]}"
+                printf '    %s \\\n' "${unique_mkdir_targets[$i]}"
             fi
         done
+        printf '\n'
     fi
 
     # Symlink commands
-    total=${#symlink_cmds[@]}
-    for i in "${!symlink_cmds[@]}"; do
-        cmd="${symlink_cmds[$i]}"
-        if [[ $i -eq $((total - 1)) ]]; then
-            # Last command - no trailing backslash or &&
-            printf '    %s\n' "$cmd"
-        else
-            printf '    %s && \\\n' "$cmd"
-        fi
+    for cmd in "${symlink_cmds[@]}"; do
+        printf '%s\n' "$cmd"
     done
 } > "$OUTPUT_FILE"
 
+chmod +x "$OUTPUT_FILE"
 printf 'Generated: %s\n' "$OUTPUT_FILE" >&2

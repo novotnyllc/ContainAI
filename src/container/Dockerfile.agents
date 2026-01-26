@@ -93,198 +93,37 @@ RUN curl -fsSL https://opencode.ai/install | bash && \
 # =============================================================================
 # AGENT CONFIGURATION SYMLINKS
 # Symlink config files to /mnt/agent-data for persistence across container restarts
-#
-# NOTE: The canonical symlink spec is generated in container/generated/symlinks.dockerfile
-# from sync-manifest.toml. The hardcoded commands below include agent-specific setup
-# (e.g., moving installer-created files) that the generator doesn't handle.
-# The generated link-spec.json is used for runtime verification via link-repair.sh.
+# Generated from sync-manifest.toml via src/scripts/gen-dockerfile-symlinks.sh
 # =============================================================================
 
-# Claude configuration symlinks
-# Note: rm -rf before ln -sfn for directories to prevent ln creating links inside existing dirs
-RUN mkdir -p /mnt/agent-data/claude/skills /mnt/agent-data/claude/plugins \
-             /mnt/agent-data/claude/commands /mnt/agent-data/claude/agents /mnt/agent-data/claude/hooks && \
-    # Move default claude.json to agent-data location
-    if [ -f /home/agent/.claude.json ]; then mv /home/agent/.claude.json /mnt/agent-data/claude/claude.json; fi && \
-    ln -sfn /mnt/agent-data/claude/credentials.json /home/agent/.claude/.credentials.json && \
-    ln -sfn /mnt/agent-data/claude/claude.json /home/agent/.claude.json && \
-    ln -sfn /mnt/agent-data/claude/settings.json /home/agent/.claude/settings.json && \
-    ln -sfn /mnt/agent-data/claude/settings.local.json /home/agent/.claude/settings.local.json && \
-    rm -rf /home/agent/.claude/plugins && \
-    ln -sfn /mnt/agent-data/claude/plugins /home/agent/.claude/plugins && \
-    rm -rf /home/agent/.claude/skills && \
-    ln -sfn /mnt/agent-data/claude/skills /home/agent/.claude/skills && \
-    rm -rf /home/agent/.claude/commands && \
-    ln -sfn /mnt/agent-data/claude/commands /home/agent/.claude/commands && \
-    rm -rf /home/agent/.claude/agents && \
-    ln -sfn /mnt/agent-data/claude/agents /home/agent/.claude/agents && \
-    rm -rf /home/agent/.claude/hooks && \
-    ln -sfn /mnt/agent-data/claude/hooks /home/agent/.claude/hooks && \
-    ln -sfn /mnt/agent-data/claude/CLAUDE.md /home/agent/.claude/CLAUDE.md
-
-# Copilot configuration symlinks
-RUN mkdir -p /mnt/agent-data/copilot/skills && \
-    ln -sfn /mnt/agent-data/copilot/config.json /home/agent/.copilot/config.json && \
-    ln -sfn /mnt/agent-data/copilot/mcp-config.json /home/agent/.copilot/mcp-config.json && \
-    rm -rf /home/agent/.copilot/skills && \
-    ln -sfn /mnt/agent-data/copilot/skills /home/agent/.copilot/skills
-
-# Gemini configuration symlinks
-RUN ln -sfn /mnt/agent-data/gemini/google_accounts.json /home/agent/.gemini/google_accounts.json && \
-    ln -sfn /mnt/agent-data/gemini/oauth_creds.json /home/agent/.gemini/oauth_creds.json && \
-    ln -sfn /mnt/agent-data/gemini/settings.json /home/agent/.gemini/settings.json && \
-    ln -sfn /mnt/agent-data/gemini/GEMINI.md /home/agent/.gemini/GEMINI.md
-
-# Codex configuration symlinks
-RUN mkdir -p /mnt/agent-data/codex/skills && \
-    ln -sfn /mnt/agent-data/codex/auth.json /home/agent/.codex/auth.json && \
-    ln -sfn /mnt/agent-data/codex/config.toml /home/agent/.codex/config.toml && \
-    rm -rf /home/agent/.codex/skills && \
-    ln -sfn /mnt/agent-data/codex/skills /home/agent/.codex/skills
-
-# OpenCode configuration symlinks (XDG config + data)
-# Selective sync: config files only (not entire directory)
-# Remove existing opencode config to ensure clean state (no stale caches from installer)
-RUN mkdir -p /mnt/agent-data/local/share/opencode \
-             /mnt/agent-data/config/opencode/agents \
-             /mnt/agent-data/config/opencode/commands \
-             /mnt/agent-data/config/opencode/skills \
-             /mnt/agent-data/config/opencode/modes \
-             /mnt/agent-data/config/opencode/plugins && \
+# Pre-symlink setup: move installer-created files to data volume location
+RUN if [ -f /home/agent/.claude.json ]; then \
+        mkdir -p /mnt/agent-data/claude && \
+        mv /home/agent/.claude.json /mnt/agent-data/claude/claude.json; \
+    fi && \
+    # Clean OpenCode installer state (selective sync requires clean slate)
     rm -rf /home/agent/.config/opencode && \
-    mkdir -p /home/agent/.config/opencode && \
-    ln -sfn /mnt/agent-data/local/share/opencode/auth.json /home/agent/.local/share/opencode/auth.json && \
-    ln -sfn /mnt/agent-data/config/opencode/opencode.json /home/agent/.config/opencode/opencode.json && \
-    ln -sfn /mnt/agent-data/config/opencode/agents /home/agent/.config/opencode/agents && \
-    ln -sfn /mnt/agent-data/config/opencode/commands /home/agent/.config/opencode/commands && \
-    ln -sfn /mnt/agent-data/config/opencode/skills /home/agent/.config/opencode/skills && \
-    ln -sfn /mnt/agent-data/config/opencode/modes /home/agent/.config/opencode/modes && \
-    ln -sfn /mnt/agent-data/config/opencode/plugins /home/agent/.config/opencode/plugins && \
-    ln -sfn /mnt/agent-data/config/opencode/instructions.md /home/agent/.config/opencode/instructions.md
+    mkdir -p /home/agent/.config/opencode
 
-# Aider configuration symlinks (home-level config files)
-RUN mkdir -p /mnt/agent-data/aider && \
-    ln -sfn /mnt/agent-data/aider/aider.conf.yml /home/agent/.aider.conf.yml && \
-    ln -sfn /mnt/agent-data/aider/aider.model.settings.yml /home/agent/.aider.model.settings.yml
-
-# Continue configuration symlinks (selective sync: config files only)
-RUN mkdir -p /mnt/agent-data/continue && \
-    ln -sfn /mnt/agent-data/continue/config.yaml /home/agent/.continue/config.yaml && \
-    ln -sfn /mnt/agent-data/continue/config.json /home/agent/.continue/config.json
-
-# Cursor configuration symlinks (selective sync: mcp.json, rules, extensions)
-RUN mkdir -p /mnt/agent-data/cursor/rules /mnt/agent-data/cursor/extensions && \
-    ln -sfn /mnt/agent-data/cursor/mcp.json /home/agent/.cursor/mcp.json && \
-    rm -rf /home/agent/.cursor/rules && \
-    ln -sfn /mnt/agent-data/cursor/rules /home/agent/.cursor/rules && \
-    rm -rf /home/agent/.cursor/extensions && \
-    ln -sfn /mnt/agent-data/cursor/extensions /home/agent/.cursor/extensions
+# Run generated symlink script (created from sync-manifest.toml)
+COPY container/generated/symlinks.sh /tmp/symlinks.sh
+RUN chmod +x /tmp/symlinks.sh && /tmp/symlinks.sh && rm /tmp/symlinks.sh
 
 # =============================================================================
-# VS CODE SERVER SYMLINKS
-# Persist VS Code settings, extensions, and MCP config across container restarts
+# POST-SYMLINK SETUP
+# Special configuration that must happen after symlinks are created
 # =============================================================================
-RUN mkdir -p /home/agent/.vscode-server/data/Machine \
-             /home/agent/.vscode-server/data/User \
-             /home/agent/.vscode-server-insiders/data/Machine \
-             /home/agent/.vscode-server-insiders/data/User && \
-    # VS Code stable
-    ln -sfn /mnt/agent-data/vscode-server/data/Machine/settings.json /home/agent/.vscode-server/data/Machine/settings.json && \
-    ln -sfn /mnt/agent-data/vscode-server/extensions /home/agent/.vscode-server/extensions && \
-    ln -sfn /mnt/agent-data/vscode-server/data/User/mcp.json /home/agent/.vscode-server/data/User/mcp.json && \
-    ln -sfn /mnt/agent-data/vscode-server/data/User/prompts /home/agent/.vscode-server/data/User/prompts && \
-    ln -sfn /mnt/agent-data/vscode-server/data/User/mcp /home/agent/.vscode-server/data/User/mcp && \
-    # VS Code Insiders
-    ln -sfn /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /home/agent/.vscode-server-insiders/data/Machine/settings.json && \
-    ln -sfn /mnt/agent-data/vscode-server-insiders/extensions /home/agent/.vscode-server-insiders/extensions && \
-    ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/mcp.json /home/agent/.vscode-server-insiders/data/User/mcp.json && \
-    ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/prompts /home/agent/.vscode-server-insiders/data/User/prompts && \
-    ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/mcp /home/agent/.vscode-server-insiders/data/User/mcp
 
-# =============================================================================
-# XDG CONFIG SYMLINKS
-# Persist gh, tmux, nvim, starship, and oh-my-posh configs via data volume
-# Note: OpenCode selective symlinks handled earlier in AGENT CONFIGURATION section
-# =============================================================================
-RUN mkdir -p /home/agent/.config /home/agent/.local/share && \
-    # GitHub CLI config (matches import.sh: /target/config/gh)
-    mkdir -p /mnt/agent-data/config/gh && \
-    ln -sfn /mnt/agent-data/config/gh /home/agent/.config/gh && \
-    # tmux (matches import.sh: /target/config/tmux, /target/local/share/tmux)
-    mkdir -p /mnt/agent-data/config/tmux /mnt/agent-data/local/share/tmux && \
-    ln -sfn /mnt/agent-data/config/tmux /home/agent/.config/tmux && \
-    ln -sfn /mnt/agent-data/local/share/tmux /home/agent/.local/share/tmux && \
-    ln -sfn /mnt/agent-data/local/share/fonts /home/agent/.local/share/fonts && \
-    # Neovim config (matches import.sh: /target/config/nvim)
-    mkdir -p /mnt/agent-data/config/nvim && \
-    rm -rf /home/agent/.config/nvim && \
-    ln -sfn /mnt/agent-data/config/nvim /home/agent/.config/nvim && \
-    # Starship prompt config (matches import.sh: /target/config/starship.toml)
-    ln -sfn /mnt/agent-data/config/starship.toml /home/agent/.config/starship.toml && \
-    # Oh-My-Posh prompt themes (matches import.sh: /target/config/oh-my-posh)
-    mkdir -p /mnt/agent-data/config/oh-my-posh && \
-    rm -rf /home/agent/.config/oh-my-posh && \
-    ln -sfn /mnt/agent-data/config/oh-my-posh /home/agent/.config/oh-my-posh && \
-    # Common agents directory for shared skills, plugins, etc.
-    mkdir -p /mnt/agent-data/agents && \
-    ln -sfn /mnt/agent-data/agents /home/agent/.agents
+# SSH directory permissions (symlinks created by generated script)
+RUN chmod 700 /home/agent/.ssh
 
-# =============================================================================
-# SHELL CONFIG SYMLINKS
-# Persist shell aliases, zsh configs, and .bashrc.d scripts (paths match import.sh)
-# =============================================================================
-RUN mkdir -p /mnt/agent-data/shell/bashrc.d /mnt/agent-data/shell/oh-my-zsh-custom && \
-    mkdir -p /home/agent/.oh-my-zsh && \
-    # Shell configs (imported aliases from host via cai import)
-    # Note: import.sh uses shell/bash_aliases (no dot), shell/bashrc.d (no dot)
-    rm -rf /home/agent/.bash_aliases_imported && \
-    ln -sfn /mnt/agent-data/shell/bash_aliases /home/agent/.bash_aliases_imported && \
-    # Zsh configs (matches import.sh: /target/shell/zshrc, /target/shell/zprofile)
-    ln -sfn /mnt/agent-data/shell/zshrc /home/agent/.zshrc && \
-    ln -sfn /mnt/agent-data/shell/zprofile /home/agent/.zprofile && \
-    # Readline config (matches import.sh: /target/shell/inputrc)
-    ln -sfn /mnt/agent-data/shell/inputrc /home/agent/.inputrc && \
-    # Oh-My-Zsh custom dir (matches import.sh: /target/shell/oh-my-zsh-custom)
-    rm -rf /home/agent/.oh-my-zsh/custom && \
-    ln -sfn /mnt/agent-data/shell/oh-my-zsh-custom /home/agent/.oh-my-zsh/custom && \
-    # Add sourcing hooks for imported aliases and volume bashrc.d scripts
-    # Note: Build-time .bashrc.d scripts (like 01-claude.sh) are already sourced via base layer
-    # This adds sourcing for user-imported scripts from the data volume
-    { grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' /home/agent/.bashrc \
+# Add bashrc hooks for imported aliases and volume bashrc.d scripts
+# Note: Build-time .bashrc.d scripts (like 01-claude.sh) are already sourced via base layer
+# This adds sourcing for user-imported scripts from the data volume
+RUN { grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' /home/agent/.bashrc \
       || { echo '# Source imported bash_aliases if exists'; echo '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported'; } >> /home/agent/.bashrc; } && \
     { grep -qxF 'if [ -d /mnt/agent-data/shell/bashrc.d ]; then for f in /mnt/agent-data/shell/bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' /home/agent/.bashrc \
       || { echo '# Source user scripts from data volume'; echo 'if [ -d /mnt/agent-data/shell/bashrc.d ]; then for f in /mnt/agent-data/shell/bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> /home/agent/.bashrc; }
-
-# =============================================================================
-# VIM/NEOVIM CONFIG SYMLINKS
-# Persist vim and neovim configs via data volume
-# =============================================================================
-RUN mkdir -p /mnt/agent-data/editors/vim && \
-    # Vimrc (matches import.sh: /target/editors/vimrc)
-    ln -sfn /mnt/agent-data/editors/vimrc /home/agent/.vimrc && \
-    # Vim directory (matches import.sh: /target/editors/vim)
-    rm -rf /home/agent/.vim && \
-    ln -sfn /mnt/agent-data/editors/vim /home/agent/.vim
-
-# =============================================================================
-# GIT CONFIG SYMLINKS
-# Note: .gitconfig is copied (not symlinked) at container startup by init script
-# because git may not handle symlinked config files well on all systems
-# Only .gitignore_global is symlinked here
-# =============================================================================
-RUN mkdir -p /mnt/agent-data/git && \
-    # Global gitignore (matches import.sh: /target/git/gitignore_global)
-    ln -sfn /mnt/agent-data/git/gitignore_global /home/agent/.gitignore_global
-
-# =============================================================================
-# SSH CONFIG SYMLINKS
-# Symlink SSH config and known_hosts for persistence
-# Private keys are synced to /mnt/agent-data/ssh/ at import time
-# =============================================================================
-RUN mkdir -p /home/agent/.ssh /mnt/agent-data/ssh && \
-    chmod 700 /home/agent/.ssh && \
-    ln -sfn /mnt/agent-data/ssh/config /home/agent/.ssh/config && \
-    ln -sfn /mnt/agent-data/ssh/known_hosts /home/agent/.ssh/known_hosts
 
 # =============================================================================
 # AGENT ALIASES
