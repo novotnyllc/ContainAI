@@ -395,7 +395,7 @@ _cai_find_workspace_container() {
     if [[ ${#by_label[@]} -gt 1 ]]; then
         echo "[ERROR] Multiple containers found for workspace: $workspace_path" >&2
         echo "[ERROR] Containers: ${by_label[*]}" >&2
-        echo "[ERROR] Use --name to specify which one" >&2
+        echo "[ERROR] Use --container to specify which one" >&2
         return 2
     fi
 
@@ -426,24 +426,27 @@ _cai_find_workspace_container() {
 }
 
 # Find container by name across multiple Docker contexts
-# Searches default context, then config-specified context, then standard secure context.
-# This is for --container mode where user specifies container name directly.
+# Searches config-specified context first, then standard secure context, then default.
+# This prioritizes managed contexts to avoid false negatives when a non-managed container
+# with the same name exists in the default context.
 #
 # Arguments:
 #   $1 = container_name (required)
 #   $2 = explicit_config (optional, config file path for context override)
+#   $3 = workspace_path (optional, for discovering config when explicit_config not provided)
 #
 # Returns:
 #   0 with found context on stdout (empty string means default context)
 #   1 if container not found in any context
 #
 # Usage:
-#   if found_context=$(_cai_find_container_by_name "my-container" "$config_file"); then
+#   if found_context=$(_cai_find_container_by_name "my-container" "$config_file" "$workspace"); then
 #       docker --context "$found_context" inspect my-container
 #   fi
 _cai_find_container_by_name() {
     local container_name="$1"
     local explicit_config="${2:-}"
+    local workspace_path="${3:-$PWD}"
     local ctx cfg_ctx
 
     if [[ -z "$container_name" ]]; then
@@ -451,8 +454,8 @@ _cai_find_container_by_name() {
         return 1
     fi
 
-    # Build list of contexts to check
-    local -a contexts_to_check=("default")
+    # Build list of contexts to check - prioritize configured/secure contexts over default
+    local -a contexts_to_check=()
 
     # Helper: check if value is already in array (safe literal match, no regex)
     _in_array() {
@@ -464,22 +467,33 @@ _cai_find_container_by_name() {
         return 1
     }
 
-    # Add secure engine context from config if provided
+    # 1. Add secure engine context from explicit config if provided
     if [[ -n "$explicit_config" ]]; then
-        cfg_ctx=$(_containai_resolve_secure_engine_context "$PWD" "$explicit_config" 2>/dev/null) || cfg_ctx=""
+        cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "$explicit_config" 2>/dev/null) || cfg_ctx=""
+        if [[ -n "$cfg_ctx" ]] && ! _in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
+            contexts_to_check+=("$cfg_ctx")
+        fi
+    else
+        # 2. Try discovered config (same as cai run does)
+        cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "" 2>/dev/null) || cfg_ctx=""
         if [[ -n "$cfg_ctx" ]] && ! _in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
             contexts_to_check+=("$cfg_ctx")
         fi
     fi
 
-    # Add standard secure context if it exists
+    # 3. Add standard secure context if it exists
     if ! _in_array "$_CAI_CONTAINAI_DOCKER_CONTEXT" "${contexts_to_check[@]}"; then
         if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
             contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
         fi
     fi
 
-    # Search for container in each context
+    # 4. Add default context last (lowest priority)
+    if ! _in_array "default" "${contexts_to_check[@]}"; then
+        contexts_to_check+=("default")
+    fi
+
+    # Search for container in each context (priority order)
     for ctx in "${contexts_to_check[@]}"; do
         local -a docker_cmd_check=(docker)
         if [[ "$ctx" != "default" ]]; then
@@ -539,7 +553,7 @@ _cai_resolve_container_name() {
     if [[ ${#by_label[@]} -gt 1 ]]; then
         echo "[ERROR] Multiple containers found for workspace: $workspace_path" >&2
         echo "[ERROR] Containers: ${by_label[*]}" >&2
-        echo "[ERROR] Use --name to specify which one" >&2
+        echo "[ERROR] Use --container to specify which one" >&2
         return 2
     fi
 

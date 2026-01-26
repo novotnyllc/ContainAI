@@ -2744,7 +2744,8 @@ _containai_run_cmd() {
         # Spec: "Container must NOT exist; error if name collision"
         # Use multi-context lookup to check all contexts where container might exist
         # This prevents accidentally creating a container with a colliding name in another context
-        if _cai_find_container_by_name "$container_name" "$explicit_config" >/dev/null 2>&1; then
+        # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
+        if _cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" >/dev/null 2>&1; then
             echo "[ERROR] Container $container_name already exists" >&2
             return 1
         fi
