@@ -49,9 +49,8 @@ Update the ContainAI setup scripts to prefer installing sysbox from ContainAI's 
 - [ ] Both WSL2 and Linux paths updated
 
 ## Done summary
-TBD
-
+Updated setup scripts to prefer ContainAI sysbox builds with the openat2 fix for runc 1.3.3+ compatibility. Added _cai_resolve_sysbox_download_url() with priority resolution (CAI_SYSBOX_URL > CAI_SYSBOX_VERSION > ContainAI releases > upstream), proper version comparison to prevent downgrades, and verbose-only openat2 verification.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: e56a55b, e60fbc6
+- Tests: shellcheck -x src/lib/setup.sh
 - PRs:
