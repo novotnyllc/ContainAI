@@ -527,7 +527,7 @@ _cai_find_container_by_name() {
         for ctx in "${found_contexts[@]}"; do
             echo "  - $ctx" >&2
         done
-        echo "Remove or rename the duplicate, or use --config to target a specific context." >&2
+        echo "Remove or rename the duplicate to resolve ambiguity." >&2
         return 2  # Ambiguity exit code
     fi
 }

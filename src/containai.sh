@@ -1276,7 +1276,7 @@ _containai_stop_cmd() {
             ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context" 2>/dev/null) || ssh_port=""
 
             echo "Removing: $container_name [context: $selected_context]"
-            if "${docker_cmd[@]}" rm -f "$container_name" >/dev/null 2>&1; then
+            if "${docker_cmd[@]}" rm -f -- "$container_name" >/dev/null 2>&1; then
                 # Clean up SSH config
                 if [[ -n "$ssh_port" ]]; then
                     _cai_cleanup_container_ssh "$container_name" "$ssh_port"
@@ -1290,7 +1290,7 @@ _containai_stop_cmd() {
             fi
         else
             echo "Stopping: $container_name [context: $selected_context]"
-            if "${docker_cmd[@]}" stop "$container_name" >/dev/null 2>&1; then
+            if "${docker_cmd[@]}" stop -- "$container_name" >/dev/null 2>&1; then
                 echo "Done."
             else
                 echo "[ERROR] Failed to stop container: $container_name" >&2
@@ -2070,6 +2070,18 @@ _containai_shell_cmd() {
     # Set CLI resource overrides (global vars read by _containai_start_container)
     _CAI_CLI_MEMORY="$cli_memory"
     _CAI_CLI_CPUS="$cli_cpus"
+
+    # Check mutual exclusivity of --container with --workspace and --data-volume
+    if [[ -n "$container_name" ]]; then
+        if [[ -n "$workspace" ]]; then
+            echo "[ERROR] --container and --workspace are mutually exclusive" >&2
+            return 1
+        fi
+        if [[ -n "$cli_volume" ]]; then
+            echo "[ERROR] --container and --data-volume are mutually exclusive" >&2
+            return 1
+        fi
+    fi
 
     # Variables to resolve
     local resolved_workspace=""
