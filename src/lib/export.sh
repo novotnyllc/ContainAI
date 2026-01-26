@@ -10,13 +10,16 @@
 # Usage:
 #   source lib/export.sh
 #   my_excludes=("pattern1" "pattern2")
-#   _containai_export "volume-name" "/path/to/output.tgz" my_excludes "false" ""
-#   _containai_export "volume-name" "/path/to/output.tgz" my_excludes "false" "containai"
+#   _containai_export "volume-name" "/path/to/output.tgz" my_excludes "false"
 #
 # Note: config.sh is NOT required for basic export. It's only needed if the
 # caller wants to resolve excludes from config (done by the CLI wrapper).
 #
-# Arguments (matching spec signature):
+# Docker Context: This function uses the current Docker context. To operate on
+# a specific context, set DOCKER_CONTEXT environment variable before calling:
+#   DOCKER_CONTEXT="containai" _containai_export "volume" "/path/output.tgz" excludes "false"
+#
+# Arguments:
 #   $1 = volume name (required)
 #   $2 = output path (optional, default: ./containai-export-YYYYMMDD-HHMMSS.tgz)
 #        If a directory, the default filename is appended.

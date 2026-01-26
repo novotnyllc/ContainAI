@@ -1238,6 +1238,15 @@ _containai_stop_cmd() {
                     return 1
                 fi
                 ;;
+            *)
+                # Bare word (positional argument) - reject if --container mode
+                # Skip the value of --container (already captured)
+                if [[ -n "$container_name" ]] && [[ "$arg" != "$container_name" ]]; then
+                    echo "[ERROR] Unexpected argument: $arg" >&2
+                    echo "Use 'cai stop --help' for usage" >&2
+                    return 1
+                fi
+                ;;
         esac
     done
 
@@ -2701,14 +2710,16 @@ _containai_run_cmd() {
         # Use multi-context lookup to check all contexts where container might exist
         # This prevents accidentally creating a container with a colliding name in another context
         # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
-        local collision_rc
-        if _cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" >/dev/null 2>&1; then
+        local collision_rc collision_ctx
+        # Don't suppress stderr - ambiguity error is useful context
+        if collision_ctx=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>/dev/null); then
             echo "[ERROR] Container $container_name already exists" >&2
             return 1
         else
             collision_rc=$?
             if [[ $collision_rc -eq 2 ]]; then
-                # Ambiguity means container exists in multiple contexts - still a collision
+                # Ambiguity means container exists in multiple contexts - emit required error
+                echo "[ERROR] Container $container_name already exists" >&2
                 return 1
             fi
             # Exit code 1 means not found - good, we can create

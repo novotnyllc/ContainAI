@@ -453,7 +453,7 @@ _cai_find_container_by_name() {
     local container_name="${1:-}"
     local explicit_config="${2:-}"
     local workspace_path="${3:-}"  # Only use if explicitly provided
-    local ctx cfg_ctx item
+    local ctx cfg_ctx c already_added
     local -a found_contexts=()
 
     if [[ -z "$container_name" ]]; then
@@ -464,45 +464,47 @@ _cai_find_container_by_name() {
     # Build list of contexts to check - prioritize configured/secure contexts over default
     local -a contexts_to_check=()
 
-    # Inline check: is value already in contexts_to_check array?
-    # (Avoids nested function which would create global in bash)
-    _is_ctx_listed() {
-        local needle="$1" c
-        for c in "${contexts_to_check[@]}"; do
-            [[ "$c" == "$needle" ]] && return 0
-        done
-        return 1
-    }
-
     # 1. Add secure engine context from explicit config if provided
     if [[ -n "$explicit_config" ]]; then
         cfg_ctx=$(_containai_resolve_secure_engine_context "${workspace_path:-$PWD}" "$explicit_config" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _is_ctx_listed "$cfg_ctx"; then
-            contexts_to_check+=("$cfg_ctx")
+        if [[ -n "$cfg_ctx" ]]; then
+            # Check if already in list (inline loop, no nested function)
+            already_added=false
+            for c in "${contexts_to_check[@]}"; do
+                [[ "$c" == "$cfg_ctx" ]] && already_added=true && break
+            done
+            [[ "$already_added" == "false" ]] && contexts_to_check+=("$cfg_ctx")
         fi
     elif [[ -n "$workspace_path" ]]; then
         # 2. Only try discovered config when workspace path was explicitly provided
         # (avoids surprising behavior when cwd changes)
         cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _is_ctx_listed "$cfg_ctx"; then
-            contexts_to_check+=("$cfg_ctx")
+        if [[ -n "$cfg_ctx" ]]; then
+            already_added=false
+            for c in "${contexts_to_check[@]}"; do
+                [[ "$c" == "$cfg_ctx" ]] && already_added=true && break
+            done
+            [[ "$already_added" == "false" ]] && contexts_to_check+=("$cfg_ctx")
         fi
     fi
 
     # 3. Add standard secure context if it exists
-    if ! _is_ctx_listed "$_CAI_CONTAINAI_DOCKER_CONTEXT"; then
+    already_added=false
+    for c in "${contexts_to_check[@]}"; do
+        [[ "$c" == "$_CAI_CONTAINAI_DOCKER_CONTEXT" ]] && already_added=true && break
+    done
+    if [[ "$already_added" == "false" ]]; then
         if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
             contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
         fi
     fi
 
     # 4. Add default context last (lowest priority)
-    if ! _is_ctx_listed "default"; then
-        contexts_to_check+=("default")
-    fi
-
-    # Clean up nested function to avoid global pollution
-    unset -f _is_ctx_listed
+    already_added=false
+    for c in "${contexts_to_check[@]}"; do
+        [[ "$c" == "default" ]] && already_added=true && break
+    done
+    [[ "$already_added" == "false" ]] && contexts_to_check+=("default")
 
     # Search for container in ALL contexts to detect ambiguity
     # Use DOCKER_CONTEXT= DOCKER_HOST= to avoid env leakage, and always use --context
@@ -525,7 +527,7 @@ _cai_find_container_by_name() {
         for ctx in "${found_contexts[@]}"; do
             echo "  - $ctx" >&2
         done
-        echo "Use --config to specify which context to use." >&2
+        echo "Remove or rename the duplicate container in one context to resolve." >&2
         return 2  # Ambiguity exit code
     fi
 }
