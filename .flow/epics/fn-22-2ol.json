@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-22-2ol",
+  "created_at": "2026-01-26T16:21:36.798977Z",
+  "depends_on_epics": [],
+  "id": "fn-22-2ol",
+  "next_task": 1,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-26T16:32:18.986805Z",
+  "spec_path": ".flow/specs/fn-22-2ol.md",
+  "status": "done",
+  "title": "Fix sysbox CI test failures and symlinks build",
+  "updated_at": "2026-01-26T16:44:29.433860Z"
+}

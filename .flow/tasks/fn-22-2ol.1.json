@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-26T16:22:01.739842Z",
+  "depends_on": [],
+  "epic": "fn-22-2ol",
+  "id": "fn-22-2ol.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-22-2ol.1.md",
+  "status": "todo",
+  "title": "Fix sysbox CI test jobs (image + headers)",
+  "updated_at": "2026-01-26T16:22:18.819972Z"
+}
