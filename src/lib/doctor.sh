@@ -612,6 +612,12 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Sysbox runs inside Lima VM" "[OK]"
 
         # Show sysbox version from inside Lima VM
+        # First check VM status to provide better error messages
+        local lima_vm_status=""
+        if command -v limactl >/dev/null 2>&1 && _cai_lima_vm_exists "$_CAI_LIMA_VM_NAME" 2>/dev/null; then
+            lima_vm_status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME" 2>/dev/null) || lima_vm_status=""
+        fi
+
         local lima_sysbox_version=""
         lima_sysbox_version=$(_cai_lima_sysbox_version 2>/dev/null) || lima_sysbox_version=""
         if [[ -n "$lima_sysbox_version" ]]; then
@@ -620,18 +626,25 @@ _cai_doctor() {
             lima_sysbox_display=$(printf '%s' "$lima_sysbox_version" | sed 's/sysbox-runc[[:space:]]*version[[:space:]]*//')
             printf '  %-44s %s\n' "Sysbox version (in VM): $lima_sysbox_display" "[OK]"
 
-            # Check for available updates
+            # Check for available updates using detected VM architecture
             if _cai_lima_sysbox_needs_update 2>/dev/null; then
+                local lima_vm_arch="${_CAI_LIMA_VM_ARCH:-amd64}"
                 local lima_bundled_version
-                lima_bundled_version=$(_cai_sysbox_bundled_version "amd64" 2>/dev/null) || lima_bundled_version=""
+                lima_bundled_version=$(_cai_sysbox_bundled_version "$lima_vm_arch" 2>/dev/null) || lima_bundled_version=""
                 if [[ -n "$lima_bundled_version" ]]; then
                     printf '  %-44s %s\n' "Bundled version: $lima_bundled_version" "[WARN] Update available"
                     printf '  %-44s %s\n' "" "(Run 'cai update' to upgrade)"
                 fi
             fi
         else
-            # VM not running or sysbox not queryable - just note it
-            printf '  %-44s %s\n' "Sysbox version (in VM):" "[SKIP] VM not running"
+            # Differentiate between VM not running vs sysbox not installed
+            if [[ -z "$lima_vm_status" ]]; then
+                printf '  %-44s %s\n' "Sysbox version (in VM):" "[SKIP] VM not found"
+            elif [[ "$lima_vm_status" != "Running" ]]; then
+                printf '  %-44s %s\n' "Sysbox version (in VM):" "[SKIP] VM not running ($lima_vm_status)"
+            else
+                printf '  %-44s %s\n' "Sysbox version (in VM):" "[WARN] sysbox not installed/queryable"
+            fi
         fi
 
         printf '\n'

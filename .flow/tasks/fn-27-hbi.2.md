@@ -49,9 +49,8 @@ Fix sysbox update mechanism to work correctly on WSL2, native Linux, and Lima/ma
 - [ ] Update verification handles same-semver ContainAI rebuilds correctly (use full version string)
 
 ## Done summary
-TBD
-
+Fixed WSL2 early-return bug preventing sysbox upgrades, added Lima VM sysbox version checking and in-place update mechanism for macOS, and added sysbox version reporting to cai doctor on macOS (both text and JSON output).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 12c96335bf05648d529facbb59e4014d6a492415
+- Tests: shellcheck -x src/lib/setup.sh, shellcheck -x src/lib/update.sh, shellcheck -x src/lib/doctor.sh, bash -n src/lib/setup.sh, bash -n src/lib/update.sh, bash -n src/lib/doctor.sh, bash -c 'source src/containai.sh'
 - PRs:

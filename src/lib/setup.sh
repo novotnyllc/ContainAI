@@ -912,7 +912,17 @@ _cai_install_sysbox_wsl2() {
         _cai_info "Sysbox already installed: $existing_version"
 
         # Check if upgrade is needed using version comparison
-        if ! _cai_sysbox_needs_update "$arch"; then
+        # Return codes: 0=needs update, 1=no update needed, 2=fetch error
+        local needs_update_rc
+        _cai_sysbox_needs_update "$arch"
+        needs_update_rc=$?
+
+        if [[ $needs_update_rc -eq 2 ]]; then
+            # Fetch error - warn but continue with install attempt
+            _cai_warn "Could not verify bundled version (${_CAI_SYSBOX_UPDATE_REASON:-fetch_failed})"
+            _cai_info "Proceeding with installation attempt..."
+        elif [[ $needs_update_rc -eq 1 ]]; then
+            # No update needed
             local reason="${_CAI_SYSBOX_UPDATE_REASON:-up_to_date}"
             case "$reason" in
                 up_to_date)
@@ -926,12 +936,12 @@ _cai_install_sysbox_wsl2() {
                     ;;
             esac
             return 0
+        else
+            # Update is needed - continue with installation
+            local bundled_version
+            bundled_version=$(_cai_sysbox_bundled_version "$arch" 2>/dev/null) || bundled_version="latest"
+            _cai_info "Upgrade available: $existing_version -> $bundled_version ($_CAI_SYSBOX_UPDATE_REASON)"
         fi
-
-        # Update is needed - continue with installation
-        local bundled_version
-        bundled_version=$(_cai_sysbox_bundled_version "$arch" 2>/dev/null) || bundled_version="latest"
-        _cai_info "Upgrade available: $existing_version -> $bundled_version ($_CAI_SYSBOX_UPDATE_REASON)"
     fi
 
     # Log what deps will be installed (informational only, no abort)

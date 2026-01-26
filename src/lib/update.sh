@@ -1320,6 +1320,47 @@ _cai_update_macos_packages() {
     return 0
 }
 
+# Get Lima VM architecture
+# Arguments: None
+# Returns: 0=success (outputs arch), 1=failure
+# Outputs: Architecture string (amd64 or arm64)
+_cai_lima_vm_arch() {
+    # Check if Lima is available
+    if ! command -v limactl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Check if VM exists and is running
+    if ! _cai_lima_vm_exists "$_CAI_LIMA_VM_NAME"; then
+        return 1
+    fi
+
+    local status
+    status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME")
+    if [[ "$status" != "Running" ]]; then
+        return 1
+    fi
+
+    # Query architecture inside the VM
+    local uname_arch
+    uname_arch=$(limactl shell "$_CAI_LIMA_VM_NAME" -- uname -m 2>/dev/null) || return 1
+
+    # Map to sysbox architecture names
+    case "$uname_arch" in
+        x86_64)
+            printf '%s' "amd64"
+            return 0
+            ;;
+        aarch64)
+            printf '%s' "arm64"
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 # Get sysbox version installed inside Lima VM
 # Arguments: None
 # Returns: 0=success (outputs version string), 1=failure
@@ -1377,10 +1418,27 @@ _cai_lima_sysbox_semver() {
 # Arguments: None
 # Returns: 0=needs update, 1=up to date or cannot determine
 # Sets: _CAI_LIMA_SYSBOX_UPDATE_REASON with explanation
+#       _CAI_LIMA_VM_ARCH with detected architecture
 _cai_lima_sysbox_needs_update() {
     _CAI_LIMA_SYSBOX_UPDATE_REASON=""
+    _CAI_LIMA_VM_ARCH=""
 
-    # Get installed version inside VM
+    # Detect VM architecture
+    local vm_arch
+    vm_arch=$(_cai_lima_vm_arch) || {
+        _CAI_LIMA_SYSBOX_UPDATE_REASON="cannot_determine_arch"
+        return 1
+    }
+    _CAI_LIMA_VM_ARCH="$vm_arch"
+
+    # Get installed version inside VM (full string for comparison)
+    local installed_version
+    installed_version=$(_cai_lima_sysbox_version) || {
+        _CAI_LIMA_SYSBOX_UPDATE_REASON="cannot_determine"
+        return 1
+    }
+
+    # Get installed semver
     local installed_semver
     installed_semver=$(_cai_lima_sysbox_semver) || {
         _CAI_LIMA_SYSBOX_UPDATE_REASON="cannot_determine"
@@ -1388,16 +1446,14 @@ _cai_lima_sysbox_needs_update() {
     }
 
     # Check if installed is ContainAI build
-    local installed_version installed_is_containai="false"
-    installed_version=$(_cai_lima_sysbox_version) || installed_version=""
+    local installed_is_containai="false"
     if [[ "$installed_version" == *"+containai"* ]] || [[ "$installed_version" == *"containai"* ]]; then
         installed_is_containai="true"
     fi
 
-    # Get bundled version (use amd64 as reference - Lima VMs are typically amd64)
-    # Note: Lima can run arm64 on Apple Silicon, but sysbox amd64 is emulated
+    # Get bundled version using detected VM architecture
     local bundled_version bundled_semver
-    bundled_version=$(_cai_sysbox_bundled_version "amd64") || {
+    bundled_version=$(_cai_sysbox_bundled_version "$vm_arch") || {
         _CAI_LIMA_SYSBOX_UPDATE_REASON="fetch_failed"
         return 1
     }
@@ -1412,14 +1468,26 @@ _cai_lima_sysbox_needs_update() {
     # Logic:
     # - If installed is upstream and bundled is ContainAI with same/newer semver -> update (prefer ContainAI)
     # - If installed is ContainAI and bundled has newer semver -> update
-    # - If installed >= bundled semver and both ContainAI -> up to date
+    # - If same semver but different build metadata (ContainAI rebuild) -> update
+    # - If installed >= bundled semver and same build type -> up to date
     if [[ "$installed_is_containai" == "true" ]]; then
-        if [[ "$highest_version" == "$installed_semver" ]]; then
-            _CAI_LIMA_SYSBOX_UPDATE_REASON="up_to_date"
-            return 1
+        # Both ContainAI - compare full version strings for rebuild detection
+        # Extract version part after "version " for comparison
+        local installed_ver_part bundled_ver_part
+        installed_ver_part=$(printf '%s' "$installed_version" | sed 's/.*version[[:space:]]*//')
+        bundled_ver_part="$bundled_version"
+
+        if [[ "$highest_version" == "$bundled_semver" ]] && [[ "$bundled_semver" != "$installed_semver" ]]; then
+            # Bundled has newer semver
+            _CAI_LIMA_SYSBOX_UPDATE_REASON="newer_version_available"
+            return 0
+        elif [[ "$bundled_semver" == "$installed_semver" ]] && [[ "$installed_ver_part" != "$bundled_ver_part" ]]; then
+            # Same semver but different build (rebuild)
+            _CAI_LIMA_SYSBOX_UPDATE_REASON="containai_rebuild"
+            return 0
         fi
-        _CAI_LIMA_SYSBOX_UPDATE_REASON="newer_version_available"
-        return 0
+        _CAI_LIMA_SYSBOX_UPDATE_REASON="up_to_date"
+        return 1
     else
         # Installed is upstream - prefer ContainAI if semver >= installed
         if [[ "$highest_version" == "$bundled_semver" ]] || [[ "$bundled_semver" == "$installed_semver" ]]; then
@@ -1449,7 +1517,7 @@ _cai_update_lima_sysbox() {
     }
     _cai_info "Installed sysbox in Lima VM: $installed_version"
 
-    # Check if update is needed
+    # Check if update is needed (also sets _CAI_LIMA_VM_ARCH)
     if ! _cai_lima_sysbox_needs_update; then
         local reason="${_CAI_LIMA_SYSBOX_UPDATE_REASON:-up_to_date}"
         case "$reason" in
@@ -1466,9 +1534,12 @@ _cai_update_lima_sysbox() {
         return 0
     fi
 
-    # Get bundled version for display
+    # Use detected VM architecture from _cai_lima_sysbox_needs_update
+    local vm_arch="${_CAI_LIMA_VM_ARCH:-amd64}"
+
+    # Get bundled version for display using correct arch
     local bundled_version
-    bundled_version=$(_cai_sysbox_bundled_version "amd64") || {
+    bundled_version=$(_cai_sysbox_bundled_version "$vm_arch") || {
         _cai_error "Failed to determine bundled sysbox version"
         return 1
     }
@@ -1479,6 +1550,10 @@ _cai_update_lima_sysbox() {
             _cai_info "Upgrade available: upstream -> ContainAI $bundled_version"
             _cai_info "  ContainAI build includes openat2 fix for runc 1.3.3+ compatibility"
             ;;
+        containai_rebuild)
+            _cai_info "Rebuild available: same semver but new ContainAI build"
+            _cai_info "  $installed_version -> $bundled_version"
+            ;;
         newer_version_available)
             _cai_info "Update available: $installed_version -> $bundled_version"
             ;;
@@ -1488,14 +1563,15 @@ _cai_update_lima_sysbox() {
     esac
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would download sysbox .deb into Lima VM"
+        _cai_info "[DRY-RUN] Would download sysbox .deb into Lima VM (arch: $vm_arch)"
         _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
         _cai_info "[DRY-RUN] Would restart sysbox services in VM"
+        _cai_info "[DRY-RUN] Would verify installed version matches expected"
         return 0
     fi
 
-    # Resolve download URL
-    if ! _cai_resolve_sysbox_download_url "amd64" "$verbose"; then
+    # Resolve download URL using correct VM architecture
+    if ! _cai_resolve_sysbox_download_url "$vm_arch" "$verbose"; then
         _cai_error "Failed to resolve sysbox download URL"
         return 1
     fi
@@ -1503,33 +1579,35 @@ _cai_update_lima_sysbox() {
     local download_url="$_CAI_SYSBOX_DOWNLOAD_URL"
     local sysbox_version="$_CAI_SYSBOX_VERSION"
 
-    _cai_step "Downloading and installing sysbox in Lima VM"
+    _cai_step "Downloading and installing sysbox in Lima VM (arch: $vm_arch)"
 
     # Download and install inside the VM
+    # SECURITY: Pass download_url as a positional parameter to avoid command injection
     local install_output install_rc
-    install_output=$(limactl shell "$_CAI_LIMA_VM_NAME" -- bash -c "
+    install_output=$(limactl shell "$_CAI_LIMA_VM_NAME" -- bash -c '
         set -e
-        tmpdir=\$(mktemp -d)
-        trap 'rm -rf \"\$tmpdir\"' EXIT
-        deb_file=\"\$tmpdir/sysbox-ce.deb\"
+        download_url="$1"
+        tmpdir=$(mktemp -d)
+        trap "rm -rf \"$tmpdir\"" EXIT
+        deb_file="$tmpdir/sysbox-ce.deb"
 
-        echo '[STEP] Downloading sysbox...'
-        if ! wget -q --show-progress -O \"\$deb_file\" '$download_url'; then
-            echo '[ERROR] Failed to download sysbox package' >&2
+        echo "[STEP] Downloading sysbox..."
+        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+            echo "[ERROR] Failed to download sysbox package" >&2
             exit 1
         fi
 
-        echo '[STEP] Installing sysbox package...'
-        if ! sudo dpkg -i \"\$deb_file\"; then
-            echo '[WARN] dpkg install had issues, attempting to fix dependencies' >&2
-            sudo apt-get install -f -y || exit 1
+        echo "[STEP] Installing sysbox package..."
+        if ! sudo DEBIAN_FRONTEND=noninteractive dpkg -i "$deb_file"; then
+            echo "[WARN] dpkg install had issues, attempting to fix dependencies" >&2
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y || exit 1
         fi
 
-        echo '[STEP] Restarting sysbox services...'
+        echo "[STEP] Restarting sysbox services..."
         sudo systemctl restart sysbox || true
 
-        echo '[OK] Sysbox updated successfully'
-    " 2>&1) && install_rc=0 || install_rc=$?
+        echo "[OK] Sysbox updated successfully"
+    ' _ "$download_url" 2>&1) && install_rc=0 || install_rc=$?
 
     if [[ $install_rc -ne 0 ]]; then
         _cai_error "Failed to update sysbox in Lima VM"
@@ -1543,7 +1621,24 @@ _cai_update_lima_sysbox() {
         printf '%s\n' "$install_output"
     fi
 
-    _cai_ok "Sysbox updated to $sysbox_version in Lima VM"
+    # Verify the installed version matches expected
+    _cai_step "Verifying sysbox installation"
+    local new_version
+    new_version=$(_cai_lima_sysbox_version) || {
+        _cai_warn "Could not verify sysbox version after install"
+        return 0
+    }
+
+    # Extract version part for comparison
+    local new_ver_part
+    new_ver_part=$(printf '%s' "$new_version" | sed 's/.*version[[:space:]]*//')
+
+    if [[ "$new_ver_part" == "$sysbox_version" ]]; then
+        _cai_ok "Sysbox updated to $sysbox_version in Lima VM"
+    else
+        _cai_warn "Installed version ($new_ver_part) differs from expected ($sysbox_version)"
+        _cai_info "This may be expected if the package version format differs"
+    fi
     return 0
 }
 
