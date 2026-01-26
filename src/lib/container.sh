@@ -494,7 +494,7 @@ _cai_find_container_by_name() {
         [[ "$c" == "$_CAI_CONTAINAI_DOCKER_CONTEXT" ]] && already_added=true && break
     done
     if [[ "$already_added" == "false" ]]; then
-        if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        if DOCKER_CONTEXT= DOCKER_HOST= docker context inspect -- "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
             contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
         fi
     fi

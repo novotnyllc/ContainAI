@@ -205,3 +205,6 @@ When using docker inspect to check container existence, always use --type contai
 
 ## 2026-01-26 manual [pitfall]
 When passing user-controlled names to docker commands (stop/rm/inspect), always use -- to prevent option injection if name starts with dash
+
+## 2026-01-26 manual [pitfall]
+When using docker --context, also clear DOCKER_CONTEXT and DOCKER_HOST env vars to prevent override (use DOCKER_CONTEXT= DOCKER_HOST= prefix)

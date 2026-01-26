@@ -771,22 +771,23 @@ _containai_import_cmd() {
 
         # Check if container is managed by ContainAI
         # Use {{with}} template to output empty string for missing labels (avoids <no value>)
+        # Clear DOCKER_CONTEXT/DOCKER_HOST to ensure --context takes effect
         local is_managed
-        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
+        is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
         fi
 
         # Derive workspace from container labels
-        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+        resolved_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
         if [[ -z "$resolved_workspace" ]]; then
             echo "[ERROR] Container $container_name is missing workspace label" >&2
             return 1
         fi
 
         # Derive data volume from container labels
-        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+        resolved_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
         if [[ -z "$resolved_volume" ]]; then
             echo "[ERROR] Container $container_name is missing data-volume label" >&2
             return 1
@@ -1092,22 +1093,23 @@ _containai_export_cmd() {
 
         # Check if container is managed by ContainAI
         # Use {{with}} template to output empty string for missing labels (avoids <no value>)
+        # Clear DOCKER_CONTEXT/DOCKER_HOST to ensure --context takes effect
         local is_managed
-        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
+        is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
         fi
 
         # Derive workspace from container labels (for excludes resolution)
-        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+        resolved_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
         if [[ -z "$resolved_workspace" ]]; then
             echo "[ERROR] Container $container_name is missing workspace label" >&2
             return 1
         fi
 
         # Derive data volume from container labels
-        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+        resolved_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
         if [[ -z "$resolved_volume" ]]; then
             echo "[ERROR] Container $container_name is missing data-volume label" >&2
             return 1
@@ -1181,15 +1183,28 @@ _containai_stop_cmd() {
 
     # Pass 2: Pre-scan to determine mode and extract values
     # This ensures validation is order-independent
-    prev=""
+    # Track whether we're expecting a value for --container
+    local expect_container_value=false
     for arg in "$@"; do
+        # First check if we're expecting a value for --container
+        if [[ "$expect_container_value" == "true" ]]; then
+            if [[ -z "$arg" ]] || [[ "$arg" == -* ]]; then
+                echo "[ERROR] --container requires a value" >&2
+                return 1
+            fi
+            container_name="$arg"
+            expect_container_value=false
+            continue
+        fi
+
         case "$arg" in
             --name | --name=*)
                 echo "[ERROR] --name is no longer supported. Use --container instead." >&2
                 return 1
                 ;;
             --container)
-                # Value will be in next iteration
+                # Value expected in next iteration
+                expect_container_value=true
                 ;;
             --container=*)
                 container_name="${arg#--container=}"
@@ -1204,21 +1219,11 @@ _containai_stop_cmd() {
             --remove)
                 remove_flag=true
                 ;;
-            *)
-                # Check if this is the value for --container
-                if [[ "$prev" == "--container" ]]; then
-                    if [[ -z "$arg" ]]; then
-                        echo "[ERROR] --container requires a value" >&2
-                        return 1
-                    fi
-                    container_name="$arg"
-                fi
-                ;;
+            # Other args handled in pass 3 (validation pass)
         esac
-        prev="$arg"
     done
     # Handle trailing --container without value
-    if [[ "$prev" == "--container" ]] && [[ -z "$container_name" ]]; then
+    if [[ "$expect_container_value" == "true" ]]; then
         echo "[ERROR] --container requires a value" >&2
         return 1
     fi
