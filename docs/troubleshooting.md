@@ -15,6 +15,7 @@ Most common issues and their one-line fixes:
 | Container won't start | Check logs with `docker logs <container>` |
 | sshd not ready | Wait or check `docker exec <container> systemctl status ssh` |
 | Updates available warning | Run `cai update` or set `CAI_UPDATE_CHECK_INTERVAL=never` |
+| Claude OAuth token expired | Re-run `claude /login` inside container, or use API key |
 
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
@@ -27,7 +28,7 @@ Most common issues and their one-line fixes:
 - [Sysbox/Secure Engine Issues](#sysboxsecure-engine-issues)
 - [Container Issues](#container-issues)
 - [Configuration Issues](#configuration-issues)
-- [Credential/Import Issues](#credentialimport-issues)
+- [Credential/Import Issues](#credentialimport-issues) (including [Claude OAuth Token Expiration](#claude-oauth-token-expiration-after-import))
 - [Platform-Specific Issues](#platform-specific-issues)
 - [Updates Available Warning](#updates-available-warning)
 - [Still Stuck?](#still-stuck)
@@ -900,6 +901,98 @@ cpus = 4
 
 ## Credential/Import Issues
 
+### Claude OAuth Token Expiration After Import
+
+**Symptom:**
+```
+API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."},...} · Please run /login
+```
+or
+```
+OAuth error: ECONNREFUSED
+```
+
+**Background:**
+
+Claude Code uses OAuth tokens stored in `~/.claude/.credentials.json`. These tokens have several characteristics that affect their usability in containerized environments:
+
+1. **Token Lifetime**: Access tokens expire within 8-12 hours. The `expiresAt` field is in **milliseconds since epoch** (Unix timestamp * 1000).
+
+2. **Refresh Tokens**: The refresh token (`sk-ant-ort01-...`) can obtain new access tokens, but only when the Claude CLI's refresh mechanism can connect to Anthropic's servers.
+
+3. **Session State**: Claude CLI maintains additional session state in `~/.claude/statsig/` for feature flags and analytics.
+
+**Root Causes:**
+
+1. **Token Already Expired at Import Time**: If the source token is near expiration when imported, it may expire before first use in the container.
+
+2. **Refresh Token Rotation**: Claude uses refresh token rotation - when a refresh token is used, it's invalidated and a new one is issued. If multiple Claude instances (host and container) use the same refresh token, only one will succeed and the other will have an invalid token.
+
+3. **Server-Side Issues**: Anthropic's OAuth infrastructure occasionally has issues that cause valid tokens to be rejected (see [GitHub Issue #19078](https://github.com/anthropics/claude-code/issues/19078)).
+
+4. **Multiple Instances Conflict**: Running Claude on both host and container simultaneously can cause refresh token conflicts, as each instance may try to refresh and invalidate the other's token.
+
+**Diagnosis:**
+```bash
+# Check token expiration time (expiresAt is in milliseconds)
+jq '.claudeAiOauth.expiresAt' ~/.claude/.credentials.json
+# Compare to current time in milliseconds
+echo $(($(date +%s) * 1000))
+
+# Check if container clock is synchronized
+docker exec <container> date
+date
+
+# Check for multiple Claude instances
+ps aux | grep claude
+```
+
+**Solutions:**
+
+1. **Re-authenticate inside the container** (most reliable):
+   ```bash
+   # Inside the container
+   claude /login
+   ```
+   This generates fresh tokens bound to the container's session.
+
+2. **Import fresh credentials immediately before use**:
+   ```bash
+   # On host: re-authenticate
+   claude /login
+
+   # Then immediately import
+   cai import
+
+   # Use container within a few hours
+   ```
+
+3. **Kill conflicting Claude processes**:
+   ```bash
+   # If using OAuth authentication on both host and container
+   pkill -f claude  # On host
+   # Then use only in container
+   ```
+
+4. **Use API key instead of OAuth** (for automation):
+   ```bash
+   # Set ANTHROPIC_API_KEY in container .env
+   # This bypasses OAuth entirely
+   ```
+
+**Known Limitations:**
+
+- OAuth tokens are designed for interactive use, not automated/containerized workflows
+- Token refresh requires network access to Anthropic's servers
+- Sharing credentials between host and container is inherently fragile due to refresh token rotation
+- Anthropic's OAuth infrastructure occasionally has server-side issues that require waiting
+
+**Workaround for Automated/CI Environments:**
+
+For reliable automated access, use an API key (`ANTHROPIC_API_KEY`) instead of OAuth. OAuth tokens are designed for interactive sessions and don't reliably persist across environment boundaries.
+
+---
+
 ### Stale or corrupted credentials in sandbox
 
 **Symptom:**
@@ -1210,6 +1303,7 @@ Quick reference of error messages and their section in this guide:
 | "Config file not found" | [Configuration Issues](#config-file-not-found) |
 | "Failed to parse config file" | [Configuration Issues](#failed-to-parse-config-file) |
 | "Authentication failed" / "Invalid credentials" | [Credential Issues](#stale-or-corrupted-credentials-in-sandbox) |
+| "OAuth token has expired" | [Claude OAuth Token Expiration](#claude-oauth-token-expiration-after-import) |
 | "Rsync sync failed" | [Credential Issues](#rsync-sync-failed) |
 | "Seccomp compatibility: warning" | [WSL2 Issues](#wsl2-seccomp-compatibility-warning) |
 | "Docker context issue" | [WSL2 Issues](#wsl2-docker-context-issue) |

@@ -30,15 +30,63 @@
 **Note:** This is investigation only - may not result in a code fix if the issue is inherent to Claude's auth model.
 
 ## Acceptance
-- [ ] Root cause identified and documented
+- [x] Root cause identified and documented
 - [ ] If fixable: solution implemented and tested
-- [ ] If not fixable: documented as known limitation with workaround
-- [ ] Investigation findings added to docs/troubleshooting.md if relevant
+- [x] If not fixable: documented as known limitation with workaround
+- [x] Investigation findings added to docs/troubleshooting.md if relevant
+
+## Investigation Findings
+
+### Root Causes Identified
+
+1. **Refresh Token Rotation**: Claude uses refresh token rotation (RFC 6819 security best practice). When a refresh token is used, it's invalidated and a new one is issued. If host and container both try to use the same refresh token, only one will succeed - the other gets an invalid token error.
+
+2. **Short Token Lifetime**: Access tokens expire within 8-12 hours. The `expiresAt` field in `.credentials.json` is in milliseconds since epoch.
+
+3. **Server-Side Issues**: Anthropic's OAuth infrastructure occasionally has issues (documented in GitHub Issues #18444, #18442, #19078) where valid tokens are rejected.
+
+4. **Multiple Instance Conflicts**: Running Claude CLI on both host and container simultaneously causes token refresh races.
+
+### Investigation of Original Hypotheses
+
+| Hypothesis | Finding |
+|------------|---------|
+| Timestamp format mismatch | **NOT an issue** - `expiresAt` is correctly in milliseconds |
+| Clock skew | **Possible but unlikely** - container uses host kernel time |
+| File permissions | **NOT an issue** - import.sh sets 600 permissions correctly |
+| Token scope mismatch | **NOT an issue** - scopes are preserved during import |
+| Symlink issues | **NOT an issue** - credentials are copied, not symlinked |
+| Config path differences | **NOT an issue** - Claude looks in ~/.claude/.credentials.json |
+| Session binding | **PARTIAL** - Refresh token rotation effectively binds token to single instance |
+
+### Why This Cannot Be Fully Fixed in ContainAI
+
+OAuth tokens with refresh token rotation are **designed** for single-instance interactive use. The security model intentionally prevents token sharing:
+
+1. Copying credentials creates a race condition on refresh
+2. Both host and container cannot use OAuth simultaneously
+3. This is an intentional security feature of OAuth 2.0, not a bug
+
+### Workarounds Documented
+
+1. **Re-authenticate inside container** (`claude /login`) - most reliable
+2. **Import fresh credentials and use immediately** - works within token lifetime
+3. **Use API key instead of OAuth** - recommended for automation/CI
+4. **Don't run Claude on host while using container** - avoids refresh conflicts
+
+### Files Added to Sync (Already Complete)
+
+The sync manifest already includes all necessary files:
+- `.claude/.credentials.json` (OAuth tokens)
+- `.claude/settings.json` and `.claude/settings.local.json` (preferences)
+- `.claude.json` (main config with session state)
+
+Note: `statsig/` directory is NOT synced because it contains session-specific analytics that could cause conflicts.
 
 ## Done summary
-TBD
+Investigated Claude OAuth token expiration. Root cause: OAuth refresh token rotation prevents credential sharing between host and container (by design). Documented as known limitation with workarounds in docs/troubleshooting.md.
 
 ## Evidence
-- Commits:
-- Tests:
+- Commits: (documentation only)
+- Tests: N/A (investigation task)
 - PRs:

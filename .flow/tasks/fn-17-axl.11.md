@@ -94,9 +94,8 @@ done
 - [ ] Service handles watcher crash/restart
 
 ## Done summary
-TBD
-
+Implemented timestamp-based auto-fix watcher: cai import writes .containai-imported-at timestamp, link-watcher.sh polls every 60s and triggers link-repair.sh when imported > checked. Systemd service enabled at boot with restart-on-failure handling.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f493189e677fe04ea39b789a2f99df882e535ece
+- Tests: shellcheck -x src/container/link-watcher.sh, shellcheck -x src/lib/import.sh, codex impl-review (SHIP)
 - PRs:
