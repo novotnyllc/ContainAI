@@ -69,9 +69,8 @@ ln -sfn /mnt/agent-data/copilot/config.json /home/agent/.copilot/config.json
 - [ ] link-repair.sh respects R flag for safe recreation
 
 ## Done summary
-TBD
-
+Implemented manifest-driven generators for container symlinks and volume initialization. The Dockerfile now COPY's and RUN's a generated symlinks.sh script from sync-manifest.toml, making the manifest the single source of truth for container symlinks. Added link-repair.sh for runtime link verification/repair with R flag support.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c2f9360152cef7eabc8e903dc8de23df2d20b817
+- Tests: shellcheck -x src/scripts/*.sh, shellcheck src/container/generated/symlinks.sh
 - PRs:

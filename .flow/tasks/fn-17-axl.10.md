@@ -174,9 +174,8 @@ Both host and container watcher use the same repair script:
 - [ ] Exit codes: 0=success, 1=errors occurred
 
 ## Done summary
-TBD
-
+Implemented cai links check and cai links fix commands for verifying and repairing container symlinks against link-spec.json. Added src/lib/links.sh with host-side SSH wrappers, updated link-repair.sh with --dry-run mode and proper state detection (BROKEN/WRONG_TARGET/MISSING), and integrated links subcommand into main CLI with support for both workspace paths and direct container names.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: e92ee9167d70e0d6e2487d732375a72ed844af5c, 6f3a77d6bbe3a97723c31f1bd055c89a585f3dab
+- Tests: shellcheck -x src/containai.sh src/lib/links.sh src/container/link-repair.sh, bash -n src/containai.sh src/lib/links.sh src/container/link-repair.sh
 - PRs:

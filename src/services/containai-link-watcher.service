@@ -1,0 +1,29 @@
+# ContainAI link watcher service
+# Long-running service that monitors for new imports and repairs symlinks
+#
+# Polls every 60 seconds, comparing:
+# - /.containai-imported-at (written by cai import)
+# - /.containai-links-checked-at (written by link-repair.sh)
+#
+# When a new import is detected, runs link-repair.sh to restore symlinks
+
+[Unit]
+Description=ContainAI link watcher (auto-repair symlinks after import)
+After=containai-init.service
+Wants=containai-init.service
+ConditionVirtualization=container
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/lib/containai/link-watcher.sh
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=containai-link-watcher
+
+[Install]
+WantedBy=multi-user.target

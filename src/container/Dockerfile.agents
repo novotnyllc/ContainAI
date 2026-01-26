@@ -160,6 +160,15 @@ COPY container/generated/init-dirs.sh /usr/local/lib/containai/init-dirs.sh
 RUN chmod +x /usr/local/lib/containai/link-repair.sh /usr/local/lib/containai/init-dirs.sh
 
 # =============================================================================
+# LINK WATCHER SERVICE
+# Monitors for new imports and auto-repairs symlinks
+# =============================================================================
+COPY container/link-watcher.sh /usr/local/lib/containai/link-watcher.sh
+COPY services/containai-link-watcher.service /etc/systemd/system/containai-link-watcher.service
+RUN chmod +x /usr/local/lib/containai/link-watcher.sh && \
+    ln -sf /etc/systemd/system/containai-link-watcher.service /etc/systemd/system/multi-user.target.wants/containai-link-watcher.service
+
+# =============================================================================
 # FINAL CONFIGURATION
 # =============================================================================
 

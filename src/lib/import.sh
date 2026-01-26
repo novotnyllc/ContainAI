@@ -2659,6 +2659,28 @@ done <<'"'"'MAP_DATA'"'"'
         return 1
     fi
 
+    # Write imported-at timestamp for link watcher (non-dry-run only)
+    # Volume is mounted at /target inside rsync container
+    if [[ "$dry_run" != "true" ]]; then
+        _import_step "Writing import timestamp..."
+        if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
+            --mount type=volume,src="$volume",dst=/target \
+            eeacms/rsync sh -c '
+                ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                tmp="/target/.containai-imported-at.tmp.$$"
+                if printf "%s\n" "$ts" > "$tmp" && mv "$tmp" "/target/.containai-imported-at"; then
+                    chown 1000:1000 "/target/.containai-imported-at"
+                else
+                    rm -f "$tmp" 2>/dev/null || true
+                    exit 1
+                fi
+            '; then
+            _import_warn "Failed to write import timestamp (link watcher may not trigger)"
+        fi
+    else
+        _import_step "[dry-run] Would write import timestamp"
+    fi
+
     return 0
 }
 
