@@ -461,13 +461,15 @@ _cai_find_container_by_name() {
 
     # Build list of contexts to check - prioritize configured/secure contexts over default
     local -a contexts_to_check=()
+    local _ctx_item
 
-    # Helper: check if value is already in array (inline to avoid global function)
-    _cai_in_array() {
-        local needle="$1"
+    # Helper function to check if value is in array (inline loop to avoid global function pollution)
+    # Usage: if _cai_ctx_in_list "value" "${array[@]}"; then ...
+    _cai_ctx_in_list() {
+        local _needle="$1"
         shift
-        for item in "$@"; do
-            [[ "$item" == "$needle" ]] && return 0
+        for _ctx_item in "$@"; do
+            [[ "$_ctx_item" == "$_needle" ]] && return 0
         done
         return 1
     }
@@ -475,37 +477,34 @@ _cai_find_container_by_name() {
     # 1. Add secure engine context from explicit config if provided
     if [[ -n "$explicit_config" ]]; then
         cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "$explicit_config" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _cai_in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
+        if [[ -n "$cfg_ctx" ]] && ! _cai_ctx_in_list "$cfg_ctx" "${contexts_to_check[@]}"; then
             contexts_to_check+=("$cfg_ctx")
         fi
     else
         # 2. Try discovered config (same as cai run does)
         cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _cai_in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
+        if [[ -n "$cfg_ctx" ]] && ! _cai_ctx_in_list "$cfg_ctx" "${contexts_to_check[@]}"; then
             contexts_to_check+=("$cfg_ctx")
         fi
     fi
 
     # 3. Add standard secure context if it exists
-    if ! _cai_in_array "$_CAI_CONTAINAI_DOCKER_CONTEXT" "${contexts_to_check[@]}"; then
+    if ! _cai_ctx_in_list "$_CAI_CONTAINAI_DOCKER_CONTEXT" "${contexts_to_check[@]}"; then
         if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
             contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
         fi
     fi
 
     # 4. Add default context last (lowest priority)
-    if ! _cai_in_array "default" "${contexts_to_check[@]}"; then
+    if ! _cai_ctx_in_list "default" "${contexts_to_check[@]}"; then
         contexts_to_check+=("default")
     fi
 
     # Search for container in each context (priority order)
+    # Use DOCKER_CONTEXT= DOCKER_HOST= to avoid env leakage, and always use --context
     for ctx in "${contexts_to_check[@]}"; do
-        local -a docker_cmd_check=(docker)
-        if [[ "$ctx" != "default" ]]; then
-            docker_cmd_check=(docker --context "$ctx")
-        fi
-        if "${docker_cmd_check[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
-            # Found! Return context (empty string for default)
+        if DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+            # Found! Return context (empty string for default so callers use DOCKER_CONTEXT= prefix)
             if [[ "$ctx" == "default" ]]; then
                 printf ''
             else

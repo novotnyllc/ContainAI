@@ -944,6 +944,7 @@ _containai_export_cmd() {
     local workspace=""
     local explicit_config=""
     local container_name=""
+    local selected_context=""  # Docker context for --container mode
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1077,11 +1078,8 @@ _containai_export_cmd() {
 
     if [[ -n "$container_name" ]]; then
         # --container mode: derive volume from container labels
-        # Use multi-context lookup to find container (default, config-specified, secure)
-        local selected_context="" found_context
-        if found_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
-            selected_context="$found_context"
-        else
+        # Use multi-context lookup to find container (config-specified, secure, default)
+        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
@@ -1153,7 +1151,13 @@ _containai_export_cmd() {
     fi
 
     # Call export function - pass array name, not array
-    _containai_export "$resolved_volume" "$output_path" "export_excludes" "$no_excludes"
+    # When --container was used, run in the correct context via env prefix
+    if [[ -n "$selected_context" ]]; then
+        DOCKER_CONTEXT="$selected_context" DOCKER_HOST= _containai_export "$resolved_volume" "$output_path" "export_excludes" "$no_excludes"
+    else
+        # Default context or no --container specified
+        _containai_export "$resolved_volume" "$output_path" "export_excludes" "$no_excludes"
+    fi
 }
 
 # Stop subcommand handler
