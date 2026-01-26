@@ -881,10 +881,15 @@ _containai_import_cmd() {
         # Check container exists and is running
         local container_state
         if ! container_state=$("${docker_cmd[@]}" inspect --type container --format '{{.State.Status}}' -- "$resolved_container_name" 2>/dev/null); then
-            echo "[ERROR] Container not found for workspace: $resolved_workspace" >&2
-            echo "" >&2
-            echo "To create a container for this workspace, run:" >&2
-            echo "  cai run $resolved_workspace" >&2
+            if [[ -n "$container_name" ]]; then
+                # --container was explicitly provided
+                echo "[ERROR] Container not found: $container_name" >&2
+            else
+                echo "[ERROR] Container not found for workspace: $resolved_workspace" >&2
+                echo "" >&2
+                echo "To create a container for this workspace, run:" >&2
+                echo "  cai run $resolved_workspace" >&2
+            fi
             return 1
         fi
 
@@ -1236,8 +1241,9 @@ _containai_stop_cmd() {
     # If --container specified, stop that specific container
     if [[ -n "$container_name" ]]; then
         # Use _cai_find_container_by_name to search configured/secure contexts
+        # Note: cai stop doesn't accept --config, so pass empty string
         local selected_context=""
-        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
+        if ! selected_context=$(_cai_find_container_by_name "$container_name" ""); then
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
@@ -2067,45 +2073,11 @@ _containai_shell_cmd() {
     # When --container is provided, derive workspace/volume from container labels
     # and skip workspace-based resolution entirely
     if [[ -n "$container_name" ]]; then
-        # Search for container across contexts (similar to _containai_stop_all)
-        local -a contexts_to_check=("default")
-        # Add secure engine context if configured/available
-        if [[ -n "$explicit_config" ]]; then
-            local cfg_ctx
-            cfg_ctx=$(_containai_resolve_secure_engine_context "$PWD" "$explicit_config" 2>/dev/null) || cfg_ctx=""
-            # shellcheck disable=SC2076 # Intentional literal match, not regex
-            if [[ -n "$cfg_ctx" ]] && [[ ! " ${contexts_to_check[*]} " =~ " $cfg_ctx " ]]; then
-                contexts_to_check+=("$cfg_ctx")
-            fi
-        fi
-        # Also check standard secure context
-        # shellcheck disable=SC2076 # Intentional literal match, not regex
-        if [[ ! " ${contexts_to_check[*]} " =~ " $_CAI_CONTAINAI_DOCKER_CONTEXT " ]]; then
-            if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
-                contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
-            fi
-        fi
-
-        # Find container in one of the contexts
-        local found_context=""
-        for ctx in "${contexts_to_check[@]}"; do
-            local -a docker_cmd_check=(docker)
-            if [[ "$ctx" != "default" ]]; then
-                docker_cmd_check=(docker --context "$ctx")
-            fi
-            if "${docker_cmd_check[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
-                found_context="$ctx"
-                break
-            fi
-        done
-
-        if [[ -z "$found_context" ]]; then
+        # Use _cai_find_container_by_name for consistent context search (config/secure first)
+        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
-
-        selected_context="$found_context"
-        [[ "$selected_context" == "default" ]] && selected_context=""
 
         # Build docker command prefix
         local -a docker_cmd=(docker)

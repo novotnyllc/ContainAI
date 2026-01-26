@@ -463,7 +463,7 @@ _cai_find_container_by_name() {
     local -a contexts_to_check=()
 
     # Helper: check if value is already in array (inline to avoid global function)
-    _cai_cai_in_array() {
+    _cai_in_array() {
         local needle="$1"
         shift
         for item in "$@"; do
