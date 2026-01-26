@@ -214,3 +214,6 @@ Piping to tee without 'set -o pipefail' masks upstream command failures - add pi
 
 ## 2026-01-26 manual [pitfall]
 GitHub Actions upload-artifact preserves directory structure; download-artifact extracts to specified path with same structure - adjust consumer paths accordingly
+
+## 2026-01-26 manual [pitfall]
+Environment variables set inline (VAR=value cmd) only apply to the immediate command, not to subsequent commands in a pipeline; use 'export VAR=value;' for pipeline-wide scope
