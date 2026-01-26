@@ -610,6 +610,30 @@ _cai_doctor() {
         printf '%s\n' "Platform: macOS"
         # Note: macOS uses Lima VM, kernel is inside the VM (Ubuntu 24.04 has 5.15+)
         printf '  %-44s %s\n' "Sysbox runs inside Lima VM" "[OK]"
+
+        # Show sysbox version from inside Lima VM
+        local lima_sysbox_version=""
+        lima_sysbox_version=$(_cai_lima_sysbox_version 2>/dev/null) || lima_sysbox_version=""
+        if [[ -n "$lima_sysbox_version" ]]; then
+            # Extract just the version part (e.g., "0.6.4+containai.20250124" from "sysbox-runc version 0.6.4+containai.20250124")
+            local lima_sysbox_display
+            lima_sysbox_display=$(printf '%s' "$lima_sysbox_version" | sed 's/sysbox-runc[[:space:]]*version[[:space:]]*//')
+            printf '  %-44s %s\n' "Sysbox version (in VM): $lima_sysbox_display" "[OK]"
+
+            # Check for available updates
+            if _cai_lima_sysbox_needs_update 2>/dev/null; then
+                local lima_bundled_version
+                lima_bundled_version=$(_cai_sysbox_bundled_version "amd64" 2>/dev/null) || lima_bundled_version=""
+                if [[ -n "$lima_bundled_version" ]]; then
+                    printf '  %-44s %s\n' "Bundled version: $lima_bundled_version" "[WARN] Update available"
+                    printf '  %-44s %s\n' "" "(Run 'cai update' to upgrade)"
+                fi
+            fi
+        else
+            # VM not running or sysbox not queryable - just note it
+            printf '  %-44s %s\n' "Sysbox version (in VM):" "[SKIP] VM not running"
+        fi
+
         printf '\n'
     elif [[ "$platform" == "linux" ]]; then
         printf '%s\n' "Platform: Linux"
@@ -1664,6 +1688,25 @@ _cai_doctor_json() {
     if [[ "$platform" == "wsl" ]] || [[ "$platform" == "linux" ]]; then
         printf '    "kernel_version": "%s",\n' "$(_cai_json_escape "$kernel_version")"
         printf '    "kernel_compatible": %s,\n' "$kernel_compatible"
+    fi
+    if [[ "$platform" == "macos" ]]; then
+        # Add Lima sysbox version info for macOS
+        local lima_sysbox_json=""
+        local lima_sysbox_needs_update_json="false"
+        lima_sysbox_json=$(_cai_lima_sysbox_version 2>/dev/null) || lima_sysbox_json=""
+        if [[ -n "$lima_sysbox_json" ]]; then
+            # Extract just the version part
+            lima_sysbox_json=$(printf '%s' "$lima_sysbox_json" | sed 's/sysbox-runc[[:space:]]*version[[:space:]]*//')
+            if _cai_lima_sysbox_needs_update 2>/dev/null; then
+                lima_sysbox_needs_update_json="true"
+            fi
+        fi
+        if [[ -n "$lima_sysbox_json" ]]; then
+            printf '    "lima_sysbox_version": "%s",\n' "$(_cai_json_escape "$lima_sysbox_json")"
+        else
+            printf '    "lima_sysbox_version": null,\n'
+        fi
+        printf '    "lima_sysbox_needs_update": %s,\n' "$lima_sysbox_needs_update_json"
     fi
     if [[ "$platform" == "wsl" ]]; then
         printf '    "seccomp_compatible": %s,\n' "$seccomp_compatible"

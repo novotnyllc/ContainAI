@@ -893,11 +893,45 @@ _cai_install_sysbox_wsl2() {
     fi
 
     _cai_step "Checking for existing Sysbox installation"
+
+    # Determine architecture early (needed for version comparison)
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)  arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        *)
+            _cai_error "Unsupported architecture: $arch"
+            return 1
+            ;;
+    esac
+
     if command -v sysbox-runc >/dev/null 2>&1; then
         local existing_version
         existing_version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
         _cai_info "Sysbox already installed: $existing_version"
-        return 0
+
+        # Check if upgrade is needed using version comparison
+        if ! _cai_sysbox_needs_update "$arch"; then
+            local reason="${_CAI_SYSBOX_UPDATE_REASON:-up_to_date}"
+            case "$reason" in
+                up_to_date)
+                    _cai_ok "Sysbox is current"
+                    ;;
+                bundled_older_than_installed)
+                    _cai_info "Installed sysbox is newer than bundled version"
+                    ;;
+                *)
+                    _cai_info "Sysbox update not needed ($reason)"
+                    ;;
+            esac
+            return 0
+        fi
+
+        # Update is needed - continue with installation
+        local bundled_version
+        bundled_version=$(_cai_sysbox_bundled_version "$arch" 2>/dev/null) || bundled_version="latest"
+        _cai_info "Upgrade available: $existing_version -> $bundled_version ($_CAI_SYSBOX_UPDATE_REASON)"
     fi
 
     # Log what deps will be installed (informational only, no abort)
@@ -920,21 +954,7 @@ _cai_install_sysbox_wsl2() {
 
     _cai_step "Downloading Sysbox package"
 
-    # Determine architecture
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64)
-            arch="amd64"
-            ;;
-        aarch64)
-            arch="arm64"
-            ;;
-        *)
-            _cai_error "Unsupported architecture: $arch"
-            return 1
-            ;;
-    esac
+    # Note: arch already determined earlier in this function
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would resolve sysbox download URL (ContainAI first, then upstream)"
