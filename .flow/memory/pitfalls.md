@@ -196,3 +196,6 @@ User-provided paths in colon-delimited formats (src:dst:flags) must reject colon
 
 ## 2026-01-25 manual [pitfall]
 Bash -d and -f tests follow symlinks; check -L FIRST to detect symlinks before other file type tests
+
+## 2026-01-26 manual [pitfall]
+When function can fail for distinct reasons (not found vs multiple matches), use distinct exit codes so callers can respond appropriately
