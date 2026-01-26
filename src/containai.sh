@@ -2735,20 +2735,23 @@ _containai_run_cmd() {
         # Use multi-context lookup to check all contexts where container might exist
         # This prevents accidentally creating a container with a colliding name in another context
         # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
-        local collision_rc
-        # Suppress stderr - we emit our own error messages for both collision and ambiguity cases
-        if _cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" >/dev/null 2>&1; then
+        local collision_rc collision_stderr
+        # Capture stderr to check for config parse errors; only show for exit code 3
+        collision_stderr=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>&1 >/dev/null) && {
             echo "[ERROR] Container $container_name already exists" >&2
             return 1
-        else
-            collision_rc=$?
-            if [[ $collision_rc -eq 2 ]]; then
-                # Ambiguity means container exists in multiple contexts - emit required error
-                echo "[ERROR] Container $container_name already exists" >&2
-                return 1
-            fi
-            # Exit code 1 means not found - good, we can create
+        }
+        collision_rc=$?
+        if [[ $collision_rc -eq 2 ]]; then
+            # Ambiguity means container exists in multiple contexts - emit required error
+            echo "[ERROR] Container $container_name already exists" >&2
+            return 1
+        elif [[ $collision_rc -eq 3 ]]; then
+            # Config parse error - show captured error message
+            printf '%s\n' "$collision_stderr" >&2
+            return 1
         fi
+        # Exit code 1 means not found - good, we can create
         start_args+=(--name "$container_name")
     fi
     # Always pass resolved credentials
