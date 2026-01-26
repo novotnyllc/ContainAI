@@ -7,10 +7,10 @@
   "depends_on_epics": [],
   "id": "fn-27-hbi",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "needs_work",
+  "plan_reviewed_at": "2026-01-26T21:36:18.924655Z",
   "spec_path": ".flow/specs/fn-27-hbi.md",
   "status": "open",
   "title": "ContainAI Reliability Pack: Safe Updates, Doctor Repair, SSH Fixes",
-  "updated_at": "2026-01-26T21:06:09.244989Z"
+  "updated_at": "2026-01-26T21:36:18.924667Z"
 }
