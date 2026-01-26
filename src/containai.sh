@@ -773,29 +773,29 @@ _containai_import_cmd() {
             docker_cmd=(docker --context "$selected_context")
         fi
 
-        # Check container exists
-        if ! "${docker_cmd[@]}" inspect "$container_name" >/dev/null 2>&1; then
+        # Check container exists (use --type container to avoid matching images)
+        if ! "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
 
         # Check if container is managed by ContainAI
         local is_managed
-        is_managed=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || is_managed=""
+        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
         fi
 
         # Derive workspace from container labels
-        resolved_workspace=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$container_name" 2>/dev/null) || resolved_workspace=""
+        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.workspace"}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
         if [[ -z "$resolved_workspace" ]]; then
             echo "[ERROR] Container $container_name is missing workspace label" >&2
             return 1
         fi
 
         # Derive data volume from container labels
-        resolved_volume=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.data-volume"}}' "$container_name" 2>/dev/null) || resolved_volume=""
+        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.data-volume"}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
         if [[ -z "$resolved_volume" ]]; then
             echo "[ERROR] Container $container_name is missing data-volume label" >&2
             return 1
@@ -1105,29 +1105,29 @@ _containai_export_cmd() {
             docker_cmd=(docker --context "$selected_context")
         fi
 
-        # Check container exists
-        if ! "${docker_cmd[@]}" inspect "$container_name" >/dev/null 2>&1; then
+        # Check container exists (use --type container to avoid matching images)
+        if ! "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
 
         # Check if container is managed by ContainAI
         local is_managed
-        is_managed=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || is_managed=""
+        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
         fi
 
         # Derive workspace from container labels (for excludes resolution)
-        resolved_workspace=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$container_name" 2>/dev/null) || resolved_workspace=""
+        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.workspace"}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
         if [[ -z "$resolved_workspace" ]]; then
             echo "[ERROR] Container $container_name is missing workspace label" >&2
             return 1
         fi
 
         # Derive data volume from container labels
-        resolved_volume=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.data-volume"}}' "$container_name" 2>/dev/null) || resolved_volume=""
+        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.data-volume"}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
         if [[ -z "$resolved_volume" ]]; then
             echo "[ERROR] Container $container_name is missing data-volume label" >&2
             return 1
@@ -1179,6 +1179,8 @@ _containai_stop_cmd() {
     local container_name=""
     local remove_flag=false
     local arg
+    # Preserve original args for passing to _containai_stop_all
+    local -a orig_args=("$@")
 
     for arg in "$@"; do
         case "$arg" in
@@ -1189,35 +1191,35 @@ _containai_stop_cmd() {
         esac
     done
 
-    # Parse --container argument
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
+    # Parse --container argument (without consuming original args)
+    for arg in "$@"; do
+        case "$arg" in
             --container)
-                if [[ -z "${2-}" ]]; then
+                # Value is next arg - need to find it
+                local found_container=false
+                local prev=""
+                for a in "$@"; do
+                    if [[ "$prev" == "--container" ]]; then
+                        container_name="$a"
+                        found_container=true
+                        break
+                    fi
+                    prev="$a"
+                done
+                if [[ "$found_container" != "true" ]] || [[ -z "$container_name" ]]; then
                     echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
-                container_name="$2"
-                shift 2
                 ;;
             --container=*)
-                container_name="${1#--container=}"
+                container_name="${arg#--container=}"
                 if [[ -z "$container_name" ]]; then
                     echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
-                shift
                 ;;
             --remove)
                 remove_flag=true
-                shift
-                ;;
-            --all | --help | -h)
-                # These are handled by _containai_stop_all
-                shift
-                ;;
-            *)
-                shift
                 ;;
         esac
     done
@@ -1240,15 +1242,15 @@ _containai_stop_cmd() {
             docker_cmd=(docker --context "$selected_context")
         fi
 
-        # Check container exists
-        if ! "${docker_cmd[@]}" inspect "$container_name" >/dev/null 2>&1; then
+        # Check container exists (use --type container to avoid matching images)
+        if ! "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
 
         # Check if container is managed by ContainAI
         local is_managed
-        is_managed=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || is_managed=""
+        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
@@ -1284,8 +1286,8 @@ _containai_stop_cmd() {
         return 0
     fi
 
-    # No --container specified, delegate to interactive stop all
-    _containai_stop_all "$@"
+    # No --container specified, delegate to interactive stop all with original args
+    _containai_stop_all "${orig_args[@]}"
 }
 
 # Sandbox subcommand - DEPRECATED (show migration message)
@@ -2129,6 +2131,18 @@ _containai_shell_cmd() {
     local find_rc
     if [[ -n "$container_name" ]]; then
         # Explicit name provided via --container
+        # Spec: "Container must exist and be ContainAI-managed; error otherwise"
+        if ! "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+            echo "[ERROR] Container not found: $container_name" >&2
+            return 1
+        fi
+        # Check if container is managed by ContainAI
+        local is_managed
+        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
+        if [[ "$is_managed" != "true" ]]; then
+            echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+            return 1
+        fi
         resolved_container_name="$container_name"
     else
         # Try to find existing container for this workspace using shared lookup helper
@@ -2636,6 +2650,28 @@ _containai_run_cmd() {
     fi
 
     if [[ -n "$container_name" ]]; then
+        # Spec: "Container must NOT exist; error if name collision"
+        # Select context first to check container existence
+        local config_context_override=""
+        if [[ -n "$explicit_config" ]]; then
+            config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config") || config_context_override=""
+        fi
+        local selected_context=""
+        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
+            : # success
+        else
+            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+            return 1
+        fi
+        local -a docker_cmd=(docker)
+        if [[ -n "$selected_context" ]]; then
+            docker_cmd=(docker --context "$selected_context")
+        fi
+        # Check container does NOT exist (use --type container to avoid matching images)
+        if "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+            echo "[ERROR] Container $container_name already exists" >&2
+            return 1
+        fi
         start_args+=(--name "$container_name")
     fi
     # Always pass resolved credentials
