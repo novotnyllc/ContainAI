@@ -441,13 +441,18 @@ _cai_find_workspace_container() {
 #
 # Usage:
 #   if found_context=$(_cai_find_container_by_name "my-container" "$config_file" "$workspace"); then
-#       docker --context "$found_context" inspect my-container
+#       # found_context is empty string for default, or context name
+#       if [[ -n "$found_context" ]]; then
+#           docker --context "$found_context" inspect my-container
+#       else
+#           docker inspect my-container
+#       fi
 #   fi
 _cai_find_container_by_name() {
-    local container_name="$1"
+    local container_name="${1:-}"
     local explicit_config="${2:-}"
     local workspace_path="${3:-$PWD}"
-    local ctx cfg_ctx
+    local ctx cfg_ctx item
 
     if [[ -z "$container_name" ]]; then
         echo "[ERROR] container name is required" >&2
@@ -457,9 +462,9 @@ _cai_find_container_by_name() {
     # Build list of contexts to check - prioritize configured/secure contexts over default
     local -a contexts_to_check=()
 
-    # Helper: check if value is already in array (safe literal match, no regex)
-    _in_array() {
-        local needle="$1" item
+    # Helper: check if value is already in array (inline to avoid global function)
+    _cai_cai_in_array() {
+        local needle="$1"
         shift
         for item in "$@"; do
             [[ "$item" == "$needle" ]] && return 0
@@ -470,26 +475,26 @@ _cai_find_container_by_name() {
     # 1. Add secure engine context from explicit config if provided
     if [[ -n "$explicit_config" ]]; then
         cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "$explicit_config" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
+        if [[ -n "$cfg_ctx" ]] && ! _cai_in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
             contexts_to_check+=("$cfg_ctx")
         fi
     else
         # 2. Try discovered config (same as cai run does)
         cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
+        if [[ -n "$cfg_ctx" ]] && ! _cai_in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
             contexts_to_check+=("$cfg_ctx")
         fi
     fi
 
     # 3. Add standard secure context if it exists
-    if ! _in_array "$_CAI_CONTAINAI_DOCKER_CONTEXT" "${contexts_to_check[@]}"; then
+    if ! _cai_in_array "$_CAI_CONTAINAI_DOCKER_CONTEXT" "${contexts_to_check[@]}"; then
         if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
             contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
         fi
     fi
 
     # 4. Add default context last (lowest priority)
-    if ! _in_array "default" "${contexts_to_check[@]}"; then
+    if ! _cai_in_array "default" "${contexts_to_check[@]}"; then
         contexts_to_check+=("default")
     fi
 
@@ -1120,7 +1125,7 @@ _containai_check_image_match() {
             echo "To use the requested agent, recreate the container:" >&2
             echo "  cai --restart" >&2
             echo "Or specify a different container name:" >&2
-            echo "  cai --name <unique-name>" >&2
+            echo "  cai run --container <unique-name>" >&2
             echo "" >&2
         fi
         return 1
@@ -1155,7 +1160,7 @@ _containai_check_volume_match() {
             echo "To use the correct volume, recreate the container:" >&2
             echo "  cai --restart" >&2
             echo "Or specify a different container name:" >&2
-            echo "  cai --name <unique-name>" >&2
+            echo "  cai run --container <unique-name>" >&2
             echo "" >&2
         fi
         return 1

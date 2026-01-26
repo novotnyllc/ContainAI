@@ -1235,34 +1235,12 @@ _containai_stop_cmd() {
 
     # If --container specified, stop that specific container
     if [[ -n "$container_name" ]]; then
-        # Search for container across contexts (similar to _containai_stop_all)
-        local -a contexts_to_check=("default")
-        # Add secure engine context if available
-        if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
-            contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
-        fi
-
-        # Find container in one of the contexts
+        # Use _cai_find_container_by_name to search configured/secure contexts
         local selected_context=""
-        local found_context=""
-        for ctx in "${contexts_to_check[@]}"; do
-            local -a docker_cmd_check=(docker)
-            if [[ "$ctx" != "default" ]]; then
-                docker_cmd_check=(docker --context "$ctx")
-            fi
-            if "${docker_cmd_check[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
-                found_context="$ctx"
-                break
-            fi
-        done
-
-        if [[ -z "$found_context" ]]; then
+        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
-
-        selected_context="$found_context"
-        [[ "$selected_context" == "default" ]] && selected_context=""
 
         # Build docker command with context
         local -a docker_cmd=(docker)
