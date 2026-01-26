@@ -200,7 +200,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: sysbox-ce-amd64
-          path: .
+          path: dist
 
       - name: Install kernel headers (best-effort)
         run: |
@@ -212,8 +212,8 @@ jobs:
       - name: Install sysbox deb
         run: |
           echo "Installing sysbox deb package..."
-          ls -la *.deb
-          sudo DEBIAN_FRONTEND=noninteractive dpkg -i ./sysbox-ce*.deb || true
+          ls -la dist/*.deb
+          sudo DEBIAN_FRONTEND=noninteractive dpkg -i dist/sysbox-ce*.deb || true
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y
 
       - name: Verify sysbox services
@@ -246,8 +246,20 @@ jobs:
           echo "=== sysbox-runc version ==="
           sysbox-runc --version
 
-          echo "=== Docker runtimes ==="
-          docker info | grep -i runtime || true
+          echo "=== Docker info ==="
+          if ! docker info; then
+            echo "::error::Docker daemon is not running or misconfigured"
+            exit 1
+          fi
+
+          echo "=== Verifying sysbox-runc runtime is registered ==="
+          if ! docker info --format '{{json .Runtimes}}' | grep -q sysbox-runc; then
+            echo "::error::sysbox-runc runtime not registered with Docker"
+            echo "Available runtimes:"
+            docker info --format '{{json .Runtimes}}'
+            exit 1
+          fi
+          echo "sysbox-runc runtime is available"
 
       - name: Run DinD smoke test
         run: |
@@ -300,7 +312,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: sysbox-ce-arm64
-          path: .
+          path: dist
 
       - name: Install kernel headers (best-effort)
         run: |
@@ -312,8 +324,8 @@ jobs:
       - name: Install sysbox deb
         run: |
           echo "Installing sysbox deb package..."
-          ls -la *.deb
-          sudo DEBIAN_FRONTEND=noninteractive dpkg -i ./sysbox-ce*.deb || true
+          ls -la dist/*.deb
+          sudo DEBIAN_FRONTEND=noninteractive dpkg -i dist/sysbox-ce*.deb || true
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y
 
       - name: Verify sysbox services
@@ -346,8 +358,20 @@ jobs:
           echo "=== sysbox-runc version ==="
           sysbox-runc --version
 
-          echo "=== Docker runtimes ==="
-          docker info | grep -i runtime || true
+          echo "=== Docker info ==="
+          if ! docker info; then
+            echo "::error::Docker daemon is not running or misconfigured"
+            exit 1
+          fi
+
+          echo "=== Verifying sysbox-runc runtime is registered ==="
+          if ! docker info --format '{{json .Runtimes}}' | grep -q sysbox-runc; then
+            echo "::error::sysbox-runc runtime not registered with Docker"
+            echo "Available runtimes:"
+            docker info --format '{{json .Runtimes}}'
+            exit 1
+          fi
+          echo "sysbox-runc runtime is available"
 
       - name: Run DinD smoke test
         run: |
