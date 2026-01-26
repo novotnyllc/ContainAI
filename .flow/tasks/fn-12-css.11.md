@@ -10,6 +10,8 @@ This task has been superseded by epic **fn-14-nm0** (Fix cai setup Docker isolat
 - fn-14-nm0.2: Refactor WSL2 setup for isolated Docker
 - fn-14-nm0.3: Refactor Native Linux setup for isolated Docker (deletes script)
 
+## Acceptance
+
 ## Done summary
 
 Superseded by fn-14-nm0 - the script merge is now part of the Docker isolation fix epic.

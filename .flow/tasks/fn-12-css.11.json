@@ -8,7 +8,7 @@
   "id": "fn-12-css.11",
   "priority": null,
   "spec_path": ".flow/tasks/fn-12-css.11.md",
-  "status": "skipped",
+  "status": "done",
   "title": "Merge install-containai-docker.sh into cai setup",
   "updated_at": "2026-01-23T22:15:00.000000Z"
 }
