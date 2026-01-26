@@ -1,0 +1,218 @@
+{
+  "created_at": "2026-01-26T09:09:44.895344Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-18-g96",
+      "created_at": "2026-01-24T22:08:43.161649Z",
+      "depends_on_epics": [
+        "fn-17-axl"
+      ],
+      "id": "fn-18-g96",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-18-g96.md",
+      "status": "open",
+      "title": "Container UX & Templates",
+      "updated_at": "2026-01-24T22:45:35.241506Z"
+    },
+    "spec": "# Container UX & Templates\n\n## Overview\n\nImprove container lifecycle management with auto-creation, consistent parameter handling, custom templates, and shell completion. Remove legacy cai sandbox command.\n\n## Scope\n\n**In scope:**\n- cai shell auto-creates/starts container if none exists\n- All commands accept --container parameter to override defaults\n- Container name completion for existing containers\n- Custom user image templates via Dockerfiles\n- Template parameter with autocompletion\n- Remove cai sandbox (no legacy/backcompat)\n\n**Out of scope:**\n- Multi-container orchestration\n- Devcontainer integration (fn-13-1c7)\n\n## Custom Templates\n\nUsers can create custom Dockerfiles in:\n```\n~/.config/containai/templates/\n\u251c\u2500\u2500 ml-gpu/\n\u2502   \u2514\u2500\u2500 Dockerfile      # FROM ghcr.io/containai/agents:latest\n\u251c\u2500\u2500 frontend/\n\u2502   \u2514\u2500\u2500 Dockerfile\n\u2514\u2500\u2500 my-custom/\n    \u2514\u2500\u2500 Dockerfile\n```\n\nUsage:\n```bash\ncai shell --template ml-gpu\ncai run --template frontend\n```\n\nTemplate Dockerfile pattern:\n```dockerfile\n# Must be based on ContainAI image\nFROM ghcr.io/containai/agents:latest\n\n# User customizations\nRUN apt-get update && apt-get install -y cuda-toolkit\n```\n\n## Container Name Parameter\n\nAll workspace commands accept `--container <name>`:\n```bash\ncai shell --container my-project\ncai run --container my-project\ncai exec --container my-project echo hello\ncai import --container my-project\ncai stop --container my-project\n```\n\nDefault container selection:\n1. Explicit --container parameter\n2. Workspace-associated container (from fn-12-css)\n3. Auto-generated from workspace path\n\n## Shell Completion\n\nTab completion for:\n- Container names (existing containers for current workspace)\n- Template names (from ~/.config/containai/templates/)\n- Common command options\n\nCompletion providers for:\n- bash\n- zsh\n- fish\n\n## Quick commands\n\n```bash\n# Test auto-create\ncai shell  # Should create if none exists\n\n# Test template\ncai shell --template ml-gpu\n\n# Test container override\ncai shell --container my-test\n\n# List templates\nls ~/.config/containai/templates/\n```\n\n## Acceptance\n\n- [ ] cai shell auto-creates container if none exists\n- [ ] cai shell auto-starts stopped container\n- [ ] --container parameter works on shell, run, exec, import, export, stop\n- [ ] Default container derived from workspace if not specified\n- [ ] Custom templates read from ~/.config/containai/templates/\n- [ ] --template parameter builds from user Dockerfile\n- [ ] Template autocompletion works (bash, zsh)\n- [ ] Container name autocompletion works\n- [ ] cai sandbox removed (command not found)\n- [ ] No backwards compatibility shims\n\n## References\n\n- Workspace state: fn-12-css\n- Bash completion: https://www.gnu.org/software/bash/manual/html_node/Programmable-Completion.html\n- Zsh completion: https://zsh.sourceforge.io/Doc/Release/Completion-System.html\n\n## Dependencies\n\n- **fn-12-css**: Workspace state persistence (for default container selection)\n- **fn-16-4c9.1**: Project reorg (clean paths)\n"
+  },
+  "epic_id": "fn-18-g96",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:09:13.339292Z",
+        "depends_on": [],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-18-g96.1.md",
+        "status": "todo",
+        "title": "cai shell auto-create and auto-start container",
+        "updated_at": "2026-01-24T22:09:13.339318Z"
+      },
+      "id": "fn-18-g96.1",
+      "runtime": null,
+      "spec": "# fn-18-g96.1 cai shell auto-create and auto-start container\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:09:13.404340Z",
+        "depends_on": [
+          "fn-18-g96.1"
+        ],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-18-g96.2.md",
+        "status": "todo",
+        "title": "Add --container parameter to all workspace commands",
+        "updated_at": "2026-01-24T22:09:21.417018Z"
+      },
+      "id": "fn-18-g96.2",
+      "runtime": null,
+      "spec": "# fn-18-g96.2 Add --container parameter to all workspace commands\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:09:13.472934Z",
+        "depends_on": [],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-18-g96.3.md",
+        "status": "todo",
+        "title": "Custom user templates from ~/.config/containai/templates/",
+        "updated_at": "2026-01-24T22:09:13.472957Z"
+      },
+      "id": "fn-18-g96.3",
+      "runtime": null,
+      "spec": "# fn-18-g96.3 Custom user templates from ~/.config/containai/templates/\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:09:13.542939Z",
+        "depends_on": [
+          "fn-18-g96.3"
+        ],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-18-g96.4.md",
+        "status": "todo",
+        "title": "Add --template parameter with template building",
+        "updated_at": "2026-01-24T22:09:21.494165Z"
+      },
+      "id": "fn-18-g96.4",
+      "runtime": null,
+      "spec": "# fn-18-g96.4 Add --template parameter with template building\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:09:13.613884Z",
+        "depends_on": [
+          "fn-18-g96.2"
+        ],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-18-g96.5.md",
+        "status": "todo",
+        "title": "Shell completion for container names",
+        "updated_at": "2026-01-24T22:09:21.562818Z"
+      },
+      "id": "fn-18-g96.5",
+      "runtime": null,
+      "spec": "# fn-18-g96.5 Shell completion for container names\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:09:13.688464Z",
+        "depends_on": [
+          "fn-18-g96.4"
+        ],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-18-g96.6.md",
+        "status": "todo",
+        "title": "Shell completion for template names",
+        "updated_at": "2026-01-24T22:09:21.636459Z"
+      },
+      "id": "fn-18-g96.6",
+      "runtime": null,
+      "spec": "# fn-18-g96.6 Shell completion for template names\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-24T22:09:13.764705Z",
+        "depends_on": [],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.7",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-18-g96.7.md",
+        "status": "todo",
+        "title": "Remove cai sandbox command",
+        "updated_at": "2026-01-24T22:09:13.764727Z"
+      },
+      "id": "fn-18-g96.7",
+      "runtime": null,
+      "spec": "# fn-18-g96.7 Remove cai sandbox command\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-25T04:41:43.571916Z",
+        "depends_on": [
+          "fn-18-g96.1"
+        ],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.8",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-18-g96.8.md",
+        "status": "todo",
+        "title": "Change container naming to repo-branch format",
+        "updated_at": "2026-01-25T04:41:43.571930Z"
+      },
+      "id": "fn-18-g96.8",
+      "runtime": null,
+      "spec": "# fn-18-g96.8 Change container naming to repo-branch format\n\n## Description\n\nReplace the current hash-based container naming (`containai-<12-char-hash>`) with a human-readable `repo-branch` format. If there are duplicates (multiple workspaces with same repo-branch), add a numeric suffix.\n\n**Current naming:**\n```\ncontainai-a1b2c3d4e5f6  # Hash of workspace path\n```\n\n**New naming:**\n```\ncontainai-myrepo-main       # First container for myrepo on main branch\ncontainai-myrepo-main-2     # Second container if duplicate\ncontainai-myrepo-feature-x  # Different branch\n```\n\n**What to do:**\n1. Modify `_containai_container_name()` in `src/lib/container.sh`:\n   - Extract repo name from workspace path (last component, or git remote name if in git repo)\n   - Extract branch name from `git branch --show-current` (or \"default\" if not in git repo)\n   - Sanitize for Docker name requirements: `[a-zA-Z0-9][a-zA-Z0-9_.-]*`\n   - Format: `containai-{repo}-{branch}`\n2. Add suffix handling for duplicates:\n   - Check if container name already exists\n   - If yes, append `-2`, `-3`, etc.\n3. Update `_cai_find_container()` to handle the new naming scheme\n4. Consider migration path for existing containers (document, don't auto-migrate)\n\n**Docker name constraints:**\n- Must match: `[a-zA-Z0-9][a-zA-Z0-9_.-]*`\n- Max length: 64 characters (truncate if needed)\n- Replace invalid chars with `-`\n\n## Acceptance\n- [ ] Container names follow `containai-{repo}-{branch}` format\n- [ ] Branch name extracted from git if available\n- [ ] Repo name extracted from directory or git remote\n- [ ] Invalid characters replaced with `-`\n- [ ] Duplicate handling with numeric suffix (-2, -3, etc.)\n- [ ] Name truncated to 64 chars if too long\n- [ ] Existing containers continue to work (no breaking change to lookup)\n- [ ] Documentation updated with new naming scheme\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-25T09:43:28.649060Z",
+        "depends_on": [],
+        "epic": "fn-18-g96",
+        "id": "fn-18-g96.9",
+        "priority": 1,
+        "spec_path": ".flow/tasks/fn-18-g96.9.md",
+        "status": "todo",
+        "title": "Skip Sysbox isolation checks when already in Sysbox container",
+        "updated_at": "2026-01-25T09:43:28.649074Z"
+      },
+      "id": "fn-18-g96.9",
+      "runtime": {
+        "assignee": "claire@novotny.org",
+        "claim_note": "",
+        "claimed_at": "2026-01-25T09:43:37.518333Z",
+        "evidence": {
+          "doctor_json": "docker --context containai-docker exec ca66ad1fca84 bash -lc 'cd /home/agent/workspace && source src/containai.sh && cai doctor --json | jq \"{isolation_available:.summary.isolation_available,recommended_action:.summary.recommended_action}\"'",
+          "doctor_text": "docker --context containai-docker exec ca66ad1fca84 bash -lc 'cd /home/agent/workspace && source src/containai.sh && cai doctor'",
+          "nested_detection": "docker --context containai-docker exec ca66ad1fca84 bash -lc 'cd /home/agent/workspace && source src/containai.sh && _cai_is_sysbox_container && echo ok'",
+          "shellcheck": "shellcheck -x src/lib/platform.sh src/lib/doctor.sh src/lib/container.sh"
+        },
+        "status": "done",
+        "updated_at": "2026-01-25T09:57:05.289567Z"
+      },
+      "spec": "# fn-18-g96.9 Skip Sysbox isolation checks when already in Sysbox container\n\n## Description\nWhen `cai` runs inside a Sysbox system container, nested Sysbox is unsupported\nand the usual Sysbox runtime checks should not block execution. Detect this\nenvironment and skip Sysbox/isolation verification silently while falling back\nto the default Docker context and a non-Sysbox runtime for nested containers.\n\n## Acceptance\n- [ ] `_cai_select_context` succeeds inside a Sysbox container even if\n      `sysbox-runc` is not available on the inner daemon.\n- [ ] `cai doctor` (text + JSON) does not report Sysbox runtime errors when\n      running inside a Sysbox container.\n- [ ] Isolation preflight checks are skipped without warnings in this mode.\n- [ ] Container creation uses `--runtime=runc` when nested inside Sysbox.\n\n## Done summary\nImplemented nested-Sysbox detection and bypass behavior:\n- Added `_cai_is_sysbox_container` detection using userns remap + sysboxfs mount.\n- Skipped Sysbox runtime verification when already inside Sysbox.\n- Made isolation preflight checks silent in nested Sysbox mode.\n- Switched container runtime to `runc` when nested.\n- Updated doctor output to report \"Outer Sysbox container\" and avoid sysbox-default warnings.\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

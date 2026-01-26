@@ -1786,18 +1786,8 @@ _containai_shell_cmd() {
         return 1
     fi
 
-    # Get container name (based on workspace path hash)
-    local resolved_container_name
-    if [[ -n "$container_name" ]]; then
-        resolved_container_name="$container_name"
-    else
-        if ! resolved_container_name=$(_containai_container_name "$resolved_workspace"); then
-            echo "[ERROR] Failed to generate container name for workspace: $resolved_workspace" >&2
-            return 1
-        fi
-    fi
-
     # === CONFIG PARSING (for context selection) ===
+    # Note: Container name resolution moved after context selection to use shared lookup helper
     local config_file=""
     if [[ -n "$explicit_config" ]]; then
         if [[ ! -f "$explicit_config" ]]; then
@@ -1848,6 +1838,27 @@ _containai_shell_cmd() {
     local -a docker_cmd=(docker)
     if [[ -n "$selected_context" ]]; then
         docker_cmd=(docker --context "$selected_context")
+    fi
+
+    # Resolve container name using shared lookup helper
+    # Priority: explicit --name > existing container lookup > new name for creation
+    local resolved_container_name
+    if [[ -n "$container_name" ]]; then
+        # Explicit name provided via --name
+        resolved_container_name="$container_name"
+    else
+        # Try to find existing container for this workspace using shared lookup helper
+        # Lookup order: label match -> new naming -> legacy hash naming
+        if resolved_container_name=$(_cai_find_workspace_container "$resolved_workspace" "$selected_context"); then
+            : # Found existing container
+        else
+            # No existing container found - get name for new container
+            # Use _cai_resolve_container_name for duplicate-aware naming
+            if ! resolved_container_name=$(_cai_resolve_container_name "$resolved_workspace" "$selected_context"); then
+                echo "[ERROR] Failed to resolve container name for workspace: $resolved_workspace" >&2
+                return 1
+            fi
+        fi
     fi
 
     # Handle --dry-run flag: delegate to _containai_start_container with --shell --dry-run

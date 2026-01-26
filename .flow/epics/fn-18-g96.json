@@ -6,10 +6,10 @@
   ],
   "id": "fn-18-g96",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-26T09:31:48.779545Z",
   "spec_path": ".flow/specs/fn-18-g96.md",
   "status": "open",
   "title": "Container UX & Templates",
-  "updated_at": "2026-01-24T22:45:35.241506Z"
+  "updated_at": "2026-01-26T09:31:48.779556Z"
 }

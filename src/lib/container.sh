@@ -6,6 +6,9 @@
 #
 # Provides:
 #   _containai_container_name      - Generate sanitized container name
+#   _containai_legacy_container_name - Generate legacy hash-based container name
+#   _cai_find_workspace_container  - Find container using shared lookup order (label/new/legacy)
+#   _cai_resolve_container_name    - Resolve container name for creation (duplicate-aware)
 #   _cai_find_container            - Find container by workspace and optional image-tag filter
 #   _containai_check_isolation     - Detect container isolation status
 #   _containai_validate_masked_paths - Validate Docker MaskedPaths are applied (in-container)
@@ -304,6 +307,8 @@ _cai_hash_path() {
 # Format: containai-<12-char-hash>
 # Arguments: $1 = workspace path (required)
 # Returns: container name via stdout, or 1 on error
+# NOTE: This function will be updated in fn-18-g96.8 to use repo-branch format.
+#       For now, it uses the legacy hash-based naming for backward compatibility.
 _containai_container_name() {
     local workspace_path="$1"
     local hash name
@@ -321,6 +326,148 @@ _containai_container_name() {
     name="containai-${hash}"
 
     printf '%s' "$name"
+}
+
+# Legacy container name - MUST match existing containers
+# Uses the SAME logic as current implementation to ensure compatibility
+# This wraps _cai_hash_path which handles:
+# - Path normalization (trailing slashes, realpath)
+# - sha256sum/shasum/openssl fallback
+# DO NOT reimplement the hash algorithm
+# Arguments: $1 = workspace path (required)
+# Returns: legacy container name via stdout, or 1 on error
+_containai_legacy_container_name() {
+    local workspace_path="$1"
+    local hash
+
+    if [[ -z "$workspace_path" ]]; then
+        workspace_path="$(pwd)"
+    fi
+
+    # Use existing _cai_hash_path - do NOT reimplement
+    if ! hash=$(_cai_hash_path "$workspace_path"); then
+        return 1
+    fi
+
+    printf 'containai-%s' "$hash"
+}
+
+# Find container for a workspace using shared lookup order
+# This is the primary lookup helper that all commands MUST use.
+#
+# Lookup order:
+#   1. Label match: containai.workspace=<resolved-path> (most reliable)
+#   2. New naming format: result from _containai_container_name()
+#   3. Legacy hash format: result from _containai_legacy_container_name()
+#
+# Arguments:
+#   $1 = workspace path (required, should be normalized/resolved)
+#   $2 = docker context (optional, empty for default)
+#
+# Returns:
+#   0 with container name on stdout if found
+#   1 if not found (no error message - caller should handle)
+#   1 with error message to stderr if multiple containers match by label
+_cai_find_workspace_container() {
+    local workspace_path="$1"
+    local context="${2:-}"
+    local -a docker_cmd=(docker)
+    local line
+
+    if [[ -z "$workspace_path" ]]; then
+        echo "[ERROR] workspace path is required" >&2
+        return 1
+    fi
+
+    [[ -n "$context" ]] && docker_cmd=(docker --context "$context")
+
+    # 1. Label match (most reliable) - with duplicate detection
+    local -a by_label=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && by_label+=("$line")
+    done < <("${docker_cmd[@]}" ps -a \
+        --filter "label=containai.workspace=$workspace_path" \
+        --format '{{.Names}}' 2>/dev/null)
+
+    # Error on multiple matches - user must be explicit
+    if [[ ${#by_label[@]} -gt 1 ]]; then
+        echo "[ERROR] Multiple containers found for workspace: $workspace_path" >&2
+        echo "[ERROR] Containers: ${by_label[*]}" >&2
+        echo "[ERROR] Use --container to specify which one" >&2
+        return 1
+    fi
+
+    if [[ ${#by_label[@]} -eq 1 ]]; then
+        printf '%s\n' "${by_label[0]}"
+        return 0
+    fi
+
+    # 2. New naming format (from _containai_container_name)
+    local new_name
+    if new_name=$(_containai_container_name "$workspace_path"); then
+        if "${docker_cmd[@]}" inspect --type container "$new_name" >/dev/null 2>&1; then
+            printf '%s\n' "$new_name"
+            return 0
+        fi
+    fi
+
+    # 3. Legacy hash format (using existing _cai_hash_path via wrapper)
+    local legacy_name
+    if legacy_name=$(_containai_legacy_container_name "$workspace_path"); then
+        if "${docker_cmd[@]}" inspect --type container "$legacy_name" >/dev/null 2>&1; then
+            printf '%s\n' "$legacy_name"
+            return 0
+        fi
+    fi
+
+    return 1  # Not found
+}
+
+# Resolve container name for creation
+# For new containers, determines the appropriate name to use.
+# If container already exists for this workspace, returns that name.
+# Otherwise returns a new name (with duplicate suffix if needed).
+#
+# Arguments:
+#   $1 = workspace path (required, should be normalized/resolved)
+#   $2 = docker context (optional, empty for default)
+#
+# Returns: container name via stdout, or 1 on error
+_cai_resolve_container_name() {
+    local workspace_path="$1"
+    local context="${2:-}"
+    local -a docker_cmd=(docker)
+    local base_name candidate existing_workspace
+    local suffix=1
+
+    if [[ -z "$workspace_path" ]]; then
+        echo "[ERROR] workspace path is required" >&2
+        return 1
+    fi
+
+    [[ -n "$context" ]] && docker_cmd=(docker --context "$context")
+
+    # Get base name from naming function
+    if ! base_name=$(_containai_container_name "$workspace_path"); then
+        return 1
+    fi
+    candidate="$base_name"
+
+    # Check if name is taken (handle duplicates)
+    while "${docker_cmd[@]}" inspect --type container "$candidate" >/dev/null 2>&1; do
+        # Check if this container is for our workspace
+        existing_workspace=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$candidate" 2>/dev/null) || existing_workspace=""
+        if [[ "$existing_workspace" == "$workspace_path" ]]; then
+            # Same workspace - reuse this container name
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+        # Different workspace - try next suffix
+        ((suffix++))
+        candidate="${base_name}-${suffix}"
+    done
+
+    printf '%s\n' "$candidate"
 }
 
 # Find container by workspace and optionally filter by image-tag label
@@ -1267,10 +1414,11 @@ _containai_start_container() {
         docker_cmd=(docker --context "$selected_context")
     fi
 
-    # Get container name (based on workspace path hash for deterministic naming)
+    # Get container name using shared resolution helper
+    # Uses _cai_resolve_container_name for duplicate-aware naming
     if [[ -z "$container_name" ]]; then
-        if ! container_name=$(_containai_container_name "$workspace_resolved"); then
-            echo "[ERROR] Failed to generate container name for workspace: $workspace_resolved" >&2
+        if ! container_name=$(_cai_resolve_container_name "$workspace_resolved" "$selected_context"); then
+            echo "[ERROR] Failed to resolve container name for workspace: $workspace_resolved" >&2
             return 1
         fi
     fi
