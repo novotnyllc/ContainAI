@@ -4,10 +4,10 @@
   "depends_on_epics": [],
   "id": "fn-21-5sw",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-26T15:53:47.508794Z",
   "spec_path": ".flow/specs/fn-21-5sw.md",
   "status": "open",
   "title": "Add CI Testing to build-sysbox.yml",
-  "updated_at": "2026-01-26T15:41:38.101402Z"
+  "updated_at": "2026-01-26T15:53:47.508806Z"
 }

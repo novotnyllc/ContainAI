@@ -186,9 +186,212 @@ jobs:
             dist/*.sha256
           retention-days: 30
 
+  # ============================================================================
+  # Test Jobs - Verify built packages work before release
+  # ============================================================================
+  test-amd64:
+    name: Test amd64
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sysbox-ce-amd64
+          path: .
+
+      - name: Install kernel headers (best-effort)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-headers-$(uname -r) || \
+            sudo apt-get install -y linux-headers-azure || \
+            echo "::warning::Kernel headers unavailable, some sysbox features may not work"
+
+      - name: Install sysbox deb
+        run: |
+          echo "Installing sysbox deb package..."
+          ls -la *.deb
+          sudo DEBIAN_FRONTEND=noninteractive dpkg -i ./sysbox-ce*.deb || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y
+
+      - name: Verify sysbox services
+        run: |
+          echo "Waiting for sysbox services to start..."
+          # Wait up to 30s for services to become active
+          for i in {1..15}; do
+            if systemctl is-active --quiet sysbox-mgr && systemctl is-active --quiet sysbox-fs; then
+              echo "Sysbox services are active"
+              break
+            fi
+            echo "Waiting for services... ($i/15)"
+            sleep 2
+          done
+
+          # Check final status
+          if ! systemctl is-active --quiet sysbox-mgr || ! systemctl is-active --quiet sysbox-fs; then
+            echo "::error::Sysbox services failed to start"
+            echo "=== sysbox-mgr status ==="
+            systemctl status sysbox-mgr --no-pager || true
+            echo "=== sysbox-fs status ==="
+            systemctl status sysbox-fs --no-pager || true
+            echo "=== sysbox-mgr logs ==="
+            journalctl -u sysbox-mgr --no-pager -n 50 || true
+            echo "=== sysbox-fs logs ==="
+            journalctl -u sysbox-fs --no-pager -n 50 || true
+            exit 1
+          fi
+
+          echo "=== sysbox-runc version ==="
+          sysbox-runc --version
+
+          echo "=== Docker runtimes ==="
+          docker info | grep -i runtime || true
+
+      - name: Run DinD smoke test
+        run: |
+          CONTAINER_NAME="test-dind-${{ github.run_id }}"
+
+          echo "Starting sysbox container: $CONTAINER_NAME"
+          docker run --runtime=sysbox-runc -d --name="$CONTAINER_NAME" \
+            nestybox/ubuntu-focal-systemd-docker:20240618
+
+          # Wait for inner dockerd to be ready (up to 60s)
+          echo "Waiting for inner dockerd to start..."
+          for i in {1..30}; do
+            if docker exec "$CONTAINER_NAME" docker info >/dev/null 2>&1; then
+              echo "Inner dockerd is ready"
+              break
+            fi
+            echo "Waiting for inner dockerd... ($i/30)"
+            sleep 2
+          done
+
+          # Run nested hello-world
+          echo "Running nested hello-world container..."
+          if ! docker exec "$CONTAINER_NAME" docker run --rm hello-world; then
+            echo "::error::Nested container test failed"
+            echo "=== Container logs ==="
+            docker logs "$CONTAINER_NAME" || true
+            echo "=== Inner docker status ==="
+            docker exec "$CONTAINER_NAME" systemctl status docker.service --no-pager || true
+            echo "=== Inner docker logs ==="
+            docker exec "$CONTAINER_NAME" journalctl -u docker.service --no-pager -n 30 || true
+            # Cleanup before exit
+            docker rm -f "$CONTAINER_NAME" || true
+            exit 1
+          fi
+
+          echo "DinD smoke test passed!"
+
+          # Cleanup
+          echo "Cleaning up test container..."
+          docker rm -f "$CONTAINER_NAME" || true
+
+  test-arm64:
+    name: Test arm64
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+
+    steps:
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sysbox-ce-arm64
+          path: .
+
+      - name: Install kernel headers (best-effort)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-headers-$(uname -r) || \
+            sudo apt-get install -y linux-headers-azure || \
+            echo "::warning::Kernel headers unavailable, some sysbox features may not work"
+
+      - name: Install sysbox deb
+        run: |
+          echo "Installing sysbox deb package..."
+          ls -la *.deb
+          sudo DEBIAN_FRONTEND=noninteractive dpkg -i ./sysbox-ce*.deb || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y
+
+      - name: Verify sysbox services
+        run: |
+          echo "Waiting for sysbox services to start..."
+          # Wait up to 30s for services to become active
+          for i in {1..15}; do
+            if systemctl is-active --quiet sysbox-mgr && systemctl is-active --quiet sysbox-fs; then
+              echo "Sysbox services are active"
+              break
+            fi
+            echo "Waiting for services... ($i/15)"
+            sleep 2
+          done
+
+          # Check final status
+          if ! systemctl is-active --quiet sysbox-mgr || ! systemctl is-active --quiet sysbox-fs; then
+            echo "::error::Sysbox services failed to start"
+            echo "=== sysbox-mgr status ==="
+            systemctl status sysbox-mgr --no-pager || true
+            echo "=== sysbox-fs status ==="
+            systemctl status sysbox-fs --no-pager || true
+            echo "=== sysbox-mgr logs ==="
+            journalctl -u sysbox-mgr --no-pager -n 50 || true
+            echo "=== sysbox-fs logs ==="
+            journalctl -u sysbox-fs --no-pager -n 50 || true
+            exit 1
+          fi
+
+          echo "=== sysbox-runc version ==="
+          sysbox-runc --version
+
+          echo "=== Docker runtimes ==="
+          docker info | grep -i runtime || true
+
+      - name: Run DinD smoke test
+        run: |
+          CONTAINER_NAME="test-dind-${{ github.run_id }}"
+
+          echo "Starting sysbox container: $CONTAINER_NAME"
+          docker run --runtime=sysbox-runc -d --name="$CONTAINER_NAME" \
+            nestybox/ubuntu-focal-systemd-docker:20240618
+
+          # Wait for inner dockerd to be ready (up to 60s)
+          echo "Waiting for inner dockerd to start..."
+          for i in {1..30}; do
+            if docker exec "$CONTAINER_NAME" docker info >/dev/null 2>&1; then
+              echo "Inner dockerd is ready"
+              break
+            fi
+            echo "Waiting for inner dockerd... ($i/30)"
+            sleep 2
+          done
+
+          # Run nested hello-world
+          echo "Running nested hello-world container..."
+          if ! docker exec "$CONTAINER_NAME" docker run --rm hello-world; then
+            echo "::error::Nested container test failed"
+            echo "=== Container logs ==="
+            docker logs "$CONTAINER_NAME" || true
+            echo "=== Inner docker status ==="
+            docker exec "$CONTAINER_NAME" systemctl status docker.service --no-pager || true
+            echo "=== Inner docker logs ==="
+            docker exec "$CONTAINER_NAME" journalctl -u docker.service --no-pager -n 30 || true
+            # Cleanup before exit
+            docker rm -f "$CONTAINER_NAME" || true
+            exit 1
+          fi
+
+          echo "DinD smoke test passed!"
+
+          # Cleanup
+          echo "Cleaning up test container..."
+          docker rm -f "$CONTAINER_NAME" || true
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, test-amd64, test-arm64]
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||

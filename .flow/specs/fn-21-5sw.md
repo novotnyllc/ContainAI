@@ -48,15 +48,17 @@ build (matrix: amd64, arm64)
 
 ### Key Implementation Points
 
-- **Kernel headers**: Install for sysbox's kernel-header-in-container feature
+- **Kernel headers** (best-effort): Install for sysbox's kernel-header-in-container feature
   ```bash
   sudo apt-get install -y linux-headers-$(uname -r) || \
-    sudo apt-get install -y linux-headers-azure
+    sudo apt-get install -y linux-headers-azure || \
+    echo "::warning::Kernel headers unavailable"
   ```
-- **Deb installation**: Use `sudo apt-get install ./sysbox-ce*.deb -y` with `-f` fallback
-- **Service verification**: Check `systemctl is-active sysbox-mgr sysbox-fs`
-- **DinD test**: Use `nestybox/ubuntu-focal-systemd-docker` image with `--runtime=sysbox-runc`
-- **Nested container**: `docker exec <container> docker run hello-world`
+- **Deb installation**: Use `sudo dpkg -i ./sysbox-ce*.deb` with `apt-get -f` fallback (matches repo pattern)
+- **Service verification**: Check with retry loop (up to 30s), dump diagnostics on failure
+- **DinD test**: Use `nestybox/ubuntu-focal-systemd-docker:20240618` (pinned) with `--runtime=sysbox-runc`
+- **Nested container**: `docker exec <container> docker run --rm hello-world`
+- **Diagnostics**: On failure, dump `systemctl status`, `journalctl`, `docker logs`
 
 ## Risks & Mitigations
 
@@ -71,9 +73,9 @@ build (matrix: amd64, arm64)
 
 - [ ] Test job for amd64 installs deb, verifies services, runs DinD test
 - [ ] Test job for arm64 installs deb, verifies services, runs DinD test (native runner)
-- [ ] Kernel headers installed (with fallback for Azure kernels)
+- [ ] Kernel headers attempted with Azure fallback (warning if unavailable, not fatal)
 - [ ] Release job only runs if both test jobs pass
-- [ ] Clear error messages if sysbox services fail to start
+- [ ] Clear error messages if sysbox services fail to start (systemctl status + journalctl)
 - [ ] Test logs visible in GitHub Actions output
 
 ## Quick Commands
@@ -89,9 +91,9 @@ gh run list --workflow=build-sysbox.yml
 gh run view <run-id> --log --job=<test-job-id>
 
 # Local simulation of test steps
-docker run --runtime=sysbox-runc -d --name=test-dind nestybox/ubuntu-focal-systemd-docker:latest
+docker run --runtime=sysbox-runc -d --name=test-dind nestybox/ubuntu-focal-systemd-docker:20240618
 sleep 30
-docker exec test-dind docker run hello-world
+docker exec test-dind docker run --rm hello-world
 docker rm -f test-dind
 ```
 
