@@ -965,7 +965,8 @@ _cai_list_running_containai_containers() {
     # This prevents proceeding with updates when we can't verify container state
 
     # Query labeled containers (new style)
-    if ! labeled_containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$label" 2>&1); then
+    # Use 2>/dev/null to avoid mixing stderr warnings into ID list
+    if ! labeled_containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$label" 2>/dev/null); then
         return 1  # Query failed - cannot verify container state
     fi
 
@@ -997,11 +998,11 @@ _cai_list_running_containai_containers() {
 # Uses DOCKER_HOST directly (not context) for reliability
 # Stops by container ID (not name) and treats "already stopped" as success
 # Arguments: $1 = dry_run ("true" to simulate)
-#            $2 = timeout in seconds (default 60)
+#            $2 = timeout in seconds (default 100 to match container's StopTimeout)
 # Returns: 0=success, 1=failure (logs stopped container names via _cai_info)
 _cai_stop_containai_containers() {
     local dry_run="${1:-false}"
-    local timeout="${2:-60}"
+    local timeout="${2:-100}"
     local docker_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
 
     local containers
@@ -1183,7 +1184,7 @@ _cai_update_linux_wsl2() {
                 _cai_info "[DRY-RUN] Would require --stop-containers flag to proceed"
             elif [[ "$stop_containers" == "true" ]]; then
                 # Stop containers before proceeding
-                if ! _cai_stop_containai_containers "false" 60; then
+                if ! _cai_stop_containai_containers "false" 100; then
                     _cai_error "Failed to stop all containers"
                     return 1
                 fi
