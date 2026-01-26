@@ -202,3 +202,6 @@ When function can fail for distinct reasons (not found vs multiple matches), use
 
 ## 2026-01-26 manual [pitfall]
 When using docker inspect to check container existence, always use --type container to avoid matching images with the same name
+
+## 2026-01-26 manual [pitfall]
+When passing user-controlled names to docker commands (stop/rm/inspect), always use -- to prevent option injection if name starts with dash

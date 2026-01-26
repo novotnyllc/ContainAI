@@ -1165,7 +1165,7 @@ _containai_stop_cmd() {
     local container_name=""
     local remove_flag=false
     local all_flag=false
-    local arg
+    local arg prev
     # Preserve original args for passing to _containai_stop_all
     local -a orig_args=("$@")
 
@@ -1179,65 +1179,49 @@ _containai_stop_cmd() {
         esac
     done
 
-    # Pass 2: Parse all arguments using standard while loop
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
+    # Pass 2: Pre-scan to determine mode and extract values
+    # This ensures validation is order-independent
+    prev=""
+    for arg in "$@"; do
+        case "$arg" in
             --name | --name=*)
-                # --name is no longer supported on stop - use --container instead
                 echo "[ERROR] --name is no longer supported. Use --container instead." >&2
                 return 1
                 ;;
             --container)
-                if [[ -z "${2-}" ]] || [[ "$2" == -* ]]; then
-                    echo "[ERROR] --container requires a value" >&2
-                    return 1
-                fi
-                container_name="$2"
-                shift 2
+                # Value will be in next iteration
                 ;;
             --container=*)
-                container_name="${1#--container=}"
-                if [[ -z "$container_name" ]]; then
+                container_name="${arg#--container=}"
+                if [[ -z "$container_name" ]] || [[ "$container_name" == -* ]]; then
                     echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
-                shift
-                ;;
-            --remove)
-                remove_flag=true
-                shift
                 ;;
             --all)
                 all_flag=true
-                shift
                 ;;
-            --help | -h)
-                # Already handled in pass 1
-                shift
-                ;;
-            -*)
-                # Unknown flag - delegate to _containai_stop_all for backward compat
-                # (unless we're in explicit --container or --all mode)
-                if [[ -n "$container_name" ]] || [[ "$all_flag" == "true" ]]; then
-                    echo "[ERROR] Unknown option: $1" >&2
-                    echo "Use 'cai stop --help' for usage" >&2
-                    return 1
-                fi
-                # Keep for delegation to stop_all
-                shift
+            --remove)
+                remove_flag=true
                 ;;
             *)
-                # Positional argument - not allowed with --container or --all
-                if [[ -n "$container_name" ]] || [[ "$all_flag" == "true" ]]; then
-                    echo "[ERROR] Unexpected argument: $1" >&2
-                    echo "Use 'cai stop --help' for usage" >&2
-                    return 1
+                # Check if this is the value for --container
+                if [[ "$prev" == "--container" ]]; then
+                    if [[ -z "$arg" ]] || [[ "$arg" == -* ]]; then
+                        echo "[ERROR] --container requires a value" >&2
+                        return 1
+                    fi
+                    container_name="$arg"
                 fi
-                # Keep for delegation to stop_all
-                shift
                 ;;
         esac
+        prev="$arg"
     done
+    # Handle trailing --container without value
+    if [[ "$prev" == "--container" ]] && [[ -z "$container_name" ]]; then
+        echo "[ERROR] --container requires a value" >&2
+        return 1
+    fi
 
     # Check mutual exclusivity of --container and --all
     if [[ -n "$container_name" ]] && [[ "$all_flag" == "true" ]]; then
@@ -1245,12 +1229,42 @@ _containai_stop_cmd() {
         return 1
     fi
 
+    # Pass 3: Validate all args based on determined mode
+    # In --container or --all mode, reject unknown flags and positional args
+    if [[ -n "$container_name" ]] || [[ "$all_flag" == "true" ]]; then
+        prev=""
+        for arg in "$@"; do
+            case "$arg" in
+                --container | --all | --remove | --help | -h)
+                    # Known flags
+                    ;;
+                --container=*)
+                    # Known flag with value
+                    ;;
+                -*)
+                    echo "[ERROR] Unknown option: $arg" >&2
+                    echo "Use 'cai stop --help' for usage" >&2
+                    return 1
+                    ;;
+                *)
+                    # Check if this is the value for --container
+                    if [[ "$prev" != "--container" ]]; then
+                        echo "[ERROR] Unexpected argument: $arg" >&2
+                        echo "Use 'cai stop --help' for usage" >&2
+                        return 1
+                    fi
+                    ;;
+            esac
+            prev="$arg"
+        done
+    fi
+
     # If --container specified, stop that specific container
     if [[ -n "$container_name" ]]; then
         # Use _cai_find_container_by_name to search configured/secure contexts
-        # Note: cai stop doesn't accept --config, so pass empty string
+        # Pass PWD as workspace hint for config-based context discovery
         local selected_context="" find_rc
-        if ! selected_context=$(_cai_find_container_by_name "$container_name" ""); then
+        if ! selected_context=$(_cai_find_container_by_name "$container_name" "" "$PWD"); then
             find_rc=$?
             if [[ $find_rc -eq 2 ]]; then
                 return 1  # Ambiguity error already printed

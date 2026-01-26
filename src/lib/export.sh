@@ -17,7 +17,7 @@
 #
 # Docker Context: This function uses the current Docker context. To operate on
 # a specific context, set DOCKER_CONTEXT environment variable before calling:
-#   DOCKER_CONTEXT="containai" _containai_export "volume" "/path/output.tgz" my_excludes "false"
+#   DOCKER_CONTEXT="containai-docker" _containai_export "volume" "/path/output.tgz" my_excludes "false"
 #
 # Arguments:
 #   $1 = volume name (required)
