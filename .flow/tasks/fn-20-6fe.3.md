@@ -46,9 +46,8 @@ Add an integration test that validates Docker-in-Docker works correctly with run
 - [ ] Test follows existing integration test patterns
 
 ## Done summary
-TBD
-
+Added integration test test-dind-runc133.sh that validates Docker-in-Docker works correctly with runc 1.3.3+ when using the ContainAI sysbox build with openat2 fix. The test verifies sysbox build markers, enforces runc >= 1.3.3, and checks that docker run/build operations succeed without "unsafe procfs detected" errors.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 835a91ad9ac8ea5bc6cc7a1c29c42a83bd68b67a, b454d5fadee097077cb0a1ea957c697ad2e924a6
+- Tests: shellcheck -x tests/integration/test-dind-runc133.sh
 - PRs:
