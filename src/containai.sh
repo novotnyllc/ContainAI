@@ -399,7 +399,8 @@ Options:
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
-  --container <name>    Container name (default: auto-generated from workspace)
+  --container <name>    Attach to existing ContainAI-managed container by name
+                        (container must already exist; ignores --workspace/--data-volume)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -429,6 +430,7 @@ Exit Codes:
 Examples:
   cai shell                    Open shell in container for current directory
   cai shell /path/to/project   Open shell in container for specified workspace
+  cai shell --container foo    Attach to existing container named 'foo'
   cai shell --fresh            Recreate container with fresh SSH keys
   cai shell --dry-run          Show what would happen (machine-parseable)
   ssh <container-name>         Direct SSH access (after cai shell setup)
@@ -1191,7 +1193,7 @@ _containai_stop_cmd() {
         esac
     done
 
-    # Parse --container argument (without consuming original args)
+    # Parse arguments (without consuming original args for _containai_stop_all)
     for arg in "$@"; do
         case "$arg" in
             --container)
@@ -1221,31 +1223,81 @@ _containai_stop_cmd() {
             --remove)
                 remove_flag=true
                 ;;
+            --all | --help | -h)
+                # Valid flags handled by _containai_stop_all or earlier
+                ;;
+            -*)
+                # Only error on unknown flags if --container mode
+                # (for backward compat, unknown flags without --container go to _containai_stop_all)
+                if [[ -n "$container_name" ]]; then
+                    echo "[ERROR] Unknown option: $arg" >&2
+                    echo "Use 'cai stop --help' for usage" >&2
+                    return 1
+                fi
+                ;;
         esac
     done
 
+    # Validate flag combinations when --container is used
+    if [[ -n "$container_name" ]]; then
+        # Check for unknown flags that were not caught above (non-flag args that aren't --container value)
+        local prev_was_container=false
+        for arg in "$@"; do
+            if [[ "$prev_was_container" == "true" ]]; then
+                prev_was_container=false
+                continue
+            fi
+            if [[ "$arg" == "--container" ]]; then
+                prev_was_container=true
+                continue
+            fi
+            case "$arg" in
+                --container=* | --remove | --all | --help | -h)
+                    ;;
+                -*)
+                    echo "[ERROR] Unknown option: $arg" >&2
+                    echo "Use 'cai stop --help' for usage" >&2
+                    return 1
+                    ;;
+            esac
+        done
+    fi
+
     # If --container specified, stop that specific container
     if [[ -n "$container_name" ]]; then
-        # Select context to find the container
-        local config_context_override=""
+        # Search for container across contexts (similar to _containai_stop_all)
+        local -a contexts_to_check=("default")
+        # Add secure engine context if available
+        if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+            contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
+        fi
+
+        # Find container in one of the contexts
         local selected_context=""
-        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
-            : # success
-        else
-            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+        local found_context=""
+        for ctx in "${contexts_to_check[@]}"; do
+            local -a docker_cmd_check=(docker)
+            if [[ "$ctx" != "default" ]]; then
+                docker_cmd_check=(docker --context "$ctx")
+            fi
+            if "${docker_cmd_check[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+                found_context="$ctx"
+                break
+            fi
+        done
+
+        if [[ -z "$found_context" ]]; then
+            echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
+
+        selected_context="$found_context"
+        [[ "$selected_context" == "default" ]] && selected_context=""
 
         # Build docker command with context
         local -a docker_cmd=(docker)
         if [[ -n "$selected_context" ]]; then
             docker_cmd=(docker --context "$selected_context")
-        fi
-
-        # Check container exists (use --type container to avoid matching images)
-        if ! "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
-            echo "[ERROR] Container not found: $container_name" >&2
-            return 1
         fi
 
         # Check if container is managed by ContainAI
@@ -2053,98 +2105,160 @@ _containai_shell_cmd() {
         esac
     done
 
-    # Resolve workspace using platform-aware normalization
-    local resolved_workspace workspace_input
-    workspace_input="${workspace:-$PWD}"
-    resolved_workspace=$(_cai_normalize_path "$workspace_input")
-    # Check if path exists (normalize_path returns as-is for non-existent paths)
-    if [[ ! -d "$resolved_workspace" ]]; then
-        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
-        return 1
-    fi
-
-    # Resolve volume (needed for container creation if --fresh)
-    local resolved_volume
-    if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
-        echo "[ERROR] Failed to resolve data volume" >&2
-        return 1
-    fi
-
-    # === CONFIG PARSING (for context selection) ===
-    # Note: Container name resolution moved after context selection to use shared lookup helper
-    local config_file=""
-    if [[ -n "$explicit_config" ]]; then
-        if [[ ! -f "$explicit_config" ]]; then
-            echo "[ERROR] Config file not found: $explicit_config" >&2
-            return 1
-        fi
-        config_file="$explicit_config"
-        if ! _containai_parse_config "$config_file" "$resolved_workspace" "strict"; then
-            echo "[ERROR] Failed to parse config: $explicit_config" >&2
-            return 1
-        fi
-    else
-        # Discovered config: suppress errors gracefully
-        config_file=$(_containai_find_config "$resolved_workspace")
-        if [[ -n "$config_file" ]]; then
-            _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
-        fi
-    fi
-    local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
-
     # Set CLI resource overrides (global vars read by _containai_start_container)
     _CAI_CLI_MEMORY="$cli_memory"
     _CAI_CLI_CPUS="$cli_cpus"
 
-    # Auto-select Docker context based on isolation availability
-    local selected_context debug_mode=""
-    if [[ "$debug_flag" == "true" ]]; then
-        debug_mode="debug"
-    fi
-    if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
-        if [[ "$force_flag" == "true" ]]; then
-            _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
-            if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
-                selected_context="$config_context_override"
-            elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
-                selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
-            else
-                _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
-                return 1
-            fi
-        else
-            _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
-            return 1
-        fi
-    fi
+    # Variables to resolve
+    local resolved_workspace=""
+    local resolved_volume=""
+    local resolved_container_name=""
+    local selected_context=""
 
-    # Build docker command prefix
-    local -a docker_cmd=(docker)
-    if [[ -n "$selected_context" ]]; then
-        docker_cmd=(docker --context "$selected_context")
-    fi
-
-    # Resolve container name using shared lookup helper
-    # Priority: explicit --container > existing container lookup > new name for creation
-    # Exit codes from helpers: 0=found, 1=not found, 2=multiple matches (abort)
-    local resolved_container_name
-    local find_rc
+    # === EARLY BRANCH: --container mode ===
+    # When --container is provided, derive workspace/volume from container labels
+    # and skip workspace-based resolution entirely
     if [[ -n "$container_name" ]]; then
-        # Explicit name provided via --container
-        # Spec: "Container must exist and be ContainAI-managed; error otherwise"
-        if ! "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+        # Search for container across contexts (similar to _containai_stop_all)
+        local -a contexts_to_check=("default")
+        # Add secure engine context if configured/available
+        if [[ -n "$explicit_config" ]]; then
+            local cfg_ctx
+            cfg_ctx=$(_containai_resolve_secure_engine_context "$PWD" "$explicit_config" 2>/dev/null) || cfg_ctx=""
+            # shellcheck disable=SC2076 # Intentional literal match, not regex
+            if [[ -n "$cfg_ctx" ]] && [[ ! " ${contexts_to_check[*]} " =~ " $cfg_ctx " ]]; then
+                contexts_to_check+=("$cfg_ctx")
+            fi
+        fi
+        # Also check standard secure context
+        # shellcheck disable=SC2076 # Intentional literal match, not regex
+        if [[ ! " ${contexts_to_check[*]} " =~ " $_CAI_CONTAINAI_DOCKER_CONTEXT " ]]; then
+            if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
+            fi
+        fi
+
+        # Find container in one of the contexts
+        local found_context=""
+        for ctx in "${contexts_to_check[@]}"; do
+            local -a docker_cmd_check=(docker)
+            if [[ "$ctx" != "default" ]]; then
+                docker_cmd_check=(docker --context "$ctx")
+            fi
+            if "${docker_cmd_check[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+                found_context="$ctx"
+                break
+            fi
+        done
+
+        if [[ -z "$found_context" ]]; then
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
-        # Check if container is managed by ContainAI
+
+        selected_context="$found_context"
+        [[ "$selected_context" == "default" ]] && selected_context=""
+
+        # Build docker command prefix
+        local -a docker_cmd=(docker)
+        if [[ -n "$selected_context" ]]; then
+            docker_cmd=(docker --context "$selected_context")
+        fi
+
+        # Verify container is managed by ContainAI
         local is_managed
         is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
         fi
+
+        # Derive workspace from container labels
+        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.workspace"}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+        if [[ -z "$resolved_workspace" ]]; then
+            echo "[ERROR] Container $container_name is missing workspace label" >&2
+            return 1
+        fi
+
+        # Derive data volume from container labels
+        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.data-volume"}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+        if [[ -z "$resolved_volume" ]]; then
+            echo "[ERROR] Container $container_name is missing data-volume label" >&2
+            return 1
+        fi
+
         resolved_container_name="$container_name"
     else
+        # === STANDARD MODE: Resolve from workspace ===
+        # Resolve workspace using platform-aware normalization
+        local workspace_input
+        workspace_input="${workspace:-$PWD}"
+        resolved_workspace=$(_cai_normalize_path "$workspace_input")
+        # Check if path exists (normalize_path returns as-is for non-existent paths)
+        if [[ ! -d "$resolved_workspace" ]]; then
+            echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+            return 1
+        fi
+
+        # Resolve volume (needed for container creation if --fresh)
+        if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+            echo "[ERROR] Failed to resolve data volume" >&2
+            return 1
+        fi
+
+        # === CONFIG PARSING (for context selection) ===
+        local config_file=""
+        if [[ -n "$explicit_config" ]]; then
+            if [[ ! -f "$explicit_config" ]]; then
+                echo "[ERROR] Config file not found: $explicit_config" >&2
+                return 1
+            fi
+            config_file="$explicit_config"
+            if ! _containai_parse_config "$config_file" "$resolved_workspace" "strict"; then
+                echo "[ERROR] Failed to parse config: $explicit_config" >&2
+                return 1
+            fi
+        else
+            # Discovered config: suppress errors gracefully
+            config_file=$(_containai_find_config "$resolved_workspace")
+            if [[ -n "$config_file" ]]; then
+                _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
+            fi
+        fi
+        local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
+
+        # Auto-select Docker context based on isolation availability
+        local debug_mode=""
+        if [[ "$debug_flag" == "true" ]]; then
+            debug_mode="debug"
+        fi
+        if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
+            if [[ "$force_flag" == "true" ]]; then
+                _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
+                if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                    selected_context="$config_context_override"
+                elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                    selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                else
+                    _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                    return 1
+                fi
+            else
+                _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
+                return 1
+            fi
+        fi
+
+        # Build docker command prefix
+        local -a docker_cmd=(docker)
+        if [[ -n "$selected_context" ]]; then
+            docker_cmd=(docker --context "$selected_context")
+        fi
+
+        # Resolve container name using shared lookup helper
+        # Priority: existing container lookup > new name for creation
+        # Exit codes from helpers: 0=found, 1=not found, 2=multiple matches (abort)
+        local find_rc
         # Try to find existing container for this workspace using shared lookup helper
         # Lookup order: label match -> new naming -> legacy hash naming
         if resolved_container_name=$(_cai_find_workspace_container "$resolved_workspace" "$selected_context"); then
@@ -2169,6 +2283,12 @@ _containai_shell_cmd() {
                 return 1
             fi
         fi
+    fi
+
+    # Build docker command prefix (may already be set in --container branch)
+    local -a docker_cmd=(docker)
+    if [[ -n "$selected_context" ]]; then
+        docker_cmd=(docker --context "$selected_context")
     fi
 
     # Handle --dry-run flag: delegate to _containai_start_container with --shell --dry-run
@@ -2651,10 +2771,13 @@ _containai_run_cmd() {
 
     if [[ -n "$container_name" ]]; then
         # Spec: "Container must NOT exist; error if name collision"
-        # Select context first to check container existence
+        # Select context using same logic as actual run (explicit or discovered config)
         local config_context_override=""
         if [[ -n "$explicit_config" ]]; then
             config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config") || config_context_override=""
+        else
+            # Also check discovered config for context override
+            config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
         fi
         local selected_context=""
         if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
