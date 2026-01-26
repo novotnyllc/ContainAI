@@ -62,8 +62,9 @@ while IFS='|' read -r source target container_link flags entry_type; do
     fi
 
     # Build symlink command - combine rm and ln into single command string
-    if [[ $is_dir -eq 1 && $needs_rm -eq 1 ]]; then
-        # Directory with R flag: rm -rf before ln -sfn
+    # R flag means "remove existing path first" for any entry type (file or directory)
+    if [[ $needs_rm -eq 1 ]]; then
+        # Entry with R flag: rm -rf before ln -sfn
         symlink_cmds+=("rm -rf ${container_path} && ln -sfn ${volume_path} ${container_path}")
     else
         # Regular symlink (file or directory without R flag)

@@ -4,11 +4,17 @@
 # Includes: Claude Code, Gemini CLI, Copilot, Codex, OpenCode, agent-browser, gh CLI
 #
 # Usage (from repo root, requires BuildKit):
+#   ./src/build.sh --layer full
+#
+# The build script runs generators first to create src/container/generated/ files.
+# Manual docker build requires running generators first:
+#   ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml src/container/generated/symlinks.dockerfile
+#   ./src/scripts/gen-init-dirs.sh src/sync-manifest.toml src/container/generated/init-dirs.sh
+#   ./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml src/container/generated/link-spec.json
+#   cp src/container/link-repair.sh src/container/generated/link-repair.sh
 #   docker build -t containai/full -f src/container/Dockerfile.agents src/
 #
-# Requires containai/sdks:latest to be built first:
-#   docker build -t containai/base -f src/container/Dockerfile.base src/
-#   docker build -t containai/sdks -f src/container/Dockerfile.sdks src/
+# Requires containai/sdks:latest to be built first (or use ./src/build.sh for all layers)
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 

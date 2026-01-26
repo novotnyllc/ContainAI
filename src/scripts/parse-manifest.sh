@@ -21,7 +21,8 @@ flags=""
 
 emit_entry() {
     local type="$1"
-    if [[ -n "$target" && -n "$container_link" ]]; then
+    # Emit entry if target is set (container_link may be empty for some entries)
+    if [[ -n "$target" ]]; then
         printf '%s|%s|%s|%s|%s\n' "$source" "$target" "$container_link" "$flags" "$type"
     fi
     source=""
