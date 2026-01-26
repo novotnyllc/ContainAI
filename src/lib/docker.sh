@@ -479,8 +479,8 @@ ExecStartPre=-/bin/rm -f $_CAI_CONTAINAI_DOCKER_PID
 # Gracefully stop labeled ContainAI containers before service stops/restarts
 # Uses DOCKER_HOST to target only the containai-docker engine, not default Docker
 # Note: Legacy containers without the label are not stopped automatically
-# Export DOCKER_HOST so it applies to both docker ps AND docker stop (via xargs)
-ExecStopPre=-/bin/sh -c 'export DOCKER_HOST=unix://$_CAI_CONTAINAI_DOCKER_SOCKET; docker ps -q --filter label=$_CONTAINAI_LABEL | xargs -r docker stop -t 60 || true'
+# Unset DOCKER_CONTEXT and export DOCKER_HOST so they apply to entire pipeline
+ExecStopPre=-/bin/sh -c 'unset DOCKER_CONTEXT; export DOCKER_HOST=unix://$_CAI_CONTAINAI_DOCKER_SOCKET; docker ps -q --filter label=$_CONTAINAI_LABEL | xargs -r docker stop -t 60 || true'
 
 # Allow time for containers to stop gracefully (60s stop timeout + 2m buffer)
 TimeoutStopSec=180
