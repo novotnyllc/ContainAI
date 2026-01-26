@@ -9,6 +9,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-20-6fe.1.md",
   "status": "todo",
-  "title": "Investigate runc/sysbox fix mechanism",
-  "updated_at": "2026-01-26T07:37:53.877057Z"
+  "title": "Create GitHub Actions workflow for sysbox deb build",
+  "updated_at": "2026-01-26T08:35:00.000000Z"
 }

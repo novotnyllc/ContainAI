@@ -11,6 +11,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-20-6fe.3.md",
   "status": "todo",
-  "title": "Write PRD-B: Sysbox host-side fix options",
-  "updated_at": "2026-01-26T07:37:54.017913Z"
+  "title": "Add integration test for DinD with runc 1.3.3+",
+  "updated_at": "2026-01-26T08:35:00.000000Z"
 }

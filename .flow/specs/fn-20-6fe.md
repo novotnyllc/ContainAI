@@ -1,4 +1,4 @@
-# Investigate runc 1.3.3 / Sysbox Incompatibility and Produce PRDs
+# Fix Docker-in-Docker runc 1.3.3 Incompatibility via Custom Sysbox Build
 
 ## Problem
 
@@ -10,98 +10,99 @@ unsafe procfs detected: openat2 /proc/./sys/net/ipv4/ip_unprivileged_port_start:
 invalid cross-device link
 ```
 
-## Root Cause (Confirmed via Research)
+## Root Cause
 
 runc 1.3.3 added security checks using `openat2()` with `RESOLVE_NO_XDEV` flag to detect "fake procfs". This conflicts with sysbox-fs which bind-mounts FUSE-backed files over `/proc/sys/*` paths.
 
-**Key insight**: The fix exists in sysbox master but is **host-side** (sysbox-fs, sysbox-runc). ContainAI can only control the **image-side** (containerd.io package version).
+## Fix Status (Verified)
 
-## Scope
+**The fix exists in sysbox master but is NOT in any released version.**
 
-This epic is **investigation and PRD creation only** - NO implementation.
+| Component | Version | Status |
+|-----------|---------|--------|
+| sysbox v0.6.7 (released) | 2025-05-09 | Does NOT have the fix |
+| sysbox-fs master | 2025-11-29 | Contains the openat2 fix |
 
-**Deliverables:**
-1. Technical analysis document (`.flow/specs/fn-20-6fe-technical-analysis.md`)
-2. PRD-A: Temporary workaround specification (`.flow/specs/prd-runc-downgrade-workaround.md`)
-3. PRD-B: Proper fix options specification (`.flow/specs/prd-sysbox-dind-fix.md`)
+**Fix commits in sysbox-fs:**
+- `1302a6f` (2025-11-18): "Trap openat2 system call to allow access to sysbox-fs mounts under /proc and /sys"
+- `2882cce` through `b70bd38`: Follow-up improvements and hardening
 
-**Out of scope for this epic:**
-- Implementation changes (Dockerfiles, runtime packages, tests)
-- Only docs/spec files are produced
+The fix uses seccomp syscall interception to trap `openat2()` calls, detect paths under sysbox-fs mounts, strip problematic flags (`RESOLVE_NO_XDEV`, `RESOLVE_NO_MAGICLINKS`, `RESOLVE_NO_SYMLINKS`, `RESOLVE_BENEATH`), and inject the file descriptor back into the process.
 
-**Allowed in Task 1 investigation:**
-- OS-level artifact inspection (apt package downloads, .deb extraction)
-- Upstream repo cloning for code archaeology
-- No ContainAI image builds or DinD tests
+## Ownership Clarification
 
-## Ownership Boundary (Critical)
+**ContainAI owns both host and container sides:**
+- Setup scripts (`src/lib/setup.sh`) install sysbox on the host
+- The `_cai_install_sysbox_wsl2()` and `_cai_install_sysbox_linux()` functions download and install sysbox from GitHub releases
+- ContainAI can build and deploy custom sysbox packages
 
-**By Deployment Mode:**
+**Current sysbox installation pattern:**
+```bash
+# From src/lib/setup.sh - downloads from nestybox releases
+release_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
+download_url=$(... | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url")
+```
 
-| Component | ContainAI-managed isolated daemon | Docker Desktop / external engine (support TBD) |
-|-----------|-----------------------------------|------------------------------------------------|
-| Host dockerd | `containai-docker` context managed by ContainAI (`src/lib/docker.sh`, `src/lib/setup.sh`) | Docker Inc default context |
-| sysbox-fs, sysbox-runc | Host operator installs, ContainAI setup configures | Docker Inc (bundled in DD) |
-| containerd.io, runc packages | ContainAI image (can pin) | ContainAI image (can pin) |
-| Dockerfile.base/test | ContainAI repo (can modify) | ContainAI repo (can modify) |
-| Inner Docker config | ContainAI image (can configure) | ContainAI image (can configure) |
+## Approach: Build Custom Sysbox Package
 
-**Context selection model** (from code analysis - Task 1 to verify):
-- **Inside container**: Uses `default` context (`src/lib/doctor.sh:168-185`)
-- **On host**: Prefers config override → `containai-docker` → legacy (`src/lib/doctor.sh:160-224`)
-- **Native Linux**: May use default socket in some paths (`src/lib/doctor.sh:340-343`) - Task 1 to clarify
+Since ContainAI owns the host-side setup, the solution is to:
 
-**Key insight**: ContainAI's intended architecture uses `containai-docker` isolated daemon + context. Docker Desktop ECI/"docker sandbox" support status is **TBD** - Task 1 produces this decision based on code evidence.
+1. **Build sysbox from master** (which contains the fix)
+2. **Publish custom deb package** to ContainAI's GitHub releases or package repository
+3. **Update setup scripts** to use the custom package instead of upstream releases
 
-**ECI Support Status Decision Flow**:
-1. **Task 1** produces "ECI Support Status (as-of repo commit)" section with code evidence
-2. Decision question: Is Docker Desktop a **documented and exercised** engine for `cai`? (not just "could work if user sets override")
-3. **Tasks 2/3** consume this decision as input - if unsupported, treat ECI as "external ecosystem context only"
-4. Evidence to gather: `src/containai.sh:356-371` (sandbox removed), `src/lib/eci.sh` (missing), `src/lib/docker.sh:229-303` (`_cai_docker_desktop_version` - check if called), `src/lib/container.sh:1164-1186` (host flags rejected), `SECURITY.md`/`src/README.md` docs drift
+This is preferred over the runc downgrade workaround because:
+- It's the proper fix, not a workaround
+- No security trade-offs from downgrading runc
+- ContainAI has full control over the deployment
 
-## Key Findings from Research
+## Deliverables
 
-### The Fix in Sysbox Master (Hypothesis - to be verified in Task 1)
+1. **GitHub Actions workflow** (`scripts/build-sysbox.sh` + `.github/workflows/build-sysbox.yml`)
+   - Builds sysbox-ce deb packages for amd64 and arm64
+   - Uses sysbox's existing packaging infrastructure (`sysbox-pkgr`)
+   - Publishes to GitHub releases with SHA256 checksums
 
-Sysbox has implemented a fix using **seccomp syscall interception** (exact mechanism to be verified from code):
+2. **Setup script updates** (`src/lib/setup.sh`)
+   - Add option to install from ContainAI's custom build
+   - Fall back to upstream releases if custom build unavailable
+   - Version pinning mechanism
 
-1. Trap all `openat2()` syscalls from processes inside sysbox containers
-2. Check if the path is under a sysbox-fs mount (`/proc/sys/*`, etc.)
-3. If yes, strip problematic flags (exact flag set to be quoted from sysbox-fs/sysbox-runc code - do NOT assume specific flags without evidence)
-4. Open the file via nsenter and inject the fd using `SECCOMP_IOCTL_NOTIF_ADDFD`
+3. **Documentation**
+   - Build process documentation
+   - Version tracking/update procedure
 
-**This is a host-side fix** - operators must upgrade sysbox; ContainAI cannot ship this.
+## Sysbox Build Process (Reference)
 
-### ContainAI-Controllable Workaround
-
-Pin containerd.io to a version bundling runc < 1.3.3. This is image-side and can be shipped by ContainAI, but has security trade-offs (CVE rollback).
-
-## Quick Commands (for investigation)
+Based on analysis of `sysbox-pkgr/`:
 
 ```bash
-# Clone repos at immutable refs
-WORKDIR=$(mktemp -d)
-git clone --depth 1 --branch v1.3.3 https://github.com/opencontainers/runc.git "$WORKDIR/runc"
-git clone https://github.com/nestybox/sysbox-fs.git "$WORKDIR/sysbox-fs"
-git clone https://github.com/nestybox/sysbox-runc.git "$WORKDIR/sysbox-runc"
+# Clone sysbox with submodules
+git clone --recursive https://github.com/nestybox/sysbox.git
 
-# Find the runc check
-grep -r "RESOLVE_NO_XDEV" "$WORKDIR/runc/"
+# Build deb package (uses Docker)
+cd sysbox-pkgr
+make sysbox-ce-deb generic  # Builds generic deb for release
 
-# Find the sysbox fix
-grep -r "openat2" "$WORKDIR/sysbox-fs/seccomp/"
+# Output: sysbox-ce_<version>.linux_<arch>.deb
 ```
+
+Key build requirements:
+- Docker (builds use containerized build environment)
+- Ubuntu Jammy baseline for release builds
+- Go 1.22+ toolchain (provided by build container)
 
 ## Acceptance
 
-- [ ] Technical analysis document produced with immutable commit refs
-- [ ] **PRD-A produced**: Temporary runc downgrade workaround with formal risk acceptance
-- [ ] **PRD-B produced**: Proper fix options with ownership boundary clarity
-- [ ] No implementation performed in this epic
+- [ ] GitHub Actions workflow builds sysbox deb for amd64 and arm64
+- [ ] Built packages published to GitHub releases with SHA256 checksums
+- [ ] Setup scripts updated to prefer ContainAI's custom sysbox build
+- [ ] DinD works in sysbox containers with runc 1.3.3+
+- [ ] Integration test validates the fix
 
 ## References
 
 - [sysbox#973](https://github.com/nestybox/sysbox/issues/973) - Docker 28.5.2 breaks DinD on Sysbox
-- [sysbox#972](https://github.com/nestybox/sysbox/issues/972) - Original bug report (closed)
-- [runc#4968](https://github.com/opencontainers/runc/issues/4968) - AppArmor/LXC related issues
+- [sysbox#972](https://github.com/nestybox/sysbox/issues/972) - Original bug report
 - [runc v1.3.3](https://github.com/opencontainers/runc/releases/tag/v1.3.3) - Release with security patches
+- sysbox-fs fix commit: `1302a6f` (2025-11-18)
