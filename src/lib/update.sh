@@ -1175,15 +1175,32 @@ _cai_update_linux_wsl2() {
 
     # Step 6: Check/update dockerd bundle version (with prompts)
     # This is called after context/unit updates per spec
-    if ! _cai_update_dockerd_bundle "$force" "$dry_run" "$verbose"; then
-        _cai_warn "Dockerd bundle update had issues (continuing anyway)"
-        # Don't fail overall - bundle might already be at latest version
+    # IMPORTANT: Only run if _cai_update_check_required detected dockerd update needed
+    # This ensures the container safety gate is authoritative - we don't proceed with
+    # service restarts unless we already checked/stopped containers above
+    if [[ "$updates_needed" == "true" ]] && [[ "$_CAI_UPDATE_REASON" == *"dockerd"* ]]; then
+        if ! _cai_update_dockerd_bundle "$force" "$dry_run" "$verbose"; then
+            _cai_warn "Dockerd bundle update had issues (continuing anyway)"
+            # Don't fail overall - bundle might already be at latest version
+        fi
+    else
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Dockerd bundle is current (skipping update)"
+        fi
     fi
 
     # Step 7: Check/update sysbox version
-    if ! _cai_update_sysbox "$force" "$dry_run" "$verbose"; then
-        _cai_warn "Sysbox update had issues (continuing anyway)"
-        # Don't fail overall - sysbox might already be at latest version
+    # IMPORTANT: Only run if _cai_update_check_required detected sysbox update needed
+    # This ensures the container safety gate is authoritative
+    if [[ "$updates_needed" == "true" ]] && [[ "$_CAI_UPDATE_REASON" == *"sysbox"* ]]; then
+        if ! _cai_update_sysbox "$force" "$dry_run" "$verbose"; then
+            _cai_warn "Sysbox update had issues (continuing anyway)"
+            # Don't fail overall - sysbox might already be at latest version
+        fi
+    else
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Sysbox is current (skipping update)"
+        fi
     fi
 
     # Step 8: Verify installation

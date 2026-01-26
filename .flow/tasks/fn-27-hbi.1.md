@@ -50,9 +50,8 @@ Add safe container management to the update flow and systemd hooks to ensure con
 - [ ] Existing `--force` flag semantics preserved (skip prompts, not skip container stop)
 
 ## Done summary
-TBD
-
+Implemented safe update flow with container stop and systemd hooks. Added --stop-containers flag to cai update, which checks for running ContainAI containers before updates requiring service restart (sysbox, dockerd bundle, or systemd unit changes). Default behavior aborts with actionable message if containers are running; --stop-containers flag gracefully stops containers before proceeding. Added ExecStopPre hook to systemd unit to stop labeled containers on service stop/restart, with PartOf=sysbox-mgr.service for restart propagation.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: e8f8010284b3669c6ad7ae765a63e8a5a2a395ae, 3e9910690c8f26fbd7fa6ba2d13ddac30c6e396e, b504fd7e60060a7b18c00f6d05a5c9ab2e89dc9c, 43cc482aca09b778542029f028a22df9cb34d743
+- Tests: shellcheck -x src/lib/update.sh src/lib/docker.sh, source src/containai.sh && _cai_dockerd_unit_content, source src/containai.sh && _cai_update_help
 - PRs:
