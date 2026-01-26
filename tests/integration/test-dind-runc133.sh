@@ -211,32 +211,38 @@ test_inner_runc_version() {
     runc_version_output=$(exec_in_container runc --version 2>&1) && runc_version_rc=0 || runc_version_rc=$?
 
     if [[ $runc_version_rc -ne 0 ]]; then
-        warn "Could not query inner runc version directly"
+        fail "Could not query inner runc version"
         info "  Output: $runc_version_output"
+        info "  runc must be accessible inside the container to verify version >= 1.3.3"
+        return 1
+    fi
+
+    info "Inner runc version output: $runc_version_output"
+
+    # Parse version number (e.g., "runc version 1.3.3")
+    local version_number
+    version_number=$(printf '%s' "$runc_version_output" | grep -oE 'runc version [0-9]+\.[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+
+    if [[ -z "$version_number" ]]; then
+        fail "Could not parse runc version from output"
+        info "  Output: $runc_version_output"
+        return 1
+    fi
+
+    info "Inner runc version: $version_number"
+
+    # Compare versions using sort -V
+    local min_version="1.3.3"
+    local older_version
+    older_version=$(printf '%s\n%s\n' "$version_number" "$min_version" | sort -V | head -1)
+
+    if [[ "$older_version" == "$min_version" ]] || [[ "$version_number" == "$min_version" ]]; then
+        pass "Inner runc version ($version_number) >= $min_version"
     else
-        info "Inner runc version output: $runc_version_output"
-
-        # Parse version number (e.g., "runc version 1.3.3")
-        local version_number
-        version_number=$(printf '%s' "$runc_version_output" | grep -oE 'runc version [0-9]+\.[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
-
-        if [[ -n "$version_number" ]]; then
-            info "Inner runc version: $version_number"
-
-            # Compare versions using sort -V
-            local min_version="1.3.3"
-            local older_version
-            older_version=$(printf '%s\n%s\n' "$version_number" "$min_version" | sort -V | head -1)
-
-            if [[ "$older_version" == "$min_version" ]] || [[ "$version_number" == "$min_version" ]]; then
-                pass "Inner runc version ($version_number) >= $min_version"
-            else
-                warn "Inner runc version ($version_number) < $min_version"
-                info "  This test is designed to verify the openat2 fix with runc >= 1.3.3"
-            fi
-        else
-            warn "Could not parse runc version from output"
-        fi
+        fail "Inner runc version ($version_number) < $min_version"
+        info "  This test requires runc >= 1.3.3 to verify the openat2 fix"
+        info "  The openat2 security check was added in runc 1.3.3"
+        return 1
     fi
 }
 
