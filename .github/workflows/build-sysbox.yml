@@ -94,14 +94,24 @@ jobs:
       - name: Verify openat2 fix is present
         run: |
           echo "Checking for openat2 fix in sysbox-fs..."
-          # The fix intercepts openat2 syscall - look for the handler
-          if grep -rq "openat2" sysbox/sysbox-fs/handler/implementations/; then
-            echo "openat2 fix detected in sysbox-fs"
+          # The fix was introduced in commit 1302a6f - verify it's an ancestor
+          # Need to fetch enough history to check ancestry
+          cd sysbox/sysbox-fs
+          git fetch --unshallow 2>/dev/null || git fetch --depth=100 origin master 2>/dev/null || true
+
+          FIX_COMMIT="1302a6f"
+          if git merge-base --is-ancestor "$FIX_COMMIT" HEAD 2>/dev/null; then
+            echo "openat2 fix verified: commit $FIX_COMMIT is ancestor of HEAD"
           else
-            echo "::error::openat2 fix NOT found in sysbox-fs"
-            echo "The whole purpose of this build is to include the openat2 fix."
-            echo "If upstream has changed, update the detection or build from a known-good commit."
-            exit 1
+            # Fallback: check for the specific syscall handler file that implements the fix
+            if [[ -f "handler/implementations/openat2.go" ]]; then
+              echo "openat2 fix verified: handler/implementations/openat2.go exists"
+            else
+              echo "::error::openat2 fix NOT found in sysbox-fs"
+              echo "Could not verify commit $FIX_COMMIT ancestry or find openat2.go handler"
+              echo "The whole purpose of this build is to include the openat2 fix."
+              exit 1
+            fi
           fi
 
       - name: Patch version

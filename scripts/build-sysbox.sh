@@ -180,12 +180,27 @@ check_prerequisites() {
 
     local missing=()
 
-    if ! command -v docker >/dev/null 2>&1; then
-        missing+=("docker")
-    fi
-
+    # Git is always required (even for dry-run to show realistic output)
     if ! command -v git >/dev/null 2>&1; then
         missing+=("git")
+    fi
+
+    # Docker checks are skipped in dry-run mode
+    if [[ "$DRY_RUN" == "true" ]]; then
+        if ! command -v docker >/dev/null 2>&1; then
+            log_info "[DRY-RUN] Docker not found (would be required for actual build)"
+        fi
+        if [[ ${#missing[@]} -gt 0 ]]; then
+            log_error "Missing required tools: ${missing[*]}"
+            exit 1
+        fi
+        log_ok "Prerequisites satisfied (dry-run mode)"
+        return 0
+    fi
+
+    # For actual builds, Docker is required
+    if ! command -v docker >/dev/null 2>&1; then
+        missing+=("docker")
     fi
 
     if [[ ${#missing[@]} -gt 0 ]]; then
@@ -200,11 +215,9 @@ check_prerequisites() {
     fi
 
     # Check for privileged mode support (needed for sysbox build)
-    if [[ "$DRY_RUN" != "true" ]]; then
-        if ! docker run --rm --privileged alpine:latest true 2>/dev/null; then
-            log_error "Docker privileged mode is not available (required for sysbox build)"
-            exit 1
-        fi
+    if ! docker run --rm --privileged alpine:latest true 2>/dev/null; then
+        log_error "Docker privileged mode is not available (required for sysbox build)"
+        exit 1
     fi
 
     log_ok "Prerequisites satisfied"
@@ -241,13 +254,32 @@ clone_sysbox() {
 
     # Verify the openat2 fix is present in sysbox-fs (this is the whole point of this build)
     log_info "Verifying openat2 fix is present..."
-    if grep -rq "openat2" "$sysbox_dir/sysbox-fs/handler/implementations/"; then
-        log_ok "openat2 fix detected in sysbox-fs"
-    else
+    local sysbox_fs_dir="$sysbox_dir/sysbox-fs"
+    local fix_commit="1302a6f"
+    local fix_verified="false"
+
+    # Try to verify via commit ancestry (most reliable)
+    # Need to fetch more history since we cloned with --depth 1
+    if git -C "$sysbox_fs_dir" fetch --unshallow 2>/dev/null || \
+       git -C "$sysbox_fs_dir" fetch --depth=100 origin master 2>/dev/null; then
+        true  # fetched more history
+    fi
+
+    if git -C "$sysbox_fs_dir" merge-base --is-ancestor "$fix_commit" HEAD 2>/dev/null; then
+        log_ok "openat2 fix verified: commit $fix_commit is ancestor of HEAD"
+        fix_verified="true"
+    fi
+
+    # Fallback: check for the specific handler file that implements the fix
+    if [[ "$fix_verified" != "true" ]] && [[ -f "$sysbox_fs_dir/handler/implementations/openat2.go" ]]; then
+        log_ok "openat2 fix verified: handler/implementations/openat2.go exists"
+        fix_verified="true"
+    fi
+
+    if [[ "$fix_verified" != "true" ]]; then
         log_error "openat2 fix NOT found in sysbox-fs"
+        log_error "Could not verify commit $fix_commit ancestry or find openat2.go handler"
         log_error "The whole purpose of this build is to include the openat2 fix for runc 1.3.3+"
-        log_error "Expected fix commit: 1302a6f in sysbox-fs"
-        log_error "If upstream has changed, update detection or build from a known-good commit"
         exit 1
     fi
 
