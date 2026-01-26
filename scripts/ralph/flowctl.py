@@ -286,8 +286,8 @@ def save_task_definition(task_id: str, definition: dict) -> None:
 def get_default_config() -> dict:
     """Return default config structure."""
     return {
-        "memory": {"enabled": False},
-        "planSync": {"enabled": False, "crossEpic": False},
+        "memory": {"enabled": True},
+        "planSync": {"enabled": True, "crossEpic": False},
         "review": {"backend": None},
     }
 
