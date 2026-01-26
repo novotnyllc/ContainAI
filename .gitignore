@@ -3,8 +3,11 @@
 .env.*
 !.env.example
 
-# Generated container files (manifest-driven)
-src/container/generated/
+# Generated container files - TRACKED (required for CI docker/build-push-action)
+# These are generated from sync-manifest.toml by build.sh but must be committed
+# so CI can build without running generators first.
+# To regenerate: ./src/build.sh --layer full (or run generators manually)
+!src/container/generated/
 
 # User-specific files
 *.rsuser
