@@ -217,3 +217,6 @@ GitHub Actions upload-artifact preserves directory structure; download-artifact 
 
 ## 2026-01-26 manual [pitfall]
 Environment variables set inline (VAR=value cmd) only apply to the immediate command, not to subsequent commands in a pipeline; use 'export VAR=value;' for pipeline-wide scope
+
+## 2026-01-26 manual [pitfall]
+When managing Docker containers, use DOCKER_HOST directly with socket path instead of relying on docker context - contexts can be misconfigured and lead to operating on wrong engine

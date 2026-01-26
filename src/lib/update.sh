@@ -936,33 +936,37 @@ _cai_update_sysbox() {
 # Container Management for Updates
 # ==============================================================================
 
-# List running ContainAI containers in the containai-docker context
+# List running ContainAI containers in the containai-docker engine
+# Uses DOCKER_HOST directly (not context) for reliability - context may be misconfigured
 # Outputs: container names (one per line)
 # Returns: 0=success (may output empty), 1=docker unavailable
 _cai_list_running_containai_containers() {
-    # Check if containai-docker context exists
-    if ! docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
-        return 0  # No context = no containers to list
+    # Check if the containai-docker socket exists
+    if [[ ! -S "$_CAI_CONTAINAI_DOCKER_SOCKET" ]]; then
+        return 0  # No socket = no containers to list
     fi
 
     # List running containers with the containai.managed label
-    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to prevent env override
+    # Use DOCKER_HOST directly for reliability (context may be outdated/misconfigured)
+    # Clear DOCKER_CONTEXT to prevent environment override
+    local docker_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
     local containers
-    containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" ps -q --filter "label=$_CONTAINAI_LABEL" 2>/dev/null) || containers=""
+    containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$_CONTAINAI_LABEL" 2>/dev/null) || containers=""
 
     if [[ -n "$containers" ]]; then
         # Get container names for display
         local container_id
         while IFS= read -r container_id; do
             if [[ -n "$container_id" ]]; then
-                DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's|^/||'
+                DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker inspect --format '{{.Name}}' -- "$container_id" 2>/dev/null | sed 's|^/||'
             fi
         done <<< "$containers"
     fi
     return 0
 }
 
-# Stop all running ContainAI containers in the containai-docker context
+# Stop all running ContainAI containers in the containai-docker engine
+# Uses DOCKER_HOST directly (not context) for reliability
 # Arguments: $1 = dry_run ("true" to simulate)
 #            $2 = timeout in seconds (default 60)
 # Outputs: list of stopped containers via stdout
@@ -970,6 +974,7 @@ _cai_list_running_containai_containers() {
 _cai_stop_containai_containers() {
     local dry_run="${1:-false}"
     local timeout="${2:-60}"
+    local docker_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
 
     local containers
     containers=$(_cai_list_running_containai_containers)
@@ -995,7 +1000,7 @@ _cai_stop_containai_containers() {
     while IFS= read -r name; do
         if [[ -n "$name" ]]; then
             _cai_info "  Stopping: $name"
-            if DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" stop -t "$timeout" -- "$name" >/dev/null 2>&1; then
+            if DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker stop -t "$timeout" -- "$name" >/dev/null 2>&1; then
                 printf '%s\n' "$name"
                 stop_count=$((stop_count + 1))
             else
