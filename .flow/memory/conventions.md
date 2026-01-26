@@ -30,3 +30,6 @@ Documentation must reference actual implementation behavior - run grep/read on s
 
 ## 2026-01-25 manual [convention]
 Write config/version files atomically: write to .tmp then mv -f to prevent truncated files on interruption
+
+## 2026-01-26 manual [convention]
+CLI argument validation should be order-independent; use pre-scan pass to determine mode before validating args

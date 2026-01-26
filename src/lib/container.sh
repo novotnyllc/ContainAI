@@ -426,9 +426,9 @@ _cai_find_workspace_container() {
 }
 
 # Find container by name across multiple Docker contexts
-# Searches config-specified context first, then standard secure context, then default.
-# This prioritizes managed contexts to avoid false negatives when a non-managed container
-# with the same name exists in the default context.
+# Searches config-specified, secure, and default contexts. Returns error if container
+# exists in multiple contexts (ambiguity). This scans all candidate contexts and does
+# NOT use first-match-wins semantics.
 #
 # Arguments:
 #   $1 = container_name (required)
