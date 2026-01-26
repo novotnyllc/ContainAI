@@ -2289,9 +2289,9 @@ _containai_shell_cmd() {
         if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
             # Verify ownership before removing
             local fresh_label_val fresh_image_fallback
-            fresh_label_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$resolved_container_name" 2>/dev/null) || fresh_label_val=""
+            fresh_label_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$resolved_container_name" 2>/dev/null) || fresh_label_val=""
             if [[ "$fresh_label_val" != "true" ]]; then
-                fresh_image_fallback=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{.Config.Image}}' -- "$resolved_container_name" 2>/dev/null) || fresh_image_fallback=""
+                fresh_image_fallback=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$resolved_container_name" 2>/dev/null) || fresh_image_fallback=""
                 if [[ "$fresh_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
                     echo "[ERROR] Cannot use --fresh - container '$resolved_container_name' was not created by ContainAI" >&2
                     echo "Remove the conflicting container manually if needed: docker rm -f '$resolved_container_name'" >&2
@@ -2391,9 +2391,9 @@ _containai_shell_cmd() {
         # Container exists - validate ownership and workspace match before connecting
         # Check ownership (label or image fallback)
         local shell_label_val shell_image_val
-        shell_label_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$resolved_container_name" 2>/dev/null) || shell_label_val=""
+        shell_label_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$resolved_container_name" 2>/dev/null) || shell_label_val=""
         if [[ "$shell_label_val" != "true" ]]; then
-            shell_image_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{.Config.Image}}' -- "$resolved_container_name" 2>/dev/null) || shell_image_val=""
+            shell_image_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$resolved_container_name" 2>/dev/null) || shell_image_val=""
             if [[ "$shell_image_val" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
                 echo "[ERROR] Container '$resolved_container_name' was not created by ContainAI" >&2
                 return 15

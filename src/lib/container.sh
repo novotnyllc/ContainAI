@@ -466,7 +466,11 @@ _cai_find_container_by_name() {
 
     # 1. Add secure engine context from explicit config if provided
     if [[ -n "$explicit_config" ]]; then
-        cfg_ctx=$(_containai_resolve_secure_engine_context "${workspace_path:-$PWD}" "$explicit_config" 2>/dev/null) || cfg_ctx=""
+        # Propagate errors for explicit config (don't suppress) - user should know if config is bad
+        if ! cfg_ctx=$(_containai_resolve_secure_engine_context "${workspace_path:-$PWD}" "$explicit_config"); then
+            echo "[ERROR] Failed to parse config: $explicit_config" >&2
+            return 1
+        fi
         if [[ -n "$cfg_ctx" ]]; then
             # Check if already in list (inline loop, no nested function)
             already_added=false

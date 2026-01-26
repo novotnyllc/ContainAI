@@ -16,8 +16,8 @@
 # caller wants to resolve excludes from config (done by the CLI wrapper).
 #
 # Docker Context: This function uses the current Docker context. To operate on
-# a specific context, set DOCKER_CONTEXT environment variable before calling:
-#   DOCKER_CONTEXT="containai-docker" _containai_export "volume" "/path/output.tgz" my_excludes "false"
+# a specific context, clear env vars and set DOCKER_CONTEXT before calling:
+#   DOCKER_CONTEXT="containai-docker" DOCKER_HOST= _containai_export "volume" "/path/output.tgz" my_excludes "false"
 #
 # Arguments:
 #   $1 = volume name (required)
