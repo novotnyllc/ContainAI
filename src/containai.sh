@@ -760,8 +760,8 @@ _containai_import_cmd() {
             selected_context="$found_context"
         else
             find_rc=$?
-            if [[ $find_rc -eq 2 ]]; then
-                return 1  # Ambiguity error already printed
+            if [[ $find_rc -eq 2 ]] || [[ $find_rc -eq 3 ]]; then
+                return 1  # Error already printed (ambiguity or config parse)
             fi
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
@@ -849,7 +849,7 @@ _containai_import_cmd() {
             # Use -a to include stopped containers for proper error messages
             local label_filter="containai.workspace=$resolved_workspace"
             local found_containers
-            found_containers=$("${docker_cmd[@]}" ps -aq --filter "label=$label_filter" 2>/dev/null | head -2)
+            found_containers=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" ps -aq --filter "label=$label_filter" 2>/dev/null | head -2)
 
             if [[ -n "$found_containers" ]]; then
                 # Count matches (filter to first line to handle empty case)
@@ -859,7 +859,7 @@ _containai_import_cmd() {
                     echo "[ERROR] Multiple containers found for workspace: $resolved_workspace" >&2
                     echo "" >&2
                     echo "Containers:" >&2
-                    "${docker_cmd[@]}" ps -a --filter "label=$label_filter" --format "  {{.Names}} ({{.Status}})" >&2
+                    DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" ps -a --filter "label=$label_filter" --format "  {{.Names}} ({{.Status}})" >&2
                     echo "" >&2
                     echo "Use --container to specify which one." >&2
                     return 1
@@ -867,7 +867,7 @@ _containai_import_cmd() {
                 # Get container name from ID (take first line only)
                 local first_container
                 first_container=$(printf '%s\n' "$found_containers" | head -1)
-                resolved_container_name=$("${docker_cmd[@]}" inspect --format '{{.Name}}' "$first_container" 2>/dev/null)
+                resolved_container_name=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{.Name}}' "$first_container" 2>/dev/null)
                 resolved_container_name="${resolved_container_name#/}" # Remove leading /
             else
                 # Fallback: try hash-based container name
@@ -880,7 +880,7 @@ _containai_import_cmd() {
 
         # Check container exists and is running
         local container_state
-        if ! container_state=$("${docker_cmd[@]}" inspect --type container --format '{{.State.Status}}' -- "$resolved_container_name" 2>/dev/null); then
+        if ! container_state=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.State.Status}}' -- "$resolved_container_name" 2>/dev/null); then
             if [[ -n "$container_name" ]]; then
                 # --container was explicitly provided
                 echo "[ERROR] Container not found: $container_name" >&2
@@ -1083,8 +1083,8 @@ _containai_export_cmd() {
         local find_rc
         if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
             find_rc=$?
-            if [[ $find_rc -eq 2 ]]; then
-                return 1  # Ambiguity error already printed
+            if [[ $find_rc -eq 2 ]] || [[ $find_rc -eq 3 ]]; then
+                return 1  # Error already printed (ambiguity or config parse)
             fi
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
@@ -1273,8 +1273,8 @@ _containai_stop_cmd() {
         local selected_context="" find_rc
         if ! selected_context=$(_cai_find_container_by_name "$container_name" "" "$PWD"); then
             find_rc=$?
-            if [[ $find_rc -eq 2 ]]; then
-                return 1  # Ambiguity error already printed
+            if [[ $find_rc -eq 2 ]] || [[ $find_rc -eq 3 ]]; then
+                return 1  # Error already printed (ambiguity or config parse)
             fi
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
@@ -2120,8 +2120,8 @@ _containai_shell_cmd() {
         local find_rc
         if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
             find_rc=$?
-            if [[ $find_rc -eq 2 ]]; then
-                return 1  # Ambiguity error already printed
+            if [[ $find_rc -eq 2 ]] || [[ $find_rc -eq 3 ]]; then
+                return 1  # Error already printed (ambiguity or config parse)
             fi
             echo "[ERROR] Container not found: $container_name" >&2
             return 1

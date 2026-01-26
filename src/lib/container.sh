@@ -439,6 +439,7 @@ _cai_find_workspace_container() {
 #   0 with found context on stdout (always returns context name, including "default")
 #   1 if container not found in any context
 #   2 if container found in multiple contexts (ambiguous - error printed to stderr)
+#   3 if explicit config parse error (error printed to stderr)
 #
 # Usage:
 #   if found_context=$(_cai_find_container_by_name "my-container" "$config_file" "$workspace"); then
@@ -446,6 +447,8 @@ _cai_find_workspace_container() {
 #       docker --context "$found_context" inspect my-container
 #   elif [[ $? -eq 2 ]]; then
 #       return 1  # Ambiguity error already printed
+#   elif [[ $? -eq 3 ]]; then
+#       return 1  # Config parse error already printed
 #   else
 #       echo "Container not found"
 #   fi
@@ -469,7 +472,7 @@ _cai_find_container_by_name() {
         # Propagate errors for explicit config (don't suppress) - user should know if config is bad
         if ! cfg_ctx=$(_containai_resolve_secure_engine_context "${workspace_path:-$PWD}" "$explicit_config"); then
             echo "[ERROR] Failed to parse config: $explicit_config" >&2
-            return 1
+            return 3  # Config parse error (distinct from not found)
         fi
         if [[ -n "$cfg_ctx" ]]; then
             # Check if already in list (inline loop, no nested function)
