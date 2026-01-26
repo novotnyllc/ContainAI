@@ -488,6 +488,40 @@ _cai_doctor() {
             printf '  %-44s %s\n' "Sysbox available:" "[OK]"
             printf '  %-44s %s\n' "Runtime: sysbox-runc" "[OK]"
             printf '  %-44s %s\n' "Context '$sysbox_context_name':" "[OK] Configured"
+
+            # Show sysbox version information (only on Linux/WSL2, not macOS)
+            if [[ "$platform" != "macos" ]]; then
+                local installed_sysbox_version=""
+                local installed_sysbox_pkg=""
+                installed_sysbox_version=$(_cai_sysbox_installed_version) || installed_sysbox_version=""
+                installed_sysbox_pkg=$(_cai_sysbox_installed_pkg_version) || installed_sysbox_pkg=""
+
+                if [[ -n "$installed_sysbox_pkg" ]]; then
+                    printf '  %-44s %s\n' "Installed version: $installed_sysbox_pkg" "[OK]"
+                elif [[ -n "$installed_sysbox_version" ]]; then
+                    printf '  %-44s %s\n' "Installed version: $installed_sysbox_version" "[OK]"
+                fi
+
+                # Get bundled version and check for updates
+                local arch bundled_version sysbox_update_needed="false"
+                arch=$(uname -m)
+                case "$arch" in
+                    x86_64)  arch="amd64" ;;
+                    aarch64) arch="arm64" ;;
+                esac
+
+                bundled_version=$(_cai_sysbox_bundled_version "$arch" 2>/dev/null) || bundled_version=""
+
+                if [[ -n "$bundled_version" ]]; then
+                    if _cai_sysbox_needs_update "$arch" 2>/dev/null; then
+                        sysbox_update_needed="true"
+                        printf '  %-44s %s\n' "Bundled version: $bundled_version" "[WARN] Update available"
+                        printf '  %-44s %s\n' "" "(Run 'cai update' to upgrade)"
+                    else
+                        printf '  %-44s %s\n' "Bundled version: $bundled_version" "[OK] Up to date"
+                    fi
+                fi
+            fi
         else
             printf '  %-44s %s\n' "Sysbox available:" "[ERROR] Not configured"
             local sysbox_error="${_CAI_SYSBOX_CONTEXT_ERROR:-${_CAI_SYSBOX_ERROR:-}}"
@@ -1394,6 +1428,28 @@ _cai_doctor_json() {
         fi
     fi
 
+    # Sysbox version information (Linux/WSL2 only)
+    local sysbox_installed_version=""
+    local sysbox_bundled_version=""
+    local sysbox_needs_update_json="false"
+    if [[ "$platform" != "macos" ]] && [[ "$sysbox_ok" == "true" ]]; then
+        sysbox_installed_version=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || sysbox_installed_version=""
+        if [[ -z "$sysbox_installed_version" ]]; then
+            sysbox_installed_version=$(_cai_sysbox_installed_version 2>/dev/null) || sysbox_installed_version=""
+        fi
+
+        local arch
+        arch=$(uname -m)
+        case "$arch" in
+            x86_64)  arch="amd64" ;;
+            aarch64) arch="arm64" ;;
+        esac
+        sysbox_bundled_version=$(_cai_sysbox_bundled_version "$arch" 2>/dev/null) || sysbox_bundled_version=""
+        if _cai_sysbox_needs_update "$arch" 2>/dev/null; then
+            sysbox_needs_update_json="true"
+        fi
+    fi
+
     # Platform-specific checks
     if [[ "$platform" == "wsl" ]] || [[ "$platform" == "linux" ]]; then
         # Kernel version check (WSL2 and Linux need kernel 5.5+ for Sysbox)
@@ -1558,6 +1614,18 @@ _cai_doctor_json() {
     fi
     printf '    "context_exists": %s,\n' "$sysbox_context_exists"
     printf '    "context_name": "%s",\n' "$(_cai_json_escape "$sysbox_context_name")"
+    # Sysbox version fields (Linux/WSL2 only)
+    if [[ -n "$sysbox_installed_version" ]]; then
+        printf '    "installed_version": "%s",\n' "$(_cai_json_escape "$sysbox_installed_version")"
+    else
+        printf '    "installed_version": null,\n'
+    fi
+    if [[ -n "$sysbox_bundled_version" ]]; then
+        printf '    "bundled_version": "%s",\n' "$(_cai_json_escape "$sysbox_bundled_version")"
+    else
+        printf '    "bundled_version": null,\n'
+    fi
+    printf '    "needs_update": %s,\n' "$sysbox_needs_update_json"
     if [[ -n "$sysbox_error" ]]; then
         printf '    "error": "%s"\n' "$(_cai_json_escape "$sysbox_error")"
     else

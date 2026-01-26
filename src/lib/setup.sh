@@ -464,6 +464,152 @@ _CAI_SYSBOX_CONTAINAI_REPO="novotnyllc/ContainAI"
 # Pinned ContainAI sysbox release tag (update this to use a new build)
 _CAI_SYSBOX_CONTAINAI_TAG="sysbox-build-20260126-7"
 
+# ==============================================================================
+# Sysbox Version Utility Functions
+# ==============================================================================
+# These functions provide reusable sysbox version checking for doctor.sh and
+# update.sh. They extract logic that was previously embedded in the install
+# functions to enable version comparison without triggering installation.
+
+# Cache for bundled version (avoid repeated API calls)
+_CAI_SYSBOX_BUNDLED_VERSION_CACHE=""
+
+# Reason for update decision (set by _cai_sysbox_needs_update)
+_CAI_SYSBOX_UPDATE_REASON=""
+
+# Get installed sysbox version (semver only)
+# Returns: 0=success (outputs version to stdout), 1=not installed
+# Example output: "0.6.7"
+_cai_sysbox_installed_version() {
+    if ! command -v sysbox-runc >/dev/null 2>&1; then
+        return 1
+    fi
+    local version_line
+    version_line=$(sysbox-runc --version 2>/dev/null | head -1 || true)
+    # Extract semver: "0.6.7" from "sysbox-runc version 0.6.7+containai.20260126"
+    printf '%s' "$version_line" | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1
+}
+
+# Get installed sysbox package version (full dpkg version)
+# Returns: 0=success (outputs version to stdout), 1=not installed or no dpkg
+# Example output: "0.6.7+containai.20260126-0"
+_cai_sysbox_installed_pkg_version() {
+    if ! command -v dpkg-query >/dev/null 2>&1; then
+        return 1
+    fi
+    dpkg-query -W -f='${Version}' sysbox-ce 2>/dev/null || return 1
+}
+
+# Check if installed sysbox is a ContainAI build
+# Returns: 0=is containai build, 1=not containai build or not installed
+_cai_sysbox_is_containai_build() {
+    local pkg_version
+    pkg_version=$(_cai_sysbox_installed_pkg_version) || return 1
+    [[ "$pkg_version" == *"+containai."* ]]
+}
+
+# Get the bundled ContainAI sysbox release tag
+# Returns: 0=success (outputs tag to stdout)
+# Example output: "sysbox-build-20260126-7"
+_cai_sysbox_bundled_tag() {
+    printf '%s' "$_CAI_SYSBOX_CONTAINAI_TAG"
+}
+
+# Get the version from the bundled ContainAI sysbox release
+# Arguments: $1 = architecture (amd64 or arm64)
+# Returns: 0=success (outputs version to stdout), 1=failed to fetch
+# Example output: "0.6.7+containai.20260126"
+# Side effect: Caches result in _CAI_SYSBOX_BUNDLED_VERSION_CACHE
+_cai_sysbox_bundled_version() {
+    local arch="${1:-amd64}"
+
+    # Return cached value if available
+    if [[ -n "$_CAI_SYSBOX_BUNDLED_VERSION_CACHE" ]]; then
+        printf '%s' "$_CAI_SYSBOX_BUNDLED_VERSION_CACHE"
+        return 0
+    fi
+
+    # Resolve download URL (this sets _CAI_SYSBOX_VERSION)
+    # Suppress output since we only want the version
+    if ! _cai_resolve_sysbox_download_url "$arch" "false" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Only cache if we got a ContainAI build (not upstream fallback)
+    if [[ "$_CAI_SYSBOX_SOURCE" == "containai" ]]; then
+        _CAI_SYSBOX_BUNDLED_VERSION_CACHE="$_CAI_SYSBOX_VERSION"
+    fi
+    printf '%s' "$_CAI_SYSBOX_VERSION"
+}
+
+# Check if sysbox needs update
+# Arguments: $1 = architecture (amd64 or arm64)
+# Returns: 0=needs update, 1=up to date or not installed, 2=error
+# Outputs: Sets _CAI_SYSBOX_UPDATE_REASON with explanation:
+#   - "not_installed" - sysbox not installed
+#   - "fetch_failed" - could not determine bundled version
+#   - "up_to_date" - installed is current
+#   - "newer_version_available" - bundled is newer than installed
+#   - "upgrade_to_containai" - installed is upstream, bundled is ContainAI
+#   - "bundled_older_than_installed" - installed is newer than bundled
+_cai_sysbox_needs_update() {
+    local arch="${1:-amd64}"
+    _CAI_SYSBOX_UPDATE_REASON=""
+
+    # Check if sysbox is installed
+    local installed_semver
+    installed_semver=$(_cai_sysbox_installed_version) || {
+        _CAI_SYSBOX_UPDATE_REASON="not_installed"
+        return 1
+    }
+
+    # Get bundled version
+    local bundled_version
+    bundled_version=$(_cai_sysbox_bundled_version "$arch") || {
+        _CAI_SYSBOX_UPDATE_REASON="fetch_failed"
+        return 2
+    }
+
+    # Extract semver from bundled version (strip +containai.* or -0 suffixes)
+    local bundled_semver
+    bundled_semver=$(printf '%s' "$bundled_version" | sed 's/+.*//' | sed 's/-[0-9]*$//')
+
+    # Check if installed is ContainAI build
+    local installed_is_containai="false"
+    if _cai_sysbox_is_containai_build; then
+        installed_is_containai="true"
+    fi
+
+    # Compare versions using sort -V
+    local highest_version
+    highest_version=$(printf '%s\n%s\n' "$installed_semver" "$bundled_semver" | sort -V | tail -1)
+
+    # Logic:
+    # - If installed is upstream and bundled is ContainAI with same/newer semver -> update (prefer ContainAI)
+    # - If installed is ContainAI and bundled has newer semver -> update
+    # - If installed >= bundled semver and both ContainAI -> up to date
+    if [[ "$installed_is_containai" == "true" ]]; then
+        if [[ "$highest_version" == "$installed_semver" ]]; then
+            _CAI_SYSBOX_UPDATE_REASON="up_to_date"
+            return 1
+        fi
+        _CAI_SYSBOX_UPDATE_REASON="newer_version_available"
+        return 0
+    else
+        # Installed is upstream - prefer ContainAI if semver >= installed
+        if [[ "$highest_version" == "$bundled_semver" ]] || [[ "$bundled_semver" == "$installed_semver" ]]; then
+            _CAI_SYSBOX_UPDATE_REASON="upgrade_to_containai"
+            return 0
+        fi
+        _CAI_SYSBOX_UPDATE_REASON="bundled_older_than_installed"
+        return 1
+    fi
+}
+
+# ==============================================================================
+# Sysbox Download URL Resolution
+# ==============================================================================
+
 # Resolve sysbox download URL from multiple sources with priority:
 #   1. CAI_SYSBOX_URL environment variable (explicit override)
 #   2. ContainAI GitHub releases (custom build with openat2 fix)

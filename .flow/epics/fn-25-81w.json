@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-25-81w",
+  "created_at": "2026-01-26T18:51:18.539674Z",
+  "depends_on_epics": [],
+  "id": "fn-25-81w",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-25-81w.md",
+  "status": "open",
+  "title": "Sysbox version checking and update across all commands",
+  "updated_at": "2026-01-26T18:51:18.539711Z"
+}

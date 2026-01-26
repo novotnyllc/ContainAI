@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-26T18:51:35.376682Z",
+  "depends_on": [],
+  "epic": "fn-25-81w",
+  "id": "fn-25-81w.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-25-81w.1.md",
+  "status": "todo",
+  "title": "Extract reusable sysbox version functions in setup.sh",
+  "updated_at": "2026-01-26T18:51:35.376693Z"
+}

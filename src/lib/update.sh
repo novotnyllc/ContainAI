@@ -90,6 +90,7 @@ What Gets Updated:
     - Docker service restart
     - Docker context verification
     - Dockerd bundle version (with prompts unless --force)
+    - Sysbox version (with prompts unless --force)
     - Legacy path cleanup
 
   macOS Lima:
@@ -786,6 +787,139 @@ _cai_update_dockerd_bundle() {
 }
 
 # ==============================================================================
+# Sysbox Update
+# ==============================================================================
+
+# Update sysbox to bundled ContainAI version
+# Arguments: $1 = force flag ("true" to skip confirmation)
+#            $2 = dry_run flag ("true" to simulate)
+#            $3 = verbose flag ("true" for verbose output)
+# Returns: 0=success (updated or already current), 1=failure
+_cai_update_sysbox() {
+    local force="${1:-false}"
+    local dry_run="${2:-false}"
+    local verbose="${3:-false}"
+
+    # Platform guard: skip on macOS (sysbox is inside Lima VM)
+    if _cai_is_macos; then
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Skipping sysbox update on macOS (managed inside Lima VM)"
+        fi
+        return 0
+    fi
+
+    _cai_step "Checking for sysbox updates"
+
+    # Get architecture
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)  arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        *)
+            _cai_info "Skipping sysbox update on unsupported architecture: $arch"
+            return 0
+            ;;
+    esac
+
+    # Check if sysbox is installed
+    local installed_version
+    installed_version=$(_cai_sysbox_installed_version) || {
+        _cai_info "Sysbox not installed - run 'cai setup' to install"
+        return 0
+    }
+
+    local installed_pkg
+    installed_pkg=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || installed_pkg="$installed_version"
+    _cai_info "Installed sysbox: $installed_pkg"
+
+    # Check if update is needed
+    if ! _cai_sysbox_needs_update "$arch"; then
+        local reason="${_CAI_SYSBOX_UPDATE_REASON:-up_to_date}"
+        case "$reason" in
+            up_to_date)
+                _cai_info "Sysbox is current"
+                ;;
+            bundled_older_than_installed)
+                _cai_info "Installed sysbox is newer than bundled version"
+                ;;
+            *)
+                _cai_info "Sysbox update not needed ($reason)"
+                ;;
+        esac
+        return 0
+    fi
+
+    # Get bundled version for display
+    local bundled_version
+    bundled_version=$(_cai_sysbox_bundled_version "$arch") || {
+        _cai_error "Failed to determine bundled sysbox version"
+        return 1
+    }
+
+    local reason="${_CAI_SYSBOX_UPDATE_REASON:-}"
+    case "$reason" in
+        upgrade_to_containai)
+            _cai_info "Upgrade available: upstream $installed_version -> ContainAI $bundled_version"
+            _cai_info "  ContainAI build includes openat2 fix for runc 1.3.3+ compatibility"
+            ;;
+        newer_version_available)
+            _cai_info "Update available: $installed_pkg -> $bundled_version"
+            ;;
+        *)
+            _cai_info "Update available: $installed_pkg -> $bundled_version"
+            ;;
+    esac
+
+    # Dry-run handling
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would download sysbox from ContainAI release"
+        _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
+        _cai_info "[DRY-RUN] Would restart sysbox services"
+        return 0
+    fi
+
+    # Prompt for confirmation (unless --force, use shared helper with CAI_YES support)
+    if [[ "$force" != "true" ]]; then
+        printf '\n'
+        _cai_warn "Updating sysbox may briefly affect running containers."
+        if ! _cai_prompt_confirm "Continue?"; then
+            printf '%s\n' "Cancelled."
+            return 0
+        fi
+    fi
+
+    # Call the existing install function (it handles upgrade logic)
+    _cai_step "Installing sysbox update"
+
+    # Determine which install function to use based on platform
+    local platform
+    platform=$(_cai_detect_platform)
+
+    case "$platform" in
+        wsl)
+            if ! _cai_install_sysbox_wsl2 "$dry_run" "$verbose"; then
+                _cai_error "Sysbox update failed"
+                return 1
+            fi
+            ;;
+        linux)
+            if ! _cai_install_sysbox_linux "$dry_run" "$verbose"; then
+                _cai_error "Sysbox update failed"
+                return 1
+            fi
+            ;;
+        *)
+            _cai_info "Sysbox update not supported on platform: $platform"
+            return 0
+            ;;
+    esac
+
+    _cai_ok "Sysbox updated to $bundled_version"
+    return 0
+}
+
+# ==============================================================================
 # Linux/WSL2 Update
 # ==============================================================================
 
@@ -837,7 +971,13 @@ _cai_update_linux_wsl2() {
         # Don't fail overall - bundle might already be at latest version
     fi
 
-    # Step 6: Verify installation
+    # Step 6: Check/update sysbox version
+    if ! _cai_update_sysbox "$force" "$dry_run" "$verbose"; then
+        _cai_warn "Sysbox update had issues (continuing anyway)"
+        # Don't fail overall - sysbox might already be at latest version
+    fi
+
+    # Step 7: Verify installation
     if [[ "$dry_run" != "true" ]]; then
         _cai_step "Verifying installation"
         if ! _cai_verify_isolated_docker "false" "$verbose"; then
