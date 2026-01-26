@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-21-5sw",
+  "created_at": "2026-01-26T15:08:24.164112Z",
+  "depends_on_epics": [],
+  "id": "fn-21-5sw",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-21-5sw.md",
+  "status": "open",
+  "title": "Add CI Testing to build-sysbox.yml",
+  "updated_at": "2026-01-26T15:41:38.101402Z"
+}
