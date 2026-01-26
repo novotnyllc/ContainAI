@@ -105,7 +105,14 @@ RUN if [ -f /home/agent/.claude.json ]; then \
     rm -rf /home/agent/.config/opencode && \
     mkdir -p /home/agent/.config/opencode
 
+# Ensure /mnt/agent-data exists and is owned by agent user
+# The base image creates this, but we verify here as a safeguard since
+# symlinks.sh runs as USER agent and needs to create subdirectories
+USER root
+RUN mkdir -p /mnt/agent-data && chown agent:agent /mnt/agent-data
+
 # Run generated symlink script (created from sync-manifest.toml)
+USER agent
 COPY container/generated/symlinks.sh /tmp/symlinks.sh
 RUN chmod +x /tmp/symlinks.sh && /tmp/symlinks.sh && rm /tmp/symlinks.sh
 
