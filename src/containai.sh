@@ -194,7 +194,7 @@ Run Options:
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
-  --name <name>         Container name (default: auto-generated from path hash)
+  --container <name>    Container name (default: auto-generated from workspace)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -246,8 +246,8 @@ ContainAI Import - Sync host configs to data volume or hot-reload into running c
 
 Usage: cai import [path] [options]
 
-Hot-Reload Mode (with workspace path):
-  When a workspace path is provided, imports configs AND reloads them into
+Hot-Reload Mode (with workspace path or --container):
+  When a workspace path or --container is provided, imports configs AND reloads them into
   the running container via SSH. Container must be running.
 
   What gets synced to volume:
@@ -261,13 +261,15 @@ Hot-Reload Mode (with workspace path):
   - SSH: agent forwarding (ssh -A) preferred; keys also synced to volume
     unless --no-secrets is used
 
-Volume-Only Mode (no workspace path):
+Volume-Only Mode (no workspace path or --container):
   Syncs configs to data volume only. Does not affect running containers.
   Use this to prepare configs before starting a container.
 
 Options:
   <path>                Workspace path (positional) - enables hot-reload mode
   --workspace <path>    Workspace path (alternative to positional)
+  --container <name>    Target specific container (derives workspace/volume from labels)
+                        Mutually exclusive with --workspace and --data-volume
   --data-volume <vol>   Data volume name (overrides config)
   --from <path>         Import source:
                         - Directory: syncs from that directory (default: $HOME)
@@ -295,6 +297,7 @@ Secret files skipped by --no-secrets (examples):
 
 Examples:
   cai import /path/to/workspace        Hot-reload configs into running container
+  cai import --container my-project    Hot-reload into named container
   cai import                           Sync configs to auto-resolved volume only
   cai import --dry-run                 Preview what would be synced
   cai import --no-excludes             Sync without applying excludes
@@ -314,6 +317,8 @@ Usage: cai export [options]
 
 Options:
   -o, --output <path>   Output path (file or directory)
+  --container <name>    Target specific container (derives volume from labels)
+                        Mutually exclusive with --workspace and --data-volume
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path for config resolution
@@ -329,6 +334,7 @@ Examples:
   cai export                         Export to current directory
   cai export -o ~/backup.tgz         Export to specific file
   cai export -o ~/backups/           Export to directory with auto-name
+  cai export --container my-project  Export from specific container
   cai export --data-volume vol       Export specific volume
 EOF
 }
@@ -340,16 +346,18 @@ ContainAI Stop - Stop ContainAI containers
 Usage: cai stop [options]
 
 Options:
-  --all         Stop all containers without prompting
-  --remove      Also remove containers (not just stop them)
-                When used with --remove, SSH configs are automatically cleaned
-  -h, --help    Show this help message
+  --container <name>  Stop specific container by name
+  --all               Stop all containers without prompting
+  --remove            Also remove containers (not just stop them)
+                      When used with --remove, SSH configs are automatically cleaned
+  -h, --help          Show this help message
 
 Examples:
-  cai stop              Interactive selection to stop containers
-  cai stop --all        Stop all ContainAI containers
-  cai stop --remove     Remove containers (cleans up SSH configs)
-  cai stop --all --remove  Remove all ContainAI containers
+  cai stop                      Interactive selection to stop containers
+  cai stop --container my-proj  Stop specific container
+  cai stop --all                Stop all ContainAI containers
+  cai stop --remove             Remove containers (cleans up SSH configs)
+  cai stop --all --remove       Remove all ContainAI containers
 EOF
 }
 
@@ -391,7 +399,7 @@ Options:
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
-  --name <name>         Container name (default: auto-generated from path hash)
+  --container <name>    Container name (default: auto-generated from workspace)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -573,7 +581,7 @@ EOF
 # Import subcommand handler
 # Supports two modes:
 # 1. Volume-only mode (no workspace path): syncs configs to data volume
-# 2. Hot-reload mode (with workspace path): syncs to volume AND reloads into running container
+# 2. Hot-reload mode (with workspace path or --container): syncs to volume AND reloads into running container
 _containai_import_cmd() {
     local dry_run="false"
     local no_excludes="false"
@@ -583,6 +591,7 @@ _containai_import_cmd() {
     local explicit_config=""
     local from_source=""
     local hot_reload="false"
+    local container_name=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -597,6 +606,24 @@ _containai_import_cmd() {
                 ;;
             --no-secrets)
                 no_secrets="true"
+                shift
+                ;;
+            --container)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                container_name="$2"
+                hot_reload="true"
+                shift 2
+                ;;
+            --container=*)
+                container_name="${1#--container=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                hot_reload="true"
                 shift
                 ;;
             --data-volume)
@@ -707,49 +734,115 @@ _containai_import_cmd() {
         esac
     done
 
-    # Resolve workspace using platform-aware normalization
-    local resolved_workspace workspace_input
-    workspace_input="${workspace:-$PWD}"
-    resolved_workspace=$(_cai_normalize_path "$workspace_input")
-    # Check if path exists (normalize_path returns as-is for non-existent paths)
-    if [[ ! -d "$resolved_workspace" ]]; then
-        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
-        return 1
+    # Check mutual exclusivity of --container with --workspace and --data-volume
+    if [[ -n "$container_name" ]]; then
+        if [[ -n "$workspace" ]]; then
+            echo "[ERROR] --container and --workspace are mutually exclusive" >&2
+            return 1
+        fi
+        if [[ -n "$cli_volume" ]]; then
+            echo "[ERROR] --container and --data-volume are mutually exclusive" >&2
+            return 1
+        fi
     fi
 
-    # === CONTEXT SELECTION (mirrors cai run in lib/container.sh) ===
-    # Resolve secure engine context from config (for context override)
-    local config_context_override=""
-    if [[ -n "$explicit_config" ]]; then
-        # Explicit config: strict mode - fail on parse errors
-        if ! config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config"); then
-            echo "[ERROR] Failed to parse config: $explicit_config" >&2
+    # Resolve workspace and volume - from container labels if --container provided
+    local resolved_workspace="" resolved_volume="" selected_context=""
+
+    if [[ -n "$container_name" ]]; then
+        # --container mode: derive workspace and volume from container labels
+        # First, select context to find the container
+        local config_context_override=""
+        if [[ -n "$explicit_config" ]]; then
+            if ! config_context_override=$(_containai_resolve_secure_engine_context "$PWD" "$explicit_config"); then
+                echo "[ERROR] Failed to parse config: $explicit_config" >&2
+                return 1
+            fi
+        fi
+
+        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
+            : # success
+        else
+            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+            return 1
+        fi
+
+        # Build docker command with context
+        local -a docker_cmd=(docker)
+        if [[ -n "$selected_context" ]]; then
+            docker_cmd=(docker --context "$selected_context")
+        fi
+
+        # Check container exists
+        if ! "${docker_cmd[@]}" inspect "$container_name" >/dev/null 2>&1; then
+            echo "[ERROR] Container not found: $container_name" >&2
+            return 1
+        fi
+
+        # Check if container is managed by ContainAI
+        local is_managed
+        is_managed=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || is_managed=""
+        if [[ "$is_managed" != "true" ]]; then
+            echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+            return 1
+        fi
+
+        # Derive workspace from container labels
+        resolved_workspace=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$container_name" 2>/dev/null) || resolved_workspace=""
+        if [[ -z "$resolved_workspace" ]]; then
+            echo "[ERROR] Container $container_name is missing workspace label" >&2
+            return 1
+        fi
+
+        # Derive data volume from container labels
+        resolved_volume=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.data-volume"}}' "$container_name" 2>/dev/null) || resolved_volume=""
+        if [[ -z "$resolved_volume" ]]; then
+            echo "[ERROR] Container $container_name is missing data-volume label" >&2
             return 1
         fi
     else
-        # Discovered config: suppress errors gracefully
-        config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
-    fi
+        # Standard mode: resolve from workspace path
+        local workspace_input
+        workspace_input="${workspace:-$PWD}"
+        resolved_workspace=$(_cai_normalize_path "$workspace_input")
+        # Check if path exists (normalize_path returns as-is for non-existent paths)
+        if [[ ! -d "$resolved_workspace" ]]; then
+            echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+            return 1
+        fi
 
-    # Auto-select Docker context based on Sysbox availability
-    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix for shell function call (pitfall: env -u only works with external commands)
-    local selected_context=""
-    if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
-        : # success - selected_context is isolated context (Sysbox)
-    else
-        echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
-        return 1
-    fi
+        # === CONTEXT SELECTION (mirrors cai run in lib/container.sh) ===
+        # Resolve secure engine context from config (for context override)
+        local config_context_override=""
+        if [[ -n "$explicit_config" ]]; then
+            # Explicit config: strict mode - fail on parse errors
+            if ! config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config"); then
+                echo "[ERROR] Failed to parse config: $explicit_config" >&2
+                return 1
+            fi
+        else
+            # Discovered config: suppress errors gracefully
+            config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
+        fi
 
-    # Resolve volume
-    local resolved_volume
-    if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
-        echo "[ERROR] Failed to resolve data volume" >&2
-        return 1
+        # Auto-select Docker context based on Sysbox availability
+        # Use DOCKER_CONTEXT= DOCKER_HOST= prefix for shell function call (pitfall: env -u only works with external commands)
+        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
+            : # success - selected_context is isolated context (Sysbox)
+        else
+            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+            return 1
+        fi
+
+        # Resolve volume
+        if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+            echo "[ERROR] Failed to resolve data volume" >&2
+            return 1
+        fi
     fi
 
     # For hot-reload mode, validate container is running before proceeding
-    local container_name=""
+    local resolved_container_name=""
     if [[ "$hot_reload" == "true" ]]; then
         # Build docker command with context
         local -a docker_cmd=(docker)
@@ -757,42 +850,47 @@ _containai_import_cmd() {
             docker_cmd=(docker --context "$selected_context")
         fi
 
-        # Try to find container by workspace label first (handles --name containers)
-        # Label format: containai.workspace=/absolute/path
-        # Use -a to include stopped containers for proper error messages
-        local label_filter="containai.workspace=$resolved_workspace"
-        local found_containers
-        found_containers=$("${docker_cmd[@]}" ps -aq --filter "label=$label_filter" 2>/dev/null | head -2)
-
-        if [[ -n "$found_containers" ]]; then
-            # Count matches (filter to first line to handle empty case)
-            local match_count
-            match_count=$(printf '%s\n' "$found_containers" | grep -c . || echo 0)
-            if [[ "$match_count" -gt 1 ]]; then
-                echo "[ERROR] Multiple containers found for workspace: $resolved_workspace" >&2
-                echo "" >&2
-                echo "Containers:" >&2
-                "${docker_cmd[@]}" ps -a --filter "label=$label_filter" --format "  {{.Names}} ({{.Status}})" >&2
-                echo "" >&2
-                echo "Remove extra containers or use a unique workspace path." >&2
-                return 1
-            fi
-            # Get container name from ID (take first line only)
-            local first_container
-            first_container=$(printf '%s\n' "$found_containers" | head -1)
-            container_name=$("${docker_cmd[@]}" inspect --format '{{.Name}}' "$first_container" 2>/dev/null)
-            container_name="${container_name#/}" # Remove leading /
+        if [[ -n "$container_name" ]]; then
+            # --container was provided, use it directly
+            resolved_container_name="$container_name"
         else
-            # Fallback: try hash-based container name
-            if ! container_name=$(_containai_container_name "$resolved_workspace"); then
-                echo "[ERROR] Failed to generate container name for workspace: $resolved_workspace" >&2
-                return 1
+            # Try to find container by workspace label first (handles --container containers)
+            # Label format: containai.workspace=/absolute/path
+            # Use -a to include stopped containers for proper error messages
+            local label_filter="containai.workspace=$resolved_workspace"
+            local found_containers
+            found_containers=$("${docker_cmd[@]}" ps -aq --filter "label=$label_filter" 2>/dev/null | head -2)
+
+            if [[ -n "$found_containers" ]]; then
+                # Count matches (filter to first line to handle empty case)
+                local match_count
+                match_count=$(printf '%s\n' "$found_containers" | grep -c . || echo 0)
+                if [[ "$match_count" -gt 1 ]]; then
+                    echo "[ERROR] Multiple containers found for workspace: $resolved_workspace" >&2
+                    echo "" >&2
+                    echo "Containers:" >&2
+                    "${docker_cmd[@]}" ps -a --filter "label=$label_filter" --format "  {{.Names}} ({{.Status}})" >&2
+                    echo "" >&2
+                    echo "Use --container to specify which one." >&2
+                    return 1
+                fi
+                # Get container name from ID (take first line only)
+                local first_container
+                first_container=$(printf '%s\n' "$found_containers" | head -1)
+                resolved_container_name=$("${docker_cmd[@]}" inspect --format '{{.Name}}' "$first_container" 2>/dev/null)
+                resolved_container_name="${resolved_container_name#/}" # Remove leading /
+            else
+                # Fallback: try hash-based container name
+                if ! resolved_container_name=$(_containai_container_name "$resolved_workspace"); then
+                    echo "[ERROR] Failed to generate container name for workspace: $resolved_workspace" >&2
+                    return 1
+                fi
             fi
         fi
 
         # Check container exists and is running
         local container_state
-        if ! container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$container_name" 2>/dev/null); then
+        if ! container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$resolved_container_name" 2>/dev/null); then
             echo "[ERROR] Container not found for workspace: $resolved_workspace" >&2
             echo "" >&2
             echo "To create a container for this workspace, run:" >&2
@@ -801,7 +899,7 @@ _containai_import_cmd() {
         fi
 
         if [[ "$container_state" != "running" ]]; then
-            echo "[ERROR] Container '$container_name' is not running (state: $container_state)" >&2
+            echo "[ERROR] Container '$resolved_container_name' is not running (state: $container_state)" >&2
             echo "" >&2
             echo "Start the container first with:" >&2
             echo "  cai shell $resolved_workspace" >&2
@@ -810,7 +908,7 @@ _containai_import_cmd() {
         fi
 
         if [[ "$dry_run" != "true" ]]; then
-            _cai_info "Hot-reload mode: will sync configs and reload into container '$container_name'"
+            _cai_info "Hot-reload mode: will sync configs and reload into container '$resolved_container_name'"
         fi
     fi
 
@@ -834,12 +932,12 @@ _containai_import_cmd() {
 
     # Hot-reload: execute reload commands in container via SSH
     if [[ "$hot_reload" == "true" && "$dry_run" != "true" ]]; then
-        if ! _cai_hot_reload_container "$container_name" "$selected_context"; then
+        if ! _cai_hot_reload_container "$resolved_container_name" "$selected_context"; then
             echo "[ERROR] Hot-reload failed" >&2
             return 1
         fi
     elif [[ "$hot_reload" == "true" && "$dry_run" == "true" ]]; then
-        _cai_info "[dry-run] Would reload configs into container: $container_name"
+        _cai_info "[dry-run] Would reload configs into container: $resolved_container_name"
     fi
 }
 
@@ -850,6 +948,7 @@ _containai_export_cmd() {
     local cli_volume=""
     local workspace=""
     local explicit_config=""
+    local container_name=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -879,6 +978,22 @@ _containai_export_cmd() {
                 ;;
             --no-excludes)
                 no_excludes="true"
+                shift
+                ;;
+            --container)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                container_name="$2"
+                shift 2
+                ;;
+            --container=*)
+                container_name="${1#--container=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
                 shift
                 ;;
             --data-volume)
@@ -950,21 +1065,89 @@ _containai_export_cmd() {
         esac
     done
 
-    # Resolve workspace using platform-aware normalization
-    local resolved_workspace workspace_input
-    workspace_input="${workspace:-$PWD}"
-    resolved_workspace=$(_cai_normalize_path "$workspace_input")
-    # Check if path exists (normalize_path returns as-is for non-existent paths)
-    if [[ ! -d "$resolved_workspace" ]]; then
-        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
-        return 1
+    # Check mutual exclusivity of --container with --workspace and --data-volume
+    if [[ -n "$container_name" ]]; then
+        if [[ -n "$workspace" ]]; then
+            echo "[ERROR] --container and --workspace are mutually exclusive" >&2
+            return 1
+        fi
+        if [[ -n "$cli_volume" ]]; then
+            echo "[ERROR] --container and --data-volume are mutually exclusive" >&2
+            return 1
+        fi
     fi
 
-    # Resolve volume
-    local resolved_volume
-    if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
-        echo "[ERROR] Failed to resolve data volume" >&2
-        return 1
+    # Resolve workspace and volume - from container labels if --container provided
+    local resolved_workspace="" resolved_volume=""
+
+    if [[ -n "$container_name" ]]; then
+        # --container mode: derive volume from container labels
+        # First, select context to find the container
+        local config_context_override=""
+        if [[ -n "$explicit_config" ]]; then
+            if ! config_context_override=$(_containai_resolve_secure_engine_context "$PWD" "$explicit_config"); then
+                echo "[ERROR] Failed to parse config: $explicit_config" >&2
+                return 1
+            fi
+        fi
+
+        local selected_context=""
+        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
+            : # success
+        else
+            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+            return 1
+        fi
+
+        # Build docker command with context
+        local -a docker_cmd=(docker)
+        if [[ -n "$selected_context" ]]; then
+            docker_cmd=(docker --context "$selected_context")
+        fi
+
+        # Check container exists
+        if ! "${docker_cmd[@]}" inspect "$container_name" >/dev/null 2>&1; then
+            echo "[ERROR] Container not found: $container_name" >&2
+            return 1
+        fi
+
+        # Check if container is managed by ContainAI
+        local is_managed
+        is_managed=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || is_managed=""
+        if [[ "$is_managed" != "true" ]]; then
+            echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+            return 1
+        fi
+
+        # Derive workspace from container labels (for excludes resolution)
+        resolved_workspace=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$container_name" 2>/dev/null) || resolved_workspace=""
+        if [[ -z "$resolved_workspace" ]]; then
+            echo "[ERROR] Container $container_name is missing workspace label" >&2
+            return 1
+        fi
+
+        # Derive data volume from container labels
+        resolved_volume=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.data-volume"}}' "$container_name" 2>/dev/null) || resolved_volume=""
+        if [[ -z "$resolved_volume" ]]; then
+            echo "[ERROR] Container $container_name is missing data-volume label" >&2
+            return 1
+        fi
+    else
+        # Standard mode: resolve from workspace path
+        local workspace_input
+        workspace_input="${workspace:-$PWD}"
+        resolved_workspace=$(_cai_normalize_path "$workspace_input")
+        # Check if path exists (normalize_path returns as-is for non-existent paths)
+        if [[ ! -d "$resolved_workspace" ]]; then
+            echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+            return 1
+        fi
+
+        # Resolve volume
+        if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+            echo "[ERROR] Failed to resolve data volume" >&2
+            return 1
+        fi
     fi
 
     # Resolve excludes from config (unless --no-excludes)
@@ -993,7 +1176,10 @@ _containai_export_cmd() {
 
 # Stop subcommand handler
 _containai_stop_cmd() {
+    local container_name=""
+    local remove_flag=false
     local arg
+
     for arg in "$@"; do
         case "$arg" in
             --help | -h)
@@ -1003,6 +1189,102 @@ _containai_stop_cmd() {
         esac
     done
 
+    # Parse --container argument
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --container)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                container_name="$2"
+                shift 2
+                ;;
+            --container=*)
+                container_name="${1#--container=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --remove)
+                remove_flag=true
+                shift
+                ;;
+            --all | --help | -h)
+                # These are handled by _containai_stop_all
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    # If --container specified, stop that specific container
+    if [[ -n "$container_name" ]]; then
+        # Select context to find the container
+        local config_context_override=""
+        local selected_context=""
+        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
+            : # success
+        else
+            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+            return 1
+        fi
+
+        # Build docker command with context
+        local -a docker_cmd=(docker)
+        if [[ -n "$selected_context" ]]; then
+            docker_cmd=(docker --context "$selected_context")
+        fi
+
+        # Check container exists
+        if ! "${docker_cmd[@]}" inspect "$container_name" >/dev/null 2>&1; then
+            echo "[ERROR] Container not found: $container_name" >&2
+            return 1
+        fi
+
+        # Check if container is managed by ContainAI
+        local is_managed
+        is_managed=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' "$container_name" 2>/dev/null) || is_managed=""
+        if [[ "$is_managed" != "true" ]]; then
+            echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+            return 1
+        fi
+
+        if [[ "$remove_flag" == "true" ]]; then
+            # Get SSH port before removing (for cleanup)
+            local ssh_port
+            ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context" 2>/dev/null) || ssh_port=""
+
+            echo "Removing: $container_name${selected_context:+ [context: $selected_context]}"
+            if "${docker_cmd[@]}" rm -f "$container_name" >/dev/null 2>&1; then
+                # Clean up SSH config
+                if [[ -n "$ssh_port" ]]; then
+                    _cai_cleanup_container_ssh "$container_name" "$ssh_port"
+                else
+                    _cai_remove_ssh_host_config "$container_name"
+                fi
+                echo "Done."
+            else
+                echo "[ERROR] Failed to remove container: $container_name" >&2
+                return 1
+            fi
+        else
+            echo "Stopping: $container_name${selected_context:+ [context: $selected_context]}"
+            if "${docker_cmd[@]}" stop "$container_name" >/dev/null 2>&1; then
+                echo "Done."
+            else
+                echo "[ERROR] Failed to stop container: $container_name" >&2
+                return 1
+            fi
+        fi
+        return 0
+    fi
+
+    # No --container specified, delegate to interactive stop all
     _containai_stop_all "$@"
 }
 
@@ -1648,18 +1930,18 @@ _containai_shell_cmd() {
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
-            --name)
+            --container)
                 if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --name requires a value" >&2
+                    echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
                 container_name="$2"
                 shift 2
                 ;;
-            --name=*)
-                container_name="${1#--name=}"
+            --container=*)
+                container_name="${1#--container=}"
                 if [[ -z "$container_name" ]]; then
-                    echo "[ERROR] --name requires a value" >&2
+                    echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
                 shift
@@ -1841,12 +2123,12 @@ _containai_shell_cmd() {
     fi
 
     # Resolve container name using shared lookup helper
-    # Priority: explicit --name > existing container lookup > new name for creation
+    # Priority: explicit --container > existing container lookup > new name for creation
     # Exit codes from helpers: 0=found, 1=not found, 2=multiple matches (abort)
     local resolved_container_name
     local find_rc
     if [[ -n "$container_name" ]]; then
-        # Explicit name provided via --name
+        # Explicit name provided via --container
         resolved_container_name="$container_name"
     else
         # Try to find existing container for this workspace using shared lookup helper
@@ -2156,18 +2438,18 @@ _containai_run_cmd() {
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
-            --name)
+            --container)
                 if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --name requires a value" >&2
+                    echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
                 container_name="$2"
                 shift 2
                 ;;
-            --name=*)
-                container_name="${1#--name=}"
+            --container=*)
+                container_name="${1#--container=}"
                 if [[ -z "$container_name" ]]; then
-                    echo "[ERROR] --name requires a value" >&2
+                    echo "[ERROR] --container requires a value" >&2
                     return 1
                 fi
                 shift
