@@ -753,19 +753,12 @@ _containai_import_cmd() {
 
     if [[ -n "$container_name" ]]; then
         # --container mode: derive workspace and volume from container labels
-        # First, select context to find the container
-        local config_context_override=""
-        if [[ -n "$explicit_config" ]]; then
-            if ! config_context_override=$(_containai_resolve_secure_engine_context "$PWD" "$explicit_config"); then
-                echo "[ERROR] Failed to parse config: $explicit_config" >&2
-                return 1
-            fi
-        fi
-
-        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
-            : # success
+        # Use multi-context lookup to find container (default, config-specified, secure)
+        local found_context
+        if found_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
+            selected_context="$found_context"
         else
-            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+            echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
 
@@ -775,29 +768,24 @@ _containai_import_cmd() {
             docker_cmd=(docker --context "$selected_context")
         fi
 
-        # Check container exists (use --type container to avoid matching images)
-        if ! "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
-            echo "[ERROR] Container not found: $container_name" >&2
-            return 1
-        fi
-
         # Check if container is managed by ContainAI
+        # Use {{with}} template to output empty string for missing labels (avoids <no value>)
         local is_managed
-        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
+        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
         fi
 
         # Derive workspace from container labels
-        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.workspace"}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
         if [[ -z "$resolved_workspace" ]]; then
             echo "[ERROR] Container $container_name is missing workspace label" >&2
             return 1
         fi
 
         # Derive data volume from container labels
-        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.data-volume"}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
         if [[ -z "$resolved_volume" ]]; then
             echo "[ERROR] Container $container_name is missing data-volume label" >&2
             return 1
@@ -892,7 +880,7 @@ _containai_import_cmd() {
 
         # Check container exists and is running
         local container_state
-        if ! container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$resolved_container_name" 2>/dev/null); then
+        if ! container_state=$("${docker_cmd[@]}" inspect --type container --format '{{.State.Status}}' -- "$resolved_container_name" 2>/dev/null); then
             echo "[ERROR] Container not found for workspace: $resolved_workspace" >&2
             echo "" >&2
             echo "To create a container for this workspace, run:" >&2
@@ -1084,20 +1072,12 @@ _containai_export_cmd() {
 
     if [[ -n "$container_name" ]]; then
         # --container mode: derive volume from container labels
-        # First, select context to find the container
-        local config_context_override=""
-        if [[ -n "$explicit_config" ]]; then
-            if ! config_context_override=$(_containai_resolve_secure_engine_context "$PWD" "$explicit_config"); then
-                echo "[ERROR] Failed to parse config: $explicit_config" >&2
-                return 1
-            fi
-        fi
-
-        local selected_context=""
-        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
-            : # success
+        # Use multi-context lookup to find container (default, config-specified, secure)
+        local selected_context="" found_context
+        if found_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
+            selected_context="$found_context"
         else
-            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+            echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
 
@@ -1107,29 +1087,24 @@ _containai_export_cmd() {
             docker_cmd=(docker --context "$selected_context")
         fi
 
-        # Check container exists (use --type container to avoid matching images)
-        if ! "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
-            echo "[ERROR] Container not found: $container_name" >&2
-            return 1
-        fi
-
         # Check if container is managed by ContainAI
+        # Use {{with}} template to output empty string for missing labels (avoids <no value>)
         local is_managed
-        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
+        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
         fi
 
         # Derive workspace from container labels (for excludes resolution)
-        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.workspace"}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
         if [[ -z "$resolved_workspace" ]]; then
             echo "[ERROR] Container $container_name is missing workspace label" >&2
             return 1
         fi
 
         # Derive data volume from container labels
-        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.data-volume"}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
         if [[ -z "$resolved_volume" ]]; then
             echo "[ERROR] Container $container_name is missing data-volume label" >&2
             return 1
@@ -2161,22 +2136,23 @@ _containai_shell_cmd() {
         fi
 
         # Verify container is managed by ContainAI
+        # Use {{with}} template to output empty string for missing labels (avoids <no value>)
         local is_managed
-        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
+        is_managed=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
         fi
 
         # Derive workspace from container labels
-        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.workspace"}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+        resolved_workspace=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
         if [[ -z "$resolved_workspace" ]]; then
             echo "[ERROR] Container $container_name is missing workspace label" >&2
             return 1
         fi
 
         # Derive data volume from container labels
-        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.data-volume"}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+        resolved_volume=$("${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
         if [[ -z "$resolved_volume" ]]; then
             echo "[ERROR] Container $container_name is missing data-volume label" >&2
             return 1
@@ -2766,27 +2742,9 @@ _containai_run_cmd() {
 
     if [[ -n "$container_name" ]]; then
         # Spec: "Container must NOT exist; error if name collision"
-        # Select context using same logic as actual run (explicit or discovered config)
-        local config_context_override=""
-        if [[ -n "$explicit_config" ]]; then
-            config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config") || config_context_override=""
-        else
-            # Also check discovered config for context override
-            config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
-        fi
-        local selected_context=""
-        if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
-            : # success
-        else
-            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
-            return 1
-        fi
-        local -a docker_cmd=(docker)
-        if [[ -n "$selected_context" ]]; then
-            docker_cmd=(docker --context "$selected_context")
-        fi
-        # Check container does NOT exist (use --type container to avoid matching images)
-        if "${docker_cmd[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+        # Use multi-context lookup to check all contexts where container might exist
+        # This prevents accidentally creating a container with a colliding name in another context
+        if _cai_find_container_by_name "$container_name" "$explicit_config" >/dev/null 2>&1; then
             echo "[ERROR] Container $container_name already exists" >&2
             return 1
         fi

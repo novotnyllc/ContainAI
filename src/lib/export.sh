@@ -10,7 +10,8 @@
 # Usage:
 #   source lib/export.sh
 #   my_excludes=("pattern1" "pattern2")
-#   _containai_export "volume-name" "/path/to/output.tgz" my_excludes "false"
+#   _containai_export "volume-name" "/path/to/output.tgz" my_excludes "false" ""
+#   _containai_export "volume-name" "/path/to/output.tgz" my_excludes "false" "containai"
 #
 # Note: config.sh is NOT required for basic export. It's only needed if the
 # caller wants to resolve excludes from config (done by the CLI wrapper).

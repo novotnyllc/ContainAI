@@ -8,6 +8,7 @@
 #   _containai_container_name      - Generate sanitized container name
 #   _containai_legacy_container_name - Generate legacy hash-based container name
 #   _cai_find_workspace_container  - Find container using shared lookup order (label/new/legacy)
+#   _cai_find_container_by_name    - Find container by name across multiple contexts
 #   _cai_resolve_container_name    - Resolve container name for creation (duplicate-aware)
 #   _cai_find_container            - Find container by workspace and optional image-tag filter
 #   _containai_check_isolation     - Detect container isolation status
@@ -422,6 +423,80 @@ _cai_find_workspace_container() {
     fi
 
     return 1  # Not found
+}
+
+# Find container by name across multiple Docker contexts
+# Searches default context, then config-specified context, then standard secure context.
+# This is for --container mode where user specifies container name directly.
+#
+# Arguments:
+#   $1 = container_name (required)
+#   $2 = explicit_config (optional, config file path for context override)
+#
+# Returns:
+#   0 with found context on stdout (empty string means default context)
+#   1 if container not found in any context
+#
+# Usage:
+#   if found_context=$(_cai_find_container_by_name "my-container" "$config_file"); then
+#       docker --context "$found_context" inspect my-container
+#   fi
+_cai_find_container_by_name() {
+    local container_name="$1"
+    local explicit_config="${2:-}"
+    local ctx cfg_ctx
+
+    if [[ -z "$container_name" ]]; then
+        echo "[ERROR] container name is required" >&2
+        return 1
+    fi
+
+    # Build list of contexts to check
+    local -a contexts_to_check=("default")
+
+    # Helper: check if value is already in array (safe literal match, no regex)
+    _in_array() {
+        local needle="$1" item
+        shift
+        for item in "$@"; do
+            [[ "$item" == "$needle" ]] && return 0
+        done
+        return 1
+    }
+
+    # Add secure engine context from config if provided
+    if [[ -n "$explicit_config" ]]; then
+        cfg_ctx=$(_containai_resolve_secure_engine_context "$PWD" "$explicit_config" 2>/dev/null) || cfg_ctx=""
+        if [[ -n "$cfg_ctx" ]] && ! _in_array "$cfg_ctx" "${contexts_to_check[@]}"; then
+            contexts_to_check+=("$cfg_ctx")
+        fi
+    fi
+
+    # Add standard secure context if it exists
+    if ! _in_array "$_CAI_CONTAINAI_DOCKER_CONTEXT" "${contexts_to_check[@]}"; then
+        if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+            contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
+        fi
+    fi
+
+    # Search for container in each context
+    for ctx in "${contexts_to_check[@]}"; do
+        local -a docker_cmd_check=(docker)
+        if [[ "$ctx" != "default" ]]; then
+            docker_cmd_check=(docker --context "$ctx")
+        fi
+        if "${docker_cmd_check[@]}" inspect --type container -- "$container_name" >/dev/null 2>&1; then
+            # Found! Return context (empty string for default)
+            if [[ "$ctx" == "default" ]]; then
+                printf ''
+            else
+                printf '%s' "$ctx"
+            fi
+            return 0
+        fi
+    done
+
+    return 1  # Not found in any context
 }
 
 # Resolve container name for creation
