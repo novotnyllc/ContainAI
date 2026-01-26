@@ -438,17 +438,23 @@ _cai_find_workspace_container() {
 # Returns:
 #   0 with found context on stdout (always returns context name, including "default")
 #   1 if container not found in any context
+#   2 if container found in multiple contexts (ambiguous - error printed to stderr)
 #
 # Usage:
 #   if found_context=$(_cai_find_container_by_name "my-container" "$config_file" "$workspace"); then
 #       # Always use --context explicitly (even for "default")
 #       docker --context "$found_context" inspect my-container
+#   elif [[ $? -eq 2 ]]; then
+#       return 1  # Ambiguity error already printed
+#   else
+#       echo "Container not found"
 #   fi
 _cai_find_container_by_name() {
     local container_name="${1:-}"
     local explicit_config="${2:-}"
-    local workspace_path="${3:-$PWD}"
-    local ctx cfg_ctx _check_item
+    local workspace_path="${3:-}"  # Only use if explicitly provided
+    local ctx cfg_ctx item
+    local -a found_contexts=()
 
     if [[ -z "$container_name" ]]; then
         echo "[ERROR] container name is required" >&2
@@ -458,52 +464,70 @@ _cai_find_container_by_name() {
     # Build list of contexts to check - prioritize configured/secure contexts over default
     local -a contexts_to_check=()
 
-    # Inline helper: check if value is already in array (avoids nested function global pollution)
-    _ctx_already_added() {
-        local needle="$1"
-        for _check_item in "${contexts_to_check[@]}"; do
-            [[ "$_check_item" == "$needle" ]] && return 0
+    # Inline check: is value already in contexts_to_check array?
+    # (Avoids nested function which would create global in bash)
+    _is_ctx_listed() {
+        local needle="$1" c
+        for c in "${contexts_to_check[@]}"; do
+            [[ "$c" == "$needle" ]] && return 0
         done
         return 1
     }
 
     # 1. Add secure engine context from explicit config if provided
     if [[ -n "$explicit_config" ]]; then
-        cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "$explicit_config" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _ctx_already_added "$cfg_ctx"; then
+        cfg_ctx=$(_containai_resolve_secure_engine_context "${workspace_path:-$PWD}" "$explicit_config" 2>/dev/null) || cfg_ctx=""
+        if [[ -n "$cfg_ctx" ]] && ! _is_ctx_listed "$cfg_ctx"; then
             contexts_to_check+=("$cfg_ctx")
         fi
-    else
-        # 2. Try discovered config (same as cai run does)
+    elif [[ -n "$workspace_path" ]]; then
+        # 2. Only try discovered config when workspace path was explicitly provided
+        # (avoids surprising behavior when cwd changes)
         cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _ctx_already_added "$cfg_ctx"; then
+        if [[ -n "$cfg_ctx" ]] && ! _is_ctx_listed "$cfg_ctx"; then
             contexts_to_check+=("$cfg_ctx")
         fi
     fi
 
     # 3. Add standard secure context if it exists
-    if ! _ctx_already_added "$_CAI_CONTAINAI_DOCKER_CONTEXT"; then
+    if ! _is_ctx_listed "$_CAI_CONTAINAI_DOCKER_CONTEXT"; then
         if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
             contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
         fi
     fi
 
     # 4. Add default context last (lowest priority)
-    if ! _ctx_already_added "default"; then
+    if ! _is_ctx_listed "default"; then
         contexts_to_check+=("default")
     fi
 
-    # Search for container in each context (priority order)
+    # Clean up nested function to avoid global pollution
+    unset -f _is_ctx_listed
+
+    # Search for container in ALL contexts to detect ambiguity
     # Use DOCKER_CONTEXT= DOCKER_HOST= to avoid env leakage, and always use --context
     for ctx in "${contexts_to_check[@]}"; do
         if DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" inspect --type container -- "$container_name" >/dev/null 2>&1; then
-            # Found! Return context name (always include "default" so callers use --context)
-            printf '%s' "$ctx"
-            return 0
+            found_contexts+=("$ctx")
         fi
     done
 
-    return 1  # Not found in any context
+    # Handle results
+    if [[ ${#found_contexts[@]} -eq 0 ]]; then
+        return 1  # Not found in any context
+    elif [[ ${#found_contexts[@]} -eq 1 ]]; then
+        # Found in exactly one context - success
+        printf '%s' "${found_contexts[0]}"
+        return 0
+    else
+        # Found in multiple contexts - ambiguous
+        echo "[ERROR] Container '$container_name' exists in multiple contexts:" >&2
+        for ctx in "${found_contexts[@]}"; do
+            echo "  - $ctx" >&2
+        done
+        echo "Use --config to specify which context to use." >&2
+        return 2  # Ambiguity exit code
+    fi
 }
 
 # Resolve container name for creation

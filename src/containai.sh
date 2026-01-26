@@ -754,10 +754,14 @@ _containai_import_cmd() {
     if [[ -n "$container_name" ]]; then
         # --container mode: derive workspace and volume from container labels
         # Use multi-context lookup to find container (default, config-specified, secure)
-        local found_context
+        local found_context find_rc
         if found_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
             selected_context="$found_context"
         else
+            find_rc=$?
+            if [[ $find_rc -eq 2 ]]; then
+                return 1  # Ambiguity error already printed
+            fi
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
@@ -1073,7 +1077,12 @@ _containai_export_cmd() {
     if [[ -n "$container_name" ]]; then
         # --container mode: derive volume from container labels
         # Use multi-context lookup to find container (config-specified, secure, default)
+        local find_rc
         if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
+            find_rc=$?
+            if [[ $find_rc -eq 2 ]]; then
+                return 1  # Ambiguity error already printed
+            fi
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
@@ -1242,8 +1251,12 @@ _containai_stop_cmd() {
     if [[ -n "$container_name" ]]; then
         # Use _cai_find_container_by_name to search configured/secure contexts
         # Note: cai stop doesn't accept --config, so pass empty string
-        local selected_context=""
+        local selected_context="" find_rc
         if ! selected_context=$(_cai_find_container_by_name "$container_name" ""); then
+            find_rc=$?
+            if [[ $find_rc -eq 2 ]]; then
+                return 1  # Ambiguity error already printed
+            fi
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
@@ -2071,7 +2084,12 @@ _containai_shell_cmd() {
     # and skip workspace-based resolution entirely
     if [[ -n "$container_name" ]]; then
         # Use _cai_find_container_by_name for consistent context search (config/secure first)
+        local find_rc
         if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
+            find_rc=$?
+            if [[ $find_rc -eq 2 ]]; then
+                return 1  # Ambiguity error already printed
+            fi
             echo "[ERROR] Container not found: $container_name" >&2
             return 1
         fi
@@ -2683,9 +2701,17 @@ _containai_run_cmd() {
         # Use multi-context lookup to check all contexts where container might exist
         # This prevents accidentally creating a container with a colliding name in another context
         # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
+        local collision_rc
         if _cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" >/dev/null 2>&1; then
             echo "[ERROR] Container $container_name already exists" >&2
             return 1
+        else
+            collision_rc=$?
+            if [[ $collision_rc -eq 2 ]]; then
+                # Ambiguity means container exists in multiple contexts - still a collision
+                return 1
+            fi
+            # Exit code 1 means not found - good, we can create
         fi
         start_args+=(--name "$container_name")
     fi
