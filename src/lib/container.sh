@@ -367,7 +367,7 @@ _containai_legacy_container_name() {
 # Returns:
 #   0 with container name on stdout if found
 #   1 if not found (no error message - caller should handle)
-#   1 with error message to stderr if multiple containers match by label
+#   2 if multiple containers match (error message to stderr) - caller must abort
 _cai_find_workspace_container() {
     local workspace_path="$1"
     local context="${2:-}"
@@ -390,11 +390,12 @@ _cai_find_workspace_container() {
         --format '{{.Names}}' 2>/dev/null)
 
     # Error on multiple matches - user must be explicit
+    # Return exit code 2 to distinguish from "not found"
     if [[ ${#by_label[@]} -gt 1 ]]; then
         echo "[ERROR] Multiple containers found for workspace: $workspace_path" >&2
         echo "[ERROR] Containers: ${by_label[*]}" >&2
-        echo "[ERROR] Use --container to specify which one" >&2
-        return 1
+        echo "[ERROR] Use --name to specify which one" >&2
+        return 2
     fi
 
     if [[ ${#by_label[@]} -eq 1 ]]; then
@@ -432,13 +433,16 @@ _cai_find_workspace_container() {
 #   $1 = workspace path (required, should be normalized/resolved)
 #   $2 = docker context (optional, empty for default)
 #
-# Returns: container name via stdout, or 1 on error
+# Returns:
+#   0 with container name via stdout
+#   1 on error
+#   2 if multiple containers exist for workspace (caller must abort)
 _cai_resolve_container_name() {
     local workspace_path="$1"
     local context="${2:-}"
     local -a docker_cmd=(docker)
-    local base_name candidate existing_workspace
-    local suffix=1
+    local base_name candidate existing_workspace existing_name
+    local suffix=1 find_rc line
 
     if [[ -z "$workspace_path" ]]; then
         echo "[ERROR] workspace path is required" >&2
@@ -447,13 +451,36 @@ _cai_resolve_container_name() {
 
     [[ -n "$context" ]] && docker_cmd=(docker --context "$context")
 
-    # Get base name from naming function
+    # First, check if a container already exists for this workspace via label
+    # This prevents creating duplicates when existing container has suffixed name
+    local -a by_label=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && by_label+=("$line")
+    done < <("${docker_cmd[@]}" ps -a \
+        --filter "label=containai.workspace=$workspace_path" \
+        --format '{{.Names}}' 2>/dev/null)
+
+    # Multiple containers for same workspace - abort
+    if [[ ${#by_label[@]} -gt 1 ]]; then
+        echo "[ERROR] Multiple containers found for workspace: $workspace_path" >&2
+        echo "[ERROR] Containers: ${by_label[*]}" >&2
+        echo "[ERROR] Use --name to specify which one" >&2
+        return 2
+    fi
+
+    # Found exactly one - return it
+    if [[ ${#by_label[@]} -eq 1 ]]; then
+        printf '%s\n' "${by_label[0]}"
+        return 0
+    fi
+
+    # No existing container by label - generate new name with collision handling
     if ! base_name=$(_containai_container_name "$workspace_path"); then
         return 1
     fi
     candidate="$base_name"
 
-    # Check if name is taken (handle duplicates)
+    # Check if name is taken by another workspace (handle collisions)
     while "${docker_cmd[@]}" inspect --type container "$candidate" >/dev/null 2>&1; do
         # Check if this container is for our workspace
         existing_workspace=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$candidate" 2>/dev/null) || existing_workspace=""

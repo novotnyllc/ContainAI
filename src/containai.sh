@@ -1842,7 +1842,9 @@ _containai_shell_cmd() {
 
     # Resolve container name using shared lookup helper
     # Priority: explicit --name > existing container lookup > new name for creation
+    # Exit codes from helpers: 0=found, 1=not found, 2=multiple matches (abort)
     local resolved_container_name
+    local find_rc
     if [[ -n "$container_name" ]]; then
         # Explicit name provided via --name
         resolved_container_name="$container_name"
@@ -1850,11 +1852,23 @@ _containai_shell_cmd() {
         # Try to find existing container for this workspace using shared lookup helper
         # Lookup order: label match -> new naming -> legacy hash naming
         if resolved_container_name=$(_cai_find_workspace_container "$resolved_workspace" "$selected_context"); then
-            : # Found existing container
+            : # Found existing container (exit code 0)
         else
-            # No existing container found - get name for new container
+            find_rc=$?
+            # Exit code 2 means multiple containers - abort with error (already printed)
+            if [[ $find_rc -eq 2 ]]; then
+                return 1
+            fi
+            # Exit code 1 means not found - get name for new container
             # Use _cai_resolve_container_name for duplicate-aware naming
-            if ! resolved_container_name=$(_cai_resolve_container_name "$resolved_workspace" "$selected_context"); then
+            if resolved_container_name=$(_cai_resolve_container_name "$resolved_workspace" "$selected_context"); then
+                : # Got name for creation
+            else
+                find_rc=$?
+                # Exit code 2 means multiple containers (should not happen but handle it)
+                if [[ $find_rc -eq 2 ]]; then
+                    return 1
+                fi
                 echo "[ERROR] Failed to resolve container name for workspace: $resolved_workspace" >&2
                 return 1
             fi
@@ -1868,9 +1882,8 @@ _containai_shell_cmd() {
         dry_run_args+=(--workspace "$resolved_workspace")
         dry_run_args+=(--shell)
         dry_run_args+=(--dry-run)
-        if [[ -n "$container_name" ]]; then
-            dry_run_args+=(--name "$container_name")
-        fi
+        # Always pass resolved name to ensure single-sourced naming
+        dry_run_args+=(--name "$resolved_container_name")
         if [[ -n "$image_tag" ]]; then
             dry_run_args+=(--image-tag "$image_tag")
         fi
@@ -1947,9 +1960,8 @@ _containai_shell_cmd() {
         create_args+=(--data-volume "$resolved_volume")
         create_args+=(--workspace "$resolved_workspace")
         create_args+=(--detached)
-        if [[ -n "$container_name" ]]; then
-            create_args+=(--name "$container_name")
-        fi
+        # Always pass resolved name to ensure single-sourced naming
+        create_args+=(--name "$resolved_container_name")
         if [[ -n "$image_tag" ]]; then
             create_args+=(--image-tag "$image_tag")
         fi
@@ -1979,9 +1991,8 @@ _containai_shell_cmd() {
         create_args+=(--data-volume "$resolved_volume")
         create_args+=(--workspace "$resolved_workspace")
         create_args+=(--detached)
-        if [[ -n "$container_name" ]]; then
-            create_args+=(--name "$container_name")
-        fi
+        # Always pass resolved name to ensure single-sourced naming
+        create_args+=(--name "$resolved_container_name")
         if [[ -n "$image_tag" ]]; then
             create_args+=(--image-tag "$image_tag")
         fi
