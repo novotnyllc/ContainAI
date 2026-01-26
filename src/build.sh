@@ -411,6 +411,14 @@ generate_container_files() {
     # Copy link-repair.sh to generated dir so it gets included in build context
     cp "${SCRIPT_DIR}/container/link-repair.sh" "${gen_dir}/link-repair.sh"
 
+    # Validate Dockerfile symlinks match manifest
+    echo "  Validating Dockerfile symlinks against manifest..."
+    if ! "${scripts_dir}/validate-dockerfile-symlinks.sh" "$manifest" "${SCRIPT_DIR}/container/Dockerfile.agents"; then
+        printf 'WARNING: Dockerfile symlinks may be out of sync with manifest\n' >&2
+        printf 'Review generated/symlinks.dockerfile and update Dockerfile.agents\n' >&2
+        # Don't fail the build, just warn - Dockerfile may have valid agent-specific setup
+    fi
+
     # Verify generated files are newer than manifest (staleness check)
     local manifest_mtime gen_file_mtime
     manifest_mtime=$(stat -c %Y "$manifest" 2>/dev/null || stat -f %m "$manifest" 2>/dev/null)

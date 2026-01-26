@@ -277,6 +277,16 @@ RUN mkdir -p /mnt/agent-data/git && \
     ln -sfn /mnt/agent-data/git/gitignore_global /home/agent/.gitignore_global
 
 # =============================================================================
+# SSH CONFIG SYMLINKS
+# Symlink SSH config and known_hosts for persistence
+# Private keys are synced to /mnt/agent-data/ssh/ at import time
+# =============================================================================
+RUN mkdir -p /home/agent/.ssh /mnt/agent-data/ssh && \
+    chmod 700 /home/agent/.ssh && \
+    ln -sfn /mnt/agent-data/ssh/config /home/agent/.ssh/config && \
+    ln -sfn /mnt/agent-data/ssh/known_hosts /home/agent/.ssh/known_hosts
+
+# =============================================================================
 # AGENT ALIASES
 # Convenience aliases for running agents in autonomous mode
 # =============================================================================

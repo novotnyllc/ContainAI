@@ -41,6 +41,11 @@ while IFS='|' read -r source target container_link flags entry_type; do
     # Skip entries that only have container_link (container_symlinks section)
     # We still process them for volume initialization
     [[ "$entry_type" == "symlink" ]] && continue
+    # Skip file entries with empty container_link - these are imported but not symlinked
+    # (e.g., .gitconfig is copied at runtime, not init-created)
+    if [[ "$flags" == *f* && -z "$container_link" ]]; then
+        continue
+    fi
 
     is_dir=0
     is_file=0
