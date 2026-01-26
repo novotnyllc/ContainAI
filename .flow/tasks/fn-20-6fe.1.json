@@ -9,6 +9,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-20-6fe.1.md",
   "status": "todo",
-  "title": "Diagnose and fix current container runtime",
-  "updated_at": "2026-01-26T05:20:34.207855Z"
+  "title": "Investigate runc/sysbox fix mechanism",
+  "updated_at": "2026-01-26T07:37:53.877057Z"
 }

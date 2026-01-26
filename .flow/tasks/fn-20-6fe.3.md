@@ -1,57 +1,104 @@
-# fn-20-6fe.3 Document limitation and verify integration tests
+# fn-20-6fe.3 Write PRD-B: Sysbox host-side fix options
 
 ## Description
-Document the runc 1.3.3 incompatibility as a known limitation with security trade-off notes, and verify DinD integration tests pass with the fixed image.
+
+Write PRD-B: A Product Requirements Document for the proper fix options. This is a specification document only - no implementation.
 
 **Size:** S
 **Files:**
-- `.flow/memory/pitfalls.md` (add new pitfall entry)
-- `tests/integration/test-dind.sh` (verify passes with local image)
+- `.flow/specs/prd-sysbox-dind-fix.md` (new file)
 
 ## Approach
 
-1. Add pitfall entry to `.flow/memory/pitfalls.md` in existing date-stamped format:
-   ```markdown
-   ## YYYY-MM-DD manual [pitfall]
+Write a comprehensive PRD covering:
 
-   **runc 1.3.3+ incompatible with sysbox DinD**: Docker containers fail inside sysbox with
-   "unsafe procfs detected: openat2 /proc/./sys/net/ipv4/ip_unprivileged_port_start: invalid cross-device link".
-   Pin containerd.io to version with runc < 1.3.3. Security trade-off: temporarily reverts
-   CVE-2025-31133/-52565/-52881 fixes, mitigated by sysbox user namespace isolation.
-   Track sysbox#973 for removal. (2026-01-26)
-   ```
+1. **Executive Summary**
+   - Problem statement
+   - Available fix options with clear ownership boundaries by deployment mode
+   - Recommended approach
 
-2. Rebuild image with pinned version:
-   ```bash
-   ./src/build.sh --layer base --load
-   ```
+2. **Technical Analysis**
+   - Reference fn-20-6fe-technical-analysis.md for details
+   - How sysbox-fs virtualizes /proc (bind mounts FUSE over procfs)
+   - How runc's security check works (openat2 + RESOLVE_NO_XDEV)
+   - Why the conflict occurs (cross-device detection)
+   - Specific commit SHAs from technical analysis
 
-3. Run integration test with local image:
-   ```bash
-   CONTAINAI_TEST_IMAGE=containai/base:latest ./tests/integration/test-dind.sh
-   ```
+3. **Ownership Boundary Clarification by Deployment Mode**
+   - **Linux Sysbox Mode**:
+     - Operator-controlled: sysbox-fs, sysbox-runc upgrade
+     - ContainAI-controlled: containerd.io pin, Dockerfile
+   - **Docker Desktop ECI Mode**:
+     - Docker Inc-controlled: Sysbox components bundled in Docker Desktop
+     - Operator cannot independently upgrade sysbox
+     - ContainAI-controlled: containerd.io pin, Dockerfile
+   - Which options ContainAI can ship vs which require operator/vendor action
 
-4. Verify DinD operations work end-to-end inside the test container.
+4. **Fix Options Evaluated**
 
-Follow pattern in `.flow/memory/pitfalls.md` for existing pitfall entries (date-stamped, concise).
+   **Option A: Wait for Sysbox Release** (varies by deployment mode)
+   - **Linux Sysbox Mode**: Operator upgrades sysbox when release is available
+     - Pros: No effort, officially supported
+     - Cons: Unknown timeline, dependency on upstream
+     - Version gate: Sysbox release containing fix commits (SHAs from Task 1)
+     - Action: Track sysbox releases, document minimum version
+   - **Docker Desktop ECI Mode**: Wait for Docker Desktop update
+     - Pros: No operator effort
+     - Cons: Depends on Docker Inc release cadence, no direct control
+     - Action: Track Docker Desktop releases
+   - Hypothesis status: Treat version numbers as hypotheses until confirmed
+
+   **Option B: Build Sysbox from Source** (Linux Sysbox Mode only)
+   - Pros: Immediate fix, proven code
+   - Cons: Maintenance burden, not released, supply-chain risk
+   - Required commits: [specific SHAs from technical analysis]
+   - Risk: Untested, potential regressions
+   - Not applicable to ECI Mode
+
+   **Option C: Contribute Fix Upstream** (community action)
+   - Pros: Benefits community
+   - Cons: Time to contribute and merge
+   - Scope: What testing/documentation would be required?
+
+   **Option D: Alternative Workarounds**
+   - AppArmor profile (different error variant - LXC/Proxmox only, not sysbox)
+   - Configure inner Docker to avoid requesting the sysctl (based on Task 1 sysctl source analysis)
+     - If sysbox injects the sysctl: document sysbox configuration option if available
+     - If moby/containerd defaults: document how to override
+   - Sysbox configuration options (if any exist)
+
+5. **Recommendation**
+   - Primary: [based on analysis, respecting ownership boundaries by deployment mode]
+   - Secondary: [fallback option]
+   - Use PRD-A workaround in the meantime
+   - Differentiate recommendations for Linux Sysbox vs Docker Desktop ECI users
+
+6. **Future Implementation Scope** (for implementation epic)
+   - What would be done for each option
+   - Testing requirements
+   - Documentation updates
 
 ## Key context
 
-- Pitfalls use date-stamped format: `## YYYY-MM-DD manual [pitfall]`
-- The test defaults to `ghcr.io/novotnyllc/containai/base:latest` - must override with `CONTAINAI_TEST_IMAGE`
-- Test requires sysbox-runc runtime on the host
-- Document removal criteria: when Sysbox releases compatibility fix for sysbox#973
-- Security trade-off must be explicitly documented (CVE rollback, mitigation via sysbox isolation)
+- This PRD is for long-term solutions
+- Based on analysis from Task 1 (technical analysis document)
+- Clearly separate ContainAI-controllable vs operator-controllable vs vendor-controllable options
+- Seccomp interception fix is host-side (operator must upgrade sysbox in Linux mode)
+- **ECI support status**: Consume Task 1's "ECI Support Status" section as input - do NOT pre-assume; if deprecated, discuss ECI as external ecosystem context only
+- Treat version predictions as hypotheses
 
 ## Acceptance
-- [ ] Pitfall entry added to .flow/memory/pitfalls.md in date-stamped format
-- [ ] Entry includes error message and root cause (runc 1.3.3 CVE fixes)
-- [ ] Entry includes workaround (pin containerd.io)
-- [ ] Entry documents security trade-off (CVE rollback) and mitigation (sysbox isolation)
-- [ ] Entry includes sysbox#973 reference and removal criteria
-- [ ] Image rebuilt with pinned version: `./src/build.sh --layer base --load`
-- [ ] tests/integration/test-dind.sh passes with `CONTAINAI_TEST_IMAGE=containai/base:latest`
-- [ ] DinD verified working: can run `docker run` inside test container
+
+- [ ] PRD-B created at `.flow/specs/prd-sysbox-dind-fix.md`
+- [ ] Technical analysis references technical analysis document with commit SHAs
+- [ ] Ownership boundary clearly documented by deployment mode (Linux Sysbox vs Docker Desktop ECI)
+- [ ] All fix options evaluated with pros/cons and ownership assignment
+- [ ] Option A includes specific version gate (commits, not predicted version numbers) + ECI mode considerations
+- [ ] Option B includes specific commit SHAs and supply-chain risk (Linux mode only)
+- [ ] Option D evaluated based on sysctl OCI spec source analysis from Task 1
+- [ ] Clear recommendation with rationale respecting ownership boundaries by deployment mode
+- [ ] No implementation performed - PRD only
+
 ## Done summary
 TBD
 

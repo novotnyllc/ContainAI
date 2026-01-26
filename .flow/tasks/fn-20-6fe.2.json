@@ -11,6 +11,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-20-6fe.2.md",
   "status": "todo",
-  "title": "Pin containerd.io version in Dockerfiles",
-  "updated_at": "2026-01-26T05:20:46.967078Z"
+  "title": "Write PRD-A: Temporary runc downgrade workaround",
+  "updated_at": "2026-01-26T07:37:53.947097Z"
 }

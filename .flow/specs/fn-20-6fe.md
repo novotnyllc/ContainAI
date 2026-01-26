@@ -1,4 +1,4 @@
-# Fix Docker-in-Docker runc 1.3.3 Incompatibility
+# Investigate runc 1.3.3 / Sysbox Incompatibility and Produce PRDs
 
 ## Problem
 
@@ -10,61 +10,98 @@ unsafe procfs detected: openat2 /proc/./sys/net/ipv4/ip_unprivileged_port_start:
 invalid cross-device link
 ```
 
-## Root Cause
+## Root Cause (Confirmed via Research)
 
-runc 1.3.3 security patches (CVE-2025-31133, CVE-2025-52565, CVE-2025-52881) detect Sysbox's procfs bind mounts as "fake procfs" and intentionally reject them. Per runc maintainer:
+runc 1.3.3 added security checks using `openat2()` with `RESOLVE_NO_XDEV` flag to detect "fake procfs". This conflicts with sysbox-fs which bind-mounts FUSE-backed files over `/proc/sys/*` paths.
 
-> "The error you are getting is different and would be caused by a bind mount being placed on top of `/proc/...` and is thus an expected error."
-
-This is tracked as [sysbox issue #973](https://github.com/nestybox/sysbox/issues/973).
+**Key insight**: The fix exists in sysbox master but is **host-side** (sysbox-fs, sysbox-runc). ContainAI can only control the **image-side** (containerd.io package version).
 
 ## Scope
 
-- Diagnose and fix current container by pinning containerd.io to exact working version
-- Update Dockerfile.base and Dockerfile.test with version pin
-- Verify fix with integration tests using correct image
-- Document as known limitation with security trade-off notes
+This epic is **investigation and PRD creation only** - NO implementation.
 
-## Approach
+**Deliverables:**
+1. Technical analysis document (`.flow/specs/fn-20-6fe-technical-analysis.md`)
+2. PRD-A: Temporary workaround specification (`.flow/specs/prd-runc-downgrade-workaround.md`)
+3. PRD-B: Proper fix options specification (`.flow/specs/prd-sysbox-dind-fix.md`)
 
-Pin `containerd.io` apt package to an **exact version** proven to bundle runc < 1.3.3. The specific version will be determined in Task 1 by:
-1. Checking available containerd.io versions: `apt-cache madison containerd.io`
-2. Downgrading and verifying runc version: `runc --version`
-3. Confirming DinD works with that exact version
+**Out of scope for this epic:**
+- Implementation changes (Dockerfiles, runtime packages, tests)
+- Only docs/spec files are produced
 
-**Security trade-off**: This workaround temporarily reverts protections from CVE-2025-31133, CVE-2025-52565, CVE-2025-52881 within the container. These CVEs relate to container escape vectors that are already mitigated by Sysbox's user namespace isolation. The workaround is scoped to inner Docker only and will be removed when Sysbox releases a compatibility fix (track: sysbox#973).
+**Allowed in Task 1 investigation:**
+- OS-level artifact inspection (apt package downloads, .deb extraction)
+- Upstream repo cloning for code archaeology
+- No ContainAI image builds or DinD tests
 
-**Key files:**
-- `src/container/Dockerfile.base:151-172` - docker-ce/containerd.io installation
-- `src/container/Dockerfile.test:51-82` - test container installation
-- `tests/integration/test-dind.sh` - DinD integration test
+## Ownership Boundary (Critical)
 
-## Quick commands
+**By Deployment Mode:**
+
+| Component | ContainAI-managed isolated daemon | Docker Desktop / external engine (support TBD) |
+|-----------|-----------------------------------|------------------------------------------------|
+| Host dockerd | `containai-docker` context managed by ContainAI (`src/lib/docker.sh`, `src/lib/setup.sh`) | Docker Inc default context |
+| sysbox-fs, sysbox-runc | Host operator installs, ContainAI setup configures | Docker Inc (bundled in DD) |
+| containerd.io, runc packages | ContainAI image (can pin) | ContainAI image (can pin) |
+| Dockerfile.base/test | ContainAI repo (can modify) | ContainAI repo (can modify) |
+| Inner Docker config | ContainAI image (can configure) | ContainAI image (can configure) |
+
+**Context selection model** (from code analysis - Task 1 to verify):
+- **Inside container**: Uses `default` context (`src/lib/doctor.sh:168-185`)
+- **On host**: Prefers config override → `containai-docker` → legacy (`src/lib/doctor.sh:160-224`)
+- **Native Linux**: May use default socket in some paths (`src/lib/doctor.sh:340-343`) - Task 1 to clarify
+
+**Key insight**: ContainAI's intended architecture uses `containai-docker` isolated daemon + context. Docker Desktop ECI/"docker sandbox" support status is **TBD** - Task 1 produces this decision based on code evidence.
+
+**ECI Support Status Decision Flow**:
+1. **Task 1** produces "ECI Support Status (as-of repo commit)" section with code evidence
+2. Decision question: Is Docker Desktop a **documented and exercised** engine for `cai`? (not just "could work if user sets override")
+3. **Tasks 2/3** consume this decision as input - if unsupported, treat ECI as "external ecosystem context only"
+4. Evidence to gather: `src/containai.sh:356-371` (sandbox removed), `src/lib/eci.sh` (missing), `src/lib/docker.sh:229-303` (`_cai_docker_desktop_version` - check if called), `src/lib/container.sh:1164-1186` (host flags rejected), `SECURITY.md`/`src/README.md` docs drift
+
+## Key Findings from Research
+
+### The Fix in Sysbox Master (Hypothesis - to be verified in Task 1)
+
+Sysbox has implemented a fix using **seccomp syscall interception** (exact mechanism to be verified from code):
+
+1. Trap all `openat2()` syscalls from processes inside sysbox containers
+2. Check if the path is under a sysbox-fs mount (`/proc/sys/*`, etc.)
+3. If yes, strip problematic flags (exact flag set to be quoted from sysbox-fs/sysbox-runc code - do NOT assume specific flags without evidence)
+4. Open the file via nsenter and inject the fd using `SECCOMP_IOCTL_NOTIF_ADDFD`
+
+**This is a host-side fix** - operators must upgrade sysbox; ContainAI cannot ship this.
+
+### ContainAI-Controllable Workaround
+
+Pin containerd.io to a version bundling runc < 1.3.3. This is image-side and can be shipped by ContainAI, but has security trade-offs (CVE rollback).
+
+## Quick Commands (for investigation)
 
 ```bash
-# Verify containerd.io and runc versions inside container
-apt-cache policy containerd.io
-runc --version
-docker info | grep -E 'containerd|runc'
+# Clone repos at immutable refs
+WORKDIR=$(mktemp -d)
+git clone --depth 1 --branch v1.3.3 https://github.com/opencontainers/runc.git "$WORKDIR/runc"
+git clone https://github.com/nestybox/sysbox-fs.git "$WORKDIR/sysbox-fs"
+git clone https://github.com/nestybox/sysbox-runc.git "$WORKDIR/sysbox-runc"
 
-# Test DinD works
-docker run --rm alpine:latest echo "DinD works"
+# Find the runc check
+grep -r "RESOLVE_NO_XDEV" "$WORKDIR/runc/"
 
-# Run integration test with local image
-CONTAINAI_TEST_IMAGE=containai/base:latest ./tests/integration/test-dind.sh
+# Find the sysbox fix
+grep -r "openat2" "$WORKDIR/sysbox-fs/seccomp/"
 ```
 
 ## Acceptance
 
-- [ ] `docker run --rm alpine:latest echo hello` succeeds inside sysbox container
-- [ ] `tests/integration/test-dind.sh` passes with `CONTAINAI_TEST_IMAGE=containai/base:latest`
-- [ ] containerd.io pinned to exact version (with runc < 1.3.3) in Dockerfile.base
-- [ ] containerd.io pinned to exact version in Dockerfile.test
-- [ ] Known limitation documented in pitfalls.md with security trade-off notes
-- [ ] Pitfall entry includes removal criteria (Sysbox compatibility release)
+- [ ] Technical analysis document produced with immutable commit refs
+- [ ] **PRD-A produced**: Temporary runc downgrade workaround with formal risk acceptance
+- [ ] **PRD-B produced**: Proper fix options with ownership boundary clarity
+- [ ] No implementation performed in this epic
 
 ## References
 
 - [sysbox#973](https://github.com/nestybox/sysbox/issues/973) - Docker 28.5.2 breaks DinD on Sysbox
-- [runc#4968](https://github.com/opencontainers/runc/issues/4968) - CVE-2025-52881 fd reopening issue
-- [containerd#12484](https://github.com/containerd/containerd/issues/12484) - workaround discussion
+- [sysbox#972](https://github.com/nestybox/sysbox/issues/972) - Original bug report (closed)
+- [runc#4968](https://github.com/opencontainers/runc/issues/4968) - AppArmor/LXC related issues
+- [runc v1.3.3](https://github.com/opencontainers/runc/releases/tag/v1.3.3) - Release with security patches
