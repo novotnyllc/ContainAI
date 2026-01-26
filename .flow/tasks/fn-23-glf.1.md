@@ -48,9 +48,8 @@ For both build jobs:
 - [ ] Workflow YAML validates (`gh workflow view build-sysbox.yml`)
 
 ## Done summary
-TBD
-
+Refactored build-sysbox.yml to use native runners: build-amd64 on ubuntu-22.04, build-arm64 on ubuntu-24.04-arm. Removed QEMU cross-compilation, added architecture verification using dpkg --print-architecture, and updated job dependencies so tests depend only on their respective build jobs.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: d78d7e72e20eb08771743dc829142c47a7d1716a
+- Tests: gh workflow view build-sysbox.yml
 - PRs:
