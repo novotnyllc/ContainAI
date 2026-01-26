@@ -22,9 +22,8 @@ This matches the pattern already used by `_cai_ssh_run_with_retry` for running c
 - [ ] Host key auto-recovery still works
 
 ## Done summary
-TBD
-
+Modified _cai_ssh_connect_with_retry to start SSH shell session in /home/agent/workspace with proper TTY allocation via -t flag, matching cai run behavior.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: d5aa39ea2343f299b08f88ea9b0d2ad23a4a85fb
+- Tests: source src/containai.sh && cai shell --help, shellcheck -x src/lib/ssh.sh
 - PRs:
