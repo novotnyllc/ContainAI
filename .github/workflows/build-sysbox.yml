@@ -39,28 +39,32 @@ env:
   SYSBOX_BRANCH: master
 
 jobs:
-  build:
-    name: Build ${{ matrix.arch }}
+  # ============================================================================
+  # Build Jobs - Native architecture builds (no QEMU cross-compilation)
+  # ============================================================================
+  build-amd64:
+    name: Build amd64
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64]
 
     steps:
       - name: Checkout ContainAI
         uses: actions/checkout@v4
 
-      - name: Set up QEMU for cross-arch builds
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       - name: Set up build environment
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
+
+      - name: Verify native architecture
+        id: arch
+        run: |
+          TARGET_ARCH=$(dpkg --print-architecture)
+          echo "target_arch=$TARGET_ARCH" >> "$GITHUB_OUTPUT"
+          echo "Native architecture: $TARGET_ARCH"
+          if [[ "$TARGET_ARCH" != "amd64" ]]; then
+            echo "::error::Expected amd64 architecture but got $TARGET_ARCH"
+            exit 1
+          fi
 
       - name: Determine version suffix
         id: version
@@ -131,14 +135,14 @@ jobs:
           set -o pipefail
           cd sysbox/sysbox-pkgr
           export EDITION=ce
-          # Set target architecture for cross-compilation
-          export TARGET_ARCH=${{ matrix.arch }}
+          # Set target architecture explicitly from native arch
+          export TARGET_ARCH=${{ steps.arch.outputs.target_arch }}
 
-          echo "Building sysbox-ce deb package for ${{ matrix.arch }}..."
+          echo "Building sysbox-ce deb package for amd64 (native)..."
           echo "Target architecture: $TARGET_ARCH"
           echo "This may take 15-30 minutes..."
 
-          make -C deb generic EDITION=ce TARGET_ARCH=${{ matrix.arch }} 2>&1 | tee build.log
+          make -C deb generic EDITION=ce TARGET_ARCH=${{ steps.arch.outputs.target_arch }} 2>&1 | tee build.log
 
           echo "Build completed"
 
@@ -160,7 +164,7 @@ jobs:
           mkdir -p dist
 
           version="${{ steps.sysbox_version.outputs.full_version }}"
-          arch="${{ matrix.arch }}"
+          arch="${{ steps.arch.outputs.target_arch }}"
           final_name="sysbox-ce_${version}.linux_${arch}.deb"
 
           cp "${{ steps.package.outputs.path }}" "dist/${final_name}"
@@ -180,18 +184,164 @@ jobs:
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sysbox-ce-${{ matrix.arch }}
+          name: sysbox-ce-amd64
           path: |
             dist/*.deb
             dist/*.sha256
           retention-days: 30
 
-  # ============================================================================
-  # Test Jobs - Verify built packages work before release
-  # ============================================================================
+  build-arm64:
+    name: Build arm64
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout ContainAI
+        uses: actions/checkout@v4
+
+      - name: Set up build environment
+        run: |
+          # Install build dependencies - ubuntu-24.04-arm may have different defaults
+          sudo apt-get update
+          sudo apt-get install -y jq build-essential
+
+      - name: Verify native architecture
+        id: arch
+        run: |
+          TARGET_ARCH=$(dpkg --print-architecture)
+          echo "target_arch=$TARGET_ARCH" >> "$GITHUB_OUTPUT"
+          echo "Native architecture: $TARGET_ARCH"
+          if [[ "$TARGET_ARCH" != "arm64" ]]; then
+            echo "::error::Expected arm64 architecture but got $TARGET_ARCH"
+            exit 1
+          fi
+
+      - name: Determine version suffix
+        id: version
+        env:
+          INPUT_SUFFIX: ${{ inputs.version_suffix }}
+        run: |
+          if [[ -n "$INPUT_SUFFIX" ]]; then
+            suffix="$INPUT_SUFFIX"
+          else
+            suffix="+containai.$(date +%Y%m%d)"
+          fi
+          printf 'suffix=%s\n' "$suffix" >> "$GITHUB_OUTPUT"
+          echo "Version suffix: $suffix"
+
+      - name: Clone sysbox repository
+        run: |
+          echo "Cloning sysbox from ${{ env.SYSBOX_BRANCH }} branch..."
+          git clone --recursive --depth 1 --branch ${{ env.SYSBOX_BRANCH }} \
+            ${{ env.SYSBOX_REPO }} sysbox
+
+      - name: Get sysbox version
+        id: sysbox_version
+        run: |
+          version=$(cat sysbox/VERSION | tr -d '[:space:]')
+          full_version="${version}${{ steps.version.outputs.suffix }}"
+          echo "base_version=$version" >> $GITHUB_OUTPUT
+          echo "full_version=$full_version" >> $GITHUB_OUTPUT
+          echo "Sysbox base version: $version"
+          echo "Full version: $full_version"
+
+      - name: Verify openat2 fix is present
+        run: |
+          echo "Checking for openat2 fix in sysbox-fs..."
+          # The fix was introduced in commit 1302a6f - verify it's an ancestor
+          # Need to fetch enough history to check ancestry
+          cd sysbox/sysbox-fs
+          git fetch --unshallow 2>/dev/null || git fetch --depth=100 origin master 2>/dev/null || true
+
+          FIX_COMMIT="1302a6f"
+          if git merge-base --is-ancestor "$FIX_COMMIT" HEAD 2>/dev/null; then
+            echo "openat2 fix verified: commit $FIX_COMMIT is ancestor of HEAD"
+          else
+            # Fallback: check for the specific syscall handler file that implements the fix
+            if [[ -f "handler/implementations/openat2.go" ]]; then
+              echo "openat2 fix verified: handler/implementations/openat2.go exists"
+            else
+              echo "::error::openat2 fix NOT found in sysbox-fs"
+              echo "Could not verify commit $FIX_COMMIT ancestry or find openat2.go handler"
+              echo "The whole purpose of this build is to include the openat2 fix."
+              exit 1
+            fi
+          fi
+
+      - name: Patch version
+        run: |
+          echo "${{ steps.sysbox_version.outputs.full_version }}" > sysbox/VERSION
+          echo "Patched VERSION file:"
+          cat sysbox/VERSION
+
+      - name: Set up sysbox-pkgr
+        run: |
+          cd sysbox/sysbox-pkgr
+          mkdir -p sources
+          ln -sfn "$(pwd)/../" sources/sysbox
+
+      - name: Build sysbox-ce deb package
+        run: |
+          set -o pipefail
+          cd sysbox/sysbox-pkgr
+          export EDITION=ce
+          # Set target architecture explicitly from native arch
+          export TARGET_ARCH=${{ steps.arch.outputs.target_arch }}
+
+          echo "Building sysbox-ce deb package for arm64 (native)..."
+          echo "Target architecture: $TARGET_ARCH"
+          echo "This may take 15-30 minutes..."
+
+          make -C deb generic EDITION=ce TARGET_ARCH=${{ steps.arch.outputs.target_arch }} 2>&1 | tee build.log
+
+          echo "Build completed"
+
+      - name: Locate built package
+        id: package
+        run: |
+          deb_path=$(find sysbox/sysbox-pkgr/deb/build -name "sysbox-ce*.deb" -type f | head -1)
+          if [[ -z "$deb_path" ]]; then
+            echo "::error::Built deb package not found"
+            find sysbox/sysbox-pkgr/deb/build -type f || true
+            exit 1
+          fi
+          echo "Found package: $deb_path"
+          echo "path=$deb_path" >> $GITHUB_OUTPUT
+
+      - name: Prepare artifacts
+        id: artifacts
+        run: |
+          mkdir -p dist
+
+          version="${{ steps.sysbox_version.outputs.full_version }}"
+          arch="${{ steps.arch.outputs.target_arch }}"
+          final_name="sysbox-ce_${version}.linux_${arch}.deb"
+
+          cp "${{ steps.package.outputs.path }}" "dist/${final_name}"
+
+          cd dist
+          sha256sum "${final_name}" > "${final_name}.sha256"
+
+          echo "Artifacts:"
+          ls -la
+          echo ""
+          echo "SHA256:"
+          cat "${final_name}.sha256"
+
+          echo "deb_name=${final_name}" >> $GITHUB_OUTPUT
+          echo "checksum_name=${final_name}.sha256" >> $GITHUB_OUTPUT
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysbox-ce-arm64
+          path: |
+            dist/*.deb
+            dist/*.sha256
+          retention-days: 30
+
   test-amd64:
     name: Test amd64
-    needs: build
+    needs: build-amd64
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -297,7 +447,7 @@ jobs:
 
   test-arm64:
     name: Test arm64
-    needs: build
+    needs: build-arm64
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
 
@@ -403,7 +553,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build, test-amd64, test-arm64]
+    needs: [build-amd64, build-arm64, test-amd64, test-arm64]
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||

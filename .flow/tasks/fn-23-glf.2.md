@@ -10,28 +10,76 @@ ERROR: failed to build: failed to solve: process "/bin/bash -o pipefail -c chmod
 
 ### Root cause analysis
 
-The failure is silent - `set -e` in symlinks.sh causes exit on first error but doesn't show which command failed.
+The failure is silent - `set -e` in symlinks.sh causes exit on first error but doesn't show which command failed. The failure is likely deterministic (link collision or permission issue), not cache-related.
 
 Potential causes:
-1. **GHA cache staleness** - The cache (`cache-from: type=gha,scope=full`) may serve old layers from before the `/mnt/agent-data` permission fix
-2. **Generated file drift** - `docker.yml` doesn't run generators, relies on committed files which may be stale
-3. **Buildx layer isolation** - Multi-platform buildx may not properly inherit `/mnt/agent-data` permissions from previous RUN
+1. **Link collision** - attempting to create symlink where a file/directory already exists
+2. **Permission issue** - `/mnt/agent-data` not writable or ownership mismatch
+3. **Path doesn't exist** - parent directory for symlink target missing
 
 ### Solution
 
-1. **Run generators in CI** - Add a step to `docker.yml` to regenerate files before building
-2. **Add verbose error handling to symlinks.sh** - Replace `set -e` with explicit error checking so failures show context
-3. **Bust the GHA cache** - Change cache scope or add a comment to invalidate stale layers
+1. **Primary: Add deterministic logging to symlinks.sh**
+   - Convert from `#!/bin/sh` to `#!/usr/bin/env bash` (enables proper error handling)
+   - Update Dockerfile.agents to run with `bash` instead of relying on shebang
+   - Log each command before execution
+   - On failure, show: failing command, `id`, `ls -ld /mnt/agent-data`, and `ls -ld` of the failing path
+
+2. **Run generators in CI** - Add a step to `docker.yml` to regenerate files before building
+
+3. **Secondary: Bust GHA cache** - Change cache scope from `full` → `full-v2` (one-time)
 
 ### Files to modify
 
-- `.github/workflows/docker.yml` - Add generator step before builds
-- `src/container/generated/symlinks.sh` - Add error reporting (regenerate via generator)
-- `src/scripts/gen-dockerfile-symlinks.sh` - Update template to include better error handling
+- `src/scripts/gen-dockerfile-symlinks.sh` - Update template to generate bash script with logging
+- `src/container/Dockerfile.agents` - Update RUN command to use bash explicitly
+- `.github/workflows/docker.yml` - Add generator step, change cache scope to `full-v2`
 
 ### Detailed changes
 
-**docker.yml**: Add step before "Build and push full image":
+**gen-dockerfile-symlinks.sh**: Update template to generate:
+```bash
+#!/usr/bin/env bash
+# Generated from sync-manifest.toml - DO NOT EDIT
+# Regenerate with: src/scripts/gen-dockerfile-symlinks.sh
+set -euo pipefail
+
+# Logging helper - prints command and executes it
+run_cmd() {
+    echo "+ $*"
+    if ! "$@"; then
+        echo "ERROR: Command failed: $*" >&2
+        echo "  id: $(id)" >&2
+        echo "  ls -ld /mnt/agent-data:" >&2
+        ls -ld /mnt/agent-data 2>&1 | sed 's/^/    /' >&2 || echo "    (not found)" >&2
+        exit 1
+    fi
+}
+
+# Verify /mnt/agent-data is writable
+if ! touch /mnt/agent-data/.write-test 2>/dev/null; then
+    echo "ERROR: /mnt/agent-data is not writable by $(id)" >&2
+    ls -la /mnt/agent-data 2>&1 || echo "/mnt/agent-data does not exist" >&2
+    exit 1
+fi
+rm -f /mnt/agent-data/.write-test
+
+run_cmd mkdir -p \
+    ...
+
+run_cmd ln -sfn ...
+```
+
+**Dockerfile.agents**: Change from:
+```dockerfile
+RUN chmod +x /tmp/symlinks.sh && /tmp/symlinks.sh && rm /tmp/symlinks.sh
+```
+to:
+```dockerfile
+RUN bash /tmp/symlinks.sh && rm /tmp/symlinks.sh
+```
+
+**docker.yml**: Add before "Build and push full image":
 ```yaml
 - name: Generate container files
   run: |
@@ -41,33 +89,18 @@ Potential causes:
     cp src/container/link-repair.sh src/container/generated/link-repair.sh
 ```
 
-**symlinks.sh** (via generator): Add error context:
-```sh
-#!/bin/sh
-# Generated from sync-manifest.toml - DO NOT EDIT
-set -e
-
-# Error handler to show which command failed
-trap 'echo "ERROR: Command failed at line $LINENO" >&2' ERR
-
-# Verify /mnt/agent-data is writable
-if ! touch /mnt/agent-data/.write-test 2>/dev/null; then
-    echo "ERROR: /mnt/agent-data is not writable by $(whoami)" >&2
-    ls -la /mnt/agent-data 2>&1 || echo "/mnt/agent-data does not exist" >&2
-    exit 1
-fi
-rm -f /mnt/agent-data/.write-test
-
-mkdir -p \
-    ...
-```
+And change cache scopes from `full` to `full-v2`.
 
 ## Acceptance
 
 - [ ] `docker.yml` runs generators before building agents layer
-- [ ] symlinks.sh includes error context on failure
+- [ ] symlinks.sh uses bash (`#!/usr/bin/env bash`) not sh
+- [ ] symlinks.sh logs each command before execution (via `run_cmd` wrapper)
+- [ ] On failure, symlinks.sh shows failing command, `id`, and `ls -ld` of relevant paths
+- [ ] Dockerfile.agents runs symlinks.sh with `bash` explicitly
+- [ ] Cache scope changed from `full` to `full-v2`
 - [ ] Build passes for both amd64 and arm64 platforms
-- [ ] No reliance on committed generated files for CI builds
+- [ ] CI regenerates and uses generated files (doesn't require them to be up-to-date in git)
 
 ## Done summary
 TBD

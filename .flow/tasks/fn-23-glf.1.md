@@ -2,7 +2,7 @@
 
 ## Description
 
-Refactor `.github/workflows/build-sysbox.yml` to eliminate QEMU cross-compilation by building each architecture on its native runner.
+Refactor `.github/workflows/build-sysbox.yml` to eliminate cross-compilation issues by building each architecture on its native runner.
 
 ### Changes required
 
@@ -12,12 +12,16 @@ Refactor `.github/workflows/build-sysbox.yml` to eliminate QEMU cross-compilatio
 
 2. **Remove QEMU setup** - no longer needed since each arch builds natively
 
-3. **Update job dependencies**
+3. **Keep `TARGET_ARCH` explicit** - set from `dpkg --print-architecture` to ensure sysbox-pkgr uses correct arch metadata, even on native runners
+
+4. **Add explicit dependency install step for arm64** - ensure sysbox-pkgr build requirements are installed (may differ between ubuntu-22.04 and ubuntu-24.04-arm runner images)
+
+5. **Update job dependencies**
    - `test-amd64: needs: build-amd64`
    - `test-arm64: needs: build-arm64`
    - `release: needs: [build-amd64, build-arm64, test-amd64, test-arm64]`
 
-4. **Preserve artifact naming** - keep `sysbox-ce-amd64` and `sysbox-ce-arm64` so download jobs work unchanged
+6. **Preserve artifact naming** - keep `sysbox-ce-amd64` and `sysbox-ce-arm64` so download jobs work unchanged
 
 ### File to modify
 
@@ -25,15 +29,18 @@ Refactor `.github/workflows/build-sysbox.yml` to eliminate QEMU cross-compilatio
 
 ### Build step notes
 
-For arm64 build job, can simplify since no cross-compilation:
-- Remove `TARGET_ARCH` environment variable (native arch is correct)
-- Remove QEMU conditional step entirely
+For both build jobs:
+- Set `TARGET_ARCH=$(dpkg --print-architecture)` to be explicit
+- Remove QEMU setup step from arm64 job
+- Add build dependency verification step
 
 ## Acceptance
 
 - [ ] `build-amd64` job runs on `ubuntu-22.04`
 - [ ] `build-arm64` job runs on `ubuntu-24.04-arm`
+- [ ] Both jobs set `TARGET_ARCH` explicitly (from `dpkg --print-architecture`)
 - [ ] No QEMU setup steps in workflow
+- [ ] `build-arm64` includes explicit dependency install for sysbox-pkgr requirements
 - [ ] `test-amd64` depends only on `build-amd64`
 - [ ] `test-arm64` depends only on `build-arm64`
 - [ ] `release` depends on all four jobs

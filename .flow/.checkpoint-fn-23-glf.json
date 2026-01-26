@@ -1,0 +1,61 @@
+{
+  "created_at": "2026-01-26T17:08:02.211410Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-23-glf",
+      "created_at": "2026-01-26T16:58:52.460077Z",
+      "depends_on_epics": [],
+      "id": "fn-23-glf",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-23-glf.md",
+      "status": "open",
+      "title": "Simplify sysbox CI: native arch builds",
+      "updated_at": "2026-01-26T16:58:52.460088Z"
+    },
+    "spec": "# fn-23-glf Fix CI build failures (sysbox + docker)\n\n## Overview\n\nTwo CI workflows are failing due to architecture and build issues:\n\n1. **build-sysbox.yml** - arm64 packages contain amd64 binaries (QEMU cross-compilation doesn't work for Go)\n2. **docker.yml** - symlinks.sh fails silently during buildx with exit code 1\n\n## Problem 1: Sysbox architecture mismatch\n\n```\ndpkg: error processing archive dist/sysbox-ce_0.6.7+containai.20260126.linux_arm64.deb (--install):\n package architecture (amd64) does not match system (arm64)\n```\n\n**Root cause**: QEMU emulation on amd64 hosts doesn't cross-compile Go binaries correctly. Go detects the host architecture, producing amd64 binaries even with `TARGET_ARCH=arm64`.\n\n**Solution**: Build each architecture on native runners. No QEMU, no cross-compilation.\n\n## Problem 2: Docker buildx symlinks.sh failure\n\n```\nERROR: failed to build: failed to solve: process \"/bin/bash -o pipefail -c chmod +x /tmp/symlinks.sh && /tmp/symlinks.sh && rm /tmp/symlinks.sh\" did not complete successfully: exit code: 1\n```\n\n**Root cause**: Silent failure - `set -e` exits without showing which command failed. Likely GHA cache staleness or permission issues with `/mnt/agent-data`.\n\n**Solution**: Add error reporting to symlinks.sh, run generators in CI workflow, bust stale cache.\n\n## Quick commands\n\n- `gh workflow run build-sysbox.yml` - trigger sysbox build\n- `gh workflow run docker.yml` - trigger docker build\n- `gh run list --workflow=build-sysbox.yml` - check sysbox runs\n- `gh run list --workflow=docker.yml` - check docker runs\n\n## Acceptance\n\n### Sysbox workflow\n- [ ] amd64 builds on ubuntu-22.04, tests on ubuntu-latest\n- [ ] arm64 builds on ubuntu-24.04-arm, tests on ubuntu-24.04-arm\n- [ ] No QEMU setup steps\n- [ ] Both architectures pass CI\n\n### Docker workflow\n- [ ] Generators run before building agents layer\n- [ ] symlinks.sh includes error context on failure\n- [ ] Build passes for both amd64 and arm64 platforms\n\n## References\n\n- `.github/workflows/build-sysbox.yml`\n- `.github/workflows/docker.yml`\n- `src/container/Dockerfile.agents`\n- `src/scripts/gen-dockerfile-symlinks.sh`\n"
+  },
+  "epic_id": "fn-23-glf",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T16:59:36.674119Z",
+        "depends_on": [],
+        "epic": "fn-23-glf",
+        "id": "fn-23-glf.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-23-glf.1.md",
+        "status": "todo",
+        "title": "Refactor build-sysbox.yml to use native runners per architecture",
+        "updated_at": "2026-01-26T16:59:36.674135Z"
+      },
+      "id": "fn-23-glf.1",
+      "runtime": null,
+      "spec": "# fn-23-glf.1 Refactor build-sysbox.yml to use native runners per architecture\n\n## Description\n\nRefactor `.github/workflows/build-sysbox.yml` to eliminate QEMU cross-compilation by building each architecture on its native runner.\n\n### Changes required\n\n1. **Split `build` job into `build-amd64` and `build-arm64`**\n   - `build-amd64`: runs on `ubuntu-22.04`, builds amd64 package\n   - `build-arm64`: runs on `ubuntu-24.04-arm`, builds arm64 package\n\n2. **Remove QEMU setup** - no longer needed since each arch builds natively\n\n3. **Update job dependencies**\n   - `test-amd64: needs: build-amd64`\n   - `test-arm64: needs: build-arm64`\n   - `release: needs: [build-amd64, build-arm64, test-amd64, test-arm64]`\n\n4. **Preserve artifact naming** - keep `sysbox-ce-amd64` and `sysbox-ce-arm64` so download jobs work unchanged\n\n### File to modify\n\n- `.github/workflows/build-sysbox.yml`\n\n### Build step notes\n\nFor arm64 build job, can simplify since no cross-compilation:\n- Remove `TARGET_ARCH` environment variable (native arch is correct)\n- Remove QEMU conditional step entirely\n\n## Acceptance\n\n- [ ] `build-amd64` job runs on `ubuntu-22.04`\n- [ ] `build-arm64` job runs on `ubuntu-24.04-arm`\n- [ ] No QEMU setup steps in workflow\n- [ ] `test-amd64` depends only on `build-amd64`\n- [ ] `test-arm64` depends only on `build-arm64`\n- [ ] `release` depends on all four jobs\n- [ ] Artifact names unchanged (`sysbox-ce-amd64`, `sysbox-ce-arm64`)\n- [ ] Workflow YAML validates (`gh workflow view build-sysbox.yml`)\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T17:02:44.148593Z",
+        "depends_on": [],
+        "epic": "fn-23-glf",
+        "id": "fn-23-glf.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-23-glf.2.md",
+        "status": "todo",
+        "title": "Fix symlinks.sh build failure in docker.yml workflow",
+        "updated_at": "2026-01-26T17:02:44.148605Z"
+      },
+      "id": "fn-23-glf.2",
+      "runtime": null,
+      "spec": "# fn-23-glf.2 Fix symlinks.sh build failure in docker.yml workflow\n\n## Description\n\nThe buildx build fails during the symlinks.sh execution:\n\n```\nERROR: failed to build: failed to solve: process \"/bin/bash -o pipefail -c chmod +x /tmp/symlinks.sh && /tmp/symlinks.sh && rm /tmp/symlinks.sh\" did not complete successfully: exit code: 1\n```\n\n### Root cause analysis\n\nThe failure is silent - `set -e` in symlinks.sh causes exit on first error but doesn't show which command failed.\n\nPotential causes:\n1. **GHA cache staleness** - The cache (`cache-from: type=gha,scope=full`) may serve old layers from before the `/mnt/agent-data` permission fix\n2. **Generated file drift** - `docker.yml` doesn't run generators, relies on committed files which may be stale\n3. **Buildx layer isolation** - Multi-platform buildx may not properly inherit `/mnt/agent-data` permissions from previous RUN\n\n### Solution\n\n1. **Run generators in CI** - Add a step to `docker.yml` to regenerate files before building\n2. **Add verbose error handling to symlinks.sh** - Replace `set -e` with explicit error checking so failures show context\n3. **Bust the GHA cache** - Change cache scope or add a comment to invalidate stale layers\n\n### Files to modify\n\n- `.github/workflows/docker.yml` - Add generator step before builds\n- `src/container/generated/symlinks.sh` - Add error reporting (regenerate via generator)\n- `src/scripts/gen-dockerfile-symlinks.sh` - Update template to include better error handling\n\n### Detailed changes\n\n**docker.yml**: Add step before \"Build and push full image\":\n```yaml\n- name: Generate container files\n  run: |\n    ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml src/container/generated/symlinks.sh\n    ./src/scripts/gen-init-dirs.sh src/sync-manifest.toml src/container/generated/init-dirs.sh\n    ./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml src/container/generated/link-spec.json\n    cp src/container/link-repair.sh src/container/generated/link-repair.sh\n```\n\n**symlinks.sh** (via generator): Add error context:\n```sh\n#!/bin/sh\n# Generated from sync-manifest.toml - DO NOT EDIT\nset -e\n\n# Error handler to show which command failed\ntrap 'echo \"ERROR: Command failed at line $LINENO\" >&2' ERR\n\n# Verify /mnt/agent-data is writable\nif ! touch /mnt/agent-data/.write-test 2>/dev/null; then\n    echo \"ERROR: /mnt/agent-data is not writable by $(whoami)\" >&2\n    ls -la /mnt/agent-data 2>&1 || echo \"/mnt/agent-data does not exist\" >&2\n    exit 1\nfi\nrm -f /mnt/agent-data/.write-test\n\nmkdir -p \\\n    ...\n```\n\n## Acceptance\n\n- [ ] `docker.yml` runs generators before building agents layer\n- [ ] symlinks.sh includes error context on failure\n- [ ] Build passes for both amd64 and arm64 platforms\n- [ ] No reliance on committed generated files for CI builds\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}
