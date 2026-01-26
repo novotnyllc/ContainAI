@@ -86,26 +86,40 @@ for i in $(seq 0 $((links_count - 1))); do
     remove_first=$(jq -r ".links[$i].remove_first" "$LINK_SPEC")
 
     # Check current state
+    # States: OK, MISSING, WRONG_TARGET, BROKEN (dangling), EXISTS_FILE, EXISTS_DIR
     if [[ -L "$link" ]]; then
         # It's a symlink - check if it points to the right target
         current_target=$(readlink "$link")
         if [[ "$current_target" == "$target" ]]; then
-            ((ok++))
-            continue
+            # Target text matches - but is the symlink dangling?
+            if [[ ! -e "$link" ]]; then
+                log "[BROKEN] $link -> $target (dangling symlink)"
+                ((broken++))
+            else
+                ((ok++))
+                continue
+            fi
         else
-            log "[BROKEN] $link -> $current_target (expected: $target)"
+            log "[WRONG_TARGET] $link -> $current_target (expected: $target)"
             ((broken++))
         fi
     elif [[ -e "$link" ]]; then
-        # Exists but is not a symlink
-        # remove_first can be true, false, 1, or 0 depending on JSON format
-        if [[ "$remove_first" == "true" || "$remove_first" == "1" || "$remove_first" -eq 1 ]] 2>/dev/null; then
-            log "[EXISTS] $link is a regular file/dir (will remove with R flag)"
-            ((broken++))
+        # Exists but is not a symlink - check if it's a file or directory
+        if [[ -d "$link" ]]; then
+            # Directory requires R flag to remove
+            # remove_first can be true, false, 1, or 0 depending on JSON format
+            if [[ "$remove_first" == "true" || "$remove_first" == "1" || "$remove_first" -eq 1 ]] 2>/dev/null; then
+                log "[EXISTS_DIR] $link is a directory (will remove with R flag)"
+                ((broken++))
+            else
+                log "[CONFLICT] $link exists as directory (no R flag - cannot fix)"
+                ((errors++))
+                continue
+            fi
         else
-            log "[CONFLICT] $link exists as regular file/dir (no R flag - cannot fix)"
-            ((errors++))
-            continue
+            # Regular file - ln -sfn can replace it without R flag
+            log "[EXISTS_FILE] $link is a regular file (will replace)"
+            ((broken++))
         fi
     else
         # Does not exist
@@ -129,31 +143,47 @@ for i in $(seq 0 $((links_count - 1))); do
             fi
         fi
 
-        # Remove existing if R flag or if it's a broken symlink
+        # Remove existing if needed before creating symlink
+        # - Symlinks: always safe to replace with ln -sfn
+        # - Regular files: ln -sfn can replace them
+        # - Directories: require R flag (rm -rf) before ln -sfn
         if [[ -e "$link" || -L "$link" ]]; then
-            # Check remove_first flag (can be true, 1, or integer 1)
-            can_remove=0
-            if [[ -L "$link" ]]; then
-                can_remove=1
-            elif [[ "$remove_first" == "true" || "$remove_first" == "1" ]]; then
-                can_remove=1
-            elif [[ "$remove_first" -eq 1 ]] 2>/dev/null; then
-                can_remove=1
-            fi
-            if [[ $can_remove -eq 1 ]]; then
-                if [[ "$MODE" == "dry-run" ]]; then
-                    log "[WOULD] Remove existing: $link"
-                else
-                    if ! rm -rf "$link"; then
-                        log_err "ERROR: Failed to remove: $link"
-                        ((errors++))
-                        continue
-                    fi
+            if [[ -d "$link" && ! -L "$link" ]]; then
+                # Directory (not symlink to directory) - requires R flag
+                # Check remove_first flag (can be true, 1, or integer 1)
+                can_remove=0
+                if [[ "$remove_first" == "true" || "$remove_first" == "1" ]]; then
+                    can_remove=1
+                elif [[ "$remove_first" -eq 1 ]] 2>/dev/null; then
+                    can_remove=1
                 fi
+                if [[ $can_remove -eq 1 ]]; then
+                    if [[ "$MODE" == "dry-run" ]]; then
+                        log "[WOULD] Remove directory: $link"
+                    else
+                        if ! rm -rf "$link"; then
+                            log_err "ERROR: Failed to remove directory: $link"
+                            ((errors++))
+                            continue
+                        fi
+                    fi
+                else
+                    log_err "ERROR: Cannot fix - directory exists without R flag: $link"
+                    ((errors++))
+                    continue
+                fi
+            elif [[ -L "$link" ]]; then
+                # Symlink - ln -sfn handles replacement, but log for dry-run
+                if [[ "$MODE" == "dry-run" ]]; then
+                    log "[WOULD] Replace symlink: $link"
+                fi
+                # ln -sfn will replace the symlink
             else
-                log_err "ERROR: Cannot fix - exists without R flag: $link"
-                ((errors++))
-                continue
+                # Regular file - ln -sfn will replace it
+                if [[ "$MODE" == "dry-run" ]]; then
+                    log "[WOULD] Replace file: $link"
+                fi
+                # ln -sfn will replace the file
             fi
         fi
 

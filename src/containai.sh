@@ -1266,10 +1266,17 @@ _containai_links_check_cmd() {
                 return 0
                 ;;
             *)
-                # Check if it's a directory path (positional workspace argument)
-                if [[ -z "$workspace" && -d "$1" ]]; then
-                    workspace="$1"
-                    workspace="${workspace/#\~/$HOME}"
+                # Positional argument: could be workspace path OR container name
+                if [[ -z "$workspace" && -z "$container_name" ]]; then
+                    local arg="$1"
+                    arg="${arg/#\~/$HOME}"
+                    if [[ -d "$arg" ]]; then
+                        # It's a directory - treat as workspace
+                        workspace="$arg"
+                    else
+                        # Not a directory - treat as container name
+                        container_name="$arg"
+                    fi
                     shift
                 else
                     echo "[ERROR] Unknown option: $1" >&2
@@ -1280,23 +1287,26 @@ _containai_links_check_cmd() {
         esac
     done
 
-    # Resolve workspace using platform-aware normalization
-    local resolved_workspace workspace_input
-    workspace_input="${workspace:-$PWD}"
-    resolved_workspace=$(_cai_normalize_path "$workspace_input")
-    if [[ ! -d "$resolved_workspace" ]]; then
-        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
-        return 1
+    # Resolve workspace using platform-aware normalization (if not using direct container name)
+    local resolved_workspace=""
+    if [[ -z "$container_name" ]]; then
+        local workspace_input
+        workspace_input="${workspace:-$PWD}"
+        resolved_workspace=$(_cai_normalize_path "$workspace_input")
+        if [[ ! -d "$resolved_workspace" ]]; then
+            echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+            return 1
+        fi
     fi
 
-    # Resolve context from config
+    # Resolve context from config (skip if using direct container name without config)
     local config_context_override=""
-    if [[ -n "$explicit_config" ]]; then
+    if [[ -n "$explicit_config" && -n "$resolved_workspace" ]]; then
         if ! config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config"); then
             echo "[ERROR] Failed to parse config: $explicit_config" >&2
             return 1
         fi
-    else
+    elif [[ -n "$resolved_workspace" ]]; then
         config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
     fi
 
@@ -1398,10 +1408,17 @@ _containai_links_fix_cmd() {
                 return 0
                 ;;
             *)
-                # Check if it's a directory path (positional workspace argument)
-                if [[ -z "$workspace" && -d "$1" ]]; then
-                    workspace="$1"
-                    workspace="${workspace/#\~/$HOME}"
+                # Positional argument: could be workspace path OR container name
+                if [[ -z "$workspace" && -z "$container_name" ]]; then
+                    local arg="$1"
+                    arg="${arg/#\~/$HOME}"
+                    if [[ -d "$arg" ]]; then
+                        # It's a directory - treat as workspace
+                        workspace="$arg"
+                    else
+                        # Not a directory - treat as container name
+                        container_name="$arg"
+                    fi
                     shift
                 else
                     echo "[ERROR] Unknown option: $1" >&2
@@ -1412,23 +1429,26 @@ _containai_links_fix_cmd() {
         esac
     done
 
-    # Resolve workspace using platform-aware normalization
-    local resolved_workspace workspace_input
-    workspace_input="${workspace:-$PWD}"
-    resolved_workspace=$(_cai_normalize_path "$workspace_input")
-    if [[ ! -d "$resolved_workspace" ]]; then
-        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
-        return 1
+    # Resolve workspace using platform-aware normalization (if not using direct container name)
+    local resolved_workspace=""
+    if [[ -z "$container_name" ]]; then
+        local workspace_input
+        workspace_input="${workspace:-$PWD}"
+        resolved_workspace=$(_cai_normalize_path "$workspace_input")
+        if [[ ! -d "$resolved_workspace" ]]; then
+            echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+            return 1
+        fi
     fi
 
-    # Resolve context from config
+    # Resolve context from config (skip if using direct container name without config)
     local config_context_override=""
-    if [[ -n "$explicit_config" ]]; then
+    if [[ -n "$explicit_config" && -n "$resolved_workspace" ]]; then
         if ! config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config"); then
             echo "[ERROR] Failed to parse config: $explicit_config" >&2
             return 1
         fi
-    else
+    elif [[ -n "$resolved_workspace" ]]; then
         config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
     fi
 
