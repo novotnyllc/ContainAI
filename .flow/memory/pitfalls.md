@@ -199,3 +199,6 @@ Bash -d and -f tests follow symlinks; check -L FIRST to detect symlinks before o
 
 ## 2026-01-26 manual [pitfall]
 When function can fail for distinct reasons (not found vs multiple matches), use distinct exit codes so callers can respond appropriately
+
+## 2026-01-26 manual [pitfall]
+When using docker inspect to check container existence, always use --type container to avoid matching images with the same name
