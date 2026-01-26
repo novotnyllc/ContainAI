@@ -62,15 +62,9 @@ while IFS='|' read -r source target container_link flags entry_type; do
         mkdir_targets+=("$volume_path")
     fi
 
-    # Build symlink command - combine rm and ln into single command string
+    # Build symlink commands as structured entries (source|target|needs_rm)
     # R flag means "remove existing path first" for any entry type (file or directory)
-    if [[ $needs_rm -eq 1 ]]; then
-        # Entry with R flag: rm -rf before ln -sfn
-        symlink_cmds+=("rm -rf ${container_path} && ln -sfn ${volume_path} ${container_path}")
-    else
-        # Regular symlink (file or directory without R flag)
-        symlink_cmds+=("ln -sfn ${volume_path} ${container_path}")
-    fi
+    symlink_cmds+=("${volume_path}|${container_path}|${needs_rm}")
 done < <("$PARSE_SCRIPT" "$MANIFEST_FILE")
 
 # Deduplicate mkdir targets
@@ -96,11 +90,22 @@ done
     printf 'run_cmd() {\n'
     printf '    printf '"'"'+ %%s\\n'"'"' "$*"\n'
     printf '    if ! "$@"; then\n'
+    printf '        local arg\n'
     printf '        printf '"'"'ERROR: Command failed: %%s\\n'"'"' "$*" >&2\n'
     printf '        printf '"'"'  id: %%s\\n'"'"' "$(id)" >&2\n'
     printf '        printf '"'"'  ls -ld /mnt/agent-data:\\n'"'"' >&2\n'
     printf '        # shellcheck disable=SC2012\n'
-    printf '        ls -ld /mnt/agent-data 2>&1 | sed '"'"'s/^/    /'"'"' >&2 || printf '"'"'    (not found)\\n'"'"' >&2\n'
+    printf '        ls -ld -- /mnt/agent-data 2>&1 | sed '"'"'s/^/    /'"'"' >&2 || printf '"'"'    (not found)\\n'"'"' >&2\n'
+    printf '        # Show ls -ld for any absolute path arguments\n'
+    printf '        for arg in "$@"; do\n'
+    printf '            case "$arg" in\n'
+    printf '                /home/*|/mnt/*)\n'
+    printf '                    printf '"'"'  ls -ld %%s:\\n'"'"' "$arg" >&2\n'
+    printf '                    # shellcheck disable=SC2012\n'
+    printf '                    ls -ld -- "$arg" 2>&1 | sed '"'"'s/^/    /'"'"' >&2 || printf '"'"'    (not found)\\n'"'"' >&2\n'
+    printf '                    ;;\n'
+    printf '            esac\n'
+    printf '        done\n'
     printf '        exit 1\n'
     printf '    fi\n'
     printf '}\n\n'
@@ -127,14 +132,14 @@ done
         printf '\n'
     fi
 
-    # Symlink commands - wrap each in run_cmd
-    for cmd in "${symlink_cmds[@]}"; do
-        # Handle compound commands (rm && ln) by wrapping in bash -c
-        if [[ "$cmd" == *" && "* ]]; then
-            printf 'run_cmd bash -c '"'"'%s'"'"'\n' "$cmd"
-        else
-            printf 'run_cmd %s\n' "$cmd"
+    # Symlink commands - emit separate rm and ln commands with proper quoting
+    for entry in "${symlink_cmds[@]}"; do
+        IFS='|' read -r volume_path container_path needs_rm <<< "$entry"
+        if [[ "$needs_rm" == "1" ]]; then
+            # Emit separate rm command before ln
+            printf 'run_cmd rm -rf -- "%s"\n' "$container_path"
         fi
+        printf 'run_cmd ln -sfn -- "%s" "%s"\n' "$volume_path" "$container_path"
     done
 } > "$OUTPUT_FILE"
 

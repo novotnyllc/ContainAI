@@ -8,11 +8,22 @@ set -euo pipefail
 run_cmd() {
     printf '+ %s\n' "$*"
     if ! "$@"; then
+        local arg
         printf 'ERROR: Command failed: %s\n' "$*" >&2
         printf '  id: %s\n' "$(id)" >&2
         printf '  ls -ld /mnt/agent-data:\n' >&2
         # shellcheck disable=SC2012
-        ls -ld /mnt/agent-data 2>&1 | sed 's/^/    /' >&2 || printf '    (not found)\n' >&2
+        ls -ld -- /mnt/agent-data 2>&1 | sed 's/^/    /' >&2 || printf '    (not found)\n' >&2
+        # Show ls -ld for any absolute path arguments
+        for arg in "$@"; do
+            case "$arg" in
+                /home/*|/mnt/*)
+                    printf '  ls -ld %s:\n' "$arg" >&2
+                    # shellcheck disable=SC2012
+                    ls -ld -- "$arg" 2>&1 | sed 's/^/    /' >&2 || printf '    (not found)\n' >&2
+                    ;;
+            esac
+        done
         exit 1
     fi
 }
@@ -74,67 +85,81 @@ run_cmd mkdir -p \
     /home/agent/.vscode-server/data/Machine \
     /home/agent/.vscode-server-insiders/data/Machine
 
-run_cmd ln -sfn /mnt/agent-data/claude/claude.json /home/agent/.claude.json
-run_cmd ln -sfn /mnt/agent-data/claude/credentials.json /home/agent/.claude/.credentials.json
-run_cmd ln -sfn /mnt/agent-data/claude/settings.json /home/agent/.claude/settings.json
-run_cmd ln -sfn /mnt/agent-data/claude/settings.local.json /home/agent/.claude/settings.local.json
-run_cmd bash -c 'rm -rf /home/agent/.claude/plugins && ln -sfn /mnt/agent-data/claude/plugins /home/agent/.claude/plugins'
-run_cmd bash -c 'rm -rf /home/agent/.claude/skills && ln -sfn /mnt/agent-data/claude/skills /home/agent/.claude/skills'
-run_cmd bash -c 'rm -rf /home/agent/.claude/commands && ln -sfn /mnt/agent-data/claude/commands /home/agent/.claude/commands'
-run_cmd bash -c 'rm -rf /home/agent/.claude/agents && ln -sfn /mnt/agent-data/claude/agents /home/agent/.claude/agents'
-run_cmd bash -c 'rm -rf /home/agent/.claude/hooks && ln -sfn /mnt/agent-data/claude/hooks /home/agent/.claude/hooks'
-run_cmd ln -sfn /mnt/agent-data/claude/CLAUDE.md /home/agent/.claude/CLAUDE.md
-run_cmd ln -sfn /mnt/agent-data/config/gh/hosts.yml /home/agent/.config/gh/hosts.yml
-run_cmd ln -sfn /mnt/agent-data/config/gh/config.yml /home/agent/.config/gh/config.yml
-run_cmd ln -sfn /mnt/agent-data/git/gitignore_global /home/agent/.gitignore_global
-run_cmd ln -sfn /mnt/agent-data/ssh/config /home/agent/.ssh/config
-run_cmd ln -sfn /mnt/agent-data/ssh/known_hosts /home/agent/.ssh/known_hosts
-run_cmd ln -sfn /mnt/agent-data/config/opencode/opencode.json /home/agent/.config/opencode/opencode.json
-run_cmd ln -sfn /mnt/agent-data/config/opencode/agents /home/agent/.config/opencode/agents
-run_cmd ln -sfn /mnt/agent-data/config/opencode/commands /home/agent/.config/opencode/commands
-run_cmd ln -sfn /mnt/agent-data/config/opencode/skills /home/agent/.config/opencode/skills
-run_cmd ln -sfn /mnt/agent-data/config/opencode/modes /home/agent/.config/opencode/modes
-run_cmd ln -sfn /mnt/agent-data/config/opencode/plugins /home/agent/.config/opencode/plugins
-run_cmd ln -sfn /mnt/agent-data/config/opencode/instructions.md /home/agent/.config/opencode/instructions.md
-run_cmd ln -sfn /mnt/agent-data/local/share/opencode/auth.json /home/agent/.local/share/opencode/auth.json
-run_cmd ln -sfn /mnt/agent-data/config/tmux /home/agent/.config/tmux
-run_cmd ln -sfn /mnt/agent-data/local/share/tmux /home/agent/.local/share/tmux
-run_cmd ln -sfn /mnt/agent-data/local/share/fonts /home/agent/.local/share/fonts
-run_cmd ln -sfn /mnt/agent-data/agents /home/agent/.agents
-run_cmd bash -c 'rm -rf /home/agent/.bash_aliases_imported && ln -sfn /mnt/agent-data/shell/bash_aliases /home/agent/.bash_aliases_imported'
-run_cmd ln -sfn /mnt/agent-data/shell/zshrc /home/agent/.zshrc
-run_cmd ln -sfn /mnt/agent-data/shell/zprofile /home/agent/.zprofile
-run_cmd ln -sfn /mnt/agent-data/shell/inputrc /home/agent/.inputrc
-run_cmd bash -c 'rm -rf /home/agent/.oh-my-zsh/custom && ln -sfn /mnt/agent-data/shell/oh-my-zsh-custom /home/agent/.oh-my-zsh/custom'
-run_cmd ln -sfn /mnt/agent-data/editors/vimrc /home/agent/.vimrc
-run_cmd bash -c 'rm -rf /home/agent/.vim && ln -sfn /mnt/agent-data/editors/vim /home/agent/.vim'
-run_cmd bash -c 'rm -rf /home/agent/.config/nvim && ln -sfn /mnt/agent-data/config/nvim /home/agent/.config/nvim'
-run_cmd ln -sfn /mnt/agent-data/config/starship.toml /home/agent/.config/starship.toml
-run_cmd bash -c 'rm -rf /home/agent/.config/oh-my-posh && ln -sfn /mnt/agent-data/config/oh-my-posh /home/agent/.config/oh-my-posh'
-run_cmd ln -sfn /mnt/agent-data/vscode-server/extensions /home/agent/.vscode-server/extensions
-run_cmd ln -sfn /mnt/agent-data/vscode-server/data/User/mcp /home/agent/.vscode-server/data/User/mcp
-run_cmd ln -sfn /mnt/agent-data/vscode-server/data/User/prompts /home/agent/.vscode-server/data/User/prompts
-run_cmd ln -sfn /mnt/agent-data/vscode-server-insiders/extensions /home/agent/.vscode-server-insiders/extensions
-run_cmd ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/mcp /home/agent/.vscode-server-insiders/data/User/mcp
-run_cmd ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/prompts /home/agent/.vscode-server-insiders/data/User/prompts
-run_cmd ln -sfn /mnt/agent-data/copilot/config.json /home/agent/.copilot/config.json
-run_cmd ln -sfn /mnt/agent-data/copilot/mcp-config.json /home/agent/.copilot/mcp-config.json
-run_cmd bash -c 'rm -rf /home/agent/.copilot/skills && ln -sfn /mnt/agent-data/copilot/skills /home/agent/.copilot/skills'
-run_cmd ln -sfn /mnt/agent-data/gemini/google_accounts.json /home/agent/.gemini/google_accounts.json
-run_cmd ln -sfn /mnt/agent-data/gemini/oauth_creds.json /home/agent/.gemini/oauth_creds.json
-run_cmd ln -sfn /mnt/agent-data/gemini/settings.json /home/agent/.gemini/settings.json
-run_cmd ln -sfn /mnt/agent-data/gemini/GEMINI.md /home/agent/.gemini/GEMINI.md
-run_cmd ln -sfn /mnt/agent-data/codex/config.toml /home/agent/.codex/config.toml
-run_cmd ln -sfn /mnt/agent-data/codex/auth.json /home/agent/.codex/auth.json
-run_cmd bash -c 'rm -rf /home/agent/.codex/skills && ln -sfn /mnt/agent-data/codex/skills /home/agent/.codex/skills'
-run_cmd ln -sfn /mnt/agent-data/aider/aider.conf.yml /home/agent/.aider.conf.yml
-run_cmd ln -sfn /mnt/agent-data/aider/aider.model.settings.yml /home/agent/.aider.model.settings.yml
-run_cmd ln -sfn /mnt/agent-data/continue/config.yaml /home/agent/.continue/config.yaml
-run_cmd ln -sfn /mnt/agent-data/continue/config.json /home/agent/.continue/config.json
-run_cmd ln -sfn /mnt/agent-data/cursor/mcp.json /home/agent/.cursor/mcp.json
-run_cmd bash -c 'rm -rf /home/agent/.cursor/rules && ln -sfn /mnt/agent-data/cursor/rules /home/agent/.cursor/rules'
-run_cmd bash -c 'rm -rf /home/agent/.cursor/extensions && ln -sfn /mnt/agent-data/cursor/extensions /home/agent/.cursor/extensions'
-run_cmd ln -sfn /mnt/agent-data/vscode-server/data/Machine/settings.json /home/agent/.vscode-server/data/Machine/settings.json
-run_cmd ln -sfn /mnt/agent-data/vscode-server/data/User/mcp.json /home/agent/.vscode-server/data/User/mcp.json
-run_cmd ln -sfn /mnt/agent-data/vscode-server-insiders/data/Machine/settings.json /home/agent/.vscode-server-insiders/data/Machine/settings.json
-run_cmd ln -sfn /mnt/agent-data/vscode-server-insiders/data/User/mcp.json /home/agent/.vscode-server-insiders/data/User/mcp.json
+run_cmd ln -sfn -- "/mnt/agent-data/claude/claude.json" "/home/agent/.claude.json"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/credentials.json" "/home/agent/.claude/.credentials.json"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/settings.json" "/home/agent/.claude/settings.json"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/settings.local.json" "/home/agent/.claude/settings.local.json"
+run_cmd rm -rf -- "/home/agent/.claude/plugins"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/plugins" "/home/agent/.claude/plugins"
+run_cmd rm -rf -- "/home/agent/.claude/skills"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/skills" "/home/agent/.claude/skills"
+run_cmd rm -rf -- "/home/agent/.claude/commands"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/commands" "/home/agent/.claude/commands"
+run_cmd rm -rf -- "/home/agent/.claude/agents"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/agents" "/home/agent/.claude/agents"
+run_cmd rm -rf -- "/home/agent/.claude/hooks"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/hooks" "/home/agent/.claude/hooks"
+run_cmd ln -sfn -- "/mnt/agent-data/claude/CLAUDE.md" "/home/agent/.claude/CLAUDE.md"
+run_cmd ln -sfn -- "/mnt/agent-data/config/gh/hosts.yml" "/home/agent/.config/gh/hosts.yml"
+run_cmd ln -sfn -- "/mnt/agent-data/config/gh/config.yml" "/home/agent/.config/gh/config.yml"
+run_cmd ln -sfn -- "/mnt/agent-data/git/gitignore_global" "/home/agent/.gitignore_global"
+run_cmd ln -sfn -- "/mnt/agent-data/ssh/config" "/home/agent/.ssh/config"
+run_cmd ln -sfn -- "/mnt/agent-data/ssh/known_hosts" "/home/agent/.ssh/known_hosts"
+run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/opencode.json" "/home/agent/.config/opencode/opencode.json"
+run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/agents" "/home/agent/.config/opencode/agents"
+run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/commands" "/home/agent/.config/opencode/commands"
+run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/skills" "/home/agent/.config/opencode/skills"
+run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/modes" "/home/agent/.config/opencode/modes"
+run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/plugins" "/home/agent/.config/opencode/plugins"
+run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/instructions.md" "/home/agent/.config/opencode/instructions.md"
+run_cmd ln -sfn -- "/mnt/agent-data/local/share/opencode/auth.json" "/home/agent/.local/share/opencode/auth.json"
+run_cmd ln -sfn -- "/mnt/agent-data/config/tmux" "/home/agent/.config/tmux"
+run_cmd ln -sfn -- "/mnt/agent-data/local/share/tmux" "/home/agent/.local/share/tmux"
+run_cmd ln -sfn -- "/mnt/agent-data/local/share/fonts" "/home/agent/.local/share/fonts"
+run_cmd ln -sfn -- "/mnt/agent-data/agents" "/home/agent/.agents"
+run_cmd rm -rf -- "/home/agent/.bash_aliases_imported"
+run_cmd ln -sfn -- "/mnt/agent-data/shell/bash_aliases" "/home/agent/.bash_aliases_imported"
+run_cmd ln -sfn -- "/mnt/agent-data/shell/zshrc" "/home/agent/.zshrc"
+run_cmd ln -sfn -- "/mnt/agent-data/shell/zprofile" "/home/agent/.zprofile"
+run_cmd ln -sfn -- "/mnt/agent-data/shell/inputrc" "/home/agent/.inputrc"
+run_cmd rm -rf -- "/home/agent/.oh-my-zsh/custom"
+run_cmd ln -sfn -- "/mnt/agent-data/shell/oh-my-zsh-custom" "/home/agent/.oh-my-zsh/custom"
+run_cmd ln -sfn -- "/mnt/agent-data/editors/vimrc" "/home/agent/.vimrc"
+run_cmd rm -rf -- "/home/agent/.vim"
+run_cmd ln -sfn -- "/mnt/agent-data/editors/vim" "/home/agent/.vim"
+run_cmd rm -rf -- "/home/agent/.config/nvim"
+run_cmd ln -sfn -- "/mnt/agent-data/config/nvim" "/home/agent/.config/nvim"
+run_cmd ln -sfn -- "/mnt/agent-data/config/starship.toml" "/home/agent/.config/starship.toml"
+run_cmd rm -rf -- "/home/agent/.config/oh-my-posh"
+run_cmd ln -sfn -- "/mnt/agent-data/config/oh-my-posh" "/home/agent/.config/oh-my-posh"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server/extensions" "/home/agent/.vscode-server/extensions"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server/data/User/mcp" "/home/agent/.vscode-server/data/User/mcp"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server/data/User/prompts" "/home/agent/.vscode-server/data/User/prompts"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/extensions" "/home/agent/.vscode-server-insiders/extensions"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/data/User/mcp" "/home/agent/.vscode-server-insiders/data/User/mcp"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/data/User/prompts" "/home/agent/.vscode-server-insiders/data/User/prompts"
+run_cmd ln -sfn -- "/mnt/agent-data/copilot/config.json" "/home/agent/.copilot/config.json"
+run_cmd ln -sfn -- "/mnt/agent-data/copilot/mcp-config.json" "/home/agent/.copilot/mcp-config.json"
+run_cmd rm -rf -- "/home/agent/.copilot/skills"
+run_cmd ln -sfn -- "/mnt/agent-data/copilot/skills" "/home/agent/.copilot/skills"
+run_cmd ln -sfn -- "/mnt/agent-data/gemini/google_accounts.json" "/home/agent/.gemini/google_accounts.json"
+run_cmd ln -sfn -- "/mnt/agent-data/gemini/oauth_creds.json" "/home/agent/.gemini/oauth_creds.json"
+run_cmd ln -sfn -- "/mnt/agent-data/gemini/settings.json" "/home/agent/.gemini/settings.json"
+run_cmd ln -sfn -- "/mnt/agent-data/gemini/GEMINI.md" "/home/agent/.gemini/GEMINI.md"
+run_cmd ln -sfn -- "/mnt/agent-data/codex/config.toml" "/home/agent/.codex/config.toml"
+run_cmd ln -sfn -- "/mnt/agent-data/codex/auth.json" "/home/agent/.codex/auth.json"
+run_cmd rm -rf -- "/home/agent/.codex/skills"
+run_cmd ln -sfn -- "/mnt/agent-data/codex/skills" "/home/agent/.codex/skills"
+run_cmd ln -sfn -- "/mnt/agent-data/aider/aider.conf.yml" "/home/agent/.aider.conf.yml"
+run_cmd ln -sfn -- "/mnt/agent-data/aider/aider.model.settings.yml" "/home/agent/.aider.model.settings.yml"
+run_cmd ln -sfn -- "/mnt/agent-data/continue/config.yaml" "/home/agent/.continue/config.yaml"
+run_cmd ln -sfn -- "/mnt/agent-data/continue/config.json" "/home/agent/.continue/config.json"
+run_cmd ln -sfn -- "/mnt/agent-data/cursor/mcp.json" "/home/agent/.cursor/mcp.json"
+run_cmd rm -rf -- "/home/agent/.cursor/rules"
+run_cmd ln -sfn -- "/mnt/agent-data/cursor/rules" "/home/agent/.cursor/rules"
+run_cmd rm -rf -- "/home/agent/.cursor/extensions"
+run_cmd ln -sfn -- "/mnt/agent-data/cursor/extensions" "/home/agent/.cursor/extensions"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server/data/Machine/settings.json" "/home/agent/.vscode-server/data/Machine/settings.json"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server/data/User/mcp.json" "/home/agent/.vscode-server/data/User/mcp.json"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/data/Machine/settings.json" "/home/agent/.vscode-server-insiders/data/Machine/settings.json"
+run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/data/User/mcp.json" "/home/agent/.vscode-server-insiders/data/User/mcp.json"
