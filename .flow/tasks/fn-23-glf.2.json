@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-26T17:02:44.148593Z",
+  "depends_on": [],
+  "epic": "fn-23-glf",
+  "id": "fn-23-glf.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-23-glf.2.md",
+  "status": "todo",
+  "title": "Fix symlinks.sh build failure in docker.yml workflow",
+  "updated_at": "2026-01-26T17:02:44.148605Z"
+}

@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-23-glf",
+  "created_at": "2026-01-26T16:58:52.460077Z",
+  "depends_on_epics": [],
+  "id": "fn-23-glf",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-23-glf.md",
+  "status": "open",
+  "title": "Simplify sysbox CI: native arch builds",
+  "updated_at": "2026-01-26T16:58:52.460088Z"
+}
