@@ -754,8 +754,9 @@ _containai_import_cmd() {
     if [[ -n "$container_name" ]]; then
         # --container mode: derive workspace and volume from container labels
         # Use multi-context lookup to find container (default, config-specified, secure)
+        # Pass PWD as workspace hint for config-based context discovery
         local found_context find_rc
-        if found_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
+        if found_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
             selected_context="$found_context"
         else
             find_rc=$?
@@ -1078,8 +1079,9 @@ _containai_export_cmd() {
     if [[ -n "$container_name" ]]; then
         # --container mode: derive volume from container labels
         # Use multi-context lookup to find container (config-specified, secure, default)
+        # Pass PWD as workspace hint for config-based context discovery
         local find_rc
-        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
+        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
             find_rc=$?
             if [[ $find_rc -eq 2 ]]; then
                 return 1  # Ambiguity error already printed
@@ -2114,8 +2116,9 @@ _containai_shell_cmd() {
     # and skip workspace-based resolution entirely
     if [[ -n "$container_name" ]]; then
         # Use _cai_find_container_by_name for consistent context search (config/secure first)
+        # Pass PWD as workspace hint for config-based context discovery
         local find_rc
-        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config"); then
+        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
             find_rc=$?
             if [[ $find_rc -eq 2 ]]; then
                 return 1  # Ambiguity error already printed
