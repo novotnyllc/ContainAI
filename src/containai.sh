@@ -762,11 +762,8 @@ _containai_import_cmd() {
             return 1
         fi
 
-        # Build docker command with context
-        local -a docker_cmd=(docker)
-        if [[ -n "$selected_context" ]]; then
-            docker_cmd=(docker --context "$selected_context")
-        fi
+        # Build docker command with context (always use --context, even for "default")
+        local -a docker_cmd=(docker --context "$selected_context")
 
         # Check if container is managed by ContainAI
         # Use {{with}} template to output empty string for missing labels (avoids <no value>)
@@ -834,11 +831,8 @@ _containai_import_cmd() {
     # For hot-reload mode, validate container is running before proceeding
     local resolved_container_name=""
     if [[ "$hot_reload" == "true" ]]; then
-        # Build docker command with context
-        local -a docker_cmd=(docker)
-        if [[ -n "$selected_context" ]]; then
-            docker_cmd=(docker --context "$selected_context")
-        fi
+        # Build docker command with context (always use --context)
+        local -a docker_cmd=(docker --context "$selected_context")
 
         if [[ -n "$container_name" ]]; then
             # --container was provided, use it directly
@@ -1084,11 +1078,8 @@ _containai_export_cmd() {
             return 1
         fi
 
-        # Build docker command with context
-        local -a docker_cmd=(docker)
-        if [[ -n "$selected_context" ]]; then
-            docker_cmd=(docker --context "$selected_context")
-        fi
+        # Build docker command with context (always use --context)
+        local -a docker_cmd=(docker --context "$selected_context")
 
         # Check if container is managed by ContainAI
         # Use {{with}} template to output empty string for missing labels (avoids <no value>)
@@ -1181,10 +1172,15 @@ _containai_stop_cmd() {
     local all_flag=false
     for arg in "$@"; do
         case "$arg" in
+            --name | --name=*)
+                # --name is no longer supported on stop - use --container instead
+                echo "[ERROR] --name is no longer supported. Use --container instead." >&2
+                return 1
+                ;;
             --container)
                 # Value is next arg - need to find it
                 local found_container=false
-                local prev=""
+                local prev="" a
                 for a in "$@"; do
                     if [[ "$prev" == "--container" ]]; then
                         # Reject values that look like flags
@@ -1252,11 +1248,8 @@ _containai_stop_cmd() {
             return 1
         fi
 
-        # Build docker command with context
-        local -a docker_cmd=(docker)
-        if [[ -n "$selected_context" ]]; then
-            docker_cmd=(docker --context "$selected_context")
-        fi
+        # Build docker command with context (always use --context)
+        local -a docker_cmd=(docker --context "$selected_context")
 
         # Check if container is managed by ContainAI
         local is_managed
@@ -1271,7 +1264,7 @@ _containai_stop_cmd() {
             local ssh_port
             ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context" 2>/dev/null) || ssh_port=""
 
-            echo "Removing: $container_name${selected_context:+ [context: $selected_context]}"
+            echo "Removing: $container_name [context: $selected_context]"
             if "${docker_cmd[@]}" rm -f "$container_name" >/dev/null 2>&1; then
                 # Clean up SSH config
                 if [[ -n "$ssh_port" ]]; then
@@ -1285,7 +1278,7 @@ _containai_stop_cmd() {
                 return 1
             fi
         else
-            echo "Stopping: $container_name${selected_context:+ [context: $selected_context]}"
+            echo "Stopping: $container_name [context: $selected_context]"
             if "${docker_cmd[@]}" stop "$container_name" >/dev/null 2>&1; then
                 echo "Done."
             else
@@ -2083,11 +2076,8 @@ _containai_shell_cmd() {
             return 1
         fi
 
-        # Build docker command prefix
-        local -a docker_cmd=(docker)
-        if [[ -n "$selected_context" ]]; then
-            docker_cmd=(docker --context "$selected_context")
-        fi
+        # Build docker command prefix (always use --context)
+        local -a docker_cmd=(docker --context "$selected_context")
 
         # Verify container is managed by ContainAI
         # Use {{with}} template to output empty string for missing labels (avoids <no value>)
@@ -2174,11 +2164,8 @@ _containai_shell_cmd() {
             fi
         fi
 
-        # Build docker command prefix
-        local -a docker_cmd=(docker)
-        if [[ -n "$selected_context" ]]; then
-            docker_cmd=(docker --context "$selected_context")
-        fi
+        # Build docker command prefix (always use --context)
+        local -a docker_cmd=(docker --context "$selected_context")
 
         # Resolve container name using shared lookup helper
         # Priority: existing container lookup > new name for creation
@@ -2210,11 +2197,8 @@ _containai_shell_cmd() {
         fi
     fi
 
-    # Build docker command prefix (may already be set in --container branch)
-    local -a docker_cmd=(docker)
-    if [[ -n "$selected_context" ]]; then
-        docker_cmd=(docker --context "$selected_context")
-    fi
+    # Build docker command prefix (always use --context)
+    local -a docker_cmd=(docker --context "$selected_context")
 
     # Handle --dry-run flag: delegate to _containai_start_container with --shell --dry-run
     if [[ "$dry_run_flag" == "true" ]]; then

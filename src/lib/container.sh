@@ -436,23 +436,19 @@ _cai_find_workspace_container() {
 #   $3 = workspace_path (optional, for discovering config when explicit_config not provided)
 #
 # Returns:
-#   0 with found context on stdout (empty string means default context)
+#   0 with found context on stdout (always returns context name, including "default")
 #   1 if container not found in any context
 #
 # Usage:
 #   if found_context=$(_cai_find_container_by_name "my-container" "$config_file" "$workspace"); then
-#       # found_context is empty string for default, or context name
-#       if [[ -n "$found_context" ]]; then
-#           docker --context "$found_context" inspect my-container
-#       else
-#           docker inspect my-container
-#       fi
+#       # Always use --context explicitly (even for "default")
+#       docker --context "$found_context" inspect my-container
 #   fi
 _cai_find_container_by_name() {
     local container_name="${1:-}"
     local explicit_config="${2:-}"
     local workspace_path="${3:-$PWD}"
-    local ctx cfg_ctx item
+    local ctx cfg_ctx _check_item
 
     if [[ -z "$container_name" ]]; then
         echo "[ERROR] container name is required" >&2
@@ -461,15 +457,12 @@ _cai_find_container_by_name() {
 
     # Build list of contexts to check - prioritize configured/secure contexts over default
     local -a contexts_to_check=()
-    local _ctx_item
 
-    # Helper function to check if value is in array (inline loop to avoid global function pollution)
-    # Usage: if _cai_ctx_in_list "value" "${array[@]}"; then ...
-    _cai_ctx_in_list() {
-        local _needle="$1"
-        shift
-        for _ctx_item in "$@"; do
-            [[ "$_ctx_item" == "$_needle" ]] && return 0
+    # Inline helper: check if value is already in array (avoids nested function global pollution)
+    _ctx_already_added() {
+        local needle="$1"
+        for _check_item in "${contexts_to_check[@]}"; do
+            [[ "$_check_item" == "$needle" ]] && return 0
         done
         return 1
     }
@@ -477,26 +470,26 @@ _cai_find_container_by_name() {
     # 1. Add secure engine context from explicit config if provided
     if [[ -n "$explicit_config" ]]; then
         cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "$explicit_config" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _cai_ctx_in_list "$cfg_ctx" "${contexts_to_check[@]}"; then
+        if [[ -n "$cfg_ctx" ]] && ! _ctx_already_added "$cfg_ctx"; then
             contexts_to_check+=("$cfg_ctx")
         fi
     else
         # 2. Try discovered config (same as cai run does)
         cfg_ctx=$(_containai_resolve_secure_engine_context "$workspace_path" "" 2>/dev/null) || cfg_ctx=""
-        if [[ -n "$cfg_ctx" ]] && ! _cai_ctx_in_list "$cfg_ctx" "${contexts_to_check[@]}"; then
+        if [[ -n "$cfg_ctx" ]] && ! _ctx_already_added "$cfg_ctx"; then
             contexts_to_check+=("$cfg_ctx")
         fi
     fi
 
     # 3. Add standard secure context if it exists
-    if ! _cai_ctx_in_list "$_CAI_CONTAINAI_DOCKER_CONTEXT" "${contexts_to_check[@]}"; then
+    if ! _ctx_already_added "$_CAI_CONTAINAI_DOCKER_CONTEXT"; then
         if docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
             contexts_to_check+=("$_CAI_CONTAINAI_DOCKER_CONTEXT")
         fi
     fi
 
     # 4. Add default context last (lowest priority)
-    if ! _cai_ctx_in_list "default" "${contexts_to_check[@]}"; then
+    if ! _ctx_already_added "default"; then
         contexts_to_check+=("default")
     fi
 
@@ -504,12 +497,8 @@ _cai_find_container_by_name() {
     # Use DOCKER_CONTEXT= DOCKER_HOST= to avoid env leakage, and always use --context
     for ctx in "${contexts_to_check[@]}"; do
         if DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" inspect --type container -- "$container_name" >/dev/null 2>&1; then
-            # Found! Return context (empty string for default so callers use DOCKER_CONTEXT= prefix)
-            if [[ "$ctx" == "default" ]]; then
-                printf ''
-            else
-                printf '%s' "$ctx"
-            fi
+            # Found! Return context name (always include "default" so callers use --context)
+            printf '%s' "$ctx"
             return 0
         fi
     done
