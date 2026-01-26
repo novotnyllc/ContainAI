@@ -938,7 +938,8 @@ _cai_update_sysbox() {
 
 # List running ContainAI containers in the containai-docker engine
 # Uses DOCKER_HOST directly (not context) for reliability - context may be misconfigured
-# Outputs: container names (one per line) on stdout
+# Detects both labeled containers (containai.managed=true) AND legacy ancestor-based containers
+# Outputs: "container_id<TAB>container_name" (one per line) on stdout
 # Returns: 0=success (may output empty if no containers), 1=docker unavailable or query failed
 # IMPORTANT: This function is fail-closed - returns non-zero if we cannot verify container state
 _cai_list_running_containai_containers() {
@@ -952,34 +953,49 @@ _cai_list_running_containai_containers() {
         return 1  # Cannot verify container state without docker CLI
     fi
 
-    # List running containers with the containai.managed label
+    # List running containers - both labeled AND legacy ancestor-based
     # Use DOCKER_HOST directly for reliability (context may be outdated/misconfigured)
     # Clear DOCKER_CONTEXT to prevent environment override
-    # Use fallback for label in case container.sh isn't loaded yet
     local docker_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
     local label="${_CONTAINAI_LABEL:-containai.managed=true}"
-    local containers
+    local repo="${_CONTAINAI_DEFAULT_REPO:-containai}"
+    local labeled_containers legacy_containers all_ids
 
     # IMPORTANT: Fail-closed - if docker ps fails, return non-zero
     # This prevents proceeding with updates when we can't verify container state
-    if ! containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$label" 2>&1); then
+
+    # Query labeled containers (new style)
+    if ! labeled_containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$label" 2>&1); then
         return 1  # Query failed - cannot verify container state
     fi
 
-    if [[ -n "$containers" ]]; then
-        # Get container names for display
+    # Query legacy ancestor-based containers (containai:* images)
+    # Note: ancestor filter matches any tag, so we query for common tags
+    local legacy_claude legacy_gemini
+    legacy_claude=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "ancestor=${repo}:latest" 2>/dev/null) || legacy_claude=""
+    legacy_gemini=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "ancestor=${repo}:gemini" 2>/dev/null) || legacy_gemini=""
+    legacy_containers=$(printf '%s\n%s' "$legacy_claude" "$legacy_gemini" | sed '/^$/d')
+
+    # Combine and dedupe container IDs
+    all_ids=$(printf '%s\n%s' "$labeled_containers" "$legacy_containers" | sed '/^$/d' | sort -u)
+
+    if [[ -n "$all_ids" ]]; then
+        # Get container ID and name for each (single docker inspect call for efficiency)
         local container_id
         while IFS= read -r container_id; do
             if [[ -n "$container_id" ]]; then
-                DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker inspect --format '{{.Name}}' -- "$container_id" 2>/dev/null | sed 's|^/||'
+                local name
+                name=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker inspect --format '{{.Name}}' -- "$container_id" 2>/dev/null | sed 's|^/||') || name="$container_id"
+                printf '%s\t%s\n' "$container_id" "$name"
             fi
-        done <<< "$containers"
+        done <<< "$all_ids"
     fi
     return 0
 }
 
 # Stop all running ContainAI containers in the containai-docker engine
 # Uses DOCKER_HOST directly (not context) for reliability
+# Stops by container ID (not name) and treats "already stopped" as success
 # Arguments: $1 = dry_run ("true" to simulate)
 #            $2 = timeout in seconds (default 60)
 # Returns: 0=success, 1=failure (logs stopped container names via _cai_info)
@@ -1001,8 +1017,8 @@ _cai_stop_containai_containers() {
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_info "[DRY-RUN] Would stop containers:"
-        local name
-        while IFS= read -r name; do
+        local container_id name
+        while IFS=$'\t' read -r container_id name; do
             if [[ -n "$name" ]]; then
                 _cai_info "[DRY-RUN]   - $name"
             fi
@@ -1012,16 +1028,28 @@ _cai_stop_containai_containers() {
 
     _cai_step "Stopping ContainAI containers"
 
-    local name stop_count=0 fail_count=0
-    while IFS= read -r name; do
-        if [[ -n "$name" ]]; then
-            _cai_info "  Stopping: $name"
-            if DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker stop -t "$timeout" -- "$name" >/dev/null 2>&1; then
+    local container_id name stop_count=0 fail_count=0
+    while IFS=$'\t' read -r container_id name; do
+        if [[ -n "$container_id" ]]; then
+            _cai_info "  Stopping: $name ($container_id)"
+            # Stop by container ID (not name) for reliability
+            # Check if container is still running before counting as failure
+            if DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker stop -t "$timeout" -- "$container_id" >/dev/null 2>&1; then
                 _cai_info "  Stopped: $name"
                 stop_count=$((stop_count + 1))
             else
-                _cai_warn "  Failed to stop: $name"
-                fail_count=$((fail_count + 1))
+                # Check if container is actually still running (race: may have stopped between list and stop)
+                local state
+                state=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker inspect --format '{{.State.Running}}' -- "$container_id" 2>/dev/null) || state=""
+                if [[ "$state" == "false" ]] || [[ -z "$state" ]]; then
+                    # Container already stopped or removed - treat as success (race condition)
+                    _cai_info "  Already stopped: $name"
+                    stop_count=$((stop_count + 1))
+                else
+                    # Container still running but stop failed - this is a real failure
+                    _cai_warn "  Failed to stop: $name"
+                    fail_count=$((fail_count + 1))
+                fi
             fi
         fi
     done <<< "$containers"
@@ -1146,8 +1174,8 @@ _cai_update_linux_wsl2() {
         if [[ -n "$running_containers" ]]; then
             if [[ "$dry_run" == "true" ]]; then
                 _cai_info "[DRY-RUN] Running containers that would be affected:"
-                local name
-                while IFS= read -r name; do
+                local container_id name
+                while IFS=$'\t' read -r container_id name; do
                     if [[ -n "$name" ]]; then
                         _cai_info "[DRY-RUN]   - $name"
                     fi
@@ -1164,8 +1192,8 @@ _cai_update_linux_wsl2() {
                 _cai_error "Cannot update: running ContainAI containers detected"
                 printf '\n' >&2
                 _cai_error "Running containers:"
-                local name
-                while IFS= read -r name; do
+                local container_id name
+                while IFS=$'\t' read -r container_id name; do
                     if [[ -n "$name" ]]; then
                         _cai_error "  - $name"
                     fi
