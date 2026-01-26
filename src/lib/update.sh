@@ -5,16 +5,19 @@
 # This file must be sourced, not executed directly.
 #
 # Provides:
-#   _cai_update()                     - Main update entry point
-#   _cai_update_help()                - Show update command help
-#   _cai_update_linux_wsl2()          - Update Linux/WSL2 installation
-#   _cai_update_macos()               - Update macOS Lima installation
-#   _cai_update_macos_packages()      - Run apt update/upgrade in Lima VM
-#   _cai_update_macos_recreate_vm()   - Recreate Lima VM (delete and create fresh)
-#   _cai_update_systemd_unit()        - Update systemd unit if template changed
-#   _cai_update_docker_context()      - Update Docker context if socket changed
-#   _cai_update_check()               - Rate-limited check for dockerd bundle updates
-#   _cai_update_dockerd_bundle()      - Update dockerd bundle to latest version
+#   _cai_update()                         - Main update entry point
+#   _cai_update_help()                    - Show update command help
+#   _cai_update_linux_wsl2()              - Update Linux/WSL2 installation
+#   _cai_update_macos()                   - Update macOS Lima installation
+#   _cai_update_macos_packages()          - Run apt update/upgrade in Lima VM
+#   _cai_update_macos_recreate_vm()       - Recreate Lima VM (delete and create fresh)
+#   _cai_update_systemd_unit()            - Update systemd unit if template changed
+#   _cai_update_docker_context()          - Update Docker context if socket changed
+#   _cai_update_check()                   - Rate-limited check for dockerd bundle updates
+#   _cai_update_dockerd_bundle()          - Update dockerd bundle to latest version
+#   _cai_list_running_containai_containers() - List running containers in containai-docker
+#   _cai_stop_containai_containers()      - Stop running containers before update
+#   _cai_update_check_required()          - Check if updates requiring restart are needed
 #
 # Purpose:
 #   Ensures existing installation is in required state and updates dependencies
@@ -77,11 +80,12 @@ Ensures existing installation is in required state and updates dependencies
 to their latest versions. Safe to run multiple times (idempotent).
 
 Options:
-  --dry-run         Show what would be done without making changes
-  --force           Skip confirmation prompts (e.g., VM recreation on macOS)
-  --lima-recreate   Force Lima VM recreation (macOS only; bypasses hash check)
-  --verbose, -v     Show verbose output
-  -h, --help        Show this help message
+  --dry-run           Show what would be done without making changes
+  --stop-containers   Stop running containers before update (Linux/WSL2)
+  --force             Skip confirmation prompts (e.g., VM recreation on macOS)
+  --lima-recreate     Force Lima VM recreation (macOS only; bypasses hash check)
+  --verbose, -v       Show verbose output
+  -h, --help          Show this help message
 
 What Gets Updated:
 
@@ -99,6 +103,14 @@ What Gets Updated:
     - Docker context verification
     - Installation verification
 
+Container Handling (Linux/WSL2):
+  When updates are required (sysbox, dockerd bundle, or systemd unit changes),
+  running ContainAI containers must be stopped first:
+
+  - Default: Update ABORTS with list of running containers if updates needed
+  - --stop-containers: Gracefully stops containers, then proceeds with update
+  - --dry-run: Shows what would be stopped without stopping
+
 Notes:
   - Template changes are detected by comparing SHA-256 hashes
   - VM recreation only occurs when template changes or --lima-recreate is used
@@ -108,10 +120,11 @@ Notes:
   - Use 'cai doctor' after update to verify installation
 
 Examples:
-  cai update                    Update installation
-  cai update --dry-run          Preview what would be updated
-  cai update --force            Update without confirmation prompts
-  cai update --lima-recreate    Force VM recreation (macOS)
+  cai update                       Update installation (aborts if containers running)
+  cai update --dry-run             Preview what would be updated
+  cai update --stop-containers     Stop containers before update
+  cai update --force               Update without confirmation prompts
+  cai update --lima-recreate       Force VM recreation (macOS)
 EOF
 }
 
@@ -920,6 +933,143 @@ _cai_update_sysbox() {
 }
 
 # ==============================================================================
+# Container Management for Updates
+# ==============================================================================
+
+# List running ContainAI containers in the containai-docker context
+# Outputs: container names (one per line)
+# Returns: 0=success (may output empty), 1=docker unavailable
+_cai_list_running_containai_containers() {
+    # Check if containai-docker context exists
+    if ! docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        return 0  # No context = no containers to list
+    fi
+
+    # List running containers with the containai.managed label
+    # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to prevent env override
+    local containers
+    containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" ps -q --filter "label=$_CONTAINAI_LABEL" 2>/dev/null) || containers=""
+
+    if [[ -n "$containers" ]]; then
+        # Get container names for display
+        local container_id
+        while IFS= read -r container_id; do
+            if [[ -n "$container_id" ]]; then
+                DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's|^/||'
+            fi
+        done <<< "$containers"
+    fi
+    return 0
+}
+
+# Stop all running ContainAI containers in the containai-docker context
+# Arguments: $1 = dry_run ("true" to simulate)
+#            $2 = timeout in seconds (default 60)
+# Outputs: list of stopped containers via stdout
+# Returns: 0=success, 1=failure
+_cai_stop_containai_containers() {
+    local dry_run="${1:-false}"
+    local timeout="${2:-60}"
+
+    local containers
+    containers=$(_cai_list_running_containai_containers)
+
+    if [[ -z "$containers" ]]; then
+        return 0
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would stop containers:"
+        local name
+        while IFS= read -r name; do
+            if [[ -n "$name" ]]; then
+                _cai_info "[DRY-RUN]   - $name"
+            fi
+        done <<< "$containers"
+        return 0
+    fi
+
+    _cai_step "Stopping ContainAI containers"
+
+    local name stop_count=0 fail_count=0
+    while IFS= read -r name; do
+        if [[ -n "$name" ]]; then
+            _cai_info "  Stopping: $name"
+            if DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" stop -t "$timeout" -- "$name" >/dev/null 2>&1; then
+                printf '%s\n' "$name"
+                stop_count=$((stop_count + 1))
+            else
+                _cai_warn "  Failed to stop: $name"
+                fail_count=$((fail_count + 1))
+            fi
+        fi
+    done <<< "$containers"
+
+    if [[ $fail_count -gt 0 ]]; then
+        _cai_warn "Stopped $stop_count containers, $fail_count failed"
+        return 1
+    fi
+
+    _cai_ok "Stopped $stop_count container(s)"
+    return 0
+}
+
+# Check if any updates are required that would affect running containers
+# Returns: 0=updates needed (sysbox, dockerd bundle, or unit change), 1=no updates needed
+# Outputs: Sets _CAI_UPDATE_REASON with update type(s)
+_cai_update_check_required() {
+    _CAI_UPDATE_REASON=""
+    local reasons=""
+
+    # Check systemd unit needs update
+    local unit_status
+    if _cai_update_unit_needs_update; then
+        unit_status=0
+    else
+        unit_status=$?
+    fi
+    if [[ $unit_status -eq 0 ]]; then
+        reasons="${reasons}unit "
+    fi
+
+    # Check dockerd bundle update
+    if _cai_dockerd_bundle_installed; then
+        local arch
+        arch=$(uname -m)
+        case "$arch" in
+            x86_64)  arch="x86_64" ;;
+            aarch64) arch="aarch64" ;;
+        esac
+        local latest_version installed_version
+        latest_version=$(_cai_update_check_get_latest_version "$arch" 2>/dev/null) || latest_version=""
+        installed_version=$(_cai_dockerd_bundle_version 2>/dev/null) || installed_version=""
+        if [[ -n "$latest_version" ]] && [[ -n "$installed_version" ]]; then
+            if _cai_version_is_greater "$latest_version" "$installed_version"; then
+                reasons="${reasons}dockerd "
+            fi
+        fi
+    fi
+
+    # Check sysbox update
+    local sysbox_arch
+    sysbox_arch=$(uname -m)
+    case "$sysbox_arch" in
+        x86_64)  sysbox_arch="amd64" ;;
+        aarch64) sysbox_arch="arm64" ;;
+    esac
+    if _cai_sysbox_needs_update "$sysbox_arch" 2>/dev/null; then
+        reasons="${reasons}sysbox "
+    fi
+
+    _CAI_UPDATE_REASON="${reasons% }"  # Trim trailing space
+
+    if [[ -n "$reasons" ]]; then
+        return 0  # Updates needed
+    fi
+    return 1  # No updates needed
+}
+
+# ==============================================================================
 # Linux/WSL2 Update
 # ==============================================================================
 
@@ -927,11 +1077,13 @@ _cai_update_sysbox() {
 # Arguments: $1 = dry_run ("true" to simulate)
 #            $2 = verbose ("true" for verbose output)
 #            $3 = force ("true" to skip confirmation prompts)
-# Returns: 0=success, 1=failure
+#            $4 = stop_containers ("true" to stop containers before update)
+# Returns: 0=success, 1=failure, 2=aborted due to running containers
 _cai_update_linux_wsl2() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
     local force="${3:-false}"
+    local stop_containers="${4:-false}"
     local overall_status=0
 
     _cai_info "Updating Linux/WSL2 installation"
@@ -954,30 +1106,82 @@ _cai_update_linux_wsl2() {
     fi
     _cai_info "Dockerd bundle installed"
 
-    # Step 3: Check/update systemd unit
+    # Step 3: Check if updates are required and handle running containers
+    _cai_step "Checking for updates"
+    local updates_needed="false"
+    if _cai_update_check_required; then
+        updates_needed="true"
+        _cai_info "Updates required: $_CAI_UPDATE_REASON"
+
+        # Check for running containers
+        local running_containers
+        running_containers=$(_cai_list_running_containai_containers)
+
+        if [[ -n "$running_containers" ]]; then
+            if [[ "$dry_run" == "true" ]]; then
+                _cai_info "[DRY-RUN] Running containers that would be affected:"
+                local name
+                while IFS= read -r name; do
+                    if [[ -n "$name" ]]; then
+                        _cai_info "[DRY-RUN]   - $name"
+                    fi
+                done <<< "$running_containers"
+                _cai_info "[DRY-RUN] Would require --stop-containers flag to proceed"
+            elif [[ "$stop_containers" == "true" ]]; then
+                # Stop containers before proceeding
+                if ! _cai_stop_containai_containers "false" 60; then
+                    _cai_error "Failed to stop all containers"
+                    return 1
+                fi
+            else
+                # Abort with actionable message
+                _cai_error "Cannot update: running ContainAI containers detected"
+                printf '\n' >&2
+                _cai_error "Running containers:"
+                local name
+                while IFS= read -r name; do
+                    if [[ -n "$name" ]]; then
+                        _cai_error "  - $name"
+                    fi
+                done <<< "$running_containers"
+                printf '\n' >&2
+                _cai_error "Updates required ($_CAI_UPDATE_REASON) would restart the Docker service,"
+                _cai_error "which would disrupt running containers."
+                printf '\n' >&2
+                _cai_info "To proceed, run with --stop-containers to safely stop containers first:"
+                _cai_info "  cai update --stop-containers"
+                printf '\n' >&2
+                return 2
+            fi
+        fi
+    else
+        _cai_info "No component updates required"
+    fi
+
+    # Step 4: Check/update systemd unit
     if ! _cai_update_systemd_unit "$dry_run" "$verbose"; then
         overall_status=1
     fi
 
-    # Step 4: Check/update Docker context
+    # Step 5: Check/update Docker context
     if ! _cai_update_docker_context "$dry_run"; then
         overall_status=1
     fi
 
-    # Step 5: Check/update dockerd bundle version (with prompts)
+    # Step 6: Check/update dockerd bundle version (with prompts)
     # This is called after context/unit updates per spec
     if ! _cai_update_dockerd_bundle "$force" "$dry_run" "$verbose"; then
         _cai_warn "Dockerd bundle update had issues (continuing anyway)"
         # Don't fail overall - bundle might already be at latest version
     fi
 
-    # Step 6: Check/update sysbox version
+    # Step 7: Check/update sysbox version
     if ! _cai_update_sysbox "$force" "$dry_run" "$verbose"; then
         _cai_warn "Sysbox update had issues (continuing anyway)"
         # Don't fail overall - sysbox might already be at latest version
     fi
 
-    # Step 7: Verify installation
+    # Step 8: Verify installation
     if [[ "$dry_run" != "true" ]]; then
         _cai_step "Verifying installation"
         if ! _cai_verify_isolated_docker "false" "$verbose"; then
@@ -1222,11 +1426,12 @@ _cai_update_macos() {
 
 # Main update entry point
 # Arguments: parsed from command line
-# Returns: 0=success, 1=failure, 130=cancelled
+# Returns: 0=success, 1=failure, 2=aborted (containers running), 130=cancelled
 _cai_update() {
     local dry_run="false"
     local force="false"
     local lima_recreate="false"
+    local stop_containers="false"
     local verbose="false"
 
     # Parse arguments
@@ -1234,6 +1439,10 @@ _cai_update() {
         case "$1" in
             --dry-run)
                 dry_run="true"
+                shift
+                ;;
+            --stop-containers)
+                stop_containers="true"
                 shift
                 ;;
             --force)
@@ -1280,7 +1489,7 @@ _cai_update() {
         overall_status=$?
     else
         # Linux or WSL2
-        _cai_update_linux_wsl2 "$dry_run" "$verbose" "$force"
+        _cai_update_linux_wsl2 "$dry_run" "$verbose" "$force" "$stop_containers"
         overall_status=$?
     fi
 
@@ -1290,6 +1499,10 @@ _cai_update() {
         # User cancelled
         _cai_info "Update cancelled by user"
         return 130
+    elif [[ $overall_status -eq 2 ]]; then
+        # Aborted due to running containers
+        _cai_warn "Update aborted: running containers must be stopped first"
+        return 2
     elif [[ "$dry_run" == "true" ]]; then
         _cai_ok "Dry-run complete - no changes were made"
     elif [[ $overall_status -eq 0 ]]; then

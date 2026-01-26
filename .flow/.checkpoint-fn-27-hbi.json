@@ -1,0 +1,146 @@
+{
+  "created_at": "2026-01-26T22:26:01.682209Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-27-hbi",
+      "created_at": "2026-01-26T21:05:39.861087Z",
+      "default_impl": null,
+      "default_review": null,
+      "default_sync": null,
+      "depends_on_epics": [],
+      "id": "fn-27-hbi",
+      "next_task": 1,
+      "plan_review_status": "needs_work",
+      "plan_reviewed_at": "2026-01-26T22:09:14.953507Z",
+      "spec_path": ".flow/specs/fn-27-hbi.md",
+      "status": "open",
+      "title": "ContainAI Reliability Pack: Safe Updates, Doctor Repair, SSH Fixes",
+      "updated_at": "2026-01-26T22:09:14.953516Z"
+    },
+    "spec": "# ContainAI Reliability Pack\n\n## Overview\n\nFive reliability improvements addressing sysbox/docker update safety, volume ownership repair, packaging fixes, SSH execution reliability, and cross-platform update mechanisms.\n\n**Source PRD:** `.flow/specs/prd-reliability.md`\n\n## Scope\n\n1. **Safe Sysbox/Docker Update Flow** - Stop containers before updates, add systemd hooks\n2. **Data Volume Repair via cai doctor** - Add `--repair` subcommands for id-mapped mount corruption\n3. **Sysbox Packaging fuse3 Dependency** - Fix custom sysbox deb to depend on fuse3\n4. **SSH/Shell Reliability** - Fix TTY allocation, ensure interactive shell, reliable detached mode\n5. **Cross-Platform Sysbox Updates** - Fix WSL2 early-return, Lima/macOS VM updates\n\n## Quick commands\n\n```bash\n# Verify update flow\ncai update --dry-run\n\n# Test doctor repair\ncai doctor --repair --dry-run\n\n# Test SSH shell reliability\ncai shell  # Should always open interactive shell\n\n# Verify sysbox version detection\ncai doctor | grep -i sysbox\n```\n\n## Approach\n\n### Task 1: Safe Update Flow + Systemd Hooks\n- Modify `_cai_update_sysbox()` and `_cai_update_dockerd_bundle()` to check for running containers\n- Add `--stop-containers`, `--force`, `--dry-run` flags to `cai update`\n- Add systemd drop-in unit with `PartOf=` and `Before=` to stop containers on sysbox/docker restart\n- Key files: `src/lib/update.sh`, `src/lib/docker.sh:442-493`\n\n### Task 2: Cross-Platform Sysbox Update Mechanism\n- Fix `_cai_install_sysbox_wsl2()` early-return at `src/lib/setup.sh:896-901`\n- Ensure `_cai_update_macos()` updates sysbox inside Lima VM (not just VM recreation)\n- Reuse `_cai_sysbox_needs_update()` from `src/lib/setup.sh:555`\n- Key files: `src/lib/setup.sh`, `src/lib/update.sh`\n\n### Task 3: Data Volume Ownership Repair\n- Add `cai doctor --repair [--container <id>] [--all] [--dry-run]` subcommands\n- Detect id-mapped ownership corruption (files owned by nobody:nogroup)\n- Auto-detect UID/GID from running container or fallback to 1000:1000\n- Constrain repair to `/var/lib/containai-docker/volumes` only\n- Key files: `src/lib/doctor.sh`\n\n### Task 4: SSH/Shell Reliability\n- Ensure `cai shell` always allocates TTY (`-tt` flag)\n- Fix detached mode to confirm command started before exiting\n- Use `sh -lc` for consistent command parsing\n- Key files: `src/lib/ssh.sh:1727-1738`, `src/lib/ssh.sh:2081-2094`\n\n### Task 5: Sysbox Packaging fuse3 Fix\n- Update sysbox build script to add `Depends: fuse3` to control file\n- Add CI validation for dependency presence\n- Key files: `scripts/build-sysbox.sh`, `.github/workflows/build-sysbox.yml`\n\n### Task 6: Documentation Updates\n- Update `docs/setup-guide.md` with update process\n- Update `docs/troubleshooting.md` with repair subcommands\n- Update `CHANGELOG.md`\n\n## Acceptance\n\n- [ ] `cai update` warns if containers running and updates needed\n- [ ] `cai update --stop-containers` safely stops then updates\n- [ ] Systemd stop/restart of sysbox/docker stops ContainAI containers\n- [ ] `cai doctor --repair --all` repairs id-mapped volumes\n- [ ] `cai shell` always opens interactive shell with TTY\n- [ ] Sysbox updates work on WSL2, Linux, and macOS/Lima\n- [ ] Custom sysbox deb depends on fuse3\n\n## References\n\n- PRD: `.flow/specs/prd-reliability.md`\n- Current update code: `src/lib/update.sh`\n- Doctor module: `src/lib/doctor.sh`\n- SSH module: `src/lib/ssh.sh`\n- Sysbox install: `src/lib/setup.sh:813-993` (WSL2), `src/lib/setup.sh:3364-3544` (Linux)\n- Systemd unit template: `src/lib/docker.sh:442-493`\n\n## Dependencies\n\n- Extends fn-25-81w (Sysbox version checking)\n- Extends fn-15-281 (ContainAI-managed dockerd bundle)\n- Extends fn-10-vep (Systemd container lifecycle)\n"
+  },
+  "epic_id": "fn-27-hbi",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T21:06:17.958957Z",
+        "depends_on": [],
+        "epic": "fn-27-hbi",
+        "id": "fn-27-hbi.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-27-hbi.1.md",
+        "status": "todo",
+        "title": "Safe update flow with container stop and systemd hooks",
+        "updated_at": "2026-01-26T21:07:27.182209Z"
+      },
+      "id": "fn-27-hbi.1",
+      "runtime": null,
+      "spec": "# fn-27-hbi.1 Safe update flow with container stop and systemd hooks\n\n## Description\nAdd safe container management to the update flow and systemd hooks to ensure containers are cleanly stopped before sysbox/docker restarts.\n\n**Size:** M\n**Files:** `src/lib/update.sh`, `src/lib/docker.sh`, `src/lib/container.sh`\n\n## Approach\n\n1. **Container detection in update flow** - Modify `_cai_update()` to check for running ContainAI containers before sysbox/docker updates\n   - Pattern: Use `_cai_container_list()` from `src/lib/container.sh`\n   - Add `--stop-containers`, `--force`, `--dry-run` flags\n\n2. **Systemd stop hooks** - Add drop-in unit or modify `_cai_dockerd_unit_content()` at `src/lib/docker.sh:442-493`:\n   - Add `PartOf=sysbox-mgr.service sysbox-fs.service` for restart propagation\n   - Add `Before=sysbox-mgr.service sysbox-fs.service` for stop ordering\n   - Add `ExecStopPre=` to gracefully stop ContainAI containers\n\n3. **Container stop helper** - Add `_cai_stop_containai_containers()` function:\n   - Stop only containers in containai context (not other Docker containers)\n   - Graceful stop with configurable timeout\n   - Return list of stopped containers for potential restart\n\n## Key context\n\n- Current systemd unit at `src/lib/docker.sh:442-493` has `Wants=sysbox-mgr.service` but no stop hooks\n- Use `BindsTo=` for tight coupling (stops on crash) vs `PartOf=` for restart-only propagation\n- Set `TimeoutStopSec=180` to allow containers time to stop gracefully\n## Acceptance\n- [ ] `cai update` warns if containers running and sysbox/docker updates needed\n- [ ] `cai update --dry-run` shows what would be stopped without stopping\n- [ ] `cai update --stop-containers` stops containers, updates, then reports\n- [ ] `cai update --force` proceeds without stopping (with warning)\n- [ ] `systemctl stop sysbox-mgr` gracefully stops ContainAI containers first\n- [ ] `systemctl restart containai-docker` gracefully handles container lifecycle\n- [ ] Containers only stopped when updates are actually required\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T21:06:19.221635Z",
+        "depends_on": [],
+        "epic": "fn-27-hbi",
+        "id": "fn-27-hbi.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-27-hbi.2.md",
+        "status": "todo",
+        "title": "Cross-platform sysbox update mechanism (WSL2, Linux, Lima)",
+        "updated_at": "2026-01-26T21:07:27.925882Z"
+      },
+      "id": "fn-27-hbi.2",
+      "runtime": null,
+      "spec": "# fn-27-hbi.2 Cross-platform sysbox update mechanism (WSL2, Linux, Lima)\n\n## Description\nFix sysbox update mechanism to work correctly on WSL2, native Linux, and Lima/macOS. Currently WSL2 has an early-return bug preventing upgrades.\n\n**Size:** M\n**Files:** `src/lib/setup.sh`, `src/lib/update.sh`\n\n## Approach\n\n1. **Fix WSL2 early-return** - Remove early return at `src/lib/setup.sh:896-901` in `_cai_install_sysbox_wsl2()`:\n   - Currently returns if sysbox exists, preventing upgrades\n   - Add version checking using `_cai_sysbox_needs_update()` from line 555\n   - Only skip if installed version >= bundled version\n\n2. **Ensure Linux update path checks versions** - Verify `_cai_install_sysbox_linux()` at line 3364 uses version comparison:\n   - Reuse `_cai_sysbox_installed_version()` and `_cai_sysbox_bundled_version()`\n\n3. **Fix Lima/macOS sysbox update** - Modify `_cai_update_macos()` at `src/lib/update.sh:1102-1217`:\n   - Add explicit sysbox update inside Lima VM when needed\n   - Don't require full VM recreation for sysbox-only updates\n   - Check VM's sysbox version, not host\n\n## Key context\n\n- Version comparison must use `sort -V` for semver (see pitfalls.md)\n- `_cai_sysbox_needs_update()` already exists at `src/lib/setup.sh:555` - reuse it\n- Lima VM runs its own sysbox instance - update must happen inside VM\n## Acceptance\n- [ ] `cai update` upgrades sysbox on WSL2 when newer bundled version exists\n- [ ] `cai update` upgrades sysbox on native Linux when newer bundled version exists\n- [ ] `cai update` on macOS updates sysbox inside Lima VM when needed\n- [ ] `cai doctor` reports correct sysbox version on all platforms\n- [ ] No early-return when sysbox exists but is outdated\n- [ ] Version comparison uses semver logic (sort -V), not string equality\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T21:06:20.577809Z",
+        "depends_on": [],
+        "epic": "fn-27-hbi",
+        "id": "fn-27-hbi.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-27-hbi.3.md",
+        "status": "todo",
+        "title": "Data volume ownership repair via cai doctor --repair",
+        "updated_at": "2026-01-26T21:07:28.679713Z"
+      },
+      "id": "fn-27-hbi.3",
+      "runtime": null,
+      "spec": "# fn-27-hbi.3 Data volume ownership repair via cai doctor --repair\n\n## Description\nAdd data volume ownership repair functionality to `cai doctor` to fix id-mapped mount corruption after sysbox restarts.\n\n**Size:** M\n**Files:** `src/lib/doctor.sh`\n\n## Approach\n\n1. **Add repair subcommands** to `_cai_doctor()`:\n   - `cai doctor --repair` - repair volumes for current/default container\n   - `cai doctor --repair --container <id|name>` - repair specific container\n   - `cai doctor --repair --all` - repair all managed volumes\n   - `cai doctor --repair --dry-run` - show what would be repaired\n\n2. **Detect id-mapped corruption** - Add `_cai_doctor_check_volume_ownership()`:\n   - Check if files under volume are owned by `nobody:nogroup` (65534:65534)\n   - Check if `/usr/bin/sudo` is not root-owned (indicates rootfs taint)\n\n3. **UID/GID detection** - Add `_cai_doctor_detect_uid()`:\n   - Running container: `docker exec id -u agent` / `id -g agent`\n   - Stopped container: attempt detection, fallback 1000:1000 with warning\n\n4. **Safe repair** - Add `_cai_doctor_repair_volume()`:\n   - Only operate under `/var/lib/containai-docker/volumes`\n   - Use `find ... -xdev` to prevent cross-filesystem traversal\n   - Skip symlinks to prevent traversal attacks\n\n## Key context\n\n- Volume path constant at `src/lib/docker.sh:314`: `_CAI_CONTAINAI_DOCKER_DATA=\"/var/lib/containai-docker\"`\n- Existing `_cai_doctor_fix()` at line 1004 handles SSH fixes - add repair alongside\n- Files showing `nobody:nogroup` indicate broken id-mapping (kernel issue after sysbox restart)\n## Acceptance\n- [ ] `cai doctor --repair --all` repairs ownership on all managed volumes\n- [ ] `cai doctor --repair --container <name>` repairs specific container's volumes\n- [ ] `cai doctor --repair --dry-run` shows what would be changed without changing\n- [ ] Auto-detects UID/GID from running container\n- [ ] Falls back to 1000:1000 with warning for stopped containers\n- [ ] Repair constrained to `/var/lib/containai-docker/volumes` only\n- [ ] Warns if rootfs tainted (suggests container recreation)\n- [ ] No symlink traversal or cross-filesystem operations\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T21:06:22.444207Z",
+        "depends_on": [],
+        "epic": "fn-27-hbi",
+        "id": "fn-27-hbi.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-27-hbi.4.md",
+        "status": "todo",
+        "title": "SSH shell TTY allocation and detached execution reliability",
+        "updated_at": "2026-01-26T21:07:31.475670Z"
+      },
+      "id": "fn-27-hbi.4",
+      "runtime": null,
+      "spec": "# fn-27-hbi.4 SSH shell TTY allocation and detached execution reliability\n\n## Description\nFix SSH shell TTY allocation and detached command execution reliability. Currently `cai shell` sometimes exits without opening shell, and detached mode doesn't confirm command started.\n\n**Size:** M\n**Files:** `src/lib/ssh.sh`\n\n## Approach\n\n1. **Fix TTY allocation for shell** - Modify `_cai_ssh_shell()` at line 1727-1738:\n   - Always use `ssh -tt` to force pseudo-TTY allocation\n   - Ensure shell is always interactive regardless of stdin state\n\n2. **Fix detached execution** - Modify `_cai_ssh_run_with_retry()` at line 2081-2094:\n   - Use `sh -lc` wrapper for consistent command parsing\n   - Add proper quoting for env vars and arguments\n   - Verify command started before printing success message\n   - Use pattern: `ssh -n -f user@host \"nohup cmd >/dev/null 2>&1 & echo \\$!\"`\n\n3. **Remove premature \"Running in background\" message** - Only print after confirming process started\n\n## Key context\n\n- Current code at line 2093-2094 prints \"Running command in background via SSH...\" before confirmation\n- Use `-tt` (double t) to force TTY even when stdin is not a terminal\n- For background: `-n` prevents stdin reading, `-f` backgrounds before command execution\n- Reuse `_cai_ssh_run()` infrastructure per conventions.md\n## Acceptance\n- [ ] `cai shell` always opens interactive shell with TTY\n- [ ] `cai shell` works even when stdin is piped/redirected\n- [ ] Detached mode (`cai run --detached`) confirms command started\n- [ ] Detached mode uses `sh -lc` for consistent parsing\n- [ ] No \"Running in background\" message until command confirmed running\n- [ ] SSH handles env vars and special characters correctly in detached mode\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T21:06:24.049913Z",
+        "depends_on": [],
+        "epic": "fn-27-hbi",
+        "id": "fn-27-hbi.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-27-hbi.5.md",
+        "status": "todo",
+        "title": "Sysbox packaging fuse3 dependency fix",
+        "updated_at": "2026-01-26T21:07:32.203767Z"
+      },
+      "id": "fn-27-hbi.5",
+      "runtime": null,
+      "spec": "# fn-27-hbi.5 Sysbox packaging fuse3 dependency fix\n\n## Description\nFix custom sysbox deb package to depend on fuse3 instead of fuse (fuse2). Currently sysbox-fs expects fusermount3 but package only depends on fuse.\n\n**Size:** S\n**Files:** `scripts/build-sysbox.sh`, `.github/workflows/build-sysbox.yml`\n\n## Approach\n\n1. **Update deb control file** - Modify build script to add fuse3 dependency:\n   - Change `Depends:` line to include `fuse3` (or `fuse3 | fuse` for transitional)\n   - Note: fuse3 `Breaks:` and `Replaces:` fuse, so they can't coexist\n\n2. **Add CI validation** - Update workflow to verify:\n   - `dpkg -s sysbox-ce` shows fuse3 in dependencies\n   - `command -v fusermount3` present after install\n\n## Key context\n\n- fuse3 is in Debian stable since Buster (widely available)\n- Use `Depends: fuse3` (hard requirement) since sysbox-fs requires fusermount3\n- Container Dockerfile at `src/container/Dockerfile.base:54-55` has fuse but not fuse3\n## Acceptance\n- [ ] Custom sysbox deb package depends on fuse3\n- [ ] `dpkg -s sysbox-ce` shows fuse3 in Depends line\n- [ ] `command -v fusermount3` present after sysbox install\n- [ ] sysbox-fs starts without manual `apt install fuse3`\n- [ ] CI validates fuse3 dependency in built package\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T21:06:28.439025Z",
+        "depends_on": [
+          "fn-27-hbi.1",
+          "fn-27-hbi.2",
+          "fn-27-hbi.3",
+          "fn-27-hbi.4",
+          "fn-27-hbi.5"
+        ],
+        "epic": "fn-27-hbi",
+        "id": "fn-27-hbi.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-27-hbi.6.md",
+        "status": "todo",
+        "title": "Documentation updates for reliability features",
+        "updated_at": "2026-01-26T21:07:39.201859Z"
+      },
+      "id": "fn-27-hbi.6",
+      "runtime": null,
+      "spec": "# fn-27-hbi.6 Documentation updates for reliability features\n\n## Description\nUpdate documentation for all reliability features added in this epic.\n\n**Size:** S\n**Files:** `docs/setup-guide.md`, `docs/troubleshooting.md`, `CHANGELOG.md`, `README.md`\n\n## Approach\n\n1. **docs/setup-guide.md** - Add \"Updating ContainAI\" section:\n   - `cai update` workflow across platforms\n   - `--dry-run`, `--stop-containers`, `--force` flags\n   - Platform-specific behavior (WSL2, Linux, macOS)\n\n2. **docs/troubleshooting.md** - Add repair documentation:\n   - `cai doctor --repair` subcommands\n   - When to use repair vs recreate container\n   - id-mapped ownership symptoms and fixes\n\n3. **CHANGELOG.md** - Add entries for:\n   - Safe update flow with container management\n   - Doctor repair subcommands\n   - SSH/shell reliability fixes\n   - Cross-platform sysbox updates\n   - fuse3 packaging fix\n\n4. **README.md** - Add `cai update` to common commands section (line 87-96)\n\n## Key context\n\n- Follow existing doc patterns in troubleshooting.md (Quick Reference table, Diagnostic Commands format)\n- CHANGELOG uses keep-a-changelog format with date-based versioning\n## Acceptance\n- [ ] docs/setup-guide.md has \"Updating ContainAI\" section\n- [ ] docs/troubleshooting.md documents `cai doctor --repair` subcommands\n- [ ] CHANGELOG.md has entries for all reliability features\n- [ ] README.md common commands includes `cai update`\n- [ ] Documentation follows existing patterns and formatting\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}
