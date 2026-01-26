@@ -1,0 +1,84 @@
+{
+  "created_at": "2026-01-26T05:14:42.165498Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-20-6fe",
+      "created_at": "2026-01-26T05:13:04.170847Z",
+      "depends_on_epics": [],
+      "id": "fn-20-6fe",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-20-6fe.md",
+      "status": "open",
+      "title": "Fix Docker-in-Docker runc 1.3.3 incompatibility in sysbox containers",
+      "updated_at": "2026-01-26T05:13:27.473885Z"
+    },
+    "spec": "# Fix Docker-in-Docker runc 1.3.3 Incompatibility\n\n## Problem\n\nDocker run fails inside sysbox containers with error:\n```\nOCI runtime create failed: runc create failed: unable to start container process: \nerror during container init: open sysctl net.ipv4.ip_unprivileged_port_start file: \nunsafe procfs detected: openat2 /proc/./sys/net/ipv4/ip_unprivileged_port_start: \ninvalid cross-device link\n```\n\n## Root Cause\n\nrunc 1.3.3 security patches (CVE-2025-31133, CVE-2025-52565, CVE-2025-52881) detect Sysbox's procfs bind mounts as \"fake procfs\" and intentionally reject them. Per runc maintainer:\n\n> \"The error you are getting is different and would be caused by a bind mount being placed on top of `/proc/...` and is thus an expected error.\"\n\nThis is tracked as [sysbox issue #973](https://github.com/nestybox/sysbox/issues/973).\n\n## Scope\n\n- Pin containerd.io to compatible version (1.7.x with runc < 1.3.3)\n- Update Dockerfile.base and Dockerfile.test\n- Verify fix with integration tests\n- Document as known limitation\n\n## Approach\n\nPin `containerd.io` apt package to version 1.7.x (uses runc 1.3.2) until Sysbox releases a compatibility fix. This is the recommended workaround from the Sysbox issue tracker.\n\n**Key files:**\n- `src/container/Dockerfile.base:151-172` - docker-ce/containerd.io installation\n- `src/container/Dockerfile.test:51-82` - test container installation\n- `tests/integration/test-dind.sh` - DinD integration test\n\n## Quick commands\n\n```bash\n# Verify containerd.io version inside container\ndocker info --format '{{.ContainerdCommit.ID}}'\n\n# Test DinD works\ndocker run --rm alpine:latest echo \"DinD works\"\n\n# Run integration test\n./tests/integration/test-dind.sh\n```\n\n## Acceptance\n\n- [ ] `docker run --rm alpine:latest echo hello` succeeds inside sysbox container\n- [ ] `tests/integration/test-dind.sh` passes\n- [ ] containerd.io pinned to 1.7.x in Dockerfile.base\n- [ ] containerd.io pinned to 1.7.x in Dockerfile.test\n- [ ] Known limitation documented in pitfalls.md\n\n## References\n\n- [sysbox#973](https://github.com/nestybox/sysbox/issues/973) - Docker 28.5.2 breaks DinD on Sysbox\n- [runc#4968](https://github.com/opencontainers/runc/issues/4968) - CVE-2025-52881 fd reopening issue\n- [containerd#12484](https://github.com/containerd/containerd/issues/12484) - workaround discussion\n"
+  },
+  "epic_id": "fn-20-6fe",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T05:13:39.868952Z",
+        "depends_on": [],
+        "epic": "fn-20-6fe",
+        "id": "fn-20-6fe.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-20-6fe.1.md",
+        "status": "todo",
+        "title": "Diagnose and fix current container runtime",
+        "updated_at": "2026-01-26T05:13:53.785454Z"
+      },
+      "id": "fn-20-6fe.1",
+      "runtime": null,
+      "spec": "# fn-20-6fe.1 Diagnose and fix current container runtime\n\n## Description\nDiagnose the current container's containerd.io/runc version and apply the fix to make `docker run` work immediately.\n\n**Size:** S\n**Files:** None (runtime investigation and apt commands)\n\n## Approach\n\n1. Check current containerd.io version: `apt-cache policy containerd.io`\n2. Check current runc version: `runc --version` or `docker info`\n3. Verify the container is running in sysbox: check `/proc/1/cgroup` and sysbox indicators\n4. Downgrade containerd.io to 1.7.x: `sudo apt-get install containerd.io=<version>`\n5. Restart docker service: `sudo systemctl restart docker`\n6. Verify fix: `docker run --rm alpine:latest echo \"success\"`\n\n## Key context\n\n- The container is built from `src/container/Dockerfile.base` and runs with sysbox-runc\n- dockerd is managed by systemd (containai-init.service runs before docker.service)\n- The exact apt package version for Ubuntu Noble may have a suffix like `~ubuntu.24.04~noble`\n- Document the exact version string that works for use in Task 2\n## Acceptance\n- [ ] Current containerd.io version identified\n- [ ] Sysbox runtime confirmed via /proc inspection\n- [ ] containerd.io downgraded to compatible 1.7.x version\n- [ ] docker service restarted successfully\n- [ ] `docker run --rm alpine:latest echo hello` succeeds\n- [ ] Exact apt package version string documented for Dockerfile update\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T05:13:39.948042Z",
+        "depends_on": [
+          "fn-20-6fe.1"
+        ],
+        "epic": "fn-20-6fe",
+        "id": "fn-20-6fe.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-20-6fe.2.md",
+        "status": "todo",
+        "title": "Pin containerd.io version in Dockerfiles",
+        "updated_at": "2026-01-26T05:14:18.571919Z"
+      },
+      "id": "fn-20-6fe.2",
+      "runtime": null,
+      "spec": "# fn-20-6fe.2 Pin containerd.io version in Dockerfiles\n\n## Description\nUpdate Dockerfiles to pin containerd.io to the compatible version identified in Task 1.\n\n**Size:** S\n**Files:** \n- `src/container/Dockerfile.base` (docker-ce installation section, lines 151-172)\n- `src/container/Dockerfile.test` (docker installation section, lines 51-82)\n\n## Approach\n\n1. Update `Dockerfile.base` apt-get install line to pin containerd.io version:\n   ```dockerfile\n   containerd.io=<version-from-task-1>\n   ```\n2. Add `apt-mark hold containerd.io` to prevent auto-upgrade\n3. Apply same changes to `Dockerfile.test`\n4. Add comment explaining the pin with reference to sysbox#973\n\nFollow pattern at `src/container/Dockerfile.base:151-172` for existing docker installation.\n\n## Key context\n\n- Use exact version string from Task 1 (includes Ubuntu codename suffix)\n- apt-mark hold prevents unattended-upgrades from breaking the fix\n- Comment should note this is temporary until sysbox releases compatibility fix\n## Acceptance\n- [ ] Dockerfile.base pins containerd.io to compatible version\n- [ ] Dockerfile.base includes apt-mark hold\n- [ ] Dockerfile.test pins containerd.io to compatible version\n- [ ] Dockerfile.test includes apt-mark hold\n- [ ] Comment with sysbox#973 reference added\n- [ ] Local image build succeeds: `./src/build.sh --layer base`\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-26T05:13:40.023596Z",
+        "depends_on": [
+          "fn-20-6fe.2"
+        ],
+        "epic": "fn-20-6fe",
+        "id": "fn-20-6fe.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-20-6fe.3.md",
+        "status": "todo",
+        "title": "Document limitation and verify integration tests",
+        "updated_at": "2026-01-26T05:14:18.651592Z"
+      },
+      "id": "fn-20-6fe.3",
+      "runtime": null,
+      "spec": "# fn-20-6fe.3 Document limitation and verify integration tests\n\n## Description\nDocument the runc 1.3.3 incompatibility as a known limitation and verify DinD integration tests pass.\n\n**Size:** S\n**Files:**\n- `.flow/memory/pitfalls.md` (add new pitfall entry)\n- `tests/integration/test-dind.sh` (verify passes)\n\n## Approach\n\n1. Add pitfall entry to `.flow/memory/pitfalls.md` explaining:\n   - The error message and root cause\n   - That containerd.io is pinned as workaround\n   - Link to sysbox#973 for upstream tracking\n2. Run `tests/integration/test-dind.sh` with rebuilt image\n3. Verify all DinD operations work\n\nFollow pattern in `.flow/memory/pitfalls.md` for existing pitfall entries.\n\n## Key context\n\n- Pitfalls use a consistent format: problem, cause, solution, reference\n- The test requires Docker and sysbox-runc runtime on the host\n- Document that users with existing containers need to rebuild images\n## Acceptance\n- [ ] Pitfall entry added to .flow/memory/pitfalls.md\n- [ ] Entry includes error message, root cause, and workaround\n- [ ] Entry includes sysbox#973 reference\n- [ ] tests/integration/test-dind.sh passes with new image\n- [ ] DinD verified working end-to-end\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}
