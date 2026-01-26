@@ -1726,8 +1726,16 @@ _cai_ssh_connect_with_retry() {
             ssh_cmd+=(-o "ForwardAgent=no")
         fi
 
+        # Force TTY allocation for interactive shell session
+        # Required because we pass a remote command which disables automatic TTY
+        ssh_cmd+=(-t)
+
         # Connect to IPv4 loopback (explicit options override any host alias)
         ssh_cmd+=("$_CAI_SSH_HOST")
+
+        # Start shell in workspace directory (matches cai run behavior)
+        # Use exec $SHELL -l to get a proper login shell with .profile/.bashrc
+        ssh_cmd+=("cd /home/agent/workspace && exec \$SHELL -l")
 
         if [[ "$quiet" != "true" && $retry_count -eq 0 ]]; then
             _cai_info "Connecting to container via SSH..."
