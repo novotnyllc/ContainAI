@@ -938,12 +938,18 @@ _cai_update_sysbox() {
 
 # List running ContainAI containers in the containai-docker engine
 # Uses DOCKER_HOST directly (not context) for reliability - context may be misconfigured
-# Outputs: container names (one per line)
-# Returns: 0=success (may output empty), 1=docker unavailable
+# Outputs: container names (one per line) on stdout
+# Returns: 0=success (may output empty if no containers), 1=docker unavailable or query failed
+# IMPORTANT: This function is fail-closed - returns non-zero if we cannot verify container state
 _cai_list_running_containai_containers() {
     # Check if the containai-docker socket exists
     if [[ ! -S "$_CAI_CONTAINAI_DOCKER_SOCKET" ]]; then
-        return 0  # No socket = no containers to list
+        return 0  # No socket = service not running = no containers to list
+    fi
+
+    # Check if docker CLI is available
+    if ! command -v docker >/dev/null 2>&1; then
+        return 1  # Cannot verify container state without docker CLI
     fi
 
     # List running containers with the containai.managed label
@@ -953,7 +959,12 @@ _cai_list_running_containai_containers() {
     local docker_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
     local label="${_CONTAINAI_LABEL:-containai.managed=true}"
     local containers
-    containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$label" 2>/dev/null) || containers=""
+
+    # IMPORTANT: Fail-closed - if docker ps fails, return non-zero
+    # This prevents proceeding with updates when we can't verify container state
+    if ! containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$label" 2>&1); then
+        return 1  # Query failed - cannot verify container state
+    fi
 
     if [[ -n "$containers" ]]; then
         # Get container names for display
@@ -971,15 +982,18 @@ _cai_list_running_containai_containers() {
 # Uses DOCKER_HOST directly (not context) for reliability
 # Arguments: $1 = dry_run ("true" to simulate)
 #            $2 = timeout in seconds (default 60)
-# Outputs: list of stopped containers via stdout
-# Returns: 0=success, 1=failure
+# Returns: 0=success, 1=failure (logs stopped container names via _cai_info)
 _cai_stop_containai_containers() {
     local dry_run="${1:-false}"
     local timeout="${2:-60}"
     local docker_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
 
     local containers
-    containers=$(_cai_list_running_containai_containers)
+    # Fail-closed: if we can't list containers, don't proceed
+    if ! containers=$(_cai_list_running_containai_containers); then
+        _cai_error "Cannot query running containers"
+        return 1
+    fi
 
     if [[ -z "$containers" ]]; then
         return 0
@@ -1003,7 +1017,7 @@ _cai_stop_containai_containers() {
         if [[ -n "$name" ]]; then
             _cai_info "  Stopping: $name"
             if DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker stop -t "$timeout" -- "$name" >/dev/null 2>&1; then
-                printf '%s\n' "$name"
+                _cai_info "  Stopped: $name"
                 stop_count=$((stop_count + 1))
             else
                 _cai_warn "  Failed to stop: $name"
@@ -1120,9 +1134,14 @@ _cai_update_linux_wsl2() {
         updates_needed="true"
         _cai_info "Updates required: $_CAI_UPDATE_REASON"
 
-        # Check for running containers
+        # Check for running containers - fail-closed: if we can't verify, abort
         local running_containers
-        running_containers=$(_cai_list_running_containai_containers)
+        if ! running_containers=$(_cai_list_running_containai_containers); then
+            _cai_error "Cannot verify running container state"
+            _cai_error "  Ensure docker CLI is available and has access to containai-docker socket"
+            _cai_error "  Socket: $_CAI_CONTAINAI_DOCKER_SOCKET"
+            return 1
+        fi
 
         if [[ -n "$running_containers" ]]; then
             if [[ "$dry_run" == "true" ]]; then
