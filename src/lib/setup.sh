@@ -461,6 +461,8 @@ _cai_macos_ensure_host_tools() {
 
 # ContainAI GitHub repository for custom sysbox builds
 _CAI_SYSBOX_CONTAINAI_REPO="novotnyllc/ContainAI"
+# Pinned ContainAI sysbox release tag (update this to use a new build)
+_CAI_SYSBOX_CONTAINAI_TAG="sysbox-build-20260126-7"
 
 # Resolve sysbox download URL from multiple sources with priority:
 #   1. CAI_SYSBOX_URL environment variable (explicit override)
@@ -517,57 +519,65 @@ _cai_resolve_sysbox_download_url() {
         return 0
     fi
 
-    # Priority 3: Check ContainAI GitHub releases for custom build
+    # Priority 3: Use pinned ContainAI GitHub release for custom build
     # The custom build includes the openat2 fix for runc 1.3.3+ compatibility
-    local containai_releases_url="https://api.github.com/repos/${_CAI_SYSBOX_CONTAINAI_REPO}/releases"
+    # Fetches a specific release by tag for reproducibility
+    local containai_release_url="https://api.github.com/repos/${_CAI_SYSBOX_CONTAINAI_REPO}/releases/tags/${_CAI_SYSBOX_CONTAINAI_TAG}"
     local containai_json=""
     local containai_download_url=""
     local containai_version=""
     local fetch_rc
 
     if [[ "$verbose" == "true" ]]; then
-        _cai_info "Checking ContainAI releases for custom sysbox build..."
+        _cai_info "Fetching ContainAI sysbox release: ${_CAI_SYSBOX_CONTAINAI_TAG}..."
     fi
 
-    # Fetch ContainAI releases (with timeout to avoid hanging)
+    # Fetch pinned ContainAI release (with timeout to avoid hanging)
     # Handle _cai_timeout exit code 125 (no timeout mechanism available)
-    containai_json=$(_cai_timeout 15 wget -qO- "$containai_releases_url" 2>/dev/null) && fetch_rc=0 || fetch_rc=$?
+    containai_json=$(_cai_timeout 15 wget -qO- "$containai_release_url" 2>/dev/null) && fetch_rc=0 || fetch_rc=$?
     if [[ $fetch_rc -eq 0 ]]; then
         # Look for sysbox release assets matching the architecture
         # ContainAI builds use: sysbox-ce_VERSION+containai.DATE.linux_ARCH.deb
         containai_download_url=$(printf '%s' "$containai_json" | jq -r \
-            "[.[] | .assets[]? | select(.name | test(\"sysbox-ce.*\\.linux_${arch}\\.deb\$\"))] | first | .browser_download_url // empty" 2>/dev/null | head -1)
+            --arg suffix ".linux_${arch}.deb" \
+            '.assets[]? | select(.name | endswith($suffix)) | .browser_download_url // empty' 2>/dev/null | head -1)
 
         if [[ -n "$containai_download_url" ]] && [[ "$containai_download_url" != "null" ]]; then
             # Extract version from filename: sysbox-ce_VERSION.linux_ARCH.deb
-            local filename
+            # URL-decode filename first (%2B -> +)
+            local filename filename_decoded
             filename=$(printf '%s' "$containai_download_url" | sed 's|.*/||')
-            containai_version=$(printf '%s' "$filename" | sed -n 's/sysbox-ce_\(.*\)\.linux_.*/\1/p' | head -1)
+            filename_decoded=$(printf '%b' "${filename//%/\\x}")
+            containai_version=$(printf '%s' "$filename_decoded" | sed -n 's/sysbox-ce_\(.*\)\.linux_.*/\1/p' | head -1)
 
             _CAI_SYSBOX_DOWNLOAD_URL="$containai_download_url"
             _CAI_SYSBOX_VERSION="$containai_version"
             _CAI_SYSBOX_SOURCE="containai"
             _cai_info "Using ContainAI sysbox build (includes openat2 fix for runc 1.3.3+)"
             if [[ "$verbose" == "true" ]]; then
+                _cai_info "ContainAI release tag: ${_CAI_SYSBOX_CONTAINAI_TAG}"
                 _cai_info "ContainAI download URL: $containai_download_url"
             fi
             return 0
         elif [[ "$verbose" == "true" ]]; then
-            _cai_info "No sysbox packages found in ContainAI releases"
+            _cai_info "No sysbox packages found in ContainAI release ${_CAI_SYSBOX_CONTAINAI_TAG}"
         fi
     elif [[ $fetch_rc -eq 125 ]]; then
         # Exit code 125 means no timeout mechanism available
         if [[ "$verbose" == "true" ]]; then
-            _cai_info "Timeout utility not available; fetching ContainAI releases without timeout"
+            _cai_info "Timeout utility not available; fetching ContainAI release without timeout"
         fi
         # Retry without timeout wrapper
-        if containai_json=$(wget -qO- "$containai_releases_url" 2>/dev/null); then
+        if containai_json=$(wget -qO- "$containai_release_url" 2>/dev/null); then
             containai_download_url=$(printf '%s' "$containai_json" | jq -r \
-                "[.[] | .assets[]? | select(.name | test(\"sysbox-ce.*\\.linux_${arch}\\.deb\$\"))] | first | .browser_download_url // empty" 2>/dev/null | head -1)
+                --arg suffix ".linux_${arch}.deb" \
+                '.assets[]? | select(.name | endswith($suffix)) | .browser_download_url // empty' 2>/dev/null | head -1)
             if [[ -n "$containai_download_url" ]] && [[ "$containai_download_url" != "null" ]]; then
-                local filename
+                # URL-decode filename first (%2B -> +)
+                local filename filename_decoded
                 filename=$(printf '%s' "$containai_download_url" | sed 's|.*/||')
-                containai_version=$(printf '%s' "$filename" | sed -n 's/sysbox-ce_\(.*\)\.linux_.*/\1/p' | head -1)
+                filename_decoded=$(printf '%b' "${filename//%/\\x}")
+                containai_version=$(printf '%s' "$filename_decoded" | sed -n 's/sysbox-ce_\(.*\)\.linux_.*/\1/p' | head -1)
                 _CAI_SYSBOX_DOWNLOAD_URL="$containai_download_url"
                 _CAI_SYSBOX_VERSION="$containai_version"
                 _CAI_SYSBOX_SOURCE="containai"
@@ -576,7 +586,7 @@ _cai_resolve_sysbox_download_url() {
             fi
         fi
     elif [[ "$verbose" == "true" ]]; then
-        _cai_info "Could not fetch ContainAI releases (will fall back to upstream)"
+        _cai_info "Could not fetch ContainAI release ${_CAI_SYSBOX_CONTAINAI_TAG} (will fall back to upstream)"
     fi
 
     # Priority 4: Fall back to upstream nestybox releases (latest)

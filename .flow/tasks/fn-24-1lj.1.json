@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-26T18:01:59.612708Z",
+  "depends_on": [],
+  "epic": "fn-24-1lj",
+  "id": "fn-24-1lj.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-24-1lj.1.md",
+  "status": "todo",
+  "title": "Update cai setup to use GitHub release https://github.com/novotnyllc/ContainAI/releases/tag/sysbox-build-20260126-7",
+  "updated_at": "2026-01-26T18:01:59.612721Z"
+}
