@@ -7,7 +7,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-25-81w.md",
-  "status": "open",
+  "status": "done",
   "title": "Sysbox version checking and update across all commands",
-  "updated_at": "2026-01-26T18:51:18.539711Z"
+  "updated_at": "2026-01-26T18:57:38.117800Z"
 }
