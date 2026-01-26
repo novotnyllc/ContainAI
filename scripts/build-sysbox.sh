@@ -88,14 +88,26 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --arch)
+                if [[ $# -lt 2 ]] || [[ "$2" == --* ]]; then
+                    log_error "--arch requires a value (amd64 or arm64)"
+                    exit 1
+                fi
                 ARCH="$2"
                 shift 2
                 ;;
             --output)
+                if [[ $# -lt 2 ]] || [[ "$2" == --* ]]; then
+                    log_error "--output requires a directory path"
+                    exit 1
+                fi
                 OUTPUT_DIR="$2"
                 shift 2
                 ;;
             --version-suffix)
+                if [[ $# -lt 2 ]] || [[ "$2" == --* ]]; then
+                    log_error "--version-suffix requires a value"
+                    exit 1
+                fi
                 VERSION_SUFFIX="$2"
                 shift 2
                 ;;
@@ -117,22 +129,26 @@ parse_args() {
         esac
     done
 
-    # Determine architecture if not specified
+    # Determine host architecture
+    local host_arch
+    host_arch=$(uname -m)
+    local host_arch_normalized
+    case "$host_arch" in
+        x86_64)
+            host_arch_normalized="amd64"
+            ;;
+        aarch64)
+            host_arch_normalized="arm64"
+            ;;
+        *)
+            log_error "Unsupported host architecture: $host_arch"
+            exit 1
+            ;;
+    esac
+
+    # Determine target architecture if not specified
     if [[ -z "$ARCH" ]]; then
-        local host_arch
-        host_arch=$(uname -m)
-        case "$host_arch" in
-            x86_64)
-                ARCH="amd64"
-                ;;
-            aarch64)
-                ARCH="arm64"
-                ;;
-            *)
-                log_error "Unsupported host architecture: $host_arch"
-                exit 1
-                ;;
-        esac
+        ARCH="$host_arch_normalized"
         log_info "Auto-detected architecture: $ARCH"
     fi
 
@@ -144,6 +160,13 @@ parse_args() {
             exit 1
             ;;
     esac
+
+    # Warn if target architecture differs from host (requires QEMU)
+    if [[ "$ARCH" != "$host_arch_normalized" ]]; then
+        log_warn "Cross-compilation requested: building $ARCH on $host_arch_normalized host"
+        log_warn "This requires QEMU to be configured for Docker"
+        log_warn "The sysbox-pkgr build will use TARGET_ARCH=$ARCH"
+    fi
 
     # Set default version suffix with current date
     if [[ -z "$VERSION_SUFFIX" ]]; then
@@ -264,6 +287,8 @@ build_sysbox_deb() {
 
     # Set up environment for the build
     export EDITION=ce
+    # Set target architecture for the build (supports cross-compilation with QEMU)
+    export TARGET_ARCH="$ARCH"
 
     # The sysbox-pkgr needs sources/sysbox to point to the sysbox repo
     # Since we're building from within the repo, we need to set up the symlink
@@ -276,12 +301,12 @@ build_sysbox_deb() {
     printf '%s' "$full_version" > "$sysbox_dir/VERSION"
 
     # Build the generic deb package (ubuntu-jammy based, works across distros)
-    log_info "Building deb package (this may take 10-20 minutes)..."
+    log_info "Building deb package for $ARCH (this may take 10-20 minutes)..."
     cd -- "$pkgr_dir"
 
     # Run the build with proper environment
-    # The build uses Docker internally, so we need to ensure it has access
-    if ! make -C deb generic EDITION=ce; then
+    # The build uses Docker internally; TARGET_ARCH enables cross-compilation
+    if ! make -C deb generic EDITION=ce TARGET_ARCH="$ARCH"; then
         log_error "Failed to build sysbox-ce deb package"
         exit 1
     fi

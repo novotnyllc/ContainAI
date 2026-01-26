@@ -41,19 +41,21 @@ env:
 jobs:
   build:
     name: Build ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-22.04
-          - arch: arm64
-            runner: ubuntu-22.04-arm
+        arch: [amd64, arm64]
 
     steps:
       - name: Checkout ContainAI
         uses: actions/checkout@v4
+
+      - name: Set up QEMU for cross-arch builds
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Set up build environment
         run: |
@@ -112,11 +114,14 @@ jobs:
         run: |
           cd sysbox/sysbox-pkgr
           export EDITION=ce
+          # Set target architecture for cross-compilation
+          export TARGET_ARCH=${{ matrix.arch }}
 
           echo "Building sysbox-ce deb package for ${{ matrix.arch }}..."
+          echo "Target architecture: $TARGET_ARCH"
           echo "This may take 15-30 minutes..."
 
-          make -C deb generic EDITION=ce 2>&1 | tee build.log
+          make -C deb generic EDITION=ce TARGET_ARCH=${{ matrix.arch }} 2>&1 | tee build.log
 
           echo "Build completed"
 
