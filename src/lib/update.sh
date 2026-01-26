@@ -949,9 +949,11 @@ _cai_list_running_containai_containers() {
     # List running containers with the containai.managed label
     # Use DOCKER_HOST directly for reliability (context may be outdated/misconfigured)
     # Clear DOCKER_CONTEXT to prevent environment override
+    # Use fallback for label in case container.sh isn't loaded yet
     local docker_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+    local label="${_CONTAINAI_LABEL:-containai.managed=true}"
     local containers
-    containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$_CONTAINAI_LABEL" 2>/dev/null) || containers=""
+    containers=$(DOCKER_CONTEXT= DOCKER_HOST="$docker_host" docker ps -q --filter "label=$label" 2>/dev/null) || containers=""
 
     if [[ -n "$containers" ]]; then
         # Get container names for display

@@ -481,7 +481,8 @@ ExecStartPre=-/bin/rm -f $_CAI_CONTAINAI_DOCKER_PID
 # Note: Legacy containers without the label are not stopped automatically
 # Unset DOCKER_CONTEXT and export DOCKER_HOST so they apply to entire pipeline
 # Note: Uses portable if-then instead of xargs -r (GNU-ism not available on all systems)
-ExecStopPre=-/bin/sh -c 'unset DOCKER_CONTEXT; export DOCKER_HOST=unix://$_CAI_CONTAINAI_DOCKER_SOCKET; ids=\$(docker ps -q --filter label=$_CONTAINAI_LABEL); [ -n "\$ids" ] && docker stop -t 60 \$ids || true'
+# Note: Label filter is inlined (containai.managed=true) to avoid dependency on container.sh being loaded
+ExecStopPre=-/bin/sh -c 'unset DOCKER_CONTEXT; export DOCKER_HOST=unix://$_CAI_CONTAINAI_DOCKER_SOCKET; ids=\$(docker ps -q --filter label=containai.managed=true); [ -n "\$ids" ] && docker stop -t 60 \$ids || true'
 
 # Allow time for containers to stop gracefully (60s stop timeout + 2m buffer)
 TimeoutStopSec=180
