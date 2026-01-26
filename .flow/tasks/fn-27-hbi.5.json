@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-26T21:06:24.049913Z",
+  "depends_on": [],
+  "epic": "fn-27-hbi",
+  "id": "fn-27-hbi.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-27-hbi.5.md",
+  "status": "todo",
+  "title": "Sysbox packaging fuse3 dependency fix",
+  "updated_at": "2026-01-26T21:07:32.203767Z"
+}

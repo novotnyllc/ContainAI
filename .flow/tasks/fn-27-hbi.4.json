@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-26T21:06:22.444207Z",
+  "depends_on": [],
+  "epic": "fn-27-hbi",
+  "id": "fn-27-hbi.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-27-hbi.4.md",
+  "status": "todo",
+  "title": "SSH shell TTY allocation and detached execution reliability",
+  "updated_at": "2026-01-26T21:07:31.475670Z"
+}

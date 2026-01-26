@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-26T21:06:19.221635Z",
+  "depends_on": [],
+  "epic": "fn-27-hbi",
+  "id": "fn-27-hbi.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-27-hbi.2.md",
+  "status": "todo",
+  "title": "Cross-platform sysbox update mechanism (WSL2, Linux, Lima)",
+  "updated_at": "2026-01-26T21:07:27.925882Z"
+}
