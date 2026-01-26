@@ -211,3 +211,6 @@ When using docker --context, also clear DOCKER_CONTEXT and DOCKER_HOST env vars 
 
 ## 2026-01-26 manual [pitfall]
 Piping to tee without 'set -o pipefail' masks upstream command failures - add pipefail or check PIPESTATUS
+
+## 2026-01-26 manual [pitfall]
+GitHub Actions upload-artifact preserves directory structure; download-artifact extracts to specified path with same structure - adjust consumer paths accordingly

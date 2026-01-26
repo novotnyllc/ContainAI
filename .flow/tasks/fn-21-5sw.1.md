@@ -83,9 +83,8 @@ Add test jobs to `.github/workflows/build-sysbox.yml` that validate the built sy
 - [ ] Test output visible in GitHub Actions logs
 
 ## Done summary
-TBD
-
+Added test-amd64 and test-arm64 jobs to build-sysbox.yml workflow that validate built deb packages before release. Tests install kernel headers (with Azure fallback), install the deb, verify sysbox services start, check Docker runtime registration, and run a DinD smoke test with nested hello-world container. Release job now gates on both test jobs passing.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 66056ca, 1617fb2
+- Tests: python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/build-sysbox.yml"))'
 - PRs:
