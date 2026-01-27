@@ -1208,6 +1208,7 @@ _containai_check_volume_match() {
 #   --detached           Run detached
 #   --shell              Start with shell instead of agent
 #   --quiet              Suppress verbose output
+#   --verbose            Show container/volume names (stderr, for script-friendliness)
 #   --debug              Enable debug logging
 #   --image-tag <tag>    Image tag for container (advanced/debugging, stored as label)
 #   -e, --env <VAR=val>  Environment variable (repeatable, passed to command via SSH)
@@ -1233,6 +1234,7 @@ _containai_start_container() {
     local detached_flag=false
     local shell_flag=false
     local quiet_flag=false
+    local verbose_flag=false
     local debug_flag=false
     local dry_run_flag=false
     local mount_docker_socket=false
@@ -1355,6 +1357,10 @@ _containai_start_container() {
                 ;;
             --quiet | -q)
                 quiet_flag=true
+                shift
+                ;;
+            --verbose)
+                verbose_flag=true
                 shift
                 ;;
             --debug | -D)
@@ -1938,6 +1944,12 @@ _containai_start_container() {
                 fi
             fi
 
+            # Print container/volume info if verbose (stderr for pipeline safety)
+            if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
+                printf '%s\n' "[INFO] Container: $container_name" >&2
+                printf '%s\n' "[INFO] Volume: ${running_volume:-$data_volume}" >&2
+            fi
+
             # Execute command via SSH (container stays running after exit)
             # Behavior: -- <cmd> runs <cmd>, no -- runs default agent
             if [[ "$shell_flag" == "true" ]]; then
@@ -2058,6 +2070,12 @@ _containai_start_container() {
                     echo "[ERROR] SSH setup failed for container" >&2
                     return 1
                 fi
+            fi
+
+            # Print container/volume info if verbose (stderr for pipeline safety)
+            if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
+                printf '%s\n' "[INFO] Container: $container_name" >&2
+                printf '%s\n' "[INFO] Volume: ${exited_volume:-$data_volume}" >&2
             fi
 
             # Execute command via SSH (container stays running after exit)
@@ -2263,6 +2281,12 @@ _containai_start_container() {
             if ! _cai_setup_container_ssh "$container_name" "$ssh_port" "$selected_context" "true"; then
                 echo "[ERROR] SSH setup failed for container" >&2
                 return 1
+            fi
+
+            # Print container/volume info if verbose (stderr for pipeline safety)
+            if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
+                printf '%s\n' "[INFO] Container: $container_name" >&2
+                printf '%s\n' "[INFO] Volume: $data_volume" >&2
             fi
 
             # Execute command via SSH (container stays running after exit)

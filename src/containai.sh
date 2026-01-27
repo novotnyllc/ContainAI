@@ -1964,6 +1964,7 @@ _containai_shell_cmd() {
     local fresh_flag=false
     local force_flag=false
     local quiet_flag=false
+    local verbose_flag=false
     local debug_flag=false
     local dry_run_flag=false
 
@@ -2053,6 +2054,10 @@ _containai_shell_cmd() {
                 ;;
             --quiet | -q)
                 quiet_flag=true
+                shift
+                ;;
+            --verbose)
+                verbose_flag=true
                 shift
                 ;;
             --debug | -D)
@@ -2338,6 +2343,9 @@ _containai_shell_cmd() {
         if [[ "$quiet_flag" == "true" ]]; then
             dry_run_args+=(--quiet)
         fi
+        if [[ "$verbose_flag" == "true" ]]; then
+            dry_run_args+=(--verbose)
+        fi
         _containai_start_container "${dry_run_args[@]}"
         return $?
     fi
@@ -2410,6 +2418,9 @@ _containai_shell_cmd() {
         if [[ "$quiet_flag" == "true" ]]; then
             create_args+=(--quiet)
         fi
+        if [[ "$verbose_flag" == "true" ]]; then
+            create_args+=(--verbose)
+        fi
 
         if ! _containai_start_container "${create_args[@]}"; then
             echo "[ERROR] Failed to create container" >&2
@@ -2441,6 +2452,9 @@ _containai_shell_cmd() {
         if [[ "$quiet_flag" == "true" ]]; then
             create_args+=(--quiet)
         fi
+        if [[ "$verbose_flag" == "true" ]]; then
+            create_args+=(--verbose)
+        fi
 
         if ! _containai_start_container "${create_args[@]}"; then
             echo "[ERROR] Failed to create container" >&2
@@ -2465,6 +2479,12 @@ _containai_shell_cmd() {
             echo "[ERROR] Container workspace does not match. Use --fresh to recreate." >&2
             return 1
         fi
+    fi
+
+    # Print container/volume info if verbose (stderr for pipeline safety)
+    if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
+        printf '%s\n' "[INFO] Container: $resolved_container_name" >&2
+        printf '%s\n' "[INFO] Volume: $resolved_volume" >&2
     fi
 
     # Connect via SSH
@@ -2500,6 +2520,7 @@ _containai_run_cmd() {
     local force_flag=""
     local detached_flag=""
     local quiet_flag=""
+    local verbose_flag=""
     local debug_flag=""
     local dry_run_flag=""
     local mount_docker_socket=""
@@ -2626,6 +2647,10 @@ _containai_run_cmd() {
                 ;;
             --quiet | -q)
                 quiet_flag="--quiet"
+                shift
+                ;;
+            --verbose)
+                verbose_flag="--verbose"
                 shift
                 ;;
             --debug | -D)
@@ -2832,6 +2857,9 @@ _containai_run_cmd() {
     fi
     if [[ -n "$quiet_flag" ]]; then
         start_args+=("$quiet_flag")
+    fi
+    if [[ -n "$verbose_flag" ]]; then
+        start_args+=("$verbose_flag")
     fi
     if [[ -n "$debug_flag" ]]; then
         start_args+=("$debug_flag")
