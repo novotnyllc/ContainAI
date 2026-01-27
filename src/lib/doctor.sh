@@ -1874,7 +1874,6 @@ _cai_doctor_check_volume_ownership() {
 # Outputs: "uid:gid" on stdout (e.g., "1000:1000")
 _cai_doctor_detect_uid() {
     local container="$1"
-    local uid gid
 
     # Get container info from containai-docker context
     local user_info
@@ -1900,38 +1899,36 @@ _cai_doctor_detect_uid() {
         fi
     fi
 
-    # If user is a name (e.g., "agent" from Dockerfile USER), resolve via exec
-    # This handles the common case where images set USER by name not UID
-    if [[ -n "$user_info" ]] && [[ "$user_info" != "root" ]] && [[ "$container_state" == "true" ]]; then
-        # Parse user:group if present
-        local user_name group_name
-        if [[ "$user_info" == *:* ]]; then
-            user_name="${user_info%%:*}"
-            group_name="${user_info##*:}"
-        else
-            user_name="$user_info"
-            group_name="$user_info"
-        fi
-        # Resolve numeric IDs inside container
-        local id_output gid_output
-        id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
-            exec "$container" id -u "$user_name" 2>/dev/null) || id_output=""
-        gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
-            exec "$container" id -g "$user_name" 2>/dev/null) || gid_output=""
-        if [[ -n "$id_output" ]] && [[ -n "$gid_output" ]]; then
-            printf '%s:%s' "$id_output" "$gid_output"
-            return 0
-        fi
-    fi
-
-    # Fallback: try to get UID/GID for 'agent' user (ContainAI standard)
+    # For running containers, get the effective UID/GID via exec
+    # This handles: empty Config.User, root, or named users
     if [[ "$container_state" == "true" ]]; then
         local id_output gid_output
-        id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
-            exec "$container" id -u agent 2>/dev/null) || id_output=""
-        gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
-            exec "$container" id -g agent 2>/dev/null) || gid_output=""
 
+        # If user_info is a non-root name, resolve that specific user
+        if [[ -n "$user_info" ]] && [[ "$user_info" != "root" ]]; then
+            # Parse user:group if present
+            local user_name
+            if [[ "$user_info" == *:* ]]; then
+                user_name="${user_info%%:*}"
+            else
+                user_name="$user_info"
+            fi
+            id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+                exec "$container" id -u "$user_name" 2>/dev/null) || id_output=""
+            gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+                exec "$container" id -g "$user_name" 2>/dev/null) || gid_output=""
+            if [[ -n "$id_output" ]] && [[ -n "$gid_output" ]]; then
+                printf '%s:%s' "$id_output" "$gid_output"
+                return 0
+            fi
+        fi
+
+        # Get the effective UID/GID of the container's default process
+        # This works for empty Config.User, root, or when named user resolution failed
+        id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+            exec "$container" id -u 2>/dev/null) || id_output=""
+        gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+            exec "$container" id -g 2>/dev/null) || gid_output=""
         if [[ -n "$id_output" ]] && [[ -n "$gid_output" ]]; then
             printf '%s:%s' "$id_output" "$gid_output"
             return 0

@@ -223,3 +223,6 @@ When managing Docker containers, use DOCKER_HOST directly with socket path inste
 
 ## 2026-01-27 manual [pitfall]
 When embedding variables in bash -c scripts (e.g., limactl shell -- bash -c), pass them as positional parameters (bash -c 'script' _ "$var") to prevent command injection, not string interpolation
+
+## 2026-01-27 manual [pitfall]
+Docker Config.User can be a name (e.g., 'agent') not numeric UID - resolve via container exec before using in host chown
