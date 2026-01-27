@@ -846,8 +846,20 @@ _cai_update_sysbox() {
         return 0
     }
 
+    # Get full installed version for display
+    # Try dpkg version first, fall back to binary version if dpkg lacks ContainAI marker
     local installed_pkg
-    installed_pkg=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || installed_pkg="$installed_version"
+    installed_pkg=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || installed_pkg=""
+    if [[ -z "$installed_pkg" ]] || [[ "$installed_pkg" != *"+containai."* ]]; then
+        # dpkg version missing or lacks ContainAI marker - try binary version
+        local binary_ver
+        binary_ver=$(_cai_sysbox_installed_binary_version 2>/dev/null) || binary_ver=""
+        if [[ -n "$binary_ver" ]]; then
+            installed_pkg="$binary_ver"
+        elif [[ -z "$installed_pkg" ]]; then
+            installed_pkg="$installed_version"
+        fi
+    fi
     _cai_info "Installed sysbox: $installed_pkg"
 
     # Check if update is needed

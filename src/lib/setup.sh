@@ -490,6 +490,28 @@ _cai_sysbox_installed_version() {
     printf '%s' "$version_line" | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1
 }
 
+# Get installed sysbox full version string from binary
+# Returns: 0=success (outputs version to stdout), 1=not installed
+# Example output: "0.6.7+containai.20260127"
+# This extracts the full version including build metadata from sysbox-runc --version
+_cai_sysbox_installed_binary_version() {
+    if ! command -v sysbox-runc >/dev/null 2>&1; then
+        return 1
+    fi
+    # sysbox-runc --version outputs multiple lines, version is on line 2:
+    #   sysbox-runc
+    #           edition:        Community Edition (CE)
+    #           version:        0.6.7+containai.20260127
+    # Extract the version line and get the value after the colon
+    local version_value
+    version_value=$(sysbox-runc --version 2>/dev/null | grep -E '^[[:space:]]*version:' | sed 's/.*:[[:space:]]*//' || true)
+    if [[ -n "$version_value" ]]; then
+        printf '%s' "$version_value"
+        return 0
+    fi
+    return 1
+}
+
 # Get installed sysbox package version (full dpkg version)
 # Returns: 0=success (outputs version to stdout), 1=not installed or no dpkg
 # Example output: "0.6.7+containai.20260127-0"
@@ -502,10 +524,27 @@ _cai_sysbox_installed_pkg_version() {
 
 # Check if installed sysbox is a ContainAI build
 # Returns: 0=is containai build, 1=not containai build or not installed
+# Checks both dpkg version string AND sysbox-runc binary version output
+# to handle cases where dpkg version doesn't contain build metadata
 _cai_sysbox_is_containai_build() {
+    # First check dpkg version string (fastest path)
     local pkg_version
-    pkg_version=$(_cai_sysbox_installed_pkg_version) || return 1
-    [[ "$pkg_version" == *"+containai."* ]]
+    if pkg_version=$(_cai_sysbox_installed_pkg_version 2>/dev/null); then
+        if [[ "$pkg_version" == *"+containai."* ]]; then
+            return 0
+        fi
+    fi
+
+    # Fallback: check binary version output (handles mismatched dpkg metadata)
+    # sysbox-runc --version shows the actual compiled-in version string
+    local binary_version
+    if binary_version=$(_cai_sysbox_installed_binary_version 2>/dev/null); then
+        if [[ "$binary_version" == *"+containai."* ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
 }
 
 # Get the bundled ContainAI sysbox release tag
@@ -577,10 +616,16 @@ _cai_sysbox_needs_update() {
 
     # Check if installed is ContainAI build
     local installed_is_containai="false"
-    local installed_pkg_version=""
+    local installed_full_version=""
     if _cai_sysbox_is_containai_build; then
         installed_is_containai="true"
-        installed_pkg_version=$(_cai_sysbox_installed_pkg_version) || installed_pkg_version=""
+        # Try dpkg version first, fall back to binary version
+        # This handles cases where dpkg metadata doesn't have the +containai suffix
+        installed_full_version=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || installed_full_version=""
+        if [[ "$installed_full_version" != *"+containai."* ]]; then
+            # dpkg version missing ContainAI marker - get from binary
+            installed_full_version=$(_cai_sysbox_installed_binary_version 2>/dev/null) || installed_full_version=""
+        fi
     fi
 
     # Compare versions using sort -V
@@ -602,7 +647,7 @@ _cai_sysbox_needs_update() {
         # Same or older semver - check for rebuild (different build metadata)
         # Normalize versions for comparison: strip trailing -0 from dpkg version
         local installed_normalized bundled_normalized
-        installed_normalized=$(printf '%s' "$installed_pkg_version" | sed 's/-[0-9]*$//')
+        installed_normalized=$(printf '%s' "$installed_full_version" | sed 's/-[0-9]*$//')
         bundled_normalized="$bundled_version"
 
         if [[ "$bundled_semver" == "$installed_semver" ]] && [[ "$installed_normalized" != "$bundled_normalized" ]]; then

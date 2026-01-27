@@ -584,11 +584,14 @@ _cai_find_available_port() {
 # Returns: 0 on success
 _cai_list_containers_with_ports() {
     local context="${1:-}"
-    local -a docker_cmd=(docker)
+    local -a docker_cmd=()
     local container_output line name port
 
+    # Build docker command with context, clearing env vars to avoid interference
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Get container name and ssh-port for all ContainAI containers
@@ -613,11 +616,14 @@ _cai_list_containers_with_ports() {
 # Returns: 0 on success
 _cai_get_reserved_container_ports() {
     local context="${1:-}"
-    local -a docker_cmd=(docker)
+    local -a docker_cmd=()
     local ports_output line port
 
+    # Build docker command with context, clearing env vars to avoid interference
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Get all ContainAI containers (running + stopped) and extract their ssh-port labels
@@ -649,7 +655,7 @@ _cai_set_container_ssh_port() {
     local container_name="$1"
     local port="$2"
     local context="${3:-}"
-    local -a docker_cmd=(docker)
+    local -a docker_cmd=()
 
     if [[ -z "$container_name" ]] || [[ -z "$port" ]]; then
         _cai_error "Container name and port are required"
@@ -661,8 +667,11 @@ _cai_set_container_ssh_port() {
         return 1
     fi
 
+    # Build docker command with context, clearing env vars to avoid interference
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Docker doesn't support updating labels on existing containers directly
@@ -690,9 +699,12 @@ _cai_get_container_ssh_port() {
     local context="${2:-}"
     local port
 
-    local -a docker_cmd=(docker)
+    # Build docker command with context, clearing env vars to avoid interference
+    local -a docker_cmd=()
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Get the containai.ssh-port label value
@@ -734,9 +746,12 @@ _cai_allocate_ssh_port() {
     local range_end="${4:-$default_end}"
     local existing_port used_ports line port_in_use container_state
 
-    local -a docker_cmd=(docker)
+    # Build docker command with context, clearing env vars to avoid interference
+    local -a docker_cmd=()
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Check if container already has an allocated port
@@ -832,7 +847,7 @@ _cai_wait_for_sshd() {
     local container_name="$1"
     local ssh_port="$2"
     local context="${3:-}"
-    local -a docker_cmd=(docker)
+    local -a docker_cmd=()
     local wait_ms=100          # Start at 100ms
     local max_interval_ms=2000 # Cap at 2 seconds between retries
     local attempt=0
@@ -843,8 +858,11 @@ _cai_wait_for_sshd() {
         return 1
     fi
 
+    # Build docker command with context, clearing env vars to avoid interference
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Check if ssh-keyscan is available
@@ -942,12 +960,16 @@ _cai_wait_for_sshd() {
 _cai_inject_ssh_key() {
     local container_name="$1"
     local context="${2:-}"
-    local -a docker_cmd=(docker)
+    local -a docker_cmd=()
     local pubkey_path="$_CAI_SSH_PUBKEY_PATH"
     local pubkey_content
 
+    # Build docker command with context, clearing env vars to avoid interference
+    # DOCKER_CONTEXT and DOCKER_HOST env vars can override --context flag behavior
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Auto-generate SSH key if missing (transparent setup)
@@ -1576,9 +1598,12 @@ _cai_ssh_shell() {
     local force_update="${3:-false}"
     local quiet="${4:-false}"
 
-    local -a docker_cmd=(docker)
+    # Build docker command with context, clearing env vars to avoid interference
+    local -a docker_cmd=()
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Get container state
@@ -1887,9 +1912,12 @@ _cai_ssh_run() {
 
     local -a cmd_args=("$@")
 
-    local -a docker_cmd=(docker)
+    # Build docker command with context, clearing env vars to avoid interference
+    local -a docker_cmd=()
     if [[ -n "$context" ]]; then
-        docker_cmd=(docker --context "$context")
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+    else
+        docker_cmd=(docker)
     fi
 
     # Get container state
@@ -2459,9 +2487,12 @@ _cai_ssh_cleanup() {
 
     # Check which contexts are actually reachable (with timeout to avoid hangs)
     for ctx in "${contexts_to_check[@]}"; do
-        local -a docker_cmd=(docker)
+        # Build docker command with context, clearing env vars to avoid interference
+        local -a docker_cmd=()
         if [[ -n "$ctx" ]]; then
-            docker_cmd=(docker --context "$ctx")
+            docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx")
+        else
+            docker_cmd=(docker)
         fi
 
         # Use timeout wrapper to avoid hanging on wedged/remote daemons
@@ -2514,9 +2545,12 @@ _cai_ssh_cleanup() {
         # Check if container exists in any context
         container_exists=false
         for ctx in "${contexts_to_check[@]}"; do
-            local -a docker_cmd=(docker)
+            # Build docker command with context, clearing env vars to avoid interference
+            local -a docker_cmd=()
             if [[ -n "$ctx" ]]; then
-                docker_cmd=(docker --context "$ctx")
+                docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx")
+            else
+                docker_cmd=(docker)
             fi
 
             # Check if container exists (running or stopped)

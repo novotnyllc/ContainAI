@@ -504,7 +504,15 @@ _cai_doctor() {
                 local installed_sysbox_version=""
                 local installed_sysbox_pkg=""
                 installed_sysbox_version=$(_cai_sysbox_installed_version) || installed_sysbox_version=""
-                installed_sysbox_pkg=$(_cai_sysbox_installed_pkg_version) || installed_sysbox_pkg=""
+                installed_sysbox_pkg=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || installed_sysbox_pkg=""
+                # Fallback to binary version if dpkg lacks ContainAI marker
+                if [[ -z "$installed_sysbox_pkg" ]] || [[ "$installed_sysbox_pkg" != *"+containai."* ]]; then
+                    local binary_ver
+                    binary_ver=$(_cai_sysbox_installed_binary_version 2>/dev/null) || binary_ver=""
+                    if [[ -n "$binary_ver" ]]; then
+                        installed_sysbox_pkg="$binary_ver"
+                    fi
+                fi
 
                 if [[ -n "$installed_sysbox_pkg" ]]; then
                     printf '  %-44s %s\n' "Installed version: $installed_sysbox_pkg" "[OK]"
@@ -2048,8 +2056,15 @@ _cai_doctor_json() {
     local sysbox_needs_update_json="false"
     if [[ "$platform" != "macos" ]] && [[ "$sysbox_ok" == "true" ]]; then
         sysbox_installed_version=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || sysbox_installed_version=""
-        if [[ -z "$sysbox_installed_version" ]]; then
-            sysbox_installed_version=$(_cai_sysbox_installed_version 2>/dev/null) || sysbox_installed_version=""
+        # Fallback to binary version if dpkg lacks ContainAI marker
+        if [[ -z "$sysbox_installed_version" ]] || [[ "$sysbox_installed_version" != *"+containai."* ]]; then
+            local binary_ver
+            binary_ver=$(_cai_sysbox_installed_binary_version 2>/dev/null) || binary_ver=""
+            if [[ -n "$binary_ver" ]]; then
+                sysbox_installed_version="$binary_ver"
+            elif [[ -z "$sysbox_installed_version" ]]; then
+                sysbox_installed_version=$(_cai_sysbox_installed_version 2>/dev/null) || sysbox_installed_version=""
+            fi
         fi
 
         local arch
