@@ -2082,12 +2082,10 @@ _cai_ssh_run_with_retry() {
             if [[ "$detached" == "true" ]]; then
                 # Run in background with nohup, redirect output to /dev/null
                 # Use bash -lc wrapper for consistent command parsing (matches printf %q escaping)
-                # printf %q produces bash-compatible output that can be safely passed to bash -c
-                # We double-quote the entire command so bash -lc gets it as a single argument
+                # env_prefix and quoted_args are already printf %q escaped, so we pass them
+                # directly to bash -lc wrapped in double quotes (not re-escaped)
                 # Return PID so we can verify the process started
-                local bash_cmd_arg
-                bash_cmd_arg=$(printf '%q' "${env_prefix}${quoted_args}")
-                remote_cmd="cd /home/agent/workspace && nohup bash -lc ${bash_cmd_arg} </dev/null >/dev/null 2>&1 & echo \$!"
+                remote_cmd="cd /home/agent/workspace && nohup bash -lc \"${env_prefix}${quoted_args}\" </dev/null >/dev/null 2>&1 & echo \$!"
             else
                 # Run in foreground
                 remote_cmd="cd /home/agent/workspace && ${env_prefix}${quoted_args}"
@@ -2128,12 +2126,13 @@ _cai_ssh_run_with_retry() {
                     _cai_info "Auto-recovered from stale host key"
                 fi
 
-                # For detached mode, verify the process actually started
+                # For detached mode, verify the process was started
                 if [[ "$detached" == "true" ]]; then
                     local remote_pid
                     remote_pid=$(printf '%s' "$ssh_stdout" | tr -d '[:space:]')
                     if [[ -n "$remote_pid" && "$remote_pid" =~ ^[0-9]+$ ]]; then
                         # Verify process is running with kill -0 via a quick SSH check
+                        # Note: short-lived commands may complete before we can verify
                         local -a verify_ssh_cmd=(ssh)
                         verify_ssh_cmd+=(-o "HostName=$_CAI_SSH_HOST")
                         verify_ssh_cmd+=(-o "Port=$ssh_port")
@@ -2145,16 +2144,23 @@ _cai_ssh_run_with_retry() {
                         verify_ssh_cmd+=(-o "ConnectTimeout=5")
                         verify_ssh_cmd+=(-n)  # Prevent reading stdin
                         verify_ssh_cmd+=("$_CAI_SSH_HOST")
-                        verify_ssh_cmd+=("kill -0 $remote_pid 2>/dev/null && echo running")
+                        verify_ssh_cmd+=("kill -0 $remote_pid 2>/dev/null && echo running || echo completed")
                         local verify_result
                         verify_result=$("${verify_ssh_cmd[@]}" 2>/dev/null || true)
                         if [[ "$verify_result" == *"running"* ]]; then
                             if [[ "$quiet" != "true" ]]; then
                                 _cai_info "Command running in background (PID: $remote_pid)"
                             fi
+                        elif [[ "$verify_result" == *"completed"* ]]; then
+                            # Process started but completed quickly - this is OK
+                            if [[ "$quiet" != "true" ]]; then
+                                _cai_info "Command started in background (PID: $remote_pid, already completed)"
+                            fi
                         else
-                            _cai_error "Background command failed to start (PID $remote_pid not found)"
-                            return 1
+                            # SSH verification failed - but we got a PID, so assume it started
+                            if [[ "$quiet" != "true" ]]; then
+                                _cai_info "Command started in background (PID: $remote_pid)"
+                            fi
                         fi
                     else
                         _cai_error "Background command failed: could not get PID"
