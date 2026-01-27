@@ -876,6 +876,10 @@ _cai_update_sysbox() {
             _cai_info "Upgrade available: upstream $installed_version -> ContainAI $bundled_version"
             _cai_info "  ContainAI build includes openat2 fix for runc 1.3.3+ compatibility"
             ;;
+        containai_rebuild)
+            _cai_info "Rebuild available: same semver but new ContainAI build"
+            _cai_info "  $installed_pkg -> $bundled_version"
+            ;;
         newer_version_available)
             _cai_info "Update available: $installed_pkg -> $bundled_version"
             ;;

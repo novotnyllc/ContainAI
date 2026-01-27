@@ -550,6 +550,7 @@ _cai_sysbox_bundled_version() {
 #   - "fetch_failed" - could not determine bundled version
 #   - "up_to_date" - installed is current
 #   - "newer_version_available" - bundled is newer than installed
+#   - "containai_rebuild" - same semver but different ContainAI build metadata
 #   - "upgrade_to_containai" - installed is upstream, bundled is ContainAI
 #   - "bundled_older_than_installed" - installed is newer than bundled
 _cai_sysbox_needs_update() {
@@ -576,8 +577,10 @@ _cai_sysbox_needs_update() {
 
     # Check if installed is ContainAI build
     local installed_is_containai="false"
+    local installed_pkg_version=""
     if _cai_sysbox_is_containai_build; then
         installed_is_containai="true"
+        installed_pkg_version=$(_cai_sysbox_installed_pkg_version) || installed_pkg_version=""
     fi
 
     # Compare versions using sort -V
@@ -587,14 +590,28 @@ _cai_sysbox_needs_update() {
     # Logic:
     # - If installed is upstream and bundled is ContainAI with same/newer semver -> update (prefer ContainAI)
     # - If installed is ContainAI and bundled has newer semver -> update
-    # - If installed >= bundled semver and both ContainAI -> up to date
+    # - If same semver but different build metadata (ContainAI rebuild) -> update
+    # - If installed >= bundled semver and same build -> up to date
     if [[ "$installed_is_containai" == "true" ]]; then
-        if [[ "$highest_version" == "$installed_semver" ]]; then
-            _CAI_SYSBOX_UPDATE_REASON="up_to_date"
-            return 1
+        # Both are ContainAI - check if bundled has newer semver
+        if [[ "$highest_version" == "$bundled_semver" ]] && [[ "$bundled_semver" != "$installed_semver" ]]; then
+            _CAI_SYSBOX_UPDATE_REASON="newer_version_available"
+            return 0
         fi
-        _CAI_SYSBOX_UPDATE_REASON="newer_version_available"
-        return 0
+
+        # Same or older semver - check for rebuild (different build metadata)
+        # Normalize versions for comparison: strip trailing -0 from dpkg version
+        local installed_normalized bundled_normalized
+        installed_normalized=$(printf '%s' "$installed_pkg_version" | sed 's/-[0-9]*$//')
+        bundled_normalized="$bundled_version"
+
+        if [[ "$bundled_semver" == "$installed_semver" ]] && [[ "$installed_normalized" != "$bundled_normalized" ]]; then
+            _CAI_SYSBOX_UPDATE_REASON="containai_rebuild"
+            return 0
+        fi
+
+        _CAI_SYSBOX_UPDATE_REASON="up_to_date"
+        return 1
     else
         # Installed is upstream - prefer ContainAI if semver >= installed
         if [[ "$highest_version" == "$bundled_semver" ]] || [[ "$bundled_semver" == "$installed_semver" ]]; then
