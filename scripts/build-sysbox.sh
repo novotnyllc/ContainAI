@@ -346,19 +346,27 @@ build_sysbox_deb() {
 
     local f
     for f in $control_files; do
-        # Skip if fuse3 already present in Depends line (idempotent)
-        if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
-            log_info "fuse3 already present in $f"
+        # Skip if fuse3 already present and fuse already removed (idempotent)
+        if grep -qE '^Depends:.*\bfuse3\b' "$f" && ! grep -qE '^Depends:.*\bfuse\b[^3]' "$f"; then
+            log_info "fuse3 already present (fuse removed) in $f"
             already_present_count=$((already_present_count + 1))
             continue
         fi
 
-        # Add fuse3 to the beginning of the Depends line
+        # Replace fuse with fuse3 in the Depends line (per spec: "instead of fuse")
         if grep -q '^Depends:' "$f"; then
-            sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+            # First, replace 'fuse' with 'fuse3' (handles ", fuse," or ", fuse$" patterns)
+            # Use word boundary to avoid matching fuse3 when replacing fuse
+            sed -i -E 's/(^Depends:.*)(,\s*)fuse(\s*,|\s*$)/\1\2fuse3\3/' "$f"
+
+            # If fuse3 still not present (fuse wasn't in original), add it at beginning
+            if ! grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+                sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+            fi
+
             # Verify the patch worked
-            if grep -qE '^Depends:[[:space:]]*fuse3\b' "$f"; then
-                log_ok "fuse3 dependency added to $f"
+            if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+                log_ok "fuse3 dependency set in $f"
                 patched_count=$((patched_count + 1))
             else
                 log_error "Failed to patch $f"

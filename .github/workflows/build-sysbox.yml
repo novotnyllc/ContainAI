@@ -147,19 +147,26 @@ jobs:
           for f in $control_files; do
             echo "Checking $f..."
 
-            # Skip if fuse3 already present (idempotent)
-            if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
-              echo "  fuse3 already present, skipping"
+            # Skip if fuse3 already present and fuse already removed (idempotent)
+            if grep -qE '^Depends:.*\bfuse3\b' "$f" && ! grep -qE '^Depends:.*\bfuse\b[^3]' "$f"; then
+              echo "  fuse3 already present (fuse removed), skipping"
               already_present_count=$((already_present_count + 1))
               continue
             fi
 
-            # Add fuse3 to the beginning of the Depends line
+            # Replace fuse with fuse3 in the Depends line (per spec: "instead of fuse")
             if grep -q '^Depends:' "$f"; then
-              sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+              # First, replace 'fuse' with 'fuse3' (handles ", fuse," or ", fuse$" patterns)
+              sed -i -E 's/(^Depends:.*)(,[[:space:]]*)fuse([[:space:]]*,|[[:space:]]*$)/\1\2fuse3\3/' "$f"
+
+              # If fuse3 still not present (fuse wasn't in original), add it at beginning
+              if ! grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+                sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+              fi
+
               # Verify the patch worked
-              if grep -qE '^Depends:[[:space:]]*fuse3\b' "$f"; then
-                echo "  fuse3 dependency added"
+              if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+                echo "  fuse3 dependency set"
                 grep '^Depends:' "$f"
                 patched_count=$((patched_count + 1))
               else
@@ -342,19 +349,26 @@ jobs:
           for f in $control_files; do
             echo "Checking $f..."
 
-            # Skip if fuse3 already present (idempotent)
-            if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
-              echo "  fuse3 already present, skipping"
+            # Skip if fuse3 already present and fuse already removed (idempotent)
+            if grep -qE '^Depends:.*\bfuse3\b' "$f" && ! grep -qE '^Depends:.*\bfuse\b[^3]' "$f"; then
+              echo "  fuse3 already present (fuse removed), skipping"
               already_present_count=$((already_present_count + 1))
               continue
             fi
 
-            # Add fuse3 to the beginning of the Depends line
+            # Replace fuse with fuse3 in the Depends line (per spec: "instead of fuse")
             if grep -q '^Depends:' "$f"; then
-              sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+              # First, replace 'fuse' with 'fuse3' (handles ", fuse," or ", fuse$" patterns)
+              sed -i -E 's/(^Depends:.*)(,[[:space:]]*)fuse([[:space:]]*,|[[:space:]]*$)/\1\2fuse3\3/' "$f"
+
+              # If fuse3 still not present (fuse wasn't in original), add it at beginning
+              if ! grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+                sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+              fi
+
               # Verify the patch worked
-              if grep -qE '^Depends:[[:space:]]*fuse3\b' "$f"; then
-                echo "  fuse3 dependency added"
+              if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+                echo "  fuse3 dependency set"
                 grep '^Depends:' "$f"
                 patched_count=$((patched_count + 1))
               else
