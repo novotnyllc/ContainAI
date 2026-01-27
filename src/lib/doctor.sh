@@ -1839,10 +1839,10 @@ _cai_doctor_fix_container_all() {
         [[ -z "$name" ]] && continue
 
         # Get container state via inspect (more reliable than ps format)
+        # Note: --format must come before -- since -- ends flag parsing
         local state
         state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-            inspect --type container -- "$name" \
-            --format '{{.State.Status}}' 2>/dev/null) || state="unknown"
+            inspect --type container --format '{{.State.Status}}' -- "$name" 2>/dev/null) || state="unknown"
 
         printf '  Container: %s (%s)\n' "$name" "$state"
 
@@ -2859,7 +2859,8 @@ _cai_doctor_repair() {
     if [[ "$dry_run" == "true" ]]; then
         printf '  %-50s %s\n' "Mode:" "[DRY-RUN] No changes made"
     fi
-    printf '  %-50s %s\n' "Volumes checked:" "$fixed_count"
+    printf '  %-50s %s\n' "Volumes checked:" "$((fixed_count + fail_count))"
+    printf '  %-50s %s\n' "Volumes ok:" "$fixed_count"
     printf '  %-50s %s\n' "Warnings:" "$warn_count"
     printf '  %-50s %s\n' "Failures:" "$fail_count"
 

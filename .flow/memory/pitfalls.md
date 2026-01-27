@@ -238,3 +238,6 @@ When skipping sync map entries, use source rewriting instead of continue to pres
 
 ## 2026-01-27 manual [pitfall]
 When using ((var++)) in bash with set -e, the increment returns the OLD value as exit status - use ((var++)) || true, ((++var)), or var=$((var+1)) to prevent script exit when var is 0
+
+## 2026-01-27 manual [pitfall]
+Docker CLI: flags like --format must come BEFORE -- since -- ends flag parsing; 'docker inspect -- $name --format' treats --format as object name
