@@ -1057,9 +1057,14 @@ SCRIPT_EOF
 
     # Check if key is present in authorized_keys
     # Capture stderr to provide better diagnostics on failure
-    local verify_output
-    if ! verify_output=$("${docker_cmd[@]}" exec -- "$container_name" grep -qF "$key_material" /home/agent/.ssh/authorized_keys 2>&1); then
-        local verify_exit=$?
+    # Note: Capture exit code without using 'if !' to get accurate status
+    local verify_output verify_exit
+    if verify_output=$("${docker_cmd[@]}" exec -- "$container_name" grep -qF "$key_material" /home/agent/.ssh/authorized_keys 2>&1); then
+        verify_exit=0
+    else
+        verify_exit=$?
+    fi
+    if [[ $verify_exit -ne 0 ]]; then
         _cai_error "Key injection verification failed: key not found in authorized_keys"
         _cai_error "  This may indicate:"
         _cai_error "    - Script execution through SSH-based docker context mangled arguments"
