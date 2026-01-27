@@ -1394,13 +1394,15 @@ _cai_doctor_fix_dispatch() {
 
     # Resolve effective Docker context for operations
     # Inside containers, use default context (self-contained daemon)
+    # Note: We let warnings from context resolution surface for debugging,
+    # since doctor fix is meant to remediate setup issues
     local effective_context=""
     local config_context
     if _cai_is_container; then
         effective_context="default"
     else
-        config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
-        effective_context=$(_cai_select_context "$config_context" 2>/dev/null) || effective_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+        config_context=$(_containai_resolve_secure_engine_context) || config_context=""
+        effective_context=$(_cai_select_context "$config_context") || effective_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     fi
 
     case "$target" in
@@ -1587,8 +1589,8 @@ _cai_doctor_fix_volume() {
             return 0
             ;;
         --all)
-            # Fix all volumes
-            _cai_doctor_repair "" "false"
+            # Fix all volumes (pass context for context-aware repair)
+            _cai_doctor_repair "$ctx" "" "false"
             return $?
             ;;
         --help | -h)
@@ -1716,6 +1718,11 @@ _cai_doctor_fix_volume_single() {
     else
         target_ownership="1000:1000"
         printf '  %-50s %s\n' "Target ownership:" "$target_ownership (default - could not detect)"
+    fi
+
+    # Check rootfs for corruption (context-aware)
+    if _cai_doctor_check_rootfs_tainted_for_context "$ctx" "$owner_container"; then
+        printf '  %-50s %s\n' "Rootfs:" "[WARN] Tainted - consider recreating container"
     fi
 
     # Repair the volume
@@ -2691,13 +2698,46 @@ _cai_doctor_check_rootfs_tainted() {
     return 1  # Clean
 }
 
+# Check if rootfs shows id-mapping corruption (context-aware version)
+# Arguments: $1 = Docker context
+#            $2 = container name or ID
+# Returns: 0=tainted (has corruption), 1=clean or cannot check
+_cai_doctor_check_rootfs_tainted_for_context() {
+    local ctx="$1"
+    local container="$2"
+
+    # Get container rootfs path
+    local rootfs_path
+    rootfs_path=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+        inspect --type container -- "$container" \
+        --format '{{.GraphDriver.Data.MergedDir}}' 2>/dev/null) || return 1
+
+    if [[ -z "$rootfs_path" ]] || [[ ! -d "$rootfs_path" ]]; then
+        return 1
+    fi
+
+    # Check a few key paths for corruption
+    local check_paths=("/etc" "/home" "/var")
+    local path
+    for path in "${check_paths[@]}"; do
+        local full_path="$rootfs_path$path"
+        if [[ -d "$full_path" ]] && _cai_doctor_check_path_ownership "$full_path"; then
+            return 0  # Tainted
+        fi
+    done
+
+    return 1  # Clean
+}
+
 # Main entry point for repair mode
-# Arguments: $1 = container_filter ("" for --all, container name/id for --container)
-#            $2 = dry_run flag ("true" or "false")
+# Arguments: $1 = Docker context (use effective context from caller)
+#            $2 = container_filter ("" for --all, container name/id for --container)
+#            $3 = dry_run flag ("true" or "false")
 # Returns: 0=success, 1=error
 _cai_doctor_repair() {
-    local container_filter="$1"
-    local dry_run="$2"
+    local ctx="${1:-$_CAI_CONTAINAI_DOCKER_CONTEXT}"
+    local container_filter="$2"
+    local dry_run="$3"
     local platform
     local fixed_count=0
     local skip_count=0
@@ -2739,7 +2779,7 @@ _cai_doctor_repair() {
     if [[ -n "$container_filter" ]]; then
         # Specific container - verify it exists and has the managed label
         local container_labels
-        container_labels=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+        container_labels=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
             inspect --type container -- "$container_filter" \
             --format '{{index .Config.Labels "containai.managed"}}' 2>/dev/null) || {
             _cai_error "Container '$container_filter' not found"
@@ -2753,7 +2793,7 @@ _cai_doctor_repair() {
         containers="$container_filter"
     else
         # All managed containers
-        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
             ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null) || containers=""
     fi
 
@@ -2769,15 +2809,15 @@ _cai_doctor_repair() {
 
         printf '%s\n' "Container: $container"
 
-        # Check rootfs for corruption
-        if _cai_doctor_check_rootfs_tainted "$container"; then
+        # Check rootfs for corruption (context-aware)
+        if _cai_doctor_check_rootfs_tainted_for_context "$ctx" "$container"; then
             printf '  %-50s %s\n' "Rootfs:" "[WARN] Tainted - consider recreating container"
-            ((warn_count++))
+            ((warn_count++)) || true
         fi
 
-        # Get target UID/GID
+        # Get target UID/GID (context-aware)
         local target_ownership
-        if target_ownership=$(_cai_doctor_detect_uid "$container" 2>/dev/null); then
+        if target_ownership=$(_cai_doctor_detect_uid_for_context "$ctx" "$container" 2>/dev/null); then
             printf '  %-50s %s\n' "Target ownership:" "$target_ownership (from container)"
         else
             target_ownership="1000:1000"
@@ -2785,9 +2825,9 @@ _cai_doctor_repair() {
             ((warn_count++))
         fi
 
-        # Get volumes for this container
+        # Get volumes for this container (context-aware)
         local volumes
-        volumes=$(_cai_doctor_get_container_volumes "$container" 2>/dev/null) || volumes=""
+        volumes=$(_cai_doctor_get_container_volumes_for_context "$ctx" "$container" 2>/dev/null) || volumes=""
 
         if [[ -z "$volumes" ]]; then
             printf '  %-50s %s\n' "Volumes:" "[SKIP] No volumes attached"
