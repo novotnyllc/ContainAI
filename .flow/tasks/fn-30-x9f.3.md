@@ -56,3 +56,7 @@ The `$pubkey_content` could get mangled, or script errors might not propagate.
 ## Done summary
 
 <!-- flowctl done will append summary here -->
+
+## Evidence
+
+<!-- flowctl done will append evidence here -->
