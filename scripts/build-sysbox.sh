@@ -331,6 +331,21 @@ build_sysbox_deb() {
     mkdir -p "$pkgr_dir/sources"
     ln -sfn "$sysbox_dir" "$pkgr_dir/sources/sysbox"
 
+    # Patch control file to add fuse3 dependency (sysbox-fs requires fusermount3)
+    log_info "Patching control file to add fuse3 dependency..."
+    local control_file="$pkgr_dir/deb/sysbox-ce/control"
+    if [[ -f "$control_file" ]]; then
+        # Add fuse3 after fuse in the Depends line
+        sed -i 's/\(Depends:.*\), fuse,/\1, fuse, fuse3,/' "$control_file"
+        if grep -q 'fuse3' "$control_file"; then
+            log_ok "fuse3 dependency added to control file"
+        else
+            log_warn "Could not add fuse3 to control file - may already have it or format changed"
+        fi
+    else
+        log_warn "Control file not found at $control_file"
+    fi
+
     # Patch the VERSION file to include our suffix
     log_info "Patching version to: $full_version"
     printf '%s' "$full_version" > "$sysbox_dir/VERSION"

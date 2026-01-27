@@ -130,6 +130,27 @@ jobs:
           mkdir -p sources
           ln -sfn "$(pwd)/../" sources/sysbox
 
+      - name: Patch control file for fuse3 dependency
+        run: |
+          # sysbox-fs requires fusermount3 which is provided by fuse3
+          control_file="sysbox/sysbox-pkgr/deb/sysbox-ce/control"
+          echo "Patching $control_file to add fuse3 dependency..."
+
+          # Add fuse3 after fuse in the Depends line
+          sed -i 's/\(Depends:.*\), fuse,/\1, fuse, fuse3,/' "$control_file"
+
+          # Verify the patch worked
+          if grep -q 'fuse3' "$control_file"; then
+            echo "fuse3 dependency added successfully"
+            echo "Updated Depends line:"
+            grep '^Depends:' "$control_file"
+          else
+            echo "::error::Failed to add fuse3 to control file"
+            echo "Current Depends line:"
+            grep '^Depends:' "$control_file" || echo "(no Depends line found)"
+            exit 1
+          fi
+
       - name: Build sysbox-ce deb package
         run: |
           set -o pipefail
@@ -279,6 +300,27 @@ jobs:
           mkdir -p sources
           ln -sfn "$(pwd)/../" sources/sysbox
 
+      - name: Patch control file for fuse3 dependency
+        run: |
+          # sysbox-fs requires fusermount3 which is provided by fuse3
+          control_file="sysbox/sysbox-pkgr/deb/sysbox-ce/control"
+          echo "Patching $control_file to add fuse3 dependency..."
+
+          # Add fuse3 after fuse in the Depends line
+          sed -i 's/\(Depends:.*\), fuse,/\1, fuse, fuse3,/' "$control_file"
+
+          # Verify the patch worked
+          if grep -q 'fuse3' "$control_file"; then
+            echo "fuse3 dependency added successfully"
+            echo "Updated Depends line:"
+            grep '^Depends:' "$control_file"
+          else
+            echo "::error::Failed to add fuse3 to control file"
+            echo "Current Depends line:"
+            grep '^Depends:' "$control_file" || echo "(no Depends line found)"
+            exit 1
+          fi
+
       - name: Build sysbox-ce deb package
         run: |
           set -o pipefail
@@ -352,6 +394,25 @@ jobs:
           name: sysbox-ce-amd64
           path: dist
 
+      - name: Validate fuse3 dependency in deb package
+        run: |
+          echo "Validating fuse3 dependency in built deb package..."
+          deb_path=$(find dist -name "sysbox-ce*.deb" -type f | head -1)
+          echo "Package: $deb_path"
+
+          # Check deb package metadata for fuse3 dependency
+          echo "Package dependencies:"
+          dpkg-deb -I "$deb_path" | grep -i depends
+
+          if dpkg-deb -I "$deb_path" | grep -i depends | grep -q 'fuse3'; then
+            echo "fuse3 dependency found in package metadata"
+          else
+            echo "::error::fuse3 dependency NOT found in package metadata"
+            echo "Package control info:"
+            dpkg-deb -I "$deb_path"
+            exit 1
+          fi
+
       - name: Install sysbox deb
         run: |
           echo "Installing sysbox deb package..."
@@ -359,6 +420,30 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive dpkg -i dist/sysbox-ce*.deb || true
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y
+
+      - name: Verify fuse3 installed and fusermount3 present
+        run: |
+          echo "Verifying fuse3 was installed as dependency..."
+
+          # Check dpkg shows fuse3 as installed
+          if dpkg -s fuse3 >/dev/null 2>&1; then
+            echo "fuse3 package is installed:"
+            dpkg -s fuse3 | grep -E '^(Package|Status|Version):'
+          else
+            echo "::error::fuse3 package is NOT installed"
+            exit 1
+          fi
+
+          # Verify fusermount3 binary is present
+          if command -v fusermount3 >/dev/null 2>&1; then
+            echo "fusermount3 binary found: $(command -v fusermount3)"
+            fusermount3 --version || true
+          else
+            echo "::error::fusermount3 binary NOT found"
+            exit 1
+          fi
+
+          echo "fuse3 dependency verification passed"
 
       - name: Verify sysbox services
         run: |
@@ -458,6 +543,25 @@ jobs:
           name: sysbox-ce-arm64
           path: dist
 
+      - name: Validate fuse3 dependency in deb package
+        run: |
+          echo "Validating fuse3 dependency in built deb package..."
+          deb_path=$(find dist -name "sysbox-ce*.deb" -type f | head -1)
+          echo "Package: $deb_path"
+
+          # Check deb package metadata for fuse3 dependency
+          echo "Package dependencies:"
+          dpkg-deb -I "$deb_path" | grep -i depends
+
+          if dpkg-deb -I "$deb_path" | grep -i depends | grep -q 'fuse3'; then
+            echo "fuse3 dependency found in package metadata"
+          else
+            echo "::error::fuse3 dependency NOT found in package metadata"
+            echo "Package control info:"
+            dpkg-deb -I "$deb_path"
+            exit 1
+          fi
+
       - name: Install sysbox deb
         run: |
           echo "Installing sysbox deb package..."
@@ -465,6 +569,30 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive dpkg -i dist/sysbox-ce*.deb || true
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y
+
+      - name: Verify fuse3 installed and fusermount3 present
+        run: |
+          echo "Verifying fuse3 was installed as dependency..."
+
+          # Check dpkg shows fuse3 as installed
+          if dpkg -s fuse3 >/dev/null 2>&1; then
+            echo "fuse3 package is installed:"
+            dpkg -s fuse3 | grep -E '^(Package|Status|Version):'
+          else
+            echo "::error::fuse3 package is NOT installed"
+            exit 1
+          fi
+
+          # Verify fusermount3 binary is present
+          if command -v fusermount3 >/dev/null 2>&1; then
+            echo "fusermount3 binary found: $(command -v fusermount3)"
+            fusermount3 --version || true
+          else
+            echo "::error::fusermount3 binary NOT found"
+            exit 1
+          fi
+
+          echo "fuse3 dependency verification passed"
 
       - name: Verify sysbox services
         run: |
