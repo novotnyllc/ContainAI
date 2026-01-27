@@ -1391,14 +1391,17 @@ _cai_doctor_fix() {
 # Returns: 0=success, 1=error
 _cai_doctor_fix_dispatch() {
     local target="${1:-}"
-    local platform
-    platform=$(_cai_detect_platform)
 
     # Resolve effective Docker context for operations
+    # Inside containers, use default context (self-contained daemon)
     local effective_context=""
     local config_context
-    config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
-    effective_context=$(_cai_select_context "$config_context" 2>/dev/null) || effective_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    if _cai_is_container; then
+        effective_context="default"
+    else
+        config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
+        effective_context=$(_cai_select_context "$config_context" 2>/dev/null) || effective_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    fi
 
     case "$target" in
         "")
@@ -1476,7 +1479,7 @@ _cai_doctor_fix_show_targets() {
             while IFS= read -r c; do
                 [[ -z "$c" ]] && continue
                 local vols
-                vols=$(_cai_doctor_get_container_volumes "$c" 2>/dev/null) || vols=""
+                vols=$(_cai_doctor_get_container_volumes_for_context "$ctx" "$c" 2>/dev/null) || vols=""
                 if [[ -n "$vols" ]]; then
                     volumes="${volumes}${vols}"$'\n'
                 fi
@@ -1631,7 +1634,7 @@ _cai_doctor_fix_volume_list() {
     while IFS= read -r c; do
         [[ -z "$c" ]] && continue
         local vols
-        vols=$(_cai_doctor_get_container_volumes "$c" 2>/dev/null) || vols=""
+        vols=$(_cai_doctor_get_container_volumes_for_context "$ctx" "$c" 2>/dev/null) || vols=""
         if [[ -n "$vols" ]]; then
             local v
             while IFS= read -r v; do
@@ -1683,8 +1686,9 @@ _cai_doctor_fix_volume_single() {
     while IFS= read -r c; do
         [[ -z "$c" ]] && continue
         local vols
-        vols=$(_cai_doctor_get_container_volumes "$c" 2>/dev/null) || vols=""
-        if printf '%s' "$vols" | grep -qx "$volume_name"; then
+        vols=$(_cai_doctor_get_container_volumes_for_context "$ctx" "$c" 2>/dev/null) || vols=""
+        # Use -Fqx for fixed string matching (volume names may contain '.' which is regex wildcard)
+        if printf '%s' "$vols" | grep -Fqx "$volume_name"; then
             owner_container="$c"
             break
         fi
@@ -2480,6 +2484,7 @@ _cai_doctor_detect_uid() {
 # Arguments: $1 = container name or ID
 # Returns: 0=success (may have 0 volumes), 1=error
 # Outputs: Volume names (one per line) on stdout
+# Note: Uses hardcoded context - prefer _cai_doctor_get_container_volumes_for_context
 _cai_doctor_get_container_volumes() {
     local container="$1"
     local mounts
@@ -2487,6 +2492,25 @@ _cai_doctor_get_container_volumes() {
     # Get mount info
     mounts=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
         inspect --type container "$container" \
+        --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null) || return 1
+
+    printf '%s' "$mounts"
+    return 0
+}
+
+# Get volumes attached to a container (context-aware version)
+# Arguments: $1 = Docker context name
+#            $2 = container name or ID
+# Returns: 0=success (may have 0 volumes), 1=error
+# Outputs: Volume names (one per line) on stdout
+_cai_doctor_get_container_volumes_for_context() {
+    local ctx="$1"
+    local container="$2"
+    local mounts
+
+    # Get mount info using specified context
+    mounts=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+        inspect --type container -- "$container" \
         --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null) || return 1
 
     printf '%s' "$mounts"
