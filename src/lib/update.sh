@@ -82,7 +82,7 @@ to their latest versions. Safe to run multiple times (idempotent).
 Options:
   --dry-run           Show what would be done without making changes
   --stop-containers   Stop running containers before update (Linux/WSL2)
-  --force             Skip confirmation prompts (e.g., VM recreation on macOS)
+  --force             Skip all confirmation prompts (includes stopping containers)
   --lima-recreate     Force Lima VM recreation (macOS only; bypasses hash check)
   --verbose, -v       Show verbose output
   -h, --help          Show this help message
@@ -107,8 +107,12 @@ Container Handling (Linux/WSL2):
   When updates are required (sysbox, dockerd bundle, or systemd unit changes),
   running ContainAI containers must be stopped first:
 
-  - Default: Update ABORTS with list of running containers if updates needed
-  - --stop-containers: Gracefully stops containers, then proceeds with update
+  - Interactive: Prompts "Stop containers and continue? [y/N]"
+  - On "y": Gracefully stops containers, then proceeds with update
+  - On "n"/Enter/timeout: Aborts cleanly with guidance
+  - Non-interactive (no TTY): Aborts with message suggesting --stop-containers
+  - --stop-containers: Skips prompt, stops containers automatically (for CI/scripts)
+  - --force: Also skips prompt and stops containers automatically
   - --dry-run: Shows what would be stopped without stopping
 
 Notes:
@@ -120,9 +124,9 @@ Notes:
   - Use 'cai doctor' after update to verify installation
 
 Examples:
-  cai update                       Update installation (aborts if containers running)
+  cai update                       Update (prompts if containers running)
   cai update --dry-run             Preview what would be updated
-  cai update --stop-containers     Stop containers before update
+  cai update --stop-containers     Stop containers without prompting (for CI)
   cai update --force               Update without confirmation prompts
   cai update --lima-recreate       Force VM recreation (macOS)
 EOF
@@ -1185,32 +1189,42 @@ _cai_update_linux_wsl2() {
                         _cai_info "[DRY-RUN]   - $name"
                     fi
                 done <<< "$running_containers"
-                _cai_info "[DRY-RUN] Would require --stop-containers flag to proceed"
-            elif [[ "$stop_containers" == "true" ]]; then
-                # Stop containers before proceeding
+                _cai_info "[DRY-RUN] Would prompt to stop containers or require --stop-containers flag"
+            elif [[ "$stop_containers" == "true" ]] || [[ "$force" == "true" ]]; then
+                # Stop containers before proceeding (--stop-containers or --force flag)
                 if ! _cai_stop_containai_containers "false" 100; then
                     _cai_error "Failed to stop all containers"
                     return 1
                 fi
             else
-                # Abort with actionable message
-                _cai_error "Cannot update: running ContainAI containers detected"
-                printf '\n' >&2
-                _cai_error "Running containers:"
+                # Show running containers and prompt interactively
+                _cai_warn "Running ContainAI containers detected:"
                 local container_id name
                 while IFS=$'\t' read -r container_id name; do
                     if [[ -n "$name" ]]; then
-                        _cai_error "  - $name"
+                        _cai_warn "  - $name"
                     fi
                 done <<< "$running_containers"
                 printf '\n' >&2
-                _cai_error "Updates required ($_CAI_UPDATE_REASON) would restart the Docker service,"
-                _cai_error "which would disrupt running containers."
-                printf '\n' >&2
-                _cai_info "To proceed, run with --stop-containers to safely stop containers first:"
-                _cai_info "  cai update --stop-containers"
-                printf '\n' >&2
-                return 2
+                _cai_info "Updates required ($_CAI_UPDATE_REASON) would restart the Docker service,"
+                _cai_info "which would disrupt running containers."
+                printf '\n'
+
+                # Try interactive prompt (returns 1 if no TTY or user declines)
+                if _cai_prompt_confirm "Stop containers and continue?"; then
+                    # User confirmed - stop containers and proceed
+                    if ! _cai_stop_containai_containers "false" 100; then
+                        _cai_error "Failed to stop all containers"
+                        return 1
+                    fi
+                else
+                    # No TTY or user declined - abort with actionable message
+                    printf '\n' >&2
+                    _cai_info "To proceed non-interactively, use --stop-containers or --force:"
+                    _cai_info "  cai update --stop-containers"
+                    printf '\n' >&2
+                    return 2
+                fi
             fi
         fi
     else

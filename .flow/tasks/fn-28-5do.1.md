@@ -27,7 +27,14 @@ Remove the upstream nestybox fallback from `_cai_resolve_sysbox_download_url()` 
 
 ## Acceptance
 
-- [ ] `_cai_resolve_sysbox_download_url` returns error when ContainAI release unavailable
-- [ ] Error message provides actionable workarounds (CAI_SYSBOX_URL, CAI_SYSBOX_VERSION)
-- [ ] CAI_SYSBOX_URL and CAI_SYSBOX_VERSION overrides still work
-- [ ] shellcheck passes on modified file
+- [x] `_cai_resolve_sysbox_download_url` returns error when ContainAI release unavailable
+- [x] Error message provides actionable workarounds (CAI_SYSBOX_URL, CAI_SYSBOX_VERSION)
+- [x] CAI_SYSBOX_URL and CAI_SYSBOX_VERSION overrides still work
+- [x] shellcheck passes on modified file
+
+## Done summary
+Removed upstream nestybox fallback from sysbox download resolution. Now when ContainAI release is unavailable and no override is set, returns clear error with actionable workarounds (CAI_SYSBOX_URL, CAI_SYSBOX_VERSION).
+## Evidence
+- Commits: 2153301488b30fd68725c882d5bf145b23bd845d
+- Tests: shellcheck -x src/lib/setup.sh
+- PRs:
