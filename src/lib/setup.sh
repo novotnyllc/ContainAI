@@ -486,13 +486,13 @@ _cai_sysbox_installed_version() {
     fi
     local version_line
     version_line=$(sysbox-runc --version 2>/dev/null | head -1 || true)
-    # Extract semver: "0.6.7" from "sysbox-runc version 0.6.7+containai.20260126"
+    # Extract semver: "0.6.7" from "sysbox-runc version 0.6.7+containai.20260127"
     printf '%s' "$version_line" | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1
 }
 
 # Get installed sysbox package version (full dpkg version)
 # Returns: 0=success (outputs version to stdout), 1=not installed or no dpkg
-# Example output: "0.6.7+containai.20260126-0"
+# Example output: "0.6.7+containai.20260127-0"
 _cai_sysbox_installed_pkg_version() {
     if ! command -v dpkg-query >/dev/null 2>&1; then
         return 1
@@ -510,7 +510,7 @@ _cai_sysbox_is_containai_build() {
 
 # Get the bundled ContainAI sysbox release tag
 # Returns: 0=success (outputs tag to stdout)
-# Example output: "sysbox-build-20260126-7"
+# Example output: "sysbox-build-20260127-10"
 _cai_sysbox_bundled_tag() {
     printf '%s' "$_CAI_SYSBOX_CONTAINAI_TAG"
 }
@@ -518,7 +518,7 @@ _cai_sysbox_bundled_tag() {
 # Get the version from the bundled ContainAI sysbox release
 # Arguments: $1 = architecture (amd64 or arm64)
 # Returns: 0=success (outputs version to stdout), 1=failed to fetch
-# Example output: "0.6.7+containai.20260126"
+# Example output: "0.6.7+containai.20260127"
 # Side effect: Caches result in _CAI_SYSBOX_BUNDLED_VERSION_CACHE
 _cai_sysbox_bundled_version() {
     local arch="${1:-amd64}"
