@@ -56,8 +56,9 @@ At `docker.sh:514-539`, `_cai_containai_docker_context_exists()`:
 - [ ] Check is centralized and used by all context-dependent commands (`cai run`, `cai shell`, `cai docker`, etc.)
 - [ ] Auto-repair is skipped inside containers (`_cai_is_container()` check)
 ## Done summary
-Implemented auto-repair for containai-docker context when endpoint is wrong. The repair detects when the context points to a different endpoint than expected (e.g., unix:// instead of ssh:// on WSL2) and automatically recreates it with the correct endpoint. Integrated into _cai_select_context() as the centralized entrypoint, with verbose output when --verbose flag is used.
+TBD
+
 ## Evidence
-- Commits: 8d6fbc63bda4327b7aa4e81607ae223a63578a58
-- Tests: shellcheck -x src/lib/docker.sh src/lib/doctor.sh src/lib/container.sh src/containai.sh
+- Commits:
+- Tests:
 - PRs:
