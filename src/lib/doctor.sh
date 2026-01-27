@@ -1382,6 +1382,543 @@ _cai_doctor_fix() {
 }
 
 # ==============================================================================
+# Doctor Fix Subcommand Hierarchy
+# ==============================================================================
+
+# Dispatch for 'cai doctor fix' subcommand
+# Routes to appropriate fix target based on arguments
+# Arguments: $@ = remaining arguments after 'fix'
+# Returns: 0=success, 1=error
+_cai_doctor_fix_dispatch() {
+    local target="${1:-}"
+    local platform
+    platform=$(_cai_detect_platform)
+
+    # Resolve effective Docker context for operations
+    local effective_context=""
+    local config_context
+    config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
+    effective_context=$(_cai_select_context "$config_context" 2>/dev/null) || effective_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+
+    case "$target" in
+        "")
+            # 'cai doctor fix' with no target - show available targets
+            _cai_doctor_fix_show_targets "$effective_context"
+            return 0
+            ;;
+        --all)
+            # 'cai doctor fix --all' - run all fixes
+            _cai_doctor_fix_all "$effective_context"
+            return $?
+            ;;
+        volume)
+            shift
+            _cai_doctor_fix_volume "$effective_context" "$@"
+            return $?
+            ;;
+        container)
+            shift
+            _cai_doctor_fix_container "$effective_context" "$@"
+            return $?
+            ;;
+        --help | -h)
+            _containai_doctor_help
+            return 0
+            ;;
+        *)
+            echo "[ERROR] Unknown fix target: $target" >&2
+            echo "Valid targets: volume, container, --all" >&2
+            echo "Use 'cai doctor --help' for usage" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Show available fix targets and what can be fixed
+# Arguments: $1 = effective Docker context
+_cai_doctor_fix_show_targets() {
+    local ctx="$1"
+    local platform
+    platform=$(_cai_detect_platform)
+
+    printf '%s\n' "ContainAI Doctor Fix"
+    printf '%s\n' "===================="
+    printf '\n'
+    printf '%s\n' "Available fix targets:"
+    printf '\n'
+
+    # List containers
+    printf '%s\n' "  Containers:"
+    local containers=""
+    if [[ -n "$ctx" ]] && command -v docker >/dev/null 2>&1; then
+        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null) || containers=""
+    fi
+    if [[ -n "$containers" ]]; then
+        local c
+        while IFS= read -r c; do
+            [[ -z "$c" ]] && continue
+            printf '    - %s\n' "$c"
+        done <<< "$containers"
+    else
+        printf '    (none found)\n'
+    fi
+    printf '\n'
+
+    # List volumes (derived from containers)
+    printf '%s\n' "  Volumes:"
+    if [[ "$platform" == "macos" ]]; then
+        printf '    (volume fix not available on macOS - volumes are inside Lima VM)\n'
+    else
+        local volumes=""
+        if [[ -n "$containers" ]]; then
+            local c
+            while IFS= read -r c; do
+                [[ -z "$c" ]] && continue
+                local vols
+                vols=$(_cai_doctor_get_container_volumes "$c" 2>/dev/null) || vols=""
+                if [[ -n "$vols" ]]; then
+                    volumes="${volumes}${vols}"$'\n'
+                fi
+            done <<< "$containers"
+        fi
+        # Deduplicate volumes
+        if [[ -n "$volumes" ]]; then
+            local unique_volumes
+            unique_volumes=$(printf '%s' "$volumes" | sort -u | grep -v '^$')
+            local v
+            while IFS= read -r v; do
+                [[ -z "$v" ]] && continue
+                printf '    - %s\n' "$v"
+            done <<< "$unique_volumes"
+        else
+            printf '    (none found)\n'
+        fi
+    fi
+    printf '\n'
+
+    printf '%s\n' "Commands:"
+    printf '  cai doctor fix --all              Fix everything\n'
+    printf '  cai doctor fix container --all    Fix all containers (SSH refresh)\n'
+    printf '  cai doctor fix container <name>   Fix specific container\n'
+    if [[ "$platform" != "macos" ]]; then
+        printf '  cai doctor fix volume --all       Fix all volumes (ownership repair)\n'
+        printf '  cai doctor fix volume <name>      Fix specific volume\n'
+    fi
+    printf '\n'
+
+    return 0
+}
+
+# Fix all targets (containers and volumes)
+# Arguments: $1 = effective Docker context
+_cai_doctor_fix_all() {
+    local ctx="$1"
+    local platform
+    local had_error="false"
+    platform=$(_cai_detect_platform)
+
+    printf '%s\n' "ContainAI Doctor Fix (All)"
+    printf '%s\n' "=========================="
+    printf '\n'
+
+    # Run base doctor fix first (SSH keys, config, etc.)
+    printf '%s\n' "=== Base Configuration ==="
+    printf '\n'
+    if ! _cai_doctor_fix; then
+        had_error="true"
+    fi
+    printf '\n'
+
+    # Fix all containers
+    printf '%s\n' "=== Containers ==="
+    printf '\n'
+    if ! _cai_doctor_fix_container "$ctx" --all; then
+        had_error="true"
+    fi
+    printf '\n'
+
+    # Fix all volumes (Linux/WSL2 only)
+    if [[ "$platform" != "macos" ]]; then
+        printf '%s\n' "=== Volumes ==="
+        printf '\n'
+        if ! _cai_doctor_fix_volume "$ctx" --all; then
+            had_error="true"
+        fi
+    fi
+
+    if [[ "$had_error" == "true" ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Fix volume ownership
+# Arguments: $1 = effective Docker context
+#            $2... = --all or volume name
+_cai_doctor_fix_volume() {
+    local ctx="$1"
+    shift
+    local target="${1:-}"
+    local platform
+    platform=$(_cai_detect_platform)
+
+    # Platform check - volume fix is Linux/WSL2 only
+    if [[ "$platform" == "macos" ]]; then
+        _cai_info "Volume repair is not supported on macOS"
+        _cai_info "Volumes are inside the Lima VM and cannot be accessed directly"
+        return 0
+    fi
+
+    # Check nested mode - also not supported
+    if _cai_is_container; then
+        _cai_info "Volume repair is not supported in nested mode"
+        _cai_info "Use volume repair from the host system"
+        return 0
+    fi
+
+    case "$target" in
+        "")
+            # List volumes with status
+            _cai_doctor_fix_volume_list "$ctx"
+            return 0
+            ;;
+        --all)
+            # Fix all volumes
+            _cai_doctor_repair "" "false"
+            return $?
+            ;;
+        *)
+            # Fix specific volume
+            # Volume names can't start with - so no need for -- guard
+            _cai_doctor_fix_volume_single "$ctx" "$target"
+            return $?
+            ;;
+    esac
+}
+
+# List volumes with their status
+# Arguments: $1 = effective Docker context
+_cai_doctor_fix_volume_list() {
+    local ctx="$1"
+
+    printf '%s\n' "ContainAI Doctor Fix (Volume List)"
+    printf '%s\n' "==================================="
+    printf '\n'
+    printf '%s\n' "Note: Volume fix is only available on Linux/WSL2 hosts."
+    printf '%s\n' "Not supported on macOS (volumes inside Lima VM) or nested mode."
+    printf '\n'
+
+    # Get all managed containers
+    local containers=""
+    if [[ -n "$ctx" ]] && command -v docker >/dev/null 2>&1; then
+        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null) || containers=""
+    fi
+
+    if [[ -z "$containers" ]]; then
+        _cai_info "No ContainAI-managed containers found"
+        return 0
+    fi
+
+    printf '%s\n' "Volumes from managed containers:"
+    printf '\n'
+
+    local volumes_root="$_CAI_CONTAINAI_DOCKER_DATA/volumes"
+
+    # Collect all volumes from containers
+    local c
+    while IFS= read -r c; do
+        [[ -z "$c" ]] && continue
+        local vols
+        vols=$(_cai_doctor_get_container_volumes "$c" 2>/dev/null) || vols=""
+        if [[ -n "$vols" ]]; then
+            local v
+            while IFS= read -r v; do
+                [[ -z "$v" ]] && continue
+                local volume_path="$volumes_root/$v/_data"
+                local status="[OK]"
+                if [[ -d "$volume_path" ]]; then
+                    local corrupted_count
+                    corrupted_count=$(_cai_doctor_check_volume_ownership "$volume_path" 2>/dev/null) || corrupted_count=""
+                    if [[ -n "$corrupted_count" ]] && [[ "$corrupted_count" != "0" ]]; then
+                        status="[CORRUPT] $corrupted_count files with nobody:nogroup"
+                    fi
+                else
+                    status="[SKIP] Path not accessible"
+                fi
+                printf '  %-30s %s (container: %s)\n' "$v" "$status" "$c"
+            done <<< "$vols"
+        fi
+    done <<< "$containers"
+
+    printf '\n'
+    printf '%s\n' "Commands:"
+    printf '  cai doctor fix volume --all       Fix all volumes\n'
+    printf '  cai doctor fix volume <name>      Fix specific volume\n'
+
+    return 0
+}
+
+# Fix a single volume
+# Arguments: $1 = effective Docker context
+#            $2 = volume name
+_cai_doctor_fix_volume_single() {
+    local ctx="$1"
+    local volume_name="$2"
+
+    printf '%s\n' "ContainAI Doctor Fix (Volume: $volume_name)"
+    printf '%s\n' "============================================"
+    printf '\n'
+
+    # Find which container owns this volume
+    local containers=""
+    if [[ -n "$ctx" ]] && command -v docker >/dev/null 2>&1; then
+        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null) || containers=""
+    fi
+
+    local owner_container=""
+    local c
+    while IFS= read -r c; do
+        [[ -z "$c" ]] && continue
+        local vols
+        vols=$(_cai_doctor_get_container_volumes "$c" 2>/dev/null) || vols=""
+        if printf '%s' "$vols" | grep -qx "$volume_name"; then
+            owner_container="$c"
+            break
+        fi
+    done <<< "$containers"
+
+    if [[ -z "$owner_container" ]]; then
+        _cai_error "Volume '$volume_name' not found in any managed container"
+        _cai_info "Use 'cai doctor fix volume' to list available volumes"
+        return 1
+    fi
+
+    # Get target UID/GID from container
+    local target_ownership
+    if target_ownership=$(_cai_doctor_detect_uid "$owner_container" 2>/dev/null); then
+        printf '  %-50s %s\n' "Target ownership:" "$target_ownership (from container $owner_container)"
+    else
+        target_ownership="1000:1000"
+        printf '  %-50s %s\n' "Target ownership:" "$target_ownership (default - container not running)"
+    fi
+
+    # Repair the volume
+    _cai_doctor_repair_volume "$volume_name" "$target_ownership" "false"
+    return $?
+}
+
+# Fix container SSH configuration
+# Arguments: $1 = effective Docker context
+#            $2... = --all or container name
+_cai_doctor_fix_container() {
+    local ctx="$1"
+    shift
+    local target="${1:-}"
+
+    case "$target" in
+        "")
+            # List containers with status
+            _cai_doctor_fix_container_list "$ctx"
+            return 0
+            ;;
+        --all)
+            # Fix all containers
+            _cai_doctor_fix_container_all "$ctx"
+            return $?
+            ;;
+        *)
+            # Fix specific container (use -- to prevent option injection)
+            _cai_doctor_fix_container_single "$ctx" "$target"
+            return $?
+            ;;
+    esac
+}
+
+# List containers with their SSH status
+# Arguments: $1 = effective Docker context
+_cai_doctor_fix_container_list() {
+    local ctx="$1"
+
+    printf '%s\n' "ContainAI Doctor Fix (Container List)"
+    printf '%s\n' "======================================"
+    printf '\n'
+
+    # Get all managed containers
+    local containers=""
+    if [[ -n "$ctx" ]] && command -v docker >/dev/null 2>&1; then
+        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            ps -a --filter "label=containai.managed=true" --format '{{.Names}}\t{{.Status}}' 2>/dev/null) || containers=""
+    fi
+
+    if [[ -z "$containers" ]]; then
+        _cai_info "No ContainAI-managed containers found"
+        return 0
+    fi
+
+    printf '%s\n' "Managed containers:"
+    printf '\n'
+
+    local line
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local name status
+        name=$(printf '%s' "$line" | cut -f1)
+        status=$(printf '%s' "$line" | cut -f2-)
+
+        # Check SSH config
+        local ssh_status="[OK]"
+        local config_file="$_CAI_SSH_CONFIG_DIR/${name}.conf"
+        if [[ ! -f "$config_file" ]]; then
+            ssh_status="[MISSING] SSH config"
+        fi
+
+        printf '  %-30s %-20s %s\n' "$name" "($status)" "$ssh_status"
+    done <<< "$containers"
+
+    printf '\n'
+    printf '%s\n' "Commands:"
+    printf '  cai doctor fix container --all    Fix all containers\n'
+    printf '  cai doctor fix container <name>   Fix specific container\n'
+
+    return 0
+}
+
+# Fix all containers (SSH refresh)
+# Arguments: $1 = effective Docker context
+_cai_doctor_fix_container_all() {
+    local ctx="$1"
+    local fixed_count=0
+    local skip_count=0
+    local fail_count=0
+
+    printf '%s\n' "ContainAI Doctor Fix (All Containers)"
+    printf '%s\n' "======================================"
+    printf '\n'
+
+    # Get all managed containers
+    local containers=""
+    if [[ -n "$ctx" ]] && command -v docker >/dev/null 2>&1; then
+        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            ps -a --filter "label=containai.managed=true" --format '{{.Names}}\t{{.State}}' 2>/dev/null) || containers=""
+    fi
+
+    if [[ -z "$containers" ]]; then
+        _cai_info "No ContainAI-managed containers found"
+        return 0
+    fi
+
+    local line
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local name state
+        name=$(printf '%s' "$line" | cut -f1)
+        state=$(printf '%s' "$line" | cut -f2)
+
+        printf '  Container: %s (%s)\n' "$name" "$state"
+
+        if [[ "$state" != "running" ]]; then
+            printf '    %-46s %s\n' "SSH refresh:" "[SKIP] Container not running"
+            ((skip_count++))
+            continue
+        fi
+
+        # Get SSH port
+        local ssh_port
+        ssh_port=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            port -- "$name" 22 2>/dev/null | head -1 | sed 's/.*://') || ssh_port=""
+
+        if [[ -z "$ssh_port" ]]; then
+            printf '    %-46s %s\n' "SSH refresh:" "[SKIP] No SSH port mapped"
+            ((skip_count++))
+            continue
+        fi
+
+        # Refresh SSH configuration (force update)
+        if _cai_setup_container_ssh "$name" "$ssh_port" "$ctx" "true" 2>/dev/null; then
+            printf '    %-46s %s\n' "SSH refresh:" "[FIXED]"
+            ((fixed_count++))
+        else
+            printf '    %-46s %s\n' "SSH refresh:" "[FAIL]"
+            ((fail_count++))
+        fi
+    done <<< "$containers"
+
+    printf '\n'
+    printf '%s\n' "Summary"
+    printf '  %-50s %s\n' "Fixed:" "$fixed_count"
+    printf '  %-50s %s\n' "Skipped:" "$skip_count"
+    printf '  %-50s %s\n' "Failed:" "$fail_count"
+
+    if [[ $fail_count -gt 0 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Fix a single container (SSH refresh)
+# Arguments: $1 = effective Docker context
+#            $2 = container name
+_cai_doctor_fix_container_single() {
+    local ctx="$1"
+    local container_name="$2"
+
+    printf '%s\n' "ContainAI Doctor Fix (Container: $container_name)"
+    printf '%s\n' "=================================================="
+    printf '\n'
+
+    # Verify container exists and is managed
+    local container_labels
+    container_labels=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+        inspect --type container -- "$container_name" \
+        --format '{{index .Config.Labels "containai.managed"}}' 2>/dev/null) || {
+        _cai_error "Container '$container_name' not found"
+        return 1
+    }
+
+    if [[ "$container_labels" != "true" ]]; then
+        _cai_warn "Container '$container_name' is not a ContainAI-managed container"
+        _cai_info "Only containers with label 'containai.managed=true' can be fixed"
+        return 1
+    fi
+
+    # Check container state
+    local container_state
+    container_state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+        inspect --type container -- "$container_name" \
+        --format '{{.State.Status}}' 2>/dev/null) || container_state=""
+
+    printf '  Container: %s (%s)\n' "$container_name" "$container_state"
+
+    if [[ "$container_state" != "running" ]]; then
+        printf '    %-46s %s\n' "SSH refresh:" "[SKIP] Container not running"
+        _cai_info "Start the container with 'cai shell' or 'cai run' first"
+        return 0
+    fi
+
+    # Get SSH port
+    local ssh_port
+    ssh_port=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+        port -- "$container_name" 22 2>/dev/null | head -1 | sed 's/.*://') || ssh_port=""
+
+    if [[ -z "$ssh_port" ]]; then
+        printf '    %-46s %s\n' "SSH refresh:" "[SKIP] No SSH port mapped"
+        return 0
+    fi
+
+    # Refresh SSH configuration (force update)
+    if _cai_setup_container_ssh "$container_name" "$ssh_port" "$ctx" "true"; then
+        printf '    %-46s %s\n' "SSH refresh:" "[FIXED]"
+        return 0
+    else
+        printf '    %-46s %s\n' "SSH refresh:" "[FAIL]"
+        return 1
+    fi
+}
+
+# ==============================================================================
 # Doctor JSON Output
 # ==============================================================================
 

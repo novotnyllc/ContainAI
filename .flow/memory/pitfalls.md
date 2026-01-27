@@ -232,3 +232,6 @@ When passing printf %q escaped strings to bash -c, do NOT escape again - use dou
 
 ## 2026-01-27 manual [pitfall]
 When detecting a word token in grep, \bword\b[^x] fails at end-of-line; use separate patterns for start/middle/end positions or word([[:space:],]|$)
+
+## 2026-01-27 manual [pitfall]
+When skipping sync map entries, use source rewriting instead of continue to preserve ensure() behavior for creating target paths with correct permissions

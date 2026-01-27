@@ -59,9 +59,8 @@ Two fixes needed:
 - [ ] Rsync sync completes successfully
 - [ ] Users can still add `~/.ssh` via config if they want it
 ## Done summary
-TBD
-
+Updated import defaults to not import SSH by default, skip profile credentials (.claude/.credentials.json, .codex/auth.json) when importing from user home, add --verbose flag for noise suppression, add Copilot config.json ensure step with trusted_folders and banner settings, and fix base64 decode to be non-fatal.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f3ae08d, ce90caf, 12ded30, ca524a7
+- Tests: shellcheck -x src/lib/import.sh src/containai.sh
 - PRs:

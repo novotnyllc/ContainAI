@@ -495,7 +495,7 @@ _containai_doctor_help() {
 ContainAI Doctor - Check system capabilities and diagnostics
 
 Usage: cai doctor [options]
-       cai doctor --repair (--all | --container <name>) [--dry-run]
+       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>]]
 
 Checks Docker availability and Sysbox isolation configuration.
 Reports requirement levels and actionable remediation guidance.
@@ -505,19 +505,8 @@ Requirements:
   SSH: REQUIRED - cai shell/run use SSH for container access
 
 Options:
-  --fix           Auto-fix issues that can be remediated automatically
   --json          Output machine-parseable JSON
 EOF
-
-    # Show --repair options (Linux/WSL2 only)
-    if [[ "$platform" != "macos" ]]; then
-        cat <<'EOF'
-  --repair        Repair volume ownership corruption (Linux/WSL2 only)
-    --all           Repair all managed containers
-    --container <n> Repair specific container by name
-    --dry-run       Preview changes without applying
-EOF
-    fi
 
     # Show --reset-lima option only on macOS
     if [[ "$platform" == "macos" ]]; then
@@ -529,51 +518,74 @@ EOF
     cat <<'EOF'
   -h, --help      Show this help message
 
+Subcommands:
+  fix             Auto-fix issues (see below for targets)
+
+Fix Targets:
+  fix                           Show available fix targets
+  fix --all                     Fix everything fixable
+  fix volume                    List volumes, offer to fix
+  fix volume --all              Fix all volumes
+  fix volume <name>             Fix specific volume
+  fix container                 List containers, offer to fix
+  fix container --all           Fix all containers (including SSH key auth)
+  fix container <name>          Fix specific container
+
 Exit Codes:
   0    All checks pass (Sysbox available AND SSH configured)
   1    Checks failed (run 'cai setup' to configure)
 
-What --fix can remediate:
+What 'fix' can remediate:
   - Missing SSH key (regenerates)
   - Missing SSH config directory (creates)
   - Missing Include directive (adds to ~/.ssh/config)
   - Stale SSH configs (removes orphaned container configs)
   - Wrong file permissions (fixes to 700/600 as appropriate)
+  - Container SSH configuration refresh
 
-What --fix cannot remediate (requires manual action):
+What 'fix' cannot remediate (requires manual action):
   - Sysbox not installed (use 'cai setup')
   - Docker context not configured (use 'cai setup')
   - Kernel version incompatible
   - Docker daemon not running
 EOF
 
-    # Show repair examples (Linux/WSL2 only)
+    # Show volume fix info (Linux/WSL2 only)
     if [[ "$platform" != "macos" ]]; then
         cat <<'EOF'
 
-What --repair can fix (Linux/WSL2 only):
+What 'fix volume' can fix (Linux/WSL2 only):
   - Volume ownership corruption (files showing nobody:nogroup)
   - Requires sudo for chown operations
   - Only operates on volumes under /var/lib/containai-docker/volumes
   - Only affects containers with label containai.managed=true
   - Warns if rootfs is tainted (suggests container recreation)
+  - Not supported on macOS (volumes are inside Lima VM)
+EOF
+    else
+        cat <<'EOF'
+
+Note: 'fix volume' is only available on Linux/WSL2 (not macOS).
+Volumes are inside the Lima VM on macOS.
 EOF
     fi
 
     cat <<'EOF'
 
 Examples:
-  cai doctor                    Run all checks, show formatted report
-  cai doctor --fix              Auto-fix issues and show report
-  cai doctor --json             Output JSON for scripts/automation
+  cai doctor                        Run all checks, show formatted report
+  cai doctor --json                 Output JSON for scripts/automation
+  cai doctor fix                    Show available fix targets
+  cai doctor fix --all              Fix everything
+  cai doctor fix container --all    Fix SSH config for all containers
+  cai doctor fix container myname   Fix SSH config for specific container
 EOF
 
-    # Show repair examples (Linux/WSL2 only)
+    # Show volume fix examples (Linux/WSL2 only)
     if [[ "$platform" != "macos" ]]; then
         cat <<'EOF'
-  cai doctor --repair --all     Repair all managed container volumes
-  cai doctor --repair --container mycontainer    Repair specific container
-  cai doctor --repair --all --dry-run            Preview repairs
+  cai doctor fix volume --all       Repair all managed volumes
+  cai doctor fix volume myvolume    Repair specific volume
 EOF
     fi
 }
@@ -1384,47 +1396,21 @@ _containai_sandbox_cmd() {
 # Doctor subcommand handler
 _containai_doctor_cmd() {
     local json_output="false"
-    local fix_mode="false"
     local reset_lima="false"
-    local repair_mode="false"
-    local repair_all="false"
-    local repair_container=""
-    local dry_run="false"
     local workspace="$PWD"
 
-    # Parse arguments
+    # Check for 'fix' subcommand first (before option parsing)
+    if [[ "${1:-}" == "fix" ]]; then
+        shift
+        _cai_doctor_fix_dispatch "$@"
+        return $?
+    fi
+
+    # Parse arguments for base doctor command
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --json)
                 json_output="true"
-                shift
-                ;;
-            --fix)
-                fix_mode="true"
-                shift
-                ;;
-            --repair)
-                repair_mode="true"
-                shift
-                ;;
-            --all)
-                repair_all="true"
-                shift
-                ;;
-            --container)
-                if [[ -z "${2-}" ]]; then
-                    echo "[ERROR] --container requires a value" >&2
-                    return 1
-                fi
-                repair_container="$2"
-                shift 2
-                ;;
-            --container=*)
-                repair_container="${1#--container=}"
-                shift
-                ;;
-            --dry-run)
-                dry_run="true"
                 shift
                 ;;
             --reset-lima)
@@ -1468,46 +1454,6 @@ _containai_doctor_cmd() {
         return $?
     fi
 
-    # Validate that repair sub-options require --repair
-    if [[ "$repair_mode" != "true" ]]; then
-        if [[ -n "$repair_container" ]]; then
-            echo "[ERROR] --container requires --repair" >&2
-            echo "Use 'cai doctor --help' for usage" >&2
-            return 1
-        fi
-        if [[ "$repair_all" == "true" ]]; then
-            echo "[ERROR] --all requires --repair" >&2
-            echo "Use 'cai doctor --help' for usage" >&2
-            return 1
-        fi
-        if [[ "$dry_run" == "true" ]]; then
-            echo "[ERROR] --dry-run requires --repair" >&2
-            echo "Use 'cai doctor --help' for usage" >&2
-            return 1
-        fi
-    fi
-
-    # Handle --repair mode (Linux/WSL2 only)
-    if [[ "$repair_mode" == "true" ]]; then
-        # Validate repair options
-        if [[ -n "$repair_container" ]] && [[ "$repair_all" == "true" ]]; then
-            echo "[ERROR] Cannot use both --container and --all" >&2
-            return 1
-        fi
-        if [[ -z "$repair_container" ]] && [[ "$repair_all" != "true" ]]; then
-            echo "[ERROR] --repair requires either --container <name> or --all" >&2
-            echo "Use 'cai doctor --help' for usage" >&2
-            return 1
-        fi
-        # Call repair function
-        if [[ -n "$repair_container" ]]; then
-            _cai_doctor_repair "$repair_container" "$dry_run"
-        else
-            _cai_doctor_repair "" "$dry_run"
-        fi
-        return $?
-    fi
-
     # Resolve workspace and parse config to get configured resource limits
     # Use platform-aware normalization for consistency
     local resolved_workspace
@@ -1524,10 +1470,8 @@ _containai_doctor_cmd() {
         _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
     fi
 
-    # Run doctor checks
-    if [[ "$fix_mode" == "true" ]]; then
-        _cai_doctor_fix
-    elif [[ "$json_output" == "true" ]]; then
+    # Run doctor checks (default mode is diagnostic, not fix)
+    if [[ "$json_output" == "true" ]]; then
         _cai_doctor_json
     else
         _cai_doctor
