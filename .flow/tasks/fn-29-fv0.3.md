@@ -6,12 +6,12 @@ Restructure the doctor command from `--fix`/`--repair` flags to a subcommand hie
 **Size:** M
 **Files:** `src/containai.sh`, `src/lib/doctor.sh`
 
-## Current state
+## Current state (before implementation)
 
-- `src/containai.sh:1391-1395` parses `--fix` and `--repair` flags
-- `src/containai.sh:1518-1522` routes to `_cai_doctor_fix`, `_cai_doctor_json`, or `_cai_doctor`
-- `src/lib/doctor.sh:1041-1400` implements `_cai_doctor_fix()` auto-remediation
-- `src/lib/doctor.sh:2051-2185` implements `_cai_doctor_repair()` volume ownership
+- `_containai_doctor_cmd()` in containai.sh parsed `--fix` and `--repair` flags
+- Routed to `_cai_doctor_fix`, `_cai_doctor_json`, or `_cai_doctor`
+- `_cai_doctor_fix()` in doctor.sh implemented auto-remediation
+- `_cai_doctor_repair()` in doctor.sh implemented volume ownership repair
 
 ## New CLI structure
 
@@ -46,7 +46,7 @@ cai doctor fix container <name> # Fix specific container
 4. Remove `--fix` and `--repair`, no backwards compat
 
 5. In fix dispatch, resolve effective context:
-   - Use `_cai_select_context("$(_containai_resolve_secure_engine_context …)")` (at `doctor.sh:152-230`)
+   - Use `_cai_select_context("$(_containai_resolve_secure_engine_context …)")` for context resolution
    - Use `docker --context "$ctx"` consistently for container listing and SSH refresh
    - Don't hardcode to `$_CAI_CONTAINAI_DOCKER_CONTEXT`
 
@@ -54,19 +54,19 @@ cai doctor fix container <name> # Fix specific container
 
 - Volume fix = permission/ownership repair (existing `_cai_doctor_repair`) - **Linux/WSL2 host only** (uses `$_CAI_CONTAINAI_DOCKER_DATA/volumes/...` paths, not valid for macOS Lima, nested mode, or non-default engine layouts)
 - Container fix = SSH config refresh + restart if needed
-- Use `_cai_doctor_get_container_volumes()` at `doctor.sh:1946-1956` for volume lookup
+- Use `_cai_doctor_get_container_volumes()` in doctor.sh for volume lookup
 ## Acceptance
-- [ ] `cai doctor fix --all` runs all available fixes
-- [ ] `cai doctor fix volume` lists available volumes
-- [ ] `cai doctor fix volume <name>` fixes specific volume
-- [ ] `cai doctor fix volume --all` fixes all volumes
-- [ ] `cai doctor fix volume` shows Linux/WSL2 host limitation note (not supported on macOS/nested mode)
-- [ ] `cai doctor fix container` lists available containers
-- [ ] `cai doctor fix container <name>` fixes specific container, including ssh key auth
-- [ ] `cai doctor fix container --all` fixes all containers
-- [ ] `cai doctor --fix` no longer present
-- [ ] `cai doctor --repair` no longer present
-- [ ] Help text documents new subcommand structure
+- [x] `cai doctor fix --all` runs all available fixes
+- [x] `cai doctor fix volume` lists available volumes
+- [x] `cai doctor fix volume <name>` fixes specific volume
+- [x] `cai doctor fix volume --all` fixes all volumes
+- [x] `cai doctor fix volume` shows Linux/WSL2 host limitation note (not supported on macOS/nested mode)
+- [x] `cai doctor fix container` lists available containers
+- [x] `cai doctor fix container <name>` fixes specific container, including ssh key auth
+- [x] `cai doctor fix container --all` fixes all containers
+- [x] `cai doctor --fix` no longer present
+- [x] `cai doctor --repair` no longer present
+- [x] Help text documents new subcommand structure
 ## Done summary
 Restructured doctor command from flag-based (--fix, --repair) to subcommand hierarchy (fix [volume|container]). Added context-aware helper functions for volume and UID detection. Updated troubleshooting docs to reflect new commands. Multiple rounds of impl-review addressed context handling, error visibility, --help handling, and documentation accuracy.
 ## Evidence
