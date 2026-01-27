@@ -732,13 +732,18 @@ cai update --stop-containers
 3. Updates Docker context if socket path changed
 4. Updates dockerd bundle if newer version available
 5. Updates sysbox if newer version available
-6. Restarts containai-docker service
+6. Restarts containai-docker service (when updates applied)
 
 **macOS (Lima):**
 1. Updates Lima VM packages via `apt-get upgrade`
 2. Updates sysbox inside the VM if newer version available
-3. Optionally recreates VM entirely with `--lima-recreate`
+3. Checks if Lima template changed (hash mismatch or first update)
+   - If changed: prompts to recreate VM (containers will be lost)
+   - `--lima-recreate` forces recreation regardless of template
+   - `--force` auto-confirms recreation prompts
 4. Updates Docker context if socket path changed
+
+**Note:** VM recreation is destructive - all containers inside the Lima VM are lost. Data in persistent volumes outside the VM is preserved.
 
 ### Version Detection
 
@@ -751,11 +756,11 @@ On macOS, sysbox version is queried inside the Lima VM via `limactl shell`.
 
 ### Disabling Update Checks
 
-The automatic update check that runs during `cai doctor` can be disabled:
+The automatic update check runs before most `cai` commands (skipped for `--help`, `--version`, and in CI environments). To disable:
 
 ```bash
-# Disable for current session
-CAI_UPDATE_CHECK_INTERVAL=never cai doctor
+# Disable for current session (works with any cai command)
+CAI_UPDATE_CHECK_INTERVAL=never cai <command>
 
 # Disable permanently in config
 # Add to ~/.config/containai/config.toml:
