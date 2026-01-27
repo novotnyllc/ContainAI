@@ -130,26 +130,48 @@ jobs:
           mkdir -p sources
           ln -sfn "$(pwd)/../" sources/sysbox
 
-      - name: Patch control file for fuse3 dependency
+      - name: Patch control files for fuse3 dependency
         run: |
           # sysbox-fs requires fusermount3 which is provided by fuse3
-          control_file="sysbox/sysbox-pkgr/deb/sysbox-ce/control"
-          echo "Patching $control_file to add fuse3 dependency..."
+          # Use find to locate all control files (handles various template layouts)
+          echo "Patching control files to add fuse3 dependency..."
 
-          # Add fuse3 after fuse in the Depends line
-          sed -i 's/\(Depends:.*\), fuse,/\1, fuse, fuse3,/' "$control_file"
-
-          # Verify the patch worked
-          if grep -q 'fuse3' "$control_file"; then
-            echo "fuse3 dependency added successfully"
-            echo "Updated Depends line:"
-            grep '^Depends:' "$control_file"
-          else
-            echo "::error::Failed to add fuse3 to control file"
-            echo "Current Depends line:"
-            grep '^Depends:' "$control_file" || echo "(no Depends line found)"
+          control_files=$(find sysbox/sysbox-pkgr/deb -name control -type f)
+          if [[ -z "$control_files" ]]; then
+            echo "::error::No control files found in sysbox/sysbox-pkgr/deb"
             exit 1
           fi
+
+          patched_count=0
+          for f in $control_files; do
+            echo "Checking $f..."
+
+            # Skip if fuse3 already present (idempotent)
+            if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+              echo "  fuse3 already present, skipping"
+              continue
+            fi
+
+            # Add fuse3 to the beginning of the Depends line
+            if grep -q '^Depends:' "$f"; then
+              sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+              # Verify the patch worked
+              if grep -qE '^Depends:[[:space:]]*fuse3\b' "$f"; then
+                echo "  fuse3 dependency added"
+                grep '^Depends:' "$f"
+                patched_count=$((patched_count + 1))
+              else
+                echo "::error::Failed to patch $f"
+                exit 1
+              fi
+            fi
+          done
+
+          if [[ "$patched_count" -eq 0 ]]; then
+            echo "::error::No control files were patched"
+            exit 1
+          fi
+          echo "Patched $patched_count control file(s)"
 
       - name: Build sysbox-ce deb package
         run: |
@@ -300,26 +322,48 @@ jobs:
           mkdir -p sources
           ln -sfn "$(pwd)/../" sources/sysbox
 
-      - name: Patch control file for fuse3 dependency
+      - name: Patch control files for fuse3 dependency
         run: |
           # sysbox-fs requires fusermount3 which is provided by fuse3
-          control_file="sysbox/sysbox-pkgr/deb/sysbox-ce/control"
-          echo "Patching $control_file to add fuse3 dependency..."
+          # Use find to locate all control files (handles various template layouts)
+          echo "Patching control files to add fuse3 dependency..."
 
-          # Add fuse3 after fuse in the Depends line
-          sed -i 's/\(Depends:.*\), fuse,/\1, fuse, fuse3,/' "$control_file"
-
-          # Verify the patch worked
-          if grep -q 'fuse3' "$control_file"; then
-            echo "fuse3 dependency added successfully"
-            echo "Updated Depends line:"
-            grep '^Depends:' "$control_file"
-          else
-            echo "::error::Failed to add fuse3 to control file"
-            echo "Current Depends line:"
-            grep '^Depends:' "$control_file" || echo "(no Depends line found)"
+          control_files=$(find sysbox/sysbox-pkgr/deb -name control -type f)
+          if [[ -z "$control_files" ]]; then
+            echo "::error::No control files found in sysbox/sysbox-pkgr/deb"
             exit 1
           fi
+
+          patched_count=0
+          for f in $control_files; do
+            echo "Checking $f..."
+
+            # Skip if fuse3 already present (idempotent)
+            if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+              echo "  fuse3 already present, skipping"
+              continue
+            fi
+
+            # Add fuse3 to the beginning of the Depends line
+            if grep -q '^Depends:' "$f"; then
+              sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+              # Verify the patch worked
+              if grep -qE '^Depends:[[:space:]]*fuse3\b' "$f"; then
+                echo "  fuse3 dependency added"
+                grep '^Depends:' "$f"
+                patched_count=$((patched_count + 1))
+              else
+                echo "::error::Failed to patch $f"
+                exit 1
+              fi
+            fi
+          done
+
+          if [[ "$patched_count" -eq 0 ]]; then
+            echo "::error::No control files were patched"
+            exit 1
+          fi
+          echo "Patched $patched_count control file(s)"
 
       - name: Build sysbox-ce deb package
         run: |
@@ -398,17 +442,23 @@ jobs:
         run: |
           echo "Validating fuse3 dependency in built deb package..."
           deb_path=$(find dist -name "sysbox-ce*.deb" -type f | head -1)
+          if [[ -z "$deb_path" ]]; then
+            echo "::error::No deb package found in dist/"
+            exit 1
+          fi
           echo "Package: $deb_path"
 
-          # Check deb package metadata for fuse3 dependency
+          # Extract and check the Depends line specifically
           echo "Package dependencies:"
-          dpkg-deb -I "$deb_path" | grep -i depends
+          depends_line=$(dpkg-deb -f "$deb_path" Depends)
+          echo "Depends: $depends_line"
 
-          if dpkg-deb -I "$deb_path" | grep -i depends | grep -q 'fuse3'; then
+          # Verify fuse3 is in the Depends field (word boundary check)
+          if echo "$depends_line" | grep -qE '\bfuse3\b'; then
             echo "fuse3 dependency found in package metadata"
           else
-            echo "::error::fuse3 dependency NOT found in package metadata"
-            echo "Package control info:"
+            echo "::error::fuse3 dependency NOT found in package Depends field"
+            echo "Full package control info:"
             dpkg-deb -I "$deb_path"
             exit 1
           fi
@@ -547,17 +597,23 @@ jobs:
         run: |
           echo "Validating fuse3 dependency in built deb package..."
           deb_path=$(find dist -name "sysbox-ce*.deb" -type f | head -1)
+          if [[ -z "$deb_path" ]]; then
+            echo "::error::No deb package found in dist/"
+            exit 1
+          fi
           echo "Package: $deb_path"
 
-          # Check deb package metadata for fuse3 dependency
+          # Extract and check the Depends line specifically
           echo "Package dependencies:"
-          dpkg-deb -I "$deb_path" | grep -i depends
+          depends_line=$(dpkg-deb -f "$deb_path" Depends)
+          echo "Depends: $depends_line"
 
-          if dpkg-deb -I "$deb_path" | grep -i depends | grep -q 'fuse3'; then
+          # Verify fuse3 is in the Depends field (word boundary check)
+          if echo "$depends_line" | grep -qE '\bfuse3\b'; then
             echo "fuse3 dependency found in package metadata"
           else
-            echo "::error::fuse3 dependency NOT found in package metadata"
-            echo "Package control info:"
+            echo "::error::fuse3 dependency NOT found in package Depends field"
+            echo "Full package control info:"
             dpkg-deb -I "$deb_path"
             exit 1
           fi

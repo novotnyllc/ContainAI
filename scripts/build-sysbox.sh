@@ -331,20 +331,45 @@ build_sysbox_deb() {
     mkdir -p "$pkgr_dir/sources"
     ln -sfn "$sysbox_dir" "$pkgr_dir/sources/sysbox"
 
-    # Patch control file to add fuse3 dependency (sysbox-fs requires fusermount3)
-    log_info "Patching control file to add fuse3 dependency..."
-    local control_file="$pkgr_dir/deb/sysbox-ce/control"
-    if [[ -f "$control_file" ]]; then
-        # Add fuse3 after fuse in the Depends line
-        sed -i 's/\(Depends:.*\), fuse,/\1, fuse, fuse3,/' "$control_file"
-        if grep -q 'fuse3' "$control_file"; then
-            log_ok "fuse3 dependency added to control file"
-        else
-            log_warn "Could not add fuse3 to control file - may already have it or format changed"
-        fi
-    else
-        log_warn "Control file not found at $control_file"
+    # Patch control files to add fuse3 dependency (sysbox-fs requires fusermount3)
+    # Use find to locate all control files in the deb directory (handles various template layouts)
+    log_info "Patching control files to add fuse3 dependency..."
+    local patched_count=0
+    local control_files
+    control_files=$(find "$pkgr_dir/deb" -name control -type f 2>/dev/null)
+
+    if [[ -z "$control_files" ]]; then
+        log_error "No control files found in $pkgr_dir/deb"
+        exit 1
     fi
+
+    local f
+    for f in $control_files; do
+        # Skip if fuse3 already present in Depends line (idempotent)
+        if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+            log_info "fuse3 already present in $f"
+            continue
+        fi
+
+        # Add fuse3 to the beginning of the Depends line
+        if grep -q '^Depends:' "$f"; then
+            sed -i 's/^Depends:/Depends: fuse3,/' "$f"
+            # Verify the patch worked
+            if grep -qE '^Depends:[[:space:]]*fuse3\b' "$f"; then
+                log_ok "fuse3 dependency added to $f"
+                patched_count=$((patched_count + 1))
+            else
+                log_error "Failed to patch $f"
+                exit 1
+            fi
+        fi
+    done
+
+    if [[ "$patched_count" -eq 0 ]]; then
+        log_error "No control files were patched - fuse3 dependency not added"
+        exit 1
+    fi
+    log_info "Patched $patched_count control file(s)"
 
     # Patch the VERSION file to include our suffix
     log_info "Patching version to: $full_version"
