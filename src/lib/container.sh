@@ -1570,9 +1570,6 @@ _containai_start_container() {
             return 1
         fi
     fi
-    if [[ "$quiet_flag" != "true" && "$dry_run_flag" != "true" ]]; then
-        echo "Container: $container_name"
-    fi
 
     # Handle --dry-run flag: show what would happen without executing
     if [[ "$dry_run_flag" == "true" ]]; then

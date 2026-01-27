@@ -2481,10 +2481,14 @@ _containai_shell_cmd() {
         fi
 
         # Print container/volume info if verbose (stderr for pipeline safety)
-        # Only print here when container exists - _containai_start_container handles it otherwise
-        if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
+        # Only print here when container existed before this call
+        # Skip if --fresh was set (start_container already printed) or container was just created
+        if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" && "$fresh_flag" != "true" ]]; then
+            # Get actual mounted volume from container (not resolved_volume which may differ)
+            local actual_volume
+            actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
             printf '%s\n' "[INFO] Container: $resolved_container_name" >&2
-            printf '%s\n' "[INFO] Volume: $resolved_volume" >&2
+            printf '%s\n' "[INFO] Volume: ${actual_volume:-$resolved_volume}" >&2
         fi
     fi
 
