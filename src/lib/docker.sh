@@ -538,6 +538,84 @@ _cai_containai_docker_context_exists() {
     return 0
 }
 
+# Auto-repair containai-docker context when endpoint is wrong
+# This can happen after Docker Desktop updates on Windows, which resets
+# the context from ssh://containai-docker-daemon/... to unix://...
+# Arguments: $1 = verbose flag ("true" to show repair messages)
+# Returns: 0=context is now valid (or was already valid), 1=repair failed or not applicable
+# Note: Skipped inside containers (nested mode doesn't use containai-docker context)
+#       Uses guard variable _CAI_CONTEXT_REPAIR_DONE to avoid redundant repairs
+_cai_auto_repair_containai_context() {
+    local verbose="${1:-false}"
+
+    # Skip if already repaired this invocation
+    if [[ "${_CAI_CONTEXT_REPAIR_DONE:-}" == "true" ]]; then
+        return 0
+    fi
+
+    # Skip inside containers - nested mode uses default context
+    if _cai_is_container; then
+        return 0
+    fi
+
+    # Check if Docker CLI is available
+    if ! _cai_docker_cli_available; then
+        return 1
+    fi
+
+    # Check if context exists
+    if ! docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        # Context doesn't exist - nothing to repair
+        return 1
+    fi
+
+    # Get actual and expected endpoints
+    local expected_host actual_host
+    expected_host=$(_cai_expected_docker_host)
+    actual_host=$(docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null) || actual_host=""
+
+    # If endpoints match, nothing to repair
+    if [[ "$actual_host" == "$expected_host" ]]; then
+        _CAI_CONTEXT_REPAIR_DONE="true"
+        return 0
+    fi
+
+    # Endpoint is wrong - attempt repair
+    if [[ "$verbose" == "true" ]]; then
+        printf '%s\n' "[WARN] Docker context '$_CAI_CONTAINAI_DOCKER_CONTEXT' had wrong endpoint (was $actual_host, expected $expected_host)" >&2
+    fi
+
+    # Switch away if this context is currently active
+    local current_context
+    current_context=$(docker context show 2>/dev/null) || current_context=""
+    if [[ "$current_context" == "$_CAI_CONTAINAI_DOCKER_CONTEXT" ]]; then
+        docker context use default >/dev/null 2>&1 || true
+    fi
+
+    # Remove the misconfigured context
+    if ! docker context rm -f "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        if [[ "$verbose" == "true" ]]; then
+            printf '%s\n' "[ERROR] Failed to remove misconfigured context" >&2
+        fi
+        return 1
+    fi
+
+    # Recreate with correct endpoint
+    if ! docker context create "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$expected_host" >/dev/null 2>&1; then
+        if [[ "$verbose" == "true" ]]; then
+            printf '%s\n' "[ERROR] Failed to recreate context with correct endpoint" >&2
+        fi
+        return 1
+    fi
+
+    if [[ "$verbose" == "true" ]]; then
+        printf '%s\n' "[OK] Context auto-repaired" >&2
+    fi
+
+    _CAI_CONTEXT_REPAIR_DONE="true"
+    return 0
+}
+
 # Check if containai-docker socket exists
 # Returns: 0=socket exists, 1=socket does not exist
 # Note: Socket path is platform-dependent (Linux/WSL2 vs macOS Lima)

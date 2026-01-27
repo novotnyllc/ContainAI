@@ -1860,6 +1860,10 @@ _containai_docker_cmd() {
         return 1
     fi
 
+    # Auto-repair context if endpoint is wrong (e.g., after Docker Desktop updates)
+    # Silent repair - cai docker is a pass-through and shouldn't be verbose
+    _cai_auto_repair_containai_context "false" || true
+
     local context=""
     if _cai_is_container; then
         context=""
@@ -2265,7 +2269,11 @@ _containai_shell_cmd() {
         if [[ "$debug_flag" == "true" ]]; then
             debug_mode="debug"
         fi
-        if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
+        local verbose_str="false"
+        if [[ "$verbose_flag" == "true" ]]; then
+            verbose_str="true"
+        fi
+        if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode" "$verbose_str"); then
             if [[ "$force_flag" == "true" ]]; then
                 _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
                 if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then

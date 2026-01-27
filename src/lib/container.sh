@@ -1536,7 +1536,11 @@ _containai_start_container() {
     if [[ "$debug_flag" == "true" ]]; then
         debug_mode="debug"
     fi
-    if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode"); then
+    local verbose_str="false"
+    if [[ "$verbose_flag" == "true" ]]; then
+        verbose_str="true"
+    fi
+    if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode" "$verbose_str"); then
         if [[ "$force_flag" == "true" ]]; then
             echo "[WARN] Sysbox context check failed; attempting to use an existing context without validation." >&2
             echo "[WARN] Container creation will still require sysbox-runc runtime." >&2

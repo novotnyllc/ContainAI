@@ -147,11 +147,14 @@ _cai_check_kernel_for_sysbox() {
 #   - Nothing (return 1) if no isolation available
 # Arguments: $1 = config override for context name (optional)
 #            $2 = debug flag ("debug" to enable debug output)
+#            $3 = verbose flag ("true" to show auto-repair messages)
 # Returns: 0=context selected, 1=no isolation available
 # Outputs: Debug messages to stderr if debug flag is set
+# Note: Auto-repairs containai-docker context if endpoint is wrong (e.g., after Docker Desktop updates)
 _cai_select_context() {
     local config_context_name="${1:-}"
     local debug_flag="${2:-}"
+    local verbose_flag="${3:-false}"
     local in_sysbox_container="false"
     if _cai_is_sysbox_container; then
         in_sysbox_container="true"
@@ -164,6 +167,13 @@ _cai_select_context() {
     local context_name="${config_context_name:-}"
     local primary_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"  # containai-docker
     local fallback_context="${_CAI_LEGACY_CONTEXT:-containai-secure}"
+
+    # Auto-repair containai-docker context if endpoint is wrong
+    # This handles Docker Desktop updates on Windows that reset the context
+    # Skip inside containers - they use default context, not containai-docker
+    if ! _cai_is_container; then
+        _cai_auto_repair_containai_context "$verbose_flag" || true
+    fi
 
     # Inside a container, always use the default context (self-contained daemon)
     if _cai_is_container; then
