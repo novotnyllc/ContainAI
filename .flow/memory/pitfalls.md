@@ -226,3 +226,6 @@ When embedding variables in bash -c scripts (e.g., limactl shell -- bash -c), pa
 
 ## 2026-01-27 manual [pitfall]
 Docker Config.User can be a name (e.g., 'agent') not numeric UID - resolve via container exec before using in host chown
+
+## 2026-01-27 manual [pitfall]
+When passing printf %q escaped strings to bash -c, do NOT escape again - use double quotes to preserve the escaping as a single argument

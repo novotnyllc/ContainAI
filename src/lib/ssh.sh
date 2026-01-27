@@ -2045,49 +2045,66 @@ _cai_ssh_run_with_retry() {
         # For detached mode, wrap with nohup and redirect output
         local remote_cmd=""
         if [[ ${#cmd_args[@]} -gt 0 ]]; then
-            # Separate env vars (VAR=value) from actual command arguments
-            local -a env_prefix_parts=()
-            local -a actual_cmd_parts=()
-            local arg
-            local in_command=false
-
-            for arg in "${cmd_args[@]}"; do
-                if [[ "$in_command" == "false" && "$arg" =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]]; then
-                    # This is an environment variable assignment
-                    local var_name="${arg%%=*}"
-                    local var_value="${arg#*=}"
-                    local quoted_value
-                    quoted_value=$(printf '%q' "$var_value")
-                    env_prefix_parts+=("${var_name}=${quoted_value}")
-                else
-                    # This is a command or command argument
-                    in_command=true
-                    local quoted_arg
-                    quoted_arg=$(printf '%q' "$arg")
-                    actual_cmd_parts+=("$quoted_arg")
-                fi
-            done
-
-            # Build the full command string with env prefix
-            local env_prefix=""
-            if [[ ${#env_prefix_parts[@]} -gt 0 ]]; then
-                env_prefix="${env_prefix_parts[*]} "
-            fi
-
-            local quoted_args=""
-            if [[ ${#actual_cmd_parts[@]} -gt 0 ]]; then
-                quoted_args="${actual_cmd_parts[*]}"
-            fi
-
             if [[ "$detached" == "true" ]]; then
-                # Run in background with nohup, redirect output to /dev/null
-                # Use bash -lc wrapper for consistent command parsing (matches printf %q escaping)
-                # env_prefix and quoted_args are already printf %q escaped, so we pass them
-                # directly to bash -lc wrapped in double quotes (not re-escaped)
-                # Return PID so we can verify the process started
-                remote_cmd="cd /home/agent/workspace && nohup bash -lc \"${env_prefix}${quoted_args}\" </dev/null >/dev/null 2>&1 & echo \$!"
+                # For detached mode, use bash -lc wrapper for consistent command parsing
+                # Build the RAW command string, then apply printf %q ONCE for bash -lc
+                local -a raw_parts=()
+                local arg
+                local in_command=false
+
+                for arg in "${cmd_args[@]}"; do
+                    if [[ "$in_command" == "false" && "$arg" =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]]; then
+                        # Environment variable - quote the value for bash evaluation
+                        local var_name="${arg%%=*}"
+                        local var_value="${arg#*=}"
+                        local quoted_value
+                        quoted_value=$(printf '%q' "$var_value")
+                        raw_parts+=("${var_name}=${quoted_value}")
+                    else
+                        in_command=true
+                        # Quote each arg to preserve boundaries in bash evaluation
+                        local quoted_arg
+                        quoted_arg=$(printf '%q' "$arg")
+                        raw_parts+=("$quoted_arg")
+                    fi
+                done
+
+                # Join parts into command string that's safe for bash -lc to evaluate
+                local inner_cmd="${raw_parts[*]}"
+                # Wrap in single quotes for bash -lc, escaping embedded single quotes
+                # Single quotes don't interpret any special characters except themselves
+                local escaped_cmd="${inner_cmd//\'/\'\\\'\'}"
+                remote_cmd="cd /home/agent/workspace && nohup bash -lc '${escaped_cmd}' </dev/null >/dev/null 2>&1 & echo \$!"
             else
-                # Run in foreground
+                # For foreground mode, quote each argument separately
+                local -a env_prefix_parts=()
+                local -a actual_cmd_parts=()
+                local arg
+                local in_command=false
+
+                for arg in "${cmd_args[@]}"; do
+                    if [[ "$in_command" == "false" && "$arg" =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]]; then
+                        local var_name="${arg%%=*}"
+                        local var_value="${arg#*=}"
+                        local quoted_value
+                        quoted_value=$(printf '%q' "$var_value")
+                        env_prefix_parts+=("${var_name}=${quoted_value}")
+                    else
+                        in_command=true
+                        local quoted_arg
+                        quoted_arg=$(printf '%q' "$arg")
+                        actual_cmd_parts+=("$quoted_arg")
+                    fi
+                done
+
+                local env_prefix=""
+                if [[ ${#env_prefix_parts[@]} -gt 0 ]]; then
+                    env_prefix="${env_prefix_parts[*]} "
+                fi
+                local quoted_args=""
+                if [[ ${#actual_cmd_parts[@]} -gt 0 ]]; then
+                    quoted_args="${actual_cmd_parts[*]}"
+                fi
                 remote_cmd="cd /home/agent/workspace && ${env_prefix}${quoted_args}"
             fi
             ssh_cmd+=("$remote_cmd")
@@ -2104,19 +2121,29 @@ _cai_ssh_run_with_retry() {
         fi
 
         # Execute SSH and capture exit code + stderr for diagnostics
-        # For detached mode, also capture stdout to get the PID
-        local ssh_stderr_file ssh_stdout_file
+        local ssh_stderr_file ssh_stdout_file ssh_stdout=""
         ssh_stderr_file=$(mktemp)
-        ssh_stdout_file=$(mktemp)
-        if "${ssh_cmd[@]}" >"$ssh_stdout_file" 2>"$ssh_stderr_file"; then
-            ssh_exit_code=0
+        if [[ "$detached" == "true" ]]; then
+            # For detached mode, capture stdout to get the PID
+            ssh_stdout_file=$(mktemp)
+            if "${ssh_cmd[@]}" >"$ssh_stdout_file" 2>"$ssh_stderr_file"; then
+                ssh_exit_code=0
+            else
+                ssh_exit_code=$?
+            fi
+            ssh_stdout=$(cat "$ssh_stdout_file" 2>/dev/null || true)
+            rm -f "$ssh_stdout_file"
         else
-            ssh_exit_code=$?
+            # For non-detached mode, let stdout stream directly for real-time output
+            if "${ssh_cmd[@]}" 2>"$ssh_stderr_file"; then
+                ssh_exit_code=0
+            else
+                ssh_exit_code=$?
+            fi
         fi
-        local ssh_stderr ssh_stdout
+        local ssh_stderr
         ssh_stderr=$(cat "$ssh_stderr_file" 2>/dev/null || true)
-        ssh_stdout=$(cat "$ssh_stdout_file" 2>/dev/null || true)
-        rm -f "$ssh_stderr_file" "$ssh_stdout_file"
+        rm -f "$ssh_stderr_file"
 
         # Check exit code and decide whether to retry
         case $ssh_exit_code in
@@ -2166,12 +2193,8 @@ _cai_ssh_run_with_retry() {
                         _cai_error "Background command failed: could not get PID"
                         return 1
                     fi
-                else
-                    # For non-detached mode, output any stdout
-                    if [[ -n "$ssh_stdout" ]]; then
-                        printf '%s\n' "$ssh_stdout"
-                    fi
                 fi
+                # Non-detached mode stdout already streamed directly
                 return 0
                 ;;
             255)
