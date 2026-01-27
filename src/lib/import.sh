@@ -735,72 +735,6 @@ _import_rewrite_excludes() {
 }
 
 # ==============================================================================
-# Dynamic SSH key discovery
-# ==============================================================================
-
-# Discover SSH keys dynamically from source directory
-# Returns newline-delimited sync map entries for id_* files
-# Arguments:
-#   $1 = source directory (e.g., $HOME or custom --from path)
-# Output (stdout): newline-delimited entries in format:
-#   /source/.ssh/id_xxx:/target/ssh/id_xxx:fs (private keys)
-#   /source/.ssh/id_xxx.pub:/target/ssh/id_xxx.pub:f (public keys)
-_import_discover_ssh_keys() {
-    local source_root="$1"
-    local ssh_dir="$source_root/.ssh"
-
-    # Skip if .ssh directory doesn't exist
-    [[ ! -d "$ssh_dir" ]] && return 0
-
-    # Find all id_* files (but not config, known_hosts, or directories)
-    # Use a while loop with find to handle spaces in filenames
-    local filename basename
-    while IFS= read -r -d '' filename; do
-        basename="${filename##*/}"
-
-        # Skip directories
-        [[ -d "$filename" ]] && continue
-
-        # Warn about symlinked keys (they're skipped to avoid complexity)
-        if [[ -L "$filename" ]]; then
-            echo "[WARN] Skipping symlinked SSH key: $filename (symlinks not supported)" >&2
-            continue
-        fi
-
-        # Skip non-regular files
-        [[ ! -f "$filename" ]] && continue
-
-        # Skip known non-key files
-        case "$basename" in
-            config|known_hosts|authorized_keys|*.sock)
-                continue
-                ;;
-        esac
-
-        # Only process id_* files
-        case "$basename" in
-            id_*)
-                # Security: reject filenames containing delimiter chars that would corrupt map format
-                # Colon breaks field parsing, newline/CR break line parsing
-                if [[ "$basename" == *:* ]] || [[ "$basename" == *$'\n'* ]] || [[ "$basename" == *$'\r'* ]]; then
-                    echo "[WARN] Skipping SSH key with unsafe filename (contains : or control chars): $basename" >&2
-                    continue
-                fi
-
-                # Determine if this is a public key (.pub) or private key
-                if [[ "$basename" == *.pub ]]; then
-                    # Public key - no secret flag
-                    printf '%s\n' "/source/.ssh/${basename}:/target/ssh/${basename}:f"
-                else
-                    # Private key - secret flag
-                    printf '%s\n' "/source/.ssh/${basename}:/target/ssh/${basename}:fs"
-                fi
-                ;;
-        esac
-    done < <(find "$ssh_dir" -maxdepth 1 -name 'id_*' -print0 2>/dev/null)
-}
-
-# ==============================================================================
 # User-specified additional paths
 # ==============================================================================
 
@@ -1011,7 +945,7 @@ _import_map_override_path() {
         return 0
     fi
 
-    # Special case: SSH id_* keys (dynamically discovered by _import_discover_ssh_keys)
+    # Special case: SSH id_* keys (for users who add ~/.ssh via additional_paths)
     # These are not in static sync map but are valid override targets
     case "$override_path" in
         .ssh/id_*)
@@ -1337,7 +1271,7 @@ _import_apply_overrides() {
 #   $6 = explicit config path (optional, for exclude resolution)
 #   $7 = from_source path (optional, tgz file or directory; default: "" means $HOME)
 #   $8 = no_secrets flag ("true" or "false", default: "false")
-#        When true, skips syncing entries with 's' flag (OAuth tokens, API keys, SSH keys)
+#        When true, skips syncing entries with 's' flag (OAuth tokens, API keys)
 #   $9 = verbose flag ("true" or "false", default: "false")
 #        When true, shows "source not found" messages for missing import sources
 # Returns: 0 on success, 1 on failure
@@ -2513,7 +2447,8 @@ done <<'"'"'MAP_DATA'"'"'
 
         # Skip profile credentials when importing from user's home directory
         # These credentials are user-specific; container should run its own `claude login` etc.
-        # The target file/symlink is still created (empty/to volume mount) so container can write tokens.
+        # We still want the target file created with proper permissions (via ensure), so we
+        # rewrite to a guaranteed-missing source instead of using `continue`.
         if [[ "$is_profile_import" == "true" ]]; then
             case "$entry_src" in
                 "/source/.claude/.credentials.json"|"/source/.codex/auth.json")
@@ -2525,7 +2460,10 @@ done <<'"'"'MAP_DATA'"'"'
                         entry_path_display="~${entry_src#/source}"
                         _import_info "Skipping profile credential: $entry_path_display (container should run login)"
                     fi
-                    continue
+                    # Rewrite to non-existent source so rsync ensure() creates target with correct perms
+                    # Format: source:target:flags - preserve target and flags, use missing source
+                    local entry_rest="${entry#*:}"  # target:flags
+                    entry="/source/.containai-skip-profile-credential:$entry_rest"
                     ;;
             esac
         fi
