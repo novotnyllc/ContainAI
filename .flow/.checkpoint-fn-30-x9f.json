@@ -1,0 +1,64 @@
+{
+  "created_at": "2026-01-27T18:17:38.406101Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-30-x9f",
+      "created_at": "2026-01-27T18:15:56.227906Z",
+      "default_impl": null,
+      "default_review": null,
+      "default_sync": null,
+      "depends_on_epics": [],
+      "id": "fn-30-x9f",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-30-x9f.md",
+      "status": "open",
+      "title": "Fix sysbox version detection and Docker context validation",
+      "updated_at": "2026-01-27T18:16:27.323573Z"
+    },
+    "spec": "# Fix sysbox version detection and Docker context validation\n\nThree bugs in `cai update` and `cai doctor` cause incorrect behavior:\n\n1. **Version comparison false positive**: Reports \"Update available: 0.6.7+containai.20260127 -> 0.6.7+containai.20260127\" (same version) and stops services unnecessarily\n2. **Docker context wrongly flagged**: Reports `ssh://containai-docker-daemon/...` as \"wrong endpoint\" when it's correct for WSL2\n3. **SSH not actionable from doctor**: `cai doctor` shows SSH issues but doesn't fix per-container configs; users don't know to run `cai doctor fix container --all`\n\n## Root Causes\n\n### Bug 1: Version detection uses wrong output format\n- `_cai_sysbox_installed_version()` in `src/lib/setup.sh:483-491` uses `sysbox-runc --version | head -1`\n- Old format: `sysbox-runc version 0.6.7+containai.20260127` (single line)\n- New format (multiline):\n  ```\n  sysbox-runc\n          edition:        Community Edition (CE)\n          version:        0.6.7+containai.20260127\n  ```\n- `head -1` returns `sysbox-runc` (program name, no version)\n- This makes version comparison fail: empty string vs \"0.6.7\" triggers \"newer_version_available\"\n- Display at `setup.sh:914` shows `$existing_version` = \"sysbox-runc\" instead of actual version\n\n### Bug 2: Docker context platform detection issue\n- `_cai_expected_docker_host()` in `src/lib/docker.sh:355-370` checks `_cai_is_container()` BEFORE `_cai_is_wsl2()`\n- If container detection returns true (e.g., running inside sysbox with `/.dockerenv`), returns `unix://...` even on WSL2\n- OR `_cai_is_wsl2()` pattern matching fails for kernel version string\n- Result: expected = `unix://...` but actual = `ssh://...`, triggers wrong \"repair\"\n\n### Bug 3: Doctor UX gap\n- `cai doctor fix` handles global SSH infrastructure (key, config dir, Include directive)\n- Does NOT regenerate per-container SSH host configs in `~/.ssh/containai.d/`\n- User must explicitly run `cai doctor fix container --all` but this isn't communicated\n\n## Quick commands\n\n```bash\n# Test version detection fix\nsource src/containai.sh\n_cai_sysbox_installed_version && echo \"OK\" || echo \"FAIL\"\n_cai_sysbox_installed_binary_version\n\n# Test context detection\n_cai_is_wsl2 && echo \"WSL2\" || echo \"Not WSL2\"\n_cai_expected_docker_host\n\n# Run doctor to verify\ncai doctor\n```\n\n## Scope\n\n- `src/lib/setup.sh`: Fix version parsing functions\n- `src/lib/docker.sh`: Fix platform detection order/logic\n- `src/lib/doctor.sh`: Improve SSH fix UX (optional)\n\n## Out of scope\n\n- Multiline output format change (that's in sysbox binary, not our code)\n- Major doctor command restructuring\n- Test file changes (no integration tests for these functions currently)\n\n## Acceptance\n\n- [ ] `cai doctor` on WSL2 shows correct expected endpoint (`ssh://...`)\n- [ ] `cai update` with identical installed/bundled versions shows \"Sysbox is current\"\n- [ ] Version display shows actual version (e.g., \"0.6.7+containai.20260127\"), not \"sysbox-runc\"\n- [ ] No unnecessary service stops when versions match\n\n## References\n\n- Memory pitfall: \"Version comparison must use semver logic (sort -V) not string equality\"\n- fn-29-fv0: Recent SSH/context fixes (done but bugs persist)\n- SemVer 2.0.0 spec: Build metadata MUST be ignored for precedence\n"
+  },
+  "epic_id": "fn-30-x9f",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-27T18:16:33.984010Z",
+        "depends_on": [],
+        "epic": "fn-30-x9f",
+        "id": "fn-30-x9f.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-30-x9f.1.md",
+        "status": "todo",
+        "title": "Fix sysbox version parsing for multiline output format",
+        "updated_at": "2026-01-27T18:16:46.365272Z"
+      },
+      "id": "fn-30-x9f.1",
+      "runtime": null,
+      "spec": "# fn-30-x9f.1 Fix sysbox version parsing for multiline output format\n\n## Description\nFix `_cai_sysbox_installed_version()` to handle the new multiline output format from `sysbox-runc --version`. Currently uses `head -1` which returns \"sysbox-runc\" instead of the version number, causing false \"upgrade available\" messages.\n\n**Size:** S\n**Files:** `src/lib/setup.sh`\n\n## Approach\n\n1. Update `_cai_sysbox_installed_version()` (line 483-491) to parse version from multiline output\n   - Option A: Reuse logic from `_cai_sysbox_installed_binary_version()` (lines 497-513) which already handles this correctly\n   - Option B: Use `grep` for \"version:\" line then extract semver\n   - Prefer Option A for consistency - extract semver from binary version\n\n2. Fix `$existing_version` display at line 914 to use proper version function instead of raw `sysbox-runc --version | head -1`\n\n## Key context\n\nThe multiline format from sysbox-runc looks like:\n```\nsysbox-runc\n        edition:        Community Edition (CE)\n        version:        0.6.7+containai.20260127\n```\n\n`_cai_sysbox_installed_binary_version()` at lines 497-513 already handles this correctly by grepping for `version:` line.\n## Acceptance\n- [ ] `_cai_sysbox_installed_version()` returns semver (e.g., \"0.6.7\") from multiline format\n- [ ] Setup display shows actual version, not \"sysbox-runc\"\n- [ ] `cai update` with identical versions reports \"Sysbox is current\"\n- [ ] No regression: function still works if old single-line format is used\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-27T18:16:51.824584Z",
+        "depends_on": [],
+        "epic": "fn-30-x9f",
+        "id": "fn-30-x9f.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-30-x9f.2.md",
+        "status": "todo",
+        "title": "Fix Docker context platform detection on WSL2",
+        "updated_at": "2026-01-27T18:17:07.265196Z"
+      },
+      "id": "fn-30-x9f.2",
+      "runtime": null,
+      "spec": "# fn-30-x9f.2 Fix Docker context platform detection on WSL2\n\n## Description\nFix `_cai_expected_docker_host()` to return correct endpoint for WSL2. Currently returns `unix:///var/run/containai-docker.sock` even when running on WSL2, when it should return `ssh://containai-docker-daemon/var/run/containai-docker.sock`.\n\nThis causes auto-repair to incorrectly \"fix\" a working SSH-based context to unix socket.\n\n**Size:** S\n**Files:** `src/lib/docker.sh`, possibly `src/lib/setup.sh` (for `_cai_is_wsl2()`)\n\n## Approach\n\nInvestigate and fix the platform detection order in `_cai_expected_docker_host()` (lines 355-370):\n\n1. **Check detection order**: Currently checks `_cai_is_container()` before `_cai_is_wsl2()`. If `cai update` runs with `/.dockerenv` somehow present, container detection wins over WSL2.\n\n2. **Check `_cai_is_wsl2()` pattern** (setup.sh:99-121): Ensure it correctly detects WSL2 kernel string. Current pattern: `*[Mm]icrosoft-[Ss]tandard*` or `*microsoft-WSL2*`\n\n3. **Add debug logging**: Temporarily add logging to see which branch is taken during detection\n\n## Key context\n\nPlatform detection order in `_cai_expected_docker_host()`:\n1. `_cai_is_macos` \u2192 Lima socket\n2. `_cai_is_container` \u2192 inner Docker socket (`unix:///var/run/docker.sock`)\n3. `_cai_is_wsl2` \u2192 SSH endpoint\n4. Default \u2192 Linux socket\n\nThe SSH endpoint constant is: `$_CAI_CONTAINAI_DOCKER_SSH_HOST` = \"containai-docker-daemon\"\n## Acceptance\n- [ ] `_cai_expected_docker_host()` returns `ssh://containai-docker-daemon/var/run/containai-docker.sock` on WSL2 host\n- [ ] `cai doctor` shows matching expected/actual endpoints (no \"wrong endpoint\" warning)\n- [ ] Context auto-repair does NOT trigger when SSH endpoint is already correct\n- [ ] Still works correctly inside containers (returns unix:// for nested mode)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

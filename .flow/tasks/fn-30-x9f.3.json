@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-27T19:10:32.351510Z",
+  "depends_on": [
+    "fn-30-x9f.2"
+  ],
+  "epic": "fn-30-x9f",
+  "id": "fn-30-x9f.3",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-30-x9f.3.md",
+  "status": "todo",
+  "title": "Fix cai doctor to repair SSH for existing containers",
+  "updated_at": "2026-01-27T19:24:24.162010Z"
+}
