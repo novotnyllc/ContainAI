@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-28-5do",
+  "created_at": "2026-01-27T01:45:47.452933Z",
+  "depends_on_epics": [],
+  "id": "fn-28-5do",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-28-5do.md",
+  "status": "open",
+  "title": "Fix fn-27-hbi bugs: sysbox fallback, update prompts, SSH keys",
+  "updated_at": "2026-01-27T01:45:47.452946Z"
+}

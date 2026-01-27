@@ -629,15 +629,18 @@ _cai_sysbox_needs_update() {
 
 # Resolve sysbox download URL from multiple sources with priority:
 #   1. CAI_SYSBOX_URL environment variable (explicit override)
-#   2. ContainAI GitHub releases (custom build with openat2 fix)
-#   3. Upstream nestybox releases (fallback)
+#   2. CAI_SYSBOX_VERSION environment variable (pin specific upstream version)
+#   3. ContainAI GitHub releases (custom build with openat2 fix)
+#
+# If ContainAI release is unavailable and no override is set, returns error.
+# No fallback to upstream nestybox releases - ContainAI builds are required.
 #
 # Arguments: $1 = architecture (amd64 or arm64)
 #            $2 = verbose flag ("true" for verbose output)
 # Outputs: Sets the following global variables:
 #   _CAI_SYSBOX_DOWNLOAD_URL   - URL to download the deb package
 #   _CAI_SYSBOX_VERSION        - Version string (may include +containai suffix)
-#   _CAI_SYSBOX_SOURCE         - Source identifier: "override", "pinned", "containai", "upstream"
+#   _CAI_SYSBOX_SOURCE         - Source identifier: "override", "pinned", "containai"
 # Returns: 0=success, 1=failure
 _cai_resolve_sysbox_download_url() {
     local arch="${1:-}"
@@ -722,9 +725,8 @@ _cai_resolve_sysbox_download_url() {
                 _cai_info "ContainAI download URL: $containai_download_url"
             fi
             return 0
-        elif [[ "$verbose" == "true" ]]; then
-            _cai_info "No sysbox packages found in ContainAI release ${_CAI_SYSBOX_CONTAINAI_TAG}"
         fi
+        # Package not found for this architecture - fall through to error at end of function
     elif [[ $fetch_rc -eq 125 ]]; then
         # Exit code 125 means no timeout mechanism available
         if [[ "$verbose" == "true" ]]; then
@@ -747,79 +749,35 @@ _cai_resolve_sysbox_download_url() {
                 _cai_info "Using ContainAI sysbox build (includes openat2 fix for runc 1.3.3+)"
                 return 0
             fi
-        fi
-    elif [[ "$verbose" == "true" ]]; then
-        _cai_info "Could not fetch ContainAI release ${_CAI_SYSBOX_CONTAINAI_TAG} (will fall back to upstream)"
-    fi
-
-    # Priority 4: Fall back to upstream nestybox releases (latest)
-    local upstream_releases_url="https://api.github.com/repos/nestybox/sysbox/releases/latest"
-    local upstream_json=""
-    local upstream_download_url=""
-    local upstream_version=""
-
-    if [[ "$verbose" == "true" ]]; then
-        _cai_info "Checking upstream nestybox releases..."
-    fi
-
-    # Fetch latest from upstream (handle exit code 125 for timeout)
-    upstream_json=$(_cai_timeout 15 wget -qO- "$upstream_releases_url" 2>/dev/null) && fetch_rc=0 || fetch_rc=$?
-    if [[ $fetch_rc -ne 0 ]]; then
-        if [[ $fetch_rc -eq 125 ]]; then
-            # Retry without timeout wrapper
-            if ! upstream_json=$(wget -qO- "$upstream_releases_url" 2>/dev/null); then
-                _cai_error "Failed to fetch sysbox release info from GitHub"
-                _cai_error "  This may be due to GitHub API rate limiting or network issues"
-                _cai_error "  Workarounds:"
-                _cai_error "    1. Set CAI_SYSBOX_URL to a direct download URL"
-                _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific version (e.g., 0.6.7)"
-                return 1
-            fi
+            # Package not found for this architecture - fall through to error at end of function
         else
-            _cai_error "Failed to fetch sysbox release info from GitHub"
+            _cai_error "Failed to fetch ContainAI sysbox release"
+            _cai_error "  Release tag: ${_CAI_SYSBOX_CONTAINAI_TAG}"
             _cai_error "  This may be due to GitHub API rate limiting or network issues"
             _cai_error "  Workarounds:"
             _cai_error "    1. Set CAI_SYSBOX_URL to a direct download URL"
-            _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific version (e.g., 0.6.7)"
+            _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific upstream version (e.g., 0.6.7)"
+            _cai_error "  Find releases at: https://github.com/${_CAI_SYSBOX_CONTAINAI_REPO}/releases"
             return 1
         fi
-    fi
-
-    # Check for rate limit error
-    if printf '%s' "$upstream_json" | grep -qiE "API rate limit|rate limit exceeded"; then
-        _cai_error "GitHub API rate limit exceeded"
+    else
+        _cai_error "Failed to fetch ContainAI sysbox release"
+        _cai_error "  Release tag: ${_CAI_SYSBOX_CONTAINAI_TAG}"
+        _cai_error "  This may be due to GitHub API rate limiting or network issues"
         _cai_error "  Workarounds:"
         _cai_error "    1. Set CAI_SYSBOX_URL to a direct download URL"
-        _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific version"
-        _cai_error "  Find versions at: https://github.com/nestybox/sysbox/releases"
+        _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific upstream version (e.g., 0.6.7)"
+        _cai_error "  Find releases at: https://github.com/${_CAI_SYSBOX_CONTAINAI_REPO}/releases"
         return 1
     fi
 
-    local upstream_tag
-    upstream_tag=$(printf '%s' "$upstream_json" | jq -r '.tag_name // empty' | head -1)
-    upstream_version="${upstream_tag#v}"
-
-    if [[ -z "$upstream_version" ]]; then
-        _cai_error "Could not determine latest sysbox version from upstream"
-        return 1
-    fi
-
-    # Extract download URL for this architecture
-    upstream_download_url=$(printf '%s' "$upstream_json" | jq -r ".assets[] | select(.name | test(\"sysbox-ce.*${arch}.deb\")) | .browser_download_url" | head -1)
-
-    if [[ -z "$upstream_download_url" ]] || [[ "$upstream_download_url" == "null" ]]; then
-        _cai_error "Could not find sysbox .deb package for architecture: $arch"
-        return 1
-    fi
-
-    _CAI_SYSBOX_DOWNLOAD_URL="$upstream_download_url"
-    _CAI_SYSBOX_VERSION="$upstream_version"
-    _CAI_SYSBOX_SOURCE="upstream"
-    _cai_info "Using upstream nestybox sysbox release: $upstream_version"
-    if [[ "$verbose" == "true" ]]; then
-        _cai_info "Upstream download URL: $upstream_download_url"
-    fi
-    return 0
+    # ContainAI release fetched but no packages found for this architecture
+    _cai_error "No sysbox packages found in ContainAI release ${_CAI_SYSBOX_CONTAINAI_TAG} for architecture: $arch"
+    _cai_error "  Workarounds:"
+    _cai_error "    1. Set CAI_SYSBOX_URL to a direct download URL"
+    _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific upstream version (e.g., 0.6.7)"
+    _cai_error "  Find releases at: https://github.com/${_CAI_SYSBOX_CONTAINAI_REPO}/releases"
+    return 1
 }
 
 # Download and install Sysbox on WSL2/Ubuntu/Debian

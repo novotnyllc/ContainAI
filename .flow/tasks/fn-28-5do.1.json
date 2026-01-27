@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-27T01:45:55.054167Z",
+  "depends_on": [],
+  "epic": "fn-28-5do",
+  "id": "fn-28-5do.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-28-5do.1.md",
+  "status": "todo",
+  "title": "Remove upstream sysbox fallback - fail if ContainAI unavailable",
+  "updated_at": "2026-01-27T01:45:55.054179Z"
+}
