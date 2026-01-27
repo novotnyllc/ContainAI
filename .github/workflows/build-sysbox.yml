@@ -143,12 +143,14 @@ jobs:
           fi
 
           patched_count=0
+          already_present_count=0
           for f in $control_files; do
             echo "Checking $f..."
 
             # Skip if fuse3 already present (idempotent)
             if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
               echo "  fuse3 already present, skipping"
+              already_present_count=$((already_present_count + 1))
               continue
             fi
 
@@ -167,11 +169,12 @@ jobs:
             fi
           done
 
-          if [[ "$patched_count" -eq 0 ]]; then
-            echo "::error::No control files were patched"
+          # Success if we patched at least one file OR fuse3 was already present
+          if [[ "$patched_count" -eq 0 ]] && [[ "$already_present_count" -eq 0 ]]; then
+            echo "::error::No control files were patched and none had fuse3"
             exit 1
           fi
-          echo "Patched $patched_count control file(s)"
+          echo "Patched $patched_count control file(s), $already_present_count already had fuse3"
 
       - name: Build sysbox-ce deb package
         run: |
@@ -335,12 +338,14 @@ jobs:
           fi
 
           patched_count=0
+          already_present_count=0
           for f in $control_files; do
             echo "Checking $f..."
 
             # Skip if fuse3 already present (idempotent)
             if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
               echo "  fuse3 already present, skipping"
+              already_present_count=$((already_present_count + 1))
               continue
             fi
 
@@ -359,11 +364,12 @@ jobs:
             fi
           done
 
-          if [[ "$patched_count" -eq 0 ]]; then
-            echo "::error::No control files were patched"
+          # Success if we patched at least one file OR fuse3 was already present
+          if [[ "$patched_count" -eq 0 ]] && [[ "$already_present_count" -eq 0 ]]; then
+            echo "::error::No control files were patched and none had fuse3"
             exit 1
           fi
-          echo "Patched $patched_count control file(s)"
+          echo "Patched $patched_count control file(s), $already_present_count already had fuse3"
 
       - name: Build sysbox-ce deb package
         run: |

@@ -335,6 +335,7 @@ build_sysbox_deb() {
     # Use find to locate all control files in the deb directory (handles various template layouts)
     log_info "Patching control files to add fuse3 dependency..."
     local patched_count=0
+    local already_present_count=0
     local control_files
     control_files=$(find "$pkgr_dir/deb" -name control -type f 2>/dev/null)
 
@@ -348,6 +349,7 @@ build_sysbox_deb() {
         # Skip if fuse3 already present in Depends line (idempotent)
         if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
             log_info "fuse3 already present in $f"
+            already_present_count=$((already_present_count + 1))
             continue
         fi
 
@@ -365,11 +367,12 @@ build_sysbox_deb() {
         fi
     done
 
-    if [[ "$patched_count" -eq 0 ]]; then
-        log_error "No control files were patched - fuse3 dependency not added"
+    # Success if we patched at least one file OR fuse3 was already present in all files
+    if [[ "$patched_count" -eq 0 ]] && [[ "$already_present_count" -eq 0 ]]; then
+        log_error "No control files were patched and none had fuse3 - dependency not ensured"
         exit 1
     fi
-    log_info "Patched $patched_count control file(s)"
+    log_info "Patched $patched_count control file(s), $already_present_count already had fuse3"
 
     # Patch the VERSION file to include our suffix
     log_info "Patching version to: $full_version"
