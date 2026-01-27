@@ -2479,12 +2479,13 @@ _containai_shell_cmd() {
             echo "[ERROR] Container workspace does not match. Use --fresh to recreate." >&2
             return 1
         fi
-    fi
 
-    # Print container/volume info if verbose (stderr for pipeline safety)
-    if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
-        printf '%s\n' "[INFO] Container: $resolved_container_name" >&2
-        printf '%s\n' "[INFO] Volume: $resolved_volume" >&2
+        # Print container/volume info if verbose (stderr for pipeline safety)
+        # Only print here when container exists - _containai_start_container handles it otherwise
+        if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
+            printf '%s\n' "[INFO] Container: $resolved_container_name" >&2
+            printf '%s\n' "[INFO] Volume: $resolved_volume" >&2
+        fi
     fi
 
     # Connect via SSH
