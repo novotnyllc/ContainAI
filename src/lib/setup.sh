@@ -524,26 +524,14 @@ _cai_sysbox_installed_pkg_version() {
 
 # Check if installed sysbox is a ContainAI build
 # Returns: 0=is containai build, 1=not containai build or not installed
-# Checks both dpkg version string AND sysbox-runc binary version output
-# to handle cases where dpkg version doesn't contain build metadata
+# Always checks sysbox-runc binary version (authoritative, compiled-in)
+# dpkg version is unreliable - may not reflect actual build metadata
 _cai_sysbox_is_containai_build() {
-    # First check dpkg version string (fastest path)
-    local pkg_version
-    if pkg_version=$(_cai_sysbox_installed_pkg_version 2>/dev/null); then
-        if [[ "$pkg_version" == *"+containai."* ]]; then
-            return 0
-        fi
-    fi
-
-    # Fallback: check binary version output (handles mismatched dpkg metadata)
-    # sysbox-runc --version shows the actual compiled-in version string
     local binary_version
     if binary_version=$(_cai_sysbox_installed_binary_version 2>/dev/null); then
-        if [[ "$binary_version" == *"+containai."* ]]; then
-            return 0
-        fi
+        [[ "$binary_version" == *"+containai."* ]]
+        return $?
     fi
-
     return 1
 }
 
@@ -615,17 +603,12 @@ _cai_sysbox_needs_update() {
     bundled_semver=$(printf '%s' "$bundled_version" | sed 's/+.*//' | sed 's/-[0-9]*$//')
 
     # Check if installed is ContainAI build
+    # Always use binary version (authoritative) - dpkg version is unreliable
     local installed_is_containai="false"
     local installed_full_version=""
     if _cai_sysbox_is_containai_build; then
         installed_is_containai="true"
-        # Try dpkg version first, fall back to binary version
-        # This handles cases where dpkg metadata doesn't have the +containai suffix
-        installed_full_version=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || installed_full_version=""
-        if [[ "$installed_full_version" != *"+containai."* ]]; then
-            # dpkg version missing ContainAI marker - get from binary
-            installed_full_version=$(_cai_sysbox_installed_binary_version 2>/dev/null) || installed_full_version=""
-        fi
+        installed_full_version=$(_cai_sysbox_installed_binary_version 2>/dev/null) || installed_full_version=""
     fi
 
     # Compare versions using sort -V

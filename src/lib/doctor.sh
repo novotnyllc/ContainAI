@@ -501,22 +501,13 @@ _cai_doctor() {
 
             # Show sysbox version information (only on Linux/WSL2, not macOS)
             if [[ "$platform" != "macos" ]]; then
+                # Always use binary version (authoritative) - dpkg version is unreliable
                 local installed_sysbox_version=""
-                local installed_sysbox_pkg=""
-                installed_sysbox_version=$(_cai_sysbox_installed_version) || installed_sysbox_version=""
-                installed_sysbox_pkg=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || installed_sysbox_pkg=""
-                # Fallback to binary version if dpkg lacks ContainAI marker
-                if [[ -z "$installed_sysbox_pkg" ]] || [[ "$installed_sysbox_pkg" != *"+containai."* ]]; then
-                    local binary_ver
-                    binary_ver=$(_cai_sysbox_installed_binary_version 2>/dev/null) || binary_ver=""
-                    if [[ -n "$binary_ver" ]]; then
-                        installed_sysbox_pkg="$binary_ver"
-                    fi
-                fi
+                installed_sysbox_version=$(_cai_sysbox_installed_binary_version 2>/dev/null) || \
+                    installed_sysbox_version=$(_cai_sysbox_installed_version 2>/dev/null) || \
+                    installed_sysbox_version=""
 
-                if [[ -n "$installed_sysbox_pkg" ]]; then
-                    printf '  %-44s %s\n' "Installed version: $installed_sysbox_pkg" "[OK]"
-                elif [[ -n "$installed_sysbox_version" ]]; then
+                if [[ -n "$installed_sysbox_version" ]]; then
                     printf '  %-44s %s\n' "Installed version: $installed_sysbox_version" "[OK]"
                 fi
 
@@ -2051,21 +2042,14 @@ _cai_doctor_json() {
     fi
 
     # Sysbox version information (Linux/WSL2 only)
+    # Always use binary version (authoritative) - dpkg version is unreliable
     local sysbox_installed_version=""
     local sysbox_bundled_version=""
     local sysbox_needs_update_json="false"
     if [[ "$platform" != "macos" ]] && [[ "$sysbox_ok" == "true" ]]; then
-        sysbox_installed_version=$(_cai_sysbox_installed_pkg_version 2>/dev/null) || sysbox_installed_version=""
-        # Fallback to binary version if dpkg lacks ContainAI marker
-        if [[ -z "$sysbox_installed_version" ]] || [[ "$sysbox_installed_version" != *"+containai."* ]]; then
-            local binary_ver
-            binary_ver=$(_cai_sysbox_installed_binary_version 2>/dev/null) || binary_ver=""
-            if [[ -n "$binary_ver" ]]; then
-                sysbox_installed_version="$binary_ver"
-            elif [[ -z "$sysbox_installed_version" ]]; then
-                sysbox_installed_version=$(_cai_sysbox_installed_version 2>/dev/null) || sysbox_installed_version=""
-            fi
-        fi
+        sysbox_installed_version=$(_cai_sysbox_installed_binary_version 2>/dev/null) || \
+            sysbox_installed_version=$(_cai_sysbox_installed_version 2>/dev/null) || \
+            sysbox_installed_version=""
 
         local arch
         arch=$(uname -m)
