@@ -220,3 +220,6 @@ Environment variables set inline (VAR=value cmd) only apply to the immediate com
 
 ## 2026-01-26 manual [pitfall]
 When managing Docker containers, use DOCKER_HOST directly with socket path instead of relying on docker context - contexts can be misconfigured and lead to operating on wrong engine
+
+## 2026-01-27 manual [pitfall]
+When embedding variables in bash -c scripts (e.g., limactl shell -- bash -c), pass them as positional parameters (bash -c 'script' _ "$var") to prevent command injection, not string interpolation
