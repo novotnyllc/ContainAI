@@ -1899,10 +1899,11 @@ _cai_doctor_fix_container_single() {
     printf '\n'
 
     # Verify container exists and is managed
+    # Note: --format must come before -- since -- ends flag parsing
     local container_labels
     container_labels=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-        inspect --type container -- "$container_name" \
-        --format '{{index .Config.Labels "containai.managed"}}' 2>/dev/null) || {
+        inspect --type container --format '{{index .Config.Labels "containai.managed"}}' \
+        -- "$container_name" 2>/dev/null) || {
         _cai_error "Container '$container_name' not found"
         return 1
     }
@@ -1916,8 +1917,8 @@ _cai_doctor_fix_container_single() {
     # Check container state
     local container_state
     container_state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-        inspect --type container -- "$container_name" \
-        --format '{{.State.Status}}' 2>/dev/null) || container_state=""
+        inspect --type container --format '{{.State.Status}}' \
+        -- "$container_name" 2>/dev/null) || container_state=""
 
     printf '  Container: %s (%s)\n' "$container_name" "$container_state"
 
@@ -2514,17 +2515,17 @@ _cai_doctor_detect_uid_for_context() {
     local ctx="$1"
     local container="$2"
 
-    # Get container info
+    # Get container info (--format before -- since -- ends flag parsing)
     local user_info
     user_info=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-        inspect --type container -- "$container" \
-        --format '{{.Config.User}}' 2>/dev/null) || return 1
+        inspect --type container --format '{{.Config.User}}' \
+        -- "$container" 2>/dev/null) || return 1
 
     # Check container state for exec capability
     local container_state
     container_state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-        inspect --type container -- "$container" \
-        --format '{{.State.Running}}' 2>/dev/null) || container_state=""
+        inspect --type container --format '{{.State.Running}}' \
+        -- "$container" 2>/dev/null) || container_state=""
 
     # If user is specified in numeric format "uid:gid" or "uid", use it directly
     if [[ -n "$user_info" ]] && [[ "$user_info" =~ ^[0-9]+(:[0-9]+)?$ ]]; then
@@ -2605,10 +2606,10 @@ _cai_doctor_get_container_volumes_for_context() {
     local container="$2"
     local mounts
 
-    # Get mount info using specified context
+    # Get mount info using specified context (--format before -- since -- ends flag parsing)
     mounts=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-        inspect --type container -- "$container" \
-        --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null) || return 1
+        inspect --type container --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' \
+        -- "$container" 2>/dev/null) || return 1
 
     printf '%s' "$mounts"
     return 0
@@ -2710,11 +2711,11 @@ _cai_doctor_check_rootfs_tainted_for_context() {
     local ctx="$1"
     local container="$2"
 
-    # Get container rootfs path
+    # Get container rootfs path (--format before -- since -- ends flag parsing)
     local rootfs_path
     rootfs_path=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-        inspect --type container -- "$container" \
-        --format '{{.GraphDriver.Data.MergedDir}}' 2>/dev/null) || return 1
+        inspect --type container --format '{{.GraphDriver.Data.MergedDir}}' \
+        -- "$container" 2>/dev/null) || return 1
 
     if [[ -z "$rootfs_path" ]] || [[ ! -d "$rootfs_path" ]]; then
         return 1
@@ -2782,10 +2783,11 @@ _cai_doctor_repair() {
     local containers=""
     if [[ -n "$container_filter" ]]; then
         # Specific container - verify it exists and has the managed label
+        # Note: --format before -- since -- ends flag parsing
         local container_labels
         container_labels=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-            inspect --type container -- "$container_filter" \
-            --format '{{index .Config.Labels "containai.managed"}}' 2>/dev/null) || {
+            inspect --type container --format '{{index .Config.Labels "containai.managed"}}' \
+            -- "$container_filter" 2>/dev/null) || {
             _cai_error "Container '$container_filter' not found"
             return 1
         }
