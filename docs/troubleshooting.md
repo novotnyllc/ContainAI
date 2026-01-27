@@ -8,7 +8,7 @@ Most common issues and their one-line fixes:
 
 | Issue | Quick Fix |
 |-------|-----------|
-| SSH connection refused | `cai doctor --fix` then retry |
+| SSH connection refused | `cai doctor fix --all` then retry |
 | Host key verification failed | `cai ssh cleanup` then retry |
 | Permission denied (publickey) | `cai run --fresh /workspace` to recreate container |
 | Port already in use | Stop unused containers or adjust port range in config |
@@ -16,7 +16,7 @@ Most common issues and their one-line fixes:
 | sshd not ready | Wait or check `docker exec <container> systemctl status ssh` |
 | Updates available warning | Run `cai update` or set `CAI_UPDATE_CHECK_INTERVAL=never` |
 | Claude OAuth token expired | Re-run `claude /login` inside container, or use API key |
-| Files owned by nobody:nogroup | `cai doctor --repair --all` (Linux/WSL2 only) |
+| Files owned by nobody:nogroup | `cai doctor fix volume --all` (Linux/WSL2 only) |
 
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
@@ -46,7 +46,7 @@ Before diving into specific issues, run these commands to gather diagnostic info
 cai doctor
 
 # Auto-fix common issues (SSH keys, config, permissions)
-cai doctor --fix
+cai doctor fix --all
 
 # JSON output for scripting/debugging
 cai doctor --json
@@ -164,7 +164,7 @@ docker --context containai-docker exec <container-name> cat /home/agent/.ssh/aut
 
 1. **Run doctor fix to ensure SSH keys exist:**
    ```bash
-   cai doctor --fix
+   cai doctor fix --all
    ```
 
 2. **Recreate container with fresh SSH setup (recommended):**
@@ -506,7 +506,7 @@ chmod 700 ~/.config/containai
 
 Or run:
 ```bash
-cai doctor --fix
+cai doctor fix --all
 ```
 
 ---
@@ -774,11 +774,11 @@ This is **id-mapped mount corruption** - a known issue with Sysbox user namespac
 
 **Diagnosis:**
 ```bash
-# Check for corruption across all managed containers
-cai doctor --repair --all --dry-run
+# List volumes and check for corruption
+cai doctor fix volume
 
-# Check specific container
-cai doctor --repair --container mycontainer --dry-run
+# Check specific volume
+cai doctor fix volume myvolume
 ```
 
 The repair scan looks for files owned by UID/GID 65534 (`nobody:nogroup`) in volume data paths.
@@ -787,10 +787,10 @@ The repair scan looks for files owned by UID/GID 65534 (`nobody:nogroup`) in vol
 
 ```bash
 # Repair all managed container volumes
-cai doctor --repair --all
+cai doctor fix volume --all
 
 # Repair specific container volumes
-cai doctor --repair --container mycontainer
+cai doctor fix volume mycontainer
 ```
 
 **How repair works:**
@@ -803,28 +803,20 @@ cai doctor --repair --container mycontainer
 
 **Repair output:**
 ```
-ContainAI Doctor (Repair Mode)
-==============================
+ContainAI Doctor Fix (Volume: myproject-data)
+=============================================
 
-Scanning volumes...
-
-Container: myproject-main
-  Target ownership:                                1000:1000 (from container)
-  Volume 'myproject-data':                         [CORRUPT] 47 files with nobody:nogroup
-    Repairing to 1000:1000...                      [FIXED]
-
-Summary
-  Mode:                                            [DRY-RUN] No changes made
-  Volumes processed:                               1
-  Warnings:                                        0
-  Failures:                                        0
+  Target ownership:                                1000:1000 (from container myproject-main)
+  Volume path:                                     /var/lib/containai-docker/volumes/myproject-data/_data
+  Corrupted files:                                 47 with nobody:nogroup
+  Repairing...                                     [FIXED]
 ```
 
 **When to recreate vs repair:**
 
 | Situation | Action |
 |-----------|--------|
-| Only volume data corrupted | `cai doctor --repair` |
+| Only volume data corrupted | `cai doctor fix volume --all` |
 | Rootfs also tainted | Recreate container with `cai run --fresh` |
 | Corruption recurs | Investigate systemd/docker stop behavior |
 
