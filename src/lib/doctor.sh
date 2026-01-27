@@ -1700,13 +1700,13 @@ _cai_doctor_fix_volume_single() {
         return 1
     fi
 
-    # Get target UID/GID from container
+    # Get target UID/GID from container (use context-aware version)
     local target_ownership
-    if target_ownership=$(_cai_doctor_detect_uid "$owner_container" 2>/dev/null); then
+    if target_ownership=$(_cai_doctor_detect_uid_for_context "$ctx" "$owner_container" 2>/dev/null); then
         printf '  %-50s %s\n' "Target ownership:" "$target_ownership (from container $owner_container)"
     else
         target_ownership="1000:1000"
-        printf '  %-50s %s\n' "Target ownership:" "$target_ownership (default - container not running)"
+        printf '  %-50s %s\n' "Target ownership:" "$target_ownership (default - could not detect)"
     fi
 
     # Repair the volume
@@ -1825,7 +1825,7 @@ _cai_doctor_fix_container_all() {
 
         if [[ "$state" != "running" ]]; then
             printf '    %-46s %s\n' "SSH refresh:" "[SKIP] Container not running"
-            ((skip_count++))
+            ((skip_count++)) || true
             continue
         fi
 
@@ -1836,17 +1836,17 @@ _cai_doctor_fix_container_all() {
 
         if [[ -z "$ssh_port" ]]; then
             printf '    %-46s %s\n' "SSH refresh:" "[SKIP] No SSH port mapped"
-            ((skip_count++))
+            ((skip_count++)) || true
             continue
         fi
 
         # Refresh SSH configuration (force update)
         if _cai_setup_container_ssh "$name" "$ssh_port" "$ctx" "true" 2>/dev/null; then
             printf '    %-46s %s\n' "SSH refresh:" "[FIXED]"
-            ((fixed_count++))
+            ((fixed_count++)) || true
         else
             printf '    %-46s %s\n' "SSH refresh:" "[FAIL]"
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     done <<< "$containers"
 
@@ -2470,6 +2470,78 @@ _cai_doctor_detect_uid() {
             exec "$container" id -u 2>/dev/null) || id_output=""
         gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
             exec "$container" id -g 2>/dev/null) || gid_output=""
+        if [[ -n "$id_output" ]] && [[ -n "$gid_output" ]]; then
+            printf '%s:%s' "$id_output" "$gid_output"
+            return 0
+        fi
+    fi
+
+    # Could not detect - caller should use fallback
+    return 1
+}
+
+# Detect container's effective UID:GID (context-aware version)
+# Arguments: $1 = Docker context name
+#            $2 = container name or ID
+# Returns: 0=detected, 1=could not detect (container stopped or other issue)
+# Outputs: "uid:gid" on stdout (e.g., "1000:1000")
+_cai_doctor_detect_uid_for_context() {
+    local ctx="$1"
+    local container="$2"
+
+    # Get container info
+    local user_info
+    user_info=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+        inspect --type container -- "$container" \
+        --format '{{.Config.User}}' 2>/dev/null) || return 1
+
+    # Check container state for exec capability
+    local container_state
+    container_state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+        inspect --type container -- "$container" \
+        --format '{{.State.Running}}' 2>/dev/null) || container_state=""
+
+    # If user is specified in numeric format "uid:gid" or "uid", use it directly
+    if [[ -n "$user_info" ]] && [[ "$user_info" =~ ^[0-9]+(:[0-9]+)?$ ]]; then
+        if [[ "$user_info" == *:* ]]; then
+            printf '%s' "$user_info"
+            return 0
+        else
+            # Just UID, assume same GID
+            printf '%s:%s' "$user_info" "$user_info"
+            return 0
+        fi
+    fi
+
+    # For running containers, get the effective UID/GID via exec
+    # This handles: empty Config.User, root, or named users
+    if [[ "$container_state" == "true" ]]; then
+        local id_output gid_output
+
+        # If user_info is a non-root name, resolve that specific user
+        if [[ -n "$user_info" ]] && [[ "$user_info" != "root" ]]; then
+            # Parse user:group if present
+            local user_name
+            if [[ "$user_info" == *:* ]]; then
+                user_name="${user_info%%:*}"
+            else
+                user_name="$user_info"
+            fi
+            id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+                exec -- "$container" id -u "$user_name" 2>/dev/null) || id_output=""
+            gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+                exec -- "$container" id -g "$user_name" 2>/dev/null) || gid_output=""
+            if [[ -n "$id_output" ]] && [[ -n "$gid_output" ]]; then
+                printf '%s:%s' "$id_output" "$gid_output"
+                return 0
+            fi
+        fi
+
+        # Get the effective UID/GID of the container's default process
+        id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            exec -- "$container" id -u 2>/dev/null) || id_output=""
+        gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            exec -- "$container" id -g 2>/dev/null) || gid_output=""
         if [[ -n "$id_output" ]] && [[ -n "$gid_output" ]]; then
             printf '%s:%s' "$id_output" "$gid_output"
             return 0
