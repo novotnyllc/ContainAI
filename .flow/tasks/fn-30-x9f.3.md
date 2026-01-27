@@ -52,3 +52,7 @@ The `$pubkey_content` could get mangled, or script errors might not propagate.
 - [ ] If key injection fails, clear error message is shown
 - [ ] After doctor fix, `cai shell` works (end-to-end test)
 - [ ] Verbose mode (`-v`) shows what's actually happening during injection
+
+## Done summary
+
+<!-- flowctl done will append summary here -->
