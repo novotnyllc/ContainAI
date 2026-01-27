@@ -148,7 +148,17 @@ jobs:
             echo "Checking $f..."
 
             # Skip if fuse3 already present and fuse already removed (idempotent)
-            if grep -qE '^Depends:.*\bfuse3\b' "$f" && ! grep -qE '^Depends:.*\bfuse\b[^3]' "$f"; then
+            # Check for 'fuse' as standalone token (not fuse3) at start or middle/end of Depends
+            has_fuse3=false
+            has_fuse=false
+            if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+              has_fuse3=true
+            fi
+            if grep -qE '^Depends:[[:space:]]*fuse([[:space:],]|$)' "$f" || \
+               grep -qE '^Depends:.*,[[:space:]]*fuse([[:space:],]|$)' "$f"; then
+              has_fuse=true
+            fi
+            if [[ "$has_fuse3" == "true" ]] && [[ "$has_fuse" == "false" ]]; then
               echo "  fuse3 already present (fuse removed), skipping"
               already_present_count=$((already_present_count + 1))
               continue
@@ -171,8 +181,9 @@ jobs:
                 echo "::error::Failed to add fuse3 to $f"
                 exit 1
               fi
-              # Verify fuse (not fuse3) is not present
-              if grep -qE '^Depends:.*\bfuse\b[^3]' "$f" || grep -qE '^Depends:.*\bfuse[[:space:]]*$' "$f" || grep -qE '^Depends:.*\bfuse[[:space:]]*,' "$f"; then
+              # Verify fuse (not fuse3) is not present - check start and middle/end positions
+              if grep -qE '^Depends:[[:space:]]*fuse([[:space:],]|$)' "$f" || \
+                 grep -qE '^Depends:.*,[[:space:]]*fuse([[:space:],]|$)' "$f"; then
                 echo "::error::Failed to remove fuse from $f - fuse still present"
                 grep '^Depends:' "$f"
                 exit 1
@@ -357,7 +368,17 @@ jobs:
             echo "Checking $f..."
 
             # Skip if fuse3 already present and fuse already removed (idempotent)
-            if grep -qE '^Depends:.*\bfuse3\b' "$f" && ! grep -qE '^Depends:.*\bfuse\b[^3]' "$f"; then
+            # Check for 'fuse' as standalone token (not fuse3) at start or middle/end of Depends
+            has_fuse3=false
+            has_fuse=false
+            if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+              has_fuse3=true
+            fi
+            if grep -qE '^Depends:[[:space:]]*fuse([[:space:],]|$)' "$f" || \
+               grep -qE '^Depends:.*,[[:space:]]*fuse([[:space:],]|$)' "$f"; then
+              has_fuse=true
+            fi
+            if [[ "$has_fuse3" == "true" ]] && [[ "$has_fuse" == "false" ]]; then
               echo "  fuse3 already present (fuse removed), skipping"
               already_present_count=$((already_present_count + 1))
               continue
@@ -380,8 +401,9 @@ jobs:
                 echo "::error::Failed to add fuse3 to $f"
                 exit 1
               fi
-              # Verify fuse (not fuse3) is not present
-              if grep -qE '^Depends:.*\bfuse\b[^3]' "$f" || grep -qE '^Depends:.*\bfuse[[:space:]]*$' "$f" || grep -qE '^Depends:.*\bfuse[[:space:]]*,' "$f"; then
+              # Verify fuse (not fuse3) is not present - check start and middle/end positions
+              if grep -qE '^Depends:[[:space:]]*fuse([[:space:],]|$)' "$f" || \
+                 grep -qE '^Depends:.*,[[:space:]]*fuse([[:space:],]|$)' "$f"; then
                 echo "::error::Failed to remove fuse from $f - fuse still present"
                 grep '^Depends:' "$f"
                 exit 1

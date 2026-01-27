@@ -347,7 +347,18 @@ build_sysbox_deb() {
     local f
     for f in $control_files; do
         # Skip if fuse3 already present and fuse already removed (idempotent)
-        if grep -qE '^Depends:.*\bfuse3\b' "$f" && ! grep -qE '^Depends:.*\bfuse\b[^3]' "$f"; then
+        # Check for fuse as a standalone token (not fuse3)
+        local has_fuse3=false
+        local has_fuse=false
+        if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+            has_fuse3=true
+        fi
+        # Check for 'fuse' not followed by '3' - handles middle, start, and end positions
+        if grep -qE '^Depends:[[:space:]]*fuse([[:space:],]|$)' "$f" || \
+           grep -qE '^Depends:.*,[[:space:]]*fuse([[:space:],]|$)' "$f"; then
+            has_fuse=true
+        fi
+        if [[ "$has_fuse3" == "true" ]] && [[ "$has_fuse" == "false" ]]; then
             log_info "fuse3 already present (fuse removed) in $f"
             already_present_count=$((already_present_count + 1))
             continue
@@ -370,8 +381,9 @@ build_sysbox_deb() {
                 log_error "Failed to add fuse3 to $f"
                 exit 1
             fi
-            # Verify fuse (not fuse3) is not present
-            if grep -qE '^Depends:.*\bfuse\b[^3]' "$f" || grep -qE '^Depends:.*\bfuse[[:space:]]*$' "$f" || grep -qE '^Depends:.*\bfuse[[:space:]]*,' "$f"; then
+            # Verify fuse (not fuse3) is not present - check start and middle/end positions
+            if grep -qE '^Depends:[[:space:]]*fuse([[:space:],]|$)' "$f" || \
+               grep -qE '^Depends:.*,[[:space:]]*fuse([[:space:],]|$)' "$f"; then
                 log_error "Failed to remove fuse from $f - fuse still present alongside fuse3"
                 grep '^Depends:' "$f" >&2
                 exit 1
