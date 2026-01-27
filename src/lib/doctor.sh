@@ -1822,30 +1822,33 @@ _cai_doctor_fix_container_all() {
     printf '%s\n' "======================================"
     printf '\n'
 
-    # Get all managed containers
-    local containers=""
+    # Get all managed containers (names only, then inspect for state)
+    local container_names=""
     if [[ -n "$ctx" ]] && command -v docker >/dev/null 2>&1; then
-        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
-            ps -a --filter "label=containai.managed=true" --format '{{.Names}}\t{{.State}}' 2>/dev/null) || containers=""
+        container_names=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null) || container_names=""
     fi
 
-    if [[ -z "$containers" ]]; then
+    if [[ -z "$container_names" ]]; then
         _cai_info "No ContainAI-managed containers found"
         return 0
     fi
 
-    local line
-    while IFS= read -r line; do
-        [[ -z "$line" ]] && continue
-        local name state
-        name=$(printf '%s' "$line" | cut -f1)
-        state=$(printf '%s' "$line" | cut -f2)
+    local name
+    while IFS= read -r name; do
+        [[ -z "$name" ]] && continue
+
+        # Get container state via inspect (more reliable than ps format)
+        local state
+        state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$ctx" \
+            inspect --type container -- "$name" \
+            --format '{{.State.Status}}' 2>/dev/null) || state="unknown"
 
         printf '  Container: %s (%s)\n' "$name" "$state"
 
         if [[ "$state" != "running" ]]; then
             printf '    %-46s %s\n' "SSH refresh:" "[SKIP] Container not running"
-            ((skip_count++)) || true
+            skip_count=$((skip_count + 1))
             continue
         fi
 
@@ -1856,20 +1859,21 @@ _cai_doctor_fix_container_all() {
 
         if [[ -z "$ssh_port" ]]; then
             printf '    %-46s %s\n' "SSH refresh:" "[SKIP] No SSH port mapped"
-            ((skip_count++)) || true
+            skip_count=$((skip_count + 1))
             continue
         fi
 
         # Refresh SSH configuration (force update)
         # Note: errors from _cai_setup_container_ssh are visible so users can debug failures
+        # set -e safe increment: use $((var+1)) instead of ((var++))
         if _cai_setup_container_ssh "$name" "$ssh_port" "$ctx" "true"; then
             printf '    %-46s %s\n' "SSH refresh:" "[FIXED]"
-            ((fixed_count++)) || true
+            fixed_count=$((fixed_count + 1))
         else
             printf '    %-46s %s\n' "SSH refresh:" "[FAIL]"
-            ((fail_count++)) || true
+            fail_count=$((fail_count + 1))
         fi
-    done <<< "$containers"
+    done <<< "$container_names"
 
     printf '\n'
     printf '%s\n' "Summary"
@@ -2822,7 +2826,7 @@ _cai_doctor_repair() {
         else
             target_ownership="1000:1000"
             printf '  %-50s %s\n' "Target ownership:" "$target_ownership (default - container not running)"
-            ((warn_count++))
+            warn_count=$((warn_count + 1))
         fi
 
         # Get volumes for this container (context-aware)
@@ -2839,10 +2843,11 @@ _cai_doctor_repair() {
         local volume
         while IFS= read -r volume; do
             [[ -z "$volume" ]] && continue
+            # set -e safe increment: use $((var+1)) instead of ((var++))
             if _cai_doctor_repair_volume "$volume" "$target_ownership" "$dry_run"; then
-                ((fixed_count++))
+                fixed_count=$((fixed_count + 1))
             else
-                ((fail_count++))
+                fail_count=$((fail_count + 1))
             fi
         done <<< "$volumes"
 
@@ -2854,7 +2859,7 @@ _cai_doctor_repair() {
     if [[ "$dry_run" == "true" ]]; then
         printf '  %-50s %s\n' "Mode:" "[DRY-RUN] No changes made"
     fi
-    printf '  %-50s %s\n' "Volumes processed:" "$fixed_count"
+    printf '  %-50s %s\n' "Volumes checked:" "$fixed_count"
     printf '  %-50s %s\n' "Warnings:" "$warn_count"
     printf '  %-50s %s\n' "Failures:" "$fail_count"
 
