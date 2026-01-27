@@ -220,8 +220,12 @@ _setup_git_config() {
 
 update_agent_pw() {
     local agent_pw
-    agent_pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
-    run_as_root usermod -p "${agent_pw}" agent
+    # Generate random password; suppress broken pipe error from tr when head exits early
+    # (SIGPIPE is expected and benign, but causes script exit with set -eo pipefail)
+    agent_pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32)" || true
+    # Use chpasswd which handles password hashing automatically
+    # usermod -p expects an already-encrypted password, not plaintext
+    printf '%s:%s\n' agent "${agent_pw}" | run_as_root chpasswd
 }
 
 # Setup workspace symlink from original host path to mount point
