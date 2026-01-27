@@ -1649,8 +1649,12 @@ _cai_ssh_shell() {
     fi
 
     # Check if SSH config exists, regenerate if missing
+    # NOTE: Only regenerate if config is actually missing. The caller (container.sh)
+    # already runs _cai_setup_container_ssh for new containers. Running setup twice
+    # in rapid succession can cause race conditions/key corruption. The force_update
+    # flag is for container lifecycle (e.g., --fresh), not SSH setup triggering.
     local config_file="$_CAI_SSH_CONFIG_DIR/${container_name}.conf"
-    if [[ ! -f "$config_file" ]] || [[ "$force_update" == "true" ]]; then
+    if [[ ! -f "$config_file" ]]; then
         if [[ "$quiet" != "true" ]]; then
             _cai_info "Setting up SSH configuration..."
         fi
@@ -1956,8 +1960,12 @@ _cai_ssh_run() {
     fi
 
     # Check if SSH config exists, regenerate if missing
+    # NOTE: Only regenerate if config is actually missing. The caller (container.sh)
+    # already runs _cai_setup_container_ssh for new containers. Running setup twice
+    # in rapid succession can cause race conditions/key corruption. The force_update
+    # flag is for container lifecycle (e.g., --fresh), not SSH setup triggering.
     local config_file="$_CAI_SSH_CONFIG_DIR/${container_name}.conf"
-    if [[ ! -f "$config_file" ]] || [[ "$force_update" == "true" ]]; then
+    if [[ ! -f "$config_file" ]]; then
         if [[ "$quiet" != "true" ]]; then
             _cai_info "Setting up SSH configuration..."
         fi
