@@ -60,9 +60,8 @@ sysbox-runc
 - [ ] `cai update` with identical versions reports "Sysbox is current"
 - [ ] No raw `sysbox-runc --version | head -1` calls remain in version display paths
 ## Done summary
-TBD
-
+Fixed sysbox version parsing to handle both old single-line and new multiline output formats
 ## Evidence
-- Commits:
+- Commits: 605d028
 - Tests:
 - PRs:
