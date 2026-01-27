@@ -1727,8 +1727,9 @@ _cai_ssh_connect_with_retry() {
         fi
 
         # Force TTY allocation for interactive shell session
-        # Required because we pass a remote command which disables automatic TTY
-        ssh_cmd+=(-t)
+        # Use -tt (double t) to force pseudo-TTY even when stdin is not a terminal
+        # This ensures shell always works even when stdin is piped/redirected
+        ssh_cmd+=(-tt)
 
         # Connect to IPv4 loopback (explicit options override any host alias)
         ssh_cmd+=("$_CAI_SSH_HOST")
@@ -2080,8 +2081,13 @@ _cai_ssh_run_with_retry() {
 
             if [[ "$detached" == "true" ]]; then
                 # Run in background with nohup, redirect output to /dev/null
-                # Use disown pattern: nohup cmd </dev/null >/dev/null 2>&1 &
-                remote_cmd="cd /home/agent/workspace && nohup ${env_prefix}${quoted_args} </dev/null >/dev/null 2>&1 &"
+                # Use bash -lc wrapper for consistent command parsing (matches printf %q escaping)
+                # printf %q produces bash-compatible output that can be safely passed to bash -c
+                # We double-quote the entire command so bash -lc gets it as a single argument
+                # Return PID so we can verify the process started
+                local bash_cmd_arg
+                bash_cmd_arg=$(printf '%q' "${env_prefix}${quoted_args}")
+                remote_cmd="cd /home/agent/workspace && nohup bash -lc ${bash_cmd_arg} </dev/null >/dev/null 2>&1 & echo \$!"
             else
                 # Run in foreground
                 remote_cmd="cd /home/agent/workspace && ${env_prefix}${quoted_args}"
@@ -2089,10 +2095,10 @@ _cai_ssh_run_with_retry() {
             ssh_cmd+=("$remote_cmd")
         fi
 
-        if [[ "$quiet" != "true" && $retry_count -eq 0 ]]; then
-            if [[ "$detached" == "true" ]]; then
-                _cai_info "Running command in background via SSH..."
-            elif [[ ${#cmd_args[@]} -gt 0 ]]; then
+        # Show progress message for non-detached commands (before execution)
+        # Detached mode message is shown AFTER PID verification
+        if [[ "$quiet" != "true" && $retry_count -eq 0 && "$detached" != "true" ]]; then
+            if [[ ${#cmd_args[@]} -gt 0 ]]; then
                 _cai_info "Running command via SSH..."
             else
                 _cai_info "Connecting to container via SSH..."
@@ -2100,16 +2106,19 @@ _cai_ssh_run_with_retry() {
         fi
 
         # Execute SSH and capture exit code + stderr for diagnostics
-        local ssh_stderr_file
+        # For detached mode, also capture stdout to get the PID
+        local ssh_stderr_file ssh_stdout_file
         ssh_stderr_file=$(mktemp)
-        if "${ssh_cmd[@]}" 2>"$ssh_stderr_file"; then
+        ssh_stdout_file=$(mktemp)
+        if "${ssh_cmd[@]}" >"$ssh_stdout_file" 2>"$ssh_stderr_file"; then
             ssh_exit_code=0
         else
             ssh_exit_code=$?
         fi
-        local ssh_stderr
+        local ssh_stderr ssh_stdout
         ssh_stderr=$(cat "$ssh_stderr_file" 2>/dev/null || true)
-        rm -f "$ssh_stderr_file"
+        ssh_stdout=$(cat "$ssh_stdout_file" 2>/dev/null || true)
+        rm -f "$ssh_stderr_file" "$ssh_stdout_file"
 
         # Check exit code and decide whether to retry
         case $ssh_exit_code in
@@ -2117,6 +2126,45 @@ _cai_ssh_run_with_retry() {
                 # Success
                 if [[ "$host_key_auto_recovered" == "true" && "$quiet" != "true" ]]; then
                     _cai_info "Auto-recovered from stale host key"
+                fi
+
+                # For detached mode, verify the process actually started
+                if [[ "$detached" == "true" ]]; then
+                    local remote_pid
+                    remote_pid=$(printf '%s' "$ssh_stdout" | tr -d '[:space:]')
+                    if [[ -n "$remote_pid" && "$remote_pid" =~ ^[0-9]+$ ]]; then
+                        # Verify process is running with kill -0 via a quick SSH check
+                        local -a verify_ssh_cmd=(ssh)
+                        verify_ssh_cmd+=(-o "HostName=$_CAI_SSH_HOST")
+                        verify_ssh_cmd+=(-o "Port=$ssh_port")
+                        verify_ssh_cmd+=(-o "User=agent")
+                        verify_ssh_cmd+=(-o "IdentityFile=$_CAI_SSH_KEY_PATH")
+                        verify_ssh_cmd+=(-o "IdentitiesOnly=yes")
+                        verify_ssh_cmd+=(-o "UserKnownHostsFile=$_CAI_KNOWN_HOSTS_FILE")
+                        verify_ssh_cmd+=(-o "StrictHostKeyChecking=$strict_host_key_checking")
+                        verify_ssh_cmd+=(-o "ConnectTimeout=5")
+                        verify_ssh_cmd+=(-n)  # Prevent reading stdin
+                        verify_ssh_cmd+=("$_CAI_SSH_HOST")
+                        verify_ssh_cmd+=("kill -0 $remote_pid 2>/dev/null && echo running")
+                        local verify_result
+                        verify_result=$("${verify_ssh_cmd[@]}" 2>/dev/null || true)
+                        if [[ "$verify_result" == *"running"* ]]; then
+                            if [[ "$quiet" != "true" ]]; then
+                                _cai_info "Command running in background (PID: $remote_pid)"
+                            fi
+                        else
+                            _cai_error "Background command failed to start (PID $remote_pid not found)"
+                            return 1
+                        fi
+                    else
+                        _cai_error "Background command failed: could not get PID"
+                        return 1
+                    fi
+                else
+                    # For non-detached mode, output any stdout
+                    if [[ -n "$ssh_stdout" ]]; then
+                        printf '%s\n' "$ssh_stdout"
+                    fi
                 fi
                 return 0
                 ;;

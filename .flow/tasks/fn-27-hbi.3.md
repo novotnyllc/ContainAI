@@ -56,9 +56,8 @@ Add data volume ownership repair functionality to `cai doctor` to fix id-mapped 
 - [ ] Arg parsing updated in src/containai.sh with proper help text
 
 ## Done summary
-TBD
-
+Added `cai doctor --repair` for fixing volume ownership corruption after sysbox restarts. Linux/WSL2 only - macOS prints "not supported" and exits cleanly. Supports `--all` or `--container <name>` with optional `--dry-run`. Auto-detects UID/GID from running containers, constrained to `/var/lib/containai-docker/volumes`, warns if rootfs is tainted.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c80710f, 91948c7, 4f689b0
+- Tests: shellcheck -x src/containai.sh src/lib/doctor.sh, bash -n src/containai.sh, bash -n src/lib/doctor.sh, source src/containai.sh && _containai_doctor_help, source src/containai.sh && _containai_doctor_cmd --repair --all
 - PRs:
