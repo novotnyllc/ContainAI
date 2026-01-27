@@ -235,3 +235,6 @@ When detecting a word token in grep, \bword\b[^x] fails at end-of-line; use sepa
 
 ## 2026-01-27 manual [pitfall]
 When skipping sync map entries, use source rewriting instead of continue to preserve ensure() behavior for creating target paths with correct permissions
+
+## 2026-01-27 manual [pitfall]
+When using ((var++)) in bash with set -e, the increment returns the OLD value as exit status - use ((var++)) || true to prevent script exit when var is 0
