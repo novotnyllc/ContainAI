@@ -1056,12 +1056,19 @@ SCRIPT_EOF
     fi
 
     # Check if key is present in authorized_keys
-    if ! "${docker_cmd[@]}" exec -- "$container_name" grep -qF "$key_material" /home/agent/.ssh/authorized_keys 2>/dev/null; then
+    # Capture stderr to provide better diagnostics on failure
+    local verify_output
+    if ! verify_output=$("${docker_cmd[@]}" exec -- "$container_name" grep -qF "$key_material" /home/agent/.ssh/authorized_keys 2>&1); then
+        local verify_exit=$?
         _cai_error "Key injection verification failed: key not found in authorized_keys"
         _cai_error "  This may indicate:"
         _cai_error "    - Script execution through SSH-based docker context mangled arguments"
         _cai_error "    - Permission issues on /home/agent/.ssh inside container"
-        _cai_error "    - The set -e in inject script did not propagate through bash -c"
+        _cai_error "    - The authorized_keys file was not created or is empty"
+        if [[ -n "$verify_output" ]]; then
+            _cai_error "  Verification command output: $verify_output"
+        fi
+        _cai_debug "Verification exit code: $verify_exit"
         _cai_debug "Expected key material: ${key_material:0:30}..."
         return 1
     fi
@@ -1572,6 +1579,9 @@ _cai_setup_container_ssh() {
 # Arguments:
 #   $1 = SSH port (on host)
 # Returns: 0=success, 1=failure
+#
+# Note: SSH options are aligned with _cai_ssh_connect_with_retry to ensure
+# verification and actual connection use the same parameters.
 _cai_verify_ssh_connectivity() {
     local ssh_port="$1"
 
@@ -1583,25 +1593,34 @@ _cai_verify_ssh_connectivity() {
         strict_host_key_checking="yes"
     fi
 
+    # Build SSH command with explicit options (aligned with _cai_ssh_connect_with_retry)
+    # This ensures verification uses the same options as actual connections
+    local -a ssh_cmd=(ssh)
+    ssh_cmd+=(-o "BatchMode=yes")
+    ssh_cmd+=(-o "HostName=$_CAI_SSH_HOST")
+    ssh_cmd+=(-o "Port=$ssh_port")
+    ssh_cmd+=(-o "User=agent")
+    ssh_cmd+=(-o "IdentityFile=$_CAI_SSH_KEY_PATH")
+    ssh_cmd+=(-o "IdentitiesOnly=yes")
+    ssh_cmd+=(-o "UserKnownHostsFile=$_CAI_KNOWN_HOSTS_FILE")
+    ssh_cmd+=(-o "StrictHostKeyChecking=$strict_host_key_checking")
+    ssh_cmd+=(-o "PreferredAuthentications=publickey")
+    ssh_cmd+=(-o "GSSAPIAuthentication=no")
+    ssh_cmd+=(-o "PasswordAuthentication=no")
+    ssh_cmd+=(-o "AddressFamily=inet")
+    ssh_cmd+=(-o "ConnectTimeout=5")
+    # ServerAliveInterval/CountMax ensure we don't hang if server accepts but stalls
+    ssh_cmd+=(-o "ServerAliveInterval=2")
+    ssh_cmd+=(-o "ServerAliveCountMax=2")
+    ssh_cmd+=("$_CAI_SSH_HOST")
+    ssh_cmd+=("exit 0")
+
     # Quick SSH connection test: run 'exit 0' to verify authentication works
     # Uses BatchMode to fail immediately on auth issues (no password prompts)
-    # Uses ConnectTimeout=5 to avoid long waits
+    # Wrapped in timeout to prevent hanging if server accepts but stalls
+    _cai_debug "Running SSH connectivity test on port $ssh_port..."
     local ssh_test_output
-    if ! ssh_test_output=$(ssh \
-        -o "BatchMode=yes" \
-        -o "ConnectTimeout=5" \
-        -o "HostName=$_CAI_SSH_HOST" \
-        -o "Port=$ssh_port" \
-        -o "User=agent" \
-        -o "IdentityFile=$_CAI_SSH_KEY_PATH" \
-        -o "IdentitiesOnly=yes" \
-        -o "UserKnownHostsFile=$_CAI_KNOWN_HOSTS_FILE" \
-        -o "StrictHostKeyChecking=$strict_host_key_checking" \
-        -o "PreferredAuthentications=publickey" \
-        -o "GSSAPIAuthentication=no" \
-        -o "PasswordAuthentication=no" \
-        -- agent@"$_CAI_SSH_HOST" \
-        "exit 0" 2>&1); then
+    if ! ssh_test_output=$(_cai_timeout 10 "${ssh_cmd[@]}" 2>&1); then
         _cai_debug "SSH connectivity test failed"
         _cai_debug "  SSH output: $ssh_test_output"
         return 1
