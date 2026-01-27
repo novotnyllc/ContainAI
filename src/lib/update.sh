@@ -1403,15 +1403,28 @@ _cai_lima_sysbox_version() {
     fi
 
     # Query sysbox version inside the VM
-    local version_output
-    version_output=$(limactl shell "$_CAI_LIMA_VM_NAME" -- sysbox-runc --version 2>/dev/null | head -1) || return 1
+    # Handles both output formats:
+    #   Old single-line: "sysbox-runc version 0.6.7+containai.20260127 ..."
+    #   New multiline: version on "version:" line
+    local version_output version_value
+    version_output=$(limactl shell "$_CAI_LIMA_VM_NAME" -- sysbox-runc --version 2>/dev/null) || return 1
 
-    if [[ -z "$version_output" ]]; then
-        return 1
+    # Try new multiline format first (has "version:" line)
+    version_value=$(printf '%s' "$version_output" | grep -E '^[[:space:]]*version:' | sed 's/.*:[[:space:]]*//')
+    if [[ -n "$version_value" ]]; then
+        printf '%s' "$version_value"
+        return 0
     fi
 
-    printf '%s' "$version_output"
-    return 0
+    # Try old single-line format: "sysbox-runc version X.Y.Z+metadata ..."
+    version_value=$(printf '%s' "$version_output" | head -1 | sed -n 's/^sysbox-runc version \([^ ]*\).*/\1/p')
+    if [[ -n "$version_value" ]]; then
+        printf '%s' "$version_value"
+        return 0
+    fi
+
+    # Neither format matched
+    return 1
 }
 
 # Get sysbox semver from inside Lima VM
@@ -1422,9 +1435,9 @@ _cai_lima_sysbox_semver() {
     local version_output
     version_output=$(_cai_lima_sysbox_version) || return 1
 
-    # Extract semver from version string (e.g., "sysbox-runc version 0.6.4+containai.20250124")
+    # Extract semver from version string (e.g., "0.6.4+containai.20250124")
     local semver
-    semver=$(printf '%s' "$version_output" | sed -n 's/.*[[:space:]]\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
+    semver=$(printf '%s' "$version_output" | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
 
     if [[ -z "$semver" ]]; then
         return 1

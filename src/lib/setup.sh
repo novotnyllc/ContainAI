@@ -478,37 +478,54 @@ _CAI_SYSBOX_BUNDLED_VERSION_CACHE=""
 _CAI_SYSBOX_UPDATE_REASON=""
 
 # Get installed sysbox version (semver only)
-# Returns: 0=success (outputs version to stdout), 1=not installed
+# Returns: 0=success (outputs version to stdout), 1=not installed or parse failed
 # Example output: "0.6.7"
+# Uses _cai_sysbox_installed_binary_version() to handle both output formats
 _cai_sysbox_installed_version() {
-    if ! command -v sysbox-runc >/dev/null 2>&1; then
-        return 1
+    local binary_version semver
+    binary_version=$(_cai_sysbox_installed_binary_version) || return 1
+
+    # Extract semver: "0.6.7" from "0.6.7+containai.20260127"
+    semver=$(printf '%s' "$binary_version" | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+    if [[ -n "$semver" ]]; then
+        printf '%s' "$semver"
+        return 0
     fi
-    local version_line
-    version_line=$(sysbox-runc --version 2>/dev/null | head -1 || true)
-    # Extract semver: "0.6.7" from "sysbox-runc version 0.6.7+containai.20260127"
-    printf '%s' "$version_line" | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1
+    return 1
 }
 
 # Get installed sysbox full version string from binary
-# Returns: 0=success (outputs version to stdout), 1=not installed
+# Returns: 0=success (outputs version to stdout), 1=not installed or parse failed
 # Example output: "0.6.7+containai.20260127"
 # This extracts the full version including build metadata from sysbox-runc --version
+# Handles both output formats:
+#   Old single-line: "sysbox-runc version 0.6.7+containai.20260127 ..."
+#   New multiline:
+#     sysbox-runc
+#             edition:        Community Edition (CE)
+#             version:        0.6.7+containai.20260127
 _cai_sysbox_installed_binary_version() {
     if ! command -v sysbox-runc >/dev/null 2>&1; then
         return 1
     fi
-    # sysbox-runc --version outputs multiple lines, version is on line 2:
-    #   sysbox-runc
-    #           edition:        Community Edition (CE)
-    #           version:        0.6.7+containai.20260127
-    # Extract the version line and get the value after the colon
-    local version_value
-    version_value=$(sysbox-runc --version 2>/dev/null | grep -E '^[[:space:]]*version:' | sed 's/.*:[[:space:]]*//' || true)
+    local version_output version_value
+    version_output=$(sysbox-runc --version 2>/dev/null) || return 1
+
+    # Try new multiline format first (has "version:" line)
+    version_value=$(printf '%s' "$version_output" | grep -E '^[[:space:]]*version:' | sed 's/.*:[[:space:]]*//')
     if [[ -n "$version_value" ]]; then
         printf '%s' "$version_value"
         return 0
     fi
+
+    # Try old single-line format: "sysbox-runc version X.Y.Z+metadata ..."
+    version_value=$(printf '%s' "$version_output" | head -1 | sed -n 's/^sysbox-runc version \([^ ]*\).*/\1/p')
+    if [[ -n "$version_value" ]]; then
+        printf '%s' "$version_value"
+        return 0
+    fi
+
+    # Neither format matched
     return 1
 }
 
@@ -911,7 +928,7 @@ _cai_install_sysbox_wsl2() {
 
     if command -v sysbox-runc >/dev/null 2>&1; then
         local existing_version
-        existing_version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
+        existing_version=$(_cai_sysbox_installed_binary_version 2>/dev/null || printf 'unknown version')
         _cai_info "Sysbox already installed: $existing_version"
 
         # Check if upgrade is needed using version comparison
@@ -2181,9 +2198,9 @@ _cai_verify_sysbox_install() {
     fi
 
     local sysbox_version
-    sysbox_version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
+    sysbox_version=$(_cai_sysbox_installed_binary_version 2>/dev/null || true)
     if [[ "$verbose" == "true" ]]; then
-        _cai_info "sysbox-runc version: $sysbox_version"
+        _cai_info "sysbox-runc version: ${sysbox_version:-unknown}"
     fi
 
     # Check sysbox-mgr service
@@ -3469,8 +3486,8 @@ _cai_install_sysbox_linux() {
     local sysbox_present="false"
     if command -v sysbox-runc >/dev/null 2>&1; then
         sysbox_present="true"
-        installed_version_line=$(sysbox-runc --version 2>/dev/null | head -1 || true)
-        installed_version_semver=$(printf '%s' "$installed_version_line" | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
+        installed_version_line=$(_cai_sysbox_installed_binary_version 2>/dev/null || true)
+        installed_version_semver=$(_cai_sysbox_installed_version 2>/dev/null || true)
         _cai_info "Sysbox already installed: ${installed_version_line:-unknown version}"
         if [[ -n "$installed_version_semver" ]] && [[ "$verbose" == "true" ]]; then
             _cai_info "Parsed installed version: $installed_version_semver"
@@ -3681,9 +3698,9 @@ _cai_verify_sysbox_install_linux() {
     fi
 
     local sysbox_version
-    sysbox_version=$(sysbox-runc --version 2>/dev/null | head -1 || true)
+    sysbox_version=$(_cai_sysbox_installed_binary_version 2>/dev/null || true)
     if [[ "$verbose" == "true" ]]; then
-        _cai_info "sysbox-runc version: $sysbox_version"
+        _cai_info "sysbox-runc version: ${sysbox_version:-unknown}"
     fi
 
     # Check sysbox-mgr service
@@ -4066,7 +4083,7 @@ _cai_setup_nested() {
     local sysbox_missing_before="false"
     local sysbox_version_before=""
     if command -v sysbox-runc >/dev/null 2>&1; then
-        sysbox_version_before=$(sysbox-runc --version 2>/dev/null | head -1 | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
+        sysbox_version_before=$(_cai_sysbox_installed_version 2>/dev/null || true)
     else
         sysbox_missing_before="true"
     fi
@@ -4076,7 +4093,7 @@ _cai_setup_nested() {
     fi
     local sysbox_version_after=""
     if command -v sysbox-runc >/dev/null 2>&1; then
-        sysbox_version_after=$(sysbox-runc --version 2>/dev/null | head -1 | sed -n 's/[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
+        sysbox_version_after=$(_cai_sysbox_installed_version 2>/dev/null || true)
     else
         _cai_error "sysbox-runc is still not available after installation"
         return 1
