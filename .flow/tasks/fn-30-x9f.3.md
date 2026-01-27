@@ -54,9 +54,8 @@ The `$pubkey_content` could get mangled, or script errors might not propagate.
 - [ ] Verbose mode (`-v`) shows what's actually happening during injection
 
 ## Done summary
-
-<!-- flowctl done will append summary here -->
-
+Added verification to SSH key injection and connectivity testing. Key injection now verifies the key is actually in authorized_keys after injection. SSH setup now includes a connectivity test (Step 5) that verifies SSH works with proper timeouts and aligned options.
 ## Evidence
-
-<!-- flowctl done will append evidence here -->
+- Commits: 28b8d6a, 4d897aa, 79d5a42
+- Tests: shellcheck -x src/lib/ssh.sh, bash -n src/lib/ssh.sh
+- PRs:
