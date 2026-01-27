@@ -203,6 +203,7 @@ Run Options:
   --force               Skip isolation checks (for testing only)
   --detached, -d        Run in background
   --quiet, -q           Suppress verbose output
+  --verbose             Print container and volume names to stderr
   --dry-run             Show what would happen without executing (machine-parseable)
   -e, --env <VAR=val>   Set environment variable (repeatable)
   -- <args>             Pass arguments to agent
@@ -415,6 +416,7 @@ Options:
   --force               Skip isolation checks (for testing only)
   --dry-run             Show what would happen without executing (machine-parseable)
   -q, --quiet           Suppress verbose output
+  --verbose             Print container and volume names to stderr
   -h, --help            Show this help message
 
 Connection Handling:
@@ -2484,9 +2486,9 @@ _containai_shell_cmd() {
         # Only print here when container existed before this call
         # Skip if --fresh was set (start_container already printed) or container was just created
         if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" && "$fresh_flag" != "true" ]]; then
-            # Get actual mounted volume from container (not resolved_volume which may differ)
+            # Get actual volume from container label (preferred) or fall back to resolved_volume
             local actual_volume
-            actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
+            actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.data-volume"}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
             printf '%s\n' "[INFO] Container: $resolved_container_name" >&2
             printf '%s\n' "[INFO] Volume: ${actual_volume:-$resolved_volume}" >&2
         fi
