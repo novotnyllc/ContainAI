@@ -355,23 +355,29 @@ build_sysbox_deb() {
 
         # Replace fuse with fuse3 in the Depends line (per spec: "instead of fuse")
         if grep -q '^Depends:' "$f"; then
-            # First, replace 'fuse' with 'fuse3' (handles ", fuse," or ", fuse$" patterns)
-            # Use word boundary to avoid matching fuse3 when replacing fuse
-            sed -i -E 's/(^Depends:.*)(,\s*)fuse(\s*,|\s*$)/\1\2fuse3\3/' "$f"
+            # Handle fuse at start of Depends line: "Depends: fuse," or "Depends: fuse$"
+            sed -i -E 's/^Depends:[[:space:]]*fuse([[:space:]]*,|[[:space:]]*$)/Depends: fuse3\1/' "$f"
+            # Handle fuse in middle/end: ", fuse," or ", fuse$"
+            sed -i -E 's/(^Depends:.*)(,[[:space:]]*)fuse([[:space:]]*,|[[:space:]]*$)/\1\2fuse3\3/' "$f"
 
             # If fuse3 still not present (fuse wasn't in original), add it at beginning
             if ! grep -qE '^Depends:.*\bfuse3\b' "$f"; then
                 sed -i 's/^Depends:/Depends: fuse3,/' "$f"
             fi
 
-            # Verify the patch worked
-            if grep -qE '^Depends:.*\bfuse3\b' "$f"; then
-                log_ok "fuse3 dependency set in $f"
-                patched_count=$((patched_count + 1))
-            else
-                log_error "Failed to patch $f"
+            # Verify the patch worked and fuse is removed
+            if ! grep -qE '^Depends:.*\bfuse3\b' "$f"; then
+                log_error "Failed to add fuse3 to $f"
                 exit 1
             fi
+            # Verify fuse (not fuse3) is not present
+            if grep -qE '^Depends:.*\bfuse\b[^3]' "$f" || grep -qE '^Depends:.*\bfuse[[:space:]]*$' "$f" || grep -qE '^Depends:.*\bfuse[[:space:]]*,' "$f"; then
+                log_error "Failed to remove fuse from $f - fuse still present alongside fuse3"
+                grep '^Depends:' "$f" >&2
+                exit 1
+            fi
+            log_ok "fuse3 dependency set (fuse removed) in $f"
+            patched_count=$((patched_count + 1))
         fi
     done
 
