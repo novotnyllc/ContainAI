@@ -39,9 +39,8 @@ Fix SSH shell TTY allocation and detached command execution reliability. Current
 - [ ] PID returned and verified with kill -0 before success message
 
 ## Done summary
-TBD
-
+Improved SSH shell TTY allocation and detached execution reliability. Shell now uses -tt flag to force TTY even when stdin is piped. Detached mode uses bash -lc wrapper with proper single-quote escaping for consistent command parsing, returns PID for verification, and handles short-lived commands gracefully.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3737684, 70d5a9d, d1f4ef4
+- Tests: shellcheck -x src/lib/ssh.sh
 - PRs:
