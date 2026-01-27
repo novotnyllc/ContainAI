@@ -26,10 +26,17 @@ Change `cai update` behavior when containers are running. Currently it aborts wi
 
 ## Acceptance
 
-- [ ] `cai update` prompts interactively when containers running
-- [ ] Prompt shows container names/IDs
-- [ ] "y" response stops containers and proceeds with update
-- [ ] "n" or Enter aborts cleanly
-- [ ] Non-interactive (no TTY) still aborts with message
-- [ ] `--stop-containers` flag still works for scripted use
-- [ ] shellcheck passes
+- [x] `cai update` prompts interactively when containers running
+- [x] Prompt shows container names/IDs
+- [x] "y" response stops containers and proceeds with update
+- [x] "n" or Enter aborts cleanly
+- [x] Non-interactive (no TTY) still aborts with message
+- [x] `--stop-containers` flag still works for scripted use
+- [x] shellcheck passes
+
+## Done summary
+Added interactive prompt "Stop containers and continue? [y/N]" when cai update detects running containers during updates, replacing the hard abort. Prompt honors --force and --stop-containers flags for non-interactive use.
+## Evidence
+- Commits: bbf7fbf704b169fb44fceeb25f5e5a8c5d09ed74
+- Tests: shellcheck -x src/lib/update.sh, bash -n src/lib/update.sh
+- PRs:

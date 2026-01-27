@@ -1130,7 +1130,9 @@ _cai_update_known_hosts() {
     fi
     local existing_keys=""
     if [[ -f "$known_hosts_file" ]]; then
-        existing_keys=$(grep -F "$host_spec" "$known_hosts_file" 2>/dev/null || true)
+        # Use awk for exact field matching (avoids substring issues with port numbers)
+        # grep -F "$host_spec" would match [127.0.0.1]:2300 against [127.0.0.1]:23000
+        existing_keys=$(awk -v h="$host_spec" '$1 == h' "$known_hosts_file" 2>/dev/null || true)
     fi
 
     if [[ -n "$existing_keys" && "$force_update" != "true" ]]; then
