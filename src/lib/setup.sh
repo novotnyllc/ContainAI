@@ -462,7 +462,7 @@ _cai_macos_ensure_host_tools() {
 # ContainAI GitHub repository for custom sysbox builds
 _CAI_SYSBOX_CONTAINAI_REPO="novotnyllc/ContainAI"
 # Pinned ContainAI sysbox release tag (update this to use a new build)
-_CAI_SYSBOX_CONTAINAI_TAG="sysbox-build-20260126-7"
+_CAI_SYSBOX_CONTAINAI_TAG="sysbox-build-20260127-10"
 
 # ==============================================================================
 # Sysbox Version Utility Functions
