@@ -489,6 +489,7 @@ _containai_doctor_help() {
 ContainAI Doctor - Check system capabilities and diagnostics
 
 Usage: cai doctor [options]
+       cai doctor --repair (--all | --container <name>) [--dry-run]
 
 Checks Docker availability and Sysbox isolation configuration.
 Reports requirement levels and actionable remediation guidance.
@@ -501,6 +502,16 @@ Options:
   --fix           Auto-fix issues that can be remediated automatically
   --json          Output machine-parseable JSON
 EOF
+
+    # Show --repair options (Linux/WSL2 only)
+    if [[ "$platform" != "macos" ]]; then
+        cat <<'EOF'
+  --repair        Repair volume ownership corruption (Linux/WSL2 only)
+    --all           Repair all managed containers
+    --container <n> Repair specific container by name
+    --dry-run       Preview changes without applying
+EOF
+    fi
 
     # Show --reset-lima option only on macOS
     if [[ "$platform" == "macos" ]]; then
@@ -528,12 +539,37 @@ What --fix cannot remediate (requires manual action):
   - Docker context not configured (use 'cai setup')
   - Kernel version incompatible
   - Docker daemon not running
+EOF
+
+    # Show repair examples (Linux/WSL2 only)
+    if [[ "$platform" != "macos" ]]; then
+        cat <<'EOF'
+
+What --repair can fix (Linux/WSL2 only):
+  - Volume ownership corruption (files showing nobody:nogroup)
+  - Requires sudo for chown operations
+  - Only operates on volumes under /var/lib/containai-docker/volumes
+  - Only affects containers with label containai.managed=true
+  - Warns if rootfs is tainted (suggests container recreation)
+EOF
+    fi
+
+    cat <<'EOF'
 
 Examples:
   cai doctor                    Run all checks, show formatted report
   cai doctor --fix              Auto-fix issues and show report
   cai doctor --json             Output JSON for scripts/automation
 EOF
+
+    # Show repair examples (Linux/WSL2 only)
+    if [[ "$platform" != "macos" ]]; then
+        cat <<'EOF'
+  cai doctor --repair --all     Repair all managed container volumes
+  cai doctor --repair --container mycontainer    Repair specific container
+  cai doctor --repair --all --dry-run            Preview repairs
+EOF
+    fi
 }
 
 _containai_links_help() {
@@ -1339,6 +1375,10 @@ _containai_doctor_cmd() {
     local json_output="false"
     local fix_mode="false"
     local reset_lima="false"
+    local repair_mode="false"
+    local repair_all="false"
+    local repair_container=""
+    local dry_run="false"
     local workspace="$PWD"
 
     # Parse arguments
@@ -1350,6 +1390,30 @@ _containai_doctor_cmd() {
                 ;;
             --fix)
                 fix_mode="true"
+                shift
+                ;;
+            --repair)
+                repair_mode="true"
+                shift
+                ;;
+            --all)
+                repair_all="true"
+                shift
+                ;;
+            --container)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                repair_container="$2"
+                shift 2
+                ;;
+            --container=*)
+                repair_container="${1#--container=}"
+                shift
+                ;;
+            --dry-run)
+                dry_run="true"
                 shift
                 ;;
             --reset-lima)
@@ -1390,6 +1454,46 @@ _containai_doctor_cmd() {
     # Handle --reset-lima (macOS only)
     if [[ "$reset_lima" == "true" ]]; then
         _cai_doctor_reset_lima
+        return $?
+    fi
+
+    # Validate that repair sub-options require --repair
+    if [[ "$repair_mode" != "true" ]]; then
+        if [[ -n "$repair_container" ]]; then
+            echo "[ERROR] --container requires --repair" >&2
+            echo "Use 'cai doctor --help' for usage" >&2
+            return 1
+        fi
+        if [[ "$repair_all" == "true" ]]; then
+            echo "[ERROR] --all requires --repair" >&2
+            echo "Use 'cai doctor --help' for usage" >&2
+            return 1
+        fi
+        if [[ "$dry_run" == "true" ]]; then
+            echo "[ERROR] --dry-run requires --repair" >&2
+            echo "Use 'cai doctor --help' for usage" >&2
+            return 1
+        fi
+    fi
+
+    # Handle --repair mode (Linux/WSL2 only)
+    if [[ "$repair_mode" == "true" ]]; then
+        # Validate repair options
+        if [[ -n "$repair_container" ]] && [[ "$repair_all" == "true" ]]; then
+            echo "[ERROR] Cannot use both --container and --all" >&2
+            return 1
+        fi
+        if [[ -z "$repair_container" ]] && [[ "$repair_all" != "true" ]]; then
+            echo "[ERROR] --repair requires either --container <name> or --all" >&2
+            echo "Use 'cai doctor --help' for usage" >&2
+            return 1
+        fi
+        # Call repair function
+        if [[ -n "$repair_container" ]]; then
+            _cai_doctor_repair "$repair_container" "$dry_run"
+        else
+            _cai_doctor_repair "" "$dry_run"
+        fi
         return $?
     fi
 

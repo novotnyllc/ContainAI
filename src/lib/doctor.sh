@@ -1793,6 +1793,378 @@ _cai_doctor_json() {
 }
 
 # ==============================================================================
+# Volume Ownership Repair (Linux/WSL2 only)
+# ==============================================================================
+
+# Check if a path appears to have id-mapping corruption
+# Arguments: $1 = path to check
+# Returns: 0=corrupted (nobody:nogroup), 1=not corrupted or not found
+# Note: Files owned by 65534:65534 (nobody:nogroup) indicate id-mapped mount
+#       corruption after sysbox restart (kernel bug workaround)
+_cai_doctor_check_path_ownership() {
+    local path="$1"
+    local owner_uid owner_gid
+
+    if [[ ! -e "$path" ]]; then
+        return 1
+    fi
+
+    # Get UID/GID using stat
+    # Linux: stat -c "%u:%g"
+    # macOS: stat -f "%u:%g" (not used on macOS, but for consistency)
+    owner_uid=$(stat -c "%u" "$path" 2>/dev/null) || return 1
+    owner_gid=$(stat -c "%g" "$path" 2>/dev/null) || return 1
+
+    # Check for nobody:nogroup (65534:65534)
+    if [[ "$owner_uid" == "65534" ]] || [[ "$owner_gid" == "65534" ]]; then
+        return 0  # Corrupted
+    fi
+
+    return 1  # Not corrupted
+}
+
+# Check if a volume has id-mapping corruption
+# Arguments: $1 = volume path (under /var/lib/containai-docker/volumes)
+# Returns: 0=has corruption, 1=no corruption or error
+# Outputs: Number of corrupted files on stdout
+_cai_doctor_check_volume_ownership() {
+    local volume_path="$1"
+    local corrupted_count=0
+
+    # Validate path is under containai-docker volumes
+    local volumes_root="$_CAI_CONTAINAI_DOCKER_DATA/volumes"
+    case "$volume_path" in
+        "$volumes_root"/*)
+            # Path is under volumes root - OK
+            ;;
+        *)
+            # Not under volumes root - reject
+            return 1
+            ;;
+    esac
+
+    # Reject paths with .. segments (traversal attack)
+    if [[ "$volume_path" == *"/../"* ]] || [[ "$volume_path" == *"/.."* ]]; then
+        return 1
+    fi
+
+    # Check if path exists
+    if [[ ! -d "$volume_path" ]]; then
+        return 1
+    fi
+
+    # Count files with nobody:nogroup ownership using find
+    # -xdev prevents crossing filesystem boundaries
+    # -not -type l skips symlinks to prevent traversal attacks
+    # Use find with stat to check ownership
+    local file
+    while IFS= read -r file; do
+        if _cai_doctor_check_path_ownership "$file"; then
+            ((corrupted_count++))
+        fi
+    done < <(find "$volume_path" -xdev -not -type l -print 2>/dev/null || true)
+
+    printf '%d' "$corrupted_count"
+    [[ "$corrupted_count" -gt 0 ]]
+}
+
+# Detect UID/GID from a running container
+# Arguments: $1 = container name or ID
+# Returns: 0=success, 1=container not running or error
+# Outputs: "uid:gid" on stdout (e.g., "1000:1000")
+_cai_doctor_detect_uid() {
+    local container="$1"
+    local uid gid
+
+    # Get container info from containai-docker context
+    local user_info
+    user_info=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+        inspect --type container "$container" \
+        --format '{{.Config.User}}' 2>/dev/null) || return 1
+
+    # If user is specified in format "uid:gid" or "uid", use it
+    if [[ -n "$user_info" ]] && [[ "$user_info" != "root" ]]; then
+        if [[ "$user_info" == *:* ]]; then
+            printf '%s' "$user_info"
+            return 0
+        else
+            # Just UID, assume same GID
+            printf '%s:%s' "$user_info" "$user_info"
+            return 0
+        fi
+    fi
+
+    # Try to get UID/GID from running process inside container
+    # Use 'agent' user by default (ContainAI standard user)
+    local container_state
+    container_state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+        inspect --type container "$container" \
+        --format '{{.State.Running}}' 2>/dev/null) || return 1
+
+    if [[ "$container_state" == "true" ]]; then
+        # Container is running, exec id command
+        local id_output
+        id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+            exec "$container" id -u agent 2>/dev/null) || id_output=""
+        local gid_output
+        gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+            exec "$container" id -g agent 2>/dev/null) || gid_output=""
+
+        if [[ -n "$id_output" ]] && [[ -n "$gid_output" ]]; then
+            printf '%s:%s' "$id_output" "$gid_output"
+            return 0
+        fi
+    fi
+
+    # Could not detect - caller should use fallback
+    return 1
+}
+
+# Get volumes attached to a container
+# Arguments: $1 = container name or ID
+# Returns: 0=success (may have 0 volumes), 1=error
+# Outputs: Volume names (one per line) on stdout
+_cai_doctor_get_container_volumes() {
+    local container="$1"
+    local mounts
+
+    # Get mount info
+    mounts=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+        inspect --type container "$container" \
+        --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null) || return 1
+
+    printf '%s' "$mounts"
+    return 0
+}
+
+# Repair ownership on a single volume
+# Arguments: $1 = volume name
+#            $2 = target uid:gid (e.g., "1000:1000")
+#            $3 = dry_run flag ("true" or "false")
+# Returns: 0=success or no action needed, 1=error
+# Outputs: Status messages to stdout
+_cai_doctor_repair_volume() {
+    local volume_name="$1"
+    local target_ownership="$2"
+    local dry_run="$3"
+    local target_uid target_gid
+
+    # Parse target ownership
+    target_uid="${target_ownership%%:*}"
+    target_gid="${target_ownership##*:}"
+
+    # Construct volume data path
+    local volumes_root="$_CAI_CONTAINAI_DOCKER_DATA/volumes"
+    local volume_data_path="$volumes_root/$volume_name/_data"
+
+    # Validate volume path exists
+    if [[ ! -d "$volume_data_path" ]]; then
+        printf '  %-50s %s\n' "Volume '$volume_name':" "[SKIP] Not found"
+        return 0
+    fi
+
+    # Check for corruption
+    local corrupted_count
+    corrupted_count=$(_cai_doctor_check_volume_ownership "$volume_data_path" 2>/dev/null) || corrupted_count=""
+
+    if [[ -z "$corrupted_count" ]] || [[ "$corrupted_count" == "0" ]]; then
+        printf '  %-50s %s\n' "Volume '$volume_name':" "[OK] No corruption"
+        return 0
+    fi
+
+    # Report corruption
+    printf '  %-50s %s\n' "Volume '$volume_name':" "[CORRUPT] $corrupted_count files with nobody:nogroup"
+
+    if [[ "$dry_run" == "true" ]]; then
+        printf '  %-50s %s\n' "  Would chown to $target_ownership" "[DRY-RUN]"
+        return 0
+    fi
+
+    # Perform repair using sudo chown
+    # Use -h to affect symlinks themselves (not targets)
+    # Use find with -xdev to prevent cross-filesystem traversal
+    # Use -not -type l to skip symlinks
+    printf '  %-50s' "  Repairing to $target_ownership..."
+    if sudo find "$volume_data_path" -xdev -not -type l \
+        \( -user 65534 -o -group 65534 \) \
+        -exec chown -h "$target_uid:$target_gid" {} + 2>/dev/null; then
+        printf ' %s\n' "[FIXED]"
+        return 0
+    else
+        printf ' %s\n' "[FAIL]"
+        return 1
+    fi
+}
+
+# Check if rootfs shows id-mapping corruption
+# Arguments: $1 = container name or ID
+# Returns: 0=tainted (has corruption), 1=clean or cannot check
+_cai_doctor_check_rootfs_tainted() {
+    local container="$1"
+
+    # Get container rootfs path from containai-docker context
+    local rootfs_path
+    rootfs_path=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+        inspect --type container "$container" \
+        --format '{{.GraphDriver.Data.MergedDir}}' 2>/dev/null) || return 1
+
+    if [[ -z "$rootfs_path" ]] || [[ ! -d "$rootfs_path" ]]; then
+        return 1
+    fi
+
+    # Check a few key paths for corruption
+    local check_paths=("/etc" "/home" "/var")
+    local path
+    for path in "${check_paths[@]}"; do
+        local full_path="$rootfs_path$path"
+        if [[ -d "$full_path" ]] && _cai_doctor_check_path_ownership "$full_path"; then
+            return 0  # Tainted
+        fi
+    done
+
+    return 1  # Clean
+}
+
+# Main entry point for repair mode
+# Arguments: $1 = container_filter ("" for --all, container name/id for --container)
+#            $2 = dry_run flag ("true" or "false")
+# Returns: 0=success, 1=error
+_cai_doctor_repair() {
+    local container_filter="$1"
+    local dry_run="$2"
+    local platform
+    local fixed_count=0
+    local skip_count=0
+    local fail_count=0
+    local warn_count=0
+
+    platform=$(_cai_detect_platform)
+
+    # Platform check - repair is Linux/WSL2 only
+    if [[ "$platform" == "macos" ]]; then
+        _cai_info "Volume repair is not supported on macOS (volumes are inside Lima VM)"
+        return 0
+    fi
+
+    printf '%s\n' "ContainAI Doctor (Repair Mode)"
+    printf '%s\n' "=============================="
+    printf '\n'
+
+    # Check if containai-docker is available
+    if ! _cai_containai_docker_available; then
+        _cai_error "ContainAI Docker is not available"
+        _cai_info "Run 'cai setup' to configure containai-docker"
+        return 1
+    fi
+
+    # Verify volumes root exists
+    local volumes_root="$_CAI_CONTAINAI_DOCKER_DATA/volumes"
+    if [[ ! -d "$volumes_root" ]]; then
+        _cai_info "Volumes directory does not exist: $volumes_root"
+        _cai_info "No volumes to repair"
+        return 0
+    fi
+
+    printf '%s\n' "Scanning volumes..."
+    printf '\n'
+
+    # Get containers to process
+    local containers=""
+    if [[ -n "$container_filter" ]]; then
+        # Specific container - verify it exists and has the managed label
+        local container_labels
+        container_labels=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+            inspect --type container -- "$container_filter" \
+            --format '{{index .Config.Labels "containai.managed"}}' 2>/dev/null) || {
+            _cai_error "Container '$container_filter' not found"
+            return 1
+        }
+        if [[ "$container_labels" != "true" ]]; then
+            _cai_warn "Container '$container_filter' is not a ContainAI-managed container"
+            _cai_info "Only containers with label 'containai.managed=true' can be repaired"
+            return 1
+        fi
+        containers="$container_filter"
+    else
+        # All managed containers
+        containers=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+            ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null) || containers=""
+    fi
+
+    if [[ -z "$containers" ]]; then
+        _cai_info "No ContainAI-managed containers found"
+        return 0
+    fi
+
+    # Process each container
+    local container
+    while IFS= read -r container; do
+        [[ -z "$container" ]] && continue
+
+        printf '%s\n' "Container: $container"
+
+        # Check rootfs for corruption
+        if _cai_doctor_check_rootfs_tainted "$container"; then
+            printf '  %-50s %s\n' "Rootfs:" "[WARN] Tainted - consider recreating container"
+            ((warn_count++))
+        fi
+
+        # Get target UID/GID
+        local target_ownership
+        if target_ownership=$(_cai_doctor_detect_uid "$container" 2>/dev/null); then
+            printf '  %-50s %s\n' "Target ownership:" "$target_ownership (from container)"
+        else
+            target_ownership="1000:1000"
+            printf '  %-50s %s\n' "Target ownership:" "$target_ownership (default - container not running)"
+            ((warn_count++))
+        fi
+
+        # Get volumes for this container
+        local volumes
+        volumes=$(_cai_doctor_get_container_volumes "$container" 2>/dev/null) || volumes=""
+
+        if [[ -z "$volumes" ]]; then
+            printf '  %-50s %s\n' "Volumes:" "[SKIP] No volumes attached"
+            printf '\n'
+            continue
+        fi
+
+        # Process each volume
+        local volume
+        while IFS= read -r volume; do
+            [[ -z "$volume" ]] && continue
+            if _cai_doctor_repair_volume "$volume" "$target_ownership" "$dry_run"; then
+                ((fixed_count++))
+            else
+                ((fail_count++))
+            fi
+        done <<< "$volumes"
+
+        printf '\n'
+    done <<< "$containers"
+
+    # Summary
+    printf '%s\n' "Summary"
+    if [[ "$dry_run" == "true" ]]; then
+        printf '  %-50s %s\n' "Mode:" "[DRY-RUN] No changes made"
+    fi
+    printf '  %-50s %s\n' "Volumes processed:" "$fixed_count"
+    printf '  %-50s %s\n' "Warnings:" "$warn_count"
+    printf '  %-50s %s\n' "Failures:" "$fail_count"
+
+    if [[ "$warn_count" -gt 0 ]]; then
+        printf '\n'
+        _cai_warn "Some containers have tainted rootfs or used default UID/GID"
+        _cai_info "Consider recreating affected containers with 'cai stop <name> && cai run ...'"
+    fi
+
+    if [[ "$fail_count" -gt 0 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# ==============================================================================
 # Reset Lima (macOS only)
 # ==============================================================================
 
