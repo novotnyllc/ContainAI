@@ -26,7 +26,8 @@
 #   _cai_check_ssh_accept_new_support() - Check if OpenSSH supports accept-new
 #   _cai_write_ssh_host_config() - Write per-container SSH host config
 #   _cai_remove_ssh_host_config() - Remove SSH host config for a container
-#   _cai_setup_container_ssh()   - Complete SSH setup for a container
+#   _cai_setup_container_ssh()   - Complete SSH setup for a container (with verification)
+#   _cai_verify_ssh_connectivity() - Verify SSH connectivity with quick test
 #   _cai_cleanup_container_ssh() - Clean up SSH configuration for container removal
 #   _cai_is_containai_ssh_config() - Check if a file is a ContainAI SSH config
 #   _cai_ssh_cleanup()           - Remove stale SSH configs for non-existent containers
@@ -1035,12 +1036,37 @@ SCRIPT_EOF
 
     # Execute the injection script in the container
     # Pass pubkey as argument to avoid shell escaping issues
-    if ! "${docker_cmd[@]}" exec -- "$container_name" bash -c "$inject_script" _ "$pubkey_content"; then
+    _cai_debug "Running injection script via docker exec..."
+    local inject_output
+    if ! inject_output=$("${docker_cmd[@]}" exec -- "$container_name" bash -c "$inject_script" _ "$pubkey_content" 2>&1); then
         _cai_error "Failed to inject SSH key into container"
+        _cai_error "  Docker exec output: $inject_output"
+        return 1
+    fi
+    _cai_debug "Injection script completed"
+
+    # Verify the key was actually injected by checking authorized_keys
+    # This catches silent failures where docker exec returns 0 but script fails internally
+    _cai_debug "Verifying key injection..."
+    local key_material
+    key_material=$(printf '%s' "$pubkey_content" | awk '{print $2}')
+    if [[ -z "$key_material" ]]; then
+        _cai_error "Failed to extract key material for verification"
         return 1
     fi
 
-    _cai_debug "SSH key injected successfully"
+    # Check if key is present in authorized_keys
+    if ! "${docker_cmd[@]}" exec -- "$container_name" grep -qF "$key_material" /home/agent/.ssh/authorized_keys 2>/dev/null; then
+        _cai_error "Key injection verification failed: key not found in authorized_keys"
+        _cai_error "  This may indicate:"
+        _cai_error "    - Script execution through SSH-based docker context mangled arguments"
+        _cai_error "    - Permission issues on /home/agent/.ssh inside container"
+        _cai_error "    - The set -e in inject script did not propagate through bash -c"
+        _cai_debug "Expected key material: ${key_material:0:30}..."
+        return 1
+    fi
+
+    _cai_debug "SSH key injected and verified successfully"
     return 0
 }
 
@@ -1485,9 +1511,10 @@ _cai_remove_ssh_host_config() {
 #
 # Steps:
 # 1. Wait for sshd to become ready (quick_check uses single attempt)
-# 2. Inject public key to authorized_keys
+# 2. Inject public key to authorized_keys (with verification)
 # 3. Update known_hosts via ssh-keyscan (detects changes unless force_update)
 # 4. Write SSH host config
+# 5. Verify SSH connectivity (quick connection test)
 _cai_setup_container_ssh() {
     local container_name="$1"
     local ssh_port="$2"
@@ -1526,7 +1553,61 @@ _cai_setup_container_ssh() {
         return 1
     fi
 
+    # Step 5: Verify SSH connectivity (quick connection test)
+    # This catches cases where setup "succeeds" but SSH still fails with permission denied
+    _cai_debug "Verifying SSH connectivity to container $container_name on port $ssh_port..."
+    if ! _cai_verify_ssh_connectivity "$ssh_port"; then
+        _cai_error "SSH connectivity verification failed"
+        _cai_error "  Setup appeared to succeed, but SSH connection test failed"
+        _cai_error "  Run with CONTAINAI_DEBUG=1 for verbose output"
+        return 1
+    fi
+
     _cai_ok "SSH access configured for container $container_name"
+    return 0
+}
+
+# Verify SSH connectivity with a quick connection test
+# This is a minimal test to ensure SSH actually works after setup
+# Arguments:
+#   $1 = SSH port (on host)
+# Returns: 0=success, 1=failure
+_cai_verify_ssh_connectivity() {
+    local ssh_port="$1"
+
+    # Determine StrictHostKeyChecking value based on OpenSSH version
+    local strict_host_key_checking
+    if _cai_check_ssh_accept_new_support; then
+        strict_host_key_checking="accept-new"
+    else
+        strict_host_key_checking="yes"
+    fi
+
+    # Quick SSH connection test: run 'exit 0' to verify authentication works
+    # Uses BatchMode to fail immediately on auth issues (no password prompts)
+    # Uses ConnectTimeout=5 to avoid long waits
+    local ssh_test_output
+    if ! ssh_test_output=$(ssh \
+        -o "BatchMode=yes" \
+        -o "ConnectTimeout=5" \
+        -o "HostName=$_CAI_SSH_HOST" \
+        -o "Port=$ssh_port" \
+        -o "User=agent" \
+        -o "IdentityFile=$_CAI_SSH_KEY_PATH" \
+        -o "IdentitiesOnly=yes" \
+        -o "UserKnownHostsFile=$_CAI_KNOWN_HOSTS_FILE" \
+        -o "StrictHostKeyChecking=$strict_host_key_checking" \
+        -o "PreferredAuthentications=publickey" \
+        -o "GSSAPIAuthentication=no" \
+        -o "PasswordAuthentication=no" \
+        -- agent@"$_CAI_SSH_HOST" \
+        "exit 0" 2>&1); then
+        _cai_debug "SSH connectivity test failed"
+        _cai_debug "  SSH output: $ssh_test_output"
+        return 1
+    fi
+
+    _cai_debug "SSH connectivity verified"
     return 0
 }
 
