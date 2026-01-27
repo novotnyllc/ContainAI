@@ -12,7 +12,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-27T05:16:56.711764Z",
   "spec_path": ".flow/specs/fn-29-fv0.md",
-  "status": "open",
+  "status": "done",
   "title": "Fix SSH reliability, import defaults, doctor UX, and sysbox URLs",
-  "updated_at": "2026-01-27T05:16:56.711777Z"
+  "updated_at": "2026-01-27T09:22:28.688754Z"
 }
