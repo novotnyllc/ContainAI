@@ -23,12 +23,20 @@ At `docker.sh:514-539`, `_cai_containai_docker_context_exists()`:
    - Call existing context creation logic (look in `setup.sh:1813-1851`)
    - Use `docker context rm containai-docker` then `docker context create`
 
-2. Trigger the check+repair at strategic points (not every command):
-   - On `cai run` when context doesn't match
-   - On `cai shell` when context doesn't match
-   - On `cai doctor` (existing diagnostic flow)
+2. Centralize the check in one context-selection entrypoint used by all context-dependent commands:
+   - `cai run`
+   - `cai shell`
+   - `cai docker`
+   - `cai doctor`
+   - setup/validate flows
 
-3. Show user-friendly message when --verboase|-v is requested:
+3. Add "already validated this invocation" guard to avoid redundant checks:
+   - Use a shell variable like `_CAI_CONTEXT_VALIDATED=1` to skip subsequent checks in same invocation
+
+4. Skip auto-repair inside containers:
+   - Check `_cai_is_container()` before attempting repair
+
+5. Show user-friendly message when `--verbose|-v` is requested:
    ```
    [WARN] Docker context 'containai-docker' had wrong endpoint (was unix://, expected ssh://)
    [OK] Context auto-repaired
@@ -42,9 +50,11 @@ At `docker.sh:514-539`, `_cai_containai_docker_context_exists()`:
 ## Acceptance
 - [ ] Wrong context endpoint is detected automatically
 - [ ] Context is auto-repaired without user intervention
-- [ ] User sees warning about what was fixed
+- [ ] User sees warning about what was fixed (when `--verbose`)
 - [ ] Repair only happens when endpoint is actually wrong (not on every run)
 - [ ] Works on WSL2 where ssh:// endpoint is expected
+- [ ] Check is centralized and used by all context-dependent commands (`cai run`, `cai shell`, `cai docker`, etc.)
+- [ ] Auto-repair is skipped inside containers (`_cai_is_container()` check)
 ## Done summary
 TBD
 

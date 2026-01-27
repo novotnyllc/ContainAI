@@ -258,8 +258,8 @@ Hot-Reload Mode (with workspace path or --container):
   What gets activated in container:
   - Git config is copied to agent's home directory
   - Env vars loaded via shell init hook for future sessions
-  - SSH: agent forwarding (ssh -A) preferred; keys also synced to volume
-    unless --no-secrets is used
+  - SSH: agent forwarding (ssh -A) preferred; keys NOT imported by default
+    (add ~/.ssh to [import].additional_paths in containai.toml if needed)
 
 Volume-Only Mode (no workspace path or --container):
   Syncs configs to data volume only. Does not affect running containers.
@@ -282,15 +282,21 @@ Options:
                         Does NOT affect --credentials flag.
                         Note: Has no effect with --from archive.tgz (restores bypass sync).
                         Note: Symlinked SSH keys (~/.ssh/id_*) are not synced (logged as warning).
+  --verbose, -v         Show verbose output including skipped source files
   -h, --help            Show this help message
 
+Note: ~/.claude/.credentials.json and ~/.codex/auth.json are NOT imported from
+your home profile by default (containers should run their own login flows).
+Symlinks are created so containers can write their own tokens after login.
+
+Note: ~/.ssh is NOT imported by default. To import SSH keys, add ~/.ssh to
+[import].additional_paths in containai.toml. Agent forwarding (ssh -A) is preferred.
+
 Secret files skipped by --no-secrets (examples):
-  - ~/.claude/.credentials.json, ~/.claude.json (Claude OAuth)
-  - ~/.codex/auth.json (Codex API key)
+  - ~/.claude.json (Claude OAuth - credentials.json NOT imported from profile)
   - ~/.gemini/google_accounts.json, oauth_creds.json (Gemini OAuth)
   - ~/.local/share/opencode/auth.json (OpenCode auth)
   - ~/.config/gh/hosts.yml (GitHub CLI OAuth tokens)
-  - ~/.ssh/id_* (SSH private keys, dynamically discovered at sync time)
   - ~/.aider.conf.yml, ~/.aider.model.settings.yml (may contain API keys)
   - ~/.continue/config.yaml, config.json (may contain API keys)
   - ~/.cursor/mcp.json, ~/.config/opencode/opencode.json (may contain tokens)
@@ -624,6 +630,7 @@ _containai_import_cmd() {
     local dry_run="false"
     local no_excludes="false"
     local no_secrets="false"
+    local verbose="false"
     local cli_volume=""
     local workspace=""
     local explicit_config=""
@@ -644,6 +651,10 @@ _containai_import_cmd() {
                 ;;
             --no-secrets)
                 no_secrets="true"
+                shift
+                ;;
+            --verbose|-v)
+                verbose="true"
                 shift
                 ;;
             --container)
@@ -947,7 +958,7 @@ _containai_import_cmd() {
     unset _CAI_RESTORE_MODE
 
     # Call import function with context
-    if ! _containai_import "$selected_context" "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config" "$from_source" "$no_secrets"; then
+    if ! _containai_import "$selected_context" "$resolved_volume" "$dry_run" "$no_excludes" "$resolved_workspace" "$explicit_config" "$from_source" "$no_secrets" "$verbose"; then
         unset _CAI_RESTORE_MODE
         return 1
     fi

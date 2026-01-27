@@ -1,0 +1,142 @@
+{
+  "created_at": "2026-01-27T05:05:32.531988Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-29-fv0",
+      "created_at": "2026-01-27T04:36:40.826545Z",
+      "default_impl": null,
+      "default_review": null,
+      "default_sync": null,
+      "depends_on_epics": [
+        "fn-28-5do"
+      ],
+      "id": "fn-29-fv0",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-29-fv0.md",
+      "status": "open",
+      "title": "Fix SSH reliability, import defaults, doctor UX, and sysbox URLs",
+      "updated_at": "2026-01-27T04:38:49.777512Z"
+    },
+    "spec": "# Fix SSH reliability, import defaults, doctor UX, and sysbox URLs\n\n## Overview\n\nBatch of reliability and UX fixes addressing critical SSH connection failures, import system improvements, doctor command restructuring, and sysbox URL updates.\n\n**Priority:** SSH fix is CRITICAL - users cannot connect to freshly created containers.\n\n## Scope\n\n1. **SSH reliability** - Fix double SSH setup causing \"Permission denied\" after `cai shell --fresh`\n2. **Import defaults** - Remove `~/.ssh` from defaults, skip profile credentials, fix base64 errors\n3. **Doctor UX** - Restructure `--fix`/`--repair` into `cai doctor fix` subcommand hierarchy\n4. **Container/volume visibility** - Print names clearly in `cai run/shell` output\n5. **Docker context auto-repair** - Detect and fix `containai-docker` context reverting to `unix://`\n6. **Sysbox URLs** - Update to new ContainAI GitHub release URLs\n\n## Approach\n\n### SSH Double Setup Fix\n- Root cause: `_cai_ssh_shell()` at `src/lib/ssh.sh:1659` calls `_cai_setup_container_ssh()` again when `force_update=true`, even though `container.sh:2263` already called it\n- Fix: Make `_cai_ssh_shell()` smarter - only call setup if config actually missing, ignore `force_update` for SSH setup (it's meant for other things)\n- Also ensure `cai setup` doesn't regenerate keys that already exist (verify idempotency at `ssh.sh:153-233`)\n\n### Import System Changes\n- Remove `~/.ssh/*` entries from `_IMPORT_SYNC_MAP` at `import.sh:378-383`\n- For `~/.claude/.credentials.json`: skip import if source path is `$HOME/.claude/` (user profile) - keep symlink for volume mount\n- Same for `~/.codex/auth.json` - skip if from `$HOME/.codex/`\n- For `~/.copilot/config.json`: ensure minimum JSON structure `{\"trusted_folders\":[\"/home/agent/workspace\"],\"editor_version\":\"vscode-1.99.0\"}`\n- Suppress \"source not found/missing\" unless `--verbose` flag\n- Debug the `base64: truncated input` error at `import.sh:2600` - likely buffer/encoding issue\n\n### Doctor Restructure\n- Change from: `cai doctor --fix`, `cai doctor --repair`\n- To: `cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>]]`\n- List known volumes/containers when user doesn't specify one\n- Operations: volume fix = permission repair; container fix = SSH config refresh\n\n### Container/Volume Name Visibility\n- Add clear output in `cai run` and `cai shell` showing:\n  ```\n  Container: containai-0898484b57d8\n  Volume: cai-dat\n  ```\n\n### Docker Context Auto-Repair\n- Existing detection at `docker.sh:514-539` sets `_CAI_CONTAINAI_CONTEXT_ERROR=\"wrong_endpoint\"`\n- Add auto-repair when detected (recreate context with correct endpoint)\n- Run check at start of context-dependent operations, not on every command\n\n## Quick commands\n\n```bash\n# Test SSH reliability after fix\ncai shell --fresh --data-volume test-vol && cai shell\n\n# Test doctor fix\ncai doctor fix --all\ncai doctor fix volume --all\ncai doctor fix container containai-XXXX\n\n# Test import (verbose to see what's skipped)\ncai run --verbose echo \"import test\"\n```\n\n## Acceptance\n\n- [ ] `cai shell --fresh` followed by `cai shell` connects successfully (no Permission denied)\n- [ ] SSH setup messages appear only ONCE, not twice\n- [ ] `cai setup` preserves existing SSH keys (doesn't regenerate)\n- [ ] `~/.ssh` is NOT imported by default (user can add via config if wanted)\n- [ ] Claude/Codex credentials from user profile are NOT imported (symlink still works)\n- [ ] Copilot config.json gets minimum trusted_folders structure\n- [ ] \"source not found\" messages only appear with `--verbose`\n- [ ] No \"base64: truncated input\" errors during import\n- [ ] `cai doctor fix --all` works\n- [ ] `cai doctor fix volume <name>` works (lists volumes if name omitted)\n- [ ] `cai run/shell` prints container and volume names\n- [ ] Docker context auto-repairs when detected as wrong endpoint\n\n## References\n\n- SSH double setup: `src/lib/ssh.sh:1659`, `src/lib/container.sh:2263`\n- Import sync map: `src/lib/import.sh:352-479`\n- Doctor functions: `src/lib/doctor.sh`\n- Context validation: `src/lib/docker.sh:514-539`\n- Sysbox URL resolution: `src/lib/setup.sh:650-780`\n\n## Dependencies\n\n- fn-28-5do (Fix fn-27-hbi Bugs) - Related SSH fixes, should coordinate\n"
+  },
+  "epic_id": "fn-29-fv0",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-27T04:37:18.463405Z",
+        "depends_on": [],
+        "epic": "fn-29-fv0",
+        "id": "fn-29-fv0.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-29-fv0.1.md",
+        "status": "todo",
+        "title": "Fix SSH double setup causing Permission denied",
+        "updated_at": "2026-01-27T04:37:34.085533Z"
+      },
+      "id": "fn-29-fv0.1",
+      "runtime": null,
+      "spec": "# fn-29-fv0.1 Fix SSH double setup causing Permission denied\n\n## Description\nFix the SSH double setup bug that causes \"Permission denied (publickey)\" after `cai shell --fresh`.\n\n**Size:** M\n**Files:** `src/lib/ssh.sh`, `src/lib/container.sh`\n\n## Problem\n\nThe logs show SSH setup happening TWICE:\n1. `container.sh:2263` calls `_cai_setup_container_ssh(force_update=\"true\")` during container creation\n2. `ssh.sh:1659` in `_cai_ssh_shell()` checks `if [[ ! -f \"$config_file\" ]] || [[ \"$force_update\" == \"true\" ]]` and calls setup AGAIN\n\nThe double setup appears to cause key/config corruption or race conditions.\n\n## Approach\n\n1. In `_cai_ssh_shell()` at `ssh.sh:1653-1676`:\n   - Change condition to ONLY call setup if config file is actually missing\n   - Remove `force_update` from SSH setup trigger (it's meant for container state, not SSH)\n   - The caller (`container.sh`) already ran setup, so shell just needs to verify config exists\n\n2. In `_cai_ssh_run()` at `ssh.sh:1956` - apply same fix\n\n3. Verify `_cai_setup_ssh_key()` at `ssh.sh:153-233` is truly idempotent:\n   - Check that it skips key generation when key already exists\n   - Ensure `cai setup` doesn't regenerate keys blindly\n\n## Key context\n\n- `_cai_setup_container_ssh()` at `ssh.sh:1469-1509` does: inject key, update known_hosts, write host config\n- Each of these should be idempotent but rapid double-calls may cause races\n- The `force_update` flag is passed from container lifecycle, not from SSH needs\n## Acceptance\n- [ ] `cai shell --fresh` followed by `cai shell` connects without \"Permission denied\"\n- [ ] SSH setup messages appear only ONCE in output (not twice)\n- [ ] `cai setup` preserves existing SSH keys (doesn't regenerate if present)\n- [ ] Existing containers continue to work (no regression)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-27T04:37:18.737900Z",
+        "depends_on": [],
+        "epic": "fn-29-fv0",
+        "id": "fn-29-fv0.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-29-fv0.2.md",
+        "status": "todo",
+        "title": "Update import defaults and credential handling",
+        "updated_at": "2026-01-27T04:37:52.041692Z"
+      },
+      "id": "fn-29-fv0.2",
+      "runtime": null,
+      "spec": "# fn-29-fv0.2 Update import defaults and credential handling\n\n## Description\nUpdate import defaults to remove `~/.ssh`, handle credential files intelligently, and fix base64 errors.\n\n**Size:** M\n**Files:** `src/lib/import.sh`\n\n## Changes\n\n### 1. Remove ~/.ssh from default imports\n- Remove entries at `import.sh:378-383` that import SSH config/known_hosts/keys\n- Remove `_import_discover_ssh_keys()` call from defaults (lines 745-800)\n- Document that users can add `~/.ssh` to `[import] additional_paths` if wanted\n\n### 2. Skip profile credentials\nFor these files, skip import if source is from user's home profile directory:\n- `~/.claude/.credentials.json` (line 357) - skip if `$source_path` starts with `$HOME/.claude/`\n- `~/.codex/auth.json` (line 455) - skip if from `$HOME/.codex/`\n\nKeep the symlink to volume mount so container can write its own tokens after `claude login`.\n\n### 3. Copilot config.json minimum structure\nAt `import.sh:441-442`, ensure the imported/created config.json has at minimum:\n```json\n{\n  \"trusted_folders\": [\"/home/agent/workspace\"],\n  \"banner\": \"never\"\n}\n```\nIf file exists with content, merge these properties (replace trusted_folders array, preserve other properties).\n\n### 4. Suppress \"source not found\" noise\n- Change logging for missing source files from always-visible to only when `--verbose` is set\n- Look for `_cai_warn` or `_cai_info` calls about \"source not found\" or \"source missing\"\n\n### 5. Fix base64 truncated input error\n- Debug the error at `import.sh:2600` where `base64 | tr -d '\\n'` fails\n- Likely cause: large file or encoding issue in MANIFEST_DATA_B64\n- May need chunked encoding or alternative approach\n\n## Key context\n\n- Import uses rsync with base64-encoded manifest for atomic sync\n- Profile detection: compare `$source_path` to `$HOME/.<tool>/` prefix\n- Credential files use `fs` flag (secret) - symlink behavior should be preserved\n## Acceptance\n- [ ] `~/.ssh` is NOT imported by default\n- [ ] Claude `.credentials.json` from `~/.claude/` is NOT imported (symlink still created)\n- [ ] Codex `auth.json` from `~/.codex/` is NOT imported (symlink still created)\n- [ ] Copilot config.json has minimum `trusted_folders` and `banner` structure\n- [ ] \"source not found/missing\" messages only appear with `--verbose`\n- [ ] No \"base64: truncated input\" errors during import\n- [ ] Rsync sync completes successfully\n- [ ] Users can still add `~/.ssh` via config if they want it\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-27T04:37:19.009099Z",
+        "depends_on": [],
+        "epic": "fn-29-fv0",
+        "id": "fn-29-fv0.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-29-fv0.3.md",
+        "status": "todo",
+        "title": "Restructure doctor command to subcommand hierarchy",
+        "updated_at": "2026-01-27T04:38:07.879707Z"
+      },
+      "id": "fn-29-fv0.3",
+      "runtime": null,
+      "spec": "# fn-29-fv0.3 Restructure doctor command to subcommand hierarchy\n\n## Description\nRestructure the doctor command from `--fix`/`--repair` flags to a subcommand hierarchy.\n\n**Size:** M\n**Files:** `src/containai.sh`, `src/lib/doctor.sh`\n\n## Current state\n\n- `src/containai.sh:1391-1395` parses `--fix` and `--repair` flags\n- `src/containai.sh:1518-1522` routes to `_cai_doctor_fix`, `_cai_doctor_json`, or `_cai_doctor`\n- `src/lib/doctor.sh:1041-1400` implements `_cai_doctor_fix()` auto-remediation\n- `src/lib/doctor.sh:2051-2185` implements `_cai_doctor_repair()` volume ownership\n\n## New CLI structure\n\n```\ncai doctor                      # Run diagnostics (existing behavior, plus ssh key auth checks)\ncai doctor fix                  # Show available fix targets\ncai doctor fix --all            # Fix everything fixable\ncai doctor fix volume           # List volumes, offer to fix\ncai doctor fix volume --all     # Fix all volumes\ncai doctor fix volume <name>    # Fix specific volume\ncai doctor fix container        # List containers, offer to fix\ncai doctor fix container --all  # Fix all containers (including ssh key auth)\ncai doctor fix container <name> # Fix specific container\n```\n\n## Approach\n\n1. In `containai.sh`, add subcommand parsing after `doctor`:\n   - If next arg is `fix`, enter fix subcommand mode\n   - Parse `fix` target: `volume`, `container`, or `--all`\n   - Parse optional name or `--all` after target\n\n2. In `doctor.sh`, create new entry points:\n   - `_cai_doctor_fix_dispatch()` - routes based on target\n   - `_cai_doctor_fix_volume()` - takes name or `--all`\n   - `_cai_doctor_fix_container()` - takes name or `--all`\n\n3. List known volumes/containers when no name given:\n   - Volumes: from `docker volume ls --filter \"label=containai.managed=true\"`\n   - Containers: from `docker ps -a --filter \"label=containai.managed=true\"`\n\n4. Remove `--fix` and `--repair`, no backwareds compat\n\n## Key context\n\n- Volume fix = permission/ownership repair (existing `_cai_doctor_repair`)\n- Container fix = SSH config refresh + restart if needed\n- Use `_cai_doctor_get_container_volumes()` at `doctor.sh:1946-1956` for volume lookup\n## Acceptance\n- [ ] `cai doctor fix --all` runs all available fixes\n- [ ] `cai doctor fix volume` lists available volumes\n- [ ] `cai doctor fix volume <name>` fixes specific volume\n- [ ] `cai doctor fix volume --all` fixes all volumes\n- [ ] `cai doctor fix container` lists available containers\n- [ ] `cai doctor fix container <name>` fixes specific container, including ssh key auth\n- [ ] `cai doctor fix container --all` fixes all containers\n- [ ] `cai doctor --fix` no longer present\n- [ ] `cai doctor --repair` no longer present\n- [ ] Help text documents new subcommand structure\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-27T04:37:19.272421Z",
+        "depends_on": [],
+        "epic": "fn-29-fv0",
+        "id": "fn-29-fv0.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-29-fv0.4.md",
+        "status": "todo",
+        "title": "Print container and volume names in run/shell output",
+        "updated_at": "2026-01-27T04:38:17.108018Z"
+      },
+      "id": "fn-29-fv0.4",
+      "runtime": null,
+      "spec": "# fn-29-fv0.4 Print container and volume names in run/shell output\n\n## Description\nPrint container and volume names clearly in `cai run` and `cai shell` output.\n\n**Size:** S\n**Files:** `src/lib/container.sh`\n\n## Problem\n\nUsers don't know what container/volume names to use with `cai doctor fix`. The names are generated but not clearly displayed.\n\n## Approach\n\nAfter container creation/connection, add clear output:\n```\nContainer: containai-0898484b57d8\nVolume: cai-dat\n```\n\nAdd `cai workspace inspect` command that lists all containers and volumes associated with the workspace (available from config.toml).\n\n\nFind the container lifecycle functions that print status and add name output:\n- Look for `_cai_info` calls after container creation in `container.sh`\n- The container name is in `$container_name` variable\n- The volume name is in `$data_volume` variable\n\nUse consistent format:\n- `[INFO] Container: <name>`\n- `[INFO] Volume: <volume>`\n\nPlace after existing \"Creating new container...\" or similar messages when verbose is requested.\n## Acceptance\n- [ ] `cai run` prints container name before executing command\n- [ ] `cai shell` prints container name before connecting\n- [ ] `cai shell --data-volume <name>` prints both container and volume names\n- [ ] Output format is consistent and easily parseable\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-27T04:37:19.513178Z",
+        "depends_on": [],
+        "epic": "fn-29-fv0",
+        "id": "fn-29-fv0.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-29-fv0.5.md",
+        "status": "todo",
+        "title": "Auto-repair containai-docker context when endpoint wrong",
+        "updated_at": "2026-01-27T04:38:31.405826Z"
+      },
+      "id": "fn-29-fv0.5",
+      "runtime": null,
+      "spec": "# fn-29-fv0.5 Auto-repair containai-docker context when endpoint wrong\n\n## Description\nAuto-repair the `containai-docker` Docker context when it reverts to wrong endpoint (happens after Docker Desktop updates).\n\n**Size:** S\n**Files:** `src/lib/docker.sh`, possibly `src/lib/container.sh`\n\n## Problem\n\nAfter Docker Desktop updates on Windows, the `containai-docker` context can revert from `ssh://containai-docker-daemon/...` to `unix://...`. Users have to manually fix this.\n\n## Existing detection\n\nAt `docker.sh:514-539`, `_cai_containai_docker_context_exists()`:\n- Checks if context exists via `docker context inspect`\n- Compares actual endpoint to expected (`_cai_expected_docker_host()`)\n- Sets `_CAI_CONTAINAI_CONTEXT_ERROR=\"wrong_endpoint\"` on mismatch\n\n## Approach\n\n1. After detecting `wrong_endpoint`, automatically recreate the context:\n   - Call existing context creation logic (look in `setup.sh:1813-1851`)\n   - Use `docker context rm containai-docker` then `docker context create`\n\n2. Trigger the check+repair at strategic points (not every command):\n   - On `cai run` when context doesn't match\n   - On `cai shell` when context doesn't match\n   - On `cai doctor` (existing diagnostic flow)\n\n3. Show user-friendly message when --verboase|-v is requested:\n   ```\n   [WARN] Docker context 'containai-docker' had wrong endpoint (was unix://, expected ssh://)\n   [OK] Context auto-repaired\n   ```\n\n## Key context\n\n- Expected endpoints by platform at `docker.sh:355-369`\n- WSL2 expects: `ssh://containai-docker-daemon/var/run/containai-docker.sock`\n- Context creation at `setup.sh:1813-1851` via `_cai_create_isolated_docker_context()`\n## Acceptance\n- [ ] Wrong context endpoint is detected automatically\n- [ ] Context is auto-repaired without user intervention\n- [ ] User sees warning about what was fixed\n- [ ] Repair only happens when endpoint is actually wrong (not on every run)\n- [ ] Works on WSL2 where ssh:// endpoint is expected\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-27T04:37:19.758598Z",
+        "depends_on": [],
+        "epic": "fn-29-fv0",
+        "id": "fn-29-fv0.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-29-fv0.6.md",
+        "status": "todo",
+        "title": "Update sysbox download URLs to new ContainAI release",
+        "updated_at": "2026-01-27T04:38:43.598773Z"
+      },
+      "id": "fn-29-fv0.6",
+      "runtime": null,
+      "spec": "# fn-29-fv0.6 Update sysbox download URLs to new ContainAI release\n\n## Description\nUpdate sysbox download URLs to use the new ContainAI GitHub release.\n\n**Size:** S\n**Files:** `src/lib/setup.sh`, `src/container/Dockerfile.base`\n\n## New URLs\n\n```\nhttps://github.com/novotnyllc/ContainAI/releases/download/sysbox-build-20260127-10/sysbox-ce_0.6.7+containai.20260127.linux_amd64.deb\nhttps://github.com/novotnyllc/ContainAI/releases/download/sysbox-build-20260127-10/sysbox-ce_0.6.7+containai.20260127.linux_arm64.deb\n```\n\n## Changes\n\n1. Update `_CAI_SYSBOX_CONTAINAI_TAG` at `setup.sh:463-465`:\n   - Change from current value to `sysbox-build-20260127-10`\n\n2. Update version string:\n   - `_CAI_SYSBOX_CONTAINAI_VERSION` should be `0.6.7+containai.20260127`\n\n3. Update Dockerfile.base if it has hardcoded sysbox download URLs\n\n4. Verify `_cai_resolve_sysbox_download_url()` at `setup.sh:650-780` builds correct URLs from the tag\n\n## Key context\n\n- The upstream nestybox fallback was removed in commit 2153301\n- URL format: `https://github.com/novotnyllc/ContainAI/releases/download/${TAG}/sysbox-ce_${VERSION}.linux_${ARCH}.deb`\n- Architecture is `amd64` or `arm64`\n## Acceptance\n- [ ] `cai setup` downloads sysbox from new ContainAI release URL\n- [ ] Both amd64 and arm64 architectures use correct URLs\n- [ ] Dockerfile.base uses same URLs (if applicable)\n- [ ] Upgrade detection for sysbox works properly. Newer versions replace older versions.\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

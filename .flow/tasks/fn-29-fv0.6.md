@@ -18,8 +18,9 @@ https://github.com/novotnyllc/ContainAI/releases/download/sysbox-build-20260127-
 1. Update `_CAI_SYSBOX_CONTAINAI_TAG` at `setup.sh:463-465`:
    - Change from current value to `sysbox-build-20260127-10`
 
-2. Update version string:
-   - `_CAI_SYSBOX_CONTAINAI_VERSION` should be `0.6.7+containai.20260127`
+2. Version is derived from GitHub asset filename in `_cai_resolve_sysbox_download_url()`:
+   - **No separate `_CAI_SYSBOX_CONTAINAI_VERSION` constant exists** - version is parsed from the filename
+   - Only add a version constant if there's a concrete need (e.g., offline install or deterministic upgrade checks)
 
 3. Update Dockerfile.base if it has hardcoded sysbox download URLs
 

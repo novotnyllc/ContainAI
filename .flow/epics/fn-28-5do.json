@@ -7,7 +7,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-28-5do.md",
-  "status": "open",
+  "status": "done",
   "title": "Fix fn-27-hbi bugs: sysbox fallback, update prompts, SSH keys",
-  "updated_at": "2026-01-27T01:45:47.452946Z"
+  "updated_at": "2026-01-27T05:02:50.577288Z"
 }

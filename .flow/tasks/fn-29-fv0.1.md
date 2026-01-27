@@ -38,9 +38,8 @@ The double setup appears to cause key/config corruption or race conditions.
 - [ ] `cai setup` preserves existing SSH keys (doesn't regenerate if present)
 - [ ] Existing containers continue to work (no regression)
 ## Done summary
-TBD
-
+Fixed SSH double setup bug by removing the force_update check from the SSH setup conditions in _cai_ssh_shell() and _cai_ssh_run(). The config file existence check is now the sole trigger for SSH setup, preventing duplicate setup calls when container.sh already performed the initial setup.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c90e4465598ccf14c72d016d86d4651727cf4df9
+- Tests: shellcheck -x src/lib/ssh.sh
 - PRs:

@@ -376,11 +376,9 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.gitignore_global:/target/git/gitignore_global:f"
 
         # --- SSH ---
-        # Static entries: config, known_hosts (not secrets)
-        # Dynamic entries: id_* private keys - discovered by _import_discover_ssh_keys()
-        "/source/.ssh/config:/target/ssh/config:f"
-        "/source/.ssh/known_hosts:/target/ssh/known_hosts:f"
-        # Note: id_* keys added dynamically at sync time (see _import_discover_ssh_keys)
+        # NOTE: SSH is NOT imported by default for security reasons.
+        # Users can add ~/.ssh to [import].additional_paths in containai.toml if needed.
+        # SSH key generation and agent forwarding are handled separately by the container.
 
         # --- OpenCode (config) ---
         # Selective sync: config files only, skip caches
@@ -1337,6 +1335,8 @@ _import_apply_overrides() {
 #   $7 = from_source path (optional, tgz file or directory; default: "" means $HOME)
 #   $8 = no_secrets flag ("true" or "false", default: "false")
 #        When true, skips syncing entries with 's' flag (OAuth tokens, API keys, SSH keys)
+#   $9 = verbose flag ("true" or "false", default: "false")
+#        When true, shows "source not found" messages for missing import sources
 # Returns: 0 on success, 1 on failure
 _containai_import() {
     local ctx="${1:-}"
@@ -1347,6 +1347,7 @@ _containai_import() {
     local explicit_config="${6:-}"
     local from_source="${7:-}"
     local no_secrets="${8:-false}"
+    local verbose="${9:-false}"
 
     # Build docker command prefix based on context (needed early for source validation)
     # All docker calls in this function MUST use docker_cmd and neutralize DOCKER_CONTEXT/DOCKER_HOST
@@ -1620,6 +1621,9 @@ _containai_import() {
     if [[ "$no_excludes" == "true" ]]; then
         env_args+=(--env "NO_EXCLUDES=1")
     fi
+    if [[ "$verbose" == "true" ]]; then
+        env_args+=(--env "IMPORT_VERBOSE=1")
+    fi
 
     # Pass HOST_SOURCE_ROOT for symlink relinking (only if --from <directory> was used)
     if [[ "$from_directory_mode" == "true" ]]; then
@@ -1707,8 +1711,8 @@ copy() {
     # Add per-entry excludes (passed via 4th argument, base64-encoded)
     # This replaces the global EXCLUDE_DATA_B64 approach with per-entry excludes
     if [ "${NO_EXCLUDES:-}" != "1" ] && [ -n "$_entry_excludes_b64" ]; then
-        # Decode base64 to get newline-delimited excludes
-        _exclude_decoded=$(printf "%s" "$_entry_excludes_b64" | base64 -d)
+        # Decode base64 to get newline-delimited excludes (non-fatal on decode error)
+        _exclude_decoded=$(printf "%s" "$_entry_excludes_b64" | base64 -d 2>/dev/null) || _exclude_decoded=""
         # Disable globbing to prevent pattern expansion (e.g., *.log becoming actual files)
         set -f
         _old_ifs="$IFS"
@@ -1815,11 +1819,17 @@ copy() {
         else
             case "$_flags" in
                 *j*|*s*)
-                    echo "[INFO] Source missing, ensuring target: $_dst"
+                    # Always show when ensuring target (important for credential symlinks)
+                    if [ "${IMPORT_VERBOSE:-}" = "1" ]; then
+                        echo "[INFO] Source missing, ensuring target: $_dst"
+                    fi
                     ensure "$_dst" "$_flags"
                     ;;
                 *)
-                    echo "[INFO] Source not found, skipping: $_src"
+                    # Only show "source not found" in verbose mode (opt-in)
+                    if [ "${IMPORT_VERBOSE:-}" = "1" ]; then
+                        echo "[INFO] Source not found, skipping: $_src"
+                    fi
                     ;;
             esac
         fi
@@ -2013,10 +2023,10 @@ preview_symlink_relinks() {
     src_dir="$2"
     shift 2
 
-    # Decode manifest once (POSIX-compatible)
+    # Decode manifest once (POSIX-compatible, non-fatal on decode error)
     manifest=""
     if [ -n "$manifest_b64" ]; then
-        manifest=$(printf "%s" "$manifest_b64" | base64 -d)
+        manifest=$(printf "%s" "$manifest_b64" | base64 -d 2>/dev/null) || manifest=""
     fi
 
     for link; do
@@ -2162,10 +2172,10 @@ preview_symlink_relinks() {
     src_dir="$2"
     shift 2
 
-    # Decode manifest once (POSIX-compatible)
+    # Decode manifest once (POSIX-compatible, non-fatal on decode error)
     manifest=""
     if [ -n "$manifest_b64" ]; then
-        manifest=$(printf "%s" "$manifest_b64" | base64 -d)
+        manifest=$(printf "%s" "$manifest_b64" | base64 -d 2>/dev/null) || manifest=""
     fi
 
     for link; do
@@ -2324,10 +2334,10 @@ relink_internal_symlinks() {
     host_src_root="${HOST_SOURCE_ROOT:-}"
     manifest_b64="${MANIFEST_DATA_B64:-}"
 
-    # Decode manifest once (POSIX-compatible)
+    # Decode manifest once (POSIX-compatible, non-fatal on decode error)
     manifest=""
     if [ -n "$manifest_b64" ]; then
-        manifest=$(printf "%s" "$manifest_b64" | base64 -d)
+        manifest=$(printf "%s" "$manifest_b64" | base64 -d 2>/dev/null) || manifest=""
     fi
 
     for link; do
@@ -2484,11 +2494,37 @@ done <<'"'"'MAP_DATA'"'"'
 
     # Convert SYNC_MAP to newline-delimited string for exclude processing
     # Filter out entries with 's' flag when --no-secrets is set
+    # Also skip profile credentials when importing from user's default $HOME
     local sync_map_entries=""
-    local entry entry_flags entry_path_display
+    local entry entry_flags entry_path_display entry_src
+    local is_profile_import="false"
+    # Detect if we're importing from user's home profile (not --from <directory>)
+    if [[ "$source_root" == "$HOME" ]]; then
+        is_profile_import="true"
+    fi
+
     for entry in "${_IMPORT_SYNC_MAP[@]}"; do
-        # Extract flags (3rd field, colon-delimited)
+        # Extract source path and flags (colon-delimited)
+        entry_src="${entry%%:*}"
         entry_flags="${entry##*:}"
+
+        # Skip profile credentials when importing from user's home directory
+        # These credentials are user-specific; container should run its own `claude login` etc.
+        # The target file/symlink is still created (empty/to volume mount) so container can write tokens.
+        if [[ "$is_profile_import" == "true" ]]; then
+            case "$entry_src" in
+                "/source/.claude/.credentials.json"|"/source/.codex/auth.json")
+                    entry_path_display="~${entry_src#/source}"
+                    if [[ "$dry_run" == "true" ]]; then
+                        echo "[DRY-RUN] Skipping profile credential: $entry_path_display (container should run login)"
+                    else
+                        _import_info "Skipping profile credential: $entry_path_display (container should run login)"
+                    fi
+                    continue
+                    ;;
+            esac
+        fi
+
         # Skip entries with 's' flag when no_secrets=true
         if [[ "$no_secrets" == "true" && "$entry_flags" == *s* ]]; then
             # Convert /source/.xxx to ~/.xxx for user-friendly display
@@ -2505,28 +2541,9 @@ done <<'"'"'MAP_DATA'"'"'
         sync_map_entries+="$entry"$'\n'
     done
 
-    # Dynamically discover SSH keys from source directory
-    # This finds all id_* files (private keys with 's' flag, public keys without)
-    local ssh_key_entries ssh_key_entry
-    ssh_key_entries=$(_import_discover_ssh_keys "$source_root")
-    while IFS= read -r ssh_key_entry; do
-        [[ -z "$ssh_key_entry" ]] && continue
-        # Extract flags (3rd field, colon-delimited)
-        entry_flags="${ssh_key_entry##*:}"
-        # Skip entries with 's' flag when no_secrets=true
-        if [[ "$no_secrets" == "true" && "$entry_flags" == *s* ]]; then
-            # Convert /source/.xxx to ~/.xxx for user-friendly display
-            entry_path_display="${ssh_key_entry%%:*}"
-            entry_path_display="~${entry_path_display#/source}"
-            if [[ "$dry_run" == "true" ]]; then
-                echo "[DRY-RUN] Skipping secret entry: $entry_path_display (--no-secrets)"
-            else
-                _import_info "Skipping secret entry: $entry_path_display (--no-secrets)"
-            fi
-            continue
-        fi
-        sync_map_entries+="$ssh_key_entry"$'\n'
-    done <<<"$ssh_key_entries"
+    # NOTE: SSH key discovery is disabled by default for security reasons.
+    # Users can add ~/.ssh to [import].additional_paths in containai.toml if needed.
+    # SSH key generation and agent forwarding are handled separately by the container.
 
     # Dynamically discover user-specified additional paths from config
     # These are added to sync_map_entries just like SSH keys
@@ -2638,6 +2655,10 @@ done <<'"'"'MAP_DATA'"'"'
             _import_warn "Failed to merge enabledPlugins"
         fi
         _import_remove_orphan_markers "$ctx" "$volume"
+        # Ensure Copilot config.json has minimum required structure
+        if ! _import_ensure_copilot_config "$ctx" "$volume"; then
+            _import_warn "Failed to ensure Copilot config.json structure"
+        fi
         # Import git config (user identity + safe.directory)
         if ! _cai_import_git_config "$ctx" "$volume"; then
             _import_warn "Failed to import git config"
@@ -2647,6 +2668,7 @@ done <<'"'"'MAP_DATA'"'"'
         _import_step "[dry-run] Would transform known_marketplaces.json"
         _import_step "[dry-run] Would merge enabledPlugins into sandbox settings"
         _import_step "[dry-run] Would remove orphan markers"
+        _import_step "[dry-run] Would ensure Copilot config.json has trusted_folders and banner"
         _import_step "[dry-run] Would import git config (user identity + safe.directory, credential.helper filtered)"
     fi
 
@@ -2912,6 +2934,63 @@ _import_remove_orphan_markers() {
     ')
 
     _import_success "Removed $removed orphan markers"
+}
+
+# Ensure Copilot config.json has minimum required structure
+# Adds trusted_folders and banner settings if missing, preserves other properties
+# Arguments: $1 = context, $2 = volume
+_import_ensure_copilot_config() {
+    local ctx="$1"
+    local volume="$2"
+
+    # Build docker command with context
+    local -a docker_cmd=(docker)
+    if [[ -n "$ctx" ]]; then
+        docker_cmd=(docker --context "$ctx")
+    fi
+
+    _import_step "Ensuring Copilot config.json has required structure..."
+
+    # Read existing config from volume (may not exist yet)
+    local existing_config
+    existing_config=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none -v "$volume":/target alpine cat /target/copilot/config.json 2>/dev/null || echo '{}')
+
+    # Validate JSON (fallback to empty object if invalid)
+    if [[ -z "$existing_config" ]] || ! echo "$existing_config" | jq -e '.' >/dev/null 2>&1; then
+        existing_config='{}'
+    fi
+
+    # Merge minimum required structure:
+    # - trusted_folders: ["/home/agent/workspace"] (replace, not merge)
+    # - banner: "never" (set if not present)
+    # Preserves all other properties
+    local merged
+    if ! merged=$(echo "$existing_config" | jq '
+        .trusted_folders = ["/home/agent/workspace"] |
+        .banner = (.banner // "never")
+    '); then
+        _import_error "Failed to merge Copilot config.json"
+        return 1
+    fi
+
+    # Validate merged JSON
+    if ! echo "$merged" | jq -e '.' >/dev/null 2>&1; then
+        _import_error "Merged Copilot config.json is invalid JSON"
+        return 1
+    fi
+
+    # Write to volume
+    if ! echo "$merged" | DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm -i --network=none -v "$volume":/target alpine sh -c '
+        mkdir -p /target/copilot &&
+        cat > /target/copilot/config.json &&
+        chown -R 1000:1000 /target/copilot
+    '; then
+        _import_error "Failed to write Copilot config.json to volume"
+        return 1
+    fi
+
+    _import_success "Copilot config.json ensured"
+    return 0
 }
 
 # ==============================================================================

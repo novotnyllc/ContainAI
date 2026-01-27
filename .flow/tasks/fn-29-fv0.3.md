@@ -40,14 +40,19 @@ cai doctor fix container <name> # Fix specific container
    - `_cai_doctor_fix_container()` - takes name or `--all`
 
 3. List known volumes/containers when no name given:
-   - Volumes: from `docker volume ls --filter "label=containai.managed=true"`
-   - Containers: from `docker ps -a --filter "label=containai.managed=true"`
+   - Containers: from `docker ps -a --filter "label=containai.managed=true"` (containers have the label)
+   - Volumes: derive from managed containers via `docker inspect` mounts (volumes aren't created with labels - use `_cai_doctor_get_container_volumes()` approach at `doctor.sh:1946-1956`)
 
-4. Remove `--fix` and `--repair`, no backwareds compat
+4. Remove `--fix` and `--repair`, no backwards compat
+
+5. In fix dispatch, resolve effective context:
+   - Use `_cai_select_context("$(_containai_resolve_secure_engine_context …)")` (at `doctor.sh:152-230`)
+   - Use `docker --context "$ctx"` consistently for container listing and SSH refresh
+   - Don't hardcode to `$_CAI_CONTAINAI_DOCKER_CONTEXT`
 
 ## Key context
 
-- Volume fix = permission/ownership repair (existing `_cai_doctor_repair`)
+- Volume fix = permission/ownership repair (existing `_cai_doctor_repair`) - **Linux/WSL2 host only** (uses `$_CAI_CONTAINAI_DOCKER_DATA/volumes/...` paths, not valid for macOS Lima, nested mode, or non-default engine layouts)
 - Container fix = SSH config refresh + restart if needed
 - Use `_cai_doctor_get_container_volumes()` at `doctor.sh:1946-1956` for volume lookup
 ## Acceptance
@@ -55,6 +60,7 @@ cai doctor fix container <name> # Fix specific container
 - [ ] `cai doctor fix volume` lists available volumes
 - [ ] `cai doctor fix volume <name>` fixes specific volume
 - [ ] `cai doctor fix volume --all` fixes all volumes
+- [ ] `cai doctor fix volume` shows Linux/WSL2 host limitation note (not supported on macOS/nested mode)
 - [ ] `cai doctor fix container` lists available containers
 - [ ] `cai doctor fix container <name>` fixes specific container, including ssh key auth
 - [ ] `cai doctor fix container --all` fixes all containers

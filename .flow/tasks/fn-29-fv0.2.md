@@ -29,15 +29,20 @@ At `import.sh:441-442`, ensure the imported/created config.json has at minimum:
 }
 ```
 If file exists with content, merge these properties (replace trusted_folders array, preserve other properties).
+Implement merge in a post-sync host-side step (after rsync completes) using `jq` or similar - the rsync container script has no JSON tooling.
 
 ### 4. Suppress "source not found" noise
-- Change logging for missing source files from always-visible to only when `--verbose` is set
-- Look for `_cai_warn` or `_cai_info` calls about "source not found" or "source missing"
+The noisy messages are emitted inside the rsync container script (`echo "[INFO] Source not found, skipping: …"` at `src/lib/import.sh:1816-1823`), NOT in the host CLI.
+- Pass `IMPORT_VERBOSE=1` env var into the rsync container when host `--verbose` flag is set
+- Gate those `echo` statements behind `[ "$IMPORT_VERBOSE" = "1" ]`
+- Default should be silent for missing sources, with opt-in verbose output
 
 ### 5. Fix base64 truncated input error
-- Debug the error at `import.sh:2600` where `base64 | tr -d '\n'` fails
-- Likely cause: large file or encoding issue in MANIFEST_DATA_B64
-- May need chunked encoding or alternative approach
+The actual failure occurs from `base64 -d` in the rsync container script decoding `MANIFEST_DATA_B64` (at `src/lib/import.sh:2019`, `2168`, `2330`, or per-entry excludes at `1711`). With `sh -e`, any decode error aborts the whole sync.
+
+Two fixes needed:
+1. Make decode non-fatal: `… | base64 -d 2>/dev/null || manifest=""` so import can proceed even if symlink relinking fails
+2. Consider embedding MANIFEST_DATA in the heredoc alongside `MAP_DATA` (or write to temp file inside container) instead of passing via `--env` to eliminate truncation/quoting/line-ending issues
 
 ## Key context
 

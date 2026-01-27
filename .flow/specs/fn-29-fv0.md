@@ -26,27 +26,34 @@ Batch of reliability and UX fixes addressing critical SSH connection failures, i
 - Remove `~/.ssh/*` entries from `_IMPORT_SYNC_MAP` at `import.sh:378-383`
 - For `~/.claude/.credentials.json`: skip import if source path is `$HOME/.claude/` (user profile) - keep symlink for volume mount
 - Same for `~/.codex/auth.json` - skip if from `$HOME/.codex/`
-- For `~/.copilot/config.json`: ensure minimum JSON structure `{"trusted_folders":["/home/agent/workspace"],"editor_version":"vscode-1.99.0"}`
-- Suppress "source not found/missing" unless `--verbose` flag
-- Debug the `base64: truncated input` error at `import.sh:2600` - likely buffer/encoding issue
+- For `~/.copilot/config.json`: ensure minimum JSON structure `{"trusted_folders":["/home/agent/workspace"],"banner":"never"}` (merge with existing content, preserve other properties)
+- Suppress "source not found" messages in rsync container script - pass `IMPORT_VERBOSE=1` env var and gate the `echo` statements (at `import.sh:1816-1823`) behind it; default silent for missing sources
+- Fix `base64: truncated input` error: make decode non-fatal with `base64 -d 2>/dev/null || manifest=""` so import proceeds even if decode fails; consider embedding MANIFEST_DATA in heredoc instead of env var to eliminate truncation/quoting issues
 
 ### Doctor Restructure
 - Change from: `cai doctor --fix`, `cai doctor --repair`
 - To: `cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>]]`
-- List known volumes/containers when user doesn't specify one
-- Operations: volume fix = permission repair; container fix = SSH config refresh
+- List known containers via `docker ps -a --filter "label=containai.managed=true"` (containers have the label)
+- Derive volumes from managed containers via `docker inspect` mounts (volumes aren't labeled - use `_cai_doctor_get_container_volumes()` approach)
+- Use `_cai_select_context()` in fix dispatch to resolve effective context (not hardcoded to `$_CAI_CONTAINAI_DOCKER_CONTEXT`)
+- Volume fix = permission repair (Linux/WSL2 host only - uses `$_CAI_CONTAINAI_DOCKER_DATA/volumes/...` paths)
+- Container fix = SSH config refresh + restart if needed
 
 ### Container/Volume Name Visibility
-- Add clear output in `cai run` and `cai shell` showing:
+- Add clear output to stderr (not stdout to preserve `cai run <cmd>` pipelines)
+- Gate behind `--verbose` or "not `--quiet`" for script-friendliness
+- Format:
   ```
-  Container: containai-0898484b57d8
-  Volume: cai-dat
+  [INFO] Container: containai-0898484b57d8
+  [INFO] Volume: cai-dat
   ```
 
 ### Docker Context Auto-Repair
 - Existing detection at `docker.sh:514-539` sets `_CAI_CONTAINAI_CONTEXT_ERROR="wrong_endpoint"`
 - Add auto-repair when detected (recreate context with correct endpoint)
-- Run check at start of context-dependent operations, not on every command
+- Centralize check in one context-selection entrypoint used by all context-dependent commands (`cai run`, `cai shell`, `cai docker`, setup/validate flows)
+- Add "already validated this invocation" guard to avoid redundant checks
+- Skip auto-repair inside containers (check `_cai_is_container()`)
 
 ## Quick commands
 
@@ -70,13 +77,14 @@ cai run --verbose echo "import test"
 - [ ] `cai setup` preserves existing SSH keys (doesn't regenerate)
 - [ ] `~/.ssh` is NOT imported by default (user can add via config if wanted)
 - [ ] Claude/Codex credentials from user profile are NOT imported (symlink still works)
-- [ ] Copilot config.json gets minimum trusted_folders structure
-- [ ] "source not found" messages only appear with `--verbose`
+- [ ] Copilot config.json gets minimum trusted_folders and banner structure
+- [ ] "source not found" messages only appear with `--verbose` (via IMPORT_VERBOSE env var in rsync container)
 - [ ] No "base64: truncated input" errors during import
 - [ ] `cai doctor fix --all` works
-- [ ] `cai doctor fix volume <name>` works (lists volumes if name omitted)
-- [ ] `cai run/shell` prints container and volume names
-- [ ] Docker context auto-repairs when detected as wrong endpoint
+- [ ] `cai doctor fix volume <name>` works (derives volumes from managed containers; lists if name omitted)
+- [ ] `cai doctor fix volume` notes Linux/WSL2 host limitation
+- [ ] `cai run/shell` prints container and volume names to stderr when `--verbose` (script-friendly)
+- [ ] Docker context auto-repairs when detected as wrong endpoint (all context-dependent commands)
 
 ## References
 

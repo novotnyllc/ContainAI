@@ -7,7 +7,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-24-1lj.md",
-  "status": "open",
+  "status": "done",
   "title": "Update cai setup to use GitHub release sysbox-build-20260126-7",
-  "updated_at": "2026-01-26T18:01:55.440755Z"
+  "updated_at": "2026-01-27T05:02:49.527659Z"
 }
