@@ -1854,7 +1854,8 @@ _cai_doctor_fix_container_all() {
         fi
 
         # Refresh SSH configuration (force update)
-        if _cai_setup_container_ssh "$name" "$ssh_port" "$ctx" "true" 2>/dev/null; then
+        # Note: errors from _cai_setup_container_ssh are visible so users can debug failures
+        if _cai_setup_container_ssh "$name" "$ssh_port" "$ctx" "true"; then
             printf '    %-46s %s\n' "SSH refresh:" "[FIXED]"
             ((fixed_count++)) || true
         else

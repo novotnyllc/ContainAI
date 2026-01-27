@@ -789,8 +789,8 @@ The repair scan looks for files owned by UID/GID 65534 (`nobody:nogroup`) in vol
 # Repair all managed container volumes
 cai doctor fix volume --all
 
-# Repair specific container volumes
-cai doctor fix volume mycontainer
+# Repair specific volume
+cai doctor fix volume myvolume
 ```
 
 **How repair works:**
