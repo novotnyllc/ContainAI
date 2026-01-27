@@ -1591,9 +1591,18 @@ _cai_doctor_fix_volume() {
             _cai_doctor_repair "" "false"
             return $?
             ;;
+        --help | -h)
+            _containai_doctor_help
+            return 0
+            ;;
+        -*)
+            # Docker volume names must start with [a-zA-Z0-9], not dash
+            echo "[ERROR] Invalid volume name: $target" >&2
+            echo "Volume names must start with a letter or number" >&2
+            return 1
+            ;;
         *)
             # Fix specific volume
-            # Volume names can't start with - so no need for -- guard
             _cai_doctor_fix_volume_single "$ctx" "$target"
             return $?
             ;;
@@ -1732,6 +1741,10 @@ _cai_doctor_fix_container() {
             # Fix all containers
             _cai_doctor_fix_container_all "$ctx"
             return $?
+            ;;
+        --help | -h)
+            _containai_doctor_help
+            return 0
             ;;
         *)
             # Fix specific container (use -- to prevent option injection)
