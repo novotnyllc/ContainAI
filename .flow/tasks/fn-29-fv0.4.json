@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-27T04:37:19.272421Z",
+  "depends_on": [],
+  "epic": "fn-29-fv0",
+  "id": "fn-29-fv0.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-29-fv0.4.md",
+  "status": "todo",
+  "title": "Print container and volume names in run/shell output",
+  "updated_at": "2026-01-27T04:38:17.108018Z"
+}

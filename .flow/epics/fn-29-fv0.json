@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-29-fv0",
+  "created_at": "2026-01-27T04:36:40.826545Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [
+    "fn-28-5do"
+  ],
+  "id": "fn-29-fv0",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-29-fv0.md",
+  "status": "open",
+  "title": "Fix SSH reliability, import defaults, doctor UX, and sysbox URLs",
+  "updated_at": "2026-01-27T04:38:49.777512Z"
+}
