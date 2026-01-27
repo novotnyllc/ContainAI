@@ -68,8 +68,8 @@ cai doctor fix container <name> # Fix specific container
 - [x] `cai doctor --repair` no longer present
 - [x] Help text documents new subcommand structure
 ## Done summary
-Restructured doctor command from flag-based (--fix, --repair) to subcommand hierarchy (fix [volume|container]). Added context-aware helper functions for volume and UID detection. Updated troubleshooting docs to reflect new commands. Multiple rounds of impl-review addressed context handling, error visibility, --help handling, and documentation accuracy.
+Restructured doctor command from flag-based (--fix, --repair) to subcommand hierarchy (fix [volume|container]). Added context-aware helper functions for volume and UID detection. Updated troubleshooting docs to reflect new commands.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 18524e8, 36b201a, 33f0038, 5bc82c9, 2364e97, c70ac24, 0eeb5cb, 0944a60
+- Tests: shellcheck src/lib/doctor.sh, grep verification of --fix/--repair removal
 - PRs:
