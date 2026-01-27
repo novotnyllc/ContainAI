@@ -8,13 +8,34 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 ## [Unreleased]
 
 ### Added
-- `cai update` command for updating existing installations to new isolated Docker architecture
+- `cai update` command for safe updates with container management
+  - `--dry-run` flag to preview what would be updated
+  - `--stop-containers` flag to safely stop containers before update (Linux/WSL2)
+  - `--force` flag to skip confirmation prompts
+  - `--lima-recreate` flag for full Lima VM recreation (macOS)
+  - Aborts with actionable message if containers running and updates needed
+- `cai doctor --repair` for volume ownership repair (Linux/WSL2 only)
+  - `--all` flag to repair all managed container volumes
+  - `--container <name>` flag to repair specific container volumes
+  - `--dry-run` flag to preview repairs without making changes
+  - Detects and fixes id-mapped ownership corruption (files owned by nobody:nogroup)
+  - Reports if container rootfs is tainted (recommends recreation)
+- Cross-platform sysbox update mechanism
+  - WSL2/Linux: Package upgrade via dpkg with version comparison
+  - macOS: In-VM sysbox updates via `limactl shell`
+  - Full package version detection (handles same-semver ContainAI rebuilds)
+  - Lima sysbox version reporting in `cai doctor` on macOS
+- Custom sysbox deb packages now depend on `fuse3` (fixes installation on minimal systems)
 
 ### Changed
 
 ### Fixed
 - Isolated Docker daemon architecture: ContainAI now runs a completely separate Docker instance that never modifies system Docker configuration at `/etc/docker/daemon.json` (Linux/WSL2: `containai-docker.service` systemd unit; macOS: `containai-docker` Lima VM)
 - Unified naming convention: All platforms now use `containai-docker` as the Docker context name; socket paths are `/var/run/containai-docker.sock` (Linux/WSL2) and `~/.lima/containai-docker/sock/docker.sock` (macOS)
+- SSH shell reliability: `cai shell` now always allocates TTY with `-tt` flag
+- SSH detached execution: Improved reliability with PID verification before exit
+- SSH command parsing: Uses `bash -lc` for consistent command parsing in containers
+- Sysbox WSL2 update: Fixed early-return bug preventing updates when sysbox already installed
 
 ### Security
 

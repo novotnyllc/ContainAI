@@ -92,6 +92,7 @@ cai --agent gemini       # Use a different agent
 cai doctor               # Check system capabilities
 cai shell                # Open bash shell in running sandbox
 cai import               # Sync host dotfiles to data volume
+cai update               # Update ContainAI components
 cai stop --all           # Stop all ContainAI containers
 ```
 

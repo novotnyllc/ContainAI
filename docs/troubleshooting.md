@@ -16,6 +16,7 @@ Most common issues and their one-line fixes:
 | sshd not ready | Wait or check `docker exec <container> systemctl status ssh` |
 | Updates available warning | Run `cai update` or set `CAI_UPDATE_CHECK_INTERVAL=never` |
 | Claude OAuth token expired | Re-run `claude /login` inside container, or use API key |
+| Files owned by nobody:nogroup | `cai doctor --repair --all` (Linux/WSL2 only) |
 
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
@@ -26,6 +27,7 @@ Most common issues and their one-line fixes:
 - [Host Key Verification Failed](#host-key-verification-failed)
 - [Installation Issues](#installation-issues)
 - [Sysbox/Secure Engine Issues](#sysboxsecure-engine-issues)
+- [Volume Ownership Repair](#volume-ownership-repair-linuxwsl2-only)
 - [Container Issues](#container-issues)
 - [Configuration Issues](#configuration-issues)
 - [Credential/Import Issues](#credentialimport-issues) (including [Claude OAuth Token Expiration](#claude-oauth-token-expiration-after-import))
@@ -754,6 +756,82 @@ sudo systemctl enable containai-docker  # Auto-start on boot
 
 ---
 
+## Volume Ownership Repair (Linux/WSL2 only)
+
+### "Files owned by nobody:nogroup"
+
+**Symptom:**
+Inside a container, files appear owned by `nobody:nogroup`:
+```bash
+ls -la /home/agent/workspace
+# Shows: nobody nogroup instead of agent agent
+```
+
+Or agents fail with permission errors when accessing their data volumes.
+
+**Cause:**
+This is **id-mapped mount corruption** - a known issue with Sysbox user namespace isolation. When containers are stopped uncleanly or there are filesystem consistency issues, the UID/GID mappings can become corrupted.
+
+**Diagnosis:**
+```bash
+# Check for corruption across all managed containers
+cai doctor --repair --all --dry-run
+
+# Check specific container
+cai doctor --repair --container mycontainer --dry-run
+```
+
+The repair scan looks for files owned by UID/GID 65534 (`nobody:nogroup`) in volume data paths.
+
+**Solution:**
+
+```bash
+# Repair all managed container volumes
+cai doctor --repair --all
+
+# Repair specific container volumes
+cai doctor --repair --container mycontainer
+```
+
+**How repair works:**
+
+1. Identifies ContainAI-managed containers (labeled `containai.managed=true`)
+2. Detects target UID/GID from running container (or defaults to 1000:1000)
+3. Finds corrupted files (owned by 65534:65534) in volume data paths
+4. Runs `sudo chown` to fix ownership to the detected UID/GID
+5. Reports if container rootfs is tainted (consider recreating)
+
+**Repair output:**
+```
+ContainAI Doctor (Repair Mode)
+==============================
+
+Scanning volumes...
+
+Container: myproject-main
+  Target ownership:                                1000:1000 (from container)
+  Volume 'myproject-data':                         [CORRUPT] 47 files with nobody:nogroup
+    Repairing to 1000:1000...                      [FIXED]
+
+Summary
+  Mode:                                            [DRY-RUN] No changes made
+  Volumes processed:                               1
+  Warnings:                                        0
+  Failures:                                        0
+```
+
+**When to recreate vs repair:**
+
+| Situation | Action |
+|-----------|--------|
+| Only volume data corrupted | `cai doctor --repair` |
+| Rootfs also tainted | Recreate container with `cai run --fresh` |
+| Corruption recurs | Investigate systemd/docker stop behavior |
+
+**Platform note:** Volume repair is only available on Linux and WSL2. On macOS, volumes are inside the Lima VM and not directly accessible from the host.
+
+---
+
 ## Container Issues
 
 ### "Image not found"
@@ -1309,3 +1387,4 @@ Quick reference of error messages and their section in this guide:
 | "Docker context issue" | [WSL2 Issues](#wsl2-docker-context-issue) |
 | "Permission denied" | [Permission Issues](#permission-issues) |
 | "Dockerd bundle update available" | [Updates Available Warning](#updates-available-message) |
+| "Files owned by nobody:nogroup" | [Volume Ownership Repair](#files-owned-by-nobodynogroup) |

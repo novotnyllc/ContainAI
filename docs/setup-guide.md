@@ -13,6 +13,7 @@ This guide covers the complete installation and configuration of ContainAI acros
 - [Component Details](#component-details)
 - [Verification](#verification)
 - [Troubleshooting Setup](#troubleshooting-setup)
+- [Updating ContainAI](#updating-containai)
 - [Uninstalling](#uninstalling)
 
 ---
@@ -671,6 +672,96 @@ limactl start containai-docker
   ```
 
 - **Linux**: Update your distribution or kernel.
+
+---
+
+## Updating ContainAI
+
+Use `cai update` to apply updates to your ContainAI installation. The update process differs by platform and handles multiple components.
+
+### What Gets Updated
+
+| Component | WSL2/Linux | macOS |
+|-----------|------------|-------|
+| dockerd bundle | Atomic symlink swap | N/A (Lima VM) |
+| Sysbox runtime | Package upgrade | VM package update |
+| Systemd unit | Template reconciliation | N/A |
+| Docker context | Socket path update | Socket path update |
+| Lima VM packages | N/A | apt-get upgrade |
+
+### Basic Update Flow
+
+```bash
+# Preview what would be updated (no changes made)
+cai update --dry-run
+
+# Apply updates
+cai update
+```
+
+### Container Safety
+
+Updates to the dockerd bundle, sysbox, or systemd unit require restarting the containai-docker service. This stops all running ContainAI containers.
+
+**Default behavior when updates are pending and containers are running:**
+- `cai update` aborts with an actionable message listing the running containers
+- You must explicitly acknowledge container stoppage
+
+```bash
+# List running containers before update
+docker --context containai-docker ps
+
+# Proceed with container stop
+cai update --stop-containers
+```
+
+### Update Command Flags
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview changes without making any modifications |
+| `--stop-containers` | Stop running containers before applying updates (Linux/WSL2) |
+| `--force` | Skip confirmation prompts (e.g., VM recreation on macOS) |
+| `--lima-recreate` | Delete and recreate Lima VM instead of in-place update (macOS only) |
+
+### Platform-Specific Behavior
+
+**WSL2 / Native Linux:**
+1. Checks for running containers; aborts if found (unless `--stop-containers`)
+2. Updates systemd unit template if changed
+3. Updates Docker context if socket path changed
+4. Updates dockerd bundle if newer version available
+5. Updates sysbox if newer version available
+6. Restarts containai-docker service
+
+**macOS (Lima):**
+1. Updates Lima VM packages via `apt-get upgrade`
+2. Updates sysbox inside the VM if newer version available
+3. Optionally recreates VM entirely with `--lima-recreate`
+4. Updates Docker context if socket path changed
+
+### Version Detection
+
+ContainAI checks for updates by comparing:
+- **dockerd bundle**: Local version in `/opt/containai/VERSION` vs latest from download.docker.com
+- **Sysbox**: Local `sysbox-runc --version` vs latest from GitHub releases
+- **Systemd unit**: Local unit content vs expected template
+
+On macOS, sysbox version is queried inside the Lima VM via `limactl shell`.
+
+### Disabling Update Checks
+
+The automatic update check that runs during `cai doctor` can be disabled:
+
+```bash
+# Disable for current session
+CAI_UPDATE_CHECK_INTERVAL=never cai doctor
+
+# Disable permanently in config
+# Add to ~/.config/containai/config.toml:
+[update]
+check_interval = "never"
+```
 
 ---
 

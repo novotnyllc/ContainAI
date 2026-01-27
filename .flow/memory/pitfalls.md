@@ -229,3 +229,6 @@ Docker Config.User can be a name (e.g., 'agent') not numeric UID - resolve via c
 
 ## 2026-01-27 manual [pitfall]
 When passing printf %q escaped strings to bash -c, do NOT escape again - use double quotes to preserve the escaping as a single argument
+
+## 2026-01-27 manual [pitfall]
+When detecting a word token in grep, \bword\b[^x] fails at end-of-line; use separate patterns for start/middle/end positions or word([[:space:],]|$)

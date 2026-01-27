@@ -47,9 +47,8 @@ Fix custom sysbox deb package to depend on fuse3 instead of fuse (fuse2). Curren
 - [ ] Both local build script and CI workflow patched consistently
 
 ## Done summary
-TBD
-
+Added fuse3 dependency to custom sysbox deb package, replacing fuse (fuse2) per spec requirement. Uses find to locate all control files, replaces fuse with fuse3 in Depends line, and verifies both addition and removal. CI validates the built package using dpkg-deb and checks fusermount3 presence after install.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3140d0236ba35dfe7e56d2f23e9b889e207eefaf
+- Tests: shellcheck -x scripts/build-sysbox.sh
 - PRs:
