@@ -2436,7 +2436,8 @@ done <<'"'"'MAP_DATA'"'"'
     local entry entry_flags entry_path_display entry_src
     local is_profile_import="false"
     # Detect if we're importing from user's home profile (not --from <directory>)
-    if [[ "$source_root" == "$HOME" ]]; then
+    # Normalize paths to handle trailing slash (e.g., --from ~/ gives "$HOME/")
+    if [[ "${source_root%/}" == "${HOME%/}" ]]; then
         is_profile_import="true"
     fi
 
@@ -2904,13 +2905,13 @@ _import_ensure_copilot_config() {
     fi
 
     # Merge minimum required structure:
-    # - trusted_folders: ["/home/agent/workspace"] (replace, not merge)
-    # - banner: "never" (set if not present)
+    # - trusted_folders: ["/home/agent/workspace"] (always set for sandbox)
+    # - banner: "never" (always set to suppress prompts)
     # Preserves all other properties
     local merged
     if ! merged=$(echo "$existing_config" | jq '
         .trusted_folders = ["/home/agent/workspace"] |
-        .banner = (.banner // "never")
+        .banner = "never"
     '); then
         _import_error "Failed to merge Copilot config.json"
         return 1

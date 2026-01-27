@@ -130,9 +130,13 @@ flags = "f"  # file
 
 # =============================================================================
 # SSH
-# Static entries: config, known_hosts (not secrets)
-# Dynamic entries: id_* private keys (secrets) - discovered at import time
-# See _import_discover_ssh_keys() in import.sh for dynamic discovery
+# NOTE: SSH is NOT imported by default for security reasons.
+# Users who need SSH keys in containers should add ~/.ssh to
+# [import].additional_paths in containai.toml.
+# Agent forwarding (ssh -A) is the preferred approach.
+#
+# These entries document the link structure but are NOT in _IMPORT_SYNC_MAP.
+# If users add ~/.ssh via additional_paths, these links will be created.
 # =============================================================================
 
 [[entries]]
@@ -140,27 +144,24 @@ source = ".ssh/config"
 target = "ssh/config"
 container_link = ".ssh/config"
 flags = "f"  # file (not secret - SSH config is public)
+disabled = true  # Not imported by default; add via additional_paths if needed
 
 [[entries]]
 source = ".ssh/known_hosts"
 target = "ssh/known_hosts"
 container_link = ".ssh/known_hosts"
 flags = "f"  # file (not secret - host keys are public)
+disabled = true  # Not imported by default; add via additional_paths if needed
 
-# SSH private keys (id_*) - DYNAMIC PATTERN ENTRY
-# These are discovered at runtime by _import_discover_ssh_keys() in import.sh
-# because the set of keys varies per user (id_rsa, id_ed25519, id_ed25519_sk, etc.)
-# This entry documents the pattern; actual sync happens via dynamic discovery.
-# NOTE: Symlinked keys are excluded (security: prevents following symlinks outside .ssh)
+# SSH private keys pattern (for reference only)
+# If users add ~/.ssh via additional_paths, all files including keys are synced.
+# additional_paths are NOT marked as secrets, so --no-secrets won't skip them.
 [[entries]]
 source = ".ssh/id_*"
 target = "ssh/"
 container_link = ".ssh/"
 flags = "Gs"  # G=glob/dynamic pattern, s=secret (private keys)
-# Note: 'G' flag marks this as a pattern entry handled specially by import.sh
-# Private keys (id_* without .pub) get 's' flag at discovery time
-# Public keys (id_*.pub) do not get 's' flag
-# Symlinked keys are skipped with a warning (use regular files)
+disabled = true  # Not imported by default; add via additional_paths if needed
 
 # =============================================================================
 # OPENCODE
