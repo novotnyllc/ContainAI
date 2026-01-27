@@ -2486,9 +2486,10 @@ _containai_shell_cmd() {
         # Only print here when container existed before this call
         # Skip if --fresh was set (start_container already printed) or container was just created
         if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" && "$fresh_flag" != "true" ]]; then
-            # Get actual volume from container label (preferred) or fall back to resolved_volume
+            # Get actual mounted volume from container (source of truth for what's really mounted)
+            # Inspect .Mounts to find the volume at /mnt/agent-data - this is the real mounted volume
             local actual_volume
-            actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.data-volume"}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
+            actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
             printf '%s\n' "[INFO] Container: $resolved_container_name" >&2
             printf '%s\n' "[INFO] Volume: ${actual_volume:-$resolved_volume}" >&2
         fi

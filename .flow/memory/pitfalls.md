@@ -241,3 +241,6 @@ When using ((var++)) in bash with set -e, the increment returns the OLD value as
 
 ## 2026-01-27 manual [pitfall]
 Docker CLI: flags like --format must come BEFORE -- since -- ends flag parsing; 'docker inspect -- $name --format' treats --format as object name
+
+## 2026-01-27 manual [pitfall]
+Docker Go template {{index .Config.Labels "key"}} prints '<no value>' for missing labels; use {{with index ...}}{{.}}{{end}} to get empty string instead
