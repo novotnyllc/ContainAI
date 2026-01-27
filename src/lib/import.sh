@@ -13,7 +13,7 @@
 # Usage:
 #   source lib/config.sh
 #   source lib/import.sh
-#   _containai_import "" "volume-name" "false" "false" "$PWD" "" "" "false"
+#   _containai_import "" "volume-name" "false" "false" "$PWD" "" "" "false" "false"
 #
 # Arguments:
 #   $1 = Docker context ("" for default, "containai-docker" for Sysbox)
@@ -26,7 +26,10 @@
 #        - If tgz archive: restores directly to volume (bypasses sync/transforms)
 #        - If directory: syncs from that directory instead of $HOME
 #   $8 = no_secrets flag ("true" or "false", default: "false")
-#        - When true, skips entries with 's' flag (OAuth tokens, API keys, SSH keys)
+#        - When true, skips entries with 's' flag (OAuth tokens, API keys)
+#        - Note: ~/.ssh is NOT imported by default; additional_paths are not secrets
+#   $9 = verbose flag ("true" or "false", default: "false")
+#        - When true, shows "source not found" messages for missing import sources
 #
 # Dependencies:
 #   - docker (for rsync container)
@@ -1819,14 +1822,14 @@ copy() {
         else
             case "$_flags" in
                 *j*|*s*)
-                    # Always show when ensuring target (important for credential symlinks)
+                    # Show in verbose mode; target is still ensured (for credential symlinks)
                     if [ "${IMPORT_VERBOSE:-}" = "1" ]; then
                         echo "[INFO] Source missing, ensuring target: $_dst"
                     fi
                     ensure "$_dst" "$_flags"
                     ;;
                 *)
-                    # Only show "source not found" in verbose mode (opt-in)
+                    # Show "source not found" in verbose mode only (opt-in)
                     if [ "${IMPORT_VERBOSE:-}" = "1" ]; then
                         echo "[INFO] Source not found, skipping: $_src"
                     fi
@@ -2514,10 +2517,12 @@ done <<'"'"'MAP_DATA'"'"'
         if [[ "$is_profile_import" == "true" ]]; then
             case "$entry_src" in
                 "/source/.claude/.credentials.json"|"/source/.codex/auth.json")
-                    entry_path_display="~${entry_src#/source}"
+                    # Only show skip message in verbose or dry-run mode
                     if [[ "$dry_run" == "true" ]]; then
+                        entry_path_display="~${entry_src#/source}"
                         echo "[DRY-RUN] Skipping profile credential: $entry_path_display (container should run login)"
-                    else
+                    elif [[ "$verbose" == "true" ]]; then
+                        entry_path_display="~${entry_src#/source}"
                         _import_info "Skipping profile credential: $entry_path_display (container should run login)"
                     fi
                     continue

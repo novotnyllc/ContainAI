@@ -277,11 +277,10 @@ Options:
   --config <path>       Config file path (overrides auto-discovery)
   --dry-run             Preview changes without applying
   --no-excludes         Skip exclude patterns from config
-  --no-secrets          Skip syncing agent secret files (OAuth tokens, API keys,
-                        SSH private keys). Skips entries marked as secrets.
-                        Does NOT affect --credentials flag.
+  --no-secrets          Skip syncing entries marked as secrets (OAuth tokens, API keys).
+                        Does NOT affect --credentials flag or additional_paths.
                         Note: Has no effect with --from archive.tgz (restores bypass sync).
-                        Note: Symlinked SSH keys (~/.ssh/id_*) are not synced (logged as warning).
+                        Note: [import].additional_paths are NOT auto-classified as secrets.
   --verbose, -v         Show verbose output including skipped source files
   -h, --help            Show this help message
 
@@ -291,6 +290,7 @@ Symlinks are created so containers can write their own tokens after login.
 
 Note: ~/.ssh is NOT imported by default. To import SSH keys, add ~/.ssh to
 [import].additional_paths in containai.toml. Agent forwarding (ssh -A) is preferred.
+Warning: additional_paths are NOT marked as secrets; --no-secrets will NOT skip them.
 
 Secret files skipped by --no-secrets (examples):
   - ~/.claude.json (Claude OAuth - credentials.json NOT imported from profile)
