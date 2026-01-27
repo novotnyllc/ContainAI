@@ -38,9 +38,8 @@ Update documentation for all reliability features added in this epic.
 - [ ] README.md common commands includes `cai update`
 - [ ] Documentation follows existing patterns and formatting
 ## Done summary
-TBD
-
+Added documentation for all reliability features: "Updating ContainAI" section in setup-guide.md with platform-specific behavior and container safety, "Volume Ownership Repair" section in troubleshooting.md with cai doctor --repair commands, CHANGELOG entries for safe update flow/repair/SSH fixes/sysbox updates/fuse3, and cai update in README common commands.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: a7aa1e5, bd88cb8
+- Tests: shellcheck -x (passed via pre-commit)
 - PRs:
