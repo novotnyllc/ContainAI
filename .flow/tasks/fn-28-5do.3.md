@@ -33,8 +33,15 @@ User reports "many keys" being generated incorrectly. The design specifies one S
 
 ## Acceptance
 
-- [ ] Root cause identified
-- [ ] Fix implemented (if code issue found)
-- [ ] One key per host confirmed
-- [ ] known_hosts properly managed (stale entries cleaned)
-- [ ] shellcheck passes (if code changed)
+- [x] Root cause identified
+- [x] Fix implemented (if code issue found)
+- [x] One key per host confirmed
+- [x] known_hosts properly managed (stale entries cleaned)
+- [x] shellcheck passes (if code changed)
+
+## Done summary
+Fixed SSH known_hosts lookup bug where grep -F substring matching caused port number collisions (e.g., port 2300 matching entries for port 23000). Changed to awk exact field matching for consistency with existing key type detection logic.
+## Evidence
+- Commits: 521f22a88613500ae5e591132e683b7b0972bada
+- Tests: shellcheck -x src/lib/ssh.sh, awk field matching verification
+- PRs:
