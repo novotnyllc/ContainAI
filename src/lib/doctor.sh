@@ -1856,13 +1856,13 @@ _cai_doctor_check_volume_ownership() {
     # Count files with nobody:nogroup ownership using find
     # -xdev prevents crossing filesystem boundaries
     # -not -type l skips symlinks to prevent traversal attacks
-    # Use find with stat to check ownership
+    # Use -print0 to handle filenames with newlines safely
     local file
-    while IFS= read -r file; do
+    while IFS= read -r -d '' file; do
         if _cai_doctor_check_path_ownership "$file"; then
             ((corrupted_count++))
         fi
-    done < <(find "$volume_path" -xdev -not -type l -print 2>/dev/null || true)
+    done < <(find "$volume_path" -xdev -not -type l -print0 2>/dev/null || true)
 
     printf '%d' "$corrupted_count"
     [[ "$corrupted_count" -gt 0 ]]
@@ -1882,8 +1882,14 @@ _cai_doctor_detect_uid() {
         inspect --type container "$container" \
         --format '{{.Config.User}}' 2>/dev/null) || return 1
 
-    # If user is specified in format "uid:gid" or "uid", use it
-    if [[ -n "$user_info" ]] && [[ "$user_info" != "root" ]]; then
+    # Check container state for exec capability
+    local container_state
+    container_state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+        inspect --type container "$container" \
+        --format '{{.State.Running}}' 2>/dev/null) || container_state=""
+
+    # If user is specified in numeric format "uid:gid" or "uid", use it directly
+    if [[ -n "$user_info" ]] && [[ "$user_info" =~ ^[0-9]+(:[0-9]+)?$ ]]; then
         if [[ "$user_info" == *:* ]]; then
             printf '%s' "$user_info"
             return 0
@@ -1894,19 +1900,35 @@ _cai_doctor_detect_uid() {
         fi
     fi
 
-    # Try to get UID/GID from running process inside container
-    # Use 'agent' user by default (ContainAI standard user)
-    local container_state
-    container_state=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
-        inspect --type container "$container" \
-        --format '{{.State.Running}}' 2>/dev/null) || return 1
+    # If user is a name (e.g., "agent" from Dockerfile USER), resolve via exec
+    # This handles the common case where images set USER by name not UID
+    if [[ -n "$user_info" ]] && [[ "$user_info" != "root" ]] && [[ "$container_state" == "true" ]]; then
+        # Parse user:group if present
+        local user_name group_name
+        if [[ "$user_info" == *:* ]]; then
+            user_name="${user_info%%:*}"
+            group_name="${user_info##*:}"
+        else
+            user_name="$user_info"
+            group_name="$user_info"
+        fi
+        # Resolve numeric IDs inside container
+        local id_output gid_output
+        id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+            exec "$container" id -u "$user_name" 2>/dev/null) || id_output=""
+        gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
+            exec "$container" id -g "$user_name" 2>/dev/null) || gid_output=""
+        if [[ -n "$id_output" ]] && [[ -n "$gid_output" ]]; then
+            printf '%s:%s' "$id_output" "$gid_output"
+            return 0
+        fi
+    fi
 
+    # Fallback: try to get UID/GID for 'agent' user (ContainAI standard)
     if [[ "$container_state" == "true" ]]; then
-        # Container is running, exec id command
-        local id_output
+        local id_output gid_output
         id_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
             exec "$container" id -u agent 2>/dev/null) || id_output=""
-        local gid_output
         gid_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$_CAI_CONTAINAI_DOCKER_CONTEXT" \
             exec "$container" id -g agent 2>/dev/null) || gid_output=""
 
