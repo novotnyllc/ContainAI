@@ -39,9 +39,8 @@ Place after existing "Creating new container..." or similar messages when verbos
 - [ ] Output is gated behind `--verbose` (or not `--quiet`) for script-friendliness
 - [ ] Output format is consistent and easily parseable
 ## Done summary
-TBD
-
+Added --verbose flag to cai run and cai shell that prints container and volume names to stderr before executing commands. Output is properly gated behind --verbose and not --quiet flags for script-friendliness.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: beabed1, f506bab, 72c8b69, 5f5280b, d3410fa, 2782d35
+- Tests: shellcheck -x src/containai.sh src/lib/container.sh
 - PRs:
