@@ -75,7 +75,7 @@ ENV PATH="/home/agent/.local/bin:${PATH}"
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     . /home/agent/.nvm/nvm.sh && \
-    bun install -g --trust @google/gemini-cli @openai/codex playwright agent-browser skills && agent-browser install --with-deps \
+    bun install -g --trust @google/gemini-cli @openai/codex playwright agent-browser skills @mariozechner/pi-coding-agent && agent-browser install --with-deps \
     # Verify installations
     gemini --version && \
     codex --version

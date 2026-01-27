@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         iproute2 \
         kmod \
         # FUSE support (required by sysbox-fs)
-        fuse \
+        fuse3 \
         # Process utilities
         procps \
         # Tool launchers
