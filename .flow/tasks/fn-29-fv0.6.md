@@ -37,9 +37,8 @@ https://github.com/novotnyllc/ContainAI/releases/download/sysbox-build-20260127-
 - [ ] Dockerfile.base uses same URLs (if applicable)
 - [ ] Upgrade detection for sysbox works properly. Newer versions replace older versions.
 ## Done summary
-TBD
-
+Updated sysbox download URLs to use the new ContainAI GitHub release sysbox-build-20260127-10. Changed the pinned tag constant and updated example comments to reflect the new release date (20260127). Both amd64 and arm64 architectures are supported through the GitHub API-driven URL resolution.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 7599b1903ef0edbdb3fa500e60b464e06eb7a25d, 2c6b62a745574438195f8fd014b1396f32246ef8, 17d677bc9697076ad5559f4b604e5229c8bf492a
+- Tests: shellcheck -x src/lib/setup.sh, curl -sI (verified URLs accessible)
 - PRs:
