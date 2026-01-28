@@ -10,7 +10,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-01-27T18:24:41.751582Z",
   "spec_path": ".flow/specs/fn-30-x9f.md",
-  "status": "open",
+  "status": "done",
   "title": "Fix sysbox version detection and Docker context validation",
-  "updated_at": "2026-01-27T19:24:51.865203Z"
+  "updated_at": "2026-01-28T05:41:28.487513Z"
 }
