@@ -5,7 +5,7 @@
   "id": "fn-13-1c7.1",
   "priority": null,
   "spec_path": ".flow/tasks/fn-13-1c7.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Security audit devcontainer.json schema",
-  "updated_at": "2026-01-28T20:46:30.183000Z"
+  "updated_at": "2026-01-28T22:11:53.541051Z"
 }
