@@ -1376,4 +1376,146 @@ _containai_resolve_danger_allow_host_docker_socket() {
     return 0
 }
 
+# ==============================================================================
+# Workspace state persistence (user config)
+# ==============================================================================
+
+# Get user config file path
+# Returns: path to user config file (~/.config/containai/config.toml)
+_containai_user_config_path() {
+    local xdg_config="${XDG_CONFIG_HOME:-$HOME/.config}"
+    printf '%s' "$xdg_config/containai/config.toml"
+}
+
+# Read workspace state from user config
+# Arguments: $1 = workspace path (will be normalized)
+# Outputs: JSON with workspace state keys (data_volume, container_name, agent, created_at)
+#          or empty JSON object {} if not found
+# Returns: 0 on success, 1 on error (Python unavailable, parse error)
+#
+# This function ALWAYS reads from user config (~/.config/containai/config.toml),
+# independent of repo-local config. This is the key difference from _containai_parse_config.
+_containai_read_workspace_state() {
+    local workspace="$1"
+    local script_dir user_config normalized_path
+
+    # Require workspace argument
+    if [[ -z "$workspace" ]]; then
+        printf '%s\n' "[ERROR] _containai_read_workspace_state requires workspace path" >&2
+        return 1
+    fi
+
+    # Normalize the workspace path using platform-aware helper
+    # This ensures consistent keys across lookups
+    normalized_path=$(_cai_normalize_path "$workspace")
+
+    # Get user config path
+    user_config=$(_containai_user_config_path)
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] Python required to read workspace state" >&2
+        return 1
+    fi
+
+    # Determine script directory (where parse-toml.py lives)
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        printf '%s\n' "[ERROR] Failed to determine script directory" >&2
+        return 1
+    fi
+
+    # Call parse-toml.py --get-workspace
+    # This returns {} for missing file or missing workspace (not an error)
+    local ws_json
+    if ! ws_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config" --get-workspace "$normalized_path" 2>/dev/null); then
+        # Parse error - return empty (graceful degradation)
+        printf '%s' "{}"
+        return 0
+    fi
+
+    printf '%s' "$ws_json"
+    return 0
+}
+
+# Write a key to workspace state in user config
+# Arguments: $1 = workspace path (will be normalized)
+#            $2 = key name (data_volume, container_name, agent, created_at)
+#            $3 = value (string)
+# Returns: 0 on success, 1 on error
+#
+# This function ALWAYS writes to user config (~/.config/containai/config.toml).
+# Uses atomic write (temp file + rename) to prevent corruption.
+# Creates config file with 0600 and directory with 0700 if missing.
+_containai_write_workspace_state() {
+    local workspace="$1"
+    local key="$2"
+    local value="$3"
+    local script_dir user_config normalized_path
+
+    # Require all arguments
+    if [[ -z "$workspace" ]] || [[ -z "$key" ]] || [[ -z "$value" ]]; then
+        printf '%s\n' "[ERROR] _containai_write_workspace_state requires workspace, key, and value" >&2
+        return 1
+    fi
+
+    # Normalize the workspace path using platform-aware helper
+    normalized_path=$(_cai_normalize_path "$workspace")
+
+    # Get user config path
+    user_config=$(_containai_user_config_path)
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] Python required to write workspace state" >&2
+        return 1
+    fi
+
+    # Determine script directory (where parse-toml.py lives)
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        printf '%s\n' "[ERROR] Failed to determine script directory" >&2
+        return 1
+    fi
+
+    # Call parse-toml.py --set-workspace-key
+    # This creates the file and directory if needed
+    if ! python3 "$script_dir/parse-toml.py" --file "$user_config" --set-workspace-key "$normalized_path" "$key" "$value"; then
+        printf '%s\n' "[ERROR] Failed to write workspace state" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Read a specific key from workspace state
+# Arguments: $1 = workspace path (will be normalized)
+#            $2 = key name (data_volume, container_name, agent, created_at)
+# Outputs: value (string) or empty if not found
+# Returns: 0 always (empty output = not found)
+#
+# Convenience wrapper around _containai_read_workspace_state for single key access.
+_containai_read_workspace_key() {
+    local workspace="$1"
+    local key="$2"
+    local ws_json value
+
+    # Read full workspace state
+    if ! ws_json=$(_containai_read_workspace_state "$workspace"); then
+        return 0  # Graceful degradation
+    fi
+
+    # Extract the specific key using Python
+    if ! value=$(printf '%s' "$ws_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+val = data.get(sys.argv[1], '')
+if val is not None:
+    print(val, end='')
+" "$key" 2>/dev/null); then
+        return 0  # Graceful degradation
+    fi
+
+    printf '%s' "$value"
+    return 0
+}
+
 return 0
