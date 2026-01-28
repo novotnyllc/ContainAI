@@ -73,9 +73,8 @@ The SSH endpoint constant is: `$_CAI_CONTAINAI_DOCKER_SSH_HOST` = "containai-doc
 - [ ] Context auto-repair does NOT trigger when SSH endpoint is already correct
 - [ ] Nested container mode (running inside sysbox) still returns `unix:///var/run/docker.sock` for inner Docker
 ## Done summary
-TBD
-
+Fixed Docker context platform detection for WSL2 by replacing duplicated platform logic in `_cai_update_docker_context()` with a call to `_cai_expected_docker_host()`, which already correctly handles all platforms including WSL2's SSH endpoint.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 41046eac379bdb4f7396708234f55870d60e0ba5
+- Tests: shellcheck -x src/lib/update.sh, shellcheck -x src/lib/docker.sh, source src/containai.sh && _cai_is_wsl2, source src/containai.sh && _cai_expected_docker_host, source src/containai.sh && _cai_update --dry-run
 - PRs:
