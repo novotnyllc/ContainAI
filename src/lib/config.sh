@@ -1390,8 +1390,9 @@ _containai_user_config_path() {
 # Read workspace state from user config
 # Arguments: $1 = workspace path (will be normalized)
 # Outputs: JSON with workspace state keys (data_volume, container_name, agent, created_at)
-#          or empty JSON object {} if not found
-# Returns: 0 on success, 1 on error (Python unavailable, parse error)
+#          or empty JSON object {} if not found or parse error
+# Returns: 0 on success (including graceful degradation on parse errors)
+#          1 on error (missing workspace argument, non-absolute path, Python unavailable)
 #
 # This function ALWAYS reads from user config (~/.config/containai/config.toml),
 # independent of repo-local config. This is the key difference from _containai_parse_config.
