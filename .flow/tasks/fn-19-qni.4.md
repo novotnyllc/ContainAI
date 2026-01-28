@@ -40,8 +40,7 @@ Or skip with `--yes` flag.
 - [ ] `--agent` flag documented as changing agent, not creating new container
 - [ ] Passes `shellcheck -x src/containai.sh src/lib/container.sh`
 ## Done summary
-TBD
-
+Superseded - merged into fn-34-fk5
 ## Evidence
 - Commits:
 - Tests:

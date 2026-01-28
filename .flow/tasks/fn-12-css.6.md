@@ -74,8 +74,7 @@ cai config unset --workspace <key>          # Remove workspace key
 - [ ] Type validation for bool/int/string/array
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

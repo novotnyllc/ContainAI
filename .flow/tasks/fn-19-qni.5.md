@@ -50,8 +50,7 @@ Follow existing `docs/security-comparison.md` structure but focus on agent-speci
 - [ ] Format consistent with existing docs in `docs/`
 - [ ] Added to docs index/navigation if applicable
 ## Done summary
-TBD
-
+Superseded - merged into fn-34-fk5
 ## Evidence
 - Commits:
 - Tests:

@@ -9,7 +9,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-19-qni.md",
-  "status": "open",
+  "status": "done",
   "title": "Container Lifecycle & Cleanup",
-  "updated_at": "2026-01-25T12:08:21.706687Z"
+  "updated_at": "2026-01-28T19:46:08.513724Z"
 }

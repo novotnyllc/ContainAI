@@ -52,8 +52,7 @@ Add automatic exclusion of `.bashrc.d/*.priv.*` files during import. This preven
 - [ ] Pattern works with rsync-based import
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

@@ -48,8 +48,7 @@ Modify all workspace-specific commands in src/containai.sh to automatically use 
 - [ ] Existing config file settings still work (precedence preserved)
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

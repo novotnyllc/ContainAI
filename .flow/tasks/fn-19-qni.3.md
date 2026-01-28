@@ -36,8 +36,7 @@ Fix workspace symlink creation so that the expected symlink (e.g., `/home/claire
 - [ ] Works on both systemd (containai-init.sh) and non-systemd (entrypoint.sh) paths
 - [ ] Integration test verifies symlink existence
 ## Done summary
-TBD
-
+Superseded - merged into fn-34-fk5
 ## Evidence
 - Commits:
 - Tests:

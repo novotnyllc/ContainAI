@@ -7,8 +7,7 @@ TBD
 - [ ] TBD
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7.6 (cai exec command)
 ## Evidence
 - Commits:
 - Tests:

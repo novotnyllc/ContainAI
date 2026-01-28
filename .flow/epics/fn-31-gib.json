@@ -1,7 +1,9 @@
 {
   "branch_name": "fn-31-gib",
   "created_at": "2026-01-28T10:14:42.953188Z",
-  "depends_on_epics": [],
+  "depends_on_epics": [
+    "fn-36-rb7"
+  ],
   "id": "fn-31-gib",
   "next_task": 1,
   "plan_review_status": "unknown",
@@ -9,5 +11,5 @@
   "spec_path": ".flow/specs/fn-31-gib.md",
   "status": "open",
   "title": "Import Reliability & Comprehensive Testing",
-  "updated_at": "2026-01-28T10:14:42.953200Z"
+  "updated_at": "2026-01-28T19:47:43.478816Z"
 }

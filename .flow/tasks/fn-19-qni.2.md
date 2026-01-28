@@ -34,8 +34,7 @@ Add `--docker-bundle` flag to `cai uninstall` to remove the managed Docker binar
 - [ ] `cai uninstall --help` documents new flag
 - [ ] Passes `shellcheck -x src/lib/uninstall.sh`
 ## Done summary
-TBD
-
+Superseded - merged into fn-34-fk5
 ## Evidence
 - Commits:
 - Tests:

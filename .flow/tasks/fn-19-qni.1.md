@@ -47,8 +47,7 @@ age_hours=$(( ($(date +%s) - created_epoch) / 3600 ))
 - [ ] Only ContainAI-managed resources (label) are affected
 - [ ] Passes `shellcheck -x src/lib/gc.sh`
 ## Done summary
-TBD
-
+Superseded - merged into fn-34-fk5
 ## Evidence
 - Commits:
 - Tests:

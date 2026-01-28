@@ -58,8 +58,7 @@ Add to lib/env.sh:
 - [ ] volumes/ directory is created if needed
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

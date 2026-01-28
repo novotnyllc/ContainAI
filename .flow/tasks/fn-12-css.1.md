@@ -36,8 +36,7 @@ Add helper functions to lib/config.sh for managing workspace state persistence. 
 - [ ] User config directory is created if it doesn't exist
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

@@ -58,8 +58,7 @@ cai exec --workspace /path/to/project make build
 - [ ] Works in non-interactive environment (no TTY)
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

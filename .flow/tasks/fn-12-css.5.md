@@ -55,8 +55,7 @@ Extend `src/parse-toml.py` to support writing/updating TOML config files, not ju
 - [ ] Exit code 1 on errors with message to stderr
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

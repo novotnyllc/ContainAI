@@ -46,8 +46,7 @@ auto_prompt = true  # Default: prompt on new volume
 - [ ] `import.auto_prompt = false` in config disables prompt
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

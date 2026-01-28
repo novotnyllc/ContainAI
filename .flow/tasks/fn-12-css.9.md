@@ -52,8 +52,7 @@ Update lib/import.sh `_containai_import_cmd()`:
 - [ ] Hot-reload uses same .env hierarchy
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:

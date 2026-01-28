@@ -114,8 +114,7 @@ test_import_prompt() {
 - [ ] Dry-run tests don't require real containers
 
 ## Done summary
-TBD
-
+Superseded by fn-36-rb7 or fn-31-gib
 ## Evidence
 - Commits:
 - Tests:
