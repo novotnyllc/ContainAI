@@ -239,15 +239,15 @@ def format_toml_string(value: str) -> str:
     """
     Format a string value for TOML output.
 
-    Uses basic strings for simple values, literal strings for complex ones.
+    Uses basic strings with escaping. Literal strings are avoided because
+    TOML literal strings cannot contain control characters (tab, CR, etc).
     """
-    # Check if value needs escaping
-    needs_escape = any(c in value for c in ['"', "\\", "\n", "\r", "\t"])
-    if needs_escape:
-        # Use literal string (single quotes) if no single quotes in value
-        if "'" not in value and "\n" not in value:
-            return f"'{value}'"
-        # Otherwise escape and use basic string
+    # Check if value contains characters that need escaping
+    has_control = any(c in value for c in ["\n", "\r", "\t"])
+    has_special = any(c in value for c in ['"', "\\"])
+
+    if has_control or has_special:
+        # Always use escaped basic string for control chars or special chars
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         escaped = escaped.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
         return f'"{escaped}"'
@@ -520,16 +520,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Handle --set-workspace-key mode first (does not require loading file)
-    if args.set_workspace_key:
-        ws_path, ws_key, ws_value = args.set_workspace_key
-        config_path = Path(args.file)
-        if set_workspace_key(config_path, ws_path, ws_key, ws_value):
-            sys.exit(0)
-        else:
-            sys.exit(1)
-
-    # Validate mutually exclusive options for read modes
+    # Validate mutually exclusive options (all modes including write)
     # Use 'is not None' to correctly handle empty string keys
     mode_count = sum(
         [
@@ -538,6 +529,7 @@ def main():
             args.exists is not None,
             args.env,
             args.get_workspace is not None,
+            args.set_workspace_key is not None,
         ]
     )
     if mode_count == 0:
@@ -548,10 +540,19 @@ def main():
         sys.exit(1)
     if mode_count > 1:
         print(
-            "Error: Read options are mutually exclusive",
+            "Error: Options are mutually exclusive",
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # Handle --set-workspace-key mode (does not require loading file)
+    if args.set_workspace_key:
+        ws_path, ws_key, ws_value = args.set_workspace_key
+        config_path = Path(args.file)
+        if set_workspace_key(config_path, ws_path, ws_key, ws_value):
+            sys.exit(0)
+        else:
+            sys.exit(1)
 
     # Load the TOML file for read operations
     config_path = Path(args.file)

@@ -1460,9 +1460,9 @@ _containai_write_workspace_state() {
     local value="$3"
     local script_dir user_config normalized_path
 
-    # Require all arguments
-    if [[ -z "$workspace" ]] || [[ -z "$key" ]] || [[ -z "$value" ]]; then
-        printf '%s\n' "[ERROR] _containai_write_workspace_state requires workspace, key, and value" >&2
+    # Require workspace and key arguments (value can be empty string)
+    if [[ -z "$workspace" ]] || [[ -z "$key" ]]; then
+        printf '%s\n' "[ERROR] _containai_write_workspace_state requires workspace and key" >&2
         return 1
     fi
 
