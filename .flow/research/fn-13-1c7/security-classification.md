@@ -60,7 +60,7 @@ These properties control how the container is started and what capabilities it h
 |----------|----------|-----------------|----------------|---------------|
 | `privileged` | **BLOCKED** | Sandbox-host | Reject with error | `--privileged` grants nearly full host capabilities. Enforced by sandbox-host Docker daemon when launching devcontainer. Defeats container isolation entirely. |
 | `capAdd` | **FILTERED** | Sandbox-host | Allowlist only | Capabilities are applied by sandbox-host Docker daemon. Some are safe (e.g., SYS_PTRACE for debugging). Block dangerous ones (SYS_ADMIN, NET_ADMIN, etc.). |
-| `securityOpt` | **FILTERED** | Sandbox-host | Allowlist only | Security options enforced by sandbox-host Docker daemon. `seccomp=unconfined` is dangerous. Allow only known-safe options. Block apparmor=unconfined, no-new-privileges=false. |
+| `securityOpt` | **FILTERED** | Sandbox-host | Allowlist only | Security options enforced by sandbox-host Docker daemon. `seccomp=unconfined` is dangerous. Allow only known-safe options. Block `apparmor=unconfined`, `seccomp=unconfined`. Require `no-new-privileges` (enabled form). |
 | `runArgs` | **FILTERED** | Sandbox-host | Parse and filter | Args passed to sandbox-host Docker daemon. Can include `--privileged`, `--cap-add`, `-v /:/host`. Parse args and block dangerous flags. |
 | `init` | **SAFE** | Sandbox-host | Pass through | `--init` uses tini for zombie reaping. No security impact. |
 | `overrideCommand` | **SAFE** | Sandbox-host | Pass through | Boolean controlling whether to override image CMD. No direct security impact. |
