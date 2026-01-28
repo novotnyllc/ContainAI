@@ -315,6 +315,7 @@ _CAI_CONTAINAI_DOCKER_DATA="/var/lib/containai-docker"
 _CAI_CONTAINAI_DOCKER_EXEC="/var/run/containai-docker"
 _CAI_CONTAINAI_DOCKER_PID="/var/run/containai-docker.pid"
 _CAI_CONTAINAI_DOCKER_BRIDGE="cai0"
+_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR="172.30.0.1/16"
 _CAI_CONTAINAI_DOCKER_SERVICE="containai-docker.service"
 _CAI_CONTAINAI_DOCKER_UNIT="/etc/systemd/system/containai-docker.service"
 _CAI_CONTAINAI_DOCKER_SSH_HOST="containai-docker-daemon"
@@ -476,6 +477,8 @@ Restart=always
 RuntimeDirectory=containai-docker
 # Remove stale pidfile before starting (avoids "pidfile exists" errors after crash)
 ExecStartPre=-/bin/rm -f $_CAI_CONTAINAI_DOCKER_PID
+# Ensure isolated bridge exists before starting dockerd (bridge must be created manually)
+ExecStartPre=/bin/sh -c 'if ! ip link show $_CAI_CONTAINAI_DOCKER_BRIDGE >/dev/null 2>&1; then ip link add name $_CAI_CONTAINAI_DOCKER_BRIDGE type bridge; fi; if ! ip -4 addr show dev $_CAI_CONTAINAI_DOCKER_BRIDGE | grep -q "$_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR"; then ip addr add $_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR dev $_CAI_CONTAINAI_DOCKER_BRIDGE; fi; ip link set $_CAI_CONTAINAI_DOCKER_BRIDGE up'
 # Gracefully stop labeled ContainAI containers before service stops/restarts
 # Uses DOCKER_HOST to target only the containai-docker engine, not default Docker
 # Note: Legacy containers without the label are not stopped automatically

@@ -418,6 +418,58 @@ _cai_doctor_status() {
     fi
 }
 
+# Check isolated containai-docker bridge status (Linux/WSL2 only)
+# Returns: 0=ok, 1=missing or misconfigured
+# Sets: _CAI_DOCTOR_BRIDGE_ERROR to "ip_missing", "missing", or "addr_missing"
+_cai_doctor_bridge_status() {
+    _CAI_DOCTOR_BRIDGE_ERROR=""
+
+    if ! command -v ip >/dev/null 2>&1; then
+        _CAI_DOCTOR_BRIDGE_ERROR="ip_missing"
+        return 1
+    fi
+
+    if ! ip link show "$_CAI_CONTAINAI_DOCKER_BRIDGE" >/dev/null 2>&1; then
+        _CAI_DOCTOR_BRIDGE_ERROR="missing"
+        return 1
+    fi
+
+    if ip -4 addr show dev "$_CAI_CONTAINAI_DOCKER_BRIDGE" 2>/dev/null \
+        | grep -q "$_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR"; then
+        return 0
+    fi
+
+    _CAI_DOCTOR_BRIDGE_ERROR="addr_missing"
+    return 1
+}
+
+# Repair isolated containai-docker bridge (Linux/WSL2 only)
+# Returns: 0=success, 1=failure, 2=ip command missing
+_cai_doctor_fix_bridge() {
+    if ! command -v ip >/dev/null 2>&1; then
+        return 2
+    fi
+
+    if ! ip link show "$_CAI_CONTAINAI_DOCKER_BRIDGE" >/dev/null 2>&1; then
+        if ! sudo ip link add name "$_CAI_CONTAINAI_DOCKER_BRIDGE" type bridge; then
+            return 1
+        fi
+    fi
+
+    if ! ip -4 addr show dev "$_CAI_CONTAINAI_DOCKER_BRIDGE" 2>/dev/null \
+        | grep -q "$_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR"; then
+        if ! sudo ip addr add "$_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR" dev "$_CAI_CONTAINAI_DOCKER_BRIDGE"; then
+            return 1
+        fi
+    fi
+
+    if ! sudo ip link set "$_CAI_CONTAINAI_DOCKER_BRIDGE" up; then
+        return 1
+    fi
+
+    return 0
+}
+
 # Run doctor command with text output
 # Returns: 0 if Sysbox isolation is available
 #          1 if no isolation available (cannot proceed)
@@ -773,6 +825,31 @@ _cai_doctor() {
                         printf '  %-44s %s\n' "Service '$_CAI_CONTAINAI_DOCKER_SERVICE':" "[WARN] $service_state"
                         ;;
                 esac
+            fi
+
+            # Check isolated bridge (cai0) on Linux/WSL2 hosts
+            if [[ "$in_container" == "false" ]]; then
+                if _cai_doctor_bridge_status; then
+                    printf '  %-44s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE':" "[OK]"
+                else
+                    case "${_CAI_DOCTOR_BRIDGE_ERROR:-unknown}" in
+                        ip_missing)
+                            printf '  %-44s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE':" "[WARN] ip tool missing"
+                            printf '  %-44s %s\n' "" "(Install iproute2 to check/repair bridge)"
+                            ;;
+                        missing)
+                            printf '  %-44s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE':" "[ERROR] missing"
+                            printf '  %-44s %s\n' "" "(Run 'cai doctor fix' to create bridge)"
+                            ;;
+                        addr_missing)
+                            printf '  %-44s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE':" "[WARN] address missing"
+                            printf '  %-44s %s\n' "" "(Run 'cai doctor fix' to repair bridge)"
+                            ;;
+                        *)
+                            printf '  %-44s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE':" "[WARN] unknown"
+                            ;;
+                    esac
+                fi
             fi
         fi
 
@@ -1311,6 +1388,43 @@ _cai_doctor_fix() {
         fi
     else
         printf '  %-50s %s\n' "Cleanup" "[SKIP] Docker not installed"
+        ((skip_count++))
+    fi
+
+    printf '\n'
+
+    # === ContainAI Docker Bridge Fix ===
+    printf '%s\n' "ContainAI Docker"
+    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
+        if _cai_is_container; then
+            printf '  %-50s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE'" "[SKIP] running in container"
+            ((skip_count++))
+        elif _cai_doctor_bridge_status; then
+            printf '  %-50s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE'" "[OK]"
+        else
+            case "${_CAI_DOCTOR_BRIDGE_ERROR:-unknown}" in
+                ip_missing)
+                    printf '  %-50s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE'" "[SKIP] ip tool missing"
+                    ((skip_count++))
+                    ;;
+                missing|addr_missing)
+                    printf '  %-50s' "Repairing bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE'"
+                    if _cai_doctor_fix_bridge; then
+                        printf '%s\n' "[FIXED]"
+                        ((fixed_count++))
+                    else
+                        printf '%s\n' "[FAIL]"
+                        ((fail_count++))
+                    fi
+                    ;;
+                *)
+                    printf '  %-50s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE'" "[SKIP] unknown status"
+                    ((skip_count++))
+                    ;;
+            esac
+        fi
+    else
+        printf '  %-50s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE'" "[SKIP] not supported"
         ((skip_count++))
     fi
 
