@@ -58,13 +58,15 @@ These properties control how the container is started and what capabilities it h
 
 | Property | Category | Execution Scope | Default Action | Justification |
 |----------|----------|-----------------|----------------|---------------|
-| `privileged` | **BLOCKED** | Devcontainer | Reject with error | `--privileged` grants nearly full host capabilities. Defeats container isolation entirely. |
-| `capAdd` | **FILTERED** | Devcontainer | Allowlist only | Some capabilities are safe (e.g., SYS_PTRACE for debugging). Block dangerous ones (SYS_ADMIN, NET_ADMIN, etc.). |
-| `securityOpt` | **FILTERED** | Devcontainer | Allowlist only | `seccomp=unconfined` is dangerous. Allow only known-safe options. Block apparmor=unconfined, no-new-privileges=false. |
-| `runArgs` | **FILTERED** | Devcontainer | Parse and filter | Can include `--privileged`, `--cap-add`, `-v /:/host`. Parse args and block dangerous flags. |
-| `init` | **SAFE** | Devcontainer | Pass through | `--init` uses tini for zombie reaping. No security impact. |
-| `overrideCommand` | **SAFE** | Devcontainer | Pass through | Boolean controlling whether to override image CMD. No direct security impact. |
+| `privileged` | **BLOCKED** | Sandbox-host | Reject with error | `--privileged` grants nearly full host capabilities. Enforced by sandbox-host Docker daemon when launching devcontainer. Defeats container isolation entirely. |
+| `capAdd` | **FILTERED** | Sandbox-host | Allowlist only | Capabilities are applied by sandbox-host Docker daemon. Some are safe (e.g., SYS_PTRACE for debugging). Block dangerous ones (SYS_ADMIN, NET_ADMIN, etc.). |
+| `securityOpt` | **FILTERED** | Sandbox-host | Allowlist only | Security options enforced by sandbox-host Docker daemon. `seccomp=unconfined` is dangerous. Allow only known-safe options. Block apparmor=unconfined, no-new-privileges=false. |
+| `runArgs` | **FILTERED** | Sandbox-host | Parse and filter | Args passed to sandbox-host Docker daemon. Can include `--privileged`, `--cap-add`, `-v /:/host`. Parse args and block dangerous flags. |
+| `init` | **SAFE** | Sandbox-host | Pass through | `--init` uses tini for zombie reaping. No security impact. |
+| `overrideCommand` | **SAFE** | Sandbox-host | Pass through | Boolean controlling whether to override image CMD. No direct security impact. |
 | `shutdownAction` | **SAFE** | N/A | Pass through | Controls what happens on disconnect (none/stopContainer/stopCompose). |
+
+**Note on Execution Scope:** Runtime options (`privileged`, `capAdd`, `securityOpt`, `runArgs`, `init`, `overrideCommand`) are enforced by the Docker daemon running inside the Sysbox container (sandbox-host), not inside the devcontainer itself. This distinction matters: sandbox-host is already isolated by Sysbox, providing one layer of defense even if these options are misused.
 
 **Capability Allowlist (suggested):**
 - SAFE: `SYS_PTRACE` (debugging - needed for strace/gdb)
@@ -88,8 +90,8 @@ These properties control how the container is started and what capabilities it h
 
 | Property | Category | Execution Scope | Default Action | Justification |
 |----------|----------|-----------------|----------------|---------------|
-| `mounts` | **FILTERED** | Devcontainer | Validate paths | Can mount arbitrary host paths. Must validate: no `/`, `/etc`, `/var/run/docker.sock`, etc. Allow workspace-relative and named volumes only. |
-| `workspaceMount` | **FILTERED** | Devcontainer | Remap to cai paths | Specifies workspace mount. Must validate source path is within allowed directories. |
+| `mounts` | **FILTERED** | Sandbox-host | Validate paths | Mount options passed to sandbox-host Docker daemon. Can mount arbitrary paths within sandbox. Must validate: no sensitive paths. Allow workspace-relative and named volumes only. |
+| `workspaceMount` | **FILTERED** | Sandbox-host | Remap to cai paths | Workspace mount handled by sandbox-host Docker daemon. Must validate source path is within allowed directories. |
 | `workspaceFolder` | **SAFE** | N/A | Remap | Path inside container. No host impact. Remap to `/home/agent/workspace`. |
 
 **Mount filtering rules:**
@@ -263,3 +265,106 @@ WARN: Extensive logging
 3. **User remapping:** How to handle devcontainers expecting `root` or specific non-`agent` users?
 4. **Compose support:** Should multi-container devcontainers be supported in v1?
 5. **initializeCommand workarounds:** Can we provide a safe alternative (run in sandbox-host)?
+
+---
+
+## Appendix: Complete Property Enumeration
+
+All root properties from `devContainer.base.schema.json` (commit `1b2baddb5f1071ca0e8bcb7eb56dbc9d3e4a674f`):
+
+### devContainerCommon Properties
+
+| Property | Category | Scope | Default Action | Notes |
+|----------|----------|-------|----------------|-------|
+| `$schema` | SAFE | N/A | Ignore | Schema URI reference |
+| `name` | SAFE | N/A | Pass through | Display name |
+| `features` | FILTERED | Build-time | Allowlist/audit | Feature installation |
+| `overrideFeatureInstallOrder` | SAFE | N/A | Pass through | Install order array |
+| `secrets` | SAFE | N/A | Pass through | Secret recommendations (metadata only) |
+| `forwardPorts` | FILTERED | Devcontainer | Merge | Port forwarding |
+| `portsAttributes` | SAFE | N/A | Pass through | Port metadata |
+| `otherPortsAttributes` | SAFE | N/A | Pass through | Default port attributes |
+| `updateRemoteUserUID` | SAFE | Devcontainer | Pass through | UID sync boolean |
+| `containerEnv` | WARN | Devcontainer | Merge | Container environment |
+| `containerUser` | FILTERED | Devcontainer | Remap | Container start user |
+| `mounts` | FILTERED | Sandbox-host | Validate | Mount definitions |
+| `init` | SAFE | Sandbox-host | Pass through | --init flag |
+| `privileged` | BLOCKED | Sandbox-host | Reject | --privileged flag |
+| `capAdd` | FILTERED | Sandbox-host | Allowlist | Capability additions |
+| `securityOpt` | FILTERED | Sandbox-host | Allowlist | Security options |
+| `remoteEnv` | WARN | Devcontainer | Merge | Remote process env |
+| `remoteUser` | FILTERED | Devcontainer | Remap | Remote process user |
+| `initializeCommand` | BLOCKED | Host-machine | Reject | Pre-container host command |
+| `onCreateCommand` | WARN | Devcontainer | Log | Container creation hook |
+| `updateContentCommand` | WARN | Devcontainer | Log | Content update hook |
+| `postCreateCommand` | WARN | Devcontainer | Log | Post-create hook |
+| `postStartCommand` | WARN | Devcontainer | Log | Post-start hook |
+| `postAttachCommand` | WARN | Devcontainer | Log | Post-attach hook |
+| `waitFor` | SAFE | N/A | Pass through | Wait-for enum |
+| `userEnvProbe` | SAFE | Devcontainer | Pass through | Shell profile probe |
+| `hostRequirements` | SAFE | N/A | Pass through | Host resource requirements |
+| `customizations` | SAFE | N/A | Pass through | Tool-specific settings |
+
+### nonComposeBase Properties (image/Dockerfile mode)
+
+| Property | Category | Scope | Default Action | Notes |
+|----------|----------|-------|----------------|-------|
+| `appPort` | FILTERED | Devcontainer | Merge | Application ports |
+| `runArgs` | FILTERED | Sandbox-host | Filter | Docker run arguments |
+| `shutdownAction` | SAFE | N/A | Pass through | Disconnect behavior |
+| `overrideCommand` | SAFE | Sandbox-host | Pass through | Override CMD boolean |
+| `workspaceFolder` | SAFE | N/A | Remap | Container workspace path |
+| `workspaceMount` | FILTERED | Sandbox-host | Validate | Workspace mount string |
+
+### dockerfileContainer Properties
+
+| Property | Category | Scope | Default Action | Notes |
+|----------|----------|-------|----------------|-------|
+| `build` | FILTERED | Build-time | Validate | Build config object |
+| `build.dockerfile` | SAFE | Build-time | Pass through | Dockerfile path |
+| `build.context` | SAFE | Build-time | Pass through | Build context path |
+| `build.target` | SAFE | Build-time | Pass through | Multi-stage target |
+| `build.args` | WARN | Build-time | Log | Build arguments |
+| `build.cacheFrom` | SAFE | Build-time | Pass through | Cache sources |
+| `build.options` | FILTERED | Build-time | Filter | Additional build options |
+| `dockerFile` | SAFE | Build-time | Pass through | Legacy Dockerfile path |
+| `context` | SAFE | Build-time | Pass through | Legacy context path |
+
+### imageContainer Properties
+
+| Property | Category | Scope | Default Action | Notes |
+|----------|----------|-------|----------------|-------|
+| `image` | WARN | Build-time | Log | Base image reference |
+
+### composeContainer Properties
+
+| Property | Category | Scope | Default Action | Notes |
+|----------|----------|-------|----------------|-------|
+| `dockerComposeFile` | WARN | Devcontainer | Log | Compose file(s) |
+| `service` | SAFE | N/A | Pass through | Primary service name |
+| `runServices` | SAFE | N/A | Pass through | Services to start |
+| `workspaceFolder` | SAFE | N/A | Remap | Container workspace path |
+| `shutdownAction` | SAFE | N/A | Pass through | Disconnect behavior |
+| `overrideCommand` | SAFE | Sandbox-host | Pass through | Override CMD boolean |
+
+### VS Code Extension Properties
+
+| Property | Category | Scope | Default Action | Notes |
+|----------|----------|-------|----------------|-------|
+| `customizations.vscode.extensions` | SAFE | Devcontainer | Pass through | Extension IDs |
+| `customizations.vscode.settings` | SAFE | Devcontainer | Pass through | VS Code settings |
+| `customizations.vscode.devPort` | SAFE | Devcontainer | Pass through | Backend port |
+| `extensions` (deprecated) | SAFE | Devcontainer | Pass through | Legacy extensions |
+| `settings` (deprecated) | SAFE | Devcontainer | Pass through | Legacy settings |
+| `devPort` (deprecated) | SAFE | Devcontainer | Pass through | Legacy devPort |
+
+### Codespaces Extension Properties
+
+| Property | Category | Scope | Default Action | Notes |
+|----------|----------|-------|----------------|-------|
+| `customizations.codespaces.repositories` | SAFE | N/A | Ignore | Multi-repo permissions |
+| `customizations.codespaces.openFiles` | SAFE | N/A | Ignore | Files to open |
+| `customizations.codespaces.disableAutomaticConfiguration` | SAFE | N/A | Ignore | Auto-config disable |
+| `codespaces` (deprecated) | SAFE | N/A | Ignore | Legacy codespaces config |
+
+**Total properties enumerated:** 62 (including nested and deprecated)
