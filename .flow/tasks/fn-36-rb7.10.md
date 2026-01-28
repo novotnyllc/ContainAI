@@ -1,16 +1,19 @@
 # fn-36-rb7.10 Update cai setup to install shell completions
 
 ## Description
-Add completion script installation to `cai setup`:
-- For bash: Create `~/.bashrc.d/containai-completion.sh` if `.bashrc.d/` exists, otherwise add to `~/.bashrc`
-- For zsh: Create `~/.zsh/completions/_cai` and ensure fpath includes it
-- Completion file should contain: `eval "$(cai completion bash)"` (or zsh equivalent)
+Update `cai setup` to install **static** completion scripts (no eval at shell startup).
 
 ## Acceptance
-- [ ] `cai setup` creates completion file for bash
-- [ ] `cai setup` creates completion file for zsh if zsh detected
-- [ ] Completions work immediately after setup (new shell session)
-- [ ] Existing completion setups are not duplicated
+- [ ] Bash: writes `~/.bashrc.d/containai-completion.bash` if `~/.bashrc.d/` exists
+- [ ] Bash: otherwise appends source line to `~/.bashrc`
+- [ ] Zsh: writes `~/.zsh/completions/_cai`
+- [ ] Ensures `fpath` includes `~/.zsh/completions`
+- [ ] Script is static (no `eval "$(cai completion bash)"`)
+- [ ] Creates parent directories if needed
+- [ ] Logs where completion was installed
+
+## Verification
+- [ ] Run `cai setup`, start new shell, verify `cai <TAB>` works
 
 ## Done summary
 TBD
