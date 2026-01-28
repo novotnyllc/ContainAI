@@ -201,12 +201,12 @@ Features are installable components that execute `install.sh` scripts during bui
 
 ### Properties by Category
 
-| Category | Count | Properties |
-|----------|-------|------------|
-| **BLOCKED** | 2 | `initializeCommand`, `privileged` |
-| **FILTERED** | 11 | `capAdd`, `securityOpt`, `runArgs`, `mounts`, `workspaceMount`, `features`, `remoteUser`, `containerUser`, `forwardPorts`, `appPort`, `build.options` |
-| **WARN** | 8 | `onCreateCommand`, `updateContentCommand`, `postCreateCommand`, `postStartCommand`, `postAttachCommand`, `image`, `containerEnv`, `remoteEnv`, `build.args`, `dockerComposeFile` |
-| **SAFE** | 25+ | All others (metadata, paths, booleans, enums) |
+| Category | Properties |
+|----------|------------|
+| **BLOCKED** | `initializeCommand`, `privileged` |
+| **FILTERED** | `capAdd`, `securityOpt`, `runArgs`, `mounts`, `workspaceMount`, `build`, `build.options`, `features`, `remoteUser`, `containerUser`, `forwardPorts`, `appPort` |
+| **WARN** | `onCreateCommand`, `updateContentCommand`, `postCreateCommand`, `postStartCommand`, `postAttachCommand`, `image`, `build.args`, `dockerComposeFile`, `containerEnv`, `remoteEnv` |
+| **SAFE** | All others (metadata, paths, booleans, enums) |
 
 ### Critical Security Boundaries
 
