@@ -276,12 +276,15 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
         print(f"Error: Invalid key name: {key}", file=sys.stderr)
         return False
 
-    # Validate workspace path (must be absolute, no null bytes)
+    # Validate workspace path (must be absolute, no control characters)
     if not workspace_path.startswith("/"):
         print(f"Error: Workspace path must be absolute: {workspace_path}", file=sys.stderr)
         return False
     if "\0" in workspace_path:
         print("Error: Workspace path contains null byte", file=sys.stderr)
+        return False
+    if "\n" in workspace_path or "\r" in workspace_path:
+        print("Error: Workspace path contains newline", file=sys.stderr)
         return False
 
     # Read existing file content (or start fresh)
@@ -295,7 +298,9 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
 
     # Build the workspace table header
     # Use quoted key format for paths: [workspace."/path/to/dir"]
-    ws_header = f'[workspace."{workspace_path}"]'
+    # Escape backslashes and quotes in the path for valid TOML
+    escaped_path = workspace_path.replace("\\", "\\\\").replace('"', '\\"')
+    ws_header = f'[workspace."{escaped_path}"]'
 
     # Format the key-value line
     kv_line = f"{key} = {format_toml_string(value)}"
@@ -319,7 +324,9 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
         stripped = line.strip()
 
         # Check if this is the target workspace header
-        if stripped == ws_header:
+        # Handle potential inline comments after header: [workspace."/path"] # comment
+        header_part = stripped.split("#")[0].strip() if "#" in stripped else stripped
+        if header_part == ws_header:
             in_target_workspace = True
             found_workspace_section = True
             new_lines.append(line)
@@ -328,6 +335,7 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
             continue
 
         # Check if we're entering a different section (ends current workspace)
+        # Only match actual table headers [xxx], not array of tables [[xxx]]
         if in_target_workspace and any_table_pattern.match(stripped):
             # Before leaving the section, add the key if not yet updated
             if not key_updated:
@@ -342,8 +350,22 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
             # Check if this line sets the target key
             key_match = re.match(rf"^{re.escape(key)}\s*=", stripped)
             if key_match:
-                # Replace the line
-                new_lines.append(kv_line)
+                # Preserve any inline comment from the original line
+                # TOML inline comments start with # outside of strings
+                # Simple approach: check for # after the value portion
+                inline_comment = ""
+                # Find if there's a comment after the value (outside quotes)
+                # This is a simplified check - full TOML parsing would be complex
+                hash_pos = line.rfind("#")
+                if hash_pos > 0:
+                    # Check if # is outside quoted values (simple heuristic)
+                    before_hash = line[:hash_pos]
+                    # Count unescaped quotes - if even, # is outside strings
+                    quote_count = before_hash.count('"') - before_hash.count('\\"')
+                    if quote_count % 2 == 0:
+                        inline_comment = " " + line[hash_pos:].rstrip()
+                # Replace the line, preserving inline comment
+                new_lines.append(kv_line + inline_comment)
                 key_updated = True
                 # Update last content position
                 last_content_pos_in_workspace = len(new_lines) - 1

@@ -1409,6 +1409,13 @@ _containai_read_workspace_state() {
     # This ensures consistent keys across lookups
     normalized_path=$(_cai_normalize_path "$workspace")
 
+    # Validate normalized path is absolute (must start with /)
+    # This also prevents argument injection since paths starting with - would fail
+    if [[ "$normalized_path" != /* ]]; then
+        printf '%s\n' "[ERROR] Workspace path must be absolute: $normalized_path" >&2
+        return 1
+    fi
+
     # Get user config path
     user_config=$(_containai_user_config_path)
 
@@ -1460,6 +1467,13 @@ _containai_write_workspace_state() {
 
     # Normalize the workspace path using platform-aware helper
     normalized_path=$(_cai_normalize_path "$workspace")
+
+    # Validate normalized path is absolute (must start with /)
+    # This also prevents argument injection since paths starting with - would fail
+    if [[ "$normalized_path" != /* ]]; then
+        printf '%s\n' "[ERROR] Workspace path must be absolute: $normalized_path" >&2
+        return 1
+    fi
 
     # Get user config path
     user_config=$(_containai_user_config_path)
