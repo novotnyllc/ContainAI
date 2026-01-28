@@ -9,6 +9,6 @@
   "priority": 10,
   "spec_path": ".flow/tasks/fn-36-rb7.10.md",
   "status": "todo",
-  "title": "Create base image contract documentation",
+  "title": "Update cai setup to install shell completions",
   "updated_at": "2026-01-28T21:03:02.180781Z"
 }
