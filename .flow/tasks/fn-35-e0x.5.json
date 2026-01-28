@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T10:19:05.923212Z",
+  "depends_on": [],
+  "epic": "fn-35-e0x",
+  "id": "fn-35-e0x.5",
+  "priority": 5,
+  "spec_path": ".flow/tasks/fn-35-e0x.5.md",
+  "status": "todo",
+  "title": "Create E2E test for Pi",
+  "updated_at": "2026-01-28T10:19:05.923223Z"
+}

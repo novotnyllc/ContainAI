@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T19:11:22.683968Z",
+  "depends_on": [],
+  "epic": "fn-37-4xi",
+  "id": "fn-37-4xi.3",
+  "priority": 3,
+  "spec_path": ".flow/tasks/fn-37-4xi.3.md",
+  "status": "todo",
+  "title": "Add config option for warning suppression",
+  "updated_at": "2026-01-28T19:11:22.683979Z"
+}

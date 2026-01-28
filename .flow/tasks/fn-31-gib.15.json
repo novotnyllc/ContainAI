@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T18:29:30.851851Z",
+  "depends_on": [],
+  "epic": "fn-31-gib",
+  "id": "fn-31-gib.15",
+  "priority": 13,
+  "spec_path": ".flow/tasks/fn-31-gib.15.md",
+  "status": "todo",
+  "title": "Implement cai sync test scenario",
+  "updated_at": "2026-01-28T18:29:30.851861Z"
+}

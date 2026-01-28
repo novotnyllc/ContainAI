@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T18:29:48.000421Z",
+  "depends_on": [],
+  "epic": "fn-34-fk5",
+  "id": "fn-34-fk5.14",
+  "priority": 7,
+  "spec_path": ".flow/tasks/fn-34-fk5.14.md",
+  "status": "todo",
+  "title": "Document handy aliases",
+  "updated_at": "2026-01-28T18:29:48.000435Z"
+}

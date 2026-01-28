@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T10:18:47.457851Z",
+  "depends_on": [],
+  "epic": "fn-33-lp4",
+  "id": "fn-33-lp4.8",
+  "priority": 8,
+  "spec_path": ".flow/tasks/fn-33-lp4.8.md",
+  "status": "todo",
+  "title": "Implement doctor fix --template recovery",
+  "updated_at": "2026-01-28T10:18:47.457865Z"
+}

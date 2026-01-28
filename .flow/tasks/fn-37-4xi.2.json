@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T19:11:22.618644Z",
+  "depends_on": [],
+  "epic": "fn-37-4xi",
+  "id": "fn-37-4xi.2",
+  "priority": 2,
+  "spec_path": ".flow/tasks/fn-37-4xi.2.md",
+  "status": "todo",
+  "title": "Add layer validation to template builds",
+  "updated_at": "2026-01-28T19:11:22.618655Z"
+}

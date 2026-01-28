@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T10:18:47.247607Z",
+  "depends_on": [],
+  "epic": "fn-33-lp4",
+  "id": "fn-33-lp4.5",
+  "priority": 5,
+  "spec_path": ".flow/tasks/fn-33-lp4.5.md",
+  "status": "todo",
+  "title": "Implement layer stack validation",
+  "updated_at": "2026-01-28T10:18:47.247618Z"
+}

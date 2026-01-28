@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T18:29:30.783710Z",
+  "depends_on": [],
+  "epic": "fn-31-gib",
+  "id": "fn-31-gib.14",
+  "priority": 12,
+  "spec_path": ".flow/tasks/fn-31-gib.14.md",
+  "status": "todo",
+  "title": "Implement no-pollution test scenario",
+  "updated_at": "2026-01-28T18:29:30.783720Z"
+}

@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-34-fk5",
+  "created_at": "2026-01-28T10:14:46.646752Z",
+  "depends_on_epics": [],
+  "id": "fn-34-fk5",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-34-fk5.md",
+  "status": "open",
+  "title": "One-Shot Execution & Container Lifecycle",
+  "updated_at": "2026-01-28T10:14:46.646764Z"
+}

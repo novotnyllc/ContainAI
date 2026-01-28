@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-38-8lv",
+  "created_at": "2026-01-28T19:13:29.516996Z",
+  "depends_on_epics": [],
+  "id": "fn-38-8lv",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-38-8lv.md",
+  "status": "open",
+  "title": "Agent Addition Documentation",
+  "updated_at": "2026-01-28T19:13:29.517009Z"
+}

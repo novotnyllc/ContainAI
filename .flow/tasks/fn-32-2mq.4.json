@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T10:18:34.926840Z",
+  "depends_on": [],
+  "epic": "fn-32-2mq",
+  "id": "fn-32-2mq.4",
+  "priority": 4,
+  "spec_path": ".flow/tasks/fn-32-2mq.4.md",
+  "status": "todo",
+  "title": "Create GitHub Release automatically",
+  "updated_at": "2026-01-28T10:18:34.926851Z"
+}

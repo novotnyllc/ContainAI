@@ -1,5 +1,15 @@
 # fn-12-css Workspace-Centric UX & Config Improvements
 
+## STATUS: FULLY SUPERSEDED
+
+**`cai exec`** -> Superseded by **fn-36-rb7** (task fn-36-rb7.6: `cai exec` for general commands)
+**Import filtering** (.priv. files) -> Superseded by **fn-31-gib** (Import Reliability)
+**Workspace state persistence** -> Superseded by **fn-36-rb7** (task fn-36-rb7.1)
+**`cai config` command** -> Superseded by **fn-36-rb7** (task fn-36-rb7.7)
+**.env file hierarchy** -> Deferred (not critical for initial release)
+
+---
+
 ## Overview
 
 Transform ContainAI from a CLI that requires manual parameter specification to a workspace-centric tool that automatically remembers context. After creating a container for a workspace, all subsequent commands "just work" without extra flags.

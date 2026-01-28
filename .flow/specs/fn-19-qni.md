@@ -1,5 +1,22 @@
 # Container Lifecycle & Cleanup
 
+## STATUS: SUPERSEDED
+
+This epic has been **merged into fn-34-fk5** (One-Shot Execution & Container Lifecycle).
+
+Moved to fn-34-fk5:
+- `cai gc` command
+- `--reset` flag
+- Session detection integration
+- Run/shell semantics
+
+Remaining work (consider for separate epic):
+- Uninstall improvements (--docker-bundle flag)
+- Workspace symlink fix
+- Sandboxing comparison documentation
+
+---
+
 ## Overview
 
 Comprehensive improvements to container lifecycle management, cleanup, and documentation. Adds garbage collection for stale resources, improves uninstall completeness, fixes workspace symlink creation, clarifies multi-agent `cai run` semantics, and documents how ContainAI compares to other AI agent sandboxing approaches.

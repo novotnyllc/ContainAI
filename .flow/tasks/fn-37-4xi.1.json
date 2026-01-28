@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T19:11:22.550854Z",
+  "depends_on": [],
+  "epic": "fn-37-4xi",
+  "id": "fn-37-4xi.1",
+  "priority": 1,
+  "spec_path": ".flow/tasks/fn-37-4xi.1.md",
+  "status": "todo",
+  "title": "Create base-image-contract.md",
+  "updated_at": "2026-01-28T19:11:22.550864Z"
+}

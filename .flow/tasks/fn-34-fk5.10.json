@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T18:29:47.715375Z",
+  "depends_on": [],
+  "epic": "fn-34-fk5",
+  "id": "fn-34-fk5.10",
+  "priority": 1,
+  "spec_path": ".flow/tasks/fn-34-fk5.10.md",
+  "status": "todo",
+  "title": "Redesign cai run command syntax",
+  "updated_at": "2026-01-28T18:29:47.715384Z"
+}

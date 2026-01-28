@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T19:13:52.180339Z",
+  "depends_on": [],
+  "epic": "fn-38-8lv",
+  "id": "fn-38-8lv.2",
+  "priority": 2,
+  "spec_path": ".flow/tasks/fn-38-8lv.2.md",
+  "status": "todo",
+  "title": "Document agent config patterns",
+  "updated_at": "2026-01-28T19:13:52.180351Z"
+}

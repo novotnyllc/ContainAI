@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T18:29:30.651019Z",
+  "depends_on": [],
+  "epic": "fn-31-gib",
+  "id": "fn-31-gib.12",
+  "priority": 6,
+  "spec_path": ".flow/tasks/fn-31-gib.12.md",
+  "status": "todo",
+  "title": "Install cai in container image",
+  "updated_at": "2026-01-28T18:29:30.651029Z"
+}

@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-28T10:18:26.156884Z",
+  "depends_on": [],
+  "epic": "fn-31-gib",
+  "id": "fn-31-gib.4",
+  "priority": 4,
+  "spec_path": ".flow/tasks/fn-31-gib.4.md",
+  "status": "todo",
+  "title": "Audit sync-manifest.toml completeness",
+  "updated_at": "2026-01-28T10:18:26.156897Z"
+}
