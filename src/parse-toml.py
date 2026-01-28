@@ -325,7 +325,19 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
 
         # Check if this is the target workspace header
         # Handle potential inline comments after header: [workspace."/path"] # comment
-        header_part = stripped.split("#")[0].strip() if "#" in stripped else stripped
+        # Be careful: don't split on # inside quotes (path might contain #)
+        header_part = stripped
+        if stripped.startswith("[") and stripped.endswith("]"):
+            # Simple case: no inline comment
+            header_part = stripped
+        elif stripped.startswith("[") and "#" in stripped:
+            # Find the closing ] that ends the header, then check for # after
+            close_bracket = stripped.rfind("]")
+            if close_bracket > 0:
+                after_bracket = stripped[close_bracket + 1:].lstrip()
+                if after_bracket.startswith("#"):
+                    # There's a comment after the header
+                    header_part = stripped[:close_bracket + 1]
         if header_part == ws_header:
             in_target_workspace = True
             found_workspace_section = True
@@ -423,10 +435,14 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
         temp_path = Path(temp_path)
 
         try:
-            # Write content with secure permissions
+            # Write content with secure permissions using proper file object
+            # This ensures all bytes are written (os.write may be partial)
             os.fchmod(fd, 0o600)
-            os.write(fd, final_content.encode("utf-8"))
-            os.close(fd)
+            with os.fdopen(fd, "wb") as f:
+                f.write(final_content.encode("utf-8"))
+                f.flush()
+                os.fsync(f.fileno())
+            # fd is now closed by the context manager
 
             # Atomic rename
             temp_path.rename(file_path)
