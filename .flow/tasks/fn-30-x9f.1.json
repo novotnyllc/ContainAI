@@ -8,7 +8,7 @@
   "id": "fn-30-x9f.1",
   "priority": null,
   "spec_path": ".flow/tasks/fn-30-x9f.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Fix sysbox version parsing for multiline output format",
   "updated_at": "2026-01-27T18:23:49.892962Z"
 }
