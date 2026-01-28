@@ -902,6 +902,11 @@ Violations break automation and leave the user with incomplete work. Be precise,
   fi
   [[ "${FLOW_RALPH_CLAUDE_VERBOSE:-}" == "1" ]] && claude_args+=(--verbose)
 
+  # Block Explore subagent auto-delegation - causes READ-ONLY failures in autonomous mode
+  # Worker already has disallowedTools: Task but CLI-level is more reliable (precedence 2 vs 6)
+  # See: https://code.claude.com/docs/en/sub-agents#disable-specific-subagents
+  claude_args+=(--disallowedTools "Task(Explore)")
+
   ui_waiting
   claude_out=""
   set +e

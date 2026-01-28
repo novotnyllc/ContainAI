@@ -280,13 +280,10 @@ _cai_update_docker_context() {
 
     local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
-    # Determine expected socket based on platform
+    # Determine expected host based on platform (delegates to single source of truth)
+    # _cai_expected_docker_host() handles: macOS, container, WSL2, Linux
     local expected_host
-    if _cai_is_macos; then
-        expected_host="unix://$HOME/.lima/$_CAI_LIMA_VM_NAME/sock/docker.sock"
-    else
-        expected_host="unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
-    fi
+    expected_host="$(_cai_expected_docker_host)"
 
     # Check if context exists
     if ! docker context inspect "$context_name" >/dev/null 2>&1; then
