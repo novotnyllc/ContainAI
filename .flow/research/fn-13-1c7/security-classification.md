@@ -67,8 +67,11 @@ These properties control how the container is started and what capabilities it h
 | `shutdownAction` | **SAFE** | N/A | Pass through | Controls what happens on disconnect (none/stopContainer/stopCompose). |
 
 **Capability Allowlist (suggested):**
-- SAFE: `SYS_PTRACE`, `NET_RAW` (for ping), `SETPCAP`, `SETFCAP`
+- SAFE: `SYS_PTRACE` (debugging), `NET_RAW` (for ping)
+- RISKY (only if explicitly required): `SETPCAP`, `SETFCAP` (capability manipulation - high-leverage)
 - BLOCKED: `SYS_ADMIN`, `NET_ADMIN`, `SYS_RAWIO`, `SYS_MODULE`, `DAC_READ_SEARCH`, `MKNOD`
+
+**Note:** Strict mode should default to an empty capability allowlist. Only add capabilities when explicitly required by the devcontainer.
 
 **runArgs Blocklist (suggested):**
 - `--privileged`
@@ -110,7 +113,7 @@ These properties control how the container is started and what capabilities it h
 | `build.args` | **WARN** | Build-time | Allow with log | Build args can influence build. Log for audit. |
 | `build.cacheFrom` | **SAFE** | Build-time | Pass through | Cache image references. |
 | `build.options` | **FILTERED** | Build-time | Parse and filter | Additional build args. Block `--network=host`, `--security-opt`, etc. |
-| `dockerComposeFile` | **WARN** | Build-time | Allow with log | Multi-container support. Complex attack surface. Log for audit. |
+| `dockerComposeFile` | **WARN** | Devcontainer (runtime) | Allow with log | Multi-container support. Primarily affects runtime composition (services, mounts, networks), not just build. Complex attack surface. Log for audit. |
 | `service` | **SAFE** | N/A | Pass through | Service name in compose file. |
 | `runServices` | **SAFE** | N/A | Pass through | Array of service names. |
 
