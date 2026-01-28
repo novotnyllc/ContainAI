@@ -67,11 +67,11 @@ These properties control how the container is started and what capabilities it h
 | `shutdownAction` | **SAFE** | N/A | Pass through | Controls what happens on disconnect (none/stopContainer/stopCompose). |
 
 **Capability Allowlist (suggested):**
-- SAFE: `SYS_PTRACE` (debugging), `NET_RAW` (for ping)
-- RISKY (only if explicitly required): `SETPCAP`, `SETFCAP` (capability manipulation - high-leverage)
+- SAFE: `SYS_PTRACE` (debugging - needed for strace/gdb)
+- RISKY (only if explicitly required): `NET_RAW` (raw sockets for ping - higher risk in sandbox models), `SETPCAP`, `SETFCAP` (capability manipulation - high-leverage)
 - BLOCKED: `SYS_ADMIN`, `NET_ADMIN`, `SYS_RAWIO`, `SYS_MODULE`, `DAC_READ_SEARCH`, `MKNOD`
 
-**Note:** Strict mode should default to an empty capability allowlist. Only add capabilities when explicitly required by the devcontainer.
+**Note:** Strict mode should default to an empty capability allowlist. Only add capabilities when explicitly required by the devcontainer and reviewed for security implications.
 
 **runArgs Blocklist (suggested):**
 - `--privileged`
