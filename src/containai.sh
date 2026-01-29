@@ -4457,7 +4457,7 @@ _cai_completions() {
     local global_flags="-h --help"
 
     # Per-subcommand flags
-    local run_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
+    local run_flags="--data-volume --config -w --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --credentials --acknowledge-credential-risk --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
     local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
     local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --debug -D -h --help"
     local doctor_flags="--json --reset-lima --workspace -w -h --help"
@@ -4521,7 +4521,7 @@ _cai_completions() {
             fi
             return
             ;;
-        --image-tag|--memory|--cpus|--name|--from|-e|--env)
+        --image-tag|--memory|--cpus|--name|--from|-e|--env|--credentials)
             # Value expected, no completion
             return
             ;;
@@ -4674,7 +4674,7 @@ _cai_get_containers() {
     fi
 
     # Use underscore-prefixed vars matching CLI, clear DOCKER_HOST/DOCKER_CONTEXT for safety
-    local docker_socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
+    local docker_socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/var/run/containai-docker.sock}"
     local docker_context="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
     if [[ -S "$docker_socket" ]]; then
         _cai_completion_cache_containers=$(DOCKER_HOST= DOCKER_CONTEXT= _cai_completion_timeout 0.5 docker --context "$docker_context" ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')
@@ -4691,7 +4691,7 @@ _cai_get_volumes() {
     fi
 
     # Use underscore-prefixed vars matching CLI, clear DOCKER_HOST/DOCKER_CONTEXT for safety
-    local docker_socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
+    local docker_socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/var/run/containai-docker.sock}"
     local docker_context="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
     if [[ -S "$docker_socket" ]]; then
         _cai_completion_cache_volumes=$(DOCKER_HOST= DOCKER_CONTEXT= _cai_completion_timeout 0.5 docker --context "$docker_context" volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ')
@@ -4742,11 +4742,13 @@ _cai() {
                     _arguments \
                         '--data-volume[Data volume name]:volume:->volumes' \
                         '--config[Config file path]:file:_files' \
-                        '--workspace[Workspace path]:directory:_files -/' \
+                        '(-w --workspace)'{-w,--workspace}'[Workspace path]:directory:_files -/' \
                         '--container[Container name]:container:->containers' \
                         '--image-tag[Image tag]:tag:' \
                         '--memory[Memory limit]:size:' \
                         '--cpus[CPU limit]:count:' \
+                        '--credentials[Credentials mode]:mode:(none env-only all)' \
+                        '--acknowledge-credential-risk[Acknowledge credential risk]' \
                         '--fresh[Remove and recreate container]' \
                         '--restart[Force recreate container]' \
                         '--reset[Reset workspace state]' \
