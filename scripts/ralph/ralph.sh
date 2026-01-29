@@ -381,8 +381,8 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --config)
-      # Already processed in pre-scan; just consume args
-      shift
+      # Already processed in pre-scan; just consume both flag and value
+      shift 2
       ;;
     --help|-h)
       echo "Usage: ralph.sh [options]"
