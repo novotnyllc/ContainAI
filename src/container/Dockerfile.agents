@@ -66,7 +66,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash && \
 # Add Claude to PATH via .bashrc.d
 RUN printf '%s\n' \
     'export PATH="/home/agent/.local/bin:${PATH}"' \
-    > /home/agent/.bashrc.d/01-claude.sh
+    > /home/agent/.bashrc.d/01-oai-env-vars.sh
 
 ENV PATH="/home/agent/.local/bin:${PATH}"
 
@@ -83,17 +83,18 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Install Copilot CLI via official installer
 RUN curl -fsSL https://gh.io/copilot-install | bash && \
     # Verify copilot installed correctly
-    /home/agent/.local/bin/copilot --version
+    copilot --version
 
 # Install OpenCode via official installer
 RUN curl -fsSL https://opencode.ai/install | bash && \
+    ln -snf /home/agent/.opencode/bin/opencode /home/agent/.local/bin/opencode && \
     # Verify opencode installed correctly (opencode may not have --version)
-    test -x /home/agent/.opencode/bin/opencode
+    /home/agent/.local/bin/opencode --version
 
-# Install Kimi CLI via official installer
-RUN curl -fsSL https://kimi.ai/install.sh | bash && \
+# Install Kimi CLI
+RUN uv tool install --python 3.13 kimi-cli && \
     # Verify kimi installed correctly
-    /home/agent/.local/bin/kimi --version
+    kimi --version
 
 # =============================================================================
 # AGENT CONFIGURATION SYMLINKS
