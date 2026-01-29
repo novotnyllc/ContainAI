@@ -2461,7 +2461,7 @@ _containai_shell_cmd() {
             fi
 
             if [[ "$quiet_flag" != "true" ]]; then
-                echo "Removing existing container (--fresh)..."
+                echo "[INFO] Recreating container..."
             fi
 
             # Get SSH port before removal for cleanup
@@ -2490,10 +2490,6 @@ _containai_shell_cmd() {
 
         # Create new container using _containai_start_container with --detached
         # This creates the container without attaching (we'll SSH into it after)
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "Creating new container..."
-        fi
-
         local -a create_args=()
         create_args+=(--data-volume "$resolved_volume")
         create_args+=(--workspace "$resolved_workspace")
@@ -2586,7 +2582,10 @@ _containai_shell_cmd() {
         fi
 
         # Save container name to workspace state on successful use
-        _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+        # Skip if --fresh flag was used (preserves existing workspace state)
+        if [[ "$fresh_flag" != "true" ]]; then
+            _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+        fi
 
         # Print container/volume info if verbose (stderr for pipeline safety)
         # Only print here when container existed before this call
