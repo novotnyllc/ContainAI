@@ -256,3 +256,9 @@ When accepting explicit context/config from lookup results, always re-validate s
 
 ## 2026-01-29 manual [pitfall]
 When using docker --context, clear DOCKER_HOST/DOCKER_CONTEXT env vars before ALL docker calls in that code path, not just creation - wait loops and inspect calls also need it
+
+## 2026-01-29 manual [pitfall]
+When a CLI command reports 'effective' config values with defaults, those defaults must match actual runtime defaults used elsewhere in the codebase - use a single source of truth
+
+## 2026-01-29 manual [pitfall]
+When writing config values to TOML, use proper types (raw int for numbers, true/false for bools) - string-quoting everything breaks downstream parsers expecting specific types
