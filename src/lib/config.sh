@@ -1709,21 +1709,7 @@ _containai_resolve_with_source() {
         return 0
     fi
 
-    # Check if Python available (needed for remaining sources)
-    if ! command -v python3 >/dev/null 2>&1; then
-        # Fall through to default
-        printf '%s\t%s' "" "default"
-        return 0
-    fi
-
-    # Get script directory for parse-toml.py
-    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
-        printf '%s\t%s' "" "default"
-        return 0
-    fi
-
-    # 3. Workspace state (for workspace-scoped keys only)
-    # Check if this is a workspace-scoped key
+    # Check if this is a workspace-scoped key (needed for precedence logic)
     local is_workspace_key=""
     local k
     for k in $_CAI_WORKSPACE_KEYS; do
@@ -1733,7 +1719,19 @@ _containai_resolve_with_source() {
         fi
     done
 
-    if [[ "$is_workspace_key" == "true" ]]; then
+    # Check if Python available (needed for config file sources)
+    # If Python unavailable, skip to built-in defaults (don't return empty)
+    local python_available=""
+    if command -v python3 >/dev/null 2>&1; then
+        python_available="true"
+        # Get script directory for parse-toml.py
+        if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+            python_available=""
+        fi
+    fi
+
+    # 3. Workspace state (for workspace-scoped keys only)
+    if [[ "$python_available" == "true" ]] && [[ "$is_workspace_key" == "true" ]]; then
         # Read from user config workspace section
         user_config_file=$(_containai_user_config_path)
         if [[ -f "$user_config_file" ]]; then
@@ -1759,14 +1757,58 @@ if val is not None and val != '':
     # Walk up from workspace looking for .containai/config.toml
     # Track whether repo-local was found (affects whether we consult user-global)
     local repo_local_found="false"
-    local dir="$normalized_path"
-    while [[ "$dir" != "/" ]]; do
-        repo_config_file="$dir/.containai/config.toml"
-        if [[ -f "$repo_config_file" ]]; then
-            repo_local_found="true"
-            if config_json=$(python3 "$script_dir/parse-toml.py" --file "$repo_config_file" --json 2>/dev/null); then
-                # Try to get the key from config
-                value=$(printf '%s' "$config_json" | python3 -c "
+    if [[ "$python_available" == "true" ]]; then
+        local dir="$normalized_path"
+        while [[ "$dir" != "/" ]]; do
+            repo_config_file="$dir/.containai/config.toml"
+            if [[ -f "$repo_config_file" ]]; then
+                repo_local_found="true"
+                if config_json=$(python3 "$script_dir/parse-toml.py" --file "$repo_config_file" --json 2>/dev/null); then
+                    # For data_volume, check workspace section and agent.data_volume
+                    # (matches _containai_parse_config fallback chain)
+                    if [[ "$key" == "data_volume" ]]; then
+                        value=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+from pathlib import Path
+config = json.load(sys.stdin)
+workspace = sys.argv[1]
+
+# 1. Try workspace.<path>.data_volume (longest prefix match)
+workspaces = config.get('workspace', {})
+best_match = None
+best_segments = 0
+if isinstance(workspaces, dict):
+    ws_path = Path(workspace)
+    for path_str, section in workspaces.items():
+        if not isinstance(section, dict):
+            continue
+        try:
+            cfg_path = Path(path_str)
+            if not cfg_path.is_absolute():
+                continue
+            ws_path.relative_to(cfg_path)
+            num_segments = len(cfg_path.parts)
+            if num_segments > best_segments:
+                vol = section.get('data_volume', '')
+                if vol:
+                    best_match = vol
+                    best_segments = num_segments
+        except ValueError:
+            pass
+if best_match:
+    print(best_match, end='')
+    sys.exit(0)
+
+# 2. Try agent.data_volume
+agent = config.get('agent', {})
+if isinstance(agent, dict):
+    vol = agent.get('data_volume', '')
+    if vol:
+        print(vol, end='')
+" "$normalized_path" 2>/dev/null)
+                    else
+                        # Standard key lookup
+                        value=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 key = sys.argv[1]
@@ -1785,34 +1827,50 @@ if current is not None and current != '':
     else:
         print(current, end='')
 " "$key" 2>/dev/null)
-                if [[ -n "$value" ]]; then
-                    printf '%s\t%s' "$value" "repo-local"
-                    return 0
+                    fi
+                    if [[ -n "$value" ]]; then
+                        printf '%s\t%s' "$value" "repo-local"
+                        return 0
+                    fi
                 fi
+                break
             fi
-            break
-        fi
-        # Stop at git root
-        if [[ -e "$dir/.git" ]]; then
-            break
-        fi
-        dir=$(dirname "$dir")
-    done
+            # Stop at git root
+            if [[ -e "$dir/.git" ]]; then
+                break
+            fi
+            dir=$(dirname "$dir")
+        done
+    fi
 
     # 5. User global config (~/.config/containai/config.toml top-level)
     # For non-workspace-scoped keys, skip user-global if repo-local config exists
     # (matches runtime behavior where _containai_find_config returns ONE config)
     # Workspace-scoped keys always check workspace state (step 3), and user-global
     # is only for top-level global settings
-    if [[ "$repo_local_found" == "true" ]] && [[ "$is_workspace_key" != "true" ]]; then
-        # Repo-local exists but doesn't have this key - go straight to defaults
-        # (matches runtime: once repo-local found, user-global is not consulted)
-        :
-    else
-        user_config_file=$(_containai_user_config_path)
-        if [[ -f "$user_config_file" ]]; then
-            if config_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
-                value=$(printf '%s' "$config_json" | python3 -c "
+    if [[ "$python_available" == "true" ]]; then
+        if [[ "$repo_local_found" == "true" ]] && [[ "$is_workspace_key" != "true" ]]; then
+            # Repo-local exists but doesn't have this key - go straight to defaults
+            # (matches runtime: once repo-local found, user-global is not consulted)
+            :
+        else
+            user_config_file=$(_containai_user_config_path)
+            if [[ -f "$user_config_file" ]]; then
+                if config_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
+                    # For data_volume, also check agent.data_volume (matches _containai_parse_config)
+                    if [[ "$key" == "data_volume" ]]; then
+                        value=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+# Try agent.data_volume
+agent = config.get('agent', {})
+if isinstance(agent, dict):
+    vol = agent.get('data_volume', '')
+    if vol:
+        print(vol, end='')
+" 2>/dev/null)
+                    else
+                        value=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 key = sys.argv[1]
@@ -1834,9 +1892,11 @@ if current is not None and current != '':
     else:
         print(current, end='')
 " "$key" 2>/dev/null)
-                if [[ -n "$value" ]]; then
-                    printf '%s\t%s' "$value" "user-global"
-                    return 0
+                    fi
+                    if [[ -n "$value" ]]; then
+                        printf '%s\t%s' "$value" "user-global"
+                        return 0
+                    fi
                 fi
             fi
         fi
@@ -1845,8 +1905,12 @@ if current is not None and current != '':
     # 6. Built-in defaults
     # NOTE: These must match the actual defaults used in the respective modules
     # SSH defaults match _CAI_SSH_PORT_RANGE_START_DEFAULT/_END_DEFAULT in ssh.sh
+    # data_volume default matches _CONTAINAI_DEFAULT_VOLUME
     local default_value=""
     case "$key" in
+        data_volume)
+            default_value="$_CONTAINAI_DEFAULT_VOLUME"
+            ;;
         agent|agent.default)
             default_value="claude"
             ;;
@@ -1862,7 +1926,7 @@ if current is not None and current != '':
         import.auto_prompt)
             default_value="true"
             ;;
-        # No default for data_volume and container_name (generated)
+        # container_name has no default (generated per workspace)
     esac
 
     if [[ -n "$default_value" ]]; then
