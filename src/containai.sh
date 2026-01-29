@@ -195,7 +195,8 @@ Run Options:
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
   --container <name>    Use or create container with specified name
-                        (uses existing if found, creates new if missing)
+                        (uses existing if found, creates new if missing;
+                        mutually exclusive with --workspace/--data-volume)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -408,7 +409,8 @@ Options:
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
   --container <name>    Use or create container with specified name
-                        (uses existing if found, creates new if missing)
+                        (uses existing if found, creates new if missing;
+                        mutually exclusive with --workspace/--data-volume)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -2233,9 +2235,7 @@ _containai_shell_cmd() {
             fi
 
             resolved_container_name="$container_name"
-
-            # Save container name to workspace state for future lookups
-            _containai_write_workspace_state "$resolved_workspace" "container_name" "$container_name" 2>/dev/null || true
+            # Note: workspace state will be saved after successful validation later
         else
             # Container doesn't exist - will create it with the specified name
             # Use workspace from PWD (or cli_volume if provided, but that's blocked by mutual exclusivity)
@@ -2299,9 +2299,7 @@ _containai_shell_cmd() {
             fi
 
             resolved_container_name="$container_name"
-
-            # Save container name to workspace state
-            _containai_write_workspace_state "$resolved_workspace" "container_name" "$container_name" 2>/dev/null || true
+            # Note: workspace state will be saved after successful create later
         fi
     else
         # === STANDARD MODE: Resolve from workspace ===
@@ -2914,18 +2912,23 @@ _containai_run_cmd() {
         start_args+=(--volume-mismatch-warn)
     fi
 
+    # Track if we need to save container name to workspace state after success
+    local should_save_container_name="false"
+
     if [[ -n "$container_name" ]]; then
         # Use-or-create semantics: use existing container if found, create if missing
         # Use multi-context lookup to check if container exists
         # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
-        local lookup_rc lookup_context lookup_stderr
-        # Capture stderr to check for config parse errors
-        lookup_stderr=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>&1)
-        lookup_rc=$?
+        local lookup_rc lookup_context
+        # _cai_find_container_by_name returns context on stdout; capture separately from stderr
+        if lookup_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>&1); then
+            lookup_rc=0
+        else
+            lookup_rc=$?
+        fi
 
         if [[ $lookup_rc -eq 0 ]]; then
             # Container exists - verify it's ContainAI-managed before reusing
-            lookup_context=$(printf '%s' "$lookup_stderr" | head -1)
             local -a docker_cmd=(docker --context "${lookup_context:-default}")
             local is_managed
             is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
@@ -2935,20 +2938,18 @@ _containai_run_cmd() {
                 return 1
             fi
             # Container exists and is managed - pass --name and let _containai_start_container reuse it
+            should_save_container_name="true"
         elif [[ $lookup_rc -eq 2 ]]; then
-            # Ambiguity means container exists in multiple contexts
-            echo "[ERROR] Container $container_name exists in multiple contexts" >&2
+            # Ambiguity means container exists in multiple contexts - helper already printed details
             return 1
         elif [[ $lookup_rc -eq 3 ]]; then
-            # Config parse error - show captured error message
-            printf '%s\n' "$lookup_stderr" >&2
+            # Config parse error - helper already printed error
             return 1
+        else
+            # lookup_rc=1 means not found - will be created
+            should_save_container_name="true"
         fi
-        # lookup_rc=1 means not found - will be created
         start_args+=(--name "$container_name")
-
-        # Save container name to workspace state
-        _containai_write_workspace_state "$resolved_workspace" "container_name" "$container_name" 2>/dev/null || true
     fi
     # Always pass resolved credentials
     start_args+=(--credentials "$resolved_credentials")
@@ -3020,7 +3021,17 @@ _containai_run_cmd() {
         start_args+=("${agent_args[@]}")
     fi
 
+    # Run container and save workspace state only on success
+    local start_rc
     _containai_start_container "${start_args[@]}"
+    start_rc=$?
+
+    # Save container name to workspace state only after successful create/use
+    if [[ $start_rc -eq 0 ]] && [[ "$should_save_container_name" == "true" ]] && [[ -n "$container_name" ]]; then
+        _containai_write_workspace_state "$resolved_workspace" "container_name" "$container_name" 2>/dev/null || true
+    fi
+
+    return $start_rc
 }
 
 # ==============================================================================
