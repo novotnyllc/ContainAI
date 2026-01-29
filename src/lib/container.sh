@@ -1550,15 +1550,27 @@ _containai_start_container() {
 
     # Select Docker context
     # If explicit_context is provided (e.g., from --container finding an existing container),
-    # use it directly; otherwise auto-select based on isolation availability
+    # validate Sysbox availability; otherwise auto-select based on isolation availability
     local selected_context=""
     if [[ -n "$explicit_context" ]]; then
         # Use the explicitly provided context (container was found in this context)
-        # Validate the context exists before using it
+        # Validate the context exists and has Sysbox isolation
         if ! docker context inspect -- "$explicit_context" >/dev/null 2>&1; then
             echo "[ERROR] Docker context not found: $explicit_context" >&2
             echo "[HINT] Run 'docker context ls' to see available contexts" >&2
             return 1
+        fi
+        # Validate Sysbox availability for the explicit context (security requirement)
+        if ! _cai_sysbox_available_for_context "$explicit_context"; then
+            if [[ "$force_flag" == "true" ]]; then
+                echo "[WARN] Context '$explicit_context' does not have Sysbox isolation available." >&2
+                echo "[WARN] Proceeding with --force; container may lack proper isolation." >&2
+            else
+                echo "[ERROR] Context '$explicit_context' does not have Sysbox isolation available." >&2
+                echo "[HINT] Use --force to bypass isolation check, or recreate container with --fresh in an isolated context." >&2
+                echo "[HINT] Run 'cai doctor' for setup instructions." >&2
+                return 1
+            fi
         fi
         selected_context="$explicit_context"
     else
@@ -1592,7 +1604,7 @@ _containai_start_container() {
     fi
 
     # Build docker command prefix based on context
-    # Context is always Sysbox mode
+    # Context should have Sysbox mode (validated above, unless --force bypassed)
     local -a docker_cmd=(docker)
     if [[ -n "$selected_context" ]]; then
         docker_cmd=(docker --context "$selected_context")
