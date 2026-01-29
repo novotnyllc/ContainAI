@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-29T07:06:15.858983Z",
+  "depends_on": [
+    "fn-39-ua0.1"
+  ],
+  "epic": "fn-39-ua0",
+  "id": "fn-39-ua0.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-39-ua0.5.md",
+  "status": "todo",
+  "title": "Flag and operation tests",
+  "updated_at": "2026-01-29T07:07:32.884599Z"
+}

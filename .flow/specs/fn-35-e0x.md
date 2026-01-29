@@ -1,140 +1,108 @@
-# fn-35-e0x Pi Agent Support
+# fn-35-e0x Pi & Kimi Code Sync Support
 
 ## Overview
 
-Add support for the Pi agent (Inflection AI) to ContainAI. This includes installation in the Docker image and config sync via sync-manifest.toml.
+Add sync-manifest.toml entries for Pi coding agent (`@mariozechner/pi-coding-agent`) and Kimi CLI (`kimi-cli`) to enable config syncing between host and container.
 
-**Priority:** SECOND - After fn-36-rb7 (CLI UX Consistency).
+**Note**: Both agents are already installed in the Docker image. This epic adds only the config sync support.
 
-**Pi Agent:** Inflection AI's Pi is a conversational AI assistant. This epic adds support for its CLI tool and configuration.
+**Pi Agent**: `@mariozechner/pi-coding-agent` by Mario Zechner (badlogic). A coding agent CLI with read, bash, edit, write tools and session management. **NOT** Inflection AI's Pi.
+
+**Kimi CLI**: MoonshotAI's official coding assistant CLI.
 
 ## Scope
 
 ### In Scope
-- Research Pi agent (CLI, config files, auth model)
-- Add Pi to sync-manifest.toml
-- Add Pi to Dockerfile.agents
-- E2E tests for Pi installation verification
+- Add Pi entries to sync-manifest.toml
+- Add Kimi entries to sync-manifest.toml
+- Add data directories to Dockerfile.agents (mkdir -p)
+- Run generators and rebuild image
+- Verify sync works correctly
 
 ### Out of Scope
-- Documentation for adding new agents (separate epic)
-- Custom agent creation by users (they can use templates)
-- Agent marketplace/registry
-- Dynamic agent loading
+- Agent installation (already done)
+- E2E tests (simple verification suffices)
+- Documentation updates (separate epic)
 
 ## Approach
 
-### Pi Agent Research
+### Pi Config Locations (`~/.pi/agent/`)
+| File | Purpose | Flags |
+|------|---------|-------|
+| `settings.json` | User preferences | `fj` |
+| `models.json` | Provider config with API keys | `fjs` (SECRET) |
+| `keybindings.json` | Key bindings | `fj` |
+| `skills/` | Custom skills | `dR` |
+| `extensions/` | Extensions | `dR` |
+| `sessions/` | EXCLUDED - ephemeral, per-project |
 
-**Questions to Answer:**
-1. What is the Pi CLI installation method?
-2. Where does Pi store configuration? (`~/.pi/`, `~/.config/pi/`?)
-3. What credentials does Pi need? (API key, OAuth?)
-4. What files should be synced vs generated?
-5. Is there a headless/non-interactive mode?
+### Kimi Config Locations (`~/.kimi/`)
+| File | Purpose | Flags |
+|------|---------|-------|
+| `config.toml` | Main config with API keys | `fs` (SECRET) |
+| `mcp.json` | MCP server config | `fjs` (SECRET) |
+| `sessions/` | EXCLUDED - ephemeral |
 
-**Research Tasks:**
-- Check Inflection AI documentation
-- Install Pi CLI locally
-- Document file locations
-- Test in container environment
-
-### Sync Manifest Entries
-
-Expected pattern (to be validated):
-```toml
-# =============================================================================
-# PI (Inflection AI)
-# =============================================================================
-
-[[entries]]
-source = ".pi/config.json"
-target = "pi/config.json"
-container_link = ".pi/config.json"
-flags = "fjo"  # file, json-init, optional (only sync if exists)
-
-[[entries]]
-source = ".pi/credentials.json"
-target = "pi/credentials.json"
-container_link = ".pi/credentials.json"
-flags = "fso"  # file, secret, optional
-
-[[entries]]
-source = ".pi/settings.json"
-target = "pi/settings.json"
-container_link = ".pi/settings.json"
-flags = "fjo"  # file, json-init, optional
-```
-
-**Note:** Use the `o` (optional) flag so we don't create empty `.pi/` directories for users who don't use Pi.
-
-### Dockerfile.agents Addition
-
+### Dockerfile.agents Changes
+Add to directory creation block (lines 51-59):
 ```dockerfile
-# =============================================================================
-# Pi (Inflection AI)
-# =============================================================================
-RUN curl -fsSL https://pi.ai/install.sh | bash \
-    || echo "[WARN] Pi installation failed, continuing..."
+/home/agent/.pi \
+/home/agent/.pi/agent \
+/home/agent/.kimi
 ```
-
-(Actual installation method TBD from research)
 
 ## Tasks
 
-### fn-35-e0x.1: Research Pi agent
-Install Pi locally, document config files, auth model, and CLI behavior.
+### fn-35-e0x.1: Add Pi to sync-manifest.toml
+Add entries for Pi config files. Use patterns from existing agents (Claude at lines 30-88).
 
-### fn-35-e0x.2: Add Pi to sync-manifest.toml
-Add entries for Pi config files based on research. Use `o` flag for optional sync.
+### fn-35-e0x.2: Add Kimi to sync-manifest.toml
+Add entries for Kimi config files. Similar pattern to Pi.
 
-### fn-35-e0x.3: Add Pi to Dockerfile.agents
-Add installation commands, verify with version check.
+### fn-35-e0x.3: Add directories to Dockerfile.agents
+Add mkdir -p for ~/.pi, ~/.pi/agent, ~/.kimi in the agent data directory block.
 
 ### fn-35-e0x.4: Run generators and rebuild
-Regenerate symlinks.sh, init-dirs.sh, link-spec.json. Rebuild image.
+Run ./src/build.sh which regenerates symlinks.sh, init-dirs.sh, link-spec.json.
 
-### fn-35-e0x.5: Create E2E test for Pi
-Test that Pi is installed and configs sync correctly.
+### fn-35-e0x.5: Verify sync works
+Quick manual verification that configs sync correctly.
 
 ## Quick commands
 
 ```bash
-# Research: install Pi locally
-# (TBD based on research)
-
-# Build with new agent
+# Build with new entries
 ./src/build.sh
 
-# Test Pi in container
+# Test in container
 cai shell
 pi --version
+kimi --version
 
-# Verify sync (only if you have Pi config)
-cai import --dry-run | grep pi
+# Verify symlinks exist
+ls -la ~/.pi/agent/
+ls -la ~/.kimi/
 
-# Verify no pollution (if you DON'T have Pi)
-ls -la ~ | grep pi  # Should show nothing
+# Verify sync (if you have Pi/Kimi config)
+cai import --dry-run | grep -E 'pi|kimi'
 ```
 
 ## Acceptance
 
-- [ ] Pi agent researched (config location, auth, CLI)
-- [ ] Pi entries added to sync-manifest.toml with `o` flag
-- [ ] Pi installation added to Dockerfile.agents
+- [ ] Pi entries added to sync-manifest.toml
+- [ ] Kimi entries added to sync-manifest.toml
+- [ ] Directories created in Dockerfile.agents
 - [ ] Generated files updated (symlinks.sh, init-dirs.sh, link-spec.json)
-- [ ] Pi works in container (installation verified)
-- [ ] Import syncs Pi configs correctly when they exist on host
-- [ ] Import does NOT create empty .pi/ when user has no Pi config
-- [ ] E2E test verifies Pi installation
+- [ ] Image builds successfully
+- [ ] Symlinks resolve correctly in container
 
 ## Dependencies
 
-- **fn-36-rb7**: CLI UX Consistency (workspace state, container naming for testing)
+- **fn-36-rb7**: CLI UX Consistency (for container testing)
 
 ## References
 
-- Inflection AI: https://inflection.ai/
-- Pi: https://pi.ai/
-- Existing agents in sync-manifest.toml
-- Dockerfile.agents: `src/container/Dockerfile.agents`
+- Pi Mono: https://github.com/badlogic/pi-mono
+- Kimi CLI: https://github.com/MoonshotAI/kimi-cli
+- Existing patterns: sync-manifest.toml lines 30-88 (Claude), 422-467 (Codex)
+- Dockerfile.agents: src/container/Dockerfile.agents

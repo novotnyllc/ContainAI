@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-39-ua0",
+  "created_at": "2026-01-29T07:05:48.161054Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [
+    "fn-35-e0x"
+  ],
+  "id": "fn-39-ua0",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-39-ua0.md",
+  "status": "open",
+  "title": "Comprehensive Sync System E2E Tests",
+  "updated_at": "2026-01-29T07:07:33.020598Z"
+}
