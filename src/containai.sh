@@ -4747,7 +4747,7 @@ _cai() {
                         '--image-tag[Image tag]:tag:' \
                         '--memory[Memory limit]:size:' \
                         '--cpus[CPU limit]:count:' \
-                        '--credentials[Credentials mode]:mode:(none env-only all)' \
+                        '--credentials[Credentials mode]:mode:(none)' \
                         '--acknowledge-credential-risk[Acknowledge credential risk]' \
                         '--fresh[Remove and recreate container]' \
                         '--restart[Force recreate container]' \
