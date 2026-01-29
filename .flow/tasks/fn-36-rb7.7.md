@@ -21,9 +21,8 @@ Add `cai config` subcommand for get/set/list/unset with workspace-aware scope. I
 - [ ] Verify `~/.config/containai/config.toml` reflects changes
 
 ## Done summary
-TBD
-
+Implemented `cai config` command for managing ContainAI settings with workspace-aware scope. Added list/get/set/unset subcommands with source tracking (`_containai_resolve_with_source`). Extended parse-toml.py with --unset-workspace-key, --set-key, and --unset-key operations for atomic config updates.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 32decb6ef79f0159de15e1989513a2b10c940320
+- Tests: shellcheck -x src/containai.sh src/lib/config.sh, python3 -m py_compile src/parse-toml.py, cai config list, cai config get agent, cai config set/unset workspace and global keys
 - PRs:

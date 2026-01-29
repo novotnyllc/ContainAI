@@ -400,11 +400,70 @@ def unset_workspace_key(file_path: Path, workspace_path: str, key: str) -> bool:
     return True
 
 
+def format_toml_value(key: str, value: str) -> str:
+    """
+    Format a value for TOML output with proper typing based on key.
+
+    Known keys with specific types:
+    - ssh.port_range_start, ssh.port_range_end: integers
+    - ssh.forward_agent, import.auto_prompt: booleans
+    - Everything else: strings
+
+    Args:
+        key: The config key (used to determine type)
+        value: The value as a string
+
+    Returns:
+        TOML-formatted value (with quotes for strings, raw for ints/bools)
+    """
+    # Keys that should be integers
+    int_keys = {
+        "port_range_start",
+        "port_range_end",
+        "ssh.port_range_start",
+        "ssh.port_range_end",
+    }
+
+    # Keys that should be booleans
+    bool_keys = {
+        "forward_agent",
+        "auto_prompt",
+        "ssh.forward_agent",
+        "import.auto_prompt",
+    }
+
+    # Get the last part of the key for matching nested keys
+    key_name = key.split(".")[-1] if "." in key else key
+
+    # Check for integer keys
+    if key in int_keys or key_name in int_keys:
+        # Validate it's actually an integer
+        try:
+            int(value)
+            return value  # Return raw integer for TOML
+        except ValueError:
+            # Fall through to string formatting
+            pass
+
+    # Check for boolean keys
+    if key in bool_keys or key_name in bool_keys:
+        # Convert to TOML boolean
+        if value.lower() in ("true", "1", "yes"):
+            return "true"
+        elif value.lower() in ("false", "0", "no"):
+            return "false"
+        # Fall through to string formatting if not a valid bool
+
+    # Default: format as string
+    return format_toml_string(value)
+
+
 def set_global_key(file_path: Path, key: str, value: str) -> bool:
     """
     Set a global (top-level) key in config atomically.
 
     Supports dot notation for nested keys (e.g., agent.default).
+    Values are typed appropriately based on the key name.
 
     Args:
         file_path: Path to the TOML config file
@@ -435,7 +494,8 @@ def set_global_key(file_path: Path, key: str, value: str) -> bool:
 
     lines = content.split("\n")
     new_lines = []
-    kv_line = f"{parts[-1]} = {format_toml_string(value)}"
+    # Format value with proper TOML type based on key
+    kv_line = f"{parts[-1]} = {format_toml_value(key, value)}"
 
     if len(parts) == 1:
         # Top-level key

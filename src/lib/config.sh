@@ -1812,16 +1812,18 @@ if current is not None and current != '':
     fi
 
     # 6. Built-in defaults
+    # NOTE: These must match the actual defaults used in the respective modules
+    # SSH defaults match _CAI_SSH_PORT_RANGE_START_DEFAULT/_END_DEFAULT in ssh.sh
     local default_value=""
     case "$key" in
         agent|agent.default)
             default_value="claude"
             ;;
         ssh.port_range_start)
-            default_value="2222"
+            default_value="2300"
             ;;
         ssh.port_range_end)
-            default_value="2322"
+            default_value="2500"
             ;;
         ssh.forward_agent)
             default_value="false"
