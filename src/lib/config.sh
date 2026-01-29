@@ -1586,7 +1586,9 @@ _containai_generate_volume_name() {
     # Get Unix timestamp for uniqueness
     # Try nanosecond precision first (GNU date), fall back to seconds + random
     # This ensures uniqueness even for rapid consecutive --reset calls
-    if timestamp=$(date +%s%N 2>/dev/null) && [[ ${#timestamp} -gt 10 ]]; then
+    # Note: BSD/macOS date +%s%N yields literal "N" (e.g., "1700000000N"), not nanoseconds
+    # Must validate result is all digits AND length > 10 to detect this
+    if timestamp=$(date +%s%N 2>/dev/null) && [[ "$timestamp" =~ ^[0-9]+$ ]] && [[ ${#timestamp} -gt 10 ]]; then
         # Got nanoseconds - use full precision for uniqueness
         : # timestamp already set
     else
