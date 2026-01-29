@@ -253,3 +253,6 @@ Use os.fdopen() with flush()+fsync() instead of raw os.write() - os.write may re
 
 ## 2026-01-29 manual [pitfall]
 When accepting explicit context/config from lookup results, always re-validate security requirements (e.g., isolation, permissions) - don't assume prior validation
+
+## 2026-01-29 manual [pitfall]
+When using docker --context, clear DOCKER_HOST/DOCKER_CONTEXT env vars before ALL docker calls in that code path, not just creation - wait loops and inspect calls also need it
