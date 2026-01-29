@@ -90,6 +90,11 @@ RUN curl -fsSL https://opencode.ai/install | bash && \
     # Verify opencode installed correctly (opencode may not have --version)
     test -x /home/agent/.opencode/bin/opencode
 
+# Install Kimi CLI via official installer
+RUN curl -fsSL https://kimi.ai/install.sh | bash && \
+    # Verify kimi installed correctly
+    /home/agent/.local/bin/kimi --version
+
 # =============================================================================
 # AGENT CONFIGURATION SYMLINKS
 # Symlink config files to /mnt/agent-data for persistence across container restarts
@@ -143,6 +148,8 @@ RUN printf '%s\n' \
     'alias codex="codex --dangerously-bypass-approvals-and-sandbox"' \
     'alias copilot="copilot --yolo"' \
     'alias gemini="gemini --yolo"' \
+    'alias kimi="kimi --yolo"' \
+    'alias kimi-cli="kimi-cli --yolo"' \
     > /home/agent/.bash_aliases
 
 # =============================================================================

@@ -4350,11 +4350,32 @@ _CAI_COMPLETION_CACHE_CONTAINERS=""
 _CAI_COMPLETION_CACHE_VOLUMES=""
 _CAI_COMPLETION_CACHE_TTL=5  # seconds
 
+# Portable sub-second timeout for completion
+# Falls back gracefully if no timeout command is available
+# Arguments: $1 = timeout in seconds (can be fractional like 0.5), $* = command
+# Returns: command exit code, or 124 on timeout
+_cai_completion_timeout() {
+    local timeout_sec="${1:-1}"
+    shift
+
+    # Try GNU timeout (Linux) or gtimeout (macOS via coreutils)
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$timeout_sec" "$@"
+        return $?
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$timeout_sec" "$@"
+        return $?
+    fi
+
+    # Fallback: run without timeout (better than failing)
+    "$@"
+}
+
 # Get ContainAI containers for completion (with caching)
 # Outputs: space-separated container names
 # Returns: 0 always (empty output on failure/timeout)
 _cai_completion_get_containers() {
-    local now cache_time cached_values
+    local now cache_time
     now=$(date +%s)
 
     # Check cache
@@ -4366,12 +4387,12 @@ _cai_completion_get_containers() {
         fi
     fi
 
-    # Docker lookup with 500ms timeout
+    # Docker lookup with 500ms timeout using portable helper
     local containers docker_host
     docker_host="${_CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
     if [[ -S "$docker_host" ]]; then
         # shellcheck disable=SC2016
-        containers=$(timeout 0.5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}" ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ') || containers=""
+        containers=$(_cai_completion_timeout 0.5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}" ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ') || containers=""
     fi
 
     # Update cache
@@ -4383,7 +4404,7 @@ _cai_completion_get_containers() {
 # Outputs: space-separated volume names
 # Returns: 0 always (empty output on failure/timeout)
 _cai_completion_get_volumes() {
-    local now cache_time cached_values
+    local now cache_time
     now=$(date +%s)
 
     # Check cache
@@ -4395,12 +4416,12 @@ _cai_completion_get_volumes() {
         fi
     fi
 
-    # Docker lookup with 500ms timeout
+    # Docker lookup with 500ms timeout using portable helper
     local volumes docker_host
     docker_host="${_CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
     if [[ -S "$docker_host" ]]; then
         # shellcheck disable=SC2016
-        volumes=$(timeout 0.5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}" volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ') || volumes=""
+        volumes=$(_cai_completion_timeout 0.5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}" volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ') || volumes=""
     fi
 
     # Update cache
@@ -4431,9 +4452,9 @@ _cai_completions() {
     local global_flags="-h --help"
 
     # Per-subcommand flags
-    local run_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --dry-run -e --env"
-    local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose -h --help"
-    local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet -h --help"
+    local run_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --mount-docker-socket --please-root-my-host -h --help"
+    local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
+    local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --debug -D -h --help"
     local doctor_flags="--json --reset-lima --workspace -w -h --help"
     local doctor_fix_subcommands="volume container"
     local setup_flags="--dry-run --verbose -v -h --help"
@@ -4487,8 +4508,12 @@ _cai_completions() {
             return
             ;;
         --workspace|-w|--config|-o|--output)
-            # Directory/file completion
-            _filedir
+            # Directory/file completion (with fallback if bash-completion not available)
+            if type _filedir &>/dev/null; then
+                _filedir
+            else
+                COMPREPLY=($(compgen -f -- "$cur"))
+            fi
             return
             ;;
         --image-tag|--memory|--cpus|--name|--from|-e|--env)
@@ -4621,6 +4646,19 @@ typeset -g _cai_completion_cache_volumes=""
 typeset -g _cai_completion_cache_time=0
 typeset -g _cai_completion_cache_ttl=5
 
+# Portable sub-second timeout helper
+_cai_completion_timeout() {
+    local timeout_sec="$1"
+    shift
+    if (( $+commands[timeout] )); then
+        timeout "$timeout_sec" "$@"
+    elif (( $+commands[gtimeout] )); then
+        gtimeout "$timeout_sec" "$@"
+    else
+        "$@"
+    fi
+}
+
 _cai_get_containers() {
     local now=$(date +%s)
     if (( now - _cai_completion_cache_time < _cai_completion_cache_ttl )) && [[ -n "$_cai_completion_cache_containers" ]]; then
@@ -4628,9 +4666,10 @@ _cai_get_containers() {
         return
     fi
 
-    local docker_socket="/run/containai-docker/docker.sock"
+    local docker_socket="${CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
+    local docker_context="${CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
     if [[ -S "$docker_socket" ]]; then
-        _cai_completion_cache_containers=$(timeout 0.5 docker --context containai-docker ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')
+        _cai_completion_cache_containers=$(_cai_completion_timeout 0.5 docker --context "$docker_context" ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')
         _cai_completion_cache_time=$now
     fi
     echo "$_cai_completion_cache_containers"
@@ -4643,9 +4682,10 @@ _cai_get_volumes() {
         return
     fi
 
-    local docker_socket="/run/containai-docker/docker.sock"
+    local docker_socket="${CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
+    local docker_context="${CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
     if [[ -S "$docker_socket" ]]; then
-        _cai_completion_cache_volumes=$(timeout 0.5 docker --context containai-docker volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ')
+        _cai_completion_cache_volumes=$(_cai_completion_timeout 0.5 docker --context "$docker_context" volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ')
         _cai_completion_cache_time=$now
     fi
     echo "$_cai_completion_cache_volumes"
@@ -4687,7 +4727,8 @@ _cai() {
             _describe -t commands 'cai command' subcommands
             ;;
         args)
-            case $words[1] in
+            # After _arguments -C with '*:: :->args', $line[1] contains the subcommand
+            case $line[1] in
                 run)
                     _arguments \
                         '--data-volume[Data volume name]:volume:->volumes' \
@@ -4704,7 +4745,10 @@ _cai() {
                         '(-d --detached)'{-d,--detached}'[Run in background]' \
                         '(-q --quiet)'{-q,--quiet}'[Suppress output]' \
                         '--verbose[Verbose output]' \
+                        '(-D --debug)'{-D,--debug}'[Debug mode]' \
                         '--dry-run[Show what would happen]' \
+                        '--mount-docker-socket[Mount Docker socket]' \
+                        '--please-root-my-host[Dangerous: allow host root access]' \
                         '*'{-e,--env}'[Set environment variable]:var=value:' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
@@ -4724,6 +4768,7 @@ _cai() {
                         '--dry-run[Show what would happen]' \
                         '(-q --quiet)'{-q,--quiet}'[Suppress output]' \
                         '--verbose[Verbose output]' \
+                        '(-D --debug)'{-D,--debug}'[Debug mode]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 exec)
@@ -4735,26 +4780,28 @@ _cai() {
                         '--fresh[Remove and recreate container]' \
                         '--force[Skip isolation checks]' \
                         '(-q --quiet)'{-q,--quiet}'[Suppress output]' \
+                        '(-D --debug)'{-D,--debug}'[Debug mode]' \
                         '(-h --help)'{-h,--help}'[Show help]' \
                         '*:command:_command_names -e'
                     ;;
                 doctor)
-                    _arguments \
-                        '1: :->doctor_cmd' \
+                    _arguments -C \
+                        '--json[JSON output]' \
+                        '--reset-lima[Reset Lima VM (macOS)]' \
+                        '(-w --workspace)'{-w,--workspace}'[Workspace path]:directory:_files -/' \
+                        '(-h --help)'{-h,--help}'[Show help]' \
+                        '1: :->doctor_sub' \
                         '*:: :->doctor_args'
                     case $state in
-                        doctor_cmd)
+                        doctor_sub)
                             _alternative \
-                                'commands:doctor command:(fix)' \
-                                'options:option:(--json --reset-lima -w --workspace -h --help)'
+                                'commands:doctor command:(fix)'
                             ;;
                         doctor_args)
-                            if [[ $words[1] == "fix" ]]; then
-                                _arguments \
-                                    '1:target:(volume container)' \
-                                    '--all[Fix all]' \
-                                    '*:name:'
-                            fi
+                            _arguments \
+                                '1:target:(volume container)' \
+                                '--all[Fix all]' \
+                                '*:name:'
                             ;;
                     esac
                     ;;
@@ -4801,38 +4848,36 @@ _cai() {
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 ssh)
-                    _arguments \
-                        '1: :->ssh_cmd' \
+                    _arguments -C \
+                        '(-h --help)'{-h,--help}'[Show help]' \
+                        '1: :->ssh_sub' \
                         '*:: :->ssh_args'
                     case $state in
-                        ssh_cmd)
+                        ssh_sub)
                             _alternative \
-                                'commands:ssh command:(cleanup)' \
-                                'options:option:(-h --help)'
+                                'commands:ssh command:(cleanup)'
                             ;;
                         ssh_args)
-                            if [[ $words[1] == "cleanup" ]]; then
-                                _arguments \
-                                    '--dry-run[Show what would be cleaned]' \
-                                    '(-h --help)'{-h,--help}'[Show help]'
-                            fi
+                            _arguments \
+                                '--dry-run[Show what would be cleaned]' \
+                                '(-h --help)'{-h,--help}'[Show help]'
                             ;;
                     esac
                     ;;
                 links)
-                    _arguments \
-                        '1: :->links_cmd' \
+                    _arguments -C \
+                        '(-h --help)'{-h,--help}'[Show help]' \
+                        '1: :->links_sub' \
                         '*:: :->links_args'
                     case $state in
-                        links_cmd)
+                        links_sub)
                             _alternative \
-                                'commands:links command:(check fix)' \
-                                'options:option:(-h --help)'
+                                'commands:links command:(check fix)'
                             ;;
                         links_args)
                             _arguments \
                                 '--workspace[Workspace path]:directory:_files -/' \
-                                '--name[Container name]:name:->containers' \
+                                '--name[Container name]:name:' \
                                 '--config[Config file path]:file:_files' \
                                 '(-q --quiet)'{-q,--quiet}'[Suppress output]' \
                                 '--dry-run[Show what would be fixed]' \
@@ -4841,14 +4886,14 @@ _cai() {
                     esac
                     ;;
                 config)
-                    _arguments \
-                        '1: :->config_cmd' \
+                    _arguments -C \
+                        '(-h --help)'{-h,--help}'[Show help]' \
+                        '1: :->config_sub' \
                         '*:: :->config_args'
                     case $state in
-                        config_cmd)
+                        config_sub)
                             _alternative \
-                                'commands:config command:(list get set unset)' \
-                                'options:option:(-h --help)'
+                                'commands:config command:(list get set unset)'
                             ;;
                         config_args)
                             _arguments \
@@ -4880,16 +4925,16 @@ _cai() {
                     ;;
             esac
 
-            # Handle dynamic completions
+            # Handle dynamic completions for --container and --data-volume only
             case $state in
                 containers)
-                    local containers
-                    containers=($(_cai_get_containers))
+                    local -a containers
+                    containers=(${(f)"$(_cai_get_containers)"})
                     _describe -t containers 'container' containers
                     ;;
                 volumes)
-                    local volumes
-                    volumes=($(_cai_get_volumes))
+                    local -a volumes
+                    volumes=(${(f)"$(_cai_get_volumes)"})
                     _describe -t volumes 'volume' volumes
                     ;;
             esac
