@@ -262,3 +262,6 @@ When a CLI command reports 'effective' config values with defaults, those defaul
 
 ## 2026-01-29 manual [pitfall]
 When writing config values to TOML, use proper types (raw int for numbers, true/false for bools) - string-quoting everything breaks downstream parsers expecting specific types
+
+## 2026-01-29 manual [pitfall]
+In zsh _arguments -C state machines, use $line[1] not $words[1] for subcommand dispatch - $words[1] is the command name

@@ -33,3 +33,6 @@ Write config/version files atomically: write to .tmp then mv -f to prevent trunc
 
 ## 2026-01-26 manual [convention]
 CLI argument validation should be order-independent; use pre-scan pass to determine mode before validating args
+
+## 2026-01-29 manual [convention]
+For portable sub-second timeouts in shell scripts, check for timeout/gtimeout and fall back gracefully
