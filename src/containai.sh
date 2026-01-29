@@ -1885,6 +1885,11 @@ _containai_config_set_cmd() {
         return 1
     fi
 
+    # Normalize "agent" alias to "agent.default" (runtime only reads agent.default)
+    if [[ "$key" == "agent" ]]; then
+        key="agent.default"
+    fi
+
     # Determine target workspace
     local target_workspace
     if [[ -n "$explicit_workspace" ]]; then
@@ -1928,10 +1933,19 @@ _containai_config_set_cmd() {
         local final_workspace="$target_workspace"
         if [[ -z "$explicit_workspace" ]]; then
             # Find best matching workspace from existing config (nested detection)
-            local matched_ws
-            matched_ws=$(_containai_find_matching_workspace "$target_workspace" 2>/dev/null) || true
-            if [[ -n "$matched_ws" ]]; then
-                final_workspace="$matched_ws"
+            # Load user config JSON and pipe to _containai_find_matching_workspace
+            local user_config_file matched_ws config_json
+            user_config_file=$(_containai_user_config_path)
+            if [[ -f "$user_config_file" ]] && command -v python3 >/dev/null 2>&1; then
+                local script_dir
+                if script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; then
+                    if config_json=$(python3 "$script_dir/lib/../parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
+                        matched_ws=$(printf '%s' "$config_json" | _containai_find_matching_workspace "$target_workspace" 2>/dev/null) || true
+                        if [[ -n "$matched_ws" ]]; then
+                            final_workspace="$matched_ws"
+                        fi
+                    fi
+                fi
             fi
         fi
         if ! _containai_write_workspace_state "$final_workspace" "$key" "$value"; then
@@ -2002,6 +2016,11 @@ _containai_config_unset_cmd() {
         return 1
     fi
 
+    # Normalize "agent" alias to "agent.default" (runtime only reads agent.default)
+    if [[ "$key" == "agent" ]]; then
+        key="agent.default"
+    fi
+
     # Determine target workspace
     local target_workspace
     if [[ -n "$explicit_workspace" ]]; then
@@ -2038,10 +2057,19 @@ _containai_config_unset_cmd() {
         local final_workspace="$target_workspace"
         if [[ -z "$explicit_workspace" ]]; then
             # Find best matching workspace from existing config (nested detection)
-            local matched_ws
-            matched_ws=$(_containai_find_matching_workspace "$target_workspace" 2>/dev/null) || true
-            if [[ -n "$matched_ws" ]]; then
-                final_workspace="$matched_ws"
+            # Load user config JSON and pipe to _containai_find_matching_workspace
+            local user_config_file matched_ws config_json
+            user_config_file=$(_containai_user_config_path)
+            if [[ -f "$user_config_file" ]] && command -v python3 >/dev/null 2>&1; then
+                local script_dir
+                if script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; then
+                    if config_json=$(python3 "$script_dir/lib/../parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
+                        matched_ws=$(printf '%s' "$config_json" | _containai_find_matching_workspace "$target_workspace" 2>/dev/null) || true
+                        if [[ -n "$matched_ws" ]]; then
+                            final_workspace="$matched_ws"
+                        fi
+                    fi
+                fi
             fi
         fi
         if ! _containai_unset_workspace_key "$final_workspace" "$key"; then

@@ -1736,9 +1736,30 @@ _containai_resolve_with_source() {
         fi
     fi
 
+    # First, check if repo-local config exists (affects whether we consult user-global)
+    # This mimics _containai_find_config behavior: if repo-local exists, use it exclusively
+    local repo_local_found="false"
+    local repo_config_file=""
+    if [[ "$python_available" == "true" ]]; then
+        local dir="$normalized_path"
+        while [[ "$dir" != "/" ]]; do
+            if [[ -f "$dir/.containai/config.toml" ]]; then
+                repo_local_found="true"
+                repo_config_file="$dir/.containai/config.toml"
+                break
+            fi
+            # Stop at git root
+            if [[ -e "$dir/.git" ]]; then
+                break
+            fi
+            dir=$(dirname "$dir")
+        done
+    fi
+
     # 3. Workspace state (for workspace-scoped keys only)
-    # Use longest-prefix matching (same as _containai_find_matching_workspace) for nested detection
-    if [[ "$python_available" == "true" ]] && [[ "$is_workspace_key" == "true" ]]; then
+    # Only consult user-global workspace state if NO repo-local config exists
+    # (matches runtime: _containai_find_config returns ONE config, not merged)
+    if [[ "$python_available" == "true" ]] && [[ "$is_workspace_key" == "true" ]] && [[ "$repo_local_found" == "false" ]]; then
         # Read from user config workspace section with longest-prefix matching
         user_config_file=$(_containai_user_config_path)
         if [[ -f "$user_config_file" ]]; then
@@ -1796,20 +1817,13 @@ if best_match_value:
     fi
 
     # 4. Repo-local config (.containai/config.toml)
-    # Walk up from workspace looking for .containai/config.toml
-    # Track whether repo-local was found (affects whether we consult user-global)
-    local repo_local_found="false"
-    if [[ "$python_available" == "true" ]]; then
-        local dir="$normalized_path"
-        while [[ "$dir" != "/" ]]; do
-            repo_config_file="$dir/.containai/config.toml"
-            if [[ -f "$repo_config_file" ]]; then
-                repo_local_found="true"
-                if config_json=$(python3 "$script_dir/parse-toml.py" --file "$repo_config_file" --json 2>/dev/null); then
-                    # For data_volume, check workspace section and agent.data_volume
-                    # (matches _containai_parse_config fallback chain)
-                    if [[ "$key" == "data_volume" ]]; then
-                        value=$(printf '%s' "$config_json" | python3 -c "
+    # Use the repo_config_file found earlier (if any)
+    if [[ "$python_available" == "true" ]] && [[ "$repo_local_found" == "true" ]] && [[ -n "$repo_config_file" ]]; then
+        if config_json=$(python3 "$script_dir/parse-toml.py" --file "$repo_config_file" --json 2>/dev/null); then
+            # For data_volume, check workspace section and agent.data_volume
+            # (matches _containai_parse_config fallback chain)
+            if [[ "$key" == "data_volume" ]]; then
+                value=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
 from pathlib import Path
 config = json.load(sys.stdin)
@@ -1848,9 +1862,9 @@ if isinstance(agent, dict):
     if vol:
         print(vol, end='')
 " "$normalized_path" 2>/dev/null)
-                    else
-                        # Standard key lookup
-                        value=$(printf '%s' "$config_json" | python3 -c "
+            else
+                # Standard key lookup
+                value=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 key = sys.argv[1]
@@ -1869,20 +1883,12 @@ if current is not None and current != '':
     else:
         print(current, end='')
 " "$key" 2>/dev/null)
-                    fi
-                    if [[ -n "$value" ]]; then
-                        printf '%s\t%s' "$value" "repo-local"
-                        return 0
-                    fi
-                fi
-                break
             fi
-            # Stop at git root
-            if [[ -e "$dir/.git" ]]; then
-                break
+            if [[ -n "$value" ]]; then
+                printf '%s\t%s' "$value" "repo-local"
+                return 0
             fi
-            dir=$(dirname "$dir")
-        done
+        fi
     fi
 
     # 5. User global config (~/.config/containai/config.toml top-level)
