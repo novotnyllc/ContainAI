@@ -15,9 +15,8 @@ Add `--fresh` to recreate containers with the same saved settings and volume, wi
 - [ ] Create container, run `cai shell --fresh`, verify new container ID and same volume
 
 ## Done summary
-TBD
-
+Implemented --fresh flag behavior per spec: logs "[INFO] Recreating container..." at start of --fresh block (regardless of container existence), skips workspace state writes to preserve existing settings.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: decee872da66f9dd5f6b6d0490d04fd4ca64b78a, a660552ac306769dd9ddc09737c576ca5a916852
+- Tests: bash -n src/containai.sh, shellcheck -x src/containai.sh
 - PRs:
