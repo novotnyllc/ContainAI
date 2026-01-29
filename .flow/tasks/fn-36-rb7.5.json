@@ -1,7 +1,4 @@
 {
-  "assignee": null,
-  "claim_note": "",
-  "claimed_at": null,
   "created_at": "2026-01-28T18:51:37.397224Z",
   "depends_on": [],
   "epic": "fn-36-rb7",
@@ -10,5 +7,5 @@
   "spec_path": ".flow/tasks/fn-36-rb7.5.md",
   "status": "todo",
   "title": "Implement human-readable container naming",
-  "updated_at": "2026-01-28T21:02:17.204491Z"
+  "updated_at": "2026-01-29T03:07:42.903776Z"
 }

@@ -312,7 +312,7 @@ _cai_hash_path() {
 #       Collision handling is done in _cai_resolve_container_name.
 _containai_container_name() {
     local workspace_path="$1"
-    local repo_name branch_name repo_s branch_s sanitized name
+    local repo_name branch_name repo_s branch_s name
 
     if [[ -z "$workspace_path" ]]; then
         # Fallback to current directory if no workspace provided
@@ -327,15 +327,15 @@ _containai_container_name() {
         repo_name="${repo_name##*/}"
     fi
 
-    # Get branch name from git
-    if git -C "$workspace_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # Get branch name from git (guard against git not being installed)
+    if command -v git >/dev/null 2>&1 && git -C "$workspace_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         branch_name=$(git -C "$workspace_path" rev-parse --abbrev-ref HEAD 2>/dev/null) || branch_name=""
         # Detached HEAD: use 7-char short SHA
         if [[ "$branch_name" == "HEAD" || -z "$branch_name" ]]; then
             branch_name=$(git -C "$workspace_path" rev-parse --short=7 HEAD 2>/dev/null) || branch_name="nogit"
         fi
     else
-        # Non-git directory
+        # Non-git directory or git not installed
         branch_name="nogit"
     fi
 
@@ -629,10 +629,11 @@ _cai_resolve_container_name() {
 
     # First, check if a container already exists for this workspace via label
     # This prevents creating duplicates when existing container has suffixed name
+    # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context authoritative
     local -a by_label=()
     while IFS= read -r line; do
         [[ -n "$line" ]] && by_label+=("$line")
-    done < <("${docker_cmd[@]}" ps -a \
+    done < <(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" ps -a \
         --filter "label=containai.workspace=$workspace_path" \
         --format '{{.Names}}' 2>/dev/null)
 
@@ -658,9 +659,10 @@ _cai_resolve_container_name() {
 
     # Check if name is taken by another workspace (handle collisions)
     # Cap suffix at 999 to ensure max 63 chars (base 59 + "-" + 3 digits = 63)
-    while "${docker_cmd[@]}" inspect --type container "$candidate" >/dev/null 2>&1; do
+    # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context authoritative
+    while DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$candidate" >/dev/null 2>&1; do
         # Check if this container is for our workspace
-        existing_workspace=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$candidate" 2>/dev/null) || existing_workspace=""
+        existing_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$candidate" 2>/dev/null) || existing_workspace=""
         if [[ "$existing_workspace" == "$workspace_path" ]]; then
             # Same workspace - reuse this container name
             printf '%s\n' "$candidate"
@@ -2349,8 +2351,9 @@ _containai_start_container() {
             # No command: entrypoint runs systemd as PID 1
 
             # Create the container (inside lock to reserve the port)
+            # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context in args authoritative
             local create_output
-            if ! create_output=$(docker "${args[@]}" 2>&1); then
+            if ! create_output=$(DOCKER_CONTEXT= DOCKER_HOST= docker "${args[@]}" 2>&1); then
                 [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
                 echo "[ERROR] Failed to create container: $create_output" >&2
                 return 1
