@@ -1892,22 +1892,15 @@ if current is not None and current != '':
     fi
 
     # 5. User global config (~/.config/containai/config.toml top-level)
-    # For non-workspace-scoped keys, skip user-global if repo-local config exists
+    # If repo-local config exists, skip user-global entirely for ALL keys
     # (matches runtime behavior where _containai_find_config returns ONE config)
-    # Workspace-scoped keys always check workspace state (step 3), and user-global
-    # is only for top-level global settings
-    if [[ "$python_available" == "true" ]]; then
-        if [[ "$repo_local_found" == "true" ]] && [[ "$is_workspace_key" != "true" ]]; then
-            # Repo-local exists but doesn't have this key - go straight to defaults
-            # (matches runtime: once repo-local found, user-global is not consulted)
-            :
-        else
-            user_config_file=$(_containai_user_config_path)
-            if [[ -f "$user_config_file" ]]; then
-                if config_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
-                    # For data_volume, also check agent.data_volume (matches _containai_parse_config)
-                    if [[ "$key" == "data_volume" ]]; then
-                        value=$(printf '%s' "$config_json" | python3 -c "
+    if [[ "$python_available" == "true" ]] && [[ "$repo_local_found" == "false" ]]; then
+        user_config_file=$(_containai_user_config_path)
+        if [[ -f "$user_config_file" ]]; then
+            if config_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
+                # For data_volume, also check agent.data_volume (matches _containai_parse_config)
+                if [[ "$key" == "data_volume" ]]; then
+                    value=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 # Try agent.data_volume
@@ -1917,8 +1910,8 @@ if isinstance(agent, dict):
     if vol:
         print(vol, end='')
 " 2>/dev/null)
-                    else
-                        value=$(printf '%s' "$config_json" | python3 -c "
+                else
+                    value=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 key = sys.argv[1]
@@ -1940,11 +1933,10 @@ if current is not None and current != '':
     else:
         print(current, end='')
 " "$key" 2>/dev/null)
-                    fi
-                    if [[ -n "$value" ]]; then
-                        printf '%s\t%s' "$value" "user-global"
-                        return 0
-                    fi
+                fi
+                if [[ -n "$value" ]]; then
+                    printf '%s\t%s' "$value" "user-global"
+                    return 0
                 fi
             fi
         fi
