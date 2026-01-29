@@ -4459,7 +4459,7 @@ _cai_completions() {
     # Per-subcommand flags
     local run_flags="--data-volume --config -w --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --credentials --acknowledge-credential-risk --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
     local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
-    local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --debug -D -h --help"
+    local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
     local doctor_flags="--json --reset-lima --workspace -w -h --help"
     local doctor_fix_subcommands="volume container"
     local setup_flags="--dry-run --verbose -v -h --help"
@@ -4795,6 +4795,7 @@ _cai() {
                         '--fresh[Remove and recreate container]' \
                         '--force[Skip isolation checks]' \
                         '(-q --quiet)'{-q,--quiet}'[Suppress output]' \
+                        '--verbose[Verbose output]' \
                         '(-D --debug)'{-D,--debug}'[Debug mode]' \
                         '(-h --help)'{-h,--help}'[Show help]' \
                         '*:command:_command_names -e'
