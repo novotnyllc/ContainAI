@@ -2446,6 +2446,11 @@ _containai_shell_cmd() {
 
     # Handle --fresh flag: remove and recreate container
     if [[ "$fresh_flag" == "true" ]]; then
+        # Log at start of --fresh block (regardless of whether container exists)
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "[INFO] Recreating container..."
+        fi
+
         # Check if container exists
         if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
             # Verify ownership before removing
@@ -2458,10 +2463,6 @@ _containai_shell_cmd() {
                     echo "Remove the conflicting container manually if needed: docker rm -f '$resolved_container_name'" >&2
                     return 1
                 fi
-            fi
-
-            if [[ "$quiet_flag" != "true" ]]; then
-                echo "[INFO] Recreating container..."
             fi
 
             # Get SSH port before removal for cleanup
