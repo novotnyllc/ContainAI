@@ -244,3 +244,9 @@ Docker CLI: flags like --format must come BEFORE -- since -- ends flag parsing; 
 
 ## 2026-01-27 manual [pitfall]
 Docker Go template {{index .Config.Labels "key"}} prints '<no value>' for missing labels; use {{with index ...}}{{.}}{{end}} to get empty string instead
+
+## 2026-01-28 manual [pitfall]
+When generating TOML table headers with user-provided paths, escape quotes and backslashes to prevent injection into [section."path"] format
+
+## 2026-01-28 manual [pitfall]
+Use os.fdopen() with flush()+fsync() instead of raw os.write() - os.write may return partial writes and doesn't guarantee durability

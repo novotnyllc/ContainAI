@@ -19,9 +19,8 @@ Update `--container` behavior to be command-appropriate: use-or-create for shell
 - [ ] Check help output for updated semantics
 
 ## Done summary
-TBD
-
+Implemented consistent --container semantics: shell/run use-or-create (creates if missing, uses if exists), stop/export/import require-exists. Added --docker-context parameter to _containai_start_container for context consistency when reusing containers. Container name saved to workspace state on successful create/use. Help text updated to document new semantics and mutual exclusivity.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 5464b5dfb095d0a0f1f032cef89df52854040808, 6af1e62, 13721cf, 661d795, ef16c35
+- Tests: shellcheck -x src/containai.sh, cai shell --help | grep -A5 -- --container, cai stop --help | grep -A3 -- --container
 - PRs:
