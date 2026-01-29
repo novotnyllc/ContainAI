@@ -1554,6 +1554,12 @@ _containai_start_container() {
     local selected_context=""
     if [[ -n "$explicit_context" ]]; then
         # Use the explicitly provided context (container was found in this context)
+        # Validate the context exists before using it
+        if ! docker context inspect -- "$explicit_context" >/dev/null 2>&1; then
+            echo "[ERROR] Docker context not found: $explicit_context" >&2
+            echo "[HINT] Run 'docker context ls' to see available contexts" >&2
+            return 1
+        fi
         selected_context="$explicit_context"
     else
         # Auto-select context based on isolation availability

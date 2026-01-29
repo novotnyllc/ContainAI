@@ -2436,6 +2436,10 @@ _containai_shell_cmd() {
         if [[ "$verbose_flag" == "true" ]]; then
             dry_run_args+=(--verbose)
         fi
+        # Pass context to ensure dry-run reports correct context
+        if [[ -n "$selected_context" ]]; then
+            dry_run_args+=(--docker-context "$selected_context")
+        fi
         _containai_start_container "${dry_run_args[@]}"
         return $?
     fi
@@ -2511,6 +2515,10 @@ _containai_shell_cmd() {
         if [[ "$verbose_flag" == "true" ]]; then
             create_args+=(--verbose)
         fi
+        # Pass context to ensure container is created in the selected context
+        if [[ -n "$selected_context" ]]; then
+            create_args+=(--docker-context "$selected_context")
+        fi
 
         if ! _containai_start_container "${create_args[@]}"; then
             echo "[ERROR] Failed to create container" >&2
@@ -2544,6 +2552,10 @@ _containai_shell_cmd() {
         fi
         if [[ "$verbose_flag" == "true" ]]; then
             create_args+=(--verbose)
+        fi
+        # Pass context to ensure container is created in the selected context
+        if [[ -n "$selected_context" ]]; then
+            create_args+=(--docker-context "$selected_context")
         fi
 
         if ! _containai_start_container "${create_args[@]}"; then
@@ -3090,8 +3102,9 @@ _containai_run_cmd() {
     start_rc=$?
 
     # Save container name to workspace state only after successful create/use
+    # Skip on dry-run (no actual container created/used)
     # Use container_workspace (which is the container's labeled workspace, not necessarily PWD)
-    if [[ $start_rc -eq 0 ]] && [[ "$should_save_container_name" == "true" ]] && [[ -n "$container_name" ]] && [[ -n "$container_workspace" ]]; then
+    if [[ $start_rc -eq 0 ]] && [[ "$should_save_container_name" == "true" ]] && [[ -n "$container_name" ]] && [[ -n "$container_workspace" ]] && [[ -z "$dry_run_flag" ]]; then
         _containai_write_workspace_state "$container_workspace" "container_name" "$container_name" 2>/dev/null || true
     fi
 
