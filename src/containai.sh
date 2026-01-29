@@ -185,6 +185,7 @@ Subcommands:
   stop          Stop ContainAI containers
   ssh           Manage SSH configuration (cleanup stale configs)
   links         Verify and repair container symlinks
+  config        Manage settings (list/get/set/unset with workspace scope)
   version       Show current version
   update        Update ContainAI installation
   uninstall     Clean removal of system-level components
@@ -502,6 +503,53 @@ Examples:
   cai exec -- --help                 Run "--help" as command (uses -- separator)
   cai exec -w /path/to/project pwd   Exec in specific workspace
   cai exec --container foo ls        Exec in container named 'foo'
+EOF
+}
+
+_containai_config_help() {
+    cat <<'EOF'
+ContainAI Config - Manage settings with workspace-aware scope
+
+Usage: cai config <subcommand> [options]
+
+Subcommands:
+  list                          Show all settings with source
+  get <key>                     Get effective value with source
+  set <key> <value>             Set value (workspace if in one, else global)
+  unset <key>                   Remove setting
+
+Scoping Options:
+  -g, --global                  Force global scope for set/unset
+  --workspace <path>            Apply to specific workspace
+
+Workspace-scoped keys (saved per workspace):
+  data_volume                   Data volume name
+  container_name                Container name
+  agent                         Default agent for this workspace
+
+Global keys (saved in user config):
+  agent.default                 Default agent globally
+  ssh.forward_agent             Enable SSH agent forwarding
+  ssh.port_range_start          SSH port range start
+  ssh.port_range_end            SSH port range end
+  import.auto_prompt            Prompt for import on new volume
+
+Source column values:
+  cli                           From command-line flag
+  env                           From environment variable
+  workspace:<path>              From workspace state
+  repo-local                    From .containai/config.toml
+  user-global                   From ~/.config/containai/config.toml
+  default                       Built-in default
+
+Examples:
+  cai config list                        Show all settings
+  cai config get agent                   Get effective agent
+  cai config set agent claude            Set agent for current workspace
+  cai config set -g agent.default claude Set global default agent
+  cai config unset data_volume           Remove workspace data_volume
+  cai config unset -g ssh.forward_agent  Remove global ssh.forward_agent
+  cai config set --workspace /path agent gemini
 EOF
 }
 
@@ -1605,6 +1653,387 @@ _containai_ssh_cleanup_cmd() {
 
     # Call the cleanup function from ssh.sh
     _cai_ssh_cleanup "$dry_run"
+}
+
+# ==============================================================================
+# Config subcommand handlers
+# ==============================================================================
+
+# Config subcommand handler - manage settings with workspace-aware scope
+_containai_config_cmd() {
+    local config_subcommand="${1:-}"
+    local workspace=""
+    local global_scope="false"
+    local explicit_workspace=""
+
+    # Handle empty or help first
+    if [[ -z "$config_subcommand" ]]; then
+        _containai_config_help
+        return 0
+    fi
+
+    case "$config_subcommand" in
+        list)
+            shift
+            _containai_config_list_cmd "$@"
+            ;;
+        get)
+            shift
+            _containai_config_get_cmd "$@"
+            ;;
+        set)
+            shift
+            _containai_config_set_cmd "$@"
+            ;;
+        unset)
+            shift
+            _containai_config_unset_cmd "$@"
+            ;;
+        help | -h | --help)
+            _containai_config_help
+            return 0
+            ;;
+        *)
+            echo "[ERROR] Unknown config subcommand: $config_subcommand" >&2
+            echo "Use 'cai config --help' for usage" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Config list subcommand - show all settings with sources
+_containai_config_list_cmd() {
+    local workspace="$PWD"
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --workspace | -w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="$2"
+                workspace="${workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            -w*)
+                workspace="${1#-w}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            --help | -h)
+                _containai_config_help
+                return 0
+                ;;
+            *)
+                echo "[ERROR] Unknown option: $1" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    # Normalize workspace path
+    local normalized_workspace
+    if ! normalized_workspace=$(_cai_normalize_path "$workspace"); then
+        echo "[ERROR] Invalid workspace path: $workspace" >&2
+        return 1
+    fi
+
+    # Print header
+    printf '%-24s %-30s %s\n' "KEY" "VALUE" "SOURCE"
+    printf '%s\n' "$(printf '%0.s─' {1..72})"
+
+    # List all config with sources
+    local line key value source
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            # Split by tab
+            key="${line%%	*}"
+            local rest="${line#*	}"
+            value="${rest%%	*}"
+            source="${rest#*	}"
+            printf '%-24s %-30s %s\n' "$key" "$value" "$source"
+        fi
+    done < <(_containai_list_all_config "$normalized_workspace")
+}
+
+# Config get subcommand - get a specific key with source
+_containai_config_get_cmd() {
+    local workspace="$PWD"
+    local key=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --workspace | -w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="$2"
+                workspace="${workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            --help | -h)
+                _containai_config_help
+                return 0
+                ;;
+            -*)
+                echo "[ERROR] Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                if [[ -z "$key" ]]; then
+                    key="$1"
+                else
+                    echo "[ERROR] Too many arguments" >&2
+                    return 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$key" ]]; then
+        echo "[ERROR] Key required. Usage: cai config get <key>" >&2
+        return 1
+    fi
+
+    # Normalize workspace path
+    local normalized_workspace
+    if ! normalized_workspace=$(_cai_normalize_path "$workspace"); then
+        echo "[ERROR] Invalid workspace path: $workspace" >&2
+        return 1
+    fi
+
+    # Get the value with source
+    local result value source
+    result=$(_containai_resolve_with_source "$key" "$normalized_workspace")
+    value="${result%%	*}"
+    source="${result#*	}"
+
+    if [[ -z "$value" ]]; then
+        echo "[INFO] Key '$key' is not set"
+        return 0
+    fi
+
+    printf '%s\t%s\n' "$value" "$source"
+}
+
+# Config set subcommand - set a key value
+_containai_config_set_cmd() {
+    local workspace="$PWD"
+    local global_scope="false"
+    local explicit_workspace=""
+    local key=""
+    local value=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --global | -g)
+                global_scope="true"
+                shift
+                ;;
+            --workspace | -w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                explicit_workspace="$2"
+                explicit_workspace="${explicit_workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                explicit_workspace="${1#--workspace=}"
+                explicit_workspace="${explicit_workspace/#\~/$HOME}"
+                shift
+                ;;
+            --help | -h)
+                _containai_config_help
+                return 0
+                ;;
+            -*)
+                echo "[ERROR] Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                if [[ -z "$key" ]]; then
+                    key="$1"
+                elif [[ -z "$value" ]]; then
+                    value="$1"
+                else
+                    echo "[ERROR] Too many arguments" >&2
+                    return 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$key" ]] || [[ -z "$value" ]]; then
+        echo "[ERROR] Key and value required. Usage: cai config set <key> <value>" >&2
+        return 1
+    fi
+
+    # Determine target workspace
+    local target_workspace
+    if [[ -n "$explicit_workspace" ]]; then
+        if ! target_workspace=$(_cai_normalize_path "$explicit_workspace"); then
+            echo "[ERROR] Invalid workspace path: $explicit_workspace" >&2
+            return 1
+        fi
+    else
+        if ! target_workspace=$(_cai_normalize_path "$workspace"); then
+            echo "[ERROR] Invalid workspace path: $workspace" >&2
+            return 1
+        fi
+    fi
+
+    # Check if this is a workspace-scoped key
+    local is_workspace_key=""
+    local k
+    for k in $_CAI_WORKSPACE_KEYS; do
+        if [[ "$key" == "$k" ]]; then
+            is_workspace_key="true"
+            break
+        fi
+    done
+
+    # Determine scope
+    if [[ "$global_scope" == "true" ]]; then
+        # Force global scope
+        if ! _containai_set_global_key "$key" "$value"; then
+            return 1
+        fi
+        echo "[OK] Set $key = $value (user-global)"
+    elif [[ "$is_workspace_key" == "true" ]]; then
+        # Workspace-scoped key
+        if ! _containai_write_workspace_state "$target_workspace" "$key" "$value"; then
+            return 1
+        fi
+        echo "[OK] Set $key = $value (workspace:$target_workspace)"
+    else
+        # Global key
+        if ! _containai_set_global_key "$key" "$value"; then
+            return 1
+        fi
+        echo "[OK] Set $key = $value (user-global)"
+    fi
+
+    return 0
+}
+
+# Config unset subcommand - remove a key
+_containai_config_unset_cmd() {
+    local workspace="$PWD"
+    local global_scope="false"
+    local explicit_workspace=""
+    local key=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --global | -g)
+                global_scope="true"
+                shift
+                ;;
+            --workspace | -w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                explicit_workspace="$2"
+                explicit_workspace="${explicit_workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                explicit_workspace="${1#--workspace=}"
+                explicit_workspace="${explicit_workspace/#\~/$HOME}"
+                shift
+                ;;
+            --help | -h)
+                _containai_config_help
+                return 0
+                ;;
+            -*)
+                echo "[ERROR] Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                if [[ -z "$key" ]]; then
+                    key="$1"
+                else
+                    echo "[ERROR] Too many arguments" >&2
+                    return 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$key" ]]; then
+        echo "[ERROR] Key required. Usage: cai config unset <key>" >&2
+        return 1
+    fi
+
+    # Determine target workspace
+    local target_workspace
+    if [[ -n "$explicit_workspace" ]]; then
+        if ! target_workspace=$(_cai_normalize_path "$explicit_workspace"); then
+            echo "[ERROR] Invalid workspace path: $explicit_workspace" >&2
+            return 1
+        fi
+    else
+        if ! target_workspace=$(_cai_normalize_path "$workspace"); then
+            echo "[ERROR] Invalid workspace path: $workspace" >&2
+            return 1
+        fi
+    fi
+
+    # Check if this is a workspace-scoped key
+    local is_workspace_key=""
+    local k
+    for k in $_CAI_WORKSPACE_KEYS; do
+        if [[ "$key" == "$k" ]]; then
+            is_workspace_key="true"
+            break
+        fi
+    done
+
+    # Determine scope
+    if [[ "$global_scope" == "true" ]]; then
+        # Force global scope
+        if ! _containai_unset_global_key "$key"; then
+            return 1
+        fi
+        echo "[OK] Unset $key (user-global)"
+    elif [[ "$is_workspace_key" == "true" ]]; then
+        # Workspace-scoped key
+        if ! _containai_unset_workspace_key "$target_workspace" "$key"; then
+            return 1
+        fi
+        echo "[OK] Unset $key (workspace:$target_workspace)"
+    else
+        # Global key
+        if ! _containai_unset_global_key "$key"; then
+            return 1
+        fi
+        echo "[OK] Unset $key (user-global)"
+    fi
+
+    return 0
 }
 
 # ==============================================================================
@@ -3898,6 +4327,10 @@ containai() {
         links)
             shift
             _containai_links_cmd "$@"
+            ;;
+        config)
+            shift
+            _containai_config_cmd "$@"
             ;;
         sandbox)
             shift

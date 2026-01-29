@@ -254,6 +254,444 @@ def format_toml_string(value: str) -> str:
     return f'"{value}"'
 
 
+def unset_workspace_key(file_path: Path, workspace_path: str, key: str) -> bool:
+    """
+    Unset (remove) a key from a workspace section atomically.
+
+    If the workspace section becomes empty after removing the key,
+    the entire section is removed.
+
+    Args:
+        file_path: Path to the TOML config file
+        workspace_path: The workspace path (key for [workspace."path"] table)
+        key: The key to unset
+
+    Returns:
+        True on success, False on failure (error printed to stderr)
+    """
+    # Validate key name
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", key):
+        print(f"Error: Invalid key name: {key}", file=sys.stderr)
+        return False
+
+    # Validate workspace path
+    if not workspace_path.startswith("/"):
+        print(f"Error: Workspace path must be absolute: {workspace_path}", file=sys.stderr)
+        return False
+
+    # Read existing file content
+    if not file_path.exists():
+        # Nothing to unset if file doesn't exist
+        return True
+
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"Error: Cannot read file: {e}", file=sys.stderr)
+        return False
+
+    # Build the workspace table header
+    escaped_path = workspace_path.replace("\\", "\\\\").replace('"', '\\"')
+    ws_header = f'[workspace."{escaped_path}"]'
+
+    lines = content.split("\n")
+    new_lines = []
+    in_target_workspace = False
+    ws_start_idx = -1
+    ws_end_idx = -1
+    key_removed = False
+    any_table_pattern = re.compile(r"^\[")
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Check if this is the target workspace header
+        header_part = stripped
+        if stripped.startswith("[") and stripped.endswith("]"):
+            header_part = stripped
+        elif stripped.startswith("[") and "#" in stripped:
+            close_bracket = stripped.rfind("]")
+            if close_bracket > 0:
+                header_part = stripped[:close_bracket + 1]
+
+        if header_part == ws_header:
+            in_target_workspace = True
+            ws_start_idx = len(new_lines)
+            new_lines.append(line)
+            i += 1
+            continue
+
+        # Check if we're entering a different section
+        if in_target_workspace and any_table_pattern.match(stripped):
+            ws_end_idx = len(new_lines)
+            in_target_workspace = False
+
+        # If we're in the target workspace, look for the key to remove
+        if in_target_workspace:
+            key_match = re.match(rf"^{re.escape(key)}\s*=", stripped)
+            if key_match:
+                # Skip this line (remove the key)
+                key_removed = True
+                i += 1
+                continue
+
+        new_lines.append(line)
+        i += 1
+
+    # If we were still in target workspace at EOF
+    if in_target_workspace:
+        ws_end_idx = len(new_lines)
+
+    # Check if workspace section is now empty (only header and blank lines)
+    if ws_start_idx >= 0 and ws_end_idx > ws_start_idx:
+        has_content = False
+        for idx in range(ws_start_idx + 1, ws_end_idx):
+            if idx < len(new_lines):
+                line_stripped = new_lines[idx].strip()
+                # Skip blank lines and comments
+                if line_stripped and not line_stripped.startswith("#"):
+                    has_content = True
+                    break
+
+        if not has_content:
+            # Remove the entire workspace section (header and following blank lines)
+            # Remove lines from ws_start_idx to ws_end_idx - 1
+            del new_lines[ws_start_idx:ws_end_idx]
+            # Also remove any trailing blank lines before the next section
+            while new_lines and new_lines[-1].strip() == "":
+                new_lines.pop()
+
+    # Build final content
+    final_content = "\n".join(new_lines)
+    if final_content and not final_content.endswith("\n"):
+        final_content += "\n"
+
+    # Write atomically
+    try:
+        dir_path = file_path.parent
+        if not dir_path.exists():
+            return True  # Nothing to write if dir doesn't exist
+
+        fd, temp_path = tempfile.mkstemp(
+            prefix=".config_", suffix=".tmp", dir=str(dir_path)
+        )
+        temp_path = Path(temp_path)
+
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(final_content.encode("utf-8"))
+                f.flush()
+                os.fsync(f.fileno())
+            temp_path.rename(file_path)
+        except Exception as e:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            raise e
+
+    except OSError as e:
+        print(f"Error: Cannot write file: {e}", file=sys.stderr)
+        return False
+
+    return True
+
+
+def set_global_key(file_path: Path, key: str, value: str) -> bool:
+    """
+    Set a global (top-level) key in config atomically.
+
+    Supports dot notation for nested keys (e.g., agent.default).
+
+    Args:
+        file_path: Path to the TOML config file
+        key: The key to set (dot notation for nested)
+        value: The value to set
+
+    Returns:
+        True on success, False on failure
+    """
+    # Validate key name (allow dots for nesting)
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_.]*$", key):
+        print(f"Error: Invalid key name: {key}", file=sys.stderr)
+        return False
+
+    parts = key.split(".")
+    if len(parts) > 2:
+        print(f"Error: Key nesting too deep (max 2 levels): {key}", file=sys.stderr)
+        return False
+
+    # Read existing content
+    content = ""
+    if file_path.exists():
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            print(f"Error: Cannot read file: {e}", file=sys.stderr)
+            return False
+
+    lines = content.split("\n")
+    new_lines = []
+    kv_line = f"{parts[-1]} = {format_toml_string(value)}"
+
+    if len(parts) == 1:
+        # Top-level key
+        key_updated = False
+        in_table = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Check if entering a table section
+            if stripped.startswith("["):
+                in_table = True
+                if not key_updated:
+                    # Insert the key before the first table
+                    new_lines.append(kv_line)
+                    key_updated = True
+                new_lines.append(line)
+                continue
+
+            # Check if this line sets the key (only if not in a table)
+            if not in_table:
+                key_match = re.match(rf"^{re.escape(parts[0])}\s*=", stripped)
+                if key_match:
+                    new_lines.append(kv_line)
+                    key_updated = True
+                    continue
+
+            new_lines.append(line)
+
+        if not key_updated:
+            # Add at end if no tables, or at start if only tables
+            if in_table:
+                # Insert before first table
+                for i, line in enumerate(new_lines):
+                    if line.strip().startswith("["):
+                        new_lines.insert(i, kv_line)
+                        key_updated = True
+                        break
+            else:
+                new_lines.append(kv_line)
+    else:
+        # Nested key (e.g., agent.default -> [agent] section)
+        section_name = parts[0]
+        section_header = f"[{section_name}]"
+        key_updated = False
+        in_target_section = False
+        found_section = False
+        section_end_idx = -1
+
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Check if this is the target section header
+            if stripped == section_header or stripped.startswith(f"{section_header} #"):
+                in_target_section = True
+                found_section = True
+                new_lines.append(line)
+                i += 1
+                continue
+
+            # Check if entering a different section
+            if in_target_section and stripped.startswith("["):
+                if not key_updated:
+                    new_lines.append(kv_line)
+                    key_updated = True
+                in_target_section = False
+
+            # Check if this line sets the key
+            if in_target_section:
+                key_match = re.match(rf"^{re.escape(parts[-1])}\s*=", stripped)
+                if key_match:
+                    new_lines.append(kv_line)
+                    key_updated = True
+                    i += 1
+                    continue
+
+            new_lines.append(line)
+            i += 1
+
+        # If we were still in target section at EOF
+        if in_target_section and not key_updated:
+            new_lines.append(kv_line)
+            key_updated = True
+
+        # If section wasn't found, create it
+        if not found_section:
+            if content.strip():
+                new_lines.append("")
+            new_lines.append(section_header)
+            new_lines.append(kv_line)
+
+    # Build final content
+    final_content = "\n".join(new_lines)
+    if not final_content.endswith("\n"):
+        final_content += "\n"
+
+    # Write atomically
+    try:
+        dir_path = file_path.parent
+        if not dir_path.exists():
+            dir_path.mkdir(parents=True, mode=0o700)
+
+        fd, temp_path = tempfile.mkstemp(
+            prefix=".config_", suffix=".tmp", dir=str(dir_path)
+        )
+        temp_path = Path(temp_path)
+
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(final_content.encode("utf-8"))
+                f.flush()
+                os.fsync(f.fileno())
+            temp_path.rename(file_path)
+        except Exception as e:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            raise e
+
+    except OSError as e:
+        print(f"Error: Cannot write file: {e}", file=sys.stderr)
+        return False
+
+    return True
+
+
+def unset_global_key(file_path: Path, key: str) -> bool:
+    """
+    Unset (remove) a global key from config atomically.
+
+    Supports dot notation for nested keys (e.g., agent.default).
+    If a section becomes empty, it is removed.
+
+    Args:
+        file_path: Path to the TOML config file
+        key: The key to unset
+
+    Returns:
+        True on success, False on failure
+    """
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_.]*$", key):
+        print(f"Error: Invalid key name: {key}", file=sys.stderr)
+        return False
+
+    if not file_path.exists():
+        return True  # Nothing to unset
+
+    parts = key.split(".")
+
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"Error: Cannot read file: {e}", file=sys.stderr)
+        return False
+
+    lines = content.split("\n")
+    new_lines = []
+
+    if len(parts) == 1:
+        # Top-level key
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("["):
+                new_lines.append(line)
+                continue
+            key_match = re.match(rf"^{re.escape(parts[0])}\s*=", stripped)
+            if key_match:
+                continue  # Skip this line
+            new_lines.append(line)
+    else:
+        # Nested key
+        section_name = parts[0]
+        section_header = f"[{section_name}]"
+        in_target_section = False
+        section_start_idx = -1
+
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            if stripped == section_header or stripped.startswith(f"{section_header} #"):
+                in_target_section = True
+                section_start_idx = len(new_lines)
+                new_lines.append(line)
+                i += 1
+                continue
+
+            if in_target_section and stripped.startswith("["):
+                in_target_section = False
+
+            if in_target_section:
+                key_match = re.match(rf"^{re.escape(parts[-1])}\s*=", stripped)
+                if key_match:
+                    i += 1
+                    continue  # Skip this line
+
+            new_lines.append(line)
+            i += 1
+
+        # Check if section is now empty
+        if section_start_idx >= 0:
+            has_content = False
+            section_end = len(new_lines)
+            for idx in range(section_start_idx + 1, section_end):
+                stripped = new_lines[idx].strip()
+                if stripped.startswith("["):
+                    section_end = idx
+                    break
+                if stripped and not stripped.startswith("#"):
+                    has_content = True
+                    break
+
+            if not has_content:
+                # Remove the section header and blank lines
+                del new_lines[section_start_idx:section_end]
+
+    # Build final content
+    final_content = "\n".join(new_lines)
+    if final_content and not final_content.endswith("\n"):
+        final_content += "\n"
+
+    # Write atomically
+    try:
+        dir_path = file_path.parent
+
+        fd, temp_path = tempfile.mkstemp(
+            prefix=".config_", suffix=".tmp", dir=str(dir_path)
+        )
+        temp_path = Path(temp_path)
+
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(final_content.encode("utf-8"))
+                f.flush()
+                os.fsync(f.fileno())
+            temp_path.rename(file_path)
+        except Exception as e:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            raise e
+
+    except OSError as e:
+        print(f"Error: Cannot write file: {e}", file=sys.stderr)
+        return False
+
+    return True
+
+
 def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str) -> bool:
     """
     Set a key in a workspace section atomically.
@@ -517,6 +955,23 @@ def main():
         metavar="PATH",
         help="Get workspace state for path (output as JSON)",
     )
+    parser.add_argument(
+        "--unset-workspace-key",
+        nargs=2,
+        metavar=("PATH", "KEY"),
+        help="Unset a key in workspace section: --unset-workspace-key /path key",
+    )
+    parser.add_argument(
+        "--set-key",
+        nargs=2,
+        metavar=("KEY", "VALUE"),
+        help="Set a global key: --set-key key value",
+    )
+    parser.add_argument(
+        "--unset-key",
+        metavar="KEY",
+        help="Unset a global key: --unset-key key",
+    )
 
     args = parser.parse_args()
 
@@ -530,11 +985,14 @@ def main():
             args.env,
             args.get_workspace is not None,
             args.set_workspace_key is not None,
+            args.unset_workspace_key is not None,
+            args.set_key is not None,
+            args.unset_key is not None,
         ]
     )
     if mode_count == 0:
         print(
-            "Error: Must specify one of --key, --json, --exists, --env, --get-workspace, or --set-workspace-key",
+            "Error: Must specify one of --key, --json, --exists, --env, --get-workspace, --set-workspace-key, --unset-workspace-key, --set-key, or --unset-key",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -550,6 +1008,32 @@ def main():
         ws_path, ws_key, ws_value = args.set_workspace_key
         config_path = Path(args.file)
         if set_workspace_key(config_path, ws_path, ws_key, ws_value):
+            sys.exit(0)
+        else:
+            sys.exit(1)
+
+    # Handle --unset-workspace-key mode (does not require loading file)
+    if args.unset_workspace_key:
+        ws_path, ws_key = args.unset_workspace_key
+        config_path = Path(args.file)
+        if unset_workspace_key(config_path, ws_path, ws_key):
+            sys.exit(0)
+        else:
+            sys.exit(1)
+
+    # Handle --set-key mode (does not require loading file)
+    if args.set_key:
+        g_key, g_value = args.set_key
+        config_path = Path(args.file)
+        if set_global_key(config_path, g_key, g_value):
+            sys.exit(0)
+        else:
+            sys.exit(1)
+
+    # Handle --unset-key mode (does not require loading file)
+    if args.unset_key:
+        config_path = Path(args.file)
+        if unset_global_key(config_path, args.unset_key):
             sys.exit(0)
         else:
             sys.exit(1)

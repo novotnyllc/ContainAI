@@ -1638,4 +1638,356 @@ _containai_generate_volume_name() {
     return 0
 }
 
+# ==============================================================================
+# Config resolution with source tracking
+# ==============================================================================
+
+# List of known config keys with their scopes
+# Workspace-scoped keys: data_volume, container_name, agent
+# Global-scoped keys: agent.default, ssh.forward_agent, ssh.port_range_start, ssh.port_range_end, import.auto_prompt
+_CAI_WORKSPACE_KEYS="data_volume container_name agent"
+_CAI_GLOBAL_KEYS="agent.default ssh.forward_agent ssh.port_range_start ssh.port_range_end import.auto_prompt"
+
+# Resolve a config key and return value with source
+# Arguments: $1 = key name
+#            $2 = workspace path (optional, default: $PWD)
+#            $3 = CLI value override (optional)
+#            $4 = explicit config path (optional)
+# Outputs: value<TAB>source (tab-separated)
+#          Source is one of: cli, env, workspace:<path>, repo-local, user-global, default
+# Returns: 0 always (empty value = not found)
+#
+# Resolution precedence:
+# 1. CLI flags ($3)
+# 2. Environment variables (CONTAINAI_<KEY>)
+# 3. Workspace state (user config [workspace."path"] section)
+# 4. Repo-local config (.containai/config.toml)
+# 5. User global config (~/.config/containai/config.toml top-level)
+# 6. Built-in defaults
+_containai_resolve_with_source() {
+    local key="$1"
+    local workspace="${2:-$PWD}"
+    local cli_value="${3:-}"
+    local explicit_config="${4:-}"
+    local env_var_name env_value repo_config_file user_config_file
+    local script_dir config_json value normalized_path ws_json
+
+    # Normalize workspace path
+    if ! normalized_path=$(_cai_normalize_path "$workspace"); then
+        normalized_path="$PWD"
+    fi
+
+    # 1. CLI flag always wins
+    if [[ -n "$cli_value" ]]; then
+        printf '%s\t%s' "$cli_value" "cli"
+        return 0
+    fi
+
+    # 2. Environment variable
+    # Convert key to env var format: agent.default -> CONTAINAI_AGENT_DEFAULT
+    env_var_name="CONTAINAI_$(printf '%s' "$key" | tr '[:lower:].' '[:upper:]_')"
+    if [[ -n "${!env_var_name:-}" ]]; then
+        printf '%s\t%s' "${!env_var_name}" "env"
+        return 0
+    fi
+
+    # Check if Python available (needed for remaining sources)
+    if ! command -v python3 >/dev/null 2>&1; then
+        # Fall through to default
+        printf '%s\t%s' "" "default"
+        return 0
+    fi
+
+    # Get script directory for parse-toml.py
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        printf '%s\t%s' "" "default"
+        return 0
+    fi
+
+    # 3. Workspace state (for workspace-scoped keys only)
+    # Check if this is a workspace-scoped key
+    local is_workspace_key=""
+    local k
+    for k in $_CAI_WORKSPACE_KEYS; do
+        if [[ "$key" == "$k" ]]; then
+            is_workspace_key="true"
+            break
+        fi
+    done
+
+    if [[ "$is_workspace_key" == "true" ]]; then
+        # Read from user config workspace section
+        user_config_file=$(_containai_user_config_path)
+        if [[ -f "$user_config_file" ]]; then
+            if ws_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --get-workspace "$normalized_path" 2>/dev/null); then
+                if [[ "$ws_json" != "{}" ]]; then
+                    value=$(printf '%s' "$ws_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+val = data.get(sys.argv[1], '')
+if val is not None and val != '':
+    print(val, end='')
+" "$key" 2>/dev/null)
+                    if [[ -n "$value" ]]; then
+                        printf '%s\t%s' "$value" "workspace:$normalized_path"
+                        return 0
+                    fi
+                fi
+            fi
+        fi
+    fi
+
+    # 4. Repo-local config (.containai/config.toml)
+    # Walk up from workspace looking for .containai/config.toml
+    local dir="$normalized_path"
+    while [[ "$dir" != "/" ]]; do
+        repo_config_file="$dir/.containai/config.toml"
+        if [[ -f "$repo_config_file" ]]; then
+            if config_json=$(python3 "$script_dir/parse-toml.py" --file "$repo_config_file" --json 2>/dev/null); then
+                # Try to get the key from config
+                value=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+key = sys.argv[1]
+parts = key.split('.')
+current = config
+for part in parts:
+    if not isinstance(current, dict) or part not in current:
+        sys.exit(0)
+    current = current[part]
+# Reject dict/list values - we only want scalars
+if isinstance(current, (dict, list)):
+    sys.exit(0)
+if current is not None and current != '':
+    if isinstance(current, bool):
+        print('true' if current else 'false', end='')
+    else:
+        print(current, end='')
+" "$key" 2>/dev/null)
+                if [[ -n "$value" ]]; then
+                    printf '%s\t%s' "$value" "repo-local"
+                    return 0
+                fi
+            fi
+            break
+        fi
+        # Stop at git root
+        if [[ -e "$dir/.git" ]]; then
+            break
+        fi
+        dir=$(dirname "$dir")
+    done
+
+    # 5. User global config (~/.config/containai/config.toml top-level)
+    user_config_file=$(_containai_user_config_path)
+    if [[ -f "$user_config_file" ]]; then
+        if config_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
+            value=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+key = sys.argv[1]
+parts = key.split('.')
+current = config
+for part in parts:
+    if not isinstance(current, dict) or part not in current:
+        sys.exit(0)
+    current = current[part]
+# Skip workspace section (that's handled separately)
+if len(parts) == 1 and parts[0] == 'workspace':
+    sys.exit(0)
+# Reject dict/list values - we only want scalars
+if isinstance(current, (dict, list)):
+    sys.exit(0)
+if current is not None and current != '':
+    if isinstance(current, bool):
+        print('true' if current else 'false', end='')
+    else:
+        print(current, end='')
+" "$key" 2>/dev/null)
+            if [[ -n "$value" ]]; then
+                printf '%s\t%s' "$value" "user-global"
+                return 0
+            fi
+        fi
+    fi
+
+    # 6. Built-in defaults
+    local default_value=""
+    case "$key" in
+        agent|agent.default)
+            default_value="claude"
+            ;;
+        ssh.port_range_start)
+            default_value="2222"
+            ;;
+        ssh.port_range_end)
+            default_value="2322"
+            ;;
+        ssh.forward_agent)
+            default_value="false"
+            ;;
+        import.auto_prompt)
+            default_value="true"
+            ;;
+        # No default for data_volume and container_name (generated)
+    esac
+
+    if [[ -n "$default_value" ]]; then
+        printf '%s\t%s' "$default_value" "default"
+    else
+        printf '%s\t%s' "" "default"
+    fi
+    return 0
+}
+
+# List all known config keys with their values and sources
+# Arguments: $1 = workspace path (optional, default: $PWD)
+#            $2 = explicit config path (optional)
+# Outputs: Lines of KEY<TAB>VALUE<TAB>SOURCE
+# Returns: 0 always
+_containai_list_all_config() {
+    local workspace="${1:-$PWD}"
+    local explicit_config="${2:-}"
+    local key result value source
+
+    # List workspace-scoped keys
+    for key in $_CAI_WORKSPACE_KEYS; do
+        result=$(_containai_resolve_with_source "$key" "$workspace" "" "$explicit_config")
+        value="${result%%	*}"
+        source="${result#*	}"
+        if [[ -n "$value" ]]; then
+            printf '%s\t%s\t%s\n' "$key" "$value" "$source"
+        fi
+    done
+
+    # List global-scoped keys
+    for key in $_CAI_GLOBAL_KEYS; do
+        result=$(_containai_resolve_with_source "$key" "$workspace" "" "$explicit_config")
+        value="${result%%	*}"
+        source="${result#*	}"
+        if [[ -n "$value" ]]; then
+            printf '%s\t%s\t%s\n' "$key" "$value" "$source"
+        fi
+    done
+}
+
+# Unset a key from workspace state
+# Arguments: $1 = workspace path (will be normalized)
+#            $2 = key name
+# Returns: 0 on success, 1 on error
+_containai_unset_workspace_key() {
+    local workspace="$1"
+    local key="$2"
+    local script_dir user_config normalized_path
+
+    if [[ -z "$workspace" ]] || [[ -z "$key" ]]; then
+        printf '%s\n' "[ERROR] _containai_unset_workspace_key requires workspace and key" >&2
+        return 1
+    fi
+
+    # Normalize workspace path
+    normalized_path=$(_cai_normalize_path "$workspace")
+    if [[ "$normalized_path" != /* ]]; then
+        printf '%s\n' "[ERROR] Workspace path must be absolute: $normalized_path" >&2
+        return 1
+    fi
+
+    # Get user config path
+    user_config=$(_containai_user_config_path)
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] Python required to unset workspace key" >&2
+        return 1
+    fi
+
+    # Get script directory
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        printf '%s\n' "[ERROR] Failed to determine script directory" >&2
+        return 1
+    fi
+
+    # Call parse-toml.py --unset-workspace-key
+    if ! python3 "$script_dir/parse-toml.py" --file "$user_config" --unset-workspace-key "$normalized_path" "$key"; then
+        printf '%s\n' "[ERROR] Failed to unset workspace key" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Unset a global key from user config
+# Arguments: $1 = key name (dot notation, e.g., agent.default)
+# Returns: 0 on success, 1 on error
+_containai_unset_global_key() {
+    local key="$1"
+    local script_dir user_config
+
+    if [[ -z "$key" ]]; then
+        printf '%s\n' "[ERROR] _containai_unset_global_key requires key" >&2
+        return 1
+    fi
+
+    # Get user config path
+    user_config=$(_containai_user_config_path)
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] Python required to unset global key" >&2
+        return 1
+    fi
+
+    # Get script directory
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        printf '%s\n' "[ERROR] Failed to determine script directory" >&2
+        return 1
+    fi
+
+    # Call parse-toml.py --unset-key
+    if ! python3 "$script_dir/parse-toml.py" --file "$user_config" --unset-key "$key"; then
+        printf '%s\n' "[ERROR] Failed to unset global key" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Set a global key in user config
+# Arguments: $1 = key name (dot notation, e.g., agent.default)
+#            $2 = value
+# Returns: 0 on success, 1 on error
+_containai_set_global_key() {
+    local key="$1"
+    local value="$2"
+    local script_dir user_config
+
+    if [[ -z "$key" ]]; then
+        printf '%s\n' "[ERROR] _containai_set_global_key requires key" >&2
+        return 1
+    fi
+
+    # Get user config path
+    user_config=$(_containai_user_config_path)
+
+    # Check if Python available
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "[ERROR] Python required to set global key" >&2
+        return 1
+    fi
+
+    # Get script directory
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        printf '%s\n' "[ERROR] Failed to determine script directory" >&2
+        return 1
+    fi
+
+    # Call parse-toml.py --set-key
+    if ! python3 "$script_dir/parse-toml.py" --file "$user_config" --set-key "$key" "$value"; then
+        printf '%s\n' "[ERROR] Failed to set global key" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 return 0
