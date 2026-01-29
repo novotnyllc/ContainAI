@@ -304,27 +304,88 @@ _cai_hash_path() {
     printf '%s' "$hash"
 }
 
-# Generate container name from workspace path hash
-# Format: containai-<12-char-hash>
+# Generate container name from workspace path
+# Format: containai-{repo}-{branch}, max 63 chars
 # Arguments: $1 = workspace path (required)
 # Returns: container name via stdout, or 1 on error
-# NOTE: This function will be updated in fn-18-g96.8 to use repo-branch format.
-#       For now, it uses the legacy hash-based naming for backward compatibility.
+# Note: This is a pure function - no docker calls or collision logic.
+#       Collision handling is done in _cai_resolve_container_name.
 _containai_container_name() {
     local workspace_path="$1"
-    local hash name
+    local repo_name branch_name repo_s branch_s sanitized name
 
     if [[ -z "$workspace_path" ]]; then
         # Fallback to current directory if no workspace provided
         workspace_path="$(pwd)"
     fi
 
-    # Propagate hash errors - don't create invalid container names
-    if ! hash=$(_cai_hash_path "$workspace_path"); then
-        return 1
+    # Get repo name = directory name (last path component)
+    repo_name="${workspace_path##*/}"
+    # Handle case where path ends with / (e.g., /foo/bar/)
+    if [[ -z "$repo_name" ]]; then
+        repo_name="${workspace_path%/}"
+        repo_name="${repo_name##*/}"
     fi
 
-    name="containai-${hash}"
+    # Get branch name from git
+    if git -C "$workspace_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        branch_name=$(git -C "$workspace_path" rev-parse --abbrev-ref HEAD 2>/dev/null) || branch_name=""
+        # Detached HEAD: use 7-char short SHA
+        if [[ "$branch_name" == "HEAD" || -z "$branch_name" ]]; then
+            branch_name=$(git -C "$workspace_path" rev-parse --short=7 HEAD 2>/dev/null) || branch_name="nogit"
+        fi
+    else
+        # Non-git directory
+        branch_name="nogit"
+    fi
+
+    # Sanitize repo and branch SEPARATELY to ensure both segments exist
+    # Sanitization: lowercase, / → -, remove non-alphanum except -
+    repo_s="${repo_name,,}"              # lowercase
+    repo_s="${repo_s//\//-}"             # / → -
+    repo_s=$(printf '%s' "$repo_s" | LC_ALL=C tr -cd 'a-z0-9-')
+    # Collapse multiple dashes and trim
+    while [[ "$repo_s" == *--* ]]; do repo_s="${repo_s//--/-}"; done
+    repo_s="${repo_s#-}"; repo_s="${repo_s%-}"
+    # Fallback if repo sanitizes to empty
+    [[ -z "$repo_s" ]] && repo_s="repo"
+
+    branch_s="${branch_name,,}"          # lowercase
+    branch_s="${branch_s//\//-}"         # / → -
+    branch_s=$(printf '%s' "$branch_s" | LC_ALL=C tr -cd 'a-z0-9-')
+    # Collapse multiple dashes and trim
+    while [[ "$branch_s" == *--* ]]; do branch_s="${branch_s//--/-}"; done
+    branch_s="${branch_s#-}"; branch_s="${branch_s%-}"
+    # Fallback if branch sanitizes to empty
+    [[ -z "$branch_s" ]] && branch_s="branch"
+
+    # Truncate repo/branch SEPARATELY to guarantee both segments remain
+    # Max base: 59 chars. Prefix "containai-" = 10 chars. Separator "-" = 1 char.
+    # Available for repo+branch: 59 - 10 - 1 = 48 chars
+    local max_combined=48
+    local repo_keep=${#repo_s}
+    local branch_keep=${#branch_s}
+    if (( repo_keep + branch_keep > max_combined )); then
+        while (( repo_keep + branch_keep > max_combined )); do
+            if (( repo_keep >= branch_keep && repo_keep > 1 )); then
+                repo_keep=$((repo_keep - 1))
+            elif (( branch_keep > 1 )); then
+                branch_keep=$((branch_keep - 1))
+            else
+                break
+            fi
+        done
+        repo_s="${repo_s:0:repo_keep}"
+        branch_s="${branch_s:0:branch_keep}"
+        # Remove trailing dashes from truncation
+        repo_s="${repo_s%-}"
+        branch_s="${branch_s%-}"
+        [[ -z "$repo_s" ]] && repo_s="repo"
+        [[ -z "$branch_s" ]] && branch_s="branch"
+    fi
+
+    # Build name: containai-{repo}-{branch}
+    name="containai-${repo_s}-${branch_s}"
 
     printf '%s' "$name"
 }
@@ -386,7 +447,7 @@ _cai_find_workspace_container() {
     local -a by_label=()
     while IFS= read -r line; do
         [[ -n "$line" ]] && by_label+=("$line")
-    done < <("${docker_cmd[@]}" ps -a \
+    done < <(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" ps -a \
         --filter "label=containai.workspace=$workspace_path" \
         --format '{{.Names}}' 2>/dev/null)
 
@@ -407,7 +468,7 @@ _cai_find_workspace_container() {
     # 2. New naming format (from _containai_container_name)
     local new_name
     if new_name=$(_containai_container_name "$workspace_path"); then
-        if "${docker_cmd[@]}" inspect --type container "$new_name" >/dev/null 2>&1; then
+        if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$new_name" >/dev/null 2>&1; then
             printf '%s\n' "$new_name"
             return 0
         fi
@@ -416,7 +477,7 @@ _cai_find_workspace_container() {
     # 3. Legacy hash format (using existing _cai_hash_path via wrapper)
     local legacy_name
     if legacy_name=$(_containai_legacy_container_name "$workspace_path"); then
-        if "${docker_cmd[@]}" inspect --type container "$legacy_name" >/dev/null 2>&1; then
+        if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$legacy_name" >/dev/null 2>&1; then
             printf '%s\n' "$legacy_name"
             return 0
         fi
@@ -596,6 +657,7 @@ _cai_resolve_container_name() {
     candidate="$base_name"
 
     # Check if name is taken by another workspace (handle collisions)
+    # Cap suffix at 999 to ensure max 63 chars (base 59 + "-" + 3 digits = 63)
     while "${docker_cmd[@]}" inspect --type container "$candidate" >/dev/null 2>&1; do
         # Check if this container is for our workspace
         existing_workspace=$("${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$candidate" 2>/dev/null) || existing_workspace=""
@@ -605,7 +667,11 @@ _cai_resolve_container_name() {
             return 0
         fi
         # Different workspace - try next suffix
-        ((suffix++))
+        ((suffix++)) || true
+        if [[ $suffix -gt 999 ]]; then
+            echo "[ERROR] Too many container name collisions (max 999)" >&2
+            return 1
+        fi
         candidate="${base_name}-${suffix}"
     done
 
@@ -614,7 +680,7 @@ _cai_resolve_container_name() {
 
 # Find container by workspace and optionally filter by image-tag label
 # This is for advanced/debugging use when running multiple images per workspace.
-# Normal use (one container per workspace) should use _containai_container_name directly.
+# Normal use should use _cai_find_workspace_container for lookups (label → new name → legacy hash).
 #
 # Arguments:
 #   $1 = workspace path (required)
@@ -634,11 +700,6 @@ _cai_find_container() {
         return 1
     fi
 
-    # Get the expected container name for this workspace
-    if ! container_name=$(_containai_container_name "$workspace_path"); then
-        return 1
-    fi
-
     # Build docker command with optional context
     local -a docker_cmd=(docker)
     if [[ -n "$docker_context" ]]; then
@@ -647,7 +708,7 @@ _cai_find_container() {
 
     # If no image-tag filter, just check if the container exists
     if [[ -z "$image_tag_filter" ]]; then
-        if "${docker_cmd[@]}" inspect --type container "$container_name" >/dev/null 2>&1; then
+        if container_name=$(_cai_find_workspace_container "$workspace_path" "$docker_context"); then
             printf '%s' "$container_name"
             return 0
         fi

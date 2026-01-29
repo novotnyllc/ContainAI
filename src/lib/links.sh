@@ -47,7 +47,7 @@ _links_warn() { printf '%s\n' "[WARN] $*" >&2; }
 
 # Resolve container name from workspace path
 # If container_name is provided, validates it exists
-# If not provided, resolves from workspace using _containai_container_name
+# If not provided, resolves from workspace using shared lookup (label → new name → legacy hash)
 # Arguments:
 #   $1 = container name (optional, empty for auto-resolution)
 #   $2 = workspace path (required if container_name empty)
@@ -100,20 +100,20 @@ _links_resolve_container() {
         return 0
     fi
 
-    # Fallback: try hash-based container name
-    if ! container_name=$(_containai_container_name "$workspace"); then
-        _links_error "Failed to generate container name for workspace: $workspace"
+    # Fallback: use shared lookup order (label → new name → legacy hash)
+    local find_rc
+    if container_name=$(_cai_find_workspace_container "$workspace" "$context"); then
+        printf '%s' "$container_name"
+        return 0
+    fi
+    find_rc=$?
+    if [[ $find_rc -eq 2 ]]; then
+        # Multiple containers error already printed by _cai_find_workspace_container
         return 1
     fi
-
-    # Check if this container exists
-    if ! "${docker_cmd[@]}" inspect --type container "$container_name" >/dev/null 2>&1; then
-        _links_error "No container found for workspace: $workspace"
-        _links_error "Start a container first with: cai shell $workspace"
-        return 1
-    fi
-
-    printf '%s' "$container_name"
+    _links_error "No container found for workspace: $workspace"
+    _links_error "Start a container first with: cai shell $workspace"
+    return 1
 }
 
 # Check if container is running, start it if stopped (for fix operations)

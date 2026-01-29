@@ -937,9 +937,21 @@ _containai_import_cmd() {
                 resolved_container_name=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{.Name}}' "$first_container" 2>/dev/null)
                 resolved_container_name="${resolved_container_name#/}" # Remove leading /
             else
-                # Fallback: try hash-based container name
-                if ! resolved_container_name=$(_containai_container_name "$resolved_workspace"); then
-                    echo "[ERROR] Failed to generate container name for workspace: $resolved_workspace" >&2
+                # Fallback: use shared lookup order (label → new name → legacy hash)
+                # Clear DOCKER_CONTEXT/DOCKER_HOST for consistent behavior with rest of function
+                local find_rc
+                if resolved_container_name=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_find_workspace_container "$resolved_workspace" "$selected_context"); then
+                    : # Found
+                else
+                    find_rc=$?
+                    if [[ $find_rc -eq 2 ]]; then
+                        # Multiple containers error already printed
+                        return 1
+                    fi
+                    echo "[ERROR] Container not found for workspace: $resolved_workspace" >&2
+                    echo "" >&2
+                    echo "To create a container for this workspace, run:" >&2
+                    echo "  cai run $resolved_workspace" >&2
                     return 1
                 fi
             fi

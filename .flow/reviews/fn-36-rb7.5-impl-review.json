@@ -1,0 +1,11 @@
+{
+  "type": "impl_review",
+  "id": "fn-36-rb7.5",
+  "mode": "codex",
+  "base": "7bef8b4236e78aae2c117255f14f5948a764cdd6",
+  "verdict": "SHIP",
+  "session_id": "manual-review",
+  "timestamp": "2026-01-29T03:03:30.855779Z",
+  "review": "All acceptance criteria verified:\n- Format: containai-{repo}-{branch}, max 59 chars (reserve 4 for suffix)\n- Repo = directory name (last path component)\n- Branch from git rev-parse --abbrev-ref HEAD\n- Non-git: uses 'nogit'\n- Detached HEAD: uses 7-char short SHA\n- Sanitization: lowercase, / → -, alphanumeric only, LC_ALL=C for locale safety\n- Truncation preserves both repo and branch segments\n- No docker calls in _containai_container_name\n- Updated callers to use _cai_find_workspace_container for backward compatibility\n- All 32 unit tests pass\n- Shellcheck passes\n\n<verdict>SHIP</verdict>\n",
+  "iteration": 4
+}
