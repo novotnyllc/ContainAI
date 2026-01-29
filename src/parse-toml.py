@@ -299,7 +299,6 @@ def unset_workspace_key(file_path: Path, workspace_path: str, key: str) -> bool:
     in_target_workspace = False
     ws_start_idx = -1
     ws_end_idx = -1
-    key_removed = False
     any_table_pattern = re.compile(r"^\[")
 
     i = 0
@@ -333,7 +332,6 @@ def unset_workspace_key(file_path: Path, workspace_path: str, key: str) -> bool:
             key_match = re.match(rf"^{re.escape(key)}\s*=", stripped)
             if key_match:
                 # Skip this line (remove the key)
-                key_removed = True
                 i += 1
                 continue
 
@@ -400,12 +398,12 @@ def unset_workspace_key(file_path: Path, workspace_path: str, key: str) -> bool:
     return True
 
 
-def format_toml_value(key: str, value: str) -> str:
+def format_toml_value(key: str, value: str) -> str | None:
     """
     Format a value for TOML output with proper typing based on key.
 
     Known keys with specific types:
-    - ssh.port_range_start, ssh.port_range_end: integers
+    - ssh.port_range_start, ssh.port_range_end: integers (1024-65535)
     - ssh.forward_agent, import.auto_prompt: booleans
     - Everything else: strings
 
@@ -415,9 +413,10 @@ def format_toml_value(key: str, value: str) -> str:
 
     Returns:
         TOML-formatted value (with quotes for strings, raw for ints/bools)
+        None if validation fails (error is printed to stderr)
     """
-    # Keys that should be integers
-    int_keys = {
+    # Keys that should be integers (with port range validation)
+    port_keys = {
         "port_range_start",
         "port_range_end",
         "ssh.port_range_start",
@@ -435,24 +434,35 @@ def format_toml_value(key: str, value: str) -> str:
     # Get the last part of the key for matching nested keys
     key_name = key.split(".")[-1] if "." in key else key
 
-    # Check for integer keys
-    if key in int_keys or key_name in int_keys:
-        # Validate it's actually an integer
+    # Check for port keys (require valid integer in range)
+    if key in port_keys or key_name in port_keys:
         try:
-            int(value)
+            port = int(value)
+            if port < 1024 or port > 65535:
+                print(
+                    f"Error: {key} must be between 1024 and 65535, got {port}",
+                    file=sys.stderr,
+                )
+                return None
             return value  # Return raw integer for TOML
         except ValueError:
-            # Fall through to string formatting
-            pass
+            print(
+                f"Error: {key} must be an integer, got '{value}'", file=sys.stderr
+            )
+            return None
 
-    # Check for boolean keys
+    # Check for boolean keys (require valid boolean)
     if key in bool_keys or key_name in bool_keys:
         # Convert to TOML boolean
         if value.lower() in ("true", "1", "yes"):
             return "true"
         elif value.lower() in ("false", "0", "no"):
             return "false"
-        # Fall through to string formatting if not a valid bool
+        print(
+            f"Error: {key} must be a boolean (true/false), got '{value}'",
+            file=sys.stderr,
+        )
+        return None
 
     # Default: format as string
     return format_toml_string(value)
@@ -495,7 +505,11 @@ def set_global_key(file_path: Path, key: str, value: str) -> bool:
     lines = content.split("\n")
     new_lines = []
     # Format value with proper TOML type based on key
-    kv_line = f"{parts[-1]} = {format_toml_value(key, value)}"
+    formatted_value = format_toml_value(key, value)
+    if formatted_value is None:
+        # Validation failed - error already printed
+        return False
+    kv_line = f"{parts[-1]} = {formatted_value}"
 
     if len(parts) == 1:
         # Top-level key

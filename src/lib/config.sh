@@ -1643,9 +1643,11 @@ _containai_generate_volume_name() {
 # ==============================================================================
 
 # List of known config keys with their scopes
-# Workspace-scoped keys: data_volume, container_name, agent
+# Workspace-scoped keys: data_volume (runtime reads this from workspace state)
+# NOTE: container_name is internal state (written by cai up/create, not user-settable)
+# NOTE: "agent" as standalone key is an alias for agent.default (global)
 # Global-scoped keys: agent.default, ssh.forward_agent, ssh.port_range_start, ssh.port_range_end, import.auto_prompt
-_CAI_WORKSPACE_KEYS="data_volume container_name agent"
+_CAI_WORKSPACE_KEYS="data_volume"
 _CAI_GLOBAL_KEYS="agent.default ssh.forward_agent ssh.port_range_start ssh.port_range_end import.auto_prompt"
 
 # Resolve a config key and return value with source
@@ -1668,9 +1670,13 @@ _containai_resolve_with_source() {
     local key="$1"
     local workspace="${2:-$PWD}"
     local cli_value="${3:-}"
-    local explicit_config="${4:-}"
     local env_var_name env_value repo_config_file user_config_file
     local script_dir config_json value normalized_path ws_json
+
+    # Treat "agent" as alias for "agent.default" (runtime only reads agent.default)
+    if [[ "$key" == "agent" ]]; then
+        key="agent.default"
+    fi
 
     # Normalize workspace path
     if ! normalized_path=$(_cai_normalize_path "$workspace"); then
@@ -1694,7 +1700,7 @@ _containai_resolve_with_source() {
         data_volume)
             env_var_name="CONTAINAI_DATA_VOLUME"
             ;;
-        agent|agent.default)
+        agent.default)
             env_var_name="CONTAINAI_AGENT"
             ;;
         credentials|credentials.mode)
@@ -1947,7 +1953,7 @@ if current is not None and current != '':
         data_volume)
             default_value="$_CONTAINAI_DEFAULT_VOLUME"
             ;;
-        agent|agent.default)
+        agent.default)
             default_value="claude"
             ;;
         ssh.port_range_start)
@@ -1975,17 +1981,15 @@ if current is not None and current != '':
 
 # List all known config keys with their values and sources
 # Arguments: $1 = workspace path (optional, default: $PWD)
-#            $2 = explicit config path (optional)
 # Outputs: Lines of KEY<TAB>VALUE<TAB>SOURCE
 # Returns: 0 always
 _containai_list_all_config() {
     local workspace="${1:-$PWD}"
-    local explicit_config="${2:-}"
     local key result value source
 
     # List workspace-scoped keys
     for key in $_CAI_WORKSPACE_KEYS; do
-        result=$(_containai_resolve_with_source "$key" "$workspace" "" "$explicit_config")
+        result=$(_containai_resolve_with_source "$key" "$workspace")
         value="${result%%	*}"
         source="${result#*	}"
         if [[ -n "$value" ]]; then
@@ -1995,7 +1999,7 @@ _containai_list_all_config() {
 
     # List global-scoped keys
     for key in $_CAI_GLOBAL_KEYS; do
-        result=$(_containai_resolve_with_source "$key" "$workspace" "" "$explicit_config")
+        result=$(_containai_resolve_with_source "$key" "$workspace")
         value="${result%%	*}"
         source="${result#*	}"
         if [[ -n "$value" ]]; then

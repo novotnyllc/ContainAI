@@ -524,11 +524,9 @@ Scoping Options:
 
 Workspace-scoped keys (saved per workspace):
   data_volume                   Data volume name
-  container_name                Container name
-  agent                         Default agent for this workspace
 
 Global keys (saved in user config):
-  agent.default                 Default agent globally
+  agent.default                 Default agent (also accepts "agent" as alias)
   ssh.forward_agent             Enable SSH agent forwarding
   ssh.port_range_start          SSH port range start
   ssh.port_range_end            SSH port range end
@@ -544,12 +542,12 @@ Source column values:
 
 Examples:
   cai config list                        Show all settings
-  cai config get agent                   Get effective agent
-  cai config set agent claude            Set agent for current workspace
-  cai config set -g agent.default claude Set global default agent
+  cai config get agent                   Get effective agent (alias for agent.default)
+  cai config set agent.default claude    Set global default agent
+  cai config set data_volume my-vol      Set data_volume for current workspace
   cai config unset data_volume           Remove workspace data_volume
   cai config unset -g ssh.forward_agent  Remove global ssh.forward_agent
-  cai config set --workspace /path agent gemini
+  cai config set --workspace /path data_volume my-vol
 EOF
 }
 
@@ -1926,11 +1924,20 @@ _containai_config_set_cmd() {
         fi
         echo "[OK] Set $key = $value (user-global)"
     elif [[ "$is_workspace_key" == "true" ]]; then
-        # Workspace-scoped key
-        if ! _containai_write_workspace_state "$target_workspace" "$key" "$value"; then
+        # Workspace-scoped key - use longest-prefix matching when --workspace not provided
+        local final_workspace="$target_workspace"
+        if [[ -z "$explicit_workspace" ]]; then
+            # Find best matching workspace from existing config (nested detection)
+            local matched_ws
+            matched_ws=$(_containai_find_matching_workspace "$target_workspace" 2>/dev/null) || true
+            if [[ -n "$matched_ws" ]]; then
+                final_workspace="$matched_ws"
+            fi
+        fi
+        if ! _containai_write_workspace_state "$final_workspace" "$key" "$value"; then
             return 1
         fi
-        echo "[OK] Set $key = $value (workspace:$target_workspace)"
+        echo "[OK] Set $key = $value (workspace:$final_workspace)"
     else
         # Global key
         if ! _containai_set_global_key "$key" "$value"; then
@@ -2027,11 +2034,20 @@ _containai_config_unset_cmd() {
         fi
         echo "[OK] Unset $key (user-global)"
     elif [[ "$is_workspace_key" == "true" ]]; then
-        # Workspace-scoped key
-        if ! _containai_unset_workspace_key "$target_workspace" "$key"; then
+        # Workspace-scoped key - use longest-prefix matching when --workspace not provided
+        local final_workspace="$target_workspace"
+        if [[ -z "$explicit_workspace" ]]; then
+            # Find best matching workspace from existing config (nested detection)
+            local matched_ws
+            matched_ws=$(_containai_find_matching_workspace "$target_workspace" 2>/dev/null) || true
+            if [[ -n "$matched_ws" ]]; then
+                final_workspace="$matched_ws"
+            fi
+        fi
+        if ! _containai_unset_workspace_key "$final_workspace" "$key"; then
             return 1
         fi
-        echo "[OK] Unset $key (workspace:$target_workspace)"
+        echo "[OK] Unset $key (workspace:$final_workspace)"
     else
         # Global key
         if ! _containai_unset_global_key "$key"; then
