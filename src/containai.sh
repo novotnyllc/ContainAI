@@ -194,7 +194,8 @@ Run Options:
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
-  --container <name>    Container name for creation (errors if already exists)
+  --container <name>    Use or create container with specified name
+                        (uses existing if found, creates new if missing)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -269,7 +270,7 @@ Volume-Only Mode (no workspace path or --container):
 Options:
   <path>                Workspace path (positional) - enables hot-reload mode
   --workspace <path>    Workspace path (alternative to positional)
-  --container <name>    Target specific container (derives workspace/volume from labels)
+  --container <name>    Target specific existing container (must already exist)
                         Mutually exclusive with --workspace and --data-volume
   --data-volume <vol>   Data volume name (overrides config)
   --from <path>         Import source:
@@ -324,7 +325,7 @@ Usage: cai export [options]
 
 Options:
   -o, --output <path>   Output path (file or directory)
-  --container <name>    Target specific container (derives volume from labels)
+  --container <name>    Target specific existing container (must already exist)
                         Mutually exclusive with --workspace and --data-volume
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
@@ -353,7 +354,7 @@ ContainAI Stop - Stop ContainAI containers
 Usage: cai stop [options]
 
 Options:
-  --container <name>  Stop specific container by name (mutually exclusive with --all)
+  --container <name>  Stop specific existing container (must already exist)
   --all               Stop all containers without prompting (mutually exclusive with --container)
   --remove            Also remove containers (not just stop them)
                       When used with --remove, SSH configs are automatically cleaned
@@ -406,8 +407,8 @@ Options:
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path (default: current directory)
-  --container <name>    Attach to existing ContainAI-managed container by name
-                        (container must already exist; ignores --workspace/--data-volume)
+  --container <name>    Use or create container with specified name
+                        (uses existing if found, creates new if missing)
   --image-tag <tag>     Image tag (advanced/debugging, stored as label)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -438,7 +439,7 @@ Exit Codes:
 Examples:
   cai shell                    Open shell in container for current directory
   cai shell /path/to/project   Open shell in container for specified workspace
-  cai shell --container foo    Attach to existing container named 'foo'
+  cai shell --container foo    Use or create container named 'foo'
   cai shell --fresh            Recreate container with fresh SSH keys
   cai shell --dry-run          Show what would happen (machine-parseable)
   ssh <container-name>         Direct SSH access (after cai shell setup)
@@ -2182,49 +2183,126 @@ _containai_shell_cmd() {
     local selected_context=""
 
     # === EARLY BRANCH: --container mode ===
-    # When --container is provided, derive workspace/volume from container labels
-    # and skip workspace-based resolution entirely
+    # When --container is provided, use container if exists or create if missing
+    # This is the unified "use-or-create" semantic for shell/run/exec commands
     if [[ -n "$container_name" ]]; then
+        # Try to find existing container
         # Use _cai_find_container_by_name for consistent context search (config/secure first)
         # Pass PWD as workspace hint for config-based context discovery
-        local find_rc
-        if ! selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
+        local find_rc container_exists="false"
+        if selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
+            container_exists="true"
+        else
             find_rc=$?
-            if [[ $find_rc -eq 2 ]] || [[ $find_rc -eq 3 ]]; then
-                return 1  # Error already printed (ambiguity or config parse)
+            if [[ $find_rc -eq 2 ]]; then
+                return 1  # Error already printed (ambiguity)
+            elif [[ $find_rc -eq 3 ]]; then
+                return 1  # Error already printed (config parse)
             fi
-            echo "[ERROR] Container not found: $container_name" >&2
-            return 1
+            # find_rc=1 means container not found - we'll create it
         fi
 
-        # Build docker command prefix (always use --context)
-        local -a docker_cmd=(docker --context "$selected_context")
+        if [[ "$container_exists" == "true" ]]; then
+            # Container exists - derive workspace/volume from labels
+            # Build docker command prefix (always use --context)
+            local -a docker_cmd=(docker --context "$selected_context")
 
-        # Verify container is managed by ContainAI
-        # Use {{with}} template to output empty string for missing labels (avoids <no value>)
-        # Clear DOCKER_CONTEXT/DOCKER_HOST to ensure --context takes effect
-        local is_managed
-        is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
-        if [[ "$is_managed" != "true" ]]; then
-            echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
-            return 1
+            # Verify container is managed by ContainAI
+            # Use {{with}} template to output empty string for missing labels (avoids <no value>)
+            # Clear DOCKER_CONTEXT/DOCKER_HOST to ensure --context takes effect
+            local is_managed
+            is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
+            if [[ "$is_managed" != "true" ]]; then
+                echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+                echo "[HINT] Remove the conflicting container or use a different name" >&2
+                return 1
+            fi
+
+            # Derive workspace from container labels
+            resolved_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+            if [[ -z "$resolved_workspace" ]]; then
+                echo "[ERROR] Container $container_name is missing workspace label" >&2
+                return 1
+            fi
+
+            # Derive data volume from container labels
+            resolved_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+            if [[ -z "$resolved_volume" ]]; then
+                echo "[ERROR] Container $container_name is missing data-volume label" >&2
+                return 1
+            fi
+
+            resolved_container_name="$container_name"
+
+            # Save container name to workspace state for future lookups
+            _containai_write_workspace_state "$resolved_workspace" "container_name" "$container_name" 2>/dev/null || true
+        else
+            # Container doesn't exist - will create it with the specified name
+            # Use workspace from PWD (or cli_volume if provided, but that's blocked by mutual exclusivity)
+            local workspace_input
+            workspace_input="${workspace:-$PWD}"
+            resolved_workspace=$(_cai_normalize_path "$workspace_input")
+            if [[ ! -d "$resolved_workspace" ]]; then
+                echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+                return 1
+            fi
+
+            # Resolve volume for the new container
+            if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+                echo "[ERROR] Failed to resolve data volume" >&2
+                return 1
+            fi
+
+            # Select context for new container
+            local config_file=""
+            if [[ -n "$explicit_config" ]]; then
+                if [[ ! -f "$explicit_config" ]]; then
+                    echo "[ERROR] Config file not found: $explicit_config" >&2
+                    return 1
+                fi
+                config_file="$explicit_config"
+                if ! _containai_parse_config "$config_file" "$resolved_workspace" "strict"; then
+                    echo "[ERROR] Failed to parse config: $explicit_config" >&2
+                    return 1
+                fi
+            else
+                config_file=$(_containai_find_config "$resolved_workspace")
+                if [[ -n "$config_file" ]]; then
+                    _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
+                fi
+            fi
+            local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
+
+            local debug_mode=""
+            if [[ "$debug_flag" == "true" ]]; then
+                debug_mode="debug"
+            fi
+            local verbose_str="false"
+            if [[ "$verbose_flag" == "true" ]]; then
+                verbose_str="true"
+            fi
+            if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode" "$verbose_str"); then
+                if [[ "$force_flag" == "true" ]]; then
+                    _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
+                    if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                        selected_context="$config_context_override"
+                    elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                        selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                    else
+                        _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                        return 1
+                    fi
+                else
+                    _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
+                    return 1
+                fi
+            fi
+
+            resolved_container_name="$container_name"
+
+            # Save container name to workspace state
+            _containai_write_workspace_state "$resolved_workspace" "container_name" "$container_name" 2>/dev/null || true
         fi
-
-        # Derive workspace from container labels
-        resolved_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
-        if [[ -z "$resolved_workspace" ]]; then
-            echo "[ERROR] Container $container_name is missing workspace label" >&2
-            return 1
-        fi
-
-        # Derive data volume from container labels
-        resolved_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
-        if [[ -z "$resolved_volume" ]]; then
-            echo "[ERROR] Container $container_name is missing data-volume label" >&2
-            return 1
-        fi
-
-        resolved_container_name="$container_name"
     else
         # === STANDARD MODE: Resolve from workspace ===
         # Resolve workspace using platform-aware normalization
@@ -2470,6 +2548,9 @@ _containai_shell_cmd() {
             echo "[ERROR] Failed to create container" >&2
             return 1
         fi
+
+        # Save container name to workspace state on successful creation
+        _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
     else
         # Container exists - validate ownership and workspace match before connecting
         # Check ownership (label or image fallback)
@@ -2489,6 +2570,9 @@ _containai_shell_cmd() {
             echo "[ERROR] Container workspace does not match. Use --fresh to recreate." >&2
             return 1
         fi
+
+        # Save container name to workspace state on successful use
+        _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
 
         # Print container/volume info if verbose (stderr for pipeline safety)
         # Only print here when container existed before this call
@@ -2831,28 +2915,40 @@ _containai_run_cmd() {
     fi
 
     if [[ -n "$container_name" ]]; then
-        # Spec: "Container must NOT exist; error if name collision"
-        # Use multi-context lookup to check all contexts where container might exist
-        # This prevents accidentally creating a container with a colliding name in another context
+        # Use-or-create semantics: use existing container if found, create if missing
+        # Use multi-context lookup to check if container exists
         # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
-        local collision_rc collision_stderr
-        # Capture stderr to check for config parse errors; only show for exit code 3
-        collision_stderr=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>&1 >/dev/null) && {
-            echo "[ERROR] Container $container_name already exists" >&2
+        local lookup_rc lookup_context lookup_stderr
+        # Capture stderr to check for config parse errors
+        lookup_stderr=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>&1)
+        lookup_rc=$?
+
+        if [[ $lookup_rc -eq 0 ]]; then
+            # Container exists - verify it's ContainAI-managed before reusing
+            lookup_context=$(printf '%s' "$lookup_stderr" | head -1)
+            local -a docker_cmd=(docker --context "${lookup_context:-default}")
+            local is_managed
+            is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
+            if [[ "$is_managed" != "true" ]]; then
+                echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+                echo "[HINT] Remove the conflicting container or use a different name" >&2
+                return 1
+            fi
+            # Container exists and is managed - pass --name and let _containai_start_container reuse it
+        elif [[ $lookup_rc -eq 2 ]]; then
+            # Ambiguity means container exists in multiple contexts
+            echo "[ERROR] Container $container_name exists in multiple contexts" >&2
             return 1
-        }
-        collision_rc=$?
-        if [[ $collision_rc -eq 2 ]]; then
-            # Ambiguity means container exists in multiple contexts - emit required error
-            echo "[ERROR] Container $container_name already exists" >&2
-            return 1
-        elif [[ $collision_rc -eq 3 ]]; then
+        elif [[ $lookup_rc -eq 3 ]]; then
             # Config parse error - show captured error message
-            printf '%s\n' "$collision_stderr" >&2
+            printf '%s\n' "$lookup_stderr" >&2
             return 1
         fi
-        # Exit code 1 means not found - good, we can create
+        # lookup_rc=1 means not found - will be created
         start_args+=(--name "$container_name")
+
+        # Save container name to workspace state
+        _containai_write_workspace_state "$resolved_workspace" "container_name" "$container_name" 2>/dev/null || true
     fi
     # Always pass resolved credentials
     start_args+=(--credentials "$resolved_credentials")
