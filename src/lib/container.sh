@@ -2363,11 +2363,12 @@ _containai_start_container() {
             [[ -n "${lock_fd:-}" ]] && exec {lock_fd}>&-
 
             # Wait for container to be running
+            # Clear DOCKER_HOST/DOCKER_CONTEXT to match creation context
             local wait_count=0
             local max_wait=30
             while [[ $wait_count -lt $max_wait ]]; do
                 local state
-                state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || state=""
+                state=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || state=""
                 if [[ "$state" == "running" ]]; then
                     break
                 fi
