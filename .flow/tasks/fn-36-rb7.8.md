@@ -6,7 +6,7 @@ Add `cai completion bash` and `cai completion zsh` that output static completion
 ## Acceptance
 - [ ] `cai completion bash` outputs full bash completion script
 - [ ] `cai completion zsh` outputs full zsh completion script
-- [ ] Completes subcommands: shell, run, exec, import, export, stop, status, gc, doctor, config, docker
+- [ ] Completes subcommands: shell, run, exec, import, export, stop, doctor, config, docker, setup, validate, ssh, links, update, uninstall, completion, help, version
 - [ ] Completes flags per subcommand
 - [ ] Dynamic completion for `--container` and `--data-volume` only
 - [ ] Uses 5s cache for docker-derived values
