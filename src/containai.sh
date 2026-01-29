@@ -202,6 +202,7 @@ Run Options:
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
   --fresh               Remove and recreate container (preserves data volume)
   --restart             Force recreate container (alias for --fresh)
+  --reset               Reset workspace state (generates new unique volume name)
   --force               Skip isolation checks (for testing only)
   --detached, -d        Run in background
   --quiet, -q           Suppress verbose output
@@ -416,6 +417,8 @@ Options:
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
   --fresh               Remove and recreate container (preserves data volume)
   --restart             Alias for --fresh
+  --reset               Reset workspace state (generates new unique volume name,
+                        removes container; never uses default volume)
   --force               Skip isolation checks (for testing only)
   --dry-run             Show what would happen without executing (machine-parseable)
   -q, --quiet           Suppress verbose output
@@ -1971,6 +1974,7 @@ _containai_shell_cmd() {
     local cli_memory=""
     local cli_cpus=""
     local fresh_flag=false
+    local reset_flag=false
     local force_flag=false
     local quiet_flag=false
     local verbose_flag=false
@@ -2055,6 +2059,10 @@ _containai_shell_cmd() {
                 ;;
             --restart | --fresh)
                 fresh_flag=true
+                shift
+                ;;
+            --reset)
+                reset_flag=true
                 shift
                 ;;
             --force)
@@ -2174,6 +2182,26 @@ _containai_shell_cmd() {
         fi
         if [[ -n "$cli_volume" ]]; then
             echo "[ERROR] --container and --data-volume are mutually exclusive" >&2
+            return 1
+        fi
+    fi
+
+    # Check mutual exclusivity of --reset and --fresh
+    if [[ "$reset_flag" == "true" && "$fresh_flag" == "true" ]]; then
+        echo "[ERROR] --reset and --fresh are mutually exclusive" >&2
+        echo "[INFO] --fresh recreates container with same volume; --reset generates new volume" >&2
+        return 1
+    fi
+
+    # Check mutual exclusivity of --reset with --container and --data-volume
+    if [[ "$reset_flag" == "true" ]]; then
+        if [[ -n "$container_name" ]]; then
+            echo "[ERROR] --reset and --container are mutually exclusive" >&2
+            return 1
+        fi
+        if [[ -n "$cli_volume" ]]; then
+            echo "[ERROR] --reset and --data-volume are mutually exclusive" >&2
+            echo "[INFO] --reset generates a new unique volume name; use --data-volume alone to specify a volume" >&2
             return 1
         fi
     fi
@@ -2317,10 +2345,39 @@ _containai_shell_cmd() {
             return 1
         fi
 
-        # Resolve volume (needed for container creation if --fresh)
-        if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
-            echo "[ERROR] Failed to resolve data volume" >&2
-            return 1
+        # Handle --reset flag: regenerate workspace state values BEFORE any container ops
+        # This ensures the new volume name is persisted before we do anything else
+        if [[ "$reset_flag" == "true" ]]; then
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "[INFO] Resetting workspace state..."
+            fi
+
+            # Generate NEW unique volume name (never falls back to default)
+            if ! resolved_volume=$(_containai_generate_volume_name "$resolved_workspace"); then
+                echo "[ERROR] Failed to generate new volume name" >&2
+                return 1
+            fi
+
+            # Write new volume name to workspace state IMMEDIATELY (before container ops)
+            if ! _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume"; then
+                echo "[ERROR] Failed to write workspace state" >&2
+                return 1
+            fi
+
+            # Update created_at timestamp
+            local reset_timestamp
+            reset_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            _containai_write_workspace_state "$resolved_workspace" "created_at" "$reset_timestamp" 2>/dev/null || true
+
+            # Clear container_name from workspace state (will be regenerated on create)
+            # Write empty string to clear it
+            _containai_write_workspace_state "$resolved_workspace" "container_name" "" 2>/dev/null || true
+        else
+            # Resolve volume normally (needed for container creation if --fresh)
+            if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+                echo "[ERROR] Failed to resolve data volume" >&2
+                return 1
+            fi
         fi
 
         # === CONFIG PARSING (for context selection) ===
@@ -2444,10 +2501,12 @@ _containai_shell_cmd() {
         return $?
     fi
 
-    # Handle --fresh flag: remove and recreate container
-    if [[ "$fresh_flag" == "true" ]]; then
-        # Log at start of --fresh block (regardless of whether container exists)
-        if [[ "$quiet_flag" != "true" ]]; then
+    # Handle --fresh or --reset flag: remove and recreate container
+    # Note: --reset has already regenerated workspace state values above
+    if [[ "$fresh_flag" == "true" || "$reset_flag" == "true" ]]; then
+        # Log at start of block (regardless of whether container exists)
+        # --reset already logged "Resetting workspace state..." above
+        if [[ "$quiet_flag" != "true" && "$fresh_flag" == "true" ]]; then
             echo "[INFO] Recreating container..."
         fi
 
@@ -2459,7 +2518,9 @@ _containai_shell_cmd() {
             if [[ "$fresh_label_val" != "true" ]]; then
                 fresh_image_fallback=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$resolved_container_name" 2>/dev/null) || fresh_image_fallback=""
                 if [[ "$fresh_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
-                    echo "[ERROR] Cannot use --fresh - container '$resolved_container_name' was not created by ContainAI" >&2
+                    local flag_name="--fresh"
+                    [[ "$reset_flag" == "true" ]] && flag_name="--reset"
+                    echo "[ERROR] Cannot use $flag_name - container '$resolved_container_name' was not created by ContainAI" >&2
                     echo "Remove the conflicting container manually if needed: docker rm -f '$resolved_container_name'" >&2
                     return 1
                 fi

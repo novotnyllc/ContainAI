@@ -1533,4 +1533,88 @@ if val is not None:
     return 0
 }
 
+# ==============================================================================
+# Volume name generation (for --reset)
+# ==============================================================================
+
+# Generate a unique data volume name for workspace
+# Format: {repo}-{branch}-{timestamp}
+# Arguments: $1 = workspace path (required, should be normalized)
+# Outputs: volume name via stdout
+# Returns: 0 on success, 1 on error
+#
+# Rules:
+# - repo: directory name (last path component), sanitized
+# - branch: from git, sanitized; "nogit" if not a git repo
+# - timestamp: Unix timestamp for uniqueness
+# - Sanitization: lowercase, replace non-alphanumeric with dash, collapse multiple dashes
+# - Max 255 chars (Docker volume name limit)
+#
+# This function is used by --reset to generate a NEW unique volume name.
+# It NEVER falls back to the default sandbox-agent-data volume.
+_containai_generate_volume_name() {
+    local workspace="$1"
+    local repo_name branch_name timestamp sanitized_repo sanitized_branch volume_name
+
+    if [[ -z "$workspace" ]]; then
+        printf '%s\n' "[ERROR] _containai_generate_volume_name requires workspace path" >&2
+        return 1
+    fi
+
+    # Extract repo name (last path component)
+    repo_name=$(basename "$workspace")
+    if [[ -z "$repo_name" || "$repo_name" == "/" ]]; then
+        repo_name="workspace"
+    fi
+
+    # Get git branch (or "nogit" if not a git repo)
+    if command -v git >/dev/null 2>&1 && (cd -- "$workspace" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
+        # Try to get branch name
+        if branch_name=$(cd -- "$workspace" && git rev-parse --abbrev-ref HEAD 2>/dev/null); then
+            # Handle detached HEAD
+            if [[ "$branch_name" == "HEAD" ]]; then
+                # Use short SHA instead
+                branch_name=$(cd -- "$workspace" && git rev-parse --short HEAD 2>/dev/null) || branch_name="detached"
+            fi
+        else
+            branch_name="nogit"
+        fi
+    else
+        branch_name="nogit"
+    fi
+
+    # Get Unix timestamp for uniqueness
+    timestamp=$(date +%s)
+
+    # Sanitize repo name: lowercase, replace non-alphanumeric with dash, collapse dashes
+    sanitized_repo=$(printf '%s' "$repo_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//' | sed 's/-$//')
+    if [[ -z "$sanitized_repo" ]]; then
+        sanitized_repo="workspace"
+    fi
+
+    # Sanitize branch name: lowercase, replace non-alphanumeric with dash, collapse dashes
+    sanitized_branch=$(printf '%s' "$branch_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//' | sed 's/-$//')
+    if [[ -z "$sanitized_branch" ]]; then
+        sanitized_branch="unknown"
+    fi
+
+    # Combine into volume name
+    volume_name="${sanitized_repo}-${sanitized_branch}-${timestamp}"
+
+    # Truncate to 255 chars (Docker volume name limit)
+    if [[ ${#volume_name} -gt 255 ]]; then
+        volume_name="${volume_name:0:255}"
+    fi
+
+    # Validate volume name format (Docker requirements)
+    # Must start with alphanumeric, contain only alphanumeric, underscore, dot, dash
+    if ! _containai_validate_volume_name "$volume_name"; then
+        # Fallback: use timestamp-only name (guaranteed valid)
+        volume_name="cai-volume-${timestamp}"
+    fi
+
+    printf '%s' "$volume_name"
+    return 0
+}
+
 return 0
