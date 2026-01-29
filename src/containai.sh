@@ -4351,9 +4351,9 @@ _CAI_COMPLETION_CACHE_VOLUMES=""
 _CAI_COMPLETION_CACHE_TTL=5  # seconds
 
 # Portable sub-second timeout for completion
-# Falls back gracefully if no timeout command is available
+# Falls back to returning empty (skip command) if no timeout available
 # Arguments: $1 = timeout in seconds (can be fractional like 0.5), $* = command
-# Returns: command exit code, or 124 on timeout
+# Returns: command exit code, 124 on timeout, or 1 if no timeout command
 _cai_completion_timeout() {
     local timeout_sec="${1:-1}"
     shift
@@ -4367,8 +4367,9 @@ _cai_completion_timeout() {
         return $?
     fi
 
-    # Fallback: run without timeout (better than failing)
-    "$@"
+    # No timeout available - return empty to avoid potential hangs
+    # Per spec: >500ms should fall back to no suggestions
+    return 1
 }
 
 # Get ContainAI containers for completion (with caching)
@@ -4388,11 +4389,13 @@ _cai_completion_get_containers() {
     fi
 
     # Docker lookup with 500ms timeout using portable helper
-    local containers docker_host
+    # Clear DOCKER_HOST/DOCKER_CONTEXT to ensure we only hit local containai-docker
+    local containers docker_host docker_context
     docker_host="${_CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
+    docker_context="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
     if [[ -S "$docker_host" ]]; then
         # shellcheck disable=SC2016
-        containers=$(_cai_completion_timeout 0.5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}" ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ') || containers=""
+        containers=$(DOCKER_HOST= DOCKER_CONTEXT= _cai_completion_timeout 0.5 docker --context "$docker_context" ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ') || containers=""
     fi
 
     # Update cache
@@ -4417,11 +4420,13 @@ _cai_completion_get_volumes() {
     fi
 
     # Docker lookup with 500ms timeout using portable helper
-    local volumes docker_host
+    # Clear DOCKER_HOST/DOCKER_CONTEXT to ensure we only hit local containai-docker
+    local volumes docker_host docker_context
     docker_host="${_CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
+    docker_context="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
     if [[ -S "$docker_host" ]]; then
         # shellcheck disable=SC2016
-        volumes=$(_cai_completion_timeout 0.5 docker --context "${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}" volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ') || volumes=""
+        volumes=$(DOCKER_HOST= DOCKER_CONTEXT= _cai_completion_timeout 0.5 docker --context "$docker_context" volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ') || volumes=""
     fi
 
     # Update cache
@@ -4452,7 +4457,7 @@ _cai_completions() {
     local global_flags="-h --help"
 
     # Per-subcommand flags
-    local run_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --mount-docker-socket --please-root-my-host -h --help"
+    local run_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
     local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
     local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --debug -D -h --help"
     local doctor_flags="--json --reset-lima --workspace -w -h --help"
@@ -4647,6 +4652,7 @@ typeset -g _cai_completion_cache_time=0
 typeset -g _cai_completion_cache_ttl=5
 
 # Portable sub-second timeout helper
+# Returns 1 (no output) if no timeout command available - avoids hangs
 _cai_completion_timeout() {
     local timeout_sec="$1"
     shift
@@ -4655,7 +4661,8 @@ _cai_completion_timeout() {
     elif (( $+commands[gtimeout] )); then
         gtimeout "$timeout_sec" "$@"
     else
-        "$@"
+        # No timeout available - skip command to avoid potential hangs
+        return 1
     fi
 }
 
@@ -4666,10 +4673,11 @@ _cai_get_containers() {
         return
     fi
 
-    local docker_socket="${CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
-    local docker_context="${CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
+    # Use underscore-prefixed vars matching CLI, clear DOCKER_HOST/DOCKER_CONTEXT for safety
+    local docker_socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
+    local docker_context="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
     if [[ -S "$docker_socket" ]]; then
-        _cai_completion_cache_containers=$(_cai_completion_timeout 0.5 docker --context "$docker_context" ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')
+        _cai_completion_cache_containers=$(DOCKER_HOST= DOCKER_CONTEXT= _cai_completion_timeout 0.5 docker --context "$docker_context" ps -a --filter "label=containai.managed=true" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')
         _cai_completion_cache_time=$now
     fi
     echo "$_cai_completion_cache_containers"
@@ -4682,10 +4690,11 @@ _cai_get_volumes() {
         return
     fi
 
-    local docker_socket="${CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
-    local docker_context="${CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
+    # Use underscore-prefixed vars matching CLI, clear DOCKER_HOST/DOCKER_CONTEXT for safety
+    local docker_socket="${_CAI_CONTAINAI_DOCKER_SOCKET:-/run/containai-docker/docker.sock}"
+    local docker_context="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
     if [[ -S "$docker_socket" ]]; then
-        _cai_completion_cache_volumes=$(_cai_completion_timeout 0.5 docker --context "$docker_context" volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ')
+        _cai_completion_cache_volumes=$(DOCKER_HOST= DOCKER_CONTEXT= _cai_completion_timeout 0.5 docker --context "$docker_context" volume ls --filter "label=containai.managed=true" --format '{{.Name}}' 2>/dev/null | tr '\n' ' ')
         _cai_completion_cache_time=$now
     fi
     echo "$_cai_completion_cache_volumes"
@@ -4749,6 +4758,10 @@ _cai() {
                         '--dry-run[Show what would happen]' \
                         '--mount-docker-socket[Mount Docker socket]' \
                         '--please-root-my-host[Dangerous: allow host root access]' \
+                        '--allow-host-credentials[Allow host credentials]' \
+                        '--i-understand-this-exposes-host-credentials[Acknowledge credential exposure]' \
+                        '--allow-host-docker-socket[Allow host Docker socket]' \
+                        '--i-understand-this-grants-root-access[Acknowledge root access]' \
                         '*'{-e,--env}'[Set environment variable]:var=value:' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
@@ -4926,15 +4939,16 @@ _cai() {
             esac
 
             # Handle dynamic completions for --container and --data-volume only
+            # Use space split ${(s: :)} since _cai_get_* returns space-separated values
             case $state in
                 containers)
                     local -a containers
-                    containers=(${(f)"$(_cai_get_containers)"})
+                    containers=(${(s: :)"$(_cai_get_containers)"})
                     _describe -t containers 'container' containers
                     ;;
                 volumes)
                     local -a volumes
-                    volumes=(${(f)"$(_cai_get_volumes)"})
+                    volumes=(${(s: :)"$(_cai_get_volumes)"})
                     _describe -t volumes 'volume' volumes
                     ;;
             esac

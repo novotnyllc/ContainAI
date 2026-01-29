@@ -31,6 +31,22 @@ FLOWCTL="$SCRIPT_DIR/flowctl"
 FLOWCTL_PY="$SCRIPT_DIR/flowctl.py"
 
 fail() { echo "ralph: $*" >&2; exit 1; }
+
+# Pre-scan for --config before sourcing (main arg loop runs after config is loaded)
+_config_found=0
+_prev=""
+for _arg in "$@"; do
+  if [[ "$_prev" == "--config" ]]; then
+    [[ "$_arg" != --* ]] || fail "--config requires a path, not a flag"
+    CONFIG="$_arg"
+    _config_found=1
+    break
+  fi
+  _prev="$_arg"
+done
+[[ "$_prev" == "--config" && "$_config_found" -eq 0 ]] && fail "--config requires a path"
+unset _prev _arg _config_found
+
 log() {
   # Machine-readable logs: only show when UI disabled
   [[ "${UI_ENABLED:-1}" != "1" ]] && echo "ralph: $*"
@@ -331,7 +347,7 @@ ui_waiting() {
   ui "   ${C_DIM}⏳ Claude working...${C_RESET}"
 }
 
-[[ -f "$CONFIG" ]] || fail "missing config.env"
+[[ -f "$CONFIG" ]] || fail "config file not found: $CONFIG"
 [[ -x "$FLOWCTL" ]] || fail "missing flowctl"
 
 # shellcheck disable=SC1090
@@ -364,10 +380,15 @@ while [[ $# -gt 0 ]]; do
       fi
       shift
       ;;
+    --config)
+      # Already processed in pre-scan; just consume args
+      shift
+      ;;
     --help|-h)
       echo "Usage: ralph.sh [options]"
       echo ""
       echo "Options:"
+      echo "  --config <path>  Use alternate config file (default: config.env)"
       echo "  --watch          Show tool calls in real-time"
       echo "  --watch verbose  Show tool calls + model responses"
       echo "  --help, -h       Show this help"
