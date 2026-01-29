@@ -1583,23 +1583,34 @@ _containai_generate_volume_name() {
         branch_name="nogit"
     fi
 
-    # Get Unix timestamp for uniqueness
+    # Get Unix timestamp for uniqueness, with random suffix to avoid collisions
+    # within the same second (e.g., scripted consecutive --reset calls)
     timestamp=$(date +%s)
+    # Generate 4-char random hex suffix for additional uniqueness
+    local random_suffix
+    if [[ -r /dev/urandom ]]; then
+        random_suffix=$(head -c 2 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    else
+        # Fallback: use RANDOM (less entropy but still helps)
+        random_suffix=$(printf '%04x' "$RANDOM")
+    fi
 
     # Sanitize repo name: lowercase, replace non-alphanumeric with dash, collapse dashes
-    sanitized_repo=$(printf '%s' "$repo_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//' | sed 's/-$//')
+    # Note: use POSIX BRE 's/--*/-/g' instead of GNU ERE 's/-\+/-/g' for portability
+    sanitized_repo=$(printf '%s' "$repo_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//')
     if [[ -z "$sanitized_repo" ]]; then
         sanitized_repo="workspace"
     fi
 
     # Sanitize branch name: lowercase, replace non-alphanumeric with dash, collapse dashes
-    sanitized_branch=$(printf '%s' "$branch_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//' | sed 's/-$//')
+    # Note: use POSIX BRE 's/--*/-/g' instead of GNU ERE 's/-\+/-/g' for portability
+    sanitized_branch=$(printf '%s' "$branch_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//')
     if [[ -z "$sanitized_branch" ]]; then
         sanitized_branch="unknown"
     fi
 
-    # Combine into volume name
-    volume_name="${sanitized_repo}-${sanitized_branch}-${timestamp}"
+    # Combine into volume name: {repo}-{branch}-{timestamp}{random}
+    volume_name="${sanitized_repo}-${sanitized_branch}-${timestamp}${random_suffix}"
 
     # Truncate to 255 chars (Docker volume name limit)
     if [[ ${#volume_name} -gt 255 ]]; then
@@ -1609,8 +1620,8 @@ _containai_generate_volume_name() {
     # Validate volume name format (Docker requirements)
     # Must start with alphanumeric, contain only alphanumeric, underscore, dot, dash
     if ! _containai_validate_volume_name "$volume_name"; then
-        # Fallback: use timestamp-only name (guaranteed valid)
-        volume_name="cai-volume-${timestamp}"
+        # Fallback: still match documented {repo}-{branch}-{timestamp} format
+        volume_name="${sanitized_repo:-workspace}-${sanitized_branch:-nogit}-${timestamp}${random_suffix}"
     fi
 
     printf '%s' "$volume_name"

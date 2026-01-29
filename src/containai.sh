@@ -2345,8 +2345,10 @@ _containai_shell_cmd() {
             return 1
         fi
 
-        # Handle --reset flag: regenerate workspace state values BEFORE any container ops
-        # This ensures the new volume name is persisted before we do anything else
+        # Handle --reset flag: generate new volume name (but don't persist yet)
+        # State persistence is deferred until after config validation succeeds
+        # This ensures we don't mutate state if config parsing fails
+        local reset_pending=false
         if [[ "$reset_flag" == "true" ]]; then
             if [[ "$quiet_flag" != "true" ]]; then
                 echo "[INFO] Resetting workspace state..."
@@ -2358,20 +2360,11 @@ _containai_shell_cmd() {
                 return 1
             fi
 
-            # Write new volume name to workspace state IMMEDIATELY (before container ops)
-            if ! _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume"; then
-                echo "[ERROR] Failed to write workspace state" >&2
-                return 1
+            # Mark that we need to persist state after config validation
+            # Skip if dry-run (dry-run should never mutate state)
+            if [[ "$dry_run_flag" != "true" ]]; then
+                reset_pending=true
             fi
-
-            # Update created_at timestamp
-            local reset_timestamp
-            reset_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            _containai_write_workspace_state "$resolved_workspace" "created_at" "$reset_timestamp" 2>/dev/null || true
-
-            # Clear container_name from workspace state (will be regenerated on create)
-            # Write empty string to clear it
-            _containai_write_workspace_state "$resolved_workspace" "container_name" "" 2>/dev/null || true
         else
             # Resolve volume normally (needed for container creation if --fresh)
             if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
@@ -2425,6 +2418,24 @@ _containai_shell_cmd() {
                 _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
                 return 1
             fi
+        fi
+
+        # Now that config validation and context selection succeeded, persist --reset state
+        # This is deferred from above to avoid mutating state if validation fails
+        if [[ "$reset_pending" == "true" ]]; then
+            # Write new volume name to workspace state
+            if ! _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume"; then
+                echo "[ERROR] Failed to write workspace state" >&2
+                return 1
+            fi
+
+            # Update created_at timestamp
+            local reset_timestamp
+            reset_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            _containai_write_workspace_state "$resolved_workspace" "created_at" "$reset_timestamp" 2>/dev/null || true
+
+            # Clear container_name from workspace state (will be regenerated on create)
+            _containai_write_workspace_state "$resolved_workspace" "container_name" "" 2>/dev/null || true
         fi
 
         # Build docker command prefix (always use --context)
