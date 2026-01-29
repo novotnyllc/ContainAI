@@ -1609,8 +1609,9 @@ _containai_generate_volume_name() {
         sanitized_branch="unknown"
     fi
 
-    # Combine into volume name: {repo}-{branch}-{timestamp}{random}
-    volume_name="${sanitized_repo}-${sanitized_branch}-${timestamp}${random_suffix}"
+    # Combine into volume name: {repo}-{branch}-{timestamp}-{random}
+    # Using dash delimiter before random suffix for clarity and spec compliance
+    volume_name="${sanitized_repo}-${sanitized_branch}-${timestamp}-${random_suffix}"
 
     # Truncate to 255 chars (Docker volume name limit)
     if [[ ${#volume_name} -gt 255 ]]; then
@@ -1620,8 +1621,8 @@ _containai_generate_volume_name() {
     # Validate volume name format (Docker requirements)
     # Must start with alphanumeric, contain only alphanumeric, underscore, dot, dash
     if ! _containai_validate_volume_name "$volume_name"; then
-        # Fallback: still match documented {repo}-{branch}-{timestamp} format
-        volume_name="${sanitized_repo:-workspace}-${sanitized_branch:-nogit}-${timestamp}${random_suffix}"
+        # Fallback: still match documented format with random suffix
+        volume_name="${sanitized_repo:-workspace}-${sanitized_branch:-nogit}-${timestamp}-${random_suffix}"
     fi
 
     printf '%s' "$volume_name"
