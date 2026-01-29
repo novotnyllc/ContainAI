@@ -189,7 +189,7 @@ _containai_links_check() {
     fi
 
     # Run via SSH
-    # _cai_ssh_run args: container_name context force_update quiet detached allocate_tty cmd...
+    # _cai_ssh_run args: container_name context force_update quiet detached allocate_tty [--login-shell] cmd...
     local ssh_output ssh_exit_code
     if ssh_output=$(_cai_ssh_run "$container_name" "$context" "false" "$quiet" "false" "false" "${check_cmd[@]}" 2>&1); then
         ssh_exit_code=0

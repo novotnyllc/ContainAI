@@ -174,6 +174,7 @@ Usage: containai [subcommand] [options]
 Subcommands:
   run           Start/attach to sandbox container (default if omitted)
   shell         Open interactive shell in running container
+  exec          Run a command in container via SSH
   doctor        Check system capabilities and show diagnostics
   setup         Configure secure container isolation (Linux/WSL2/macOS)
   validate      Validate Secure Engine configuration
@@ -227,6 +228,7 @@ Examples:
   cai -- --print                    Pass --print to agent
   cai doctor                        Check system capabilities
   cai shell                         Open shell in running container
+  cai exec ls -la                   Run a command in container
   cai stop --all                    Stop all containers
 
 Safe Defaults:
@@ -448,6 +450,58 @@ Examples:
   cai shell --fresh            Recreate container with fresh SSH keys
   cai shell --dry-run          Show what would happen (machine-parseable)
   ssh <container-name>         Direct SSH access (after cai shell setup)
+EOF
+}
+
+_containai_exec_help() {
+    cat <<'EOF'
+ContainAI Exec - Run a command in container via SSH
+
+Usage: cai exec [options] [--] <command> [args...]
+
+Runs an arbitrary command in the container via SSH.
+If no container exists, creates one first.
+If container exists but is stopped, starts it first.
+
+The command runs in a login shell (bash -lc) which sources /etc/profile
+and one of ~/.bash_profile, ~/.bash_login, or ~/.profile (first found).
+Note: ~/.bashrc is NOT sourced by bash login shells unless explicitly sourced.
+
+Options:
+  --workspace <path>    Workspace path (default: current directory)
+  -w <path>             Short form of --workspace
+  --container <name>    Use or create container with specified name
+                        (mutually exclusive with --workspace/--data-volume)
+  --data-volume <vol>   Data volume name (overrides config)
+  --config <path>       Config file path (overrides auto-discovery)
+  --fresh               Remove and recreate container (preserves data volume)
+  --force               Skip isolation checks (for testing only)
+  -q, --quiet           Suppress verbose output
+  -h, --help            Show this help message
+  --                    Separator between cai options and command
+
+TTY Handling:
+  - Automatically allocates a PTY if stdin is a TTY
+  - Streams stdout/stderr in real-time
+  - Exit code from the command is passed through
+
+Exit Codes:
+  0    Command completed successfully
+  1    General error (container creation, config parsing, etc.)
+  11   Container failed to start
+  12   SSH setup failed
+  13   SSH connection failed after retries
+  14   Host key mismatch could not be auto-recovered
+  15   Container exists but not owned by ContainAI
+  *    Exit code from the remote command itself
+
+Examples:
+  cai exec ls -la                    List files in workspace
+  cai exec echo hello                Simple command
+  cai exec false                     Returns exit code 1
+  cai exec -- --help                 Run "--help" as command (uses -- separator)
+  cai exec -w /path/to/project pwd   Exec in specific workspace
+  cai exec --container foo ls        Exec in container named 'foo'
 EOF
 }
 
@@ -2610,7 +2664,7 @@ _containai_shell_cmd() {
     # Check if container exists; if not, create it first
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
         if [[ "$quiet_flag" != "true" ]]; then
-            echo "Container not found, creating..."
+            echo "Container not found, creating..." >&2
         fi
 
         local -a create_args=()
@@ -2696,6 +2750,582 @@ _containai_shell_cmd() {
     fi
 
     _cai_ssh_shell "$resolved_container_name" "$selected_context" "$force_arg" "$quiet_arg"
+}
+
+# Exec subcommand handler - runs arbitrary commands in container via SSH
+# Uses _cai_ssh_run with --login-shell for proper environment sourcing
+_containai_exec_cmd() {
+    local cli_volume=""
+    local workspace=""
+    local explicit_config=""
+    local container_name=""
+    local fresh_flag=false
+    local force_flag=false
+    local quiet_flag=false
+    local verbose_flag=false
+    local debug_flag=false
+    local -a exec_cmd=()
+
+    # Parse arguments - stop at first non-option or after --
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --data-volume)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
+                cli_volume="$2"
+                shift 2
+                ;;
+            --data-volume=*)
+                cli_volume="${1#--data-volume=}"
+                if [[ -z "$cli_volume" ]]; then
+                    echo "[ERROR] --data-volume requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --config)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                explicit_config="$2"
+                explicit_config="${explicit_config/#\~/$HOME}"
+                shift 2
+                ;;
+            --config=*)
+                explicit_config="${1#--config=}"
+                if [[ -z "$explicit_config" ]]; then
+                    echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                explicit_config="${explicit_config/#\~/$HOME}"
+                shift
+                ;;
+            --workspace | -w)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="$2"
+                workspace="${workspace/#\~/$HOME}"
+                shift 2
+                ;;
+            --workspace=*)
+                workspace="${1#--workspace=}"
+                if [[ -z "$workspace" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            -w*)
+                workspace="${1#-w}"
+                workspace="${workspace/#\~/$HOME}"
+                shift
+                ;;
+            --container)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                container_name="$2"
+                shift 2
+                ;;
+            --container=*)
+                container_name="${1#--container=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --fresh)
+                fresh_flag=true
+                shift
+                ;;
+            --restart)
+                # Note: --restart is not supported in exec (different semantics from run)
+                echo "[ERROR] --restart is not supported in cai exec" >&2
+                echo "[HINT] Use --fresh to recreate the container, or 'cai run --restart' to restart the container" >&2
+                return 1
+                ;;
+            --force)
+                force_flag=true
+                shift
+                ;;
+            --quiet | -q)
+                quiet_flag=true
+                shift
+                ;;
+            --verbose)
+                verbose_flag=true
+                shift
+                ;;
+            --debug | -D)
+                debug_flag=true
+                shift
+                ;;
+            --help | -h)
+                _containai_exec_help
+                return 0
+                ;;
+            --)
+                # Everything after -- is the command
+                shift
+                exec_cmd=("$@")
+                break
+                ;;
+            -*)
+                # Unknown option - could be part of command (e.g., ls -la)
+                # Stop parsing and treat rest as command
+                exec_cmd=("$@")
+                break
+                ;;
+            *)
+                # First non-option argument is start of command
+                exec_cmd=("$@")
+                break
+                ;;
+        esac
+    done
+
+    # Validate that a command was provided
+    if [[ ${#exec_cmd[@]} -eq 0 ]]; then
+        echo "[ERROR] No command specified" >&2
+        echo "Usage: cai exec [options] [--] <command> [args...]" >&2
+        return 1
+    fi
+
+    # Check mutual exclusivity of --container with --workspace and --data-volume
+    if [[ -n "$container_name" ]]; then
+        if [[ -n "$workspace" ]]; then
+            echo "[ERROR] --container and --workspace are mutually exclusive" >&2
+            return 1
+        fi
+        if [[ -n "$cli_volume" ]]; then
+            echo "[ERROR] --container and --data-volume are mutually exclusive" >&2
+            return 1
+        fi
+    fi
+
+    # Variables to resolve
+    local resolved_workspace=""
+    local resolved_volume=""
+    local resolved_container_name=""
+    local selected_context=""
+
+    # === EARLY BRANCH: --container mode ===
+    if [[ -n "$container_name" ]]; then
+        # Try to find existing container
+        local find_rc container_exists="false"
+        if selected_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
+            container_exists="true"
+        else
+            find_rc=$?
+            if [[ $find_rc -eq 2 ]]; then
+                return 1  # Error already printed (ambiguity)
+            elif [[ $find_rc -eq 3 ]]; then
+                return 1  # Error already printed (config parse)
+            fi
+        fi
+
+        if [[ "$container_exists" == "true" ]]; then
+            # Container exists - derive workspace/volume from labels
+            local -a docker_cmd=(docker --context "$selected_context")
+
+            # Verify container is managed by ContainAI
+            local is_managed container_image
+            is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
+            if [[ "$is_managed" != "true" ]]; then
+                container_image=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || container_image=""
+                if [[ "$container_image" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                    echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+                    echo "[HINT] Remove the conflicting container or use a different name" >&2
+                    return 15
+                fi
+            fi
+
+            # Derive workspace from container labels
+            resolved_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+            if [[ -z "$resolved_workspace" ]]; then
+                echo "[ERROR] Container $container_name is missing workspace label" >&2
+                return 1
+            fi
+
+            # Derive data volume from container labels
+            resolved_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+            if [[ -z "$resolved_volume" ]]; then
+                echo "[ERROR] Container $container_name is missing data-volume label" >&2
+                return 1
+            fi
+
+            resolved_container_name="$container_name"
+        else
+            # Container doesn't exist - will create it
+            local workspace_input
+            workspace_input="${workspace:-$PWD}"
+            resolved_workspace=$(_cai_normalize_path "$workspace_input")
+            if [[ ! -d "$resolved_workspace" ]]; then
+                echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+                return 1
+            fi
+
+            if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+                echo "[ERROR] Failed to resolve data volume" >&2
+                return 1
+            fi
+
+            # Select context for new container
+            local config_file=""
+            if [[ -n "$explicit_config" ]]; then
+                if [[ ! -f "$explicit_config" ]]; then
+                    echo "[ERROR] Config file not found: $explicit_config" >&2
+                    return 1
+                fi
+                config_file="$explicit_config"
+                if ! _containai_parse_config "$config_file" "$resolved_workspace" "strict"; then
+                    echo "[ERROR] Failed to parse config: $explicit_config" >&2
+                    return 1
+                fi
+            else
+                config_file=$(_containai_find_config "$resolved_workspace")
+                if [[ -n "$config_file" ]]; then
+                    _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
+                fi
+            fi
+            local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
+
+            local debug_mode=""
+            if [[ "$debug_flag" == "true" ]]; then
+                debug_mode="debug"
+            fi
+            local verbose_str="false"
+            if [[ "$verbose_flag" == "true" ]]; then
+                verbose_str="true"
+            fi
+            if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode" "$verbose_str"); then
+                if [[ "$force_flag" == "true" ]]; then
+                    _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
+                    if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                        selected_context="$config_context_override"
+                    elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                        selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                    else
+                        _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                        return 1
+                    fi
+                else
+                    _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
+                    return 1
+                fi
+            fi
+
+            resolved_container_name="$container_name"
+        fi
+    else
+        # === STANDARD MODE: Resolve from workspace ===
+        local workspace_input
+        workspace_input="${workspace:-$PWD}"
+        resolved_workspace=$(_cai_normalize_path "$workspace_input")
+        if [[ ! -d "$resolved_workspace" ]]; then
+            echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+            return 1
+        fi
+
+        # Resolve volume
+        if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+            echo "[ERROR] Failed to resolve data volume" >&2
+            return 1
+        fi
+
+        # === CONFIG PARSING (for context selection) ===
+        local config_file=""
+        if [[ -n "$explicit_config" ]]; then
+            if [[ ! -f "$explicit_config" ]]; then
+                echo "[ERROR] Config file not found: $explicit_config" >&2
+                return 1
+            fi
+            config_file="$explicit_config"
+            if ! _containai_parse_config "$config_file" "$resolved_workspace" "strict"; then
+                echo "[ERROR] Failed to parse config: $explicit_config" >&2
+                return 1
+            fi
+        else
+            config_file=$(_containai_find_config "$resolved_workspace")
+            if [[ -n "$config_file" ]]; then
+                _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
+            fi
+        fi
+        local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
+
+        # Auto-select Docker context
+        local debug_mode=""
+        if [[ "$debug_flag" == "true" ]]; then
+            debug_mode="debug"
+        fi
+        local verbose_str="false"
+        if [[ "$verbose_flag" == "true" ]]; then
+            verbose_str="true"
+        fi
+        if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode" "$verbose_str"); then
+            if [[ "$force_flag" == "true" ]]; then
+                _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
+                if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                    selected_context="$config_context_override"
+                elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                    selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                else
+                    _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                    return 1
+                fi
+            else
+                _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
+                return 1
+            fi
+        fi
+
+        # Build docker command prefix
+        local -a docker_cmd=(docker --context "$selected_context")
+
+        # Resolve container name
+        local find_rc
+        if resolved_container_name=$(_cai_find_workspace_container "$resolved_workspace" "$selected_context"); then
+            : # Found existing container
+        else
+            find_rc=$?
+            if [[ $find_rc -eq 2 ]]; then
+                return 1
+            fi
+            if resolved_container_name=$(_cai_resolve_container_name "$resolved_workspace" "$selected_context"); then
+                : # Got name for creation
+            else
+                find_rc=$?
+                if [[ $find_rc -eq 2 ]]; then
+                    return 1
+                fi
+                echo "[ERROR] Failed to resolve container name for workspace: $resolved_workspace" >&2
+                return 1
+            fi
+        fi
+    fi
+
+    # Build docker command prefix
+    local -a docker_cmd=(docker --context "$selected_context")
+
+    # Handle --fresh flag: remove and recreate container
+    if [[ "$fresh_flag" == "true" ]]; then
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "[INFO] Recreating container..." >&2
+        fi
+
+        # Check if container exists
+        if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
+            # Verify ownership before removing
+            local fresh_label_val fresh_image_fallback
+            fresh_label_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$resolved_container_name" 2>/dev/null) || fresh_label_val=""
+            if [[ "$fresh_label_val" != "true" ]]; then
+                fresh_image_fallback=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$resolved_container_name" 2>/dev/null) || fresh_image_fallback=""
+                if [[ "$fresh_image_fallback" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                    echo "[ERROR] Cannot use --fresh - container '$resolved_container_name' was not created by ContainAI" >&2
+                    return 1
+                fi
+            fi
+
+            # Get SSH port before removal for cleanup
+            local fresh_ssh_port
+            fresh_ssh_port=$(_cai_get_container_ssh_port "$resolved_container_name" "$selected_context") || fresh_ssh_port=""
+
+            # Stop and remove container
+            local fresh_stop_output fresh_rm_output
+            fresh_stop_output=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" stop -- "$resolved_container_name" 2>&1) || {
+                if ! printf '%s' "$fresh_stop_output" | grep -qiE "is not running"; then
+                    echo "$fresh_stop_output" >&2
+                fi
+            }
+            fresh_rm_output=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -- "$resolved_container_name" 2>&1) || {
+                if ! printf '%s' "$fresh_rm_output" | grep -qiE "no such container|not found"; then
+                    echo "$fresh_rm_output" >&2
+                    return 1
+                fi
+            }
+
+            # Clean up SSH configuration
+            if [[ -n "$fresh_ssh_port" ]]; then
+                _cai_cleanup_container_ssh "$resolved_container_name" "$fresh_ssh_port"
+            fi
+        fi
+
+        # Create new container using _containai_start_container with --detached
+        # Pass '-- true' to run a no-op command instead of starting the default agent
+        local -a create_args=()
+        create_args+=(--data-volume "$resolved_volume")
+        create_args+=(--workspace "$resolved_workspace")
+        create_args+=(--detached)
+        create_args+=(--name "$resolved_container_name")
+        if [[ -n "$explicit_config" ]]; then
+            create_args+=(--config "$explicit_config")
+        fi
+        if [[ "$force_flag" == "true" ]]; then
+            create_args+=(--force)
+        fi
+        if [[ "$quiet_flag" == "true" ]]; then
+            create_args+=(--quiet)
+        fi
+        if [[ "$verbose_flag" == "true" ]]; then
+            create_args+=(--verbose)
+        fi
+        if [[ -n "$selected_context" ]]; then
+            create_args+=(--docker-context "$selected_context")
+        fi
+        # Run 'true' as no-op to avoid starting default agent
+        create_args+=(-- true)
+
+        if ! _containai_start_container "${create_args[@]}"; then
+            echo "[ERROR] Failed to create container" >&2
+            return 1
+        fi
+    fi
+
+    # Check if container exists; if not, create it first
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
+        if [[ "$quiet_flag" != "true" ]]; then
+            echo "Container not found, creating..." >&2
+        fi
+
+        # Pass '-- true' to run a no-op command instead of starting the default agent
+        local -a create_args=()
+        create_args+=(--data-volume "$resolved_volume")
+        create_args+=(--workspace "$resolved_workspace")
+        create_args+=(--detached)
+        create_args+=(--name "$resolved_container_name")
+        if [[ -n "$explicit_config" ]]; then
+            create_args+=(--config "$explicit_config")
+        fi
+        if [[ "$force_flag" == "true" ]]; then
+            create_args+=(--force)
+        fi
+        if [[ "$quiet_flag" == "true" ]]; then
+            create_args+=(--quiet)
+        fi
+        if [[ "$verbose_flag" == "true" ]]; then
+            create_args+=(--verbose)
+        fi
+        if [[ -n "$selected_context" ]]; then
+            create_args+=(--docker-context "$selected_context")
+        fi
+        # Run 'true' as no-op to avoid starting default agent
+        create_args+=(-- true)
+
+        if ! _containai_start_container "${create_args[@]}"; then
+            echo "[ERROR] Failed to create container" >&2
+            return 1
+        fi
+
+        # Save container name to workspace state
+        _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+    else
+        # Container exists - validate ownership and workspace mounts
+        local exec_label_val exec_image_val
+        exec_label_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$resolved_container_name" 2>/dev/null) || exec_label_val=""
+        if [[ "$exec_label_val" != "true" ]]; then
+            exec_image_val=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$resolved_container_name" 2>/dev/null) || exec_image_val=""
+            if [[ "$exec_image_val" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                echo "[ERROR] Container '$resolved_container_name' was not created by ContainAI" >&2
+                return 15
+            fi
+        fi
+
+        # FR-4: Validate container mounts match expected configuration (type + source)
+        # This prevents exec from running in a container with mismatched workspace
+        if ! _containai_validate_fr4_mounts "$selected_context" "$resolved_container_name" "$resolved_workspace" "$resolved_volume" "false"; then
+            echo "[ERROR] Container workspace does not match. Use --fresh to recreate." >&2
+            return 1
+        fi
+
+        # Check for SSH port conflict on stopped containers and auto-recreate if needed
+        # This handles the case where the allocated port is now in use by another process
+        local exec_container_state
+        exec_container_state=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{.State.Status}}' -- "$resolved_container_name" 2>/dev/null) || exec_container_state=""
+        if [[ "$exec_container_state" == "exited" || "$exec_container_state" == "created" ]]; then
+            local exec_ssh_port exec_port_check_rc
+            if exec_ssh_port=$(_cai_get_container_ssh_port "$resolved_container_name" "$selected_context"); then
+                if _cai_is_port_available "$exec_ssh_port"; then
+                    exec_port_check_rc=0
+                else
+                    exec_port_check_rc=$?
+                fi
+                if [[ $exec_port_check_rc -eq 2 ]]; then
+                    echo "[ERROR] Cannot verify SSH port availability (ss command failed)" >&2
+                    echo "[ERROR] Ensure 'ss' (iproute2) is installed" >&2
+                    return 1
+                elif [[ $exec_port_check_rc -eq 1 ]]; then
+                    # Port is in use - recreate container with new port
+                    if [[ "$quiet_flag" != "true" ]]; then
+                        echo "[WARN] SSH port $exec_ssh_port is in use by another process" >&2
+                        echo "Recreating container with new port allocation..." >&2
+                    fi
+                    # Remove the old container
+                    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -f "$resolved_container_name" >/dev/null 2>&1; then
+                        echo "[ERROR] Failed to remove container for port reallocation" >&2
+                        return 1
+                    fi
+                    _cai_cleanup_container_ssh "$resolved_container_name" "$exec_ssh_port"
+                    # Recreate container
+                    local -a recreate_args=()
+                    recreate_args+=(--data-volume "$resolved_volume")
+                    recreate_args+=(--workspace "$resolved_workspace")
+                    recreate_args+=(--detached)
+                    recreate_args+=(--name "$resolved_container_name")
+                    if [[ -n "$explicit_config" ]]; then
+                        recreate_args+=(--config "$explicit_config")
+                    fi
+                    if [[ "$force_flag" == "true" ]]; then
+                        recreate_args+=(--force)
+                    fi
+                    if [[ "$quiet_flag" == "true" ]]; then
+                        recreate_args+=(--quiet)
+                    fi
+                    if [[ "$verbose_flag" == "true" ]]; then
+                        recreate_args+=(--verbose)
+                    fi
+                    if [[ -n "$selected_context" ]]; then
+                        recreate_args+=(--docker-context "$selected_context")
+                    fi
+                    recreate_args+=(-- true)
+                    if ! _containai_start_container "${recreate_args[@]}"; then
+                        echo "[ERROR] Failed to recreate container" >&2
+                        return 1
+                    fi
+                fi
+            fi
+        fi
+
+        # Save container name to workspace state
+        _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+    fi
+
+    # Run command via SSH with login shell
+    local quiet_arg=""
+    local force_arg=""
+    local allocate_tty="false"
+
+    if [[ "$quiet_flag" == "true" ]]; then
+        quiet_arg="true"
+    fi
+    if [[ "$fresh_flag" == "true" ]]; then
+        force_arg="true"
+    fi
+
+    # Allocate TTY if stdin is a TTY
+    if [[ -t 0 ]]; then
+        allocate_tty="true"
+    fi
+
+    # Run with --login-shell for proper environment sourcing
+    _cai_ssh_run "$resolved_container_name" "$selected_context" "$force_arg" "$quiet_arg" "false" "$allocate_tty" --login-shell "${exec_cmd[@]}"
 }
 
 # Default (run container) handler
@@ -3228,6 +3858,10 @@ containai() {
         shell)
             shift
             _containai_shell_cmd "$@"
+            ;;
+        exec)
+            shift
+            _containai_exec_cmd "$@"
             ;;
         doctor)
             shift

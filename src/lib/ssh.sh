@@ -1995,6 +1995,7 @@ _cai_ssh_connect_with_retry() {
 #   $5 = detached (optional, "true" for background execution)
 #   $6 = allocate_tty (optional, "true" for interactive TTY)
 #   $7+ = command and arguments to run (env vars can be passed as leading VAR=value args)
+#         Optional: pass "--login-shell" as the first command arg to wrap with bash -lc
 #
 # Returns:
 #   Exit code from the remote command, or error codes (10-15) on failure
@@ -2003,6 +2004,7 @@ _cai_ssh_connect_with_retry() {
 #   - Env vars: pass as leading VAR=value args before command (e.g., FOO=bar cmd args)
 #   - TTY allocation for interactive commands (-t flag)
 #   - Detached mode via nohup (background execution)
+#   - Login shell mode: wraps command in bash -lc for proper environment sourcing
 #   - Proper argument quoting/escaping
 #   - Retry on transient failures
 #   - Clear error messages with remediation steps
@@ -2013,9 +2015,15 @@ _cai_ssh_run() {
     local quiet="${4:-false}"
     local detached="${5:-false}"
     local allocate_tty="${6:-false}"
+
     shift 6
 
+    local login_shell="false"
     local -a cmd_args=("$@")
+    if [[ ${#cmd_args[@]} -gt 0 && "${cmd_args[0]}" == "--login-shell" ]]; then
+        login_shell="true"
+        cmd_args=("${cmd_args[@]:1}")
+    fi
 
     # Build docker command with context, clearing env vars to avoid interference
     local -a docker_cmd=()
@@ -2116,7 +2124,12 @@ _cai_ssh_run() {
     fi
 
     # Run command via SSH
-    _cai_ssh_run_with_retry "$container_name" "$ssh_port" "$context" "$quiet" "$detached" "$allocate_tty" "${cmd_args[@]}"
+    # Pass --login-shell as first arg if login_shell mode was requested
+    if [[ "$login_shell" == "true" ]]; then
+        _cai_ssh_run_with_retry "$container_name" "$ssh_port" "$context" "$quiet" "$detached" "$allocate_tty" --login-shell "${cmd_args[@]}"
+    else
+        _cai_ssh_run_with_retry "$container_name" "$ssh_port" "$context" "$quiet" "$detached" "$allocate_tty" "${cmd_args[@]}"
+    fi
 }
 
 # Run a command via SSH with retry and auto-recovery
@@ -2127,7 +2140,7 @@ _cai_ssh_run() {
 #   $4 = quiet (optional)
 #   $5 = detached (optional, "true" for background execution)
 #   $6 = allocate_tty (optional, "true" for interactive TTY)
-#   $7+ = command and arguments
+#   $7+ = command and arguments (pass "--login-shell" as first arg to wrap with bash -lc)
 # Returns: exit code from SSH or specific error codes
 _cai_ssh_run_with_retry() {
     local container_name="$1"
@@ -2138,7 +2151,12 @@ _cai_ssh_run_with_retry() {
     local allocate_tty="${6:-false}"
     shift 6
 
+    local login_shell="false"
     local -a cmd_args=("$@")
+    if [[ ${#cmd_args[@]} -gt 0 && "${cmd_args[0]}" == "--login-shell" ]]; then
+        login_shell="true"
+        cmd_args=("${cmd_args[@]:1}")
+    fi
 
     local max_retries=3
     local retry_count=0
@@ -2218,8 +2236,38 @@ _cai_ssh_run_with_retry() {
                 # Single quotes don't interpret any special characters except themselves
                 local escaped_cmd="${inner_cmd//\'/\'\\\'\'}"
                 remote_cmd="cd /home/agent/workspace && nohup bash -lc '${escaped_cmd}' </dev/null >/dev/null 2>&1 & echo \$!"
+            elif [[ "$login_shell" == "true" ]]; then
+                # For login shell mode, wrap command in bash -lc for proper environment sourcing
+                # Build the RAW command string, then apply printf %q ONCE for bash -lc
+                local -a raw_parts=()
+                local arg
+                local in_command=false
+
+                for arg in "${cmd_args[@]}"; do
+                    if [[ "$in_command" == "false" && "$arg" =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]]; then
+                        # Environment variable - quote the value for bash evaluation
+                        local var_name="${arg%%=*}"
+                        local var_value="${arg#*=}"
+                        local quoted_value
+                        quoted_value=$(printf '%q' "$var_value")
+                        raw_parts+=("${var_name}=${quoted_value}")
+                    else
+                        in_command=true
+                        # Quote each arg to preserve boundaries in bash evaluation
+                        local quoted_arg
+                        quoted_arg=$(printf '%q' "$arg")
+                        raw_parts+=("$quoted_arg")
+                    fi
+                done
+
+                # Join parts into command string that's safe for bash -lc to evaluate
+                local inner_cmd="${raw_parts[*]}"
+                # Wrap in single quotes for bash -lc, escaping embedded single quotes
+                # Single quotes don't interpret any special characters except themselves
+                local escaped_cmd="${inner_cmd//\'/\'\\\'\'}"
+                remote_cmd="cd /home/agent/workspace && bash -lc '${escaped_cmd}'"
             else
-                # For foreground mode, quote each argument separately
+                # For foreground mode (no login shell), quote each argument separately
                 local -a env_prefix_parts=()
                 local -a actual_cmd_parts=()
                 local arg
@@ -2277,11 +2325,35 @@ _cai_ssh_run_with_retry() {
             ssh_stdout=$(cat "$ssh_stdout_file" 2>/dev/null || true)
             rm -f "$ssh_stdout_file"
         else
-            # For non-detached mode, let stdout stream directly for real-time output
-            if "${ssh_cmd[@]}" 2>"$ssh_stderr_file"; then
-                ssh_exit_code=0
+            # For non-detached mode, let both stdout and stderr stream directly for real-time output
+            # We capture stderr via FIFO + tee for SSH transport error classification (exit 255)
+            # Use temp directory + named pipe (avoids mktemp -u TOCTOU race)
+            local ssh_fifo_dir ssh_stderr_fifo
+            ssh_fifo_dir=$(mktemp -d)
+            ssh_stderr_fifo="$ssh_fifo_dir/stderr.fifo"
+            if ! mkfifo "$ssh_stderr_fifo" 2>/dev/null; then
+                # FIFO creation failed - fall back to simpler approach without stderr capture
+                rm -rf "$ssh_fifo_dir"
+                if "${ssh_cmd[@]}"; then
+                    ssh_exit_code=0
+                else
+                    ssh_exit_code=$?
+                fi
             else
-                ssh_exit_code=$?
+                # Start tee in background: reads from fifo, writes to file and stderr
+                tee "$ssh_stderr_file" < "$ssh_stderr_fifo" >&2 &
+                local tee_pid=$!
+
+                # Run ssh with stderr going to the fifo
+                if "${ssh_cmd[@]}" 2>"$ssh_stderr_fifo"; then
+                    ssh_exit_code=0
+                else
+                    ssh_exit_code=$?
+                fi
+
+                # Wait for tee to finish processing all stderr before reading file
+                wait "$tee_pid" 2>/dev/null || true
+                rm -rf "$ssh_fifo_dir"
             fi
         fi
         local ssh_stderr
