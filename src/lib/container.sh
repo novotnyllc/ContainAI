@@ -1220,6 +1220,7 @@ _containai_start_container() {
     local workspace=""
     local data_volume=""
     local explicit_config=""
+    local explicit_context=""  # Override context selection (use when container already exists in known context)
     local image_tag=""
     local credentials="$_CONTAINAI_DEFAULT_CREDENTIALS"
     local acknowledge_credential_risk=false
@@ -1307,6 +1308,22 @@ _containai_start_container() {
                 explicit_config="${1#--config=}"
                 if [[ -z "$explicit_config" ]]; then
                     echo "[ERROR] --config requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --docker-context)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --docker-context requires a value" >&2
+                    return 1
+                fi
+                explicit_context="$2"
+                shift 2
+                ;;
+            --docker-context=*)
+                explicit_context="${1#--docker-context=}"
+                if [[ -z "$explicit_context" ]]; then
+                    echo "[ERROR] --docker-context requires a value" >&2
                     return 1
                 fi
                 shift
@@ -1531,31 +1548,40 @@ _containai_start_container() {
     fi
     local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
 
-    # Auto-select Docker context based on isolation availability
-    local selected_context debug_mode=""
-    if [[ "$debug_flag" == "true" ]]; then
-        debug_mode="debug"
-    fi
-    local verbose_str="false"
-    if [[ "$verbose_flag" == "true" ]]; then
-        verbose_str="true"
-    fi
-    if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode" "$verbose_str"); then
-        if [[ "$force_flag" == "true" ]]; then
-            echo "[WARN] Sysbox context check failed; attempting to use an existing context without validation." >&2
-            echo "[WARN] Container creation will still require sysbox-runc runtime." >&2
-            if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
-                selected_context="$config_context_override"
-            elif _cai_containai_docker_context_exists; then
-                selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    # Select Docker context
+    # If explicit_context is provided (e.g., from --container finding an existing container),
+    # use it directly; otherwise auto-select based on isolation availability
+    local selected_context=""
+    if [[ -n "$explicit_context" ]]; then
+        # Use the explicitly provided context (container was found in this context)
+        selected_context="$explicit_context"
+    else
+        # Auto-select context based on isolation availability
+        local debug_mode=""
+        if [[ "$debug_flag" == "true" ]]; then
+            debug_mode="debug"
+        fi
+        local verbose_str="false"
+        if [[ "$verbose_flag" == "true" ]]; then
+            verbose_str="true"
+        fi
+        if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode" "$verbose_str"); then
+            if [[ "$force_flag" == "true" ]]; then
+                echo "[WARN] Sysbox context check failed; attempting to use an existing context without validation." >&2
+                echo "[WARN] Container creation will still require sysbox-runc runtime." >&2
+                if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                    selected_context="$config_context_override"
+                elif _cai_containai_docker_context_exists; then
+                    selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                else
+                    _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                    return 1
+                fi
             else
-                _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
+                _cai_error "Use --force to bypass context selection (Sysbox runtime still required)"
                 return 1
             fi
-        else
-            _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
-            _cai_error "Use --force to bypass context selection (Sysbox runtime still required)"
-            return 1
         fi
     fi
 

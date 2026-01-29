@@ -2209,15 +2209,19 @@ _containai_shell_cmd() {
             # Build docker command prefix (always use --context)
             local -a docker_cmd=(docker --context "$selected_context")
 
-            # Verify container is managed by ContainAI
+            # Verify container is managed by ContainAI (label or image fallback for legacy containers)
             # Use {{with}} template to output empty string for missing labels (avoids <no value>)
             # Clear DOCKER_CONTEXT/DOCKER_HOST to ensure --context takes effect
-            local is_managed
+            local is_managed container_image
             is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
             if [[ "$is_managed" != "true" ]]; then
-                echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
-                echo "[HINT] Remove the conflicting container or use a different name" >&2
-                return 1
+                # Fallback: check if image is from our repo (for legacy containers without label)
+                container_image=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || container_image=""
+                if [[ "$container_image" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                    echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+                    echo "[HINT] Remove the conflicting container or use a different name" >&2
+                    return 1
+                fi
             fi
 
             # Derive workspace from container labels
@@ -2913,13 +2917,17 @@ _containai_run_cmd() {
             # Container exists - derive workspace/volume from labels
             local -a docker_cmd=(docker --context "${lookup_context:-default}")
 
-            # Verify container is managed by ContainAI
-            local is_managed
+            # Verify container is managed by ContainAI (label or image fallback for legacy containers)
+            local is_managed container_image
             is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
             if [[ "$is_managed" != "true" ]]; then
-                echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
-                echo "[HINT] Remove the conflicting container or use a different name" >&2
-                return 1
+                # Fallback: check if image is from our repo (for legacy containers without label)
+                container_image=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || container_image=""
+                if [[ "$container_image" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
+                    echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+                    echo "[HINT] Remove the conflicting container or use a different name" >&2
+                    return 1
+                fi
             fi
 
             # Derive workspace from container labels
@@ -2938,6 +2946,9 @@ _containai_run_cmd() {
 
             container_workspace="$resolved_workspace"
             should_save_container_name="true"
+
+            # Pass the found context to ensure we use the same context where container exists
+            start_args+=(--docker-context "$lookup_context")
         elif [[ $lookup_rc -eq 2 ]] || [[ $lookup_rc -eq 3 ]]; then
             # Ambiguity or config parse error - helper already printed details
             return 1
