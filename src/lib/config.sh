@@ -1683,10 +1683,28 @@ _containai_resolve_with_source() {
         return 0
     fi
 
-    # 2. Environment variable
-    # Convert key to env var format: agent.default -> CONTAINAI_AGENT_DEFAULT
-    env_var_name="CONTAINAI_$(printf '%s' "$key" | tr '[:lower:].' '[:upper:]_')"
-    if [[ -n "${!env_var_name:-}" ]]; then
+    # 2. Environment variable (only for keys that runtime actually reads from env)
+    # Only specific keys have env var support in runtime:
+    # - CONTAINAI_DATA_VOLUME (for data_volume)
+    # - CONTAINAI_AGENT (for agent, agent.default)
+    # - CONTAINAI_CREDENTIALS (for credentials)
+    # - CONTAINAI_SECURE_ENGINE_CONTEXT (for secure_engine.context_name)
+    local env_var_name=""
+    case "$key" in
+        data_volume)
+            env_var_name="CONTAINAI_DATA_VOLUME"
+            ;;
+        agent|agent.default)
+            env_var_name="CONTAINAI_AGENT"
+            ;;
+        credentials|credentials.mode)
+            env_var_name="CONTAINAI_CREDENTIALS"
+            ;;
+        secure_engine.context_name)
+            env_var_name="CONTAINAI_SECURE_ENGINE_CONTEXT"
+            ;;
+    esac
+    if [[ -n "$env_var_name" ]] && [[ -n "${!env_var_name:-}" ]]; then
         printf '%s\t%s' "${!env_var_name}" "env"
         return 0
     fi
@@ -1739,10 +1757,13 @@ if val is not None and val != '':
 
     # 4. Repo-local config (.containai/config.toml)
     # Walk up from workspace looking for .containai/config.toml
+    # Track whether repo-local was found (affects whether we consult user-global)
+    local repo_local_found="false"
     local dir="$normalized_path"
     while [[ "$dir" != "/" ]]; do
         repo_config_file="$dir/.containai/config.toml"
         if [[ -f "$repo_config_file" ]]; then
+            repo_local_found="true"
             if config_json=$(python3 "$script_dir/parse-toml.py" --file "$repo_config_file" --json 2>/dev/null); then
                 # Try to get the key from config
                 value=$(printf '%s' "$config_json" | python3 -c "
@@ -1779,10 +1800,19 @@ if current is not None and current != '':
     done
 
     # 5. User global config (~/.config/containai/config.toml top-level)
-    user_config_file=$(_containai_user_config_path)
-    if [[ -f "$user_config_file" ]]; then
-        if config_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
-            value=$(printf '%s' "$config_json" | python3 -c "
+    # For non-workspace-scoped keys, skip user-global if repo-local config exists
+    # (matches runtime behavior where _containai_find_config returns ONE config)
+    # Workspace-scoped keys always check workspace state (step 3), and user-global
+    # is only for top-level global settings
+    if [[ "$repo_local_found" == "true" ]] && [[ "$is_workspace_key" != "true" ]]; then
+        # Repo-local exists but doesn't have this key - go straight to defaults
+        # (matches runtime: once repo-local found, user-global is not consulted)
+        :
+    else
+        user_config_file=$(_containai_user_config_path)
+        if [[ -f "$user_config_file" ]]; then
+            if config_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
+                value=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
 config = json.load(sys.stdin)
 key = sys.argv[1]
@@ -1804,9 +1834,10 @@ if current is not None and current != '':
     else:
         print(current, end='')
 " "$key" 2>/dev/null)
-            if [[ -n "$value" ]]; then
-                printf '%s\t%s' "$value" "user-global"
-                return 0
+                if [[ -n "$value" ]]; then
+                    printf '%s\t%s' "$value" "user-global"
+                    return 0
+                fi
             fi
         fi
     fi
