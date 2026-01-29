@@ -1583,16 +1583,23 @@ _containai_generate_volume_name() {
         branch_name="nogit"
     fi
 
-    # Get Unix timestamp for uniqueness, with random suffix to avoid collisions
-    # within the same second (e.g., scripted consecutive --reset calls)
-    timestamp=$(date +%s)
-    # Generate 4-char random hex suffix for additional uniqueness
-    local random_suffix
-    if [[ -r /dev/urandom ]]; then
-        random_suffix=$(head -c 2 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    # Get Unix timestamp for uniqueness
+    # Try nanosecond precision first (GNU date), fall back to seconds + random
+    # This ensures uniqueness even for rapid consecutive --reset calls
+    if timestamp=$(date +%s%N 2>/dev/null) && [[ ${#timestamp} -gt 10 ]]; then
+        # Got nanoseconds - use full precision for uniqueness
+        : # timestamp already set
     else
-        # Fallback: use RANDOM (less entropy but still helps)
-        random_suffix=$(printf '%04x' "$RANDOM")
+        # Fallback: seconds + 4-digit random for systems without %N
+        local base_ts random_part
+        base_ts=$(date +%s)
+        if [[ -r /dev/urandom ]]; then
+            random_part=$(head -c 2 /dev/urandom | od -An -tu2 | tr -d ' ')
+            random_part=$((random_part % 10000))
+        else
+            random_part=$((RANDOM % 10000))
+        fi
+        timestamp="${base_ts}$(printf '%04d' "$random_part")"
     fi
 
     # Sanitize repo name: lowercase, replace non-alphanumeric with dash, collapse dashes
@@ -1609,9 +1616,9 @@ _containai_generate_volume_name() {
         sanitized_branch="unknown"
     fi
 
-    # Combine into volume name: {repo}-{branch}-{timestamp}-{random}
-    # Using dash delimiter before random suffix for clarity and spec compliance
-    volume_name="${sanitized_repo}-${sanitized_branch}-${timestamp}-${random_suffix}"
+    # Combine into volume name: {repo}-{branch}-{timestamp}
+    # Format matches spec exactly; uniqueness via high-resolution timestamp
+    volume_name="${sanitized_repo}-${sanitized_branch}-${timestamp}"
 
     # Truncate to 255 chars (Docker volume name limit)
     if [[ ${#volume_name} -gt 255 ]]; then
@@ -1621,8 +1628,8 @@ _containai_generate_volume_name() {
     # Validate volume name format (Docker requirements)
     # Must start with alphanumeric, contain only alphanumeric, underscore, dot, dash
     if ! _containai_validate_volume_name "$volume_name"; then
-        # Fallback: still match documented format with random suffix
-        volume_name="${sanitized_repo:-workspace}-${sanitized_branch:-nogit}-${timestamp}-${random_suffix}"
+        # Fallback: still match documented {repo}-{branch}-{timestamp} format
+        volume_name="${sanitized_repo:-workspace}-${sanitized_branch:-nogit}-${timestamp}"
     fi
 
     printf '%s' "$volume_name"
