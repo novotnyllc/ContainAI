@@ -250,3 +250,6 @@ When generating TOML table headers with user-provided paths, escape quotes and b
 
 ## 2026-01-28 manual [pitfall]
 Use os.fdopen() with flush()+fsync() instead of raw os.write() - os.write may return partial writes and doesn't guarantee durability
+
+## 2026-01-29 manual [pitfall]
+When accepting explicit context/config from lookup results, always re-validate security requirements (e.g., isolation, permissions) - don't assume prior validation
