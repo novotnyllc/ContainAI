@@ -2874,62 +2874,46 @@ _containai_run_cmd() {
         esac
     done
 
-    # Resolve workspace using platform-aware normalization
-    local resolved_workspace workspace_input
-    workspace_input="${workspace:-$PWD}"
-    resolved_workspace=$(_cai_normalize_path "$workspace_input")
-    # Check if path exists (normalize_path returns as-is for non-existent paths)
-    if [[ ! -d "$resolved_workspace" ]]; then
-        echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
-        return 1
+    # Check mutual exclusivity of --container with --workspace and --data-volume
+    if [[ -n "$container_name" ]]; then
+        if [[ -n "$workspace" ]]; then
+            echo "[ERROR] --container and --workspace are mutually exclusive" >&2
+            return 1
+        fi
+        if [[ -n "$cli_volume" ]]; then
+            echo "[ERROR] --container and --data-volume are mutually exclusive" >&2
+            return 1
+        fi
     fi
 
-    # Resolve volume
-    local resolved_volume
-    if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
-        echo "[ERROR] Failed to resolve data volume" >&2
-        return 1
-    fi
-
-    # Resolve credentials (CLI > env > config > default)
-    # Note: credentials.mode=host is no longer supported (Sysbox-only mode)
-    # The 4th parameter is unused but kept for API compatibility
-    local resolved_credentials
-    resolved_credentials=$(_containai_resolve_credentials "$credentials" "$resolved_workspace" "$explicit_config" "")
-
-    # Build args for _containai_start_container
-    local -a start_args=()
-    start_args+=(--data-volume "$resolved_volume")
-    start_args+=(--workspace "$resolved_workspace")
-
-    # Pass explicit config if provided (for context resolution)
-    if [[ -n "$explicit_config" ]]; then
-        start_args+=(--config "$explicit_config")
-    fi
-
-    # Add volume mismatch warn for implicit volume selection
-    if [[ -z "$cli_volume" ]] && [[ -z "$explicit_config" ]]; then
-        start_args+=(--volume-mismatch-warn)
-    fi
+    # Variables to resolve
+    local resolved_workspace=""
+    local resolved_volume=""
+    local resolved_credentials=""
+    local container_workspace=""  # Workspace to use for state write (may differ from resolved_workspace)
 
     # Track if we need to save container name to workspace state after success
     local should_save_container_name="false"
 
+    # Build args for _containai_start_container
+    local -a start_args=()
+
     if [[ -n "$container_name" ]]; then
-        # Use-or-create semantics: use existing container if found, create if missing
-        # Use multi-context lookup to check if container exists
-        # Pass resolved_workspace so the helper can discover config context (not just explicit_config)
+        # === --container mode: use existing if found, create if missing ===
+        # Try to find existing container
         local lookup_rc lookup_context
-        # _cai_find_container_by_name returns context on stdout; capture separately from stderr
-        if lookup_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$resolved_workspace" 2>&1); then
+        # _cai_find_container_by_name returns context on stdout; let stderr flow through
+        if lookup_context=$(_cai_find_container_by_name "$container_name" "$explicit_config" "$PWD"); then
             lookup_rc=0
         else
             lookup_rc=$?
         fi
 
         if [[ $lookup_rc -eq 0 ]]; then
-            # Container exists - verify it's ContainAI-managed before reusing
+            # Container exists - derive workspace/volume from labels
             local -a docker_cmd=(docker --context "${lookup_context:-default}")
+
+            # Verify container is managed by ContainAI
             local is_managed
             is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.managed"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || is_managed=""
             if [[ "$is_managed" != "true" ]]; then
@@ -2937,20 +2921,88 @@ _containai_run_cmd() {
                 echo "[HINT] Remove the conflicting container or use a different name" >&2
                 return 1
             fi
-            # Container exists and is managed - pass --name and let _containai_start_container reuse it
+
+            # Derive workspace from container labels
+            resolved_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.workspace"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_workspace=""
+            if [[ -z "$resolved_workspace" ]]; then
+                echo "[ERROR] Container $container_name is missing workspace label" >&2
+                return 1
+            fi
+
+            # Derive data volume from container labels
+            resolved_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "containai.data-volume"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || resolved_volume=""
+            if [[ -z "$resolved_volume" ]]; then
+                echo "[ERROR] Container $container_name is missing data-volume label" >&2
+                return 1
+            fi
+
+            container_workspace="$resolved_workspace"
             should_save_container_name="true"
-        elif [[ $lookup_rc -eq 2 ]]; then
-            # Ambiguity means container exists in multiple contexts - helper already printed details
-            return 1
-        elif [[ $lookup_rc -eq 3 ]]; then
-            # Config parse error - helper already printed error
+        elif [[ $lookup_rc -eq 2 ]] || [[ $lookup_rc -eq 3 ]]; then
+            # Ambiguity or config parse error - helper already printed details
             return 1
         else
-            # lookup_rc=1 means not found - will be created
+            # Container not found - will create it using PWD as workspace
+            local workspace_input
+            workspace_input="${workspace:-$PWD}"
+            resolved_workspace=$(_cai_normalize_path "$workspace_input")
+            if [[ ! -d "$resolved_workspace" ]]; then
+                echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+                return 1
+            fi
+
+            # Resolve volume for the new container
+            if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+                echo "[ERROR] Failed to resolve data volume" >&2
+                return 1
+            fi
+
+            container_workspace="$resolved_workspace"
             should_save_container_name="true"
         fi
+
         start_args+=(--name "$container_name")
+        start_args+=(--data-volume "$resolved_volume")
+        start_args+=(--workspace "$resolved_workspace")
+
+        # Pass explicit config if provided (for context resolution)
+        if [[ -n "$explicit_config" ]]; then
+            start_args+=(--config "$explicit_config")
+        fi
+    else
+        # === Standard mode: resolve from workspace ===
+        local workspace_input
+        workspace_input="${workspace:-$PWD}"
+        resolved_workspace=$(_cai_normalize_path "$workspace_input")
+        if [[ ! -d "$resolved_workspace" ]]; then
+            echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
+            return 1
+        fi
+
+        # Resolve volume
+        if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+            echo "[ERROR] Failed to resolve data volume" >&2
+            return 1
+        fi
+
+        container_workspace="$resolved_workspace"
+
+        start_args+=(--data-volume "$resolved_volume")
+        start_args+=(--workspace "$resolved_workspace")
+
+        # Pass explicit config if provided (for context resolution)
+        if [[ -n "$explicit_config" ]]; then
+            start_args+=(--config "$explicit_config")
+        fi
+
+        # Add volume mismatch warn for implicit volume selection
+        if [[ -z "$cli_volume" ]] && [[ -z "$explicit_config" ]]; then
+            start_args+=(--volume-mismatch-warn)
+        fi
     fi
+
+    # Resolve credentials (CLI > env > config > default)
+    resolved_credentials=$(_containai_resolve_credentials "$credentials" "$resolved_workspace" "$explicit_config" "")
     # Always pass resolved credentials
     start_args+=(--credentials "$resolved_credentials")
     if [[ -n "$acknowledge_credential_risk" ]]; then
@@ -3027,8 +3079,9 @@ _containai_run_cmd() {
     start_rc=$?
 
     # Save container name to workspace state only after successful create/use
-    if [[ $start_rc -eq 0 ]] && [[ "$should_save_container_name" == "true" ]] && [[ -n "$container_name" ]]; then
-        _containai_write_workspace_state "$resolved_workspace" "container_name" "$container_name" 2>/dev/null || true
+    # Use container_workspace (which is the container's labeled workspace, not necessarily PWD)
+    if [[ $start_rc -eq 0 ]] && [[ "$should_save_container_name" == "true" ]] && [[ -n "$container_name" ]] && [[ -n "$container_workspace" ]]; then
+        _containai_write_workspace_state "$container_workspace" "container_name" "$container_name" 2>/dev/null || true
     fi
 
     return $start_rc
