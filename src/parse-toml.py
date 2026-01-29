@@ -860,22 +860,14 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
             # Check if this line sets the target key
             key_match = re.match(rf"^{re.escape(key)}\s*=", stripped)
             if key_match:
-                # Preserve any inline comment from the original line
-                # TOML inline comments start with # outside of strings
-                # Simple approach: check for # after the value portion
-                inline_comment = ""
-                # Find if there's a comment after the value (outside quotes)
-                # This is a simplified check - full TOML parsing would be complex
-                hash_pos = line.rfind("#")
-                if hash_pos > 0:
-                    # Check if # is outside quoted values (simple heuristic)
-                    before_hash = line[:hash_pos]
-                    # Count unescaped quotes - if even, # is outside strings
-                    quote_count = before_hash.count('"') - before_hash.count('\\"')
-                    if quote_count % 2 == 0:
-                        inline_comment = " " + line[hash_pos:].rstrip()
-                # Replace the line, preserving inline comment
-                new_lines.append(kv_line + inline_comment)
+                # Replace the line with the new value
+                # Note: We do NOT preserve inline comments because properly detecting
+                # whether '#' is inside a quoted string requires a full TOML parser.
+                # A simple heuristic cannot reliably distinguish:
+                #   key = "value"  # real comment
+                #   key = '#not-a-comment'
+                # Dropping inline comments is the safe choice per TOML spec behavior.
+                new_lines.append(kv_line)
                 key_updated = True
                 # Update last content position
                 last_content_pos_in_workspace = len(new_lines) - 1

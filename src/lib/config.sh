@@ -1731,23 +1731,59 @@ _containai_resolve_with_source() {
     fi
 
     # 3. Workspace state (for workspace-scoped keys only)
+    # Use longest-prefix matching (same as _containai_find_matching_workspace) for nested detection
     if [[ "$python_available" == "true" ]] && [[ "$is_workspace_key" == "true" ]]; then
-        # Read from user config workspace section
+        # Read from user config workspace section with longest-prefix matching
         user_config_file=$(_containai_user_config_path)
         if [[ -f "$user_config_file" ]]; then
-            if ws_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --get-workspace "$normalized_path" 2>/dev/null); then
-                if [[ "$ws_json" != "{}" ]]; then
-                    value=$(printf '%s' "$ws_json" | python3 -c "
+            if config_json=$(python3 "$script_dir/parse-toml.py" --file "$user_config_file" --json 2>/dev/null); then
+                # Find best matching workspace and get the key value
+                local ws_result
+                ws_result=$(printf '%s' "$config_json" | python3 -c "
 import json, sys
-data = json.load(sys.stdin)
-val = data.get(sys.argv[1], '')
-if val is not None and val != '':
-    print(val, end='')
-" "$key" 2>/dev/null)
-                    if [[ -n "$value" ]]; then
-                        printf '%s\t%s' "$value" "workspace:$normalized_path"
-                        return 0
-                    fi
+from pathlib import Path
+
+config = json.load(sys.stdin)
+workspace = sys.argv[1]
+key = sys.argv[2]
+
+workspaces = config.get('workspace', {})
+if not isinstance(workspaces, dict):
+    sys.exit(0)
+
+# Find longest-prefix matching workspace
+best_match_path = None
+best_match_value = None
+best_segments = 0
+ws_path = Path(workspace)
+
+for path_str, section in workspaces.items():
+    if not isinstance(section, dict):
+        continue
+    try:
+        cfg_path = Path(path_str)
+        if not cfg_path.is_absolute():
+            continue
+        ws_path.relative_to(cfg_path)
+        num_segments = len(cfg_path.parts)
+        if num_segments > best_segments:
+            val = section.get(key, '')
+            if val is not None and val != '':
+                best_match_path = path_str
+                best_match_value = val
+                best_segments = num_segments
+    except ValueError:
+        pass
+
+if best_match_value:
+    # Output: value<TAB>path
+    print(f'{best_match_value}\t{best_match_path}', end='')
+" "$normalized_path" "$key" 2>/dev/null)
+                if [[ -n "$ws_result" ]]; then
+                    value="${ws_result%%	*}"
+                    local matched_path="${ws_result#*	}"
+                    printf '%s\t%s' "$value" "workspace:$matched_path"
+                    return 0
                 fi
             fi
         fi

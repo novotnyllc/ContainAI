@@ -1911,9 +1911,16 @@ _containai_config_set_cmd() {
         fi
     done
 
+    # Reject -g for workspace-scoped keys (would write a value that's never read)
+    if [[ "$global_scope" == "true" ]] && [[ "$is_workspace_key" == "true" ]]; then
+        echo "[ERROR] Cannot use -g/--global with workspace-scoped key '$key'" >&2
+        echo "        Use 'cai config set --workspace <path> $key <value>' instead" >&2
+        return 1
+    fi
+
     # Determine scope
     if [[ "$global_scope" == "true" ]]; then
-        # Force global scope
+        # Force global scope (only for non-workspace keys)
         if ! _containai_set_global_key "$key" "$value"; then
             return 1
         fi
