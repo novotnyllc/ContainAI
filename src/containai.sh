@@ -4585,10 +4585,19 @@ _containai_run_cmd() {
             if [[ -n "$cli_volume" ]]; then
                 _containai_write_workspace_state "$container_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
             else
+                # Sync actual mounted volume to workspace state if missing
+                # This self-heals state for existing containers (mirrors shell/exec behavior)
                 local existing_ws_vol
                 existing_ws_vol=$(_containai_read_workspace_key "$container_workspace" "data_volume" 2>/dev/null) || existing_ws_vol=""
+                # Only self-heal if no env override (env values shouldn't become "sticky")
                 if [[ -z "$existing_ws_vol" ]] && [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
-                    _containai_write_workspace_state "$container_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+                    # Get actual mounted volume from container (source of truth)
+                    local actual_volume save_container_name
+                    save_container_name="${container_name:-$resolved_container_name}"
+                    actual_volume=$(docker inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$save_container_name" 2>/dev/null) || actual_volume=""
+                    if [[ -n "$actual_volume" ]]; then
+                        _containai_write_workspace_state "$container_workspace" "data_volume" "$actual_volume" 2>/dev/null || true
+                    fi
                 fi
             fi
         elif [[ -n "$cli_volume" ]]; then

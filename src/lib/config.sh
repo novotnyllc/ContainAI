@@ -664,7 +664,26 @@ _containai_resolve_volume() {
         fi
     fi
 
-    # 7. Default
+    # 7. Fallback to user-global if repo-local didn't set data_volume
+    # This implements precedence: repo-local > user-global (when repo-local exists but
+    # doesn't define data_volume, check user-global before falling back to defaults)
+    local user_global_config
+    user_global_config=$(_containai_user_config_path)
+    if [[ -n "$config_file" ]] && [[ "$config_file" != "$user_global_config" ]] && [[ -f "$user_global_config" ]]; then
+        # Repo-local was parsed but didn't set volume - try user-global
+        if _containai_parse_config "$user_global_config" "$workspace" 2>/dev/null; then
+            if [[ -n "$_CAI_VOLUME" ]]; then
+                if ! _containai_validate_volume_name "$_CAI_VOLUME"; then
+                    echo "[ERROR] Invalid volume name in user config: $_CAI_VOLUME" >&2
+                    return 1
+                fi
+                printf '%s' "$_CAI_VOLUME"
+                return 0
+            fi
+        fi
+    fi
+
+    # 8. Default
     printf '%s' "$_CONTAINAI_DEFAULT_VOLUME"
 }
 
