@@ -669,6 +669,54 @@ test_plugins_in_container() {
             ;;
     esac
 
+    # Verify skills symlinks are accessible/functional (can list directory contents)
+    local skills_access_test
+    skills_access_test=$(run_in_image_no_entrypoint '
+        claude_access=0
+        codex_access=0
+        # ls on the symlinked directory should succeed (even if empty)
+        if ls ~/.claude/skills >/dev/null 2>&1; then
+            claude_access=1
+        fi
+        if ls ~/.codex/skills >/dev/null 2>&1; then
+            codex_access=1
+        fi
+        if [ "$claude_access" = "1" ] && [ "$codex_access" = "1" ]; then
+            echo "ok"
+        elif [ "$claude_access" = "0" ] && [ "$codex_access" = "0" ]; then
+            echo "both_fail"
+        elif [ "$claude_access" = "0" ]; then
+            echo "claude_fail"
+        else
+            echo "codex_fail"
+        fi
+    ')
+
+    case "$skills_access_test" in
+        ok)
+            pass "Claude skills directory is accessible"
+            pass "Codex skills directory is accessible"
+            ;;
+        docker_error)
+            fail "Docker container failed to start for skills access check"
+            ;;
+        both_fail)
+            fail "Claude skills directory not accessible"
+            fail "Codex skills directory not accessible"
+            ;;
+        claude_fail)
+            fail "Claude skills directory not accessible"
+            pass "Codex skills directory is accessible"
+            ;;
+        codex_fail)
+            pass "Claude skills directory is accessible"
+            fail "Codex skills directory not accessible"
+            ;;
+        *)
+            fail "Skills access check returned unexpected result: $skills_access_test"
+            ;;
+    esac
+
     # Verify installed_plugins.json is valid JSON if it exists (use test image which has jq)
     local json_valid
     json_valid=$(run_in_image_no_entrypoint '

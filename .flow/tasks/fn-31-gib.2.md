@@ -15,7 +15,22 @@ Create minimal repro for Codex skills not appearing, then fix the specific failu
 - [ ] Test case: Skills in `~/.codex/skills/` are accessible and functional
 
 ## Done summary
-Fixed missing Codex skills directory by ensuring import creates target directories for all directory entries (d flag) even when source doesn't exist on host. Added tests for /data/codex/skills and /data/claude/skills.
+
+**Repro scenario (failing host layout):**
+- Host has `~/.codex` directory but NOT `~/.codex/skills` subdirectory
+- Host has `~/.claude` directory but NOT `~/.claude/skills` subdirectory
+- Manifest entries exist with `flags = "dxR"` (directory, exclude .system/, remove existing)
+
+**Root cause (failure point a: host→volume sync):**
+In `src/lib/import.sh:1760-1768`, the `copy()` function's missing-source handler only called `ensure()` for entries with `j` (JSON init) or `s` (secret) flags. Directory entries with just `d` flag were silently skipped when the host source didn't exist. This left `/data/codex/skills` and `/data/claude/skills` non-existent on the volume, causing the container symlinks (`~/.codex/skills -> /mnt/agent-data/codex/skills`) to point to non-existent targets.
+
+**Fix applied:** Added `*d*` to the case pattern in `copy()` so directory entries call `ensure()` even when the host source is missing. This creates empty directories on the volume for symlinks to target.
+
+**Tests added:**
+- Volume directory existence: `/data/codex/skills` and `/data/claude/skills` in `test_full_sync`
+- Symlink verification: `~/.codex/skills` and `~/.claude/skills` point to correct volume paths
+- Symlink accessibility: `ls` on symlinked directories succeeds (functional check)
+
 ## Evidence
 - Commits: 598d3e5e68bd996749856a951ae31b510d3445be
 - Tests: shellcheck -x src/lib/import.sh, shellcheck -x tests/integration/test-sync-integration.sh
