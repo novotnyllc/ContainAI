@@ -4594,13 +4594,19 @@ _containai_run_cmd() {
                 existing_ws_vol=$(_containai_read_workspace_key "$container_workspace" "data_volume" 2>/dev/null) || existing_ws_vol=""
                 # Only self-heal if no env override (env values shouldn't become "sticky")
                 if [[ -z "$existing_ws_vol" ]] && [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
-                    # Get actual mounted volume from container (source of truth)
-                    # Use context-aware inspect to avoid reading wrong container in multi-context setups
-                    local actual_volume inspect_container_name
-                    inspect_container_name="${container_name:-$resolved_container_name}"
-                    actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "${run_context:-default}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$inspect_container_name" 2>/dev/null) || actual_volume=""
-                    if [[ -n "$actual_volume" ]]; then
-                        _containai_write_workspace_state "$container_workspace" "data_volume" "$actual_volume" 2>/dev/null || true
+                    if [[ -n "$run_context" ]]; then
+                        # Container existed - get actual mounted volume (source of truth)
+                        # Use context-aware inspect to avoid reading wrong container in multi-context setups
+                        local actual_volume inspect_container_name
+                        inspect_container_name="${container_name:-$resolved_container_name}"
+                        actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "$run_context" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$inspect_container_name" 2>/dev/null) || actual_volume=""
+                        if [[ -n "$actual_volume" ]]; then
+                            _containai_write_workspace_state "$container_workspace" "data_volume" "$actual_volume" 2>/dev/null || true
+                        fi
+                    else
+                        # Container was just created (--container mode, not found) - persist resolved_volume
+                        # No self-heal needed; resolved_volume is what was passed to _containai_start_container
+                        _containai_write_workspace_state "$container_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
                     fi
                 fi
             fi
