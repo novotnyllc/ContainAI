@@ -1746,10 +1746,11 @@ copy() {
     else
         if [ "${DRY_RUN:-}" = "1" ]; then
             case "$_flags" in
-                *j*|*s*)
+                *j*|*s*|*d*)
                     echo "[DRY-RUN] Source missing, would ensure target: $_dst"
                     case "$_flags" in *j*) echo "[DRY-RUN]   with JSON init" ;; esac
                     case "$_flags" in *s*) echo "[DRY-RUN]   with secret permissions" ;; esac
+                    case "$_flags" in *d*) echo "[DRY-RUN]   directory" ;; esac
                     ;;
                 *)
                     echo "[DRY-RUN] Source not found, would skip: $_src"
@@ -1757,8 +1758,10 @@ copy() {
             esac
         else
             case "$_flags" in
-                *j*|*s*)
-                    # Show in verbose mode; target is still ensured (for credential symlinks)
+                *j*|*s*|*d*)
+                    # Ensure target exists even when source is missing:
+                    # - j/s flags: credential files need empty placeholders for symlinks
+                    # - d flag: directories must exist for symlinks to work (e.g., .codex/skills)
                     if [ "${IMPORT_VERBOSE:-}" = "1" ]; then
                         echo "[INFO] Source missing, ensuring target: $_dst"
                     fi

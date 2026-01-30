@@ -477,11 +477,16 @@ test_full_sync() {
     pass "Full sync completed successfully"
 
     # Verify key directories exist
+    # Note: /data/codex/skills and /data/claude/skills are created even when
+    # the host doesn't have ~/.codex/skills or ~/.claude/skills directories.
+    # This ensures container symlinks work regardless of host config.
     local dirs_to_check=(
         "/data/claude"
         "/data/claude/plugins"
+        "/data/claude/skills"
         "/data/config/gh"
         "/data/codex"
+        "/data/codex/skills"
         "/data/gemini"
         "/data/copilot"
         "/data/shell"
