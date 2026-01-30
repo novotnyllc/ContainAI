@@ -1536,7 +1536,72 @@ _containai_stop_cmd() {
         return 0
     fi
 
-    # No --container specified, delegate to interactive stop all with original args
+    # No --container specified
+    # Check workspace state for container name (spec: fn-36-rb7.12)
+    if [[ "$all_flag" != "true" ]]; then
+        local ws_container_name
+        ws_container_name=$(_containai_read_workspace_key "$PWD" "container_name" 2>/dev/null) || ws_container_name=""
+        if [[ -n "$ws_container_name" ]]; then
+            # Found container in workspace state, stop it
+            local selected_context="" find_rc
+            if ! selected_context=$(_cai_find_container_by_name "$ws_container_name" "" "$PWD"); then
+                find_rc=$?
+                if [[ $find_rc -eq 2 ]] || [[ $find_rc -eq 3 ]]; then
+                    return 1  # Error already printed (ambiguity or config parse)
+                fi
+                # Container in state but not found - likely already removed
+                echo "[WARN] Container from workspace state not found: $ws_container_name" >&2
+                return 0
+            fi
+
+            local -a docker_cmd=(docker --context "$selected_context")
+            local is_managed
+            is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$ws_container_name" 2>/dev/null) || is_managed=""
+            if [[ "$is_managed" != "true" ]]; then
+                echo "[ERROR] Container $ws_container_name exists but is not managed by ContainAI" >&2
+                return 1
+            fi
+
+            # Verify container belongs to this workspace (prevent stale state issues)
+            local container_ws
+            container_ws=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.workspace"}}' -- "$ws_container_name" 2>/dev/null) || container_ws=""
+            local normalized_pwd
+            normalized_pwd=$(_cai_normalize_path "$PWD")
+            if [[ -n "$container_ws" && "$container_ws" != "$normalized_pwd" ]]; then
+                echo "[ERROR] Container '$ws_container_name' belongs to workspace '$container_ws', not current directory." >&2
+                echo "        Use 'cai stop --container $ws_container_name' to force, or fix workspace state." >&2
+                return 1
+            fi
+
+            if [[ "$remove_flag" == "true" ]]; then
+                local ssh_port
+                ssh_port=$(_cai_get_container_ssh_port "$ws_container_name" "$selected_context" 2>/dev/null) || ssh_port=""
+                echo "Removing: $ws_container_name [context: $selected_context]"
+                if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -f -- "$ws_container_name" >/dev/null 2>&1; then
+                    if [[ -n "$ssh_port" ]]; then
+                        _cai_cleanup_container_ssh "$ws_container_name" "$ssh_port"
+                    else
+                        _cai_remove_ssh_host_config "$ws_container_name"
+                    fi
+                    echo "Done."
+                else
+                    echo "[ERROR] Failed to remove container: $ws_container_name" >&2
+                    return 1
+                fi
+            else
+                echo "Stopping: $ws_container_name [context: $selected_context]"
+                if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" stop -- "$ws_container_name" >/dev/null 2>&1; then
+                    echo "Done."
+                else
+                    echo "[ERROR] Failed to stop container: $ws_container_name" >&2
+                    return 1
+                fi
+            fi
+            return 0
+        fi
+    fi
+
+    # No workspace state or --all flag, delegate to interactive stop all with original args
     _containai_stop_all "${orig_args[@]}"
 }
 
@@ -3174,6 +3239,17 @@ _containai_shell_cmd() {
             echo "[ERROR] Failed to create container" >&2
             return 1
         fi
+
+        # Save container name and volume to workspace state after --fresh/--reset recreation
+        # For explicit recreation, always persist the volume used
+        _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+        # Persist volume: CLI override always, --reset always (explicit new volume), or non-env first use
+        if [[ -n "$cli_volume" ]] || [[ "$reset_flag" == "true" ]]; then
+            _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+        elif [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+            # --fresh without env override - persist to maintain state
+            _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+        fi
     fi
 
     # Check if container exists; if not, create it first
@@ -3213,8 +3289,20 @@ _containai_shell_cmd() {
             return 1
         fi
 
-        # Save container name to workspace state on successful creation
+        # Save container name and volume to workspace state on successful creation
         _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+        # Save volume: CLI override always, or first-use (no existing state)
+        # Do NOT persist env-derived volumes to avoid "sticky" behavior
+        if [[ -n "$cli_volume" ]]; then
+            _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+        else
+            local existing_ws_vol
+            existing_ws_vol=$(_containai_read_workspace_key "$resolved_workspace" "data_volume" 2>/dev/null) || existing_ws_vol=""
+            if [[ -z "$existing_ws_vol" ]] && [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+                # First use and NOT from env var - persist to establish state
+                _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+            fi
+        fi
     else
         # Container exists - validate ownership and workspace match before connecting
         # Check ownership (label or image fallback)
@@ -3228,6 +3316,18 @@ _containai_shell_cmd() {
             fi
         fi
 
+        # Check if --data-volume was provided with a different volume than the container's current volume
+        # This error helps users understand why the command fails (spec: fn-36-rb7.12)
+        if [[ -n "$cli_volume" ]]; then
+            local actual_volume
+            actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
+            if [[ -n "$actual_volume" && "$actual_volume" != "$resolved_volume" ]]; then
+                echo "[ERROR] Container '$resolved_container_name' already uses volume '$actual_volume'." >&2
+                echo "        Use --fresh to recreate with new volume, or remove container first." >&2
+                return 1
+            fi
+        fi
+
         # Validate workspace match via FR-4 mount validation
         # This ensures the container's workspace mount matches the resolved workspace
         if ! _containai_validate_fr4_mounts "$selected_context" "$resolved_container_name" "$resolved_workspace" "$resolved_volume" "true"; then
@@ -3235,10 +3335,30 @@ _containai_shell_cmd() {
             return 1
         fi
 
-        # Save container name to workspace state on successful use
-        # Skip if --fresh flag was used (preserves existing workspace state)
+        # Save container name and volume to workspace state on successful use
+        # Skip if --fresh flag was used (handled separately above with state writes)
         if [[ "$fresh_flag" != "true" ]]; then
             _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+            # Save volume if CLI override was provided
+            if [[ -n "$cli_volume" ]]; then
+                _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+            else
+                # Sync actual mounted volume to workspace state if missing
+                # This self-heals state for existing containers
+                local existing_ws_volume
+                existing_ws_volume=$(_containai_read_workspace_key "$resolved_workspace" "data_volume" 2>/dev/null) || existing_ws_volume=""
+                # Only self-heal if no env override (env values shouldn't become "sticky")
+                if [[ -z "$existing_ws_volume" ]] && [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+                    local actual_volume
+                    actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
+                    if [[ -n "$actual_volume" ]]; then
+                        _containai_write_workspace_state "$resolved_workspace" "data_volume" "$actual_volume" 2>/dev/null || true
+                    fi
+                fi
+            fi
+        elif [[ -n "$cli_volume" ]]; then
+            # If --fresh was used with a CLI override, persist the override
+            _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
         fi
 
         # Print container/volume info if verbose (stderr for pipeline safety)
@@ -3702,6 +3822,13 @@ _containai_exec_cmd() {
             echo "[ERROR] Failed to create container" >&2
             return 1
         fi
+
+        # Save container name and volume to workspace state after --fresh recreation
+        _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+        # Persist volume: CLI override always, or non-env (--fresh without env override)
+        if [[ -n "$cli_volume" ]] || [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+            _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+        fi
     fi
 
     # Check if container exists; if not, create it first
@@ -3739,8 +3866,18 @@ _containai_exec_cmd() {
             return 1
         fi
 
-        # Save container name to workspace state
+        # Save container name and volume to workspace state
         _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+        # Persist volume: CLI override always, or first-use (no existing state) without env override
+        if [[ -n "$cli_volume" ]]; then
+            _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+        else
+            local existing_ws_vol
+            existing_ws_vol=$(_containai_read_workspace_key "$resolved_workspace" "data_volume" 2>/dev/null) || existing_ws_vol=""
+            if [[ -z "$existing_ws_vol" ]] && [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+                _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+            fi
+        fi
     else
         # Container exists - validate ownership and workspace mounts
         local exec_label_val exec_image_val
@@ -3750,6 +3887,18 @@ _containai_exec_cmd() {
             if [[ "$exec_image_val" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
                 echo "[ERROR] Container '$resolved_container_name' was not created by ContainAI" >&2
                 return 15
+            fi
+        fi
+
+        # Check if --data-volume was provided with a different volume than the container's current volume
+        # This error helps users understand why the command fails (spec: fn-36-rb7.12)
+        if [[ -n "$cli_volume" ]]; then
+            local actual_volume
+            actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
+            if [[ -n "$actual_volume" && "$actual_volume" != "$resolved_volume" ]]; then
+                echo "[ERROR] Container '$resolved_container_name' already uses volume '$actual_volume'." >&2
+                echo "        Use --fresh to recreate with new volume, or remove container first." >&2
+                return 1
             fi
         fi
 
@@ -3818,8 +3967,25 @@ _containai_exec_cmd() {
             fi
         fi
 
-        # Save container name to workspace state
+        # Save container name and volume to workspace state
         _containai_write_workspace_state "$resolved_workspace" "container_name" "$resolved_container_name" 2>/dev/null || true
+        # Save volume if CLI override was provided
+        if [[ -n "$cli_volume" ]]; then
+            _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+        else
+            # Sync actual mounted volume to workspace state if missing
+            # This self-heals state for existing containers
+            local existing_ws_volume
+            existing_ws_volume=$(_containai_read_workspace_key "$resolved_workspace" "data_volume" 2>/dev/null) || existing_ws_volume=""
+            # Only self-heal if no env override (env values shouldn't become "sticky")
+            if [[ -z "$existing_ws_volume" ]] && [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+                local actual_volume
+                actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
+                if [[ -n "$actual_volume" ]]; then
+                    _containai_write_workspace_state "$resolved_workspace" "data_volume" "$actual_volume" 2>/dev/null || true
+                fi
+            fi
+        fi
     fi
 
     # Run command via SSH with login shell
@@ -4135,6 +4301,7 @@ _containai_run_cmd() {
     local resolved_workspace=""
     local resolved_volume=""
     local resolved_credentials=""
+    local resolved_container_name=""  # Container name resolved in standard mode
     local container_workspace=""  # Workspace to use for state write (may differ from resolved_workspace)
 
     # Track if we need to save container name to workspace state after success
@@ -4239,6 +4406,77 @@ _containai_run_cmd() {
 
         container_workspace="$resolved_workspace"
 
+        # === CONFIG PARSING (for context selection) ===
+        local config_file=""
+        if [[ -n "$explicit_config" ]]; then
+            if [[ ! -f "$explicit_config" ]]; then
+                echo "[ERROR] Config file not found: $explicit_config" >&2
+                return 1
+            fi
+            config_file="$explicit_config"
+            if ! _containai_parse_config "$config_file" "$resolved_workspace" "strict"; then
+                echo "[ERROR] Failed to parse config: $explicit_config" >&2
+                return 1
+            fi
+        else
+            # Discovered config: suppress errors gracefully
+            config_file=$(_containai_find_config "$resolved_workspace")
+            if [[ -n "$config_file" ]]; then
+                _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
+            fi
+        fi
+        local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
+
+        # Auto-select Docker context based on isolation availability
+        local run_debug_mode=""
+        if [[ "$debug_flag" == "true" ]]; then
+            run_debug_mode="debug"
+        fi
+        local run_verbose_str="false"
+        if [[ "$verbose_flag" == "true" ]]; then
+            run_verbose_str="true"
+        fi
+        local selected_context=""
+        if ! selected_context=$(_cai_select_context "$config_context_override" "$run_debug_mode" "$run_verbose_str"); then
+            if [[ "$force_flag" == "true" ]]; then
+                _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
+                if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                    selected_context="$config_context_override"
+                elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+                    selected_context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+                else
+                    _cai_error "No isolation context available. Run 'cai setup' to create $_CAI_CONTAINAI_DOCKER_CONTEXT."
+                    return 1
+                fi
+            else
+                _cai_error "No isolation available. Run 'cai doctor' for setup instructions."
+                return 1
+            fi
+        fi
+
+        # Resolve container name using shared lookup helper
+        # Note: resolved_container_name is declared at function scope (line 4183)
+        local find_rc
+        if resolved_container_name=$(_cai_find_workspace_container "$resolved_workspace" "$selected_context"); then
+            : # Found existing container
+        else
+            find_rc=$?
+            if [[ $find_rc -eq 2 ]]; then
+                return 1  # Multiple containers - error already printed
+            fi
+            # Not found - resolve name for creation
+            if ! resolved_container_name=$(_cai_resolve_container_name "$resolved_workspace" "$selected_context"); then
+                find_rc=$?
+                if [[ $find_rc -eq 2 ]]; then
+                    return 1
+                fi
+                echo "[ERROR] Failed to resolve container name for workspace: $resolved_workspace" >&2
+                return 1
+            fi
+        fi
+
+        start_args+=(--name "$resolved_container_name")
+        start_args+=(--docker-context "$selected_context")
         start_args+=(--data-volume "$resolved_volume")
         start_args+=(--workspace "$resolved_workspace")
 
@@ -4251,6 +4489,9 @@ _containai_run_cmd() {
         if [[ -z "$cli_volume" ]] && [[ -z "$explicit_config" ]]; then
             start_args+=(--volume-mismatch-warn)
         fi
+
+        # Mark that we should save workspace state after success
+        should_save_container_name="true"
     fi
 
     # Resolve credentials (CLI > env > config > default)
@@ -4330,11 +4571,30 @@ _containai_run_cmd() {
     _containai_start_container "${start_args[@]}"
     start_rc=$?
 
-    # Save container name to workspace state only after successful create/use
+    # Save container name and volume to workspace state only after successful create/use
     # Skip on dry-run (no actual container created/used)
     # Use container_workspace (which is the container's labeled workspace, not necessarily PWD)
-    if [[ $start_rc -eq 0 ]] && [[ "$should_save_container_name" == "true" ]] && [[ -n "$container_name" ]] && [[ -n "$container_workspace" ]] && [[ -z "$dry_run_flag" ]]; then
-        _containai_write_workspace_state "$container_workspace" "container_name" "$container_name" 2>/dev/null || true
+    if [[ $start_rc -eq 0 ]] && [[ -n "$container_workspace" ]] && [[ -z "$dry_run_flag" ]]; then
+        if [[ "$should_save_container_name" == "true" ]]; then
+            # Determine container name to save (from --container mode or standard mode resolution)
+            local save_container_name="${container_name:-$resolved_container_name}"
+            if [[ -n "$save_container_name" ]]; then
+                _containai_write_workspace_state "$container_workspace" "container_name" "$save_container_name" 2>/dev/null || true
+            fi
+            # Persist volume: CLI override always, or first-use (no existing state) without env override
+            if [[ -n "$cli_volume" ]]; then
+                _containai_write_workspace_state "$container_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+            else
+                local existing_ws_vol
+                existing_ws_vol=$(_containai_read_workspace_key "$container_workspace" "data_volume" 2>/dev/null) || existing_ws_vol=""
+                if [[ -z "$existing_ws_vol" ]] && [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
+                    _containai_write_workspace_state "$container_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+                fi
+            fi
+        elif [[ -n "$cli_volume" ]]; then
+            # CLI volume override - save even if not first use
+            _containai_write_workspace_state "$container_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
+        fi
     fi
 
     return $start_rc

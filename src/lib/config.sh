@@ -573,9 +573,10 @@ for item in default_excludes + ws_excludes:
 # Precedence:
 #   1. --data-volume CLI flag (skips config parsing entirely)
 #   2. CONTAINAI_DATA_VOLUME env var (skips config parsing entirely)
-#   3. Config file [workspace.<path>] section matching workspace
-#   4. Config file [agent].data_volume
-#   5. Default: sandbox-agent-data
+#   3. User workspace state (~/.config/containai/config.toml [workspace."path"])
+#   4. Repo-local config (.containai/config.toml in workspace)
+#   5. User global config (~/.config/containai/config.toml top-level)
+#   6. Default: sandbox-agent-data
 _containai_resolve_volume() {
     local cli_volume="${1:-}"
     local workspace="${2:-$PWD}"
@@ -610,7 +611,25 @@ _containai_resolve_volume() {
         workspace="$PWD"
     fi
 
-    # 4. Find config file
+    # 4. Check user workspace state (always read regardless of repo-local config)
+    # This is the persisted volume name from previous cai shell/run/exec commands
+    local ws_volume
+    ws_volume=$(_containai_read_workspace_key "$workspace" "data_volume" 2>/dev/null) || ws_volume=""
+    if [[ -n "$ws_volume" ]]; then
+        # Validate volume name from workspace state
+        if ! _containai_validate_volume_name "$ws_volume"; then
+            # Sanitize value for safe logging: truncate and escape control chars
+            local sanitized_ws_volume
+            sanitized_ws_volume="${ws_volume:0:64}"
+            sanitized_ws_volume=$(printf '%s' "$sanitized_ws_volume" | LC_ALL=C tr -cd '[:print:]')
+            echo "[WARN] Invalid volume name in workspace state: $sanitized_ws_volume, skipping" >&2
+        else
+            printf '%s' "$ws_volume"
+            return 0
+        fi
+    fi
+
+    # 5. Find config file (repo-local or user-global)
     if [[ -n "$explicit_config" ]]; then
         # Explicit config: must exist
         if [[ ! -f "$explicit_config" ]]; then
@@ -622,7 +641,7 @@ _containai_resolve_volume() {
         config_file=$(_containai_find_config "$workspace")
     fi
 
-    # 5. Parse config with workspace matching
+    # 6. Parse config with workspace matching
     # Use strict mode for explicit config (fail on parse errors)
     # Use normal mode for discovered config (graceful fallback)
     if [[ -n "$config_file" ]]; then
@@ -645,7 +664,7 @@ _containai_resolve_volume() {
         fi
     fi
 
-    # 6. Default
+    # 7. Default
     printf '%s' "$_CONTAINAI_DEFAULT_VOLUME"
 }
 
