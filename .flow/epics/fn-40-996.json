@@ -3,7 +3,8 @@
   "created_at": "2026-01-29T09:40:50.965174Z",
   "depends_on_epics": [
     "fn-41-9xt",
-    "fn-34-fk5"
+    "fn-34-fk5",
+    "fn-32-2mq"
   ],
   "id": "fn-40-996",
   "next_task": 1,
@@ -12,5 +13,5 @@
   "spec_path": ".flow/specs/fn-40-996.md",
   "status": "open",
   "title": "Agent Client Protocol (ACP) Integration",
-  "updated_at": "2026-01-30T03:56:13.719117Z"
+  "updated_at": "2026-01-30T04:34:36.179029Z"
 }
