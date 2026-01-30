@@ -7,7 +7,7 @@
 # Provides:
 #   _containai_container_name      - Generate sanitized container name
 #   _containai_legacy_container_name - Generate legacy hash-based container name
-#   _cai_find_workspace_container  - Find container using shared lookup order (label/new/legacy)
+#   _cai_find_workspace_container  - Find container using shared lookup order (config/label/new/legacy)
 #   _cai_find_container_by_name    - Find container by name across multiple contexts
 #   _cai_resolve_container_name    - Resolve container name for creation (duplicate-aware)
 #   _cai_find_container            - Find container by workspace and optional image-tag filter
@@ -418,9 +418,10 @@ _containai_legacy_container_name() {
 # This is the primary lookup helper that all commands MUST use.
 #
 # Lookup order:
-#   1. Label match: containai.workspace=<resolved-path> (most reliable)
-#   2. New naming format: result from _containai_container_name()
-#   3. Legacy hash format: result from _containai_legacy_container_name()
+#   1. Workspace config: container_name from user config (if exists in docker)
+#   2. Label match: containai.workspace=<resolved-path> (most reliable)
+#   3. New naming format: result from _containai_container_name()
+#   4. Legacy hash format: result from _containai_legacy_container_name()
 #
 # Arguments:
 #   $1 = workspace path (required, should be normalized/resolved)
@@ -443,7 +444,20 @@ _cai_find_workspace_container() {
 
     [[ -n "$context" ]] && docker_cmd=(docker --context "$context")
 
-    # 1. Label match (most reliable) - with duplicate detection
+    # 1. Workspace config: check if container_name is saved and container exists
+    local config_name
+    if config_name=$(_containai_read_workspace_key "$workspace_path" "container_name" 2>/dev/null); then
+        if [[ -n "$config_name" ]]; then
+            # Check if this container actually exists
+            if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$config_name" >/dev/null 2>&1; then
+                printf '%s\n' "$config_name"
+                return 0
+            fi
+            # Container gone - fall through to other methods
+        fi
+    fi
+
+    # 2. Label match (most reliable) - with duplicate detection
     local -a by_label=()
     while IFS= read -r line; do
         [[ -n "$line" ]] && by_label+=("$line")
@@ -465,7 +479,7 @@ _cai_find_workspace_container() {
         return 0
     fi
 
-    # 2. New naming format (from _containai_container_name)
+    # 3. New naming format (from _containai_container_name)
     local new_name
     if new_name=$(_containai_container_name "$workspace_path"); then
         if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$new_name" >/dev/null 2>&1; then
@@ -474,7 +488,7 @@ _cai_find_workspace_container() {
         fi
     fi
 
-    # 3. Legacy hash format (using existing _cai_hash_path via wrapper)
+    # 4. Legacy hash format (using existing _cai_hash_path via wrapper)
     local legacy_name
     if legacy_name=$(_containai_legacy_container_name "$workspace_path"); then
         if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$legacy_name" >/dev/null 2>&1; then
@@ -658,20 +672,20 @@ _cai_resolve_container_name() {
     candidate="$base_name"
 
     # Check if name is taken by another workspace (handle collisions)
-    # Cap suffix at 999 to ensure max 63 chars (base 59 + "-" + 3 digits = 63)
+    # Cap suffix at 99 to ensure max 63 chars (base 59 + "-" + 2 digits = 62)
     # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context authoritative
     while DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$candidate" >/dev/null 2>&1; do
-        # Check if this container is for our workspace
+        # Check if this container is for our workspace via workspace label
         existing_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' "$candidate" 2>/dev/null) || existing_workspace=""
         if [[ "$existing_workspace" == "$workspace_path" ]]; then
             # Same workspace - reuse this container name
             printf '%s\n' "$candidate"
             return 0
         fi
-        # Different workspace - try next suffix
+        # Different workspace (or no label) - try next suffix
         ((suffix++)) || true
-        if [[ $suffix -gt 999 ]]; then
-            echo "[ERROR] Too many container name collisions (max 999)" >&2
+        if [[ $suffix -gt 99 ]]; then
+            echo "[ERROR] Too many container name collisions (max 99)" >&2
             return 1
         fi
         candidate="${base_name}-${suffix}"
