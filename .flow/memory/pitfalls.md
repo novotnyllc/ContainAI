@@ -265,3 +265,6 @@ When writing config values to TOML, use proper types (raw int for numbers, true/
 
 ## 2026-01-29 manual [pitfall]
 In zsh _arguments -C state machines, use $line[1] not $words[1] for subcommand dispatch - $words[1] is the command name
+
+## 2026-01-30 manual [pitfall]
+Docker inspect in multi-context setups must use DOCKER_CONTEXT= DOCKER_HOST= docker --context $ctx to avoid reading containers from wrong context
