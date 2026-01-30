@@ -2584,7 +2584,7 @@ _cai_ssh_cleanup() {
     # Check if config directory exists
     if [[ ! -d "$config_dir" ]]; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[dry-run] SSH config directory does not exist: $config_dir"
+            _cai_dryrun "SSH config directory does not exist: $config_dir"
         else
             _cai_info "SSH config directory does not exist: $config_dir"
         fi
@@ -2739,7 +2739,7 @@ _cai_ssh_cleanup() {
 
     _cai_info ""
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[dry-run] Would remove $to_clean_count stale SSH config(s):"
+        _cai_dryrun "Would remove $to_clean_count stale SSH config(s):"
     else
         _cai_info "Removing $to_clean_count stale SSH config(s):"
     fi
@@ -2750,10 +2750,10 @@ _cai_ssh_cleanup() {
         ssh_port="${config_to_port[$config_file]:-}"
 
         if [[ "$dry_run" == "true" ]]; then
-            _cai_info "  [dry-run] Would remove: $container_name"
-            _cai_info "            Config: $config_file"
+            _cai_dryrun "  Would remove: $container_name"
+            _cai_dryrun "  Config: $config_file"
             if [[ -n "$ssh_port" ]]; then
-                _cai_info "            Port: $ssh_port (would clean known_hosts)"
+                _cai_dryrun "  Port: $ssh_port (would clean known_hosts)"
             fi
         else
             _cai_info "  Removing: $container_name"
@@ -2777,9 +2777,9 @@ _cai_ssh_cleanup() {
 
     _cai_info ""
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[dry-run] Summary: Would remove $to_clean_count config(s), keep $skipped_count config(s)"
+        _cai_dryrun "Summary: Would remove $to_clean_count config(s), keep $skipped_count config(s)"
         if [[ $foreign_count -gt 0 ]]; then
-            _cai_info "          ($foreign_count non-ContainAI config(s) ignored)"
+            _cai_dryrun "($foreign_count non-ContainAI config(s) ignored)"
         fi
     else
         if [[ $fail_count -gt 0 ]]; then

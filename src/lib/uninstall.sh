@@ -109,13 +109,13 @@ _cai_uninstall_systemd_service() {
 
     if [[ "$dry_run" == "true" ]]; then
         if [[ "$service_running" == "true" ]]; then
-            _cai_info "[dry-run] Would stop service: ${_CAI_UNINSTALL_SERVICE}"
+            _cai_dryrun "Would stop service: ${_CAI_UNINSTALL_SERVICE}"
         fi
-        _cai_info "[dry-run] Would disable service: ${_CAI_UNINSTALL_SERVICE}"
+        _cai_dryrun "Would disable service: ${_CAI_UNINSTALL_SERVICE}"
         if [[ -f "$_CAI_UNINSTALL_SERVICE_FILE" ]]; then
-            _cai_info "[dry-run] Would remove: $_CAI_UNINSTALL_SERVICE_FILE"
+            _cai_dryrun "Would remove: $_CAI_UNINSTALL_SERVICE_FILE"
         fi
-        _cai_info "[dry-run] Would run: systemctl daemon-reload"
+        _cai_dryrun "Would run: systemctl daemon-reload"
         return 0
     fi
 
@@ -180,7 +180,7 @@ _cai_uninstall_docker_context() {
         _cai_step "Removing Docker context: $ctx"
 
         if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[dry-run] Would remove Docker context: $ctx"
+            _cai_dryrun "Would remove Docker context: $ctx"
             removed_any=true
             continue
         fi
@@ -314,13 +314,13 @@ _cai_uninstall_containers() {
             local cid cname cctx
             IFS=':' read -r cid cname cctx <<<"$entry"
             if [[ -n "$cctx" ]]; then
-                _cai_info "[dry-run] Would remove container: $cname ($cid) [context: $cctx]"
+                _cai_dryrun "Would remove container: $cname ($cid) [context: $cctx]"
             else
-                _cai_info "[dry-run] Would remove container: $cname ($cid)"
+                _cai_dryrun "Would remove container: $cname ($cid)"
             fi
         done
         if [[ "$remove_volumes" == "true" && ${#all_volumes[@]} -gt 0 ]]; then
-            _cai_info "[dry-run] Would remove ${#all_volumes[@]} volume(s)"
+            _cai_dryrun "Would remove ${#all_volumes[@]} volume(s)"
         fi
         return 0
     fi

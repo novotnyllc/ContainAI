@@ -177,7 +177,7 @@ _cai_update_systemd_unit() {
     if [[ ! -d /run/systemd/system ]]; then
         if [[ "$dry_run" == "true" ]]; then
             _cai_warn "[DRY-RUN] systemd is not running (required for actual update)"
-            _cai_info "[DRY-RUN] Would require systemd to be running"
+            _cai_dryrun "Would require systemd to be running"
         else
             _cai_error "systemd is not running (or not the init system)"
             _cai_error "  ContainAI requires systemd on Linux/WSL2"
@@ -201,9 +201,9 @@ _cai_update_systemd_unit() {
             _cai_info "Systemd unit file needs update"
 
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Would update: $_CAI_CONTAINAI_DOCKER_UNIT"
-                _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
-                _cai_info "[DRY-RUN] Would restart: $_CAI_CONTAINAI_DOCKER_SERVICE"
+                _cai_dryrun "Would update: $_CAI_CONTAINAI_DOCKER_UNIT"
+                _cai_dryrun "Would run: systemctl daemon-reload"
+                _cai_dryrun "Would restart: $_CAI_CONTAINAI_DOCKER_SERVICE"
                 return 0
             fi
 
@@ -290,8 +290,8 @@ _cai_update_docker_context() {
         _cai_info "Context '$context_name' not found - will create"
 
         if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would create context: $context_name"
-            _cai_info "[DRY-RUN] Would set endpoint: $expected_host"
+            _cai_dryrun "Would create context: $context_name"
+            _cai_dryrun "Would set endpoint: $expected_host"
             return 0
         fi
 
@@ -319,7 +319,7 @@ _cai_update_docker_context() {
     _cai_info "  Expected: $expected_host"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would remove and recreate context"
+        _cai_dryrun "Would remove and recreate context"
         return 0
     fi
 
@@ -652,11 +652,11 @@ _cai_update_dockerd_bundle() {
 
     # Dry-run handling
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would download docker-${latest_version}.tgz"
-        _cai_info "[DRY-RUN] Would extract to $_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
-        _cai_info "[DRY-RUN] Would update symlinks in $_CAI_DOCKERD_BIN_DIR/"
-        _cai_info "[DRY-RUN] Would restart $_CAI_CONTAINAI_DOCKER_SERVICE"
-        _cai_info "[DRY-RUN] Would cleanup old versions (keeping current + previous)"
+        _cai_dryrun "Would download docker-${latest_version}.tgz"
+        _cai_dryrun "Would extract to $_CAI_DOCKERD_BUNDLE_DIR/$latest_version/"
+        _cai_dryrun "Would update symlinks in $_CAI_DOCKERD_BIN_DIR/"
+        _cai_dryrun "Would restart $_CAI_CONTAINAI_DOCKER_SERVICE"
+        _cai_dryrun "Would cleanup old versions (keeping current + previous)"
         return 0
     fi
 
@@ -893,9 +893,9 @@ _cai_update_sysbox() {
 
     # Dry-run handling
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would download sysbox from ContainAI release"
-        _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
-        _cai_info "[DRY-RUN] Would restart sysbox services"
+        _cai_dryrun "Would download sysbox from ContainAI release"
+        _cai_dryrun "Would install with: dpkg -i sysbox-ce.deb"
+        _cai_dryrun "Would restart sysbox services"
         return 0
     fi
 
@@ -1024,11 +1024,11 @@ _cai_stop_containai_containers() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would stop containers:"
+        _cai_dryrun "Would stop containers:"
         local container_id name
         while IFS=$'\t' read -r container_id name; do
             if [[ -n "$name" ]]; then
-                _cai_info "[DRY-RUN]   - $name"
+                _cai_dryrun "  - $name"
             fi
         done <<< "$containers"
         return 0
@@ -1181,14 +1181,14 @@ _cai_update_linux_wsl2() {
 
         if [[ -n "$running_containers" ]]; then
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Running containers that would be affected:"
+                _cai_dryrun "Running containers that would be affected:"
                 local container_id name
                 while IFS=$'\t' read -r container_id name; do
                     if [[ -n "$name" ]]; then
-                        _cai_info "[DRY-RUN]   - $name"
+                        _cai_dryrun "  - $name"
                     fi
                 done <<< "$running_containers"
-                _cai_info "[DRY-RUN] Would prompt to stop containers or require --stop-containers flag"
+                _cai_dryrun "Would prompt to stop containers or require --stop-containers flag"
             elif [[ "$stop_containers" == "true" ]] || [[ "$force" == "true" ]]; then
                 # Stop containers before proceeding (--stop-containers or --force flag)
                 if ! _cai_stop_containai_containers "false" 100; then
@@ -1278,7 +1278,7 @@ _cai_update_linux_wsl2() {
             overall_status=1
         fi
     else
-        _cai_info "[DRY-RUN] Would verify installation"
+        _cai_dryrun "Would verify installation"
     fi
 
     return $overall_status
@@ -1298,9 +1298,9 @@ _cai_update_macos_packages() {
     _cai_step "Updating packages in Lima VM"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would ensure Lima VM is running"
-        _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo apt-get update"
-        _cai_info "[DRY-RUN] Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y (with dpkg options)"
+        _cai_dryrun "Would ensure Lima VM is running"
+        _cai_dryrun "Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo apt-get update"
+        _cai_dryrun "Would run: limactl shell $_CAI_LIMA_VM_NAME -- sudo env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y (with dpkg options)"
         return 0
     fi
 
@@ -1593,10 +1593,10 @@ _cai_update_lima_sysbox() {
     esac
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would download sysbox .deb into Lima VM (arch: $vm_arch)"
-        _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
-        _cai_info "[DRY-RUN] Would restart sysbox services in VM"
-        _cai_info "[DRY-RUN] Would verify installed version matches expected"
+        _cai_dryrun "Would download sysbox .deb into Lima VM (arch: $vm_arch)"
+        _cai_dryrun "Would install with: dpkg -i sysbox-ce.deb"
+        _cai_dryrun "Would restart sysbox services in VM"
+        _cai_dryrun "Would verify installed version matches expected"
         return 0
     fi
 
@@ -1681,9 +1681,9 @@ _cai_update_macos_recreate_vm() {
     local verbose="${2:-false}"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would stop Lima VM: $_CAI_LIMA_VM_NAME"
-        _cai_info "[DRY-RUN] Would delete Lima VM: $_CAI_LIMA_VM_NAME"
-        _cai_info "[DRY-RUN] Would recreate Lima VM with latest template"
+        _cai_dryrun "Would stop Lima VM: $_CAI_LIMA_VM_NAME"
+        _cai_dryrun "Would delete Lima VM: $_CAI_LIMA_VM_NAME"
+        _cai_dryrun "Would recreate Lima VM with latest template"
         return 0
     fi
 
@@ -1838,7 +1838,7 @@ _cai_update_macos() {
             overall_status=1
         fi
     else
-        _cai_info "[DRY-RUN] Would verify installation"
+        _cai_dryrun "Would verify installation"
     fi
 
     # Step 6: Clean up legacy Lima VM (only if verification passed)

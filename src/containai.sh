@@ -1544,7 +1544,7 @@ _containai_stop_cmd() {
             local ssh_port
             ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context" 2>/dev/null) || ssh_port=""
 
-            echo "Removing: $container_name [context: $selected_context]"
+            _cai_info "Removing: $container_name [context: $selected_context]"
             if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -f -- "$container_name" >/dev/null 2>&1; then
                 # Clean up SSH config
                 if [[ -n "$ssh_port" ]]; then
@@ -1552,17 +1552,17 @@ _containai_stop_cmd() {
                 else
                     _cai_remove_ssh_host_config "$container_name"
                 fi
-                echo "Done."
+                _cai_ok "Done."
             else
-                echo "[ERROR] Failed to remove container: $container_name" >&2
+                _cai_error "Failed to remove container: $container_name"
                 return 1
             fi
         else
-            echo "Stopping: $container_name [context: $selected_context]"
+            _cai_info "Stopping: $container_name [context: $selected_context]"
             if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" stop -- "$container_name" >/dev/null 2>&1; then
-                echo "Done."
+                _cai_ok "Done."
             else
-                echo "[ERROR] Failed to stop container: $container_name" >&2
+                _cai_error "Failed to stop container: $container_name"
                 return 1
             fi
         fi
