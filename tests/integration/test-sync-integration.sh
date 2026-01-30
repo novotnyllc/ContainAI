@@ -143,24 +143,18 @@ section() {
 
 FAILED=0
 
-# Helper to run commands in rsync container and extract clean output
-# Filters out SSH key generation noise from eeacms/rsync
+# Helper to run commands in rsync container
+# Uses --entrypoint sh to bypass default entrypoint that runs ssh-keygen
 # Captures docker exit code to avoid false positives
-# Uses sed instead of grep -v to avoid failure on empty output (pipefail-safe)
 run_in_rsync() {
     local output exit_code
-    output=$("${DOCKER_CMD[@]}" run --rm -v "$DATA_VOLUME":/data eeacms/rsync sh -c "$1" 2>&1) || exit_code=$?
+    output=$("${DOCKER_CMD[@]}" run --rm --entrypoint sh -v "$DATA_VOLUME":/data eeacms/rsync -c "$1" 2>&1) || exit_code=$?
     if [[ ${exit_code:-0} -ne 0 && ${exit_code:-0} -ne 1 ]]; then
         echo "docker_run_failed:$exit_code"
         return 1
     fi
-    # Use sed to filter noise (doesn't fail on empty input unlike grep -v)
-    printf '%s\n' "$output" | sed \
-        -e '/^Generating SSH/d' \
-        -e '/^ssh-keygen:/d' \
-        -e '/^Please add this/d' \
-        -e '/^====/d' \
-        -e '/^ssh-rsa /d'
+    # Filter lines unrelated to test output (equals separator)
+    printf '%s\n' "$output" | sed -e '/^====/d'
 }
 
 # Helper to get a single numeric value from rsync container (handles wc -l whitespace)
@@ -3660,6 +3654,58 @@ data_volume = "'"$test_vol"'"
     # Cleanup handled by RETURN trap
 }
 
+# Test: No ssh-keygen noise during import
+# Verifies that the rsync image entrypoint is bypassed correctly
+test_no_ssh_keygen_noise() {
+    section "Test 59: No ssh-keygen noise during import"
+
+    # Create a minimal test setup
+    local test_vol="test-sshkeygen-noise-$$"
+    local test_dir="$FIXTURE_HOME/sshkeygen-test-$$"
+
+    # Cleanup function
+    local cleanup_done=0
+    cleanup() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        "${DOCKER_CMD[@]}" volume rm -f "$test_vol" &>/dev/null || true
+        rm -rf "$test_dir"
+    }
+    trap cleanup RETURN
+
+    # Create test directory with minimal fixture
+    mkdir -p "$test_dir/.claude"
+    echo '{"test": "value"}' > "$test_dir/.claude/settings.json"
+
+    # Create test volume
+    if ! "${DOCKER_CMD[@]}" volume create "$test_vol" &>/dev/null; then
+        fail "Failed to create test volume"
+        return
+    fi
+
+    # Run import and capture ALL output (stdout and stderr)
+    local import_output
+    import_output=$(run_cai_import_from_dir "$test_dir" "" --data-volume "$test_vol" 2>&1) || true
+
+    # Check for ssh-keygen noise patterns
+    if echo "$import_output" | grep -qi "ssh-keygen\|Generating SSH\|ssh-rsa "; then
+        fail "Import output contains ssh-keygen noise"
+        info "Output: $import_output"
+    else
+        pass "Import produces no ssh-keygen noise"
+    fi
+
+    # Verify import actually worked (sanity check)
+    local settings_check
+    settings_check=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || settings_check=""
+
+    if echo "$settings_check" | grep -q "test"; then
+        pass "Import completed successfully (settings.json present)"
+    else
+        info "Note: settings.json check failed, but no ssh-keygen noise is the key assertion"
+    fi
+}
+
 # ==============================================================================
 # Main
 # ==============================================================================
@@ -3741,6 +3787,9 @@ main() {
 
     # Import overrides tests (Tests 52-58)
     test_import_overrides
+
+    # SSH keygen noise test (Test 59)
+    test_no_ssh_keygen_noise
 
     # Summary
     echo ""

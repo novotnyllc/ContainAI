@@ -1,10 +1,18 @@
 # fn-31-gib.2 Fix missing Codex skills and symlinks
 
 ## Description
-TBD
+Create minimal repro for Codex skills not appearing, then fix the specific failure point. Current state: `.codex/skills` exists in `src/sync-manifest.toml` with `flags = "dxR"`, and symlinks are generated in `src/container/generated/symlinks.sh`.
+
+**Investigation needed:**
+1. Document exact host layout that fails
+2. Identify failure point: (a) host→volume sync, (b) container symlink creation, (c) runtime link repair
 
 ## Acceptance
-- [ ] TBD
+- [ ] Documented repro scenario in task summary (exact host `~/.codex/skills` layout that fails)
+- [ ] Root cause identified and documented (which code path fails)
+- [ ] Fix applied to `src/lib/import.sh`, `gen-dockerfile-symlinks.sh`, or `containai-init.sh` as appropriate
+- [ ] Test case: `docker exec test-container ls -la ~/.codex/skills` shows valid symlink to `/mnt/agent-data/codex/skills`
+- [ ] Test case: Skills in `~/.codex/skills/` are accessible and functional
 
 ## Done summary
 TBD

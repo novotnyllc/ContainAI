@@ -1,0 +1,330 @@
+{
+  "created_at": "2026-01-30T21:24:48.528401Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-31-gib",
+      "created_at": "2026-01-28T10:14:42.953188Z",
+      "depends_on_epics": [
+        "fn-36-rb7",
+        "fn-41-9xt"
+      ],
+      "id": "fn-31-gib",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-31-gib.md",
+      "status": "open",
+      "title": "Import Reliability & Comprehensive Testing",
+      "updated_at": "2026-01-28T19:47:43.478816Z"
+    },
+    "spec": "# fn-31-gib Import Reliability & Comprehensive Testing\n\n## Overview\n\nFix critical import bugs and create a comprehensive E2E test suite for the import/sync functionality. Import is the heart of ContainAI's data management, and several bugs have been reported:\n\n1. SSH keygen runs during import (shouldn't happen)\n2. Codex skills not imported (missing symlinks)\n3. Fresh container shows \"claude: command not found\"\n4. Home directory pollution (empty .kiro, .cursor, etc. created for unused agents)\n5. Likely other missing items in sync-manifest.toml\n\nThis epic also introduces `cai sync` - an in-container command for capturing installed tools to the data volume.\n\n**Priority:** HIGH - User explicitly stated \"Getting the import to work right is very important\"\n\n## Scope\n\n### In Scope\n- Investigate and fix SSH keygen running during `cai import`\n- Fix missing Codex skills import and symlink creation\n- Audit sync-manifest.toml for completeness against all supported agents\n- Fix \"claude: command not found\" on fresh container start\n- **Prevent home directory pollution** - don't create empty dirs for agents user doesn't have\n- **Add `cai sync` command** - in-container tool to move configs to data volume\n- Install cai in container image (Dockerfile.agents)\n- Create comprehensive import test suite\n- **Test volumes MUST start with `test-` prefix**\n- **Test containers MUST start with `test-` prefix** (always specify --container test-xxx)\n- Import filtering for `.priv.` files (from fn-12-css)\n\n### Out of Scope\n- New agent support (covered in fn-35-e0x)\n- User templates (covered in fn-33-lp4)\n- Changes to import UX (prompts, flags)\n\n## Approach\n\n### Phase 1: Bug Investigation\n\n**SSH Keygen During Import**\n- Trace `cai import` code path in `src/lib/import.sh`\n- Identify where `_cai_ensure_ssh_key` or similar is called\n- SSH keys should only be generated for container creation, not import\n\n**Codex Skills Missing**\n- Check sync-manifest.toml entry for `.codex/skills`\n- Verify `flags = \"dxR\"` (directory, exclude .system/, remove existing)\n- Check if symlink is being created in container\n- Test with actual Codex installation\n\n**Claude Not Found**\n- Fresh container means new volume + new container\n- Check if `containai-init.sh` runs correctly\n- Verify PATH includes `/home/agent/.local/bin` where claude is installed\n- Check if symlinks from volume to home are created\n\n### Phase 2: Prevent Home Directory Pollution\n\n**Problem:** Running `cai import` creates empty directories like `~/.kiro`, `~/.cursor`, etc. even if user doesn't use those agents. This clutters the home directory.\n\n**Solution:** Only sync/create symlinks for paths that **exist on the host**.\n\nCurrent behavior:\n```bash\n# Creates ~/.kiro even if user has no kiro config\nmkdir -p /mnt/agent-data/kiro\nln -sfn /mnt/agent-data/kiro ~/.kiro\n```\n\nNew behavior:\n```bash\n# Only create if source exists on host\nif [[ -e \"$HOME/.kiro\" ]]; then\n    # sync and symlink\nfi\n```\n\n**Implementation:**\n1. Modify import logic to check source existence before syncing\n2. Modify symlink generation to be conditional\n3. Add flag `o` (optional) to sync-manifest entries that should only sync if present\n4. Entries without `o` flag are always synced (required dirs like `.config/containai`)\n\n### Phase 3: Import Filtering (from fn-12-css)\n\n**Private file filtering:**\n- Exclude `.bashrc.d/*.priv.*` files during import\n- Prevents accidental secret leakage\n- Controlled by `import.exclude_priv` config (default: true)\n\n### Phase 4: `cai sync` Command (In-Container)\n\n**Use Case:** User starts with clean image + clean data volume. They install agents, tools, customize their environment. Now they want that setup reusable across container recreations.\n\n**Command:**\n```bash\n# Inside container\ncai sync\n```\n\n**What it does:**\n1. Detects it's running inside a container (check for `/mnt/agent-data`)\n2. For each path in sync-manifest.toml:\n   - If path exists in home AND is not already a symlink to /mnt/agent-data\n   - Move the path to /mnt/agent-data\n   - Replace with symlink back\n3. Reports what was synced\n\n**Safety:**\n- MUST detect container environment - refuse to run on host\n- Detection: check for `/mnt/agent-data` mount point or container label\n- Never move/replace files on the actual host machine\n\n**Example:**\n```bash\n$ cai sync\n[INFO] Syncing local configs to data volume...\n[OK] ~/.claude -> /mnt/agent-data/claude (moved 3 files)\n[OK] ~/.codex -> /mnt/agent-data/codex (moved 2 files)\n[SKIP] ~/.gemini (already symlinked)\n[INFO] Done. 2 paths synced, 1 skipped.\n```\n\n### Phase 5: Install cai in Container\n\nAdd cai to Dockerfile.agents so `cai sync` works inside container:\n```dockerfile\n# =============================================================================\n# ContainAI CLI\n# =============================================================================\nCOPY containai.sh /opt/containai/containai.sh\nCOPY lib/ /opt/containai/lib/\nRUN echo 'source /opt/containai/containai.sh' >> /home/agent/.bashrc\n```\n\n### Phase 6: Test Suite\n\n```\ntests/integration/import/\n\u251c\u2500\u2500 run-import-tests.sh       # Main test runner\n\u251c\u2500\u2500 lib/\n\u2502   \u251c\u2500\u2500 test-helpers.sh       # Common functions\n\u2502   \u251c\u2500\u2500 fixtures.sh           # Test fixture creation\n\u2502   \u2514\u2500\u2500 cleanup.sh            # Container/volume cleanup\n\u251c\u2500\u2500 fixtures/\n\u2502   \u251c\u2500\u2500 claude-config/        # Expected Claude files\n\u2502   \u251c\u2500\u2500 codex-config/         # Expected Codex files\n\u2502   \u2514\u2500\u2500 ...\n\u2514\u2500\u2500 scenarios/\n    \u251c\u2500\u2500 test-new-volume.sh    # New container + new volume\n    \u251c\u2500\u2500 test-existing-volume.sh  # New container + existing volume\n    \u251c\u2500\u2500 test-hot-reload.sh    # Running container + import\n    \u251c\u2500\u2500 test-data-migration.sh   # Volume with modifications\n    \u251c\u2500\u2500 test-no-pollution.sh  # Verify no empty dirs created\n    \u2514\u2500\u2500 test-cai-sync.sh      # Test in-container sync\n```\n\n**CRITICAL: Test Resource Naming**\n- All test volumes MUST start with `test-` prefix\n- All test containers MUST start with `test-` prefix\n- Always specify `--container test-xxx` when creating test containers via cai commands\n- This prevents accidental clobbering of user files/containers\n\n**Example test container creation:**\n```bash\n# CORRECT - explicit test-prefixed container name\ncai shell --container test-import-new-volume --data-volume test-import-001\n\n# WRONG - no container name, might clobber user's container\ncai shell --data-volume test-import-001\n```\n\n**Cleanup Strategy:**\n- Stop containers: `docker stop $(docker ps -q --filter \"name=^test-\")`\n- Remove containers: `docker rm $(docker ps -aq --filter \"name=^test-\")`\n- Remove volumes: `docker volume rm $(docker volume ls -q --filter \"name=^test-\")`\n- Never touch non-test resources\n\n## Tasks\n\n### fn-31-gib.1: Investigate SSH keygen during import\nTrace the import code path and identify why SSH key generation is triggered during `cai import`. Fix the issue so import only syncs config files without side effects.\n\n### fn-31-gib.2: Fix missing Codex skills and symlinks\nDebug why `.codex/skills` (and potentially other directories) aren't being imported or symlinked correctly. Verify sync-manifest.toml entry and symlink generation.\n\n### fn-31-gib.3: Fix \"claude: command not found\" on fresh container\nInvestigate why Claude CLI is not available on fresh container start. Check PATH, symlinks, and containai-init.sh execution.\n\n### fn-31-gib.4: Audit sync-manifest.toml completeness\nReview each supported agent against their actual config structure. Add missing entries, fix incorrect paths/flags.\n\n### fn-31-gib.5: Prevent home directory pollution\nModify import to only sync/symlink paths that exist on host. Add optional flag `o` to sync-manifest.toml entries.\n\n### fn-31-gib.6: Add .priv. file filtering to import\nExclude `.bashrc.d/*.priv.*` files during import. Add config option `import.exclude_priv` (default: true).\n\n### fn-31-gib.7: Install cai in container image\nAdd cai CLI to Dockerfile.agents. Ensure it's sourced in .bashrc.\n\n### fn-31-gib.8: Implement cai sync command\nIn-container command to move local configs to data volume and replace with symlinks. Include safety checks to prevent running on host.\n\n### fn-31-gib.9: Create import test infrastructure\nBuild test framework with helpers, fixtures, and cleanup functions. Ensure all test containers use `test-` prefix.\n\n### fn-31-gib.10: Implement new-volume test scenario\nTest: fresh container + fresh volume + import. Use `--container test-new-volume`.\n\n### fn-31-gib.11: Implement existing-volume test scenario\nTest: new container + existing data volume. Use `--container test-existing-volume`.\n\n### fn-31-gib.12: Implement hot-reload test scenario\nTest: running container + import. Use `--container test-hot-reload`.\n\n### fn-31-gib.13: Implement no-pollution test scenario\nTest: import with partial agent configs. Verify no empty dirs created.\n\n### fn-31-gib.14: Implement cai sync test scenario\nTest: in-container cai sync. Verify files moved and symlinked correctly.\n\n### fn-31-gib.15: Integrate tests into CI\nAdd import tests to GitHub Actions workflow. Ensure tests run on PR.\n\n## Quick commands\n\n```bash\n# Build image if needed\n./src/build.sh\n\n# Run import manually for debugging\nsource src/containai.sh\ncai import --dry-run\n\n# Check sync-manifest.toml\ncat src/sync-manifest.toml | grep -A3 codex\n\n# List test resources\ndocker ps -a --filter \"name=^test-\"\ndocker volume ls --filter \"name=^test-\"\n\n# Test cai sync inside container\ncai shell --container test-sync-manual\ncai sync --dry-run\n\n# Clean up ALL test resources\ndocker stop $(docker ps -q --filter \"name=^test-\") 2>/dev/null || true\ndocker rm $(docker ps -aq --filter \"name=^test-\") 2>/dev/null || true\ndocker volume rm $(docker volume ls -q --filter \"name=^test-\") 2>/dev/null || true\n```\n\n## Acceptance\n\n- [ ] `cai import` does NOT trigger SSH keygen\n- [ ] Codex skills (`.codex/skills`) are imported and symlinked correctly\n- [ ] Fresh container has working `claude` command\n- [ ] sync-manifest.toml covers all supported agent config paths\n- [ ] Import does NOT create empty dirs for agents user doesn't have\n- [ ] `.bashrc.d/*.priv.*` files are NOT imported\n- [ ] `cai sync` works inside container\n- [ ] `cai sync` refuses to run on host (safety check)\n- [ ] cai installed in container image\n- [ ] Test suite covers all scenarios\n- [ ] All test volumes use `test-` prefix\n- [ ] All test containers use `test-` prefix\n- [ ] CI runs import tests on PR\n\n## Dependencies\n\n- **fn-36-rb7**: CLI UX consistency provides workspace state, better container naming\n- **fn-35-e0x**: Pi support establishes agent addition pattern\n- **fn-10-vep** (complete): Sysbox system container infrastructure\n- **fn-17-axl** (complete): Config Sync v2 architecture\n\n## Supersedes\n\n- **fn-12-css** import filtering tasks (`.priv.` file exclusion)\n\n## References\n\n- Import implementation: `src/lib/import.sh`\n- Sync manifest: `src/sync-manifest.toml`\n- Container init: `src/container/containai-init.sh`\n- Existing sync tests: `tests/integration/test-sync-integration.sh`\n- Symlink generation: `src/scripts/gen-dockerfile-symlinks.sh`\n"
+  },
+  "epic_id": "fn-31-gib",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:25.950164Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.1",
+        "priority": 1,
+        "spec_path": ".flow/tasks/fn-31-gib.1.md",
+        "status": "todo",
+        "title": "Investigate SSH keygen during import",
+        "updated_at": "2026-01-28T10:18:25.950180Z"
+      },
+      "id": "fn-31-gib.1",
+      "runtime": null,
+      "spec": "# fn-31-gib.1 Investigate SSH keygen during import\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:27.326983Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.10",
+        "priority": 10,
+        "spec_path": ".flow/tasks/fn-31-gib.10.md",
+        "status": "todo",
+        "title": "Integrate tests into CI",
+        "updated_at": "2026-01-28T10:18:27.326999Z"
+      },
+      "id": "fn-31-gib.10",
+      "runtime": null,
+      "spec": "# fn-31-gib.10 Integrate tests into CI\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T18:29:30.580633Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.11",
+        "priority": 5,
+        "spec_path": ".flow/tasks/fn-31-gib.11.md",
+        "status": "todo",
+        "title": "Prevent home directory pollution",
+        "updated_at": "2026-01-28T18:29:30.580646Z"
+      },
+      "id": "fn-31-gib.11",
+      "runtime": null,
+      "spec": "# fn-31-gib.11 Prevent home directory pollution\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T18:29:30.651019Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.12",
+        "priority": 6,
+        "spec_path": ".flow/tasks/fn-31-gib.12.md",
+        "status": "todo",
+        "title": "Install cai in container image",
+        "updated_at": "2026-01-28T18:29:30.651029Z"
+      },
+      "id": "fn-31-gib.12",
+      "runtime": null,
+      "spec": "# fn-31-gib.12 Install cai in container image\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T18:29:30.717893Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.13",
+        "priority": 7,
+        "spec_path": ".flow/tasks/fn-31-gib.13.md",
+        "status": "todo",
+        "title": "Implement cai sync command",
+        "updated_at": "2026-01-28T18:29:30.717903Z"
+      },
+      "id": "fn-31-gib.13",
+      "runtime": null,
+      "spec": "# fn-31-gib.13 Implement cai sync command\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T18:29:30.783710Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.14",
+        "priority": 12,
+        "spec_path": ".flow/tasks/fn-31-gib.14.md",
+        "status": "todo",
+        "title": "Implement no-pollution test scenario",
+        "updated_at": "2026-01-28T18:29:30.783720Z"
+      },
+      "id": "fn-31-gib.14",
+      "runtime": null,
+      "spec": "# fn-31-gib.14 Implement no-pollution test scenario\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T18:29:30.851851Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.15",
+        "priority": 13,
+        "spec_path": ".flow/tasks/fn-31-gib.15.md",
+        "status": "todo",
+        "title": "Implement cai sync test scenario",
+        "updated_at": "2026-01-28T18:29:30.851861Z"
+      },
+      "id": "fn-31-gib.15",
+      "runtime": null,
+      "spec": "# fn-31-gib.15 Implement cai sync test scenario\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T18:33:07.194787Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.16",
+        "priority": 6,
+        "spec_path": ".flow/tasks/fn-31-gib.16.md",
+        "status": "todo",
+        "title": "Add .priv. file filtering to import",
+        "updated_at": "2026-01-28T18:33:07.194799Z"
+      },
+      "id": "fn-31-gib.16",
+      "runtime": null,
+      "spec": "# fn-31-gib.16 Add .priv. file filtering to import\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:26.021828Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.2",
+        "priority": 2,
+        "spec_path": ".flow/tasks/fn-31-gib.2.md",
+        "status": "todo",
+        "title": "Fix missing Codex skills and symlinks",
+        "updated_at": "2026-01-28T10:18:26.021840Z"
+      },
+      "id": "fn-31-gib.2",
+      "runtime": null,
+      "spec": "# fn-31-gib.2 Fix missing Codex skills and symlinks\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:26.085697Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.3",
+        "priority": 3,
+        "spec_path": ".flow/tasks/fn-31-gib.3.md",
+        "status": "todo",
+        "title": "Fix claude command not found on fresh container",
+        "updated_at": "2026-01-28T10:18:26.085707Z"
+      },
+      "id": "fn-31-gib.3",
+      "runtime": null,
+      "spec": "# fn-31-gib.3 Fix claude command not found on fresh container\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:26.156884Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.4",
+        "priority": 4,
+        "spec_path": ".flow/tasks/fn-31-gib.4.md",
+        "status": "todo",
+        "title": "Audit sync-manifest.toml completeness",
+        "updated_at": "2026-01-28T10:18:26.156897Z"
+      },
+      "id": "fn-31-gib.4",
+      "runtime": null,
+      "spec": "# fn-31-gib.4 Audit sync-manifest.toml completeness\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:26.231173Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.5",
+        "priority": 5,
+        "spec_path": ".flow/tasks/fn-31-gib.5.md",
+        "status": "todo",
+        "title": "Create import test infrastructure",
+        "updated_at": "2026-01-28T10:18:26.231190Z"
+      },
+      "id": "fn-31-gib.5",
+      "runtime": null,
+      "spec": "# fn-31-gib.5 Create import test infrastructure\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:26.299512Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.6",
+        "priority": 6,
+        "spec_path": ".flow/tasks/fn-31-gib.6.md",
+        "status": "todo",
+        "title": "Implement new-volume test scenario",
+        "updated_at": "2026-01-28T10:18:26.299525Z"
+      },
+      "id": "fn-31-gib.6",
+      "runtime": null,
+      "spec": "# fn-31-gib.6 Implement new-volume test scenario\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:26.369374Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.7",
+        "priority": 7,
+        "spec_path": ".flow/tasks/fn-31-gib.7.md",
+        "status": "todo",
+        "title": "Implement existing-volume test scenario",
+        "updated_at": "2026-01-28T10:18:26.369386Z"
+      },
+      "id": "fn-31-gib.7",
+      "runtime": null,
+      "spec": "# fn-31-gib.7 Implement existing-volume test scenario\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:26.441135Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.8",
+        "priority": 8,
+        "spec_path": ".flow/tasks/fn-31-gib.8.md",
+        "status": "todo",
+        "title": "Implement hot-reload test scenario",
+        "updated_at": "2026-01-28T10:18:26.441148Z"
+      },
+      "id": "fn-31-gib.8",
+      "runtime": null,
+      "spec": "# fn-31-gib.8 Implement hot-reload test scenario\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:27.262126Z",
+        "depends_on": [],
+        "epic": "fn-31-gib",
+        "id": "fn-31-gib.9",
+        "priority": 9,
+        "spec_path": ".flow/tasks/fn-31-gib.9.md",
+        "status": "todo",
+        "title": "Implement data-migration test scenario",
+        "updated_at": "2026-01-28T10:18:27.262138Z"
+      },
+      "id": "fn-31-gib.9",
+      "runtime": null,
+      "spec": "# fn-31-gib.9 Implement data-migration test scenario\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

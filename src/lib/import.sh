@@ -1197,7 +1197,8 @@ _import_apply_overrides() {
             if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
                 --mount "type=bind,src=$override_dir,dst=/overrides,readonly" \
                 --mount "type=volume,src=$volume,dst=/target" \
-                eeacms/rsync rsync -a -- "/overrides/$rel_path" "/target/$target_path"; then
+                --entrypoint rsync \
+                eeacms/rsync -a -- "/overrides/$rel_path" "/target/$target_path"; then
                 _import_error "Failed to apply override: $rel_path"
                 error_count=$((error_count + 1))
                 continue
@@ -1419,7 +1420,8 @@ _containai_import() {
                 local mount_error
                 if ! mount_error=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
                     --mount "type=bind,src=$from_source,dst=/test,readonly" \
-                    eeacms/rsync true 2>&1); then
+                    --entrypoint sh \
+                    eeacms/rsync -c "true" 2>&1); then
                     # Distinguish image pull failure from mount failure
                     if [[ "$mount_error" == *"Unable to find image"* ]] || [[ "$mount_error" == *"pull access denied"* ]] || [[ "$mount_error" == *"manifest unknown"* ]]; then
                         _import_error "Failed to pull eeacms/rsync image (required for import)"
@@ -2631,7 +2633,8 @@ done <<'"'"'MAP_DATA'"'"'
         _import_step "Writing import timestamp..."
         if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
             --mount type=volume,src="$volume",dst=/target \
-            eeacms/rsync sh -c '
+            --entrypoint sh \
+            eeacms/rsync -c '
                 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                 tmp="/target/.containai-imported-at.tmp.$$"
                 if printf "%s\n" "$ts" > "$tmp" && mv "$tmp" "/target/.containai-imported-at"; then
