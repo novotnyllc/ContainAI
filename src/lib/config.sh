@@ -2163,4 +2163,217 @@ _containai_set_global_key() {
     return 0
 }
 
+# ==============================================================================
+# Nested workspace detection
+# ==============================================================================
+
+# Detect if a path is nested under an existing workspace
+# Checks both workspace config entries and containers with containai.workspace label
+#
+# Arguments: $1 = path to check (will be normalized)
+#            $2 = docker context (optional, for container label lookup)
+# Outputs: Parent workspace path if nested, empty if not
+# Returns: 0 if parent found (parent path on stdout)
+#          1 if no parent found (clean - can use this path as workspace)
+#             Also returned if dependencies unavailable (best-effort degradation)
+#          2 if error (message to stderr, e.g., missing required argument)
+#
+# Efficient implementation:
+# - Parses user config once, extracts all workspace paths
+# - Computes ancestor list once
+# - Queries docker once for all containers with containai.workspace label
+# - Checks ancestors in-memory against both sets
+#
+# Usage:
+#   if parent=$(_containai_detect_parent_workspace "/some/nested/path" "$docker_context"); then
+#       echo "Nested under workspace: $parent"
+#   else
+#       echo "Not nested - can create workspace here"
+#   fi
+_containai_detect_parent_workspace() {
+    local path="$1"
+    local docker_context="${2:-}"
+    local normalized_path script_dir user_config
+
+    # Require path argument
+    if [[ -z "$path" ]]; then
+        printf '%s\n' "[ERROR] _containai_detect_parent_workspace requires path argument" >&2
+        return 2
+    fi
+
+    # Normalize the path using platform-aware helper
+    normalized_path=$(_cai_normalize_path "$path")
+
+    # Validate normalized path is absolute
+    if [[ "$normalized_path" != /* ]]; then
+        printf '%s\n' "[ERROR] Path must be absolute: $normalized_path" >&2
+        return 2
+    fi
+
+    # Get user config path
+    user_config=$(_containai_user_config_path)
+
+    # Check if Python available (needed for efficient set operations)
+    if ! command -v python3 >/dev/null 2>&1; then
+        # Best-effort degradation: without python3, skip nesting detection
+        # This returns 1 (not nested) rather than 2 (error) to allow workspace creation
+        # in degraded environments. The detection is advisory, not mandatory.
+        # Note: python3 is available in all supported environments (macOS, Linux, WSL)
+        return 1
+    fi
+
+    # Get script directory for parse-toml.py
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        # Can't find parse-toml.py - fall back to no detection
+        return 1
+    fi
+
+    # Build ancestor list (from path to root, excluding path itself)
+    # Special case: if path is "/", it has no ancestors (can't be nested under itself)
+    local -a ancestors=()
+    if [[ "$normalized_path" == "/" ]]; then
+        # Root path cannot be nested under anything
+        return 1
+    fi
+
+    local current_dir
+    current_dir=$(dirname "$normalized_path")
+    while [[ "$current_dir" != "/" ]]; do
+        ancestors+=("$current_dir")
+        current_dir=$(dirname "$current_dir")
+    done
+    # Also check root in case someone has a workspace there (unlikely but complete)
+    ancestors+=("/")
+
+    # Early return if no ancestors to check (this shouldn't happen after the / special case)
+    if [[ ${#ancestors[@]} -eq 0 ]]; then
+        return 1
+    fi
+
+    # === Source 1: Workspace config entries ===
+    # Parse user config once and extract all workspace paths as a set
+    local config_workspace_set=""
+    if [[ -f "$user_config" ]]; then
+        config_workspace_set=$(python3 "$script_dir/parse-toml.py" --file "$user_config" --json 2>/dev/null | python3 -c "
+import json
+import sys
+
+try:
+    config = json.load(sys.stdin)
+    workspaces = config.get('workspace', {})
+    if isinstance(workspaces, dict):
+        for path in workspaces.keys():
+            if isinstance(path, str) and path.startswith('/'):
+                print(path)
+except:
+    pass
+" 2>/dev/null) || config_workspace_set=""
+    fi
+
+    # === Source 2: Container labels ===
+    # Query docker ONCE for all containers with containai.workspace label
+    local container_workspace_set=""
+    local -a docker_cmd=(docker)
+    [[ -n "$docker_context" ]] && docker_cmd=(docker --context "$docker_context")
+
+    # Get all workspace paths from container labels in a single docker call
+    # Use {{index .Labels "key"}} format for consistency with ssh.sh patterns
+    # Filter out empty and <no value> results
+    local docker_label_output=""
+    if docker_label_output=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" ps -a \
+        --filter "label=containai.workspace" \
+        --format '{{index .Labels "containai.workspace"}}' 2>/dev/null); then
+        # Filter out <no value> and empty lines
+        container_workspace_set=$(printf '%s\n' "$docker_label_output" | grep -v '^<no value>$' | grep -v '^$') || container_workspace_set=""
+    else
+        container_workspace_set=""
+    fi
+
+    # === Check ancestors against both sets ===
+    # Use Python for efficient set membership (O(1) lookup vs O(n) grep)
+    local parent_workspace
+    parent_workspace=$(python3 -c "
+import sys
+
+# Read ancestors from argv (newline-separated)
+ancestors_str = sys.argv[1]
+config_workspaces_str = sys.argv[2]
+container_workspaces_str = sys.argv[3]
+
+ancestors = [a.strip() for a in ancestors_str.split('\n') if a.strip()]
+config_set = set(a.strip() for a in config_workspaces_str.split('\n') if a.strip())
+container_set = set(a.strip() for a in container_workspaces_str.split('\n') if a.strip())
+
+# Combined set of all known workspaces
+all_workspaces = config_set | container_set
+
+# Find nearest ancestor that is a workspace (ancestors are already ordered from nearest to farthest)
+for ancestor in ancestors:
+    if ancestor in all_workspaces:
+        print(ancestor, end='')
+        break
+" "$(printf '%s\n' "${ancestors[@]}")" "$config_workspace_set" "$container_workspace_set" 2>/dev/null)
+
+    if [[ -n "$parent_workspace" ]]; then
+        printf '%s' "$parent_workspace"
+        return 0
+    fi
+
+    return 1
+}
+
+# Resolve workspace with nested detection
+# Returns the effective workspace (parent if nested, or original if not)
+#
+# Arguments: $1 = requested workspace path (will be normalized)
+#            $2 = docker context (optional)
+#            $3 = "strict" if explicit --workspace was provided (errors on nesting)
+# Outputs: Effective workspace path
+# Returns: 0 on success (workspace path on stdout)
+#          1 on error (message to stderr)
+#
+# Behavior:
+# - If no parent workspace: returns normalized requested path
+# - If parent workspace found and NOT strict: returns parent with INFO log
+# - If parent workspace found and strict: ERROR (explicit --workspace to nested path)
+_containai_resolve_workspace_with_nesting() {
+    local requested_path="$1"
+    local docker_context="${2:-}"
+    local strict="${3:-}"
+    local normalized_path parent_workspace detect_rc
+
+    # Normalize the requested path
+    normalized_path=$(_cai_normalize_path "$requested_path")
+
+    # Check for parent workspace
+    # Capture exit code immediately (before if consumes it)
+    parent_workspace=$(_containai_detect_parent_workspace "$normalized_path" "$docker_context")
+    detect_rc=$?
+
+    if [[ $detect_rc -eq 0 ]]; then
+        # Found parent workspace
+        if [[ "$strict" == "strict" ]]; then
+            # Explicit --workspace to nested path is an error
+            printf '%s\n' "[ERROR] Cannot use $normalized_path as workspace." >&2
+            printf '%s\n' "        An existing workspace is registered at parent path $parent_workspace." >&2
+            printf '%s\n' "        Use --workspace $parent_workspace or remove the existing workspace first." >&2
+            return 1
+        else
+            # Implicit workspace (from cwd) - use parent with info message
+            printf '%s\n' "[INFO] Using existing workspace at $parent_workspace (parent of $normalized_path)" >&2
+            printf '%s' "$parent_workspace"
+            return 0
+        fi
+    fi
+
+    if [[ $detect_rc -eq 2 ]]; then
+        # Error condition (message already printed)
+        return 1
+    fi
+
+    # No parent found - use requested path
+    printf '%s' "$normalized_path"
+    return 0
+}
+
 return 0

@@ -997,27 +997,37 @@ _containai_import_cmd() {
         fi
     else
         # Standard mode: resolve from workspace path
-        local workspace_input
+        local workspace_input strict_mode
         workspace_input="${workspace:-$PWD}"
-        resolved_workspace=$(_cai_normalize_path "$workspace_input")
-        # Check if path exists (normalize_path returns as-is for non-existent paths)
-        if [[ ! -d "$resolved_workspace" ]]; then
+
+        # First normalize to check if path exists
+        local normalized_input
+        normalized_input=$(_cai_normalize_path "$workspace_input")
+        if [[ ! -d "$normalized_input" ]]; then
             echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
             return 1
         fi
 
-        # === CONTEXT SELECTION (mirrors cai run in lib/container.sh) ===
+        # Determine if explicit --workspace was provided (strict mode for nesting check)
+        if [[ -n "$workspace" ]]; then
+            strict_mode="strict"
+        else
+            strict_mode=""
+        fi
+
+        # === CONTEXT SELECTION (before nesting check - need context for docker label lookup) ===
         # Resolve secure engine context from config (for context override)
+        # Use normalized_input for initial config resolution
         local config_context_override=""
         if [[ -n "$explicit_config" ]]; then
             # Explicit config: strict mode - fail on parse errors
-            if ! config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "$explicit_config"); then
+            if ! config_context_override=$(_containai_resolve_secure_engine_context "$normalized_input" "$explicit_config"); then
                 echo "[ERROR] Failed to parse config: $explicit_config" >&2
                 return 1
             fi
         else
             # Discovered config: suppress errors gracefully
-            config_context_override=$(_containai_resolve_secure_engine_context "$resolved_workspace" "" 2>/dev/null) || config_context_override=""
+            config_context_override=$(_containai_resolve_secure_engine_context "$normalized_input" "" 2>/dev/null) || config_context_override=""
         fi
 
         # Auto-select Docker context based on Sysbox availability
@@ -1029,7 +1039,16 @@ _containai_import_cmd() {
             return 1
         fi
 
-        # Resolve volume
+        # === NESTED WORKSPACE DETECTION ===
+        # Check if this path is nested under an existing workspace (config or container label)
+        # If explicit --workspace provided with nested path, error
+        # If implicit (cwd), use parent workspace with INFO message
+        if ! resolved_workspace=$(_containai_resolve_workspace_with_nesting "$normalized_input" "$selected_context" "$strict_mode"); then
+            # Error already printed by _containai_resolve_workspace_with_nesting
+            return 1
+        fi
+
+        # Resolve volume (using resolved_workspace which may be parent)
         if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
             echo "[ERROR] Failed to resolve data volume" >&2
             return 1
@@ -2982,44 +3001,25 @@ _containai_shell_cmd() {
     else
         # === STANDARD MODE: Resolve from workspace ===
         # Resolve workspace using platform-aware normalization
-        local workspace_input
+        local workspace_input strict_mode
         workspace_input="${workspace:-$PWD}"
-        resolved_workspace=$(_cai_normalize_path "$workspace_input")
-        # Check if path exists (normalize_path returns as-is for non-existent paths)
-        if [[ ! -d "$resolved_workspace" ]]; then
+
+        # First normalize to check if path exists
+        local normalized_input
+        normalized_input=$(_cai_normalize_path "$workspace_input")
+        if [[ ! -d "$normalized_input" ]]; then
             echo "[ERROR] Workspace path does not exist: $workspace_input" >&2
             return 1
         fi
 
-        # Handle --reset flag: generate new volume name (but don't persist yet)
-        # State persistence is deferred until after config validation succeeds
-        # This ensures we don't mutate state if config parsing fails
-        local reset_pending=false
-        if [[ "$reset_flag" == "true" ]]; then
-            if [[ "$quiet_flag" != "true" ]]; then
-                echo "[INFO] Resetting workspace state..."
-            fi
-
-            # Generate NEW unique volume name (never falls back to default)
-            if ! resolved_volume=$(_containai_generate_volume_name "$resolved_workspace"); then
-                echo "[ERROR] Failed to generate new volume name" >&2
-                return 1
-            fi
-
-            # Mark that we need to persist state after config validation
-            # Skip if dry-run (dry-run should never mutate state)
-            if [[ "$dry_run_flag" != "true" ]]; then
-                reset_pending=true
-            fi
+        # Determine if explicit --workspace was provided (strict mode for nesting check)
+        if [[ -n "$workspace" ]]; then
+            strict_mode="strict"
         else
-            # Resolve volume normally (needed for container creation if --fresh)
-            if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
-                echo "[ERROR] Failed to resolve data volume" >&2
-                return 1
-            fi
+            strict_mode=""
         fi
 
-        # === CONFIG PARSING (for context selection) ===
+        # === CONFIG PARSING (early - need context for docker label lookup in nesting check) ===
         local config_file=""
         if [[ -n "$explicit_config" ]]; then
             if [[ ! -f "$explicit_config" ]]; then
@@ -3027,20 +3027,20 @@ _containai_shell_cmd() {
                 return 1
             fi
             config_file="$explicit_config"
-            if ! _containai_parse_config "$config_file" "$resolved_workspace" "strict"; then
+            if ! _containai_parse_config "$config_file" "$normalized_input" "strict"; then
                 echo "[ERROR] Failed to parse config: $explicit_config" >&2
                 return 1
             fi
         else
             # Discovered config: suppress errors gracefully
-            config_file=$(_containai_find_config "$resolved_workspace")
+            config_file=$(_containai_find_config "$normalized_input")
             if [[ -n "$config_file" ]]; then
-                _containai_parse_config "$config_file" "$resolved_workspace" 2>/dev/null || true
+                _containai_parse_config "$config_file" "$normalized_input" 2>/dev/null || true
             fi
         fi
         local config_context_override="${_CAI_SECURE_ENGINE_CONTEXT:-}"
 
-        # Auto-select Docker context based on isolation availability
+        # Auto-select Docker context (needed for nesting check docker label lookup)
         local debug_mode=""
         if [[ "$debug_flag" == "true" ]]; then
             debug_mode="debug"
@@ -3065,6 +3065,44 @@ _containai_shell_cmd() {
                 return 1
             fi
         fi
+
+        # === NESTED WORKSPACE DETECTION ===
+        # Check if this path is nested under an existing workspace (config or container label)
+        # If explicit --workspace provided with nested path, error
+        # If implicit (cwd), use parent workspace with INFO message
+        if ! resolved_workspace=$(_containai_resolve_workspace_with_nesting "$normalized_input" "$selected_context" "$strict_mode"); then
+            # Error already printed by _containai_resolve_workspace_with_nesting
+            return 1
+        fi
+
+        # Handle --reset flag: generate new volume name (but don't persist yet)
+        # State persistence is deferred until after validation succeeds
+        # This ensures we don't mutate state if validation fails
+        local reset_pending=false
+        if [[ "$reset_flag" == "true" ]]; then
+            if [[ "$quiet_flag" != "true" ]]; then
+                echo "[INFO] Resetting workspace state..."
+            fi
+
+            # Generate NEW unique volume name (never falls back to default)
+            if ! resolved_volume=$(_containai_generate_volume_name "$resolved_workspace"); then
+                echo "[ERROR] Failed to generate new volume name" >&2
+                return 1
+            fi
+
+            # Mark that we need to persist state after validation
+            # Skip if dry-run (dry-run should never mutate state)
+            if [[ "$dry_run_flag" != "true" ]]; then
+                reset_pending=true
+            fi
+        else
+            # Resolve volume normally (needed for container creation if --fresh)
+            if ! resolved_volume=$(_containai_resolve_volume "$cli_volume" "$resolved_workspace" "$explicit_config"); then
+                echo "[ERROR] Failed to resolve data volume" >&2
+                return 1
+            fi
+        fi
+        # Note: config_file and selected_context were already set above during nested workspace detection
 
         # Now that config validation and context selection succeeded, persist --reset state
         # This is deferred from above to avoid mutating state if validation fails

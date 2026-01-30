@@ -268,3 +268,6 @@ In zsh _arguments -C state machines, use $line[1] not $words[1] for subcommand d
 
 ## 2026-01-30 manual [pitfall]
 Docker inspect in multi-context setups must use DOCKER_CONTEXT= DOCKER_HOST= docker --context $ctx to avoid reading containers from wrong context
+
+## 2026-01-30 manual [pitfall]
+Bash if-statement consumes exit code: capture $? immediately after command, not after 'if cmd; then ... fi' block
