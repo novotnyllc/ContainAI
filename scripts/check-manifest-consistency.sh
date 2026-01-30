@@ -37,16 +37,6 @@ if [[ ! -x "$PARSE_SCRIPT" ]]; then
     exit 2
 fi
 
-# Helper to normalize a path for comparison
-# Strips /source/ and /target/ prefixes that import.sh uses internally
-normalize_path() {
-    local path="$1"
-    path="${path#/source/}"
-    path="${path#/target/}"
-    # Strip leading dot if present (manifest uses .claude, import uses .claude)
-    printf '%s' "$path"
-}
-
 # Helper to extract flags (strip irrelevant flags for comparison)
 # import.sh uses different flag conventions in some cases
 normalize_flags() {
@@ -83,20 +73,21 @@ done < <("$PARSE_SCRIPT" "$MANIFEST_FILE")
 declare -A import_map_entries
 in_sync_map=0
 while IFS= read -r line; do
+    # Strip leading whitespace for all checks
+    line="${line#"${line%%[![:space:]]*}"}"
+
     # Detect start of _IMPORT_SYNC_MAP array
     if [[ "$line" =~ _IMPORT_SYNC_MAP=\( ]]; then
         in_sync_map=1
         continue
     fi
-    # Detect end of array
+    # Detect end of array (closing paren, possibly with trailing content)
     if [[ $in_sync_map -eq 1 && "$line" =~ ^\) ]]; then
         in_sync_map=0
         continue
     fi
     # Parse entry lines
     if [[ $in_sync_map -eq 1 ]]; then
-        # Strip leading whitespace and quotes
-        line="${line#"${line%%[![:space:]]*}"}"
         # Skip comments and empty lines
         [[ -z "$line" || "$line" == \#* ]] && continue
         # Extract quoted entry with full format: "/source/...:target:flags"

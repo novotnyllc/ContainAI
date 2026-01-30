@@ -53,7 +53,8 @@ while IFS='|' read -r source target container_link flags disabled entry_type; do
 
     link_json="    {\"link\": \"${container_path_escaped}\", \"target\": \"${volume_path_escaped}\", \"remove_first\": ${needs_rm}}"
     links+=("$link_json")
-done < <("$PARSE_SCRIPT" "$MANIFEST_FILE")
+# Include disabled entries - they document optional paths that may be imported via additional_paths
+done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
 
 # Write output
 {

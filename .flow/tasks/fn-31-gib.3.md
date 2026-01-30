@@ -16,9 +16,8 @@ Investigate PATH availability via `cai shell` SSH session pathway. The Dockerfil
 - [ ] Test case: `cai shell` then `claude --version` succeeds
 
 ## Done summary
-TBD
-
+Fixed "claude: command not found" in SSH sessions by adding PATH configuration to /etc/profile.d/containai-agent-path.sh. This ensures ~/.local/bin and ~/.bun/bin are on PATH for login shells regardless of user shell config. Added comprehensive troubleshooting documentation explaining cai shell connection pathway (SSH -> login shell -> /etc/profile sourcing).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: a9b08426fc4c3866e5f86f83f4ad6e6e7d70d49d, e8986e756cbaa0084ae7a0af0f7ef6bc90f1a0d9, 924ec43ca9e200c0df9c4a009c6c5500a7249525
+- Tests: shellcheck (pre-commit), codex impl-review SHIP
 - PRs:

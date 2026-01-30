@@ -23,6 +23,10 @@
 #   R = remove existing path first (rm -rf before ln -sfn)
 #   G = glob/dynamic pattern (not synced directly; discovered at runtime by import.sh)
 #
+# Optional fields:
+#   disabled = true  # Entry excluded from _IMPORT_SYNC_MAP (not synced by default)
+#                    # but still generates symlinks/init (for use with additional_paths)
+#
 # Fields:
 #   source = path relative to $HOME (includes leading dot, e.g., ".claude.json")
 #   target = path relative to /mnt/agent-data (volume)

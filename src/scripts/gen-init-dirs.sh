@@ -82,7 +82,8 @@ while IFS='|' read -r source target container_link flags disabled entry_type; do
             fi
         fi
     fi
-done < <("$PARSE_SCRIPT" "$MANIFEST_FILE")
+# Include disabled entries - they document optional paths that may be imported via additional_paths
+done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
 
 # Also process container_symlinks section for volume-only entries
 while IFS='|' read -r source target container_link flags disabled entry_type; do
@@ -103,7 +104,8 @@ while IFS='|' read -r source target container_link flags disabled entry_type; do
             file_cmds+=("ensure_file \"$volume_path\"")
         fi
     fi
-done < <("$PARSE_SCRIPT" "$MANIFEST_FILE")
+# Include disabled entries - they document optional paths that may be imported via additional_paths
+done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
 
 # Write output
 {

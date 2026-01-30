@@ -16,6 +16,8 @@
     {"link": "/home/agent/.config/gh/hosts.yml", "target": "/mnt/agent-data/config/gh/hosts.yml", "remove_first": 0},
     {"link": "/home/agent/.config/gh/config.yml", "target": "/mnt/agent-data/config/gh/config.yml", "remove_first": 0},
     {"link": "/home/agent/.gitignore_global", "target": "/mnt/agent-data/git/gitignore_global", "remove_first": 0},
+    {"link": "/home/agent/.ssh/config", "target": "/mnt/agent-data/ssh/config", "remove_first": 0},
+    {"link": "/home/agent/.ssh/known_hosts", "target": "/mnt/agent-data/ssh/known_hosts", "remove_first": 0},
     {"link": "/home/agent/.config/opencode/opencode.json", "target": "/mnt/agent-data/config/opencode/opencode.json", "remove_first": 0},
     {"link": "/home/agent/.config/opencode/agents", "target": "/mnt/agent-data/config/opencode/agents", "remove_first": 0},
     {"link": "/home/agent/.config/opencode/commands", "target": "/mnt/agent-data/config/opencode/commands", "remove_first": 0},

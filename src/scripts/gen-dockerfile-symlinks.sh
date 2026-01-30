@@ -65,7 +65,8 @@ while IFS='|' read -r source target container_link flags disabled entry_type; do
     # Build symlink commands as structured entries (source|target|needs_rm)
     # R flag means "remove existing path first" for any entry type (file or directory)
     symlink_cmds+=("${volume_path}|${container_path}|${needs_rm}")
-done < <("$PARSE_SCRIPT" "$MANIFEST_FILE")
+# Include disabled entries - they document optional paths that may be imported via additional_paths
+done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
 
 # Deduplicate mkdir targets
 declare -A seen_dirs=()
