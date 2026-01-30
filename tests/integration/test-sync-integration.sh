@@ -18,6 +18,38 @@
 # 40-45. --from source tests (directory sync, tgz restore, roundtrip, idempotency, errors)
 # 46-51. Symlink relinking tests (internal, relative, external, broken, circular, pitfall)
 # 52-58. Import overrides tests (basic, replace, nested, symlinks, traversal, dry-run, missing)
+#
+# ==============================================================================
+# Import Test Infrastructure
+# ==============================================================================
+# Test resource helpers for import scenario testing. All test resources are
+# identified by BOTH a name prefix ("test-") AND a Docker label for safe cleanup.
+#
+# Helper Functions:
+#   create_test_container NAME [DOCKER_ARGS...]
+#     - Creates a container with name "test-<NAME>" and label containai.test=1
+#     - Passes additional args to docker create
+#     - Returns container ID on stdout
+#
+#   create_test_volume NAME
+#     - Creates a volume with name "test-<NAME>" and label containai.test=1
+#     - Returns volume name on stdout
+#
+#   cleanup_test_resources
+#     - Removes all containers and volumes with containai.test=1 label
+#     - Falls back to test- prefix match for unlabeled resources
+#     - Safe for parallel test runs (only removes labeled resources)
+#
+#   create_claude_fixture DIR
+#     - Populates DIR with standard Claude config files for testing
+#     - Creates: .claude.json, .claude/.credentials.json, .claude/settings.json
+#     - Creates: .claude/plugins/cache/test-plugin/plugin.json
+#
+# Resource Naming Convention:
+#   - All test volumes: "test-<purpose>-<run_id>" + containai.test=1 label
+#   - All test containers: "test-<purpose>-<run_id>" + containai.test=1 label
+#   - The test- prefix provides a human safety net
+#   - The label enables programmatic cleanup
 # ==============================================================================
 
 set -euo pipefail
@@ -119,9 +151,124 @@ cleanup_test_volumes() {
     fi
 }
 
-# Combined cleanup: volumes AND fixture directory
+# ==============================================================================
+# Import Test Infrastructure
+# ==============================================================================
+# Label used to identify test resources for safe cleanup
+TEST_RESOURCE_LABEL="containai.test=1"
+
+# Track test containers created by THIS run (in addition to volumes)
+declare -a TEST_CONTAINERS_CREATED=()
+
+# Create a test container with label and name prefix
+# Usage: create_test_container NAME [DOCKER_ARGS...]
+# Example: create_test_container "import-new" --volume "$vol:/mnt/agent-data" "$IMAGE_NAME"
+# Returns: container ID on stdout
+create_test_container() {
+    local name="$1"
+    shift
+    local full_name="test-${name}-${TEST_RUN_ID}"
+    local container_id
+
+    # Validate name starts with expected prefix (safety check)
+    if [[ ! "$full_name" == test-* ]]; then
+        echo "[ERROR] Container name must start with 'test-'" >&2
+        return 1
+    fi
+
+    # Create container with label
+    container_id=$("${DOCKER_CMD[@]}" create \
+        --label "$TEST_RESOURCE_LABEL" \
+        --name "$full_name" \
+        "$@") || return 1
+
+    TEST_CONTAINERS_CREATED+=("$full_name")
+    echo "$container_id"
+}
+
+# Create a test volume with label and name prefix
+# Usage: create_test_volume NAME
+# Example: vol=$(create_test_volume "import-data")
+# Returns: volume name on stdout
+create_test_volume() {
+    local name="$1"
+    local full_name="test-${name}-${TEST_RUN_ID}"
+
+    # Validate name starts with expected prefix (safety check)
+    if [[ ! "$full_name" == test-* ]]; then
+        echo "[ERROR] Volume name must start with 'test-'" >&2
+        return 1
+    fi
+
+    # Create volume with label
+    "${DOCKER_CMD[@]}" volume create \
+        --label "$TEST_RESOURCE_LABEL" \
+        "$full_name" >/dev/null || return 1
+
+    TEST_VOLUMES_CREATED+=("$full_name")
+    echo "$full_name"
+}
+
+# Cleanup all test resources (containers and volumes)
+# First pass: remove by label (safe, explicit)
+# Second pass: remove by test- prefix as fallback (catches unlabeled resources)
+cleanup_test_resources() {
+    local container vol
+
+    # Stop and remove containers by label first
+    local labeled_containers
+    labeled_containers=$("${DOCKER_CMD[@]}" ps -aq --filter "label=$TEST_RESOURCE_LABEL" 2>/dev/null || true)
+    if [[ -n "$labeled_containers" ]]; then
+        echo "$labeled_containers" | xargs "${DOCKER_CMD[@]}" stop 2>/dev/null || true
+        echo "$labeled_containers" | xargs "${DOCKER_CMD[@]}" rm 2>/dev/null || true
+    fi
+
+    # Stop and remove registered containers (fallback for unlabeled)
+    for container in "${TEST_CONTAINERS_CREATED[@]}"; do
+        "${DOCKER_CMD[@]}" stop -- "$container" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$container" 2>/dev/null || true
+    done
+
+    # Remove volumes by label first
+    local labeled_volumes
+    labeled_volumes=$("${DOCKER_CMD[@]}" volume ls -q --filter "label=$TEST_RESOURCE_LABEL" 2>/dev/null || true)
+    if [[ -n "$labeled_volumes" ]]; then
+        echo "$labeled_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
+    fi
+
+    # Remove registered volumes (fallback for unlabeled)
+    for vol in "${TEST_VOLUMES_CREATED[@]}"; do
+        "${DOCKER_CMD[@]}" volume rm "$vol" 2>/dev/null || true
+    done
+
+    # Final fallback: catch any volumes containing this run's ID that weren't registered
+    local run_volumes
+    run_volumes=$("${DOCKER_CMD[@]}" volume ls --filter "name=${TEST_RUN_ID}" -q 2>/dev/null || true)
+    if [[ -n "$run_volumes" ]]; then
+        echo "$run_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
+    fi
+}
+
+# Create standard Claude config fixture in a directory
+# Usage: create_claude_fixture DIR
+# Creates .claude.json, .claude/.credentials.json, .claude/settings.json
+# Creates .claude/plugins/cache/test-plugin/plugin.json
+create_claude_fixture() {
+    local fixture="$1"
+
+    # Create directory structure
+    mkdir -p "$fixture/.claude/plugins/cache/test-plugin"
+
+    # Claude Code files
+    echo '{"test": true}' >"$fixture/.claude.json"
+    echo '{"credentials": "test"}' >"$fixture/.claude/.credentials.json"
+    echo '{"settings": "test"}' >"$fixture/.claude/settings.json"
+    echo '{}' >"$fixture/.claude/plugins/cache/test-plugin/plugin.json"
+}
+
+# Combined cleanup: resources AND fixture directory
 cleanup_all() {
-    cleanup_test_volumes
+    cleanup_test_resources
     cleanup_fixture
 }
 trap cleanup_all EXIT
