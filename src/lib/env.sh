@@ -74,6 +74,13 @@ _env_warn() {
         printf '%s\n' "[WARN] $*" >&2
     fi
 }
+_env_dryrun() {
+    if declare -f _cai_dryrun >/dev/null 2>&1; then
+        _cai_dryrun "$@"
+    else
+        printf '%s\n' "[DRY-RUN] $*" >&2
+    fi
+}
 _env_step() {
     if declare -f _cai_step >/dev/null 2>&1; then
         _cai_step "$@"
@@ -490,10 +497,10 @@ if ef is not None:
 
     # Handle dry-run mode
     if [[ "$dry_run" == "true" ]]; then
-        _env_info "Docker context: ${ctx:-default}"
-        _env_info "[dry-run] Would import $imported_count env vars: $imported_keys"
+        _env_dryrun "Docker context: ${ctx:-default}"
+        _env_dryrun "Would import $imported_count env vars: $imported_keys"
         if [[ $skipped_count -gt 0 ]]; then
-            _env_info "[dry-run] Would skip $skipped_count vars (not found): $skipped_keys"
+            _env_dryrun "Would skip $skipped_count vars (not found): $skipped_keys"
         fi
         return 0
     fi
