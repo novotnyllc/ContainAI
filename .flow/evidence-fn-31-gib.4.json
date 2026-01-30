@@ -1,0 +1,13 @@
+{
+  "commits": [
+    "2a8c87b feat(import): add sync-manifest consistency check with CI enforcement",
+    "c801b21 fix(import): address review feedback for manifest consistency check"
+  ],
+  "tests": [
+    "scripts/check-manifest-consistency.sh (pass - 62 entries verified)"
+  ],
+  "verification": [
+    "CI lint job runs check on PR (.github/workflows/docker.yml)",
+    "AGENTS.md documents sync-manifest.toml as authoritative source"
+  ]
+}
