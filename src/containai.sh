@@ -4560,7 +4560,42 @@ _cai_completions() {
             COMPREPLY=($(compgen -W "$validate_flags" -- "$cur"))
             ;;
         docker)
-            COMPREPLY=($(compgen -W "$docker_flags" -- "$cur"))
+            # Delegate to docker completion with containai-docker context
+            # Build docker command line from words after 'docker'
+            local docker_context="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
+            local docker_words=()
+            local found_docker=""
+            for ((i=0; i < ${#words[@]}; i++)); do
+                if [[ "$found_docker" == "true" ]]; then
+                    docker_words+=("${words[i]}")
+                elif [[ "${words[i]}" == "docker" ]]; then
+                    found_docker="true"
+                fi
+            done
+
+            # Check if docker completion is available (Cobra-style __completeNoDesc)
+            # Use __completeNoDesc to get plain completion words without tab-separated descriptions
+            # Set context via DOCKER_CONTEXT env var for Cobra compatibility
+            if command -v docker &>/dev/null; then
+                local docker_out
+                # Use timeout to avoid hanging if containai-docker context is slow/unreachable
+                docker_out=$(_cai_completion_timeout 0.5 docker __completeNoDesc "${docker_words[@]}" 2>/dev/null) || docker_out=""
+                if [[ -n "$docker_out" ]]; then
+                    # Docker __completeNoDesc outputs completions one per line, with directive as last line
+                    # Filter out the directive line (starts with :) and empty lines
+                    local completions
+                    completions=$(printf '%s\n' "$docker_out" | grep -v '^:' | grep -v '^$')
+                    # Only return if we have actual completions, otherwise fall through to fallback
+                    if [[ -n "$completions" ]]; then
+                        COMPREPLY=($(compgen -W "$completions" -- "$cur"))
+                        return
+                    fi
+                fi
+            fi
+
+            # Fallback: basic docker subcommands
+            local docker_subcommands="attach build commit container cp create diff events exec export history image images import info inspect kill load login logout logs network node pause plugin port ps pull push rename restart rm rmi run save search secret service stack start stats stop swarm system tag top unpause update version volume wait"
+            COMPREPLY=($(compgen -W "$docker_subcommands" -- "$cur"))
             ;;
         import)
             COMPREPLY=($(compgen -W "$import_flags" -- "$cur"))
@@ -4832,6 +4867,83 @@ _cai() {
                         '--config[Config file path]:file:_files' \
                         '--workspace[Workspace path]:directory:_files -/' \
                         '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
+                docker)
+                    # Delegate to docker completion with containai-docker context
+                    # Use __completeNoDesc to get plain completion words without tab-separated descriptions
+                    # Set context via DOCKER_CONTEXT env var for Cobra compatibility
+                    local docker_context="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
+
+                    # Build words array for docker (everything after 'docker')
+                    local -a docker_words
+                    docker_words=("${words[@]:2}")
+
+                    # Try docker __completeNoDesc for Cobra-style completion
+                    # Use timeout to avoid hanging if containai-docker context is slow/unreachable
+                    if (( $+commands[docker] )); then
+                        local docker_out
+                        docker_out=$(_cai_completion_timeout 0.5 docker __completeNoDesc "${docker_words[@]}" 2>/dev/null)
+                        if [[ -n "$docker_out" ]]; then
+                            # Docker __completeNoDesc outputs completions one per line, with directive as last line
+                            # Filter out directive line (starts with :) and empty lines
+                            local -a completions
+                            completions=("${(@f)$(printf '%s\n' "$docker_out" | grep -v '^:' | grep -v '^$')}")
+                            if (( ${#completions[@]} > 0 )); then
+                                compadd -a completions
+                                return
+                            fi
+                        fi
+                    fi
+
+                    # Fallback: basic docker subcommands
+                    local -a docker_subcommands
+                    docker_subcommands=(
+                        'attach:Attach to a running container'
+                        'build:Build an image from a Dockerfile'
+                        'commit:Create a new image from container changes'
+                        'container:Manage containers'
+                        'cp:Copy files between container and host'
+                        'create:Create a new container'
+                        'diff:Inspect changes to files or directories'
+                        'events:Get real time events from the server'
+                        'exec:Run a command in a running container'
+                        'export:Export container filesystem as tar'
+                        'history:Show the history of an image'
+                        'image:Manage images'
+                        'images:List images'
+                        'import:Import contents from a tarball'
+                        'info:Display system-wide information'
+                        'inspect:Return low-level information'
+                        'kill:Kill running containers'
+                        'load:Load an image from a tar archive'
+                        'login:Log in to a registry'
+                        'logout:Log out from a registry'
+                        'logs:Fetch container logs'
+                        'network:Manage networks'
+                        'pause:Pause all processes in containers'
+                        'port:List port mappings'
+                        'ps:List containers'
+                        'pull:Pull an image from a registry'
+                        'push:Push an image to a registry'
+                        'rename:Rename a container'
+                        'restart:Restart containers'
+                        'rm:Remove containers'
+                        'rmi:Remove images'
+                        'run:Run a command in a new container'
+                        'save:Save images to a tar archive'
+                        'search:Search Docker Hub for images'
+                        'start:Start stopped containers'
+                        'stats:Display container resource usage'
+                        'stop:Stop running containers'
+                        'tag:Create a tag for an image'
+                        'top:Display running processes'
+                        'unpause:Unpause paused containers'
+                        'update:Update container configuration'
+                        'version:Show Docker version info'
+                        'volume:Manage volumes'
+                        'wait:Wait for container to stop'
+                    )
+                    _describe -t docker-commands 'docker command' docker_subcommands
                     ;;
                 import)
                     _arguments \
