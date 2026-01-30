@@ -15,9 +15,8 @@ Create minimal repro for Codex skills not appearing, then fix the specific failu
 - [ ] Test case: Skills in `~/.codex/skills/` are accessible and functional
 
 ## Done summary
-TBD
-
+Fixed missing Codex skills directory by ensuring import creates target directories for all directory entries (d flag) even when source doesn't exist on host. Added tests for /data/codex/skills and /data/claude/skills.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 598d3e5e68bd996749856a951ae31b510d3445be
+- Tests: shellcheck -x src/lib/import.sh, shellcheck -x tests/integration/test-sync-integration.sh
 - PRs:

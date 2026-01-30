@@ -476,10 +476,10 @@ test_full_sync() {
     fi
     pass "Full sync completed successfully"
 
-    # Verify key directories exist
+    # Verify key directories exist on the volume
     # Note: /data/codex/skills and /data/claude/skills are created even when
     # the host doesn't have ~/.codex/skills or ~/.claude/skills directories.
-    # This ensures container symlinks work regardless of host config.
+    # This ensures volume targets exist for container symlinks to work.
     local dirs_to_check=(
         "/data/claude"
         "/data/claude/plugins"
@@ -620,6 +620,54 @@ test_plugins_in_container() {
     else
         fail "Claude plugins symlink incorrect"
     fi
+
+    # Check skills symlinks point to correct locations (fn-31-gib.2 acceptance criteria)
+    # These symlinks must work even when host doesn't have ~/.codex/skills or ~/.claude/skills
+    local skills_symlink_test
+    skills_symlink_test=$(run_in_image_no_entrypoint '
+        claude_ok=0
+        codex_ok=0
+        if [ -L ~/.claude/skills ] && [ "$(readlink ~/.claude/skills)" = "/mnt/agent-data/claude/skills" ]; then
+            claude_ok=1
+        fi
+        if [ -L ~/.codex/skills ] && [ "$(readlink ~/.codex/skills)" = "/mnt/agent-data/codex/skills" ]; then
+            codex_ok=1
+        fi
+        if [ "$claude_ok" = "1" ] && [ "$codex_ok" = "1" ]; then
+            echo "ok"
+        elif [ "$claude_ok" = "0" ] && [ "$codex_ok" = "0" ]; then
+            echo "both_fail"
+        elif [ "$claude_ok" = "0" ]; then
+            echo "claude_fail"
+        else
+            echo "codex_fail"
+        fi
+    ')
+
+    case "$skills_symlink_test" in
+        ok)
+            pass "Claude skills symlink points to volume"
+            pass "Codex skills symlink points to volume"
+            ;;
+        docker_error)
+            fail "Docker container failed to start for skills symlink check"
+            ;;
+        both_fail)
+            fail "Claude skills symlink incorrect or missing"
+            fail "Codex skills symlink incorrect or missing"
+            ;;
+        claude_fail)
+            fail "Claude skills symlink incorrect or missing"
+            pass "Codex skills symlink points to volume"
+            ;;
+        codex_fail)
+            pass "Claude skills symlink points to volume"
+            fail "Codex skills symlink incorrect or missing"
+            ;;
+        *)
+            fail "Skills symlink check returned unexpected result: $skills_symlink_test"
+            ;;
+    esac
 
     # Verify installed_plugins.json is valid JSON if it exists (use test image which has jq)
     local json_valid
