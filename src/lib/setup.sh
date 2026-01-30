@@ -3927,6 +3927,248 @@ _cai_setup_linux() {
     return 0
 }
 
+# ==============================================================================
+# Shell Completion Installation
+# ==============================================================================
+
+# Install shell completion scripts (static, no eval at startup)
+# Arguments:
+#   $1 - dry_run (true/false)
+# Returns: 0 always (completion install is non-fatal)
+_cai_setup_shell_completions() {
+    local dry_run="${1:-false}"
+    local installed_count=0
+
+    _cai_info "Setting up shell completions..."
+
+    # Guard: ensure completion functions exist
+    if ! declare -F _cai_completion_bash >/dev/null 2>&1 || \
+       ! declare -F _cai_completion_zsh >/dev/null 2>&1; then
+        _cai_warn "Completion functions not available; skipping shell completion setup"
+        return 0
+    fi
+
+    # Generate bash completion content
+    local bash_completion
+    bash_completion="$(_cai_completion_bash)"
+
+    # Generate zsh completion content
+    local zsh_completion
+    zsh_completion="$(_cai_completion_zsh)"
+
+    # === Bash completion ===
+    local bash_target=""
+    local bash_installed="false"
+
+    # Prefer ~/.bashrc.d/ if it exists (used by some distros for modular bashrc)
+    if [[ -d "$HOME/.bashrc.d" ]]; then
+        bash_target="$HOME/.bashrc.d/containai-completion.bash"
+    else
+        # Fall back to ~/.local/share/bash-completion/completions/cai
+        local bash_completion_dir="$HOME/.local/share/bash-completion/completions"
+        bash_target="$bash_completion_dir/cai"
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        if [[ ! -d "$HOME/.bashrc.d" ]]; then
+            _cai_info "[DRY-RUN] Would create directory $(dirname "$bash_target")"
+        fi
+        _cai_info "[DRY-RUN] Would write bash completion to $bash_target"
+        _cai_info "[DRY-RUN] Would ensure ~/.bashrc sources the completion file"
+    else
+        # Create parent directory if needed
+        local bash_dir
+        bash_dir="$(dirname "$bash_target")"
+        if [[ ! -d "$bash_dir" ]]; then
+            if ! mkdir -p "$bash_dir" 2>/dev/null; then
+                _cai_warn "Failed to create $bash_dir"
+            fi
+        fi
+
+        if [[ -d "$bash_dir" ]]; then
+            if printf '%s\n' "$bash_completion" > "$bash_target" 2>/dev/null; then
+                _cai_info "Installed bash completion: $bash_target"
+                bash_installed="true"
+                installed_count=$((installed_count + 1))
+
+                # Ensure ~/.bashrc sources the completion file
+                # Check all common forms to avoid duplicates
+                local source_line="# ContainAI completion"
+                local source_cmd="[[ -f \"$bash_target\" ]] && source \"$bash_target\""
+                local needs_source="true"
+
+                if [[ -f "$HOME/.bashrc" ]]; then
+                    # Check for existing source commands (various forms)
+                    if grep -qF "source \"$bash_target\"" "$HOME/.bashrc" 2>/dev/null || \
+                       grep -qF "source '$bash_target'" "$HOME/.bashrc" 2>/dev/null || \
+                       grep -qF ". \"$bash_target\"" "$HOME/.bashrc" 2>/dev/null || \
+                       grep -qF ". '$bash_target'" "$HOME/.bashrc" 2>/dev/null || \
+                       grep -qF "source $bash_target" "$HOME/.bashrc" 2>/dev/null; then
+                        needs_source="false"
+                    fi
+                    # Also check if ~/.bashrc.d is already being sourced (common patterns)
+                    # If so, the completion file will be loaded automatically
+                    # Filter out commented lines to avoid false positives
+                    if [[ -d "$HOME/.bashrc.d" ]] && [[ "$bash_target" == "$HOME/.bashrc.d/"* ]]; then
+                        if grep -E '^[^#]*(source|\.)[[:space:]]+.*\.bashrc\.d' "$HOME/.bashrc" 2>/dev/null | grep -qv '^[[:space:]]*#' || \
+                           grep -E '^[^#]*for[[:space:]]+.*\.bashrc\.d' "$HOME/.bashrc" 2>/dev/null | grep -qv '^[[:space:]]*#'; then
+                            needs_source="false"
+                        fi
+                    fi
+                fi
+
+                if [[ "$needs_source" == "true" ]]; then
+                    if [[ -f "$HOME/.bashrc" ]]; then
+                        if printf '\n%s\n%s\n' "$source_line" "$source_cmd" >> "$HOME/.bashrc" 2>/dev/null; then
+                            _cai_info "Added source line to ~/.bashrc"
+                        else
+                            _cai_warn "Failed to append source line to ~/.bashrc"
+                        fi
+                    else
+                        # Create minimal .bashrc
+                        if printf '%s\n%s\n' "$source_line" "$source_cmd" > "$HOME/.bashrc" 2>/dev/null; then
+                            _cai_info "Created ~/.bashrc with source line"
+                        else
+                            _cai_warn "Failed to create ~/.bashrc"
+                        fi
+                    fi
+                fi
+            else
+                _cai_warn "Failed to write bash completion to $bash_target"
+            fi
+        fi
+    fi
+
+    # === Zsh completion ===
+    local zsh_completion_dir="$HOME/.zsh/completions"
+    local zsh_target="$zsh_completion_dir/_cai"
+    local zsh_installed="false"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_info "[DRY-RUN] Would create directory $zsh_completion_dir"
+        _cai_info "[DRY-RUN] Would write zsh completion to $zsh_target"
+        _cai_info "[DRY-RUN] Would ensure fpath includes $zsh_completion_dir in ~/.zshrc"
+    else
+        # Create directory if needed
+        if [[ ! -d "$zsh_completion_dir" ]]; then
+            if ! mkdir -p "$zsh_completion_dir" 2>/dev/null; then
+                _cai_warn "Failed to create $zsh_completion_dir"
+            fi
+        fi
+
+        if [[ -d "$zsh_completion_dir" ]]; then
+            if printf '%s\n' "$zsh_completion" > "$zsh_target" 2>/dev/null; then
+                _cai_info "Installed zsh completion: $zsh_target"
+                zsh_installed="true"
+                installed_count=$((installed_count + 1))
+            else
+                _cai_warn "Failed to write zsh completion to $zsh_target"
+            fi
+        fi
+
+        # Ensure fpath includes ~/.zsh/completions in ~/.zshrc
+        if [[ "$zsh_installed" == "true" ]] && [[ -f "$HOME/.zshrc" ]]; then
+            local fpath_line='fpath=(~/.zsh/completions $fpath)'
+            local zshrc_path="$HOME/.zshrc"
+            # Check if fpath line already exists (avoid duplicates)
+            if ! grep -qF "$fpath_line" "$zshrc_path" 2>/dev/null; then
+                # Also check for equivalent patterns
+                if ! grep -qE 'fpath=.*~/\.zsh/completions' "$zshrc_path" 2>/dev/null && \
+                   ! grep -qE 'fpath=.*\$HOME/\.zsh/completions' "$zshrc_path" 2>/dev/null; then
+                    # Resolve symlinks properly for atomic write
+                    # Need to handle both absolute and relative symlink targets
+                    local actual_zshrc="$zshrc_path"
+                    if [[ -L "$zshrc_path" ]]; then
+                        local link_target
+                        link_target=$(readlink "$zshrc_path" 2>/dev/null)
+                        if [[ -n "$link_target" ]]; then
+                            if [[ "$link_target" == /* ]]; then
+                                # Absolute path - use directly
+                                actual_zshrc="$link_target"
+                            else
+                                # Relative path - resolve relative to symlink's directory
+                                actual_zshrc="$(dirname "$zshrc_path")/$link_target"
+                            fi
+                            _cai_info "~/.zshrc is a symlink to $actual_zshrc"
+                        fi
+                    fi
+                    # Try to insert fpath before compinit to ensure completions are discovered
+                    local fpath_block="# ContainAI shell completion
+$fpath_line"
+                    if grep -qE '^[[:space:]]*(autoload.*compinit|compinit)' "$actual_zshrc" 2>/dev/null; then
+                        # Insert before first compinit line using awk
+                        local zshrc_dir
+                        zshrc_dir="$(dirname "$actual_zshrc")"
+                        local temp_zshrc
+                        temp_zshrc=$(mktemp "${zshrc_dir}/.containai-zshrc.XXXXXX")
+                        # Preserve original permissions (portable: works on Linux and macOS)
+                        local orig_perms
+                        orig_perms=$(stat -c '%a' "$actual_zshrc" 2>/dev/null || stat -f '%Lp' "$actual_zshrc" 2>/dev/null) || orig_perms=""
+                        # Insert fpath_block before first line matching compinit
+                        awk -v block="$fpath_block" '
+                            !inserted && /^[[:space:]]*(autoload.*compinit|compinit)/ {
+                                print block
+                                inserted=1
+                            }
+                            {print}
+                        ' "$actual_zshrc" > "$temp_zshrc"
+                        # Restore original permissions or default to restrictive
+                        if [[ -n "$orig_perms" ]]; then
+                            chmod "$orig_perms" "$temp_zshrc" 2>/dev/null
+                        else
+                            chmod 600 "$temp_zshrc" 2>/dev/null
+                        fi
+                        if mv "$temp_zshrc" "$actual_zshrc" 2>/dev/null; then
+                            _cai_info "Inserted fpath directive before compinit in ~/.zshrc"
+                        else
+                            _cai_warn "Failed to update ~/.zshrc with fpath"
+                            rm -f "$temp_zshrc" 2>/dev/null
+                        fi
+                    else
+                        # No compinit found - just append fpath line
+                        # Don't auto-add compinit as it may conflict with plugin managers
+                        if printf '\n%s\n' "$fpath_block" >> "$zshrc_path" 2>/dev/null; then
+                            _cai_info "Added fpath directive to ~/.zshrc"
+                            _cai_info "Note: Run 'autoload -Uz compinit && compinit' to enable completions"
+                        else
+                            _cai_warn "Failed to update ~/.zshrc with fpath"
+                        fi
+                    fi
+                fi
+            fi
+        elif [[ "$zsh_installed" == "true" ]] && [[ ! -f "$HOME/.zshrc" ]]; then
+            # Create minimal .zshrc with fpath only (no compinit - let user/framework handle it)
+            local fpath_line='fpath=(~/.zsh/completions $fpath)'
+            if {
+                printf '# ContainAI shell completion\n'
+                printf '%s\n' "$fpath_line"
+            } > "$HOME/.zshrc" 2>/dev/null; then
+                _cai_info "Created ~/.zshrc with fpath directive"
+                _cai_info "Note: Run 'autoload -Uz compinit && compinit' to enable completions"
+            else
+                _cai_warn "Failed to create ~/.zshrc"
+            fi
+        fi
+    fi
+
+    # Summary
+    if [[ "$dry_run" != "true" ]]; then
+        if [[ $installed_count -gt 0 ]]; then
+            _cai_info "Shell completions installed. Restart your shell or run:"
+            if [[ "$bash_installed" == "true" ]]; then
+                _cai_info "  Bash: source $bash_target"
+            fi
+            if [[ "$zsh_installed" == "true" ]]; then
+                _cai_info "  Zsh:  autoload -Uz compinit && compinit"
+            fi
+        else
+            _cai_warn "No shell completions were installed"
+        fi
+    fi
+
+    return 0
+}
+
 # Main setup entry point
 # Arguments: parsed from command line
 # Returns: 0=success, 1=failure
@@ -3994,14 +4236,18 @@ _cai_setup() {
     fi
 
     if _cai_is_container; then
-        _cai_setup_nested "$dry_run" "$verbose"
-        return $?
+        _cai_setup_nested "$dry_run" "$verbose" || return $?
+        # Install shell completions (non-fatal on failure)
+        printf '\n'
+        _cai_setup_shell_completions "$dry_run"
+        return 0
     fi
 
     # Detect platform - must be WSL2 specifically
     local platform
     platform=$(_cai_detect_platform)
 
+    local platform_result=0
     case "$platform" in
         wsl)
             # Additional check: must be WSL2, not WSL1
@@ -4012,21 +4258,32 @@ _cai_setup() {
                 return 1
             fi
             _cai_setup_wsl2 "$force" "$dry_run" "$verbose"
-            return $?
+            platform_result=$?
             ;;
         macos)
             _cai_setup_macos "$force" "$dry_run" "$verbose"
-            return $?
+            platform_result=$?
             ;;
         linux)
             _cai_setup_linux "$force" "$dry_run" "$verbose"
-            return $?
+            platform_result=$?
             ;;
         *)
             _cai_error "Unknown platform: $platform"
             return 1
             ;;
     esac
+
+    # If platform setup failed, exit early
+    if [[ $platform_result -ne 0 ]]; then
+        return $platform_result
+    fi
+
+    # Install shell completions (non-fatal on failure)
+    printf '\n'
+    _cai_setup_shell_completions "$dry_run"
+
+    return 0
 }
 
 # Nested setup (running inside a container)
@@ -4323,6 +4580,7 @@ What It Does (Linux native):
      - Service: containai-docker.service
   5. Creates 'containai-docker' Docker context pointing to isolated socket
   6. Verifies installation with test container
+  7. Installs shell completions for bash and zsh
   Note: System Docker is NOT modified. Fedora/RHEL/Arch require manual install.
 
 What It Does (WSL2):
@@ -4335,6 +4593,7 @@ What It Does (WSL2):
      - Service: containai-docker.service
   5. Creates 'containai-docker' Docker context pointing to isolated socket
   6. Verifies installation
+  7. Installs shell completions for bash and zsh
 
 What It Does (macOS):
   1. Installs Lima via Homebrew (if not present)
@@ -4343,6 +4602,7 @@ What It Does (macOS):
   4. Exposes Docker socket to macOS host via Lima port forwarding
   5. Creates 'containai-docker' Docker context pointing to Lima socket
   6. Verifies installation
+  7. Installs shell completions for bash and zsh
 
 Requirements (Linux native):
   - Ubuntu 22.04/24.04 or Debian 11/12 (auto-install)
@@ -4389,6 +4649,11 @@ Isolated Docker (Linux/WSL2):
   Usage after setup:
     docker --context containai-docker info
     docker --context containai-docker run hello-world
+
+Shell Completions:
+  Bash: ~/.bashrc.d/containai-completion.bash (if dir exists)
+        or ~/.local/share/bash-completion/completions/cai (source added to ~/.bashrc)
+  Zsh:  ~/.zsh/completions/_cai (fpath updated in ~/.zshrc)
 
 Examples:
   cai setup                    Configure isolation (auto-detects platform)

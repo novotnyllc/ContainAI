@@ -4577,17 +4577,27 @@ _cai_completions() {
             # Use __completeNoDesc to get plain completion words without tab-separated descriptions
             # Set context via DOCKER_CONTEXT env var for Cobra compatibility
             if command -v docker &>/dev/null; then
-                local docker_out
+                local docker_out docker_candidates
                 # Use timeout to avoid hanging if containai-docker context is slow/unreachable
-                docker_out=$(_cai_completion_timeout 0.5 docker __completeNoDesc "${docker_words[@]}" 2>/dev/null) || docker_out=""
+                # Clear DOCKER_HOST to ensure DOCKER_CONTEXT takes effect
+                docker_out=$(DOCKER_HOST= DOCKER_CONTEXT="$docker_context" _cai_completion_timeout 0.5 docker __completeNoDesc "${docker_words[@]}" 2>/dev/null) || docker_out=""
                 if [[ -n "$docker_out" ]]; then
                     # Docker __completeNoDesc outputs completions one per line, with directive as last line
                     # Filter out the directive line (starts with :) and empty lines
-                    local completions
-                    completions=$(printf '%s\n' "$docker_out" | grep -v '^:' | grep -v '^$')
+                    docker_candidates=$(printf '%s\n' "$docker_out" | grep -v '^:' | grep -v '^$')
                     # Only return if we have actual completions, otherwise fall through to fallback
-                    if [[ -n "$completions" ]]; then
-                        COMPREPLY=($(compgen -W "$completions" -- "$cur"))
+                    if [[ -n "$docker_candidates" ]]; then
+                        COMPREPLY=($(compgen -W "$docker_candidates" -- "$cur"))
+                        return
+                    fi
+                fi
+
+                # Fallback to __complete (with descriptions) if __completeNoDesc unavailable
+                docker_out=$(DOCKER_HOST= DOCKER_CONTEXT="$docker_context" _cai_completion_timeout 0.5 docker __complete "${docker_words[@]}" 2>/dev/null) || docker_out=""
+                if [[ -n "$docker_out" ]]; then
+                    docker_candidates=$(printf '%s\n' "$docker_out" | grep -v '^:' | grep -v '^$' | awk -F '\t' '{print $1}')
+                    if [[ -n "$docker_candidates" ]]; then
+                        COMPREPLY=($(compgen -W "$docker_candidates" -- "$cur"))
                         return
                     fi
                 fi
@@ -4880,9 +4890,10 @@ _cai() {
 
                     # Try docker __completeNoDesc for Cobra-style completion
                     # Use timeout to avoid hanging if containai-docker context is slow/unreachable
+                    # Clear DOCKER_HOST to ensure DOCKER_CONTEXT takes effect
                     if (( $+commands[docker] )); then
                         local docker_out
-                        docker_out=$(_cai_completion_timeout 0.5 docker __completeNoDesc "${docker_words[@]}" 2>/dev/null)
+                        docker_out=$(DOCKER_HOST= DOCKER_CONTEXT="$docker_context" _cai_completion_timeout 0.5 docker __completeNoDesc "${docker_words[@]}" 2>/dev/null)
                         if [[ -n "$docker_out" ]]; then
                             # Docker __completeNoDesc outputs completions one per line, with directive as last line
                             # Filter out directive line (starts with :) and empty lines
@@ -4890,6 +4901,17 @@ _cai() {
                             completions=("${(@f)$(printf '%s\n' "$docker_out" | grep -v '^:' | grep -v '^$')}")
                             if (( ${#completions[@]} > 0 )); then
                                 compadd -a completions
+                                return
+                            fi
+                        fi
+
+                        docker_out=$(DOCKER_HOST= DOCKER_CONTEXT="$docker_context" _cai_completion_timeout 0.5 docker __complete "${docker_words[@]}" 2>/dev/null)
+                        if [[ -n "$docker_out" ]]; then
+                            # Convert tab-separated name/description to name:description for _describe
+                            local -a completions
+                            completions=("${(@f)$(printf '%s\n' "$docker_out" | grep -v '^:' | grep -v '^$' | awk -F '\t' '{print ($2 ? $1 ":" $2 : $1)}')}")
+                            if (( ${#completions[@]} > 0 )); then
+                                _describe -t docker-commands 'docker command' completions
                                 return
                             fi
                         fi
