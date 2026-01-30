@@ -485,33 +485,33 @@ _cai_uninstall() {
         return 1
     fi
 
-    # Show what will be done
-    printf '%s\n' ""
-    printf '%s\n' "ContainAI Uninstall"
-    printf '%s\n' "==================="
-    printf '%s\n' ""
-    printf '%s\n' "The following will be REMOVED:"
-    printf '%s\n' "  - containai-docker.service (systemd unit)"
-    printf '%s\n' "  - Docker contexts: containai-docker, containai-secure, docker-containai (legacy)"
+    # Show what will be done (verbose-gated, but always show in dry-run)
+    _cai_info ""
+    _cai_info "ContainAI Uninstall"
+    _cai_info "==================="
+    _cai_info ""
+    _cai_info "The following will be REMOVED:"
+    _cai_info "  - containai-docker.service (systemd unit)"
+    _cai_info "  - Docker contexts: containai-docker, containai-secure, docker-containai (legacy)"
     if [[ "$remove_containers" == "true" ]]; then
-        printf '%s\n' "  - All ContainAI containers (--containers)"
+        _cai_info "  - All ContainAI containers (--containers)"
         if [[ "$remove_volumes" == "true" ]]; then
-            printf '%s\n' "  - Container volumes (--volumes)"
+            _cai_info "  - Container volumes (--volumes)"
         fi
     fi
-    printf '%s\n' ""
-    printf '%s\n' "The following will be PRESERVED (user data):"
-    printf '%s\n' "  - ~/.config/containai/ (SSH keys, config)"
-    printf '%s\n' "  - ~/.ssh/containai.d/ (SSH host configs)"
-    printf '%s\n' "  - /etc/containai/docker/ (daemon.json)"
-    printf '%s\n' "  - /var/lib/containai-docker/ (Docker data)"
-    printf '%s\n' "  - Sysbox packages (apt packages)"
-    printf '%s\n' "  - Lima VM (macOS)"
-    printf '%s\n' ""
+    _cai_info ""
+    _cai_info "The following will be PRESERVED (user data):"
+    _cai_info "  - ~/.config/containai/ (SSH keys, config)"
+    _cai_info "  - ~/.ssh/containai.d/ (SSH host configs)"
+    _cai_info "  - /etc/containai/docker/ (daemon.json)"
+    _cai_info "  - /var/lib/containai-docker/ (Docker data)"
+    _cai_info "  - Sysbox packages (apt packages)"
+    _cai_info "  - Lima VM (macOS)"
+    _cai_info ""
 
     if [[ "$dry_run" == "true" ]]; then
-        printf '%s\n' "[DRY-RUN MODE - no changes will be made]"
-        printf '%s\n' ""
+        _cai_dryrun "[DRY-RUN MODE - no changes will be made]"
+        _cai_info ""
     fi
 
     # Confirm unless --force or --dry-run

@@ -1900,15 +1900,15 @@ _cai_update() {
         esac
     done
 
-    # Header
-    printf '%s\n' ""
-    printf '%s\n' "ContainAI Update"
-    printf '%s\n' "================"
-    printf '%s\n' ""
+    # Header (verbose-gated)
+    _cai_info ""
+    _cai_info "ContainAI Update"
+    _cai_info "================"
+    _cai_info ""
 
     if [[ "$dry_run" == "true" ]]; then
-        printf '%s\n' "[DRY-RUN MODE - no changes will be made]"
-        printf '%s\n' ""
+        _cai_dryrun "[DRY-RUN MODE - no changes will be made]"
+        _cai_info ""
     fi
 
     # Dispatch based on platform
@@ -1924,7 +1924,7 @@ _cai_update() {
     fi
 
     # Summary
-    printf '%s\n' ""
+    _cai_info ""
     if [[ $overall_status -eq 130 ]]; then
         # User cancelled
         _cai_info "Update cancelled by user"
@@ -1937,13 +1937,13 @@ _cai_update() {
         _cai_ok "Dry-run complete - no changes were made"
     elif [[ $overall_status -eq 0 ]]; then
         _cai_ok "Update complete"
-        printf '%s\n' ""
-        printf '%s\n' "Run 'cai doctor' to verify installation."
+        _cai_info ""
+        _cai_info "Run 'cai doctor' to verify installation."
     else
         _cai_warn "Update completed with some issues"
-        printf '%s\n' ""
-        printf '%s\n' "Check the output above for details."
-        printf '%s\n' "Run 'cai doctor' to diagnose issues."
+        _cai_info ""
+        _cai_info "Check the output above for details."
+        _cai_info "Run 'cai doctor' to diagnose issues."
     fi
 
     return $overall_status
