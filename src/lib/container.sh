@@ -822,9 +822,10 @@ _containai_validate_fr4_mounts() {
                 ;;
             *)
                 # Unexpected mount destination
-                echo "[ERROR] FR-4: Container has unexpected mount: $mount_dest" >&2
-                echo "[INFO] Container may have been tainted by 'cai shell --volume'" >&2
-                echo "[INFO] Use --fresh to recreate with clean mount configuration" >&2
+                _cai_error "FR-4: Container has unexpected mount: $mount_dest"
+                # Guidance messages use _cai_warn since they should always emit
+                _cai_warn "Container may have been tainted by 'cai shell --volume'"
+                _cai_warn "Use --fresh to recreate with clean mount configuration"
                 return 1
                 ;;
         esac
@@ -894,18 +895,18 @@ _containai_check_isolation() {
 
     # Guard: check docker availability
     if ! command -v docker >/dev/null 2>&1; then
-        echo "[WARN] Unable to determine isolation status (docker not found)" >&2
+        _cai_warn "Unable to determine isolation status (docker not found)"
         return 2
     fi
 
     # Use docker info --format for reliable structured output with timeout
     # Use if ! pattern for set -e safety
     if ! runtime=$(_cai_timeout 5 docker info --format '{{.DefaultRuntime}}' 2>/dev/null); then
-        echo "[WARN] Unable to determine isolation status" >&2
+        _cai_warn "Unable to determine isolation status"
         return 2
     fi
     if [[ -z "$runtime" ]]; then
-        echo "[WARN] Unable to determine isolation status" >&2
+        _cai_warn "Unable to determine isolation status"
         return 2
     fi
 
@@ -931,11 +932,11 @@ _containai_check_isolation() {
 
     # Standard runc without isolation features
     if [[ "$runtime" == "runc" ]]; then
-        echo "[WARN] No additional isolation detected (standard runtime)" >&2
+        _cai_warn "No additional isolation detected (standard runtime)"
         return 1
     fi
 
-    echo "[WARN] Unable to determine isolation status" >&2
+    _cai_warn "Unable to determine isolation status"
     return 2
 }
 
@@ -957,10 +958,10 @@ _containai_preflight_checks() {
     fi
 
     if [[ "$force_flag" == "true" ]]; then
-        echo "[WARN] Skipping isolation check (--force)" >&2
+        _cai_warn "Skipping isolation check (--force)"
         if [[ "${CONTAINAI_REQUIRE_ISOLATION:-0}" == "1" ]]; then
-            echo "*** WARNING: Bypassing isolation requirement with --force" >&2
-            echo "*** Running without verified isolation may expose host system" >&2
+            _cai_warn "*** WARNING: Bypassing isolation requirement with --force"
+            _cai_warn "*** Running without verified isolation may expose host system"
         fi
         return 0
     fi
@@ -1020,9 +1021,7 @@ _containai_ensure_volumes() {
     fi
 
     if ! "${docker_cmd[@]}" volume inspect "$volume_name" >/dev/null 2>&1; then
-        if [[ "$quiet" != "true" ]]; then
-            echo "Creating volume: $volume_name"
-        fi
+        _cai_info "Creating volume: $volume_name"
         if ! "${docker_cmd[@]}" volume create "$volume_name" >/dev/null; then
             echo "[ERROR] Failed to create volume $volume_name" >&2
             return 1
@@ -1218,19 +1217,18 @@ _containai_check_image_match() {
     fi
 
     if [[ "$actual_image" != "$resolved_image" ]]; then
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "[WARN] Image mismatch for container '$container_name'" >&2
-            echo "" >&2
-            echo "  Container image: $actual_image" >&2
-            echo "  Requested image: $resolved_image" >&2
-            echo "" >&2
-            echo "The container was created with a different agent/image." >&2
-            echo "To use the requested agent, recreate the container:" >&2
-            echo "  cai --restart" >&2
-            echo "Or specify a different container name:" >&2
-            echo "  cai run --container <unique-name>" >&2
-            echo "" >&2
-        fi
+        # Warnings always emit regardless of quiet flag
+        _cai_warn "Image mismatch for container '$container_name'"
+        printf '\n' >&2
+        _cai_warn "  Container image: $actual_image"
+        _cai_warn "  Requested image: $resolved_image"
+        printf '\n' >&2
+        _cai_warn "The container was created with a different agent/image."
+        _cai_warn "To use the requested agent, recreate the container:"
+        _cai_warn "  cai --restart"
+        _cai_warn "Or specify a different container name:"
+        _cai_warn "  cai run --container <unique-name>"
+        printf '\n' >&2
         return 1
     fi
 
@@ -1253,19 +1251,18 @@ _containai_check_volume_match() {
     fi
 
     if [[ "$mounted_volume" != "$desired_volume" ]]; then
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "[WARN] Volume mismatch for container '$container_name'" >&2
-            echo "" >&2
-            echo "  Container uses volume: $mounted_volume" >&2
-            echo "  Workspace expects:     $desired_volume" >&2
-            echo "" >&2
-            echo "The container was created with a different workspace/config." >&2
-            echo "To use the correct volume, recreate the container:" >&2
-            echo "  cai --restart" >&2
-            echo "Or specify a different container name:" >&2
-            echo "  cai run --container <unique-name>" >&2
-            echo "" >&2
-        fi
+        # Warnings always emit regardless of quiet flag
+        _cai_warn "Volume mismatch for container '$container_name'"
+        printf '\n' >&2
+        _cai_warn "  Container uses volume: $mounted_volume"
+        _cai_warn "  Workspace expects:     $desired_volume"
+        printf '\n' >&2
+        _cai_warn "The container was created with a different workspace/config."
+        _cai_warn "To use the correct volume, recreate the container:"
+        _cai_warn "  cai --restart"
+        _cai_warn "Or specify a different container name:"
+        _cai_warn "  cai run --container <unique-name>"
+        printf '\n' >&2
         return 1
     fi
 
@@ -1456,10 +1453,12 @@ _containai_start_container() {
                 ;;
             --quiet | -q)
                 quiet_flag=true
+                _cai_set_quiet
                 shift
                 ;;
             --verbose)
                 verbose_flag=true
+                _cai_set_verbose
                 shift
                 ;;
             --debug | -D)
@@ -1638,19 +1637,19 @@ _containai_start_container() {
         # Use the explicitly provided context (container was found in this context)
         # Validate the context exists and has Sysbox isolation
         if ! docker context inspect -- "$explicit_context" >/dev/null 2>&1; then
-            echo "[ERROR] Docker context not found: $explicit_context" >&2
-            echo "[HINT] Run 'docker context ls' to see available contexts" >&2
+            _cai_error "Docker context not found: $explicit_context"
+            _cai_warn "Run 'docker context ls' to see available contexts"
             return 1
         fi
         # Validate Sysbox availability for the explicit context (security requirement)
         if ! _cai_sysbox_available_for_context "$explicit_context"; then
             if [[ "$force_flag" == "true" ]]; then
-                echo "[WARN] Context '$explicit_context' does not have Sysbox isolation available." >&2
-                echo "[WARN] Proceeding with --force; container may lack proper isolation." >&2
+                _cai_warn "Context '$explicit_context' does not have Sysbox isolation available."
+                _cai_warn "Proceeding with --force; container may lack proper isolation."
             else
-                echo "[ERROR] Context '$explicit_context' does not have Sysbox isolation available." >&2
-                echo "[HINT] Use --force to bypass isolation check, or recreate container with --fresh in an isolated context." >&2
-                echo "[HINT] Run 'cai doctor' for setup instructions." >&2
+                _cai_error "Context '$explicit_context' does not have Sysbox isolation available."
+                _cai_warn "Use --force to bypass isolation check, or recreate container with --fresh in an isolated context."
+                _cai_warn "Run 'cai doctor' for setup instructions."
                 return 1
             fi
         fi
@@ -1667,8 +1666,8 @@ _containai_start_container() {
         fi
         if ! selected_context=$(_cai_select_context "$config_context_override" "$debug_mode" "$verbose_str"); then
             if [[ "$force_flag" == "true" ]]; then
-                echo "[WARN] Sysbox context check failed; attempting to use an existing context without validation." >&2
-                echo "[WARN] Container creation will still require sysbox-runc runtime." >&2
+                _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
+                _cai_warn "Container creation will still require sysbox-runc runtime."
                 if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
                     selected_context="$config_context_override"
                 elif _cai_containai_docker_context_exists; then
@@ -1909,10 +1908,9 @@ _containai_start_container() {
                         return 1
                     fi
                 fi
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "[WARN] SSH port $existing_ssh_port is in use by another process" >&2
-                    echo "Recreating container with new port allocation..."
-                fi
+                # Warnings always emit regardless of quiet flag
+                _cai_warn "SSH port $existing_ssh_port is in use by another process"
+                _cai_info "Recreating container with new port allocation..."
                 # Remove the old container first (like --fresh but automatic)
                 if ! "${docker_cmd[@]}" rm -f "$container_name" >/dev/null 2>&1; then
                     echo "[ERROR] Failed to remove container for port reallocation" >&2
@@ -1941,9 +1939,7 @@ _containai_start_container() {
                 return 1
             fi
         fi
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "Removing existing container (--fresh)..."
-        fi
+        _cai_info "Removing existing container (--fresh)..."
         # Get SSH port before removal for cleanup
         local fresh_ssh_port
         fresh_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context") || fresh_ssh_port=""
@@ -1983,9 +1979,7 @@ _containai_start_container() {
                 return 1
             fi
         fi
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "Stopping existing container..."
-        fi
+        _cai_info "Stopping existing container..."
         # Get SSH port before removal for cleanup
         local restart_ssh_port
         restart_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context") || restart_ssh_port=""
@@ -2038,11 +2032,10 @@ _containai_start_container() {
             local running_volume
             running_volume=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null) || running_volume=""
             if [[ "$running_volume" != "$data_volume" ]]; then
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "[WARN] Data volume mismatch:" >&2
-                    echo "  Running:   ${running_volume:-<none>}" >&2
-                    echo "  Requested: $data_volume" >&2
-                fi
+                # Warnings always emit regardless of quiet flag
+                _cai_warn "Data volume mismatch:"
+                _cai_warn "  Running:   ${running_volume:-<none>}"
+                _cai_warn "  Requested: $data_volume"
                 if [[ "$volume_mismatch_warn" != "true" ]]; then
                     echo "[ERROR] Volume mismatch prevents attachment. Use --fresh to recreate." >&2
                     return 1
@@ -2071,10 +2064,10 @@ _containai_start_container() {
                 fi
             fi
 
-            # Print container/volume info if verbose (stderr for pipeline safety)
-            if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
-                printf '%s\n' "[INFO] Container: $container_name" >&2
-                printf '%s\n' "[INFO] Volume: ${running_volume:-$data_volume}" >&2
+            # Print container/volume info if verbose (uses _cai_info which checks verbose state)
+            if [[ "$verbose_flag" == "true" ]]; then
+                _cai_info "Container: $container_name"
+                _cai_info "Volume: ${running_volume:-$data_volume}"
             fi
 
             # Execute command via SSH (container stays running after exit)
@@ -2129,11 +2122,10 @@ _containai_start_container() {
             local exited_volume
             exited_volume=$("${docker_cmd[@]}" inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' "$container_name" 2>/dev/null) || exited_volume=""
             if [[ "$exited_volume" != "$data_volume" ]]; then
-                if [[ "$quiet_flag" != "true" ]]; then
-                    echo "[WARN] Data volume mismatch:" >&2
-                    echo "  Running:   ${exited_volume:-<none>}" >&2
-                    echo "  Requested: $data_volume" >&2
-                fi
+                # Warnings always emit regardless of quiet flag
+                _cai_warn "Data volume mismatch:"
+                _cai_warn "  Running:   ${exited_volume:-<none>}"
+                _cai_warn "  Requested: $data_volume"
                 if [[ "$volume_mismatch_warn" != "true" ]]; then
                     echo "[ERROR] Volume mismatch prevents start. Use --fresh to recreate." >&2
                     return 1
@@ -2151,9 +2143,7 @@ _containai_start_container() {
             # If we reach here, the port is available
 
             # Start stopped container (systemd is PID 1)
-            if [[ "$quiet_flag" != "true" ]]; then
-                echo "Starting stopped container..."
-            fi
+            _cai_info "Starting stopped container..."
             local start_output
             if ! start_output=$("${docker_cmd[@]}" start "$container_name" 2>&1); then
                 local log_file=""
@@ -2199,10 +2189,10 @@ _containai_start_container() {
                 fi
             fi
 
-            # Print container/volume info if verbose (stderr for pipeline safety)
-            if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
-                printf '%s\n' "[INFO] Container: $container_name" >&2
-                printf '%s\n' "[INFO] Volume: ${exited_volume:-$data_volume}" >&2
+            # Print container/volume info if verbose (uses _cai_info which checks verbose state)
+            if [[ "$verbose_flag" == "true" ]]; then
+                _cai_info "Container: $container_name"
+                _cai_info "Volume: ${exited_volume:-$data_volume}"
             fi
 
             # Execute command via SSH (container stays running after exit)
@@ -2254,12 +2244,10 @@ _containai_start_container() {
 
             # Create new container (systemd is PID 1)
             # Agent sessions use docker exec; container stays running between sessions
-            if [[ "$quiet_flag" != "true" ]]; then
-                if [[ -n "$selected_context" ]]; then
-                    echo "Creating new container (Sysbox mode, context: $selected_context)..."
-                else
-                    echo "Creating new container (Sysbox mode)..."
-                fi
+            if [[ -n "$selected_context" ]]; then
+                _cai_info "Creating new container (Sysbox mode, context: $selected_context)..."
+            else
+                _cai_info "Creating new container (Sysbox mode)..."
             fi
 
             # Validate extra_volumes don't target protected paths (FR-4)
@@ -2412,10 +2400,10 @@ _containai_start_container() {
                 return 1
             fi
 
-            # Print container/volume info if verbose (stderr for pipeline safety)
-            if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" ]]; then
-                printf '%s\n' "[INFO] Container: $container_name" >&2
-                printf '%s\n' "[INFO] Volume: $data_volume" >&2
+            # Print container/volume info if verbose (uses _cai_info which checks verbose state)
+            if [[ "$verbose_flag" == "true" ]]; then
+                _cai_info "Container: $container_name"
+                _cai_info "Volume: $data_volume"
             fi
 
             # Execute command via SSH (container stays running after exit)
@@ -2674,7 +2662,7 @@ _containai_stop_all() {
             if [[ "$num" =~ ^[0-9]+$ ]] && [[ "$num" -ge 1 ]] && [[ "$num" -le "${#names[@]}" ]]; then
                 to_stop_idx+=("$((num - 1))")
             else
-                echo "[WARN] Invalid selection: $num" >&2
+                _cai_warn "Invalid selection: $num"
             fi
         done
     fi

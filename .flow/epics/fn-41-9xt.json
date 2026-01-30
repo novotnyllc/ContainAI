@@ -1,5 +1,7 @@
 {
   "branch_name": "fn-41-9xt",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-01-30T03:36:11.202883Z",
   "default_impl": null,
   "default_review": null,
@@ -9,10 +11,10 @@
   ],
   "id": "fn-41-9xt",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-01-30T16:59:40.067151Z",
   "spec_path": ".flow/specs/fn-41-9xt.md",
-  "status": "open",
+  "status": "done",
   "title": "Silent by Default CLI Output",
-  "updated_at": "2026-01-30T04:16:06.235273Z"
+  "updated_at": "2026-01-30T19:47:28.226223Z"
 }

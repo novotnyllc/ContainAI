@@ -37,7 +37,14 @@ fi
 # ==============================================================================
 # Output helpers
 # ==============================================================================
-_links_info() { printf '%s\n' "[INFO] $*" >&2; }
+_links_info() {
+    # Delegate to _cai_info for verbose gating; fallback if not available
+    if declare -f _cai_info >/dev/null 2>&1; then
+        _cai_info "$@"
+    else
+        printf '%s\n' "[INFO] $*" >&2
+    fi
+}
 _links_error() { printf '%s\n' "[ERROR] $*" >&2; }
 _links_warn() { printf '%s\n' "[WARN] $*" >&2; }
 

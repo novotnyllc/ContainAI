@@ -28,6 +28,12 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 - Custom sysbox deb packages now depend on `fuse3` (fixes installation on minimal systems)
 
 ### Changed
+- **BREAKING:** CLI output is now silent by default (Unix Rule of Silence)
+  - Info, step, and OK messages suppressed unless `--verbose` flag or `CONTAINAI_VERBOSE=1` is set
+  - Warnings and errors always emit to stderr regardless of verbosity
+  - Precedence: `--quiet` > `--verbose` > `CONTAINAI_VERBOSE` environment variable
+  - Note: `-v` is NOT a verbose shorthand (conflicts with `--version` and Docker volume conventions)
+  - `doctor`, `help`, and `version` commands exempt (always produce output)
 
 ### Fixed
 - Isolated Docker daemon architecture: ContainAI now runs a completely separate Docker instance that never modifies system Docker configuration at `/etc/docker/daemon.json` (Linux/WSL2: `containai-docker.service` systemd unit; macOS: `containai-docker` Lima VM)

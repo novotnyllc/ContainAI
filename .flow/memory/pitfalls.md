@@ -271,3 +271,6 @@ Docker inspect in multi-context setups must use DOCKER_CONTEXT= DOCKER_HOST= doc
 
 ## 2026-01-30 manual [pitfall]
 Bash if-statement consumes exit code: capture $? immediately after command, not after 'if cmd; then ... fi' block
+
+## 2026-01-30 manual [pitfall]
+Flag variables stored as option strings (e.g. --force) must use -n test not == true comparison

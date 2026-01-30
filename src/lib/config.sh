@@ -2360,7 +2360,7 @@ _containai_resolve_workspace_with_nesting() {
             return 1
         else
             # Implicit workspace (from cwd) - use parent with info message
-            printf '%s\n' "[INFO] Using existing workspace at $parent_workspace (parent of $normalized_path)" >&2
+            _cai_info "Using existing workspace at $parent_workspace (parent of $normalized_path)"
             printf '%s' "$parent_workspace"
             return 0
         fi

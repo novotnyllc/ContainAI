@@ -463,6 +463,10 @@ _cai_uninstall() {
                 force="true"
                 shift
                 ;;
+            --verbose)
+                _cai_set_verbose
+                shift
+                ;;
             --help | -h)
                 _cai_uninstall_help
                 return 0
@@ -592,6 +596,7 @@ Options:
   --containers    Stop and remove all ContainAI containers
   --volumes       Also remove container volumes (requires --containers)
   --force         Skip confirmation prompts
+  --verbose       Enable verbose output
   -h, --help      Show this help message
 
 What Gets Removed:

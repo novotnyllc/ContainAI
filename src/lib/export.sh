@@ -79,7 +79,14 @@ _export_validate_volume_name() {
 # ==============================================================================
 # Output helpers - all logs go to stderr, only archive path to stdout
 # ==============================================================================
-_export_info() { echo "[INFO] $*" >&2; }
+_export_info() {
+    # Delegate to _cai_info for verbose gating; fallback if not available
+    if declare -f _cai_info >/dev/null 2>&1; then
+        _cai_info "$@"
+    else
+        echo "[INFO] $*" >&2
+    fi
+}
 _export_success() { echo "[OK] $*" >&2; }
 _export_error() { echo "[ERROR] $*" >&2; }
 _export_warn() { echo "[WARN] $*" >&2; }

@@ -36,3 +36,9 @@ CLI argument validation should be order-independent; use pre-scan pass to determ
 
 ## 2026-01-29 manual [convention]
 For portable sub-second timeouts in shell scripts, check for timeout/gtimeout and fall back gracefully
+
+## 2026-01-30 manual [convention]
+CLI commands are silent by default (Unix Rule of Silence). Use `_cai_info()`/`_cai_step()`/`_cai_ok()` for status messages which respect `_CAI_VERBOSE`. Enable with `--verbose` (long form only, no `-v`) or `CONTAINAI_VERBOSE=1` env var. Warnings/errors always emit to stderr. Precedence: `--quiet` > `--verbose` > `CONTAINAI_VERBOSE`
+
+## 2026-01-30 manual [convention]
+Dry-run messages must always emit regardless of verbosity settings - use dedicated _cai_dryrun() that bypasses verbose gating

@@ -210,7 +210,7 @@ Run Options:
   --force               Skip isolation checks (for testing only)
   --detached, -d        Run in background
   --quiet, -q           Suppress verbose output
-  --verbose             Print container and volume names to stderr
+  --verbose             Enable verbose output (status/progress messages)
   --dry-run             Show what would happen without executing (machine-parseable)
   -e, --env <VAR=val>   Set environment variable (repeatable)
   -- <args>             Pass arguments to agent
@@ -290,7 +290,7 @@ Options:
                         Does NOT affect --credentials flag or additional_paths.
                         Note: Has no effect with --from archive.tgz (restores bypass sync).
                         Note: [import].additional_paths are NOT auto-classified as secrets.
-  --verbose, -v         Show verbose output including skipped source files
+  --verbose             Show verbose output including skipped source files
   -h, --help            Show this help message
 
 Note: ~/.claude/.credentials.json and ~/.codex/auth.json are NOT imported from
@@ -338,6 +338,7 @@ Options:
   --config <path>       Config file path (overrides auto-discovery)
   --workspace <path>    Workspace path for config resolution
   --no-excludes         Skip exclude patterns from config
+  --verbose             Enable verbose output
   -h, --help            Show this help message
 
 Output Path:
@@ -365,6 +366,7 @@ Options:
   --all               Stop all containers without prompting (mutually exclusive with --container)
   --remove            Also remove containers (not just stop them)
                       When used with --remove, SSH configs are automatically cleaned
+  --verbose           Enable verbose output
   -h, --help          Show this help message
 
 Examples:
@@ -480,6 +482,7 @@ Options:
   --fresh               Remove and recreate container (preserves data volume)
   --force               Skip isolation checks (for testing only)
   -q, --quiet           Suppress verbose output
+  --verbose             Enable verbose output
   -h, --help            Show this help message
   --                    Separator between cai options and command
 
@@ -523,6 +526,7 @@ Subcommands:
 Scoping Options:
   -g, --global                  Force global scope for set/unset
   --workspace <path>            Apply to specific workspace
+  --verbose                     Enable verbose output
 
 Workspace-scoped keys (saved per workspace):
   data_volume                   Data volume name
@@ -582,6 +586,7 @@ that no longer exist. Also cleans corresponding known_hosts entries.
 
 Options:
   --dry-run     Show what would be cleaned without doing it
+  --verbose     Enable verbose output
   -h, --help    Show this help message
 
 What gets cleaned:
@@ -716,6 +721,7 @@ Options:
   --name <name>         Container name (overrides workspace-based lookup)
   --config <path>       Config file path (overrides auto-discovery)
   --quiet, -q           Suppress verbose output
+  --verbose             Enable verbose output
   --dry-run             Show what would be fixed without making changes (fix only)
   -h, --help            Show this help message
 
@@ -808,8 +814,9 @@ _containai_import_cmd() {
                 no_secrets="true"
                 shift
                 ;;
-            --verbose|-v)
+            --verbose)
                 verbose="true"
+                _cai_set_verbose
                 shift
                 ;;
             --container)
@@ -1282,6 +1289,10 @@ _containai_export_cmd() {
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
+            --verbose)
+                _cai_set_verbose
+                shift
+                ;;
             --help | -h)
                 _containai_export_help
                 return 0
@@ -1454,6 +1465,9 @@ _containai_stop_cmd() {
             --remove)
                 remove_flag=true
                 ;;
+            --verbose)
+                _cai_set_verbose
+                ;;
             # Other args handled in pass 3 (validation pass)
         esac
     done
@@ -1475,7 +1489,7 @@ _containai_stop_cmd() {
         prev=""
         for arg in "$@"; do
             case "$arg" in
-                --container | --all | --remove | --help | -h)
+                --container | --all | --remove | --verbose | --help | -h)
                     # Known flags
                     ;;
                 --container=*)
@@ -1634,6 +1648,9 @@ _containai_sandbox_cmd() {
 
 # Doctor subcommand handler
 _containai_doctor_cmd() {
+    # Exempt command: auto-enable verbose (diagnostic tool - output is the point)
+    _cai_set_verbose
+
     local json_output="false"
     local reset_lima="false"
     local workspace="$PWD"
@@ -1756,6 +1773,10 @@ _containai_ssh_cleanup_cmd() {
                 dry_run="true"
                 shift
                 ;;
+            --verbose)
+                _cai_set_verbose
+                shift
+                ;;
             --help | -h)
                 _containai_ssh_cleanup_help
                 return 0
@@ -1844,6 +1865,10 @@ _containai_config_list_cmd() {
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
+            --verbose)
+                _cai_set_verbose
+                shift
+                ;;
             --help | -h)
                 _containai_config_help
                 return 0
@@ -1902,6 +1927,10 @@ _containai_config_get_cmd() {
                 workspace="${workspace/#\~/$HOME}"
                 shift
                 ;;
+            --verbose)
+                _cai_set_verbose
+                shift
+                ;;
             --help | -h)
                 _containai_config_help
                 return 0
@@ -1941,7 +1970,7 @@ _containai_config_get_cmd() {
     source="${result#*	}"
 
     if [[ -z "$value" ]]; then
-        echo "[INFO] Key '$key' is not set"
+        _cai_info "Key '$key' is not set"
         return 0
     fi
 
@@ -1975,6 +2004,10 @@ _containai_config_set_cmd() {
             --workspace=*)
                 explicit_workspace="${1#--workspace=}"
                 explicit_workspace="${explicit_workspace/#\~/$HOME}"
+                shift
+                ;;
+            --verbose)
+                _cai_set_verbose
                 shift
                 ;;
             --help | -h)
@@ -2108,6 +2141,10 @@ _containai_config_unset_cmd() {
             --workspace=*)
                 explicit_workspace="${1#--workspace=}"
                 explicit_workspace="${explicit_workspace/#\~/$HOME}"
+                shift
+                ;;
+            --verbose)
+                _cai_set_verbose
                 shift
                 ;;
             --help | -h)
@@ -2311,6 +2348,11 @@ _containai_links_check_cmd() {
                 ;;
             --quiet | -q)
                 quiet_flag="true"
+                _cai_set_quiet
+                shift
+                ;;
+            --verbose)
+                _cai_set_verbose
                 shift
                 ;;
             --help | -h)
@@ -2449,6 +2491,11 @@ _containai_links_fix_cmd() {
                 ;;
             --quiet | -q)
                 quiet_flag="true"
+                _cai_set_quiet
+                shift
+                ;;
+            --verbose)
+                _cai_set_verbose
                 shift
                 ;;
             --dry-run)
@@ -2736,10 +2783,12 @@ _containai_shell_cmd() {
                 ;;
             --quiet | -q)
                 quiet_flag=true
+                _cai_set_quiet
                 shift
                 ;;
             --verbose)
                 verbose_flag=true
+                _cai_set_verbose
                 shift
                 ;;
             --debug | -D)
@@ -2806,18 +2855,18 @@ _containai_shell_cmd() {
             --mount-docker-socket | --please-root-my-host | --allow-host-credentials | \
                 --i-understand-this-exposes-host-credentials | --allow-host-docker-socket | \
                 --i-understand-this-grants-root-access)
-                echo "[ERROR] $1 is no longer supported in cai shell" >&2
-                echo "[INFO] cai shell uses SSH - host mounts are not available" >&2
+                _cai_error "$1 is no longer supported in cai shell"
+                _cai_warn "cai shell uses SSH - host mounts are not available"
                 return 1
                 ;;
             --env | -e | --env=* | -e*)
-                echo "[ERROR] --env is not supported in cai shell (SSH mode)" >&2
-                echo "[INFO] Set environment variables in the container's shell directly" >&2
+                _cai_error "--env is not supported in cai shell (SSH mode)"
+                _cai_warn "Set environment variables in the container's shell directly"
                 return 1
                 ;;
             --volume | -v | --volume=* | -v*)
-                echo "[ERROR] --volume is not supported in cai shell (SSH mode)" >&2
-                echo "[INFO] Volumes must be configured at container creation time" >&2
+                _cai_error "--volume is not supported in cai shell (SSH mode)"
+                _cai_warn "Volumes must be configured at container creation time"
                 return 1
                 ;;
             *)
@@ -2853,8 +2902,8 @@ _containai_shell_cmd() {
 
     # Check mutual exclusivity of --reset and --fresh
     if [[ "$reset_flag" == "true" && "$fresh_flag" == "true" ]]; then
-        echo "[ERROR] --reset and --fresh are mutually exclusive" >&2
-        echo "[INFO] --fresh recreates container with same volume; --reset generates new volume" >&2
+        _cai_error "--reset and --fresh are mutually exclusive"
+        _cai_warn "--fresh recreates container with same volume; --reset generates new volume"
         return 1
     fi
 
@@ -2865,8 +2914,8 @@ _containai_shell_cmd() {
             return 1
         fi
         if [[ -n "$cli_volume" ]]; then
-            echo "[ERROR] --reset and --data-volume are mutually exclusive" >&2
-            echo "[INFO] --reset generates a new unique volume name; use --data-volume alone to specify a volume" >&2
+            _cai_error "--reset and --data-volume are mutually exclusive"
+            _cai_warn "--reset generates a new unique volume name; use --data-volume alone to specify a volume"
             return 1
         fi
     fi
@@ -3080,9 +3129,7 @@ _containai_shell_cmd() {
         # This ensures we don't mutate state if validation fails
         local reset_pending=false
         if [[ "$reset_flag" == "true" ]]; then
-            if [[ "$quiet_flag" != "true" ]]; then
-                echo "[INFO] Resetting workspace state..."
-            fi
+            _cai_info "Resetting workspace state..."
 
             # Generate NEW unique volume name (never falls back to default)
             if ! resolved_volume=$(_containai_generate_volume_name "$resolved_workspace"); then
@@ -3201,8 +3248,8 @@ _containai_shell_cmd() {
     if [[ "$fresh_flag" == "true" || "$reset_flag" == "true" ]]; then
         # Log at start of block (regardless of whether container exists)
         # --reset already logged "Resetting workspace state..." above
-        if [[ "$quiet_flag" != "true" && "$fresh_flag" == "true" ]]; then
-            echo "[INFO] Recreating container..."
+        if [[ "$fresh_flag" == "true" ]]; then
+            _cai_info "Recreating container..."
         fi
 
         # Check if container exists
@@ -3292,9 +3339,7 @@ _containai_shell_cmd() {
 
     # Check if container exists; if not, create it first
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "Container not found, creating..." >&2
-        fi
+        _cai_info "Container not found, creating..."
 
         local -a create_args=()
         create_args+=(--data-volume "$resolved_volume")
@@ -3399,16 +3444,16 @@ _containai_shell_cmd() {
             _containai_write_workspace_state "$resolved_workspace" "data_volume" "$resolved_volume" 2>/dev/null || true
         fi
 
-        # Print container/volume info if verbose (stderr for pipeline safety)
+        # Print container/volume info if verbose (uses _cai_info which checks verbose state)
         # Only print here when container existed before this call
         # Skip if --fresh was set (start_container already printed) or container was just created
-        if [[ "$verbose_flag" == "true" && "$quiet_flag" != "true" && "$fresh_flag" != "true" ]]; then
+        if [[ "$verbose_flag" == "true" && "$fresh_flag" != "true" ]]; then
             # Get actual mounted volume from container (source of truth for what's really mounted)
             # Inspect .Mounts to find the volume at /mnt/agent-data - this is the real mounted volume
             local actual_volume
             actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || actual_volume=""
-            printf '%s\n' "[INFO] Container: $resolved_container_name" >&2
-            printf '%s\n' "[INFO] Volume: ${actual_volume:-$resolved_volume}" >&2
+            _cai_info "Container: $resolved_container_name"
+            _cai_info "Volume: ${actual_volume:-$resolved_volume}"
         fi
     fi
 
@@ -3531,10 +3576,12 @@ _containai_exec_cmd() {
                 ;;
             --quiet | -q)
                 quiet_flag=true
+                _cai_set_quiet
                 shift
                 ;;
             --verbose)
                 verbose_flag=true
+                _cai_set_verbose
                 shift
                 ;;
             --debug | -D)
@@ -3790,9 +3837,7 @@ _containai_exec_cmd() {
 
     # Handle --fresh flag: remove and recreate container
     if [[ "$fresh_flag" == "true" ]]; then
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "[INFO] Recreating container..." >&2
-        fi
+        _cai_info "Recreating container..."
 
         # Check if container exists
         if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
@@ -3871,9 +3916,7 @@ _containai_exec_cmd() {
 
     # Check if container exists; if not, create it first
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
-        if [[ "$quiet_flag" != "true" ]]; then
-            echo "Container not found, creating..." >&2
-        fi
+        _cai_info "Container not found, creating..."
 
         # Pass '-- true' to run a no-op command instead of starting the default agent
         local -a create_args=()
@@ -3965,10 +4008,9 @@ _containai_exec_cmd() {
                     return 1
                 elif [[ $exec_port_check_rc -eq 1 ]]; then
                     # Port is in use - recreate container with new port
-                    if [[ "$quiet_flag" != "true" ]]; then
-                        echo "[WARN] SSH port $exec_ssh_port is in use by another process" >&2
-                        echo "Recreating container with new port allocation..." >&2
-                    fi
+                    # Warnings always emit regardless of quiet flag
+                    _cai_warn "SSH port $exec_ssh_port is in use by another process"
+                    _cai_info "Recreating container with new port allocation..."
                     # Remove the old container
                     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -f "$resolved_container_name" >/dev/null 2>&1; then
                         echo "[ERROR] Failed to remove container for port reallocation" >&2
@@ -4194,10 +4236,12 @@ _containai_run_cmd() {
                 ;;
             --quiet | -q)
                 quiet_flag="--quiet"
+                _cai_set_quiet
                 shift
                 ;;
             --verbose)
                 verbose_flag="--verbose"
+                _cai_set_verbose
                 shift
                 ;;
             --debug | -D)
@@ -4299,9 +4343,9 @@ _containai_run_cmd() {
             --volume | -v | --volume=* | -v*)
                 # FR-4: Extra volume mounts are not allowed in containai run
                 # Only workspace + named data volume are permitted
-                echo "[ERROR] --volume is not supported in containai run" >&2
-                echo "[INFO] FR-4 restricts mounts to workspace + data volume only" >&2
-                echo "[INFO] Use 'containai shell' if you need extra mounts" >&2
+                _cai_error "--volume is not supported in containai run"
+                _cai_warn "FR-4 restricts mounts to workspace + data volume only"
+                _cai_warn "Use 'containai shell' if you need extra mounts"
                 return 1
                 ;;
             --help | -h)
@@ -4469,16 +4513,16 @@ _containai_run_cmd() {
 
         # Auto-select Docker context based on isolation availability
         local run_debug_mode=""
-        if [[ "$debug_flag" == "true" ]]; then
+        if [[ -n "$debug_flag" ]]; then
             run_debug_mode="debug"
         fi
         local run_verbose_str="false"
-        if [[ "$verbose_flag" == "true" ]]; then
+        if [[ -n "$verbose_flag" ]]; then
             run_verbose_str="true"
         fi
         local selected_context=""
         if ! selected_context=$(_cai_select_context "$config_context_override" "$run_debug_mode" "$run_verbose_str"); then
-            if [[ "$force_flag" == "true" ]]; then
+            if [[ -n "$force_flag" ]]; then
                 _cai_warn "Sysbox context check failed; attempting to use an existing context without validation."
                 if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
                     selected_context="$config_context_override"
@@ -4779,20 +4823,20 @@ _cai_completions() {
     local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
     local doctor_flags="--json --reset-lima --workspace -w -h --help"
     local doctor_fix_subcommands="volume container"
-    local setup_flags="--dry-run --verbose -v -h --help"
-    local validate_flags="--config --workspace -h --help"
+    local setup_flags="--dry-run --verbose --force -h --help"
+    local validate_flags="--verbose --config --workspace -h --help"
     local docker_flags=""
-    local import_flags="--dry-run --no-excludes --no-secrets --verbose -v --container --data-volume --config --workspace --from -h --help"
-    local export_flags="-o --output --container --data-volume --config --workspace --no-excludes -h --help"
-    local stop_flags="--container --all --remove -h --help"
+    local import_flags="--dry-run --no-excludes --no-secrets --verbose --container --data-volume --config --workspace --from -h --help"
+    local export_flags="-o --output --container --data-volume --config --workspace --no-excludes --verbose -h --help"
+    local stop_flags="--container --all --remove --verbose -h --help"
     local ssh_subcommands="cleanup"
-    local ssh_cleanup_flags="--dry-run -h --help"
+    local ssh_cleanup_flags="--dry-run --verbose -h --help"
     local links_subcommands="check fix"
-    local links_flags="--workspace --name --config --quiet -q --dry-run -h --help"
+    local links_flags="--workspace --name --config --quiet -q --verbose --dry-run -h --help"
     local config_subcommands="list get set unset"
-    local config_flags="-g --global --workspace -h --help"
-    local update_flags="--dry-run --stop-containers --force --lima-recreate --verbose -v -h --help"
-    local uninstall_flags="--dry-run --force -h --help"
+    local config_flags="-g --global --workspace --verbose -h --help"
+    local update_flags="--dry-run --stop-containers --force --lima-recreate --verbose -h --help"
+    local uninstall_flags="--dry-run --containers --volumes --force --verbose -h --help"
     local completion_shells="bash zsh"
 
     # Find the subcommand (first non-flag argument after cai/containai)
@@ -5186,11 +5230,12 @@ _cai() {
                 setup)
                     _arguments \
                         '--dry-run[Show what would happen]' \
-                        '(-v --verbose)'{-v,--verbose}'[Verbose output]' \
+                        '--verbose[Verbose output]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 validate)
                     _arguments \
+                        '--verbose[Verbose output]' \
                         '--config[Config file path]:file:_files' \
                         '--workspace[Workspace path]:directory:_files -/' \
                         '(-h --help)'{-h,--help}'[Show help]'
@@ -5289,7 +5334,7 @@ _cai() {
                         '--dry-run[Show what would happen]' \
                         '--no-excludes[Skip exclude patterns]' \
                         '--no-secrets[Skip secrets sync]' \
-                        '(-v --verbose)'{-v,--verbose}'[Verbose output]' \
+                        '--verbose[Verbose output]' \
                         '--container[Container name]:container:->containers' \
                         '--data-volume[Data volume name]:volume:->volumes' \
                         '--config[Config file path]:file:_files' \
@@ -5305,6 +5350,7 @@ _cai() {
                         '--config[Config file path]:file:_files' \
                         '--workspace[Workspace path]:directory:_files -/' \
                         '--no-excludes[Skip exclude patterns]' \
+                        '--verbose[Verbose output]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 stop)
@@ -5312,6 +5358,7 @@ _cai() {
                         '--container[Container name]:container:->containers' \
                         '--all[Stop all containers]' \
                         '--remove[Remove containers]' \
+                        '--verbose[Verbose output]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 ssh)
@@ -5327,6 +5374,7 @@ _cai() {
                         ssh_args)
                             _arguments \
                                 '--dry-run[Show what would be cleaned]' \
+                                '--verbose[Verbose output]' \
                                 '(-h --help)'{-h,--help}'[Show help]'
                             ;;
                     esac
@@ -5347,6 +5395,7 @@ _cai() {
                                 '--name[Container name]:name:' \
                                 '--config[Config file path]:file:_files' \
                                 '(-q --quiet)'{-q,--quiet}'[Suppress output]' \
+                                '--verbose[Verbose output]' \
                                 '--dry-run[Show what would be fixed]' \
                                 '(-h --help)'{-h,--help}'[Show help]'
                             ;;
@@ -5366,6 +5415,7 @@ _cai() {
                             _arguments \
                                 '(-g --global)'{-g,--global}'[Force global scope]' \
                                 '--workspace[Workspace path]:directory:_files -/' \
+                                '--verbose[Verbose output]' \
                                 '(-h --help)'{-h,--help}'[Show help]' \
                                 '*:key:'
                             ;;
@@ -5377,13 +5427,16 @@ _cai() {
                         '--stop-containers[Stop containers before update]' \
                         '--force[Skip confirmation prompts]' \
                         '--lima-recreate[Force Lima VM recreation]' \
-                        '(-v --verbose)'{-v,--verbose}'[Verbose output]' \
+                        '--verbose[Verbose output]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 uninstall)
                     _arguments \
                         '--dry-run[Show what would happen]' \
+                        '--containers[Remove containers]' \
+                        '--volumes[Remove volumes]' \
                         '--force[Skip confirmation prompts]' \
+                        '--verbose[Verbose output]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 completion)
@@ -5443,6 +5496,11 @@ _containai_completion_cmd() {
 
 containai() {
     local subcommand="${1:-}"
+
+    # Reset verbose/quiet state at start of each invocation
+    # This prevents state leaking between commands in sourced/dev mode
+    _CAI_VERBOSE=""
+    _CAI_QUIET=""
 
     # Run rate-limited update check before command dispatch
     # Skip in CI environments to avoid noise/delays in automated pipelines

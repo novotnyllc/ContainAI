@@ -195,9 +195,9 @@ _cai_handle_wsl2_mirrored_mode() {
 
     # In dry-run mode, just show what would happen
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would prompt to disable mirrored networking"
-        _cai_info "[DRY-RUN] Would modify .wslconfig to set networkingMode=nat"
-        _cai_info "[DRY-RUN] Would run: wsl.exe --shutdown"
+        _cai_dryrun " Would prompt to disable mirrored networking"
+        _cai_dryrun " Would modify .wslconfig to set networkingMode=nat"
+        _cai_dryrun " Would run: wsl.exe --shutdown"
         return 75
     fi
 
@@ -432,7 +432,7 @@ _cai_macos_ensure_host_tools() {
 
     if ! command -v brew >/dev/null 2>&1; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_warn "[DRY-RUN] Homebrew not found; cannot install: ${missing_pkgs[*]}"
+            _cai_dryrun " Homebrew not found; cannot install: ${missing_pkgs[*]}"
             return 0
         fi
         _cai_error "Homebrew is required to install missing tools: ${missing_pkgs[*]}"
@@ -441,7 +441,7 @@ _cai_macos_ensure_host_tools() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would install via brew: ${missing_pkgs[*]}"
+        _cai_dryrun " Would install via brew: ${missing_pkgs[*]}"
         return 0
     fi
 
@@ -856,7 +856,7 @@ _cai_install_sysbox_wsl2() {
     # In dry-run mode, warn but continue
     if ! command -v systemctl >/dev/null 2>&1; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_warn "[DRY-RUN] systemctl not found - systemd required for actual install"
+            _cai_dryrun " systemctl not found - systemd required for actual install"
         else
             _cai_error "Sysbox requires systemd (systemctl not found)"
             _cai_error "  Enable systemd in your WSL distribution:"
@@ -871,7 +871,7 @@ _cai_install_sysbox_wsl2() {
     pid1_cmd=$(ps -p 1 -o comm= 2>/dev/null || true)
     if [[ "$pid1_cmd" != "systemd" ]]; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_warn "[DRY-RUN] Systemd not running as PID 1 (found: $pid1_cmd) - required for actual install"
+            _cai_dryrun " Systemd not running as PID 1 (found: $pid1_cmd) - required for actual install"
         else
             _cai_error "Systemd is not running as PID 1 (found: $pid1_cmd)"
             _cai_error "  Configure WSL to boot with systemd:"
@@ -887,7 +887,7 @@ _cai_install_sysbox_wsl2() {
     # Do this BEFORE checking for Sysbox to ensure jq is available for configure step
     _cai_step "Ensuring required tools are installed"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would ensure jq, ripgrep, and wget are installed"
+        _cai_dryrun " Would ensure jq, ripgrep, and wget are installed"
     else
         local missing_pkgs=()
         if ! command -v jq >/dev/null 2>&1; then
@@ -969,8 +969,8 @@ _cai_install_sysbox_wsl2() {
 
     _cai_step "Installing Sysbox dependencies"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: apt-get update"
-        _cai_info "[DRY-RUN] Would run: apt-get install -y jq ripgrep wget"
+        _cai_dryrun " Would run: apt-get update"
+        _cai_dryrun " Would run: apt-get install -y jq ripgrep wget"
     else
         if ! sudo apt-get update; then
             _cai_error "Failed to run apt-get update"
@@ -987,10 +987,10 @@ _cai_install_sysbox_wsl2() {
     # Note: arch already determined earlier in this function
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would resolve sysbox download URL (ContainAI first, then upstream)"
-        _cai_info "[DRY-RUN] Would download Sysbox .deb for architecture: $arch"
-        _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
-        _cai_ok "Sysbox installation (dry-run) complete"
+        _cai_dryrun " Would resolve sysbox download URL (ContainAI first, then upstream)"
+        _cai_dryrun " Would download Sysbox .deb for architecture: $arch"
+        _cai_dryrun " Would install with: dpkg -i sysbox-ce.deb"
+        _cai_dryrun "Sysbox installation complete"
         return 0
     fi
 
@@ -1079,8 +1079,8 @@ _cai_install_dockerd_bundle() {
 
     if [[ -n "$missing_tools" ]]; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_warn "[DRY-RUN] Missing required tools:$missing_tools"
-            _cai_info "[DRY-RUN] Would install with: sudo apt-get install -y$missing_tools"
+            _cai_dryrun " Missing required tools:$missing_tools"
+            _cai_dryrun " Would install with: sudo apt-get install -y$missing_tools"
         else
             _cai_info "Installing required tools:$missing_tools"
             if ! sudo apt-get update -qq; then
@@ -1122,12 +1122,12 @@ _cai_install_dockerd_bundle() {
     local index_url="https://download.docker.com/linux/static/stable/${arch}/"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would fetch latest version from: $index_url"
-        _cai_info "[DRY-RUN] Would download docker-<version>.tgz"
-        _cai_info "[DRY-RUN] Would extract to: $_CAI_DOCKERD_BUNDLE_DIR/<version>/"
-        _cai_info "[DRY-RUN] Would create symlinks in: $_CAI_DOCKERD_BIN_DIR/"
-        _cai_info "[DRY-RUN] Would write version to: $_CAI_DOCKERD_VERSION_FILE"
-        _cai_ok "Docker bundle installation (dry-run) complete"
+        _cai_dryrun " Would fetch latest version from: $index_url"
+        _cai_dryrun " Would download docker-<version>.tgz"
+        _cai_dryrun " Would extract to: $_CAI_DOCKERD_BUNDLE_DIR/<version>/"
+        _cai_dryrun " Would create symlinks in: $_CAI_DOCKERD_BIN_DIR/"
+        _cai_dryrun " Would write version to: $_CAI_DOCKERD_VERSION_FILE"
+        _cai_dryrun "Docker bundle installation complete"
         return 0
     fi
 
@@ -1289,11 +1289,11 @@ _cai_configure_daemon_json() {
 
     # In dry-run mode, show static preview without requiring jq/sudo
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would ensure directory exists: $(dirname "$daemon_json")"
-        _cai_info "[DRY-RUN] Would read existing config: $daemon_json"
-        _cai_info "[DRY-RUN] Would merge sysbox-runc runtime into daemon.json"
-        _cai_info "[DRY-RUN] Would write to: $daemon_json"
-        _cai_info "[DRY-RUN] Config would include:"
+        _cai_dryrun " Would ensure directory exists: $(dirname "$daemon_json")"
+        _cai_dryrun " Would read existing config: $daemon_json"
+        _cai_dryrun " Would merge sysbox-runc runtime into daemon.json"
+        _cai_dryrun " Would write to: $daemon_json"
+        _cai_dryrun " Config would include:"
         printf '%s\n' '{
   "runtimes": {
     "sysbox-runc": {
@@ -1301,7 +1301,7 @@ _cai_configure_daemon_json() {
     }
   }
 }'
-        _cai_ok "Docker daemon configuration (dry-run) complete"
+        _cai_dryrun "Docker daemon configuration complete"
         return 0
     fi
 
@@ -1387,7 +1387,7 @@ _cai_cleanup_legacy_paths() {
     # Clean up old socket (use -e to catch any file type, not just sockets)
     if [[ -e "$_CAI_LEGACY_SOCKET" ]]; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would remove legacy socket: $_CAI_LEGACY_SOCKET"
+            _cai_dryrun " Would remove legacy socket: $_CAI_LEGACY_SOCKET"
         else
             _cai_info "Removing legacy socket: $_CAI_LEGACY_SOCKET"
             if sudo rm -f "$_CAI_LEGACY_SOCKET"; then
@@ -1409,7 +1409,7 @@ _cai_cleanup_legacy_paths() {
             # On macOS, legacy context cleanup is deferred to after VM verification
             [[ "$verbose" == "true" ]] && _cai_info "Legacy context cleanup deferred until after VM verification (macOS)"
         elif [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would remove legacy context: $_CAI_LEGACY_CONTEXT"
+            _cai_dryrun " Would remove legacy context: $_CAI_LEGACY_CONTEXT"
         else
             _cai_info "Removing legacy context: $_CAI_LEGACY_CONTEXT"
             # Switch to default context first if legacy context is active
@@ -1431,8 +1431,8 @@ _cai_cleanup_legacy_paths() {
     # Clean up old drop-in
     if [[ -f "$_CAI_LEGACY_DROPIN" ]]; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would remove legacy drop-in: $_CAI_LEGACY_DROPIN"
-            _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
+            _cai_dryrun " Would remove legacy drop-in: $_CAI_LEGACY_DROPIN"
+            _cai_dryrun " Would run: systemctl daemon-reload"
         else
             _cai_info "Removing legacy drop-in: $_CAI_LEGACY_DROPIN"
             if sudo rm -f "$_CAI_LEGACY_DROPIN"; then
@@ -1499,9 +1499,9 @@ _cai_cleanup_legacy_lima_vm() {
     _cai_step "Legacy macOS resources detected"
 
     if [[ "$dry_run" == "true" ]]; then
-        [[ "$has_legacy_vm" == "true" ]] && _cai_info "[DRY-RUN] Would offer to delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
-        [[ "$has_legacy_context" == "true" ]] && _cai_info "[DRY-RUN] Would remove legacy context: $_CAI_LEGACY_CONTEXT"
-        _cai_info "[DRY-RUN] (Safe to delete: new VM '$_CAI_LIMA_VM_NAME' is verified working)"
+        [[ "$has_legacy_vm" == "true" ]] && _cai_dryrun " Would offer to delete legacy Lima VM: $_CAI_LEGACY_LIMA_VM_NAME"
+        [[ "$has_legacy_context" == "true" ]] && _cai_dryrun " Would remove legacy context: $_CAI_LEGACY_CONTEXT"
+        _cai_dryrun " (Safe to delete: new VM '$_CAI_LIMA_VM_NAME' is verified working)"
         return 0
     fi
 
@@ -1607,8 +1607,8 @@ EOF
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would create directory: $(dirname "$_CAI_CONTAINAI_DOCKER_CONFIG")"
-        _cai_info "[DRY-RUN] Would write: $_CAI_CONTAINAI_DOCKER_CONFIG"
+        _cai_dryrun " Would create directory: $(dirname "$_CAI_CONTAINAI_DOCKER_CONFIG")"
+        _cai_dryrun " Would write: $_CAI_CONTAINAI_DOCKER_CONFIG"
         return 0
     fi
 
@@ -1650,8 +1650,8 @@ _cai_create_isolated_docker_service() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would write: $_CAI_CONTAINAI_DOCKER_UNIT"
-        _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
+        _cai_dryrun " Would write: $_CAI_CONTAINAI_DOCKER_UNIT"
+        _cai_dryrun " Would run: systemctl daemon-reload"
         return 0
     fi
 
@@ -1680,8 +1680,8 @@ _cai_create_isolated_docker_dirs() {
     _cai_step "Creating isolated Docker directories"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would create: $_CAI_CONTAINAI_DOCKER_DATA"
-        _cai_info "[DRY-RUN] Would create: $_CAI_CONTAINAI_DOCKER_EXEC"
+        _cai_dryrun " Would create: $_CAI_CONTAINAI_DOCKER_DATA"
+        _cai_dryrun " Would create: $_CAI_CONTAINAI_DOCKER_EXEC"
         return 0
     fi
 
@@ -1724,7 +1724,7 @@ _cai_ensure_isolated_bridge() {
 
     if [[ "$bridge_exists" == "false" ]]; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_info "[DRY-RUN] Would create bridge: $bridge"
+            _cai_dryrun " Would create bridge: $bridge"
         else
             if ! sudo ip link add name "$bridge" type bridge; then
                 _cai_error "Failed to create bridge: $bridge"
@@ -1739,8 +1739,8 @@ _cai_ensure_isolated_bridge() {
     fi
 
     if [[ "$dry_run" == "true" && "$bridge_exists" == "false" ]]; then
-        _cai_info "[DRY-RUN] Would assign $bridge_addr to $bridge"
-        _cai_info "[DRY-RUN] Would bring up bridge: $bridge"
+        _cai_dryrun " Would assign $bridge_addr to $bridge"
+        _cai_dryrun " Would bring up bridge: $bridge"
         return 0
     fi
 
@@ -1754,7 +1754,7 @@ _cai_ensure_isolated_bridge() {
             _cai_warn "  Leaving existing address as-is"
         else
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Would assign $bridge_addr to $bridge"
+                _cai_dryrun " Would assign $bridge_addr to $bridge"
             else
                 if ! sudo ip addr add "$bridge_addr" dev "$bridge"; then
                     _cai_error "Failed to assign $bridge_addr to $bridge"
@@ -1765,7 +1765,7 @@ _cai_ensure_isolated_bridge() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would bring up bridge: $bridge"
+        _cai_dryrun " Would bring up bridge: $bridge"
     else
         if ! sudo ip link set "$bridge" up; then
             _cai_error "Failed to bring up bridge: $bridge"
@@ -1786,8 +1786,8 @@ _cai_start_isolated_docker_service() {
     _cai_step "Starting isolated Docker service: $_CAI_CONTAINAI_DOCKER_SERVICE"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would enable and start $_CAI_CONTAINAI_DOCKER_SERVICE"
-        _cai_info "[DRY-RUN] Would wait for socket: $_CAI_CONTAINAI_DOCKER_SOCKET"
+        _cai_dryrun " Would enable and start $_CAI_CONTAINAI_DOCKER_SERVICE"
+        _cai_dryrun " Would wait for socket: $_CAI_CONTAINAI_DOCKER_SOCKET"
         return 0
     fi
 
@@ -1867,7 +1867,7 @@ _cai_create_isolated_docker_context() {
             _cai_warn "  Expected: $expected_host"
 
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Would remove and recreate context"
+                _cai_dryrun " Would remove and recreate context"
             else
                 _cai_step "Removing misconfigured context"
                 # Switch away if this context is currently active
@@ -1885,7 +1885,7 @@ _cai_create_isolated_docker_context() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: docker context create $_CAI_CONTAINAI_DOCKER_CONTEXT --docker host=$expected_host"
+        _cai_dryrun " Would run: docker context create $_CAI_CONTAINAI_DOCKER_CONTEXT --docker host=$expected_host"
     else
         if ! docker context create "$_CAI_CONTAINAI_DOCKER_CONTEXT" --docker "host=$expected_host"; then
             _cai_error "Failed to create Docker context '$_CAI_CONTAINAI_DOCKER_CONTEXT'"
@@ -1908,9 +1908,9 @@ _cai_verify_isolated_docker() {
     _cai_step "Verifying isolated Docker installation"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would verify sysbox-runc is default runtime"
-        _cai_info "[DRY-RUN] Would verify Docker context: $_CAI_CONTAINAI_DOCKER_CONTEXT"
-        _cai_info "[DRY-RUN] Would run test container"
+        _cai_dryrun " Would verify sysbox-runc is default runtime"
+        _cai_dryrun " Would verify Docker context: $_CAI_CONTAINAI_DOCKER_CONTEXT"
+        _cai_dryrun " Would run test container"
         return 0
     fi
 
@@ -2031,9 +2031,9 @@ EOF
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would create directory: $_CAI_DOCKER_DROPIN_DIR"
-        _cai_info "[DRY-RUN] Would write drop-in: $dropin_file"
-        _cai_info "[DRY-RUN] Would run: systemctl daemon-reload"
+        _cai_dryrun " Would create directory: $_CAI_DOCKER_DROPIN_DIR"
+        _cai_dryrun " Would write drop-in: $dropin_file"
+        _cai_dryrun " Would run: systemctl daemon-reload"
         return 0
     fi
 
@@ -2070,8 +2070,8 @@ _cai_restart_docker_service() {
     _cai_step "Restarting Docker service"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: systemctl restart docker"
-        _cai_info "[DRY-RUN] Would wait for socket: $socket_path"
+        _cai_dryrun " Would run: systemctl restart docker"
+        _cai_dryrun " Would wait for socket: $socket_path"
         return 0
     fi
 
@@ -2143,7 +2143,7 @@ _cai_create_containai_context() {
             _cai_warn "  Expected: $expected_host"
 
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Would remove and recreate context"
+                _cai_dryrun " Would remove and recreate context"
             else
                 _cai_step "Removing misconfigured context"
                 if ! docker context rm "$context_name" >/dev/null 2>&1; then
@@ -2155,7 +2155,7 @@ _cai_create_containai_context() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: docker context create $context_name --docker host=$expected_host"
+        _cai_dryrun " Would run: docker context create $context_name --docker host=$expected_host"
     else
         if ! docker context create "$context_name" --docker "host=$expected_host"; then
             _cai_error "Failed to create Docker context '$context_name'"
@@ -2185,9 +2185,9 @@ _cai_verify_sysbox_install() {
     _cai_step "Verifying Sysbox installation"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would verify sysbox-runc and sysbox-mgr"
-        _cai_info "[DRY-RUN] Would verify Docker runtime configuration via socket: $socket_path"
-        _cai_info "[DRY-RUN] Would verify $context_name context"
+        _cai_dryrun " Would verify sysbox-runc and sysbox-mgr"
+        _cai_dryrun " Would verify Docker runtime configuration via socket: $socket_path"
+        _cai_dryrun " Would verify $context_name context"
         return 0
     fi
 
@@ -2337,11 +2337,11 @@ _cai_setup_wsl2_windows_npipe_bridge() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would disable containai-npipe-bridge.service if present"
-        _cai_info "[DRY-RUN] Would configure sshd for key-only auth on port $ssh_port"
-        _cai_info "[DRY-RUN] Would create dedicated SSH key: $wsl_key"
-        _cai_info "[DRY-RUN] Would add host entry: $host_alias"
-        _cai_info "[DRY-RUN] Would update docker contexts to: $(_cai_expected_docker_host)"
+        _cai_dryrun " Would disable containai-npipe-bridge.service if present"
+        _cai_dryrun " Would configure sshd for key-only auth on port $ssh_port"
+        _cai_dryrun " Would create dedicated SSH key: $wsl_key"
+        _cai_dryrun " Would add host entry: $host_alias"
+        _cai_dryrun " Would update docker contexts to: $(_cai_expected_docker_host)"
         return 0
     fi
 
@@ -2657,7 +2657,7 @@ _cai_setup_wsl2() {
         _cai_warn "Isolated Docker verification had issues - check output above"
     fi
 
-    printf '\n'
+_cai_spacing
     _cai_ok "Secure Engine setup complete"
     _cai_info "To use the Secure Engine:"
     _cai_info "  cai run --workspace /path/to/project"
@@ -2837,7 +2837,7 @@ _cai_lima_install() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: brew install lima"
+        _cai_dryrun " Would run: brew install lima"
         return 0
     fi
 
@@ -2906,7 +2906,7 @@ _cai_lima_create_vm() {
         if [[ "$status" == "Stopped" ]]; then
             _cai_step "Starting stopped Lima VM"
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Would run: limactl start $_CAI_LIMA_VM_NAME"
+                _cai_dryrun " Would run: limactl start $_CAI_LIMA_VM_NAME"
             else
                 if ! limactl start "$_CAI_LIMA_VM_NAME"; then
                     _cai_error "Failed to start Lima VM"
@@ -2932,14 +2932,20 @@ _cai_lima_create_vm() {
         _cai_lima_template >"$template_file"
 
         if [[ "$verbose" == "true" ]]; then
-            printf '%s\n' "[INFO] Lima template:"
-            cat "$template_file"
-            printf '\n'
+            # Use _cai_info if available (for verbose gating), otherwise direct print
+            if declare -f _cai_info >/dev/null 2>&1; then
+                _cai_info "Lima template:"
+            else
+                printf '%s\n' "[INFO] Lima template:" >&2
+            fi
+            cat "$template_file" >&2
+            printf '\n' >&2
         fi
 
         if [[ "$dry_run" == "true" ]]; then
-            printf '%s\n' "[INFO] [DRY-RUN] Would run: limactl create --name=$_CAI_LIMA_VM_NAME <template>"
-            printf '%s\n' "[INFO] [DRY-RUN] Would run: limactl start $_CAI_LIMA_VM_NAME"
+            # Dry-run messages always emit (show what would happen)
+            _cai_dryrun "Would run: limactl create --name=$_CAI_LIMA_VM_NAME <template>"
+            _cai_dryrun "Would run: limactl start $_CAI_LIMA_VM_NAME"
             exit 0
         fi
 
@@ -2986,8 +2992,8 @@ _cai_lima_repair_docker_access() {
     _cai_step "Repairing Docker access in Lima VM"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would check and repair docker group membership"
-        _cai_info "[DRY-RUN] Would restart Lima VM to apply changes"
+        _cai_dryrun " Would check and repair docker group membership"
+        _cai_dryrun " Would restart Lima VM to apply changes"
         return 0
     fi
 
@@ -3038,7 +3044,7 @@ _cai_lima_wait_socket() {
     local socket_path="$_CAI_LIMA_SOCKET_PATH"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would wait for socket: $socket_path"
+        _cai_dryrun " Would wait for socket: $socket_path"
         return 0
     fi
 
@@ -3139,7 +3145,7 @@ _cai_lima_create_context() {
             _cai_warn "  Expected: $expected_host"
 
             if [[ "$dry_run" == "true" ]]; then
-                _cai_info "[DRY-RUN] Would remove and recreate context"
+                _cai_dryrun " Would remove and recreate context"
             else
                 _cai_step "Removing misconfigured context"
                 # Switch away from context if it's currently active
@@ -3158,7 +3164,7 @@ _cai_lima_create_context() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would run: docker context create $context_name --docker host=$expected_host"
+        _cai_dryrun " Would run: docker context create $context_name --docker host=$expected_host"
     else
         if ! docker context create "$context_name" --docker "host=$expected_host"; then
             _cai_error "Failed to create Docker context '$context_name'"
@@ -3183,9 +3189,9 @@ _cai_lima_verify_install() {
     _cai_step "Verifying Lima + Sysbox installation"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would verify Lima VM status"
-        _cai_info "[DRY-RUN] Would verify Sysbox in VM"
-        _cai_info "[DRY-RUN] Would verify $context_name context"
+        _cai_dryrun " Would verify Lima VM status"
+        _cai_dryrun " Would verify Sysbox in VM"
+        _cai_dryrun " Would verify $context_name context"
         return 0
     fi
 
@@ -3277,12 +3283,12 @@ _cai_setup_macos() {
     _cai_info "Setting up Secure Engine with Lima VM + Sysbox"
 
     # CRITICAL: Warn about Docker Desktop protection
-    printf '\n'
+_cai_spacing
     _cai_info "IMPORTANT: This setup does NOT modify Docker Desktop"
     _cai_info "  - Docker Desktop remains the default context"
     _cai_info "  - A separate Lima VM provides Sysbox isolation"
     _cai_info "  - Use --context $_CAI_CONTAINAI_DOCKER_CONTEXT to access Sysbox"
-    printf '\n'
+_cai_spacing
 
     # Step 0: Clean up legacy paths (sockets, contexts, drop-ins)
     # Note: Lima VM cleanup happens AFTER new VM is verified (Step 7)
@@ -3338,12 +3344,12 @@ _cai_setup_macos() {
         fi
     fi
 
-    printf '\n'
+_cai_spacing
     _cai_ok "Secure Engine setup complete (macOS/Lima)"
     _cai_info "To use the Secure Engine:"
     _cai_info "  cai run --workspace /path/to/project"
     _cai_info "Or use docker directly: docker --context $_CAI_CONTAINAI_DOCKER_CONTEXT --runtime=sysbox-runc ..."
-    printf '\n'
+_cai_spacing
     _cai_info "Lima VM management:"
     _cai_info "  Start:  limactl start $_CAI_LIMA_VM_NAME"
     _cai_info "  Stop:   limactl stop $_CAI_LIMA_VM_NAME"
@@ -3430,7 +3436,7 @@ _cai_install_sysbox_linux() {
     # Check for systemd (required for Sysbox service)
     if ! command -v systemctl >/dev/null 2>&1; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_warn "[DRY-RUN] systemctl not found - systemd required for actual install"
+            _cai_dryrun " systemctl not found - systemd required for actual install"
         else
             _cai_error "Sysbox requires systemd (systemctl not found)"
             _cai_error "  Sysbox services require systemd to be the init system"
@@ -3455,7 +3461,7 @@ _cai_install_sysbox_linux() {
     # Ensure jq (daemon.json merge), ripgrep (rg), and wget are available
     _cai_step "Ensuring required tools are installed"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would ensure jq, ripgrep, and wget are installed"
+        _cai_dryrun " Would ensure jq, ripgrep, and wget are installed"
     else
         local -a missing_tools=()
         if ! command -v jq >/dev/null 2>&1; then
@@ -3513,10 +3519,10 @@ _cai_install_sysbox_linux() {
     esac
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would resolve sysbox download URL (ContainAI first, then upstream)"
-        _cai_info "[DRY-RUN] Would download Sysbox .deb for architecture: $arch"
-        _cai_info "[DRY-RUN] Would install with: dpkg -i sysbox-ce.deb"
-        _cai_ok "Sysbox installation (dry-run) complete"
+        _cai_dryrun " Would resolve sysbox download URL (ContainAI first, then upstream)"
+        _cai_dryrun " Would download Sysbox .deb for architecture: $arch"
+        _cai_dryrun " Would install with: dpkg -i sysbox-ce.deb"
+        _cai_dryrun "Sysbox installation complete"
         return 0
     fi
 
@@ -3685,9 +3691,9 @@ _cai_verify_sysbox_install_linux() {
     local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would verify sysbox-runc and sysbox-mgr"
-        _cai_info "[DRY-RUN] Would verify Docker runtime configuration via socket: $socket_path"
-        _cai_info "[DRY-RUN] Would verify $context_name context"
+        _cai_dryrun " Would verify sysbox-runc and sysbox-mgr"
+        _cai_dryrun " Would verify Docker runtime configuration via socket: $socket_path"
+        _cai_dryrun " Would verify $context_name context"
         return 0
     fi
 
@@ -3793,11 +3799,11 @@ _cai_setup_linux() {
     if ! _cai_linux_detect_distro; then
         # Distribution not supported for auto-install
         _cai_error "Auto-install not supported for distribution: ${_CAI_LINUX_DISTRO:-unknown}"
-        printf '\n'
+_cai_spacing
         _cai_info "Supported distributions for auto-install:"
         _cai_info "  - Ubuntu 22.04, 24.04"
         _cai_info "  - Debian 11, 12"
-        printf '\n'
+_cai_spacing
         _cai_info "For other distributions, install Sysbox manually:"
         _cai_info "  Fedora/RHEL: Build from source"
         _cai_info "  Arch Linux: AUR package (sysbox-ce-bin)"
@@ -3823,7 +3829,7 @@ _cai_setup_linux() {
     _cai_step "Preflight: Checking Docker CLI"
     if ! command -v docker >/dev/null 2>&1; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_warn "[DRY-RUN] Docker CLI not found - would be required for actual setup"
+            _cai_dryrun " Docker CLI not found - would be required for actual setup"
             _cai_warn "  Install Docker Engine first: https://docs.docker.com/engine/install/"
         else
             _cai_error "Docker CLI is not installed"
@@ -3841,27 +3847,27 @@ _cai_setup_linux() {
     # Step 1: Check for Docker Desktop coexistence
     _cai_step "Checking for Docker Desktop"
     if _cai_linux_docker_desktop_detected; then
-        printf '\n'
+_cai_spacing
         _cai_info "Docker Desktop detected on this system"
         _cai_info "  ContainAI creates a completely isolated Docker daemon"
         _cai_info "  Docker Desktop configuration will NOT be modified"
         _cai_info "  Use --context $_CAI_CONTAINAI_DOCKER_CONTEXT to access Sysbox isolation"
-        printf '\n'
+_cai_spacing
     fi
 
     # Check for active system Docker service (potential iptables conflicts)
     if systemctl is-active docker.service >/dev/null 2>&1; then
-        printf '\n'
+        printf '\n' >&2
         _cai_warn "System docker.service is currently active"
         _cai_warn "  Running two Docker daemons can cause iptables/networking conflicts"
         _cai_warn "  ContainAI uses a separate bridge (cai0) and subnet (172.30.0.0/16)"
         _cai_warn "  to minimize conflicts, but issues may still occur."
-        _cai_warn ""
+        printf '\n' >&2
         _cai_warn "  Options to avoid conflicts:"
         _cai_warn "    1. Stop system Docker while using ContainAI:"
         _cai_warn "       sudo systemctl stop docker.service"
         _cai_warn "    2. Or continue and monitor for networking issues"
-        printf '\n'
+        printf '\n' >&2
         # Not a fatal error - user may want to run both carefully
     fi
 
@@ -3916,7 +3922,7 @@ _cai_setup_linux() {
         _cai_warn "Isolated Docker verification had issues - check output above"
     fi
 
-    printf '\n'
+_cai_spacing
     _cai_ok "Secure Engine setup complete"
     _cai_info "To use the Secure Engine:"
     _cai_info "  cai run --workspace /path/to/project"
@@ -3971,10 +3977,10 @@ _cai_setup_shell_completions() {
 
     if [[ "$dry_run" == "true" ]]; then
         if [[ ! -d "$HOME/.bashrc.d" ]]; then
-            _cai_info "[DRY-RUN] Would create directory $(dirname "$bash_target")"
+            _cai_dryrun " Would create directory $(dirname "$bash_target")"
         fi
-        _cai_info "[DRY-RUN] Would write bash completion to $bash_target"
-        _cai_info "[DRY-RUN] Would ensure ~/.bashrc sources the completion file"
+        _cai_dryrun " Would write bash completion to $bash_target"
+        _cai_dryrun " Would ensure ~/.bashrc sources the completion file"
     else
         # Create parent directory if needed
         local bash_dir
@@ -4045,9 +4051,9 @@ _cai_setup_shell_completions() {
     local zsh_installed="false"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would create directory $zsh_completion_dir"
-        _cai_info "[DRY-RUN] Would write zsh completion to $zsh_target"
-        _cai_info "[DRY-RUN] Would ensure fpath includes $zsh_completion_dir in ~/.zshrc"
+        _cai_dryrun " Would create directory $zsh_completion_dir"
+        _cai_dryrun " Would write zsh completion to $zsh_target"
+        _cai_dryrun " Would ensure fpath includes $zsh_completion_dir in ~/.zshrc"
     else
         # Create directory if needed
         if [[ ! -d "$zsh_completion_dir" ]]; then
@@ -4188,8 +4194,9 @@ _cai_setup() {
                 dry_run="true"
                 shift
                 ;;
-            --verbose | -v)
+            --verbose)
                 verbose="true"
+                _cai_set_verbose
                 shift
                 ;;
             --help | -h)
@@ -4204,14 +4211,14 @@ _cai_setup() {
         esac
     done
 
-    printf '\n'
+    _cai_spacing
     _cai_info "ContainAI Secure Engine Setup"
     _cai_info "=============================="
-    printf '\n'
+    _cai_spacing
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN MODE] No changes will be made"
-        printf '\n'
+        _cai_dryrun "[DRY-RUN MODE] No changes will be made"
+        _cai_spacing
     fi
 
     # Step 0: Setup SSH key and config directory (common to all platforms)
@@ -4220,25 +4227,25 @@ _cai_setup() {
             _cai_error "Failed to setup SSH key"
             return 1
         fi
-        printf '\n'
+        _cai_spacing
         if ! _cai_setup_ssh_config; then
             _cai_error "Failed to setup SSH config"
             return 1
         fi
-        printf '\n'
+        _cai_spacing
     else
-        _cai_info "[DRY-RUN] Would create ~/.config/containai/ directory"
-        _cai_info "[DRY-RUN] Would generate ed25519 SSH key at ~/.config/containai/id_containai"
-        _cai_info "[DRY-RUN] Would create ~/.config/containai/config.toml"
-        _cai_info "[DRY-RUN] Would create ~/.ssh/containai.d/ directory"
-        _cai_info "[DRY-RUN] Would add Include directive to ~/.ssh/config"
-        printf '\n'
+        _cai_dryrun "Would create ~/.config/containai/ directory"
+        _cai_dryrun "Would generate ed25519 SSH key at ~/.config/containai/id_containai"
+        _cai_dryrun "Would create ~/.config/containai/config.toml"
+        _cai_dryrun "Would create ~/.ssh/containai.d/ directory"
+        _cai_dryrun "Would add Include directive to ~/.ssh/config"
+        _cai_spacing
     fi
 
     if _cai_is_container; then
         _cai_setup_nested "$dry_run" "$verbose" || return $?
         # Install shell completions (non-fatal on failure)
-        printf '\n'
+        _cai_spacing
         _cai_setup_shell_completions "$dry_run"
         return 0
     fi
@@ -4280,7 +4287,7 @@ _cai_setup() {
     fi
 
     # Install shell completions (non-fatal on failure)
-    printf '\n'
+    _cai_spacing
     _cai_setup_shell_completions "$dry_run"
 
     return 0
@@ -4296,17 +4303,17 @@ _cai_setup_nested() {
     _cai_info "Detected container environment (nested setup)"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_info "[DRY-RUN] Would stop containai-docker.service if running"
-        _cai_info "[DRY-RUN] Would remove bridge $_CAI_CONTAINAI_DOCKER_BRIDGE if present"
-        _cai_info "[DRY-RUN] Would ensure sysbox-runc is installed and up to date"
-        _cai_info "[DRY-RUN] Would start sysbox-mgr/sysbox-fs if available"
-        _cai_info "[DRY-RUN] Would ensure docker defaults to sysbox-runc"
-        _cai_info "[DRY-RUN] Would ensure docker data-root is /var/lib/docker"
-        _cai_info "[DRY-RUN] Would restart docker.service if configuration changes"
-        _cai_info "[DRY-RUN] Would ensure docker.service is running"
-        _cai_info "[DRY-RUN] Would verify Docker daemon via default context"
-        _cai_info "[DRY-RUN] Would verify DockerRootDir is /var/lib/docker"
-        _cai_info "[DRY-RUN] Would verify default runtime is sysbox-runc"
+        _cai_dryrun " Would stop containai-docker.service if running"
+        _cai_dryrun " Would remove bridge $_CAI_CONTAINAI_DOCKER_BRIDGE if present"
+        _cai_dryrun " Would ensure sysbox-runc is installed and up to date"
+        _cai_dryrun " Would start sysbox-mgr/sysbox-fs if available"
+        _cai_dryrun " Would ensure docker defaults to sysbox-runc"
+        _cai_dryrun " Would ensure docker data-root is /var/lib/docker"
+        _cai_dryrun " Would restart docker.service if configuration changes"
+        _cai_dryrun " Would ensure docker.service is running"
+        _cai_dryrun " Would verify Docker daemon via default context"
+        _cai_dryrun " Would verify DockerRootDir is /var/lib/docker"
+        _cai_dryrun " Would verify default runtime is sysbox-runc"
         return 0
     fi
 
@@ -4543,7 +4550,7 @@ EOF
         return 1
     fi
 
-    printf '\n'
+_cai_spacing
     _cai_ok "Nested setup complete"
     _cai_info "Using default Docker context inside the container"
     return 0
@@ -4671,7 +4678,7 @@ EOF
 _CAI_VALIDATE_TIMEOUT=30
 
 # Validate Secure Engine is correctly configured and operational
-# Arguments: Parsed from command line (--verbose/-v, --help/-h)
+# Arguments: Parsed from command line (--verbose, --help/-h)
 # Returns: 0=all checks pass, 1=one or more checks failed
 # Outputs: Prints validation results to stdout with [PASS]/[FAIL]/[WARN] markers
 #
@@ -4689,8 +4696,9 @@ _cai_secure_engine_validate() {
     # Parse arguments (same pattern as _cai_setup)
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --verbose | -v)
+            --verbose)
                 verbose="true"
+                _cai_set_verbose
                 shift
                 ;;
             --help | -h)
@@ -4707,10 +4715,10 @@ _cai_secure_engine_validate() {
 
     local failed=0
 
-    printf '\n'
+_cai_spacing
     _cai_info "Secure Engine Validation"
     _cai_info "========================"
-    printf '\n'
+_cai_spacing
 
     # Detect platform for expected context and socket path
     # All platforms now use containai-docker context (Linux/WSL2 use isolated daemon, macOS uses Lima VM)
@@ -4947,7 +4955,7 @@ _cai_secure_engine_validate() {
     fi
 
     # Summary
-    printf '\n'
+_cai_spacing
     if [[ $failed -eq 0 ]]; then
         _cai_ok "All Secure Engine validation checks passed"
         return 0
@@ -4968,7 +4976,7 @@ Usage: cai validate [options]
 Verifies that the Secure Engine (Sysbox) is correctly configured and operational.
 
 Options:
-  --verbose, -v   Show detailed information for each check
+  --verbose       Show detailed information for each check
   -h, --help      Show this help message
 
 Validation Checks:

@@ -10,6 +10,7 @@ This guide covers the complete installation and configuration of ContainAI acros
   - [WSL2 (Windows)](#wsl2-windows)
   - [Native Linux](#native-linux)
   - [macOS (via Lima)](#macos-via-lima)
+- [CLI Output Behavior](#cli-output-behavior)
 - [Component Details](#component-details)
 - [Verification](#verification)
 - [Troubleshooting Setup](#troubleshooting-setup)
@@ -215,15 +216,17 @@ ContainAI installs and manages its own dockerd bundle on WSL2 - you do not need 
 # Source ContainAI CLI
 source /path/to/containai/src/containai.sh
 
-# Run setup
+# Run setup (silent by default)
 cai setup
 
-# Or with verbose output
+# Or with verbose output to see progress messages
 cai setup --verbose
 
 # If seccomp warning appears, use --force
 cai setup --force
 ```
+
+> **Note:** Commands are silent by default (Unix Rule of Silence). Use `--verbose` to see status messages during setup, or set `CONTAINAI_VERBOSE=1` for persistent verbosity. Warnings and errors always emit to stderr regardless of verbosity settings.
 
 #### WSL2 Component Locations
 
@@ -316,10 +319,10 @@ ContainAI installs and manages its own dockerd bundle on Linux - you do not need
 # Source ContainAI CLI
 source /path/to/containai/src/containai.sh
 
-# Run setup
+# Run setup (silent by default)
 cai setup
 
-# Or with verbose output
+# Or with verbose output to see progress messages
 cai setup --verbose
 ```
 
@@ -373,10 +376,10 @@ macOS uses Lima to run a Linux VM with Docker and Sysbox. This provides the same
 # Source ContainAI CLI
 source /path/to/containai/src/containai.sh
 
-# Run setup (may take several minutes for Lima VM creation)
+# Run setup (silent by default; may take several minutes for Lima VM creation)
 cai setup
 
-# Or with verbose output
+# Or with verbose output to see progress messages
 cai setup --verbose
 ```
 
@@ -410,6 +413,70 @@ limactl shell containai-docker
 # Delete the VM (removes all data inside VM)
 limactl delete containai-docker
 ```
+
+---
+
+## CLI Output Behavior
+
+ContainAI follows the Unix "Rule of Silence" - commands are silent by default and only produce output when there's something meaningful to report.
+
+### Default Behavior
+
+- **Silent by default**: Info and status messages are suppressed
+- **Warnings and errors always emit**: Important messages always go to stderr
+- **Piping-friendly**: Silent default allows clean piping and scripting
+
+### Enabling Verbose Output
+
+Use the `--verbose` flag (long form only) to see status messages:
+
+```bash
+# See progress during setup
+cai setup --verbose
+
+# See connection messages during shell
+cai shell --verbose
+
+# Verbose import
+cai import --verbose
+```
+
+Or set the environment variable for persistent verbosity:
+
+```bash
+# Enable for current session
+export CONTAINAI_VERBOSE=1
+cai setup
+
+# Or per-command
+CONTAINAI_VERBOSE=1 cai shell
+```
+
+### Precedence Rules
+
+When multiple verbosity controls are specified:
+
+1. `--quiet` overrides everything (suppresses info/step/ok messages)
+2. `--verbose` takes next priority (enables info/step/ok messages)
+3. `CONTAINAI_VERBOSE=1` env var is the default fallback
+
+Example:
+
+```bash
+# Quiet wins over env var
+CONTAINAI_VERBOSE=1 cai shell --quiet  # Silent
+
+# --verbose enables output
+cai setup --verbose  # Shows progress
+```
+
+### Note on `-v` Flag
+
+The `-v` short flag is **not** a verbose shorthand. This avoids conflicts with:
+- Top-level `cai -v` for `--version`
+- Docker conventions where `-v` means volume mount
+
+Always use `--verbose` (long form) for verbosity.
 
 ---
 

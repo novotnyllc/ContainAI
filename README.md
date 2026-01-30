@@ -96,6 +96,8 @@ cai update               # Update ContainAI components
 cai stop --all           # Stop all ContainAI containers
 ```
 
+**Note:** Most commands are silent by default (Unix Rule of Silence). Use `--verbose` to see status messages, or set `CONTAINAI_VERBOSE=1` for persistent verbosity. Warnings and errors always emit to stderr. (`doctor`, `help`, and `version` always produce output.)
+
 ## Documentation
 
 | Document | Description |

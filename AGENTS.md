@@ -72,6 +72,7 @@ docs/                   # Architecture, config, quickstart
 - Functions return status codes; use stdout for data, stderr for errors
 - Error handling: `set -euo pipefail` at script start
 - Build images use buildx by default; platform defaults to `linux/<host-arch>`. Use `--platforms` for CI multi-arch, `--build-setup` to configure buildx/binfmt, and `--image-prefix` to tag/push to a registry.
+- **Verbose pattern:** Commands are silent by default (Unix Rule of Silence). Info messages use `_cai_info()` which respects `_CAI_VERBOSE`. Use `--verbose` flag (long form only, no `-v`) or `CONTAINAI_VERBOSE=1` env var. Warnings/errors always emit to stderr. Precedence: `--quiet` > `--verbose` > `CONTAINAI_VERBOSE`.
 
 See `.flow/memory/conventions.md` for discovered patterns.
 

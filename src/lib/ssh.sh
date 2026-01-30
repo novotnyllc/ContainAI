@@ -1216,11 +1216,11 @@ _cai_update_known_hosts() {
                 key_changed=true
                 _cai_warn "SSH host key has changed for container $container_name (port $ssh_port)"
                 _cai_warn "  Key type: $key_type"
-                _cai_warn ""
+                printf '\n' >&2
                 _cai_warn "This could indicate:"
                 _cai_warn "  1. Container was recreated (expected after --fresh)"
                 _cai_warn "  2. A potential security concern (man-in-the-middle)"
-                _cai_warn ""
+                printf '\n' >&2
                 _cai_warn "If you trust this is the correct container, clean the old key with:"
                 _cai_warn "  ssh-keygen -R \"$host_spec\" -f \"$known_hosts_file\""
                 _cai_warn "Then retry the operation, or use --fresh to force recreation."
@@ -1739,9 +1739,7 @@ _cai_ssh_shell() {
 
     # Start container if not running
     if [[ "$container_state" != "running" ]]; then
-        if [[ "$quiet" != "true" ]]; then
-            _cai_info "Starting container $container_name..."
-        fi
+        _cai_info "Starting container $container_name..."
         if ! "${docker_cmd[@]}" start "$container_name" >/dev/null 2>&1; then
             _cai_error "Failed to start container: $container_name"
             _cai_error ""
@@ -1785,9 +1783,7 @@ _cai_ssh_shell() {
     # flag is for container lifecycle (e.g., --fresh), not SSH setup triggering.
     local config_file="$_CAI_SSH_CONFIG_DIR/${container_name}.conf"
     if [[ ! -f "$config_file" ]]; then
-        if [[ "$quiet" != "true" ]]; then
-            _cai_info "Setting up SSH configuration..."
-        fi
+        _cai_info "Setting up SSH configuration..."
 
         # Full SSH setup (wait for sshd, inject key, update known_hosts, write config)
         if ! _cai_setup_container_ssh "$container_name" "$ssh_port" "$context" "$force_update"; then
@@ -1874,7 +1870,7 @@ _cai_ssh_connect_with_retry() {
         # Use exec $SHELL -l to get a proper login shell with .profile/.bashrc
         ssh_cmd+=("cd /home/agent/workspace && exec \$SHELL -l")
 
-        if [[ "$quiet" != "true" && $retry_count -eq 0 ]]; then
+        if [[ $retry_count -eq 0 ]]; then
             _cai_info "Connecting to container via SSH..."
         fi
 
@@ -1894,7 +1890,7 @@ _cai_ssh_connect_with_retry() {
         case $ssh_exit_code in
             0)
                 # Success
-                if [[ "$host_key_auto_recovered" == "true" && "$quiet" != "true" ]]; then
+                if [[ "$host_key_auto_recovered" == "true" ]]; then
                     _cai_info "Auto-recovered from stale host key"
                 fi
                 return "$_CAI_SSH_EXIT_SUCCESS"
@@ -1905,9 +1901,7 @@ _cai_ssh_connect_with_retry() {
                 if printf '%s' "$ssh_stderr" | grep -qiE "host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED"; then
                     # Auto-recover: clean stale keys and retry (once)
                     if [[ "$host_key_auto_recovered" != "true" ]]; then
-                        if [[ "$quiet" != "true" ]]; then
-                            _cai_warn "SSH host key changed, auto-recovering..."
-                        fi
+                        _cai_warn "SSH host key changed, auto-recovering..."
                         _cai_clean_known_hosts "$ssh_port"
                         _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "true" 2>/dev/null || true
                         host_key_auto_recovered=true
@@ -1941,9 +1935,7 @@ _cai_ssh_connect_with_retry() {
                 # Connection refused or timeout - these are transient, retry
                 retry_count=$((retry_count + 1))
                 if ((retry_count < max_retries)); then
-                    if [[ "$quiet" != "true" ]]; then
-                        _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
-                    fi
+                    _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
 
                     # Exponential backoff
                     local sleep_sec
@@ -2061,9 +2053,7 @@ _cai_ssh_run() {
 
     # Start container if not running
     if [[ "$container_state" != "running" ]]; then
-        if [[ "$quiet" != "true" ]]; then
-            _cai_info "Starting container $container_name..."
-        fi
+        _cai_info "Starting container $container_name..."
         if ! "${docker_cmd[@]}" start "$container_name" >/dev/null 2>&1; then
             _cai_error "Failed to start container: $container_name"
             _cai_error ""
@@ -2107,9 +2097,7 @@ _cai_ssh_run() {
     # flag is for container lifecycle (e.g., --fresh), not SSH setup triggering.
     local config_file="$_CAI_SSH_CONFIG_DIR/${container_name}.conf"
     if [[ ! -f "$config_file" ]]; then
-        if [[ "$quiet" != "true" ]]; then
-            _cai_info "Setting up SSH configuration..."
-        fi
+        _cai_info "Setting up SSH configuration..."
 
         # Full SSH setup (wait for sshd, inject key, update known_hosts, write config)
         if ! _cai_setup_container_ssh "$container_name" "$ssh_port" "$context" "$force_update"; then
@@ -2303,7 +2291,7 @@ _cai_ssh_run_with_retry() {
 
         # Show progress message for non-detached commands (before execution)
         # Detached mode message is shown AFTER PID verification
-        if [[ "$quiet" != "true" && $retry_count -eq 0 && "$detached" != "true" ]]; then
+        if [[ $retry_count -eq 0 && "$detached" != "true" ]]; then
             if [[ ${#cmd_args[@]} -gt 0 ]]; then
                 _cai_info "Running command via SSH..."
             else
@@ -2364,7 +2352,7 @@ _cai_ssh_run_with_retry() {
         case $ssh_exit_code in
             0)
                 # Success
-                if [[ "$host_key_auto_recovered" == "true" && "$quiet" != "true" ]]; then
+                if [[ "$host_key_auto_recovered" == "true" ]]; then
                     _cai_info "Auto-recovered from stale host key"
                 fi
 
@@ -2390,19 +2378,13 @@ _cai_ssh_run_with_retry() {
                         local verify_result
                         verify_result=$("${verify_ssh_cmd[@]}" 2>/dev/null || true)
                         if [[ "$verify_result" == *"running"* ]]; then
-                            if [[ "$quiet" != "true" ]]; then
-                                _cai_info "Command running in background (PID: $remote_pid)"
-                            fi
+                            _cai_info "Command running in background (PID: $remote_pid)"
                         elif [[ "$verify_result" == *"completed"* ]]; then
                             # Process started but completed quickly - this is OK
-                            if [[ "$quiet" != "true" ]]; then
-                                _cai_info "Command started in background (PID: $remote_pid, already completed)"
-                            fi
+                            _cai_info "Command started in background (PID: $remote_pid, already completed)"
                         else
                             # SSH verification failed - but we got a PID, so assume it started
-                            if [[ "$quiet" != "true" ]]; then
-                                _cai_info "Command started in background (PID: $remote_pid)"
-                            fi
+                            _cai_info "Command started in background (PID: $remote_pid)"
                         fi
                     else
                         _cai_error "Background command failed: could not get PID"
@@ -2418,9 +2400,7 @@ _cai_ssh_run_with_retry() {
                 if printf '%s' "$ssh_stderr" | grep -qiE "host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED"; then
                     # Auto-recover: clean stale keys and retry (once)
                     if [[ "$host_key_auto_recovered" != "true" ]]; then
-                        if [[ "$quiet" != "true" ]]; then
-                            _cai_warn "SSH host key changed, auto-recovering..."
-                        fi
+                        _cai_warn "SSH host key changed, auto-recovering..."
                         _cai_clean_known_hosts "$ssh_port"
                         _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "true" 2>/dev/null || true
                         host_key_auto_recovered=true
@@ -2454,9 +2434,7 @@ _cai_ssh_run_with_retry() {
                 # Connection refused or timeout - these are transient, retry
                 retry_count=$((retry_count + 1))
                 if ((retry_count < max_retries)); then
-                    if [[ "$quiet" != "true" ]]; then
-                        _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
-                    fi
+                    _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
 
                     # Exponential backoff
                     local sleep_sec

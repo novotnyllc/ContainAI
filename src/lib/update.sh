@@ -84,7 +84,7 @@ Options:
   --stop-containers   Stop running containers before update (Linux/WSL2)
   --force             Skip all confirmation prompts (includes stopping containers)
   --lima-recreate     Force Lima VM recreation (macOS only; bypasses hash check)
-  --verbose, -v       Show verbose output
+  --verbose           Show verbose output
   -h, --help          Show this help message
 
 What Gets Updated:
@@ -1883,8 +1883,9 @@ _cai_update() {
                 lima_recreate="true"
                 shift
                 ;;
-            --verbose | -v)
+            --verbose)
                 verbose="true"
+                _cai_set_verbose
                 shift
                 ;;
             --help | -h)
