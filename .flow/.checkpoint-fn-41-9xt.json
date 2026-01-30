@@ -1,0 +1,109 @@
+{
+  "created_at": "2026-01-30T16:42:53.231191Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-41-9xt",
+      "created_at": "2026-01-30T03:36:11.202883Z",
+      "default_impl": null,
+      "default_review": null,
+      "default_sync": null,
+      "depends_on_epics": [
+        "fn-36-rb7"
+      ],
+      "id": "fn-41-9xt",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-41-9xt.md",
+      "status": "open",
+      "title": "Silent by Default CLI Output",
+      "updated_at": "2026-01-30T04:16:06.235273Z"
+    },
+    "spec": "# Silent by Default CLI Output\n\n## Overview\n\nImplement Unix CLI best practices for output handling. All commands should be silent by default (no informational messages), with `--verbose|-v` flag to opt-in to status messages. This ensures piping works correctly and follows the Unix \"Rule of Silence.\"\n\n**Current behavior:** Commands emit info messages by default, requiring `--quiet|-q` to suppress.\n**Target behavior:** Commands are silent by default, requiring `--verbose|-v` to see info messages.\n\n## Scope\n\n**In scope:**\n- Add `--verbose|-v` flag to all commands\n- Add `CONTAINAI_VERBOSE=1` environment variable support\n- Modify `_cai_info()`, `_cai_step()`, `_cai_ok()` to respect verbose state\n- Keep `_cai_warn()` and `_cai_error()` always emitting (stderr)\n- Update help text and documentation\n\n**Out of scope:**\n- Verbosity levels (-v, -vv, -vvv) - defer to future\n- Config file `verbose = true` - defer to future\n- Deprecating existing `--quiet` flags - keep for backwards compatibility\n\n**Exempt commands** (always emit output regardless of verbose):\n- `doctor` - diagnostic tool, output is the point\n- `help` / `--help` - output is the point\n- `version` / `--version` - output is the point\n\n## Approach\n\n1. Add global verbose state to `src/lib/core.sh`\n2. Modify logging functions to check `_CAI_VERBOSE` variable\n3. Add `--verbose|-v` flag parsing to each command\n4. Support `CONTAINAI_VERBOSE=1` environment variable\n5. Update documentation\n\nPattern to follow (from `src/lib/core.sh:75-79` debug pattern):\n```bash\n_cai_debug() {\n    [[ \"${CONTAINAI_DEBUG:-}\" == \"1\" ]] || return 0\n    printf '[DEBUG] %s\\n' \"$*\" >&2\n}\n```\n\n## Quick commands\n\n```bash\n# Test silent default\ncai ssh mycontainer 2>&1 | grep -c \"INFO\\|Connecting\"  # Should be 0\n\n# Test verbose mode\ncai ssh mycontainer --verbose 2>&1 | grep -c \"Connecting\"  # Should be 1\n\n# Test env var\nCONTAINAI_VERBOSE=1 cai ssh mycontainer 2>&1 | grep -c \"Connecting\"  # Should be 1\n\n# Lint\nshellcheck -x src/*.sh src/lib/*.sh\n```\n\n## Risks & Dependencies\n\n**Breaking change:** Scripts parsing `[INFO]` lines from stdout/stderr will break. Acceptable per user request.\n\n**Dependency:** fn-36-rb7 (CLI UX Consistency) already added `--verbose` to some commands. This work builds on that foundation.\n\n## Acceptance\n\n- [ ] All commands accept `--verbose|-v` flag\n- [ ] `CONTAINAI_VERBOSE=1` environment variable works\n- [ ] Default output is silent (no info/step/ok messages)\n- [ ] Errors and warnings still emit to stderr\n- [ ] `doctor`, `help`, `version` commands unaffected\n- [ ] Documentation updated (help text, README, AGENTS.md)\n- [ ] shellcheck passes\n\n## References\n\n- Unix Rule of Silence: http://www.catb.org/esr/writings/taoup/html/ch11s09.html\n- CLI Guidelines: https://clig.dev/\n- GNU Option Table: https://www.gnu.org/prep/standards/html_node/Option-Table.html\n- Current logging: `src/lib/core.sh:55-84`\n- Current SSH messages: `src/lib/ssh.sh:1877-1878`\n"
+  },
+  "epic_id": "fn-41-9xt",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-30T03:36:55.890352Z",
+        "depends_on": [],
+        "epic": "fn-41-9xt",
+        "id": "fn-41-9xt.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-41-9xt.1.md",
+        "status": "todo",
+        "title": "Add verbose state to core logging functions",
+        "updated_at": "2026-01-30T03:37:38.289707Z"
+      },
+      "id": "fn-41-9xt.1",
+      "runtime": null,
+      "spec": "# fn-41-9xt.1 Add verbose state to core logging functions\n\n## Description\nAdd global verbose state management to `src/lib/core.sh` and modify logging functions to respect it.\n\n**Size:** M\n**Files:** `src/lib/core.sh`\n\n## Approach\n\n1. Add `_CAI_VERBOSE` global variable (default: empty/false)\n2. Add `_cai_set_verbose()` function to set state\n3. Modify `_cai_info()` to check `_CAI_VERBOSE` before emitting\n4. Modify `_cai_step()` to check `_CAI_VERBOSE` before emitting\n5. Modify `_cai_ok()` to check `_CAI_VERBOSE` before emitting\n6. Support `CONTAINAI_VERBOSE=1` environment variable (like `CONTAINAI_DEBUG`)\n7. Keep `_cai_warn()` and `_cai_error()` unchanged (always emit to stderr)\n\nFollow pattern at `src/lib/core.sh:75-79` for `_cai_debug()`.\n\n## Key context\n\nThe codebase already has `CONTAINAI_DEBUG=1` pattern. Use same style:\n```bash\n_cai_info() {\n    [[ \"${_CAI_VERBOSE:-}\" == \"1\" || \"${CONTAINAI_VERBOSE:-}\" == \"1\" ]] || return 0\n    printf '[INFO] %s\\n' \"$*\"\n}\n```\n## Acceptance\n- [ ] `_CAI_VERBOSE` global variable exists\n- [ ] `_cai_set_verbose()` function sets `_CAI_VERBOSE=1`\n- [ ] `_cai_info()` only emits when verbose is set\n- [ ] `_cai_step()` only emits when verbose is set\n- [ ] `_cai_ok()` only emits when verbose is set\n- [ ] `CONTAINAI_VERBOSE=1` environment variable works\n- [ ] `_cai_warn()` and `_cai_error()` still always emit\n- [ ] shellcheck passes on core.sh\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-30T03:36:55.961159Z",
+        "depends_on": [],
+        "epic": "fn-41-9xt",
+        "id": "fn-41-9xt.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-41-9xt.2.md",
+        "status": "todo",
+        "title": "Add --verbose flag to CLI commands",
+        "updated_at": "2026-01-30T03:37:47.131732Z"
+      },
+      "id": "fn-41-9xt.2",
+      "runtime": null,
+      "spec": "# fn-41-9xt.2 Add --verbose flag to CLI commands\n\n## Description\nAdd `--verbose|-v` flag parsing to all CLI commands in `src/containai.sh` and call `_cai_set_verbose` when flag is present.\n\n**Size:** M\n**Files:** `src/containai.sh`\n\n## Approach\n\n1. Add `--verbose|-v)` case to argument parsing in each command function\n2. Call `_cai_set_verbose` when flag is detected\n3. Update help text for each command to document `--verbose`\n4. Ensure exempt commands (`doctor`, `help`, `version`) call `_cai_set_verbose` unconditionally\n\nCommands to update:\n- `shell` (line ~2600)\n- `exec` (line ~3272)\n- `run` (line ~1269 in container.sh)\n- `ssh` (handled via ssh.sh)\n- `import` (line ~252)\n- `export` (line ~327)\n- `stop` (line ~357)\n- `setup`\n- `update`\n- `status`\n- `links`\n- `cleanup`\n\nFollow existing pattern at `src/containai.sh:3374-3380` for flag parsing.\n\n## Key context\n\nSome commands already have `--verbose` flag but with `verbose_flag=false` default. These need to call `_cai_set_verbose` instead of using local boolean.\n## Acceptance\n- [ ] All main commands accept `--verbose|-v` flag\n- [ ] `--verbose` flag calls `_cai_set_verbose`\n- [ ] `doctor` command auto-enables verbose\n- [ ] Help text for each command documents `--verbose`\n- [ ] Main help text updated with `--verbose` description\n- [ ] shellcheck passes on containai.sh\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-30T03:36:56.036250Z",
+        "depends_on": [
+          "fn-41-9xt.1"
+        ],
+        "epic": "fn-41-9xt",
+        "id": "fn-41-9xt.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-41-9xt.3.md",
+        "status": "todo",
+        "title": "Update SSH and container functions for verbose state",
+        "updated_at": "2026-01-30T03:37:47.208157Z"
+      },
+      "id": "fn-41-9xt.3",
+      "runtime": null,
+      "spec": "# fn-41-9xt.3 Update SSH and container functions for verbose state\n\n## Description\nUpdate SSH and container library functions to use the global verbose state instead of passing `quiet` parameter. Remove redundant info messages that are now gated by verbose.\n\n**Size:** M\n**Files:** `src/lib/ssh.sh`, `src/lib/container.sh`\n\n## Approach\n\n1. In `ssh.sh`: Remove explicit `quiet` parameter checks where `_cai_info` is now auto-gated\n2. In `ssh.sh`: Keep function signatures but simplify internal logic\n3. In `container.sh`: Same approach - rely on global verbose state\n4. Test that `cai ssh` is silent by default\n5. Test that `cai ssh --verbose` shows connection messages\n\nKey locations in ssh.sh:\n- `_cai_ssh_shell()` at line ~1700 (has quiet param)\n- `_cai_ssh_connect_with_retry()` at line ~1812 (has quiet param)\n- `_cai_ssh_run()` at line ~1987 (has quiet param)\n- Connection message at line ~1877-1878\n\n## Key context\n\nCurrent pattern checks `[[ \"$quiet\" != \"true\" ]]` before emitting. After task 1, `_cai_info()` is self-gating, so these explicit checks become redundant and can be simplified.\n## Acceptance\n- [ ] `cai ssh <container>` is silent by default (no \"Connecting...\" message)\n- [ ] `cai ssh <container> --verbose` shows connection messages\n- [ ] `cai shell` is silent by default\n- [ ] `cai shell --verbose` shows status messages\n- [ ] Container lifecycle messages are gated by verbose\n- [ ] shellcheck passes on ssh.sh and container.sh\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-30T03:36:56.108964Z",
+        "depends_on": [
+          "fn-41-9xt.2",
+          "fn-41-9xt.3"
+        ],
+        "epic": "fn-41-9xt",
+        "id": "fn-41-9xt.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-41-9xt.4.md",
+        "status": "todo",
+        "title": "Update documentation and help text",
+        "updated_at": "2026-01-30T03:37:47.356437Z"
+      },
+      "id": "fn-41-9xt.4",
+      "runtime": null,
+      "spec": "# fn-41-9xt.4 Update documentation and help text\n\n## Description\nUpdate documentation to reflect the new silent-by-default behavior and `--verbose` flag.\n\n**Size:** S\n**Files:** `README.md`, `AGENTS.md`, `docs/setup-guide.md`, `.flow/memory/conventions.md`\n\n## Approach\n\n1. Update README.md common commands section to mention `--verbose`\n2. Update AGENTS.md Code Conventions to document verbose pattern\n3. Update docs/setup-guide.md to explain `--verbose` behavior\n4. Add convention to .flow/memory/conventions.md\n5. Prepare CHANGELOG.md entry (under Unreleased)\n\n## Key context\n\nThe setup-guide.md already has examples with `--verbose` (lines 222, 323, 380). These should have explanation text added.\n## Acceptance\n- [ ] README.md mentions `--verbose` flag\n- [ ] AGENTS.md Code Conventions documents verbose pattern\n- [ ] docs/setup-guide.md explains `--verbose` behavior\n- [ ] .flow/memory/conventions.md has verbose pattern entry\n- [ ] CHANGELOG.md has entry under Unreleased\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}
