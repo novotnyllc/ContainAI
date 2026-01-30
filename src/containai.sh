@@ -1172,7 +1172,7 @@ _containai_import_cmd() {
             return 1
         fi
     elif [[ "$hot_reload" == "true" && "$dry_run" == "true" ]]; then
-        _cai_info "[dry-run] Would reload configs into container: $resolved_container_name"
+        _cai_dryrun "Would reload configs into container: $resolved_container_name"
     fi
 }
 
@@ -1609,24 +1609,24 @@ _containai_stop_cmd() {
             if [[ "$remove_flag" == "true" ]]; then
                 local ssh_port
                 ssh_port=$(_cai_get_container_ssh_port "$ws_container_name" "$selected_context" 2>/dev/null) || ssh_port=""
-                echo "Removing: $ws_container_name [context: $selected_context]"
+                _cai_info "Removing: $ws_container_name [context: $selected_context]"
                 if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -f -- "$ws_container_name" >/dev/null 2>&1; then
                     if [[ -n "$ssh_port" ]]; then
                         _cai_cleanup_container_ssh "$ws_container_name" "$ssh_port"
                     else
                         _cai_remove_ssh_host_config "$ws_container_name"
                     fi
-                    echo "Done."
+                    _cai_ok "Done."
                 else
-                    echo "[ERROR] Failed to remove container: $ws_container_name" >&2
+                    _cai_error "Failed to remove container: $ws_container_name"
                     return 1
                 fi
             else
-                echo "Stopping: $ws_container_name [context: $selected_context]"
+                _cai_info "Stopping: $ws_container_name [context: $selected_context]"
                 if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" stop -- "$ws_container_name" >/dev/null 2>&1; then
-                    echo "Done."
+                    _cai_ok "Done."
                 else
-                    echo "[ERROR] Failed to stop container: $ws_container_name" >&2
+                    _cai_error "Failed to stop container: $ws_container_name"
                     return 1
                 fi
             fi
