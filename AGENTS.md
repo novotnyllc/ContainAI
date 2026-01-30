@@ -60,6 +60,13 @@ docs/                   # Architecture, config, quickstart
 .flow/                  # Flow-Next task tracking
 ```
 
+## Config Sync Architecture
+
+- **`src/sync-manifest.toml` is the authoritative source** for what gets synced between host and container
+- `_IMPORT_SYNC_MAP` in `src/lib/import.sh` must match the manifest
+- Run `scripts/check-manifest-consistency.sh` to verify alignment (CI enforces this)
+- Generator scripts (`src/scripts/gen-*.sh`) read the manifest to produce container artifacts
+
 ## Code Conventions
 
 - **Bash 4.0+ required** (not zsh or fish)

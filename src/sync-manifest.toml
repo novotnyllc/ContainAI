@@ -1,5 +1,11 @@
 # ContainAI Sync Manifest
-# Single source of truth for config sync between host and container
+# ==============================================================================
+# AUTHORITATIVE SOURCE: This file is the single source of truth for config sync.
+# ==============================================================================
+#
+# If you modify this manifest, also update _IMPORT_SYNC_MAP in src/lib/import.sh.
+# Run `scripts/check-manifest-consistency.sh` to verify alignment.
+# CI enforces consistency between this manifest and the import map.
 #
 # This manifest defines:
 # - What gets synced from host $HOME to the data volume

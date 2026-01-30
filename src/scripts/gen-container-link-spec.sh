@@ -31,7 +31,7 @@ HOME_DIR="/home/agent"
 # Collect link specs
 declare -a links=()
 
-while IFS='|' read -r source target container_link flags entry_type; do
+while IFS='|' read -r source target container_link flags disabled entry_type; do
     # Skip entries without container_link
     [[ -z "$container_link" ]] && continue
     # Skip dynamic pattern entries (G flag)

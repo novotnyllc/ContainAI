@@ -33,7 +33,7 @@ declare -a file_cmds=()
 declare -a secret_file_cmds=()
 declare -a secret_dir_cmds=()
 
-while IFS='|' read -r source target container_link flags entry_type; do
+while IFS='|' read -r source target container_link flags disabled entry_type; do
     # Skip entries without target
     [[ -z "$target" ]] && continue
     # Skip dynamic pattern entries (G flag)
@@ -85,7 +85,7 @@ while IFS='|' read -r source target container_link flags entry_type; do
 done < <("$PARSE_SCRIPT" "$MANIFEST_FILE")
 
 # Also process container_symlinks section for volume-only entries
-while IFS='|' read -r source target container_link flags entry_type; do
+while IFS='|' read -r source target container_link flags disabled entry_type; do
     [[ "$entry_type" != "symlink" ]] && continue
     [[ -z "$target" ]] && continue
 

@@ -44,7 +44,6 @@ run_cmd mkdir -p \
     /mnt/agent-data/claude/agents \
     /mnt/agent-data/claude/hooks \
     /home/agent/.config/gh \
-    /home/agent/.ssh \
     /home/agent/.config/opencode \
     /mnt/agent-data/config/opencode/agents \
     /mnt/agent-data/config/opencode/commands \
@@ -103,8 +102,6 @@ run_cmd ln -sfn -- "/mnt/agent-data/claude/CLAUDE.md" "/home/agent/.claude/CLAUD
 run_cmd ln -sfn -- "/mnt/agent-data/config/gh/hosts.yml" "/home/agent/.config/gh/hosts.yml"
 run_cmd ln -sfn -- "/mnt/agent-data/config/gh/config.yml" "/home/agent/.config/gh/config.yml"
 run_cmd ln -sfn -- "/mnt/agent-data/git/gitignore_global" "/home/agent/.gitignore_global"
-run_cmd ln -sfn -- "/mnt/agent-data/ssh/config" "/home/agent/.ssh/config"
-run_cmd ln -sfn -- "/mnt/agent-data/ssh/known_hosts" "/home/agent/.ssh/known_hosts"
 run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/opencode.json" "/home/agent/.config/opencode/opencode.json"
 run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/agents" "/home/agent/.config/opencode/agents"
 run_cmd ln -sfn -- "/mnt/agent-data/config/opencode/commands" "/home/agent/.config/opencode/commands"

@@ -14,7 +14,17 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check manifest consistency
+        run: ./scripts/check-manifest-consistency.sh
+
   build:
+    needs: lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
