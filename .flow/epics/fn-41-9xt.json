@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-41-9xt",
+  "created_at": "2026-01-30T03:36:11.202883Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [
+    "fn-36-rb7"
+  ],
+  "id": "fn-41-9xt",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-41-9xt.md",
+  "status": "open",
+  "title": "Silent by Default CLI Output",
+  "updated_at": "2026-01-30T04:16:06.235273Z"
+}

@@ -4,7 +4,8 @@
   "depends_on_epics": [
     "fn-36-rb7",
     "fn-31-gib",
-    "fn-33-lp4"
+    "fn-33-lp4",
+    "fn-41-9xt"
   ],
   "id": "fn-34-fk5",
   "next_task": 1,
@@ -13,5 +14,5 @@
   "spec_path": ".flow/specs/fn-34-fk5.md",
   "status": "open",
   "title": "One-Shot Execution & Container Lifecycle",
-  "updated_at": "2026-01-28T19:47:43.748536Z"
+  "updated_at": "2026-01-30T03:55:35.073887Z"
 }
