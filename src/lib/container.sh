@@ -444,16 +444,21 @@ _cai_find_workspace_container() {
 
     [[ -n "$context" ]] && docker_cmd=(docker --context "$context")
 
-    # 1. Workspace config: check if container_name is saved and container exists
-    local config_name
+    # 1. Workspace config: check if container_name is saved and container still exists for this workspace
+    local config_name config_workspace
     if config_name=$(_containai_read_workspace_key "$workspace_path" "container_name" 2>/dev/null); then
         if [[ -n "$config_name" ]]; then
-            # Check if this container actually exists
-            if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$config_name" >/dev/null 2>&1; then
-                printf '%s\n' "$config_name"
-                return 0
+            # Check if this container actually exists (use -- for option injection protection)
+            if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$config_name" >/dev/null 2>&1; then
+                # Verify container still belongs to this workspace via label
+                config_workspace=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format '{{index .Config.Labels "containai.workspace"}}' -- "$config_name" 2>/dev/null) || config_workspace=""
+                if [[ "$config_workspace" == "$workspace_path" ]]; then
+                    printf '%s\n' "$config_name"
+                    return 0
+                fi
+                # Container exists but belongs to different workspace - fall through
             fi
-            # Container gone - fall through to other methods
+            # Container gone or wrong workspace - fall through to other methods
         fi
     fi
 
@@ -696,7 +701,7 @@ _cai_resolve_container_name() {
 
 # Find container by workspace and optionally filter by image-tag label
 # This is for advanced/debugging use when running multiple images per workspace.
-# Normal use should use _cai_find_workspace_container for lookups (label → new name → legacy hash).
+# Normal use should use _cai_find_workspace_container for lookups (config → label → new name → legacy hash).
 #
 # Arguments:
 #   $1 = workspace path (required)
