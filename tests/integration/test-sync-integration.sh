@@ -22,23 +22,28 @@
 # ==============================================================================
 # Import Test Infrastructure
 # ==============================================================================
-# Test resource helpers for import scenario testing. All test resources are
-# identified by BOTH a name prefix ("test-") AND a Docker label for safe cleanup.
+# Test resource helpers for import scenario testing. Resources created by these
+# helpers are identified by BOTH a name pattern AND Docker labels for safe cleanup.
 #
 # Helper Functions:
 #   create_test_container NAME [DOCKER_ARGS...]
-#     - Creates a container with name "test-<NAME>" and label containai.test=1
+#     - Creates container with name "test-<NAME>-<RUN_ID>"
+#     - Applies labels: containai.test=1, containai.test_run=<RUN_ID>
+#     - NAME must be non-empty alphanumeric (with dash/underscore)
 #     - Passes additional args to docker create
 #     - Returns container ID on stdout
 #
 #   create_test_volume NAME
-#     - Creates a volume with name "test-<NAME>" and label containai.test=1
+#     - Creates volume with name "test-<NAME>-<RUN_ID>"
+#     - Applies labels: containai.test=1, containai.test_run=<RUN_ID>
+#     - NAME must be non-empty alphanumeric (with dash/underscore)
 #     - Returns volume name on stdout
 #
 #   cleanup_test_resources
-#     - Removes all containers and volumes with containai.test=1 label
-#     - Falls back to test- prefix match for unlabeled resources
-#     - Safe for parallel test runs (only removes labeled resources)
+#     - Removes containers/volumes created by THIS run only
+#     - Filters by run-specific label AND name containing RUN_ID
+#     - Falls back to name pattern match for unlabeled resources
+#     - Safe for parallel test runs (scoped by RUN_ID)
 #
 #   create_claude_fixture DIR
 #     - Populates DIR with standard Claude config files for testing
@@ -46,10 +51,10 @@
 #     - Creates: .claude/plugins/cache/test-plugin/plugin.json
 #
 # Resource Naming Convention:
-#   - All test volumes: "test-<purpose>-<run_id>" + containai.test=1 label
-#   - All test containers: "test-<purpose>-<run_id>" + containai.test=1 label
+#   - Resources created via helpers: "test-<purpose>-<run_id>"
+#   - Labels: containai.test=1 (generic), containai.test_run=<run_id> (scoped)
 #   - The test- prefix provides a human safety net
-#   - The label enables programmatic cleanup
+#   - The run-specific label enables parallel-safe cleanup
 # ==============================================================================
 
 set -euo pipefail
@@ -154,73 +159,92 @@ cleanup_test_volumes() {
 # ==============================================================================
 # Import Test Infrastructure
 # ==============================================================================
-# Label used to identify test resources for safe cleanup
+# Labels used to identify test resources for safe cleanup
+# - TEST_RESOURCE_LABEL: generic marker for all test resources
+# - TEST_RUN_LABEL: run-specific marker for parallel safety
 TEST_RESOURCE_LABEL="containai.test=1"
+TEST_RUN_LABEL="containai.test_run=${TEST_RUN_ID}"
 
 # Track test containers created by THIS run (in addition to volumes)
 declare -a TEST_CONTAINERS_CREATED=()
 
-# Create a test container with label and name prefix
+# Create a test container with labels and name prefix
 # Usage: create_test_container NAME [DOCKER_ARGS...]
 # Example: create_test_container "import-new" --volume "$vol:/mnt/agent-data" "$IMAGE_NAME"
 # Returns: container ID on stdout
+# Name must be non-empty and contain only alphanumeric, dash, underscore
 create_test_container() {
     local name="$1"
     shift
-    local full_name="test-${name}-${TEST_RUN_ID}"
-    local container_id
 
-    # Validate name starts with expected prefix (safety check)
-    if [[ ! "$full_name" == test-* ]]; then
-        echo "[ERROR] Container name must start with 'test-'" >&2
+    # Validate name is non-empty and has valid characters
+    if [[ -z "$name" ]]; then
+        printf '%s\n' "[ERROR] Container name cannot be empty" >&2
+        return 1
+    fi
+    if [[ ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        printf '%s\n' "[ERROR] Container name must contain only alphanumeric, dash, underscore" >&2
         return 1
     fi
 
-    # Create container with label
+    local full_name="test-${name}-${TEST_RUN_ID}"
+    local container_id
+
+    # Create container with both labels for parallel-safe cleanup
     container_id=$("${DOCKER_CMD[@]}" create \
         --label "$TEST_RESOURCE_LABEL" \
+        --label "$TEST_RUN_LABEL" \
         --name "$full_name" \
         "$@") || return 1
 
     TEST_CONTAINERS_CREATED+=("$full_name")
-    echo "$container_id"
+    printf '%s\n' "$container_id"
 }
 
-# Create a test volume with label and name prefix
+# Create a test volume with labels and name prefix
 # Usage: create_test_volume NAME
 # Example: vol=$(create_test_volume "import-data")
 # Returns: volume name on stdout
+# Name must be non-empty and contain only alphanumeric, dash, underscore
 create_test_volume() {
     local name="$1"
-    local full_name="test-${name}-${TEST_RUN_ID}"
 
-    # Validate name starts with expected prefix (safety check)
-    if [[ ! "$full_name" == test-* ]]; then
-        echo "[ERROR] Volume name must start with 'test-'" >&2
+    # Validate name is non-empty and has valid characters
+    if [[ -z "$name" ]]; then
+        printf '%s\n' "[ERROR] Volume name cannot be empty" >&2
+        return 1
+    fi
+    if [[ ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        printf '%s\n' "[ERROR] Volume name must contain only alphanumeric, dash, underscore" >&2
         return 1
     fi
 
-    # Create volume with label
+    local full_name="test-${name}-${TEST_RUN_ID}"
+
+    # Create volume with both labels for parallel-safe cleanup
     "${DOCKER_CMD[@]}" volume create \
         --label "$TEST_RESOURCE_LABEL" \
+        --label "$TEST_RUN_LABEL" \
         "$full_name" >/dev/null || return 1
 
     TEST_VOLUMES_CREATED+=("$full_name")
-    echo "$full_name"
+    printf '%s\n' "$full_name"
 }
 
-# Cleanup all test resources (containers and volumes)
-# First pass: remove by label (safe, explicit)
-# Second pass: remove by test- prefix as fallback (catches unlabeled resources)
+# Cleanup test resources created by THIS run (containers and volumes)
+# Strategy: filter by run-specific label AND name containing TEST_RUN_ID
+# This ensures parallel test runs don't interfere with each other
 cleanup_test_resources() {
     local container vol
 
-    # Stop and remove containers by label first
-    local labeled_containers
-    labeled_containers=$("${DOCKER_CMD[@]}" ps -aq --filter "label=$TEST_RESOURCE_LABEL" 2>/dev/null || true)
-    if [[ -n "$labeled_containers" ]]; then
-        echo "$labeled_containers" | xargs "${DOCKER_CMD[@]}" stop 2>/dev/null || true
-        echo "$labeled_containers" | xargs "${DOCKER_CMD[@]}" rm 2>/dev/null || true
+    # Stop and remove containers by run-specific label (parallel-safe)
+    local run_containers
+    run_containers=$("${DOCKER_CMD[@]}" ps -aq \
+        --filter "label=$TEST_RUN_LABEL" \
+        --filter "name=${TEST_RUN_ID}" 2>/dev/null || true)
+    if [[ -n "$run_containers" ]]; then
+        printf '%s\n' "$run_containers" | xargs "${DOCKER_CMD[@]}" stop 2>/dev/null || true
+        printf '%s\n' "$run_containers" | xargs "${DOCKER_CMD[@]}" rm 2>/dev/null || true
     fi
 
     # Stop and remove registered containers (fallback for unlabeled)
@@ -229,11 +253,13 @@ cleanup_test_resources() {
         "${DOCKER_CMD[@]}" rm -- "$container" 2>/dev/null || true
     done
 
-    # Remove volumes by label first
-    local labeled_volumes
-    labeled_volumes=$("${DOCKER_CMD[@]}" volume ls -q --filter "label=$TEST_RESOURCE_LABEL" 2>/dev/null || true)
-    if [[ -n "$labeled_volumes" ]]; then
-        echo "$labeled_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
+    # Remove volumes by run-specific label (parallel-safe)
+    local run_labeled_volumes
+    run_labeled_volumes=$("${DOCKER_CMD[@]}" volume ls -q \
+        --filter "label=$TEST_RUN_LABEL" \
+        --filter "name=${TEST_RUN_ID}" 2>/dev/null || true)
+    if [[ -n "$run_labeled_volumes" ]]; then
+        printf '%s\n' "$run_labeled_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
     fi
 
     # Remove registered volumes (fallback for unlabeled)
@@ -241,11 +267,19 @@ cleanup_test_resources() {
         "${DOCKER_CMD[@]}" volume rm "$vol" 2>/dev/null || true
     done
 
-    # Final fallback: catch any volumes containing this run's ID that weren't registered
+    # Final fallback: catch any volumes/containers containing this run's ID
+    # This catches resources that were created but not registered
     local run_volumes
     run_volumes=$("${DOCKER_CMD[@]}" volume ls --filter "name=${TEST_RUN_ID}" -q 2>/dev/null || true)
     if [[ -n "$run_volumes" ]]; then
-        echo "$run_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
+        printf '%s\n' "$run_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
+    fi
+
+    local run_containers_by_name
+    run_containers_by_name=$("${DOCKER_CMD[@]}" ps -aq --filter "name=${TEST_RUN_ID}" 2>/dev/null || true)
+    if [[ -n "$run_containers_by_name" ]]; then
+        printf '%s\n' "$run_containers_by_name" | xargs "${DOCKER_CMD[@]}" stop 2>/dev/null || true
+        printf '%s\n' "$run_containers_by_name" | xargs "${DOCKER_CMD[@]}" rm 2>/dev/null || true
     fi
 }
 
