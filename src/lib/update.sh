@@ -1927,7 +1927,7 @@ _cai_update() {
     _cai_info ""
     if [[ $overall_status -eq 130 ]]; then
         # User cancelled
-        _cai_info "Update cancelled by user"
+        _cai_warn "Update cancelled by user"
         return 130
     elif [[ $overall_status -eq 2 ]]; then
         # Aborted due to running containers

@@ -146,9 +146,9 @@ _containai_check_image() {
         if printf '%s' "$inspect_output" | grep -qiE "no such image|not found"; then
             _cai_error "Image not found: $image"
             if [[ -n "$context" ]]; then
-                _cai_info "Pull the image with: docker --context $context pull $image"
+                _cai_warn "Pull the image with: docker --context $context pull $image"
             else
-                _cai_info "Pull the image with: docker pull $image"
+                _cai_warn "Pull the image with: docker pull $image"
             fi
         else
             printf '%s\n' "$inspect_output" >&2

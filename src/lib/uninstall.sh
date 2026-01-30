@@ -485,33 +485,41 @@ _cai_uninstall() {
         return 1
     fi
 
-    # Show what will be done (verbose-gated, but always show in dry-run)
-    _cai_info ""
-    _cai_info "ContainAI Uninstall"
-    _cai_info "==================="
-    _cai_info ""
-    _cai_info "The following will be REMOVED:"
-    _cai_info "  - containai-docker.service (systemd unit)"
-    _cai_info "  - Docker contexts: containai-docker, containai-secure, docker-containai (legacy)"
+    # Show what will be done - use _cai_dryrun in dry-run mode (always visible),
+    # _cai_info otherwise (verbose-gated)
+    local _emit
+    if [[ "$dry_run" == "true" ]]; then
+        _emit=_cai_dryrun
+    else
+        _emit=_cai_info
+    fi
+
+    $_emit ""
+    $_emit "ContainAI Uninstall"
+    $_emit "==================="
+    $_emit ""
+    $_emit "The following will be REMOVED:"
+    $_emit "  - containai-docker.service (systemd unit)"
+    $_emit "  - Docker contexts: containai-docker, containai-secure, docker-containai (legacy)"
     if [[ "$remove_containers" == "true" ]]; then
-        _cai_info "  - All ContainAI containers (--containers)"
+        $_emit "  - All ContainAI containers (--containers)"
         if [[ "$remove_volumes" == "true" ]]; then
-            _cai_info "  - Container volumes (--volumes)"
+            $_emit "  - Container volumes (--volumes)"
         fi
     fi
-    _cai_info ""
-    _cai_info "The following will be PRESERVED (user data):"
-    _cai_info "  - ~/.config/containai/ (SSH keys, config)"
-    _cai_info "  - ~/.ssh/containai.d/ (SSH host configs)"
-    _cai_info "  - /etc/containai/docker/ (daemon.json)"
-    _cai_info "  - /var/lib/containai-docker/ (Docker data)"
-    _cai_info "  - Sysbox packages (apt packages)"
-    _cai_info "  - Lima VM (macOS)"
-    _cai_info ""
+    $_emit ""
+    $_emit "The following will be PRESERVED (user data):"
+    $_emit "  - ~/.config/containai/ (SSH keys, config)"
+    $_emit "  - ~/.ssh/containai.d/ (SSH host configs)"
+    $_emit "  - /etc/containai/docker/ (daemon.json)"
+    $_emit "  - /var/lib/containai-docker/ (Docker data)"
+    $_emit "  - Sysbox packages (apt packages)"
+    $_emit "  - Lima VM (macOS)"
+    $_emit ""
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_dryrun "[DRY-RUN MODE - no changes will be made]"
-        _cai_info ""
+        $_emit ""
     fi
 
     # Confirm unless --force or --dry-run
