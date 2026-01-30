@@ -42,3 +42,6 @@ CLI commands are silent by default (Unix Rule of Silence). Use `_cai_info()`/`_c
 
 ## 2026-01-30 manual [convention]
 Dry-run messages must always emit regardless of verbosity settings - use dedicated _cai_dryrun() that bypasses verbose gating
+
+## 2026-01-30 manual [convention]
+Dry-run messages must use _cai_dryrun (or module-specific _xxx_dryrun helper), not _cai_info, to ensure visibility without --verbose
