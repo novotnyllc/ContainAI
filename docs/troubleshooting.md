@@ -17,7 +17,7 @@ Most common issues and their one-line fixes:
 | Updates available warning | Run `cai update` or set `CAI_UPDATE_CHECK_INTERVAL=never` |
 | Claude OAuth token expired | Re-run `claude /login` inside container, or use API key |
 | Files owned by nobody:nogroup | `cai doctor fix volume --all` (Linux/WSL2 only) |
-| claude/bun command not found | Pull latest image: `cai run --fresh /workspace` |
+| claude/bun command not found | Pull latest image: `cai shell --fresh /path/to/workspace` |
 
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
@@ -1221,22 +1221,22 @@ When you run `cai shell`, ContainAI connects to the container via SSH and starts
 
 **Likely causes:**
 1. Container image missing PATH configuration (older image version)
-2. Custom `~/.bash_profile` that doesn't source system profile
+2. Custom `~/.bash_profile` that overwrites PATH without preserving `$PATH`
 3. Shell not running as login shell
 
 **Diagnosis:**
 ```bash
-# Check PATH inside container
-cai exec -- echo '$PATH'
+# Check PATH inside container (use printenv, not echo, for proper expansion)
+cai exec -- printenv PATH
 
 # Check if profile.d script exists
 cai exec -- cat /etc/profile.d/containai-agent-path.sh
 
 # Check which shell init files exist
-cai exec -- ls -la ~/.bash_profile ~/.bash_login ~/.profile 2>/dev/null
+cai exec -- bash -lc 'ls -la ~/.bash_profile ~/.bash_login ~/.profile 2>/dev/null || echo "No user profile files"'
 
 # Verify claude location
-cai exec -- which claude
+cai exec -- command -v claude
 cai exec -- ls -la /home/agent/.local/bin/claude
 ```
 
@@ -1246,13 +1246,18 @@ cai exec -- ls -la /home/agent/.local/bin/claude
    ```bash
    # Pull latest image and recreate container
    docker --context containai-docker pull ghcr.io/novotnyllc/containai/agents:latest
-   cai run --fresh /path/to/workspace
+   cai shell --fresh /path/to/workspace
    ```
 
 2. **Manual PATH fix** (temporary):
    ```bash
-   # Inside container, add to ~/.bashrc
-   echo 'export PATH="/home/agent/.local/bin:/home/agent/.bun/bin:$PATH"' >> ~/.bashrc
+   # Inside container, add to the appropriate profile file
+   # If ~/.bash_profile exists, add there; otherwise add to ~/.profile
+   if [ -f ~/.bash_profile ]; then
+       echo 'export PATH="/home/agent/.local/bin:/home/agent/.bun/bin:$PATH"' >> ~/.bash_profile
+   else
+       echo 'export PATH="/home/agent/.local/bin:/home/agent/.bun/bin:$PATH"' >> ~/.profile
+   fi
    ```
 
 3. **Verify login shell** (for debugging):
@@ -1266,14 +1271,14 @@ cai exec -- ls -la /home/agent/.local/bin/claude
 The container image configures PATH in `/etc/profile.d/containai-agent-path.sh`:
 ```bash
 # Sourced by /etc/profile for all login shells
-if [ "$(id -u)" = "1000" ] || [ "$(whoami)" = "agent" ]; then
+if [ "$(id -u)" = "1000" ] || [ "$(id -un)" = "agent" ]; then
     export PATH="/home/agent/.local/bin:/home/agent/.bun/bin:${PATH}"
 fi
 ```
 
 This is more robust than using `~/.profile` because:
-- Bash login shells check `~/.bash_profile` BEFORE `~/.profile`
-- If `~/.bash_profile` exists, `~/.profile` is never sourced
+- `/etc/profile` is sourced BEFORE user profile files (`~/.bash_profile`, `~/.profile`)
+- User profile files could overwrite PATH without preserving the system-set value
 - `/etc/profile.d/` scripts are always sourced via `/etc/profile`
 
 ---

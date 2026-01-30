@@ -303,7 +303,7 @@ RUN mkdir -p /mnt/agent-data && \
 RUN printf '%s\n' \
     '# ContainAI PATH configuration for agent user tools' \
     '# Sourced by /etc/profile for all login shells (including SSH sessions)' \
-    'if [ "$(id -u)" = "1000" ] || [ "$(whoami)" = "agent" ]; then' \
+    'if [ "$(id -u)" = "1000" ] || [ "$(id -un)" = "agent" ]; then' \
     '    export PATH="/home/agent/.local/bin:/home/agent/.bun/bin:${PATH}"' \
     'fi' \
     > /etc/profile.d/containai-agent-path.sh && \

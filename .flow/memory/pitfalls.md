@@ -274,3 +274,6 @@ Bash if-statement consumes exit code: capture $? immediately after command, not 
 
 ## 2026-01-30 manual [pitfall]
 Flag variables stored as option strings (e.g. --force) must use -n test not == true comparison
+
+## 2026-01-30 manual [pitfall]
+Bash login shells source ~/.bash_profile BEFORE ~/.profile - if .bash_profile exists, .profile is never sourced; use /etc/profile.d/ for robust PATH configuration
