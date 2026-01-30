@@ -144,11 +144,11 @@ section() {
 FAILED=0
 
 # Helper to run commands in rsync container
-# Uses --entrypoint sh to bypass default entrypoint that runs ssh-keygen
+# Uses --entrypoint /bin/sh to bypass default entrypoint that runs ssh-keygen
 # Captures docker exit code to avoid false positives
 run_in_rsync() {
     local output exit_code
-    output=$("${DOCKER_CMD[@]}" run --rm --entrypoint sh -v "$DATA_VOLUME":/data eeacms/rsync -c "$1" 2>&1) || exit_code=$?
+    output=$("${DOCKER_CMD[@]}" run --rm --entrypoint /bin/sh -v "$DATA_VOLUME":/data eeacms/rsync -c "$1" 2>&1) || exit_code=$?
     if [[ ${exit_code:-0} -ne 0 && ${exit_code:-0} -ne 1 ]]; then
         echo "docker_run_failed:$exit_code"
         return 1
@@ -3656,12 +3656,17 @@ data_volume = "'"$test_vol"'"
 
 # Test: No ssh-keygen noise during import
 # Verifies that the rsync image entrypoint is bypassed correctly
+# Uses --from to exercise the mount preflight path that originally triggered the noise
 test_no_ssh_keygen_noise() {
     section "Test 59: No ssh-keygen noise during import"
 
-    # Create a minimal test setup
+    # Create a minimal test setup under REAL_HOME (like test_from_directory)
+    # This ensures Docker can mount the directory
     local test_vol="test-sshkeygen-noise-$$"
-    local test_dir="$FIXTURE_HOME/sshkeygen-test-$$"
+    local alt_source_dir
+    alt_source_dir=$(mktemp -d "${REAL_HOME}/.containai-sshkeygen-test-XXXXXX")
+    local test_dir
+    test_dir=$(mktemp -d)
 
     # Cleanup function
     local cleanup_done=0
@@ -3669,23 +3674,39 @@ test_no_ssh_keygen_noise() {
         [[ $cleanup_done -eq 1 ]] && return
         cleanup_done=1
         "${DOCKER_CMD[@]}" volume rm -f "$test_vol" &>/dev/null || true
-        rm -rf "$test_dir"
+        rm -rf "$alt_source_dir" "$test_dir"
     }
     trap cleanup RETURN
 
-    # Create test directory with minimal fixture
-    mkdir -p "$test_dir/.claude"
-    echo '{"test": "value"}' > "$test_dir/.claude/settings.json"
+    # Create test directory with minimal fixture and distinctive marker
+    mkdir -p "$alt_source_dir/.claude"
+    echo '{"test_marker": "ssh_keygen_test_12345"}' > "$alt_source_dir/.claude/settings.json"
+
+    # Create config pointing to test volume
+    create_env_test_config "$test_dir" '
+[agent]
+data_volume = "'"$test_vol"'"
+'
 
     # Create test volume
     if ! "${DOCKER_CMD[@]}" volume create "$test_vol" &>/dev/null; then
         fail "Failed to create test volume"
         return
     fi
+    register_test_volume "$test_vol"
 
-    # Run import and capture ALL output (stdout and stderr)
-    local import_output
-    import_output=$(run_cai_import_from_dir "$test_dir" "" --data-volume "$test_vol" 2>&1) || true
+    # Run import with --from to exercise the directory source path (including mount preflight)
+    local import_output import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
+
+    # Check import succeeded (must pass for meaningful test)
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Import failed (exit=$import_exit) - cannot verify ssh-keygen noise"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Import with --from succeeded"
 
     # Check for ssh-keygen noise patterns
     if echo "$import_output" | grep -qi "ssh-keygen\|Generating SSH\|ssh-rsa "; then
@@ -3695,14 +3716,15 @@ test_no_ssh_keygen_noise() {
         pass "Import produces no ssh-keygen noise"
     fi
 
-    # Verify import actually worked (sanity check)
+    # Verify import actually synced the content (hard assertion)
     local settings_check
     settings_check=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 cat /data/claude/settings.json 2>/dev/null) || settings_check=""
 
-    if echo "$settings_check" | grep -q "test"; then
-        pass "Import completed successfully (settings.json present)"
+    if echo "$settings_check" | grep -q "ssh_keygen_test_12345"; then
+        pass "Import completed successfully (settings.json marker found)"
     else
-        info "Note: settings.json check failed, but no ssh-keygen noise is the key assertion"
+        fail "Import did not sync settings.json correctly"
+        info "Content: $settings_check"
     fi
 }
 

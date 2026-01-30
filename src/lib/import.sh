@@ -1420,7 +1420,7 @@ _containai_import() {
                 local mount_error
                 if ! mount_error=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
                     --mount "type=bind,src=$from_source,dst=/test,readonly" \
-                    --entrypoint sh \
+                    --entrypoint /bin/sh \
                     eeacms/rsync -c "true" 2>&1); then
                     # Distinguish image pull failure from mount failure
                     if [[ "$mount_error" == *"Unable to find image"* ]] || [[ "$mount_error" == *"pull access denied"* ]] || [[ "$mount_error" == *"manifest unknown"* ]]; then
@@ -2573,7 +2573,7 @@ done <<'"'"'MAP_DATA'"'"'
     # Use source_root (defaults to $HOME, or custom directory from --from)
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
-        --entrypoint sh \
+        --entrypoint /bin/sh \
         --mount type=bind,src="$source_root",dst=/source,readonly \
         --mount type=volume,src="$volume",dst=/target \
         "${env_args[@]}" \
@@ -2633,7 +2633,7 @@ done <<'"'"'MAP_DATA'"'"'
         _import_step "Writing import timestamp..."
         if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
             --mount type=volume,src="$volume",dst=/target \
-            --entrypoint sh \
+            --entrypoint /bin/sh \
             eeacms/rsync -c '
                 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                 tmp="/target/.containai-imported-at.tmp.$$"
