@@ -4303,6 +4303,7 @@ _containai_run_cmd() {
     local resolved_credentials=""
     local resolved_container_name=""  # Container name resolved in standard mode
     local container_workspace=""  # Workspace to use for state write (may differ from resolved_workspace)
+    local run_context=""  # Docker context used for this run (for self-heal inspect)
 
     # Track if we need to save container name to workspace state after success
     local should_save_container_name="false"
@@ -4357,6 +4358,7 @@ _containai_run_cmd() {
 
             # Pass the found context to ensure we use the same context where container exists
             start_args+=(--docker-context "$lookup_context")
+            run_context="$lookup_context"
         elif [[ $lookup_rc -eq 2 ]] || [[ $lookup_rc -eq 3 ]]; then
             # Ambiguity or config parse error - helper already printed details
             return 1
@@ -4479,6 +4481,7 @@ _containai_run_cmd() {
         start_args+=(--docker-context "$selected_context")
         start_args+=(--data-volume "$resolved_volume")
         start_args+=(--workspace "$resolved_workspace")
+        run_context="$selected_context"
 
         # Pass explicit config if provided (for context resolution)
         if [[ -n "$explicit_config" ]]; then
@@ -4592,9 +4595,10 @@ _containai_run_cmd() {
                 # Only self-heal if no env override (env values shouldn't become "sticky")
                 if [[ -z "$existing_ws_vol" ]] && [[ -z "${CONTAINAI_DATA_VOLUME:-}" ]]; then
                     # Get actual mounted volume from container (source of truth)
-                    local actual_volume save_container_name
-                    save_container_name="${container_name:-$resolved_container_name}"
-                    actual_volume=$(docker inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$save_container_name" 2>/dev/null) || actual_volume=""
+                    # Use context-aware inspect to avoid reading wrong container in multi-context setups
+                    local actual_volume inspect_container_name
+                    inspect_container_name="${container_name:-$resolved_container_name}"
+                    actual_volume=$(DOCKER_CONTEXT= DOCKER_HOST= docker --context "${run_context:-default}" inspect --type container --format '{{range .Mounts}}{{if eq .Destination "/mnt/agent-data"}}{{.Name}}{{end}}{{end}}' -- "$inspect_container_name" 2>/dev/null) || actual_volume=""
                     if [[ -n "$actual_volume" ]]; then
                         _containai_write_workspace_state "$container_workspace" "data_volume" "$actual_volume" 2>/dev/null || true
                     fi
