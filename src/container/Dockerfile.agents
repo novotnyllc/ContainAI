@@ -63,19 +63,11 @@ RUN curl -fsSL https://claude.ai/install.sh | bash && \
     # Verify claude installed correctly
     /home/agent/.local/bin/claude --version
 
-# Add Claude/local binaries to PATH via .bashrc.d (for interactive shells)
-# AND via .profile (for SSH login shells - critical for cai shell to find claude)
-# The SSH session runs as a login shell which sources ~/.profile but may not source
-# .bashrc.d depending on shell interactivity state.
+# Add Claude/local binaries to PATH via .bashrc.d (for interactive non-login shells)
+# SSH login shells get PATH from /etc/profile.d/containai-agent-path.sh (set in base image)
 RUN printf '%s\n' \
     'export PATH="/home/agent/.local/bin:${PATH}"' \
-    > /home/agent/.bashrc.d/01-oai-env-vars.sh && \
-    # Add to .profile for login shell sessions (SSH via cai shell)
-    # Check if already present to be idempotent
-    if ! grep -qF '/home/agent/.local/bin' /home/agent/.profile 2>/dev/null; then \
-        printf '\n%s\n' '# Add local binaries to PATH (for SSH login shells)' >> /home/agent/.profile && \
-        printf '%s\n' 'export PATH="/home/agent/.local/bin:${PATH}"' >> /home/agent/.profile; \
-    fi
+    > /home/agent/.bashrc.d/01-oai-env-vars.sh
 
 ENV PATH="/home/agent/.local/bin:${PATH}"
 

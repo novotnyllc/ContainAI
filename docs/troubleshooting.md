@@ -17,6 +17,7 @@ Most common issues and their one-line fixes:
 | Updates available warning | Run `cai update` or set `CAI_UPDATE_CHECK_INTERVAL=never` |
 | Claude OAuth token expired | Re-run `claude /login` inside container, or use API key |
 | Files owned by nobody:nogroup | `cai doctor fix volume --all` (Linux/WSL2 only) |
+| claude/bun command not found | Pull latest image: `cai run --fresh /workspace` |
 
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
@@ -33,6 +34,7 @@ Most common issues and their one-line fixes:
 - [Credential/Import Issues](#credentialimport-issues) (including [Claude OAuth Token Expiration](#claude-oauth-token-expiration-after-import))
 - [Platform-Specific Issues](#platform-specific-issues)
 - [Updates Available Warning](#updates-available-warning)
+- [Shell Environment Issues](#shell-environment-issues) (command not found for claude, bun, etc.)
 - [Still Stuck?](#still-stuck)
 
 ---
@@ -1194,6 +1196,88 @@ sudo systemctl start containai-docker
 
 ---
 
+## Shell Environment Issues
+
+### "Command not found" for claude, bun, uv, etc.
+
+**Symptom:**
+```
+claude: command not found
+```
+or
+```
+bun: command not found
+```
+
+**Background: How `cai shell` Connects**
+
+When you run `cai shell`, ContainAI connects to the container via SSH and starts a login shell:
+
+1. **Connection pathway**: `cai shell` -> SSH to container (port 2300-2500) -> `exec $SHELL -l`
+2. **Shell initialization**: The `-l` flag makes bash source login shell init files
+3. **Init file order**: `/etc/profile` -> (`~/.bash_profile` OR `~/.bash_login` OR `~/.profile`)
+
+**Key insight**: Bash login shells source `/etc/profile` first, which in turn sources all files in `/etc/profile.d/*.sh`. ContainAI sets PATH in `/etc/profile.d/containai-agent-path.sh` to ensure tools are always available regardless of user shell config.
+
+**Likely causes:**
+1. Container image missing PATH configuration (older image version)
+2. Custom `~/.bash_profile` that doesn't source system profile
+3. Shell not running as login shell
+
+**Diagnosis:**
+```bash
+# Check PATH inside container
+cai exec -- echo '$PATH'
+
+# Check if profile.d script exists
+cai exec -- cat /etc/profile.d/containai-agent-path.sh
+
+# Check which shell init files exist
+cai exec -- ls -la ~/.bash_profile ~/.bash_login ~/.profile 2>/dev/null
+
+# Verify claude location
+cai exec -- which claude
+cai exec -- ls -la /home/agent/.local/bin/claude
+```
+
+**Solutions:**
+
+1. **Update container image** (recommended):
+   ```bash
+   # Pull latest image and recreate container
+   docker --context containai-docker pull ghcr.io/novotnyllc/containai/agents:latest
+   cai run --fresh /path/to/workspace
+   ```
+
+2. **Manual PATH fix** (temporary):
+   ```bash
+   # Inside container, add to ~/.bashrc
+   echo 'export PATH="/home/agent/.local/bin:/home/agent/.bun/bin:$PATH"' >> ~/.bashrc
+   ```
+
+3. **Verify login shell** (for debugging):
+   ```bash
+   # Inside container
+   shopt -q login_shell && echo "Login shell" || echo "Not login shell"
+   ```
+
+**Technical Details:**
+
+The container image configures PATH in `/etc/profile.d/containai-agent-path.sh`:
+```bash
+# Sourced by /etc/profile for all login shells
+if [ "$(id -u)" = "1000" ] || [ "$(whoami)" = "agent" ]; then
+    export PATH="/home/agent/.local/bin:/home/agent/.bun/bin:${PATH}"
+fi
+```
+
+This is more robust than using `~/.profile` because:
+- Bash login shells check `~/.bash_profile` BEFORE `~/.profile`
+- If `~/.bash_profile` exists, `~/.profile` is never sourced
+- `/etc/profile.d/` scripts are always sourced via `/etc/profile`
+
+---
+
 ## SSH Debugging Commands
 
 When troubleshooting SSH issues, these commands provide detailed diagnostic information:
@@ -1380,3 +1464,5 @@ Quick reference of error messages and their section in this guide:
 | "Permission denied" | [Permission Issues](#permission-issues) |
 | "Dockerd bundle update available" | [Updates Available Warning](#updates-available-message) |
 | "Files owned by nobody:nogroup" | [Volume Ownership Repair](#files-owned-by-nobodynogroup) |
+| "claude: command not found" | [Shell Environment Issues](#command-not-found-for-claude-bun-uv-etc) |
+| "bun: command not found" | [Shell Environment Issues](#command-not-found-for-claude-bun-uv-etc) |
