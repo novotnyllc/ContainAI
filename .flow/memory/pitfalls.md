@@ -280,3 +280,6 @@ Bash login shells source ~/.bash_profile BEFORE ~/.profile - if .bash_profile ex
 
 ## 2026-01-30 manual [pitfall]
 When using Docker labels for test resource cleanup, use run-scoped labels (test_run=ID) to enable parallel-safe cleanup - generic labels can delete resources from concurrent test runs
+
+## 2026-01-31 manual [pitfall]
+Fractional sleep (e.g., sleep 0.5) is not portable across all environments; use integer sleeps with adjusted iteration counts

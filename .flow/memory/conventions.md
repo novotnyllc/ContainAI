@@ -45,3 +45,6 @@ Dry-run messages must always emit regardless of verbosity settings - use dedicat
 
 ## 2026-01-30 manual [convention]
 Dry-run messages must use _cai_dryrun (or module-specific _xxx_dryrun helper), not _cai_info, to ensure visibility without --verbose
+
+## 2026-01-31 manual [convention]
+Use direct test -f/-d commands instead of parsing ls output for file/directory existence checks in tests
