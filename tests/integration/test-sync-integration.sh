@@ -131,7 +131,8 @@ cleanup_fixture() {
 TEST_RUN_ID="test-$(date +%s)-$$"
 DATA_VOLUME="containai-test-${TEST_RUN_ID}"
 
-IMAGE_NAME="containai-test:latest"
+# Allow CI to override image name; default to containai-test:latest for local runs
+IMAGE_NAME="${IMAGE_NAME:-containai-test:latest}"
 
 # Track all test volumes created by THIS run for safe cleanup
 # (avoids deleting volumes from parallel test runs)

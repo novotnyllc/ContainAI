@@ -20,6 +20,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
       - name: Lint shell scripts with shellcheck
         run: |
           echo "Running shellcheck on shell scripts..."
@@ -203,12 +206,13 @@ jobs:
   # Tiered test strategy:
   # - Host-side tests (manifest parsing, consistency) run in lint job above
   # - Integration tests run here after build, using the built image
-  # - E2E tests requiring sysbox/systemd are documented as manual-only
+  # - Full E2E tests (sysbox/systemd containers) require self-hosted runners
+  #   with sysbox installed - see docs/testing.md for manual E2E testing
   #
   # Test execution on PRs:
   # - Depends on build job to ensure build passes first
   # - Builds image locally (GitHub Actions jobs can't share Docker images)
-  # - Runs full test suite except tests requiring sysbox runtime
+  # - Runs full test suite (standard Docker runtime, no sysbox required)
   #
   # Note: The test job rebuilds the image because GitHub Actions jobs run on
   # separate runners. The build dependency ensures we don't waste CI time
@@ -262,6 +266,6 @@ jobs:
         with:
           name: test-logs-${{ github.run_id }}
           path: |
-            /tmp/containai-test-*
+            ~/.containai-test-*
           retention-days: 7
           if-no-files-found: ignore
