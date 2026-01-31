@@ -68,7 +68,8 @@ _containai_libs_exist() {
         && [[ -f "$_CAI_SCRIPT_DIR/lib/version.sh" ]] \
         && [[ -f "$_CAI_SCRIPT_DIR/lib/uninstall.sh" ]] \
         && [[ -f "$_CAI_SCRIPT_DIR/lib/update.sh" ]] \
-        && [[ -f "$_CAI_SCRIPT_DIR/lib/links.sh" ]]
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/links.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/sync.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -158,6 +159,11 @@ if ! source "$_CAI_SCRIPT_DIR/lib/links.sh"; then
     return 1
 fi
 
+if ! source "$_CAI_SCRIPT_DIR/lib/sync.sh"; then
+    echo "[ERROR] Failed to source lib/sync.sh" >&2
+    return 1
+fi
+
 # Mark libraries as loaded
 _CONTAINAI_LIB_LOADED="1"
 
@@ -183,6 +189,7 @@ Subcommands:
   sandbox       (Deprecated - use 'cai stop && cai --restart')
   import        Sync host configs to data volume
   export        Export data volume to .tgz archive
+  sync          (In-container) Move local configs to data volume with symlinks
   stop          Stop ContainAI containers
   ssh           Manage SSH configuration (cleanup stale configs)
   links         Verify and repair container symlinks
@@ -4812,7 +4819,7 @@ _cai_completions() {
     }
 
     # Subcommands
-    local subcommands="run shell exec doctor setup validate docker import export stop ssh links config update uninstall completion help version"
+    local subcommands="run shell exec doctor setup validate docker import export sync stop ssh links config update uninstall completion help version"
 
     # Global flags
     local global_flags="-h --help"
@@ -4828,6 +4835,7 @@ _cai_completions() {
     local docker_flags=""
     local import_flags="--dry-run --no-excludes --no-secrets --verbose --container --data-volume --config --workspace --from -h --help"
     local export_flags="-o --output --container --data-volume --config --workspace --no-excludes --verbose -h --help"
+    local sync_flags="--dry-run --verbose -h --help"
     local stop_flags="--container --all --remove --verbose -h --help"
     local ssh_subcommands="cleanup"
     local ssh_cleanup_flags="--dry-run --verbose -h --help"
@@ -4973,6 +4981,9 @@ _cai_completions() {
             ;;
         export)
             COMPREPLY=($(compgen -W "$export_flags" -- "$cur"))
+            ;;
+        sync)
+            COMPREPLY=($(compgen -W "$sync_flags" -- "$cur"))
             ;;
         stop)
             COMPREPLY=($(compgen -W "$stop_flags" -- "$cur"))
@@ -5121,6 +5132,7 @@ _cai() {
         'docker:Run docker with ContainAI context'
         'import:Sync host configs to data volume'
         'export:Export data volume to archive'
+        'sync:Move local configs to data volume with symlinks'
         'stop:Stop ContainAI containers'
         'ssh:Manage SSH configuration'
         'links:Verify and repair symlinks'
@@ -5353,6 +5365,12 @@ _cai() {
                         '--verbose[Verbose output]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
+                sync)
+                    _arguments \
+                        '--dry-run[Show what would happen]' \
+                        '--verbose[Verbose output]' \
+                        '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
                 stop)
                     _arguments \
                         '--container[Container name]:container:->containers' \
@@ -5556,6 +5574,10 @@ containai() {
         export)
             shift
             _containai_export_cmd "$@"
+            ;;
+        sync)
+            shift
+            _cai_sync_cmd "$@"
             ;;
         stop)
             shift

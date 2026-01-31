@@ -195,6 +195,8 @@ RUN chmod +x /usr/local/lib/containai/link-watcher.sh && \
 # Copy containai library to /opt/containai
 COPY containai.sh /opt/containai/containai.sh
 COPY lib/ /opt/containai/lib/
+COPY scripts/parse-manifest.sh /opt/containai/scripts/parse-manifest.sh
+COPY sync-manifest.toml /opt/containai/sync-manifest.toml
 
 # Executable wrapper for non-interactive use (docker exec <container> cai --help)
 RUN printf '#!/bin/bash\nsource /opt/containai/containai.sh\ncai "$@"\n' > /usr/local/bin/cai && \
