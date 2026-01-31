@@ -22,6 +22,7 @@
 # 60. New volume scenario test
 # 61. Existing volume scenario test
 # 62-64. .priv. file filtering tests (security)
+# 65. Hot-reload test (live import while container running)
 #
 # ==============================================================================
 # Import Test Infrastructure
@@ -4827,6 +4828,265 @@ EOF
     # Cleanup happens via RETURN trap
 }
 
+# Test: Hot-reload scenario
+# Validates live import while container is running:
+# 1. Creates volume and pre-populates with initial test data
+# 2. Starts container with the volume mounted
+# 3. Modifies host config (source fixture)
+# 4. Runs cai import to sync changes
+# 5. Asserts changes visible inside container without restart
+# 6. Asserts no file corruption (compare checksums)
+# 7. Asserts container process still running after import
+# 8. Cleans up on success/failure (trap)
+test_hot_reload() {
+    section "Test 65: Hot-reload test scenario"
+
+    # Create test volume with proper labels
+    local test_vol test_container_name
+    test_vol=$(create_test_volume "hot-reload-data") || {
+        fail "Failed to create test volume"
+        return
+    }
+
+    # Create source fixture directory under REAL_HOME for Docker mount compatibility
+    local source_dir
+    source_dir=$(mktemp -d "${REAL_HOME}/.containai-hot-reload-test-XXXXXX") || {
+        fail "Failed to create source fixture directory"
+        return
+    }
+    if [[ -z "$source_dir" || ! -d "$source_dir" ]]; then
+        fail "mktemp returned empty or invalid source_dir"
+        return
+    fi
+    local test_dir
+    test_dir=$(mktemp -d) || {
+        fail "Failed to create test directory"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    }
+    if [[ -z "$test_dir" || ! -d "$test_dir" ]]; then
+        fail "mktemp returned empty or invalid test_dir"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    fi
+
+    # Set container name early for cleanup
+    test_container_name="test-hot-reload-${TEST_RUN_ID}"
+
+    # Local cleanup function for this test
+    local cleanup_done=0
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        # Stop and remove container if it exists
+        "${DOCKER_CMD[@]}" stop -- "$test_container_name" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$test_container_name" 2>/dev/null || true
+        # Also remove volume (best-effort, EXIT trap is fallback)
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
+        rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
+    }
+    trap cleanup_test RETURN
+
+    # Create INITIAL Claude config fixture with distinctive markers
+    mkdir -p "$source_dir/.claude/plugins/cache/test-plugin"
+    mkdir -p "$source_dir/.claude/skills/test-skill"
+    echo '{"hot_reload_test": "initial_marker_11111", "version": 1}' > "$source_dir/.claude/settings.json"
+    echo '{"test": true, "version": 1}' > "$source_dir/.claude.json"
+    echo '{}' > "$source_dir/.claude/plugins/cache/test-plugin/plugin.json"
+    echo '{"name": "test-skill", "version": 1}' > "$source_dir/.claude/skills/test-skill/manifest.json"
+
+    # Step 1: Run initial cai import to sync host configs to volume
+    local import_output import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Initial import failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Initial import to volume succeeded"
+
+    # Compute checksum of initial settings.json content
+    local initial_checksum
+    initial_checksum=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c \
+        'cat /data/claude/settings.json | md5sum | cut -d" " -f1' 2>/dev/null) || initial_checksum=""
+    if [[ -z "$initial_checksum" ]]; then
+        fail "Failed to compute initial checksum"
+        return
+    fi
+    pass "Initial checksum computed: $initial_checksum"
+
+    # Step 2: Create container with the test volume mounted
+    if ! create_test_container "hot-reload" \
+        --volume "$test_vol":/mnt/agent-data \
+        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+        fail "Failed to create test container"
+        return
+    fi
+    pass "Created test container: $test_container_name"
+
+    # Step 3: Start the container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to start test container"
+        return
+    fi
+    pass "Started test container"
+
+    # Wait for container to be ready (poll with integer sleep for portability)
+    local wait_count=0
+    while [[ $wait_count -lt 30 ]]; do
+        if "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data/claude 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    if [[ $wait_count -ge 30 ]]; then
+        fail "Container did not become ready in time (30s timeout)"
+        return
+    fi
+
+    # Verify initial marker is present
+    local initial_content
+    initial_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /mnt/agent-data/claude/settings.json 2>&1) || initial_content=""
+
+    if echo "$initial_content" | grep -q "initial_marker_11111"; then
+        pass "Initial marker present in container before hot-reload"
+    else
+        fail "Initial marker NOT found in container"
+        info "Content: $initial_content"
+        return
+    fi
+
+    # Record container StartedAt for restart detection (PID 1 always returns 1 inside container)
+    local started_at_before
+    started_at_before=$("${DOCKER_CMD[@]}" inspect -f '{{.State.StartedAt}}' "$test_container_name" 2>&1) || started_at_before=""
+
+    # Step 4: Modify host config while container is running
+    echo '{"hot_reload_test": "updated_marker_22222", "version": 2, "new_field": "added_after_hot_reload"}' > "$source_dir/.claude/settings.json"
+    echo '{"name": "test-skill", "version": 2, "updated": true}' > "$source_dir/.claude/skills/test-skill/manifest.json"
+    pass "Modified host config files"
+
+    # Step 5: Run cai import to sync changes (hot-reload)
+    import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Hot-reload import failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Hot-reload import succeeded"
+
+    # Step 6: Assert changes visible inside container via docker exec cat (without restart)
+    local updated_content
+    updated_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /mnt/agent-data/claude/settings.json 2>&1) || updated_content=""
+
+    if echo "$updated_content" | grep -q "updated_marker_22222"; then
+        pass "Updated marker visible in container (hot-reload worked)"
+    else
+        fail "Updated marker NOT found in container after hot-reload"
+        info "Expected: updated_marker_22222"
+        info "Got: $updated_content"
+    fi
+
+    if echo "$updated_content" | grep -q "new_field"; then
+        pass "New field visible in container (hot-reload worked)"
+    else
+        fail "New field NOT found in container after hot-reload"
+        info "Content: $updated_content"
+    fi
+
+    # Check skill manifest was updated
+    local skill_content
+    skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /mnt/agent-data/claude/skills/test-skill/manifest.json 2>&1) || skill_content=""
+
+    if echo "$skill_content" | grep -q '"version": 2'; then
+        pass "Skill manifest updated to version 2"
+    else
+        fail "Skill manifest NOT updated"
+        info "Content: $skill_content"
+    fi
+
+    # Step 7: Assert no file corruption (compare checksums against host fixture)
+    # Compute expected checksum from host file
+    local expected_checksum
+    expected_checksum=$("${DOCKER_CMD[@]}" run --rm -v "$source_dir":/src alpine:3.19 sh -c \
+        'cat /src/.claude/settings.json | md5sum | cut -d" " -f1' 2>/dev/null) || expected_checksum=""
+    if [[ -z "$expected_checksum" ]]; then
+        fail "Failed to compute expected checksum from host fixture"
+        return
+    fi
+
+    # Compute actual checksum inside container using alpine for portability (md5sum guaranteed)
+    local actual_checksum
+    actual_checksum=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c \
+        'cat /data/claude/settings.json | md5sum | cut -d" " -f1' 2>/dev/null) || actual_checksum=""
+
+    if [[ -z "$actual_checksum" ]]; then
+        fail "Failed to compute checksum from container volume"
+    elif [[ "$actual_checksum" != "$expected_checksum" ]]; then
+        fail "Checksum mismatch: container file differs from host fixture (corruption)"
+        info "Expected: $expected_checksum"
+        info "Got: $actual_checksum"
+    else
+        pass "Checksum matches host fixture (no corruption)"
+    fi
+
+    # Also verify checksum changed from initial (file was actually updated)
+    if [[ "$actual_checksum" == "$initial_checksum" ]]; then
+        fail "Checksum unchanged after hot-reload (file not updated)"
+    else
+        pass "Checksum changed after hot-reload (file updated correctly)"
+    fi
+
+    # Verify skill manifest checksum matches host fixture
+    local expected_skill_checksum actual_skill_checksum
+    expected_skill_checksum=$("${DOCKER_CMD[@]}" run --rm -v "$source_dir":/src alpine:3.19 sh -c \
+        'cat /src/.claude/skills/test-skill/manifest.json | md5sum | cut -d" " -f1' 2>/dev/null) || expected_skill_checksum=""
+    actual_skill_checksum=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c \
+        'cat /data/claude/skills/test-skill/manifest.json | md5sum | cut -d" " -f1' 2>/dev/null) || actual_skill_checksum=""
+
+    if [[ -n "$expected_skill_checksum" && "$expected_skill_checksum" == "$actual_skill_checksum" ]]; then
+        pass "Skill manifest checksum matches host fixture"
+    elif [[ -z "$actual_skill_checksum" ]]; then
+        fail "Failed to compute skill manifest checksum from container"
+    else
+        fail "Skill manifest checksum mismatch (corruption)"
+        info "Expected: $expected_skill_checksum"
+        info "Got: $actual_skill_checksum"
+    fi
+
+    # Step 8: Assert container process still running after import
+    local container_running
+    container_running=$("${DOCKER_CMD[@]}" inspect -f '{{.State.Running}}' "$test_container_name" 2>&1) || container_running=""
+
+    if [[ "$container_running" == "true" ]]; then
+        pass "Container still running after hot-reload"
+    else
+        fail "Container NOT running after hot-reload"
+        info "State: $container_running"
+    fi
+
+    # Verify container was not restarted (compare StartedAt timestamps)
+    local started_at_after
+    started_at_after=$("${DOCKER_CMD[@]}" inspect -f '{{.State.StartedAt}}' "$test_container_name" 2>&1) || started_at_after=""
+
+    if [[ -n "$started_at_before" && "$started_at_before" == "$started_at_after" ]]; then
+        pass "Container StartedAt unchanged (no restart occurred)"
+    elif [[ -z "$started_at_after" ]]; then
+        fail "Could not verify container StartedAt after hot-reload"
+    else
+        fail "Container was restarted during hot-reload"
+        info "StartedAt before: $started_at_before"
+        info "StartedAt after: $started_at_after"
+    fi
+
+    # Cleanup happens automatically via RETURN trap
+}
+
 # ==============================================================================
 # Main
 # ==============================================================================
@@ -4915,6 +5175,9 @@ main() {
     # Import scenario tests (Test 60-61)
     test_new_volume
     test_existing_volume
+
+    # Hot-reload test (Test 65)
+    test_hot_reload
 
     # .priv. file filtering tests (Tests 62-64)
     test_priv_file_filtering
