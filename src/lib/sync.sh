@@ -318,15 +318,6 @@ _cai_sync_entry() {
             printf '[ERROR] Failed to create symlink: %s -> %s\n' "$home_link" "$volume_target" >&2
             return 1
         fi
-
-        # When container_link != source, also create symlink at original source location
-        # so that tools expecting the original path still work
-        if [[ "$container_link" != "$source" ]]; then
-            if ! ln -sfn "$volume_target" "$home_source" 2>/dev/null; then
-                printf '[WARN] Failed to create symlink at original location: %s\n' "$home_source" >&2
-                # Non-fatal - the primary symlink was created
-            fi
-        fi
     fi
 
     printf '[OK] ~/%s -> %s (moved %d files)\n' "$source" "$volume_target" "$item_count"
@@ -365,15 +356,15 @@ _cai_sync_cmd() {
         esac
     done
 
-    # Check required commands are available
-    if ! _cai_sync_check_dependencies; then
-        return 1
-    fi
-
-    # Check we're inside a container
+    # Check we're inside a container (do this first to give clear error on host)
     if ! _cai_sync_detect_container; then
         printf '[ERROR] cai sync must be run inside a ContainAI container\n' >&2
         printf '  /mnt/agent-data must be mounted AND container indicators present\n' >&2
+        return 1
+    fi
+
+    # Check required commands are available
+    if ! _cai_sync_check_dependencies; then
         return 1
     fi
 
