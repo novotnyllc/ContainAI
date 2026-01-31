@@ -3953,10 +3953,11 @@ test_new_volume() {
     cleanup_test() {
         [[ $cleanup_done -eq 1 ]] && return
         cleanup_done=1
-        # Stop and remove container if it exists (use variable, not hardcoded name)
+        # Stop and remove container if it exists
         "${DOCKER_CMD[@]}" stop -- "$test_container_name" 2>/dev/null || true
         "${DOCKER_CMD[@]}" rm -- "$test_container_name" 2>/dev/null || true
-        # Volume cleanup handled by cleanup_test_resources via EXIT trap
+        # Also remove volume (best-effort, EXIT trap is fallback)
+        "${DOCKER_CMD[@]}" volume rm "$test_vol" 2>/dev/null || true
         rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
     }
     trap cleanup_test RETURN
@@ -4005,53 +4006,42 @@ data_volume = "'"$test_vol"'"
     fi
     pass "Started test container"
 
-    # Wait for container to be ready (poll for volume mount, not fixed sleep)
+    # Wait for container to be ready (poll with integer sleep for portability)
     local wait_count=0
-    while [[ $wait_count -lt 10 ]]; do
+    while [[ $wait_count -lt 30 ]]; do
         if "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data/claude 2>/dev/null; then
             break
         fi
-        sleep 0.5
+        sleep 1
         wait_count=$((wait_count + 1))
     done
-    if [[ $wait_count -ge 10 ]]; then
-        fail "Container did not become ready in time"
+    if [[ $wait_count -ge 30 ]]; then
+        fail "Container did not become ready in time (30s timeout)"
         return
     fi
 
     # Step 4: Assert expected files present in volume via docker exec
-    local files_check exec_exit=0
-    files_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la /mnt/agent-data/claude/ 2>&1) || exec_exit=$?
-
-    if [[ $exec_exit -ne 0 ]]; then
-        # Differentiate exec failure from ls failure
-        if [[ "$files_check" == *"No such container"* ]] || [[ "$files_check" == *"is not running"* ]]; then
-            fail "Docker exec failed - container not running"
-        else
-            fail "Volume directory /mnt/agent-data/claude not accessible (exit=$exec_exit)"
-            info "Output: $files_check"
-        fi
-        return
-    fi
-
-    # Check for expected files
-    if echo "$files_check" | grep -q "settings.json"; then
-        pass "settings.json present in volume"
-    else
+    # Use direct test commands instead of parsing ls output
+    if ! "${DOCKER_CMD[@]}" exec "$test_container_name" test -f /mnt/agent-data/claude/settings.json 2>/dev/null; then
         fail "settings.json NOT found in volume"
-        info "Volume contents: $files_check"
+        # Show volume contents on failure for debugging
+        local vol_contents
+        vol_contents=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la /mnt/agent-data/claude/ 2>&1) || vol_contents="(exec failed)"
+        info "Volume contents: $vol_contents"
+    else
+        pass "settings.json present in volume"
     fi
 
-    if echo "$files_check" | grep -q "plugins"; then
-        pass "plugins directory present in volume"
-    else
+    if ! "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data/claude/plugins 2>/dev/null; then
         fail "plugins directory NOT found in volume"
+    else
+        pass "plugins directory present in volume"
     fi
 
-    if echo "$files_check" | grep -q "skills"; then
-        pass "skills directory present in volume"
-    else
+    if ! "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data/claude/skills 2>/dev/null; then
         fail "skills directory NOT found in volume"
+    else
+        pass "skills directory present in volume"
     fi
 
     # Verify settings.json content has our marker
