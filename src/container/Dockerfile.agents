@@ -188,8 +188,27 @@ RUN chmod +x /usr/local/lib/containai/link-watcher.sh && \
     ln -sf /etc/systemd/system/containai-link-watcher.service /etc/systemd/system/multi-user.target.wants/containai-link-watcher.service
 
 # =============================================================================
+# CONTAINAI CLI
+# In-container cai command for sync and other operations
+# =============================================================================
+
+# Copy containai library to /opt/containai
+COPY containai.sh /opt/containai/containai.sh
+COPY lib/ /opt/containai/lib/
+
+# Executable wrapper for non-interactive use (docker exec <container> cai --help)
+RUN printf '#!/bin/bash\nsource /opt/containai/containai.sh\ncai "$@"\n' > /usr/local/bin/cai && \
+    chmod +x /usr/local/bin/cai
+
+# Source containai.sh in .bashrc for interactive shells
+USER agent
+RUN echo '# Source ContainAI CLI' >> /home/agent/.bashrc && \
+    echo 'source /opt/containai/containai.sh' >> /home/agent/.bashrc
+
+# =============================================================================
 # FINAL CONFIGURATION
 # =============================================================================
+USER root
 
 # Clean up temporary files
 RUN rm -rf /tmp/*
