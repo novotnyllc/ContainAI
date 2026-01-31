@@ -109,6 +109,41 @@ _cai_sync_verify_path_under_data() {
     return 1
 }
 
+# Verify path resolves under HOME directory (prevents .. traversal escapes)
+_cai_sync_verify_path_under_home() {
+    local path="$1"
+    local resolved
+
+    resolved="$(realpath -m "$path" 2>/dev/null)" || {
+        return 1
+    }
+
+    # Check path is under HOME (with trailing slash to prevent prefix attacks)
+    if [[ "$resolved" == "${HOME}" || "$resolved" == "${HOME}/"* ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Check for required external commands
+_cai_sync_check_dependencies() {
+    local missing=()
+
+    if ! command -v realpath >/dev/null 2>&1; then
+        missing+=("realpath")
+    fi
+    if ! command -v rsync >/dev/null 2>&1; then
+        missing+=("rsync")
+    fi
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        printf '[ERROR] Missing required commands: %s\n' "${missing[*]}" >&2
+        return 1
+    fi
+    return 0
+}
+
 # Reject paths containing symlinks (for security-sensitive operations)
 _cai_sync_reject_symlinks_in_path() {
     local path="$1"
@@ -163,6 +198,18 @@ _cai_sync_entry() {
         return 2
     fi
 
+    # Security: verify source path stays under HOME (prevents .. traversal)
+    if ! _cai_sync_verify_path_under_home "$home_source"; then
+        printf '[ERROR] Source path escapes HOME directory: %s\n' "$home_source" >&2
+        return 1
+    fi
+
+    # Security: verify link path stays under HOME (prevents .. traversal)
+    if ! _cai_sync_verify_path_under_home "$home_link"; then
+        printf '[ERROR] Container link path escapes HOME directory: %s\n' "$home_link" >&2
+        return 1
+    fi
+
     # Security: verify target path would be under data directory
     if ! _cai_sync_verify_path_under_data "$volume_target"; then
         printf '[ERROR] Target path escapes data directory: %s\n' "$volume_target" >&2
@@ -175,12 +222,10 @@ _cai_sync_entry() {
         return 1
     fi
 
-    # Count items for reporting
+    # Count items for reporting (use tr to reliably strip whitespace from wc output)
     local item_count=1
     if [[ -d "$home_source" ]]; then
-        item_count=$(find "$home_source" -type f 2>/dev/null | wc -l)
-        item_count="${item_count##*[[:space:]]}"  # Trim whitespace
-        item_count="${item_count%%[[:space:]]*}"
+        item_count=$(find "$home_source" -type f 2>/dev/null | wc -l | tr -d '[:space:]')
         [[ -z "$item_count" ]] && item_count=0
     fi
 
@@ -262,14 +307,25 @@ _cai_sync_entry() {
             return 1
         fi
 
-        # Remove existing file/dir at link location if needed (only after validation)
+        # Refuse to overwrite existing file/dir at link location (safety)
         if [[ -e "$home_link" && ! -L "$home_link" ]]; then
-            rm -rf "$home_link"
+            printf '[ERROR] Container link location exists and is not a symlink: %s\n' "$home_link" >&2
+            printf '  Move or remove it manually before running cai sync\n' >&2
+            return 1
         fi
 
         if ! ln -sfn "$volume_target" "$home_link" 2>/dev/null; then
             printf '[ERROR] Failed to create symlink: %s -> %s\n' "$home_link" "$volume_target" >&2
             return 1
+        fi
+
+        # When container_link != source, also create symlink at original source location
+        # so that tools expecting the original path still work
+        if [[ "$container_link" != "$source" ]]; then
+            if ! ln -sfn "$volume_target" "$home_source" 2>/dev/null; then
+                printf '[WARN] Failed to create symlink at original location: %s\n' "$home_source" >&2
+                # Non-fatal - the primary symlink was created
+            fi
         fi
     fi
 
@@ -308,6 +364,11 @@ _cai_sync_cmd() {
                 ;;
         esac
     done
+
+    # Check required commands are available
+    if ! _cai_sync_check_dependencies; then
+        return 1
+    fi
 
     # Check we're inside a container
     if ! _cai_sync_detect_container; then
