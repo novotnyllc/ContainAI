@@ -5289,6 +5289,7 @@ test_data_migration() {
         fail "Recreated container symlinks not ready in time (30s timeout)"
         return
     fi
+    pass "Recreated container symlinks ready"
 
     # Step 6: Assert user modification still present (via ~/.claude path)
     local custom_content
@@ -5313,12 +5314,12 @@ test_data_migration() {
         info "Content: $user_skill_content"
     fi
 
-    # Step 7: Assert symlinks still valid (use realpath for portability with relative symlinks)
+    # Step 7: Assert symlinks still valid (use cd -P + pwd for portability with relative symlinks)
     local symlink_check
     symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
         # Check for directory symlink first (preferred structure)
         if [ -L ~/.claude ]; then
-            # Use realpath to handle both absolute and relative symlinks
+            # Use cd -P + pwd to resolve symlinks (portable, works with relative symlinks)
             resolved=$(cd -P ~/.claude 2>/dev/null && pwd) || resolved=""
             if [ "$resolved" = "/mnt/agent-data/claude" ]; then
                 echo "dir_symlink_ok"
