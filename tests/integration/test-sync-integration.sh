@@ -5105,7 +5105,7 @@ test_data_migration() {
     section "Test 66: Data-migration test scenario"
 
     # Create test volume with proper labels
-    local test_vol test_container_name_1 test_container_name_2
+    local test_vol
     test_vol=$(create_test_volume "data-migration-data") || {
         fail "Failed to create test volume"
         return
@@ -5133,20 +5133,18 @@ test_data_migration() {
         return
     fi
 
-    # Set container names early for cleanup
-    test_container_name_1="test-data-migration-1-${TEST_RUN_ID}"
-    test_container_name_2="test-data-migration-2-${TEST_RUN_ID}"
+    # Use single container name (true recreation uses same name)
+    local test_container_name
+    test_container_name="test-data-migration-${TEST_RUN_ID}"
 
     # Local cleanup function for this test
     local cleanup_done=0
     cleanup_test() {
         [[ $cleanup_done -eq 1 ]] && return
         cleanup_done=1
-        # Stop and remove both containers if they exist
-        "${DOCKER_CMD[@]}" stop -- "$test_container_name_1" 2>/dev/null || true
-        "${DOCKER_CMD[@]}" rm -- "$test_container_name_1" 2>/dev/null || true
-        "${DOCKER_CMD[@]}" stop -- "$test_container_name_2" 2>/dev/null || true
-        "${DOCKER_CMD[@]}" rm -- "$test_container_name_2" 2>/dev/null || true
+        # Stop and remove container if it exists
+        "${DOCKER_CMD[@]}" stop -- "$test_container_name" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$test_container_name" 2>/dev/null || true
         # Also remove volume (best-effort, EXIT trap is fallback)
         "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
         rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
@@ -5173,105 +5171,27 @@ test_data_migration() {
     fi
     pass "Initial import to volume succeeded"
 
-    # Step 2: Create FIRST container with the test volume mounted
-    if ! create_test_container "data-migration-1" \
+    # Step 2: Create container with the test volume mounted
+    if ! create_test_container "data-migration" \
         --volume "$test_vol":/mnt/agent-data \
         "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
-        fail "Failed to create first test container"
+        fail "Failed to create test container"
         return
     fi
-    pass "Created first test container: $test_container_name_1"
+    pass "Created test container: $test_container_name"
 
-    # Start the first container
-    if ! "${DOCKER_CMD[@]}" start "$test_container_name_1" >/dev/null 2>&1; then
-        fail "Failed to start first test container"
+    # Start the container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to start test container"
         return
     fi
-    pass "Started first test container"
+    pass "Started test container (first run)"
 
-    # Wait for container to be ready (poll with integer sleep for portability)
+    # Wait for container to be ready - poll for symlink state (ensures init completed)
     local wait_count=0
     while [[ $wait_count -lt 30 ]]; do
-        if "${DOCKER_CMD[@]}" exec "$test_container_name_1" test -d /mnt/agent-data/claude 2>/dev/null; then
-            break
-        fi
-        sleep 1
-        wait_count=$((wait_count + 1))
-    done
-    if [[ $wait_count -ge 30 ]]; then
-        fail "First container did not become ready in time (30s timeout)"
-        return
-    fi
-
-    # Verify initial marker is present
-    local initial_content
-    initial_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_1" cat /mnt/agent-data/claude/settings.json 2>&1) || initial_content=""
-
-    if echo "$initial_content" | grep -q "original_marker_33333"; then
-        pass "Initial marker present in first container"
-    else
-        fail "Initial marker NOT found in first container"
-        info "Content: $initial_content"
-        return
-    fi
-
-    # Step 3: Make user modification inside container (adds custom file)
-    local modification_output modification_exit=0
-    modification_output=$("${DOCKER_CMD[@]}" exec "$test_container_name_1" bash -c '
-        # Add a user custom file in the claude directory
-        echo "user_custom_content_44444" > /mnt/agent-data/claude/user-custom-config.json
-
-        # Add a custom skill created by the user
-        mkdir -p /mnt/agent-data/claude/skills/user-skill
-        echo "{\"name\": \"user-skill\", \"created_by\": \"user\"}" > /mnt/agent-data/claude/skills/user-skill/manifest.json
-
-        # Verify the files were created
-        test -f /mnt/agent-data/claude/user-custom-config.json && \
-        test -f /mnt/agent-data/claude/skills/user-skill/manifest.json && \
-        echo "modification_success"
-    ' 2>&1) || modification_exit=$?
-
-    if [[ $modification_exit -ne 0 ]] || [[ "$modification_output" != *"modification_success"* ]]; then
-        fail "Failed to make user modifications (exit=$modification_exit)"
-        info "Output: $modification_output"
-        return
-    fi
-    pass "User modifications made inside first container"
-
-    # Step 4: Stop and remove the first container
-    if ! "${DOCKER_CMD[@]}" stop "$test_container_name_1" >/dev/null 2>&1; then
-        fail "Failed to stop first container"
-        return
-    fi
-    pass "Stopped first container"
-
-    if ! "${DOCKER_CMD[@]}" rm "$test_container_name_1" >/dev/null 2>&1; then
-        fail "Failed to remove first container"
-        return
-    fi
-    pass "Removed first container"
-
-    # Step 5: Create NEW container with the SAME volume (simulating container recreation)
-    if ! create_test_container "data-migration-2" \
-        --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
-        fail "Failed to create second test container"
-        return
-    fi
-    pass "Created second test container: $test_container_name_2"
-
-    # Start the second container
-    if ! "${DOCKER_CMD[@]}" start "$test_container_name_2" >/dev/null 2>&1; then
-        fail "Failed to start second test container"
-        return
-    fi
-    pass "Started second test container"
-
-    # Wait for second container to be ready - poll for symlink state
-    wait_count=0
-    while [[ $wait_count -lt 30 ]]; do
         # Check for symlink setup: either ~/.claude is a symlink, or ~/.claude/plugins is
-        if "${DOCKER_CMD[@]}" exec "$test_container_name_2" bash -c \
+        if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
             '[ -L ~/.claude ] || [ -L ~/.claude/plugins ]' 2>/dev/null; then
             break
         fi
@@ -5279,43 +5199,133 @@ test_data_migration() {
         wait_count=$((wait_count + 1))
     done
     if [[ $wait_count -ge 30 ]]; then
-        fail "Second container did not become ready in time (30s timeout)"
+        fail "Container symlinks not ready in time (30s timeout)"
+        return
+    fi
+    pass "Container symlinks ready"
+
+    # Verify initial marker is present via ~/.claude path (through symlink)
+    local initial_content
+    initial_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/settings.json 2>&1) || initial_content=""
+
+    if echo "$initial_content" | grep -q "original_marker_33333"; then
+        pass "Initial marker accessible via ~/.claude path"
+    else
+        fail "Initial marker NOT accessible via ~/.claude path"
+        info "Content: $initial_content"
         return
     fi
 
-    # Step 6: Assert user modification still present
+    # Step 3: Make user modification inside container via ~/.claude path (not volume directly)
+    # This verifies symlinks are working correctly for user writes
+    local modification_output modification_exit=0
+    modification_output=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        # Add a user custom file via the symlinked ~/.claude path
+        echo "user_custom_content_44444" > ~/.claude/user-custom-config.json
+
+        # Add a custom skill created by the user via symlinked path
+        mkdir -p ~/.claude/skills/user-skill
+        echo "{\"name\": \"user-skill\", \"created_by\": \"user\"}" > ~/.claude/skills/user-skill/manifest.json
+
+        # Verify the files were created AND exist on the volume (symlink works)
+        if [ -f ~/.claude/user-custom-config.json ] && \
+           [ -f ~/.claude/skills/user-skill/manifest.json ] && \
+           [ -f /mnt/agent-data/claude/user-custom-config.json ] && \
+           [ -f /mnt/agent-data/claude/skills/user-skill/manifest.json ]; then
+            echo "modification_success"
+        else
+            echo "modification_failed"
+        fi
+    ' 2>&1) || modification_exit=$?
+
+    if [[ $modification_exit -ne 0 ]] || [[ "$modification_output" != *"modification_success"* ]]; then
+        fail "Failed to make user modifications via ~/.claude path (exit=$modification_exit)"
+        info "Output: $modification_output"
+        return
+    fi
+    pass "User modifications made via ~/.claude symlink (verified on volume)"
+
+    # Step 4: Stop and remove the container
+    if ! "${DOCKER_CMD[@]}" stop "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to stop container"
+        return
+    fi
+    pass "Stopped container"
+
+    if ! "${DOCKER_CMD[@]}" rm "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to remove container"
+        return
+    fi
+    pass "Removed container"
+
+    # Step 5: Recreate container with SAME name and SAME volume (true recreation)
+    if ! create_test_container "data-migration" \
+        --volume "$test_vol":/mnt/agent-data \
+        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+        fail "Failed to recreate test container"
+        return
+    fi
+    pass "Recreated test container: $test_container_name"
+
+    # Start the recreated container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to start recreated container"
+        return
+    fi
+    pass "Started recreated container"
+
+    # Wait for recreated container to be ready - poll for symlink state
+    wait_count=0
+    while [[ $wait_count -lt 30 ]]; do
+        # Check for symlink setup: either ~/.claude is a symlink, or ~/.claude/plugins is
+        if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+            '[ -L ~/.claude ] || [ -L ~/.claude/plugins ]' 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    if [[ $wait_count -ge 30 ]]; then
+        fail "Recreated container symlinks not ready in time (30s timeout)"
+        return
+    fi
+
+    # Step 6: Assert user modification still present (via ~/.claude path)
     local custom_content
-    custom_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" cat /mnt/agent-data/claude/user-custom-config.json 2>&1) || custom_content=""
+    custom_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/user-custom-config.json 2>&1) || custom_content=""
 
     if [[ "$custom_content" == *"user_custom_content_44444"* ]]; then
-        pass "User custom file present after container recreation"
+        pass "User custom file accessible via ~/.claude after recreation"
     else
-        fail "User custom file MISSING after container recreation"
+        fail "User custom file NOT accessible via ~/.claude after recreation"
         info "Expected content containing: user_custom_content_44444"
         info "Got: $custom_content"
     fi
 
-    # Check user-created skill manifest
+    # Check user-created skill manifest via symlinked path
     local user_skill_content
-    user_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" cat /mnt/agent-data/claude/skills/user-skill/manifest.json 2>&1) || user_skill_content=""
+    user_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/skills/user-skill/manifest.json 2>&1) || user_skill_content=""
 
     if echo "$user_skill_content" | grep -q "user-skill"; then
-        pass "User-created skill manifest present after container recreation"
+        pass "User-created skill manifest accessible via ~/.claude after recreation"
     else
-        fail "User-created skill manifest MISSING after container recreation"
+        fail "User-created skill manifest NOT accessible via ~/.claude after recreation"
         info "Content: $user_skill_content"
     fi
 
-    # Step 7: Assert symlinks still valid
+    # Step 7: Assert symlinks still valid (use realpath for portability with relative symlinks)
     local symlink_check
-    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" bash -c '
+    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
         # Check for directory symlink first (preferred structure)
         if [ -L ~/.claude ]; then
-            claude_link=$(readlink ~/.claude)
-            if [ "$claude_link" = "/mnt/agent-data/claude" ]; then
+            # Use realpath to handle both absolute and relative symlinks
+            resolved=$(cd -P ~/.claude 2>/dev/null && pwd) || resolved=""
+            if [ "$resolved" = "/mnt/agent-data/claude" ]; then
                 echo "dir_symlink_ok"
+            elif [ -z "$resolved" ]; then
+                echo "dir_symlink_broken"
             else
-                echo "dir_symlink_wrong:$claude_link"
+                echo "dir_symlink_wrong:$resolved"
             fi
         elif [ -d ~/.claude ]; then
             # Directory exists, check for individual file symlinks
@@ -5323,12 +5333,12 @@ test_data_migration() {
             plugins_ok=0
             skills_ok=0
             if [ -L ~/.claude/plugins ]; then
-                target=$(readlink ~/.claude/plugins)
-                [ "$target" = "/mnt/agent-data/claude/plugins" ] && plugins_ok=1
+                resolved=$(cd -P ~/.claude/plugins 2>/dev/null && pwd) || resolved=""
+                [ "$resolved" = "/mnt/agent-data/claude/plugins" ] && plugins_ok=1
             fi
             if [ -L ~/.claude/skills ]; then
-                target=$(readlink ~/.claude/skills)
-                [ "$target" = "/mnt/agent-data/claude/skills" ] && skills_ok=1
+                resolved=$(cd -P ~/.claude/skills 2>/dev/null && pwd) || resolved=""
+                [ "$resolved" = "/mnt/agent-data/claude/skills" ] && skills_ok=1
             fi
             if [ "$plugins_ok" = "1" ] && [ "$skills_ok" = "1" ]; then
                 echo "file_symlinks_ok"
@@ -5346,32 +5356,35 @@ test_data_migration() {
 
     case "$symlink_check" in
         dir_symlink_ok)
-            pass "~/.claude symlink points to /mnt/agent-data/claude in second container"
+            pass "~/.claude symlink resolves to /mnt/agent-data/claude after recreation"
             ;;
         file_symlinks_ok)
-            pass "~/.claude/plugins symlink points to volume in second container"
-            pass "~/.claude/skills symlink points to volume in second container"
+            pass "~/.claude/plugins symlink resolves to volume after recreation"
+            pass "~/.claude/skills symlink resolves to volume after recreation"
+            ;;
+        dir_symlink_broken)
+            fail "~/.claude symlink is broken (target does not exist)"
             ;;
         dir_symlink_wrong:*)
-            fail "~/.claude symlink points to wrong target: ${symlink_check#dir_symlink_wrong:}"
+            fail "~/.claude symlink resolves to wrong target: ${symlink_check#dir_symlink_wrong:}"
             ;;
         file_symlinks_missing_both)
-            fail "~/.claude/plugins symlink missing or incorrect in second container"
-            fail "~/.claude/skills symlink missing or incorrect in second container"
+            fail "~/.claude/plugins symlink missing or incorrect after recreation"
+            fail "~/.claude/skills symlink missing or incorrect after recreation"
             ;;
         file_symlinks_missing_plugins)
-            fail "~/.claude/plugins symlink missing or incorrect in second container"
-            pass "~/.claude/skills symlink points to volume in second container"
+            fail "~/.claude/plugins symlink missing or incorrect after recreation"
+            pass "~/.claude/skills symlink resolves to volume after recreation"
             ;;
         file_symlinks_missing_skills)
-            pass "~/.claude/plugins symlink points to volume in second container"
-            fail "~/.claude/skills symlink missing or incorrect in second container"
+            pass "~/.claude/plugins symlink resolves to volume after recreation"
+            fail "~/.claude/skills symlink missing or incorrect after recreation"
             ;;
         claude_dir_missing)
-            fail "~/.claude directory does not exist in second container"
+            fail "~/.claude directory does not exist after recreation"
             ;;
         exec_failed)
-            fail "Docker exec failed for symlink check in second container"
+            fail "Docker exec failed for symlink check after recreation"
             ;;
         *)
             fail "Unexpected symlink check result: $symlink_check"
@@ -5379,43 +5392,43 @@ test_data_migration() {
     esac
 
     # Step 8: Assert no data loss (original + custom files present)
-    # Check original settings.json content is still there
+    # Check original settings.json content is still there (via ~/.claude path)
     local settings_content
-    settings_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" cat /mnt/agent-data/claude/settings.json 2>&1) || settings_content=""
+    settings_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/settings.json 2>&1) || settings_content=""
 
     if echo "$settings_content" | grep -q "original_marker_33333"; then
-        pass "Original settings.json marker present after container recreation (no data loss)"
+        pass "Original settings.json marker accessible via ~/.claude after recreation (no data loss)"
     else
-        fail "Original settings.json marker MISSING after container recreation (DATA LOSS)"
+        fail "Original settings.json marker NOT accessible after recreation (DATA LOSS)"
         info "Expected: original_marker_33333"
         info "Got: $settings_content"
     fi
 
     # Check original skill manifest is still there
     local original_skill_content
-    original_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" cat /mnt/agent-data/claude/skills/test-skill/manifest.json 2>&1) || original_skill_content=""
+    original_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/skills/test-skill/manifest.json 2>&1) || original_skill_content=""
 
     if echo "$original_skill_content" | grep -q "test-skill"; then
-        pass "Original test-skill manifest present after container recreation"
+        pass "Original test-skill manifest accessible after recreation"
     else
-        fail "Original test-skill manifest MISSING after container recreation (DATA LOSS)"
+        fail "Original test-skill manifest NOT accessible after recreation (DATA LOSS)"
         info "Content: $original_skill_content"
     fi
 
     # Check original plugin is still there
     local plugin_exists
-    plugin_exists=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" bash -c \
-        'test -f /mnt/agent-data/claude/plugins/cache/test-plugin/plugin.json && echo "exists"' 2>&1) || plugin_exists=""
+    plugin_exists=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+        'test -f ~/.claude/plugins/cache/test-plugin/plugin.json && echo "exists"' 2>&1) || plugin_exists=""
 
     if [[ "$plugin_exists" == "exists" ]]; then
-        pass "Original plugin file present after container recreation"
+        pass "Original plugin file accessible after recreation"
     else
-        fail "Original plugin file MISSING after container recreation (DATA LOSS)"
+        fail "Original plugin file NOT accessible after recreation (DATA LOSS)"
     fi
 
     # Verify both original AND user files coexist (complete data integrity check)
     local integrity_check
-    integrity_check=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" bash -c '
+    integrity_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
         original_ok=0
         user_ok=0
 
