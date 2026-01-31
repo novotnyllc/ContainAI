@@ -3941,9 +3941,25 @@ test_new_volume() {
 
     # Create a source fixture directory under REAL_HOME for Docker mount compatibility
     local source_dir
-    source_dir=$(mktemp -d "${REAL_HOME}/.containai-new-volume-test-XXXXXX")
+    source_dir=$(mktemp -d "${REAL_HOME}/.containai-new-volume-test-XXXXXX") || {
+        fail "Failed to create source fixture directory"
+        return
+    }
+    if [[ -z "$source_dir" || ! -d "$source_dir" ]]; then
+        fail "mktemp returned empty or invalid source_dir"
+        return
+    fi
     local test_dir
-    test_dir=$(mktemp -d)
+    test_dir=$(mktemp -d) || {
+        fail "Failed to create test directory"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    }
+    if [[ -z "$test_dir" || ! -d "$test_dir" ]]; then
+        fail "mktemp returned empty or invalid test_dir"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    fi
 
     # Set container name early for cleanup
     test_container_name="test-new-volume-${TEST_RUN_ID}"
@@ -3957,7 +3973,7 @@ test_new_volume() {
         "${DOCKER_CMD[@]}" stop -- "$test_container_name" 2>/dev/null || true
         "${DOCKER_CMD[@]}" rm -- "$test_container_name" 2>/dev/null || true
         # Also remove volume (best-effort, EXIT trap is fallback)
-        "${DOCKER_CMD[@]}" volume rm "$test_vol" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
         rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
     }
     trap cleanup_test RETURN
@@ -3972,13 +3988,8 @@ test_new_volume() {
     mkdir -p "$source_dir/.claude/skills/test-skill"
     echo '{"name": "test-skill"}' > "$source_dir/.claude/skills/test-skill/manifest.json"
 
-    # Create config pointing to test volume
-    create_env_test_config "$test_dir" '
-[agent]
-data_volume = "'"$test_vol"'"
-'
-
     # Step 1: Run cai import to sync host configs to volume
+    # Note: Using explicit --data-volume and --from flags, not config file
     local import_output import_exit=0
     import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
         bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$source_dir" 2>&1) || import_exit=$?
@@ -4020,14 +4031,22 @@ data_volume = "'"$test_vol"'"
         return
     fi
 
-    # Step 4: Assert expected files present in volume via docker exec
-    # Use direct test commands instead of parsing ls output
+    # Step 4: Assert expected files present in volume via docker exec ls (per spec)
+    # Run ls to display volume contents, then use test -f/-d for reliable assertions
+    local vol_contents
+    vol_contents=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la /mnt/agent-data/claude/ 2>&1) || {
+        fail "docker exec ls /mnt/agent-data/claude failed"
+        info "Output: $vol_contents"
+        return
+    }
+    info "Volume contents (ls -la /mnt/agent-data/claude/):"
+    printf '%s\n' "$vol_contents" | while IFS= read -r line; do
+        echo "    $line"
+    done
+
+    # Use direct test commands for reliable assertions (not parsing ls)
     if ! "${DOCKER_CMD[@]}" exec "$test_container_name" test -f /mnt/agent-data/claude/settings.json 2>/dev/null; then
         fail "settings.json NOT found in volume"
-        # Show volume contents on failure for debugging
-        local vol_contents
-        vol_contents=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la /mnt/agent-data/claude/ 2>&1) || vol_contents="(exec failed)"
-        info "Volume contents: $vol_contents"
     else
         pass "settings.json present in volume"
     fi
