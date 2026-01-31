@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-42-cli-ux-fixes-hostname-reset-wait-help",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-01-31T22:49:10.037947Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-42-cli-ux-fixes-hostname-reset-wait-help",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-42-cli-ux-fixes-hostname-reset-wait-help.md",
+  "status": "open",
+  "title": "CLI UX Fixes: Hostname, Reset Wait, Help Defaults",
+  "updated_at": "2026-01-31T23:02:48.524634Z"
+}
