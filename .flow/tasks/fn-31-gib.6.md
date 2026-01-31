@@ -13,8 +13,8 @@ Test fresh container + fresh volume + import workflow. This validates the initia
 - [ ] Cleans up container and volume on success and failure (trap)
 
 ## Done summary
-Implemented test_new_volume() test scenario for fresh container + fresh volume + import workflow. Test creates labeled container and volume, runs cai import to sync fixtures, and verifies files present and symlinks correctly set up via docker exec.
+Implemented test_new_volume() test scenario for fresh container + fresh volume + import workflow. Test creates labeled container and volume, runs cai import to sync fixtures, and verifies files present and symlinks correctly set up via docker exec. Implementation reviewed and approved with SHIP verdict.
 ## Evidence
-- Commits: 3f166fc6633d21ecc178d0073f7bd49859f5357c
-- Tests: shellcheck -x tests/integration/test-sync-integration.sh
+- Commits: 18212b1, 3f166fc, 97922f3, cce0b4c
+- Tests: test_new_volume() implemented in tests/integration/test-sync-integration.sh:3932
 - PRs:
