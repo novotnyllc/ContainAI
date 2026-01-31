@@ -289,3 +289,6 @@ When using process substitution (< <(cmd)) in bash, failures in cmd are silently
 
 ## 2026-01-31 manual [pitfall]
 After rm -rf in shell scripts, verify deletion succeeded with [[ ! -e path ]] before continuing - ln -sfn on an existing directory creates symlink INSIDE the directory
+
+## 2026-01-31 manual [pitfall]
+When capturing command output to check for errors, use 'if \! output=$(cmd)' to check exit status explicitly - relying on stderr content misses non-zero exits with no output
