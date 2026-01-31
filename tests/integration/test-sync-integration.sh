@@ -25,6 +25,7 @@
 # 65. Hot-reload test (live import while container running)
 # 66. Data-migration test (volume survives container recreation)
 # 67. No-pollution test (optional agents don't create empty dirs)
+# 68. cai sync test (in-container sync moves files and creates symlinks)
 #
 # ==============================================================================
 # Import Test Infrastructure
@@ -5750,6 +5751,246 @@ test_no_pollution() {
 }
 
 # ==============================================================================
+# Test 68: cai sync test scenario
+# ==============================================================================
+# This test verifies that `cai sync` works correctly inside a container:
+# - Moves directories from home to data volume
+# - Creates symlinks pointing to the volume
+# - Files are accessible via the symlink
+# - cai sync on host fails with appropriate error
+test_cai_sync() {
+    section "Test 68: cai sync test scenario"
+
+    # Create test volume with proper labels
+    local test_vol test_container_name
+    test_vol=$(create_test_volume "cai-sync-data") || {
+        fail "Failed to create test volume"
+        return
+    }
+
+    # Set container name early for cleanup
+    test_container_name="test-cai-sync-${TEST_RUN_ID}"
+
+    # Local cleanup function for this test
+    local cleanup_done=0
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        # Stop and remove container if it exists
+        "${DOCKER_CMD[@]}" stop -- "$test_container_name" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$test_container_name" 2>/dev/null || true
+        # Also remove volume (best-effort, EXIT trap is fallback)
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
+    }
+    trap cleanup_test RETURN
+
+    # Step 1: Create container with the test volume mounted
+    # Override entrypoint to bypass systemd init (which requires sysbox runtime)
+    # Use --user agent to run as the container's configured user
+    if ! create_test_container "cai-sync" \
+        --volume "$test_vol":/mnt/agent-data \
+        --user agent \
+        --entrypoint /bin/bash \
+        "$IMAGE_NAME" -c "sleep 300" >/dev/null; then
+        fail "Failed to create test container"
+        return
+    fi
+    pass "Created test container: $test_container_name"
+
+    # Step 2: Start the container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to start test container"
+        return
+    fi
+    pass "Started test container"
+
+    # Wait for container to be ready (poll with integer sleep for portability)
+    local wait_count=0
+    while [[ $wait_count -lt 30 ]]; do
+        if "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    if [[ $wait_count -ge 30 ]]; then
+        fail "Container did not become ready in time (30s timeout)"
+        return
+    fi
+
+    # Step 3: Create a test config directory in the container home (simulating user-installed tool)
+    # We use .cursor/rules since it's an optional directory entry with container_link in the manifest
+    # First, ensure any existing .cursor/rules symlink is removed (from container init)
+    local test_content
+    test_content="test_sync_content_$(date +%s)"
+    local setup_result
+    setup_result=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        # Remove any existing symlink at ~/.cursor/rules (created by container init)
+        rm -rf ~/.cursor/rules 2>/dev/null || true
+        mkdir -p ~/.cursor
+
+        # Create a real directory (not symlink) with test content
+        mkdir -p ~/.cursor/rules
+        echo "'"$test_content"'" > ~/.cursor/rules/test-rule.md
+
+        # Verify it is a real directory, not a symlink
+        if [ -L ~/.cursor/rules ]; then
+            echo "ERROR: ~/.cursor/rules is still a symlink"
+            exit 1
+        fi
+        if [ ! -d ~/.cursor/rules ]; then
+            echo "ERROR: ~/.cursor/rules is not a directory"
+            exit 1
+        fi
+        if [ ! -f ~/.cursor/rules/test-rule.md ]; then
+            echo "ERROR: test-rule.md not created"
+            exit 1
+        fi
+        echo "OK"
+    ' 2>&1) || setup_result="exec_failed"
+
+    if [[ "$setup_result" != "OK" ]]; then
+        fail "Failed to set up test directory: $setup_result"
+        return
+    fi
+    pass "Created real ~/.cursor/rules directory with test content"
+
+    # Step 4: Run cai sync inside the container
+    # Note: cai sync may return non-zero if other entries have issues (e.g., existing symlinks)
+    # We check for success on our specific test path, not overall exit code
+    local sync_output sync_exit=0
+    sync_output=$("${DOCKER_CMD[@]}" exec "$test_container_name" cai sync 2>&1) || sync_exit=$?
+
+    # Check that our specific entry was synced successfully
+    if [[ "$sync_output" == *"[OK] ~/.cursor/rules -> /mnt/agent-data/cursor/rules"* ]]; then
+        pass "cai sync processed .cursor/rules successfully"
+    else
+        fail "cai sync did not sync .cursor/rules (exit=$sync_exit)"
+        info "Output: $sync_output"
+        return
+    fi
+
+    # Step 5: Verify directory was moved to volume
+    local volume_check
+    volume_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        if [ -d /mnt/agent-data/cursor/rules ]; then
+            echo "dir_exists"
+        else
+            echo "dir_missing"
+        fi
+    ' 2>&1) || volume_check="exec_failed"
+
+    if [[ "$volume_check" != "dir_exists" ]]; then
+        fail "Directory not moved to volume: $volume_check"
+        return
+    fi
+    pass "Directory moved to /mnt/agent-data/cursor/rules"
+
+    # Step 6: Verify symlink created at ~/.cursor/rules pointing to volume
+    local symlink_check
+    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        if [ -L ~/.cursor/rules ]; then
+            target=$(readlink ~/.cursor/rules)
+            if [ "$target" = "/mnt/agent-data/cursor/rules" ]; then
+                echo "symlink_ok"
+            else
+                echo "symlink_wrong:$target"
+            fi
+        elif [ -d ~/.cursor/rules ]; then
+            echo "still_directory"
+        else
+            echo "not_found"
+        fi
+    ' 2>&1) || symlink_check="exec_failed"
+
+    case "$symlink_check" in
+        symlink_ok)
+            pass "Symlink created at ~/.cursor/rules -> /mnt/agent-data/cursor/rules"
+            ;;
+        symlink_wrong:*)
+            fail "Symlink points to wrong target: ${symlink_check#symlink_wrong:}"
+            return
+            ;;
+        still_directory)
+            fail "~/.cursor/rules is still a directory (not converted to symlink)"
+            return
+            ;;
+        not_found)
+            fail "~/.cursor/rules does not exist after sync"
+            return
+            ;;
+        *)
+            fail "Unexpected symlink check result: $symlink_check"
+            return
+            ;;
+    esac
+
+    # Step 7: Verify files accessible via symlink (content matches)
+    local content_check
+    content_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        if [ -f ~/.cursor/rules/test-rule.md ]; then
+            cat ~/.cursor/rules/test-rule.md
+        else
+            echo "FILE_NOT_FOUND"
+        fi
+    ' 2>&1) || content_check="exec_failed"
+
+    # Trim whitespace for comparison
+    content_check="${content_check%$'\n'}"
+    content_check="${content_check#$'\n'}"
+
+    if [[ "$content_check" == "$test_content" ]]; then
+        pass "Files accessible via symlink with correct content"
+    else
+        fail "File content mismatch. Expected: '$test_content', Got: '$content_check'"
+        return
+    fi
+
+    # Step 8: Verify cai sync on host fails with appropriate error
+    # Note: If we're already in a container (CI environment), skip this check since
+    # the container detection will pass for the parent environment too
+    if [[ -f "/.dockerenv" ]] && mountpoint -q /mnt/agent-data 2>/dev/null; then
+        info "Skipping host-fail test: test environment is already inside a container"
+    else
+        local test_dir
+        test_dir=$(mktemp -d) || {
+            fail "Failed to create temp directory for host test"
+            return
+        }
+
+        local host_sync_output host_sync_exit=0
+        host_sync_output=$(cd -- "$test_dir" && HOME="$test_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+            bash -c 'source "$1/containai.sh" && cai sync 2>&1' _ "$SRC_DIR") || host_sync_exit=$?
+
+        rm -rf "$test_dir" 2>/dev/null || true
+
+        if [[ $host_sync_exit -eq 0 ]]; then
+            fail "cai sync on host should have failed but succeeded"
+            return
+        fi
+
+        # Check for expected error message about container environment
+        if [[ "$host_sync_output" == *"must be run inside a ContainAI container"* ]] || \
+           [[ "$host_sync_output" == *"/mnt/agent-data must be mounted"* ]]; then
+            pass "cai sync on host fails with appropriate error"
+        else
+            fail "cai sync on host failed but with unexpected error: $host_sync_output"
+            return
+        fi
+    fi
+
+    # Show sync output for visibility
+    info "cai sync output:"
+    printf '%s\n' "$sync_output" | while IFS= read -r line; do
+        echo "    $line"
+    done
+
+    pass "cai sync test scenario completed successfully"
+
+    # Cleanup happens automatically via RETURN trap
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
@@ -5846,6 +6087,9 @@ main() {
 
     # No-pollution test (Test 67)
     test_no_pollution
+
+    # cai sync test (Test 68)
+    test_cai_sync
 
     # .priv. file filtering tests (Tests 62-64)
     test_priv_file_filtering
