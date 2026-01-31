@@ -23,6 +23,7 @@
 # 61. Existing volume scenario test
 # 62-64. .priv. file filtering tests (security)
 # 65. Hot-reload test (live import while container running)
+# 66. Data-migration test (volume survives container recreation)
 #
 # ==============================================================================
 # Import Test Infrastructure
@@ -5088,6 +5089,383 @@ test_hot_reload() {
 }
 
 # ==============================================================================
+# Test 66: Data-migration test scenario
+# ==============================================================================
+# Verifies volume with user modifications survives container recreation:
+# 1. Creates test volume and first container
+# 2. Pre-populates volume with initial config via import
+# 3. Makes user modification inside container (adds custom file)
+# 4. Stops and removes container
+# 5. Creates new container with same volume
+# 6. Asserts: user modification still present
+# 7. Asserts: symlinks still valid
+# 8. Asserts: no data loss (original + custom files present)
+# 9. Cleans up on success/failure (trap)
+test_data_migration() {
+    section "Test 66: Data-migration test scenario"
+
+    # Create test volume with proper labels
+    local test_vol test_container_name_1 test_container_name_2
+    test_vol=$(create_test_volume "data-migration-data") || {
+        fail "Failed to create test volume"
+        return
+    }
+
+    # Create source fixture directory under REAL_HOME for Docker mount compatibility
+    local source_dir
+    source_dir=$(mktemp -d "${REAL_HOME}/.containai-data-migration-test-XXXXXX") || {
+        fail "Failed to create source fixture directory"
+        return
+    }
+    if [[ -z "$source_dir" || ! -d "$source_dir" ]]; then
+        fail "mktemp returned empty or invalid source_dir"
+        return
+    fi
+    local test_dir
+    test_dir=$(mktemp -d) || {
+        fail "Failed to create test directory"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    }
+    if [[ -z "$test_dir" || ! -d "$test_dir" ]]; then
+        fail "mktemp returned empty or invalid test_dir"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    fi
+
+    # Set container names early for cleanup
+    test_container_name_1="test-data-migration-1-${TEST_RUN_ID}"
+    test_container_name_2="test-data-migration-2-${TEST_RUN_ID}"
+
+    # Local cleanup function for this test
+    local cleanup_done=0
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        # Stop and remove both containers if they exist
+        "${DOCKER_CMD[@]}" stop -- "$test_container_name_1" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$test_container_name_1" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" stop -- "$test_container_name_2" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$test_container_name_2" 2>/dev/null || true
+        # Also remove volume (best-effort, EXIT trap is fallback)
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
+        rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
+    }
+    trap cleanup_test RETURN
+
+    # Create initial Claude config fixture with distinctive markers
+    mkdir -p "$source_dir/.claude/plugins/cache/test-plugin"
+    mkdir -p "$source_dir/.claude/skills/test-skill"
+    echo '{"data_migration_test": "original_marker_33333", "version": 1}' > "$source_dir/.claude/settings.json"
+    echo '{"test": true, "version": 1}' > "$source_dir/.claude.json"
+    echo '{}' > "$source_dir/.claude/plugins/cache/test-plugin/plugin.json"
+    echo '{"name": "test-skill", "version": 1}' > "$source_dir/.claude/skills/test-skill/manifest.json"
+
+    # Step 1: Run initial cai import to sync host configs to volume
+    local import_output import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Initial import failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Initial import to volume succeeded"
+
+    # Step 2: Create FIRST container with the test volume mounted
+    if ! create_test_container "data-migration-1" \
+        --volume "$test_vol":/mnt/agent-data \
+        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+        fail "Failed to create first test container"
+        return
+    fi
+    pass "Created first test container: $test_container_name_1"
+
+    # Start the first container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name_1" >/dev/null 2>&1; then
+        fail "Failed to start first test container"
+        return
+    fi
+    pass "Started first test container"
+
+    # Wait for container to be ready (poll with integer sleep for portability)
+    local wait_count=0
+    while [[ $wait_count -lt 30 ]]; do
+        if "${DOCKER_CMD[@]}" exec "$test_container_name_1" test -d /mnt/agent-data/claude 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    if [[ $wait_count -ge 30 ]]; then
+        fail "First container did not become ready in time (30s timeout)"
+        return
+    fi
+
+    # Verify initial marker is present
+    local initial_content
+    initial_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_1" cat /mnt/agent-data/claude/settings.json 2>&1) || initial_content=""
+
+    if echo "$initial_content" | grep -q "original_marker_33333"; then
+        pass "Initial marker present in first container"
+    else
+        fail "Initial marker NOT found in first container"
+        info "Content: $initial_content"
+        return
+    fi
+
+    # Step 3: Make user modification inside container (adds custom file)
+    local modification_output modification_exit=0
+    modification_output=$("${DOCKER_CMD[@]}" exec "$test_container_name_1" bash -c '
+        # Add a user custom file in the claude directory
+        echo "user_custom_content_44444" > /mnt/agent-data/claude/user-custom-config.json
+
+        # Add a custom skill created by the user
+        mkdir -p /mnt/agent-data/claude/skills/user-skill
+        echo "{\"name\": \"user-skill\", \"created_by\": \"user\"}" > /mnt/agent-data/claude/skills/user-skill/manifest.json
+
+        # Verify the files were created
+        test -f /mnt/agent-data/claude/user-custom-config.json && \
+        test -f /mnt/agent-data/claude/skills/user-skill/manifest.json && \
+        echo "modification_success"
+    ' 2>&1) || modification_exit=$?
+
+    if [[ $modification_exit -ne 0 ]] || [[ "$modification_output" != *"modification_success"* ]]; then
+        fail "Failed to make user modifications (exit=$modification_exit)"
+        info "Output: $modification_output"
+        return
+    fi
+    pass "User modifications made inside first container"
+
+    # Step 4: Stop and remove the first container
+    if ! "${DOCKER_CMD[@]}" stop "$test_container_name_1" >/dev/null 2>&1; then
+        fail "Failed to stop first container"
+        return
+    fi
+    pass "Stopped first container"
+
+    if ! "${DOCKER_CMD[@]}" rm "$test_container_name_1" >/dev/null 2>&1; then
+        fail "Failed to remove first container"
+        return
+    fi
+    pass "Removed first container"
+
+    # Step 5: Create NEW container with the SAME volume (simulating container recreation)
+    if ! create_test_container "data-migration-2" \
+        --volume "$test_vol":/mnt/agent-data \
+        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+        fail "Failed to create second test container"
+        return
+    fi
+    pass "Created second test container: $test_container_name_2"
+
+    # Start the second container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name_2" >/dev/null 2>&1; then
+        fail "Failed to start second test container"
+        return
+    fi
+    pass "Started second test container"
+
+    # Wait for second container to be ready - poll for symlink state
+    wait_count=0
+    while [[ $wait_count -lt 30 ]]; do
+        # Check for symlink setup: either ~/.claude is a symlink, or ~/.claude/plugins is
+        if "${DOCKER_CMD[@]}" exec "$test_container_name_2" bash -c \
+            '[ -L ~/.claude ] || [ -L ~/.claude/plugins ]' 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    if [[ $wait_count -ge 30 ]]; then
+        fail "Second container did not become ready in time (30s timeout)"
+        return
+    fi
+
+    # Step 6: Assert user modification still present
+    local custom_content
+    custom_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" cat /mnt/agent-data/claude/user-custom-config.json 2>&1) || custom_content=""
+
+    if [[ "$custom_content" == *"user_custom_content_44444"* ]]; then
+        pass "User custom file present after container recreation"
+    else
+        fail "User custom file MISSING after container recreation"
+        info "Expected content containing: user_custom_content_44444"
+        info "Got: $custom_content"
+    fi
+
+    # Check user-created skill manifest
+    local user_skill_content
+    user_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" cat /mnt/agent-data/claude/skills/user-skill/manifest.json 2>&1) || user_skill_content=""
+
+    if echo "$user_skill_content" | grep -q "user-skill"; then
+        pass "User-created skill manifest present after container recreation"
+    else
+        fail "User-created skill manifest MISSING after container recreation"
+        info "Content: $user_skill_content"
+    fi
+
+    # Step 7: Assert symlinks still valid
+    local symlink_check
+    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" bash -c '
+        # Check for directory symlink first (preferred structure)
+        if [ -L ~/.claude ]; then
+            claude_link=$(readlink ~/.claude)
+            if [ "$claude_link" = "/mnt/agent-data/claude" ]; then
+                echo "dir_symlink_ok"
+            else
+                echo "dir_symlink_wrong:$claude_link"
+            fi
+        elif [ -d ~/.claude ]; then
+            # Directory exists, check for individual file symlinks
+            # At minimum, plugins and skills must be symlinked
+            plugins_ok=0
+            skills_ok=0
+            if [ -L ~/.claude/plugins ]; then
+                target=$(readlink ~/.claude/plugins)
+                [ "$target" = "/mnt/agent-data/claude/plugins" ] && plugins_ok=1
+            fi
+            if [ -L ~/.claude/skills ]; then
+                target=$(readlink ~/.claude/skills)
+                [ "$target" = "/mnt/agent-data/claude/skills" ] && skills_ok=1
+            fi
+            if [ "$plugins_ok" = "1" ] && [ "$skills_ok" = "1" ]; then
+                echo "file_symlinks_ok"
+            elif [ "$plugins_ok" = "0" ] && [ "$skills_ok" = "0" ]; then
+                echo "file_symlinks_missing_both"
+            elif [ "$plugins_ok" = "0" ]; then
+                echo "file_symlinks_missing_plugins"
+            else
+                echo "file_symlinks_missing_skills"
+            fi
+        else
+            echo "claude_dir_missing"
+        fi
+    ' 2>&1) || symlink_check="exec_failed"
+
+    case "$symlink_check" in
+        dir_symlink_ok)
+            pass "~/.claude symlink points to /mnt/agent-data/claude in second container"
+            ;;
+        file_symlinks_ok)
+            pass "~/.claude/plugins symlink points to volume in second container"
+            pass "~/.claude/skills symlink points to volume in second container"
+            ;;
+        dir_symlink_wrong:*)
+            fail "~/.claude symlink points to wrong target: ${symlink_check#dir_symlink_wrong:}"
+            ;;
+        file_symlinks_missing_both)
+            fail "~/.claude/plugins symlink missing or incorrect in second container"
+            fail "~/.claude/skills symlink missing or incorrect in second container"
+            ;;
+        file_symlinks_missing_plugins)
+            fail "~/.claude/plugins symlink missing or incorrect in second container"
+            pass "~/.claude/skills symlink points to volume in second container"
+            ;;
+        file_symlinks_missing_skills)
+            pass "~/.claude/plugins symlink points to volume in second container"
+            fail "~/.claude/skills symlink missing or incorrect in second container"
+            ;;
+        claude_dir_missing)
+            fail "~/.claude directory does not exist in second container"
+            ;;
+        exec_failed)
+            fail "Docker exec failed for symlink check in second container"
+            ;;
+        *)
+            fail "Unexpected symlink check result: $symlink_check"
+            ;;
+    esac
+
+    # Step 8: Assert no data loss (original + custom files present)
+    # Check original settings.json content is still there
+    local settings_content
+    settings_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" cat /mnt/agent-data/claude/settings.json 2>&1) || settings_content=""
+
+    if echo "$settings_content" | grep -q "original_marker_33333"; then
+        pass "Original settings.json marker present after container recreation (no data loss)"
+    else
+        fail "Original settings.json marker MISSING after container recreation (DATA LOSS)"
+        info "Expected: original_marker_33333"
+        info "Got: $settings_content"
+    fi
+
+    # Check original skill manifest is still there
+    local original_skill_content
+    original_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" cat /mnt/agent-data/claude/skills/test-skill/manifest.json 2>&1) || original_skill_content=""
+
+    if echo "$original_skill_content" | grep -q "test-skill"; then
+        pass "Original test-skill manifest present after container recreation"
+    else
+        fail "Original test-skill manifest MISSING after container recreation (DATA LOSS)"
+        info "Content: $original_skill_content"
+    fi
+
+    # Check original plugin is still there
+    local plugin_exists
+    plugin_exists=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" bash -c \
+        'test -f /mnt/agent-data/claude/plugins/cache/test-plugin/plugin.json && echo "exists"' 2>&1) || plugin_exists=""
+
+    if [[ "$plugin_exists" == "exists" ]]; then
+        pass "Original plugin file present after container recreation"
+    else
+        fail "Original plugin file MISSING after container recreation (DATA LOSS)"
+    fi
+
+    # Verify both original AND user files coexist (complete data integrity check)
+    local integrity_check
+    integrity_check=$("${DOCKER_CMD[@]}" exec "$test_container_name_2" bash -c '
+        original_ok=0
+        user_ok=0
+
+        # Check all original files
+        [ -f /mnt/agent-data/claude/settings.json ] && \
+        [ -f /mnt/agent-data/claude/skills/test-skill/manifest.json ] && \
+        [ -f /mnt/agent-data/claude/plugins/cache/test-plugin/plugin.json ] && \
+        original_ok=1
+
+        # Check all user files
+        [ -f /mnt/agent-data/claude/user-custom-config.json ] && \
+        [ -f /mnt/agent-data/claude/skills/user-skill/manifest.json ] && \
+        user_ok=1
+
+        if [ "$original_ok" = "1" ] && [ "$user_ok" = "1" ]; then
+            echo "complete_integrity"
+        elif [ "$original_ok" = "1" ]; then
+            echo "missing_user_files"
+        elif [ "$user_ok" = "1" ]; then
+            echo "missing_original_files"
+        else
+            echo "missing_both"
+        fi
+    ' 2>&1) || integrity_check="exec_failed"
+
+    case "$integrity_check" in
+        complete_integrity)
+            pass "Complete data integrity verified: original AND user files coexist"
+            ;;
+        missing_user_files)
+            fail "User files missing after container recreation"
+            ;;
+        missing_original_files)
+            fail "Original files missing after container recreation"
+            ;;
+        missing_both)
+            fail "Both original AND user files missing (severe data loss)"
+            ;;
+        exec_failed)
+            fail "Docker exec failed for integrity check"
+            ;;
+        *)
+            fail "Unexpected integrity check result: $integrity_check"
+            ;;
+    esac
+
+    # Cleanup happens automatically via RETURN trap
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
@@ -5178,6 +5556,9 @@ main() {
 
     # Hot-reload test (Test 65)
     test_hot_reload
+
+    # Data-migration test (Test 66)
+    test_data_migration
 
     # .priv. file filtering tests (Tests 62-64)
     test_priv_file_filtering
