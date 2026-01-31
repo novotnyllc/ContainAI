@@ -24,6 +24,7 @@
 # 62-64. .priv. file filtering tests (security)
 # 65. Hot-reload test (live import while container running)
 # 66. Data-migration test (volume survives container recreation)
+# 67. No-pollution test (optional agents don't create empty dirs)
 #
 # ==============================================================================
 # Import Test Infrastructure
@@ -5499,6 +5500,246 @@ test_data_migration() {
 }
 
 # ==============================================================================
+# Test 67: No-pollution test scenario
+# ==============================================================================
+# Verifies import with partial agent configs creates no empty directories for
+# agents user doesn't have. The `o` (optional) flag ensures:
+# - Dockerfile doesn't pre-create optional agent dirs
+# - Import skips entries when source doesn't exist
+# - Container home only has symlinks for agents user actually has
+#
+# This test creates a source with ONLY Claude config, runs import, then asserts:
+# - ~/.claude symlink exists (expected - primary agent)
+# - ~/.cursor does NOT exist (optional agent, no source)
+# - ~/.aider.conf.yml does NOT exist (optional agent, no source)
+# - ~/.continue does NOT exist (optional agent, no source)
+# - ~/.copilot does NOT exist (optional agent, no source)
+# - ~/.gemini does NOT exist (optional agent, no source)
+test_no_pollution() {
+    section "Test 67: No-pollution test scenario"
+
+    # Create test volume with proper labels
+    local test_vol test_container_name
+    test_vol=$(create_test_volume "no-pollution-data") || {
+        fail "Failed to create test volume"
+        return
+    }
+
+    # Create a source fixture directory under REAL_HOME for Docker mount compatibility
+    local source_dir
+    source_dir=$(mktemp -d "${REAL_HOME}/.containai-no-pollution-test-XXXXXX") || {
+        fail "Failed to create source fixture directory"
+        return
+    }
+    if [[ -z "$source_dir" || ! -d "$source_dir" ]]; then
+        fail "mktemp returned empty or invalid source_dir"
+        return
+    fi
+    local test_dir
+    test_dir=$(mktemp -d) || {
+        fail "Failed to create test directory"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    }
+    if [[ -z "$test_dir" || ! -d "$test_dir" ]]; then
+        fail "mktemp returned empty or invalid test_dir"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    fi
+
+    # Set container name early for cleanup
+    test_container_name="test-no-pollution-${TEST_RUN_ID}"
+
+    # Local cleanup function for this test
+    local cleanup_done=0
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        # Stop and remove container if it exists
+        "${DOCKER_CMD[@]}" stop -- "$test_container_name" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$test_container_name" 2>/dev/null || true
+        # Also remove volume (best-effort, EXIT trap is fallback)
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
+        rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
+    }
+    trap cleanup_test RETURN
+
+    # Create ONLY Claude config fixture - explicitly NO cursor, kiro, aider, etc.
+    # This simulates a user who only has Claude configured
+    mkdir -p "$source_dir/.claude/plugins/cache/test-plugin"
+    mkdir -p "$source_dir/.claude/skills"
+    echo '{"no_pollution_test": "marker_67890"}' > "$source_dir/.claude/settings.json"
+    echo '{"test": true}' > "$source_dir/.claude.json"
+    echo '{}' > "$source_dir/.claude/plugins/cache/test-plugin/plugin.json"
+    mkdir -p "$source_dir/.claude/skills/test-skill"
+    echo '{"name": "test-skill"}' > "$source_dir/.claude/skills/test-skill/manifest.json"
+
+    # Explicitly verify we did NOT create optional agent dirs in source
+    # (This confirms test setup is correct)
+    for agent_path in ".cursor" ".aider.conf.yml" ".continue" ".copilot" ".gemini"; do
+        if [[ -e "$source_dir/$agent_path" ]]; then
+            fail "Test setup error: $agent_path should not exist in source"
+            return
+        fi
+    done
+    pass "Source fixture has ONLY Claude config (no optional agents)"
+
+    # Step 1: Run cai import to sync host configs to volume
+    local import_output import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Import failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Import to volume succeeded"
+
+    # Step 2: Create container with the test volume mounted
+    if ! create_test_container "no-pollution" \
+        --volume "$test_vol":/mnt/agent-data \
+        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+        fail "Failed to create test container"
+        return
+    fi
+    pass "Created test container: $test_container_name"
+
+    # Step 3: Start the container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to start test container"
+        return
+    fi
+    pass "Started test container"
+
+    # Wait for container to be ready (poll with integer sleep for portability)
+    local wait_count=0
+    while [[ $wait_count -lt 30 ]]; do
+        if "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data/claude 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    if [[ $wait_count -ge 30 ]]; then
+        fail "Container did not become ready in time (30s timeout)"
+        return
+    fi
+
+    # Step 4: Assert ~/.claude symlink exists (expected for primary agent)
+    local claude_check
+    claude_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        if [ -L ~/.claude ]; then
+            target=$(readlink ~/.claude)
+            if [ "$target" = "/mnt/agent-data/claude" ]; then
+                echo "symlink_ok"
+            else
+                echo "symlink_wrong:$target"
+            fi
+        elif [ -d ~/.claude ]; then
+            # Directory exists - check if key subdirs are symlinked
+            plugins_ok=0
+            if [ -L ~/.claude/plugins ]; then
+                target=$(readlink ~/.claude/plugins)
+                [ "$target" = "/mnt/agent-data/claude/plugins" ] && plugins_ok=1
+            fi
+            if [ "$plugins_ok" = "1" ]; then
+                echo "dir_with_symlinks"
+            else
+                echo "dir_no_symlinks"
+            fi
+        else
+            echo "not_found"
+        fi
+    ' 2>&1) || claude_check="exec_failed"
+
+    case "$claude_check" in
+        symlink_ok)
+            pass "~/.claude symlink points to /mnt/agent-data/claude"
+            ;;
+        dir_with_symlinks)
+            pass "~/.claude exists with proper internal symlinks"
+            ;;
+        symlink_wrong:*)
+            fail "~/.claude symlink points to wrong target: ${claude_check#symlink_wrong:}"
+            ;;
+        dir_no_symlinks)
+            fail "~/.claude is a directory without proper symlinks"
+            ;;
+        not_found)
+            fail "~/.claude does not exist"
+            ;;
+        exec_failed)
+            fail "Docker exec failed for claude check"
+            ;;
+        *)
+            fail "Unexpected claude check result: $claude_check"
+            ;;
+    esac
+
+    # Step 5: Assert optional agent paths do NOT exist (no pollution)
+    # These are all marked with 'o' flag in sync-manifest.toml
+    local pollution_found=0
+
+    # Check ~/.cursor (directory - optional agent)
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.cursor 2>/dev/null; then
+        fail "POLLUTION: ~/.cursor exists but should not (user has no cursor config)"
+        pollution_found=1
+    else
+        pass "~/.cursor does NOT exist (no pollution)"
+    fi
+
+    # Check ~/.aider.conf.yml (file - optional agent)
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.aider.conf.yml 2>/dev/null; then
+        fail "POLLUTION: ~/.aider.conf.yml exists but should not (user has no aider config)"
+        pollution_found=1
+    else
+        pass "~/.aider.conf.yml does NOT exist (no pollution)"
+    fi
+
+    # Check ~/.continue (directory - optional agent)
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.continue 2>/dev/null; then
+        fail "POLLUTION: ~/.continue exists but should not (user has no continue config)"
+        pollution_found=1
+    else
+        pass "~/.continue does NOT exist (no pollution)"
+    fi
+
+    # Check ~/.copilot (directory - optional agent)
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.copilot 2>/dev/null; then
+        fail "POLLUTION: ~/.copilot exists but should not (user has no copilot config)"
+        pollution_found=1
+    else
+        pass "~/.copilot does NOT exist (no pollution)"
+    fi
+
+    # Check ~/.gemini (directory - optional agent)
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.gemini 2>/dev/null; then
+        fail "POLLUTION: ~/.gemini exists but should not (user has no gemini config)"
+        pollution_found=1
+    else
+        pass "~/.gemini does NOT exist (no pollution)"
+    fi
+
+    # Step 6: Display home directory contents for visibility
+    local home_contents
+    home_contents=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la ~ 2>&1) || home_contents="[ls failed]"
+    info "Container home directory contents (ls -la ~):"
+    printf '%s\n' "$home_contents" | while IFS= read -r line; do
+        echo "    $line"
+    done
+
+    # Final summary
+    if [[ $pollution_found -eq 0 ]]; then
+        pass "No home directory pollution detected - only configured agents have entries"
+    else
+        fail "Home directory pollution detected - optional agents created without source"
+    fi
+
+    # Cleanup happens automatically via RETURN trap
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
@@ -5592,6 +5833,9 @@ main() {
 
     # Data-migration test (Test 66)
     test_data_migration
+
+    # No-pollution test (Test 67)
+    test_no_pollution
 
     # .priv. file filtering tests (Tests 62-64)
     test_priv_file_filtering
