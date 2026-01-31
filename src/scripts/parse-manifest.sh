@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Parse sync-manifest.toml and output entries in machine-readable format
 # Usage: parse-manifest.sh [--include-disabled] <manifest_path>
-# Output: One line per entry with fields: source|target|container_link|flags|disabled|type
+# Output: One line per entry with fields: source|target|container_link|flags|disabled|type|optional
 #   type: "entry" for [[entries]], "symlink" for [[container_symlinks]]
 #   disabled: "true" or "false"
+#   optional: "true" if flags contains 'o', "false" otherwise
 # By default, disabled entries are excluded. Use --include-disabled to include them.
 set -euo pipefail
 
@@ -49,9 +50,14 @@ emit_entry() {
         disabled="false"
         return
     fi
+    # Determine if entry is optional (has 'o' flag)
+    local optional="false"
+    if [[ "$flags" == *o* ]]; then
+        optional="true"
+    fi
     # Emit entry if target is set (container_link may be empty for some entries)
     if [[ -n "$target" ]]; then
-        printf '%s|%s|%s|%s|%s|%s\n' "$source" "$target" "$container_link" "$flags" "$disabled" "$type"
+        printf '%s|%s|%s|%s|%s|%s|%s\n' "$source" "$target" "$container_link" "$flags" "$disabled" "$type" "$optional"
     fi
     source=""
     target=""

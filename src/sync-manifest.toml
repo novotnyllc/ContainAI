@@ -22,6 +22,7 @@
 #   g = git-filter (strip credential.helper from .gitconfig)
 #   R = remove existing path first (rm -rf before ln -sfn)
 #   G = glob/dynamic pattern (not synced directly; discovered at runtime by import.sh)
+#   o = optional (skip if source doesn't exist; don't pre-create in Dockerfile/init)
 #
 # Optional fields:
 #   disabled = true  # Entry excluded from _IMPORT_SYNC_MAP (not synced by default)
@@ -406,54 +407,54 @@ container_link = ".vscode-server-insiders/data/User/prompts"
 flags = "d"  # directory
 
 # =============================================================================
-# COPILOT
+# COPILOT (optional - only sync if user has it configured)
 # =============================================================================
 
 [[entries]]
 source = ".copilot/config.json"
 target = "copilot/config.json"
 container_link = ".copilot/config.json"
-flags = "f"  # file
+flags = "fo"  # file, optional
 
 [[entries]]
 source = ".copilot/mcp-config.json"
 target = "copilot/mcp-config.json"
 container_link = ".copilot/mcp-config.json"
-flags = "f"  # file
+flags = "fo"  # file, optional
 
 [[entries]]
 source = ".copilot/skills"
 target = "copilot/skills"
 container_link = ".copilot/skills"
-flags = "dR"  # directory, remove existing first
+flags = "dRo"  # directory, remove existing first, optional
 
 # =============================================================================
-# GEMINI
+# GEMINI (optional - only sync if user has it configured)
 # =============================================================================
 
 [[entries]]
 source = ".gemini/google_accounts.json"
 target = "gemini/google_accounts.json"
 container_link = ".gemini/google_accounts.json"
-flags = "fs"  # file, secret
+flags = "fso"  # file, secret, optional
 
 [[entries]]
 source = ".gemini/oauth_creds.json"
 target = "gemini/oauth_creds.json"
 container_link = ".gemini/oauth_creds.json"
-flags = "fs"  # file, secret
+flags = "fso"  # file, secret, optional
 
 [[entries]]
 source = ".gemini/settings.json"
 target = "gemini/settings.json"
 container_link = ".gemini/settings.json"
-flags = "fj"  # file, json-init
+flags = "fjo"  # file, json-init, optional
 
 [[entries]]
 source = ".gemini/GEMINI.md"
 target = "gemini/GEMINI.md"
 container_link = ".gemini/GEMINI.md"
-flags = "f"  # file
+flags = "fo"  # file, optional
 
 # =============================================================================
 # CODEX
@@ -478,7 +479,7 @@ container_link = ".codex/skills"
 flags = "dxR"  # directory, exclude .system/, remove existing first
 
 # =============================================================================
-# AIDER
+# AIDER (optional - only sync if user has it configured)
 # Simple config files (no directory structure)
 # May contain API keys (openai-api-key, etc.)
 # =============================================================================
@@ -487,16 +488,16 @@ flags = "dxR"  # directory, exclude .system/, remove existing first
 source = ".aider.conf.yml"
 target = "aider/aider.conf.yml"
 container_link = ".aider.conf.yml"
-flags = "fs"  # file, secret
+flags = "fso"  # file, secret, optional
 
 [[entries]]
 source = ".aider.model.settings.yml"
 target = "aider/aider.model.settings.yml"
 container_link = ".aider.model.settings.yml"
-flags = "fs"  # file, secret
+flags = "fso"  # file, secret, optional
 
 # =============================================================================
-# CONTINUE
+# CONTINUE (optional - only sync if user has it configured)
 # Selective sync: config files only, skip sessions/index
 # May contain API keys/tokens
 # =============================================================================
@@ -505,16 +506,16 @@ flags = "fs"  # file, secret
 source = ".continue/config.yaml"
 target = "continue/config.yaml"
 container_link = ".continue/config.yaml"
-flags = "fs"  # file, secret
+flags = "fso"  # file, secret, optional
 
 [[entries]]
 source = ".continue/config.json"
 target = "continue/config.json"
 container_link = ".continue/config.json"
-flags = "fjs"  # file, JSON init, secret
+flags = "fjso"  # file, JSON init, secret, optional
 
 # =============================================================================
-# CURSOR
+# CURSOR (optional - only sync if user has it configured)
 # Selective sync: mcp.json, rules, extensions
 # mcp.json may contain API keys/tokens
 # =============================================================================
@@ -523,19 +524,19 @@ flags = "fjs"  # file, JSON init, secret
 source = ".cursor/mcp.json"
 target = "cursor/mcp.json"
 container_link = ".cursor/mcp.json"
-flags = "fjs"  # file, JSON init, secret
+flags = "fjso"  # file, JSON init, secret, optional
 
 [[entries]]
 source = ".cursor/rules"
 target = "cursor/rules"
 container_link = ".cursor/rules"
-flags = "dR"  # directory, remove existing first
+flags = "dRo"  # directory, remove existing first, optional
 
 [[entries]]
 source = ".cursor/extensions"
 target = "cursor/extensions"
 container_link = ".cursor/extensions"
-flags = "dR"  # directory, remove existing first
+flags = "dRo"  # directory, remove existing first, optional
 
 # =============================================================================
 # ADDITIONAL SYMLINKS (container-only, no host import)

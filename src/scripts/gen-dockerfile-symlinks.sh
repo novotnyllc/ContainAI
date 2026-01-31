@@ -33,11 +33,13 @@ HOME_DIR="/home/agent"
 declare -a mkdir_targets=()
 declare -a symlink_cmds=()
 
-while IFS='|' read -r source target container_link flags disabled entry_type; do
+while IFS='|' read -r source target container_link flags disabled entry_type optional; do
     # Skip entries without container_link
     [[ -z "$container_link" ]] && continue
     # Skip dynamic pattern entries (G flag)
     [[ "$flags" == *G* ]] && continue
+    # Skip optional entries (o flag) - symlinks created only if source exists at import time
+    [[ "$optional" == "true" ]] && continue
 
     is_dir=0
     needs_rm=0

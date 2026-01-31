@@ -437,18 +437,18 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.vscode-server-insiders/data/User/mcp:/target/vscode-server-insiders/data/User/mcp:d"
         "/source/.vscode-server-insiders/data/User/prompts:/target/vscode-server-insiders/data/User/prompts:d"
 
-        # --- Copilot ---
+        # --- Copilot (optional) ---
         # Selective sync: config, mcp-config, skills (exclude logs/, command-history-state.json)
-        "/source/.copilot/config.json:/target/copilot/config.json:f"
-        "/source/.copilot/mcp-config.json:/target/copilot/mcp-config.json:f"
-        "/source/.copilot/skills:/target/copilot/skills:d"
+        "/source/.copilot/config.json:/target/copilot/config.json:fo"
+        "/source/.copilot/mcp-config.json:/target/copilot/mcp-config.json:fo"
+        "/source/.copilot/skills:/target/copilot/skills:do"
 
-        # --- Gemini ---
+        # --- Gemini (optional) ---
         # Selective sync: credentials + settings + user instructions (exclude tmp/, antigravity/)
-        "/source/.gemini/google_accounts.json:/target/gemini/google_accounts.json:fs"
-        "/source/.gemini/oauth_creds.json:/target/gemini/oauth_creds.json:fs"
-        "/source/.gemini/settings.json:/target/gemini/settings.json:fj"
-        "/source/.gemini/GEMINI.md:/target/gemini/GEMINI.md:f"
+        "/source/.gemini/google_accounts.json:/target/gemini/google_accounts.json:fso"
+        "/source/.gemini/oauth_creds.json:/target/gemini/oauth_creds.json:fso"
+        "/source/.gemini/settings.json:/target/gemini/settings.json:fjo"
+        "/source/.gemini/GEMINI.md:/target/gemini/GEMINI.md:fo"
 
         # --- Codex ---
         # Selective sync: config, auth, skills (exclude history.jsonl, log/, sessions/, shell_snapshots/, tmp/)
@@ -460,23 +460,23 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         # Only need auth from data dir
         "/source/.local/share/opencode/auth.json:/target/local/share/opencode/auth.json:fs"
 
-        # --- Aider ---
+        # --- Aider (optional) ---
         # May contain API keys (openai-api-key, etc.)
-        "/source/.aider.conf.yml:/target/aider/aider.conf.yml:fs"
-        "/source/.aider.model.settings.yml:/target/aider/aider.model.settings.yml:fs"
+        "/source/.aider.conf.yml:/target/aider/aider.conf.yml:fso"
+        "/source/.aider.model.settings.yml:/target/aider/aider.model.settings.yml:fso"
 
-        # --- Continue ---
+        # --- Continue (optional) ---
         # Selective sync: config files only (skip sessions/, index/)
         # May contain API keys/tokens
-        "/source/.continue/config.yaml:/target/continue/config.yaml:fs"
-        "/source/.continue/config.json:/target/continue/config.json:fjs"
+        "/source/.continue/config.yaml:/target/continue/config.yaml:fso"
+        "/source/.continue/config.json:/target/continue/config.json:fjso"
 
-        # --- Cursor ---
+        # --- Cursor (optional) ---
         # Selective sync: mcp.json, rules, extensions
         # mcp.json may contain API keys/tokens
-        "/source/.cursor/mcp.json:/target/cursor/mcp.json:fjs"
-        "/source/.cursor/rules:/target/cursor/rules:d"
-        "/source/.cursor/extensions:/target/cursor/extensions:d"
+        "/source/.cursor/mcp.json:/target/cursor/mcp.json:fjso"
+        "/source/.cursor/rules:/target/cursor/rules:do"
+        "/source/.cursor/extensions:/target/cursor/extensions:do"
     )
 fi
 
@@ -1744,6 +1744,19 @@ copy() {
                 ;;
         esac
     else
+        # Source does not exist
+        # For optional entries (o flag), skip entirely - no target creation
+        case "$_flags" in
+            *o*)
+                if [ "${DRY_RUN:-}" = "1" ]; then
+                    echo "[DRY-RUN] Optional source not found, would skip: $_src"
+                elif [ "${IMPORT_VERBOSE:-}" = "1" ]; then
+                    echo "[INFO] Optional source not found, skipping: $_src"
+                fi
+                # Return early - do not create target for optional entries
+                return
+                ;;
+        esac
         if [ "${DRY_RUN:-}" = "1" ]; then
             case "$_flags" in
                 *j*|*s*|*d*)

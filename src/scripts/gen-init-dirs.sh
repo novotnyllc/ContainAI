@@ -33,11 +33,13 @@ declare -a file_cmds=()
 declare -a secret_file_cmds=()
 declare -a secret_dir_cmds=()
 
-while IFS='|' read -r source target container_link flags disabled entry_type; do
+while IFS='|' read -r source target container_link flags disabled entry_type optional; do
     # Skip entries without target
     [[ -z "$target" ]] && continue
     # Skip dynamic pattern entries (G flag)
     [[ "$flags" == *G* ]] && continue
+    # Skip optional entries (o flag) - they are created only if source exists at import time
+    [[ "$optional" == "true" ]] && continue
     # Skip entries that only have container_link (container_symlinks section)
     # We still process them for volume initialization
     [[ "$entry_type" == "symlink" ]] && continue
@@ -86,9 +88,11 @@ while IFS='|' read -r source target container_link flags disabled entry_type; do
 done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
 
 # Also process container_symlinks section for volume-only entries
-while IFS='|' read -r source target container_link flags disabled entry_type; do
+while IFS='|' read -r source target container_link flags disabled entry_type optional; do
     [[ "$entry_type" != "symlink" ]] && continue
     [[ -z "$target" ]] && continue
+    # Skip optional entries (o flag)
+    [[ "$optional" == "true" ]] && continue
 
     is_file=0
     is_json=0

@@ -73,15 +73,8 @@ run_cmd mkdir -p \
     /home/agent/.vscode-server-insiders/data/User \
     /mnt/agent-data/vscode-server-insiders/data/User/mcp \
     /mnt/agent-data/vscode-server-insiders/data/User/prompts \
-    /home/agent/.copilot \
-    /mnt/agent-data/copilot/skills \
-    /home/agent/.gemini \
     /home/agent/.codex \
     /mnt/agent-data/codex/skills \
-    /home/agent/.continue \
-    /home/agent/.cursor \
-    /mnt/agent-data/cursor/rules \
-    /mnt/agent-data/cursor/extensions \
     /home/agent/.vscode-server/data/Machine \
     /home/agent/.vscode-server-insiders/data/Machine
 
@@ -138,27 +131,10 @@ run_cmd ln -sfn -- "/mnt/agent-data/vscode-server/data/User/prompts" "/home/agen
 run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/extensions" "/home/agent/.vscode-server-insiders/extensions"
 run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/data/User/mcp" "/home/agent/.vscode-server-insiders/data/User/mcp"
 run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/data/User/prompts" "/home/agent/.vscode-server-insiders/data/User/prompts"
-run_cmd ln -sfn -- "/mnt/agent-data/copilot/config.json" "/home/agent/.copilot/config.json"
-run_cmd ln -sfn -- "/mnt/agent-data/copilot/mcp-config.json" "/home/agent/.copilot/mcp-config.json"
-run_cmd rm -rf -- "/home/agent/.copilot/skills"
-run_cmd ln -sfn -- "/mnt/agent-data/copilot/skills" "/home/agent/.copilot/skills"
-run_cmd ln -sfn -- "/mnt/agent-data/gemini/google_accounts.json" "/home/agent/.gemini/google_accounts.json"
-run_cmd ln -sfn -- "/mnt/agent-data/gemini/oauth_creds.json" "/home/agent/.gemini/oauth_creds.json"
-run_cmd ln -sfn -- "/mnt/agent-data/gemini/settings.json" "/home/agent/.gemini/settings.json"
-run_cmd ln -sfn -- "/mnt/agent-data/gemini/GEMINI.md" "/home/agent/.gemini/GEMINI.md"
 run_cmd ln -sfn -- "/mnt/agent-data/codex/config.toml" "/home/agent/.codex/config.toml"
 run_cmd ln -sfn -- "/mnt/agent-data/codex/auth.json" "/home/agent/.codex/auth.json"
 run_cmd rm -rf -- "/home/agent/.codex/skills"
 run_cmd ln -sfn -- "/mnt/agent-data/codex/skills" "/home/agent/.codex/skills"
-run_cmd ln -sfn -- "/mnt/agent-data/aider/aider.conf.yml" "/home/agent/.aider.conf.yml"
-run_cmd ln -sfn -- "/mnt/agent-data/aider/aider.model.settings.yml" "/home/agent/.aider.model.settings.yml"
-run_cmd ln -sfn -- "/mnt/agent-data/continue/config.yaml" "/home/agent/.continue/config.yaml"
-run_cmd ln -sfn -- "/mnt/agent-data/continue/config.json" "/home/agent/.continue/config.json"
-run_cmd ln -sfn -- "/mnt/agent-data/cursor/mcp.json" "/home/agent/.cursor/mcp.json"
-run_cmd rm -rf -- "/home/agent/.cursor/rules"
-run_cmd ln -sfn -- "/mnt/agent-data/cursor/rules" "/home/agent/.cursor/rules"
-run_cmd rm -rf -- "/home/agent/.cursor/extensions"
-run_cmd ln -sfn -- "/mnt/agent-data/cursor/extensions" "/home/agent/.cursor/extensions"
 run_cmd ln -sfn -- "/mnt/agent-data/vscode-server/data/Machine/settings.json" "/home/agent/.vscode-server/data/Machine/settings.json"
 run_cmd ln -sfn -- "/mnt/agent-data/vscode-server/data/User/mcp.json" "/home/agent/.vscode-server/data/User/mcp.json"
 run_cmd ln -sfn -- "/mnt/agent-data/vscode-server-insiders/data/Machine/settings.json" "/home/agent/.vscode-server-insiders/data/Machine/settings.json"

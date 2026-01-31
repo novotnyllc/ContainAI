@@ -49,13 +49,13 @@ USER agent
 WORKDIR /home/agent
 
 # Create agent data directories for config/auth file symlinks
+# Note: Only primary agents (.claude, .codex) are pre-created here.
+# Optional agents (.copilot, .gemini, .continue, .cursor) are created by
+# gen-dockerfile-symlinks.sh only if they exist on the host at import time.
+# This prevents home directory pollution with empty directories.
 RUN mkdir -p \
     /home/agent/.claude \
-    /home/agent/.copilot \
-    /home/agent/.gemini \
     /home/agent/.codex \
-    /home/agent/.continue \
-    /home/agent/.cursor \
     /home/agent/.local/share/opencode
 
 # Install Claude Code via official installer

@@ -36,10 +36,7 @@ ensure_dir "${DATA_DIR}/vscode-server-insiders/extensions"
 ensure_dir "${DATA_DIR}/vscode-server-insiders/data/Machine"
 ensure_dir "${DATA_DIR}/vscode-server-insiders/data/User/mcp"
 ensure_dir "${DATA_DIR}/vscode-server-insiders/data/User/prompts"
-ensure_dir "${DATA_DIR}/copilot/skills"
 ensure_dir "${DATA_DIR}/codex/skills"
-ensure_dir "${DATA_DIR}/cursor/rules"
-ensure_dir "${DATA_DIR}/cursor/extensions"
 
 # Regular files
 ensure_file "${DATA_DIR}/claude/settings.json" true
@@ -56,10 +53,6 @@ ensure_file "${DATA_DIR}/shell/zprofile"
 ensure_file "${DATA_DIR}/shell/inputrc"
 ensure_file "${DATA_DIR}/editors/vimrc"
 ensure_file "${DATA_DIR}/config/starship.toml"
-ensure_file "${DATA_DIR}/copilot/config.json"
-ensure_file "${DATA_DIR}/copilot/mcp-config.json"
-ensure_file "${DATA_DIR}/gemini/settings.json" true
-ensure_file "${DATA_DIR}/gemini/GEMINI.md"
 ensure_file "${DATA_DIR}/codex/config.toml"
 ensure_file "${DATA_DIR}/vscode-server/data/Machine/settings.json" true
 ensure_file "${DATA_DIR}/vscode-server/data/User/mcp.json" true
@@ -77,21 +70,7 @@ ensure_file "${DATA_DIR}/config/opencode/opencode.json" true
 safe_chmod 600 "${DATA_DIR}/config/opencode/opencode.json"
 ensure_file "${DATA_DIR}/local/share/opencode/auth.json"
 safe_chmod 600 "${DATA_DIR}/local/share/opencode/auth.json"
-ensure_file "${DATA_DIR}/gemini/google_accounts.json"
-safe_chmod 600 "${DATA_DIR}/gemini/google_accounts.json"
-ensure_file "${DATA_DIR}/gemini/oauth_creds.json"
-safe_chmod 600 "${DATA_DIR}/gemini/oauth_creds.json"
 ensure_file "${DATA_DIR}/codex/auth.json"
 safe_chmod 600 "${DATA_DIR}/codex/auth.json"
-ensure_file "${DATA_DIR}/aider/aider.conf.yml"
-safe_chmod 600 "${DATA_DIR}/aider/aider.conf.yml"
-ensure_file "${DATA_DIR}/aider/aider.model.settings.yml"
-safe_chmod 600 "${DATA_DIR}/aider/aider.model.settings.yml"
-ensure_file "${DATA_DIR}/continue/config.yaml"
-safe_chmod 600 "${DATA_DIR}/continue/config.yaml"
-ensure_file "${DATA_DIR}/continue/config.json" true
-safe_chmod 600 "${DATA_DIR}/continue/config.json"
-ensure_file "${DATA_DIR}/cursor/mcp.json" true
-safe_chmod 600 "${DATA_DIR}/cursor/mcp.json"
 
 # Secret directories (700 permissions)
