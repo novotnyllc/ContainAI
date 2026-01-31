@@ -5576,7 +5576,7 @@ test_no_pollution() {
 
     # Explicitly verify we did NOT create optional agent dirs in source
     # (This confirms test setup is correct)
-    for agent_path in ".cursor" ".aider.conf.yml" ".continue" ".copilot" ".gemini"; do
+    for agent_path in ".cursor" ".kiro" ".aider.conf.yml" ".continue" ".copilot" ".gemini"; do
         if [[ -e "$source_dir/$agent_path" ]]; then
             fail "Test setup error: $agent_path should not exist in source"
             return
@@ -5679,18 +5679,27 @@ test_no_pollution() {
 
     # Step 5: Assert optional agent paths do NOT exist (no pollution)
     # These are all marked with 'o' flag in sync-manifest.toml
+    # Note: Must use 'bash -lc' to ensure ~ expands inside the container, not the host
     local pollution_found=0
 
     # Check ~/.cursor (directory - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.cursor 2>/dev/null; then
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.cursor' 2>/dev/null; then
         fail "POLLUTION: ~/.cursor exists but should not (user has no cursor config)"
         pollution_found=1
     else
         pass "~/.cursor does NOT exist (no pollution)"
     fi
 
+    # Check ~/.kiro (directory - optional agent per spec)
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.kiro' 2>/dev/null; then
+        fail "POLLUTION: ~/.kiro exists but should not (user has no kiro config)"
+        pollution_found=1
+    else
+        pass "~/.kiro does NOT exist (no pollution)"
+    fi
+
     # Check ~/.aider.conf.yml (file - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.aider.conf.yml 2>/dev/null; then
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.aider.conf.yml' 2>/dev/null; then
         fail "POLLUTION: ~/.aider.conf.yml exists but should not (user has no aider config)"
         pollution_found=1
     else
@@ -5698,7 +5707,7 @@ test_no_pollution() {
     fi
 
     # Check ~/.continue (directory - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.continue 2>/dev/null; then
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.continue' 2>/dev/null; then
         fail "POLLUTION: ~/.continue exists but should not (user has no continue config)"
         pollution_found=1
     else
@@ -5706,7 +5715,7 @@ test_no_pollution() {
     fi
 
     # Check ~/.copilot (directory - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.copilot 2>/dev/null; then
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.copilot' 2>/dev/null; then
         fail "POLLUTION: ~/.copilot exists but should not (user has no copilot config)"
         pollution_found=1
     else
@@ -5714,7 +5723,7 @@ test_no_pollution() {
     fi
 
     # Check ~/.gemini (directory - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -e ~/.gemini 2>/dev/null; then
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.gemini' 2>/dev/null; then
         fail "POLLUTION: ~/.gemini exists but should not (user has no gemini config)"
         pollution_found=1
     else
@@ -5722,8 +5731,9 @@ test_no_pollution() {
     fi
 
     # Step 6: Display home directory contents for visibility
+    # Note: Must use 'bash -lc' to ensure ~ expands inside the container, not the host
     local home_contents
-    home_contents=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la ~ 2>&1) || home_contents="[ls failed]"
+    home_contents=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'ls -la ~' 2>&1) || home_contents="[ls failed]"
     info "Container home directory contents (ls -la ~):"
     printf '%s\n' "$home_contents" | while IFS= read -r line; do
         echo "    $line"
