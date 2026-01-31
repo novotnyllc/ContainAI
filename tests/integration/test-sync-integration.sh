@@ -5819,14 +5819,16 @@ test_cai_sync() {
 
     # Step 2b: Fix volume permissions (volumes are root-owned by default)
     # Must run as root before switching to agent user
-    if ! "${DOCKER_CMD[@]}" exec --user root "$test_container_name" chown -R 1000:1000 /mnt/agent-data 2>/dev/null; then
+    # Use agent:agent instead of hardcoded UID to be more portable
+    if ! "${DOCKER_CMD[@]}" exec --user root "$test_container_name" chown -R agent:agent /mnt/agent-data 2>/dev/null; then
         fail "Failed to fix volume permissions"
         return
     fi
     pass "Fixed volume permissions for agent user"
 
     # Step 3: Create a test config directory in the container home (simulating user-installed tool)
-    # We use .cursor/rules since it's an optional directory entry with container_link in the manifest
+    # We use .cursor/rules as a concrete example of an optional directory entry with container_link
+    # (the spec says "e.g., ~/.testconfig" meaning any optional entry works)
     # First verify ~/.cursor is not a symlink (would place test data on volume already)
     local test_content
     test_content="test_sync_content_$(date +%s)"
@@ -5967,38 +5969,26 @@ test_cai_sync() {
         return
     fi
 
-    # Step 8: Verify cai sync on host fails with appropriate error
-    # Note: If we're already in a container (CI environment with /mnt/agent-data mounted),
-    # skip this check since container detection will pass. This is an allowed exception
-    # per the acceptance criteria for containerized CI environments.
-    if [[ -f "/.dockerenv" ]] && mountpoint -q /mnt/agent-data 2>/dev/null; then
-        info "Skipping host-fail test: test environment is already inside a container (allowed for containerized CI)"
+    # Step 8: Verify cai sync fails when run in a container WITHOUT /mnt/agent-data mounted
+    # This tests the container detection logic (must have mountpoint AND container indicators)
+    # Run in a fresh container without the volume mount to ensure detection fails
+    local host_sync_output host_sync_exit=0
+    host_sync_output=$("${DOCKER_CMD[@]}" run --rm \
+        --entrypoint /bin/bash \
+        "$IMAGE_NAME" -c 'cai sync 2>&1') || host_sync_exit=$?
+
+    if [[ $host_sync_exit -eq 0 ]]; then
+        fail "cai sync without /mnt/agent-data mounted should have failed but succeeded"
+        return
+    fi
+
+    # Check for expected error message about container environment
+    if [[ "$host_sync_output" == *"must be run inside a ContainAI container"* ]] || \
+       [[ "$host_sync_output" == *"/mnt/agent-data must be mounted"* ]]; then
+        pass "cai sync fails with appropriate error when volume not mounted"
     else
-        local test_dir
-        test_dir=$(mktemp -d) || {
-            fail "Failed to create temp directory for host test"
-            return
-        }
-
-        local host_sync_output host_sync_exit=0
-        host_sync_output=$(cd -- "$test_dir" && HOME="$test_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-            bash -c 'source "$1/containai.sh" && cai sync 2>&1' _ "$SRC_DIR") || host_sync_exit=$?
-
-        rm -rf "$test_dir" 2>/dev/null || true
-
-        if [[ $host_sync_exit -eq 0 ]]; then
-            fail "cai sync on host should have failed but succeeded"
-            return
-        fi
-
-        # Check for expected error message about container environment
-        if [[ "$host_sync_output" == *"must be run inside a ContainAI container"* ]] || \
-           [[ "$host_sync_output" == *"/mnt/agent-data must be mounted"* ]]; then
-            pass "cai sync on host fails with appropriate error"
-        else
-            fail "cai sync on host failed but with unexpected error: $host_sync_output"
-            return
-        fi
+        fail "cai sync failed but with unexpected error: $host_sync_output"
+        return
     fi
 
     pass "cai sync test scenario completed successfully"
