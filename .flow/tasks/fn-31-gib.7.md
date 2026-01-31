@@ -15,9 +15,8 @@ Test new container attaching to existing data volume. Validates data persistence
 - [ ] Cleans up on success/failure (trap)
 
 ## Done summary
-TBD
-
+Implemented test_existing_volume() to validate data persistence across container recreation. The test pre-populates a volume with marker file and configs, creates a new container attaching to the existing volume, then verifies data persistence via marker file, symlink validity pointing to volume data, and config accessibility through symlinks with realpath validation.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: be3de4a, e35ffe9, 67f4f27
+- Tests: shellcheck -x tests/integration/test-sync-integration.sh, bash -n tests/integration/test-sync-integration.sh
 - PRs:

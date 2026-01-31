@@ -283,3 +283,9 @@ When using Docker labels for test resource cleanup, use run-scoped labels (test_
 
 ## 2026-01-31 manual [pitfall]
 Fractional sleep (e.g., sleep 0.5) is not portable across all environments; use integer sleeps with adjusted iteration counts
+
+## 2026-01-31 manual [pitfall]
+When using process substitution (< <(cmd)) in bash, failures in cmd are silently ignored; capture to temp file and check exit status for reliable error detection
+
+## 2026-01-31 manual [pitfall]
+After rm -rf in shell scripts, verify deletion succeeded with [[ ! -e path ]] before continuing - ln -sfn on an existing directory creates symlink INSIDE the directory

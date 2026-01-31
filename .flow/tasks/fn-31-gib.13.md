@@ -31,9 +31,8 @@ In-container command to move local configs to data volume and replace with symli
 - [ ] `--dry-run` flag shows what would happen without changes
 
 ## Done summary
-TBD
-
+Implemented `cai sync` subcommand for in-container config persistence. The command moves user configs from $HOME to /mnt/agent-data and creates symlinks, enabling container customizations to persist across recreations. Includes security validations (container detection, path validation, symlink rejection) and --dry-run mode.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 95cb6d8b16af809929bddc885cc70519e8eb7dcb
+- Tests: shellcheck -x src/lib/sync.sh, source src/containai.sh && cai sync --dry-run, source src/containai.sh && cai sync --help
 - PRs:

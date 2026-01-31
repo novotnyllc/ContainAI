@@ -83,6 +83,8 @@ _cai_sync_detect_container() {
     # Check cgroup for container markers (works for Docker, Podman, Sysbox)
     if [[ -f "/proc/1/cgroup" ]]; then
         # Look for docker, lxc, or kubepods in cgroup paths
+        # Note: Using ERE (-E) is intentional here - this code only runs in containers
+        # where GNU grep is available (Linux containers with /proc filesystem)
         if grep -qE '(docker|lxc|kubepods|containerd)' /proc/1/cgroup 2>/dev/null; then
             return 0
         fi
@@ -261,7 +263,7 @@ _cai_sync_entry() {
             fi
         # For files, prefer local source (user's newer changes) - overwrite volume
         elif [[ -f "$home_source" && -f "$volume_target" ]]; then
-            if ! mv -f "$home_source" "$volume_target" 2>/dev/null; then
+            if ! mv -f -- "$home_source" "$volume_target" 2>/dev/null; then
                 printf '[ERROR] Failed to overwrite volume file: %s\n' "$volume_target" >&2
                 return 1
             fi
@@ -271,7 +273,7 @@ _cai_sync_entry() {
         fi
     else
         # Move source to volume
-        if ! mv "$home_source" "$volume_target" 2>/dev/null; then
+        if ! mv -- "$home_source" "$volume_target" 2>/dev/null; then
             printf '[ERROR] Failed to move: %s -> %s\n' "$home_source" "$volume_target" >&2
             return 1
         fi
@@ -282,7 +284,7 @@ _cai_sync_entry() {
     # If container_link != source, we create symlink at container_link location
     if [[ "$container_link" == "$source" ]]; then
         # Simple case: symlink at original location
-        if ! ln -sfn "$volume_target" "$home_source" 2>/dev/null; then
+        if ! ln -sfn -- "$volume_target" "$home_source" 2>/dev/null; then
             printf '[ERROR] Failed to create symlink: %s -> %s\n' "$home_source" "$volume_target" >&2
             return 1
         fi
@@ -321,7 +323,7 @@ _cai_sync_entry() {
             return 1
         fi
 
-        if ! ln -sfn "$volume_target" "$home_link" 2>/dev/null; then
+        if ! ln -sfn -- "$volume_target" "$home_link" 2>/dev/null; then
             printf '[ERROR] Failed to create symlink: %s -> %s\n' "$home_link" "$volume_target" >&2
             return 1
         fi
@@ -397,23 +399,22 @@ _cai_sync_cmd() {
     local skipped=0
     local failed=0
 
-    # Parse manifest - capture to temp file to detect parser errors
-    local parser_output
-    parser_output=$(mktemp) || {
-        printf '[ERROR] Cannot create temp file for parser output\n' >&2
-        return 1
+    # Parse manifest - capture output and detect parser errors
+    # Use a subshell to avoid global trap side effects
+    local parser_output parser_error
+    parser_error=""
+    parser_output=$("$parser" "$manifest" 2>&1) || {
+        parser_error="$parser_output"
     }
-    # shellcheck disable=SC2064
-    trap "rm -f '$parser_output'" RETURN
 
-    if ! "$parser" "$manifest" > "$parser_output" 2>&1; then
+    if [[ -n "$parser_error" ]]; then
         printf '[ERROR] Failed to parse manifest: %s\n' "$manifest" >&2
-        cat "$parser_output" >&2
+        printf '%s\n' "$parser_error" >&2
         return 1
     fi
 
     # Process manifest entries with non-empty container_link
-    local line source target container_link flags disabled entry_type optional
+    local source target container_link flags disabled entry_type optional
     while IFS='|' read -r source target container_link flags disabled entry_type optional; do
         # Skip container_symlinks (type=symlink) - these have no source to sync
         [[ "$entry_type" == "symlink" ]] && continue
@@ -440,7 +441,7 @@ _cai_sync_cmd() {
             1) failed=$((failed + 1)) ;;
             2) skipped=$((skipped + 1)) ;;
         esac
-    done < "$parser_output"
+    done <<< "$parser_output"
 
     # Summary
     if [[ "$dry_run" == "true" ]]; then
