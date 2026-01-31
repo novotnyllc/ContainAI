@@ -55,15 +55,23 @@ _cai_sync_get_manifest() {
 
 # Detect if we're running inside a container
 # Requires BOTH conditions:
-# 1. /mnt/agent-data mountpoint exists
+# 1. /mnt/agent-data must be a mountpoint (strict - no directory fallback)
 # 2. At least one of: /.dockerenv OR container cgroup marker
 _cai_sync_detect_container() {
-    # Condition 1: /mnt/agent-data must be a mountpoint
-    if ! mountpoint -q "$_CAI_SYNC_DATA_DIR" 2>/dev/null; then
-        # Fallback: check if it's at least a directory (for testing)
-        if [[ ! -d "$_CAI_SYNC_DATA_DIR" ]]; then
+    # Condition 1: /mnt/agent-data must be a mountpoint (REQUIRED)
+    # Use mountpoint command if available, otherwise parse /proc/self/mountinfo
+    if command -v mountpoint >/dev/null 2>&1; then
+        if ! mountpoint -q "$_CAI_SYNC_DATA_DIR" 2>/dev/null; then
             return 1
         fi
+    elif [[ -f /proc/self/mountinfo ]]; then
+        # Parse mountinfo to check if path is a mountpoint
+        if ! grep -q " ${_CAI_SYNC_DATA_DIR} " /proc/self/mountinfo 2>/dev/null; then
+            return 1
+        fi
+    else
+        # Cannot verify mountpoint - fail closed
+        return 1
     fi
 
     # Condition 2: At least one container indicator must be present
@@ -80,12 +88,7 @@ _cai_sync_detect_container() {
         fi
     fi
 
-    # Check for container runtime environment variables
-    if [[ -n "${container:-}" ]] || [[ -n "${CONTAINAI_CONTAINER:-}" ]]; then
-        return 0
-    fi
-
-    # No container indicators found
+    # No container indicators found (env vars alone are not sufficient)
     return 1
 }
 
@@ -197,16 +200,19 @@ _cai_sync_entry() {
 
     # If target already exists on volume, we need to merge or handle conflict
     if [[ -e "$volume_target" ]]; then
-        # For directories, rsync to merge contents
+        # For directories, rsync to merge contents (local source wins on conflicts)
         if [[ -d "$home_source" && -d "$volume_target" ]]; then
             if ! rsync -a "$home_source/" "$volume_target/" 2>/dev/null; then
                 printf '[ERROR] Failed to merge directory: %s\n' "$home_source" >&2
                 return 1
             fi
             rm -rf "$home_source"
-        # For files, prefer volume version (already synced), just remove source
+        # For files, prefer local source (user's newer changes) - overwrite volume
         elif [[ -f "$home_source" && -f "$volume_target" ]]; then
-            rm -f "$home_source"
+            if ! mv -f "$home_source" "$volume_target" 2>/dev/null; then
+                printf '[ERROR] Failed to overwrite volume file: %s\n' "$volume_target" >&2
+                return 1
+            fi
         else
             printf '[ERROR] Type conflict: %s exists on volume but differs in type\n' "$volume_target" >&2
             return 1
@@ -230,12 +236,33 @@ _cai_sync_entry() {
         fi
     else
         # Different link name: create at container_link location
-        # Ensure parent directory for container_link exists
         local link_parent
         link_parent="$(dirname "$home_link")"
-        mkdir -p "$link_parent" 2>/dev/null || true
 
-        # Remove existing file/dir at link location if needed
+        # Security: reject if container_link parent path contains symlinks
+        if ! _cai_sync_reject_symlinks_in_path "$link_parent"; then
+            printf '[ERROR] Container link parent path contains symlinks: %s\n' "$link_parent" >&2
+            return 1
+        fi
+
+        # Security: verify link parent resolves under $HOME
+        local resolved_parent
+        resolved_parent="$(realpath -m "$link_parent" 2>/dev/null)" || {
+            printf '[ERROR] Cannot resolve container link parent: %s\n' "$link_parent" >&2
+            return 1
+        }
+        if [[ "$resolved_parent" != "${HOME}" && "$resolved_parent" != "${HOME}/"* ]]; then
+            printf '[ERROR] Container link parent escapes HOME: %s -> %s\n' "$link_parent" "$resolved_parent" >&2
+            return 1
+        fi
+
+        # Ensure parent directory exists (fail-closed on errors)
+        if ! mkdir -p "$link_parent" 2>/dev/null; then
+            printf '[ERROR] Cannot create container link parent directory: %s\n' "$link_parent" >&2
+            return 1
+        fi
+
+        # Remove existing file/dir at link location if needed (only after validation)
         if [[ -e "$home_link" && ! -L "$home_link" ]]; then
             rm -rf "$home_link"
         fi
