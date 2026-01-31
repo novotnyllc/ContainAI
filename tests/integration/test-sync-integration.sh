@@ -3932,8 +3932,8 @@ data_volume = "'"$test_vol"'"
 test_new_volume() {
     section "Test 60: New volume test scenario"
 
-    # Create test volume and container with proper labels
-    local test_vol test_container_name test_container_id
+    # Create test volume with proper labels
+    local test_vol test_container_name
     test_vol=$(create_test_volume "new-volume-data") || {
         fail "Failed to create test volume"
         return
@@ -3945,14 +3945,17 @@ test_new_volume() {
     local test_dir
     test_dir=$(mktemp -d)
 
+    # Set container name early for cleanup
+    test_container_name="test-new-volume-${TEST_RUN_ID}"
+
     # Local cleanup function for this test
     local cleanup_done=0
     cleanup_test() {
         [[ $cleanup_done -eq 1 ]] && return
         cleanup_done=1
-        # Stop and remove container if it exists
-        "${DOCKER_CMD[@]}" stop -- "test-new-volume-${TEST_RUN_ID}" 2>/dev/null || true
-        "${DOCKER_CMD[@]}" rm -- "test-new-volume-${TEST_RUN_ID}" 2>/dev/null || true
+        # Stop and remove container if it exists (use variable, not hardcoded name)
+        "${DOCKER_CMD[@]}" stop -- "$test_container_name" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$test_container_name" 2>/dev/null || true
         # Volume cleanup handled by cleanup_test_resources via EXIT trap
         rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
     }
@@ -3987,13 +3990,12 @@ data_volume = "'"$test_vol"'"
     pass "Import to new volume succeeded"
 
     # Step 2: Create container with the test volume mounted
-    test_container_id=$(create_test_container "new-volume" \
+    if ! create_test_container "new-volume" \
         --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" /bin/bash -c "sleep 300") || {
+        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
         fail "Failed to create test container"
         return
-    }
-    test_container_name="test-new-volume-${TEST_RUN_ID}"
+    fi
     pass "Created test container: $test_container_name"
 
     # Step 3: Start the container
@@ -4003,15 +4005,32 @@ data_volume = "'"$test_vol"'"
     fi
     pass "Started test container"
 
-    # Give container a moment to initialize
-    sleep 1
+    # Wait for container to be ready (poll for volume mount, not fixed sleep)
+    local wait_count=0
+    while [[ $wait_count -lt 10 ]]; do
+        if "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data/claude 2>/dev/null; then
+            break
+        fi
+        sleep 0.5
+        wait_count=$((wait_count + 1))
+    done
+    if [[ $wait_count -ge 10 ]]; then
+        fail "Container did not become ready in time"
+        return
+    fi
 
     # Step 4: Assert expected files present in volume via docker exec
-    local files_check
-    files_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la /mnt/agent-data/claude/ 2>&1) || files_check="exec_failed"
+    local files_check exec_exit=0
+    files_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la /mnt/agent-data/claude/ 2>&1) || exec_exit=$?
 
-    if [[ "$files_check" == "exec_failed" ]]; then
-        fail "Docker exec failed - cannot verify volume contents"
+    if [[ $exec_exit -ne 0 ]]; then
+        # Differentiate exec failure from ls failure
+        if [[ "$files_check" == *"No such container"* ]] || [[ "$files_check" == *"is not running"* ]]; then
+            fail "Docker exec failed - container not running"
+        else
+            fail "Volume directory /mnt/agent-data/claude not accessible (exit=$exec_exit)"
+            info "Output: $files_check"
+        fi
         return
     fi
 
@@ -4047,107 +4066,76 @@ data_volume = "'"$test_vol"'"
     fi
 
     # Step 5: Assert symlinks valid via docker exec readlink
-    # Note: Container must have symlinks set up via the generated symlinks.sh during build
-    # We check that the image's symlink structure points to the volume mount
+    # The container image creates symlinks from ~/.claude/* to /mnt/agent-data/claude/*
+    # This is a hard requirement - symlinks must be correctly set up
     local symlink_check
     symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
-        claude_link=$(readlink ~/.claude 2>/dev/null || echo "not_symlink")
-        if [ "$claude_link" = "/mnt/agent-data/claude" ]; then
-            echo "claude_ok"
+        # Check for directory symlink first (preferred structure)
+        if [ -L ~/.claude ]; then
+            claude_link=$(readlink ~/.claude)
+            if [ "$claude_link" = "/mnt/agent-data/claude" ]; then
+                echo "dir_symlink_ok"
+            else
+                echo "dir_symlink_wrong:$claude_link"
+            fi
+        elif [ -d ~/.claude ]; then
+            # Directory exists, check for individual file symlinks
+            # At minimum, plugins and skills must be symlinked
+            plugins_ok=0
+            skills_ok=0
+            if [ -L ~/.claude/plugins ]; then
+                target=$(readlink ~/.claude/plugins)
+                [ "$target" = "/mnt/agent-data/claude/plugins" ] && plugins_ok=1
+            fi
+            if [ -L ~/.claude/skills ]; then
+                target=$(readlink ~/.claude/skills)
+                [ "$target" = "/mnt/agent-data/claude/skills" ] && skills_ok=1
+            fi
+            if [ "$plugins_ok" = "1" ] && [ "$skills_ok" = "1" ]; then
+                echo "file_symlinks_ok"
+            elif [ "$plugins_ok" = "0" ] && [ "$skills_ok" = "0" ]; then
+                echo "file_symlinks_missing_both"
+            elif [ "$plugins_ok" = "0" ]; then
+                echo "file_symlinks_missing_plugins"
+            else
+                echo "file_symlinks_missing_skills"
+            fi
         else
-            echo "claude_fail:$claude_link"
+            echo "claude_dir_missing"
         fi
     ' 2>&1) || symlink_check="exec_failed"
 
     case "$symlink_check" in
-        claude_ok)
+        dir_symlink_ok)
             pass "~/.claude symlink points to /mnt/agent-data/claude"
+            ;;
+        file_symlinks_ok)
+            pass "~/.claude/plugins symlink points to volume"
+            pass "~/.claude/skills symlink points to volume"
+            ;;
+        dir_symlink_wrong:*)
+            fail "~/.claude symlink points to wrong target: ${symlink_check#dir_symlink_wrong:}"
+            ;;
+        file_symlinks_missing_both)
+            fail "~/.claude/plugins symlink missing or incorrect"
+            fail "~/.claude/skills symlink missing or incorrect"
+            ;;
+        file_symlinks_missing_plugins)
+            fail "~/.claude/plugins symlink missing or incorrect"
+            pass "~/.claude/skills symlink points to volume"
+            ;;
+        file_symlinks_missing_skills)
+            pass "~/.claude/plugins symlink points to volume"
+            fail "~/.claude/skills symlink missing or incorrect"
+            ;;
+        claude_dir_missing)
+            fail "~/.claude directory does not exist"
             ;;
         exec_failed)
             fail "Docker exec failed for symlink check"
             ;;
-        claude_fail:*)
-            # The container image may use individual file symlinks instead of directory symlink
-            # Check for individual file symlinks instead
-            local alt_symlink_check
-            alt_symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
-                if [ -L ~/.claude/settings.json ]; then
-                    settings_target=$(readlink ~/.claude/settings.json)
-                    if [ "$settings_target" = "/mnt/agent-data/claude/settings.json" ]; then
-                        echo "settings_ok"
-                    else
-                        echo "settings_fail:$settings_target"
-                    fi
-                elif [ -d ~/.claude ]; then
-                    echo "dir_not_symlink"
-                else
-                    echo "not_found"
-                fi
-            ' 2>&1) || alt_symlink_check="exec_failed"
-
-            case "$alt_symlink_check" in
-                settings_ok)
-                    pass "~/.claude/settings.json symlink points to volume"
-                    ;;
-                dir_not_symlink)
-                    # Check if individual files are symlinked
-                    info "~/.claude is a directory (not symlink), checking file symlinks"
-                    local plugins_check
-                    plugins_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
-                        if [ -L ~/.claude/plugins ]; then
-                            target=$(readlink ~/.claude/plugins)
-                            if [ "$target" = "/mnt/agent-data/claude/plugins" ]; then
-                                echo "ok"
-                            else
-                                echo "fail:$target"
-                            fi
-                        else
-                            echo "not_symlink"
-                        fi
-                    ' 2>&1)
-                    if [[ "$plugins_check" == "ok" ]]; then
-                        pass "~/.claude/plugins symlink points to volume"
-                    else
-                        info "~/.claude/plugins status: $plugins_check (may be expected based on image build)"
-                    fi
-                    ;;
-                *)
-                    info "Symlink check result: $alt_symlink_check"
-                    ;;
-            esac
-            ;;
         *)
             fail "Unexpected symlink check result: $symlink_check"
-            ;;
-    esac
-
-    # Verify skills symlink (important for fn-31-gib.2 acceptance)
-    local skills_symlink_check
-    skills_symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
-        if [ -L ~/.claude/skills ]; then
-            target=$(readlink ~/.claude/skills)
-            if [ "$target" = "/mnt/agent-data/claude/skills" ]; then
-                echo "ok"
-            else
-                echo "fail:$target"
-            fi
-        else
-            echo "not_symlink"
-        fi
-    ' 2>&1) || skills_symlink_check="exec_failed"
-
-    case "$skills_symlink_check" in
-        ok)
-            pass "~/.claude/skills symlink points to volume"
-            ;;
-        "fail:"*)
-            fail "~/.claude/skills symlink points to wrong target: ${skills_symlink_check#fail:}"
-            ;;
-        not_symlink)
-            info "~/.claude/skills is not a symlink (may be expected based on image configuration)"
-            ;;
-        exec_failed)
-            fail "Docker exec failed for skills symlink check"
             ;;
     esac
 

@@ -31,8 +31,9 @@ Implement `o` (optional) flag across all code paths to prevent creating empty di
 - [ ] Regenerated files reflect changes: `generated/init-dirs.sh`, `generated/symlinks.sh`, `generated/link-spec.json`
 
 ## Done summary
-Implemented 'o' (optional) flag across all code paths to prevent creating empty directories for agents user doesn't have. Optional agents (Cursor, Aider, Continue, Copilot, Gemini) are skipped in Dockerfile mkdir, init-dirs, symlinks, and link-spec generation. Import now skips optional entries when source doesn't exist. Required agents (Claude, Codex) remain always available.
+TBD
+
 ## Evidence
-- Commits: f2c0c45, bf7d3ba
-- Tests: ./scripts/check-manifest-consistency.sh, shellcheck
+- Commits:
+- Tests:
 - PRs:
