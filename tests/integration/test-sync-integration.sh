@@ -4468,7 +4468,7 @@ data_volume = "'"$test_vol"'"
 }
 
 # ==============================================================================
-# Test 61-62: .priv. file filtering in .bashrc.d
+# Test 62-63: .priv. file filtering in .bashrc.d
 # ==============================================================================
 # Verifies that *.priv.* files in .bashrc.d are excluded from import for security.
 # Tests both normal import and --no-excludes to verify security behavior.
@@ -4517,7 +4517,7 @@ test_priv_file_filtering() {
     echo '{}' > "$source_dir/.claude/settings.json"
 
     # -------------------------------------------------------------------------
-    # Test 61: Normal import filters .priv. files
+    # Test 62: Normal import filters .priv. files
     # -------------------------------------------------------------------------
     section "Test 62: Normal import filters .priv. files"
 
@@ -4581,7 +4581,7 @@ test_priv_file_filtering() {
     fi
 
     # -------------------------------------------------------------------------
-    # Test 62: --no-excludes does NOT disable .priv. filtering (security)
+    # Test 63: --no-excludes does NOT disable .priv. filtering (security)
     # -------------------------------------------------------------------------
     section "Test 63: --no-excludes does NOT disable .priv. filtering"
 
@@ -4632,7 +4632,7 @@ test_priv_file_filtering() {
 }
 
 # ==============================================================================
-# Test 63: .priv. filtering in tgz restore
+# Test 64: .priv. filtering in tgz restore
 # ==============================================================================
 test_priv_file_filtering_tgz() {
     section "Test 64: .priv. file filtering in tgz restore"
