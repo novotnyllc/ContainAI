@@ -5829,27 +5829,45 @@ test_cai_sync() {
     # Step 3: Create a test config directory in the container home (simulating user-installed tool)
     # We use .cursor/rules as a concrete example of an optional directory entry with container_link
     # (the spec says "e.g., ~/.testconfig" meaning any optional entry works)
-    # First verify ~/.cursor is not a symlink (would place test data on volume already)
+    # IMPORTANT: Must verify paths are not symlinks before any deletions (safety)
     local test_content
     test_content="test_sync_content_$(date +%s)"
     local setup_result
     setup_result=$("${DOCKER_CMD[@]}" exec --user agent "$test_container_name" bash -c '
-        # Verify ~/.cursor is not a symlink to the volume (would invalidate test)
-        if [ -L ~/.cursor ]; then
-            cursor_target=$(readlink -f ~/.cursor 2>/dev/null || echo "")
-            if [ "${cursor_target#/mnt/agent-data}" != "$cursor_target" ]; then
-                echo "ERROR: ~/.cursor is already a symlink to volume"
-                exit 1
+        # Safety check: Verify neither ~/.cursor nor ~/.cursor/rules are symlinks
+        # pointing to the volume BEFORE any deletions (to avoid deleting volume data)
+        for path in ~/.cursor ~/.cursor/rules; do
+            if [ -L "$path" ]; then
+                resolved=$(readlink -f "$path" 2>/dev/null || echo "")
+                if [ "${resolved#/mnt/agent-data}" != "$resolved" ]; then
+                    echo "ERROR: $path is a symlink pointing to volume ($resolved) - cannot safely prepare test"
+                    exit 1
+                fi
             fi
-            # Symlink to somewhere else - remove it
+        done
+
+        # Now safe to remove ~/.cursor if it exists as a symlink (not to volume)
+        if [ -L ~/.cursor ]; then
             rm -f ~/.cursor
         fi
 
-        # Remove any existing symlink at ~/.cursor/rules (created by container init)
-        rm -rf ~/.cursor/rules 2>/dev/null || true
+        # Verify ~/.cursor resolves under $HOME, not /mnt/agent-data
+        cursor_resolved=$(realpath -m ~/.cursor)
+        if [ "${cursor_resolved#/mnt/agent-data}" != "$cursor_resolved" ]; then
+            echo "ERROR: ~/.cursor would resolve to volume path"
+            exit 1
+        fi
+
+        # Safe to remove ~/.cursor/rules now (verified not pointing to volume)
+        if [ -L ~/.cursor/rules ]; then
+            rm -f ~/.cursor/rules
+        elif [ -d ~/.cursor/rules ]; then
+            rm -rf ~/.cursor/rules
+        fi
+
         mkdir -p ~/.cursor
 
-        # Verify ~/.cursor/rules would be under $HOME, not /mnt/agent-data
+        # Final verification: ~/.cursor/rules would be under $HOME, not /mnt/agent-data
         rules_path=$(realpath -m ~/.cursor/rules)
         if [ "${rules_path#/mnt/agent-data}" != "$rules_path" ]; then
             echo "ERROR: ~/.cursor/rules resolves to volume path"
