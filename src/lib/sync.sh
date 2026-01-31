@@ -399,17 +399,13 @@ _cai_sync_cmd() {
     local skipped=0
     local failed=0
 
-    # Parse manifest - capture output and detect parser errors
-    # Use a subshell to avoid global trap side effects
-    local parser_output parser_error
-    parser_error=""
-    parser_output=$("$parser" "$manifest" 2>&1) || {
-        parser_error="$parser_output"
-    }
-
-    if [[ -n "$parser_error" ]]; then
+    # Parse manifest - capture output and check exit status explicitly
+    local parser_output
+    if ! parser_output=$("$parser" "$manifest" 2>&1); then
         printf '[ERROR] Failed to parse manifest: %s\n' "$manifest" >&2
-        printf '%s\n' "$parser_error" >&2
+        if [[ -n "$parser_output" ]]; then
+            printf '%s\n' "$parser_output" >&2
+        fi
         return 1
     fi
 
