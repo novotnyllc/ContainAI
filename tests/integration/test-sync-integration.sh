@@ -5216,43 +5216,48 @@ test_data_migration() {
         return
     fi
 
-    # Step 3: Make user modification inside container via ~/.claude path (not volume directly)
-    # This verifies symlinks are working correctly for user writes
+    # Step 3: Make user modification inside container via symlinked paths
+    # NOTE: ~/.claude is a real directory; only specific subdirs are symlinked to volume
+    # (plugins, skills, etc.). We write to symlinked paths to test persistence.
     local modification_output modification_exit=0
     modification_output=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
-        # Add a user custom file via the symlinked ~/.claude path
-        echo "user_custom_content_44444" > ~/.claude/user-custom-config.json
-
-        # Add a custom skill created by the user via symlinked path
+        # Add a custom skill via symlinked ~/.claude/skills path
         mkdir -p ~/.claude/skills/user-skill
-        echo "{\"name\": \"user-skill\", \"created_by\": \"user\"}" > ~/.claude/skills/user-skill/manifest.json
+        echo "{\"name\": \"user-skill\", \"created_by\": \"user\", \"marker\": \"user_skill_44444\"}" > ~/.claude/skills/user-skill/manifest.json
 
-        # Verify the files were created AND exist on the volume (symlink works)
-        if [ -f ~/.claude/user-custom-config.json ] && \
-           [ -f ~/.claude/skills/user-skill/manifest.json ] && \
-           [ -f /mnt/agent-data/claude/user-custom-config.json ] && \
-           [ -f /mnt/agent-data/claude/skills/user-skill/manifest.json ]; then
+        # Add a custom plugin via symlinked ~/.claude/plugins path
+        mkdir -p ~/.claude/plugins/cache/user-plugin
+        echo "{\"name\": \"user-plugin\", \"marker\": \"user_plugin_55555\"}" > ~/.claude/plugins/cache/user-plugin/plugin.json
+
+        # Verify the files exist via symlink AND on volume (proves symlink works)
+        if [ -f ~/.claude/skills/user-skill/manifest.json ] && \
+           [ -f ~/.claude/plugins/cache/user-plugin/plugin.json ] && \
+           [ -f /mnt/agent-data/claude/skills/user-skill/manifest.json ] && \
+           [ -f /mnt/agent-data/claude/plugins/cache/user-plugin/plugin.json ]; then
             echo "modification_success"
         else
             echo "modification_failed"
+            # Debug output
+            ls -la ~/.claude/skills/user-skill/ 2>&1 || true
+            ls -la /mnt/agent-data/claude/skills/user-skill/ 2>&1 || true
         fi
     ' 2>&1) || modification_exit=$?
 
     if [[ $modification_exit -ne 0 ]] || [[ "$modification_output" != *"modification_success"* ]]; then
-        fail "Failed to make user modifications via ~/.claude path (exit=$modification_exit)"
+        fail "Failed to make user modifications via symlinked paths (exit=$modification_exit)"
         info "Output: $modification_output"
         return
     fi
-    pass "User modifications made via ~/.claude symlink (verified on volume)"
+    pass "User modifications made via symlinked paths (verified on volume)"
 
     # Step 4: Stop and remove the container
-    if ! "${DOCKER_CMD[@]}" stop "$test_container_name" >/dev/null 2>&1; then
+    if ! "${DOCKER_CMD[@]}" stop -- "$test_container_name" >/dev/null 2>&1; then
         fail "Failed to stop container"
         return
     fi
     pass "Stopped container"
 
-    if ! "${DOCKER_CMD[@]}" rm "$test_container_name" >/dev/null 2>&1; then
+    if ! "${DOCKER_CMD[@]}" rm -- "$test_container_name" >/dev/null 2>&1; then
         fail "Failed to remove container"
         return
     fi
@@ -5291,27 +5296,40 @@ test_data_migration() {
     fi
     pass "Recreated container symlinks ready"
 
-    # Step 6: Assert user modification still present (via ~/.claude path)
-    local custom_content
-    custom_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/user-custom-config.json 2>&1) || custom_content=""
-
-    if [[ "$custom_content" == *"user_custom_content_44444"* ]]; then
-        pass "User custom file accessible via ~/.claude after recreation"
-    else
-        fail "User custom file NOT accessible via ~/.claude after recreation"
-        info "Expected content containing: user_custom_content_44444"
-        info "Got: $custom_content"
-    fi
-
-    # Check user-created skill manifest via symlinked path
+    # Step 6: Assert user modifications still present via symlinked paths
+    # Check user-created skill manifest
     local user_skill_content
     user_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/skills/user-skill/manifest.json 2>&1) || user_skill_content=""
 
-    if echo "$user_skill_content" | grep -q "user-skill"; then
-        pass "User-created skill manifest accessible via ~/.claude after recreation"
+    if echo "$user_skill_content" | grep -q "user_skill_44444"; then
+        pass "User-created skill accessible via ~/.claude/skills after recreation"
     else
-        fail "User-created skill manifest NOT accessible via ~/.claude after recreation"
-        info "Content: $user_skill_content"
+        fail "User-created skill NOT accessible via ~/.claude/skills after recreation"
+        info "Expected marker: user_skill_44444"
+        info "Got: $user_skill_content"
+    fi
+
+    # Verify skill also exists on volume (proves symlink worked)
+    local skill_on_volume
+    skill_on_volume=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /mnt/agent-data/claude/skills/user-skill/manifest.json 2>&1) || skill_on_volume=""
+
+    if echo "$skill_on_volume" | grep -q "user_skill_44444"; then
+        pass "User-created skill persisted on volume"
+    else
+        fail "User-created skill NOT found on volume"
+        info "Content: $skill_on_volume"
+    fi
+
+    # Check user-created plugin
+    local user_plugin_content
+    user_plugin_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/plugins/cache/user-plugin/plugin.json 2>&1) || user_plugin_content=""
+
+    if echo "$user_plugin_content" | grep -q "user_plugin_55555"; then
+        pass "User-created plugin accessible via ~/.claude/plugins after recreation"
+    else
+        fail "User-created plugin NOT accessible via ~/.claude/plugins after recreation"
+        info "Expected marker: user_plugin_55555"
+        info "Got: $user_plugin_content"
     fi
 
     # Step 7: Assert symlinks still valid (use cd -P + pwd for portability with relative symlinks)
@@ -5427,21 +5445,21 @@ test_data_migration() {
         fail "Original plugin file NOT accessible after recreation (DATA LOSS)"
     fi
 
-    # Verify both original AND user files coexist (complete data integrity check)
+    # Verify both original AND user files coexist on volume (complete data integrity check)
     local integrity_check
     integrity_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
         original_ok=0
         user_ok=0
 
-        # Check all original files
+        # Check all original files on volume
         [ -f /mnt/agent-data/claude/settings.json ] && \
         [ -f /mnt/agent-data/claude/skills/test-skill/manifest.json ] && \
         [ -f /mnt/agent-data/claude/plugins/cache/test-plugin/plugin.json ] && \
         original_ok=1
 
-        # Check all user files
-        [ -f /mnt/agent-data/claude/user-custom-config.json ] && \
+        # Check all user-created files on volume (in symlinked paths)
         [ -f /mnt/agent-data/claude/skills/user-skill/manifest.json ] && \
+        [ -f /mnt/agent-data/claude/plugins/cache/user-plugin/plugin.json ] && \
         user_ok=1
 
         if [ "$original_ok" = "1" ] && [ "$user_ok" = "1" ]; then
@@ -5457,16 +5475,16 @@ test_data_migration() {
 
     case "$integrity_check" in
         complete_integrity)
-            pass "Complete data integrity verified: original AND user files coexist"
+            pass "Complete data integrity verified: original AND user files coexist on volume"
             ;;
         missing_user_files)
-            fail "User files missing after container recreation"
+            fail "User files missing from volume after container recreation"
             ;;
         missing_original_files)
-            fail "Original files missing after container recreation"
+            fail "Original files missing from volume after container recreation"
             ;;
         missing_both)
-            fail "Both original AND user files missing (severe data loss)"
+            fail "Both original AND user files missing from volume (severe data loss)"
             ;;
         exec_failed)
             fail "Docker exec failed for integrity check"

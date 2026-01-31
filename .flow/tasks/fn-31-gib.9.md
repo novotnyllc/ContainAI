@@ -17,9 +17,8 @@ Test volume with user modifications survives container recreation. Ensures user 
 - [ ] Cleans up on success/failure (trap)
 
 ## Done summary
-TBD
-
+Implemented data-migration test scenario that verifies volume data survives container recreation. The test creates a container, makes user modifications via the ~/.claude symlink path (custom file and skill), stops and removes the container, then recreates it with the same name and volume. Asserts user modifications, original data, and symlinks remain valid after recreation.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 2e1024c, e240c37, aeea5df
+- Tests: bash -n tests/integration/test-sync-integration.sh, shellcheck -x tests/integration/test-sync-integration.sh
 - PRs:
