@@ -5757,7 +5757,7 @@ test_no_pollution() {
 # - Moves directories from home to data volume
 # - Creates symlinks pointing to the volume
 # - Files are accessible via the symlink
-# - cai sync on host fails with appropriate error
+# - cai sync fails when run in container without /mnt/agent-data mounted
 test_cai_sync() {
     section "Test 68: cai sync test scenario"
 
@@ -5904,11 +5904,12 @@ test_cai_sync() {
     local sync_output sync_exit=0
     sync_output=$("${DOCKER_CMD[@]}" exec --user agent "$test_container_name" cai sync 2>&1) || sync_exit=$?
 
-    # Log output for debugging
-    info "cai sync output:"
-    printf '%s\n' "$sync_output" | while IFS= read -r line; do
-        echo "    $line"
-    done
+    # Note: cai sync may exit non-zero if some entries fail (e.g., container_link issues)
+    # The test verifies our specific target path was synced successfully via filesystem checks
+    # Only log output on failure or non-zero exit for quieter CI logs
+    if [[ $sync_exit -ne 0 ]]; then
+        info "cai sync exited with code $sync_exit (checking if target was synced)"
+    fi
 
     # Step 5: Verify directory was moved to volume (filesystem-based assertion)
     local volume_check
@@ -5922,7 +5923,6 @@ test_cai_sync() {
 
     if [[ "$volume_check" != "dir_exists" ]]; then
         fail "Directory not moved to volume: $volume_check"
-        info "cai sync exit code was: $sync_exit"
         return
     fi
     pass "Directory moved to /mnt/agent-data/cursor/rules"
@@ -5990,22 +5990,22 @@ test_cai_sync() {
     # Step 8: Verify cai sync fails when run in a container WITHOUT /mnt/agent-data mounted
     # This tests the container detection logic (must have mountpoint AND container indicators)
     # Run in a fresh container without the volume mount to ensure detection fails
-    local host_sync_output host_sync_exit=0
-    host_sync_output=$("${DOCKER_CMD[@]}" run --rm \
+    local no_mount_sync_output no_mount_sync_exit=0
+    no_mount_sync_output=$("${DOCKER_CMD[@]}" run --rm \
         --entrypoint /bin/bash \
-        "$IMAGE_NAME" -c 'cai sync 2>&1') || host_sync_exit=$?
+        "$IMAGE_NAME" -c 'cai sync 2>&1') || no_mount_sync_exit=$?
 
-    if [[ $host_sync_exit -eq 0 ]]; then
+    if [[ $no_mount_sync_exit -eq 0 ]]; then
         fail "cai sync without /mnt/agent-data mounted should have failed but succeeded"
         return
     fi
 
     # Check for expected error message about container environment
-    if [[ "$host_sync_output" == *"must be run inside a ContainAI container"* ]] || \
-       [[ "$host_sync_output" == *"/mnt/agent-data must be mounted"* ]]; then
+    if [[ "$no_mount_sync_output" == *"must be run inside a ContainAI container"* ]] || \
+       [[ "$no_mount_sync_output" == *"/mnt/agent-data must be mounted"* ]]; then
         pass "cai sync fails with appropriate error when volume not mounted"
     else
-        fail "cai sync failed but with unexpected error: $host_sync_output"
+        fail "cai sync failed but with unexpected error: $no_mount_sync_output"
         return
     fi
 
