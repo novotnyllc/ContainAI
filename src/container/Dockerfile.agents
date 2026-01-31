@@ -50,9 +50,10 @@ WORKDIR /home/agent
 
 # Create agent data directories for config/auth file symlinks
 # Note: Only primary agents (.claude, .codex) are pre-created here.
-# Optional agents (.copilot, .gemini, .continue, .cursor) are created by
-# gen-dockerfile-symlinks.sh only if they exist on the host at import time.
-# This prevents home directory pollution with empty directories.
+# Optional agents (.copilot, .gemini, .continue, .cursor, .aider) are NOT
+# pre-created to prevent home directory pollution. Users who configure
+# optional agents inside the container should run `cai sync` to persist
+# their configuration to the data volume.
 RUN mkdir -p \
     /home/agent/.claude \
     /home/agent/.codex \

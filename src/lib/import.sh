@@ -2912,9 +2912,23 @@ _import_ensure_copilot_config() {
         docker_cmd=(docker --context "$ctx")
     fi
 
+    # Check if copilot config exists on volume (from import or previous run)
+    # Copilot is optional - don't create volume structure if user doesn't use it
+    local has_copilot_config
+    if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none -v "$volume":/target alpine test -f /target/copilot/config.json 2>/dev/null; then
+        has_copilot_config=true
+    else
+        has_copilot_config=false
+    fi
+
+    if [[ "$has_copilot_config" != "true" ]]; then
+        # No copilot config on volume - user hasn't configured copilot, skip
+        return 0
+    fi
+
     _import_step "Ensuring Copilot config.json has required structure..."
 
-    # Read existing config from volume (may not exist yet)
+    # Read existing config from volume
     local existing_config
     existing_config=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none -v "$volume":/target alpine cat /target/copilot/config.json 2>/dev/null || echo '{}')
 
