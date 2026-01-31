@@ -20,6 +20,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Lint shell scripts with shellcheck
+        run: |
+          echo "Running shellcheck on shell scripts..."
+          shellcheck -x src/*.sh src/lib/*.sh
+
       - name: Check manifest consistency
         run: ./scripts/check-manifest-consistency.sh
 
@@ -191,3 +196,72 @@ jobs:
             VERSION=${{ steps.image_version.outputs.version }}
           cache-from: type=gha,scope=main
           cache-to: type=gha,mode=max,scope=main
+
+  # ============================================================================
+  # Import Tests
+  # ============================================================================
+  # Tiered test strategy:
+  # - Host-side tests (manifest parsing, consistency) run in lint job above
+  # - Integration tests run here after build, using the built image
+  # - E2E tests requiring sysbox/systemd are documented as manual-only
+  #
+  # Test execution on PRs:
+  # - Depends on build job to ensure build passes first
+  # - Builds image locally (GitHub Actions jobs can't share Docker images)
+  # - Runs full test suite except tests requiring sysbox runtime
+  #
+  # Note: The test job rebuilds the image because GitHub Actions jobs run on
+  # separate runners. The build dependency ensures we don't waste CI time
+  # running tests if the build would fail.
+  # ============================================================================
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        run: |
+          echo "Building containai image for testing..."
+          ./src/build.sh \
+            --image-prefix containai \
+            --platforms linux/amd64 \
+            --load
+
+      - name: Verify test image
+        run: |
+          echo "Verifying containai:latest image was built..."
+          if ! docker image inspect containai:latest >/dev/null 2>&1; then
+            echo "::error::containai:latest image not found after build"
+            echo "Available images:"
+            docker images | grep -E '^(containai|REPOSITORY)' || true
+            exit 1
+          fi
+          echo "Image built successfully:"
+          docker image inspect containai:latest --format '{{.Id}} {{.Created}}'
+
+      - name: Run import integration tests
+        run: |
+          echo "============================================="
+          echo "Running import integration tests"
+          echo "============================================="
+          # Set IMAGE_NAME to use the built image
+          export IMAGE_NAME="containai:latest"
+          ./tests/integration/test-sync-integration.sh
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ github.run_id }}
+          path: |
+            /tmp/containai-test-*
+          retention-days: 7
+          if-no-files-found: ignore
