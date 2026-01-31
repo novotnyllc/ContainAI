@@ -322,11 +322,20 @@ _import_restore_from_tgz() {
     # Pattern from export.sh:233-243 - use docker run with tar extraction
     # Read archive via stdin to avoid needing to mount the archive file
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
+    # Note: Exclude .priv. files in shell/bashrc.d (security filter)
+    # This matches the p flag behavior in rsync sync path for .bashrc.d
+    # Controlled by _IMPORT_EXCLUDE_PRIV internal variable (set by _containai_import)
+    # Archives use -C /data . so paths have leading ./ (e.g., ./shell/bashrc.d/...)
+    local -a tar_args=(-xzf - -C /data)
+    if [[ "${_IMPORT_EXCLUDE_PRIV:-true}" != "false" ]]; then
+        # Exclude both forms: with and without leading ./
+        tar_args+=(--exclude './shell/bashrc.d/*.priv.*' --exclude 'shell/bashrc.d/*.priv.*')
+    fi
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
         -v "$volume":/data \
         -i \
         alpine:3.20 \
-        tar -xzf - -C /data <"$archive"; then
+        tar "${tar_args[@]}" <"$archive"; then
         _import_error "Failed to extract archive to volume"
         return 1
     fi
@@ -344,6 +353,7 @@ _import_restore_from_tgz() {
 #   f = file
 #   j = initialize JSON with {} if empty
 #   m = mirror mode (--delete to remove files not in source)
+#   p = exclude *.priv.* files (privacy filter, NOT disabled by --no-excludes)
 #   s = secret (600 for files, 700 for dirs)
 #   x = exclude .system/ subdirectory
 #
@@ -409,7 +419,7 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
 
         # --- Shell ---
         "/source/.bash_aliases:/target/shell/bash_aliases:f"
-        "/source/.bashrc.d:/target/shell/bashrc.d:d"
+        "/source/.bashrc.d:/target/shell/bashrc.d:dp"  # p = exclude *.priv.* (security)
         "/source/.zshrc:/target/shell/zshrc:f"
         "/source/.zprofile:/target/shell/zprofile:f"
         "/source/.inputrc:/target/shell/inputrc:f"
@@ -1294,6 +1304,21 @@ _containai_import() {
         docker_cmd=(docker --context "$ctx")
     fi
 
+    # Resolve import.exclude_priv config option early (needed for both tgz and rsync paths)
+    # Note: This is NOT disabled by --no-excludes for security
+    # Honor explicit_config if provided (--config flag)
+    local exclude_priv="true"
+    if declare -f _containai_resolve_import_exclude_priv >/dev/null 2>&1; then
+        local exclude_priv_result
+        exclude_priv_result=$(_containai_resolve_import_exclude_priv "$workspace" "$explicit_config")
+        exclude_priv="${exclude_priv_result:-true}"
+    elif declare -f _containai_resolve_with_source >/dev/null 2>&1; then
+        # Fallback if dedicated resolver not available
+        local exclude_priv_result
+        exclude_priv_result=$(_containai_resolve_with_source "import.exclude_priv" "$workspace")
+        exclude_priv="${exclude_priv_result%%	*}"
+    fi
+
     # Handle --from source: detect type and route accordingly
     local source_type=""
     local source_root="$HOME"         # Default to $HOME for backward compatibility
@@ -1378,6 +1403,8 @@ _containai_import() {
                 fi
 
                 # Restore from archive
+                # Pass exclude_priv setting via internal variable for tgz extraction
+                _IMPORT_EXCLUDE_PRIV="$exclude_priv"
                 if ! _import_restore_from_tgz "$ctx" "$volume" "$from_source"; then
                     return 1
                 fi
@@ -1569,6 +1596,12 @@ _containai_import() {
         env_args+=(--env "HOST_SOURCE_ROOT=$source_root")
     fi
 
+    # Pass import.exclude_priv to container (EXCLUDE_PRIV=0 means disabled)
+    # Note: exclude_priv variable was resolved earlier in the function
+    if [[ "$exclude_priv" == "false" ]]; then
+        env_args+=(--env "EXCLUDE_PRIV=0")
+    fi
+
     # Build map data and pass via heredoc inside the script
     # NOTE: MANIFEST_DATA_B64 is built later from rewritten_entries (after --no-secrets and excludes filtering)
     # Note: This script runs inside eeacms/rsync with POSIX sh (not bash)
@@ -1644,6 +1677,15 @@ copy() {
     if [ "${NO_EXCLUDES:-}" != "1" ]; then
         case "$_flags" in
             *x*) set -- "$@" "--exclude=.system/" ;;
+        esac
+    fi
+
+    # Add *.priv.* exclusion for p flag (security: NOT disabled by --no-excludes)
+    # This prevents accidental sync of files like ~/.bashrc.d/secrets.priv.sh
+    # Only disabled via EXCLUDE_PRIV=0 environment variable (from import.exclude_priv config)
+    if [ "${EXCLUDE_PRIV:-1}" != "0" ]; then
+        case "$_flags" in
+            *p*) set -- "$@" "--exclude=*.priv.*" ;;
         esac
     fi
 

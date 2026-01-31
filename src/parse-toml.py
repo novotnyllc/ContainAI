@@ -427,8 +427,10 @@ def format_toml_value(key: str, value: str) -> str | None:
     bool_keys = {
         "forward_agent",
         "auto_prompt",
+        "exclude_priv",
         "ssh.forward_agent",
         "import.auto_prompt",
+        "import.exclude_priv",
     }
 
     # Get the last part of the key for matching nested keys

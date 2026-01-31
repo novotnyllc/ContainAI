@@ -18,6 +18,9 @@
 # 40-45. --from source tests (directory sync, tgz restore, roundtrip, idempotency, errors)
 # 46-51. Symlink relinking tests (internal, relative, external, broken, circular, pitfall)
 # 52-58. Import overrides tests (basic, replace, nested, symlinks, traversal, dry-run, missing)
+# 59. SSH keygen noise test
+# 60. New volume scenario test
+# 61-62. .priv. file filtering tests (security)
 #
 # ==============================================================================
 # Import Test Infrastructure
@@ -4226,6 +4229,366 @@ data_volume = "'"$test_vol"'"
 }
 
 # ==============================================================================
+# Test 61-62: .priv. file filtering in .bashrc.d
+# ==============================================================================
+# Verifies that *.priv.* files in .bashrc.d are excluded from import for security.
+# Tests both normal import and --no-excludes to verify security behavior.
+test_priv_file_filtering() {
+    section "Tests 61-62: .priv. file filtering in .bashrc.d"
+
+    # Create a test volume
+    local test_vol
+    test_vol=$(create_test_volume "priv-filter") || {
+        fail "Failed to create test volume"
+        return
+    }
+
+    # Create a source fixture directory under REAL_HOME for Docker mount compatibility
+    local source_dir
+    source_dir=$(mktemp -d "${REAL_HOME}/.containai-priv-test-XXXXXX") || {
+        fail "Failed to create source fixture directory"
+        return
+    }
+    local test_dir
+    test_dir=$(mktemp -d) || {
+        fail "Failed to create test directory"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    }
+
+    # Cleanup function
+    local cleanup_done=0
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
+    }
+    trap cleanup_test RETURN
+
+    # Create .bashrc.d with both normal and .priv. files
+    mkdir -p "$source_dir/.bashrc.d"
+    echo 'export NORMAL_VAR=public' > "$source_dir/.bashrc.d/normal.sh"
+    echo 'export SECRET_TOKEN=supersecret123' > "$source_dir/.bashrc.d/secrets.priv.sh"
+    echo 'export WORK_SECRET=worktoken' > "$source_dir/.bashrc.d/work.priv.stuff.sh"
+    chmod +x "$source_dir/.bashrc.d/"*.sh
+
+    # Also create Claude config for full import test
+    mkdir -p "$source_dir/.claude"
+    echo '{}' > "$source_dir/.claude/settings.json"
+
+    # -------------------------------------------------------------------------
+    # Test 61: Normal import filters .priv. files
+    # -------------------------------------------------------------------------
+    section "Test 61: Normal import filters .priv. files"
+
+    local import_output import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Import failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Import succeeded"
+
+    # Check normal file IS synced
+    local normal_check
+    normal_check=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/normal.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || normal_check="error"
+
+    if [[ "$normal_check" == "present" ]]; then
+        pass "Normal .bashrc.d file (normal.sh) was synced"
+    else
+        fail "Normal .bashrc.d file (normal.sh) was NOT synced (got: $normal_check)"
+    fi
+
+    # Check .priv. file is NOT synced
+    local priv_check1
+    priv_check1=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/secrets.priv.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || priv_check1="error"
+
+    if [[ "$priv_check1" == "missing" ]]; then
+        pass ".priv. file (secrets.priv.sh) was correctly filtered out"
+    else
+        fail ".priv. file (secrets.priv.sh) was synced (should be filtered)"
+    fi
+
+    # Check second .priv. file pattern is also filtered
+    local priv_check2
+    priv_check2=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/work.priv.stuff.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || priv_check2="error"
+
+    if [[ "$priv_check2" == "missing" ]]; then
+        pass "Second .priv. file (work.priv.stuff.sh) was correctly filtered out"
+    else
+        fail "Second .priv. file (work.priv.stuff.sh) was synced (should be filtered)"
+    fi
+
+    # -------------------------------------------------------------------------
+    # Test 62: --no-excludes does NOT disable .priv. filtering (security)
+    # -------------------------------------------------------------------------
+    section "Test 62: --no-excludes does NOT disable .priv. filtering"
+
+    # Clear volume and re-import with --no-excludes
+    "${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 find /data -mindepth 1 -delete 2>/dev/null || true
+
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3" --no-excludes' _ "$SRC_DIR" "$test_vol" "$source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Import with --no-excludes failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Import with --no-excludes succeeded"
+
+    # Check normal file IS synced (should still work)
+    normal_check=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/normal.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || normal_check="error"
+
+    if [[ "$normal_check" == "present" ]]; then
+        pass "Normal file still synced with --no-excludes"
+    else
+        fail "Normal file NOT synced with --no-excludes (got: $normal_check)"
+    fi
+
+    # Key security test: .priv. file should STILL be filtered even with --no-excludes
+    priv_check1=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/secrets.priv.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || priv_check1="error"
+
+    if [[ "$priv_check1" == "missing" ]]; then
+        pass ".priv. file STILL filtered even with --no-excludes (security verified)"
+    else
+        fail "SECURITY: .priv. file was synced with --no-excludes (filtering should NOT be disabled)"
+    fi
+
+    # Cleanup happens via RETURN trap
+}
+
+# ==============================================================================
+# Test 63: .priv. filtering in tgz restore
+# ==============================================================================
+test_priv_file_filtering_tgz() {
+    section "Test 63: .priv. file filtering in tgz restore"
+
+    # Create a test volume
+    local test_vol
+    test_vol=$(create_test_volume "priv-tgz-filter") || {
+        fail "Failed to create test volume"
+        return
+    }
+
+    # Create fixture directories under REAL_HOME for Docker mount compatibility
+    local source_dir tgz_dir test_dir
+    source_dir=$(mktemp -d "${REAL_HOME}/.containai-priv-tgz-src-XXXXXX") || {
+        fail "Failed to create source fixture directory"
+        return
+    }
+    tgz_dir=$(mktemp -d "${REAL_HOME}/.containai-priv-tgz-archive-XXXXXX") || {
+        fail "Failed to create tgz directory"
+        rm -rf "$source_dir" 2>/dev/null || true
+        return
+    }
+    test_dir=$(mktemp -d) || {
+        fail "Failed to create test directory"
+        rm -rf "$source_dir" "$tgz_dir" 2>/dev/null || true
+        return
+    }
+
+    # Cleanup function
+    local cleanup_done=0
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        rm -rf "$source_dir" "$tgz_dir" "$test_dir" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
+    }
+    trap cleanup_test RETURN
+
+    # Create .bashrc.d with both normal and .priv. files
+    mkdir -p "$source_dir/.bashrc.d"
+    echo 'export NORMAL_VAR=public' > "$source_dir/.bashrc.d/normal.sh"
+    echo 'export SECRET_TOKEN=supersecret123' > "$source_dir/.bashrc.d/secrets.priv.sh"
+    echo 'export WORK_SECRET=worktoken' > "$source_dir/.bashrc.d/work.priv.stuff.sh"
+    chmod +x "$source_dir/.bashrc.d/"*.sh
+
+    # Create Claude config for full export/import test
+    mkdir -p "$source_dir/.claude"
+    echo '{}' > "$source_dir/.claude/settings.json"
+
+    # First, import from directory to populate the volume (including .priv. files for testing)
+    # We'll disable the priv filtering for this initial import via config
+    local config_file="$test_dir/containai.toml"
+    cat > "$config_file" << 'EOF'
+[import]
+exclude_priv = false
+EOF
+
+    local import_output import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" \
+        env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3" --config "$4"' _ "$SRC_DIR" "$test_vol" "$source_dir" "$config_file" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Initial import failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+
+    # Verify .priv. file was imported (with filtering disabled)
+    local priv_present
+    priv_present=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/secrets.priv.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || priv_present="error"
+
+    if [[ "$priv_present" != "present" ]]; then
+        fail "Setup failed: .priv. file not present after initial import (got: $priv_present)"
+        return
+    fi
+    pass "Setup: .priv. file imported with filtering disabled"
+
+    # Export to tgz (this will include the .priv. file)
+    local tgz_file="$tgz_dir/backup.tgz"
+    local export_output export_exit=0
+    export_output=$(cd -- "$test_dir" && HOME="$source_dir" \
+        env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai export --data-volume "$2" --to "$3"' _ "$SRC_DIR" "$test_vol" "$tgz_file" 2>&1) || export_exit=$?
+
+    if [[ $export_exit -ne 0 ]]; then
+        fail "Export failed (exit=$export_exit)"
+        info "Output: $export_output"
+        return
+    fi
+
+    if [[ ! -f "$tgz_file" ]]; then
+        fail "Export did not create tgz file"
+        return
+    fi
+    pass "Export to tgz succeeded"
+
+    # Verify tgz contains .priv. file (check for specific path)
+    local tgz_has_priv
+    if tar -tzf "$tgz_file" 2>/dev/null | grep -q 'shell/bashrc.d/secrets.priv.sh'; then
+        tgz_has_priv="yes"
+    else
+        tgz_has_priv="no"
+    fi
+    if [[ "$tgz_has_priv" != "yes" ]]; then
+        fail "Setup failed: tgz does not contain shell/bashrc.d/secrets.priv.sh"
+        return
+    fi
+    pass "Setup: tgz contains .priv. files"
+
+    # Create a fresh volume for restore test
+    local restore_vol
+    restore_vol=$(create_test_volume "priv-tgz-restore") || {
+        fail "Failed to create restore volume"
+        return
+    }
+    # Update cleanup to include restore volume
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        rm -rf "$source_dir" "$tgz_dir" "$test_dir" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm -- "$restore_vol" 2>/dev/null || true
+    }
+
+    # Now restore from tgz with default filtering (exclude_priv = true)
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" \
+        env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$restore_vol" "$tgz_file" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Restore from tgz failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Restore from tgz succeeded"
+
+    # Check normal file IS restored
+    local normal_check
+    normal_check=$("${DOCKER_CMD[@]}" run --rm -v "$restore_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/normal.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || normal_check="error"
+
+    if [[ "$normal_check" == "present" ]]; then
+        pass "Normal file (normal.sh) was restored from tgz"
+    else
+        fail "Normal file (normal.sh) was NOT restored from tgz (got: $normal_check)"
+    fi
+
+    # KEY TEST: .priv. file should NOT be restored (filtered during tgz restore)
+    local priv_check
+    priv_check=$("${DOCKER_CMD[@]}" run --rm -v "$restore_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/secrets.priv.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || priv_check="error"
+
+    if [[ "$priv_check" == "missing" ]]; then
+        pass ".priv. file (secrets.priv.sh) was correctly filtered during tgz restore"
+    else
+        fail "SECURITY: .priv. file (secrets.priv.sh) was restored from tgz (should be filtered)"
+    fi
+
+    # Check second .priv. file pattern is also filtered
+    local priv_check2
+    priv_check2=$("${DOCKER_CMD[@]}" run --rm -v "$restore_vol":/data alpine:3.19 sh -c '
+        if [ -f /data/shell/bashrc.d/work.priv.stuff.sh ]; then
+            echo "present"
+        else
+            echo "missing"
+        fi
+    ' 2>/dev/null) || priv_check2="error"
+
+    if [[ "$priv_check2" == "missing" ]]; then
+        pass "Second .priv. file (work.priv.stuff.sh) was correctly filtered during tgz restore"
+    else
+        fail "SECURITY: Second .priv. file (work.priv.stuff.sh) was restored from tgz (should be filtered)"
+    fi
+
+    # Cleanup happens via RETURN trap
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
@@ -4312,6 +4675,10 @@ main() {
 
     # Import scenario tests (Test 60+)
     test_new_volume
+
+    # .priv. file filtering tests (Tests 61-63)
+    test_priv_file_filtering
+    test_priv_file_filtering_tgz
 
     # Summary
     echo ""

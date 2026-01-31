@@ -12,9 +12,8 @@ Add cai CLI to Dockerfile.agents as real executable (not just sourced in .bashrc
 - [ ] Dockerfile changes in `src/container/Dockerfile.agents`
 
 ## Done summary
-TBD
-
+Added cai CLI to container image by copying containai.sh and lib/ to /opt/containai/, creating an executable wrapper at /usr/local/bin/cai for non-interactive use, and sourcing containai.sh in .bashrc for interactive shells.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 5978fff7dd7e8d2dc4d46e6540be040dab15cddd
+- Tests: docker build --check -f src/container/Dockerfile.agents src/
 - PRs:

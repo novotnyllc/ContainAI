@@ -1122,8 +1122,83 @@ print(json.dumps(result, separators=(',', ':')))
 }
 
 # ==============================================================================
-# Import config resolution (for additional_paths)
+# Import config resolution
 # ==============================================================================
+
+# Resolve [import].exclude_priv from config
+# Returns boolean value ("true" or "false") for controlling .priv. file filtering
+#
+# Arguments: $1 = workspace path (default: $PWD)
+#            $2 = explicit config path (optional)
+# Outputs: "true" or "false" (defaults to "true" if not set or error)
+# Returns: 0 always (graceful fallback to default)
+_containai_resolve_import_exclude_priv() {
+    local workspace="${1:-$PWD}"
+    local explicit_config="${2:-}"
+    local config_file script_dir config_json
+
+    # Resolve workspace to absolute path
+    if ! workspace=$(cd -- "$workspace" 2>/dev/null && pwd); then
+        workspace="$PWD"
+    fi
+
+    # Require python3 for TOML parsing
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf '%s' "true"
+        return 0
+    fi
+
+    # Get script dir for parse-toml.py
+    if ! script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+        printf '%s' "true"
+        return 0
+    fi
+
+    # Resolve config file (explicit or discovered)
+    if [[ -n "$explicit_config" ]]; then
+        if [[ ! -f "$explicit_config" ]]; then
+            # Explicit config missing - fall back to default
+            printf '%s' "true"
+            return 0
+        fi
+        config_file="$explicit_config"
+    else
+        # Discover config via normal path
+        config_file=$(_containai_find_config "$workspace" 2>/dev/null) || config_file=""
+        if [[ -z "$config_file" ]] || [[ ! -f "$config_file" ]]; then
+            printf '%s' "true"
+            return 0
+        fi
+    fi
+
+    # Parse config and extract import.exclude_priv
+    if ! config_json=$(python3 "$script_dir/parse-toml.py" --file "$config_file" --json 2>/dev/null); then
+        printf '%s' "true"
+        return 0
+    fi
+
+    # Extract value - default to true if missing or not boolean
+    # Security: Only accept explicit "false" strings, all other values default to true
+    local value
+    value=$(printf '%s' "$config_json" | python3 -c "
+import json
+import sys
+config = json.load(sys.stdin)
+import_section = config.get('import', {})
+val = import_section.get('exclude_priv', True)
+# Coerce to boolean string - security: default to true for unknown values
+if isinstance(val, bool):
+    print('true' if val else 'false')
+elif isinstance(val, str):
+    # Only explicit false values disable filtering; empty/unknown -> true (safe default)
+    print('false' if val.lower() in ('false', 'no', '0') else 'true')
+else:
+    print('true')
+" 2>/dev/null) || value="true"
+
+    printf '%s' "${value:-true}"
+    return 0
+}
 
 # Resolve [import].additional_paths from config
 # Validates paths and outputs newline-delimited list of validated paths
@@ -1684,9 +1759,9 @@ _containai_generate_volume_name() {
 # Workspace-scoped keys: data_volume (runtime reads this from workspace state)
 # NOTE: container_name is internal state (written by cai up/create, not user-settable)
 # NOTE: "agent" as standalone key is an alias for agent.default (global)
-# Global-scoped keys: agent.default, ssh.forward_agent, ssh.port_range_start, ssh.port_range_end, import.auto_prompt
+# Global-scoped keys: agent.default, ssh.forward_agent, ssh.port_range_start, ssh.port_range_end, import.auto_prompt, import.exclude_priv
 _CAI_WORKSPACE_KEYS="data_volume"
-_CAI_GLOBAL_KEYS="agent.default ssh.forward_agent ssh.port_range_start ssh.port_range_end import.auto_prompt"
+_CAI_GLOBAL_KEYS="agent.default ssh.forward_agent ssh.port_range_start ssh.port_range_end import.auto_prompt import.exclude_priv"
 
 # Resolve a config key and return value with source
 # Arguments: $1 = key name
@@ -2002,6 +2077,9 @@ if current is not None and current != '':
             default_value="false"
             ;;
         import.auto_prompt)
+            default_value="true"
+            ;;
+        import.exclude_priv)
             default_value="true"
             ;;
         # container_name has no default (generated per workspace)

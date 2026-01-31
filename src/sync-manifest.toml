@@ -286,7 +286,7 @@ flags = "fR"  # file, remove existing first (Dockerfile uses rm -rf before ln)
 source = ".bashrc.d"
 target = "shell/bashrc.d"
 container_link = ""  # Sourced via .bashrc hook, not directly symlinked
-flags = "d"  # directory
+flags = "dp"  # directory, exclude *.priv.* files (security)
 
 [[entries]]
 source = ".zshrc"

@@ -182,6 +182,7 @@ Configuration for additional files and directories to sync via `cai import`. Thi
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `additional_paths` | array of strings | `[]` | Additional files/directories to sync from host |
+| `exclude_priv` | boolean | `true` | Filter out `*.priv.*` files from `.bashrc.d/` |
 
 ```toml
 [import]
@@ -189,7 +190,16 @@ additional_paths = [
     "~/.my-tool/config.json",
     "~/.my-other-tool/",
 ]
+exclude_priv = true  # default, filters ~/.bashrc.d/*.priv.* files
 ```
+
+**Privacy filtering (`exclude_priv`):**
+
+When `true` (default), files matching `*.priv.*` in `~/.bashrc.d/` are excluded from import. This prevents accidental sync of files like:
+- `~/.bashrc.d/secrets.priv.sh` - API keys or tokens
+- `~/.bashrc.d/work.priv.sh` - Work-specific environment variables
+
+**Security note:** The `--no-excludes` CLI flag does NOT disable this filtering. Only the config option can disable it, ensuring secrets aren't accidentally leaked by CLI flags. This filtering also applies to `--from <tgz>` restore operations.
 
 **Path rules:**
 - Must start with `~/` (tilde expansion) or be an absolute path under `$HOME`

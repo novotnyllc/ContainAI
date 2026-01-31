@@ -41,7 +41,7 @@ fi
 # import.sh uses different flag conventions in some cases
 normalize_flags() {
     local flags="$1"
-    # For comparison, we care about: f (file), d (dir), s (secret), j (json), x (exclude .system), o (optional)
+    # For comparison, we care about: f (file), d (dir), s (secret), j (json), x (exclude .system), o (optional), p (priv filter)
     # R (remove) and G (glob) are not in import map
     local result=""
     [[ "$flags" == *f* ]] && result+="f"
@@ -50,6 +50,7 @@ normalize_flags() {
     [[ "$flags" == *j* ]] && result+="j"
     [[ "$flags" == *x* ]] && result+="x"
     [[ "$flags" == *o* ]] && result+="o"
+    [[ "$flags" == *p* ]] && result+="p"
     printf '%s' "$result"
 }
 
