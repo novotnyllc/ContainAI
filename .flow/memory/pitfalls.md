@@ -277,3 +277,6 @@ Flag variables stored as option strings (e.g. --force) must use -n test not == t
 
 ## 2026-01-30 manual [pitfall]
 Bash login shells source ~/.bash_profile BEFORE ~/.profile - if .bash_profile exists, .profile is never sourced; use /etc/profile.d/ for robust PATH configuration
+
+## 2026-01-30 manual [pitfall]
+When using Docker labels for test resource cleanup, use run-scoped labels (test_run=ID) to enable parallel-safe cleanup - generic labels can delete resources from concurrent test runs

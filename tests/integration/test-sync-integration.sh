@@ -41,8 +41,9 @@
 #
 #   cleanup_test_resources
 #     - Removes containers/volumes created by THIS run only
-#     - Filters by run-specific label AND name containing RUN_ID
-#     - Falls back to name pattern match for unlabeled resources
+#     - First pass: filters by BOTH labels (containai.test=1 AND run-specific)
+#     - Second pass: registered arrays (fallback for unlabeled)
+#     - Final: name pattern match containing RUN_ID
 #     - Safe for parallel test runs (scoped by RUN_ID)
 #
 #   create_claude_fixture DIR
@@ -135,27 +136,6 @@ register_test_volume() {
     TEST_VOLUMES_CREATED+=("$1")
 }
 
-# Cleanup test volumes created by THIS run
-# First pass: registered volumes (explicit tracking)
-# Second pass: any volumes containing this run's ID (catches unregistered volumes)
-cleanup_test_volumes() {
-    local vol
-    # First pass: explicitly registered volumes
-    for vol in "${TEST_VOLUMES_CREATED[@]}"; do
-        "${DOCKER_CMD[@]}" volume rm "$vol" 2>/dev/null || true
-    done
-    # Second pass: catch any volumes containing this run's ID that weren't registered
-    # Note: containai-test-env-${TEST_RUN_ID}, containai-test-cli-${TEST_RUN_ID}, etc.
-    # all contain $TEST_RUN_ID as a substring, so filter by run ID directly
-    local run_volumes
-    run_volumes=$("${DOCKER_CMD[@]}" volume ls --filter "name=${TEST_RUN_ID}" -q 2>/dev/null || true)
-    if [[ -n "$run_volumes" ]]; then
-        # Avoid xargs -r for portability (BSD/macOS doesn't support -r)
-        # The non-empty check above guards against empty input
-        echo "$run_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
-    fi
-}
-
 # ==============================================================================
 # Import Test Infrastructure
 # ==============================================================================
@@ -174,8 +154,8 @@ declare -a TEST_CONTAINERS_CREATED=()
 # Returns: container ID on stdout
 # Name must be non-empty and contain only alphanumeric, dash, underscore
 create_test_container() {
-    local name="$1"
-    shift
+    local name="${1:-}"
+    shift || true
 
     # Validate name is non-empty and has valid characters
     if [[ -z "$name" ]]; then
@@ -207,7 +187,7 @@ create_test_container() {
 # Returns: volume name on stdout
 # Name must be non-empty and contain only alphanumeric, dash, underscore
 create_test_volume() {
-    local name="$1"
+    local name="${1:-}"
 
     # Validate name is non-empty and has valid characters
     if [[ -z "$name" ]]; then
@@ -232,43 +212,46 @@ create_test_volume() {
 }
 
 # Cleanup test resources created by THIS run (containers and volumes)
-# Strategy: filter by run-specific label AND name containing TEST_RUN_ID
+# Strategy:
+#   1. First pass: filter by BOTH labels (containai.test=1 AND run-specific)
+#   2. Second pass: registered arrays (fallback for any missed)
+#   3. Final fallback: name pattern containing TEST_RUN_ID
 # This ensures parallel test runs don't interfere with each other
 cleanup_test_resources() {
     local container vol
 
-    # Stop and remove containers by run-specific label (parallel-safe)
-    local run_containers
-    run_containers=$("${DOCKER_CMD[@]}" ps -aq \
-        --filter "label=$TEST_RUN_LABEL" \
-        --filter "name=${TEST_RUN_ID}" 2>/dev/null || true)
-    if [[ -n "$run_containers" ]]; then
-        printf '%s\n' "$run_containers" | xargs "${DOCKER_CMD[@]}" stop 2>/dev/null || true
-        printf '%s\n' "$run_containers" | xargs "${DOCKER_CMD[@]}" rm 2>/dev/null || true
+    # First pass: remove containers by BOTH labels (parallel-safe)
+    local labeled_containers
+    labeled_containers=$("${DOCKER_CMD[@]}" ps -aq \
+        --filter "label=$TEST_RESOURCE_LABEL" \
+        --filter "label=$TEST_RUN_LABEL" 2>/dev/null || true)
+    if [[ -n "$labeled_containers" ]]; then
+        printf '%s\n' "$labeled_containers" | xargs "${DOCKER_CMD[@]}" stop 2>/dev/null || true
+        printf '%s\n' "$labeled_containers" | xargs "${DOCKER_CMD[@]}" rm 2>/dev/null || true
     fi
 
-    # Stop and remove registered containers (fallback for unlabeled)
+    # Second pass: registered containers (fallback for unlabeled)
     for container in "${TEST_CONTAINERS_CREATED[@]}"; do
         "${DOCKER_CMD[@]}" stop -- "$container" 2>/dev/null || true
         "${DOCKER_CMD[@]}" rm -- "$container" 2>/dev/null || true
     done
 
-    # Remove volumes by run-specific label (parallel-safe)
-    local run_labeled_volumes
-    run_labeled_volumes=$("${DOCKER_CMD[@]}" volume ls -q \
-        --filter "label=$TEST_RUN_LABEL" \
-        --filter "name=${TEST_RUN_ID}" 2>/dev/null || true)
-    if [[ -n "$run_labeled_volumes" ]]; then
-        printf '%s\n' "$run_labeled_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
+    # First pass: remove volumes by BOTH labels (parallel-safe)
+    local labeled_volumes
+    labeled_volumes=$("${DOCKER_CMD[@]}" volume ls -q \
+        --filter "label=$TEST_RESOURCE_LABEL" \
+        --filter "label=$TEST_RUN_LABEL" 2>/dev/null || true)
+    if [[ -n "$labeled_volumes" ]]; then
+        printf '%s\n' "$labeled_volumes" | xargs "${DOCKER_CMD[@]}" volume rm 2>/dev/null || true
     fi
 
-    # Remove registered volumes (fallback for unlabeled)
+    # Second pass: registered volumes (fallback for unlabeled)
     for vol in "${TEST_VOLUMES_CREATED[@]}"; do
         "${DOCKER_CMD[@]}" volume rm "$vol" 2>/dev/null || true
     done
 
-    # Final fallback: catch any volumes/containers containing this run's ID
-    # This catches resources that were created but not registered
+    # Final fallback: catch any resources containing this run's ID by name
+    # This catches resources that were created but not registered or labeled
     local run_volumes
     run_volumes=$("${DOCKER_CMD[@]}" volume ls --filter "name=${TEST_RUN_ID}" -q 2>/dev/null || true)
     if [[ -n "$run_volumes" ]]; then
@@ -288,7 +271,12 @@ cleanup_test_resources() {
 # Creates .claude.json, .claude/.credentials.json, .claude/settings.json
 # Creates .claude/plugins/cache/test-plugin/plugin.json
 create_claude_fixture() {
-    local fixture="$1"
+    local fixture="${1:-}"
+
+    if [[ -z "$fixture" ]]; then
+        printf '%s\n' "[ERROR] Fixture directory cannot be empty" >&2
+        return 1
+    fi
 
     # Create directory structure
     mkdir -p "$fixture/.claude/plugins/cache/test-plugin"

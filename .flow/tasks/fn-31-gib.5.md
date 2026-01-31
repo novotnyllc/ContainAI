@@ -12,9 +12,8 @@ Extend existing `tests/integration/test-sync-integration.sh` framework with help
 - [ ] Helper functions documented in script header or README
 
 ## Done summary
-TBD
-
+Added import test infrastructure with labeled resources for safe parallel cleanup. Implemented create_test_container(), create_test_volume(), cleanup_test_resources(), and create_claude_fixture() helpers with run-scoped labels and proper input validation.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: e5e4a09, 8a52198
+- Tests: bash -n tests/integration/test-sync-integration.sh, shellcheck -x tests/integration/test-sync-integration.sh
 - PRs:
