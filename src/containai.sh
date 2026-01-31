@@ -17,6 +17,7 @@
 #   sandbox      (Deprecated - use 'cai stop && cai --restart')
 #   import       Sync host configs to data volume
 #   export       Export data volume to .tgz archive
+#   sync         (In-container) Move local configs to data volume with symlinks
 #   stop         Stop ContainAI containers
 #   completion   Generate shell completion scripts (bash, zsh)
 #   version      Show current version

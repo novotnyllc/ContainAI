@@ -186,16 +186,19 @@ _cai_sync_entry() {
         return 2
     fi
 
-    # Skip if source is already a symlink (already synced or user symlink)
+    # Handle if source is already a symlink
     if [[ -L "$home_source" ]]; then
         local link_target
         link_target="$(readlink -f "$home_source" 2>/dev/null)" || true
         if [[ "$link_target" == "${_CAI_SYNC_DATA_DIR}/"* ]]; then
+            # Already synced to volume - this is expected, skip silently
             printf '[SKIP] %s (already symlinked to volume)\n' "$home_source"
+            return 2
         else
-            printf '[SKIP] %s (is a symlink to %s)\n' "$home_source" "$link_target"
+            # User symlink pointing elsewhere - warn and count as failure
+            printf '[WARN] %s is a symlink to %s (resolve manually)\n' "$home_source" "$link_target" >&2
+            return 1
         fi
-        return 2
     fi
 
     # Security: verify source path stays under HOME (prevents .. traversal)
@@ -251,7 +254,11 @@ _cai_sync_entry() {
                 printf '[ERROR] Failed to merge directory: %s\n' "$home_source" >&2
                 return 1
             fi
-            rm -rf "$home_source"
+            # Remove source after merge - fail closed if removal fails
+            if ! rm -rf "$home_source" 2>/dev/null || [[ -e "$home_source" ]]; then
+                printf '[ERROR] Failed to remove source after merge: %s\n' "$home_source" >&2
+                return 1
+            fi
         # For files, prefer local source (user's newer changes) - overwrite volume
         elif [[ -f "$home_source" && -f "$volume_target" ]]; then
             if ! mv -f "$home_source" "$volume_target" 2>/dev/null; then
@@ -390,7 +397,22 @@ _cai_sync_cmd() {
     local skipped=0
     local failed=0
 
-    # Parse manifest and process entries with non-empty container_link
+    # Parse manifest - capture to temp file to detect parser errors
+    local parser_output
+    parser_output=$(mktemp) || {
+        printf '[ERROR] Cannot create temp file for parser output\n' >&2
+        return 1
+    }
+    # shellcheck disable=SC2064
+    trap "rm -f '$parser_output'" RETURN
+
+    if ! "$parser" "$manifest" > "$parser_output" 2>&1; then
+        printf '[ERROR] Failed to parse manifest: %s\n' "$manifest" >&2
+        cat "$parser_output" >&2
+        return 1
+    fi
+
+    # Process manifest entries with non-empty container_link
     local line source target container_link flags disabled entry_type optional
     while IFS='|' read -r source target container_link flags disabled entry_type optional; do
         # Skip container_symlinks (type=symlink) - these have no source to sync
@@ -418,7 +440,7 @@ _cai_sync_cmd() {
             1) failed=$((failed + 1)) ;;
             2) skipped=$((skipped + 1)) ;;
         esac
-    done < <("$parser" "$manifest")
+    done < "$parser_output"
 
     # Summary
     if [[ "$dry_run" == "true" ]]; then
