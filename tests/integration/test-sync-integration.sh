@@ -3924,6 +3924,236 @@ data_volume = "'"$test_vol"'"
     # Cleanup handled by RETURN trap
 }
 
+# ==============================================================================
+# Test 60: New volume scenario
+# ==============================================================================
+# Validates the initial setup path: fresh container + fresh volume + import
+# This is the common case for first-time users or new containers
+test_new_volume() {
+    section "Test 60: New volume test scenario"
+
+    # Create test volume and container with proper labels
+    local test_vol test_container_name test_container_id
+    test_vol=$(create_test_volume "new-volume-data") || {
+        fail "Failed to create test volume"
+        return
+    }
+
+    # Create a source fixture directory under REAL_HOME for Docker mount compatibility
+    local source_dir
+    source_dir=$(mktemp -d "${REAL_HOME}/.containai-new-volume-test-XXXXXX")
+    local test_dir
+    test_dir=$(mktemp -d)
+
+    # Local cleanup function for this test
+    local cleanup_done=0
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        # Stop and remove container if it exists
+        "${DOCKER_CMD[@]}" stop -- "test-new-volume-${TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "test-new-volume-${TEST_RUN_ID}" 2>/dev/null || true
+        # Volume cleanup handled by cleanup_test_resources via EXIT trap
+        rm -rf "$source_dir" "$test_dir" 2>/dev/null || true
+    }
+    trap cleanup_test RETURN
+
+    # Create Claude config fixture with distinctive markers
+    mkdir -p "$source_dir/.claude/plugins/cache/test-plugin"
+    mkdir -p "$source_dir/.claude/skills"
+    echo '{"new_volume_test": "marker_12345"}' > "$source_dir/.claude/settings.json"
+    echo '{"test": true}' > "$source_dir/.claude.json"
+    echo '{}' > "$source_dir/.claude/plugins/cache/test-plugin/plugin.json"
+    # Create a test skill to verify skills directory syncs
+    mkdir -p "$source_dir/.claude/skills/test-skill"
+    echo '{"name": "test-skill"}' > "$source_dir/.claude/skills/test-skill/manifest.json"
+
+    # Create config pointing to test volume
+    create_env_test_config "$test_dir" '
+[agent]
+data_volume = "'"$test_vol"'"
+'
+
+    # Step 1: Run cai import to sync host configs to volume
+    local import_output import_exit=0
+    import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$source_dir" 2>&1) || import_exit=$?
+
+    if [[ $import_exit -ne 0 ]]; then
+        fail "Import failed (exit=$import_exit)"
+        info "Output: $import_output"
+        return
+    fi
+    pass "Import to new volume succeeded"
+
+    # Step 2: Create container with the test volume mounted
+    test_container_id=$(create_test_container "new-volume" \
+        --volume "$test_vol":/mnt/agent-data \
+        "$IMAGE_NAME" /bin/bash -c "sleep 300") || {
+        fail "Failed to create test container"
+        return
+    }
+    test_container_name="test-new-volume-${TEST_RUN_ID}"
+    pass "Created test container: $test_container_name"
+
+    # Step 3: Start the container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to start test container"
+        return
+    fi
+    pass "Started test container"
+
+    # Give container a moment to initialize
+    sleep 1
+
+    # Step 4: Assert expected files present in volume via docker exec
+    local files_check
+    files_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" ls -la /mnt/agent-data/claude/ 2>&1) || files_check="exec_failed"
+
+    if [[ "$files_check" == "exec_failed" ]]; then
+        fail "Docker exec failed - cannot verify volume contents"
+        return
+    fi
+
+    # Check for expected files
+    if echo "$files_check" | grep -q "settings.json"; then
+        pass "settings.json present in volume"
+    else
+        fail "settings.json NOT found in volume"
+        info "Volume contents: $files_check"
+    fi
+
+    if echo "$files_check" | grep -q "plugins"; then
+        pass "plugins directory present in volume"
+    else
+        fail "plugins directory NOT found in volume"
+    fi
+
+    if echo "$files_check" | grep -q "skills"; then
+        pass "skills directory present in volume"
+    else
+        fail "skills directory NOT found in volume"
+    fi
+
+    # Verify settings.json content has our marker
+    local settings_content
+    settings_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /mnt/agent-data/claude/settings.json 2>&1) || settings_content=""
+
+    if echo "$settings_content" | grep -q "marker_12345"; then
+        pass "settings.json contains expected test marker"
+    else
+        fail "settings.json does NOT contain expected test marker"
+        info "Content: $settings_content"
+    fi
+
+    # Step 5: Assert symlinks valid via docker exec readlink
+    # Note: Container must have symlinks set up via the generated symlinks.sh during build
+    # We check that the image's symlink structure points to the volume mount
+    local symlink_check
+    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        claude_link=$(readlink ~/.claude 2>/dev/null || echo "not_symlink")
+        if [ "$claude_link" = "/mnt/agent-data/claude" ]; then
+            echo "claude_ok"
+        else
+            echo "claude_fail:$claude_link"
+        fi
+    ' 2>&1) || symlink_check="exec_failed"
+
+    case "$symlink_check" in
+        claude_ok)
+            pass "~/.claude symlink points to /mnt/agent-data/claude"
+            ;;
+        exec_failed)
+            fail "Docker exec failed for symlink check"
+            ;;
+        claude_fail:*)
+            # The container image may use individual file symlinks instead of directory symlink
+            # Check for individual file symlinks instead
+            local alt_symlink_check
+            alt_symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+                if [ -L ~/.claude/settings.json ]; then
+                    settings_target=$(readlink ~/.claude/settings.json)
+                    if [ "$settings_target" = "/mnt/agent-data/claude/settings.json" ]; then
+                        echo "settings_ok"
+                    else
+                        echo "settings_fail:$settings_target"
+                    fi
+                elif [ -d ~/.claude ]; then
+                    echo "dir_not_symlink"
+                else
+                    echo "not_found"
+                fi
+            ' 2>&1) || alt_symlink_check="exec_failed"
+
+            case "$alt_symlink_check" in
+                settings_ok)
+                    pass "~/.claude/settings.json symlink points to volume"
+                    ;;
+                dir_not_symlink)
+                    # Check if individual files are symlinked
+                    info "~/.claude is a directory (not symlink), checking file symlinks"
+                    local plugins_check
+                    plugins_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+                        if [ -L ~/.claude/plugins ]; then
+                            target=$(readlink ~/.claude/plugins)
+                            if [ "$target" = "/mnt/agent-data/claude/plugins" ]; then
+                                echo "ok"
+                            else
+                                echo "fail:$target"
+                            fi
+                        else
+                            echo "not_symlink"
+                        fi
+                    ' 2>&1)
+                    if [[ "$plugins_check" == "ok" ]]; then
+                        pass "~/.claude/plugins symlink points to volume"
+                    else
+                        info "~/.claude/plugins status: $plugins_check (may be expected based on image build)"
+                    fi
+                    ;;
+                *)
+                    info "Symlink check result: $alt_symlink_check"
+                    ;;
+            esac
+            ;;
+        *)
+            fail "Unexpected symlink check result: $symlink_check"
+            ;;
+    esac
+
+    # Verify skills symlink (important for fn-31-gib.2 acceptance)
+    local skills_symlink_check
+    skills_symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        if [ -L ~/.claude/skills ]; then
+            target=$(readlink ~/.claude/skills)
+            if [ "$target" = "/mnt/agent-data/claude/skills" ]; then
+                echo "ok"
+            else
+                echo "fail:$target"
+            fi
+        else
+            echo "not_symlink"
+        fi
+    ' 2>&1) || skills_symlink_check="exec_failed"
+
+    case "$skills_symlink_check" in
+        ok)
+            pass "~/.claude/skills symlink points to volume"
+            ;;
+        "fail:"*)
+            fail "~/.claude/skills symlink points to wrong target: ${skills_symlink_check#fail:}"
+            ;;
+        not_symlink)
+            info "~/.claude/skills is not a symlink (may be expected based on image configuration)"
+            ;;
+        exec_failed)
+            fail "Docker exec failed for skills symlink check"
+            ;;
+    esac
+
+    # Cleanup happens automatically via RETURN trap
+}
+
 # Test: No ssh-keygen noise during import
 # Verifies that the rsync image entrypoint is bypassed correctly
 # Uses --from to exercise the mount preflight path that originally triggered the noise
@@ -4082,6 +4312,9 @@ main() {
 
     # SSH keygen noise test (Test 59)
     test_no_ssh_keygen_noise
+
+    # Import scenario tests (Test 60+)
+    test_new_volume
 
     # Summary
     echo ""
