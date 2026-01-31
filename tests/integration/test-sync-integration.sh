@@ -4190,10 +4190,12 @@ test_existing_volume() {
 
     # Step 1: Pre-populate the volume with known test data using a temporary container
     # This simulates a volume that was previously used with another container
+    # Use --entrypoint to bypass image entrypoint and avoid side effects
     local populate_output populate_exit=0
     populate_output=$("${DOCKER_CMD[@]}" run --rm \
         --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" bash -c '
+        --entrypoint /bin/bash \
+        "$IMAGE_NAME" -c '
             # Create marker file at root of data volume
             echo "existing_volume_marker_67890" > /mnt/agent-data/marker.txt
 
@@ -4204,8 +4206,8 @@ test_existing_volume() {
             echo "{\"name\": \"test-skill\"}" > /mnt/agent-data/claude/skills/test-skill/manifest.json
             echo "{}" > /mnt/agent-data/claude/plugins/cache/test-plugin/plugin.json
 
-            # Set proper ownership (agent user in container)
-            chown -R agent:agent /mnt/agent-data
+            # Set proper ownership (use numeric IDs for robustness across base images)
+            chown -R 1000:1000 /mnt/agent-data
         ' 2>&1) || populate_exit=$?
 
     if [[ $populate_exit -ne 0 ]]; then
@@ -4231,10 +4233,13 @@ test_existing_volume() {
     fi
     pass "Started test container"
 
-    # Wait for container to be ready (poll with integer sleep for portability)
+    # Wait for container to be ready - poll for symlink state (not just volume existence)
+    # This ensures the container's init has completed symlink setup
     local wait_count=0
     while [[ $wait_count -lt 30 ]]; do
-        if "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data/claude 2>/dev/null; then
+        # Check for symlink setup: either ~/.claude is a symlink, or ~/.claude/plugins is
+        if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+            '[ -L ~/.claude ] || [ -L ~/.claude/plugins ]' 2>/dev/null; then
             break
         fi
         sleep 1
@@ -4329,8 +4334,25 @@ test_existing_volume() {
             ;;
     esac
 
-    # Step 6: Assert configs accessible via symlinks
-    # Verify we can read settings.json through the symlink
+    # Step 6: Assert configs accessible via symlinks AND resolve to volume path
+    # Verify settings.json resolves to the volume (not a regular file copy)
+    local settings_realpath
+    settings_realpath=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+        'realpath ~/.claude/settings.json 2>/dev/null || echo "resolve_failed"') || settings_realpath="exec_failed"
+
+    case "$settings_realpath" in
+        /mnt/agent-data/claude/settings.json)
+            pass "settings.json resolves to volume path"
+            ;;
+        resolve_failed|exec_failed)
+            fail "settings.json does not exist or cannot be resolved"
+            ;;
+        *)
+            fail "settings.json resolves to wrong path: $settings_realpath (expected /mnt/agent-data/claude/settings.json)"
+            ;;
+    esac
+
+    # Verify settings.json content is correct
     local settings_content
     settings_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/settings.json 2>&1) || settings_content=""
 
@@ -4341,14 +4363,30 @@ test_existing_volume() {
         info "Content: $settings_content"
     fi
 
-    # Verify skills directory accessible via symlink
+    # Verify skills directory accessible via symlink and resolves to volume
+    local skills_realpath
+    skills_realpath=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+        'realpath ~/.claude/skills/test-skill/manifest.json 2>/dev/null || echo "resolve_failed"') || skills_realpath="exec_failed"
+
+    case "$skills_realpath" in
+        /mnt/agent-data/claude/skills/test-skill/manifest.json)
+            pass "skills/test-skill/manifest.json resolves to volume path"
+            ;;
+        resolve_failed|exec_failed)
+            fail "skills/test-skill/manifest.json does not exist or cannot be resolved"
+            ;;
+        *)
+            fail "skills/test-skill/manifest.json resolves to wrong path: $skills_realpath"
+            ;;
+    esac
+
     local skills_manifest
     skills_manifest=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/skills/test-skill/manifest.json 2>&1) || skills_manifest=""
 
     if echo "$skills_manifest" | grep -q "test-skill"; then
-        pass "Skills accessible via symlink"
+        pass "Skills accessible via symlink with correct content"
     else
-        fail "Skills NOT accessible via symlink"
+        fail "Skills NOT accessible via symlink or has wrong content"
         info "Content: $skills_manifest"
     fi
 
@@ -4435,7 +4473,7 @@ data_volume = "'"$test_vol"'"
 # Verifies that *.priv.* files in .bashrc.d are excluded from import for security.
 # Tests both normal import and --no-excludes to verify security behavior.
 test_priv_file_filtering() {
-    section "Tests 61-62: .priv. file filtering in .bashrc.d"
+    section "Tests 62-63: .priv. file filtering in .bashrc.d"
 
     # Create a test volume
     local test_vol
