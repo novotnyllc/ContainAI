@@ -292,3 +292,6 @@ After rm -rf in shell scripts, verify deletion succeeded with [[ ! -e path ]] be
 
 ## 2026-01-31 manual [pitfall]
 When capturing command output to check for errors, use 'if \! output=$(cmd)' to check exit status explicitly - relying on stderr content misses non-zero exits with no output
+
+## 2026-01-31 manual [pitfall]
+docker exec --user changes UID but may not set HOME; use -e HOME=/path for reliable ~ expansion in commands

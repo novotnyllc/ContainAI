@@ -5833,7 +5833,7 @@ test_cai_sync() {
     local test_content
     test_content="test_sync_content_$(date +%s)"
     local setup_result
-    setup_result=$("${DOCKER_CMD[@]}" exec --user agent "$test_container_name" bash -c '
+    setup_result=$("${DOCKER_CMD[@]}" exec --user agent -e HOME=/home/agent "$test_container_name" bash -c '
         # Safety check: Verify neither ~/.cursor nor ~/.cursor/rules are symlinks
         # pointing to the volume BEFORE any deletions (to avoid deleting volume data)
         for path in ~/.cursor ~/.cursor/rules; do
@@ -5902,7 +5902,7 @@ test_cai_sync() {
 
     # Step 4: Run cai sync inside the container as agent user
     local sync_output sync_exit=0
-    sync_output=$("${DOCKER_CMD[@]}" exec --user agent "$test_container_name" cai sync 2>&1) || sync_exit=$?
+    sync_output=$("${DOCKER_CMD[@]}" exec --user agent -e HOME=/home/agent "$test_container_name" cai sync 2>&1) || sync_exit=$?
 
     # Note: cai sync may exit non-zero if some entries fail (e.g., container_link issues)
     # The test verifies our specific target path was synced successfully via filesystem checks
@@ -5913,7 +5913,7 @@ test_cai_sync() {
 
     # Step 5: Verify directory was moved to volume (filesystem-based assertion)
     local volume_check
-    volume_check=$("${DOCKER_CMD[@]}" exec --user agent "$test_container_name" bash -c '
+    volume_check=$("${DOCKER_CMD[@]}" exec --user agent -e HOME=/home/agent "$test_container_name" bash -c '
         if [ -d /mnt/agent-data/cursor/rules ]; then
             echo "dir_exists"
         else
@@ -5929,7 +5929,7 @@ test_cai_sync() {
 
     # Step 6: Verify symlink created at ~/.cursor/rules pointing to volume (filesystem-based)
     local symlink_check
-    symlink_check=$("${DOCKER_CMD[@]}" exec --user agent "$test_container_name" bash -c '
+    symlink_check=$("${DOCKER_CMD[@]}" exec --user agent -e HOME=/home/agent "$test_container_name" bash -c '
         if [ -L ~/.cursor/rules ]; then
             target=$(readlink ~/.cursor/rules)
             if [ "$target" = "/mnt/agent-data/cursor/rules" ]; then
@@ -5968,7 +5968,7 @@ test_cai_sync() {
 
     # Step 7: Verify files accessible via symlink (content matches - filesystem-based)
     local content_check
-    content_check=$("${DOCKER_CMD[@]}" exec --user agent "$test_container_name" bash -c '
+    content_check=$("${DOCKER_CMD[@]}" exec --user agent -e HOME=/home/agent "$test_container_name" bash -c '
         if [ -f ~/.cursor/rules/test-rule.md ]; then
             cat ~/.cursor/rules/test-rule.md
         else
