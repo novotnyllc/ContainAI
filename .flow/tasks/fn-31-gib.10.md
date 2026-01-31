@@ -12,9 +12,8 @@ Add import tests to GitHub Actions with tiered strategy: host-side tests on stan
 - [ ] Test job depends on build job (image available)
 
 ## Done summary
-TBD
-
+Added import integration tests to CI workflow with tiered strategy: lint job runs shellcheck and manifest consistency on ubuntu-latest, test job builds image and runs full integration test suite on PRs after build job completes. E2E tests requiring sysbox are documented in docs/testing.md for manual execution.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 83a4df79aca60a40defc6c8f87d85bc2d0b2e1c5, 9dc2b8974eda69d6b8175a550c9cec9a47f3160d
+- Tests: shellcheck -x src/*.sh src/lib/*.sh, ./scripts/check-manifest-consistency.sh, python3 -c 'import yaml; yaml.safe_load(...)'
 - PRs:
