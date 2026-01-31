@@ -20,7 +20,8 @@
 # 52-58. Import overrides tests (basic, replace, nested, symlinks, traversal, dry-run, missing)
 # 59. SSH keygen noise test
 # 60. New volume scenario test
-# 61-62. .priv. file filtering tests (security)
+# 61. Existing volume scenario test
+# 62-64. .priv. file filtering tests (security)
 #
 # ==============================================================================
 # Import Test Infrastructure
@@ -4154,6 +4155,206 @@ test_new_volume() {
     # Cleanup happens automatically via RETURN trap
 }
 
+# Test: Existing volume scenario
+# Validates data persistence across container recreation:
+# 1. Creates volume and pre-populates with known test data
+# 2. Creates NEW container attaching to existing volume
+# 3. Asserts marker file still present (data persistence)
+# 4. Asserts symlinks valid and point to volume data
+# 5. Asserts configs accessible via symlinks
+test_existing_volume() {
+    section "Test 61: Existing volume test scenario"
+
+    # Create test volume with proper labels
+    local test_vol test_container_name
+    test_vol=$(create_test_volume "existing-volume-data") || {
+        fail "Failed to create test volume"
+        return
+    }
+
+    # Set container name early for cleanup
+    test_container_name="test-existing-volume-${TEST_RUN_ID}"
+
+    # Local cleanup function for this test
+    local cleanup_done=0
+    cleanup_test() {
+        [[ $cleanup_done -eq 1 ]] && return
+        cleanup_done=1
+        # Stop and remove container if it exists
+        "${DOCKER_CMD[@]}" stop -- "$test_container_name" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -- "$test_container_name" 2>/dev/null || true
+        # Also remove volume (best-effort, EXIT trap is fallback)
+        "${DOCKER_CMD[@]}" volume rm -- "$test_vol" 2>/dev/null || true
+    }
+    trap cleanup_test RETURN
+
+    # Step 1: Pre-populate the volume with known test data using a temporary container
+    # This simulates a volume that was previously used with another container
+    local populate_output populate_exit=0
+    populate_output=$("${DOCKER_CMD[@]}" run --rm \
+        --volume "$test_vol":/mnt/agent-data \
+        "$IMAGE_NAME" bash -c '
+            # Create marker file at root of data volume
+            echo "existing_volume_marker_67890" > /mnt/agent-data/marker.txt
+
+            # Create Claude config structure (simulating previous import)
+            mkdir -p /mnt/agent-data/claude/plugins/cache/test-plugin
+            mkdir -p /mnt/agent-data/claude/skills/test-skill
+            echo "{\"existing_volume_test\": true}" > /mnt/agent-data/claude/settings.json
+            echo "{\"name\": \"test-skill\"}" > /mnt/agent-data/claude/skills/test-skill/manifest.json
+            echo "{}" > /mnt/agent-data/claude/plugins/cache/test-plugin/plugin.json
+
+            # Set proper ownership (agent user in container)
+            chown -R agent:agent /mnt/agent-data
+        ' 2>&1) || populate_exit=$?
+
+    if [[ $populate_exit -ne 0 ]]; then
+        fail "Failed to pre-populate volume (exit=$populate_exit)"
+        info "Output: $populate_output"
+        return
+    fi
+    pass "Pre-populated volume with test data"
+
+    # Step 2: Create NEW container attaching to the existing volume
+    if ! create_test_container "existing-volume" \
+        --volume "$test_vol":/mnt/agent-data \
+        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+        fail "Failed to create test container"
+        return
+    fi
+    pass "Created test container: $test_container_name"
+
+    # Step 3: Start the container
+    if ! "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null 2>&1; then
+        fail "Failed to start test container"
+        return
+    fi
+    pass "Started test container"
+
+    # Wait for container to be ready (poll with integer sleep for portability)
+    local wait_count=0
+    while [[ $wait_count -lt 30 ]]; do
+        if "${DOCKER_CMD[@]}" exec "$test_container_name" test -d /mnt/agent-data/claude 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    if [[ $wait_count -ge 30 ]]; then
+        fail "Container did not become ready in time (30s timeout)"
+        return
+    fi
+
+    # Step 4: Assert marker file still present (data persistence)
+    local marker_content
+    marker_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /mnt/agent-data/marker.txt 2>&1) || marker_content=""
+
+    if [[ "$marker_content" == "existing_volume_marker_67890" ]]; then
+        pass "Marker file present with correct content (data persisted)"
+    else
+        fail "Marker file missing or has wrong content"
+        info "Expected: existing_volume_marker_67890"
+        info "Got: $marker_content"
+    fi
+
+    # Step 5: Assert symlinks valid and point to volume data
+    local symlink_check
+    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+        # Check for directory symlink first (preferred structure)
+        if [ -L ~/.claude ]; then
+            claude_link=$(readlink ~/.claude)
+            if [ "$claude_link" = "/mnt/agent-data/claude" ]; then
+                echo "dir_symlink_ok"
+            else
+                echo "dir_symlink_wrong:$claude_link"
+            fi
+        elif [ -d ~/.claude ]; then
+            # Directory exists, check for individual file symlinks
+            # At minimum, plugins and skills must be symlinked
+            plugins_ok=0
+            skills_ok=0
+            if [ -L ~/.claude/plugins ]; then
+                target=$(readlink ~/.claude/plugins)
+                [ "$target" = "/mnt/agent-data/claude/plugins" ] && plugins_ok=1
+            fi
+            if [ -L ~/.claude/skills ]; then
+                target=$(readlink ~/.claude/skills)
+                [ "$target" = "/mnt/agent-data/claude/skills" ] && skills_ok=1
+            fi
+            if [ "$plugins_ok" = "1" ] && [ "$skills_ok" = "1" ]; then
+                echo "file_symlinks_ok"
+            elif [ "$plugins_ok" = "0" ] && [ "$skills_ok" = "0" ]; then
+                echo "file_symlinks_missing_both"
+            elif [ "$plugins_ok" = "0" ]; then
+                echo "file_symlinks_missing_plugins"
+            else
+                echo "file_symlinks_missing_skills"
+            fi
+        else
+            echo "claude_dir_missing"
+        fi
+    ' 2>&1) || symlink_check="exec_failed"
+
+    case "$symlink_check" in
+        dir_symlink_ok)
+            pass "~/.claude symlink points to /mnt/agent-data/claude"
+            ;;
+        file_symlinks_ok)
+            pass "~/.claude/plugins symlink points to volume"
+            pass "~/.claude/skills symlink points to volume"
+            ;;
+        dir_symlink_wrong:*)
+            fail "~/.claude symlink points to wrong target: ${symlink_check#dir_symlink_wrong:}"
+            ;;
+        file_symlinks_missing_both)
+            fail "~/.claude/plugins symlink missing or incorrect"
+            fail "~/.claude/skills symlink missing or incorrect"
+            ;;
+        file_symlinks_missing_plugins)
+            fail "~/.claude/plugins symlink missing or incorrect"
+            pass "~/.claude/skills symlink points to volume"
+            ;;
+        file_symlinks_missing_skills)
+            pass "~/.claude/plugins symlink points to volume"
+            fail "~/.claude/skills symlink missing or incorrect"
+            ;;
+        claude_dir_missing)
+            fail "~/.claude directory does not exist"
+            ;;
+        exec_failed)
+            fail "Docker exec failed for symlink check"
+            ;;
+        *)
+            fail "Unexpected symlink check result: $symlink_check"
+            ;;
+    esac
+
+    # Step 6: Assert configs accessible via symlinks
+    # Verify we can read settings.json through the symlink
+    local settings_content
+    settings_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/settings.json 2>&1) || settings_content=""
+
+    if echo "$settings_content" | grep -q "existing_volume_test"; then
+        pass "settings.json accessible via symlink with correct content"
+    else
+        fail "settings.json NOT accessible via symlink or has wrong content"
+        info "Content: $settings_content"
+    fi
+
+    # Verify skills directory accessible via symlink
+    local skills_manifest
+    skills_manifest=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/skills/test-skill/manifest.json 2>&1) || skills_manifest=""
+
+    if echo "$skills_manifest" | grep -q "test-skill"; then
+        pass "Skills accessible via symlink"
+    else
+        fail "Skills NOT accessible via symlink"
+        info "Content: $skills_manifest"
+    fi
+
+    # Cleanup happens automatically via RETURN trap
+}
+
 # Test: No ssh-keygen noise during import
 # Verifies that the rsync image entrypoint is bypassed correctly
 # Uses --from to exercise the mount preflight path that originally triggered the noise
@@ -4280,7 +4481,7 @@ test_priv_file_filtering() {
     # -------------------------------------------------------------------------
     # Test 61: Normal import filters .priv. files
     # -------------------------------------------------------------------------
-    section "Test 61: Normal import filters .priv. files"
+    section "Test 62: Normal import filters .priv. files"
 
     local import_output import_exit=0
     import_output=$(cd -- "$test_dir" && HOME="$source_dir" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
@@ -4344,7 +4545,7 @@ test_priv_file_filtering() {
     # -------------------------------------------------------------------------
     # Test 62: --no-excludes does NOT disable .priv. filtering (security)
     # -------------------------------------------------------------------------
-    section "Test 62: --no-excludes does NOT disable .priv. filtering"
+    section "Test 63: --no-excludes does NOT disable .priv. filtering"
 
     # Clear volume and re-import with --no-excludes
     "${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 find /data -mindepth 1 -delete 2>/dev/null || true
@@ -4396,7 +4597,7 @@ test_priv_file_filtering() {
 # Test 63: .priv. filtering in tgz restore
 # ==============================================================================
 test_priv_file_filtering_tgz() {
-    section "Test 63: .priv. file filtering in tgz restore"
+    section "Test 64: .priv. file filtering in tgz restore"
 
     # Create a test volume
     local test_vol
@@ -4673,10 +4874,11 @@ main() {
     # SSH keygen noise test (Test 59)
     test_no_ssh_keygen_noise
 
-    # Import scenario tests (Test 60+)
+    # Import scenario tests (Test 60-61)
     test_new_volume
+    test_existing_volume
 
-    # .priv. file filtering tests (Tests 61-63)
+    # .priv. file filtering tests (Tests 62-64)
     test_priv_file_filtering
     test_priv_file_filtering_tgz
 
