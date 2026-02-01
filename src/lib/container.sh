@@ -2445,6 +2445,7 @@ _containai_start_container() {
             fi
             args+=(--runtime="$runtime")
             args+=(--name "$container_name")
+            args+=(--hostname "$container_name")
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
             args+=(--label "containai.ssh-port=$ssh_port")
