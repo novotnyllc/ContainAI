@@ -624,7 +624,7 @@ _containai_doctor_help() {
 ContainAI Doctor - Check system capabilities and diagnostics
 
 Usage: cai doctor [options]
-       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>] | template]
+       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>] | template [--all|<name>]]
 
 Checks Docker availability and Sysbox isolation configuration.
 Reports requirement levels and actionable remediation guidance.

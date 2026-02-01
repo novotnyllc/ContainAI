@@ -2138,10 +2138,20 @@ _cai_doctor_fix_template() {
                 return 1
                 ;;
             *)
+                if [[ -n "$template_name" ]]; then
+                    _cai_error "Only one template name allowed (got '$template_name' and '$arg')"
+                    return 1
+                fi
                 template_name="$arg"
                 ;;
         esac
     done
+
+    # Reject --all combined with a template name
+    if [[ "$fix_all" == "true" && -n "$template_name" ]]; then
+        _cai_error "Cannot use --all with a specific template name"
+        return 1
+    fi
 
     _cai_info "ContainAI Doctor Fix - Templates"
     _cai_info "================================="
@@ -2255,9 +2265,10 @@ _cai_doctor_fix_single_template() {
             fi
         fi
 
-        _cai_info "  Restoring from repo..."
+        _cai_info "  Restoring from: $full_source"
+        _cai_info "  Restoring to:   $template_path"
         if cp "$full_source" "$template_path" 2>/dev/null; then
-            _cai_ok "  Restored: $template_path"
+            _cai_ok "  Restored successfully"
             return 0
         else
             _cai_error "  Failed to restore template"
@@ -2265,7 +2276,7 @@ _cai_doctor_fix_single_template() {
         fi
     else
         # User-created template - can only backup, cannot restore
-        _cai_warn "  User template, cannot restore from repo"
+        printf '  %-46s %s\n' "Restore:" "[FAIL] User template, cannot restore from repo"
         if [[ -n "${backup_path:-}" ]]; then
             _cai_info "  Backup saved at: $backup_path"
         fi

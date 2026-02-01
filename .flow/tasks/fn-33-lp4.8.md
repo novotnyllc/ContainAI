@@ -19,9 +19,8 @@
 - [x] Logs backup and restore paths with formatted output
 
 ## Done summary
-Already implemented in fn-33-lp4.7. See `_cai_doctor_fix_template()` and `_cai_doctor_fix_single_template()` in src/lib/doctor.sh.
-
+Task fn-33-lp4.8 was already implemented as part of fn-33-lp4.7 (commit 406ab33). The implementation includes `_cai_doctor_fix_template()` for handling `cai doctor fix template [--all | <name>]` and `_cai_doctor_fix_single_template()` for backup/restore logic. All acceptance criteria are met: default template recovery, specific template recovery, --all iteration, backup naming format, repo template restoration via `_cai_get_repo_templates_dir()`, user template error handling, and formatted output.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 406ab33
+- Tests: Verified _cai_doctor_fix_template and _cai_doctor_fix_single_template exist in doctor.sh
 - PRs:

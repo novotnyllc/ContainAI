@@ -48,3 +48,6 @@ Dry-run messages must use _cai_dryrun (or module-specific _xxx_dryrun helper), n
 
 ## 2026-01-31 manual [convention]
 Use direct test -f/-d commands instead of parsing ls output for file/directory existence checks in tests
+
+## 2026-02-01 manual [convention]
+When doctor uses docker context, derive it from _cai_select_context() not hardcoded constants - ensures text and JSON output use same context
