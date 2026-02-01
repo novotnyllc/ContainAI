@@ -29,7 +29,7 @@ Verified that warning suppression config documentation is complete and correctly
    - Suppresses warnings in doctor checks (`cai doctor`)
    - Config format: `[template]` section with `suppress_base_warning = true`
 
-4. **Implementation verified**: Source code at `src/lib/config.sh:535-540` parses the config and stores in `_CAI_TEMPLATE_SUPPRESS_BASE_WARNING`, used by both template.sh (builds) and doctor.sh (health checks).
+4. **Implementation verified**: Source code at `src/lib/config.sh:535-540` parses the config and stores in `_CAI_TEMPLATE_SUPPRESS_BASE_WARNING`, used by `container.sh` (passes to `_cai_build_template` for builds) and `doctor.sh` (health checks). The validation function `_cai_validate_template_base` in `template.sh` receives this flag as an argument.
 
 No code changes required - documentation was already complete and cross-referenced.
 
