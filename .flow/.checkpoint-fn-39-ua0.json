@@ -1,0 +1,152 @@
+{
+  "created_at": "2026-02-01T20:23:20.594477Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-39-ua0",
+      "created_at": "2026-01-29T07:05:48.161054Z",
+      "default_impl": null,
+      "default_review": null,
+      "default_sync": null,
+      "depends_on_epics": [
+        "fn-35-e0x"
+      ],
+      "id": "fn-39-ua0",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-39-ua0.md",
+      "status": "open",
+      "title": "Comprehensive Sync System E2E Tests",
+      "updated_at": "2026-01-29T07:07:33.020598Z"
+    },
+    "spec": "# fn-39-ua0 Comprehensive Sync System E2E Tests\n\n## Overview\n\nCreate comprehensive E2E tests for the entire sync system. Test ALL agents and tools in sync-manifest.toml, shell customization (.bashrc.d), and all flag combinations.\n\nTests run from user perspective: build container, create mock HOME with test configs, run cai import/export, verify everything syncs correctly.\n\n## Scope\n\n### In Scope\n\n**10 AI Agents:**\n| Agent | Config Location | Key Files |\n|-------|-----------------|-----------|\n| Claude Code | ~/.claude/ | .credentials.json (s), settings.json, plugins/, skills/, hooks/ |\n| Gemini | ~/.gemini/ | google_accounts.json (s), oauth_creds.json (s), settings.json |\n| Codex | ~/.codex/ | config.toml, auth.json (s), skills/ |\n| Copilot | ~/.copilot/ | config.json, mcp-config.json, skills/ |\n| OpenCode | ~/.config/opencode/ | opencode.json, auth.json (s), agents/, commands/ |\n| Aider | ~/ | .aider.conf.yml, .aider.model.settings.yml |\n| Continue | ~/.continue/ | config.yaml, config.json |\n| Cursor | ~/.cursor/ | mcp.json, rules/, extensions/ |\n| Pi | ~/.pi/agent/ | settings.json, models.json (s), skills/, extensions/ |\n| Kimi | ~/.kimi/ | config.toml (s), mcp.json (s) |\n\n**6 Dev Tools:**\n| Tool | Config Location | Key Files |\n|------|-----------------|-----------|\n| Git | ~/ | .gitconfig, .gitignore_global |\n| GitHub CLI | ~/.config/gh/ | hosts.yml (s), config.yml |\n| SSH | ~/.ssh/ | config, known_hosts, id_* (s) |\n| VS Code Server | ~/.vscode-server/ | extensions/, data/Machine/, data/User/mcp/ |\n| tmux | ~/ | .tmux.conf, .config/tmux/, .local/share/tmux/ |\n| vim/neovim | ~/ | .vimrc, .vim/, .config/nvim/ |\n\n**Shell Customization:**\n- .bashrc.d/ - custom shell scripts (MUST source on login)\n- .bash_aliases - alias definitions\n- .zshrc, .zprofile - zsh configs\n- .inputrc - readline config\n- .oh-my-zsh/custom - oh-my-zsh customizations\n\n**Other:**\n- ~/.agents/ - shared agent configuration\n- ~/.local/share/fonts/ - custom fonts\n- Starship, Oh My Posh prompt configs\n\n### Out of Scope\n- Modifying sync logic (testing only)\n- Adding new agents (that's fn-35-e0x)\n- Performance benchmarks\n\n## Approach\n\n### Test Categories\n\n1. **Import Tests** - host \u2192 container for each agent/tool\n2. **Export Tests** - container \u2192 host\n3. **Shell Tests** - .bashrc.d sourced, aliases work\n4. **Flag Tests** - s, j, R, x flags behave correctly\n5. **Dry-Run Tests** - --dry-run shows but doesn't change\n6. **Edge Cases** - no config, partial config, large dirs\n\n### Test Structure\n\n```\ntests/integration/test-sync-e2e.sh      # Main test runner\ntests/integration/sync-tests/           # Test modules\n\u251c\u2500\u2500 test-agent-sync.sh                  # All AI agents\n\u251c\u2500\u2500 test-tool-sync.sh                   # Dev tools (git, gh, ssh, etc)\n\u251c\u2500\u2500 test-shell-sync.sh                  # .bashrc.d, aliases, etc\n\u251c\u2500\u2500 test-flags.sh                       # Flag behavior tests\n\u2514\u2500\u2500 test-edge-cases.sh                  # Edge cases\n```\n\n## Tasks\n\n### fn-39-ua0.1: Test infrastructure setup\nCreate test harness, mock HOME setup, container management helpers.\n\n### fn-39-ua0.2: AI agent sync tests\nTest all 10 AI agents: Claude, Gemini, Codex, Copilot, OpenCode, Aider, Continue, Cursor, Pi, Kimi.\n\n### fn-39-ua0.3: Dev tool sync tests\nTest Git, GitHub CLI, SSH, VS Code Server, tmux, vim/neovim, Starship, Oh My Posh.\n\n### fn-39-ua0.4: Shell customization tests\nTest .bashrc.d sourcing, .bash_aliases, .inputrc, zsh configs, oh-my-zsh.\n\n### fn-39-ua0.5: Flag and operation tests\nTest all flags (s, j, R, x), --no-secrets, import, export, dry-run modes.\n\n### fn-39-ua0.6: Edge case tests\nTest no-config pollution, partial configs, large directories, concurrent containers.\n\n## Quick commands\n\n```bash\n# Run all sync tests\n./tests/integration/test-sync-e2e.sh\n\n# Run specific test module\n./tests/integration/test-sync-e2e.sh --only agents\n./tests/integration/test-sync-e2e.sh --only shell\n./tests/integration/test-sync-e2e.sh --only flags\n\n# Build container first\n./src/build.sh\n```\n\n## Acceptance\n\n- [ ] Test infrastructure created (mock HOME, container helpers)\n- [ ] All 10 AI agents tested for sync\n- [ ] All 6 dev tools tested for sync\n- [ ] Shell customization tested (.bashrc.d sourced on login)\n- [ ] All flags tested (s, j, R, x)\n- [ ] --no-secrets option tested\n- [ ] Import and export operations tested\n- [ ] Dry-run modes tested\n- [ ] Edge cases tested (no pollution, partial config)\n- [ ] All tests pass: ./tests/integration/test-sync-e2e.sh\n\n## Dependencies\n\n- **fn-35-e0x**: Pi & Kimi sync entries must be added first\n\n## References\n\n- sync-manifest.toml: src/sync-manifest.toml\n- Existing sync tests: tests/integration/test-sync-integration.sh\n- Import logic: src/lib/import.sh\n"
+  },
+  "epic_id": "fn-39-ua0",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-29T07:06:15.587786Z",
+        "depends_on": [],
+        "epic": "fn-39-ua0",
+        "id": "fn-39-ua0.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-39-ua0.1.md",
+        "status": "todo",
+        "title": "Test infrastructure setup",
+        "updated_at": "2026-01-29T07:06:28.130357Z"
+      },
+      "id": "fn-39-ua0.1",
+      "runtime": null,
+      "spec": "# fn-39-ua0.1 Test infrastructure setup\n\n## Description\nCreate test harness for sync E2E tests: mock HOME setup, container management, test helpers.\n\n**Size:** M\n**Files:** `tests/integration/test-sync-e2e.sh`, `tests/integration/sync-test-helpers.sh`\n\n## Approach\n\n### Mock HOME Setup\n```bash\nsetup_mock_home() {\n    TEST_HOME=$(mktemp -d)\n    # Create directory structure for all agents\n    mkdir -p \"$TEST_HOME/.claude\" \"$TEST_HOME/.gemini\" \"$TEST_HOME/.codex\" ...\n    # Create mock config files with test content\n    echo '{\"test\": true}' > \"$TEST_HOME/.claude/settings.json\"\n    ...\n}\n```\n\n### Container Management\n```bash\nstart_test_container() {\n    local name=\"test-sync-$$\"\n    docker run -d --name \"$name\" containai:latest sleep infinity\n    echo \"$name\"\n}\n\nexec_in_container() {\n    docker exec \"$CONTAINER_NAME\" \"$@\"\n}\n\ncleanup_container() {\n    docker rm -f \"$CONTAINER_NAME\" 2>/dev/null || true\n}\n```\n\n### Test Helpers\n```bash\nassert_file_exists() { ... }\nassert_file_contains() { ... }\nassert_symlink_target() { ... }\nassert_permissions() { ... }\nrun_test() { ... }\nprint_summary() { ... }\n```\n\n## Key context\n\n- Pattern: `tests/integration/test-containai.sh` for existing test structure\n- Use `test-` prefix for container names\n- Trap EXIT to ensure cleanup\n## Acceptance\n- [ ] test-sync-e2e.sh created with main structure\n- [ ] sync-test-helpers.sh created with helper functions\n- [ ] setup_mock_home() creates all agent directories\n- [ ] Container start/stop/exec helpers work\n- [ ] Assert functions work (file exists, contains, symlink, permissions)\n- [ ] Cleanup on exit (trap)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-29T07:06:15.654180Z",
+        "depends_on": [
+          "fn-39-ua0.1"
+        ],
+        "epic": "fn-39-ua0",
+        "id": "fn-39-ua0.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-39-ua0.2.md",
+        "status": "todo",
+        "title": "AI agent sync tests",
+        "updated_at": "2026-01-29T07:07:32.683577Z"
+      },
+      "id": "fn-39-ua0.2",
+      "runtime": null,
+      "spec": "# fn-39-ua0.2 AI agent sync tests\n\n## Description\nTest sync for all 10 AI agents: Claude, Gemini, Codex, Copilot, OpenCode, Aider, Continue, Cursor, Pi, Kimi.\n\n**Size:** M\n**Files:** `tests/integration/sync-tests/test-agent-sync.sh`\n\n## Approach\n\nFor each agent, test:\n1. Config files sync from mock HOME to container\n2. Secret files have correct permissions (600)\n3. Directories sync recursively\n4. Symlinks point to /mnt/agent-data/\n5. Agent CLI works after sync (--version or equivalent)\n\n### Agents to Test\n\n| Agent | Test Files | Secret Files |\n|-------|------------|--------------|\n| Claude | settings.json, plugins/ | .credentials.json |\n| Gemini | settings.json, GEMINI.md | google_accounts.json, oauth_creds.json |\n| Codex | config.toml, skills/ | auth.json |\n| Copilot | config.json, skills/ | mcp-config.json |\n| OpenCode | opencode.json, agents/ | auth.json |\n| Aider | .aider.conf.yml | .aider.model.settings.yml |\n| Continue | config.yaml | config.json |\n| Cursor | rules/, extensions/ | mcp.json |\n| Pi | settings.json, skills/ | models.json |\n| Kimi | mcp.json | config.toml |\n\n### Test Structure\n```bash\ntest_claude_sync() {\n    create_mock_claude_config\n    run_import\n    assert_file_exists_in_container \"~/.claude/settings.json\"\n    assert_symlink_target \"~/.claude/settings.json\" \"/mnt/agent-data/claude/settings.json\"\n    assert_permissions \"~/.claude/.credentials.json\" \"600\"\n    exec_in_container claude --version\n}\n```\n\n## Key context\n\n- Some agents may not be installed - skip gracefully with info message\n- Use patterns from sync-manifest.toml for correct paths\n## Acceptance\n- [ ] Claude Code sync tested\n- [ ] Gemini sync tested\n- [ ] Codex sync tested\n- [ ] Copilot sync tested\n- [ ] OpenCode sync tested\n- [ ] Aider sync tested\n- [ ] Continue sync tested\n- [ ] Cursor sync tested\n- [ ] Pi sync tested\n- [ ] Kimi sync tested\n- [ ] All secret files have 600 permissions\n- [ ] All symlinks resolve correctly\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-29T07:06:15.721574Z",
+        "depends_on": [
+          "fn-39-ua0.1"
+        ],
+        "epic": "fn-39-ua0",
+        "id": "fn-39-ua0.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-39-ua0.3.md",
+        "status": "todo",
+        "title": "Dev tool sync tests",
+        "updated_at": "2026-01-29T07:07:32.751758Z"
+      },
+      "id": "fn-39-ua0.3",
+      "runtime": null,
+      "spec": "# fn-39-ua0.3 Dev tool sync tests\n\n## Description\nTest sync for dev tools: Git, GitHub CLI, SSH, VS Code Server, tmux, vim/neovim, Starship, Oh My Posh.\n\n**Size:** M\n**Files:** `tests/integration/sync-tests/test-tool-sync.sh`\n\n## Approach\n\n### Tools to Test\n\n| Tool | Test Files | Secret Files | Notes |\n|------|------------|--------------|-------|\n| Git | .gitconfig, .gitignore_global | - | |\n| GitHub CLI | config.yml | hosts.yml | |\n| SSH | config, known_hosts | id_* | Disabled by default |\n| VS Code | extensions/, data/Machine/ | - | Only if installed |\n| tmux | .tmux.conf, .config/tmux/ | - | |\n| vim | .vimrc, .vim/, .config/nvim/ | - | |\n| Starship | starship.toml | - | |\n| Oh My Posh | oh-my-posh/ | - | |\n\n### SSH Special Handling\nSSH entries are disabled by default in sync-manifest.toml. Test should:\n1. Verify disabled entries are NOT synced by default\n2. Test that enabling works (if mechanism exists)\n\n### Test Structure\n```bash\ntest_git_sync() {\n    create_mock_gitconfig\n    run_import\n    assert_file_exists_in_container \"~/.gitconfig\"\n    exec_in_container git config --global user.name  # Verify readable\n}\n```\n\n## Key context\n\n- SSH has `disabled = true` in manifest\n- VS Code Server only exists if user has connected via VS Code\n- fonts/ can be large - test with small mock\n## Acceptance\n- [ ] Git config sync tested\n- [ ] GitHub CLI sync tested (hosts.yml secret)\n- [ ] SSH sync tested (respects disabled flag)\n- [ ] VS Code Server sync tested (graceful skip if not present)\n- [ ] tmux sync tested\n- [ ] vim/neovim sync tested\n- [ ] Starship sync tested\n- [ ] Oh My Posh sync tested\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-29T07:06:15.791107Z",
+        "depends_on": [
+          "fn-39-ua0.1"
+        ],
+        "epic": "fn-39-ua0",
+        "id": "fn-39-ua0.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-39-ua0.4.md",
+        "status": "todo",
+        "title": "Shell customization tests",
+        "updated_at": "2026-01-29T07:07:32.817786Z"
+      },
+      "id": "fn-39-ua0.4",
+      "runtime": null,
+      "spec": "# fn-39-ua0.4 Shell customization tests\n\n## Description\nTest shell customization sync: .bashrc.d sourcing, aliases, inputrc, zsh configs.\n\n**Size:** M\n**Files:** `tests/integration/sync-tests/test-shell-sync.sh`\n\n## Approach\n\n### Critical: .bashrc.d Sourcing\n\nThe most important test - verify .bashrc.d scripts are sourced on login:\n\n```bash\ntest_bashrc_d_sourced() {\n    # Create test script in mock .bashrc.d\n    echo 'export BASHRC_D_TEST=\"sourced\"' > \"$TEST_HOME/.bashrc.d/test.sh\"\n\n    run_import\n\n    # Start interactive shell and check variable\n    result=$(exec_in_container bash -l -c 'echo $BASHRC_D_TEST')\n    assert_equals \"$result\" \"sourced\"\n}\n```\n\n### Items to Test\n\n| Item | Test |\n|------|------|\n| .bashrc.d/ | Scripts sourced on login shell |\n| .bash_aliases | Aliases available after login |\n| .inputrc | Readline bindings applied |\n| .zshrc | Zsh config loaded |\n| .zprofile | Zsh profile loaded |\n| .oh-my-zsh/custom | Custom themes/plugins available |\n\n### Test Structure\n```bash\ntest_aliases_available() {\n    echo 'alias testcmd=\"echo works\"' > \"$TEST_HOME/.bash_aliases\"\n    run_import\n    result=$(exec_in_container bash -l -c 'testcmd')\n    assert_equals \"$result\" \"works\"\n}\n\ntest_inputrc_bindings() {\n    echo '\"\\e[A\": history-search-backward' > \"$TEST_HOME/.inputrc\"\n    run_import\n    assert_file_exists_in_container \"~/.inputrc\"\n    # Note: Actually testing readline bindings is complex\n}\n```\n\n## Key context\n\n- Use `bash -l` for login shell (sources .bashrc.d)\n- .bashrc.d is a directory of scripts, not a single file\n- zsh tests only if zsh is installed in container\n## Acceptance\n- [ ] .bashrc.d/ scripts sourced on login\n- [ ] .bash_aliases available after login\n- [ ] .inputrc synced correctly\n- [ ] .zshrc synced correctly\n- [ ] .zprofile synced correctly\n- [ ] .oh-my-zsh/custom synced correctly\n- [ ] Custom alias works in container shell\n- [ ] Custom .bashrc.d script exports variable\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-29T07:06:15.858983Z",
+        "depends_on": [
+          "fn-39-ua0.1"
+        ],
+        "epic": "fn-39-ua0",
+        "id": "fn-39-ua0.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-39-ua0.5.md",
+        "status": "todo",
+        "title": "Flag and operation tests",
+        "updated_at": "2026-01-29T07:07:32.884599Z"
+      },
+      "id": "fn-39-ua0.5",
+      "runtime": null,
+      "spec": "# fn-39-ua0.5 Flag and operation tests\n\n## Description\nTest all sync flags and operations: s, j, R, x flags, --no-secrets, import, export, dry-run.\n\n**Size:** M\n**Files:** `tests/integration/sync-tests/test-flags.sh`\n\n## Approach\n\n### Flag Tests\n\n| Flag | Test Case |\n|------|-----------|\n| `s` (secret) | File gets 600 permissions |\n| `j` (json-init) | Missing file \u2192 creates `{}` |\n| `R` (remove) | Directory cleaned before sync |\n| `x` (exclude) | .system/ subdirectory skipped |\n\n### Operation Tests\n\n| Operation | Test Case |\n|-----------|-----------|\n| `cai import` | Host \u2192 container sync |\n| `cai export` | Container \u2192 host sync |\n| `cai import --dry-run` | Shows changes, no actual sync |\n| `cai export --dry-run` | Shows changes, no actual sync |\n| `cai import --no-secrets` | Skips files with `s` flag |\n\n### Test Structure\n```bash\ntest_secret_flag() {\n    echo '{\"key\": \"secret\"}' > \"$TEST_HOME/.claude/.credentials.json\"\n    run_import\n    perms=$(exec_in_container stat -c '%a' ~/.claude/.credentials.json)\n    assert_equals \"$perms\" \"600\"\n}\n\ntest_json_init_flag() {\n    # Don't create the file - let json-init create it\n    run_import\n    content=$(exec_in_container cat ~/.claude/settings.json)\n    assert_equals \"$content\" \"{}\"\n}\n\ntest_no_secrets_option() {\n    echo '{\"key\": \"secret\"}' > \"$TEST_HOME/.claude/.credentials.json\"\n    run_import --no-secrets\n    # File should NOT exist in container\n    assert_file_not_exists_in_container \"~/.claude/.credentials.json\"\n}\n\ntest_dry_run() {\n    output=$(run_import --dry-run)\n    assert_contains \"$output\" \"would sync\"\n    # Verify no actual changes\n    assert_file_not_exists_in_container \"~/.claude/settings.json\"\n}\n```\n\n## Key context\n\n- `j` flag creates empty `{}` for JSON files that don't exist on host\n- `R` flag removes existing directory contents before syncing\n- `x` flag is used for entries like plugins/ that have .system/ subdirs\n## Acceptance\n- [ ] Secret flag (s) - 600 permissions verified\n- [ ] JSON-init flag (j) - creates empty {} for missing files\n- [ ] Remove flag (R) - cleans directory before sync\n- [ ] Exclude flag (x) - skips .system/ subdirectories\n- [ ] cai import works (host \u2192 container)\n- [ ] cai export works (container \u2192 host)\n- [ ] --dry-run shows changes without syncing\n- [ ] --no-secrets excludes secret files\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-29T07:06:15.930224Z",
+        "depends_on": [
+          "fn-39-ua0.1"
+        ],
+        "epic": "fn-39-ua0",
+        "id": "fn-39-ua0.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-39-ua0.6.md",
+        "status": "todo",
+        "title": "Edge case tests",
+        "updated_at": "2026-01-29T07:07:32.952795Z"
+      },
+      "id": "fn-39-ua0.6",
+      "runtime": null,
+      "spec": "# fn-39-ua0.6 Edge case tests\n\n## Description\nTest edge cases: no-config pollution, partial configs, large directories, special characters.\n\n**Size:** M\n**Files:** `tests/integration/sync-tests/test-edge-cases.sh`\n\n## Approach\n\n### Edge Cases to Test\n\n| Case | Test |\n|------|------|\n| No config on host | Verify no empty dirs created in container |\n| Partial config | Some files exist, others don't - handled gracefully |\n| Large directory | fonts/ with many files syncs correctly |\n| Spaces in filename | \"My Config.json\" syncs correctly |\n| Unicode in content | Config with emoji/unicode preserved |\n| Broken symlink | Graceful handling, no crash |\n| Permission mismatch | Files with unusual permissions |\n| Concurrent containers | Two containers don't conflict |\n\n### Test Structure\n```bash\ntest_no_config_no_pollution() {\n    # Don't create any Pi config\n    run_import\n    # Verify no .pi directory exists\n    assert_dir_not_exists_in_container \"~/.pi\"\n}\n\ntest_partial_config() {\n    # Create only settings.json, not models.json\n    echo '{}' > \"$TEST_HOME/.pi/agent/settings.json\"\n    run_import\n    assert_file_exists_in_container \"~/.pi/agent/settings.json\"\n    # models.json should be json-init'd to {}\n    assert_file_exists_in_container \"~/.pi/agent/models.json\"\n}\n\ntest_spaces_in_filename() {\n    mkdir -p \"$TEST_HOME/.config/test\"\n    echo 'test' > \"$TEST_HOME/.config/test/My Config.json\"\n    run_import\n    assert_file_exists_in_container \"~/.config/test/My Config.json\"\n}\n\ntest_unicode_content() {\n    echo '{\"emoji\": \"\ud83d\ude80\", \"chinese\": \"\u4f60\u597d\"}' > \"$TEST_HOME/.claude/settings.json\"\n    run_import\n    content=$(exec_in_container cat ~/.claude/settings.json)\n    assert_contains \"$content\" \"\ud83d\ude80\"\n}\n\ntest_concurrent_containers() {\n    start_test_container \"test-sync-1\"\n    start_test_container \"test-sync-2\"\n    run_import_to \"test-sync-1\"\n    run_import_to \"test-sync-2\"\n    # Both should have configs, no conflicts\n    assert_file_exists_in_container \"test-sync-1\" \"~/.claude/settings.json\"\n    assert_file_exists_in_container \"test-sync-2\" \"~/.claude/settings.json\"\n}\n```\n\n## Key context\n\n- \"No pollution\" = empty directories shouldn't be created for agents user doesn't have\n- Partial config tests json-init flag behavior\n- Concurrent container test ensures no locking issues\n## Acceptance\n- [ ] No-config = no empty directories created\n- [ ] Partial config handled (missing files json-init'd)\n- [ ] Large directory (fonts/) syncs correctly\n- [ ] Spaces in filenames handled\n- [ ] Unicode in content preserved\n- [ ] Broken symlinks handled gracefully\n- [ ] Concurrent containers don't conflict\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}
