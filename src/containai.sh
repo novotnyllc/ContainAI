@@ -3301,6 +3301,9 @@ _containai_shell_cmd() {
             _cai_info "Recreating container..."
         fi
 
+        # Signal recreation in progress - other SSH sessions will wait gracefully
+        _cai_set_recreating "$resolved_container_name"
+
         # Check if container exists
         if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
             # Verify ownership before removing
@@ -3313,6 +3316,8 @@ _containai_shell_cmd() {
                     [[ "$reset_flag" == "true" ]] && flag_name="--reset"
                     echo "[ERROR] Cannot use $flag_name - container '$resolved_container_name' was not created by ContainAI" >&2
                     echo "Remove the conflicting container manually if needed: docker rm -f '$resolved_container_name'" >&2
+                    # Clear recreation flag on early failure
+                    _cai_clear_recreating "$resolved_container_name"
                     return 1
                 fi
             fi
@@ -3331,6 +3336,8 @@ _containai_shell_cmd() {
             fresh_rm_output=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -- "$resolved_container_name" 2>&1) || {
                 if ! printf '%s' "$fresh_rm_output" | grep -qiE "no such container|not found"; then
                     echo "$fresh_rm_output" >&2
+                    # Clear recreation flag on failure
+                    _cai_clear_recreating "$resolved_container_name"
                     return 1
                 fi
             }
@@ -3374,6 +3381,8 @@ _containai_shell_cmd() {
 
         if ! _containai_start_container "${create_args[@]}"; then
             echo "[ERROR] Failed to create container" >&2
+            # Clear recreation flag on failure to avoid stale flags
+            _cai_clear_recreating "$resolved_container_name"
             return 1
         fi
 

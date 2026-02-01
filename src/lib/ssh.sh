@@ -105,6 +105,19 @@ _CAI_KNOWN_HOSTS_LOCK_FILE="$_CAI_CONFIG_DIR/.known_hosts.lock"
 # Minimum OpenSSH version for StrictHostKeyChecking=accept-new (7.6)
 _CAI_SSH_ACCEPT_NEW_MIN_VERSION="7.6"
 
+# State directory for ephemeral runtime state (recreation flags, etc.)
+# Uses XDG_STATE_HOME if set, otherwise ~/.local/state/containai
+_CAI_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/containai"
+
+# Directory for container recreation state files (signals to other sessions)
+_CAI_RECREATE_STATE_DIR="$_CAI_STATE_DIR/recreating"
+
+# Maximum wait time for container recreation before failing (seconds)
+_CAI_RECREATE_WAIT_MAX=60
+
+# Stale threshold for recreation flags (2x max wait to allow for slow recreations)
+_CAI_RECREATE_STALE_THRESHOLD=120
+
 # Get effective SSH port range (config overrides defaults)
 # Outputs: "start end" (space-separated)
 # Returns: 0 always
@@ -134,6 +147,137 @@ _cai_get_ssh_pubkey_path() {
 # Return path to ContainAI SSH config directory
 _cai_get_ssh_config_dir() {
     printf '%s' "$_CAI_SSH_CONFIG_DIR"
+}
+
+# ==============================================================================
+# Container Recreation State
+# ==============================================================================
+
+# Signal that a container is being recreated (--fresh/--reset)
+# Other SSH sessions will detect this and wait gracefully instead of error storms
+# Arguments:
+#   $1 = container name
+# Returns: 0 always
+_cai_set_recreating() {
+    local container_name="$1"
+    local state_dir="$_CAI_RECREATE_STATE_DIR"
+    local flag_file="$state_dir/$container_name"
+
+    mkdir -p "$state_dir" 2>/dev/null || true
+    chmod 700 "$state_dir" 2>/dev/null || true
+    # Atomic write: write to temp file then mv (prevents partial reads)
+    # shellcheck disable=SC2015  # Intentional: || true catches either failure
+    touch "${flag_file}.tmp" 2>/dev/null && mv -f "${flag_file}.tmp" "$flag_file" 2>/dev/null || true
+}
+
+# Clear the recreation flag after container is SSH-ready
+# Arguments:
+#   $1 = container name
+# Returns: 0 always
+_cai_clear_recreating() {
+    local container_name="$1"
+    local flag_file="$_CAI_RECREATE_STATE_DIR/$container_name"
+
+    rm -f "$flag_file" "${flag_file}.tmp" 2>/dev/null || true
+}
+
+# Check if a container is currently being recreated
+# Arguments:
+#   $1 = container name
+# Returns: 0=recreating, 1=not recreating
+_cai_is_recreating() {
+    local container_name="$1"
+    local flag_file="$_CAI_RECREATE_STATE_DIR/$container_name"
+
+    [[ -f "$flag_file" ]]
+}
+
+# Get file mtime in seconds since epoch (portable across Linux/macOS)
+# Arguments:
+#   $1 = file path
+# Returns: mtime via stdout, or 0 on error
+_cai_get_file_mtime() {
+    local file="$1"
+    local mtime
+
+    # Linux stat format
+    if mtime=$(stat -c %Y "$file" 2>/dev/null); then
+        printf '%s' "$mtime"
+        return 0
+    fi
+    # macOS stat format
+    if mtime=$(stat -f %m "$file" 2>/dev/null); then
+        printf '%s' "$mtime"
+        return 0
+    fi
+    printf '0'
+}
+
+# Wait for container recreation to complete with timeout
+# Other SSH sessions call this when they detect recreation in progress
+# Arguments:
+#   $1 = container name
+# Returns: 0=recreation done, 1=timeout or stale flag
+_cai_wait_for_recreation() {
+    local container_name="$1"
+    local flag_file="$_CAI_RECREATE_STATE_DIR/$container_name"
+    local start_seconds=$SECONDS
+    local wait_interval_ms=500
+    local max_interval_ms=2000
+
+    _cai_info "Container is being recreated, waiting..."
+
+    while [[ -f "$flag_file" ]]; do
+        # Check timeout
+        if ((SECONDS - start_seconds >= _CAI_RECREATE_WAIT_MAX)); then
+            _cai_warn "Recreation wait timeout after ${_CAI_RECREATE_WAIT_MAX}s"
+            return 1
+        fi
+
+        # Check if flag file is stale using mtime (more reliable than file content)
+        # Use larger stale threshold (2x wait max) to avoid false positives
+        local flag_mtime now
+        flag_mtime=$(_cai_get_file_mtime "$flag_file")
+        now=$(date +%s)
+        if ((now - flag_mtime > _CAI_RECREATE_STALE_THRESHOLD)); then
+            # Stale flag - recreation process likely crashed or was interrupted
+            _cai_warn "Stale recreation flag detected (age: $((now - flag_mtime))s)"
+            _cai_warn "Recreation may have failed - check container status"
+            rm -f "$flag_file" 2>/dev/null || true
+            return 1
+        fi
+
+        # Sleep with backoff
+        local sleep_sec
+        sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_interval_ms / 1000}")
+        sleep "$sleep_sec"
+
+        wait_interval_ms=$((wait_interval_ms * 2))
+        if ((wait_interval_ms > max_interval_ms)); then
+            wait_interval_ms=$max_interval_ms
+        fi
+    done
+
+    _cai_info "Container ready"
+    return 0
+}
+
+# Check for recreation and wait if needed, failing on timeout
+# Helper to centralize recreation-wait logic in SSH retry loops
+# Arguments:
+#   $1 = container name
+# Returns: 0=no recreation or recreation done, 1=timeout/failure
+_cai_wait_if_recreating() {
+    local container_name="$1"
+
+    if _cai_is_recreating "$container_name"; then
+        if ! _cai_wait_for_recreation "$container_name"; then
+            _cai_error "Container recreation did not complete in time"
+            _cai_error "Check container status: docker ps --filter name=\"$container_name\""
+            return 1
+        fi
+    fi
+    return 0
 }
 
 # ==============================================================================
@@ -1575,6 +1719,10 @@ _cai_setup_container_ssh() {
         return 1
     fi
 
+    # Clear recreation flag (if set) - container is now SSH-ready
+    # This signals to other waiting SSH sessions that they can reconnect
+    _cai_clear_recreating "$container_name"
+
     _cai_ok "SSH access configured for container $container_name"
     return 0
 }
@@ -1834,6 +1982,12 @@ _cai_ssh_connect_with_retry() {
     fi
 
     while ((retry_count < max_retries)); do
+        # Check if container is being recreated by another session (--fresh/--reset)
+        # Wait gracefully instead of generating error storms
+        if ! _cai_wait_if_recreating "$container_name"; then
+            return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
+        fi
+
         # Build SSH command with explicit options (does not depend on ~/.ssh/config)
         # This makes connection robust even if Include directive is missing/broken
         local -a ssh_cmd=(ssh)
@@ -1933,6 +2087,18 @@ _cai_ssh_connect_with_retry() {
                 fi
 
                 # Connection refused or timeout - these are transient, retry
+                # First check if container is being recreated - if so, wait instead of counting retry
+                if _cai_is_recreating "$container_name"; then
+                    if _cai_wait_for_recreation "$container_name"; then
+                        # Recreation complete - restart retry loop from beginning
+                        retry_count=0
+                        wait_ms=500
+                        continue
+                    fi
+                    # Recreation timeout - exit with failure
+                    return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
+                fi
+
                 retry_count=$((retry_count + 1))
                 if ((retry_count < max_retries)); then
                     _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
@@ -2162,6 +2328,12 @@ _cai_ssh_run_with_retry() {
     fi
 
     while ((retry_count < max_retries)); do
+        # Check if container is being recreated by another session (--fresh/--reset)
+        # Wait gracefully instead of generating error storms
+        if ! _cai_wait_if_recreating "$container_name"; then
+            return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
+        fi
+
         # Build SSH command with explicit options (does not depend on ~/.ssh/config)
         local -a ssh_cmd=(ssh)
         ssh_cmd+=(-o "HostName=$_CAI_SSH_HOST")
@@ -2432,6 +2604,18 @@ _cai_ssh_run_with_retry() {
                 fi
 
                 # Connection refused or timeout - these are transient, retry
+                # First check if container is being recreated - if so, wait instead of counting retry
+                if _cai_is_recreating "$container_name"; then
+                    if _cai_wait_for_recreation "$container_name"; then
+                        # Recreation complete - restart retry loop from beginning
+                        retry_count=0
+                        wait_ms=500
+                        continue
+                    fi
+                    # Recreation timeout - exit with failure
+                    return "$_CAI_SSH_EXIT_SSH_CONNECT_FAILED"
+                fi
+
                 retry_count=$((retry_count + 1))
                 if ((retry_count < max_retries)); then
                     _cai_warn "SSH connection failed, retrying ($retry_count/$max_retries)..."
