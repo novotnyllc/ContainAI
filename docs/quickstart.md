@@ -299,3 +299,51 @@ source src/containai.sh
 - Docker Engine: 24.0+ with Sysbox runtime
 - Git: any recent version
 - Bash: 4.0+ (macOS default is 3.2; use `brew install bash`)
+
+## Shell Aliases
+
+For frequent agent usage, add aliases or functions to your shell configuration.
+
+### Bash/Zsh (~/.bashrc or ~/.zshrc)
+
+```bash
+# Function-based aliases (recommended - cleaner argument handling)
+claude() { CONTAINAI_AGENT=claude cai -- "$@"; }
+gemini() { CONTAINAI_AGENT=gemini cai -- "$@"; }
+codex() { CONTAINAI_AGENT=codex cai -- "$@"; }
+```
+
+### Usage
+
+```bash
+claude "Fix the bug in main.py"
+gemini "Explain this code"
+codex "Write tests for this function"
+```
+
+### Important: Quoting
+
+Always quote arguments with spaces or special characters:
+
+```bash
+# Good - quoted argument passed as single string
+claude "What does this function do?"
+
+# Bad - splits into multiple arguments
+claude What does this function do?
+```
+
+### Alternative: Environment Variable
+
+If you prefer to set the agent globally for a session:
+
+```bash
+export CONTAINAI_AGENT=claude
+cai -- "Fix the bug"
+```
+
+Or configure it permanently via config:
+
+```bash
+cai config set agent.default claude
+```
