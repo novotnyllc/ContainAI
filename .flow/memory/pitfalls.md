@@ -331,3 +331,6 @@ Bash exit code capture: 'cmd && rc=$? || rc=$?' always sets rc=0 because assignm
 
 ## 2026-02-01 manual [pitfall]
 Integration tests must clear XDG_CONFIG_HOME and similar env vars to prevent developer's real config from affecting test behavior
+
+## 2026-02-01 manual [pitfall]
+When testing import functions that read from $HOME (like _cai_import_git_config), ensure HOME points to the fixture, not a separate profile home

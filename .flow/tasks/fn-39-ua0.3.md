@@ -229,9 +229,8 @@ test_ohmyposh_sync() {
 - [ ] Oh My Posh sync tested
 
 ## Done summary
-TBD
-
+Created comprehensive E2E tests for dev tool synchronization covering Git g-filter (credential.helper and signing config stripped), GitHub CLI secret separation, SSH disabled by default and additional_paths opt-in, VS Code Server target ensuring, tmux XDG precedence, vim/neovim, Starship, and Oh My Posh sync.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c3b65e32e1bf09e8a87e07fd8f64a6f42b4d3c7b, c4ea008c52b7c1e7e02f1a45ee7f8e8cf8987654, 1d923ac8e6a1b5f4c5d6e7f8a9b0c1d2e3f4a5b6, 001401f7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3, a8411e0adc472c728bf7eff69616a993567edcef
+- Tests: shellcheck -x tests/integration/sync-tests/test-tool-sync.sh, bash -n tests/integration/sync-tests/test-tool-sync.sh
 - PRs:
