@@ -3,7 +3,8 @@
   "created_at": "2026-01-28T19:13:29.516996Z",
   "depends_on_epics": [
     "fn-35-e0x",
-    "fn-37-4xi"
+    "fn-37-4xi",
+    "fn-43-container-network-security-private"
   ],
   "id": "fn-38-8lv",
   "next_task": 1,

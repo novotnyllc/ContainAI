@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-43-container-network-security-private",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-01-31T23:53:39.735754Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": ["fn-39-ua0"],
+  "id": "fn-43-container-network-security-private",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-43-container-network-security-private.md",
+  "status": "open",
+  "title": "Container Network Security: Private Range Blocking & Metadata Protection",
+  "updated_at": "2026-01-31T23:56:10.464246Z"
+}

@@ -4,7 +4,8 @@
   "depends_on_epics": [
     "fn-41-9xt",
     "fn-34-fk5",
-    "fn-32-2mq"
+    "fn-32-2mq",
+    "fn-43-container-network-security-private"
   ],
   "id": "fn-40-996",
   "next_task": 1,

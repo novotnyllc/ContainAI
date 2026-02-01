@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-31T23:54:10.306166Z",
+  "depends_on": [],
+  "epic": "fn-43-container-network-security-private",
+  "id": "fn-43-container-network-security-private.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-43-container-network-security-private.1.md",
+  "status": "todo",
+  "title": "Implement iptables rules for cai0 bridge",
+  "updated_at": "2026-01-31T23:56:26.983111Z"
+}

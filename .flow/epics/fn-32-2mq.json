@@ -4,8 +4,8 @@
   "depends_on_epics": [
     "fn-36-rb7",
     "fn-31-gib",
-    "fn-33-lp4",
-    "fn-34-fk5"
+    "fn-34-fk5",
+    "fn-42-cli-ux-fixes-hostname-reset-wait-help"
   ],
   "id": "fn-32-2mq",
   "next_task": 1,

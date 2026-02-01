@@ -6,7 +6,7 @@
   "default_impl": null,
   "default_review": null,
   "default_sync": null,
-  "depends_on_epics": [],
+  "depends_on_epics": ["fn-33-lp4"],
   "id": "fn-42-cli-ux-fixes-hostname-reset-wait-help",
   "next_task": 1,
   "plan_review_status": "unknown",

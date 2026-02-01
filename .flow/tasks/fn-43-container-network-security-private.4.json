@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-01-31T23:54:10.525685Z",
+  "depends_on": [],
+  "epic": "fn-43-container-network-security-private",
+  "id": "fn-43-container-network-security-private.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-43-container-network-security-private.4.md",
+  "status": "todo",
+  "title": "Integrate with setup/doctor/uninstall",
+  "updated_at": "2026-01-31T23:57:26.805113Z"
+}
