@@ -12,28 +12,8 @@ Ensure the warning suppression config option is fully documented and linked. The
 - [x] Example TOML syntax is correct: `suppress_base_warning = true` under `[template]`
 
 ## Done summary
-Verified that warning suppression config documentation is complete and correctly linked:
-
-1. **docs/configuration.md** (lines 296-317): Complete `[template]` section with:
-   - Table entry at line 302: `suppress_base_warning | boolean | false | Suppress warning...`
-   - Example TOML at lines 305-307 showing correct syntax
-   - Description of behavior at lines 309-313
-
-2. **docs/base-image-contract.md** (lines 112-127):
-   - Warning Suppression subsection with example TOML
-   - Link to configuration.md#template-section at line 122
-   - Explicitly lists where suppression applies: template builds and doctor checks
-
-3. **Behavior consistency verified**: Both docs describe same behavior:
-   - Suppresses warnings in template builds (`cai run`, `cai build`)
-   - Suppresses warnings in doctor checks (`cai doctor`)
-   - Config format: `[template]` section with `suppress_base_warning = true`
-
-4. **Implementation verified**: Source code at `src/lib/config.sh:535-540` parses the config and stores in `_CAI_TEMPLATE_SUPPRESS_BASE_WARNING`, used by `container.sh` (passes to `_cai_build_template` for builds) and `doctor.sh` (health checks). The validation function `_cai_validate_template_base` in `template.sh` receives this flag as an argument.
-
-No code changes required - documentation was already complete and cross-referenced.
-
+Verified that warning suppression config documentation is complete and correctly cross-referenced between docs/configuration.md and docs/base-image-contract.md.
 ## Evidence
-- Commits: (none - verification task)
-- Tests: (none - verification task)
+- Commits: 34430a2, 1097f20
+- Tests:
 - PRs:
