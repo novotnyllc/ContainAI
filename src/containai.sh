@@ -198,6 +198,7 @@ Subcommands:
   export        Export data volume to .tgz archive
   sync          (In-container) Move local configs to data volume with symlinks
   stop          Stop ContainAI containers
+  status        Show container status and resource usage
   ssh           Manage SSH configuration (cleanup stale configs)
   links         Verify and repair container symlinks
   config        Manage settings (list/get/set/unset with workspace scope)
@@ -400,6 +401,35 @@ Examples:
   cai stop --remove             Remove containers (cleans up SSH configs)
   cai stop --all --remove       Remove all ContainAI containers
   cai stop --force              Stop without session warning prompt
+EOF
+}
+
+_containai_status_help() {
+    cat <<'EOF'
+ContainAI Status - Show container status and resource usage
+
+Usage: cai status [options]
+
+Options:
+  --workspace <path>  Show status for container associated with workspace
+  --container <name>  Show status for specific container (must already exist)
+  --json              Output in JSON format
+  --verbose           Enable verbose output
+  -h, --help          Show this help message
+
+Container Resolution:
+  Without --workspace or --container, uses current directory to find container.
+  The command looks for a running or stopped ContainAI container.
+
+Output Fields:
+  Required: container name, status, image
+  Best-effort (5s timeout): uptime, sessions, memory, cpu
+
+Examples:
+  cai status                      Show status for current workspace container
+  cai status --container my-proj  Show status for specific container
+  cai status --json               Output in JSON format
+  cai status --workspace ~/proj   Show status for specific workspace
 EOF
 }
 
@@ -1705,6 +1735,320 @@ _containai_stop_cmd() {
 
     # No workspace state or --all flag, delegate to interactive stop all with original args
     _containai_stop_all "${orig_args[@]}"
+}
+
+# Status subcommand - show container status and resource usage
+_containai_status_cmd() {
+    local container_name=""
+    local workspace=""
+    local json_flag=false
+    local arg prev
+
+    # Pass 1: Check for help early
+    for arg in "$@"; do
+        case "$arg" in
+            --help | -h)
+                _containai_status_help
+                return 0
+                ;;
+        esac
+    done
+
+    # Pass 2: Parse arguments
+    local expect_container_value=false
+    local expect_workspace_value=false
+    for arg in "$@"; do
+        # Handle expected values first
+        if [[ "$expect_container_value" == "true" ]]; then
+            if [[ -z "$arg" ]] || [[ "$arg" == -* ]]; then
+                echo "[ERROR] --container requires a value" >&2
+                return 1
+            fi
+            container_name="$arg"
+            expect_container_value=false
+            continue
+        fi
+        if [[ "$expect_workspace_value" == "true" ]]; then
+            if [[ -z "$arg" ]] || [[ "$arg" == -* ]]; then
+                echo "[ERROR] --workspace requires a value" >&2
+                return 1
+            fi
+            workspace="$arg"
+            workspace="${workspace/#\~/$HOME}"
+            expect_workspace_value=false
+            continue
+        fi
+
+        case "$arg" in
+            --container)
+                expect_container_value=true
+                ;;
+            --container=*)
+                container_name="${arg#--container=}"
+                if [[ -z "$container_name" ]]; then
+                    echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                ;;
+            --workspace)
+                expect_workspace_value=true
+                ;;
+            --workspace=*)
+                workspace="${arg#--workspace=}"
+                workspace="${workspace/#\~/$HOME}"
+                if [[ -z "$workspace" ]]; then
+                    echo "[ERROR] --workspace requires a value" >&2
+                    return 1
+                fi
+                ;;
+            --json)
+                json_flag=true
+                ;;
+            --verbose)
+                _cai_set_verbose
+                ;;
+            -*)
+                echo "[ERROR] Unknown option: $arg" >&2
+                echo "Use 'cai status --help' for usage" >&2
+                return 1
+                ;;
+            *)
+                echo "[ERROR] Unexpected argument: $arg" >&2
+                echo "Use 'cai status --help' for usage" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    # Handle trailing expected values
+    if [[ "$expect_container_value" == "true" ]]; then
+        echo "[ERROR] --container requires a value" >&2
+        return 1
+    fi
+    if [[ "$expect_workspace_value" == "true" ]]; then
+        echo "[ERROR] --workspace requires a value" >&2
+        return 1
+    fi
+
+    # Check mutual exclusivity
+    if [[ -n "$container_name" ]] && [[ -n "$workspace" ]]; then
+        echo "[ERROR] --container and --workspace are mutually exclusive" >&2
+        return 1
+    fi
+
+    # Resolve container name if not provided
+    local selected_context=""
+    if [[ -z "$container_name" ]]; then
+        # Use workspace (default to PWD)
+        local resolve_ws="${workspace:-$PWD}"
+        local ws_container_name
+        ws_container_name=$(_containai_read_workspace_key "$resolve_ws" "container_name" 2>/dev/null) || ws_container_name=""
+        if [[ -z "$ws_container_name" ]]; then
+            echo "[ERROR] No container found for workspace: $resolve_ws" >&2
+            echo "Use 'cai status --container <name>' to specify a container" >&2
+            return 1
+        fi
+        container_name="$ws_container_name"
+    fi
+
+    # Find container and context
+    local find_rc
+    if ! selected_context=$(_cai_find_container_by_name "$container_name" "" "$PWD"); then
+        find_rc=$?
+        if [[ $find_rc -eq 2 ]] || [[ $find_rc -eq 3 ]]; then
+            return 1  # Error already printed
+        fi
+        echo "[ERROR] Container not found: $container_name" >&2
+        return 1
+    fi
+
+    # Build docker command with context
+    local -a docker_cmd=(docker --context "$selected_context")
+
+    # Check if container is managed by ContainAI
+    local is_managed
+    is_managed=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || is_managed=""
+    if [[ "$is_managed" != "true" ]]; then
+        echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
+        return 1
+    fi
+
+    # Get required container info
+    local inspect_json status image started_at
+    inspect_json=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$container_name" 2>/dev/null) || {
+        echo "[ERROR] Failed to inspect container: $container_name" >&2
+        return 1
+    }
+
+    status=$(printf '%s' "$inspect_json" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['State']['Status'])" 2>/dev/null) || status="unknown"
+    image=$(printf '%s' "$inspect_json" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['Config']['Image'])" 2>/dev/null) || image="unknown"
+    started_at=$(printf '%s' "$inspect_json" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['State']['StartedAt'])" 2>/dev/null) || started_at=""
+
+    # Best-effort: Calculate uptime
+    local uptime=""
+    if [[ "$status" == "running" ]] && [[ -n "$started_at" ]] && [[ "$started_at" != "0001-01-01T00:00:00Z" ]]; then
+        uptime=$(python3 -c "
+from datetime import datetime, timezone
+import sys
+try:
+    started = sys.argv[1]
+    # Handle various timestamp formats
+    for fmt in ['%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S.%f']:
+        try:
+            if started.endswith('Z'):
+                dt = datetime.strptime(started, fmt)
+            else:
+                dt = datetime.fromisoformat(started.replace('Z', '+00:00'))
+            break
+        except ValueError:
+            continue
+    else:
+        dt = datetime.fromisoformat(started.replace('Z', '+00:00'))
+
+    now = datetime.now(timezone.utc)
+    dt = dt.replace(tzinfo=timezone.utc)
+    diff = now - dt
+    days = diff.days
+    hours, rem = divmod(diff.seconds, 3600)
+    minutes = rem // 60
+
+    if days > 0:
+        print(f'{days}d {hours}h {minutes}m')
+    elif hours > 0:
+        print(f'{hours}h {minutes}m')
+    else:
+        print(f'{minutes}m')
+except Exception:
+    pass
+" "$started_at" 2>/dev/null) || uptime=""
+    fi
+
+    # Best-effort: Get resource usage (5s timeout)
+    local mem_usage="" mem_limit="" mem_pct="" cpu_pct=""
+    if [[ "$status" == "running" ]]; then
+        local stats_output
+        if stats_output=$(_cai_timeout 5 env DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" stats --no-stream --format '{{.MemUsage}}|{{.CPUPerc}}' -- "$container_name" 2>/dev/null); then
+            # Parse output: "1.2GiB / 4.0GiB|5.2%"
+            local mem_part cpu_part
+            mem_part="${stats_output%%|*}"
+            cpu_part="${stats_output##*|}"
+            # mem_part: "1.2GiB / 4.0GiB"
+            mem_usage="${mem_part%% /*}"
+            mem_limit="${mem_part##*/ }"
+            # Calculate percentage
+            mem_pct=$(python3 -c "
+import sys
+usage = sys.argv[1]
+limit = sys.argv[2]
+
+def parse_mem(s):
+    s = s.strip()
+    if s.endswith('GiB'):
+        return float(s[:-3]) * 1024
+    elif s.endswith('MiB'):
+        return float(s[:-3])
+    elif s.endswith('KiB'):
+        return float(s[:-3]) / 1024
+    elif s.endswith('B'):
+        return float(s[:-1]) / (1024*1024)
+    return 0
+
+u = parse_mem(usage)
+l = parse_mem(limit)
+if l > 0:
+    print(f'{u/l*100:.0f}%')
+" "$mem_usage" "$mem_limit" 2>/dev/null) || mem_pct=""
+            cpu_pct="$cpu_part"
+        fi
+    fi
+
+    # Best-effort: Get session info (5s timeout)
+    local ssh_count="" pty_count=""
+    if [[ "$status" == "running" ]]; then
+        local session_result
+        _cai_detect_sessions "$container_name" "$selected_context" && session_result=$? || session_result=$?
+        if [[ "$session_result" -eq 0 || "$session_result" -eq 1 ]]; then
+            # Get actual counts by re-running the detection and capturing output
+            local session_output
+            if session_output=$(_cai_timeout 5 env DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" exec "$container_name" sh -c '
+                if command -v ss >/dev/null 2>&1; then
+                    ssh_count=$(ss -t state established sport = :22 2>/dev/null | tail -n +2 | wc -l)
+                    pty_count=$(ls /dev/pts/ 2>/dev/null | grep -c "^[0-9]" || echo 0)
+                    echo "$ssh_count $pty_count"
+                fi
+            ' 2>/dev/null); then
+                read -r ssh_count pty_count <<< "$session_output"
+            fi
+        fi
+    fi
+
+    # Output results
+    if [[ "$json_flag" == "true" ]]; then
+        # JSON output
+        python3 -c "
+import json
+import sys
+
+data = {
+    'container': sys.argv[1],
+    'status': sys.argv[2],
+    'image': sys.argv[3],
+    'uptime': sys.argv[4] if sys.argv[4] else None,
+    'sessions': {
+        'ssh_connections': int(sys.argv[5]) if sys.argv[5] else None,
+        'active_terminals': int(sys.argv[6]) if sys.argv[6] else None
+    } if sys.argv[5] or sys.argv[6] else None,
+    'resources': {
+        'memory_usage': sys.argv[7] if sys.argv[7] else None,
+        'memory_limit': sys.argv[8] if sys.argv[8] else None,
+        'memory_percent': sys.argv[9] if sys.argv[9] else None,
+        'cpu_percent': sys.argv[10] if sys.argv[10] else None
+    } if sys.argv[7] or sys.argv[10] else None
+}
+
+# Remove None values for cleaner output
+def clean_none(d):
+    if isinstance(d, dict):
+        return {k: clean_none(v) for k, v in d.items() if v is not None}
+    return d
+
+print(json.dumps(clean_none(data), indent=2))
+" "$container_name" "$status" "$image" "$uptime" "$ssh_count" "$pty_count" "$mem_usage" "$mem_limit" "$mem_pct" "$cpu_pct"
+    else
+        # Human-readable output
+        printf 'Container: %s\n' "$container_name"
+        printf '  Status: %s\n' "$status"
+        if [[ -n "$uptime" ]]; then
+            printf '  Uptime: %s\n' "$uptime"
+        fi
+        printf '  Image: %s\n' "$image"
+
+        if [[ -n "$ssh_count" || -n "$pty_count" ]]; then
+            printf '\n  Sessions (best-effort):\n'
+            if [[ -n "$ssh_count" ]]; then
+                printf '    SSH connections: %s\n' "$ssh_count"
+            fi
+            if [[ -n "$pty_count" ]]; then
+                printf '    Active terminals: %s\n' "$pty_count"
+            fi
+        fi
+
+        if [[ -n "$mem_usage" || -n "$cpu_pct" ]]; then
+            printf '\n  Resource Usage:\n'
+            if [[ -n "$mem_usage" ]] && [[ -n "$mem_limit" ]]; then
+                if [[ -n "$mem_pct" ]]; then
+                    printf '    Memory: %s / %s (%s)\n' "$mem_usage" "$mem_limit" "$mem_pct"
+                else
+                    printf '    Memory: %s / %s\n' "$mem_usage" "$mem_limit"
+                fi
+            fi
+            if [[ -n "$cpu_pct" ]]; then
+                printf '    CPU: %s\n' "$cpu_pct"
+            fi
+        fi
+    fi
+
+    return 0
 }
 
 # Sandbox subcommand - DEPRECATED (show migration message)
@@ -5827,6 +6171,10 @@ containai() {
         stop)
             shift
             _containai_stop_cmd "$@"
+            ;;
+        status)
+            shift
+            _containai_status_cmd "$@"
             ;;
         ssh)
             shift
