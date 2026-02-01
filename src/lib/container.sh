@@ -1629,9 +1629,11 @@ _containai_start_container() {
     # Resolve image: use --image-tag if provided (advanced/debugging), else default
     # Note: For new containers, template build happens later (after context selection)
     # to use the same Docker context as container creation
+    # When use_template=true (either default or --template), image_tag is ignored for image selection
     local resolved_image
-    if [[ -n "$image_tag" ]]; then
+    if [[ -n "$image_tag" && "$use_template" != "true" ]]; then
         # Advanced mode: explicit image tag for debugging or multi-image workflows
+        # Only used when template is NOT being built
         resolved_image="${_CONTAINAI_DEFAULT_REPO}:${image_tag}"
     else
         # Default: one container per workspace with default agent image
@@ -1960,8 +1962,9 @@ _containai_start_container() {
     fi
 
     # Template mismatch check for existing containers
+    # Skip if --fresh/--restart will rebuild anyway (they will recreate with the requested template)
     # Check if --template is specified (or use_template=true) and container exists
-    if [[ "$container_state" != "none" && "$use_template" == "true" ]]; then
+    if [[ "$container_state" != "none" && "$use_template" == "true" && "$fresh_flag" != "true" && "$restart_flag" != "true" ]]; then
         # Get container's template label (using with...end to get empty string for missing labels)
         local container_template
         container_template=$("${docker_cmd[@]}" inspect --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || container_template=""
@@ -2436,7 +2439,8 @@ _containai_start_container() {
                 args+=(--label "ai.containai.template=$template_name")
             fi
             # Store image-tag label when explicitly specified (advanced/debugging feature)
-            if [[ -n "$image_tag" ]]; then
+            # Only write when NOT using templates (image-tag is ignored with templates)
+            if [[ -n "$image_tag" && "$use_template" != "true" ]]; then
                 args+=(--label "containai.image-tag=$image_tag")
             fi
             args+=(-p "${ssh_port}:22") # Map allocated port to container SSH

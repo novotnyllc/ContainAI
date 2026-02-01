@@ -2845,6 +2845,22 @@ _containai_shell_cmd() {
                 fi
                 shift
                 ;;
+            --template)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                cli_template="$2"
+                shift 2
+                ;;
+            --template=*)
+                cli_template="${1#--template=}"
+                if [[ -z "$cli_template" ]]; then
+                    echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
             --memory)
                 if [[ -z "${2-}" ]]; then
                     echo "[ERROR] --memory requires a value" >&2
@@ -3247,6 +3263,9 @@ _containai_shell_cmd() {
         if [[ -n "$image_tag" ]]; then
             dry_run_args+=(--image-tag "$image_tag")
         fi
+        if [[ -n "$cli_template" ]]; then
+            dry_run_args+=(--template "$cli_template")
+        fi
         if [[ -n "$explicit_config" ]]; then
             dry_run_args+=(--config "$explicit_config")
         fi
@@ -3333,6 +3352,9 @@ _containai_shell_cmd() {
         if [[ -n "$image_tag" ]]; then
             create_args+=(--image-tag "$image_tag")
         fi
+        if [[ -n "$cli_template" ]]; then
+            create_args+=(--template "$cli_template")
+        fi
         if [[ -n "$explicit_config" ]]; then
             create_args+=(--config "$explicit_config")
         fi
@@ -3379,6 +3401,9 @@ _containai_shell_cmd() {
         create_args+=(--name "$resolved_container_name")
         if [[ -n "$image_tag" ]]; then
             create_args+=(--image-tag "$image_tag")
+        fi
+        if [[ -n "$cli_template" ]]; then
+            create_args+=(--template "$cli_template")
         fi
         if [[ -n "$explicit_config" ]]; then
             create_args+=(--config "$explicit_config")
@@ -4078,6 +4103,9 @@ _containai_exec_cmd() {
                     recreate_args+=(--name "$resolved_container_name")
                     if [[ -n "$explicit_config" ]]; then
                         recreate_args+=(--config "$explicit_config")
+                    fi
+                    if [[ -n "$cli_template" ]]; then
+                        recreate_args+=(--template "$cli_template")
                     fi
                     if [[ "$force_flag" == "true" ]]; then
                         recreate_args+=(--force)
