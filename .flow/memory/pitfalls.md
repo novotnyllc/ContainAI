@@ -319,3 +319,6 @@ Git config section names and keys are case-insensitive; use tolower() in awk fil
 
 ## 2026-02-01 manual [pitfall]
 When changing config file paths on volumes, add a migration step to move content from old path to new path on startup to prevent data loss during upgrades
+
+## 2026-02-01 manual [pitfall]
+ssh-keygen -R hostname won't remove [hostname]:port entries - must use port-aware removal for non-22 ports
