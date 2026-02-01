@@ -17,8 +17,26 @@ Review and verify that the new contract doc and existing docs accurately describ
 - [ ] Verified `docs/configuration.md` doesn't contradict the contract doc
 
 ## Done summary
-TBD
+## Summary
 
+Verified that documentation accurately describes the template base image validation behavior:
+
+1. **FROM-based validation**: `docs/base-image-contract.md` lines 99-110 correctly describe that validation parses the first `FROM` line from the Dockerfile source (not runtime layer history)
+
+2. **No incorrect references**: Neither `docs/base-image-contract.md` nor `docs/configuration.md` mention "docker image history" or "layer history"
+
+3. **ARG substitution documented**: Lines 101-102 explain the three supported variable formats (`$VAR`, `${VAR}`, `${VAR:-default}`)
+
+4. **All three patterns listed**: Lines 103-106 list exactly the patterns from `_cai_validate_template_base()`:
+   - `ghcr.io/novotnyllc/containai*`
+   - `containai:*`
+   - `containai-template-*:local`
+
+5. **Unresolved variable warning**: Lines 107-108 mention the warning path for unresolved ARG variables
+
+6. **Configuration consistency**: `docs/configuration.md` `[template]` section (lines 296-443) is consistent with the contract doc - both describe `suppress_base_warning` identically
+
+No code changes required - this was a verification task and all documentation is already accurate.
 ## Evidence
 - Commits:
 - Tests:
