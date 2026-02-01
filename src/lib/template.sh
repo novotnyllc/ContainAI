@@ -21,6 +21,8 @@
 #   _cai_install_template()        - Install a single template from repo (if missing)
 #   _cai_install_all_templates()   - Install all repo templates during setup
 #   _cai_ensure_default_templates() - Install all missing default templates
+#   _cai_build_template()          - Build template Dockerfile using Docker context
+#   _cai_get_template_image_name() - Get image name for a template (no build)
 #
 # Template directory structure:
 #   ~/.config/containai/templates/
@@ -389,4 +391,99 @@ _cai_ensure_default_templates() {
     fi
 
     return 0
+}
+
+# ==============================================================================
+# Template Build Functions
+# ==============================================================================
+
+# Build a template Dockerfile and return the image name
+# Uses the same Docker context as container creation for consistency
+# Args: template_name [docker_context] [dry_run]
+#   template_name  - Name of the template (e.g., "default", "my-custom")
+#   docker_context - Docker context to use (optional, uses default if empty)
+#   dry_run        - If "true", outputs TEMPLATE_BUILD_CMD instead of building
+# Returns: 0 on success, 1 on failure
+# Outputs: Image name (stdout) on success: containai-template-{name}:local
+# Note: For dry-run mode, outputs TEMPLATE_BUILD_CMD=<command> to stdout
+_cai_build_template() {
+    local template_name="${1:-default}"
+    local docker_context="${2:-}"
+    local dry_run="${3:-false}"
+
+    # Validate template name
+    if ! _cai_validate_template_name "$template_name"; then
+        _cai_error "Invalid template name: $template_name"
+        return 1
+    fi
+
+    # Get template Dockerfile path (triggers first-use install if needed)
+    local dockerfile_path
+    if ! dockerfile_path=$(_cai_require_template "$template_name" "$dry_run"); then
+        return 1
+    fi
+
+    # Template directory is the build context (parent of Dockerfile)
+    local template_dir
+    template_dir="$(dirname "$dockerfile_path")"
+
+    # Image tag: containai-template-{name}:local
+    local image_tag="containai-template-${template_name}:local"
+
+    # Build docker command array based on context
+    local -a docker_cmd=(docker)
+    if [[ -n "$docker_context" ]]; then
+        docker_cmd=(docker --context "$docker_context")
+    fi
+
+    # Construct the build command
+    local -a build_args=("${docker_cmd[@]}" build -t "$image_tag" "$template_dir")
+
+    # Handle dry-run mode
+    if [[ "$dry_run" == "true" ]]; then
+        # Output machine-parseable format
+        # Quote command properly for shell execution
+        local build_cmd_str
+        build_cmd_str="${build_args[*]}"
+        printf '%s\n' "TEMPLATE_BUILD_CMD=$build_cmd_str"
+        printf '%s\n' "TEMPLATE_IMAGE=$image_tag"
+        printf '%s\n' "TEMPLATE_NAME=$template_name"
+        return 0
+    fi
+
+    # Build the template
+    _cai_info "Building template '$template_name'..."
+    local build_output
+    # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context flag authoritative
+    if ! build_output=$(DOCKER_CONTEXT= DOCKER_HOST= "${build_args[@]}" 2>&1); then
+        _cai_error "Failed to build template '$template_name'"
+        _cai_error "Build output:"
+        # Print each line of build output as an error
+        printf '%s\n' "$build_output" | while IFS= read -r line; do
+            _cai_error "  $line"
+        done
+        return 1
+    fi
+
+    _cai_info "Template '$template_name' built successfully: $image_tag"
+
+    # Output the image name for use by caller
+    printf '%s' "$image_tag"
+    return 0
+}
+
+# Get the template image name without building
+# Useful for checking if a template image exists or for label creation
+# Args: template_name
+# Returns: 0 on success, 1 if template name is invalid
+# Outputs: Image name (stdout): containai-template-{name}:local
+_cai_get_template_image_name() {
+    local template_name="${1:-default}"
+
+    if ! _cai_validate_template_name "$template_name"; then
+        _cai_error "Invalid template name: $template_name"
+        return 1
+    fi
+
+    printf '%s' "containai-template-${template_name}:local"
 }

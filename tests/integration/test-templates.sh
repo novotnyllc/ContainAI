@@ -581,9 +581,9 @@ test_template_build() {
     _CAI_TEMPLATE_DIR="$TEST_TEMPLATE_DIR"
     TEMPLATE_DIR_OVERRIDDEN=1
 
-    # Test template build with correct context (pass as separate arguments)
+    # Test template build with correct context (context name only, not --context flag)
     local build_output build_rc
-    build_output=$(_cai_build_template "default" --context "$CONTEXT_NAME" 2>&1) && build_rc=0 || build_rc=$?
+    build_output=$(_cai_build_template "default" "$CONTEXT_NAME" 2>&1) && build_rc=0 || build_rc=$?
 
     if [[ $build_rc -eq 0 ]]; then
         pass "Template build succeeded"
@@ -603,7 +603,102 @@ test_template_build() {
 }
 
 # ==============================================================================
-# Test 12: Layer validation (requires fn-33-lp4.5)
+# Test 12b: Template build dry-run (requires fn-33-lp4.4)
+# ==============================================================================
+test_template_build_dry_run() {
+    section "Test 12b: Template build dry-run outputs TEMPLATE_BUILD_CMD"
+
+    # Check if _cai_build_template exists (fn-33-lp4.4)
+    if ! declare -f _cai_build_template >/dev/null 2>&1; then
+        skip "Template build not implemented (fn-33-lp4.4 pending)"
+        return
+    fi
+
+    # Use fresh test directory with default template
+    rm -rf "$TEST_TEMPLATE_DIR"
+    mkdir -p "$TEST_TEMPLATE_DIR/default"
+    cp "$SRC_DIR/templates/default.Dockerfile" "$TEST_TEMPLATE_DIR/default/Dockerfile"
+    _CAI_TEMPLATE_DIR="$TEST_TEMPLATE_DIR"
+    TEMPLATE_DIR_OVERRIDDEN=1
+
+    # Test dry-run output format (no Docker required - just shows what would run)
+    local dry_run_output dry_run_rc
+    dry_run_output=$(_cai_build_template "default" "" "true" 2>&1) && dry_run_rc=0 || dry_run_rc=$?
+
+    if [[ $dry_run_rc -eq 0 ]]; then
+        pass "Template build dry-run succeeded"
+
+        # Verify TEMPLATE_BUILD_CMD is in output
+        if printf '%s' "$dry_run_output" | grep -q "^TEMPLATE_BUILD_CMD="; then
+            pass "Dry-run outputs TEMPLATE_BUILD_CMD"
+        else
+            fail "Dry-run missing TEMPLATE_BUILD_CMD"
+        fi
+
+        # Verify TEMPLATE_IMAGE is in output
+        if printf '%s' "$dry_run_output" | grep -q "^TEMPLATE_IMAGE=containai-template-default:local"; then
+            pass "Dry-run outputs correct TEMPLATE_IMAGE"
+        else
+            fail "Dry-run missing or incorrect TEMPLATE_IMAGE"
+        fi
+
+        # Verify TEMPLATE_NAME is in output
+        if printf '%s' "$dry_run_output" | grep -q "^TEMPLATE_NAME=default"; then
+            pass "Dry-run outputs correct TEMPLATE_NAME"
+        else
+            fail "Dry-run missing or incorrect TEMPLATE_NAME"
+        fi
+
+        # Verify build command includes docker build
+        if printf '%s' "$dry_run_output" | grep -q "docker build"; then
+            pass "Dry-run build command includes 'docker build'"
+        else
+            fail "Dry-run build command missing 'docker build'"
+        fi
+    else
+        fail "Template build dry-run failed: $dry_run_output"
+    fi
+}
+
+# ==============================================================================
+# Test 12c: Template image name helper (requires fn-33-lp4.4)
+# ==============================================================================
+test_template_image_name() {
+    section "Test 12c: Template image name helper"
+
+    # Check if _cai_get_template_image_name exists (fn-33-lp4.4)
+    if ! declare -f _cai_get_template_image_name >/dev/null 2>&1; then
+        skip "Template image name helper not implemented (fn-33-lp4.4 pending)"
+        return
+    fi
+
+    # Test default template image name
+    local image_name
+    image_name=$(_cai_get_template_image_name "default")
+    if [[ "$image_name" == "containai-template-default:local" ]]; then
+        pass "Default template image name correct"
+    else
+        fail "Default template image name incorrect: $image_name"
+    fi
+
+    # Test custom template image name
+    image_name=$(_cai_get_template_image_name "my-custom")
+    if [[ "$image_name" == "containai-template-my-custom:local" ]]; then
+        pass "Custom template image name correct"
+    else
+        fail "Custom template image name incorrect: $image_name"
+    fi
+
+    # Test invalid template name is rejected
+    if _cai_get_template_image_name "../escape" 2>/dev/null; then
+        fail "Invalid template name accepted for image name"
+    else
+        pass "Invalid template name rejected for image name"
+    fi
+}
+
+# ==============================================================================
+# Test 13: Layer validation (requires fn-33-lp4.5)
 # ==============================================================================
 test_layer_validation() {
     section "Test 13: Layer validation warning for non-ContainAI base"
@@ -775,6 +870,8 @@ test_setup_installs_templates
 
 # Run tests - pending features (will skip if not implemented)
 test_template_build
+test_template_build_dry_run
+test_template_image_name
 test_layer_validation
 test_doctor_template_detection
 test_doctor_fix_template
