@@ -346,6 +346,7 @@ cai --fresh
 - `--template <name>` builds a user-customized Dockerfile before container creation
 - `--image-tag <tag>` overrides the base image (advanced/debugging use)
 - If both are specified, `--template` takes priority and `--image-tag` is ignored
+- `--image-tag` without `--template` bypasses templates entirely (no Dockerfile build)
 
 #### Template Container Labels
 
@@ -364,8 +365,16 @@ To run scripts when the container starts, create a systemd service in your templ
 COPY my-startup.sh /opt/containai/startup/my-startup.sh
 RUN chmod +x /opt/containai/startup/my-startup.sh
 
-# Create service file
-COPY <<'EOF' /etc/systemd/system/my-startup.service
+# Create service file (place my-startup.service alongside your Dockerfile)
+COPY my-startup.service /etc/systemd/system/my-startup.service
+
+# Enable using symlink (NOT systemctl enable)
+RUN ln -sf /etc/systemd/system/my-startup.service \
+    /etc/systemd/system/multi-user.target.wants/my-startup.service
+```
+
+Example `my-startup.service` file:
+```ini
 [Unit]
 Description=My Custom Startup Script
 After=containai-init.service
@@ -377,12 +386,9 @@ User=agent
 
 [Install]
 WantedBy=multi-user.target
-EOF
-
-# Enable using symlink (NOT systemctl enable)
-RUN ln -sf /etc/systemd/system/my-startup.service \
-    /etc/systemd/system/multi-user.target.wants/my-startup.service
 ```
+
+**Note:** If you prefer inline heredocs (`COPY <<'EOF' ...`), add `# syntax=docker/dockerfile:1.4` as the first line of your Dockerfile to enable BuildKit heredoc support.
 
 #### Template Restrictions
 
@@ -392,7 +398,9 @@ ContainAI containers require specific configuration to function correctly:
 |-------------|--------|
 | Do NOT override ENTRYPOINT | systemd must be PID 1 for services and init to work |
 | Do NOT override CMD | Required for proper systemd startup sequence |
-| Do NOT change USER | agent user (UID 1000) is required for volume permissions |
+| Do NOT change the final USER away from agent | agent user (UID 1000) is required for volume permissions |
+
+**Note:** You can temporarily switch to `USER root` for privileged operations (like `apt-get install`), but the final `USER` directive in your Dockerfile must be `agent`.
 
 If you override these, ContainAI features (SSH, agent startup, import/export) will not work correctly.
 
@@ -413,15 +421,17 @@ cai doctor fix template
 cai doctor fix template --all
 ```
 
-**Recover a specific template:**
+**Recover a specific repo-shipped template:**
 ```bash
 cai doctor fix template <name>
 ```
 
+**Note:** Only repo-shipped templates (`default`, `example-ml`) can be restored. For user-created templates, the command backs up the file but cannot restore from repo.
+
 The `fix template` command:
 1. Backs up your existing template to `Dockerfile.backup.<timestamp>`
 2. Restores the template from the ContainAI repo (for repo-shipped templates like `default` and `example-ml`)
-3. For user-created templates, only creates a backup (cannot restore from repo)
+3. For user-created templates, only creates a backup and exits with an error (cannot restore from repo)
 
 **View template examples:**
 ```bash
