@@ -1819,8 +1819,18 @@ _cai_cleanup_container_ssh() {
 
     # Also remove entries by container name (SSH Host alias)
     # Users connecting via "ssh <container_name>" get entries with the alias
+    # Handle both formats: "container_name" (port 22) and "[container_name]:port" (non-22)
     if [[ -f "$known_hosts_file" ]]; then
-        ssh-keygen -R "$container_name" -f "$known_hosts_file" >/dev/null 2>&1 || true
+        if [[ "$ssh_port" == "22" ]]; then
+            ssh-keygen -R "$container_name" -f "$known_hosts_file" >/dev/null 2>&1 || true
+            # Also try bracketed form in case it was added that way
+            ssh-keygen -R "[$container_name]:22" -f "$known_hosts_file" >/dev/null 2>&1 || true
+        else
+            # Non-standard ports use [host]:port format
+            ssh-keygen -R "[$container_name]:${ssh_port}" -f "$known_hosts_file" >/dev/null 2>&1 || true
+            # Also try plain form in case of legacy entries
+            ssh-keygen -R "$container_name" -f "$known_hosts_file" >/dev/null 2>&1 || true
+        fi
     fi
 
     return 0
@@ -2076,8 +2086,15 @@ _cai_ssh_connect_with_retry() {
                     if [[ "$host_key_auto_recovered" != "true" ]]; then
                         _cai_warn "SSH host key changed, auto-recovering..."
                         _cai_clean_known_hosts "$ssh_port"
-                        # Also clean container name entry (SSH Host alias)
-                        ssh-keygen -R "$container_name" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                        # Also clean container name entries (SSH Host alias)
+                        # Handle both formats: plain and [host]:port
+                        if [[ "$ssh_port" == "22" ]]; then
+                            ssh-keygen -R "$container_name" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                            ssh-keygen -R "[$container_name]:22" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                        else
+                            ssh-keygen -R "[$container_name]:${ssh_port}" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                            ssh-keygen -R "$container_name" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                        fi
                         _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "true" 2>/dev/null || true
                         host_key_auto_recovered=true
                         # Don't count this as a retry - it's auto-recovery
@@ -2595,8 +2612,15 @@ _cai_ssh_run_with_retry() {
                     if [[ "$host_key_auto_recovered" != "true" ]]; then
                         _cai_warn "SSH host key changed, auto-recovering..."
                         _cai_clean_known_hosts "$ssh_port"
-                        # Also clean container name entry (SSH Host alias)
-                        ssh-keygen -R "$container_name" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                        # Also clean container name entries (SSH Host alias)
+                        # Handle both formats: plain and [host]:port
+                        if [[ "$ssh_port" == "22" ]]; then
+                            ssh-keygen -R "$container_name" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                            ssh-keygen -R "[$container_name]:22" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                        else
+                            ssh-keygen -R "[$container_name]:${ssh_port}" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                            ssh-keygen -R "$container_name" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
+                        fi
                         _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "true" 2>/dev/null || true
                         host_key_auto_recovered=true
                         # Don't count this as a retry - it's auto-recovery
