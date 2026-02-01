@@ -42,9 +42,8 @@ The hostname implementation uses `_cai_sanitize_hostname()` to convert container
 - [x] Hostname flag added to docker run (line 2483)
 - [x] Fallback to "container" if sanitization results in empty string
 ## Done summary
-RFC 1123 hostname sanitization implemented: `_cai_sanitize_hostname()` function converts container names to valid hostnames using lowercase, hyphen conversion, character filtering, and truncation. Applied to docker run with --hostname flag.
-
+RFC 1123 hostname sanitization was already implemented in prior commits. The `_cai_sanitize_hostname()` function (lines 313-336) converts container names to valid hostnames using lowercase conversion, underscore to hyphen replacement, non-alphanumeric removal, multiple hyphen collapsing, leading/trailing hyphen stripping, 63-character truncation, and fallback to "container" for empty results. The hostname flag is applied at line 2483 in docker run.
 ## Evidence
-- Commits: ebe7b53, 9642ade (from fn-42-cli-ux-fixes-hostname-reset-wait-help.10)
-- Tests: shellcheck -x src/lib/container.sh
+- Commits: ebe7b53 feat(container): add hostname flag to match container name, 9642ade fix(container): sanitize hostname for RFC 1123 compliance, 31c5491 docs: document RFC 1123 hostname feature for containers
+- Tests:
 - PRs:

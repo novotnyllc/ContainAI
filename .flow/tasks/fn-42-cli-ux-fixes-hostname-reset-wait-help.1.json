@@ -1,7 +1,4 @@
 {
-  "assignee": null,
-  "claim_note": "",
-  "claimed_at": null,
   "created_at": "2026-01-31T22:49:44.513068Z",
   "depends_on": [],
   "epic": "fn-42-cli-ux-fixes-hostname-reset-wait-help",
@@ -10,5 +7,5 @@
   "spec_path": ".flow/tasks/fn-42-cli-ux-fixes-hostname-reset-wait-help.1.md",
   "status": "todo",
   "title": "Add container hostname flag to docker run",
-  "updated_at": "2026-01-31T23:02:59.354817Z"
+  "updated_at": "2026-02-01T13:17:55.818758Z"
 }
