@@ -5,6 +5,7 @@
 # This file must be sourced, not executed directly.
 #
 # Provides:
+#   _cai_sanitize_hostname         - Sanitize value to RFC 1123 hostname
 #   _containai_container_name      - Generate sanitized container name
 #   _containai_legacy_container_name - Generate legacy hash-based container name
 #   _cai_find_workspace_container  - Find container using shared lookup order (config/label/new/legacy)
@@ -302,6 +303,36 @@ _cai_hash_path() {
     fi
 
     printf '%s' "$hash"
+}
+
+# Sanitize a value to be a valid RFC 1123 hostname
+# Hostnames must be: lowercase, alphanumeric + hyphens, max 63 chars,
+# start/end with alphanumeric (no leading/trailing hyphens)
+# Arguments: $1 = value to sanitize (required)
+# Returns: sanitized hostname via stdout
+_cai_sanitize_hostname() {
+    local value="$1"
+    local sanitized
+
+    # Lowercase
+    sanitized="${value,,}"
+    # Replace underscores with hyphens (common in container names but invalid in hostnames)
+    sanitized="${sanitized//_/-}"
+    # Remove any character that's not alphanumeric or hyphen
+    sanitized=$(printf '%s' "$sanitized" | LC_ALL=C tr -cd 'a-z0-9-')
+    # Collapse multiple hyphens
+    while [[ "$sanitized" == *--* ]]; do sanitized="${sanitized//--/-}"; done
+    # Remove leading/trailing hyphens
+    sanitized="${sanitized#-}"
+    sanitized="${sanitized%-}"
+    # Truncate to 63 chars (max hostname length per RFC 1123)
+    sanitized="${sanitized:0:63}"
+    # Remove trailing hyphen from truncation
+    sanitized="${sanitized%-}"
+    # Fallback if sanitizes to empty
+    [[ -z "$sanitized" ]] && sanitized="container"
+
+    printf '%s' "$sanitized"
 }
 
 # Generate container name from workspace path
@@ -2445,7 +2476,11 @@ _containai_start_container() {
             fi
             args+=(--runtime="$runtime")
             args+=(--name "$container_name")
-            args+=(--hostname "$container_name")
+            # Hostname must be RFC 1123 compliant (lowercase, alphanumeric + hyphens)
+            # Container names may contain underscores, so sanitize for hostname use
+            local container_hostname
+            container_hostname=$(_cai_sanitize_hostname "$container_name")
+            args+=(--hostname "$container_hostname")
             args+=(--label "$_CONTAINAI_LABEL")
             args+=(--label "containai.workspace=$workspace_resolved")
             args+=(--label "containai.ssh-port=$ssh_port")
