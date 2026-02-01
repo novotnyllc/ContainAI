@@ -4954,6 +4954,17 @@ _cai_completion_get_volumes() {
     printf '%s' "$volumes"
 }
 
+# Get template names from templates directory for completion
+_cai_completion_get_templates() {
+    local templates_dir="${HOME}/.config/containai/templates"
+    local templates=""
+    if [[ -d "$templates_dir" ]]; then
+        # List directories (template names) under templates dir
+        templates=$(find "$templates_dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | tr '\n' ' ') || templates=""
+    fi
+    printf '%s' "$templates"
+}
+
 # Output bash completion script
 _cai_completion_bash() {
     cat <<'BASH_COMPLETION'
@@ -5042,7 +5053,19 @@ _cai_completions() {
             fi
             return
             ;;
-        --image-tag|--template|--memory|--cpus|--name|--from|-e|--env|--credentials)
+        --template)
+            # Template name completion from templates directory
+            local templates templates_dir
+            templates_dir="${HOME}/.config/containai/templates"
+            if [[ -d "$templates_dir" ]]; then
+                templates=$(find "$templates_dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | tr '\n' ' ') || templates=""
+            else
+                templates=""
+            fi
+            COMPREPLY=($(compgen -W "$templates" -- "$cur"))
+            return
+            ;;
+        --image-tag|--memory|--cpus|--name|--from|-e|--env|--credentials)
             # Value expected, no completion
             return
             ;;
@@ -5269,6 +5292,13 @@ _cai_get_volumes() {
     echo "$_cai_completion_cache_volumes"
 }
 
+_cai_get_templates() {
+    local templates_dir="${HOME}/.config/containai/templates"
+    if [[ -d "$templates_dir" ]]; then
+        find "$templates_dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | tr '\n' ' '
+    fi
+}
+
 _cai() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
@@ -5314,7 +5344,7 @@ _cai() {
                         '--config[Config file path]:file:_files' \
                         '(-w --workspace)'{-w,--workspace}'[Workspace path]:directory:_files -/' \
                         '--container[Container name]:container:->containers' \
-                        '--template[Template name]:template:' \
+                        '--template[Template name]:template:->templates' \
                         '--image-tag[Image tag]:tag:' \
                         '--memory[Memory limit]:size:' \
                         '--cpus[CPU limit]:count:' \
@@ -5344,7 +5374,7 @@ _cai() {
                         '--config[Config file path]:file:_files' \
                         '--workspace[Workspace path]:directory:_files -/' \
                         '--container[Container name]:container:->containers' \
-                        '--template[Template name]:template:' \
+                        '--template[Template name]:template:->templates' \
                         '--image-tag[Image tag]:tag:' \
                         '--memory[Memory limit]:size:' \
                         '--cpus[CPU limit]:count:' \
@@ -5362,7 +5392,7 @@ _cai() {
                     _arguments \
                         '(-w --workspace)'{-w,--workspace}'[Workspace path]:directory:_files -/' \
                         '--container[Container name]:container:->containers' \
-                        '--template[Template name]:template:' \
+                        '--template[Template name]:template:->templates' \
                         '--data-volume[Data volume name]:volume:->volumes' \
                         '--config[Config file path]:file:_files' \
                         '--fresh[Remove and recreate container]' \
@@ -5631,6 +5661,11 @@ _cai() {
                     local -a volumes
                     volumes=(${(s: :)"$(_cai_get_volumes)"})
                     _describe -t volumes 'volume' volumes
+                    ;;
+                templates)
+                    local -a templates
+                    templates=(${(s: :)"$(_cai_get_templates)"})
+                    _describe -t templates 'template' templates
                     ;;
             esac
             ;;
