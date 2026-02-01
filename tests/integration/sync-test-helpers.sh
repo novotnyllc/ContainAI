@@ -560,7 +560,9 @@ run_cai_import_from() {
 # This tests the profile import behavior where secrets become placeholders
 # Usage: run_cai_import_profile [extra_args...]
 run_cai_import_profile() {
-    HOME="$SYNC_TEST_FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import --data-volume "$2" "$@"' _ "$SYNC_TEST_SRC_DIR" "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
+    # $1=SRC_DIR, $2=DATA_VOLUME, $3+=extra args
+    # After shift: $1=DATA_VOLUME, $2+=extra args
+    HOME="$SYNC_TEST_FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import --data-volume "$1" "${@:2}"' _ "$SYNC_TEST_SRC_DIR" "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
 }
 
 # ==============================================================================

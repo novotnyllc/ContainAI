@@ -537,9 +537,8 @@ test_shell_sync_assertions() {
     local test_var_output
     test_var_output=$(exec_in_container "$SYNC_TEST_CONTAINER" bash -i -c 'echo "$TEST_VAR"' 2>/dev/null || true)
     if [[ "$test_var_output" != "from_bashrc_d" ]]; then
-        # Note: This may fail if container bashrc doesn't source /mnt/agent-data/shell/bashrc.d
-        # For now, just verify the file is correctly synced (functional test depends on container setup)
-        sync_test_info "Note: TEST_VAR not set - container may not source bashrc.d"
+        # Container bashrc must source /mnt/agent-data/shell/bashrc.d for this to work
+        return 1  # TEST_VAR should be set from bashrc.d/test.sh
     fi
 
     return 0
