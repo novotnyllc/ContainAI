@@ -22,6 +22,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # This prevents issues like additional_paths=["~/.ssh"] in user's config
 # breaking the ssh-disabled test.
 unset XDG_CONFIG_HOME 2>/dev/null || true
+# Also unset git-related env vars that _cai_import_git_config honors
+unset GIT_CONFIG_GLOBAL 2>/dev/null || true
 
 # Source test helpers
 source "$SCRIPT_DIR/../sync-test-helpers.sh"
@@ -127,9 +129,72 @@ run_tool_sync_test() {
     find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 }
 
+# Special helper for git test that uses profile import (HOME == fixture)
+# This is needed because _cai_import_git_config reads from $HOME, not --from
+run_git_sync_test() {
+    local test_name="$1"
+    local setup_fn="$2"
+    local test_fn="$3"
+    shift 3
+
+    local import_output import_exit=0
+
+    # Create fresh volume for this test (isolation)
+    SYNC_TEST_COUNTER=$((SYNC_TEST_COUNTER + 1))
+    SYNC_TEST_DATA_VOLUME=$(create_test_volume "tool-data-${SYNC_TEST_COUNTER}")
+
+    # Create unique container for this test
+    create_test_container "$test_name" \
+        --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
+        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+
+    # Set up fixture
+    if [[ -n "$setup_fn" ]]; then
+        "$setup_fn"
+    fi
+
+    # Run import using PROFILE mode (HOME == fixture) so _cai_import_git_config
+    # reads the fixture's .gitconfig
+    import_output=$(run_cai_import_profile 2>&1) || import_exit=$?
+    if [[ $import_exit -ne 0 ]]; then
+        sync_test_fail "$test_name: import failed (exit=$import_exit)"
+        printf '%s\n' "$import_output" | head -20 >&2
+        find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+        return
+    fi
+
+    # Start container
+    start_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+
+    # Set current container for assertions
+    SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
+
+    # Run test
+    if "$test_fn"; then
+        sync_test_pass "$test_name"
+    else
+        sync_test_fail "$test_name"
+    fi
+
+    # Stop container
+    stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+
+    # Clean up
+    "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+    "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+
+    # Clear fixture for next test
+    find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+}
+
 # ==============================================================================
 # Test 1: Git g-filter - credential.helper stripped
 # ==============================================================================
+# NOTE: _cai_import_git_config reads from $HOME, not from the --from source.
+# For the git filter test, we use profile import mode (HOME == fixture)
+# so that the gitconfig in the fixture is the one being imported.
 setup_git_filter_fixture() {
     local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
 
@@ -635,7 +700,8 @@ main() {
     sync_test_info "Run ID: $SYNC_TEST_RUN_ID"
 
     # Test 1: Git g-filter - credential.helper stripped
-    run_tool_sync_test "git-filter" setup_git_filter_fixture test_git_filter_assertions
+    # Uses profile import mode because _cai_import_git_config reads from $HOME
+    run_git_sync_test "git-filter" setup_git_filter_fixture test_git_filter_assertions
 
     # Test 2: GitHub CLI secret separation
     run_tool_sync_test "gh-secret-sep" setup_gh_secret_fixture test_gh_secret_separation_assertions

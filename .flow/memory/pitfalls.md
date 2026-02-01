@@ -328,3 +328,6 @@ When task specs have code examples, verify they work with actual CLI API before 
 
 ## 2026-02-01 manual [pitfall]
 Bash exit code capture: 'cmd && rc=$? || rc=$?' always sets rc=0 because assignment succeeds; use 'if cmd; then rc=0; else rc=$?; fi' instead
+
+## 2026-02-01 manual [pitfall]
+Integration tests must clear XDG_CONFIG_HOME and similar env vars to prevent developer's real config from affecting test behavior
