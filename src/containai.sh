@@ -1961,25 +1961,36 @@ if l > 0:
         fi
     fi
 
-    # Best-effort: Get session info (5s timeout)
-    # Use single docker exec to get counts directly (avoids duplicate _cai_detect_sessions call)
+    # Best-effort: Get session info (5s timeout) using _cai_detect_sessions
     local ssh_count="" pty_count=""
     if [[ "$status" == "running" ]]; then
-        local session_output
-        if session_output=$(_cai_timeout 5 env DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" exec "$container_name" sh -c '
-            if command -v ss >/dev/null 2>&1; then
+        local session_result
+        # Use _cai_detect_sessions as spec requires (returns 0=has sessions, 1=no sessions, 2=unknown)
+        if _cai_detect_sessions "$container_name" "$selected_context"; then
+            session_result=0
+        else
+            session_result=$?
+        fi
+        # Only get counts if detection succeeded (0 or 1 means ss is available)
+        if [[ "$session_result" -eq 0 || "$session_result" -eq 1 ]]; then
+            local session_output
+            if session_output=$(_cai_timeout 5 env DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" exec "$container_name" sh -c '
                 ssh_count=$(ss -t state established sport = :22 2>/dev/null | tail -n +2 | wc -l)
                 pty_count=$(ls /dev/pts/ 2>/dev/null | grep -c "^[0-9]" || echo 0)
                 echo "$ssh_count $pty_count"
+            ' 2>/dev/null); then
+                read -r ssh_count pty_count <<< "$session_output"
             fi
-        ' 2>/dev/null); then
-            read -r ssh_count pty_count <<< "$session_output"
         fi
     fi
 
     # Output results
     if [[ "$json_flag" == "true" ]]; then
-        # JSON output
+        # JSON output requires python3
+        if ! command -v python3 >/dev/null 2>&1; then
+            echo "[ERROR] --json requires python3 which is not available" >&2
+            return 1
+        fi
         python3 -c "
 import json
 import sys
