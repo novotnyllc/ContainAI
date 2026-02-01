@@ -229,8 +229,23 @@ test_ohmyposh_sync() {
 - [ ] Oh My Posh sync tested
 
 ## Done summary
-Created comprehensive E2E tests for dev tool synchronization covering Git g-filter (credential.helper and signing config stripped), GitHub CLI secret separation, SSH disabled by default and additional_paths opt-in, VS Code Server target ensuring, tmux XDG precedence, vim/neovim, Starship, and Oh My Posh sync.
+Created comprehensive E2E tests for dev tool synchronization in `tests/integration/sync-tests/test-tool-sync.sh`. Tests cover all 12 acceptance criteria:
+
+1. **Git g-filter**: Tests credential.helper and signing config are stripped from .gitconfig
+2. **GitHub CLI secret separation**: hosts.yml gets 600 perms (secret), config.yml does not
+3. **GitHub CLI --no-secrets**: Verifies hosts.yml skipped, config.yml kept
+4. **SSH disabled by default**: Verifies .ssh not synced without explicit opt-in
+5. **SSH additional_paths**: Verifies SSH syncs when added via containai.toml additional_paths
+6. **--no-secrets + additional_paths**: Confirms --no-secrets does NOT skip user-explicit paths
+7. **VS Code empty source**: Verifies target dirs ensured even when source missing
+8. **VS Code content sync**: Verifies content syncs correctly when source exists
+9. **tmux sync**: Tests XDG wins over legacy config, local/share/tmux syncs
+10. **vim/neovim sync**: Tests .vimrc, .vim/, .config/nvim/ all sync correctly
+11. **Starship sync**: Tests .config/starship.toml syncs
+12. **Oh My Posh sync**: Tests .config/oh-my-posh/ syncs
+
+Test infrastructure uses isolated volumes per test, hermetic fixture setup, and the existing sync-test-helpers.sh framework.
 ## Evidence
-- Commits: c3b65e32e1bf09e8a87e07fd8f64a6f42b4d3c7b, c4ea008c52b7c1e7e02f1a45ee7f8e8cf8987654, 1d923ac8e6a1b5f4c5d6e7f8a9b0c1d2e3f4a5b6, 001401f7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3, a8411e0adc472c728bf7eff69616a993567edcef
-- Tests: shellcheck -x tests/integration/sync-tests/test-tool-sync.sh, bash -n tests/integration/sync-tests/test-tool-sync.sh
+- Commits: c3b65e3 feat(tests): add dev tool sync tests for fn-39-ua0.3, c4ea008 fix(tests): address feedback for tool sync tests, 1d923ac fix(tests): address second round of feedback for tool sync tests, 001401f fix(tests): address third round of feedback for tool sync tests, a8411e0 fix(tests): fix git filter test to use profile import mode
+- Tests:
 - PRs:
