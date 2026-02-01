@@ -519,6 +519,196 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
+# Test: _cai_validate_template_base validates ContainAI base images
+# ==============================================================================
+
+test_start "_cai_validate_template_base accepts ghcr.io/novotnyllc/containai:latest"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM ghcr.io/novotnyllc/containai:latest
+RUN echo "test"
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "rejected valid ContainAI base"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base accepts containai:latest"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM containai:latest
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "rejected valid containai base"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base accepts containai-template-custom:local"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM containai-template-custom:local
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "rejected valid chained template base"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base rejects ubuntu:latest"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM ubuntu:latest
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "true" 2>/dev/null; then
+    test_fail "accepted invalid base image"
+else
+    test_pass
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base emits warning for invalid base"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM debian:bookworm
+EOF
+output=$(_cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>&1) || true
+if [[ "$output" == *"not based on ContainAI"* ]]; then
+    test_pass
+else
+    test_fail "warning not emitted"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base suppresses warning when asked"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM ubuntu:latest
+EOF
+output=$(_cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "true" 2>&1) || true
+if [[ "$output" == "" ]]; then
+    test_pass
+else
+    test_fail "warning should be suppressed but got: $output"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base handles ARG substitution"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+ARG BASE_IMAGE=ghcr.io/novotnyllc/containai:latest
+FROM $BASE_IMAGE
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "failed to substitute ARG variable"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base handles \${VAR} syntax"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+ARG IMAGE=ghcr.io/novotnyllc/containai
+ARG TAG=latest
+FROM ${IMAGE}:${TAG}
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "failed to substitute \${VAR} syntax"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base warns on unresolved variable"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM $UNDEFINED_VAR
+EOF
+output=$(_cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>&1) || true
+if [[ "$output" == *"unresolved variable"* ]]; then
+    test_pass
+else
+    test_fail "should warn about unresolved variable, got: $output"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base handles \${VAR:-default} syntax"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM ${IMAGE:-ghcr.io/novotnyllc/containai:latest}
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "failed to handle \${VAR:-default} syntax"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base handles ARG override of \${VAR:-default}"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+ARG IMAGE=containai:v2
+FROM ${IMAGE:-ghcr.io/novotnyllc/containai:latest}
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "failed to override default with ARG"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base returns error for missing file"
+if _cai_validate_template_base "/nonexistent/path/Dockerfile" "false" 2>/dev/null; then
+    test_fail "should fail for missing file"
+else
+    test_pass
+fi
+
+test_start "_cai_validate_template_base returns error for missing FROM"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+# No FROM line in this file
+RUN echo "test"
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_fail "should fail for missing FROM"
+else
+    test_pass
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base warning includes entrypoint note"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM alpine:latest
+EOF
+output=$(_cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>&1) || true
+if [[ "$output" == *"ENTRYPOINT must not be overridden"* ]]; then
+    test_pass
+else
+    test_fail "warning should mention entrypoint, got: $output"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base warning includes suppression hint"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM nginx:latest
+EOF
+output=$(_cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>&1) || true
+if [[ "$output" == *"suppress_base_warning"* ]]; then
+    test_pass
+else
+    test_fail "warning should include suppression hint, got: $output"
+fi
+teardown_tmpdir
+
+# ==============================================================================
 # Summary
 # ==============================================================================
 

@@ -23,6 +23,7 @@
 #   _cai_ensure_default_templates() - Install all missing default templates
 #   _cai_build_template()          - Build template Dockerfile using Docker context
 #   _cai_get_template_image_name() - Get image name for a template (no build)
+#   _cai_validate_template_base()  - Validate Dockerfile FROM uses ContainAI base
 #
 # Template directory structure:
 #   ~/.config/containai/templates/
@@ -500,4 +501,172 @@ _cai_get_template_image_name() {
     fi
 
     printf '%s' "containai-template-${template_name}:local"
+}
+
+# ==============================================================================
+# Layer Stack Validation
+# ==============================================================================
+
+# Validate that template Dockerfile is based on ContainAI images
+# Parses FROM line with ARG variable substitution
+# Args: dockerfile_path [suppress_warning]
+#   dockerfile_path    - Path to Dockerfile to validate
+#   suppress_warning   - If "true", suppress warning output (config-driven)
+# Returns: 0 if valid ContainAI base, 1 if invalid/unresolved, 2 if parse error
+# Outputs: Warning message to stderr if invalid (unless suppressed)
+#
+# Accepted patterns:
+#   - containai:*
+#   - ghcr.io/novotnyllc/containai*
+#   - containai-template-*:local (chained templates)
+#
+# Handles ARG substitution for patterns like:
+#   ARG BASE_IMAGE=ghcr.io/novotnyllc/containai:latest
+#   FROM $BASE_IMAGE
+_cai_validate_template_base() {
+    local dockerfile_path="${1:-}"
+    local suppress_warning="${2:-false}"
+
+    if [[ -z "$dockerfile_path" ]]; then
+        _cai_error "Dockerfile path required"
+        return 2
+    fi
+
+    if [[ ! -f "$dockerfile_path" ]]; then
+        _cai_error "Dockerfile not found: $dockerfile_path"
+        return 2
+    fi
+
+    # Parse Dockerfile to collect ARG values and find FROM line
+    # We only care about the first FROM (base stage)
+    local -A arg_values=()
+    local from_line=""
+    local line key value
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Remove leading/trailing whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+
+        # Skip empty lines and comments
+        [[ -z "$line" ]] && continue
+        [[ "$line" == \#* ]] && continue
+
+        # Parse ARG lines: ARG NAME or ARG NAME=value
+        if [[ "$line" =~ ^[Aa][Rr][Gg][[:space:]]+([A-Za-z_][A-Za-z0-9_]*)([[:space:]]*=[[:space:]]*(.*))? ]]; then
+            key="${BASH_REMATCH[1]}"
+            # Value is in capture group 3 (after the = sign)
+            value="${BASH_REMATCH[3]:-}"
+            # Remove quotes if present (simple case)
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+            arg_values["$key"]="$value"
+            continue
+        fi
+
+        # Parse FROM line (first one wins - this is the base image)
+        if [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+([^[:space:]]+) ]]; then
+            from_line="${BASH_REMATCH[1]}"
+            break
+        fi
+    done < "$dockerfile_path"
+
+    # Check if we found a FROM line
+    if [[ -z "$from_line" ]]; then
+        _cai_error "No FROM line found in Dockerfile: $dockerfile_path"
+        return 2
+    fi
+
+    # Resolve variable substitution in FROM line
+    # Handles: $VAR, ${VAR}, ${VAR:-default}
+    local resolved_image="$from_line"
+    local var_pattern var_name var_default has_unresolved="false"
+
+    # Process ${VAR:-default} patterns first
+    while [[ "$resolved_image" =~ \$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\} ]]; do
+        var_name="${BASH_REMATCH[1]}"
+        var_default="${BASH_REMATCH[2]}"
+        if [[ -n "${arg_values[$var_name]:-}" ]]; then
+            resolved_image="${resolved_image/\$\{$var_name:-$var_default\}/${arg_values[$var_name]}}"
+        else
+            resolved_image="${resolved_image/\$\{$var_name:-$var_default\}/$var_default}"
+        fi
+    done
+
+    # Process ${VAR} patterns
+    while [[ "$resolved_image" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]]; do
+        var_name="${BASH_REMATCH[1]}"
+        if [[ -n "${arg_values[$var_name]:-}" ]]; then
+            resolved_image="${resolved_image/\$\{$var_name\}/${arg_values[$var_name]}}"
+        else
+            has_unresolved="true"
+            break
+        fi
+    done
+
+    # Process $VAR patterns (without braces)
+    while [[ "$resolved_image" =~ \$([A-Za-z_][A-Za-z0-9_]*) ]]; do
+        var_name="${BASH_REMATCH[1]}"
+        if [[ -n "${arg_values[$var_name]:-}" ]]; then
+            resolved_image="${resolved_image/\$$var_name/${arg_values[$var_name]}}"
+        else
+            has_unresolved="true"
+            break
+        fi
+    done
+
+    # Check for unresolved variables
+    if [[ "$has_unresolved" == "true" ]]; then
+        if [[ "$suppress_warning" != "true" ]]; then
+            cat >&2 <<'EOF'
+[WARN] Your template uses an unresolved variable in FROM.
+       Cannot validate if it's based on ContainAI images.
+       ENTRYPOINT must not be overridden or systemd won't start.
+
+       To suppress this warning, add to config.toml:
+       [template]
+       suppress_base_warning = true
+EOF
+        fi
+        return 1
+    fi
+
+    # Check if resolved image matches ContainAI patterns
+    # Patterns: containai:*, ghcr.io/novotnyllc/containai*, containai-template-*:local
+    local is_valid="false"
+
+    # Pattern 1: containai:* (local shorthand)
+    if [[ "$resolved_image" =~ ^containai: ]]; then
+        is_valid="true"
+    fi
+
+    # Pattern 2: ghcr.io/novotnyllc/containai*
+    if [[ "$resolved_image" =~ ^ghcr\.io/novotnyllc/containai ]]; then
+        is_valid="true"
+    fi
+
+    # Pattern 3: containai-template-*:local (chained templates)
+    if [[ "$resolved_image" =~ ^containai-template-[a-zA-Z0-9_.-]+:local$ ]]; then
+        is_valid="true"
+    fi
+
+    if [[ "$is_valid" == "true" ]]; then
+        return 0
+    fi
+
+    # Invalid base image - emit warning
+    if [[ "$suppress_warning" != "true" ]]; then
+        cat >&2 <<'EOF'
+[WARN] Your template is not based on ContainAI images.
+       ContainAI features (systemd, agents, init) may not work.
+       ENTRYPOINT must not be overridden or systemd won't start.
+
+       To suppress this warning, add to config.toml:
+       [template]
+       suppress_base_warning = true
+EOF
+    fi
+    return 1
 }

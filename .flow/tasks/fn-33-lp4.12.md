@@ -15,9 +15,8 @@ Create `tests/integration/test-templates.sh` to verify template build, doctor ch
 - [ ] Test passes in CI (requires Docker)
 
 ## Done summary
-TBD
-
+Created tests/integration/test-templates.sh with 15 tests covering template system functionality: repo template files, directory helpers, name validation, installation, existence checks, first-use auto-install, require_template, install_all, ensure_default, dry-run mode, setup integration, and placeholder tests for pending features (build, layer validation, doctor checks/fix) that skip until implementation.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 8c8b7b4, 83d8eea, 38db67d, 0f954cb
+- Tests: ./tests/integration/test-templates.sh
 - PRs:
