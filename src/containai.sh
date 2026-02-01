@@ -382,8 +382,14 @@ Options:
   --all               Stop all containers without prompting (mutually exclusive with --container)
   --remove            Also remove containers (not just stop them)
                       When used with --remove, SSH configs are automatically cleaned
+  --force             Skip session warning prompt (proceed without confirmation)
   --verbose           Enable verbose output
   -h, --help          Show this help message
+
+Session Warning:
+  When active sessions (SSH connections or terminals) are detected in a container,
+  you will be prompted to confirm before stopping. Use --force to skip this prompt.
+  In non-interactive mode (piped input), the warning is skipped automatically.
 
 Examples:
   cai stop                      Interactive selection to stop containers
@@ -391,6 +397,7 @@ Examples:
   cai stop --all                Stop all ContainAI containers
   cai stop --remove             Remove containers (cleans up SSH configs)
   cai stop --all --remove       Remove all ContainAI containers
+  cai stop --force              Stop without session warning prompt
 EOF
 }
 
@@ -1437,6 +1444,7 @@ _containai_stop_cmd() {
     local container_name=""
     local remove_flag=false
     local all_flag=false
+    local force_flag=false
     local arg prev
     # Preserve original args for passing to _containai_stop_all
     local -a orig_args=("$@")
@@ -1489,6 +1497,9 @@ _containai_stop_cmd() {
             --remove)
                 remove_flag=true
                 ;;
+            --force)
+                force_flag=true
+                ;;
             --verbose)
                 _cai_set_verbose
                 ;;
@@ -1513,7 +1524,7 @@ _containai_stop_cmd() {
         prev=""
         for arg in "$@"; do
             case "$arg" in
-                --container | --all | --remove | --verbose | --help | -h)
+                --container | --all | --remove | --force | --verbose | --help | -h)
                     # Known flags
                     ;;
                 --container=*)
@@ -1561,6 +1572,19 @@ _containai_stop_cmd() {
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
+        fi
+
+        # Session warning: prompt if sessions detected (unless --force or non-interactive)
+        if [[ "$force_flag" != "true" ]] && [[ -t 0 ]]; then
+            local session_result
+            _cai_detect_sessions "$container_name" "$selected_context" && session_result=$? || session_result=$?
+            if [[ "$session_result" -eq 0 ]]; then
+                _cai_warn "Container may have active sessions"
+                local confirm
+                read -rp "Stop anyway? [y/N]: " confirm
+                [[ "$confirm" =~ ^[Yy] ]] || return 1
+            fi
+            # session_result 1 = no sessions, 2 = unknown: proceed
         fi
 
         if [[ "$remove_flag" == "true" ]]; then
@@ -1628,6 +1652,19 @@ _containai_stop_cmd() {
                 echo "[ERROR] Container '$ws_container_name' belongs to workspace '$container_ws', not current directory." >&2
                 echo "        Use 'cai stop --container $ws_container_name' to force, or fix workspace state." >&2
                 return 1
+            fi
+
+            # Session warning: prompt if sessions detected (unless --force or non-interactive)
+            if [[ "$force_flag" != "true" ]] && [[ -t 0 ]]; then
+                local session_result
+                _cai_detect_sessions "$ws_container_name" "$selected_context" && session_result=$? || session_result=$?
+                if [[ "$session_result" -eq 0 ]]; then
+                    _cai_warn "Container may have active sessions"
+                    local confirm
+                    read -rp "Stop anyway? [y/N]: " confirm
+                    [[ "$confirm" =~ ^[Yy] ]] || return 1
+                fi
+                # session_result 1 = no sessions, 2 = unknown: proceed
             fi
 
             if [[ "$remove_flag" == "true" ]]; then

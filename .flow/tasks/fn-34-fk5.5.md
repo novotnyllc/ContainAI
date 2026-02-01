@@ -31,7 +31,39 @@ fi
 - `src/containai.sh`: `_containai_stop_cmd` function
 
 ## Acceptance
-- [ ] Warns when sessions detected (interactive prompt)
-- [ ] `--force` flag skips warning
-- [ ] Non-interactive mode proceeds without prompt
-- [ ] "Unknown" session state (return 2) proceeds without warning
+- [x] Warns when sessions detected (interactive prompt)
+- [x] `--force` flag skips warning
+- [x] Non-interactive mode proceeds without prompt
+- [x] "Unknown" session state (return 2) proceeds without warning
+
+## Done summary
+## Summary
+
+Added session warning to `cai stop` command that prompts users before stopping containers with active SSH sessions or terminals.
+
+### Changes
+
+- Added `--force` flag to `_containai_stop_cmd` to skip session warning prompt
+- Added session detection before stop/remove in two locations:
+  1. When using `--container <name>` to stop a specific container
+  2. When stopping via workspace state (auto-resolved container)
+- Updated `_containai_stop_help` to document `--force` flag and session warning behavior
+
+### Implementation Details
+
+- Calls `_cai_detect_sessions` before stopping if:
+  - `--force` is NOT set
+  - stdin is a terminal (`-t 0`)
+- Session detection return codes:
+  - 0 = has sessions → prompt for confirmation
+  - 1 = no sessions → proceed silently
+  - 2 = unknown (ss unavailable) → proceed silently
+- Prompt format: `"Stop anyway? [y/N]: "` (defaults to No)
+
+### Files Changed
+
+- `src/containai.sh`: `_containai_stop_cmd` function and `_containai_stop_help`
+## Evidence
+- Commits:
+- Tests:
+- PRs:
