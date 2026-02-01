@@ -11,9 +11,8 @@ Add `[template].suppress_base_warning = true` config option. Update config parse
 - [ ] Works with both true/false and 1/0 values
 
 ## Done summary
-TBD
-
+Added [template].suppress_base_warning config option to control whether the base image validation warning is shown when building templates. Updated config parser to read the new option and pass it through to the template build flow.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 5e34360e78d1697249fa953d98ed1c26c9d0f895
+- Tests: ./tests/unit/test-template-paths.sh
 - PRs:

@@ -471,9 +471,11 @@ _cai_doctor_fix_bridge() {
 }
 
 # Run doctor command with text output
+# Args: build_templates ("true" to run heavy template build checks)
 # Returns: 0 if Sysbox isolation is available
 #          1 if no isolation available (cannot proceed)
 _cai_doctor() {
+    local build_templates="${1:-false}"
     local sysbox_ok="false"
     local docker_cli_ok="false"
     local docker_daemon_ok="false"
@@ -1030,6 +1032,11 @@ _cai_doctor() {
 
     printf '\n'
 
+    # === Templates Section ===
+    local template_all_ok="true"
+    _cai_doctor_template_checks "$build_templates"
+    template_all_ok="${TEMPLATE_ALL_OK:-true}"
+
     # === Resources Section ===
     printf '%s\n' "Resources"
 
@@ -1107,6 +1114,14 @@ _cai_doctor() {
     else
         printf '  %-44s %s\n' "SSH:" "[ERROR] Not configured"
         printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure SSH"
+    fi
+
+    # Template summary
+    if [[ "$template_all_ok" == "true" ]]; then
+        printf '  %-44s %s\n' "Templates:" "[OK] Ready"
+    else
+        printf '  %-44s %s\n' "Templates:" "[ERROR] Issues found"
+        printf '  %-44s %s\n' "Recommended:" "Run 'cai doctor fix template' to recover"
     fi
 
     # Exit code: 0 if isolation ready AND SSH configured, 1 if not
@@ -2090,9 +2105,11 @@ _cai_json_escape() {
 }
 
 # Run doctor command with JSON output
+# Args: build_templates ("true" to run heavy template build checks)
 # Returns: 0 if Sysbox isolation is available
 #          1 if no isolation available (cannot proceed)
 _cai_doctor_json() {
+    local build_templates="${1:-false}"
     local sysbox_ok="false"
     local platform
     local platform_json
@@ -2465,10 +2482,16 @@ _cai_doctor_json() {
     printf '    "include_directive_present": %s,\n' "$ssh_include_ok"
     printf '    "all_ok": %s\n' "$ssh_all_ok"
     printf '  },\n'
+
+    # Template checks
+    local template_all_ok="true"
+    _cai_doctor_template_checks_json "$build_templates" || template_all_ok="false"
+
     printf '  "summary": {\n'
     printf '    "sysbox_ok": %s,\n' "$sysbox_ok"
     printf '    "containai_docker_ok": %s,\n' "$containai_docker_ok"
     printf '    "ssh_ok": %s,\n' "$ssh_all_ok"
+    printf '    "templates_ok": %s,\n' "$template_all_ok"
     printf '    "isolation_available": %s,\n' "$isolation_available"
     printf '    "recommended_action": "%s"\n' "$recommended_action"
     printf '  }\n'
@@ -3085,6 +3108,284 @@ _cai_doctor_reset_lima() {
     _cai_ok "Lima VM reset complete"
     _cai_info "Run 'cai setup' to recreate the VM"
     return 0
+}
+
+# ==============================================================================
+# Template Checks
+# ==============================================================================
+
+# Check if a template exists (filesystem check only)
+# Args: template_name (defaults to "default")
+# Returns: 0=exists, 1=missing, 2=parse error
+# Outputs: error status string to stdout ("ok", "missing", "parse_error")
+_cai_doctor_check_template_exists() {
+    local template_name="${1:-default}"
+    local template_path
+
+    # Validate template name
+    if ! _cai_validate_template_name "$template_name" 2>/dev/null; then
+        printf '%s' "invalid_name"
+        return 2
+    fi
+
+    template_path="$_CAI_TEMPLATE_DIR/$template_name/Dockerfile"
+
+    if [[ -f "$template_path" ]]; then
+        printf '%s' "ok"
+        return 0
+    else
+        printf '%s' "missing"
+        return 1
+    fi
+}
+
+# Check basic Dockerfile syntax (FROM line exists)
+# This is a fast filesystem check, no Docker daemon needed
+# Args: template_name (defaults to "default")
+# Returns: 0=valid, 1=invalid syntax, 2=template not found
+# Outputs: error status string to stdout ("ok", "no_from", "missing")
+_cai_doctor_check_template_syntax() {
+    local template_name="${1:-default}"
+    local template_path
+    local from_found="false"
+    local line
+
+    # Validate template name
+    if ! _cai_validate_template_name "$template_name" 2>/dev/null; then
+        printf '%s' "invalid_name"
+        return 2
+    fi
+
+    template_path="$_CAI_TEMPLATE_DIR/$template_name/Dockerfile"
+
+    if [[ ! -f "$template_path" ]]; then
+        printf '%s' "missing"
+        return 2
+    fi
+
+    # Parse Dockerfile looking for FROM line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Remove leading whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        # Skip empty lines and comments
+        [[ -z "$line" ]] && continue
+        [[ "$line" == \#* ]] && continue
+
+        # Check for FROM line (case-insensitive)
+        if [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+ ]]; then
+            from_found="true"
+            break
+        fi
+    done < "$template_path"
+
+    if [[ "$from_found" == "true" ]]; then
+        printf '%s' "ok"
+        return 0
+    else
+        printf '%s' "no_from"
+        return 1
+    fi
+}
+
+# Perform heavy template validation by attempting actual Docker build
+# This is opt-in only via --build-templates flag
+# Args: template_name [docker_context]
+# Returns: 0=build successful, 1=build failed
+# Outputs: error status string to stdout ("ok", "build_failed", "missing")
+_cai_doctor_check_template_build() {
+    local template_name="${1:-default}"
+    local docker_context="${2:-}"
+    local template_path image_tag
+
+    # Validate template name
+    if ! _cai_validate_template_name "$template_name" 2>/dev/null; then
+        printf '%s' "invalid_name"
+        return 1
+    fi
+
+    template_path="$_CAI_TEMPLATE_DIR/$template_name/Dockerfile"
+
+    if [[ ! -f "$template_path" ]]; then
+        printf '%s' "missing"
+        return 1
+    fi
+
+    # Build docker command array
+    local -a docker_cmd=(docker)
+    if [[ -n "$docker_context" ]]; then
+        docker_cmd=(docker --context "$docker_context")
+    fi
+
+    # Template directory is the build context
+    local template_dir
+    template_dir="$(dirname "$template_path")"
+
+    # Image tag for test build
+    image_tag="containai-template-${template_name}:local"
+
+    # Attempt the build
+    if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" build -t "$image_tag" "$template_dir" >/dev/null 2>&1; then
+        printf '%s' "ok"
+        return 0
+    else
+        printf '%s' "build_failed"
+        return 1
+    fi
+}
+
+# Run all template checks for doctor output (text format)
+# Args: build_templates ("true" to run heavy build checks)
+# Outputs: Formatted text report to stdout
+# Sets: TEMPLATE_ALL_OK="true" if all checks pass
+_cai_doctor_template_checks() {
+    local build_templates="${1:-false}"
+    local template_exists_status template_syntax_status template_build_status
+    local template_path="$_CAI_TEMPLATE_DIR/default/Dockerfile"
+
+    TEMPLATE_ALL_OK="true"
+
+    printf '%s\n' "Templates"
+
+    # Check if default template exists
+    template_exists_status=$(_cai_doctor_check_template_exists "default")
+    case "$template_exists_status" in
+        ok)
+            printf '  %-44s %s\n' "Template 'default':" "[OK]"
+            ;;
+        missing)
+            TEMPLATE_ALL_OK="false"
+            printf '  %-44s %s\n' "Template 'default':" "[FAIL] Missing"
+            printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
+            ;;
+        invalid_name)
+            # Should never happen for "default"
+            TEMPLATE_ALL_OK="false"
+            printf '  %-44s %s\n' "Template 'default':" "[ERROR] Invalid name"
+            ;;
+    esac
+
+    # Only run syntax check if template exists
+    if [[ "$template_exists_status" == "ok" ]]; then
+        template_syntax_status=$(_cai_doctor_check_template_syntax "default")
+        case "$template_syntax_status" in
+            ok)
+                printf '  %-44s %s\n' "Dockerfile syntax:" "[OK] FROM line found"
+
+                # Run base image validation (warn only, don't fail)
+                # Only check if syntax is valid (FROM line exists)
+                local suppress_warning="${_CAI_TEMPLATE_SUPPRESS_BASE_WARNING:-false}"
+                if _cai_validate_template_base "$template_path" "true" 2>/dev/null; then
+                    printf '  %-44s %s\n' "Base image:" "[OK] ContainAI base"
+                else
+                    # Check if it was an unresolved variable vs invalid base
+                    if [[ "$suppress_warning" != "true" ]]; then
+                        printf '  %-44s %s\n' "Base image:" "[WARN] Not ContainAI"
+                        printf '  %-44s %s\n' "" "(ContainAI features may not work)"
+                    else
+                        printf '  %-44s %s\n' "Base image:" "[WARN] Not ContainAI (suppressed)"
+                    fi
+                fi
+                ;;
+            no_from)
+                TEMPLATE_ALL_OK="false"
+                printf '  %-44s %s\n' "Dockerfile syntax:" "[FAIL] No FROM line"
+                printf '  %-44s %s\n' "" "Dockerfile must have a FROM instruction"
+                printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
+                ;;
+        esac
+    fi
+
+    # Heavy build check (opt-in only)
+    if [[ "$build_templates" == "true" ]]; then
+        if [[ "$template_exists_status" != "ok" ]]; then
+            printf '  %-44s %s\n' "Docker build:" "[SKIP] Template missing"
+        else
+            printf '  %-44s' "Docker build:"
+            template_build_status=$(_cai_doctor_check_template_build "default")
+            case "$template_build_status" in
+                ok)
+                    printf ' %s\n' "[OK] Build successful"
+                    ;;
+                build_failed)
+                    TEMPLATE_ALL_OK="false"
+                    printf ' %s\n' "[FAIL] Build failed"
+                    printf '  %-44s %s\n' "" "Check Dockerfile for errors"
+                    printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
+                    ;;
+            esac
+        fi
+    fi
+
+    printf '\n'
+}
+
+# Run template checks for doctor JSON output
+# Args: build_templates ("true" to run heavy build checks)
+# Outputs: JSON object fields to stdout (no surrounding braces)
+# Returns: 0 if all checks pass, 1 otherwise
+_cai_doctor_template_checks_json() {
+    local build_templates="${1:-false}"
+    local template_exists_status template_syntax_status template_build_status
+    local template_path="$_CAI_TEMPLATE_DIR/default/Dockerfile"
+    local base_valid="false"
+    local all_ok="true"
+
+    # Check if default template exists
+    template_exists_status=$(_cai_doctor_check_template_exists "default")
+    if [[ "$template_exists_status" != "ok" ]]; then
+        all_ok="false"
+    fi
+
+    # Syntax check (only if exists)
+    if [[ "$template_exists_status" == "ok" ]]; then
+        template_syntax_status=$(_cai_doctor_check_template_syntax "default")
+        if [[ "$template_syntax_status" != "ok" ]]; then
+            all_ok="false"
+        fi
+
+        # Base validation (only if syntax is valid - FROM line exists)
+        if [[ "$template_syntax_status" == "ok" ]]; then
+            if _cai_validate_template_base "$template_path" "true" 2>/dev/null; then
+                base_valid="true"
+            fi
+        fi
+    else
+        template_syntax_status="not_checked"
+    fi
+
+    # Build check (only if requested and template exists)
+    if [[ "$build_templates" == "true" ]] && [[ "$template_exists_status" == "ok" ]]; then
+        template_build_status=$(_cai_doctor_check_template_build "default")
+        if [[ "$template_build_status" != "ok" ]]; then
+            all_ok="false"
+        fi
+    else
+        template_build_status="not_checked"
+    fi
+
+    # Output JSON fields
+    printf '  "templates": {\n'
+    printf '    "default": {\n'
+    printf '      "exists": %s,\n' "$([[ "$template_exists_status" == "ok" ]] && printf 'true' || printf 'false')"
+    printf '      "path": "%s",\n' "$(_cai_json_escape "$template_path")"
+    printf '      "syntax_valid": %s,\n' "$([[ "$template_syntax_status" == "ok" ]] && printf 'true' || printf 'false')"
+    printf '      "base_valid": %s,\n' "$base_valid"
+    if [[ "$build_templates" == "true" ]]; then
+        printf '      "build_ok": %s,\n' "$([[ "$template_build_status" == "ok" ]] && printf 'true' || printf 'false')"
+        printf '      "build_checked": true\n'
+    else
+        printf '      "build_ok": null,\n'
+        printf '      "build_checked": false\n'
+    fi
+    printf '    },\n'
+    printf '    "all_ok": %s\n' "$all_ok"
+    printf '  },\n'
+
+    if [[ "$all_ok" == "true" ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 return 0

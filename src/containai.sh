@@ -624,7 +624,7 @@ _containai_doctor_help() {
 ContainAI Doctor - Check system capabilities and diagnostics
 
 Usage: cai doctor [options]
-       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>]]
+       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>] | template]
 
 Checks Docker availability and Sysbox isolation configuration.
 Reports requirement levels and actionable remediation guidance.
@@ -634,7 +634,8 @@ Requirements:
   SSH: REQUIRED - cai shell/run use SSH for container access
 
 Options:
-  --json          Output machine-parseable JSON
+  --json              Output machine-parseable JSON
+  --build-templates   Run heavy template validation (actual docker build)
 EOF
 
     # Show --reset-lima option only on macOS
@@ -1667,6 +1668,7 @@ _containai_doctor_cmd() {
 
     local json_output="false"
     local reset_lima="false"
+    local build_templates="false"
     local workspace="$PWD"
 
     # Check for 'fix' subcommand first (before option parsing)
@@ -1681,6 +1683,10 @@ _containai_doctor_cmd() {
         case "$1" in
             --json)
                 json_output="true"
+                shift
+                ;;
+            --build-templates)
+                build_templates="true"
                 shift
                 ;;
             --reset-lima)
@@ -1742,9 +1748,9 @@ _containai_doctor_cmd() {
 
     # Run doctor checks (default mode is diagnostic, not fix)
     if [[ "$json_output" == "true" ]]; then
-        _cai_doctor_json
+        _cai_doctor_json "$build_templates"
     else
-        _cai_doctor
+        _cai_doctor "$build_templates"
     fi
 }
 
@@ -4835,8 +4841,8 @@ _cai_completions() {
     local run_flags="--data-volume --config -w --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --credentials --acknowledge-credential-risk --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
     local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
     local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
-    local doctor_flags="--json --reset-lima --workspace -w -h --help"
-    local doctor_fix_subcommands="volume container"
+    local doctor_flags="--json --build-templates --reset-lima --workspace -w -h --help"
+    local doctor_fix_subcommands="volume container template"
     local setup_flags="--dry-run --verbose --force -h --help"
     local validate_flags="--verbose --config --workspace -h --help"
     local docker_flags=""
@@ -5228,6 +5234,7 @@ _cai() {
                 doctor)
                     _arguments -C \
                         '--json[JSON output]' \
+                        '--build-templates[Run heavy template validation]' \
                         '--reset-lima[Reset Lima VM (macOS)]' \
                         '(-w --workspace)'{-w,--workspace}'[Workspace path]:directory:_files -/' \
                         '(-h --help)'{-h,--help}'[Show help]' \
@@ -5240,7 +5247,7 @@ _cai() {
                             ;;
                         doctor_args)
                             _arguments \
-                                '1:target:(volume container)' \
+                                '1:target:(volume container template)' \
                                 '--all[Fix all]' \
                                 '*:name:'
                             ;;
