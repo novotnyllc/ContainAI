@@ -387,9 +387,11 @@ Options:
   -h, --help          Show this help message
 
 Session Warning:
-  When active sessions (SSH connections or terminals) are detected in a container,
-  you will be prompted to confirm before stopping. Use --force to skip this prompt.
+  When stopping a specific container (via --container or workspace-resolved),
+  active sessions (SSH connections or terminals) are detected and you will be
+  prompted to confirm before stopping. Use --force to skip this prompt.
   In non-interactive mode (piped input), the warning is skipped automatically.
+  Note: Interactive selection mode and --all do not perform session detection.
 
 Examples:
   cai stop                      Interactive selection to stop containers
@@ -1579,9 +1581,12 @@ _containai_stop_cmd() {
             local session_result
             _cai_detect_sessions "$container_name" "$selected_context" && session_result=$? || session_result=$?
             if [[ "$session_result" -eq 0 ]]; then
-                _cai_warn "Container may have active sessions"
+                _cai_warn "Container '$container_name' may have active sessions"
                 local confirm
-                read -rp "Stop anyway? [y/N]: " confirm
+                if ! read -rp "Stop anyway? [y/N]: " confirm; then
+                    echo "Cancelled." >&2
+                    return 0
+                fi
                 [[ "$confirm" =~ ^[Yy] ]] || return 1
             fi
             # session_result 1 = no sessions, 2 = unknown: proceed
@@ -1659,9 +1664,12 @@ _containai_stop_cmd() {
                 local session_result
                 _cai_detect_sessions "$ws_container_name" "$selected_context" && session_result=$? || session_result=$?
                 if [[ "$session_result" -eq 0 ]]; then
-                    _cai_warn "Container may have active sessions"
+                    _cai_warn "Container '$ws_container_name' may have active sessions"
                     local confirm
-                    read -rp "Stop anyway? [y/N]: " confirm
+                    if ! read -rp "Stop anyway? [y/N]: " confirm; then
+                        echo "Cancelled." >&2
+                        return 0
+                    fi
                     [[ "$confirm" =~ ^[Yy] ]] || return 1
                 fi
                 # session_result 1 = no sessions, 2 = unknown: proceed
