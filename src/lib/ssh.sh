@@ -222,8 +222,8 @@ _cai_wait_for_recreation() {
     local container_name="$1"
     local flag_file="$_CAI_RECREATE_STATE_DIR/$container_name"
     local start_seconds=$SECONDS
-    local wait_interval_ms=500
-    local max_interval_ms=2000
+    local wait_interval=1  # Start at 1 second (portable integer sleep)
+    local max_interval=2   # Cap at 2 seconds
 
     _cai_info "Container is being recreated, waiting..."
 
@@ -238,6 +238,19 @@ _cai_wait_for_recreation() {
         # Use larger stale threshold (2x wait max) to avoid false positives
         local flag_mtime now
         flag_mtime=$(_cai_get_file_mtime "$flag_file")
+
+        # Re-check file exists after stat - flag may have been removed (race window)
+        # If file is gone, recreation completed successfully
+        if [[ ! -f "$flag_file" ]]; then
+            break
+        fi
+
+        # If mtime is 0 (stat failed), file was likely just removed - recheck loop
+        if ((flag_mtime == 0)); then
+            sleep 1
+            continue
+        fi
+
         now=$(date +%s)
         if ((now - flag_mtime > _CAI_RECREATE_STALE_THRESHOLD)); then
             # Stale flag - recreation process likely crashed or was interrupted
@@ -247,14 +260,12 @@ _cai_wait_for_recreation() {
             return 1
         fi
 
-        # Sleep with backoff
-        local sleep_sec
-        sleep_sec=$(awk "BEGIN {printf \"%.3f\", $wait_interval_ms / 1000}")
-        sleep "$sleep_sec"
+        # Sleep with backoff (integer seconds for portability)
+        sleep "$wait_interval"
 
-        wait_interval_ms=$((wait_interval_ms * 2))
-        if ((wait_interval_ms > max_interval_ms)); then
-            wait_interval_ms=$max_interval_ms
+        wait_interval=$((wait_interval * 2))
+        if ((wait_interval > max_interval)); then
+            wait_interval=$max_interval
         fi
     done
 

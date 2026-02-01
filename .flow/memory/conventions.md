@@ -51,3 +51,6 @@ Use direct test -f/-d commands instead of parsing ls output for file/directory e
 
 ## 2026-02-01 manual [convention]
 When doctor uses docker context, derive it from _cai_select_context() not hardcoded constants - ensures text and JSON output use same context
+
+## 2026-02-01 manual [convention]
+Use file mtime (via stat) for timestamp checks instead of file content - more reliable, avoids race conditions during file writes

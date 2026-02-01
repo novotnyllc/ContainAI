@@ -310,3 +310,6 @@ Template names with uppercase letters pass validation but cause Docker build fai
 
 ## 2026-02-01 manual [pitfall]
 When adding CLI flags that affect container creation, ensure validation runs in ALL code paths (new container, existing container, fresh/restart, port-conflict auto-recreate)
+
+## 2026-02-01 manual [pitfall]
+Stale flag cleanup should fail (return 1) not succeed - returning success can mask legitimately-long operations and defeats explicit timeout behavior
