@@ -40,10 +40,32 @@ Update documentation to reflect new short container naming and --fresh wait beha
 - [ ] No conflicting info with existing docs
 - [ ] Hostname behavior documented (container name vs hostname differences)
 ## Done summary
-Documentation updated to reflect RFC 1123 hostname sanitization and graceful --fresh behavior. Architecture docs explain sanitization rules, troubleshooting has FAQs, and changelog has entries.
+## Summary
 
+Updated documentation to reflect RFC 1123 hostname sanitization and graceful --fresh/--reset behavior:
+
+### Changes Made:
+
+1. **README.md**: Added "RFC 1123 Hostnames" section under Key Capabilities explaining that containers receive RFC 1123 compliant hostnames (e.g., underscores become hyphens)
+
+2. **CHANGELOG.md**: Added entry for graceful `--fresh` and `--reset` behavior with SSH wait (up to 60 seconds with exponential backoff)
+
+3. **docs/troubleshooting.md**:
+   - Added new FAQ: "Why does my SSH session wait during --fresh?" explaining the container recreation and SSH wait process
+   - Added entry to Quick Reference table for SSH wait during --fresh
+   - Added entry to Error Message Reference appendix
+
+### Files Modified:
+- `README.md`
+- `CHANGELOG.md`
+- `docs/troubleshooting.md`
+
+### Verification:
+- docs/architecture.md already had Container Naming and Hostname section with sanitization rules (lines 240-272)
+- docs/troubleshooting.md already had Hostname Issues FAQ (lines 1287-1343)
+- CHANGELOG.md already had RFC 1123 hostname entry (line 11)
+- All documentation is consistent and cross-referenced
 ## Evidence
 - Commits:
-- Tests: Verify docs are consistent and readable
+- Tests:
 - PRs:
-<!-- Updated by plan-sync (cross-phase): fn-42-cli-ux-fixes-hostname-reset-wait-help.10 changed hostname approach from short naming to RFC 1123 sanitization -->

@@ -19,6 +19,7 @@ Most common issues and their one-line fixes:
 | Files owned by nobody:nogroup | `cai doctor fix volume --all` (Linux/WSL2 only) |
 | claude/bun command not found | Pull latest image: `cai shell --fresh /path/to/workspace` |
 | Hostname differs from container name | Expected behavior - see [Hostname Issues](#hostname-issues) |
+| SSH waits during --fresh | Expected behavior - see [Hostname Issues](#why-does-my-ssh-session-wait-during---fresh) |
 
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
@@ -1341,6 +1342,37 @@ hostname  # Returns the sanitized RFC 1123 hostname
 
 Note: The container name and hostname may differ due to sanitization (e.g., underscores become hyphens).
 
+### "Why does my SSH session wait during --fresh?"
+
+**Symptom:**
+```
+cai shell --fresh /path/to/workspace
+# (brief pause before connection)
+```
+
+**Explanation:**
+
+When using `--fresh` or `--reset`, ContainAI destroys the existing container and creates a new one. The new container must boot systemd, start sshd, and generate new host keys before SSH can connect.
+
+**What's happening:**
+
+1. Old container is removed
+2. New container is created with fresh state
+3. systemd boots as PID 1
+4. `ssh-keygen.service` generates new host keys
+5. `containai-init.service` sets up workspace symlinks
+6. `ssh.service` starts
+7. CLI waits for sshd to accept connections (up to 60 seconds with exponential backoff)
+8. Old known_hosts entries are automatically cleaned
+9. SSH connects to the fresh container
+
+**This is normal:** The brief pause (typically 5-15 seconds) is expected behavior. The CLI waits gracefully rather than failing with "connection refused" errors.
+
+**If it takes longer than expected:**
+- Check container logs: `docker --context containai-docker logs <container>`
+- Increase resources in config if system is resource-constrained
+- See [Container Startup Issues](#container-startup-issues) for boot problems
+
 ---
 
 ## SSH Debugging Commands
@@ -1532,3 +1564,4 @@ Quick reference of error messages and their section in this guide:
 | "claude: command not found" | [Shell Environment Issues](#command-not-found-for-claude-bun-uv-etc) |
 | "bun: command not found" | [Shell Environment Issues](#command-not-found-for-claude-bun-uv-etc) |
 | Hostname differs from container name | [Hostname Issues](#why-does-my-hostname-differ-from-my-container-name) |
+| SSH waits during --fresh/--reset | [Hostname Issues](#why-does-my-ssh-session-wait-during---fresh) |

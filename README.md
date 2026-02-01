@@ -75,6 +75,10 @@ Supports agent forwarding and port tunneling for development workflows.
 
 Sysbox maps container root to an unprivileged host user automatically. No manual UID/GID configuration required.
 
+### RFC 1123 Hostnames
+
+Containers receive RFC 1123 compliant hostnames derived from their names. This ensures compatibility with network tools and DNS. Container names with underscores become hyphens in the hostname (e.g., `my_project-main` → `my-project-main`).
+
 ## Requirements
 
 | Requirement | Version |
