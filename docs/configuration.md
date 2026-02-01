@@ -315,6 +315,123 @@ suppress_base_warning = true
 - Boolean: `true` or `false`
 - Integer: `1` (true) or `0` (false)
 
+#### Template Directory Structure
+
+Templates are stored in `~/.config/containai/templates/`:
+
+```
+~/.config/containai/templates/
+├── default/
+│   └── Dockerfile     # Default template (installed from repo)
+└── my-custom/
+    └── Dockerfile     # User-created template
+```
+
+#### Using Templates
+
+The `--template` parameter controls which template is used for container creation:
+
+```bash
+# Use default template (automatic if not specified)
+cai
+
+# Use a specific template
+cai --template my-custom
+
+# Rebuild container with updated template
+cai --fresh
+```
+
+**Template vs image-tag:**
+- `--template <name>` builds a user-customized Dockerfile before container creation
+- `--image-tag <tag>` overrides the base image (advanced/debugging use)
+- If both are specified, `--template` takes priority and `--image-tag` is ignored
+
+#### Template Container Labels
+
+When a container is created from a template, ContainAI stores the template name as a Docker label (`ai.containai.template`). This enables:
+- Template mismatch detection when reconnecting to existing containers
+- Guidance to use `--fresh` when switching templates
+
+#### Creating Startup Scripts in Templates
+
+To run scripts when the container starts, create a systemd service in your template Dockerfile.
+
+**Important:** Use the symlink pattern, NOT `systemctl enable`. The `systemctl` command fails during docker build because systemd is not running as PID 1.
+
+```dockerfile
+# Create startup script
+COPY my-startup.sh /opt/containai/startup/my-startup.sh
+RUN chmod +x /opt/containai/startup/my-startup.sh
+
+# Create service file
+COPY <<'EOF' /etc/systemd/system/my-startup.service
+[Unit]
+Description=My Custom Startup Script
+After=containai-init.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/containai/startup/my-startup.sh
+User=agent
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable using symlink (NOT systemctl enable)
+RUN ln -sf /etc/systemd/system/my-startup.service \
+    /etc/systemd/system/multi-user.target.wants/my-startup.service
+```
+
+#### Template Restrictions
+
+ContainAI containers require specific configuration to function correctly:
+
+| Restriction | Reason |
+|-------------|--------|
+| Do NOT override ENTRYPOINT | systemd must be PID 1 for services and init to work |
+| Do NOT override CMD | Required for proper systemd startup sequence |
+| Do NOT change USER | agent user (UID 1000) is required for volume permissions |
+
+If you override these, ContainAI features (SSH, agent startup, import/export) will not work correctly.
+
+#### Troubleshooting Templates
+
+**Check template status:**
+```bash
+cai doctor
+```
+
+**Recover a broken default template:**
+```bash
+cai doctor fix template
+```
+
+**Recover all repo-shipped templates:**
+```bash
+cai doctor fix template --all
+```
+
+**Recover a specific template:**
+```bash
+cai doctor fix template <name>
+```
+
+The `fix template` command:
+1. Backs up your existing template to `Dockerfile.backup.<timestamp>`
+2. Restores the template from the ContainAI repo (for repo-shipped templates like `default` and `example-ml`)
+3. For user-created templates, only creates a backup (cannot restore from repo)
+
+**View template examples:**
+```bash
+# Default template (mostly blank with extensive comments)
+cat ~/.config/containai/templates/default/Dockerfile
+
+# ML development example (shows real-world patterns)
+cat ~/.config/containai/templates/example-ml/Dockerfile
+```
+
 ### `default_excludes` (Top-level)
 
 Global list of patterns to exclude from import and export operations.

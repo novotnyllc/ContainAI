@@ -166,10 +166,109 @@ flowchart TB
 | `cai shell` | Open bash shell in running sandbox |
 | `cai stop --all` | Stop all ContainAI containers |
 
+## Customizing Your Container
+
+ContainAI supports user templates to customize your container environment. Templates let you install additional tools, languages, or startup scripts that persist across container recreations.
+
+### Template Location
+
+Templates are stored in `~/.config/containai/templates/`. The default template is installed during first use:
+
+```
+~/.config/containai/templates/
+└── default/
+    └── Dockerfile    # Your customizable Dockerfile
+```
+
+### Editing Your Template
+
+Open the default template and add your customizations:
+
+```bash
+# View/edit your template
+${EDITOR:-nano} ~/.config/containai/templates/default/Dockerfile
+```
+
+The template Dockerfile includes comments showing how to:
+- Install system packages (apt-get)
+- Add Node/Python/Rust packages
+- Create startup scripts
+
+### Using a Custom Template
+
+```bash
+# Use the default template (automatic)
+cai
+
+# Use a specific template
+cai --template my-custom
+
+# Rebuild container with template changes
+cai --fresh
+```
+
+### Creating Startup Scripts
+
+To run scripts when the container starts, create a systemd service. In Dockerfiles, you must use the symlink pattern instead of `systemctl enable` (systemd is not running during docker build):
+
+```dockerfile
+# Create your startup script
+COPY my-startup.sh /opt/containai/startup/my-startup.sh
+RUN chmod +x /opt/containai/startup/my-startup.sh
+
+# Create the systemd service file
+COPY my-startup.service /etc/systemd/system/my-startup.service
+
+# Enable using symlink (NOT systemctl enable)
+RUN ln -sf /etc/systemd/system/my-startup.service \
+    /etc/systemd/system/multi-user.target.wants/my-startup.service
+```
+
+Example service file (`my-startup.service`):
+```ini
+[Unit]
+Description=My Custom Startup Script
+After=containai-init.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/containai/startup/my-startup.sh
+User=agent
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Template Warnings
+
+When customizing templates, avoid these common mistakes:
+
+| What NOT to do | Why |
+|----------------|-----|
+| Override ENTRYPOINT | systemd must be PID 1 for services to work |
+| Override CMD | Required for systemd startup |
+| Change USER to non-agent | Permissions will break (agent is UID 1000) |
+| Use `systemctl enable` | Fails during docker build; use symlink pattern |
+
+### Recovering a Broken Template
+
+If your template has issues, recover it with:
+
+```bash
+# Check template status
+cai doctor
+
+# Restore default template from repo
+cai doctor fix template
+```
+
+See [Configuration Reference](configuration.md#template-section) for template configuration options.
+
 ## Next Steps
 
 - **Configure ContainAI** - See the [Technical README](../src/README.md#commands) for volume, naming, and configuration options
 - **Troubleshoot issues** - See [Troubleshooting](../src/README.md#troubleshooting) for common problems
+- **Customize your container** - See [Configuration Reference](configuration.md#template-section) for template options
 - **Security model** - See [SECURITY.md](../SECURITY.md) for security guarantees and threat model
 
 ---
