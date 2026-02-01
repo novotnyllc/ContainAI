@@ -765,9 +765,10 @@ FROM ubuntu:latest
 RUN apt-get update
 EOF
 
-    # Test that validation emits warning
-    local validation_output
-    validation_output=$(_cai_validate_template_base "test-ubuntu" 2>&1) || true
+    # Test that validation emits warning (function expects Dockerfile path, not template name)
+    local validation_output dockerfile_path
+    dockerfile_path="$TEST_TEMPLATE_DIR/test-ubuntu/Dockerfile"
+    validation_output=$(_cai_validate_template_base "$dockerfile_path" 2>&1) || true
 
     if printf '%s' "$validation_output" | grep -qi "not based on ContainAI"; then
         pass "Layer validation warns for non-ContainAI base"
@@ -782,7 +783,8 @@ FROM ghcr.io/novotnyllc/containai:latest
 RUN echo "test"
 EOF
 
-    validation_output=$(_cai_validate_template_base "test-containai" 2>&1) || true
+    dockerfile_path="$TEST_TEMPLATE_DIR/test-containai/Dockerfile"
+    validation_output=$(_cai_validate_template_base "$dockerfile_path" 2>&1) || true
 
     if printf '%s' "$validation_output" | grep -qi "not based on ContainAI"; then
         fail "Layer validation incorrectly warns for ContainAI base"

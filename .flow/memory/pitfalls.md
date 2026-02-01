@@ -304,3 +304,6 @@ Shell completion tasks should depend on parameter-parsing tasks - advertising no
 
 ## 2026-02-01 manual [pitfall]
 grep with pipe alternation (\|) requires -E flag for POSIX/BSD portability; use grep -E 'a|b' instead of grep 'a\|b'
+
+## 2026-02-01 manual [pitfall]
+Template names with uppercase letters pass validation but cause Docker build failures because repository names must be lowercase
