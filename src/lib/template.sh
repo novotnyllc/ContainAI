@@ -406,6 +406,7 @@ _cai_ensure_default_templates() {
 # Returns: 0 on success, 1 on failure
 # Outputs: Image name (stdout) on success: containai-template-{name}:local
 # Note: For dry-run mode, outputs TEMPLATE_BUILD_CMD=<command> to stdout
+#       The command is shell-escaped and includes env var clearing prefix
 _cai_build_template() {
     local template_name="${1:-default}"
     local docker_context="${2:-}"
@@ -441,11 +442,19 @@ _cai_build_template() {
 
     # Handle dry-run mode
     if [[ "$dry_run" == "true" ]]; then
-        # Output machine-parseable format
-        # Quote command properly for shell execution
-        local build_cmd_str
-        build_cmd_str="${build_args[*]}"
-        printf '%s\n' "TEMPLATE_BUILD_CMD=$build_cmd_str"
+        # Output machine-parseable format with proper shell escaping
+        # Use printf %q to escape each argument, preserving argument boundaries
+        local build_cmd_str=""
+        local arg
+        for arg in "${build_args[@]}"; do
+            if [[ -n "$build_cmd_str" ]]; then
+                build_cmd_str+=" "
+            fi
+            # Use printf %q to shell-escape each argument
+            build_cmd_str+=$(printf '%q' "$arg")
+        done
+        # Include env var clearing prefix to match actual execution
+        printf '%s\n' "TEMPLATE_BUILD_CMD=DOCKER_CONTEXT= DOCKER_HOST= $build_cmd_str"
         printf '%s\n' "TEMPLATE_IMAGE=$image_tag"
         printf '%s\n' "TEMPLATE_NAME=$template_name"
         return 0
@@ -453,15 +462,20 @@ _cai_build_template() {
 
     # Build the template
     _cai_info "Building template '$template_name'..."
-    local build_output
     # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context flag authoritative
-    if ! build_output=$(DOCKER_CONTEXT= DOCKER_HOST= "${build_args[@]}" 2>&1); then
-        _cai_error "Failed to build template '$template_name'"
-        _cai_error "Build output:"
-        # Print each line of build output as an error
-        printf '%s\n' "$build_output" | while IFS= read -r line; do
-            _cai_error "  $line"
-        done
+    # Stream output directly on failure to avoid memory issues with large builds
+    local build_rc
+    if DOCKER_CONTEXT= DOCKER_HOST= "${build_args[@]}" >/dev/null 2>&1; then
+        build_rc=0
+    else
+        build_rc=$?
+    fi
+
+    if [[ $build_rc -ne 0 ]]; then
+        _cai_error "Failed to build template '$template_name' (exit code: $build_rc)"
+        _cai_error "Re-running build to show output:"
+        # Re-run with output visible for debugging (output goes to stderr)
+        DOCKER_CONTEXT= DOCKER_HOST= "${build_args[@]}" >&2 || true
         return 1
     fi
 

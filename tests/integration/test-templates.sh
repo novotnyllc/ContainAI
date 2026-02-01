@@ -655,8 +655,52 @@ test_template_build_dry_run() {
         else
             fail "Dry-run build command missing 'docker build'"
         fi
+
+        # Verify env var clearing prefix is included (matches actual execution)
+        if printf '%s' "$dry_run_output" | grep -q "^TEMPLATE_BUILD_CMD=DOCKER_CONTEXT= DOCKER_HOST="; then
+            pass "Dry-run command includes env var clearing prefix"
+        else
+            fail "Dry-run command missing env var clearing prefix"
+        fi
     else
         fail "Template build dry-run failed: $dry_run_output"
+    fi
+}
+
+# ==============================================================================
+# Test 12d: Template build dry-run with context (requires fn-33-lp4.4)
+# ==============================================================================
+test_template_build_dry_run_with_context() {
+    section "Test 12d: Template build dry-run with context"
+
+    # Check if _cai_build_template exists (fn-33-lp4.4)
+    if ! declare -f _cai_build_template >/dev/null 2>&1; then
+        skip "Template build not implemented (fn-33-lp4.4 pending)"
+        return
+    fi
+
+    # Use fresh test directory with default template
+    rm -rf "$TEST_TEMPLATE_DIR"
+    mkdir -p "$TEST_TEMPLATE_DIR/default"
+    cp "$SRC_DIR/templates/default.Dockerfile" "$TEST_TEMPLATE_DIR/default/Dockerfile"
+    _CAI_TEMPLATE_DIR="$TEST_TEMPLATE_DIR"
+    TEMPLATE_DIR_OVERRIDDEN=1
+
+    # Test dry-run with a context specified
+    local dry_run_output dry_run_rc
+    dry_run_output=$(_cai_build_template "default" "my-context" "true" 2>&1) && dry_run_rc=0 || dry_run_rc=$?
+
+    if [[ $dry_run_rc -eq 0 ]]; then
+        pass "Template build dry-run with context succeeded"
+
+        # Verify --context flag is included in the command
+        if printf '%s' "$dry_run_output" | grep -q "\-\-context.*my-context"; then
+            pass "Dry-run command includes --context flag"
+        else
+            fail "Dry-run command missing --context flag"
+        fi
+    else
+        fail "Template build dry-run with context failed: $dry_run_output"
     fi
 }
 
@@ -871,6 +915,7 @@ test_setup_installs_templates
 # Run tests - pending features (will skip if not implemented)
 test_template_build
 test_template_build_dry_run
+test_template_build_dry_run_with_context
 test_template_image_name
 test_layer_validation
 test_doctor_template_detection
