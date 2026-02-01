@@ -745,6 +745,105 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
+# Test: _containai_parse_config extracts [template].suppress_base_warning
+# ==============================================================================
+
+test_start "_containai_parse_config parses [template].suppress_base_warning = true"
+setup_tmpdir
+mkdir -p "$TEST_TMPDIR/workspace"
+cat > "$TEST_TMPDIR/config.toml" <<'EOF'
+[template]
+suppress_base_warning = true
+EOF
+_CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
+if _containai_parse_config "$TEST_TMPDIR/config.toml" "$TEST_TMPDIR/workspace" 2>/dev/null; then
+    if [[ "$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING" == "true" ]]; then
+        test_pass
+    else
+        test_fail "expected 'true', got '$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING'"
+    fi
+else
+    test_fail "parse_config failed"
+fi
+teardown_tmpdir
+
+test_start "_containai_parse_config parses [template].suppress_base_warning = false"
+setup_tmpdir
+mkdir -p "$TEST_TMPDIR/workspace"
+cat > "$TEST_TMPDIR/config.toml" <<'EOF'
+[template]
+suppress_base_warning = false
+EOF
+_CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
+if _containai_parse_config "$TEST_TMPDIR/config.toml" "$TEST_TMPDIR/workspace" 2>/dev/null; then
+    if [[ "$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING" == "" ]]; then
+        test_pass
+    else
+        test_fail "expected empty, got '$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING'"
+    fi
+else
+    test_fail "parse_config failed"
+fi
+teardown_tmpdir
+
+test_start "_containai_parse_config handles [template].suppress_base_warning = 1"
+setup_tmpdir
+mkdir -p "$TEST_TMPDIR/workspace"
+cat > "$TEST_TMPDIR/config.toml" <<'EOF'
+[template]
+suppress_base_warning = 1
+EOF
+_CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
+if _containai_parse_config "$TEST_TMPDIR/config.toml" "$TEST_TMPDIR/workspace" 2>/dev/null; then
+    if [[ "$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING" == "true" ]]; then
+        test_pass
+    else
+        test_fail "expected 'true' for value 1, got '$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING'"
+    fi
+else
+    test_fail "parse_config failed"
+fi
+teardown_tmpdir
+
+test_start "_containai_parse_config handles [template].suppress_base_warning = 0"
+setup_tmpdir
+mkdir -p "$TEST_TMPDIR/workspace"
+cat > "$TEST_TMPDIR/config.toml" <<'EOF'
+[template]
+suppress_base_warning = 0
+EOF
+_CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
+if _containai_parse_config "$TEST_TMPDIR/config.toml" "$TEST_TMPDIR/workspace" 2>/dev/null; then
+    if [[ "$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING" == "" ]]; then
+        test_pass
+    else
+        test_fail "expected empty for value 0, got '$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING'"
+    fi
+else
+    test_fail "parse_config failed"
+fi
+teardown_tmpdir
+
+test_start "_containai_parse_config handles missing [template] section"
+setup_tmpdir
+mkdir -p "$TEST_TMPDIR/workspace"
+cat > "$TEST_TMPDIR/config.toml" <<'EOF'
+[agent]
+default = "claude"
+EOF
+_CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
+if _containai_parse_config "$TEST_TMPDIR/config.toml" "$TEST_TMPDIR/workspace" 2>/dev/null; then
+    if [[ "$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING" == "" ]]; then
+        test_pass
+    else
+        test_fail "expected empty for missing section, got '$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING'"
+    fi
+else
+    test_fail "parse_config failed"
+fi
+teardown_tmpdir
+
+# ==============================================================================
 # Summary
 # ==============================================================================
 

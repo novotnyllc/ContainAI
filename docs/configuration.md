@@ -293,6 +293,28 @@ Update check state is stored in `~/.cache/containai/update-check`. This file tra
 - Update checks only run on Linux/WSL2 where the managed dockerd bundle is installed
 - On macOS, update checks are skipped (Lima VM manages its own Docker)
 
+### `[template]` Section
+
+Template system configuration for customizing container images.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `suppress_base_warning` | boolean | `false` | Suppress warning when template is not based on ContainAI images |
+
+```toml
+[template]
+suppress_base_warning = true
+```
+
+**Warning suppression:**
+- When `false` (default), ContainAI warns if your template Dockerfile uses a base image that doesn't appear to be a ContainAI image
+- This warning helps catch configuration mistakes where the template might not work correctly (missing systemd, agents, init scripts)
+- Set to `true` if you intentionally use a non-ContainAI base image and understand the implications
+
+**Accepted values:**
+- Boolean: `true` or `false`
+- Integer: `1` (true) or `0` (false)
+
 ### `default_excludes` (Top-level)
 
 Global list of patterns to exclude from import and export operations.

@@ -2299,7 +2299,8 @@ _containai_start_container() {
             # This builds the user's Dockerfile using the same Docker context as container creation
             if [[ "$use_template" == "true" ]]; then
                 local template_image
-                if ! template_image=$(_cai_build_template "$template_name" "$selected_context"); then
+                # Args: template_name, context, dry_run=false, suppress_base_warning from config
+                if ! template_image=$(_cai_build_template "$template_name" "$selected_context" "false" "$_CAI_TEMPLATE_SUPPRESS_BASE_WARNING"); then
                     _cai_error "Failed to build template '$template_name'"
                     return 1
                 fi

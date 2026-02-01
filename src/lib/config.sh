@@ -31,6 +31,7 @@
 #   _CAI_SSH_LOCAL_FORWARDS   - Bash array of LocalForward entries (from [ssh] section)
 #   _CAI_CONTAINER_MEMORY     - Memory limit (from [container] section, e.g., "4g")
 #   _CAI_CONTAINER_CPUS       - CPU limit (from [container] section, e.g., 2)
+#   _CAI_TEMPLATE_SUPPRESS_BASE_WARNING - Suppress template base image warning ("true" or empty)
 #
 # Usage: source lib/config.sh
 # ==============================================================================
@@ -70,6 +71,7 @@ _CAI_SSH_FORWARD_AGENT=""
 _CAI_SSH_LOCAL_FORWARDS=()
 _CAI_CONTAINER_MEMORY=""
 _CAI_CONTAINER_CPUS=""
+_CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
 
 # ==============================================================================
 # Volume name validation
@@ -243,6 +245,7 @@ _containai_parse_config() {
     _CAI_SSH_LOCAL_FORWARDS=()
     _CAI_CONTAINER_MEMORY=""
     _CAI_CONTAINER_CPUS=""
+    _CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
 
     # Check if config file exists
     if [[ ! -f "$config_file" ]]; then
@@ -521,6 +524,20 @@ if isinstance(container, dict):
 ")
     _CAI_CONTAINER_MEMORY="$container_memory"
     _CAI_CONTAINER_CPUS="$container_cpus"
+
+    # Extract [template] section for template-related configuration
+    local template_suppress_warning
+    template_suppress_warning=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+template = config.get('template', {})
+if isinstance(template, dict):
+    val = template.get('suppress_base_warning', False)
+    # Accept boolean true/false or 1/0
+    if val is True or val == 1 or (isinstance(val, str) and val.lower() in ('true', '1')):
+        print('true')
+")
+    _CAI_TEMPLATE_SUPPRESS_BASE_WARNING="$template_suppress_warning"
 
     # Extract excludes with cumulative merge (pass JSON via stdin):
     # default_excludes + workspace.<key>.excludes (deduped)
