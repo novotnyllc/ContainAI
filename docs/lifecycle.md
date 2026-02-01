@@ -109,6 +109,8 @@ cai export --container myapp-main
 
 The export creates a `.tgz` archive containing agent credentials, configuration, and other persistent data from the data volume.
 
+> **Planned**: A `cai stop --export` flag will be added in a future release to automatically export data before stopping the container.
+
 ### Importing Data
 
 Use `cai import` to restore or sync configurations into the data volume:
