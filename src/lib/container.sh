@@ -2783,10 +2783,14 @@ _containai_list_containers_for_context() {
 # Arguments:
 #   --all    Stop all containers without prompting (non-interactive mode)
 #   --remove Also remove containers (not just stop) and clean SSH configs
+#   --export Export data volume before stopping each selected container
+#   --force  Continue stopping even if export fails
 # Returns: 0 on success, 1 on error (non-interactive without --all, or docker unavailable)
 _containai_stop_all() {
     local stop_all_flag=false
     local remove_flag=false
+    local export_first=false
+    local force_flag=false
     local arg
 
     for arg in "$@"; do
@@ -2796,6 +2800,12 @@ _containai_stop_all() {
                 ;;
             --remove)
                 remove_flag=true
+                ;;
+            --export)
+                export_first=true
+                ;;
+            --force)
+                force_flag=true
                 ;;
         esac
     done
@@ -2971,6 +2981,19 @@ _containai_stop_all() {
     for idx in "${to_stop_idx[@]}"; do
         container_to_stop="${names[$idx]}"
         ctx_to_use="${contexts[$idx]}"
+
+        # Export before stop: run export first (if --export), before stopping
+        if [[ "$export_first" == "true" ]]; then
+            _cai_info "Exporting data volume for $container_to_stop..."
+            # Use --container flag only; export resolves context internally
+            if ! _containai_export_cmd --container "$container_to_stop"; then
+                if [[ "$force_flag" != "true" ]]; then
+                    _cai_error "Export failed for $container_to_stop. Use --force to continue anyway."
+                    return 1
+                fi
+                _cai_warn "Export failed for $container_to_stop, continuing due to --force"
+            fi
+        fi
 
         # Get SSH port before stopping/removing (for cleanup)
         ssh_port=""

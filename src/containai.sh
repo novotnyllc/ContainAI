@@ -398,8 +398,9 @@ Session Warning:
 
 Export Before Stop:
   When --export is used, the container's data volume is exported before stopping.
-  The order of operations is: export → session check → stop.
+  The order of operations is: export → session check (unless --force) → stop.
   If export fails, the stop is aborted unless --force is used.
+  Works with --container, workspace-resolved containers, or interactive selection.
 
 Examples:
   cai stop                      Interactive selection to stop containers
