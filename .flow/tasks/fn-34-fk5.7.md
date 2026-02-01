@@ -36,3 +36,10 @@ Write documentation on container lifecycle: when containers are created, started
 - [ ] Documents start/stop behavior
 - [ ] Documents volume lifecycle
 - [ ] Documents GC behavior and protection rules
+
+## Done summary
+Created comprehensive container lifecycle documentation covering creation, starting, stopping, destruction, backup/export, garbage collection (planned), and status monitoring. Added link from quickstart guide.
+## Evidence
+- Commits: a0f5611, 11c0ace, 4e9e25e
+- Tests:
+- PRs:
