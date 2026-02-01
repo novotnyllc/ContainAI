@@ -1,7 +1,4 @@
 {
-  "assignee": null,
-  "claim_note": "",
-  "claimed_at": null,
   "created_at": "2026-01-28T10:18:56.217345Z",
   "depends_on": [],
   "epic": "fn-34-fk5",
@@ -10,5 +7,5 @@
   "spec_path": ".flow/tasks/fn-34-fk5.3.md",
   "status": "todo",
   "title": "Implement exit code passthrough",
-  "updated_at": "2026-02-01T15:48:10.781698Z"
+  "updated_at": "2026-02-01T16:37:27.582740Z"
 }

@@ -56,7 +56,32 @@ Code analysis verification (no runtime test required as implementation is straig
 ## Artifacts
 
 - `.flow/evidence/fn-34-fk5.3-verification.md` - Detailed verification report
+## Summary
+
+Verified that remote command exit codes are properly returned to the caller through code analysis of the SSH subsystem in `src/lib/ssh.sh`.
+
+## Key Findings
+
+1. **Exit codes 0 (success)**: Correctly returned via `return 0` (line 2605)
+2. **Exit codes 1-254 (remote command)**: Passed through unchanged via `return $ssh_exit_code` (line 2697)
+3. **Exit code 255 (SSH transport)**: Handled with retry logic and appropriate error codes
+4. **Container/SSH errors (10-15)**: Returned for specific failure conditions
+
+## Implementation Evidence
+
+- Exit code constants defined at lines 1844-1850
+- Passthrough logic in `_cai_ssh_run_with_retry` at line 2697
+- Container not found returns 10 at line 2239
+- Direct propagation in `_containai_exec_cmd` at line 4237
+
+## Verification Type
+
+Code analysis verification (no runtime test required as implementation is straightforward passthrough).
+
+## Artifacts
+
+- `.flow/evidence/fn-34-fk5.3-verification.md` - Detailed verification report
 ## Evidence
-- Commits:
+- Commits: 3666aa7
 - Tests:
 - PRs:
