@@ -27,14 +27,14 @@
 
 # Require bash first (before using BASH_SOURCE)
 if [[ -z "${BASH_VERSION:-}" ]]; then
-    echo "[ERROR] lib/template.sh requires bash" >&2
+    printf '%s\n' "[ERROR] lib/template.sh requires bash" >&2
     return 1 2>/dev/null || exit 1
 fi
 
 # Detect direct execution (must be sourced, not executed)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    echo "[ERROR] lib/template.sh must be sourced, not executed directly" >&2
-    echo "Usage: source lib/template.sh" >&2
+    printf '%s\n' "[ERROR] lib/template.sh must be sourced, not executed directly" >&2
+    printf '%s\n' "Usage: source lib/template.sh" >&2
     exit 1
 fi
 
@@ -60,7 +60,7 @@ _CAI_TEMPLATE_DIR="${_CAI_CONFIG_DIR:-$HOME/.config/containai}/templates"
 # Rejects: empty, slashes, .., or names not matching safe pattern
 # Returns: 0=valid, 1=invalid
 _cai_validate_template_name() {
-    local name="$1"
+    local name="${1:-}"
 
     # Check empty
     if [[ -z "$name" ]]; then

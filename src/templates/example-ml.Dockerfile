@@ -1,8 +1,12 @@
+# syntax=docker/dockerfile:1.4
 # ContainAI Example Template - ML Development
 # ==========================================
 #
 # This example shows how to customize ContainAI for ML development.
-# Copy this to ~/.config/containai/templates/ml/Dockerfile and modify as needed.
+# Copy this to ~/.config/containai/templates/example-ml/Dockerfile and modify.
+#
+# NOTE: This Dockerfile uses BuildKit heredocs (requires Docker 20.10+ with
+# BuildKit enabled). ContainAI builds use BuildKit by default.
 #
 # IMPORTANT WARNINGS:
 # ------------------

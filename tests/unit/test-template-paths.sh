@@ -118,7 +118,7 @@ for name in "${valid_names[@]}"; do
         break
     fi
 done
-if $all_passed; then
+if [[ "$all_passed" == "true" ]]; then
     test_pass
 fi
 
@@ -136,7 +136,7 @@ for name in "${invalid_names[@]}"; do
         break
     fi
 done
-if $all_rejected; then
+if [[ "$all_rejected" == "true" ]]; then
     test_pass
 fi
 
@@ -154,7 +154,7 @@ for name in "${invalid_patterns[@]}"; do
         break
     fi
 done
-if $all_rejected; then
+if [[ "$all_rejected" == "true" ]]; then
     test_pass
 fi
 

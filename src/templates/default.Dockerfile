@@ -10,7 +10,9 @@
 # 2. DO NOT override CMD - it's set to start systemd properly
 # 3. DO NOT change the USER - agent user (UID 1000) is required for permissions
 #
-# To reset to default: cai doctor fix template
+# To reset to default, reinstall the template from the repo:
+#   cp /path/to/containai/src/templates/default.Dockerfile \
+#      ~/.config/containai/templates/default/Dockerfile
 #
 # Base image - ContainAI with all agents and SDKs
 FROM ghcr.io/novotnyllc/containai:latest
