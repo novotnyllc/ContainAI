@@ -416,15 +416,54 @@ teardown_tmpdir
 
 test_start "_cai_ensure_default_templates returns non-zero when templates cannot be installed"
 setup_tmpdir
+# Point _CAI_TEMPLATE_DIR at a regular file (not directory) to force mkdir -p failure
+printf '%s\n' "not a directory" > "$TEST_TMPDIR/templates"
 _CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
-# Make templates dir unwritable to force failure
-mkdir -p "$TEST_TMPDIR/templates"
-chmod 000 "$TEST_TMPDIR/templates"
 if _cai_ensure_default_templates "false" 2>/dev/null; then
-    chmod 755 "$TEST_TMPDIR/templates"  # Restore for cleanup
     test_fail "returned success when install should fail"
 else
-    chmod 755 "$TEST_TMPDIR/templates"  # Restore for cleanup
+    test_pass
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_template_exists_or_install auto-installs repo templates
+# ==============================================================================
+
+test_start "_cai_template_exists_or_install auto-installs missing default template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+if _cai_template_exists_or_install "default" 2>/dev/null; then
+    if [[ -f "$TEST_TMPDIR/templates/default/Dockerfile" ]]; then
+        test_pass
+    else
+        test_fail "template file not created"
+    fi
+else
+    test_fail "returned failure"
+fi
+teardown_tmpdir
+
+test_start "_cai_template_exists_or_install auto-installs missing example-ml template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+if _cai_template_exists_or_install "example-ml" 2>/dev/null; then
+    if [[ -f "$TEST_TMPDIR/templates/example-ml/Dockerfile" ]]; then
+        test_pass
+    else
+        test_fail "template file not created"
+    fi
+else
+    test_fail "returned failure"
+fi
+teardown_tmpdir
+
+test_start "_cai_template_exists_or_install returns false for non-repo template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+if _cai_template_exists_or_install "custom-not-repo" 2>/dev/null; then
+    test_fail "should have failed for non-repo template"
+else
     test_pass
 fi
 teardown_tmpdir

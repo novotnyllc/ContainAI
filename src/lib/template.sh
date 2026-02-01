@@ -5,14 +5,15 @@
 # This file must be sourced, not executed directly.
 #
 # Provides:
-#   _cai_get_template_dir()       - Return path to templates directory
-#   _cai_get_template_path()      - Return path to template Dockerfile
-#   _cai_ensure_template_dir()    - Create template directory if missing
-#   _cai_template_exists()        - Check if a named template exists
-#   _cai_validate_template_name() - Validate template name (no path traversal)
-#   _cai_require_template()       - Get template path with first-use auto-install
-#   _cai_install_template()       - Install a single template from repo (if missing)
-#   _cai_install_all_templates()  - Install all repo templates during setup
+#   _cai_get_template_dir()        - Return path to templates directory
+#   _cai_get_template_path()       - Return path to template Dockerfile
+#   _cai_ensure_template_dir()     - Create template directory if missing
+#   _cai_template_exists()         - Check if a named template exists (no auto-install)
+#   _cai_template_exists_or_install() - Check with first-use auto-install for repo templates
+#   _cai_validate_template_name()  - Validate template name (no path traversal)
+#   _cai_require_template()        - Get template path with first-use auto-install
+#   _cai_install_template()        - Install a single template from repo (if missing)
+#   _cai_install_all_templates()   - Install all repo templates during setup
 #   _cai_ensure_default_templates() - Install all missing default templates
 #
 # Template directory structure:
@@ -140,9 +141,10 @@ _cai_ensure_template_dir() {
     return 0
 }
 
-# Check if a named template exists
+# Check if a named template exists (without triggering first-use install)
 # Args: template_name
 # Returns: 0 if template Dockerfile exists, 1 otherwise
+# Note: Use _cai_require_template() for first-use auto-install behavior
 _cai_template_exists() {
     local template_name="${1:-default}"
     local template_path
@@ -153,6 +155,35 @@ _cai_template_exists() {
 
     template_path="$_CAI_TEMPLATE_DIR/$template_name/Dockerfile"
     [[ -f "$template_path" ]]
+}
+
+# Check if template exists, auto-installing repo templates on first use
+# This implements the "first-use detection" for repo-shipped templates
+# Args: template_name
+# Returns: 0 if template exists or was auto-installed, 1 otherwise
+_cai_template_exists_or_install() {
+    local template_name="${1:-default}"
+
+    # If already exists, return success
+    if _cai_template_exists "$template_name"; then
+        return 0
+    fi
+
+    # Check if this is a repo-shipped template that can be auto-installed
+    local entry
+    for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
+        local name="${entry%%:*}"
+        if [[ "$name" == "$template_name" ]]; then
+            # First-use: auto-install missing repo template
+            if _cai_install_template "$template_name" "false"; then
+                return 0
+            fi
+            return 1
+        fi
+    done
+
+    # Not a repo template and doesn't exist
+    return 1
 }
 
 # Require a template to exist, triggering first-use installation if needed
