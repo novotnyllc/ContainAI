@@ -493,6 +493,12 @@ test_dry_run_mode() {
 test_setup_installs_templates() {
     section "Test 11: Template installation via setup"
 
+    # cai setup --dry-run calls docker context inspect, so skip if Docker unavailable
+    if [[ "$DOCKER_AVAILABLE" -ne 1 ]]; then
+        skip "Docker not available (required for setup commands)"
+        return
+    fi
+
     # This test verifies that `cai setup --dry-run` mentions template installation
     # Uses hermetic HOME to avoid polluting user config
 
