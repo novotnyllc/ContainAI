@@ -1803,9 +1803,11 @@ _cai_verify_ssh_connectivity() {
 # Removes:
 # - SSH host config file
 # - known_hosts entries for the port
+# - known_hosts entries for the container name (SSH Host alias)
 _cai_cleanup_container_ssh() {
     local container_name="$1"
     local ssh_port="$2"
+    local known_hosts_file="$_CAI_KNOWN_HOSTS_FILE"
 
     _cai_debug "Cleaning up SSH configuration for container $container_name"
 
@@ -1814,6 +1816,12 @@ _cai_cleanup_container_ssh() {
 
     # Clean known_hosts entries for this port
     _cai_clean_known_hosts "$ssh_port"
+
+    # Also remove entries by container name (SSH Host alias)
+    # Users connecting via "ssh <container_name>" get entries with the alias
+    if [[ -f "$known_hosts_file" ]]; then
+        ssh-keygen -R "$container_name" -f "$known_hosts_file" >/dev/null 2>&1 || true
+    fi
 
     return 0
 }
@@ -2068,6 +2076,8 @@ _cai_ssh_connect_with_retry() {
                     if [[ "$host_key_auto_recovered" != "true" ]]; then
                         _cai_warn "SSH host key changed, auto-recovering..."
                         _cai_clean_known_hosts "$ssh_port"
+                        # Also clean container name entry (SSH Host alias)
+                        ssh-keygen -R "$container_name" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
                         _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "true" 2>/dev/null || true
                         host_key_auto_recovered=true
                         # Don't count this as a retry - it's auto-recovery
@@ -2585,6 +2595,8 @@ _cai_ssh_run_with_retry() {
                     if [[ "$host_key_auto_recovered" != "true" ]]; then
                         _cai_warn "SSH host key changed, auto-recovering..."
                         _cai_clean_known_hosts "$ssh_port"
+                        # Also clean container name entry (SSH Host alias)
+                        ssh-keygen -R "$container_name" -f "$_CAI_KNOWN_HOSTS_FILE" >/dev/null 2>&1 || true
                         _cai_update_known_hosts "$container_name" "$ssh_port" "$context" "true" 2>/dev/null || true
                         host_key_auto_recovered=true
                         # Don't count this as a retry - it's auto-recovery

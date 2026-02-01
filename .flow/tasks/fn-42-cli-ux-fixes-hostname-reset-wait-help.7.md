@@ -28,8 +28,23 @@ This should already be happening - verify it works correctly.
 - [ ] No "REMOTE HOST IDENTIFICATION HAS CHANGED" warning after recreation
 - [ ] Works for both container name and localhost:port entries
 ## Done summary
-TBD
+## Summary
 
+Enhanced SSH known_hosts cleanup in `_cai_cleanup_container_ssh()` to also remove entries by container name (SSH Host alias), preventing "REMOTE HOST IDENTIFICATION HAS CHANGED" warnings after container recreation.
+
+## Changes
+
+1. **`_cai_cleanup_container_ssh()`** (src/lib/ssh.sh:1807): Added cleanup of container name entries in known_hosts file. Users connecting via `ssh <container_name>` get entries with the alias that need to be cleaned on recreation.
+
+2. **`_cai_ssh_connect_with_retry()`** (src/lib/ssh.sh:2076): Added container name cleanup in the auto-recovery path for host key mismatches.
+
+3. **`_cai_ssh_run_with_retry()`** (src/lib/ssh.sh:2595): Added container name cleanup in the auto-recovery path for host key mismatches.
+
+## Verification
+
+- shellcheck passes with no errors
+- CLI sources successfully
+- Changes are minimal and focused on the specific issue
 ## Evidence
 - Commits:
 - Tests:
