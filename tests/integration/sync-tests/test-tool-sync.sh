@@ -225,7 +225,17 @@ test_git_filter_assertions() {
 # Test 2: GitHub CLI secret separation (hosts.yml vs config.yml)
 # ==============================================================================
 setup_gh_secret_fixture() {
-    create_gh_fixture
+    local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
+    mkdir -p "$fixture/.config/gh"
+
+    printf '%s\n' 'github.com:' >"$fixture/.config/gh/hosts.yml"
+    printf '%s\n' '  oauth_token: test-token' >>"$fixture/.config/gh/hosts.yml"
+    # Set explicit 600 for secret file
+    chmod 600 "$fixture/.config/gh/hosts.yml"
+
+    printf '%s\n' 'editor: vim' >"$fixture/.config/gh/config.yml"
+    # Set explicit 644 for non-secret file to avoid umask issues
+    chmod 644 "$fixture/.config/gh/config.yml"
 }
 
 test_gh_secret_separation_assertions() {
@@ -236,11 +246,12 @@ test_gh_secret_separation_assertions() {
     # hosts.yml should have 600 perms (secret)
     assert_permissions_in_volume "config/gh/hosts.yml" "600" || return 1
 
-    # config.yml should NOT have 600 perms (not secret, typically 644)
+    # config.yml should have 644 perms (not secret)
+    # We explicitly set 644 in the fixture to ensure deterministic test
     local config_perms
     config_perms=$(exec_in_container "$SYNC_TEST_CONTAINER" stat -c '%a' "/mnt/agent-data/config/gh/config.yml")
-    if [[ "$config_perms" == "600" ]]; then
-        printf '%s\n' "[DEBUG] config.yml has 600 perms but should not (not a secret)" >&2
+    if [[ "$config_perms" != "644" ]]; then
+        printf '%s\n' "[DEBUG] config.yml has $config_perms perms but should have 644 (not a secret)" >&2
         return 1
     fi
 
@@ -410,6 +421,14 @@ test_no_secrets_keeps_additional_paths_assertions() {
     assert_dir_exists_in_volume "ssh" || return 1
     assert_file_exists_in_volume "ssh/config" || return 1
 
+    # Crucially: secret files (private keys) should ALSO be synced because
+    # additional_paths are an explicit user choice that overrides --no-secrets
+    # This is the key assertion that validates the spec requirement
+    assert_file_exists_in_volume "ssh/id_ed25519" || {
+        printf '%s\n' "[DEBUG] ssh/id_ed25519 should exist - --no-secrets must not affect additional_paths" >&2
+        return 1
+    }
+
     return 0
 }
 
@@ -427,16 +446,26 @@ setup_vscode_empty_fixture() {
 test_vscode_ensures_targets_assertions() {
     # VS Code entries are non-optional d flags
     # Even when source is missing, targets should be ensured (empty dirs created)
-    # Note: Only directories that already exist in volume (from container init) will persist
-    # The actual behavior depends on whether the entrypoint/init script creates these
+    # This tests the ensure() behavior for non-optional directory entries
 
-    # These paths should exist (created by container init or by import)
-    # If they don't exist from import, they may be created by container startup
-    # We're testing that the import doesn't fail and that the container starts correctly
-    # The vscode-server directories may or may not exist depending on container init
+    # These directories should be ensured even when source is missing
+    assert_dir_exists_in_volume "vscode-server/extensions" || {
+        printf '%s\n' "[DEBUG] vscode-server/extensions should be ensured even when source missing" >&2
+        return 1
+    }
+    assert_dir_exists_in_volume "vscode-server/data/Machine" || {
+        printf '%s\n' "[DEBUG] vscode-server/data/Machine should be ensured even when source missing" >&2
+        return 1
+    }
+    assert_dir_exists_in_volume "vscode-server/data/User/mcp" || {
+        printf '%s\n' "[DEBUG] vscode-server/data/User/mcp should be ensured even when source missing" >&2
+        return 1
+    }
+    assert_dir_exists_in_volume "vscode-server/data/User/prompts" || {
+        printf '%s\n' "[DEBUG] vscode-server/data/User/prompts should be ensured even when source missing" >&2
+        return 1
+    }
 
-    # At minimum, verify import succeeded and container is running
-    # (test would have failed earlier if import failed)
     return 0
 }
 
