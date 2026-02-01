@@ -126,9 +126,11 @@ create_claude_fixture() {
     mkdir -p "$fixture/.claude/skills"
     mkdir -p "$fixture/.claude/hooks"
 
-    printf '%s\n' '{"test": true}' >"$fixture/.claude.json"
-    printf '%s\n' '{"credentials": "test-creds"}' >"$fixture/.claude/.credentials.json"
-    printf '%s\n' '{"settings": "test"}' >"$fixture/.claude/settings.json"
+    # Use unique marker content for content verification
+    printf '%s\n' '{"test": true, "_marker": "CLAUDE_JSON_MARKER"}' >"$fixture/.claude.json"
+    printf '%s\n' '{"credentials": "test-creds", "_marker": "CREDENTIALS_MARKER"}' >"$fixture/.claude/.credentials.json"
+    printf '%s\n' '{"settings": "test", "_marker": "SETTINGS_MARKER"}' >"$fixture/.claude/settings.json"
+    printf '%s\n' '{"local": true, "_marker": "SETTINGS_LOCAL_MARKER"}' >"$fixture/.claude/settings.local.json"
     printf '%s\n' '{}' >"$fixture/.claude/plugins/cache/test-plugin/plugin.json"
     printf '%s\n' '# Test CLAUDE.md' >"$fixture/.claude/CLAUDE.md"
 }
@@ -138,8 +140,9 @@ create_codex_fixture() {
     mkdir -p "$fixture/.codex/skills/.system"
     mkdir -p "$fixture/.codex/skills/custom"
 
-    printf '%s\n' '# Codex config' >"$fixture/.codex/config.toml"
-    printf '%s\n' '{"auth": "test-auth"}' >"$fixture/.codex/auth.json"
+    # Use unique marker content for content verification
+    printf '%s\n' '# Codex config - CODEX_CONFIG_MARKER' >"$fixture/.codex/config.toml"
+    printf '%s\n' '{"auth": "test-auth", "_marker": "CODEX_AUTH_MARKER"}' >"$fixture/.codex/auth.json"
     printf '%s\n' '{"skill": "system"}' >"$fixture/.codex/skills/.system/hidden.json"
     printf '%s\n' '{"skill": "custom"}' >"$fixture/.codex/skills/custom/user.json"
 }
@@ -153,9 +156,10 @@ create_opencode_fixture() {
     mkdir -p "$fixture/.config/opencode/plugins"
     mkdir -p "$fixture/.local/share/opencode"
 
-    printf '%s\n' '{"opencode": "config"}' >"$fixture/.config/opencode/opencode.json"
+    # Use unique marker content for content verification
+    printf '%s\n' '{"opencode": "config", "_marker": "OPENCODE_CONFIG_MARKER"}' >"$fixture/.config/opencode/opencode.json"
     printf '%s\n' '# Instructions' >"$fixture/.config/opencode/instructions.md"
-    printf '%s\n' '{"auth": "test-auth"}' >"$fixture/.local/share/opencode/auth.json"
+    printf '%s\n' '{"auth": "test-auth", "_marker": "OPENCODE_AUTH_MARKER"}' >"$fixture/.local/share/opencode/auth.json"
 }
 
 create_pi_fixture() {
@@ -164,8 +168,9 @@ create_pi_fixture() {
     mkdir -p "$fixture/.pi/agent/skills/custom"
     mkdir -p "$fixture/.pi/agent/extensions"
 
+    # Use unique marker content for content verification
     printf '%s\n' '{}' >"$fixture/.pi/agent/settings.json"
-    printf '%s\n' '{"models": "secret"}' >"$fixture/.pi/agent/models.json"
+    printf '%s\n' '{"models": "secret", "_marker": "PI_MODELS_MARKER"}' >"$fixture/.pi/agent/models.json"
     printf '%s\n' '{}' >"$fixture/.pi/agent/keybindings.json"
     printf '%s\n' '{}' >"$fixture/.pi/agent/skills/.system/hidden.json"
     printf '%s\n' '{}' >"$fixture/.pi/agent/skills/custom/user.json"
@@ -175,24 +180,27 @@ create_kimi_fixture() {
     local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
     mkdir -p "$fixture/.kimi"
 
-    printf '%s\n' '# Kimi config' >"$fixture/.kimi/config.toml"
-    printf '%s\n' '{}' >"$fixture/.kimi/mcp.json"
+    # Use unique marker content for content verification
+    printf '%s\n' '# Kimi config - KIMI_CONFIG_MARKER' >"$fixture/.kimi/config.toml"
+    printf '%s\n' '{"_marker": "KIMI_MCP_MARKER"}' >"$fixture/.kimi/mcp.json"
 }
 
 create_copilot_fixture() {
     local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
     mkdir -p "$fixture/.copilot/skills"
 
-    printf '%s\n' '{"config": "test"}' >"$fixture/.copilot/config.json"
-    printf '%s\n' '{"mcp": "test"}' >"$fixture/.copilot/mcp-config.json"
+    # Use unique marker content for content verification
+    printf '%s\n' '{"config": "test", "_marker": "COPILOT_CONFIG_MARKER"}' >"$fixture/.copilot/config.json"
+    printf '%s\n' '{"mcp": "test", "_marker": "COPILOT_MCP_MARKER"}' >"$fixture/.copilot/mcp-config.json"
 }
 
 create_gemini_fixture() {
     local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
     mkdir -p "$fixture/.gemini"
 
-    printf '%s\n' '{"accounts": "test"}' >"$fixture/.gemini/google_accounts.json"
-    printf '%s\n' '{"oauth": "test"}' >"$fixture/.gemini/oauth_creds.json"
+    # Use unique marker content for content verification
+    printf '%s\n' '{"accounts": "test", "_marker": "GEMINI_ACCOUNTS_MARKER"}' >"$fixture/.gemini/google_accounts.json"
+    printf '%s\n' '{"oauth": "test", "_marker": "GEMINI_OAUTH_MARKER"}' >"$fixture/.gemini/oauth_creds.json"
     printf '%s\n' '{}' >"$fixture/.gemini/settings.json"
     printf '%s\n' '# Gemini MD' >"$fixture/.gemini/GEMINI.md"
 }
@@ -200,16 +208,18 @@ create_gemini_fixture() {
 create_aider_fixture() {
     local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
 
-    printf '%s\n' 'model: gpt-4' >"$fixture/.aider.conf.yml"
-    printf '%s\n' 'settings: true' >"$fixture/.aider.model.settings.yml"
+    # Use unique marker content for content verification
+    printf '%s\n' 'model: gpt-4  # AIDER_CONF_MARKER' >"$fixture/.aider.conf.yml"
+    printf '%s\n' 'settings: true  # AIDER_MODEL_MARKER' >"$fixture/.aider.model.settings.yml"
 }
 
 create_continue_fixture() {
     local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
     mkdir -p "$fixture/.continue"
 
-    printf '%s\n' 'config: true' >"$fixture/.continue/config.yaml"
-    printf '%s\n' '{"continue": "config"}' >"$fixture/.continue/config.json"
+    # Use unique marker content for content verification
+    printf '%s\n' 'config: true  # CONTINUE_YAML_MARKER' >"$fixture/.continue/config.yaml"
+    printf '%s\n' '{"continue": "config", "_marker": "CONTINUE_JSON_MARKER"}' >"$fixture/.continue/config.json"
 }
 
 create_cursor_fixture() {
@@ -217,7 +227,8 @@ create_cursor_fixture() {
     mkdir -p "$fixture/.cursor/rules"
     mkdir -p "$fixture/.cursor/extensions"
 
-    printf '%s\n' '{}' >"$fixture/.cursor/mcp.json"
+    # Use unique marker content for content verification
+    printf '%s\n' '{"_marker": "CURSOR_MCP_MARKER"}' >"$fixture/.cursor/mcp.json"
 }
 
 create_gh_fixture() {
@@ -532,6 +543,24 @@ assert_file_not_contains() {
     local path="$1"
     local pattern="$2"
     ! exec_in_container "$SYNC_TEST_CONTAINER" grep -q -- "$pattern" "$path"
+}
+
+# Assert content was copied (not placeholders) by checking for marker
+assert_content_marker_in_volume() {
+    local path="$1"
+    local marker="$2"
+    local content
+    content=$(cat_from_volume "$path" 2>/dev/null) || return 1
+    [[ "$content" == *"$marker"* ]]
+}
+
+# Assert content was NOT copied (placeholders) by checking marker is absent
+assert_no_content_marker_in_volume() {
+    local path="$1"
+    local marker="$2"
+    local content
+    content=$(cat_from_volume "$path" 2>/dev/null) || return 0  # missing file = no marker
+    [[ "$content" != *"$marker"* ]]
 }
 
 # ==============================================================================

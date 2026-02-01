@@ -143,6 +143,7 @@ test_claude_sync_assertions() {
     assert_file_exists_in_volume "claude/claude.json" || return 1
     assert_file_exists_in_volume "claude/credentials.json" || return 1
     assert_file_exists_in_volume "claude/settings.json" || return 1
+    assert_file_exists_in_volume "claude/settings.local.json" || return 1
     assert_dir_exists_in_volume "claude/plugins" || return 1
     assert_file_exists_in_volume "claude/plugins/cache/test-plugin/plugin.json" || return 1
     assert_file_exists_in_volume "claude/CLAUDE.md" || return 1
@@ -151,12 +152,11 @@ test_claude_sync_assertions() {
     assert_is_symlink "/home/agent/.claude.json" || return 1
     assert_is_symlink "/home/agent/.claude/settings.json" || return 1
 
-    # Verify content synced correctly (full content with --from)
-    local content
-    content=$(cat_from_volume "claude/credentials.json")
-    if ! printf '%s' "$content" | grep -q "test-creds"; then
-        return 1  # Content should be copied with --from
-    fi
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "claude/credentials.json" "CREDENTIALS_MARKER" || return 1
+    assert_content_marker_in_volume "claude/claude.json" "CLAUDE_JSON_MARKER" || return 1
+    assert_content_marker_in_volume "claude/settings.json" "SETTINGS_MARKER" || return 1
+    assert_content_marker_in_volume "claude/settings.local.json" "SETTINGS_LOCAL_MARKER" || return 1
 
     return 0
 }
@@ -177,12 +177,9 @@ test_opencode_sync_assertions() {
     # Verify auth.json at different path (~/.local/share/opencode/)
     assert_file_exists_in_volume "local/share/opencode/auth.json" || return 1
 
-    # Verify auth.json content synced (full content with --from)
-    local content
-    content=$(cat_from_volume "local/share/opencode/auth.json")
-    if ! printf '%s' "$content" | grep -q "test-auth"; then
-        return 1  # Content should be copied with --from
-    fi
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "local/share/opencode/auth.json" "OPENCODE_AUTH_MARKER" || return 1
+    assert_content_marker_in_volume "config/opencode/opencode.json" "OPENCODE_CONFIG_MARKER" || return 1
 
     return 0
 }
@@ -204,6 +201,10 @@ test_codex_sync_assertions() {
     assert_dir_exists_in_volume "codex/skills/custom" || return 1
     assert_file_exists_in_volume "codex/skills/custom/user.json" || return 1
 
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "codex/auth.json" "CODEX_AUTH_MARKER" || return 1
+    assert_content_marker_in_volume "codex/config.toml" "CODEX_CONFIG_MARKER" || return 1
+
     return 0
 }
 
@@ -219,6 +220,10 @@ test_copilot_sync_assertions() {
     # Verify symlinks in container
     assert_is_symlink "/home/agent/.copilot/config.json" || return 1
     assert_is_symlink "/home/agent/.copilot/mcp-config.json" || return 1
+
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "copilot/config.json" "COPILOT_CONFIG_MARKER" || return 1
+    assert_content_marker_in_volume "copilot/mcp-config.json" "COPILOT_MCP_MARKER" || return 1
 
     return 0
 }
@@ -236,6 +241,10 @@ test_gemini_sync_assertions() {
     # Verify secret file permissions (fso = file, secret, optional)
     assert_permissions_in_volume "gemini/google_accounts.json" "600" || return 1
     assert_permissions_in_volume "gemini/oauth_creds.json" "600" || return 1
+
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "gemini/google_accounts.json" "GEMINI_ACCOUNTS_MARKER" || return 1
+    assert_content_marker_in_volume "gemini/oauth_creds.json" "GEMINI_OAUTH_MARKER" || return 1
 
     return 0
 }
@@ -256,6 +265,10 @@ test_aider_sync_assertions() {
     assert_is_symlink "/home/agent/.aider.conf.yml" || return 1
     assert_is_symlink "/home/agent/.aider.model.settings.yml" || return 1
 
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "aider/aider.conf.yml" "AIDER_CONF_MARKER" || return 1
+    assert_content_marker_in_volume "aider/aider.model.settings.yml" "AIDER_MODEL_MARKER" || return 1
+
     return 0
 }
 
@@ -271,6 +284,10 @@ test_continue_sync_assertions() {
     assert_permissions_in_volume "continue/config.yaml" "600" || return 1
     assert_permissions_in_volume "continue/config.json" "600" || return 1
 
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "continue/config.yaml" "CONTINUE_YAML_MARKER" || return 1
+    assert_content_marker_in_volume "continue/config.json" "CONTINUE_JSON_MARKER" || return 1
+
     return 0
 }
 
@@ -285,6 +302,9 @@ test_cursor_sync_assertions() {
 
     # Verify secret permissions on mcp.json (fjso)
     assert_permissions_in_volume "cursor/mcp.json" "600" || return 1
+
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "cursor/mcp.json" "CURSOR_MCP_MARKER" || return 1
 
     return 0
 }
@@ -310,6 +330,9 @@ test_pi_sync_assertions() {
     # Verify secret permissions on models.json (fjso)
     assert_permissions_in_volume "pi/models.json" "600" || return 1
 
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "pi/models.json" "PI_MODELS_MARKER" || return 1
+
     return 0
 }
 
@@ -325,6 +348,10 @@ test_kimi_sync_assertions() {
     assert_permissions_in_volume "kimi/config.toml" "600" || return 1
     assert_permissions_in_volume "kimi/mcp.json" "600" || return 1
 
+    # Verify content synced correctly (full content with --from, not placeholders)
+    assert_content_marker_in_volume "kimi/config.toml" "KIMI_CONFIG_MARKER" || return 1
+    assert_content_marker_in_volume "kimi/mcp.json" "KIMI_MCP_MARKER" || return 1
+
     return 0
 }
 
@@ -333,9 +360,8 @@ test_kimi_sync_assertions() {
 # ==============================================================================
 # Note: This tests that when importing from $HOME (profile import), secret
 # credentials become placeholders rather than copying actual content.
-# We simulate this by NOT using --from (which would use HOME).
-# However, in our test harness we always use --from, so we'll verify the
-# difference by checking that --from DOES copy content.
+# Profile import is triggered when HOME == source (no --from flag).
+# This test uses run_agent_sync_test with --profile-import to test this path.
 
 setup_profile_import_fixture() {
     create_fixture_home >/dev/null
@@ -349,16 +375,9 @@ test_profile_import_placeholder_assertions() {
     assert_file_exists_in_volume "claude/credentials.json" || return 1
     assert_permissions_in_volume "claude/credentials.json" "600" || return 1
 
-    # But the content should NOT contain the actual secret (it's skipped in profile import)
-    # The file should be empty or minimal placeholder, NOT the fixture's test-creds
-    local content
-    content=$(cat_from_volume "claude/credentials.json" 2>/dev/null || true)
-
-    # Profile import skips .credentials.json copy, so either it's empty or placeholder
-    # It should NOT contain "test-creds" which was in the fixture
-    if printf '%s' "$content" | grep -q "test-creds"; then
-        return 1  # FAIL: Profile import should NOT copy actual credentials
-    fi
+    # But the content should NOT contain the actual secret marker (it's skipped in profile import)
+    # The file should be empty or minimal placeholder, NOT the fixture's marker
+    assert_no_content_marker_in_volume "claude/credentials.json" "CREDENTIALS_MARKER" || return 1
 
     return 0
 }
