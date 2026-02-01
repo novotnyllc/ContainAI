@@ -67,9 +67,46 @@ _cai_detect_sessions() {
 - `src/lib/container.sh`: Add `_cai_detect_sessions` function
 
 ## Acceptance
-- [ ] Uses `_cai_timeout` wrapper (not raw `timeout`)
-- [ ] Uses context-aware docker command
-- [ ] Checks for `ss` availability, returns 2 if missing
-- [ ] Detects SSH connections via `ss`
-- [ ] Detects PTY count via `/dev/pts`
-- [ ] Returns 2 (unknown) on timeout/failure
+- [x] Uses `_cai_timeout` wrapper (not raw `timeout`)
+- [x] Uses context-aware docker command
+- [x] Checks for `ss` availability, returns 2 if missing
+- [x] Detects SSH connections via `ss`
+- [x] Detects PTY count via `/dev/pts`
+- [x] Returns 2 (unknown) on timeout/failure
+
+## Done summary
+# fn-34-fk5.4: Implement session detection - Summary
+
+## Implementation
+
+Added `_cai_detect_sessions()` function to `src/lib/container.sh` (line 1377).
+
+### Function Signature
+```bash
+_cai_detect_sessions container_name [context]
+```
+
+### Return Codes
+- 0: Container has active sessions (SSH connections or PTYs > 1)
+- 1: No active sessions detected
+- 2: Unknown (ss unavailable, timeout, or other error)
+
+### Features Implemented
+1. **Context-aware docker command**: Uses `env DOCKER_CONTEXT= DOCKER_HOST= docker --context` pattern
+2. **Portable timeout**: Uses `_cai_timeout` wrapper from `lib/docker.sh`
+3. **ss availability check**: Returns exit code 2 if `ss` command not available in container
+4. **SSH connection detection**: Counts established connections on port 22 via `ss`
+5. **PTY detection**: Counts active PTY devices in `/dev/pts/`
+6. **Graceful failure**: Returns 2 (unknown) on timeout or docker errors
+
+### Files Modified
+- `src/lib/container.sh`: Added function and header documentation
+
+### Quality Checks
+- shellcheck passes
+- bash -n syntax check passes
+- Function sources correctly via `source src/containai.sh`
+## Evidence
+- Commits:
+- Tests:
+- PRs:

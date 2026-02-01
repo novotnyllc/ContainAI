@@ -322,3 +322,6 @@ When changing config file paths on volumes, add a migration step to move content
 
 ## 2026-02-01 manual [pitfall]
 ssh-keygen -R hostname won't remove [hostname]:port entries - must use port-aware removal for non-22 ports
+
+## 2026-02-01 manual [pitfall]
+When task specs have code examples, verify they work with actual CLI API before implementing - spec syntax may be outdated or incorrect
