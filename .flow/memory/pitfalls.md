@@ -325,3 +325,6 @@ ssh-keygen -R hostname won't remove [hostname]:port entries - must use port-awar
 
 ## 2026-02-01 manual [pitfall]
 When task specs have code examples, verify they work with actual CLI API before implementing - spec syntax may be outdated or incorrect
+
+## 2026-02-01 manual [pitfall]
+Bash exit code capture: 'cmd && rc=$? || rc=$?' always sets rc=0 because assignment succeeds; use 'if cmd; then rc=0; else rc=$?; fi' instead
