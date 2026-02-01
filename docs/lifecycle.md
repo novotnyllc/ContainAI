@@ -18,15 +18,13 @@ ContainAI containers are designed to be persistent workspaces for AI coding agen
   'background': '#0d1117'
 }}}%%
 stateDiagram-v2
-    [*] --> Created: cai run (first use)
-    Created --> Running: docker start
+    [*] --> Running: cai run (first use)
     Running --> Running: cai run (attach)
     Running --> Stopped: cai stop
     Stopped --> Running: cai run
     Stopped --> [*]: cai stop --remove
     Running --> [*]: cai stop --remove
 
-    note right of Created: Container exists but not started
     note right of Running: Agent sessions attach via SSH
     note right of Stopped: Volume preserved
 ```
@@ -40,7 +38,7 @@ Containers are created automatically when you first run `cai run` or `cai` for a
 Container names are derived from your workspace:
 - **Format**: `{repo}-{branch_leaf}` (max 24 characters)
 - **Branch leaf**: Last segment of a branch path (e.g., `feature/oauth` becomes `oauth`)
-- **Deterministic**: Same workspace always produces the same container name
+- **Deterministic**: Same repo and branch always produces the same container name
 
 ```bash
 # In a git repo on branch "feature/auth"
@@ -56,15 +54,21 @@ ContainAI containers are labeled for identification and management:
 |-------|-------------|
 | `containai.managed=true` | Identifies ContainAI-managed containers |
 | `containai.workspace` | Original workspace path |
-| `containai.keep=true` | Protection label (prevents GC deletion) |
+| `containai.ssh-port` | Assigned SSH port for container |
+| `containai.data-volume` | Associated data volume name |
+| `ai.containai.template` | Template used for container build |
+
+> **Planned**: A `containai.keep=true` label will be supported in a future release to protect containers from garbage collection.
 
 ### What Happens During Creation
 
 1. **Context selection**: ContainAI selects the appropriate Docker context (e.g., `containai-docker` for Sysbox isolation)
 2. **Image resolution**: Resolves the container image based on agent and template
 3. **Volume setup**: Creates or attaches the data volume for persistent storage
-4. **Container creation**: Runs `docker create` with appropriate mounts and labels
+4. **Container creation**: Runs `docker run -d` to create and start the container with appropriate mounts and labels
 5. **SSH configuration**: Sets up SSH access for agent sessions
+
+Note: Containers go directly to "running" state on first use (create+start in one step).
 
 ## Container Starting
 
@@ -83,6 +87,41 @@ ContainAI verifies container health on start:
 - Systemd services are running (systemd is PID 1)
 - SSH daemon is accessible
 - Required ports are available
+
+## Backup and Export
+
+ContainAI provides commands to back up and restore your container data.
+
+### Exporting Data
+
+Use `cai export` to create a backup archive of your data volume:
+
+```bash
+# Export data volume to archive
+cai export
+
+# Export to specific file
+cai export --output ~/backups/my-backup.tgz
+
+# Export specific container's data
+cai export --container myapp-main
+```
+
+The export creates a `.tgz` archive containing agent credentials, configuration, and other persistent data from the data volume.
+
+### Importing Data
+
+Use `cai import` to restore or sync configurations into the data volume:
+
+```bash
+# Import from host home directory (default)
+cai import
+
+# Import from specific directory
+cai import --from ~/my-configs
+```
+
+The import syncs host configurations (git config, shell aliases, etc.) into the container's data volume.
 
 ## Container Stopping
 
@@ -227,7 +266,7 @@ cai gc --force
 
 Containers will be protected from GC if:
 1. **Running**: Active containers are never pruned
-2. **Keep label**: Containers with `containai.keep=true` are protected
+2. **Keep label**: Containers with `containai.keep=true` label will be protected (planned)
 3. **Managed only**: Only `containai.managed=true` containers are considered
 
 ### Staleness Calculation
