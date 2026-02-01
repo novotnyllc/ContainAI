@@ -237,6 +237,39 @@ sequenceDiagram
 5. **Service Startup**: `ssh.service` and `docker.service` start after init completes
 6. **SSH Connection**: CLI allocates port, injects key, waits for sshd, then connects
 
+### Container Naming and Hostname
+
+Each container receives a short name in the format `{repo}-{branch_leaf}` (max 24 characters) and an RFC 1123 compliant hostname that matches a sanitized version of its name.
+
+**Hostname Sanitization Rules:**
+
+The `_cai_sanitize_hostname()` function ensures hostnames comply with RFC 1123:
+
+| Rule | Example |
+|------|---------|
+| Convert to lowercase | `MyProject` → `myproject` |
+| Replace underscores with hyphens | `my_workspace` → `my-workspace` |
+| Remove invalid characters | `app@v2.0` → `appv20` |
+| Collapse multiple hyphens | `app--test` → `app-test` |
+| Remove leading/trailing hyphens | `-app-` → `app` |
+| Truncate to 63 characters | Long names are shortened |
+| Fallback if empty | Empty result becomes `container` |
+
+**Why This Matters:**
+
+- For broad DNS and network compatibility, ContainAI enforces RFC 1123-style hostnames
+- Container names can include underscores and special characters that aren't valid hostnames
+- The hostname is set via Docker's `--hostname` flag during container creation
+- Inside the container, `hostname` returns this sanitized value
+
+**Example Transformations:**
+
+| Container Name | Hostname |
+|----------------|----------|
+| `my_workspace-main` | `my-workspace-main` |
+| `MyProject-Feature` | `myproject-feature` |
+| `test__app` | `test-app` |
+
 ## SSH Connection Flow
 
 All container access uses SSH instead of `docker attach` or direct execution. This enables:

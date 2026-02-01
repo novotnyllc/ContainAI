@@ -18,6 +18,7 @@ Most common issues and their one-line fixes:
 | Claude OAuth token expired | Re-run `claude /login` inside container, or use API key |
 | Files owned by nobody:nogroup | `cai doctor fix volume --all` (Linux/WSL2 only) |
 | claude/bun command not found | Pull latest image: `cai shell --fresh /path/to/workspace` |
+| Hostname differs from container name | Expected behavior - see [Hostname Issues](#hostname-issues) |
 
 **Quick Links:**
 - [Diagnostic Commands](#diagnostic-commands)
@@ -35,6 +36,7 @@ Most common issues and their one-line fixes:
 - [Platform-Specific Issues](#platform-specific-issues)
 - [Updates Available Warning](#updates-available-warning)
 - [Shell Environment Issues](#shell-environment-issues) (command not found for claude, bun, etc.)
+- [Hostname Issues](#hostname-issues) (hostname differs from container name)
 - [Still Stuck?](#still-stuck)
 
 ---
@@ -1283,6 +1285,64 @@ This is more robust than using `~/.profile` because:
 
 ---
 
+## Hostname Issues
+
+### "Why does my hostname differ from my container name?"
+
+**Symptom:**
+```bash
+$ hostname
+my-workspace-main
+# But container name is: my_workspace-main
+```
+
+**Explanation:**
+
+ContainAI sets each container's hostname to a sanitized version of its name to ensure RFC 1123 compliance. UNIX hostnames have stricter requirements than Docker container names.
+
+**What's happening:**
+
+The hostname sanitization rules transform the container name:
+
+| Container Name | Hostname | Transformation Applied |
+|----------------|----------|------------------------|
+| `my_workspace` | `my-workspace` | Underscores → hyphens |
+| `MyProject` | `myproject` | Uppercase → lowercase |
+| `app@v2.0` | `appv20` | Invalid chars removed |
+| `test--app` | `test-app` | Multiple hyphens collapsed |
+
+**RFC 1123 Rules:**
+
+Valid hostnames must:
+- Contain only lowercase letters, numbers, and hyphens
+- Start and end with alphanumeric characters (no leading/trailing hyphens)
+- Be 63 characters or fewer
+
+**This is by design:**
+
+The hostname is set via Docker's `--hostname` flag during container creation to ensure network compatibility. Tools like `hostname`, shell prompts (PS1), and network services use this value.
+
+**Why this matters:**
+
+- Some tools and scripts expect valid RFC 1123 hostnames
+- Network services require compliant hostnames for proper DNS resolution
+- Container names can include underscores, but hostnames cannot
+
+**No action needed:**
+
+This is expected behavior. To see both values:
+```bash
+# Get the Docker container name (from host)
+docker --context containai-docker ps --filter "label=containai.managed=true" --format '{{.Names}}'
+
+# Get the hostname (from inside the container)
+hostname  # Returns the sanitized RFC 1123 hostname
+```
+
+Note: The container name and hostname may differ due to sanitization (e.g., underscores become hyphens).
+
+---
+
 ## SSH Debugging Commands
 
 When troubleshooting SSH issues, these commands provide detailed diagnostic information:
@@ -1471,3 +1531,4 @@ Quick reference of error messages and their section in this guide:
 | "Files owned by nobody:nogroup" | [Volume Ownership Repair](#files-owned-by-nobodynogroup) |
 | "claude: command not found" | [Shell Environment Issues](#command-not-found-for-claude-bun-uv-etc) |
 | "bun: command not found" | [Shell Environment Issues](#command-not-found-for-claude-bun-uv-etc) |
+| Hostname differs from container name | [Hostname Issues](#why-does-my-hostname-differ-from-my-container-name) |

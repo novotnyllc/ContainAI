@@ -8,6 +8,7 @@ This project uses date-based versioning in `YYYY-MM-DD` format since it does not
 ## [Unreleased]
 
 ### Added
+- RFC 1123 compliant hostnames for all containers (hostname matches sanitized container name)
 - `cai update` command for safe updates with container management
   - `--dry-run` flag to preview what would be updated
   - `--stop-containers` flag to safely stop containers before update (Linux/WSL2)

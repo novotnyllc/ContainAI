@@ -40,10 +40,23 @@ Update documentation to explain the new RFC 1123 hostname feature. When containe
 - [ ] No conflicting documentation with other tasks
 
 ## Done summary
-Documentation updated with RFC 1123 hostname feature explanation, including sanitization rules, examples of name transformation, and rationale for hostname compatibility.
+## Summary
+Updated documentation to explain RFC 1123 hostname feature:
 
+1. **docs/architecture.md** - Added "Container Naming and Hostname" section under Container Lifecycle:
+   - Explains that containers get RFC 1123 compliant hostnames
+   - Documents all sanitization rules from `_cai_sanitize_hostname()`
+   - Includes example transformations table
+
+2. **docs/troubleshooting.md** - Added "Hostname Issues" FAQ:
+   - Added to Quick Reference table
+   - Added to Quick Links
+   - New section explaining why hostname differs from container name
+   - Added to Error Message Reference
+
+3. **CHANGELOG.md** - Added entry under [Unreleased] → Added:
+   - "RFC 1123 compliant hostnames for all containers"
 ## Evidence
 - Commits:
-- Tests: Verify documentation is clear and consistent
+- Tests: Documentation verification via grep confirmed RFC 1123 references in all target files
 - PRs:
-<!-- Updated by plan-sync: fn-42-cli-ux-fixes-hostname-reset-wait-help.10 implemented RFC 1123 hostname sanitization -->
