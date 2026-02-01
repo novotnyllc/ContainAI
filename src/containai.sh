@@ -665,7 +665,7 @@ Fix Targets:
   fix template --all            Restore all repo-shipped templates
 
 Exit Codes:
-  0    All checks pass (Sysbox available AND SSH configured)
+  0    All checks pass (Sysbox, SSH, and templates OK)
   1    Checks failed (run 'cai setup' to configure)
 
 What 'fix' can remediate:

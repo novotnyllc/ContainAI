@@ -729,12 +729,26 @@ _cai_doctor() {
     # === ContainAI Docker Section ===
     local containai_docker_ok="false"
     local containai_docker_sysbox_default="false"
-    local docker_context_for_checks="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    local docker_context_for_checks
+
+    # Resolve context: use _cai_select_context which tries config override,
+    # then containai-docker, then legacy fallback for old installs.
+    # Inside a container, always use default context.
+    if [[ "$in_container" == "true" ]]; then
+        docker_context_for_checks="default"
+    else
+        local config_context
+        config_context=$(_containai_resolve_secure_engine_context 2>/dev/null) || config_context=""
+        docker_context_for_checks=$(_cai_select_context "$config_context" 2>/dev/null) || docker_context_for_checks=""
+        # Default for error reporting if no context available
+        if [[ -z "$docker_context_for_checks" ]]; then
+            docker_context_for_checks="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+        fi
+    fi
 
     printf '%s\n' "ContainAI Docker"
 
     if [[ "$in_container" == "true" ]]; then
-        docker_context_for_checks="default"
         local display_socket="/var/run/docker.sock"
         local info_output info_rc
         info_output=$(_cai_timeout 5 env DOCKER_CONTEXT= DOCKER_HOST= docker info 2>&1) && info_rc=0 || info_rc=$?
