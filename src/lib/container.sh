@@ -1580,18 +1580,29 @@ _containai_start_container() {
 
     # First-use detection: ensure default templates are installed
     # This enables template customization (fn-33-lp4) even if user skipped `cai setup`
-    # Templates will be built in fn-33-lp4.4 when --template is added
     if ! _cai_ensure_default_templates "$dry_run_flag"; then
         _cai_debug "Some default templates could not be installed (continuing)"
     fi
 
+    # Template name for container creation (default for now, --template in fn-33-lp4.9)
+    # When --image-tag is specified, skip template build (advanced/debugging mode)
+    local template_name="default"
+    local use_template="true"
+    if [[ -n "$image_tag" ]]; then
+        # Advanced mode: explicit image tag bypasses template build
+        use_template="false"
+    fi
+
     # Resolve image: use --image-tag if provided (advanced/debugging), else default
+    # Note: For new containers, template build happens later (after context selection)
+    # to use the same Docker context as container creation
     local resolved_image
     if [[ -n "$image_tag" ]]; then
         # Advanced mode: explicit image tag for debugging or multi-image workflows
         resolved_image="${_CONTAINAI_DEFAULT_REPO}:${image_tag}"
     else
         # Default: one container per workspace with default agent image
+        # Will be overridden by template build for new containers
         resolved_image="${_CONTAINAI_DEFAULT_REPO}:${_CONTAINAI_AGENT_TAGS[$_CONTAINAI_DEFAULT_AGENT]}"
     fi
 
@@ -1727,6 +1738,15 @@ _containai_start_container() {
             echo "DOCKER_CONTEXT=$selected_context"
         else
             echo "DOCKER_CONTEXT=default"
+        fi
+
+        # Template build information (for new containers or --fresh/--restart)
+        if [[ "$use_template" == "true" && ("$dry_run_state" == "none" || "$fresh_flag" == "true" || "$restart_flag" == "true") ]]; then
+            echo "TEMPLATE_NAME=$template_name"
+            # Output the build command using _cai_build_template dry-run mode
+            _cai_build_template "$template_name" "$selected_context" "true" 2>/dev/null || {
+                echo "TEMPLATE_BUILD_ERROR=Failed to generate build command"
+            }
         fi
 
         # Port allocation
@@ -2275,6 +2295,19 @@ _containai_start_container() {
                 esac
             done
 
+            # Build template image if using templates (default unless --image-tag specified)
+            # This builds the user's Dockerfile using the same Docker context as container creation
+            if [[ "$use_template" == "true" ]]; then
+                local template_image
+                if ! template_image=$(_cai_build_template "$template_name" "$selected_context"); then
+                    _cai_error "Failed to build template '$template_name'"
+                    return 1
+                fi
+                # Use the built template image for container creation
+                resolved_image="$template_image"
+                _cai_debug "Using template image: $resolved_image"
+            fi
+
             # Build container creation args - always detached with tini init + sleep infinity
             local -a args=()
             if [[ -n "$selected_context" ]]; then
@@ -2315,6 +2348,10 @@ _containai_start_container() {
             args+=(--label "containai.workspace=$workspace_resolved")
             args+=(--label "containai.ssh-port=$ssh_port")
             args+=(--label "containai.data-volume=$data_volume")
+            # Store template name label when using templates (fn-33-lp4.4)
+            if [[ "$use_template" == "true" ]]; then
+                args+=(--label "ai.containai.template=$template_name")
+            fi
             # Store image-tag label when explicitly specified (advanced/debugging feature)
             if [[ -n "$image_tag" ]]; then
                 args+=(--label "containai.image-tag=$image_tag")
