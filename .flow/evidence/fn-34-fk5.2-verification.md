@@ -51,7 +51,7 @@ For non-detached mode:
 
 **When `allocate_tty=true` (interactive terminal)**:
 - SSH allocates a PTY on the remote side (`-t` flag)
-- PTY provides line-buffered output for most programs
+- PTY typically results in line-buffered output for many programs
 - Stdout flows directly to local terminal
 
 **When `allocate_tty=false` (piped/script)**:

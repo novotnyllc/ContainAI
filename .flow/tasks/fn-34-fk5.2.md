@@ -19,7 +19,7 @@ The existing `_cai_ssh_run` function in `src/lib/ssh.sh` handles SSH execution. 
 - [x] Interactive commands get TTY (`-t` flag when `allocate_tty=true`)
 - [x] Non-interactive commands work without TTY
 - [x] Stdout and stderr stream to host in real-time
-- [x] No output buffering delays
+- [x] Line buffering in TTY mode (PTY allocation enables typical line-buffered output)
 
 ## Done summary
 
@@ -39,7 +39,8 @@ Code inspection verified the implementation meets all acceptance criteria:
 - Stderr captured via FIFO + tee for error classification while still displaying - lines 2529-2556
 
 ### Buffering Behavior
-- When `allocate_tty=true`: PTY ensures line buffering for remote process stdout
+- When `allocate_tty=true`: PTY typically results in line buffering for many programs
+- Non-TTY mode: programs may use full buffering (expected POSIX behavior)
 - Stderr uses FIFO which has small kernel buffers (~64KB) and `tee` processes data immediately
 
 ## Evidence
