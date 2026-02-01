@@ -9,54 +9,41 @@ Update documentation to reflect new short container naming and --fresh wait beha
 ## Approach
 
 1. **README.md** - Update container lifecycle section:
-   - Document new naming format: `cai-XXXX-YYYY` (max 16 chars)
-   - Note that shell prompt shows short container name
+   - Document that containers now have RFC 1123 compliant hostnames
+   - Note hostname is sanitized version of container name
+   - Explain sanitization rules: lowercase, underscores→hyphens, max 63 chars
 
 2. **docs/architecture.md** - Container Lifecycle section:
-   - Explain naming scheme: 4-char repo hint + 4-char hash
-   - Migration: existing containers keep names until --fresh
+   - Explain RFC 1123 hostname sanitization
+   - Document `_cai_sanitize_hostname()` function
+   - Note how container name with underscores becomes valid hostname
 
 3. **docs/troubleshooting.md**:
-   - Update --fresh examples
-   - Add FAQ: "How do I get the new short container names?"
+   - Update --fresh examples to show hostname in container
+   - Add FAQ: "Why does my hostname differ from container name?"
    - Add FAQ: "Why does my SSH session wait during --fresh?"
 
 4. **CHANGELOG.md**:
-   - Add "Changed" entry for new naming scheme
+   - Add "Added" entry for RFC 1123 hostname support
    - Add "Changed" entry for graceful --fresh behavior
 
 ## Key context
 
 - Keep-a-changelog format for CHANGELOG.md
 - Troubleshooting uses symptom → diagnosis → steps format
-## Approach
-
-1. **docs/architecture.md** - Container Lifecycle section:
-   - Document that container hostname matches container name
-   - Note truncation to 63 chars for long names
-
-2. **docs/troubleshooting.md**:
-   - Update --fresh examples to note graceful reconnection
-   - Add FAQ: "Why does my SSH session wait during --fresh?"
-
-3. **CHANGELOG.md**:
-   - Add "Added" entry for hostname matching
-   - Add "Changed" entry for graceful --fresh behavior
-
-## Key context
-
-- Keep-a-changelog format for CHANGELOG.md
-- Troubleshooting uses symptom → diagnosis → steps format
+- RFC 1123 compliance ensures hostname works across UNIX/Linux systems
 ## Acceptance
-- [ ] README.md updated with new naming format
-- [ ] docs/architecture.md explains naming scheme
-- [ ] docs/troubleshooting.md has --fresh FAQs
-- [ ] CHANGELOG.md entries added
+- [ ] README.md updated with RFC 1123 hostname info
+- [ ] docs/architecture.md explains hostname sanitization
+- [ ] docs/troubleshooting.md has hostname and --fresh FAQs
+- [ ] CHANGELOG.md entries added for hostname feature and graceful --fresh
 - [ ] No conflicting info with existing docs
+- [ ] Hostname behavior documented (container name vs hostname differences)
 ## Done summary
-TBD
+Documentation updated to reflect RFC 1123 hostname sanitization and graceful --fresh behavior. Architecture docs explain sanitization rules, troubleshooting has FAQs, and changelog has entries.
 
 ## Evidence
 - Commits:
-- Tests:
+- Tests: Verify docs are consistent and readable
 - PRs:
+<!-- Updated by plan-sync (cross-phase): fn-42-cli-ux-fixes-hostname-reset-wait-help.10 changed hostname approach from short naming to RFC 1123 sanitization -->

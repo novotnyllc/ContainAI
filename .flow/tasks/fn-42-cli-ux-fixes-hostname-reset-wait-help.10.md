@@ -7,9 +7,8 @@ TBD
 - [ ] TBD
 
 ## Done summary
-TBD
-
+Added --hostname flag to docker run command in container creation, with RFC 1123 sanitization to handle container names that may contain underscores or other hostname-invalid characters.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: ebe7b53, 9642ade
+- Tests: shellcheck -x src/lib/container.sh
 - PRs:
