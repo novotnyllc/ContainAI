@@ -16,7 +16,32 @@ The existing `_cai_ssh_run` function in `src/lib/ssh.sh` handles SSH execution. 
 - `src/lib/ssh.sh`: `_cai_ssh_run` function (lines 2185-2290)
 
 ## Acceptance
-- [ ] Interactive commands get TTY (`-t` flag when `allocate_tty=true`)
-- [ ] Non-interactive commands work without TTY
-- [ ] Stdout and stderr stream to host in real-time
-- [ ] No output buffering delays
+- [x] Interactive commands get TTY (`-t` flag when `allocate_tty=true`)
+- [x] Non-interactive commands work without TTY
+- [x] Stdout and stderr stream to host in real-time
+- [x] No output buffering delays
+
+## Done summary
+# fn-34-fk5.2: stdio/stderr passthrough verification
+
+## Summary
+Verified that `_cai_ssh_run` properly implements TTY allocation and real-time output streaming.
+
+## Verification Results
+
+1. **TTY allocation** ✅ - `cai exec` detects interactive terminals via `[[ -t 0 ]]` and passes `allocate_tty=true` to `_cai_ssh_run`, which adds `-t` flag to SSH
+
+2. **Non-interactive commands** ✅ - When stdin is not a terminal, no `-t` flag is added
+
+3. **Real-time streaming** ✅ - Uses FIFO-based approach: stdout streams directly, stderr goes through named pipe + background tee for both display and capture
+
+4. **No buffering** ✅ - FIFO pattern ensures immediate output without delays
+
+## Code Locations
+- TTY detection: `src/containai.sh:4231-4234`
+- SSH -t flag: `src/lib/ssh.sh:2395-2398`
+- Streaming: `src/lib/ssh.sh:2525-2556`
+## Evidence
+- Commits:
+- Tests:
+- PRs:
