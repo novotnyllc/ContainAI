@@ -300,25 +300,23 @@ source src/containai.sh
 - Git: any recent version
 - Bash: 4.0+ (macOS default is 3.2; use `brew install bash`)
 
-## Shell Aliases
+## Shell Functions
 
-For frequent agent usage, add aliases or functions to your shell configuration.
-
-### Bash/Zsh (~/.bashrc or ~/.zshrc)
+For frequent agent usage, add wrapper functions to your `~/.bashrc`:
 
 ```bash
-# Function-based aliases (recommended - cleaner argument handling)
+# Agent wrapper functions (add to ~/.bashrc)
 claude() { CONTAINAI_AGENT=claude cai -- "$@"; }
 gemini() { CONTAINAI_AGENT=gemini cai -- "$@"; }
-codex() { CONTAINAI_AGENT=codex cai -- "$@"; }
 ```
+
+> **Note:** ContainAI requires bash 4.0+, so these functions belong in `~/.bashrc`, not `~/.zshrc`. If you use zsh as your default shell, run `bash` first (as noted in the prerequisites), then these functions will be available.
 
 ### Usage
 
 ```bash
 claude "Fix the bug in main.py"
 gemini "Explain this code"
-codex "Write tests for this function"
 ```
 
 ### Important: Quoting
@@ -335,14 +333,14 @@ claude What does this function do?
 
 ### Alternative: Environment Variable
 
-If you prefer to set the agent globally for a session:
+Set the agent for the current session:
 
 ```bash
 export CONTAINAI_AGENT=claude
 cai -- "Fix the bug"
 ```
 
-Or configure it permanently via config:
+Or configure it permanently:
 
 ```bash
 cai config set agent.default claude
