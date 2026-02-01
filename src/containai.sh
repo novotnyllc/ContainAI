@@ -3454,6 +3454,35 @@ _containai_shell_cmd() {
             fi
         fi
 
+        # Template mismatch check for existing containers (when --template specified)
+        if [[ -n "$cli_template" ]]; then
+            # Validate template name
+            if ! _cai_validate_template_name "$cli_template"; then
+                _cai_error "Invalid template name: $cli_template"
+                _cai_warn "Template names must be lowercase alphanumeric with dashes/underscores/dots"
+                return 1
+            fi
+            # Get container's template label
+            local container_template
+            container_template=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || container_template=""
+            if [[ -z "$container_template" ]]; then
+                # Missing label = pre-existing container; allow only if --template default
+                if [[ "$cli_template" != "default" ]]; then
+                    _cai_error "Container was created before templates. Use --fresh to rebuild with template."
+                    _cai_warn "Container: $resolved_container_name"
+                    _cai_warn "Requested template: $cli_template"
+                    return 1
+                fi
+            elif [[ "$container_template" != "$cli_template" ]]; then
+                # Label mismatch
+                _cai_error "Container exists with template '$container_template'. Use --fresh to rebuild."
+                _cai_warn "Container: $resolved_container_name"
+                _cai_warn "Requested template: $cli_template"
+                _cai_warn "Existing template: $container_template"
+                return 1
+            fi
+        fi
+
         # Check if --data-volume was provided with a different volume than the container's current volume
         # This error helps users understand why the command fails (spec: fn-36-rb7.12)
         if [[ -n "$cli_volume" ]]; then
@@ -4046,6 +4075,35 @@ _containai_exec_cmd() {
             if [[ "$exec_image_val" != "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
                 echo "[ERROR] Container '$resolved_container_name' was not created by ContainAI" >&2
                 return 15
+            fi
+        fi
+
+        # Template mismatch check for existing containers (when --template specified)
+        if [[ -n "$cli_template" ]]; then
+            # Validate template name
+            if ! _cai_validate_template_name "$cli_template"; then
+                _cai_error "Invalid template name: $cli_template"
+                _cai_warn "Template names must be lowercase alphanumeric with dashes/underscores/dots"
+                return 1
+            fi
+            # Get container's template label
+            local exec_container_template
+            exec_container_template=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || exec_container_template=""
+            if [[ -z "$exec_container_template" ]]; then
+                # Missing label = pre-existing container; allow only if --template default
+                if [[ "$cli_template" != "default" ]]; then
+                    _cai_error "Container was created before templates. Use --fresh to rebuild with template."
+                    _cai_warn "Container: $resolved_container_name"
+                    _cai_warn "Requested template: $cli_template"
+                    return 1
+                fi
+            elif [[ "$exec_container_template" != "$cli_template" ]]; then
+                # Label mismatch
+                _cai_error "Container exists with template '$exec_container_template'. Use --fresh to rebuild."
+                _cai_warn "Container: $resolved_container_name"
+                _cai_warn "Requested template: $cli_template"
+                _cai_warn "Existing template: $exec_container_template"
+                return 1
             fi
         fi
 
