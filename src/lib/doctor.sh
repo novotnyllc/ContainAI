@@ -1034,8 +1034,9 @@ _cai_doctor() {
 
     # === Templates Section ===
     local template_all_ok="true"
-    _cai_doctor_template_checks "$build_templates"
-    template_all_ok="${TEMPLATE_ALL_OK:-true}"
+    if ! _cai_doctor_template_checks "$build_templates"; then
+        template_all_ok="false"
+    fi
 
     # === Resources Section ===
     printf '%s\n' "Resources"
@@ -1121,7 +1122,7 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Templates:" "[OK] Ready"
     else
         printf '  %-44s %s\n' "Templates:" "[ERROR] Issues found"
-        printf '  %-44s %s\n' "Recommended:" "Run 'cai doctor fix template' to recover"
+        printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to reinstall templates"
     fi
 
     # Exit code: 0 if isolation ready AND SSH configured, 1 if not
@@ -3116,8 +3117,8 @@ _cai_doctor_reset_lima() {
 
 # Check if a template exists (filesystem check only)
 # Args: template_name (defaults to "default")
-# Returns: 0=exists, 1=missing, 2=parse error
-# Outputs: error status string to stdout ("ok", "missing", "parse_error")
+# Returns: 0=exists, 1=missing, 2=invalid name
+# Outputs: status string to stdout ("ok", "missing", "invalid_name")
 _cai_doctor_check_template_exists() {
     local template_name="${1:-default}"
     local template_path
@@ -3236,13 +3237,12 @@ _cai_doctor_check_template_build() {
 # Run all template checks for doctor output (text format)
 # Args: build_templates ("true" to run heavy build checks)
 # Outputs: Formatted text report to stdout
-# Sets: TEMPLATE_ALL_OK="true" if all checks pass
+# Returns: 0 if all checks pass, 1 if any check fails
 _cai_doctor_template_checks() {
     local build_templates="${1:-false}"
     local template_exists_status template_syntax_status template_build_status
     local template_path="$_CAI_TEMPLATE_DIR/default/Dockerfile"
-
-    TEMPLATE_ALL_OK="true"
+    local all_ok="true"
 
     printf '%s\n' "Templates"
 
@@ -3253,13 +3253,13 @@ _cai_doctor_template_checks() {
             printf '  %-44s %s\n' "Template 'default':" "[OK]"
             ;;
         missing)
-            TEMPLATE_ALL_OK="false"
+            all_ok="false"
             printf '  %-44s %s\n' "Template 'default':" "[FAIL] Missing"
-            printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
+            printf '  %-44s %s\n' "" "Run 'cai setup' to reinstall templates"
             ;;
         invalid_name)
             # Should never happen for "default"
-            TEMPLATE_ALL_OK="false"
+            all_ok="false"
             printf '  %-44s %s\n' "Template 'default':" "[ERROR] Invalid name"
             ;;
     esac
@@ -3287,10 +3287,10 @@ _cai_doctor_template_checks() {
                 fi
                 ;;
             no_from)
-                TEMPLATE_ALL_OK="false"
+                all_ok="false"
                 printf '  %-44s %s\n' "Dockerfile syntax:" "[FAIL] No FROM line"
                 printf '  %-44s %s\n' "" "Dockerfile must have a FROM instruction"
-                printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
+                printf '  %-44s %s\n' "" "Run 'cai setup' to reinstall templates"
                 ;;
         esac
     fi
@@ -3307,16 +3307,22 @@ _cai_doctor_template_checks() {
                     printf ' %s\n' "[OK] Build successful"
                     ;;
                 build_failed)
-                    TEMPLATE_ALL_OK="false"
+                    all_ok="false"
                     printf ' %s\n' "[FAIL] Build failed"
-                    printf '  %-44s %s\n' "" "Check Dockerfile for errors"
-                    printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
+                    printf '  %-44s %s\n' "" "Check Dockerfile for errors or Docker availability"
                     ;;
             esac
         fi
     fi
 
     printf '\n'
+
+    # Return status
+    if [[ "$all_ok" == "true" ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Run template checks for doctor JSON output

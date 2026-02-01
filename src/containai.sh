@@ -624,7 +624,7 @@ _containai_doctor_help() {
 ContainAI Doctor - Check system capabilities and diagnostics
 
 Usage: cai doctor [options]
-       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>] | template]
+       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>]]
 
 Checks Docker availability and Sysbox isolation configuration.
 Reports requirement levels and actionable remediation guidance.
@@ -4842,7 +4842,7 @@ _cai_completions() {
     local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
     local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
     local doctor_flags="--json --build-templates --reset-lima --workspace -w -h --help"
-    local doctor_fix_subcommands="volume container template"
+    local doctor_fix_subcommands="volume container"
     local setup_flags="--dry-run --verbose --force -h --help"
     local validate_flags="--verbose --config --workspace -h --help"
     local docker_flags=""
@@ -5247,7 +5247,7 @@ _cai() {
                             ;;
                         doctor_args)
                             _arguments \
-                                '1:target:(volume container template)' \
+                                '1:target:(volume container)' \
                                 '--all[Fix all]' \
                                 '*:name:'
                             ;;
