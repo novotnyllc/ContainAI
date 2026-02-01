@@ -179,8 +179,24 @@ RUN mkdir -p /home/agent/.profile.d && \
 - [ ] zsh-specific syntax skipped (setopt, autoload, etc.)
 - [ ] Mac user's common settings work in container
 ## Done summary
-TBD
+## Summary
 
+Added `.zshenv` to the zsh config file sync to complete Mac user support. The manifest and import map already had `.zshrc` and `.zprofile`; this adds the third essential zsh config file.
+
+### Changes
+
+1. **`src/sync-manifest.toml`**: Added `.zshenv` entry in SHELL section
+2. **`src/lib/import.sh`**: Added `.zshenv` to `_IMPORT_SYNC_MAP`
+3. **`src/container/generated/`**: Regenerated symlinks.sh, init-dirs.sh, and link-spec.json
+
+### Verification
+
+- `scripts/check-manifest-consistency.sh` passes (63 entries checked)
+- `shellcheck` passes on import.sh
+
+### Notes
+
+Mac's zsh startup order: `.zshenv` → `.zprofile` (login) → `.zshrc` (interactive). All three are now synced to the container's data volume for reference and backup.
 ## Evidence
 - Commits:
 - Tests:

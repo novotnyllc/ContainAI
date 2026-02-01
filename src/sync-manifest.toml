@@ -301,6 +301,12 @@ container_link = ".zprofile"
 flags = "f"  # file
 
 [[entries]]
+source = ".zshenv"
+target = "shell/zshenv"
+container_link = ".zshenv"
+flags = "f"  # file
+
+[[entries]]
 source = ".inputrc"
 target = "shell/inputrc"
 container_link = ".inputrc"

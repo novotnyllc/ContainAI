@@ -152,10 +152,11 @@ ensure_volume_structure() {
     ensure_dir "${DATA_DIR}/local/share/fonts"
     ensure_dir "${DATA_DIR}/agents"
 
-    # Shell (SYNC_MAP flags: f for .bash_aliases, d for .bashrc.d)
+    # Shell (SYNC_MAP flags: f for bash_aliases, d for bashrc.d)
+    # Note: paths are NOT dot-prefixed in the data volume per sync-manifest.toml
     ensure_dir "${DATA_DIR}/shell"
-    ensure_file "${DATA_DIR}/shell/.bash_aliases"
-    ensure_dir "${DATA_DIR}/shell/.bashrc.d"
+    ensure_file "${DATA_DIR}/shell/bash_aliases"
+    ensure_dir "${DATA_DIR}/shell/bashrc.d"
 
     # VS Code Server (SYNC_MAP flags: d for dirs, Dockerfile symlinks need JSON init)
     ensure_dir "${DATA_DIR}/vscode-server/extensions"

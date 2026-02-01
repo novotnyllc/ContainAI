@@ -34,6 +34,7 @@
     {"link": "/home/agent/.bash_aliases_imported", "target": "/mnt/agent-data/shell/bash_aliases", "remove_first": 1},
     {"link": "/home/agent/.zshrc", "target": "/mnt/agent-data/shell/zshrc", "remove_first": 0},
     {"link": "/home/agent/.zprofile", "target": "/mnt/agent-data/shell/zprofile", "remove_first": 0},
+    {"link": "/home/agent/.zshenv", "target": "/mnt/agent-data/shell/zshenv", "remove_first": 0},
     {"link": "/home/agent/.inputrc", "target": "/mnt/agent-data/shell/inputrc", "remove_first": 0},
     {"link": "/home/agent/.oh-my-zsh/custom", "target": "/mnt/agent-data/shell/oh-my-zsh-custom", "remove_first": 1},
     {"link": "/home/agent/.vimrc", "target": "/mnt/agent-data/editors/vimrc", "remove_first": 0},

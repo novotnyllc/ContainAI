@@ -149,7 +149,9 @@ RUN chmod 700 /home/agent/.ssh
 RUN { grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' /home/agent/.bashrc \
       || { echo '# Source imported bash_aliases if exists'; echo '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported'; } >> /home/agent/.bashrc; } && \
     { grep -qxF 'if [ -d /mnt/agent-data/shell/bashrc.d ]; then for f in /mnt/agent-data/shell/bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' /home/agent/.bashrc \
-      || { echo '# Source user scripts from data volume'; echo 'if [ -d /mnt/agent-data/shell/bashrc.d ]; then for f in /mnt/agent-data/shell/bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> /home/agent/.bashrc; }
+      || { echo '# Source user scripts from data volume'; echo 'if [ -d /mnt/agent-data/shell/bashrc.d ]; then for f in /mnt/agent-data/shell/bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> /home/agent/.bashrc; } && \
+    { grep -qxF '[ -f /mnt/agent-data/shell/zsh-imported.sh ] && . /mnt/agent-data/shell/zsh-imported.sh' /home/agent/.bashrc \
+      || { echo '# Source POSIX-compatible settings extracted from zsh config (Mac users)'; echo '[ -f /mnt/agent-data/shell/zsh-imported.sh ] && . /mnt/agent-data/shell/zsh-imported.sh'; } >> /home/agent/.bashrc; }
 
 # =============================================================================
 # AGENT ALIASES
